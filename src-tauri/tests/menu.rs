@@ -44,7 +44,7 @@ fn the_menu_builds_and_carries_the_ids_the_frontend_switches_on() {
 
     // These three are the contract with src/lib/menu.ts. A rename on either
     // side turns a menu item into one that silently does nothing.
-    for id in ["settings", "import", "missing", "info", "sub", "fullscreen"] {
+    for id in ["settings", "import", "import-folder", "missing", "info", "sub", "fullscreen"] {
         assert!(found.iter().any(|f| f == id), "no item with id {id}; got {found:?}");
     }
 }
