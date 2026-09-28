@@ -5,9 +5,9 @@ describe("errorMessage", () => {
   it("includes the developer detail returned with an internal error", () => {
     expect(errorMessage({
       kind: "internal",
-      message: "Something went wrong inside rbxport.",
+      message: "rbxport could not complete this action because it encountered an unexpected problem. Try again, and send a problem report if it keeps happening.",
       detail: "The backup folder is not writable: permission denied",
-    })).toBe("Something went wrong inside rbxport. The backup folder is not writable: permission denied");
+    })).toBe("rbxport could not complete this action because it encountered an unexpected problem. Try again, and send a problem report if it keeps happening. The backup folder is not writable: permission denied");
   });
 
   it("does not repeat identical detail", () => {

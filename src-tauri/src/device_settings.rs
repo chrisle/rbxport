@@ -283,7 +283,10 @@ pub fn write_dev_defaults(mount: &Path, dto: &StickDefaultsDto) -> AppResult<()>
     }
     let next = DeviceSettings { dev: Some(dev_defaults(dto)?), library: None, ..current };
     rbl_devices::settings::write_changes(mount, &current, &next)
-        .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))
+        .map_err(|e| AppError::new(
+            ErrorKind::Internal,
+            "The device settings could not be saved. Check that the device is connected and writable, then try again.",
+        ).with_detail(e.to_string()))
 }
 
 fn bad_value(field: &str, value: &str) -> AppError {
@@ -327,7 +330,10 @@ pub async fn ensure_device_library(
         let my_tags: Vec<rbl_export::SourceMyTag> = my_tags.iter().map(crate::commands::source_my_tag).collect();
         let sync = rbl_export::SyncSource { db_id, tree: Vec::new(), automatic: false };
         rbl_export::create_library(mount, library.as_ref(), &my_tags, Some(&sync))
-            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+            .map_err(|e| AppError::new(
+                ErrorKind::Internal,
+                "rbxport could not create the device library. Check that the device is connected and writable, then try again.",
+            ).with_detail(e.to_string()))?;
         if let Some(defaults) = &defaults {
             write_dev_defaults(mount, defaults)?;
         }
@@ -360,7 +366,10 @@ pub async fn save_device_settings(
         let current = rbl_devices::settings::read(mount);
         let next = apply(&current, &settings)?;
         rbl_devices::settings::write_changes(mount, &current, &next)
-            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+            .map_err(|e| AppError::new(
+                ErrorKind::Internal,
+                "The device settings could not be saved. Check that the device is connected and writable, then try again.",
+            ).with_detail(e.to_string()))?;
         Ok(to_dto(&rbl_devices::settings::read(mount)))
     })
     .await

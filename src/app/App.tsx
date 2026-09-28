@@ -3,6 +3,7 @@ import { useExportProgress } from "@/store/useExportProgress";
 import { reportStartupPaint } from "@/lib/startup";
 import { useShowWindowWhenReady } from "@/lib/windowReady";
 import { waveformKindOf } from "@/canvas";
+import { errorMessage } from "@/lib/errorMessage";
 import { useEventCallback } from "@/store/useEventCallback";
 /**
  * Export-mode shell.
@@ -1552,7 +1553,7 @@ function AppBody() {
       // the queue, as rekordbox does unless told not to.
       if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
     } catch (e) {
-      refuse(e instanceof Error ? e.message : "Those files could not be imported.");
+      refuse(errorMessage(e));
     }
   }, [report, refuse, analysisPrefs.auto, analysis]);
 
@@ -1584,7 +1585,7 @@ function AppBody() {
       setTree(await backend.playlistTree());
       if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
     } catch (e) {
-      refuse(e instanceof Error ? e.message : "That XML could not be imported.");
+      refuse(errorMessage(e));
     }
   }, [report, refuse, analysisPrefs.auto, analysis]);
 
@@ -1607,7 +1608,7 @@ function AppBody() {
       report(`${imported.imported} tracks imported, ${imported.skipped.length} missing or skipped.`);
     } catch (e) {
       setXmlImport(null); setXmlProgress(null);
-      refuse(e instanceof Error ? e.message : "That XML could not be imported.");
+      refuse(errorMessage(e));
     }
   }, [xmlImport, analysisPrefs.auto, analysis, report, refuse]);
 
@@ -1622,7 +1623,7 @@ function AppBody() {
       }
       report(`Wrote ${written.toLocaleString()} tracks and the playlists as XML.`);
     } catch (e) {
-      refuse(e instanceof Error ? e.message : "The XML could not be written.");
+      refuse(errorMessage(e));
     }
   }, [report, refuse]);
 

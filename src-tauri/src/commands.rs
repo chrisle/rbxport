@@ -902,7 +902,36 @@ pub(crate) fn refresh_after_edit(
 pub(crate) fn write_error(error: rbl_db::DbError) -> AppError {
     match error {
         rbl_db::DbError::WriteRefused(reason) => AppError::new(ErrorKind::ReadOnly, reason),
-        other => AppError::new(ErrorKind::Internal, other.to_string()),
+        rbl_db::DbError::NotInstalled(detail) => AppError::new(
+            ErrorKind::NotFound,
+            "Rekordbox is not installed, or its library could not be found. Open rekordbox once, then try again.",
+        )
+        .with_detail(detail),
+        rbl_db::DbError::KeyDerivation(detail) => AppError::new(
+            ErrorKind::NotFound,
+            "rbxport could not unlock your Rekordbox library. Make sure rekordbox is installed and has been opened, then try again.",
+        )
+        .with_detail(detail),
+        rbl_db::DbError::Open(detail) => AppError::new(
+            ErrorKind::NotFound,
+            "rbxport could not open your Rekordbox library. Make sure its files are available and try again.",
+        )
+        .with_detail(detail),
+        rbl_db::DbError::Schema(detail) => AppError::new(
+            ErrorKind::Malformed,
+            "This Rekordbox library version is not supported by this version of rbxport. Update rbxport and try again.",
+        )
+        .with_detail(detail),
+        rbl_db::DbError::Sqlite(detail) => AppError::new(
+            ErrorKind::Internal,
+            "rbxport could not read your Rekordbox library. Close rekordbox and try again.",
+        )
+        .with_detail(detail.to_string()),
+        rbl_db::DbError::Io(detail) => AppError::new(
+            ErrorKind::NotFound,
+            "rbxport could not read a Rekordbox library file. Check that the file is available and try again.",
+        )
+        .with_detail(detail.to_string()),
     }
 }
 
@@ -928,8 +957,13 @@ pub(crate) async fn reload<R: tauri::Runtime>(
         let db_version = db.schema().db_version;
         let location = db.location().clone();
         let started = std::time::Instant::now();
-        let (library, _) =
-            rbl_index::load(&db).map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+        let (library, _) = rbl_index::load(&db).map_err(|e| {
+            AppError::new(
+                ErrorKind::Internal,
+                "rbxport could not load your Rekordbox library. Close rekordbox and try again.",
+            )
+            .with_detail(e.to_string())
+        })?;
         let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let read_only = rbl_db::is_rekordbox_running();
         state.set_library(library, read_only, db_version, load_ms, location);
@@ -2098,14 +2132,24 @@ fn write_export_with_phase(
     }
 
     for (name, bytes) in imported_settings {
-        crate::durable::write(&export_root.join(name), &bytes)
-            .map_err(|e| AppError::internal(e.to_string()))?;
+        crate::durable::write(&export_root.join(name), &bytes).map_err(|e| {
+            AppError::new(
+                ErrorKind::Internal,
+                "rbxport could not save the device settings during export. Check that the device is connected and writable, then try again.",
+            )
+            .with_detail(e.to_string())
+        })?;
     }
     // Re-read what was written with the independent parser: an export that
     // cannot be read back is not an export.
     phase("verifying");
-    let check = rbl_export::verify_databases(destination)
-        .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+    let check = rbl_export::verify_databases(destination).map_err(|e| {
+        AppError::new(
+            ErrorKind::Internal,
+            "rbxport could not verify the exported device library. Keep the device connected and try the export again.",
+        )
+        .with_detail(e.to_string())
+    })?;
     if !check.is_ok() || check.tracks != report.tracks {
         return Err(AppError::internal(format!(
             "USB verification failed: missing audio {:?}; {}",

@@ -158,8 +158,13 @@ async fn edit_cues<R: tauri::Runtime>(
         // The writer held the file read-write; `write` has closed it before
         // the read-only handle below opens, as an edit in `commands.rs` is.
         let db = state.open_read_only().map_err(write_error)?;
-        rbl_index::reload_cues_of(&db, &library, &change.track)
-            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+        rbl_index::reload_cues_of(&db, &library, &change.track).map_err(|e| {
+            AppError::new(
+                ErrorKind::Internal,
+                "The cue change was saved, but rbxport could not refresh the track. Reselect the track and try again.",
+            )
+            .with_detail(e.to_string())
+        })?;
         Ok(change)
     })
     .await?;

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { LinkStatus } from "@/ipc/types";
+import { errorMessage } from "@/lib/errorMessage";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import { Button, Section } from "./controls";
@@ -63,7 +64,7 @@ export function LinkPane() {
           setStatusError(null);
         }
       } catch (cause) {
-        if (live && requestedAt === revision.current) setStatusError(String(cause));
+        if (live && requestedAt === revision.current) setStatusError(errorMessage(cause));
       } finally {
         if (live) timer = setTimeout(() => void refresh(), 2000);
       }
@@ -98,7 +99,7 @@ export function LinkPane() {
         setLink(next);
         setStatusError(null);
       } catch (cause) {
-        setError(String(cause));
+        setError(errorMessage(cause));
       } finally {
         actionPending.current = false;
         setBusy(false);

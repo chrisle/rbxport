@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import { submitBugReport } from "@/lib/bugReport";
+import { errorMessage } from "@/lib/errorMessage";
 import { startWindowDrag } from "@/lib/windowDrag";
 import styles from "./ReportBug.module.css";
 import { useShowWindowWhenReady } from "@/lib/windowReady";
@@ -84,7 +85,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
     let live = true;
     void getBackend().then(backend => backend.reportAttachment()).then(text => {
       if (live) { setAttachment(text); setError(""); }
-    }).catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
+    }).catch((e: unknown) => { if (live) setError(errorMessage(e)); });
     return () => { live = false; };
   }, [include]);
   const body = (
@@ -98,7 +99,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
         if (busy || (include && attachment === null)) return;
         setBusy(true); setError(""); setReceipt(null);
         void submitBugReport({ email, description, attachment: include ? attachment ?? "" : "", turnstileToken })
-          .then(setReceipt).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+          .then(setReceipt).catch((e: unknown) => setError(errorMessage(e)))
           .finally(() => { setBusy(false); setTurnstileToken(""); setResetCount(count => count + 1); });
       }}>
         <div className={styles.fields}>
@@ -117,7 +118,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
                 setOpening(true);
                 setError("");
                 void getBackend().then(backend => backend.openReportAttachment(attachment))
-                  .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+                  .catch((e: unknown) => setError(errorMessage(e)))
                   .finally(() => setOpening(false));
               }}>
                 {opening ? "Opening…" : "Show log"}

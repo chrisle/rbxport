@@ -45,7 +45,10 @@ impl AppError {
     pub fn internal(detail: impl Into<String>) -> Self {
         let detail = detail.into();
         tracing::error!(error.detail = %detail, "internal error");
-        Self::new(ErrorKind::Internal, "Something went wrong inside rbxport.")
+        Self::new(
+            ErrorKind::Internal,
+            "rbxport could not complete this action because it encountered an unexpected problem. Try again, and send a problem report if it keeps happening.",
+        )
             .with_detail(detail)
     }
 }
@@ -100,7 +103,10 @@ mod tests {
     #[test]
     fn an_internal_error_keeps_its_explanation() {
         let err = AppError::internal("the database was unavailable");
-        assert_eq!(err.message, "Something went wrong inside rbxport.");
+        assert_eq!(
+            err.message,
+            "rbxport could not complete this action because it encountered an unexpected problem. Try again, and send a problem report if it keeps happening."
+        );
         assert_eq!(err.detail.as_deref(), Some("the database was unavailable"));
     }
 }
