@@ -1562,6 +1562,31 @@ impl Writer {
         }
     }
 
+    /// Finds a detected musical key, creating its lookup row when this
+    /// library has not encountered that key before.
+    ///
+    /// Unlike [`Self::set_field`], this is deliberately only for a result
+    /// produced by the analyser. A typed key is still required to name an
+    /// existing rekordbox key, but a new or sparsely imported library starts
+    /// with no `djmdKey` rows at all and must be able to retain analysis.
+    pub fn ensure_detected_key(&mut self, name: &str) -> Result<()> {
+        self.prepare()?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Ok(());
+        }
+        let stamp = time::now();
+        let _ = intern(
+            self.library.connection(),
+            "djmdKey",
+            "ScaleName",
+            name,
+            &mut self.rng,
+            &stamp,
+        )?;
+        Ok(())
+    }
+
     /// Writes one information-panel field and retains its exact stored value.
     /// BPM is deliberately excluded: it owns analysis-file history in the
     /// grid editor rather than this database-only history.
