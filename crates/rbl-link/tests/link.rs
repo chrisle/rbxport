@@ -123,7 +123,8 @@ fn a_player_browses_loads_and_reads_a_track_as_the_capture_shows() {
 
     // The root menu and the collection.
     let root = browse(&mut db, kind::ROOT_MENU, &[CTX, 0, 0x5cf_ffff]);
-    assert_eq!(root.len(), 9);
+    assert_eq!(root.len(), 20);
+    assert_eq!(root[3][6], Argument::Number(0x80));
     let tracks = browse(&mut db, kind::TRACK_MENU, &[CTX, 0]);
     assert_eq!(tracks.len(), 3);
     let Argument::Number(first) = tracks[0][1] else { panic!() };

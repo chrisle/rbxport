@@ -51,16 +51,26 @@ pub mod item_type {
     /// The path row in track info.
     pub const PATH: u32 = 0x00;
     // Root-menu categories and sort options carry their own codes.
+    pub const MENU_GENRE: u32 = 0x80;
     pub const MENU_ARTIST: u32 = 0x81;
     pub const MENU_ALBUM: u32 = 0x82;
     pub const MENU_TRACK: u32 = 0x83;
     pub const MENU_PLAYLIST: u32 = 0x84;
     pub const MENU_BPM: u32 = 0x85;
     pub const MENU_RATING: u32 = 0x86;
+    pub const MENU_YEAR: u32 = 0x87;
+    pub const MENU_REMIXER: u32 = 0x88;
+    pub const MENU_LABEL: u32 = 0x89;
+    pub const MENU_ORIGINAL_ARTIST: u32 = 0x8a;
     pub const MENU_KEY: u32 = 0x8b;
     pub const MENU_DATE_ADDED: u32 = 0x8c;
+    pub const MENU_COLOR: u32 = 0x8e;
     pub const MENU_SEARCH: u32 = 0x91;
+    pub const MENU_TIME: u32 = 0x92;
+    pub const MENU_BITRATE: u32 = 0x93;
+    pub const MENU_FILE_NAME: u32 = 0x94;
     pub const MENU_HISTORY: u32 = 0x95;
+    pub const MENU_HOT_CUE_BANK: u32 = 0x98;
     pub const MENU_DEFAULT: u32 = 0xa1;
     pub const MENU_ALPHABET: u32 = 0xa2;
     pub const MENU_MATCHING: u32 = 0xaa;
@@ -210,18 +220,29 @@ pub struct TrackRow {
     pub bpm_x100: u32,
 }
 
-/// The nine categories of the root menu, in rekordbox's order.
+/// The categories and order advertised by the live rekordbox library.
 pub fn root_menu() -> Vec<Item> {
     vec![
-        Item::heading(0x02, "ARTIST", item_type::MENU_ARTIST),
-        Item::heading(0x03, "ALBUM", item_type::MENU_ALBUM),
         Item::heading(0x04, "TRACK", item_type::MENU_TRACK),
         Item::heading(0x0c, "KEY", item_type::MENU_KEY),
+        Item::heading(0x06, "BPM", item_type::MENU_BPM),
+        Item::heading(0x01, "GENRE", item_type::MENU_GENRE),
+        Item::heading(0x02, "ARTIST", item_type::MENU_ARTIST),
+        Item::heading(0x03, "ALBUM", item_type::MENU_ALBUM),
+        Item::heading(0x1a, "MATCHING", item_type::MENU_MATCHING),
+        Item::heading(0x12, "SEARCH", item_type::MENU_SEARCH),
         Item::heading(0x05, "PLAYLIST", item_type::MENU_PLAYLIST),
         Item::heading(0x16, "HISTORY", item_type::MENU_HISTORY),
-        Item::heading(0x12, "SEARCH", item_type::MENU_SEARCH),
-        Item::heading(0x1a, "MATCHING", item_type::MENU_MATCHING),
-        Item::heading(0x1b, "DATE ADDED", item_type::MENU_DATE_ADDED),
+        Item::heading(0x14, "BITRATE", item_type::MENU_BITRATE),
+        Item::heading(0x0f, "COLOR", item_type::MENU_COLOR),
+        Item::heading(0x15, "FILE NAME", item_type::MENU_FILE_NAME),
+        Item::heading(0x17, "HOT CUE BANK", item_type::MENU_HOT_CUE_BANK),
+        Item::heading(0x0a, "LABEL", item_type::MENU_LABEL),
+        Item::heading(0x0b, "ORIGINAL ARTIST", item_type::MENU_ORIGINAL_ARTIST),
+        Item::heading(0x07, "RATING", item_type::MENU_RATING),
+        Item::heading(0x09, "REMIXER", item_type::MENU_REMIXER),
+        Item::heading(0x13, "TIME", item_type::MENU_TIME),
+        Item::heading(0x08, "YEAR", item_type::MENU_YEAR),
     ]
 }
 

@@ -137,21 +137,31 @@ fn args(item: &Message) -> String {
 }
 
 #[test]
-fn the_root_menu_is_rekordboxs_nine_categories_byte_for_byte() {
+fn the_root_menu_matches_the_live_rekordbox_order() {
     let mut s = session();
     let (count, items) = browse(&mut s, kind::ROOT_MENU, &[CTX, 0, 0x5cf_ffff]);
-    assert_eq!(count, 9);
-    // The first row exactly as captured (transaction 0x180 in the capture).
-    let artist = items[0].clone();
+    assert_eq!(count, 20);
+    let expected = [
+        (4, "TRACK", 0x83), (12, "KEY", 0x8b), (6, "BPM", 0x85), (1, "GENRE", 0x80),
+        (2, "ARTIST", 0x81), (3, "ALBUM", 0x82), (26, "MATCHING", 0xaa), (18, "SEARCH", 0x91),
+        (5, "PLAYLIST", 0x84), (22, "HISTORY", 0x95), (20, "BITRATE", 0x93), (15, "COLOR", 0x8e),
+        (21, "FILE NAME", 0x94), (23, "HOT CUE BANK", 0x98), (10, "LABEL", 0x89),
+        (11, "ORIGINAL ARTIST", 0x8a), (7, "RATING", 0x86), (9, "REMIXER", 0x88),
+        (19, "TIME", 0x92), (8, "YEAR", 0x87),
+    ];
+    for (item, (id, label, item_type)) in items.iter().zip(expected) {
+        assert_eq!(item.arguments[1], Argument::Number(id));
+        assert_eq!(item.arguments[3], Argument::String(format!("\u{fffa}{label}\u{fffb}")));
+        assert_eq!(item.arguments[6], Argument::Number(item_type));
+    }
+    // The artist row exactly as captured (transaction 0x180 in the capture).
+    let artist = items[4].clone();
     let mut captured = artist.clone();
     captured.transaction = 0x180;
     assert_eq!(
         captured.encode(),
         hex("11872349ae11000001801041010f101400000010060606020602060606060606060602061100000000110000000211000000122600000009fffa004100520054004900530054fffb000011000000022600000001000011000000811100000000110000000011000000001100000000110000000011000000001100000002260000000100001100000000")
     );
-    let labels: Vec<String> = items.iter().map(args).collect();
-    assert_eq!(labels[3], "0x0, 0xc, 0xc, \"\\u{fffa}KEY\\u{fffb}\", 0x2, \"\", 0x8b, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(labels[8], "0x0, 0x1b, 0x1a, \"\\u{fffa}DATE ADDED\\u{fffb}\", 0x2, \"\", 0x8c, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
 }
 
 #[test]
