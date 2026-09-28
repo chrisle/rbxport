@@ -80,7 +80,11 @@ impl XmlLibrary {
         let mut node_stack: Vec<Option<usize>> = Vec::new();
         for tag in tags(text) {
             match tag {
-                Tag::Open { name, attributes, closed } => match name.as_str() {
+                Tag::Open {
+                    name,
+                    attributes,
+                    closed,
+                } => match name.as_str() {
                     "COLLECTION" => in_collection = !closed,
                     "PLAYLISTS" => in_playlists = !closed,
                     "TRACK" if in_collection => {
@@ -104,8 +108,12 @@ impl XmlLibrary {
                             let end = attribute(&attributes, "End");
                             current.cues.push(XmlCue {
                                 num: attribute(&attributes, "Num").trim().parse().unwrap_or(-1),
-                                start_secs: attribute(&attributes, "Start").trim().parse().unwrap_or(0.0),
-                                end_secs: (!end.trim().is_empty()).then(|| end.trim().parse().unwrap_or(0.0)),
+                                start_secs: attribute(&attributes, "Start")
+                                    .trim()
+                                    .parse()
+                                    .unwrap_or(0.0),
+                                end_secs: (!end.trim().is_empty())
+                                    .then(|| end.trim().parse().unwrap_or(0.0)),
                             });
                         }
                     }
@@ -170,11 +178,12 @@ pub(crate) fn file_path(location: &str) -> Option<PathBuf> {
         return None;
     }
     // A Windows path arrives as `/C:/Users/…`.
-    let decoded = if decoded.len() > 2 && decoded.as_bytes()[0] == b'/' && decoded.as_bytes()[2] == b':' {
-        decoded.get(1..).unwrap_or("").to_owned()
-    } else {
-        decoded
-    };
+    let decoded =
+        if decoded.len() > 2 && decoded.as_bytes()[0] == b'/' && decoded.as_bytes()[2] == b':' {
+            decoded.get(1..).unwrap_or("").to_owned()
+        } else {
+            decoded
+        };
     Some(PathBuf::from(decoded))
 }
 
@@ -227,21 +236,71 @@ pub struct XmlImportReport {
 /// Imports a parsed document through the writer.
 ///
 /// `progress` is told how many tracks are done of how many, after each.
-pub fn import(writer: &mut Writer, library: &XmlLibrary, progress: &mut dyn FnMut(usize, usize)) -> Result<XmlImportReport> {
+pub fn import(
+    writer: &mut Writer,
+    library: &XmlLibrary,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<XmlImportReport> {
+    import_with_options(writer, library, false, progress)
+}
+
+/// Imports a parsed document, optionally retaining missing audio as tracks
+/// that can be relocated later.
+pub fn import_with_options(
+    writer: &mut Writer,
+    library: &XmlLibrary,
+    include_missing: bool,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<XmlImportReport> {
+    import_with_progress(
+        writer,
+        library,
+        include_missing,
+        &mut |done, total, _, _, _| progress(done, total),
+    )
+}
+
+/// Like [`import_with_options`], but reports the cumulative outcomes after
+/// every entry: imported, missing/skipped, and errors (currently zero until a
+/// fatal database error aborts the import).
+pub fn import_with_progress(
+    writer: &mut Writer,
+    library: &XmlLibrary,
+    include_missing: bool,
+    progress: &mut dyn FnMut(usize, usize, usize, usize, usize),
+) -> Result<XmlImportReport> {
     let mut report = XmlImportReport::default();
     // `TrackID` → the library's content id, for the playlists.
     let mut ids: HashMap<&str, String> = HashMap::with_capacity(library.tracks.len());
     let total = library.tracks.len();
     for (done, track) in library.tracks.iter().enumerate() {
-        let label = if track.artist.is_empty() { track.title.clone() } else { format!("{} — {}", track.artist, track.title) };
+        let label = if track.artist.is_empty() {
+            track.title.clone()
+        } else {
+            format!("{} — {}", track.artist, track.title)
+        };
         let Some(path) = track.path.as_deref() else {
             report.skipped.push(format!("{label}: not a file"));
-            progress(done + 1, total);
+            progress(done + 1, total, report.imported, report.skipped.len(), 0);
             continue;
         };
         if !path.is_file() {
-            report.skipped.push(format!("{label}: {} is not there", path.display()));
-            progress(done + 1, total);
+            if include_missing {
+                match writer.import_missing_file(path, &track.title, &track.artist) {
+                    Ok(id) => {
+                        report.imported += 1;
+                        report.tracks.push((id.clone(), track.title.clone()));
+                        ids.insert(track.id.as_str(), id);
+                    }
+                    Err(reason) => report.skipped.push(format!("{label}: {reason}")),
+                }
+                progress(done + 1, total, report.imported, report.skipped.len(), 0);
+                continue;
+            }
+            report
+                .skipped
+                .push(format!("{label}: {} is not there", path.display()));
+            progress(done + 1, total, report.imported, report.skipped.len(), 0);
             continue;
         }
         match writer.import_file(path) {
@@ -270,7 +329,7 @@ pub fn import(writer: &mut Writer, library: &XmlLibrary, progress: &mut dyn FnMu
             }
             Err(other) => return Err(other),
         }
-        progress(done + 1, total);
+        progress(done + 1, total, report.imported, report.skipped.len(), 0);
     }
 
     // The tree, in document order: a node's parent is the nearest open node
@@ -284,7 +343,11 @@ pub fn import(writer: &mut Writer, library: &XmlLibrary, progress: &mut dyn FnMu
             parents.push(id);
         } else {
             let id = writer.create_playlist(&node.name, &parent)?;
-            let members: Vec<String> = node.track_ids.iter().filter_map(|key| ids.get(key.as_str()).cloned()).collect();
+            let members: Vec<String> = node
+                .track_ids
+                .iter()
+                .filter_map(|key| ids.get(key.as_str()).cloned())
+                .collect();
             if !members.is_empty() {
                 writer.add_tracks(&id, &members)?;
             }
@@ -328,7 +391,11 @@ fn add_cues(writer: &mut Writer, content: &str, cues: &[XmlCue]) -> Result<usize
     Ok(added)
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped to u32's range first")]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "clamped to u32's range first"
+)]
 fn millis(secs: f64) -> u32 {
     (secs * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32
 }
@@ -383,23 +450,53 @@ mod tests {
         let library = XmlLibrary::parse(DOC);
         assert_eq!(library.tracks.len(), 2);
         let first = &library.tracks[0];
-        assert_eq!(first.path.as_deref(), Some(Path::new("/Users/me/Music/All U Need.mp3")));
+        assert_eq!(
+            first.path.as_deref(),
+            Some(Path::new("/Users/me/Music/All U Need.mp3"))
+        );
         assert_eq!((first.rating, first.comment.as_str()), (4, "peak & more"));
         assert_eq!(first.cues.len(), 3);
-        assert_eq!(first.cues[2], XmlCue { num: 1, start_secs: 60.0, end_secs: Some(63.75) });
+        assert_eq!(
+            first.cues[2],
+            XmlCue {
+                num: 1,
+                start_secs: 60.0,
+                end_secs: Some(63.75)
+            }
+        );
         assert_eq!(library.tracks[1].path, None);
 
-        let names: Vec<(&str, bool, usize)> = library.nodes.iter().map(|n| (n.name.as_str(), n.folder, n.depth)).collect();
-        assert_eq!(names, vec![("Sets", true, 0), ("Warm up", false, 1), ("Loose", false, 0)]);
+        let names: Vec<(&str, bool, usize)> = library
+            .nodes
+            .iter()
+            .map(|n| (n.name.as_str(), n.folder, n.depth))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                ("Sets", true, 0),
+                ("Warm up", false, 1),
+                ("Loose", false, 0)
+            ]
+        );
         assert_eq!(library.nodes[1].track_ids, vec!["1", "2"]);
         assert!(XmlLibrary::parse("<html/>").tracks.is_empty());
     }
 
     #[test]
     fn locations_decode_as_paths() {
-        assert_eq!(file_path("file:///Music/a%20b.mp3"), Some(PathBuf::from("/Music/a b.mp3")));
-        assert_eq!(file_path("file://localhost/C:/Users/me/x.mp3"), Some(PathBuf::from("C:/Users/me/x.mp3")));
-        assert_eq!(file_path("file://localhost/M%C3%BCsic/%E2%99%AA.mp3"), Some(PathBuf::from("/Müsic/♪.mp3")));
+        assert_eq!(
+            file_path("file:///Music/a%20b.mp3"),
+            Some(PathBuf::from("/Music/a b.mp3"))
+        );
+        assert_eq!(
+            file_path("file://localhost/C:/Users/me/x.mp3"),
+            Some(PathBuf::from("C:/Users/me/x.mp3"))
+        );
+        assert_eq!(
+            file_path("file://localhost/M%C3%BCsic/%E2%99%AA.mp3"),
+            Some(PathBuf::from("/Müsic/♪.mp3"))
+        );
         assert_eq!(file_path("http://x/y"), None);
         assert_eq!(stars("255"), 5);
         assert_eq!(stars("51"), 1);

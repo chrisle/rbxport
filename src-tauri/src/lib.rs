@@ -5,46 +5,46 @@
 //! them against a mock app and a fixture library, the way the webview does
 //! against the real one.
 
-mod windowfit;
-mod file_drop;
-mod file_drag;
-mod startup;
-mod screen_cache;
 pub mod analysis;
+mod backup_copy;
+mod backup_restore_scripts;
+mod backup_sizes;
+mod backup_zip;
+mod backups;
+mod browse_settings;
 pub mod commands;
-mod usb_import;
 pub mod cues;
 pub mod details;
-pub mod grid;
-mod durable;
-mod backups;
-mod backup_copy;
-mod backup_zip;
-mod backup_sizes;
-mod backup_restore_scripts;
-mod file_journal;
-mod new_library;
+mod device_settings;
 mod diagnostics;
+pub mod dto;
+mod durable;
+mod error;
 mod explorer;
+mod file_drag;
+mod file_drop;
+mod file_journal;
+pub mod grid;
 mod link;
-mod rx3_link;
-mod network_labels;
 pub mod logging;
 pub mod menu;
+mod network_labels;
+mod new_library;
 pub mod player;
 mod preferences;
-mod browse_settings;
 mod protocol;
 mod relocate;
-mod sync_window;
 mod report;
+mod rx3_link;
+mod screen_cache;
 mod scripting;
-mod device_settings;
-pub mod dto;
-mod error;
+mod startup;
 pub mod state;
+mod sync_window;
 mod test_port;
 mod update;
+mod usb_import;
+mod windowfit;
 
 pub use error::{AppError, AppResult, ErrorKind};
 
@@ -76,21 +76,38 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
     tauri::async_runtime::spawn_blocking(move || {
         let started = std::time::Instant::now();
         if let Ok(location) = rbl_db::detect() {
-            if let Err(e) = backups::recover(app.state::<Arc<state::AppState>>().backup_dir(), &location) {
-                report_problem(&app, dto::LibraryProblemDto::Failed { message: e.to_string() });
+            if let Err(e) =
+                backups::recover(app.state::<Arc<state::AppState>>().backup_dir(), &location)
+            {
+                report_problem(
+                    &app,
+                    dto::LibraryProblemDto::Failed {
+                        message: e.to_string(),
+                    },
+                );
                 return;
             }
         }
         let cache_path = cache_path(&app);
         let snapshot = cache_path.clone().and_then(|path| {
-            std::thread::Builder::new().name("startup-snapshot".into())
-                .spawn(move || rbl_index::cache::prepare(&path)).ok()
+            std::thread::Builder::new()
+                .name("startup-snapshot".into())
+                .spawn(move || rbl_index::cache::prepare(&path))
+                .ok()
         });
         match rbl_db::Library::open_installed_read_only() {
             Ok(db) => {
-                if let Err(e) = file_journal::recover(app.state::<Arc<state::AppState>>().backup_dir(), db.location()) {
+                if let Err(e) = file_journal::recover(
+                    app.state::<Arc<state::AppState>>().backup_dir(),
+                    db.location(),
+                ) {
                     tracing::error!(error = %e, "analysis recovery failed");
-                    report_problem(&app, dto::LibraryProblemDto::Failed { message: e.to_string() });
+                    report_problem(
+                        &app,
+                        dto::LibraryProblemDto::Failed {
+                            message: e.to_string(),
+                        },
+                    );
                     return;
                 }
                 let db_version = db.schema().db_version;
@@ -114,19 +131,20 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
                             u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                         tracing::debug!(tracks = library.len(), load_ms, "library from cache");
                         let read_only = rbl_db::is_rekordbox_running();
-                        app.state::<Arc<AppState>>().set_library(
-                            library, read_only, db_version, load_ms, location,
-                        );
+                        app.state::<Arc<AppState>>()
+                            .set_library(library, read_only, db_version, load_ms, location);
                         let _ = tauri::Emitter::emit(&app, "library:ready", ());
                         return;
                     }
                 }
                 // A second read-only handle allows cues to overlap metadata.
                 // Failure falls back to the single-connection loader.
-                let cue_reader = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).ok();
+                let cue_reader =
+                    rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).ok();
                 match rbl_index::load_with_cue_reader(&db, cue_reader) {
                     Ok((library, stats)) => {
-                        let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        let load_ms =
+                            u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                         tracing::debug!(
                             tracks = stats.tracks,
                             playlists = stats.playlists,
@@ -158,9 +176,7 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
                             if after == Some(before) {
                                 let held = app.state::<Arc<AppState>>();
                                 if let Ok(library) = held.library() {
-                                    if let Err(e) =
-                                        rbl_index::cache::save(path, &library, before)
-                                    {
+                                    if let Err(e) = rbl_index::cache::save(path, &library, before) {
                                         tracing::warn!(error = %e, "could not write the library cache");
                                     }
                                 }
@@ -169,7 +185,12 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "could not index the library");
-                        report_problem(&app, dto::LibraryProblemDto::Failed { message: e.to_string() });
+                        report_problem(
+                            &app,
+                            dto::LibraryProblemDto::Failed {
+                                message: e.to_string(),
+                            },
+                        );
                     }
                 }
             }
@@ -178,13 +199,21 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
                 // offered as a new library rather than reported as a failure.
                 if let Ok(Some(plan)) = rbl_db::new_library::plan() {
                     tracing::info!(path = %plan.master_db.display(), error = %e, "no library here; offering to make one");
-                    report_problem(&app, dto::LibraryProblemDto::Missing {
-                        master_db: plan.master_db.display().to_string(),
-                    });
+                    report_problem(
+                        &app,
+                        dto::LibraryProblemDto::Missing {
+                            master_db: plan.master_db.display().to_string(),
+                        },
+                    );
                     return;
                 }
                 tracing::error!(error = %e, "could not open the library");
-                report_problem(&app, dto::LibraryProblemDto::Failed { message: e.to_string() });
+                report_problem(
+                    &app,
+                    dto::LibraryProblemDto::Failed {
+                        message: e.to_string(),
+                    },
+                );
             }
         }
     });
@@ -193,7 +222,8 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
 /// Keeps why the library did not load, for a window that asks later, and
 /// tells a window already listening.
 fn report_problem(app: &tauri::AppHandle, problem: dto::LibraryProblemDto) {
-    app.state::<Arc<AppState>>().set_library_problem(Some(problem.clone()));
+    app.state::<Arc<AppState>>()
+        .set_library_problem(Some(problem.clone()));
     let _ = tauri::Emitter::emit(app, "library:problem", problem);
 }
 
@@ -217,7 +247,8 @@ const MAIN_WINDOW: &str = "main";
 /// included visibility called `show()` the moment the window was built, and
 /// the window came up as an empty frame until React drew into it.
 const WINDOW_STATE: tauri_plugin_window_state::StateFlags =
-    tauri_plugin_window_state::StateFlags::all().difference(tauri_plugin_window_state::StateFlags::VISIBLE);
+    tauri_plugin_window_state::StateFlags::all()
+        .difference(tauri_plugin_window_state::StateFlags::VISIBLE);
 
 /// How long after the window appears its geometry is still corrected.
 ///
@@ -225,7 +256,6 @@ const WINDOW_STATE: tauri_plugin_window_state::StateFlags =
 /// within a second. Two gives that room without reaching as far as anything a
 /// person could have done deliberately.
 const SETTLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
-
 
 /// Puts the window back where it was, then makes sure that is on a screen.
 ///
@@ -270,14 +300,19 @@ fn window_geometry() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             // rewrite the file every frame.
             let last_save = std::sync::Arc::new(std::sync::Mutex::new(opened));
             window.on_window_event(move |event| {
-                if !matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                if !matches!(
+                    event,
+                    tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)
+                ) {
                     return;
                 }
                 if opened.elapsed() < SETTLE_WINDOW {
                     fit_window(&subject);
                     return;
                 }
-                let Ok(mut last) = last_save.lock() else { return };
+                let Ok(mut last) = last_save.lock() else {
+                    return;
+                };
                 if last.elapsed() < std::time::Duration::from_millis(300) {
                     return;
                 }
@@ -309,8 +344,12 @@ fn fit_window<R: tauri::Runtime>(window: &tauri::Window<R>) {
     // The work area, not the whole monitor: it excludes the menu bar and the
     // Dock, which is what "on the screen" means to someone using it.
     let area = monitor.work_area();
-    let available =
-        windowfit::Rect::new(area.position.x, area.position.y, area.size.width, area.size.height);
+    let available = windowfit::Rect::new(
+        area.position.x,
+        area.position.y,
+        area.size.width,
+        area.size.height,
+    );
     let current = windowfit::Rect::new(position.x, position.y, size.width, size.height);
     let fitted = windowfit::fit_within(current, available);
     if fitted == current {
@@ -318,8 +357,14 @@ fn fit_window<R: tauri::Runtime>(window: &tauri::Window<R>) {
     }
 
     tracing::debug!(
-        from = format!("{}x{} at {},{}", current.width, current.height, current.x, current.y),
-        to = format!("{}x{} at {},{}", fitted.width, fitted.height, fitted.x, fitted.y),
+        from = format!(
+            "{}x{} at {},{}",
+            current.width, current.height, current.x, current.y
+        ),
+        to = format!(
+            "{}x{} at {},{}",
+            fitted.width, fitted.height, fitted.x, fitted.y
+        ),
         "window did not fit the screen"
     );
     // Size first: moving a window that is still too big only pins it to a
@@ -356,7 +401,10 @@ pub fn browser_args() -> Option<String> {
     ))
 }
 
-#[allow(clippy::too_many_lines, reason = "the command list is one line per command, and that is the whole function")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the command list is one line per command, and that is the whole function"
+)]
 pub fn run() {
     startup::begin();
     logging::install();
@@ -421,9 +469,10 @@ pub fn run() {
             // seconds, focused or not; the panel refreshes itself on the event.
             {
                 let emitter = app.handle().clone();
-                let mounts = rbl_devices::MountWatcher::start(rbl_devices::mounts::INTERVAL, move || {
-                    let _ = tauri::Emitter::emit(&emitter, "devices:changed", ());
-                });
+                let mounts =
+                    rbl_devices::MountWatcher::start(rbl_devices::mounts::INTERVAL, move || {
+                        let _ = tauri::Emitter::emit(&emitter, "devices:changed", ());
+                    });
                 app.manage(mounts);
             }
             app.set_menu(crate::menu::build(app.handle())?)?;
@@ -435,7 +484,9 @@ pub fn run() {
         // the process stayed alive showing nothing but Preferences (0.5.1 on
         // Windows, where the main window's close box is the way out).
         .on_window_event(|window, event| {
-            if window.label() == MAIN_WINDOW && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+            if window.label() == MAIN_WINDOW
+                && matches!(event, tauri::WindowEvent::CloseRequested { .. })
+            {
                 for label in [crate::preferences::WINDOW, crate::sync_window::WINDOW] {
                     if let Some(extra) = window.app_handle().get_webview_window(label) {
                         let _ = extra.close();
@@ -580,6 +631,8 @@ pub fn run() {
             commands::export_playlist_file,
             commands::export_loop_wav,
             commands::import_xml,
+            commands::preview_xml_import,
+            commands::execute_xml_import,
             commands::import_itunes,
             commands::export_xml,
             commands::list_backups,

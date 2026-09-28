@@ -350,6 +350,10 @@ export interface Backend {
    * track that landed. Null when the dialog is cancelled.
    */
   importXml(): Promise<XmlImportReport | null>;
+  chooseXml(): Promise<string | null>;
+  previewXmlImport(path: string): Promise<XmlImportPreview>;
+  executeXmlImport(path: string, includeMissing: boolean): Promise<XmlImportReport>;
+  onImportProgress(listener: (progress: ImportProgress) => void): () => void;
   /** Asks for Music.app's Library.xml and imports its tracks and playlists. */
   importItunes(): Promise<XmlImportReport | null>;
   /**
@@ -1236,6 +1240,25 @@ export interface XmlImportReport {
   playlists: number;
   cues: number;
   tracks: { id: string; title: string }[];
+}
+
+/** Counts shown before a rekordbox XML collection is written. */
+export interface XmlImportPreview {
+  tracks: number;
+  available: number;
+  missing: number;
+  invalid: number;
+  playlists: number;
+}
+
+/** Progress emitted while XML entries are written. */
+export interface ImportProgress {
+  path: string;
+  done: number;
+  total: number;
+  imported: number;
+  missing: number;
+  errors: number;
 }
 
 /** What an automatic relocate did. */

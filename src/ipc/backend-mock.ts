@@ -2334,6 +2334,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     importFiles: () => wait(null),
     importPaths: (paths) => wait({ imported: 0, skipped: paths.map((p) => `${p}: the mock library takes no files`), tracks: [] }),
     importXml: () => wait(null),
+    chooseXml: () => wait(null),
+    previewXmlImport: () => wait({ tracks: 0, available: 0, missing: 0, invalid: 0, playlists: 0 }),
+    executeXmlImport: () => wait({ imported: 0, existing: 0, skipped: [], playlists: 0, cues: 0, tracks: [] }),
+    onImportProgress: () => () => {},
     exportLoopWav: () => wait(null),
     importItunes: () => wait(null),
     // The mock's phrases are drawn from a table, not a file: nothing to cut.

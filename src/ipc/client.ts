@@ -8,7 +8,7 @@ import { detectPlatform } from "@/lib/shortcuts";
 import type {
   AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, DeviceSyncState,
   Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
-  UpdateProgress, UpdateReady, XmlImportReport,
+  ImportProgress, UpdateProgress, UpdateReady, XmlImportPreview, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   EditHistoryState, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
   LinkStatus, MissingExportFile, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
@@ -176,6 +176,14 @@ async function realBackend(): Promise<Backend> {
       if (typeof picked !== "string") return null;
       return invoke<XmlImportReport>("import_xml", { path: picked });
     },
+    chooseXml: async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({ multiple: false, directory: false, title: "Choose a rekordbox XML collection", filters: [{ name: "rekordbox XML", extensions: ["xml"] }] });
+      return typeof picked === "string" ? picked : null;
+    },
+    previewXmlImport: (path) => invoke<XmlImportPreview>("preview_xml_import", { path }),
+    executeXmlImport: (path, includeMissing) => invoke<XmlImportReport>("execute_xml_import", { path, includeMissing }),
+    onImportProgress: (listener) => subscribe<ImportProgress>("import:progress", listener),
     importItunes: async () => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({

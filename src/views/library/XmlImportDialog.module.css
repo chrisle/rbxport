@@ -1,0 +1,12 @@
+.backdrop { position:fixed; inset:0; z-index:120; display:grid; place-items:center; background:var(--c-modal-scrim); }
+.dialog { width:min(510px, calc(100vw - 32px)); border:1px solid var(--c-raised); border-radius:10px; overflow:hidden; background:var(--c-black); color:var(--c-icon-on); }
+.dialog header { padding:12px 18px; background:var(--c-titlebar); font-weight:700; text-align:center; }
+.dialog main { padding:18px; }
+.path { margin:0 0 16px; overflow:hidden; color:var(--c-text-dim); text-overflow:ellipsis; white-space:nowrap; }
+.stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 0 16px; }
+.stats div { display:flex; justify-content:space-between; padding:8px; background:var(--c-raised); }
+.stats dt { color:var(--c-text-dim); }.stats dd { margin:0; font-variant-numeric:tabular-nums; }
+.check { display:flex; gap:8px; align-items:center; }
+.progress { margin-top:18px; }.bar { height:8px; overflow:hidden; background:var(--c-raised); border-radius:99px; }.bar i { display:block; height:100%; background:var(--c-accent); transition:width .15s linear; }
+.progress p { margin:8px 0; color:var(--c-text-dim); }.counters { display:flex; gap:16px; font-size:12px; }.counters b { font-variant-numeric:tabular-nums; }
+.dialog footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid var(--c-raised); }.dialog button { min-width:82px; }.primary { background:var(--c-accent); color:white; }

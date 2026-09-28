@@ -108,7 +108,11 @@ pub struct LimiterDto {
 
 /// Why the library did not load at startup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum LibraryProblemDto {
     /// No library here at all, and one can be made at `master_db`.
     Missing { master_db: String },
@@ -258,8 +262,7 @@ pub fn cue_colour_css(index: u8) -> Option<String> {
     if index == 0 {
         return None;
     }
-    rbl_anlz::cue_colour_drawn(index)
-        .map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}"))
+    rbl_anlz::cue_colour_drawn(index).map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}"))
 }
 
 /// What an import batch did.
@@ -402,6 +405,28 @@ pub struct XmlImportReportDto {
     pub cues: u32,
     /// The tracks that landed, so they can be queued for analysis.
     pub tracks: Vec<ImportedTrackDto>,
+}
+
+/// What an XML collection contains before it is written.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct XmlImportPreviewDto {
+    pub tracks: u32,
+    pub available: u32,
+    pub missing: u32,
+    pub invalid: u32,
+    pub playlists: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct XmlImportProgressDto {
+    pub path: String,
+    pub done: u32,
+    pub total: u32,
+    pub imported: u32,
+    pub missing: u32,
+    pub errors: u32,
 }
 
 /// One explicit library backup, for Preferences › Backups.

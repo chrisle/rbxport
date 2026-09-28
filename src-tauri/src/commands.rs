@@ -12,16 +12,17 @@ use rbl_index::Library;
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
-use crate::link::LinkStatusDto;
 use crate::dto::{
-    cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
-    EditHistoryDto, ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
-    TreeNodeDto, ViewHandleDto, ViewSpecDto,
-    BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
-    ExportProgressDto, FilterValuesDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
-    XmlImportReportDto,
+    cue_colour_css, AudioDeviceDto, AudioDevicesDto, BackupDto, CountedDto, CueDto, DeviceDto,
+    DeviceExportDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
+    EditHistoryDto, ExportProgressDto, ExportReportDto, FilterValuesDto, ImportReportDto,
+    LibrarySummaryDto, LimiterDto, MissingExportFileDto, MissingTrackDto, MissingTracksDto,
+    PhraseDto, RowDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto,
+    SyncProgressDto, TagCategoryDto, TreeNodeDto, ViewHandleDto, ViewSpecDto, XmlImportPreviewDto,
+    XmlImportProgressDto, XmlImportReportDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
+use crate::link::LinkStatusDto;
 use crate::state::{rows_to_dto, spec_from_wire, AppState, EditHistory, LibraryEdit};
 
 /// Rows per request. The frontend asks a page at a time; this bound is what
@@ -165,18 +166,36 @@ struct ListStyle {
 }
 
 impl ListStyle {
-    const PLAYLISTS: Self =
-        Self { folder: "folder", leaf: "playlist", smart: "smartPlaylist", calendar: false };
-    const HISTORIES: Self =
-        Self { folder: "history", leaf: "history", smart: "history", calendar: true };
+    const PLAYLISTS: Self = Self {
+        folder: "folder",
+        leaf: "playlist",
+        smart: "smartPlaylist",
+        calendar: false,
+    };
+    const HISTORIES: Self = Self {
+        folder: "history",
+        leaf: "history",
+        smart: "history",
+        calendar: true,
+    };
 }
 
 /// A month folder's name as rekordbox shows it: `djmdHistory` stores the
 /// month as its number.
 fn month_name(number: &str) -> Option<&'static str> {
     const MONTHS: [&str; 12] = [
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ];
     let month = number.parse::<usize>().ok()?;
     MONTHS.get(month.checked_sub(1)?).copied()
@@ -275,7 +294,10 @@ fn push_lists(
 }
 
 #[tauri::command]
-pub async fn open_view(state: State<'_, Arc<AppState>>, spec: ViewSpecDto) -> AppResult<ViewHandleDto> {
+pub async fn open_view(
+    state: State<'_, Arc<AppState>>,
+    spec: ViewSpecDto,
+) -> AppResult<ViewHandleDto> {
     let library = state.library()?;
     // A folder is read from disk, not from the index, so it takes its own
     // path before the source is translated.
@@ -288,7 +310,11 @@ pub async fn open_view(state: State<'_, Arc<AppState>>, spec: ViewSpecDto) -> Ap
     let handle = Arc::clone(&state);
     blocking("open_view", move || {
         let (view_id, len, generation) = handle.open_view_scoped(&parsed, spec.search_field)?;
-        Ok(ViewHandleDto { view_id, len, gen: generation })
+        Ok(ViewHandleDto {
+            view_id,
+            len,
+            gen: generation,
+        })
     })
     .await
 }
@@ -318,7 +344,8 @@ pub async fn fetch_rows(
             blocking("fetch_row_details", move || {
                 enrich_rows(&handle, &mut rows, &extra_columns)?;
                 Ok(rows)
-            }).await
+            })
+            .await
         }
     } else {
         let view = state.view(view_id)?;
@@ -326,7 +353,9 @@ pub async fn fetch_rows(
             let offset = offset as usize;
             let window = view.window(offset, len as usize);
             let mut rows = rows_to_dto(&library, window, offset);
-            if !extra_columns.is_empty() { enrich_rows(&handle, &mut rows, &extra_columns)?; }
+            if !extra_columns.is_empty() {
+                enrich_rows(&handle, &mut rows, &extra_columns)?;
+            }
             Ok(rows)
         })
         .await
@@ -337,13 +366,37 @@ pub async fn fetch_rows(
 fn enrich_rows(state: &AppState, rows: &mut [RowDto], columns: &[String]) -> AppResult<()> {
     use serde_json::{json, Value};
     const FIELDS: &[&str] = &[
-        "size", "discNo", "albumArtist", "composer", "lyricist", "fileType", "year",
-        "mixName", "remixer", "originalArtist", "sampleRate", "bitrate", "bitDepth",
-        "location", "dateCreated", "publishTrackInfo", "message", "color",
-        "djPlayCount", "myTag", "trackNumber", "cloud",
+        "size",
+        "discNo",
+        "albumArtist",
+        "composer",
+        "lyricist",
+        "fileType",
+        "year",
+        "mixName",
+        "remixer",
+        "originalArtist",
+        "sampleRate",
+        "bitrate",
+        "bitDepth",
+        "location",
+        "dateCreated",
+        "publishTrackInfo",
+        "message",
+        "color",
+        "djPlayCount",
+        "myTag",
+        "trackNumber",
+        "cloud",
     ];
-    let wanted: Vec<&str> = columns.iter().map(String::as_str).filter(|column| FIELDS.contains(column)).collect();
-    if wanted.is_empty() { return Ok(()); }
+    let wanted: Vec<&str> = columns
+        .iter()
+        .map(String::as_str)
+        .filter(|column| FIELDS.contains(column))
+        .collect();
+    if wanted.is_empty() {
+        return Ok(());
+    }
     state.read_db(|db| {
         for row in rows {
             if row.id.starts_with("file:") { continue; }
@@ -429,14 +482,18 @@ pub async fn track_waveform(
 ) -> AppResult<tauri::ipc::Response> {
     let library = match state.library() {
         Ok(library) => library,
-        Err(error) => return crate::screen_cache::cached_waveform(&track_id, &kind)
-            .map(tauri::ipc::Response::new)
-            .ok_or(error),
+        Err(error) => {
+            return crate::screen_cache::cached_waveform(&track_id, &kind)
+                .map(tauri::ipc::Response::new)
+                .ok_or(error)
+        }
     };
     let share = state.share_root();
-    blocking("track_waveform", move || waveform_bytes(&library, &share, &track_id, &kind, from, len))
-        .await
-        .map(tauri::ipc::Response::new)
+    blocking("track_waveform", move || {
+        waveform_bytes(&library, &share, &track_id, &kind, from, len)
+    })
+    .await
+    .map(tauri::ipc::Response::new)
 }
 
 pub(crate) fn waveform_bytes(
@@ -448,8 +505,10 @@ pub(crate) fn waveform_bytes(
     len: Option<u32>,
 ) -> AppResult<Vec<u8>> {
     let Ok(numeric) = track_id.parse::<u64>() else {
-        return Err(AppError::new(ErrorKind::Malformed, "That track id is not valid.")
-            .with_detail(format!("track_id {track_id:?}")));
+        return Err(
+            AppError::new(ErrorKind::Malformed, "That track id is not valid.")
+                .with_detail(format!("track_id {track_id:?}")),
+        );
     };
     // Through the id map, not a scan. `ids` is 38,681 long and a screenful
     // of rows asks once each, which is the reason `artwork_path_of` was
@@ -463,29 +522,32 @@ pub(crate) fn waveform_bytes(
         return Ok(Vec::new());
     }
 
-        // The stored path names the .DAT; the colour waveforms live in the
-        // .EXT sibling and the three-band ones in .2EX.
+    // The stored path names the .DAT; the colour waveforms live in the
+    // .EXT sibling and the three-band ones in .2EX.
     let dat = rbl_anlz::resolve(share, analysis_path);
-        // rekordbox 7 draws the three-band waveforms, and every one of the
-        // first 300 tracks checked in the reference library has them. `PWV6`
-        // is the 1,200-column overview and `PWV7` the full-resolution detail,
-        // both three bytes per column: low, mid, high.
+    // rekordbox 7 draws the three-band waveforms, and every one of the
+    // first 300 tracks checked in the reference library has them. `PWV6`
+    // is the 1,200-column overview and `PWV7` the full-resolution detail,
+    // both three bytes per column: low, mid, high.
     let (file, tag, stride): (std::path::PathBuf, [u8; 4], usize) = match kind {
-            "bands" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV6", 3),
-            "bandsDetail" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV7", 3),
-            // The RGB palette's pair, six and two bytes a column.
-            "colourDetail" | "detail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV5", 2),
-            "colour" | "color" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV4", 6),
-            // The BLUE palette's pair, one byte a column.
-            "monoDetail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV3", 1),
-            _ => (dat, *b"PWAV", 1),
+        "bands" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV6", 3),
+        "bandsDetail" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV7", 3),
+        // The RGB palette's pair, six and two bytes a column.
+        "colourDetail" | "detail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV5", 2),
+        "colour" | "color" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV4", 6),
+        // The BLUE palette's pair, one byte a column.
+        "monoDetail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV3", 1),
+        _ => (dat, *b"PWAV", 1),
     };
 
     let Ok(anlz) = rbl_anlz::Anlz::read(&file) else {
         // Analysis missing on disk: draw nothing rather than fail the view.
         return Ok(Vec::new());
     };
-    let whole = anlz.waveform(&tag).map(|(_, data)| data).unwrap_or_default();
+    let whole = anlz
+        .waveform(&tag)
+        .map(|(_, data)| data)
+        .unwrap_or_default();
     Ok(window_of(whole, stride, from, len))
 }
 
@@ -511,22 +573,42 @@ pub async fn track_pcm_waveform(
     let from_ms = from_ms.max(0.0);
     let to_ms = to_ms.max(from_ms);
     blocking("track_pcm_waveform", move || {
-        let Some(path) = library.audio_path_of(&track_id).map(std::path::PathBuf::from) else {
+        let Some(path) = library
+            .audio_path_of(&track_id)
+            .map(std::path::PathBuf::from)
+        else {
             return Ok(Vec::new());
         };
         if !path.exists() || to_ms <= from_ms {
             return Ok(Vec::new());
         }
-        let mut stream = rbl_deck::decode::Streamer::open(&path, RATE)
-            .map_err(|e| AppError::new(ErrorKind::Malformed, "That file could not be decoded.").with_detail(e.to_string()))?;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a waveform span in frames, already clamped non-negative")]
+        let mut stream = rbl_deck::decode::Streamer::open(&path, RATE).map_err(|e| {
+            AppError::new(ErrorKind::Malformed, "That file could not be decoded.")
+                .with_detail(e.to_string())
+        })?;
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a waveform span in frames, already clamped non-negative"
+        )]
         let first = (from_ms * f64::from(RATE) / 1000.0).round().max(0.0) as u64;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a waveform span in frames, already clamped non-negative")]
-        let frames = ((to_ms - from_ms) * f64::from(RATE) / 1000.0).ceil().max(1.0) as usize;
-        stream.seek(first).map_err(|e| AppError::new(ErrorKind::Malformed, "That file could not be decoded.").with_detail(e.to_string()))?;
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a waveform span in frames, already clamped non-negative"
+        )]
+        let frames = ((to_ms - from_ms) * f64::from(RATE) / 1000.0)
+            .ceil()
+            .max(1.0) as usize;
+        stream.seek(first).map_err(|e| {
+            AppError::new(ErrorKind::Malformed, "That file could not be decoded.")
+                .with_detail(e.to_string())
+        })?;
         let mut pcm = vec![0.0_f32; frames * 2];
-        let read = stream.fill(&mut pcm)
-            .map_err(|e| AppError::new(ErrorKind::Malformed, "That file could not be decoded.").with_detail(e.to_string()))?;
+        let read = stream.fill(&mut pcm).map_err(|e| {
+            AppError::new(ErrorKind::Malformed, "That file could not be decoded.")
+                .with_detail(e.to_string())
+        })?;
         let mut out = Vec::with_capacity(columns * 8);
         for column in 0..columns {
             let start = column * frames / columns;
@@ -540,16 +622,25 @@ pub async fn track_pcm_waveform(
                 right.0 = right.0.min(pcm[at + 1]);
                 right.1 = right.1.max(pcm[at + 1]);
             }
-            if !left.0.is_finite() { left = (0.0, 0.0); }
-            if !right.0.is_finite() { right = (0.0, 0.0); }
+            if !left.0.is_finite() {
+                left = (0.0, 0.0);
+            }
+            if !right.0.is_finite() {
+                right = (0.0, 0.0);
+            }
             for sample in [left.0, left.1, right.0, right.1] {
-                #[allow(clippy::cast_possible_truncation, reason = "clamped to [-1.0, 1.0] * i16::MAX, so it always fits")]
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "clamped to [-1.0, 1.0] * i16::MAX, so it always fits"
+                )]
                 let pcm16 = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
                 out.extend_from_slice(&pcm16.to_le_bytes());
             }
         }
         Ok(out)
-    }).await.map(tauri::ipc::Response::new)
+    })
+    .await
+    .map(tauri::ipc::Response::new)
 }
 
 /// The requested span of a waveform tag, clamped to what is there.
@@ -561,7 +652,9 @@ fn window_of(data: &[u8], stride: usize, from: Option<u32>, len: Option<u32>) ->
     let entries = data.len() / stride;
     let first = from.map_or(0, |f| f as usize).min(entries);
     let count = len.map_or(entries - first, |l| (l as usize).min(entries - first));
-    data.get(first * stride..(first + count) * stride).unwrap_or(&[]).to_vec()
+    data.get(first * stride..(first + count) * stride)
+        .unwrap_or(&[])
+        .to_vec()
 }
 
 // ---------------------------------------------------------------- editing
@@ -587,7 +680,11 @@ impl Touched {
     /// view as it was, so it has its own rather than `library:changed`,
     /// which makes every open list fetch its rows again.
     pub(crate) fn event(&self) -> &'static str {
-        if matches!(self, Self::TagList) { "tag-list:changed" } else { "library:changed" }
+        if matches!(self, Self::TagList) {
+            "tag-list:changed"
+        } else {
+            "library:changed"
+        }
     }
 }
 
@@ -606,12 +703,15 @@ where
     let event = touched.event();
     let (generation, history) = blocking(name, move || {
         let _gate = state.edit_gate.lock();
-        let generation = state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched)).map_err(write_error)?;
+        let generation = state
+            .write_then(action, |db, ()| refresh_after_edit(&state, db, touched))
+            .map_err(write_error)?;
         // Any non-recorded edit after an undo starts a new branch.
         let mut history = state.edit_history.lock();
         history.clear_redo();
         Ok((generation, history_dto(generation, &history)))
-    }).await?;
+    })
+    .await?;
     let _ = tauri::Emitter::emit(&app, event, generation);
     let _ = tauri::Emitter::emit(&app, "edit-history:changed", history);
     Ok(generation)
@@ -633,12 +733,14 @@ where
     let event = touched.event();
     let (generation, history) = blocking(name, move || {
         let _gate = state.edit_gate.lock();
-        let generation = state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched))
+        let generation = state
+            .write_then(action, |db, ()| refresh_after_edit(&state, db, touched))
             .map_err(write_error)?;
         let mut history = state.edit_history.lock();
         history.clear();
         Ok((generation, history_dto(generation, &history)))
-    }).await?;
+    })
+    .await?;
     let _ = tauri::Emitter::emit(&app, event, generation);
     let _ = tauri::Emitter::emit(&app, "edit-history:changed", history);
     Ok(generation)
@@ -668,16 +770,18 @@ where
     let state = Arc::clone(&state);
     let dto = blocking(name, move || {
         let _gate = state.edit_gate.lock();
-        let (generation, reversible) = state.write_then(
-            action,
-            |db, reversible| refresh_after_edit(&state, db, touched).map(|generation| (generation, reversible)),
-        ).map_err(write_error)?;
+        let (generation, reversible) = state
+            .write_then(action, |db, reversible| {
+                refresh_after_edit(&state, db, touched).map(|generation| (generation, reversible))
+            })
+            .map_err(write_error)?;
         let mut history = state.edit_history.lock();
         if !reversible.is_empty() {
             history.record(reversible, label);
         }
         Ok(history_dto(generation, &history))
-    }).await?;
+    })
+    .await?;
     let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
     let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
     Ok(dto)
@@ -685,20 +789,46 @@ where
 
 fn touched_by(edit: &LibraryEdit) -> Touched {
     match edit {
-        LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) |
-        LibraryEdit::MovePlaylist(_) | LibraryEdit::RemovePlaylistTracks(_) => Touched::Playlists,
+        LibraryEdit::DeletePlaylist(_)
+        | LibraryEdit::RenamePlaylist(_)
+        | LibraryEdit::MovePlaylist(_)
+        | LibraryEdit::RemovePlaylistTracks(_) => Touched::Playlists,
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
         LibraryEdit::Track(_) | LibraryEdit::TrackTags(_) => Touched::Tracks,
     }
 }
 
-fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: bool) -> Result<(), rbl_db::DbError> {
+fn apply_history(
+    writer: &mut rbl_db::write::Writer,
+    edit: &LibraryEdit,
+    undo: bool,
+) -> Result<(), rbl_db::DbError> {
     match edit {
-        LibraryEdit::DeletePlaylist(value) => if undo { writer.restore_playlist(value) } else { writer.redo_playlist_deletion(value) }.map(|_| ()),
-        LibraryEdit::RenamePlaylist(value) => if undo { writer.undo_rename(value) } else { writer.redo_rename(value) }.map(|_| ()),
-        LibraryEdit::MovePlaylist(value) => if undo { writer.undo_move(value) } else { writer.redo_move(value) }.map(|_| ()),
-        LibraryEdit::RemovePlaylistTracks(value) => if undo { writer.undo_track_removal(value) } else { writer.redo_track_removal(value) }.map(|_| ()),
+        LibraryEdit::DeletePlaylist(value) => if undo {
+            writer.restore_playlist(value)
+        } else {
+            writer.redo_playlist_deletion(value)
+        }
+        .map(|_| ()),
+        LibraryEdit::RenamePlaylist(value) => if undo {
+            writer.undo_rename(value)
+        } else {
+            writer.redo_rename(value)
+        }
+        .map(|_| ()),
+        LibraryEdit::MovePlaylist(value) => if undo {
+            writer.undo_move(value)
+        } else {
+            writer.redo_move(value)
+        }
+        .map(|_| ()),
+        LibraryEdit::RemovePlaylistTracks(value) => if undo {
+            writer.undo_track_removal(value)
+        } else {
+            writer.redo_track_removal(value)
+        }
+        .map(|_| ()),
         LibraryEdit::Track(values) => {
             let ordered: Box<dyn Iterator<Item = _>> = if undo {
                 Box::new(values.iter().rev())
@@ -706,7 +836,11 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
                 Box::new(values.iter())
             };
             for value in ordered {
-                if undo { writer.undo_track_edit(value)?; } else { writer.redo_track_edit(value)?; }
+                if undo {
+                    writer.undo_track_edit(value)?;
+                } else {
+                    writer.redo_track_edit(value)?;
+                }
             }
             Ok(())
         }
@@ -714,13 +848,18 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
             writer.undo_tag_edit(value)
         } else {
             writer.redo_tag_edit(value)
-        }.map(|_| ()),
+        }
+        .map(|_| ()),
     }
 }
 
 /// Shared by desktop and CDJ edits; the writer holds the edit gate until
 /// both persistence and the new index are visible.
-pub(crate) fn refresh_after_edit(state: &AppState, db: &rbl_db::Library, touched: Touched) -> Result<u32, rbl_db::DbError> {
+pub(crate) fn refresh_after_edit(
+    state: &AppState,
+    db: &rbl_db::Library,
+    touched: Touched,
+) -> Result<u32, rbl_db::DbError> {
     match touched {
         Touched::Metadata(ids) => state.refresh_metadata(db, &ids, false),
         Touched::Histories(ids) if !ids.is_empty() => state.refresh_metadata(db, &ids, true),
@@ -728,18 +867,30 @@ pub(crate) fn refresh_after_edit(state: &AppState, db: &rbl_db::Library, touched
             let started = std::time::Instant::now();
             let (library, _) = rbl_index::load(db)?;
             let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-            state.set_library(library, rbl_db::is_rekordbox_running(), db.schema().db_version, load_ms, db.location().clone());
+            state.set_library(
+                library,
+                rbl_db::is_rekordbox_running(),
+                db.schema().db_version,
+                load_ms,
+                db.location().clone(),
+            );
             Ok(state.summary().3)
         }
         touched => {
-            let library = state.library().map_err(|e| rbl_db::DbError::Open(e.to_string()))?;
+            let library = state
+                .library()
+                .map_err(|e| rbl_db::DbError::Open(e.to_string()))?;
             match touched {
                 Touched::TagList => {
                     library.set_tag_list(rbl_index::reload_tag_list(db, &library)?);
                     return Ok(state.invalidate_tag_list_views());
                 }
-                Touched::Playlists => library.set_playlists(rbl_index::reload_playlists(db, &library)?),
-                Touched::Histories(_) => library.set_histories(rbl_index::reload_histories(db, &library)?),
+                Touched::Playlists => {
+                    library.set_playlists(rbl_index::reload_playlists(db, &library)?)
+                }
+                Touched::Histories(_) => {
+                    library.set_histories(rbl_index::reload_histories(db, &library)?)
+                }
                 _ => unreachable!("track changes handled above"),
             }
             Ok(state.invalidate_views())
@@ -767,15 +918,18 @@ pub async fn reload_library<R: tauri::Runtime>(
 }
 
 /// Re-reads the library and returns the new generation.
-pub(crate) async fn reload<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Arc<AppState>) -> AppResult<u32> {
+pub(crate) async fn reload<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: Arc<AppState>,
+) -> AppResult<u32> {
     let generation = blocking("reload", move || {
         let _gate = state.edit_gate.lock();
         let db = state.open_read_only().map_err(write_error)?;
         let db_version = db.schema().db_version;
         let location = db.location().clone();
         let started = std::time::Instant::now();
-        let (library, _) = rbl_index::load(&db)
-            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+        let (library, _) =
+            rbl_index::load(&db).map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
         let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let read_only = rbl_db::is_rekordbox_running();
         state.set_library(library, read_only, db_version, load_ms, location);
@@ -794,7 +948,9 @@ pub(crate) async fn reload<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: A
 /// ever pressed.
 #[tauri::command]
 pub async fn link_status(state: State<'_, Arc<AppState>>) -> AppResult<LinkStatusDto> {
-    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
+    Ok(state
+        .link_status()
+        .unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
 }
 
 /// The players and mixers heard on the network, whether or not LINK is on.
@@ -824,16 +980,25 @@ pub async fn start_link_export<R: tauri::Runtime>(
         tracing::warn!(%problem, "LINK refused");
         return Ok(LinkStatusDto::off(Some(problem)));
     }
-    tracing::info!(interface = interface.as_deref().unwrap_or("auto"), "LINK starting");
+    tracing::info!(
+        interface = interface.as_deref().unwrap_or("auto"),
+        "LINK starting"
+    );
     let owner = Arc::clone(&state);
     let emitter = app.clone();
     let library_emitter = app.clone();
     let started = blocking("start_link_export", move || {
-        Ok(crate::link::Session::start(&owner, interface.as_deref(), alphabetical_keys.unwrap_or(false), move |status| {
-            let _ = tauri::Emitter::emit(&emitter, "link:status", status);
-        }, Arc::new(move |event, generation| {
-            let _ = tauri::Emitter::emit(&library_emitter, event, generation);
-        })))
+        Ok(crate::link::Session::start(
+            &owner,
+            interface.as_deref(),
+            alphabetical_keys.unwrap_or(false),
+            move |status| {
+                let _ = tauri::Emitter::emit(&emitter, "link:status", status);
+            },
+            Arc::new(move |event, generation| {
+                let _ = tauri::Emitter::emit(&library_emitter, event, generation);
+            }),
+        ))
     })
     .await?;
     match started {
@@ -883,8 +1048,14 @@ pub async fn link_load_track(
     player_number: u8,
     track_id: String,
 ) -> AppResult<()> {
-    let id: u32 = track_id.parse().map_err(|_| AppError::internal(format!("bad track id: {track_id}")))?;
-    tracing::info!(player_number, track_id = id, "asking a player to load a track");
+    let id: u32 = track_id
+        .parse()
+        .map_err(|_| AppError::internal(format!("bad track id: {track_id}")))?;
+    tracing::info!(
+        player_number,
+        track_id = id,
+        "asking a player to load a track"
+    );
     state.link_load_track(player_number, id).map_err(|reason| {
         tracing::warn!(player_number, track_id = id, %reason, "the player could not be asked");
         AppError::internal(reason)
@@ -894,17 +1065,27 @@ pub async fn link_load_track(
 /// Becomes the network's tempo master, or resigns, and returns LINK's fresh
 /// status.
 #[tauri::command]
-pub async fn link_set_master(state: State<'_, Arc<AppState>>, on: bool) -> AppResult<LinkStatusDto> {
+pub async fn link_set_master(
+    state: State<'_, Arc<AppState>>,
+    on: bool,
+) -> AppResult<LinkStatusDto> {
     state.link_set_master(on);
-    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
+    Ok(state
+        .link_status()
+        .unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
 }
 
 /// Nudges the master tempo by `delta_bpm` (rekordbox's −/+ is ±1), and
 /// returns LINK's fresh status.
 #[tauri::command]
-pub async fn link_nudge_master(state: State<'_, Arc<AppState>>, delta_bpm: f64) -> AppResult<LinkStatusDto> {
+pub async fn link_nudge_master(
+    state: State<'_, Arc<AppState>>,
+    delta_bpm: f64,
+) -> AppResult<LinkStatusDto> {
     state.link_nudge_master(delta_bpm);
-    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
+    Ok(state
+        .link_status()
+        .unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
 }
 
 /// Takes the current master player's tempo as the master tempo (rekordbox's
@@ -912,7 +1093,9 @@ pub async fn link_nudge_master(state: State<'_, Arc<AppState>>, delta_bpm: f64) 
 #[tauri::command]
 pub async fn link_take_master_tempo(state: State<'_, Arc<AppState>>) -> AppResult<LinkStatusDto> {
     state.link_take_master_tempo();
-    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
+    Ok(state
+        .link_status()
+        .unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
 }
 
 /// Writes a playlist to a stick.
@@ -937,10 +1120,28 @@ pub async fn export_playlist<R: tauri::Runtime>(
     let state = Arc::clone(&state);
     let progress_app = app.clone();
     let report = blocking("export_playlist", move || {
-        let selection = ExportSelection::from_playlists(&state, &library, &share, std::slice::from_ref(&playlist), false)?;
+        let selection = ExportSelection::from_playlists(
+            &state,
+            &library,
+            &share,
+            std::slice::from_ref(&playlist),
+            false,
+        )?;
         let destination = std::path::Path::new(&destination);
-        let selection = selection.for_stick(&state, &library, &share, destination, delete_unlisted_music.unwrap_or(false))?;
-        write_export_with_progress(&progress_app, destination, &selection, defaults.as_ref(), compatibility_format)
+        let selection = selection.for_stick(
+            &state,
+            &library,
+            &share,
+            destination,
+            delete_unlisted_music.unwrap_or(false),
+        )?;
+        write_export_with_progress(
+            &progress_app,
+            destination,
+            &selection,
+            defaults.as_ref(),
+            compatibility_format,
+        )
     })
     .await?;
 
@@ -957,7 +1158,10 @@ pub async fn export_playlist<R: tauri::Runtime>(
 /// and only building the selection can fail the whole run. Every export owns
 /// its progress event, so the window can show each stick moving independently.
 #[tauri::command]
-#[allow(clippy::too_many_arguments, reason = "the Sync Manager's own settings, one per IPC field the frontend already sends")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Sync Manager's own settings, one per IPC field the frontend already sends"
+)]
 pub async fn sync_devices<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
@@ -977,30 +1181,54 @@ pub async fn sync_devices<R: tauri::Runtime>(
     let share = state.share_root();
     let state = Arc::clone(&state);
     blocking("sync_devices", move || {
-        let selection =
-            ExportSelection::from_playlists(&state, &library, &share, &playlists, automatic.unwrap_or(false))?;
+        let selection = ExportSelection::from_playlists(
+            &state,
+            &library,
+            &share,
+            &playlists,
+            automatic.unwrap_or(false),
+        )?;
         // The selection contains owned tracks and analysis. Clone it for each
         // worker rather than rereading the library, then preserve the user's
         // device order when collecting reports.
         std::thread::scope(|scope| {
-            let workers: Vec<_> = destinations.into_iter().map(|destination| {
-                let app = app.clone();
-                let state = Arc::clone(&state);
-                let library = Arc::clone(&library);
-                let selection = selection.clone();
-                let share = share.clone();
-                let defaults = defaults.clone();
-                scope.spawn(move || sync_one_device(
-                    &app, &state, &library, &share, &selection, destination,
-                    defaults.as_ref(), delete_unlisted_music.unwrap_or(false),
-                    eject_after_sync.unwrap_or(false), compatibility_format,
-                ))
-            }).collect();
-            Ok(workers.into_iter().map(|worker| worker.join().unwrap_or_else(|_| SyncDeviceReportDto {
-                path: "Unknown device".to_owned(), report: None,
-                error: Some("The sync worker stopped unexpectedly.".to_owned()),
-                ejected: false, eject_error: None,
-            })).collect())
+            let workers: Vec<_> = destinations
+                .into_iter()
+                .map(|destination| {
+                    let app = app.clone();
+                    let state = Arc::clone(&state);
+                    let library = Arc::clone(&library);
+                    let selection = selection.clone();
+                    let share = share.clone();
+                    let defaults = defaults.clone();
+                    scope.spawn(move || {
+                        sync_one_device(
+                            &app,
+                            &state,
+                            &library,
+                            &share,
+                            &selection,
+                            destination,
+                            defaults.as_ref(),
+                            delete_unlisted_music.unwrap_or(false),
+                            eject_after_sync.unwrap_or(false),
+                            compatibility_format,
+                        )
+                    })
+                })
+                .collect();
+            Ok(workers
+                .into_iter()
+                .map(|worker| {
+                    worker.join().unwrap_or_else(|_| SyncDeviceReportDto {
+                        path: "Unknown device".to_owned(),
+                        report: None,
+                        error: Some("The sync worker stopped unexpectedly.".to_owned()),
+                        ejected: false,
+                        eject_error: None,
+                    })
+                })
+                .collect())
         })
     })
     .await
@@ -1018,43 +1246,72 @@ pub async fn validate_export_files(
     blocking("validate_export_files", move || {
         let selection =
             ExportSelection::from_playlists(&state, &library, &share, &playlists, false)?;
-        Ok(selection.tracks.into_iter().filter_map(|track| {
-            if track.source_path.is_file() {
-                return None;
-            }
-            Some(MissingExportFileDto {
-                title: if track.title.is_empty() {
-                    "Untitled track".to_owned()
-                } else {
-                    track.title
-                },
-                path: track.source_path.to_string_lossy().into_owned(),
+        Ok(selection
+            .tracks
+            .into_iter()
+            .filter_map(|track| {
+                if track.source_path.is_file() {
+                    return None;
+                }
+                Some(MissingExportFileDto {
+                    title: if track.title.is_empty() {
+                        "Untitled track".to_owned()
+                    } else {
+                        track.title
+                    },
+                    path: track.source_path.to_string_lossy().into_owned(),
+                })
             })
-        })
-        .collect())
+            .collect())
     })
     .await
 }
 
 #[allow(clippy::too_many_arguments, reason = "one independent USB sync worker")]
 fn sync_one_device<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>, state: &AppState, library: &rbl_index::Library,
-    share: &std::path::Path, selection: &ExportSelection, destination: String,
-    defaults: Option<&crate::device_settings::StickDefaultsDto>, delete_unlisted_music: bool,
-    eject_after_sync: bool, compatibility_format: Option<rbl_export::CompatibilityFormat>,
+    app: &tauri::AppHandle<R>,
+    state: &AppState,
+    library: &rbl_index::Library,
+    share: &std::path::Path,
+    selection: &ExportSelection,
+    destination: String,
+    defaults: Option<&crate::device_settings::StickDefaultsDto>,
+    delete_unlisted_music: bool,
+    eject_after_sync: bool,
+    compatibility_format: Option<rbl_export::CompatibilityFormat>,
 ) -> SyncDeviceReportDto {
     let progress = |state: &'static str| {
-        let _ = tauri::Emitter::emit(app, "sync:progress", SyncProgressDto { path: destination.clone(), state });
+        let _ = tauri::Emitter::emit(
+            app,
+            "sync:progress",
+            SyncProgressDto {
+                path: destination.clone(),
+                state,
+            },
+        );
     };
     progress("writing");
     let stick = std::path::Path::new(&destination);
-    let written = selection.for_stick(state, library, share, stick, delete_unlisted_music)
-        .and_then(|selection| write_export_with_progress(app, stick, &selection, defaults, compatibility_format));
+    let written = selection
+        .for_stick(state, library, share, stick, delete_unlisted_music)
+        .and_then(|selection| {
+            write_export_with_progress(app, stick, &selection, defaults, compatibility_format)
+        });
     match written {
         Ok(report) => {
-            let mut result = SyncDeviceReportDto { path: destination.clone(), report: Some(report), error: None, ejected: false, eject_error: None };
+            let mut result = SyncDeviceReportDto {
+                path: destination.clone(),
+                report: Some(report),
+                error: None,
+                ejected: false,
+                eject_error: None,
+            };
             if eject_after_sync {
-                if result.report.as_ref().is_some_and(|report| report.verified && report.skipped.is_empty()) {
+                if result
+                    .report
+                    .as_ref()
+                    .is_some_and(|report| report.verified && report.skipped.is_empty())
+                {
                     progress("ejecting");
                     set_export_stage(app, stick, "ejecting");
                     match rbl_devices::eject::eject(stick) {
@@ -1066,14 +1323,22 @@ fn sync_one_device<R: tauri::Runtime>(
                 }
             }
             progress("done");
-            if eject_after_sync { set_export_stage(app, stick, "done"); }
+            if eject_after_sync {
+                set_export_stage(app, stick, "done");
+            }
             result
-        },
+        }
         Err(e) => {
             progress("failed");
             tracing::warn!(destination, error = %e, "sync to one device failed");
             set_export_failure(app, stick, e.message.clone());
-            SyncDeviceReportDto { path: destination, report: None, error: Some(e.message), ejected: false, eject_error: None }
+            SyncDeviceReportDto {
+                path: destination,
+                report: None,
+                error: Some(e.message),
+                ejected: false,
+                eject_error: None,
+            }
         }
     }
 }
@@ -1097,13 +1362,25 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
     let report = blocking("export_tracks_to_device", move || {
         let stick = std::path::Path::new(&destination);
         if !stick.is_dir() {
-            return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
+            return Err(AppError::new(
+                ErrorKind::NotFound,
+                "That device is no longer connected.",
+            ));
         }
         let record = rbl_export::Manifest::load(stick);
         let (playlists, mut loose, automatic) = match record {
             Some(m) => {
-                let ids: Vec<String> = m.playlists.iter().filter(|p| !p.folder).map(|p| p.library_id.to_string()).collect();
-                (ids, m.loose, rbl_export::sync_record::read(stick).is_some_and(|r| r.automatic))
+                let ids: Vec<String> = m
+                    .playlists
+                    .iter()
+                    .filter(|p| !p.folder)
+                    .map(|p| p.library_id.to_string())
+                    .collect();
+                (
+                    ids,
+                    m.loose,
+                    rbl_export::sync_record::read(stick).is_some_and(|r| r.automatic),
+                )
             }
             None => (Vec::new(), Vec::new(), false),
         };
@@ -1112,8 +1389,16 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
                 loose.push(id);
             }
         }
-        let selection = ExportSelection::from_playlists_and_tracks(&state, &library, &share, &playlists, &loose, automatic)?;
-        write_export_with_progress(&progress_app, stick, &selection, defaults.as_ref(), compatibility_format)
+        let selection = ExportSelection::from_playlists_and_tracks(
+            &state, &library, &share, &playlists, &loose, automatic,
+        )?;
+        write_export_with_progress(
+            &progress_app,
+            stick,
+            &selection,
+            defaults.as_ref(),
+            compatibility_format,
+        )
     })
     .await?;
     let _ = tauri::Emitter::emit(&app, "export:done", &report);
@@ -1131,18 +1416,26 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
 /// comes from `export.pdb` itself, whoever wrote it, because that is what
 /// the player will show.
 #[tauri::command]
-pub async fn device_sync_state(state: State<'_, Arc<AppState>>, path: String) -> AppResult<DeviceSyncStateDto> {
+pub async fn device_sync_state(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> AppResult<DeviceSyncStateDto> {
     let library = state.library().ok();
     let state = Arc::clone(&state);
     blocking("device_sync_state", move || {
         let mount = std::path::Path::new(&path);
         if !mount.is_dir() {
-            return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
+            return Err(AppError::new(
+                ErrorKind::NotFound,
+                "That device is no longer connected.",
+            ));
         }
         let record = rbl_export::sync_record::read(mount);
         // Only read when there is a record to match it against.
         let db_id = if record.is_some() {
-            state.read_db(|db| rbl_db::export_info::db_id(db.connection())).unwrap_or(0)
+            state
+                .read_db(|db| rbl_db::export_info::db_id(db.connection()))
+                .unwrap_or(0)
         } else {
             0
         };
@@ -1171,7 +1464,10 @@ pub async fn device_sync_state(state: State<'_, Arc<AppState>>, path: String) ->
                     .iter()
                     .filter_map(|&id| {
                         let index = playlists.index_of(id)?;
-                        Some(SyncPlaylistDto { library_id: id.to_string(), name: playlists.name(index).to_owned() })
+                        Some(SyncPlaylistDto {
+                            library_id: id.to_string(),
+                            name: playlists.name(index).to_owned(),
+                        })
                     })
                     .collect();
             }
@@ -1191,12 +1487,22 @@ pub async fn device_sync_state(state: State<'_, Arc<AppState>>, path: String) ->
 /// that cannot be read holds nothing the window can name.
 fn playlists_on_device(mount: &std::path::Path) -> Vec<String> {
     let pdb = rbl_devices::settings::export_root(mount).join("rekordbox/export.pdb");
-    let Ok(bytes) = std::fs::read(&pdb) else { return Vec::new() };
-    let Ok(parsed) = rbl_pdb::Pdb::parse(&bytes) else { return Vec::new() };
-    let Some(table) = parsed.table(rbl_pdb::PageType::PlaylistTree) else { return Vec::new() };
+    let Ok(bytes) = std::fs::read(&pdb) else {
+        return Vec::new();
+    };
+    let Ok(parsed) = rbl_pdb::Pdb::parse(&bytes) else {
+        return Vec::new();
+    };
+    let Some(table) = parsed.table(rbl_pdb::PageType::PlaylistTree) else {
+        return Vec::new();
+    };
     let mut nodes = parsed.playlist_nodes(table);
     nodes.sort_by_key(|node| (node.parent_id, node.sort_order));
-    nodes.into_iter().filter(|node| !node.is_folder).map(|node| node.name).collect()
+    nodes
+        .into_iter()
+        .filter(|node| !node.is_folder)
+        .map(|node| node.name)
+        .collect()
 }
 
 /// A My Tag row as the export takes it.
@@ -1256,25 +1562,43 @@ impl ExportSelection {
         let _analysis = state.analysis_write.lock();
         // Named first and read after: `source_rows` takes the playlists
         // itself, so the guard is let go before it is asked.
-        let mut named: Vec<(u64, String, rbl_index::TrackSource)> = Vec::with_capacity(playlist_ids.len());
+        let mut named: Vec<(u64, String, rbl_index::TrackSource)> =
+            Vec::with_capacity(playlist_ids.len());
         {
             let playlists = library.playlists();
             for id in playlist_ids {
-                let Some(index) = id.parse::<u64>().ok().and_then(|numeric| playlists.index_of(numeric)) else {
-                    return Err(AppError::new(ErrorKind::NotFound, "That playlist is not in the library."));
+                let Some(index) = id
+                    .parse::<u64>()
+                    .ok()
+                    .and_then(|numeric| playlists.index_of(numeric))
+                else {
+                    return Err(AppError::new(
+                        ErrorKind::NotFound,
+                        "That playlist is not in the library.",
+                    ));
                 };
                 let source = if playlists.is_smart(index) {
                     rbl_index::TrackSource::SmartPlaylist(index)
                 } else {
                     rbl_index::TrackSource::Playlist(index)
                 };
-                named.push((playlists.ids.get(index).copied().unwrap_or(0), playlists.name(index).to_owned(), source));
+                named.push((
+                    playlists.ids.get(index).copied().unwrap_or(0),
+                    playlists.name(index).to_owned(),
+                    source,
+                ));
             }
         }
-        let rows_of: Vec<Vec<u32>> = named.iter().map(|(_, _, source)| library.source_rows(source)).collect();
+        let rows_of: Vec<Vec<u32>> = named
+            .iter()
+            .map(|(_, _, source)| library.source_rows(source))
+            .collect();
         // A loose track the library no longer has is left off without a
         // word: the stick's record outlives the track.
-        let loose_rows: Vec<u32> = loose.iter().filter_map(|&id| library.row_of_id(id)).collect();
+        let loose_rows: Vec<u32> = loose
+            .iter()
+            .filter_map(|&id| library.row_of_id(id))
+            .collect();
 
         // What the index does not hold: the My Tags, and the other places a
         // cloud-synced file may be. One read for the whole selection.
@@ -1282,7 +1606,14 @@ impl ExportSelection {
             .iter()
             .flatten()
             .chain(loose_rows.iter())
-            .map(|&row| library.ids.get(row as usize).copied().unwrap_or(0).to_string())
+            .map(|&row| {
+                library
+                    .ids
+                    .get(row as usize)
+                    .copied()
+                    .unwrap_or(0)
+                    .to_string()
+            })
             .collect();
         let (my_tags, extras, db_id) = state
             .read_db(|db| {
@@ -1311,7 +1642,11 @@ impl ExportSelection {
                 })
                 .collect()
         };
-        let sync = rbl_export::SyncSource { db_id, tree, automatic };
+        let sync = rbl_export::SyncSource {
+            db_id,
+            tree,
+            automatic,
+        };
         let my_tags: Vec<rbl_export::SourceMyTag> = my_tags.iter().map(source_my_tag).collect();
 
         let mut tracks: Vec<rbl_export::SourceTrack> = Vec::new();
@@ -1320,19 +1655,41 @@ impl ExportSelection {
         for ((id, name, _), rows) in named.into_iter().zip(rows_of) {
             let mut track_indices = Vec::with_capacity(rows.len());
             for row in rows {
-                let at = if let Some(at)=position.get(&row) { *at } else {
-                    let content = library.ids.get(row as usize).copied().unwrap_or(0).to_string();
+                let at = if let Some(at) = position.get(&row) {
+                    *at
+                } else {
+                    let content = library
+                        .ids
+                        .get(row as usize)
+                        .copied()
+                        .unwrap_or(0)
+                        .to_string();
                     let extra = extras.get(&content).cloned().unwrap_or_default();
                     tracks.push(source_track(library, share, row, &extra)?);
-                    let at=tracks.len()-1; position.insert(row,at); at
+                    let at = tracks.len() - 1;
+                    position.insert(row, at);
+                    at
                 };
                 track_indices.push(at);
             }
-            source_playlists.push(rbl_export::SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id, name, track_indices });
+            source_playlists.push(rbl_export::SourcePlaylist {
+                device_id: 0,
+                device_only: false,
+                parent_id: 0,
+                folder: false,
+                id,
+                name,
+                track_indices,
+            });
         }
         for row in loose_rows {
             if let std::collections::hash_map::Entry::Vacant(entry) = position.entry(row) {
-                let content = library.ids.get(row as usize).copied().unwrap_or(0).to_string();
+                let content = library
+                    .ids
+                    .get(row as usize)
+                    .copied()
+                    .unwrap_or(0)
+                    .to_string();
                 let extra = extras.get(&content).cloned().unwrap_or_default();
                 tracks.push(source_track(library, share, row, &extra)?);
                 entry.insert(tracks.len() - 1);
@@ -1342,20 +1699,47 @@ impl ExportSelection {
         let tree_view = library.playlists();
         let mut ancestors = std::collections::BTreeSet::new();
         for p in &mut source_playlists {
-            p.parent_id = sync.tree.iter().find(|n| n.id == p.id).map_or(0, |n| n.parent);
+            p.parent_id = sync
+                .tree
+                .iter()
+                .find(|n| n.id == p.id)
+                .map_or(0, |n| n.parent);
             let mut parent = p.parent_id;
             while parent != 0 && ancestors.insert(parent) {
-                parent = sync.tree.iter().find(|n| n.id == parent).map_or(0, |n| n.parent);
+                parent = sync
+                    .tree
+                    .iter()
+                    .find(|n| n.id == parent)
+                    .map_or(0, |n| n.parent);
             }
         }
         let mut folders = Vec::new();
         for id in ancestors {
-            let Some(index) = tree_view.index_of(id) else { return Err(AppError::internal("Missing playlist ancestor")); };
-            folders.push(rbl_export::SourcePlaylist { device_id: 0, device_only: false, id, name: tree_view.name(index).to_owned(), parent_id: sync.tree.iter().find(|n| n.id == id).map_or(0, |n| n.parent), folder: true, track_indices: Vec::new() });
+            let Some(index) = tree_view.index_of(id) else {
+                return Err(AppError::internal("Missing playlist ancestor"));
+            };
+            folders.push(rbl_export::SourcePlaylist {
+                device_id: 0,
+                device_only: false,
+                id,
+                name: tree_view.name(index).to_owned(),
+                parent_id: sync
+                    .tree
+                    .iter()
+                    .find(|n| n.id == id)
+                    .map_or(0, |n| n.parent),
+                folder: true,
+                track_indices: Vec::new(),
+            });
         }
         folders.append(&mut source_playlists);
         source_playlists = folders;
-        Ok(Self { tracks, playlists: source_playlists, my_tags, sync })
+        Ok(Self {
+            tracks,
+            playlists: source_playlists,
+            my_tags,
+            sync,
+        })
     }
 
     /// This selection with the loose tracks a stick's record names added,
@@ -1375,18 +1759,34 @@ impl ExportSelection {
             return Ok(std::borrow::Cow::Borrowed(self));
         }
         rbl_export::recover(destination).map_err(|e| AppError::internal(e.to_string()))?;
-        let recorded = rbl_export::Manifest::load(destination).filter(|m| m.db_id == self.sync.db_id).map(|m| m.loose).unwrap_or_default();
+        let recorded = rbl_export::Manifest::load(destination)
+            .filter(|m| m.db_id == self.sync.db_id)
+            .map(|m| m.loose)
+            .unwrap_or_default();
         let held: std::collections::HashSet<u64> = self.tracks.iter().map(|t| t.id).collect();
-        let missing: Vec<u64> = recorded.into_iter().filter(|id| !held.contains(id)).collect();
+        let missing: Vec<u64> = recorded
+            .into_iter()
+            .filter(|id| !held.contains(id))
+            .collect();
         if missing.is_empty() {
             return Ok(std::borrow::Cow::Borrowed(self));
         }
-        let playlist_ids: Vec<String> = self.playlists.iter().filter(|p| !p.folder).map(|p| p.id.to_string()).collect();
+        let playlist_ids: Vec<String> = self
+            .playlists
+            .iter()
+            .filter(|p| !p.folder)
+            .map(|p| p.id.to_string())
+            .collect();
         let loose: Vec<u64> = self
             .tracks
             .iter()
             .enumerate()
-            .filter(|(index, _)| !self.playlists.iter().any(|p| p.track_indices.contains(index)))
+            .filter(|(index, _)| {
+                !self
+                    .playlists
+                    .iter()
+                    .any(|p| p.track_indices.contains(index))
+            })
             .map(|(_, t)| t.id)
             .chain(missing)
             .collect();
@@ -1423,7 +1823,11 @@ fn source_track(
         id: library.ids.get(i).copied().unwrap_or(0),
         source_path: source_audio(library.folder_path.get(i), &extra.alternate_paths),
         artwork,
-        my_tags: extra.my_tags.iter().filter_map(|t| t.parse().ok()).collect(),
+        my_tags: extra
+            .my_tags
+            .iter()
+            .filter_map(|t| t.parse().ok())
+            .collect(),
         title: library.title.get(i).to_owned(),
         artist: library.artist_name(row).to_owned(),
         album: library.album_name(row).to_owned(),
@@ -1434,7 +1838,8 @@ fn source_track(
         date_added: library.date_added.get(i).to_owned(),
         release_date: library.release_date.get(i).to_owned(),
         bpm_x100: library.bpm_x100.get(i).copied().unwrap_or(0),
-        duration_sec: u16::try_from(library.length_sec.get(i).copied().unwrap_or(0)).unwrap_or(u16::MAX),
+        duration_sec: u16::try_from(library.length_sec.get(i).copied().unwrap_or(0))
+            .unwrap_or(u16::MAX),
         rating: library.rating.get(i).copied().unwrap_or(0),
         color_id: library.color.get(i).copied().unwrap_or(0),
         bitrate: library.bitrate.get(i).copied().unwrap_or(0),
@@ -1448,12 +1853,18 @@ fn source_track(
 /// Writes a selection to one destination and reads it back.
 ///
 /// Runs inside a `blocking` closure: it copies audio over USB.
-static EXPORT_PROGRESS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, ExportProgressDto>>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-static EXPORT_CANCEL: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+static EXPORT_PROGRESS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, ExportProgressDto>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+static EXPORT_CANCEL: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
-fn set_export_stage<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &std::path::Path, state: &'static str) {
+fn set_export_stage<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    destination: &std::path::Path,
+    state: &'static str,
+) {
     let path = destination.to_string_lossy().into_owned();
     let progress = if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
         if let Some(job) = jobs.get_mut(&path) {
@@ -1463,8 +1874,12 @@ fn set_export_stage<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &
         } else {
             None
         }
-    } else { None };
-    if let Some(progress) = progress { let _ = tauri::Emitter::emit(app, "export:progress", progress); }
+    } else {
+        None
+    };
+    if let Some(progress) = progress {
+        let _ = tauri::Emitter::emit(app, "export:progress", progress);
+    }
 }
 
 fn set_export_failure<R: tauri::Runtime>(
@@ -1474,13 +1889,15 @@ fn set_export_failure<R: tauri::Runtime>(
 ) {
     let path = destination.to_string_lossy().into_owned();
     let progress = if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
-        let job = jobs.entry(path.clone()).or_insert_with(|| ExportProgressDto {
-            path,
-            state: "failed",
-            done: 0,
-            total: 0,
-            title: String::new(),
-        });
+        let job = jobs
+            .entry(path.clone())
+            .or_insert_with(|| ExportProgressDto {
+                path,
+                state: "failed",
+                done: 0,
+                total: 0,
+                title: String::new(),
+            });
         job.state = "failed";
         job.title = message;
         Some(job.clone())
@@ -1503,22 +1920,30 @@ pub fn cancel_export(path: &str) {
 
 #[tauri::command]
 pub fn export_progress() -> Vec<ExportProgressDto> {
-    EXPORT_PROGRESS.lock().map(|jobs| jobs.values().cloned().collect()).unwrap_or_default()
+    EXPORT_PROGRESS
+        .lock()
+        .map(|jobs| jobs.values().cloned().collect())
+        .unwrap_or_default()
 }
 
 #[tauri::command]
 pub async fn eject_device(path: String) -> AppResult<()> {
     blocking("eject_device", move || {
         // Keep new exports from starting until the OS has finished ejecting.
-        let jobs = EXPORT_PROGRESS.lock().map_err(|e| AppError::internal(e.to_string()))?;
+        let jobs = EXPORT_PROGRESS
+            .lock()
+            .map_err(|e| AppError::internal(e.to_string()))?;
         if jobs.get(&path).is_some_and(|job| job.state == "writing") {
-            return Err(AppError::internal("This device is being exported to. Wait for the export to finish."));
+            return Err(AppError::internal(
+                "This device is being exported to. Wait for the export to finish.",
+            ));
         }
         let result = rbl_devices::eject::eject(std::path::Path::new(&path))
             .map_err(|e| AppError::internal(e.to_string()));
         drop(jobs);
         result
-    }).await
+    })
+    .await
 }
 
 fn write_export_with_progress<R: tauri::Runtime>(
@@ -1532,9 +1957,13 @@ fn write_export_with_progress<R: tauri::Runtime>(
     let path = destination.to_string_lossy().into_owned();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
-        let mut jobs = EXPORT_CANCEL.lock().map_err(|e| AppError::internal(e.to_string()))?;
+        let mut jobs = EXPORT_CANCEL
+            .lock()
+            .map_err(|e| AppError::internal(e.to_string()))?;
         if jobs.contains_key(&path) {
-            return Err(AppError::internal("An export to this device is already running."));
+            return Err(AppError::internal(
+                "An export to this device is already running.",
+            ));
         }
         // A new batch replaces terminal progress from the previous one. When
         // another job is active this export belongs to that same batch, so a
@@ -1548,7 +1977,11 @@ fn write_export_with_progress<R: tauri::Runtime>(
     }
     let emit = |state, done, title: String| {
         let progress = ExportProgressDto {
-            path: destination.to_string_lossy().into_owned(), state, done, total, title,
+            path: destination.to_string_lossy().into_owned(),
+            state,
+            done,
+            total,
+            title,
         };
         if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
             jobs.insert(progress.path.clone(), progress.clone());
@@ -1558,18 +1991,48 @@ fn write_export_with_progress<R: tauri::Runtime>(
     emit("preparing", 0, String::new());
     let done = std::cell::Cell::new(0);
     let result = write_export_with_phase(
-        destination, selection, defaults, compatibility_format,
+        destination,
+        selection,
+        defaults,
+        compatibility_format,
         &mut |p| {
             done.set(u32::try_from(p.done).unwrap_or(u32::MAX));
             emit(p.stage, done.get(), p.title.clone());
         },
-        &mut |phase| emit(phase, if phase == "verifying" { total } else { done.get() }, String::new()),
+        &mut |phase| {
+            emit(
+                phase,
+                if phase == "verifying" {
+                    total
+                } else {
+                    done.get()
+                },
+                String::new(),
+            )
+        },
         &|| cancel.load(std::sync::atomic::Ordering::Relaxed),
     );
-    let cancelled = result.as_ref().err().is_some_and(|e| matches!(e.kind, ErrorKind::Cancelled));
-    emit(if result.is_ok() { "done" } else if cancelled { "cancelled" } else { "failed" }, if result.is_ok() { total } else { done.get() },
-        result.as_ref().err().map_or_else(String::new, |e| e.message.clone()));
-    if let Ok(mut jobs) = EXPORT_CANCEL.lock() { jobs.remove(&path); }
+    let cancelled = result
+        .as_ref()
+        .err()
+        .is_some_and(|e| matches!(e.kind, ErrorKind::Cancelled));
+    emit(
+        if result.is_ok() {
+            "done"
+        } else if cancelled {
+            "cancelled"
+        } else {
+            "failed"
+        },
+        if result.is_ok() { total } else { done.get() },
+        result
+            .as_ref()
+            .err()
+            .map_or_else(String::new, |e| e.message.clone()),
+    );
+    if let Ok(mut jobs) = EXPORT_CANCEL.lock() {
+        jobs.remove(&path);
+    }
     result
 }
 
@@ -1589,30 +2052,54 @@ fn write_export_with_phase(
         ));
     }
     if rbl_db::is_rekordbox_running() {
-        return Err(AppError::internal("Quit rekordbox before syncing this USB so only one application writes its libraries."));
+        return Err(AppError::internal(
+            "Quit rekordbox before syncing this USB so only one application writes its libraries.",
+        ));
     }
     let export_root = rbl_export::export_root(destination);
-    let settings_root = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("rbxport/usb-settings");
-    let imported_settings: Vec<_> = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"].into_iter()
+    let settings_root = dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("rbxport/usb-settings");
+    let imported_settings: Vec<_> = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"]
+        .into_iter()
         .filter(|name| !export_root.join(name).exists())
-        .filter_map(|name| std::fs::read(settings_root.join(name)).ok().map(|bytes| (name, bytes))).collect();
+        .filter_map(|name| {
+            std::fs::read(settings_root.join(name))
+                .ok()
+                .map(|bytes| (name, bytes))
+        })
+        .collect();
     let library_defaults = defaults.map(crate::device_settings::library_defaults);
     let report = rbl_export::export_cancellable(
         destination,
         &selection.tracks,
         &selection.playlists,
         &selection.my_tags,
-        &rbl_export::ExportOptions { defaults: library_defaults.as_ref(), sync: Some(&selection.sync), compatibility: compatibility_format },
+        &rbl_export::ExportOptions {
+            defaults: library_defaults.as_ref(),
+            sync: Some(&selection.sync),
+            compatibility: compatibility_format,
+        },
         progress,
         cancelled,
     )
-    .map_err(|e| AppError::new(if matches!(e, rbl_export::ExportError::Cancelled) { ErrorKind::Cancelled } else { ErrorKind::Internal }, e.to_string()))?;
+    .map_err(|e| {
+        AppError::new(
+            if matches!(e, rbl_export::ExportError::Cancelled) {
+                ErrorKind::Cancelled
+            } else {
+                ErrorKind::Internal
+            },
+            e.to_string(),
+        )
+    })?;
     if let Some(defaults) = defaults {
         crate::device_settings::write_dev_defaults(destination, defaults)?;
     }
 
     for (name, bytes) in imported_settings {
-        crate::durable::write(&export_root.join(name), &bytes).map_err(|e| AppError::internal(e.to_string()))?;
+        crate::durable::write(&export_root.join(name), &bytes)
+            .map_err(|e| AppError::internal(e.to_string()))?;
     }
     // Re-read what was written with the independent parser: an export that
     // cannot be read back is not an export.
@@ -1620,7 +2107,11 @@ fn write_export_with_phase(
     let check = rbl_export::verify_databases(destination)
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
     if !check.is_ok() || check.tracks != report.tracks {
-        return Err(AppError::internal(format!("USB verification failed: missing audio {:?}; {}", check.missing_audio, check.errors.join("; "))));
+        return Err(AppError::internal(format!(
+            "USB verification failed: missing audio {:?}; {}",
+            check.missing_audio,
+            check.errors.join("; ")
+        )));
     }
 
     Ok(ExportReportDto {
@@ -1704,11 +2195,18 @@ fn read_analysis(share: &std::path::Path, relative: &str) -> AppResult<Vec<(Stri
         let path = base.with_extension(extension);
         match std::fs::read(&path) {
             Ok(bytes) => {
-                rbl_anlz::parse(&bytes).map_err(|e|AppError::internal(format!("Invalid analysis {}: {e}",path.display())))?;
+                rbl_anlz::parse(&bytes).map_err(|e| {
+                    AppError::internal(format!("Invalid analysis {}: {e}", path.display()))
+                })?;
                 out.push((extension.to_owned(), bytes));
             }
-            Err(e) if e.kind()==std::io::ErrorKind::NotFound && extension!="DAT" => {},
-            Err(e) => return Err(AppError::internal(format!("Cannot read analysis {}: {e}",path.display()))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && extension != "DAT" => {}
+            Err(e) => {
+                return Err(AppError::internal(format!(
+                    "Cannot read analysis {}: {e}",
+                    path.display()
+                )))
+            }
         }
     }
     Ok(out)
@@ -1736,7 +2234,9 @@ pub async fn track_beats(
     let library = state.library()?;
     let share = state.share_root();
     blocking("track_beats", move || {
-        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
+        let Some(row) = library.row_of(&track) else {
+            return Ok(Vec::new());
+        };
         let relative = library.analysis_path.get(row as usize);
         if relative.is_empty() {
             return Ok(Vec::new());
@@ -1759,8 +2259,12 @@ pub async fn track_beats(
 /// of them. Empty for a track without one.
 pub(crate) fn read_beat_grid(share: &std::path::Path, relative: &str) -> Vec<(u32, u8, u16)> {
     let path = share.join(relative.trim_start_matches(['/', '\\']));
-    let Ok(bytes) = std::fs::read(&path) else { return Vec::new() };
-    let Ok(file) = rbl_anlz::parse(&bytes) else { return Vec::new() };
+    let Ok(bytes) = std::fs::read(&path) else {
+        return Vec::new();
+    };
+    let Ok(file) = rbl_anlz::parse(&bytes) else {
+        return Vec::new();
+    };
     file.sections
         .iter()
         .find_map(rbl_anlz::Section::as_beat_grid)
@@ -1769,7 +2273,11 @@ pub(crate) fn read_beat_grid(share: &std::path::Path, relative: &str) -> Vec<(u3
                 .iter()
                 .take(MAX_BEATS)
                 .map(|beat| {
-                    (beat.time_ms, u8::try_from(beat.beat_number).unwrap_or(0), beat.tempo_x100)
+                    (
+                        beat.time_ms,
+                        u8::try_from(beat.beat_number).unwrap_or(0),
+                        beat.tempo_x100,
+                    )
                 })
                 .collect()
         })
@@ -1796,12 +2304,16 @@ pub async fn deck_load<R: tauri::Runtime>(
 ) -> AppResult<()> {
     let library = state.library()?;
     let Some(path) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
-        return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
-            .with_detail(format!("track {track}")));
+        return Err(
+            AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
+                .with_detail(format!("track {track}")),
+        );
     };
     if !path.is_file() {
-        return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
-            .with_detail(path.display().to_string()));
+        return Err(
+            AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
+                .with_detail(path.display().to_string()),
+        );
     }
     let engine = player.engine(&app)?;
     let which = crate::player::deck_of(&deck);
@@ -1811,7 +2323,9 @@ pub async fn deck_load<R: tauri::Runtime>(
     // And the grid, for the metronome. Read off the async thread: it is a
     // file, and the deck is loading on its own thread anyway.
     let share = state.share_root();
-    let relative = library.row_of(&track).map(|row| library.analysis_path.get(row as usize).to_owned());
+    let relative = library
+        .row_of(&track)
+        .map(|row| library.analysis_path.get(row as usize).to_owned());
     let grid = blocking("deck_load_grid", move || {
         Ok(relative
             .filter(|rel| !rel.is_empty())
@@ -1824,7 +2338,10 @@ pub async fn deck_load<R: tauri::Runtime>(
     if player.loaded_tracks.lock().get(&which) == Some(&track) {
         engine.set_metronome_grid(
             which,
-            &grid.iter().map(|&(ms, number, _)| (ms, number == 1)).collect::<Vec<_>>(),
+            &grid
+                .iter()
+                .map(|&(ms, number, _)| (ms, number == 1))
+                .collect::<Vec<_>>(),
         );
     }
     Ok(())
@@ -1888,7 +2405,10 @@ pub async fn set_audio_config<R: tauri::Runtime>(
     sample_rate: Option<u32>,
     buffer_frames: Option<u32>,
 ) -> AppResult<()> {
-    if player.set_wish(rbl_deck::StreamWish { sample_rate, buffer_frames }) {
+    if player.set_wish(rbl_deck::StreamWish {
+        sample_rate,
+        buffer_frames,
+    }) {
         let _ = tauri::Emitter::emit(&app, "deck:reset", ());
     }
     Ok(())
@@ -1899,7 +2419,10 @@ pub async fn deck_unload(
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
 ) -> AppResult<()> {
-    player.loaded_tracks.lock().remove(&crate::player::deck_of(&deck));
+    player
+        .loaded_tracks
+        .lock()
+        .remove(&crate::player::deck_of(&deck));
     if let Some(engine) = player.opened() {
         engine.unload(crate::player::deck_of(&deck));
     }
@@ -2105,7 +2628,9 @@ pub async fn set_eq_curve<R: tauri::Runtime>(
     isolator: bool,
 ) -> AppResult<()> {
     let engine = player.engine(&app)?;
-    engine.mixer().set_curve(if isolator { Curve::Isolator } else { Curve::Eq });
+    engine
+        .mixer()
+        .set_curve(if isolator { Curve::Isolator } else { Curve::Eq });
     Ok(())
 }
 
@@ -2165,7 +2690,10 @@ pub async fn audio_devices(
     Ok(AudioDevicesDto {
         devices: rbl_deck::output_devices()
             .into_iter()
-            .map(|device| AudioDeviceDto { id: device.id, name: device.name })
+            .map(|device| AudioDeviceDto {
+                id: device.id,
+                name: device.name,
+            })
             .collect(),
         default: rbl_deck::default_output_device().map(|device| device.id),
         chosen,
@@ -2224,12 +2752,16 @@ pub async fn reveal_track<R: tauri::Runtime>(
 ) -> AppResult<()> {
     let library = state.library()?;
     let Some(path) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
-        return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
-            .with_detail(format!("track {track}")));
+        return Err(
+            AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
+                .with_detail(format!("track {track}")),
+        );
     };
     if !path.exists() {
-        return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
-            .with_detail(path.display().to_string()));
+        return Err(
+            AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
+                .with_detail(path.display().to_string()),
+        );
     }
     app.opener().reveal_item_in_dir(&path).map_err(|e| {
         AppError::new(ErrorKind::Internal, "The Finder would not open.").with_detail(e.to_string())
@@ -2269,16 +2801,22 @@ pub async fn open_log<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppResult<
 }
 
 #[tauri::command]
-pub async fn app_diagnostics(player: State<'_, std::sync::Arc<crate::player::Player>>) -> AppResult<crate::diagnostics::Diagnostics> {
+pub async fn app_diagnostics(
+    player: State<'_, std::sync::Arc<crate::player::Player>>,
+) -> AppResult<crate::diagnostics::Diagnostics> {
     // The sampler is kept between calls: CPU is a difference between two
     // readings, and a fresh `System` every second would always report zero.
-    let health = player.opened().map(|engine| engine.audio_health()).unwrap_or_default();
+    let health = player
+        .opened()
+        .map(|engine| engine.audio_health())
+        .unwrap_or_default();
     blocking("app_diagnostics", move || {
         let mut sample = crate::diagnostics::sample_shared();
         sample.audio_load = health.load;
         sample.audio_xruns = health.xruns;
         Ok(sample)
-    }).await
+    })
+    .await
 }
 
 /// Starts a drag on a deck.
@@ -2334,9 +2872,11 @@ pub async fn deck_scrub_end<R: tauri::Runtime>(
 pub async fn deck_state(
     player: State<'_, Arc<crate::player::Player>>,
 ) -> AppResult<crate::player::TickDto> {
-    Ok(player.opened().map_or_else(crate::player::TickDto::silent, |engine| {
-        crate::player::tick_of(&engine.snapshot(), engine.master())
-    }))
+    Ok(player
+        .opened()
+        .map_or_else(crate::player::TickDto::silent, |engine| {
+            crate::player::tick_of(&engine.snapshot(), engine.master())
+        }))
 }
 
 /// A track's cue points.
@@ -2346,41 +2886,53 @@ pub async fn deck_state(
 /// rekordbox. An invalid index is reported without a colour. A memory cue
 /// never carries one.
 #[tauri::command]
-pub async fn track_cues(
-    state: State<'_, Arc<AppState>>,
-    track: String,
-) -> AppResult<Vec<CueDto>> {
+pub async fn track_cues(state: State<'_, Arc<AppState>>, track: String) -> AppResult<Vec<CueDto>> {
     let library = state.library()?;
     let cue_state = Arc::clone(&state);
     blocking("track_cues", move || {
         const MEMORY_CSS: [&str; 8] = [
-            "#E778F1", "#E33122", "#EBA44A", "#F4E458",
-            "#66DD42", "#56BDF3", "#204FEF", "#8B1EEF",
+            "#E778F1", "#E33122", "#EBA44A", "#F4E458", "#66DD42", "#56BDF3", "#204FEF", "#8B1EEF",
         ];
-        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
+        let Some(row) = library.row_of(&track) else {
+            return Ok(Vec::new());
+        };
         // Rekordbox may have added cues since the library snapshot was built.
         // Refresh this track before reading its comments and colours so the
         // panel and waveform see the same current set of cues.
-        let (comments, memory_colours) = cue_state.read_db(|db| {
-            rbl_index::reload_cues_of(db, &library, &track)?;
-            Ok((
-                rbl_db::details::cue_comments(db.connection(), &track)?,
-                rbl_db::details::memory_cue_colours(db.connection(), &track)?,
-            ))
-        }).map_err(write_error)?;
+        let (comments, memory_colours) = cue_state
+            .read_db(|db| {
+                rbl_index::reload_cues_of(db, &library, &track)?;
+                Ok((
+                    rbl_db::details::cue_comments(db.connection(), &track)?,
+                    rbl_db::details::memory_cue_colours(db.connection(), &track)?,
+                ))
+            })
+            .map_err(write_error)?;
         Ok(library
             .cues_of(row)
             .iter()
             .map(|cue| CueDto {
-                comment: comments.get(&cue.id.to_string()).cloned().unwrap_or_default(),
-                id: if cue.id == 0 { String::new() } else { cue.id.to_string() },
+                comment: comments
+                    .get(&cue.id.to_string())
+                    .cloned()
+                    .unwrap_or_default(),
+                id: if cue.id == 0 {
+                    String::new()
+                } else {
+                    cue.id.to_string()
+                },
                 position_ms: cue.position_ms,
                 out_ms: cue.out_ms,
                 letter: cue.hot_letter().map(String::from).unwrap_or_default(),
                 memory: cue.is_memory(),
                 colour: if cue.is_memory() {
-                    memory_colours.get(&cue.id.to_string()).and_then(|value| MEMORY_CSS.get(usize::from(*value))).map(|value| (*value).to_owned())
-                } else { cue_colour_css(cue.colour) },
+                    memory_colours
+                        .get(&cue.id.to_string())
+                        .and_then(|value| MEMORY_CSS.get(usize::from(*value)))
+                        .map(|value| (*value).to_owned())
+                } else {
+                    cue_colour_css(cue.colour)
+                },
             })
             .collect())
     })
@@ -2401,7 +2953,9 @@ pub async fn track_phrases(
     let library = state.library()?;
     let share = state.share_root();
     blocking("track_phrases", move || {
-        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
+        let Some(row) = library.row_of(&track) else {
+            return Ok(Vec::new());
+        };
         let relative = library.analysis_path.get(row as usize);
         if relative.is_empty() {
             return Ok(Vec::new());
@@ -2413,7 +2967,9 @@ pub async fn track_phrases(
             // rather than fail the view.
             return Ok(Vec::new());
         };
-        let Some(phrases) = ext.phrases() else { return Ok(Vec::new()) };
+        let Some(phrases) = ext.phrases() else {
+            return Ok(Vec::new());
+        };
 
         // The grid is optional here. A phrase without a time is still worth
         // returning, since its beat number is what the tag actually holds.
@@ -2428,7 +2984,8 @@ pub async fn track_phrases(
                 kind: phrase.kind,
                 // Beat numbers in `PSSI` are 1-based; the grid is a list.
                 time_ms: grid.as_ref().and_then(|g| {
-                    g.get(usize::from(phrase.beat).checked_sub(1)?).map(|b| b.time_ms)
+                    g.get(usize::from(phrase.beat).checked_sub(1)?)
+                        .map(|b| b.time_ms)
                 }),
             })
             .collect())
@@ -2452,7 +3009,9 @@ pub async fn track_vocals(
     let library = state.library()?;
     let share = state.share_root();
     blocking("track_vocals", move || {
-        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
+        let Some(row) = library.row_of(&track) else {
+            return Ok(Vec::new());
+        };
         let relative = library.analysis_path.get(row as usize);
         if relative.is_empty() {
             return Ok(Vec::new());
@@ -2494,12 +3053,17 @@ pub async fn missing_tracks(
                 missing.push(MissingTrackDto {
                     id: library.ids.get(index).copied().unwrap_or(0).to_string(),
                     title: library.title.get(index).to_owned(),
-                    artist: library.artist_name(u32::try_from(index).unwrap_or(0)).to_owned(),
+                    artist: library
+                        .artist_name(u32::try_from(index).unwrap_or(0))
+                        .to_owned(),
                     path: path.to_owned(),
                 });
             }
         }
-        Ok(MissingTracksDto { total, tracks: missing })
+        Ok(MissingTracksDto {
+            total,
+            tracks: missing,
+        })
     })
     .await
 }
@@ -2542,7 +3106,11 @@ pub async fn import_files<R: tauri::Runtime>(
                         Err(other) => return Err(other),
                     }
                 }
-                Ok(ImportReportDto { imported, skipped, tracks })
+                Ok(ImportReportDto {
+                    imported,
+                    skipped,
+                    tracks,
+                })
             })
             .map_err(write_error)
     })
@@ -2576,23 +3144,43 @@ pub async fn create_playlist<R: tauri::Runtime>(
     name: String,
     parent: String,
 ) -> AppResult<u32> {
-    edit(app, state, "create_playlist", Touched::Playlists, move |w| w.create_playlist(&name, &parent).map(|_| ())).await
+    edit(
+        app,
+        state,
+        "create_playlist",
+        Touched::Playlists,
+        move |w| w.create_playlist(&name, &parent).map(|_| ()),
+    )
+    .await
 }
 
 /// An intelligent playlist's rule, for the editor. Refused when the rule
 /// nests groups, which the editor cannot show without losing them.
 #[tauri::command]
-pub async fn smart_rule(state: State<'_, Arc<AppState>>, playlist: String) -> AppResult<SmartRuleDto> {
+pub async fn smart_rule(
+    state: State<'_, Arc<AppState>>,
+    playlist: String,
+) -> AppResult<SmartRuleDto> {
     let library = state.library()?;
     blocking("smart_rule", move || {
         let playlists = library.playlists();
-        let Some(index) = playlist.parse::<u64>().ok().and_then(|id| playlists.index_of(id)) else {
-            return Err(AppError::new(ErrorKind::NotFound, "That playlist is not in the library."));
+        let Some(index) = playlist
+            .parse::<u64>()
+            .ok()
+            .and_then(|id| playlists.index_of(id))
+        else {
+            return Err(AppError::new(
+                ErrorKind::NotFound,
+                "That playlist is not in the library.",
+            ));
         };
         let Some(rule) = playlists.smart_rule(index) else {
             // A new intelligent playlist, or one whose rule does not parse,
             // starts from an empty "all of the following".
-            return Ok(SmartRuleDto { logic: "all".to_owned(), conditions: Vec::new() });
+            return Ok(SmartRuleDto {
+                logic: "all".to_owned(),
+                conditions: Vec::new(),
+            });
         };
         rule_to_dto(&rule)
     })
@@ -2635,10 +3223,16 @@ fn rule_from_dto(dto: &SmartRuleDto) -> AppResult<rbl_index::SmartRule> {
     for c in &dto.conditions {
         let property = Property::from_name(&c.property);
         if property == Property::Unsupported {
-            return Err(AppError::new(ErrorKind::Malformed, format!("{:?} is not a property a rule can use here.", c.property)));
+            return Err(AppError::new(
+                ErrorKind::Malformed,
+                format!("{:?} is not a property a rule can use here.", c.property),
+            ));
         }
         let Some(operator) = Operator::from_code(&c.operator) else {
-            return Err(AppError::new(ErrorKind::Malformed, format!("{:?} is not an operator.", c.operator)));
+            return Err(AppError::new(
+                ErrorKind::Malformed,
+                format!("{:?} is not an operator.", c.operator),
+            ));
         };
         items.push(Item::Condition(Condition {
             property,
@@ -2649,7 +3243,14 @@ fn rule_from_dto(dto: &SmartRuleDto) -> AppResult<rbl_index::SmartRule> {
         }));
     }
     Ok(rbl_index::SmartRule {
-        root: Group { logic: if dto.logic == "any" { Logic::Any } else { Logic::All }, items },
+        root: Group {
+            logic: if dto.logic == "any" {
+                Logic::Any
+            } else {
+                Logic::All
+            },
+            items,
+        },
     })
 }
 
@@ -2663,9 +3264,16 @@ pub async fn create_smart_playlist<R: tauri::Runtime>(
     rule: SmartRuleDto,
 ) -> AppResult<u32> {
     let rule = rule_from_dto(&rule)?;
-    edit(app, state, "create_smart_playlist", Touched::Playlists, move |w| {
-        w.create_smart_playlist(&name, &parent, |id| rule.to_xml(id.parse().unwrap_or(0))).map(|_| ())
-    })
+    edit(
+        app,
+        state,
+        "create_smart_playlist",
+        Touched::Playlists,
+        move |w| {
+            w.create_smart_playlist(&name, &parent, |id| rule.to_xml(id.parse().unwrap_or(0)))
+                .map(|_| ())
+        },
+    )
     .await
 }
 
@@ -2679,7 +3287,10 @@ pub async fn set_smart_rule<R: tauri::Runtime>(
 ) -> AppResult<u32> {
     let rule = rule_from_dto(&rule)?;
     let xml = rule.to_xml(playlist.parse().unwrap_or(0));
-    edit(app, state, "set_smart_rule", Touched::Playlists, move |w| w.set_smart_list(&playlist, &xml).map(|_| ())).await
+    edit(app, state, "set_smart_rule", Touched::Playlists, move |w| {
+        w.set_smart_list(&playlist, &xml).map(|_| ())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2689,7 +3300,10 @@ pub async fn create_folder<R: tauri::Runtime>(
     name: String,
     parent: String,
 ) -> AppResult<u32> {
-    edit(app, state, "create_folder", Touched::Playlists, move |w| w.create_folder(&name, &parent).map(|_| ())).await
+    edit(app, state, "create_folder", Touched::Playlists, move |w| {
+        w.create_folder(&name, &parent).map(|_| ())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2699,9 +3313,18 @@ pub async fn rename_playlist<R: tauri::Runtime>(
     id: String,
     name: String,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "rename_playlist", Touched::Playlists, "Rename Playlist", move |w| {
-        w.rename_with_undo(&id, &name).map(|(_, edit)| LibraryEdit::RenamePlaylist(edit))
-    }).await
+    recorded_edit(
+        app,
+        state,
+        "rename_playlist",
+        Touched::Playlists,
+        "Rename Playlist",
+        move |w| {
+            w.rename_with_undo(&id, &name)
+                .map(|(_, edit)| LibraryEdit::RenamePlaylist(edit))
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -2712,9 +3335,18 @@ pub async fn move_playlist<R: tauri::Runtime>(
     parent: String,
     index: Option<usize>,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "move_playlist", Touched::Playlists, "Move Playlist", move |w| {
-        w.move_with_undo(&id, &parent, index).map(|(_, edit)| LibraryEdit::MovePlaylist(edit))
-    }).await
+    recorded_edit(
+        app,
+        state,
+        "move_playlist",
+        Touched::Playlists,
+        "Move Playlist",
+        move |w| {
+            w.move_with_undo(&id, &parent, index)
+                .map(|(_, edit)| LibraryEdit::MovePlaylist(edit))
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -2723,9 +3355,18 @@ pub async fn delete_playlist<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "delete_playlist", Touched::Playlists, "Delete Playlist", move |w| {
-        w.delete_playlist_with_undo(&id).map(|(_, edit)| LibraryEdit::DeletePlaylist(edit))
-    }).await
+    recorded_edit(
+        app,
+        state,
+        "delete_playlist",
+        Touched::Playlists,
+        "Delete Playlist",
+        move |w| {
+            w.delete_playlist_with_undo(&id)
+                .map(|(_, edit)| LibraryEdit::DeletePlaylist(edit))
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -2736,18 +3377,28 @@ pub async fn undo_edit<R: tauri::Runtime>(
     let state = Arc::clone(&state);
     let dto = blocking("undo_edit", move || {
         let _gate = state.edit_gate.lock();
-        let entry = state.edit_history.lock().undo.last().cloned()
-            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no library edit to undo."))?;
+        let entry = state
+            .edit_history
+            .lock()
+            .undo
+            .last()
+            .cloned()
+            .ok_or_else(|| {
+                AppError::new(ErrorKind::NotFound, "There is no library edit to undo.")
+            })?;
         let touched = touched_by(&entry.edit);
-        let generation = state.write_then(
-            |w| apply_history(w, &entry.edit, true),
-            |db, ()| refresh_after_edit(&state, db, touched),
-        ).map_err(write_error)?;
+        let generation = state
+            .write_then(
+                |w| apply_history(w, &entry.edit, true),
+                |db, ()| refresh_after_edit(&state, db, touched),
+            )
+            .map_err(write_error)?;
         let mut history = state.edit_history.lock();
         history.undo.pop();
         history.redo.push(entry);
         Ok(history_dto(generation, &history))
-    }).await?;
+    })
+    .await?;
     let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
     let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
     Ok(dto)
@@ -2761,18 +3412,28 @@ pub async fn redo_edit<R: tauri::Runtime>(
     let state = Arc::clone(&state);
     let dto = blocking("redo_edit", move || {
         let _gate = state.edit_gate.lock();
-        let entry = state.edit_history.lock().redo.last().cloned()
-            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no library edit to redo."))?;
+        let entry = state
+            .edit_history
+            .lock()
+            .redo
+            .last()
+            .cloned()
+            .ok_or_else(|| {
+                AppError::new(ErrorKind::NotFound, "There is no library edit to redo.")
+            })?;
         let touched = touched_by(&entry.edit);
-        let generation = state.write_then(
-            |w| apply_history(w, &entry.edit, false),
-            |db, ()| refresh_after_edit(&state, db, touched),
-        ).map_err(write_error)?;
+        let generation = state
+            .write_then(
+                |w| apply_history(w, &entry.edit, false),
+                |db, ()| refresh_after_edit(&state, db, touched),
+            )
+            .map_err(write_error)?;
         let mut history = state.edit_history.lock();
         history.redo.pop();
         history.undo.push(entry);
         Ok(history_dto(generation, &history))
-    }).await?;
+    })
+    .await?;
     let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
     let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
     Ok(dto)
@@ -2785,9 +3446,13 @@ pub async fn add_tracks_to_playlist<R: tauri::Runtime>(
     playlist: String,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "add_tracks_to_playlist", Touched::Playlists, move |w| {
-        w.add_tracks(&playlist, &tracks).map(|_| ())
-    })
+    edit(
+        app,
+        state,
+        "add_tracks_to_playlist",
+        Touched::Playlists,
+        move |w| w.add_tracks(&playlist, &tracks).map(|_| ()),
+    )
     .await
 }
 
@@ -2814,7 +3479,10 @@ pub async fn add_to_tag_list<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "add_to_tag_list", Touched::TagList, move |w| w.tag_list_add(&tracks).map(|_| ())).await
+    edit(app, state, "add_to_tag_list", Touched::TagList, move |w| {
+        w.tag_list_add(&tracks).map(|_| ())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2823,8 +3491,14 @@ pub async fn remove_from_tag_list<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "remove_from_tag_list", Touched::TagList, move |w| w.tag_list_remove(&tracks).map(|_| ()))
-        .await
+    edit(
+        app,
+        state,
+        "remove_from_tag_list",
+        Touched::TagList,
+        move |w| w.tag_list_remove(&tracks).map(|_| ()),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -2832,7 +3506,10 @@ pub async fn clear_tag_list<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
 ) -> AppResult<u32> {
-    edit(app, state, "clear_tag_list", Touched::TagList, move |w| w.tag_list_clear().map(|_| ())).await
+    edit(app, state, "clear_tag_list", Touched::TagList, move |w| {
+        w.tag_list_clear().map(|_| ())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2842,9 +3519,18 @@ pub async fn remove_tracks_from_playlist<R: tauri::Runtime>(
     playlist: String,
     tracks: Vec<String>,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "remove_tracks_from_playlist", Touched::Playlists, "Remove Tracks from Playlist", move |w| {
-        w.remove_tracks_with_undo(&playlist, &tracks).map(|(_, edit)| LibraryEdit::RemovePlaylistTracks(edit))
-    }).await
+    recorded_edit(
+        app,
+        state,
+        "remove_tracks_from_playlist",
+        Touched::Playlists,
+        "Remove Tracks from Playlist",
+        move |w| {
+            w.remove_tracks_with_undo(&playlist, &tracks)
+                .map(|(_, edit)| LibraryEdit::RemovePlaylistTracks(edit))
+        },
+    )
+    .await
 }
 
 /// Tracks that share a title and an artist, case and accents aside.
@@ -2855,26 +3541,44 @@ pub async fn remove_tracks_from_playlist<R: tauri::Runtime>(
 /// not tried: a re-encode of the same track has neither, and the same
 /// title under the same artist is what a person calls a duplicate.
 #[tauri::command]
-pub async fn find_duplicates(state: State<'_, Arc<AppState>>, limit: u32) -> AppResult<DuplicatesDto> {
+pub async fn find_duplicates(
+    state: State<'_, Arc<AppState>>,
+    limit: u32,
+) -> AppResult<DuplicatesDto> {
     let library = state.library()?;
     let wanted = (limit as usize).min(MAX_ROWS as usize);
     blocking("find_duplicates", move || {
-        let mut groups: std::collections::HashMap<(&str, &str), Vec<usize>> = std::collections::HashMap::new();
+        let mut groups: std::collections::HashMap<(&str, &str), Vec<usize>> =
+            std::collections::HashMap::new();
         for index in 0..library.len() {
             let title = library.title_folded.get(index);
             if title.trim().is_empty() {
                 continue;
             }
-            let artist = library.artists.folded(library.artist.get(index).copied().unwrap_or(rbl_index::NO_ID));
+            let artist = library.artists.folded(
+                library
+                    .artist
+                    .get(index)
+                    .copied()
+                    .unwrap_or(rbl_index::NO_ID),
+            );
             groups.entry((title, artist)).or_default().push(index);
         }
-        let mut found: Vec<Vec<usize>> = groups.into_values().filter(|rows| rows.len() > 1).collect();
+        let mut found: Vec<Vec<usize>> =
+            groups.into_values().filter(|rows| rows.len() > 1).collect();
         // By title, so the list reads the same from one look to the next.
         found.sort_by(|a, b| {
-            let name = |rows: &Vec<usize>| rows.first().map_or("", |&i| library.title_folded.get(i)).to_owned();
+            let name = |rows: &Vec<usize>| {
+                rows.first()
+                    .map_or("", |&i| library.title_folded.get(i))
+                    .to_owned()
+            };
             name(a).cmp(&name(b))
         });
-        let extra = found.iter().map(|rows| u32::try_from(rows.len() - 1).unwrap_or(u32::MAX)).fold(0_u32, u32::saturating_add);
+        let extra = found
+            .iter()
+            .map(|rows| u32::try_from(rows.len() - 1).unwrap_or(u32::MAX))
+            .fold(0_u32, u32::saturating_add);
         let shown = found
             .iter()
             .take(wanted)
@@ -2882,7 +3586,9 @@ pub async fn find_duplicates(state: State<'_, Arc<AppState>>, limit: u32) -> App
                 let first = rows.first().copied().unwrap_or(0);
                 DuplicateGroupDto {
                     title: library.title.get(first).to_owned(),
-                    artist: library.artist_name(u32::try_from(first).unwrap_or(0)).to_owned(),
+                    artist: library
+                        .artist_name(u32::try_from(first).unwrap_or(0))
+                        .to_owned(),
                     tracks: rows
                         .iter()
                         .map(|&i| {
@@ -2898,7 +3604,11 @@ pub async fn find_duplicates(state: State<'_, Arc<AppState>>, limit: u32) -> App
                 }
             })
             .collect();
-        Ok(DuplicatesDto { groups: u32::try_from(found.len()).unwrap_or(u32::MAX), extra, shown })
+        Ok(DuplicatesDto {
+            groups: u32::try_from(found.len()).unwrap_or(u32::MAX),
+            extra,
+            shown,
+        })
     })
     .await
 }
@@ -2911,13 +3621,80 @@ pub async fn import_xml<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> AppResult<XmlImportReportDto> {
-    import_collection(app, state, path, "import_xml", |text| {
+    import_collection(app, state, path, false, "import_xml", |text| {
         let document = rbl_db::xml::XmlLibrary::parse(text);
         if document.tracks.is_empty() && document.nodes.is_empty() {
-            return Err(AppError::new(ErrorKind::Malformed, "That is not a rekordbox XML collection."));
+            return Err(AppError::new(
+                ErrorKind::Malformed,
+                "That is not a rekordbox XML collection.",
+            ));
         }
         Ok(document)
     })
+    .await
+}
+
+/// Counts what a rekordbox XML import would do without touching the library.
+#[tauri::command]
+pub async fn preview_xml_import(path: String) -> AppResult<XmlImportPreviewDto> {
+    blocking("preview_xml_import", move || {
+        let text = std::fs::read_to_string(&path).map_err(|e| {
+            AppError::new(ErrorKind::NotFound, "That file could not be read.")
+                .with_detail(e.to_string())
+        })?;
+        let document = rbl_db::xml::XmlLibrary::parse(&text);
+        if document.tracks.is_empty() && document.nodes.is_empty() {
+            return Err(AppError::new(
+                ErrorKind::Malformed,
+                "That is not a rekordbox XML collection.",
+            ));
+        }
+        let mut available = 0_u32;
+        let mut missing = 0_u32;
+        let mut invalid = 0_u32;
+        for track in &document.tracks {
+            match track.path.as_deref() {
+                Some(path) if path.is_file() => available = available.saturating_add(1),
+                Some(_) => missing = missing.saturating_add(1),
+                None => invalid = invalid.saturating_add(1),
+            }
+        }
+        Ok(XmlImportPreviewDto {
+            tracks: u32::try_from(document.tracks.len()).unwrap_or(u32::MAX),
+            available,
+            missing,
+            invalid,
+            playlists: u32::try_from(document.nodes.len()).unwrap_or(u32::MAX),
+        })
+    })
+    .await
+}
+
+/// Writes a previously previewed rekordbox XML collection.
+#[tauri::command]
+pub async fn execute_xml_import<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    include_missing: bool,
+) -> AppResult<XmlImportReportDto> {
+    import_collection(
+        app,
+        state,
+        path,
+        include_missing,
+        "execute_xml_import",
+        |text| {
+            let document = rbl_db::xml::XmlLibrary::parse(text);
+            if document.tracks.is_empty() && document.nodes.is_empty() {
+                return Err(AppError::new(
+                    ErrorKind::Malformed,
+                    "That is not a rekordbox XML collection.",
+                ));
+            }
+            Ok(document)
+        },
+    )
     .await
 }
 
@@ -2930,9 +3707,13 @@ pub async fn import_itunes<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> AppResult<XmlImportReportDto> {
-    import_collection(app, state, path, "import_itunes", |text| {
-        rbl_db::itunes::parse(text)
-            .ok_or_else(|| AppError::new(ErrorKind::Malformed, "That is not an iTunes or Music library file."))
+    import_collection(app, state, path, false, "import_itunes", |text| {
+        rbl_db::itunes::parse(text).ok_or_else(|| {
+            AppError::new(
+                ErrorKind::Malformed,
+                "That is not an iTunes or Music library file.",
+            )
+        })
     })
     .await
 }
@@ -2942,6 +3723,7 @@ async fn import_collection<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     path: String,
+    include_missing: bool,
     name: &'static str,
     parse: impl FnOnce(&str) -> AppResult<rbl_db::xml::XmlLibrary> + Send + 'static,
 ) -> AppResult<XmlImportReportDto> {
@@ -2950,24 +3732,34 @@ async fn import_collection<R: tauri::Runtime>(
     let progress_app = app.clone();
     let report = blocking(name, move || {
         let text = std::fs::read_to_string(&path).map_err(|e| {
-            AppError::new(ErrorKind::NotFound, "That file could not be read.").with_detail(e.to_string())
+            AppError::new(ErrorKind::NotFound, "That file could not be read.")
+                .with_detail(e.to_string())
         })?;
         let document = parse(&text)?;
-        let mut on_progress = |done: usize, total: usize| {
-            let _ = tauri::Emitter::emit(
-                &progress_app,
-                "import:progress",
-                ExportProgressDto {
-                    path: path.clone(),
-                    state: "writing",
-                    done: u32::try_from(done).unwrap_or(u32::MAX),
-                    total: u32::try_from(total).unwrap_or(u32::MAX),
-                    title: String::new(),
-                },
-            );
-        };
+        let mut on_progress =
+            |done: usize, total: usize, imported: usize, missing: usize, errors: usize| {
+                let _ = tauri::Emitter::emit(
+                    &progress_app,
+                    "import:progress",
+                    XmlImportProgressDto {
+                        path: path.clone(),
+                        done: u32::try_from(done).unwrap_or(u32::MAX),
+                        total: u32::try_from(total).unwrap_or(u32::MAX),
+                        imported: u32::try_from(imported).unwrap_or(u32::MAX),
+                        missing: u32::try_from(missing).unwrap_or(u32::MAX),
+                        errors: u32::try_from(errors).unwrap_or(u32::MAX),
+                    },
+                );
+            };
         let report = writing
-            .write(|writer| rbl_db::xml::import(writer, &document, &mut on_progress))
+            .write(|writer| {
+                rbl_db::xml::import_with_progress(
+                    writer,
+                    &document,
+                    include_missing,
+                    &mut on_progress,
+                )
+            })
             .map_err(write_error)?;
         Ok(XmlImportReportDto {
             imported: u32::try_from(report.imported).unwrap_or(u32::MAX),
@@ -2975,7 +3767,11 @@ async fn import_collection<R: tauri::Runtime>(
             skipped: report.skipped,
             playlists: u32::try_from(report.playlists).unwrap_or(u32::MAX),
             cues: u32::try_from(report.cues).unwrap_or(u32::MAX),
-            tracks: report.tracks.into_iter().map(|(id, title)| crate::dto::ImportedTrackDto { id, title }).collect(),
+            tracks: report
+                .tracks
+                .into_iter()
+                .map(|(id, title)| crate::dto::ImportedTrackDto { id, title })
+                .collect(),
         })
     })
     .await?;
@@ -2998,10 +3794,23 @@ pub async fn export_loop_wav(
     let library = state.library()?;
     blocking("export_loop_wav", move || {
         let Some(source) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
-            return Err(AppError::new(ErrorKind::NotFound, "That track has no file to read."));
+            return Err(AppError::new(
+                ErrorKind::NotFound,
+                "That track has no file to read.",
+            ));
         };
-        rbl_audio::write_range_wav(&source, in_ms / 1000.0, out_ms / 1000.0, std::path::Path::new(&path))
-            .map_err(|e| AppError::new(ErrorKind::Malformed, format!("The loop could not be written: {e}")))
+        rbl_audio::write_range_wav(
+            &source,
+            in_ms / 1000.0,
+            out_ms / 1000.0,
+            std::path::Path::new(&path),
+        )
+        .map_err(|e| {
+            AppError::new(
+                ErrorKind::Malformed,
+                format!("The loop could not be written: {e}"),
+            )
+        })
     })
     .await
 }
@@ -3019,8 +3828,15 @@ pub async fn export_playlist_file(
     let library = state.library()?;
     blocking("export_playlist_file", move || {
         let playlists = library.playlists();
-        let Some(index) = playlist.parse::<u64>().ok().and_then(|numeric| playlists.index_of(numeric)) else {
-            return Err(AppError::new(ErrorKind::NotFound, "That playlist is not in the library."));
+        let Some(index) = playlist
+            .parse::<u64>()
+            .ok()
+            .and_then(|numeric| playlists.index_of(numeric))
+        else {
+            return Err(AppError::new(
+                ErrorKind::NotFound,
+                "That playlist is not in the library.",
+            ));
         };
         let source = if playlists.is_smart(index) {
             rbl_index::TrackSource::SmartPlaylist(index)
@@ -3034,7 +3850,11 @@ pub async fn export_playlist_file(
             _ => playlist_m3u8(&library, &rows),
         };
         std::fs::write(&path, text).map_err(|e| {
-            AppError::new(ErrorKind::Internal, "The playlist file could not be written.").with_detail(e.to_string())
+            AppError::new(
+                ErrorKind::Internal,
+                "The playlist file could not be written.",
+            )
+            .with_detail(e.to_string())
         })?;
         Ok(u32::try_from(rows.len()).unwrap_or(u32::MAX))
     })
@@ -3049,8 +3869,17 @@ fn playlist_m3u8(library: &rbl_index::Library, rows: &[u32]) -> String {
         let i = row as usize;
         let artist = library.artist_name(row);
         let title = library.title.get(i);
-        let name = if artist.is_empty() { title.to_owned() } else { format!("{artist} - {title}") };
-        let _ = writeln!(out, "#EXTINF:{},{name}\n{}", library.length_sec.get(i).copied().unwrap_or(0), library.folder_path.get(i));
+        let name = if artist.is_empty() {
+            title.to_owned()
+        } else {
+            format!("{artist} - {title}")
+        };
+        let _ = writeln!(
+            out,
+            "#EXTINF:{},{name}\n{}",
+            library.length_sec.get(i).copied().unwrap_or(0),
+            library.folder_path.get(i)
+        );
     }
     out
 }
@@ -3059,7 +3888,8 @@ fn playlist_m3u8(library: &rbl_index::Library, rows: &[u32]) -> String {
 /// the playlist's order, times as `m:ss`.
 fn playlist_txt(library: &rbl_index::Library, rows: &[u32]) -> String {
     use std::fmt::Write as _;
-    let mut out = String::from("#\tTrack Title\tArtist\tAlbum\tGenre\tBPM\tRating\tTime\tKey\tDate Added\n");
+    let mut out =
+        String::from("#\tTrack Title\tArtist\tAlbum\tGenre\tBPM\tRating\tTime\tKey\tDate Added\n");
     let clean = |text: &str| text.replace(['\t', '\n', '\r'], " ");
     for (n, &row) in rows.iter().enumerate() {
         let i = row as usize;
@@ -3091,7 +3921,8 @@ pub async fn export_xml(state: State<'_, Arc<AppState>>, path: String) -> AppRes
     blocking("export_xml", move || {
         let text = rbl_index::export_xml(&library);
         std::fs::write(&path, text).map_err(|e| {
-            AppError::new(ErrorKind::Internal, "The XML could not be written.").with_detail(e.to_string())
+            AppError::new(ErrorKind::Internal, "The XML could not be written.")
+                .with_detail(e.to_string())
         })?;
         Ok(u32::try_from(library.len()).unwrap_or(u32::MAX))
     })
@@ -3099,9 +3930,15 @@ pub async fn export_xml(state: State<'_, Arc<AppState>>, path: String) -> AppRes
 }
 
 #[tauri::command]
-pub async fn backup_sizes(state: State<'_, Arc<AppState>>, refresh: Option<bool>) -> AppResult<crate::backup_sizes::BackupSizes> {
+pub async fn backup_sizes(
+    state: State<'_, Arc<AppState>>,
+    refresh: Option<bool>,
+) -> AppResult<crate::backup_sizes::BackupSizes> {
     let state = Arc::clone(&state);
-    blocking("backup_sizes", move || crate::backup_sizes::cached(&state, refresh.unwrap_or(false))).await
+    blocking("backup_sizes", move || {
+        crate::backup_sizes::cached(&state, refresh.unwrap_or(false))
+    })
+    .await
 }
 
 /// Open the configured folder, creating it if no backup has been taken yet.
@@ -3115,33 +3952,49 @@ pub async fn open_backup_directory<R: tauri::Runtime>(
         crate::durable::create_dir_all(&path).map_err(|e| {
             AppError::internal("The backup folder could not be created.").with_detail(e.to_string())
         })?;
-        app.opener().open_path(path.to_string_lossy().into_owned(), None::<&str>).map_err(|e| {
-            AppError::internal("The backup folder could not be opened.").with_detail(e.to_string())
-        })
-    }).await
+        app.opener()
+            .open_path(path.to_string_lossy().into_owned(), None::<&str>)
+            .map_err(|e| {
+                AppError::internal("The backup folder could not be opened.")
+                    .with_detail(e.to_string())
+            })
+    })
+    .await
 }
 
 /// The configured destination, whether or not any backups exist yet.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Tauri's State extractor is injected by value"
+)]
 pub fn backup_directory(state: State<'_, Arc<AppState>>) -> String {
     state.backup_destination().to_string_lossy().into_owned()
 }
 
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Tauri's State extractor is injected by value"
+)]
 pub fn backup_progress(state: State<'_, Arc<AppState>>) -> crate::backups::BackupProgress {
     state.backup_progress.lock().clone()
 }
 
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Tauri's State extractor is injected by value"
+)]
 pub fn cancel_backup(state: State<'_, Arc<AppState>>) {
     crate::backups::cancel(&state);
 }
 
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Tauri's State extractor is injected by value"
+)]
 pub fn start_backup(state: State<'_, Arc<AppState>>) -> AppResult<()> {
     crate::backups::start(Arc::clone(&state))
 }
@@ -3162,13 +4015,22 @@ pub async fn back_up_library(state: State<'_, Arc<AppState>>) -> AppResult<Strin
 #[tauri::command]
 pub async fn delete_backup(state: State<'_, Arc<AppState>>, path: String) -> AppResult<()> {
     let state = Arc::clone(&state);
-    blocking("delete_backup", move || crate::backups::delete(&state, std::path::Path::new(&path))).await
+    blocking("delete_backup", move || {
+        crate::backups::delete(&state, std::path::Path::new(&path))
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn set_backup_directory(state: State<'_, Arc<AppState>>, directory: String) -> AppResult<String> {
+pub async fn set_backup_directory(
+    state: State<'_, Arc<AppState>>,
+    directory: String,
+) -> AppResult<String> {
     let state = Arc::clone(&state);
-    blocking("set_backup_directory", move || state.set_backup_destination(std::path::Path::new(&directory))).await
+    blocking("set_backup_directory", move || {
+        state.set_backup_destination(std::path::Path::new(&directory))
+    })
+    .await
 }
 
 /// A play: the track goes on today's history session and its play count
@@ -3179,7 +4041,14 @@ pub async fn record_play<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     track: String,
 ) -> AppResult<u32> {
-    edit(app, state, "record_play", Touched::Histories(vec![track.clone()]), move |w| w.record_play(&track).map(|_| ())).await
+    edit(
+        app,
+        state,
+        "record_play",
+        Touched::Histories(vec![track.clone()]),
+        move |w| w.record_play(&track).map(|_| ()),
+    )
+    .await
 }
 
 /// Remove from History: the tracks' plays leave the session.
@@ -3190,9 +4059,13 @@ pub async fn remove_from_history<R: tauri::Runtime>(
     history: String,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "remove_from_history", Touched::Histories(Vec::new()), move |w| {
-        w.remove_from_history(&history, &tracks).map(|_| ())
-    })
+    edit(
+        app,
+        state,
+        "remove_from_history",
+        Touched::Histories(Vec::new()),
+        move |w| w.remove_from_history(&history, &tracks).map(|_| ()),
+    )
     .await
 }
 
@@ -3202,10 +4075,14 @@ pub async fn remove_from_history<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn open_url<R: tauri::Runtime>(app: tauri::AppHandle<R>, url: String) -> AppResult<()> {
     if !url.starts_with("https://") {
-        return Err(AppError::new(ErrorKind::Malformed, "Only an https address can be opened."));
+        return Err(AppError::new(
+            ErrorKind::Malformed,
+            "Only an https address can be opened.",
+        ));
     }
     app.opener().open_url(&url, None::<&str>).map_err(|e| {
-        AppError::new(ErrorKind::Internal, "That address could not be opened.").with_detail(e.to_string())
+        AppError::new(ErrorKind::Internal, "That address could not be opened.")
+            .with_detail(e.to_string())
     })
 }
 
@@ -3216,14 +4093,24 @@ pub async fn reset_play_count<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     tracks: Vec<String>,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "reset_play_count", Touched::Metadata(tracks.clone()), "Track Edit", move |w| {
-        let mut edits = Vec::with_capacity(tracks.len());
-        for track in &tracks {
-            let (_, edit) = w.set_field_with_undo(track, rbl_db::write::TrackField::PlayCount, "0")?;
-            if !edit.is_empty() { edits.push(edit); }
-        }
-        Ok(LibraryEdit::Track(edits))
-    })
+    recorded_edit(
+        app,
+        state,
+        "reset_play_count",
+        Touched::Metadata(tracks.clone()),
+        "Track Edit",
+        move |w| {
+            let mut edits = Vec::with_capacity(tracks.len());
+            for track in &tracks {
+                let (_, edit) =
+                    w.set_field_with_undo(track, rbl_db::write::TrackField::PlayCount, "0")?;
+                if !edit.is_empty() {
+                    edits.push(edit);
+                }
+            }
+            Ok(LibraryEdit::Track(edits))
+        },
+    )
     .await
 }
 
@@ -3235,12 +4122,18 @@ pub async fn remove_from_collection<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    permanent_edit(app, state, "remove_from_collection", Touched::Tracks, move |w| {
-        for track in &tracks {
-            w.delete_track(track)?;
-        }
-        Ok(())
-    })
+    permanent_edit(
+        app,
+        state,
+        "remove_from_collection",
+        Touched::Tracks,
+        move |w| {
+            for track in &tracks {
+                w.delete_track(track)?;
+            }
+            Ok(())
+        },
+    )
     .await
 }
 
@@ -3251,7 +4144,14 @@ pub async fn reorder_playlist<R: tauri::Runtime>(
     playlist: String,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "reorder_playlist", Touched::Playlists, move |w| w.reorder(&playlist, &tracks).map(|_| ())).await
+    edit(
+        app,
+        state,
+        "reorder_playlist",
+        Touched::Playlists,
+        move |w| w.reorder(&playlist, &tracks).map(|_| ()),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -3261,9 +4161,18 @@ pub async fn set_track_rating<R: tauri::Runtime>(
     track: String,
     stars: u8,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "set_track_rating", Touched::Metadata(vec![track.clone()]), "Track Edit", move |w| {
-        w.set_rating_with_undo(&track, stars).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
-    }).await
+    recorded_edit(
+        app,
+        state,
+        "set_track_rating",
+        Touched::Metadata(vec![track.clone()]),
+        "Track Edit",
+        move |w| {
+            w.set_rating_with_undo(&track, stars)
+                .map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -3273,9 +4182,18 @@ pub async fn set_track_comment<R: tauri::Runtime>(
     track: String,
     comment: String,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "set_track_comment", Touched::Metadata(vec![track.clone()]), "Track Edit", move |w| {
-        w.set_comment_with_undo(&track, &comment).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
-    }).await
+    recorded_edit(
+        app,
+        state,
+        "set_track_comment",
+        Touched::Metadata(vec![track.clone()]),
+        "Track Edit",
+        move |w| {
+            w.set_comment_with_undo(&track, &comment)
+                .map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -3285,9 +4203,18 @@ pub async fn set_track_color<R: tauri::Runtime>(
     track: String,
     color: Option<String>,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "set_track_color", Touched::Metadata(vec![track.clone()]), "Track Edit", move |w| {
-        w.set_color_with_undo(&track, color.as_deref()).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
-    }).await
+    recorded_edit(
+        app,
+        state,
+        "set_track_color",
+        Touched::Metadata(vec![track.clone()]),
+        "Track Edit",
+        move |w| {
+            w.set_color_with_undo(&track, color.as_deref())
+                .map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+        },
+    )
+    .await
 }
 
 /// The BPMs and keys the track filter bar can offer for a list.
@@ -3308,17 +4235,26 @@ pub async fn filter_values(
             bpms: values
                 .bpms
                 .into_iter()
-                .map(|c| CountedDto { value: c.value, count: c.count })
+                .map(|c| CountedDto {
+                    value: c.value,
+                    count: c.count,
+                })
                 .collect(),
             keys: values
                 .keys
                 .into_iter()
-                .map(|c| CountedDto { value: c.value, count: c.count })
+                .map(|c| CountedDto {
+                    value: c.value,
+                    count: c.count,
+                })
                 .collect(),
             tags: values
                 .tags
                 .into_iter()
-                .map(|c| TagCategoryDto { name: c.name, tags: c.tags })
+                .map(|c| TagCategoryDto {
+                    name: c.name,
+                    tags: c.tags,
+                })
                 .collect(),
         })
     })

@@ -144,12 +144,32 @@ const ID_ATTEMPTS: usize = 64;
 /// Columns [`Writer::touch`] will set. A column name is interpolated into SQL,
 /// so the set of legal names is spelled out rather than trusted.
 const WRITABLE_COLUMNS: &[&str] = &[
-    "Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL", "SmartList",
+    "Name",
+    "Rating",
+    "Commnt",
+    "ColorID",
+    "FolderPath",
+    "FileNameL",
+    "SmartList",
     // The tempo, which a grid edit changes with the `.DAT`'s grid.
     "BPM",
     // The information panel's Info tab.
-    "Title", "Lyricist", "ReleaseYear", "TrackNo", "DiscNo", "DJPlayCount", "KeyID", "BPM", "ImagePath",
-    "ArtistID", "OrgArtistID", "ComposerID", "RemixerID", "AlbumID", "GenreID", "LabelID",
+    "Title",
+    "Lyricist",
+    "ReleaseYear",
+    "TrackNo",
+    "DiscNo",
+    "DJPlayCount",
+    "KeyID",
+    "BPM",
+    "ImagePath",
+    "ArtistID",
+    "OrgArtistID",
+    "ComposerID",
+    "RemixerID",
+    "AlbumID",
+    "GenreID",
+    "LabelID",
 ];
 
 /// Lookup tables [`intern`] may add a row to. Same reason as above.
@@ -226,8 +246,9 @@ impl Unsupported {
     #[must_use]
     pub const fn reason(self) -> &'static str {
         match self {
-            Self::ContentCueOrFile =>
-                "contentCue and contentFile are not understood and must not be touched",
+            Self::ContentCueOrFile => {
+                "contentCue and contentFile are not understood and must not be touched"
+            }
         }
     }
 }
@@ -441,7 +462,9 @@ impl Writer {
             )
             .unwrap_or(false);
         if !is_smart {
-            return Err(DbError::WriteRefused(format!("{id} is not an intelligent playlist")));
+            return Err(DbError::WriteRefused(format!(
+                "{id} is not an intelligent playlist"
+            )));
         }
         self.touch_playlist(id, "SmartList", &Value::Text(smart_list.to_owned()))
     }
@@ -461,11 +484,15 @@ impl Writer {
         let id = self.unused_id("djmdPlaylist")?;
         let uuid = self.rng.uuid4();
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         if parent != ROOT && !node_exists(&tx, parent)? {
-            return Err(DbError::WriteRefused(format!("no playlist or folder {parent}")));
+            return Err(DbError::WriteRefused(format!(
+                "no playlist or folder {parent}"
+            )));
         }
         // Seq appends: parents in the reference library start at 0 or 1, so
         // there is no base to assume.
@@ -503,7 +530,14 @@ impl Writer {
             |row| row.get::<_, String>(0),
         )?;
         let changed = self.rename(id, name)?;
-        Ok((changed, PlaylistRename { id: id.to_owned(), before, after: name.to_owned() }))
+        Ok((
+            changed,
+            PlaylistRename {
+                id: id.to_owned(),
+                before,
+                after: name.to_owned(),
+            },
+        ))
     }
 
     pub fn undo_rename(&mut self, edit: &PlaylistRename) -> Result<Changed> {
@@ -527,10 +561,14 @@ impl Writer {
     pub fn move_to(&mut self, id: &str, parent: &str, index: Option<usize>) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if parent != ROOT && !node_exists(&tx, parent)? {
-            return Err(DbError::WriteRefused(format!("no playlist or folder {parent}")));
+            return Err(DbError::WriteRefused(format!(
+                "no playlist or folder {parent}"
+            )));
         }
         if parent == id || is_descendant(&tx, parent, id)? {
             // Reparenting a folder under itself detaches the whole subtree from
@@ -580,9 +618,16 @@ impl Writer {
         let (before_parent, before_index) = self.playlist_position(id)?;
         let changed = self.move_to(id, parent, index)?;
         let (after_parent, after_index) = self.playlist_position(id)?;
-        Ok((changed, PlaylistMove {
-            id: id.to_owned(), before_parent, before_index, after_parent, after_index,
-        }))
+        Ok((
+            changed,
+            PlaylistMove {
+                id: id.to_owned(),
+                before_parent,
+                before_index,
+                after_parent,
+                after_index,
+            },
+        ))
     }
 
     pub fn undo_move(&mut self, edit: &PlaylistMove) -> Result<Changed> {
@@ -606,7 +651,9 @@ impl Writer {
         let siblings: Vec<String> = statement
             .query_map(params![parent], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?;
-        let index = siblings.iter().position(|sibling| sibling == id)
+        let index = siblings
+            .iter()
+            .position(|sibling| sibling == id)
             .ok_or_else(|| DbError::WriteRefused(format!("no playlist or folder {id}")))?;
         Ok((parent, index))
     }
@@ -616,21 +663,27 @@ impl Writer {
     ///
     /// Never `DELETE`: rekordbox's own sync relies on the tombstone.
     pub fn delete_playlist(&mut self, id: &str) -> Result<Changed> {
-        self.delete_playlist_with_undo(id).map(|(changed, _)| changed)
+        self.delete_playlist_with_undo(id)
+            .map(|(changed, _)| changed)
     }
 
     /// Deletes a playlist and returns the exact rows needed to undo it.
     pub fn delete_playlist_with_undo(&mut self, id: &str) -> Result<(Changed, PlaylistDeletion)> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
-        let exists = tx.query_row(
-            "SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
-            params![id],
-            |_| Ok(()),
-        ).optional()?.is_some();
+        let exists = tx
+            .query_row(
+                "SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
         if !exists {
             return Err(DbError::WriteRefused(format!("no playlist or folder {id}")));
         }
@@ -682,10 +735,13 @@ impl Writer {
         }
         set_counter(&tx, usn)?;
         tx.commit()?;
-        Ok((Changed { rows, usn }, PlaylistDeletion {
-            playlist_ids: doomed,
-            membership_ids,
-        }))
+        Ok((
+            Changed { rows, usn },
+            PlaylistDeletion {
+                playlist_ids: doomed,
+                membership_ids,
+            },
+        ))
     }
 
     /// Restores exactly the rows made into tombstones by a deletion.
@@ -698,13 +754,21 @@ impl Writer {
         self.set_playlist_deletion(deletion, true)
     }
 
-    fn set_playlist_deletion(&mut self, deletion: &PlaylistDeletion, deleted: bool) -> Result<Changed> {
+    fn set_playlist_deletion(
+        &mut self,
+        deletion: &PlaylistDeletion,
+        deleted: bool,
+    ) -> Result<Changed> {
         if deletion.is_empty() {
-            return Err(DbError::WriteRefused("empty playlist deletion history".to_owned()));
+            return Err(DbError::WriteRefused(
+                "empty playlist deletion history".to_owned(),
+            ));
         }
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let from = i64::from(!deleted);
         let to = i64::from(deleted);
@@ -722,7 +786,9 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
+                    return Err(DbError::WriteRefused(
+                        "that playlist deletion can no longer be redone".to_owned(),
+                    ));
                 }
                 rows += changed;
             }
@@ -734,7 +800,9 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
+                    return Err(DbError::WriteRefused(
+                        "that playlist deletion can no longer be redone".to_owned(),
+                    ));
                 }
                 rows += changed;
             }
@@ -747,7 +815,9 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
+                    return Err(DbError::WriteRefused(
+                        "that playlist deletion can no longer be undone".to_owned(),
+                    ));
                 }
                 rows += changed;
             }
@@ -759,7 +829,9 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
+                    return Err(DbError::WriteRefused(
+                        "that playlist deletion can no longer be undone".to_owned(),
+                    ));
                 }
                 rows += changed;
             }
@@ -783,7 +855,9 @@ impl Writer {
             ids.push((self.rng.uuid4(), self.rng.uuid4()));
         }
 
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !node_exists(&tx, playlist)? {
             return Err(DbError::WriteRefused(format!("no playlist {playlist}")));
@@ -830,7 +904,9 @@ impl Writer {
     pub fn remove_tracks(&mut self, playlist: &str, contents: &[String]) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         refuse_if_smart(&tx, playlist)?;
 
@@ -870,10 +946,15 @@ impl Writer {
             .collect::<rusqlite::Result<_>>()?;
         drop(statement);
         let order = memberships.iter().map(|(id, _)| id.clone()).collect();
-        let removed = memberships.into_iter()
+        let removed = memberships
+            .into_iter()
             .filter_map(|(id, content)| contents.contains(&content).then_some(id))
             .collect();
-        let edit = PlaylistTrackRemoval { playlist: playlist.to_owned(), removed, order };
+        let edit = PlaylistTrackRemoval {
+            playlist: playlist.to_owned(),
+            removed,
+            order,
+        };
         let changed = self.remove_tracks(playlist, contents)?;
         Ok((changed, edit))
     }
@@ -888,11 +969,15 @@ impl Writer {
 
     fn set_track_removal(&mut self, edit: &PlaylistTrackRemoval, deleted: bool) -> Result<Changed> {
         if edit.is_empty() {
-            return Err(DbError::WriteRefused("empty playlist track-removal history".to_owned()));
+            return Err(DbError::WriteRefused(
+                "empty playlist track-removal history".to_owned(),
+            ));
         }
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut rows = 0;
         let mut usn = 0;
@@ -901,7 +986,13 @@ impl Writer {
             rows += tx.execute(
                 "UPDATE djmdSongPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
                     updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
-                params![i64::from(deleted), usn, stamp, membership, i64::from(!deleted)],
+                params![
+                    i64::from(deleted),
+                    usn,
+                    stamp,
+                    membership,
+                    i64::from(!deleted)
+                ],
             )?;
         }
         if deleted {
@@ -912,7 +1003,12 @@ impl Writer {
                 rows += tx.execute(
                     "UPDATE djmdSongPlaylist SET TrackNo = ?1, rb_local_usn = ?2, updated_at = ?3
                      WHERE ID = ?4 AND rb_local_deleted = 0",
-                    params![i64::try_from(index + 1).unwrap_or(i64::MAX), usn, stamp, membership],
+                    params![
+                        i64::try_from(index + 1).unwrap_or(i64::MAX),
+                        usn,
+                        stamp,
+                        membership
+                    ],
                 )?;
             }
         }
@@ -938,7 +1034,9 @@ impl Writer {
         for _ in contents {
             ids.push((self.rng.uuid4(), self.rng.uuid4()));
         }
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut track_no: i64 = tx.query_row(
             "SELECT COALESCE(MAX(TrackNo), 0) FROM djmdSongTagList WHERE rb_local_deleted = 0",
@@ -978,7 +1076,9 @@ impl Writer {
     pub fn tag_list_remove(&mut self, contents: &[String]) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut rows = 0;
         for content in contents {
@@ -992,8 +1092,9 @@ impl Writer {
             let mut stmt = tx.prepare(
                 "SELECT ID FROM djmdSongTagList WHERE rb_local_deleted = 0 ORDER BY TrackNo, created_at",
             )?;
-            let remaining: Vec<String> =
-                stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<_>>()?;
+            let remaining: Vec<String> = stmt
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<_>>()?;
             drop(stmt);
             for (position, id) in remaining.iter().enumerate() {
                 let track_no = i64::try_from(position).unwrap_or(0) + 1;
@@ -1011,7 +1112,9 @@ impl Writer {
     pub fn tag_list_clear(&mut self) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let rows = tx.execute(
             "UPDATE djmdSongTagList SET rb_local_deleted = 1, updated_at = ?1 WHERE rb_local_deleted = 0",
@@ -1028,7 +1131,9 @@ impl Writer {
     pub fn reorder(&mut self, playlist: &str, order: &[String]) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         refuse_if_smart(&tx, playlist)?;
 
@@ -1041,8 +1146,11 @@ impl Writer {
             .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
 
-        let mut sequence: Vec<String> =
-            order.iter().filter(|c| existing.contains(c)).cloned().collect();
+        let mut sequence: Vec<String> = order
+            .iter()
+            .filter(|c| existing.contains(c))
+            .cloned()
+            .collect();
         for content in &existing {
             if !sequence.contains(content) {
                 sequence.push(content.clone());
@@ -1056,7 +1164,13 @@ impl Writer {
             rows += tx.execute(
                 "UPDATE djmdSongPlaylist SET TrackNo = ?1, rb_local_usn = ?2, updated_at = ?3
                  WHERE PlaylistID = ?4 AND ContentID = ?5 AND rb_local_deleted = 0",
-                params![i64::try_from(index + 1).unwrap_or(i64::MAX), usn, stamp, playlist, content],
+                params![
+                    i64::try_from(index + 1).unwrap_or(i64::MAX),
+                    usn,
+                    stamp,
+                    playlist,
+                    content
+                ],
             )?;
         }
         if rows > 0 {
@@ -1085,8 +1199,41 @@ impl Writer {
         // hands one in.
         let path = normalized(path);
         let path = path.as_path();
-        let tags = crate::import::read_tags(path)
-            .map_err(|e| DbError::WriteRefused(e.to_string()))?;
+        let tags =
+            crate::import::read_tags(path).map_err(|e| DbError::WriteRefused(e.to_string()))?;
+        self.import_track(path, &tags)
+    }
+
+    /// Adds an unavailable XML entry so it can be relocated later.
+    pub fn import_missing_file(
+        &mut self,
+        path: &Path,
+        title: &str,
+        artist: &str,
+    ) -> Result<String> {
+        let path = normalized(path);
+        let path = path.as_path();
+        if !crate::import::is_audio(path) {
+            return Err(DbError::WriteRefused(format!(
+                "{} is not a format rekordbox plays",
+                path.display()
+            )));
+        }
+        let tags = crate::import::TrackTags {
+            title: if title.trim().is_empty() {
+                path.file_stem()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            } else {
+                title.trim().to_owned()
+            },
+            artist: artist.trim().to_owned(),
+            ..crate::import::TrackTags::default()
+        };
+        self.import_track(path, &tags)
+    }
+
+    fn import_track(&mut self, path: &Path, tags: &crate::import::TrackTags) -> Result<String> {
         self.prepare()?;
 
         let id = self.unused_id_below("djmdContent", MAX_CONTENT_ID)?;
@@ -1099,14 +1246,18 @@ impl Writer {
         let (master_db, device): (Option<String>, Option<String>) = self
             .library
             .connection()
-            .query_row("SELECT DBID, DeviceID FROM djmdProperty LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row("SELECT DBID, DeviceID FROM djmdProperty LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
             .unwrap_or((None, None));
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
 
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         // Already in the library: importing again would give one file two
@@ -1123,7 +1274,14 @@ impl Writer {
             )));
         }
 
-        let artist = intern(&tx, "djmdArtist", "Name", &tags.artist, &mut self.rng, &stamp)?;
+        let artist = intern(
+            &tx,
+            "djmdArtist",
+            "Name",
+            &tags.artist,
+            &mut self.rng,
+            &stamp,
+        )?;
         let album = intern(&tx, "djmdAlbum", "Name", &tags.album, &mut self.rng, &stamp)?;
         let genre = intern(&tx, "djmdGenre", "Name", &tags.genre, &mut self.rng, &stamp)?;
         let label = intern(&tx, "djmdLabel", "Name", &tags.label, &mut self.rng, &stamp)?;
@@ -1235,7 +1393,9 @@ impl Writer {
     ) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         let key_id = match analysis.key {
@@ -1269,7 +1429,9 @@ impl Writer {
         for _ in 0..ID_ATTEMPTS {
             let candidate = self.rng.numeric_id(limit);
             let taken: i64 =
-                self.library.connection().query_row(&sql, params![candidate], |r| r.get(0))?;
+                self.library
+                    .connection()
+                    .query_row(&sql, params![candidate], |r| r.get(0))?;
             if taken == 0 {
                 return Ok(candidate);
             }
@@ -1303,7 +1465,9 @@ impl Writer {
         let stamp = time::now();
         let memory = kind == 0;
 
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         // A cue points at a track by id *and* by UUID; both have to match or
@@ -1356,13 +1520,20 @@ impl Writer {
     /// `Color` field (255 means no colour); hot cues use `ColorTableIndex`.
     pub fn set_cue_colour(&mut self, cue: &str, colour: Option<u8>) -> Result<Changed> {
         self.prepare()?;
-        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .library
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let kind: i64 = tx.query_row(
-            "SELECT Kind FROM djmdCue WHERE ID=?1 AND rb_local_deleted=0", [cue], |row| row.get(0),
+            "SELECT Kind FROM djmdCue WHERE ID=?1 AND rb_local_deleted=0",
+            [cue],
+            |row| row.get(0),
         )?;
         let maximum = if kind == 0 { 7 } else { 64 };
         if colour.is_some_and(|value| value > maximum) {
-            return Err(DbError::WriteRefused("cue colour is outside rekordbox's palette".into()));
+            return Err(DbError::WriteRefused(
+                "cue colour is outside rekordbox's palette".into(),
+            ));
         }
         let usn = next_usn(&tx)?;
         let stamp = time::now();
@@ -1398,12 +1569,18 @@ impl Writer {
         }
         let id = self.add_cue(content, kind, start_ms)?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
         // The low half is always 1 across every value in the reference
         // library; it reads as the denominator of a beats-per-loop fraction.
-        let size = if beats == 0 { 0_i64 } else { (i64::from(beats) << 16) | 1 };
+        let size = if beats == 0 {
+            0_i64
+        } else {
+            (i64::from(beats) << 16) | 1
+        };
         tx.execute(
             "UPDATE djmdCue SET OutMsec = ?1, BeatLoopSize = ?2, rb_local_usn = ?3,
                 updated_at = ?4 WHERE ID = ?5",
@@ -1418,7 +1595,9 @@ impl Writer {
     pub fn move_cue(&mut self, cue: &str, position_ms: u32) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
         let rows = tx.execute(
@@ -1437,14 +1616,11 @@ impl Writer {
     /// or delete a cue needs to know whose cues to re-read afterwards, and the
     /// cue's own id is all the interface holds.
     pub fn cue_owner(&self, cue: &str) -> Result<Option<String>> {
-        let owner = self
-            .library
-            .connection()
-            .query_row(
-                "SELECT ContentID FROM djmdCue WHERE ID = ?1 AND rb_local_deleted = 0",
-                params![cue],
-                |r| r.get::<_, Option<String>>(0),
-            );
+        let owner = self.library.connection().query_row(
+            "SELECT ContentID FROM djmdCue WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![cue],
+            |r| r.get::<_, Option<String>>(0),
+        );
         match owner {
             Ok(content) => Ok(content),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1456,7 +1632,9 @@ impl Writer {
     pub fn delete_cue(&mut self, cue: &str) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
         let rows = tx.execute(
@@ -1474,7 +1652,9 @@ impl Writer {
     /// Sets a track's rating, 0 to 5 stars.
     pub fn set_rating(&mut self, content: &str, stars: u8) -> Result<Changed> {
         if stars > 5 {
-            return Err(DbError::WriteRefused(format!("{stars} is not a rating between 0 and 5")));
+            return Err(DbError::WriteRefused(format!(
+                "{stars} is not a rating between 0 and 5"
+            )));
         }
         // Stars as they are. The reference library holds 0 to 5 and nothing
         // else across 38,681 rows [OBS]; the multiples of 51 are the XML
@@ -1482,8 +1662,14 @@ impl Writer {
         self.touch_content(content, "Rating", &Value::Integer(i64::from(stars)))
     }
 
-    pub fn set_rating_with_undo(&mut self, content: &str, stars: u8) -> Result<(Changed, TrackEdit)> {
-        self.track_edit(content, "Rating", |writer| writer.set_rating(content, stars))
+    pub fn set_rating_with_undo(
+        &mut self,
+        content: &str,
+        stars: u8,
+    ) -> Result<(Changed, TrackEdit)> {
+        self.track_edit(content, "Rating", |writer| {
+            writer.set_rating(content, stars)
+        })
     }
 
     /// Sets a track's tempo, BPM x100, as a grid edit that changed the tempo
@@ -1497,7 +1683,9 @@ impl Writer {
     /// step with it. Zero is refused — a track with a grid has a tempo.
     pub fn set_bpm_x100(&mut self, content: &str, bpm_x100: u32) -> Result<Changed> {
         if bpm_x100 == 0 {
-            return Err(DbError::WriteRefused("a grid's tempo cannot be zero".to_owned()));
+            return Err(DbError::WriteRefused(
+                "a grid's tempo cannot be zero".to_owned(),
+            ));
         }
         self.touch_content(content, "BPM", &Value::Integer(i64::from(bpm_x100)))
     }
@@ -1507,8 +1695,14 @@ impl Writer {
         self.touch_content(content, "Commnt", &Value::Text(comment.to_owned()))
     }
 
-    pub fn set_comment_with_undo(&mut self, content: &str, comment: &str) -> Result<(Changed, TrackEdit)> {
-        self.track_edit(content, "Commnt", |writer| writer.set_comment(content, comment))
+    pub fn set_comment_with_undo(
+        &mut self,
+        content: &str,
+        comment: &str,
+    ) -> Result<(Changed, TrackEdit)> {
+        self.track_edit(content, "Commnt", |writer| {
+            writer.set_comment(content, comment)
+        })
     }
 
     /// Sets a track's colour, or clears it with `None`.
@@ -1520,8 +1714,14 @@ impl Writer {
         )
     }
 
-    pub fn set_color_with_undo(&mut self, content: &str, color: Option<&str>) -> Result<(Changed, TrackEdit)> {
-        self.track_edit(content, "ColorID", |writer| writer.set_color(content, color))
+    pub fn set_color_with_undo(
+        &mut self,
+        content: &str,
+        color: Option<&str>,
+    ) -> Result<(Changed, TrackEdit)> {
+        self.track_edit(content, "ColorID", |writer| {
+            writer.set_color(content, color)
+        })
     }
 
     /// Sets one of the information panel's editable fields.
@@ -1540,7 +1740,9 @@ impl Writer {
     /// a typo in the year box must not erase the year.
     pub fn set_field(&mut self, content: &str, field: TrackField, value: &str) -> Result<Changed> {
         match field {
-            TrackField::Title => self.touch_content(content, "Title", &Value::Text(value.to_owned())),
+            TrackField::Title => {
+                self.touch_content(content, "Title", &Value::Text(value.to_owned()))
+            }
             TrackField::Lyricist => {
                 self.touch_content(content, "Lyricist", &Value::Text(value.to_owned()))
             }
@@ -1552,7 +1754,9 @@ impl Writer {
             TrackField::OriginalArtist => {
                 self.touch_reference(content, "OrgArtistID", "djmdArtist", value)
             }
-            TrackField::Composer => self.touch_reference(content, "ComposerID", "djmdArtist", value),
+            TrackField::Composer => {
+                self.touch_reference(content, "ComposerID", "djmdArtist", value)
+            }
             TrackField::Remixer => self.touch_reference(content, "RemixerID", "djmdArtist", value),
             TrackField::Album => self.touch_reference(content, "AlbumID", "djmdAlbum", value),
             TrackField::Genre => self.touch_reference(content, "GenreID", "djmdGenre", value),
@@ -1586,11 +1790,15 @@ impl Writer {
             TrackField::Genre => "GenreID",
             TrackField::Label => "LabelID",
             TrackField::Key => "KeyID",
-            TrackField::Bpm => return Err(DbError::WriteRefused(
-                "BPM history belongs to the beat grid editor".to_owned(),
-            )),
+            TrackField::Bpm => {
+                return Err(DbError::WriteRefused(
+                    "BPM history belongs to the beat grid editor".to_owned(),
+                ))
+            }
         };
-        self.track_edit(content, column, |writer| writer.set_field(content, field, value))
+        self.track_edit(content, column, |writer| {
+            writer.set_field(content, field, value)
+        })
     }
 
     pub fn undo_track_edit(&mut self, edit: &TrackEdit) -> Result<Changed> {
@@ -1610,18 +1818,31 @@ impl Writer {
         let before = self.track_value(content, column)?;
         let changed = write(self)?;
         let after = self.track_value(content, column)?;
-        Ok((changed, TrackEdit { content: content.to_owned(), column, before, after }))
+        Ok((
+            changed,
+            TrackEdit {
+                content: content.to_owned(),
+                column,
+                before,
+                after,
+            },
+        ))
     }
 
     fn track_value(&self, content: &str, column: &'static str) -> Result<Value> {
         if !WRITABLE_COLUMNS.contains(&column) {
             return Err(DbError::WriteRefused(format!("{column} is not writable")));
         }
-        self.library.connection().query_row(
-            &format!("SELECT `{column}` FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0"),
-            params![content],
-            |row| row.get(0),
-        ).map_err(Into::into)
+        self.library
+            .connection()
+            .query_row(
+                &format!(
+                    "SELECT `{column}` FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0"
+                ),
+                params![content],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
     }
 
     // ---------------------------------------------------------------- my tag
@@ -1638,7 +1859,9 @@ impl Writer {
         for _ in tags {
             ids.push((self.rng.uuid4(), self.rng.uuid4()));
         }
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !content_exists(&tx, content)? {
             return Err(DbError::WriteRefused(format!("no track {content}")));
@@ -1702,7 +1925,14 @@ impl Writer {
         let before = self.track_tags(content)?;
         let changed = self.set_my_tags(content, tags)?;
         let after = self.track_tags(content)?;
-        Ok((changed, TrackTagEdit { content: content.to_owned(), before, after }))
+        Ok((
+            changed,
+            TrackTagEdit {
+                content: content.to_owned(),
+                before,
+                after,
+            },
+        ))
     }
 
     pub fn undo_tag_edit(&mut self, edit: &TrackTagEdit) -> Result<Changed> {
@@ -1718,7 +1948,8 @@ impl Writer {
             "SELECT MyTagID FROM djmdSongMyTag
              WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY MyTagID",
         )?;
-        let tags: Vec<String> = statement.query_map(params![content], |row| row.get(0))?
+        let tags: Vec<String> = statement
+            .query_map(params![content], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         Ok(tags)
     }
@@ -1726,15 +1957,34 @@ impl Writer {
     /// Persist an edited grid's tempo and invalidate cached analysis consumers.
     pub fn save_grid_revision(&mut self, content: &str, bpm: u32) -> Result<()> {
         self.prepare()?;
-        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let previous: Option<String> = tx.query_row("SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [content], |r| r.get(0))?;
+        let tx = self
+            .library
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let previous: Option<String> = tx.query_row(
+            "SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0",
+            [content],
+            |r| r.get(0),
+        )?;
         // modifyAnalysisUpdated increments the first UTF-16 code unit, not
         // a parsed decimal integer. Preserve that reference wire behavior.
-        let unit = previous.as_deref().unwrap_or("").encode_utf16().next().unwrap_or(0).wrapping_add(1);
-        let revision = if unit == 0 { String::new() } else { String::from_utf16_lossy(&[unit]) };
+        let unit = previous
+            .as_deref()
+            .unwrap_or("")
+            .encode_utf16()
+            .next()
+            .unwrap_or(0)
+            .wrapping_add(1);
+        let revision = if unit == 0 {
+            String::new()
+        } else {
+            String::from_utf16_lossy(&[unit])
+        };
         let usn = next_usn(&tx)?;
         let rows = tx.execute("UPDATE djmdContent SET BPM=?2, AnalysisUpdated=?5, rb_local_usn=?3, updated_at=?4 WHERE ID=?1 AND rb_local_deleted=0", params![content, bpm, usn, time::now(), revision])?;
-        if rows != 1 { return Err(DbError::WriteRefused("Track no longer exists".into())); }
+        if rows != 1 {
+            return Err(DbError::WriteRefused("Track no longer exists".into()));
+        }
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(())
@@ -1743,30 +1993,58 @@ impl Writer {
     /// `BeatGridAdjustment` uses bit 7; preserve the other analysis flags.
     pub fn set_analysis_lock(&mut self, content: &str, on: bool) -> Result<()> {
         self.prepare()?;
-        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .library
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
         let rows = tx.execute("UPDATE djmdContent SET Analysed=(COALESCE(Analysed,0)&127)|?2, rb_local_usn=?3, updated_at=?4 WHERE ID=?1 AND rb_local_deleted=0", params![content, if on {128} else {0}, usn, time::now()])?;
-        if rows != 1 { return Err(DbError::WriteRefused("Track no longer exists".into())); }
+        if rows != 1 {
+            return Err(DbError::WriteRefused("Track no longer exists".into()));
+        }
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(())
     }
 
     /// Replaces a track's cues from a USB export and updates its grid metadata atomically.
-    pub fn import_usb_cues(&mut self, content: &str, cues: &[rbl_anlz::CueEntry], bpm: u32) -> Result<()> {
+    pub fn import_usb_cues(
+        &mut self,
+        content: &str,
+        cues: &[rbl_anlz::CueEntry],
+        bpm: u32,
+    ) -> Result<()> {
         self.prepare()?;
-        if cues.iter().any(|c| c.hot_cue > 16 || !matches!(c.kind, 1 | 2) || (c.kind == 2 && c.loop_time_ms <= c.time_ms)) {
+        if cues.iter().any(|c| {
+            c.hot_cue > 16
+                || !matches!(c.kind, 1 | 2)
+                || (c.kind == 2 && c.loop_time_ms <= c.time_ms)
+        }) {
             return Err(DbError::WriteRefused("Invalid USB cue data".into()));
         }
-        let ids: Vec<_> = cues.iter().map(|_| self.unused_id_below("djmdCue", MAX_CUE_ID)).collect::<Result<_>>()?;
+        let ids: Vec<_> = cues
+            .iter()
+            .map(|_| self.unused_id_below("djmdCue", MAX_CUE_ID))
+            .collect::<Result<_>>()?;
         let uuids: Vec<_> = cues.iter().map(|_| self.rng.uuid4()).collect();
-        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let owner: String = tx.query_row("SELECT UUID FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [content], |r| r.get(0))?;
+        let tx = self
+            .library
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let owner: String = tx.query_row(
+            "SELECT UUID FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0",
+            [content],
+            |r| r.get(0),
+        )?;
         let stamp = time::now();
         let usn = next_usn(&tx)?;
         tx.execute("UPDATE djmdCue SET rb_local_deleted=1, rb_local_usn=?2, updated_at=?3 WHERE ContentID=?1 AND rb_local_deleted=0", params![content, usn, stamp])?;
         for ((cue, id), uuid) in cues.iter().zip(ids).zip(uuids) {
-            let kind = if cue.hot_cue >= 4 { cue.hot_cue + 1 } else { cue.hot_cue };
+            let kind = if cue.hot_cue >= 4 {
+                cue.hot_cue + 1
+            } else {
+                cue.hot_cue
+            };
             let end = (cue.kind == 2).then_some(i64::from(cue.loop_time_ms));
             tx.execute("INSERT INTO djmdCue (ID, ContentID, InMsec, InFrame, InMpegFrame, InMpegAbs, OutMsec, Kind, Color, ColorTableIndex, ActiveLoop, Comment, ContentUUID, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced, rb_local_usn, created_at, updated_at) VALUES (?1,?2,?3,0,0,0,?4,?5,?6,?7,0,?8,?9,?10,0,0,0,0,?11,?12,?12)", params![id, content, cue.time_ms, end, kind, if kind == 0 {255} else {-1}, cue.color_code.unwrap_or(cue.color_id), cue.comment.as_deref().unwrap_or(""), owner, uuid, usn, stamp])?;
         }
@@ -1777,29 +2055,75 @@ impl Writer {
     }
 
     /// Imports a USB session once, preserving order and repeated plays.
-    pub fn import_usb_history(&mut self, name: &str, source_uuid: &str, tracks: &[String]) -> Result<usize> {
+    pub fn import_usb_history(
+        &mut self,
+        name: &str,
+        source_uuid: &str,
+        tracks: &[String],
+    ) -> Result<usize> {
         self.prepare()?;
         let candidate = self.unused_id("djmdHistory")?;
         let stamp = time::now();
         let created = time::local_stamp();
-        let ids: Vec<_> = tracks.iter().map(|_| (self.rng.uuid4(), self.rng.uuid4())).collect();
-        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing: Option<String> = tx.query_row("SELECT ID FROM djmdHistory WHERE UUID=?1 AND rb_local_deleted=0", [source_uuid], |r| r.get(0)).optional()?;
+        let ids: Vec<_> = tracks
+            .iter()
+            .map(|_| (self.rng.uuid4(), self.rng.uuid4()))
+            .collect();
+        let tx = self
+            .library
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT ID FROM djmdHistory WHERE UUID=?1 AND rb_local_deleted=0",
+                [source_uuid],
+                |r| r.get(0),
+            )
+            .optional()?;
         let session = match existing {
             Some(id) => id,
-            None => history_node(&tx, name, ROOT, 0, &candidate, source_uuid, &created, &stamp)?,
+            None => history_node(
+                &tx,
+                name,
+                ROOT,
+                0,
+                &candidate,
+                source_uuid,
+                &created,
+                &stamp,
+            )?,
         };
-        let previous: i64 = tx.query_row("SELECT COUNT(*) FROM djmdSongHistory WHERE HistoryID=?1 AND rb_local_deleted=0", [&session], |r| r.get(0))?;
+        let previous: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM djmdSongHistory WHERE HistoryID=?1 AND rb_local_deleted=0",
+            [&session],
+            |r| r.get(0),
+        )?;
         let previous_tracks: Vec<String> = tx.prepare("SELECT ContentID FROM djmdSongHistory WHERE HistoryID=?1 AND rb_local_deleted=0 ORDER BY TrackNo")?
             .query_map([&session], |r| r.get(0))?.collect::<std::result::Result<_,_>>()?;
         if !tracks.starts_with(&previous_tracks) {
-            return Err(DbError::WriteRefused("This USB history changed since its last import; it was left unchanged.".into()));
+            return Err(DbError::WriteRefused(
+                "This USB history changed since its last import; it was left unchanged.".into(),
+            ));
         }
-        if previous_tracks.len() == tracks.len() { return Ok(0); }
+        if previous_tracks.len() == tracks.len() {
+            return Ok(0);
+        }
         let mut count = 0;
         let usn = next_usn(&tx)?;
-        for (index, (content, (id, uuid))) in tracks.iter().zip(ids).enumerate().skip(usize::try_from(previous.max(0)).map_err(|_| DbError::WriteRefused("history length exceeds this platform".into()))?) {
-            if !content_exists(&tx, content)? { return Err(DbError::WriteRefused("USB history contains an unknown track".into())); }
+        for (index, (content, (id, uuid))) in
+            tracks
+                .iter()
+                .zip(ids)
+                .enumerate()
+                .skip(usize::try_from(previous.max(0)).map_err(|_| {
+                    DbError::WriteRefused("history length exceeds this platform".into())
+                })?)
+        {
+            if !content_exists(&tx, content)? {
+                return Err(DbError::WriteRefused(
+                    "USB history contains an unknown track".into(),
+                ));
+            }
             tx.execute("INSERT INTO djmdSongHistory (ID, HistoryID, ContentID, TrackNo, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced, rb_local_usn, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,0,0,0,0,?6,?7,?7)", params![id, session, content, i64::try_from(index + 1).map_err(|_| DbError::WriteRefused("history length exceeds database capacity".into()))?, uuid, usn, stamp])?;
             count += 1;
         }
@@ -1836,13 +2160,30 @@ impl Writer {
         let created = time::local_stamp();
         let session_name = format!("HISTORY {}", created.get(..10).unwrap_or_default());
 
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !content_exists(&tx, content)? {
             return Err(DbError::WriteRefused(format!("no track {content}")));
         }
-        let month_id = month_folder(&tx, [&candidates[0], &candidates[1]], [&node_uuids[0], &node_uuids[1]], &created, &stamp)?;
-        let session_id = history_node(&tx, &session_name, &month_id, 0, &candidates[2], &node_uuids[2], &created, &stamp)?;
+        let month_id = month_folder(
+            &tx,
+            [&candidates[0], &candidates[1]],
+            [&node_uuids[0], &node_uuids[1]],
+            &created,
+            &stamp,
+        )?;
+        let session_id = history_node(
+            &tx,
+            &session_name,
+            &month_id,
+            0,
+            &candidates[2],
+            &node_uuids[2],
+            &created,
+            &stamp,
+        )?;
         let changed = append_play(&tx, &session_id, content, &play, &stamp)?;
         tx.commit()?;
         Ok(changed)
@@ -1867,7 +2208,9 @@ impl Writer {
         let created = time::local_stamp();
         let base = format!("LINK HISTORY {}", created.get(..10).unwrap_or_default());
 
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let names: Vec<String> = tx
             .prepare("SELECT Name FROM djmdHistory WHERE rb_local_deleted = 0")?
@@ -1878,8 +2221,23 @@ impl Writer {
             0 => base,
             n => format!("{base} ({n})"),
         };
-        let month_id = month_folder(&tx, [&candidates[0], &candidates[1]], [&node_uuids[0], &node_uuids[1]], &created, &stamp)?;
-        let session_id = history_node(&tx, &name, &month_id, 0, &candidates[2], &node_uuids[2], &created, &stamp)?;
+        let month_id = month_folder(
+            &tx,
+            [&candidates[0], &candidates[1]],
+            [&node_uuids[0], &node_uuids[1]],
+            &created,
+            &stamp,
+        )?;
+        let session_id = history_node(
+            &tx,
+            &name,
+            &month_id,
+            0,
+            &candidates[2],
+            &node_uuids[2],
+            &created,
+            &stamp,
+        )?;
         // The highest update number the rows above took.
         set_counter(&tx, next_usn(&tx)? - 1)?;
         tx.commit()?;
@@ -1894,7 +2252,9 @@ impl Writer {
         self.prepare()?;
         let play = [self.rng.uuid4(), self.rng.uuid4()];
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !content_exists(&tx, content)? {
             return Err(DbError::WriteRefused(format!("no track {content}")));
@@ -1917,7 +2277,9 @@ impl Writer {
     pub fn remove_from_history(&mut self, history: &str, contents: &[String]) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut rows = 0;
         let mut usn = 0;
@@ -1956,7 +2318,9 @@ impl Writer {
             .and_then(|e| e.to_str())
             .map(str::to_ascii_lowercase)
             .filter(|e| matches!(e.as_str(), "jpg" | "jpeg" | "png"))
-            .ok_or_else(|| DbError::WriteRefused(format!("{} is not a JPEG or PNG", image.display())))?;
+            .ok_or_else(|| {
+                DbError::WriteRefused(format!("{} is not a JPEG or PNG", image.display()))
+            })?;
         let bytes = std::fs::read(image)?;
         let uuid = self.rng.uuid4();
         let bucket = uuid.get(..3).unwrap_or("000").to_owned();
@@ -1971,7 +2335,9 @@ impl Writer {
         content: &str,
         image: Option<&Path>,
     ) -> Result<(Changed, TrackEdit)> {
-        self.track_edit(content, "ImagePath", |writer| writer.set_artwork(content, image))
+        self.track_edit(content, "ImagePath", |writer| {
+            writer.set_artwork(content, image)
+        })
     }
 
     /// Import a file's embedded cover only when the track has no artwork.
@@ -1980,13 +2346,15 @@ impl Writer {
         self.prepare()?;
         let (path, image): (String, Option<String>) = self.library.connection().query_row(
             "SELECT FolderPath, ImagePath FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
-            [content], |r| Ok((r.get(0)?, r.get(1)?)),
+            [content],
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         if image.is_some_and(|p| !p.is_empty()) {
             return Ok(false);
         }
         let Some(bytes) = crate::import::read_artwork(Path::new(&path))
-            .map_err(|e| DbError::WriteRefused(e.to_string()))? else {
+            .map_err(|e| DbError::WriteRefused(e.to_string()))?
+        else {
             return Ok(false);
         };
         let format = image::guess_format(&bytes)
@@ -2011,7 +2379,11 @@ impl Writer {
     /// Gives a playlist artwork, or takes it away with `None`. The image
     /// goes where a track's does [ASSUME: the reference library has no
     /// playlist with artwork to copy the path from].
-    pub fn set_playlist_artwork(&mut self, playlist: &str, image: Option<&Path>) -> Result<Changed> {
+    pub fn set_playlist_artwork(
+        &mut self,
+        playlist: &str,
+        image: Option<&Path>,
+    ) -> Result<Changed> {
         let Some(image) = image else {
             return self.touch_playlist(playlist, "ImagePath", &Value::Text(String::new()));
         };
@@ -2020,7 +2392,9 @@ impl Writer {
             .and_then(|e| e.to_str())
             .map(str::to_ascii_lowercase)
             .filter(|e| matches!(e.as_str(), "jpg" | "jpeg" | "png"))
-            .ok_or_else(|| DbError::WriteRefused(format!("{} is not a JPEG or PNG", image.display())))?;
+            .ok_or_else(|| {
+                DbError::WriteRefused(format!("{} is not a JPEG or PNG", image.display()))
+            })?;
         let bytes = std::fs::read(image)?;
         let uuid = self.rng.uuid4();
         let bucket = uuid.get(..3).unwrap_or("000").to_owned();
@@ -2054,20 +2428,33 @@ impl Writer {
         let tags = crate::import::read_tags(Path::new(&path))
             .map_err(|e| DbError::WriteRefused(e.to_string()))?;
         let stamp = time::now();
-        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .library
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut fields = Vec::new();
         for (column, value) in [("Title", &tags.title), ("Commnt", &tags.comment)] {
-            if !value.is_empty() { fields.push((column, Value::Text(value.clone()))); }
+            if !value.is_empty() {
+                fields.push((column, Value::Text(value.clone())));
+            }
         }
-        for (column, table, value) in [("ArtistID", "djmdArtist", &tags.artist), ("AlbumID", "djmdAlbum", &tags.album),
-            ("GenreID", "djmdGenre", &tags.genre), ("LabelID", "djmdLabel", &tags.label)] {
+        for (column, table, value) in [
+            ("ArtistID", "djmdArtist", &tags.artist),
+            ("AlbumID", "djmdAlbum", &tags.album),
+            ("GenreID", "djmdGenre", &tags.genre),
+            ("LabelID", "djmdLabel", &tags.label),
+        ] {
             if !value.is_empty() {
                 let id = intern(&tx, table, "Name", value.trim(), &mut self.rng, &stamp)?;
                 fields.push((column, id.map_or(Value::Null, Value::Text)));
             }
         }
-        if tags.year != 0 { fields.push(("ReleaseYear", Value::Integer(i64::from(tags.year)))); }
-        if tags.track_no != 0 { fields.push(("TrackNo", Value::Integer(i64::from(tags.track_no)))); }
+        if tags.year != 0 {
+            fields.push(("ReleaseYear", Value::Integer(i64::from(tags.year))));
+        }
+        if tags.track_no != 0 {
+            fields.push(("TrackNo", Value::Integer(i64::from(tags.track_no))));
+        }
         let mut changed = 0;
         for (column, value) in fields {
             let usn = next_usn(&tx)?;
@@ -2088,43 +2475,92 @@ impl Writer {
     /// are flushed before BPM and `AnalysisDataPath` commit together. A crash
     /// can leave unreferenced files, but cannot change the old grid in place.
     pub fn set_bpm(&mut self, content: &str, value: &str) -> Result<Changed> {
-        let bpm: f64 = value.trim().parse().map_err(|_| DbError::WriteRefused(format!("{value:?} is not a BPM")))?;
+        let bpm: f64 = value
+            .trim()
+            .parse()
+            .map_err(|_| DbError::WriteRefused(format!("{value:?} is not a BPM")))?;
         if !bpm.is_finite() || !(20.0..=400.0).contains(&bpm) {
-            return Err(DbError::WriteRefused(format!("{bpm} is outside 20 to 400 BPM")));
+            return Err(DbError::WriteRefused(format!(
+                "{bpm} is outside 20 to 400 BPM"
+            )));
         }
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "20 to 400, checked above")]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "20 to 400, checked above"
+        )]
         let bpm_x100 = (bpm * 100.0).round() as u32;
 
         self.prepare()?;
         let location = self.library.location().clone();
         let uuid = self.rng.uuid4();
-        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .library
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let relative: Option<String> = tx.query_row(
-            "SELECT AnalysisDataPath FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [content], |r| r.get(0))?;
+            "SELECT AnalysisDataPath FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0",
+            [content],
+            |r| r.get(0),
+        )?;
         let mut next_path = None;
         if let Some(relative) = relative.filter(|p| !p.is_empty()) {
             let dat = rbl_anlz::resolve(&location.share_root, &relative);
             // An unreadable existing grid must not silently become a mismatched BPM.
-            let anlz = rbl_anlz::Anlz::read(&dat).map_err(|e| DbError::WriteRefused(e.to_string()))?;
+            let anlz =
+                rbl_anlz::Anlz::read(&dat).map_err(|e| DbError::WriteRefused(e.to_string()))?;
             if let Some(beats) = anlz.beat_grid().filter(|b| !b.is_empty()) {
                 let retimed = retime(&beats, bpm_x100);
                 let path = format!("/PIONEER/USBANLZ/{}/{uuid}/ANLZ0000.DAT", &uuid[..3]);
                 let target = rbl_anlz::resolve(&location.share_root, &path);
-                let dir = target.parent().ok_or_else(|| DbError::WriteRefused("invalid analysis path".into()))?;
+                let dir = target
+                    .parent()
+                    .ok_or_else(|| DbError::WriteRefused("invalid analysis path".into()))?;
                 rbl_core::durable::create_dir_all(dir)?;
-                let primary = rbl_anlz::Anlz { header_extra: anlz.header_extra, sections: anlz.sections.into_iter().filter(|s| s.tag != rbl_core::FourCc::new(b"PQT2")).collect() };
+                let primary = rbl_anlz::Anlz {
+                    header_extra: anlz.header_extra,
+                    sections: anlz
+                        .sections
+                        .into_iter()
+                        .filter(|s| s.tag != rbl_core::FourCc::new(b"PQT2"))
+                        .collect(),
+                };
                 rbl_core::durable::write(&target, &primary.with_beat_grid(&retimed))?;
                 // Keep every companion (including stems), with a consistent grid
                 // in each ANLZ file. The old row and files stay usable until commit.
-                for entry in std::fs::read_dir(dat.parent().ok_or_else(|| DbError::WriteRefused("invalid analysis path".into()))?)? {
+                for entry in std::fs::read_dir(
+                    dat.parent()
+                        .ok_or_else(|| DbError::WriteRefused("invalid analysis path".into()))?,
+                )? {
                     let entry = entry?;
                     let source = entry.path();
-                    if source == dat || !std::fs::metadata(&source)?.is_file() { continue; }
-                    let is_anlz = source.file_stem() == dat.file_stem() && source.extension().is_some_and(|e| ["DAT", "EXT", "2EX"].iter().any(|ext| e.eq_ignore_ascii_case(ext)));
+                    if source == dat || !std::fs::metadata(&source)?.is_file() {
+                        continue;
+                    }
+                    let is_anlz = source.file_stem() == dat.file_stem()
+                        && source.extension().is_some_and(|e| {
+                            ["DAT", "EXT", "2EX"]
+                                .iter()
+                                .any(|ext| e.eq_ignore_ascii_case(ext))
+                        });
                     if is_anlz {
-                        let file = rbl_anlz::Anlz::read(&source).map_err(|e| DbError::WriteRefused(e.to_string()))?;
-                        let kept = rbl_anlz::Anlz { header_extra: file.header_extra, sections: file.sections.into_iter().filter(|s| s.tag != rbl_core::FourCc::new(b"PQT2")).collect() };
-                        let destination = target.with_extension(source.extension().unwrap_or_default().to_string_lossy().to_ascii_uppercase());
+                        let file = rbl_anlz::Anlz::read(&source)
+                            .map_err(|e| DbError::WriteRefused(e.to_string()))?;
+                        let kept = rbl_anlz::Anlz {
+                            header_extra: file.header_extra,
+                            sections: file
+                                .sections
+                                .into_iter()
+                                .filter(|s| s.tag != rbl_core::FourCc::new(b"PQT2"))
+                                .collect(),
+                        };
+                        let destination = target.with_extension(
+                            source
+                                .extension()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_ascii_uppercase(),
+                        );
                         rbl_core::durable::write(&destination, &kept.with_beat_grid(&retimed))?;
                     } else {
                         rbl_core::durable::copy(&source, &dir.join(entry.file_name()))?;
@@ -2142,10 +2578,17 @@ impl Writer {
     }
 
     /// A non-negative integer column, refused when the text is not one.
-    fn touch_number(&mut self, content: &str, column: &str, value: &str, max: i64) -> Result<Changed> {
-        let n: i64 = value.trim().parse().map_err(|_| {
-            DbError::WriteRefused(format!("{value:?} is not a whole number"))
-        })?;
+    fn touch_number(
+        &mut self,
+        content: &str,
+        column: &str,
+        value: &str,
+        max: i64,
+    ) -> Result<Changed> {
+        let n: i64 = value
+            .trim()
+            .parse()
+            .map_err(|_| DbError::WriteRefused(format!("{value:?} is not a whole number")))?;
         if !(0..=max).contains(&n) {
             return Err(DbError::WriteRefused(format!("{n} is outside 0 to {max}")));
         }
@@ -2161,11 +2604,15 @@ impl Writer {
         name: &str,
     ) -> Result<Changed> {
         if !WRITABLE_COLUMNS.contains(&column) || !LOOKUP_TABLES.contains(&table) {
-            return Err(DbError::WriteRefused(format!("{table}.{column} is not a writable reference")));
+            return Err(DbError::WriteRefused(format!(
+                "{table}.{column} is not a writable reference"
+            )));
         }
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let id = intern(&tx, table, "Name", name.trim(), &mut self.rng, &stamp)?;
         let usn = next_usn(&tx)?;
@@ -2220,7 +2667,10 @@ impl Writer {
             .unwrap_or_default();
         let full = path.to_string_lossy().into_owned();
         self.prepare()?;
-        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .library
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
         let rows = tx.execute("UPDATE djmdContent SET FolderPath=?1, FileNameL=?2, rb_local_usn=?3, updated_at=?4 WHERE ID=?5 AND rb_local_deleted=0",
             params![full, name, usn, time::now(), content])?;
@@ -2233,7 +2683,9 @@ impl Writer {
     pub fn delete_track(&mut self, content: &str) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         let mut playlists = Vec::new();
@@ -2292,11 +2744,15 @@ impl Writer {
     /// user's library.
     fn touch(&mut self, table: &str, id: &str, column: &str, value: &Value) -> Result<Changed> {
         if !WRITABLE_COLUMNS.contains(&column) {
-            return Err(DbError::WriteRefused(format!("{column} is not a writable column")));
+            return Err(DbError::WriteRefused(format!(
+                "{column} is not a writable column"
+            )));
         }
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
         let sql = format!(
@@ -2360,7 +2816,9 @@ impl Writer {
     pub fn set_analysis(&mut self, content: &str, analysis: &AnalysisWrite<'_>) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
-        let tx = self.library.connection_mut()
+        let tx = self
+            .library
+            .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let key_id: Option<String> = match analysis.key.map(str::trim).filter(|k| !k.is_empty()) {
             Some(name) => tx
@@ -2439,7 +2897,9 @@ impl Writer {
 
         let staging = tempfile::tempdir_in(&self.backup_dir)?;
         let staged = staging.path().join("master.db");
-        self.library.connection().execute("VACUUM main INTO ?1", [staged.to_string_lossy().as_ref()])?;
+        self.library
+            .connection()
+            .execute("VACUUM main INTO ?1", [staged.to_string_lossy().as_ref()])?;
         rbl_core::durable::replace(&staged, &target)?;
 
         prune_backups(&self.backup_dir, BACKUPS_KEPT);
@@ -2463,7 +2923,9 @@ impl Writer {
         for _ in 0..ID_ATTEMPTS {
             let candidate = self.rng.numeric_id(MAX_PLAYLIST_ID);
             let taken: i64 =
-                self.library.connection().query_row(&sql, params![candidate], |r| r.get(0))?;
+                self.library
+                    .connection()
+                    .query_row(&sql, params![candidate], |r| r.get(0))?;
             if taken == 0 {
                 return Ok(candidate);
             }
@@ -2553,7 +3015,11 @@ fn is_descendant(conn: &Connection, candidate: &str, ancestor: &str) -> Result<b
             return Ok(false);
         }
         let parent: Option<String> = conn
-            .query_row("SELECT ParentID FROM djmdPlaylist WHERE ID = ?1", params![at], |r| r.get(0))
+            .query_row(
+                "SELECT ParentID FROM djmdPlaylist WHERE ID = ?1",
+                params![at],
+                |r| r.get(0),
+            )
             .optional()?;
         match parent {
             Some(p) if p == ancestor => return Ok(true),
@@ -2561,7 +3027,9 @@ fn is_descendant(conn: &Connection, candidate: &str, ancestor: &str) -> Result<b
             None => return Ok(false),
         }
     }
-    Err(DbError::WriteRefused("cyclic or excessively deep playlist tree".into()))
+    Err(DbError::WriteRefused(
+        "cyclic or excessively deep playlist tree".into(),
+    ))
 }
 
 /// The next local USN.
@@ -2619,9 +3087,16 @@ fn write_artwork_sizes(target: &Path, bytes: &[u8]) -> Result<()> {
         return Ok(());
     };
     let side = decoded.width().min(decoded.height());
-    let square = decoded.crop_imm((decoded.width() - side) / 2, (decoded.height() - side) / 2, side, side);
+    let square = decoded.crop_imm(
+        (decoded.width() - side) / 2,
+        (decoded.height() - side) / 2,
+        side,
+        side,
+    );
     for (name, size) in [("artwork_m.jpg", 240_u32), ("artwork_s.jpg", 80_u32)] {
-        let small = square.resize_exact(size, size, image::imageops::FilterType::Lanczos3).to_rgb8();
+        let small = square
+            .resize_exact(size, size, image::imageops::FilterType::Lanczos3)
+            .to_rgb8();
         let path = target.with_file_name(name);
         let mut out = Vec::new();
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90);
@@ -2633,23 +3108,23 @@ fn write_artwork_sizes(target: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 pub(crate) fn next_usn(conn: &Connection) -> Result<i64> {
-    let counter: i64 = conn
-        .query_row(
-            "SELECT COALESCE(int_1, 0) FROM agentRegistry WHERE registry_id = 'localUpdateCount'",
-            [],
-            |r| r.get(0),
-        )
-        ?;
+    let counter: i64 = conn.query_row(
+        "SELECT COALESCE(int_1, 0) FROM agentRegistry WHERE registry_id = 'localUpdateCount'",
+        [],
+        |r| r.get(0),
+    )?;
     let mut highest = counter;
     for table in USN_TABLES {
-        let max: i64 = conn
-            .query_row(&format!("SELECT COALESCE(MAX(rb_local_usn), 0) FROM {table}"), [], |r| {
-                r.get(0)
-            })
-            ?;
+        let max: i64 = conn.query_row(
+            &format!("SELECT COALESCE(MAX(rb_local_usn), 0) FROM {table}"),
+            [],
+            |r| r.get(0),
+        )?;
         highest = highest.max(max);
     }
-    highest.checked_add(1).ok_or_else(|| DbError::WriteRefused("local update counter overflow".into()))
+    highest
+        .checked_add(1)
+        .ok_or_else(|| DbError::WriteRefused("local update counter overflow".into()))
 }
 
 /// Writes the registry counter in the same transaction as its rows.
@@ -2659,7 +3134,11 @@ pub(crate) fn set_counter(conn: &Connection, usn: i64) -> Result<()> {
         "UPDATE agentRegistry SET int_1 = ?1, updated_at = ?2 WHERE registry_id = 'localUpdateCount'",
         params![usn, time::now()],
     )?;
-    if rows != 1 { return Err(DbError::WriteRefused("missing or duplicate local update counter".into())); }
+    if rows != 1 {
+        return Err(DbError::WriteRefused(
+            "missing or duplicate local update counter".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -2717,7 +3196,10 @@ fn content_exists(conn: &Connection, id: &str) -> Result<bool> {
 
 /// A history folder or session by name under a parent, made when missing
 /// with `id`, appended by `Seq`.
-#[allow(clippy::too_many_arguments, reason = "one row's columns, given rather than guessed")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one row's columns, given rather than guessed"
+)]
 fn history_node(
     conn: &Connection,
     name: &str,
@@ -2761,16 +3243,32 @@ fn history_node(
 /// inside a year folder named by the year — made when missing. `created` is
 /// the local `YYYY-MM-DD HH:MM:SS` the new rows are dated with, and the
 /// day the folders are for.
-fn month_folder(conn: &Connection, ids: [&str; 2], uuids: [&str; 2], created: &str, stamp: &str) -> Result<String> {
+fn month_folder(
+    conn: &Connection,
+    ids: [&str; 2],
+    uuids: [&str; 2],
+    created: &str,
+    stamp: &str,
+) -> Result<String> {
     let year = created.get(..4).unwrap_or("1970");
-    let month = created.get(5..7).and_then(|m| m.parse::<u32>().ok()).unwrap_or(1).to_string();
+    let month = created
+        .get(5..7)
+        .and_then(|m| m.parse::<u32>().ok())
+        .unwrap_or(1)
+        .to_string();
     let year_id = history_node(conn, year, ROOT, 1, ids[0], uuids[0], created, stamp)?;
     history_node(conn, &month, &year_id, 1, ids[1], uuids[1], created, stamp)
 }
 
 /// A play on the end of a session, and one more DJ play for the track.
 /// `ids` are the new `djmdSongHistory` row's `ID` and `UUID`.
-fn append_play(conn: &Connection, session: &str, content: &str, ids: &[String; 2], stamp: &str) -> Result<Changed> {
+fn append_play(
+    conn: &Connection,
+    session: &str,
+    content: &str,
+    ids: &[String; 2],
+    stamp: &str,
+) -> Result<Changed> {
     let track_no: i64 = conn.query_row(
         "SELECT COALESCE(MAX(TrackNo), 0) + 1 FROM djmdSongHistory
          WHERE HistoryID = ?1 AND rb_local_deleted = 0",
@@ -2806,7 +3304,11 @@ fn name_suffix(base: &str, names: &[String]) -> u32 {
         // What follows the `(`, when anything does; the number is its
         // leading digits, 0 when there are none, as `String::getIntValue`
         // reads it.
-        match rest.find('(').and_then(|open| rest.get(open + 1..)).filter(|after| !after.is_empty()) {
+        match rest
+            .find('(')
+            .and_then(|open| rest.get(open + 1..))
+            .filter(|after| !after.is_empty())
+        {
             Some(after) => {
                 let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
                 let n = digits.parse::<u32>().unwrap_or(0);
@@ -2828,7 +3330,9 @@ fn renumber_history(conn: &Connection, history: &str, stamp: &str) -> Result<i64
          ORDER BY TrackNo",
     )?;
     let rows: Vec<(String, i64)> = stmt
-        .query_map(params![history], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+        .query_map(params![history], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?
         .collect::<rusqlite::Result<_>>()?;
     drop(stmt);
     let mut usn = next_usn(conn)?;
@@ -2856,9 +3360,18 @@ fn retime(beats: &[rbl_anlz::Beat], bpm_x100: u32) -> Vec<rbl_anlz::Beat> {
         .iter()
         .enumerate()
         .map(|(i, beat)| {
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, reason = "milliseconds of a track, far inside u32")]
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss,
+                reason = "milliseconds of a track, far inside u32"
+            )]
             let time_ms = (first + i as f64 * interval_ms).round().max(0.0) as u32;
-            rbl_anlz::Beat { beat_number: beat.beat_number, tempo_x100: tempo, time_ms }
+            rbl_anlz::Beat {
+                beat_number: beat.beat_number,
+                tempo_x100: tempo,
+                time_ms,
+            }
         })
         .collect()
 }
@@ -2867,7 +3380,9 @@ fn retime(beats: &[rbl_anlz::Beat], bpm_x100: u32) -> Vec<rbl_anlz::Beat> {
 /// timestamp, so sorting by name sorts by age.
 #[must_use]
 pub fn backups_in(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     let mut backups: Vec<PathBuf> = entries
         .filter_map(std::result::Result::ok)
         .map(|e| e.path())
@@ -2890,38 +3405,59 @@ pub fn backups_in(dir: &Path) -> Vec<PathBuf> {
 /// one of this app's backups. The caller reopens every handle it holds:
 /// one on the old inode would answer with the old rows for ever.
 pub fn restore_backup(location: &crate::LibraryLocation, backup: &Path) -> Result<()> {
-    if let Some(reason) = crate::write_refusal_reason(location.is_real_install,
-        std::env::var_os("RB_LITE_TEST").is_some(), is_rekordbox_running()) {
+    if let Some(reason) = crate::write_refusal_reason(
+        location.is_real_install,
+        std::env::var_os("RB_LITE_TEST").is_some(),
+        is_rekordbox_running(),
+    ) {
         return Err(DbError::WriteRefused(reason.into()));
     }
     let is_ours = backup
         .file_name()
         .and_then(|n| n.to_str())
-        .is_some_and(|n| n.starts_with("master-") && Path::new(n).extension().is_some_and(|e| e.eq_ignore_ascii_case("db")));
+        .is_some_and(|n| {
+            n.starts_with("master-")
+                && Path::new(n)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("db"))
+        });
     if !is_ours || !backup.is_file() {
-        return Err(DbError::WriteRefused(format!("{} is not a backup of the library", backup.display())));
+        return Err(DbError::WriteRefused(format!(
+            "{} is not a backup of the library",
+            backup.display()
+        )));
     }
     let live = &location.master_db;
-    let parent = live.parent().ok_or_else(|| DbError::WriteRefused("invalid library path".into()))?;
+    let parent = live
+        .parent()
+        .ok_or_else(|| DbError::WriteRefused("invalid library path".into()))?;
     let staging = tempfile::tempdir_in(parent)?;
     let staged = staging.path().join("master.db");
     std::fs::copy(backup, &staged)?;
     let wal = with_suffix(backup, "-wal");
-    if wal.exists() { std::fs::copy(wal, with_suffix(&staged, "-wal"))?; }
+    if wal.exists() {
+        std::fs::copy(wal, with_suffix(&staged, "-wal"))?;
+    }
     let mut staged_location = location.clone();
     staged_location.master_db.clone_from(&staged);
     staged_location.is_real_install = false;
     {
         let db = Library::open(staged_location, OpenMode::ReadWrite)?;
-        let check: String = db.connection().query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-        if check != "ok" { return Err(DbError::WriteRefused(format!("invalid backup: {check}"))); }
-        db.connection().pragma_update(None, "journal_mode", "DELETE")?;
+        let check: String = db
+            .connection()
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+        if check != "ok" {
+            return Err(DbError::WriteRefused(format!("invalid backup: {check}")));
+        }
+        db.connection()
+            .pragma_update(None, "journal_mode", "DELETE")?;
     }
     // Checkpoint the OLD library first. If interrupted here, SQLite recovers
     // the old library. Once closed, one atomic rename publishes the new one.
     {
         let db = Library::open(location.clone(), OpenMode::ReadWrite)?;
-        db.connection().pragma_update(None, "journal_mode", "DELETE")?;
+        db.connection()
+            .pragma_update(None, "journal_mode", "DELETE")?;
     }
     rbl_core::durable::replace(&staged, live)?;
     tracing::info!(path = %backup.display(), "restored the library from a backup");

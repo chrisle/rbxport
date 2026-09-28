@@ -1711,6 +1711,12 @@ fn a_rekordbox_xml_document_is_imported_with_its_playlists_and_cues() {
     let again = xml::import(&mut f.writer, &parsed, &mut |_, _| {}).unwrap();
     assert_eq!((again.imported, again.existing, again.cues), (0, 2, 0));
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0 AND FolderPath LIKE '%One.wav'"), 1);
+
+    // The review dialog can explicitly retain unavailable files for a later
+    // relocate; the normal XML path above keeps rekordbox's skip-by-default.
+    let with_missing = xml::import_with_options(&mut f.writer, &parsed, true, &mut |_, _| {}).unwrap();
+    assert_eq!(with_missing.imported, 1);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE FolderPath = '/nowhere/gone.wav'"), 1);
 }
 
 #[test]

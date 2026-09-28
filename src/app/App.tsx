@@ -68,8 +68,9 @@ import { NewLibraryDialog } from "@/views/library/NewLibraryDialog";
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus, SmartRule } from "@/ipc/types";
+import type { AnalysisResult, FilterValues, ImportProgress, LinkPeerSeen, LinkStatus, SmartRule, XmlImportPreview } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
+import { XmlImportDialog } from "@/views/library/XmlImportDialog";
 
 /**
  * The metadata fields a row already carries, so an edit to one can be shown
@@ -142,6 +143,8 @@ function AppBody() {
   const [restored] = useState(loadSession);
 
   const [tree, setTree] = useState<readonly TreeNode[]>(restored.tree);
+  const [xmlImport, setXmlImport] = useState<{ path: string; preview: XmlImportPreview; includeMissing: boolean } | null>(null);
+  const [xmlProgress, setXmlProgress] = useState<ImportProgress | null>(null);
   const [treeExpansion, setTreeExpansion] = useState(restored.treeExpansion);
   const [editHistory, setEditHistory] = useState({
     canUndo: false, canRedo: false, undoLabel: null as string | null, redoLabel: null as string | null,
@@ -1557,6 +1560,14 @@ function AppBody() {
     report(source === "itunes" ? "Choosing the iTunes Library.xml…" : "Choosing a rekordbox XML file…");
     try {
       const backend = await getBackend();
+      if (source === "rekordbox") {
+        const path = await backend.chooseXml();
+        if (path === null) { setNote(null); return; }
+        const preview = await backend.previewXmlImport(path);
+        setNote(null);
+        setXmlImport({ path, preview, includeMissing: false });
+        return;
+      }
       const imported = source === "itunes" ? await backend.importItunes() : await backend.importXml();
       if (imported === null) {
         setNote(null);
@@ -1576,6 +1587,29 @@ function AppBody() {
       refuse(e instanceof Error ? e.message : "That XML could not be imported.");
     }
   }, [report, refuse, analysisPrefs.auto, analysis]);
+
+  useEffect(() => {
+    if (xmlImport === null) return;
+    let stop: (() => void) | undefined;
+    void getBackend().then(backend => { stop = backend.onImportProgress(setXmlProgress); });
+    return () => stop?.();
+  }, [xmlImport]);
+
+  const executeXmlImport = useCallback(async () => {
+    if (xmlImport === null) return;
+    setXmlProgress({ path: xmlImport.path, done: 0, total: xmlImport.preview.tracks, imported: 0, missing: 0, errors: 0 });
+    try {
+      const backend = await getBackend();
+      const imported = await backend.executeXmlImport(xmlImport.path, xmlImport.includeMissing);
+      setXmlImport(null); setXmlProgress(null);
+      setTree(await backend.playlistTree());
+      if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
+      report(`${imported.imported} tracks imported, ${imported.skipped.length} missing or skipped.`);
+    } catch (e) {
+      setXmlImport(null); setXmlProgress(null);
+      refuse(e instanceof Error ? e.message : "That XML could not be imported.");
+    }
+  }, [xmlImport, analysisPrefs.auto, analysis, report, refuse]);
 
   const exportXmlFromMenu = useCallback(async () => {
     report("Choosing where to write the XML…");
@@ -2461,6 +2495,12 @@ function AppBody() {
           onCancel={() => setSmartEditor(null)}
         />
       ) : null}
+      {xmlImport ? <XmlImportDialog
+        path={xmlImport.path} preview={xmlImport.preview} includeMissing={xmlImport.includeMissing} progress={xmlProgress}
+        onIncludeMissing={includeMissing => setXmlImport(current => current ? { ...current, includeMissing } : current)}
+        onImport={() => void executeXmlImport()}
+        onCancel={() => { if (xmlProgress === null) setXmlImport(null); }}
+      /> : null}
 
       </Suspense>
       {/* The LINK strip: present from the moment a player or mixer is heard,
