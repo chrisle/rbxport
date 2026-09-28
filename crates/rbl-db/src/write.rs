@@ -1087,38 +1087,6 @@ impl Writer {
         let path = path.as_path();
         let tags = crate::import::read_tags(path)
             .map_err(|e| DbError::WriteRefused(e.to_string()))?;
-        self.import_track(path, &tags)
-    }
-
-    /// Adds a track named by an imported collection when its file is not on
-    /// this machine yet.
-    ///
-    /// The original path is retained so the missing-file tools can relocate
-    /// it later. Metadata that requires opening the file stays unset; callers
-    /// supply the title and artist that the collection carries.
-    pub fn import_missing_file(&mut self, path: &Path, title: &str, artist: &str) -> Result<String> {
-        let path = normalized(path);
-        let path = path.as_path();
-        if !crate::import::is_audio(path) {
-            return Err(DbError::WriteRefused(format!(
-                "{} is not a format rekordbox plays",
-                path.display()
-            )));
-        }
-        let title = if title.trim().is_empty() {
-            path.file_stem().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
-        } else {
-            title.trim().to_owned()
-        };
-        let tags = crate::import::TrackTags {
-            title,
-            artist: artist.trim().to_owned(),
-            ..crate::import::TrackTags::default()
-        };
-        self.import_track(path, &tags)
-    }
-
-    fn import_track(&mut self, path: &Path, tags: &crate::import::TrackTags) -> Result<String> {
         self.prepare()?;
 
         let id = self.unused_id_below("djmdContent", MAX_CONTENT_ID)?;
