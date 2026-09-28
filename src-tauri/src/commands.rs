@@ -1799,6 +1799,10 @@ pub async fn deck_load<R: tauri::Runtime>(
         return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
             .with_detail(format!("track {track}")));
     };
+    if !path.is_file() {
+        return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
+            .with_detail(path.display().to_string()));
+    }
     let engine = player.engine(&app)?;
     let which = crate::player::deck_of(&deck);
     // The engine's own thread does the opening; this only hands it the path.

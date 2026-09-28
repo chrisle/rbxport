@@ -239,12 +239,12 @@ pub fn import(writer: &mut Writer, library: &XmlLibrary, progress: &mut dyn FnMu
             progress(done + 1, total);
             continue;
         };
-        if !path.is_file() {
-            report.skipped.push(format!("{label}: {} is not there", path.display()));
-            progress(done + 1, total);
-            continue;
-        }
-        match writer.import_file(path) {
+        let imported = if path.is_file() {
+            writer.import_file(path)
+        } else {
+            writer.import_missing_file(path, &track.title, &track.artist)
+        };
+        match imported {
             Ok(id) => {
                 report.imported += 1;
                 // What the file's tags do not carry and the document does.

@@ -986,9 +986,10 @@ fn a_track_whose_file_is_gone_is_refused_at_load_rather_than_failing_later() {
     let s = shell();
     // The fixture's tracks point at files that do not exist. That is caught
     // when the deck is asked for one, not by the engine mid-play.
-    let err = run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), "no-such-track".into(), 1))
+    let err = run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), track_id(0), 1))
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
+    assert_eq!(err.message, "That track's file could not be found.");
     assert!(s.sink.lock().unwrap().is_none(), "the audio output was not opened for it");
 }
 

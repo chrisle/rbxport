@@ -1688,9 +1688,18 @@ fn a_rekordbox_xml_document_is_imported_with_its_playlists_and_cues() {
     let mut f = fixture();
     let mut seen = Vec::new();
     let report = xml::import(&mut f.writer, &parsed, &mut |done, total| seen.push((done, total))).unwrap();
-    assert_eq!((report.imported, report.existing, report.skipped.len(), report.playlists, report.cues), (2, 0, 1, 2, 3));
+    assert_eq!((report.imported, report.existing, report.skipped.len(), report.playlists, report.cues), (3, 0, 0, 2, 3));
     assert_eq!(seen, vec![(1, 3), (2, 3), (3, 3)]);
-    assert!(report.skipped[0].contains("gone.wav"));
+    let missing: (String, String, String, i64) = f.conn().query_row(
+        "SELECT Title, ArtistID, FolderPath, FileType FROM djmdContent WHERE FolderPath = '/nowhere/gone.wav'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).unwrap();
+    assert_eq!(missing.0, "Gone");
+    assert_eq!(missing.2, "/nowhere/gone.wav");
+    assert_eq!(missing.3, 11);
+    let missing_artist: String = f.one("SELECT Name FROM djmdArtist WHERE ID = ?1", &[&missing.1]);
+    assert_eq!(missing_artist, "C");
 
     let (rating, comment): (i64, String) = f
         .conn()
@@ -1705,12 +1714,16 @@ fn a_rekordbox_xml_document_is_imported_with_its_playlists_and_cues() {
     let folder: String = f.one("SELECT ID FROM djmdPlaylist WHERE Name = 'Sets' AND Attribute = 1", &[]);
     let playlist_parent: String = f.one("SELECT ParentID FROM djmdPlaylist WHERE Name = 'Warm up'", &[]);
     assert_eq!(playlist_parent, folder);
-    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 0 AND PlaylistID = (SELECT ID FROM djmdPlaylist WHERE Name = 'Warm up')"), 2);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 0 AND PlaylistID = (SELECT ID FROM djmdPlaylist WHERE Name = 'Warm up')"), 3);
 
     // Importing again reuses the tracks and doubles no cues.
     let again = xml::import(&mut f.writer, &parsed, &mut |_, _| {}).unwrap();
-    assert_eq!((again.imported, again.existing, again.cues), (0, 2, 0));
-    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0 AND FolderPath LIKE '%One.wav'"), 1);
+    assert_eq!((again.imported, again.existing, again.cues), (0, 3, 0));
+    let one_count: i64 = f.one(
+        "SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0 AND FolderPath = ?1",
+        &[&one.to_string_lossy()],
+    );
+    assert_eq!(one_count, 1);
 }
 
 #[test]
