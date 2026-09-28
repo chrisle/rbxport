@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyClick, clickSettles, emptySelection, modifierFor, pressSelects } from "./selection";
+import { applyClick, clickSettles, emptySelection, modifierFor, pressSelects, selectAll } from "./selection";
 
 describe("selection", () => {
   it("reads the modifier from the event", () => {
@@ -58,5 +58,21 @@ describe("selection", () => {
   it("range without an anchor degrades to a plain click", () => {
     const s = applyClick(emptySelection, { id: "z", index: 9 }, "range", undefined);
     expect([...s.ids]).toEqual(["z"]);
+  });
+
+  it("select all takes every id the backend resolved", () => {
+    const s = selectAll(emptySelection, ["a", "b", "c"]);
+    expect([...s.ids].sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("select all keeps an existing anchor and defaults to the top", () => {
+    // Made from nothing: the anchor sits at the top so a following shift-click
+    // has an origin.
+    expect(selectAll(emptySelection, ["a", "b"]).anchorIndex).toBe(0);
+    // Empty view: nothing to anchor on.
+    expect(selectAll(emptySelection, []).anchorIndex).toBeNull();
+    // An anchor already set is left where it was.
+    const anchored = applyClick(emptySelection, { id: "b", index: 3 }, "none");
+    expect(selectAll(anchored, ["a", "b", "c"]).anchorIndex).toBe(3);
   });
 });
