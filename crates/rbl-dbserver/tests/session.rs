@@ -1302,6 +1302,18 @@ fn rx3_scalar_track_and_mobile_queries_use_their_native_reply_shapes() {
         idle.handle(&numbers(kind::TRACK_PLAY_STATE, 0x53, &[CTX, TRACK]))[0].arguments,
         vec![Argument::Number(0x3b03), Argument::Number(0)]
     );
+    assert_eq!(
+        idle.handle(&numbers(kind::LEGACY_KEY_TO_NEW_KEY, 0x56, &[CTX, 0x14]))[0].arguments,
+        vec![Argument::Number(0x3a03), Argument::Number(0x14)]
+    );
+    assert_eq!(
+        idle.handle(&numbers(kind::LEGACY_KEY_TO_NEW_KEY, 0x57, &[CTX, 25]))[0].arguments,
+        vec![Argument::Number(0x3a03), Argument::Number(0)]
+    );
+    assert_eq!(
+        idle.handle(&numbers(kind::CONTENT_NEW_KEY, 0x58, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3d03), Argument::Number(0x14)]
+    );
 
     let mut loaded = session_with(Small(true));
     assert_eq!(

@@ -819,6 +819,28 @@ impl Session for LinkSession {
                 u32::from(message.kind),
                 u32::from(self.catalog.played(Self::number(message, 1))),
             )],
+            // RX3 converts the `djmdKey` ID returned by its legacy key menu
+            // before opening a related-key menu. The virtual legacy menu
+            // already advertises the dense 1..=24 IDs, which are exactly the
+            // values its newer menu family consumes.
+            kind::LEGACY_KEY_TO_NEW_KEY => {
+                let key = Self::number(message, 1);
+                vec![menu_header(
+                    tx,
+                    u32::from(message.kind),
+                    if (1..=24).contains(&key) { key } else { 0 },
+                )]
+            }
+            // `Dsql_getContentNewKeyID` looks up a content record's raw key
+            // and converts it to the same dense ID. `TrackRow::key` retains
+            // that canonical value independently of the display key text.
+            kind::CONTENT_NEW_KEY => vec![menu_header(
+                tx,
+                u32::from(message.kind),
+                self.catalog
+                    .track_row(Self::number(message, 1))
+                    .map_or(0, |track| track.key),
+            )],
             // `dbcl_GetIsRekordboxMobile` waits for a `0x4b02` reply, not a
             // menu header. rbxport is a desktop rekordbox-export source, so
             // report false and the empty mobile mount name, just as RX3 does

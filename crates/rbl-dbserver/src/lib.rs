@@ -518,6 +518,12 @@ pub mod kind {
     pub const BROWSE_TYPE: u16 = 0x3303;
     /// Whether a track has been loaded on a player this session.
     pub const TRACK_PLAY_STATE: u16 = 0x3b03;
+    /// Converts a legacy key-menu identifier to the dense ID used by the
+    /// newer related-key menus. rbxport's legacy-key rows already use those
+    /// dense IDs, so valid advertised IDs map to themselves.
+    pub const LEGACY_KEY_TO_NEW_KEY: u16 = 0x3a03;
+    /// Resolves a content ID to the dense key ID used by the newer key menus.
+    pub const CONTENT_NEW_KEY: u16 = 0x3d03;
     /// Asks whether the remote source is rekordbox Mobile. A desktop
     /// rekordbox export answers false with an empty mount-name string.
     pub const REKORDBOX_MOBILE: u16 = 0x3e03;
@@ -628,6 +634,9 @@ pub mod kind {
             FILTER_GET => "filter properties".to_owned(),
             FILTER_SET => "set filter properties".to_owned(),
             BROWSE_TYPE => "browse type".to_owned(),
+            LEGACY_KEY_TO_NEW_KEY => "legacy-to-new key id".to_owned(),
+            TRACK_PLAY_STATE => "track play state".to_owned(),
+            CONTENT_NEW_KEY => "content new key id".to_owned(),
             SEARCH_TRACK => "search track".to_owned(),
             MENU_HEADER => "menu header".to_owned(),
             RENDER_HEADER => "render header".to_owned(),
