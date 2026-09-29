@@ -58,9 +58,14 @@ pub fn serve_session(
 ) -> io::Result<()> {
     stream.set_read_timeout(Some(READ_TIMEOUT))?;
     stream.set_nodelay(true)?;
-    SockRef::from(&*stream)
-        .set_tcp_keepalive(&TcpKeepalive::new().with_time(KEEPALIVE_AFTER).with_interval(KEEPALIVE_INTERVAL))?;
-    let peer = stream.peer_addr().map_or_else(|_| "?".to_owned(), |a| a.to_string());
+    SockRef::from(&*stream).set_tcp_keepalive(
+        &TcpKeepalive::new()
+            .with_time(KEEPALIVE_AFTER)
+            .with_interval(KEEPALIVE_INTERVAL),
+    )?;
+    let peer = stream
+        .peer_addr()
+        .map_or_else(|_| "?".to_owned(), |a| a.to_string());
     tracing::debug!(%peer, "player connected to the database server");
 
     let mut session = handler.open();
@@ -145,17 +150,28 @@ pub fn serve_session(
 
 /// A message's arguments, one after another, for a log line.
 fn describe(message: &Message) -> String {
-    let parts: Vec<String> = message.arguments.iter().map(crate::Argument::describe).collect();
+    let parts: Vec<String> = message
+        .arguments
+        .iter()
+        .map(crate::Argument::describe)
+        .collect();
     format!("[{}]", parts.join(", "))
 }
 
 /// Bytes as hex pairs, for a log line.
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+    bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn is_timeout(error: &io::Error) -> bool {
-    matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
+    matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
 }
 
 fn is_disconnect(error: &io::Error) -> bool {
@@ -190,7 +206,10 @@ impl Bound {
     ) -> io::Result<Self> {
         let query_listener = TcpListener::bind(SocketAddr::new(address, query_port))?;
         let database_listener = TcpListener::bind(SocketAddr::new(address, database_port))?;
-        let (query, database) = (query_listener.local_addr()?, database_listener.local_addr()?);
+        let (query, database) = (
+            query_listener.local_addr()?,
+            database_listener.local_addr()?,
+        );
         tracing::debug!(%query, %database, "database server bound");
 
         let stop = Arc::new(AtomicBool::new(false));
@@ -223,7 +242,12 @@ impl Bound {
             }));
         }
 
-        Ok(Self { stop, threads, query, database })
+        Ok(Self {
+            stop,
+            threads,
+            query,
+            database,
+        })
     }
 
     pub const fn query_address(&self) -> SocketAddr {
@@ -238,7 +262,10 @@ impl Bound {
         self.stop.store(true, Ordering::Relaxed);
         // Unblock the accept loops by connecting to each once.
         for address in [self.query, self.database] {
-            drop(TcpStream::connect_timeout(&address, Duration::from_millis(200)));
+            drop(TcpStream::connect_timeout(
+                &address,
+                Duration::from_millis(200),
+            ));
         }
         for thread in self.threads.drain(..) {
             drop(thread.join());
@@ -287,7 +314,9 @@ where
 /// Reads the fixed port-query request and answers with a two-byte port.
 fn answer_port_query(stream: &mut TcpStream, port: u16) -> io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let peer = stream.peer_addr().map_or_else(|_| "?".to_owned(), |a| a.to_string());
+    let peer = stream
+        .peer_addr()
+        .map_or_else(|_| "?".to_owned(), |a| a.to_string());
     let mut request = vec![0_u8; PORT_QUERY_REQUEST.len()];
     stream.read_exact(&mut request)?;
     if request != PORT_QUERY_REQUEST {

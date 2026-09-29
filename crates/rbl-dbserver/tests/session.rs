@@ -2,7 +2,12 @@
 //! 7.2.11 sent a CDJ-3000 (`docs/pre-release/verification/link/*-decoded.txt`).
 //! Where a row depends on library data, a small catalog is built to hold
 //! exactly what the captured row showed, so the bytes can be compared whole.
-#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 
 use std::sync::Arc;
 
@@ -16,7 +21,10 @@ use rbl_dbserver::{kind, setup_request, Argument, Message};
 const CTX: u32 = 0x0101_0301;
 
 fn hex(s: &str) -> Vec<u8> {
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
 }
 
 /// A library of one artist with one album and one track — the first rows
@@ -26,13 +34,16 @@ struct Small(bool);
 
 const AALIYAH: u32 = 0x6d5c_28f2;
 const ALBUM: u32 = 0xdc0d_0bca;
+const GENRE: u32 = 0x8b0c_83f7;
 const TRACK: u32 = 0x475f;
 
 fn the_track() -> TrackRow {
     TrackRow {
         id: TRACK,
         title: "At Your Best (You Are Love)".into(),
-        comment: "Em - 156".into(),
+        secondary_text: "Em - 156".into(),
+        column: Default::default(),
+        column_value: 0,
         key: 0x14,
         key_name: "D".into(),
         artwork: 0x14,
@@ -46,26 +57,103 @@ impl Catalog for Small {
     }
     fn list(&self, query: &Query) -> Vec<Row> {
         match query {
-            Query::Artists(_) => vec![Row::Named { id: AALIYAH, name: "Aaliyah".into() }],
-            Query::Albums(_) | Query::ArtistAlbums(_) => vec![Row::Named { id: ALBUM, name: "Aaliyah".into() }],
-            Query::Folder(0) => vec![
-                Row::List { id: 0xaa1f_785f, name: "CURRENT".into(), folder: true, position: 1 },
-                Row::List { id: 0xffb7_d23b, name: "NP3-TEST-MP3".into(), folder: false, position: 0xb },
+            Query::BpmBuckets => vec![Row::Date(7_800)],
+            Query::Ratings => vec![Row::Date(1), Row::Date(0)],
+            Query::Bitrates => vec![Row::Date(320), Row::Date(0)],
+            Query::Colors => vec![
+                Row::Named {
+                    id: 1,
+                    name: "Pink".into(),
+                },
+                Row::Named {
+                    id: 8,
+                    name: "Purple".into(),
+                },
             ],
-            Query::Histories => vec![Row::Named { id: 0x68ef_cd5c, name: "LINK HISTORY 2026-09-11".into() }],
+            Query::DurationMinutes => vec![Row::Date(11), Row::Date(0)],
+            Query::ReleaseDecades => vec![Row::Date(2020), Row::Date(1990)],
+            Query::ReleaseYears(2020) => vec![Row::Date(2024), Row::Date(2023)],
+            Query::Genres(_) => vec![Row::Named {
+                id: GENRE,
+                name: "Pop".into(),
+            }],
+            Query::GenreArtists(_) => vec![Row::Named {
+                id: AALIYAH,
+                name: "Aaliyah".into(),
+            }],
+            Query::GenreArtistAlbums { .. } => vec![Row::Named {
+                id: ALBUM,
+                name: "Aaliyah".into(),
+            }],
+            Query::Labels(_) => vec![Row::Named {
+                id: 0x1234,
+                name: "Ablazing".into(),
+            }],
+            Query::LabelArtists(_) => vec![Row::Named {
+                id: AALIYAH,
+                name: "Aaliyah".into(),
+            }],
+            Query::LabelArtistAlbums { .. } => vec![Row::Named {
+                id: ALBUM,
+                name: "Aaliyah".into(),
+            }],
+            Query::Artists(_) => vec![Row::Named {
+                id: AALIYAH,
+                name: "Aaliyah".into(),
+            }],
+            Query::Albums(_) | Query::ArtistAlbums(_) => vec![Row::Named {
+                id: ALBUM,
+                name: "Aaliyah".into(),
+            }],
+            Query::Folder(0) => vec![
+                Row::List {
+                    id: 0xaa1f_785f,
+                    name: "CURRENT".into(),
+                    folder: true,
+                    position: 1,
+                },
+                Row::List {
+                    id: 0xffb7_d23b,
+                    name: "NP3-TEST-MP3".into(),
+                    folder: false,
+                    position: 0xb,
+                },
+            ],
+            Query::Histories => vec![Row::Named {
+                id: 0x68ef_cd5c,
+                name: "LINK HISTORY 2026-09-11".into(),
+            }],
             Query::Years => vec![Row::Date(2026), Row::Date(2025)],
             Query::Months(2026) => vec![Row::Date(1), Row::Date(2)],
-            Query::Tracks { scope: TrackScope::Album(ALBUM), .. } => vec![Row::Track { id: TRACK, position: 0x55 }],
-            Query::Tracks { .. } => vec![Row::Track { id: TRACK, position: 0 }],
+            Query::Tracks {
+                scope: TrackScope::Album(ALBUM),
+                ..
+            } => vec![Row::Track {
+                id: TRACK,
+                position: 0x55,
+            }],
+            Query::Tracks { .. } => vec![Row::Track {
+                id: TRACK,
+                position: 0,
+            }],
             _ => vec![],
         }
     }
     fn track_row(&self, id: u32) -> Option<TrackRow> {
         (id == TRACK).then(the_track)
     }
+    fn file_name_row(&self, id: u32) -> Option<TrackRow> {
+        (id == TRACK).then(|| TrackRow {
+            title: "70 at your best (you are love).mp3".into(),
+            ..the_track()
+        })
+    }
     fn track(&self, id: u32) -> Option<TrackDetails> {
         (id == TRACK).then(|| TrackDetails {
             row: the_track(),
+            comment: "Em - 156".into(),
+            key_id: 0x1814_5d65,
+            key_name: "11B".into(),
             artist_id: AALIYAH,
             artist: "Aaliyah".into(),
             duration_s: 0x122,
@@ -88,7 +176,9 @@ impl Catalog for Small {
     }
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>> {
         match what {
-            Analysis::Tag { fourcc, extension } if track == TRACK && fourcc == b"PWV4" && extension == b"EXT" => {
+            Analysis::Tag { fourcc, extension }
+                if track == TRACK && fourcc == b"PWV4" && extension == b"EXT" =>
+            {
                 Some(vec![b'P', b'W', b'V', b'4', 1, 2, 3])
             }
             _ => None,
@@ -108,7 +198,11 @@ fn session_with(catalog: Small) -> Box<dyn Session> {
 }
 
 fn numbers(kind: u16, tx: u32, args: &[u32]) -> Message {
-    Message::new(tx, kind, args.iter().map(|&n| Argument::Number(n)).collect())
+    Message::new(
+        tx,
+        kind,
+        args.iter().map(|&n| Argument::Number(n)).collect(),
+    )
 }
 
 /// Asks for a menu and renders all of it; returns the items.
@@ -117,10 +211,26 @@ fn browse(session: &mut Box<dyn Session>, kind: u16, args: &[u32]) -> (u32, Vec<
     assert_eq!(header.len(), 1);
     assert_eq!(header[0].kind, rbl_dbserver::kind::MENU_HEADER);
     assert_eq!(header[0].arguments[0], Argument::Number(u32::from(kind)));
-    let Argument::Number(count) = header[0].arguments[1] else { panic!() };
-    let rendered = session.handle(&numbers(rbl_dbserver::kind::RENDER, 0x101, &[args[0], 0, count, 0, count, 0xc, 1, 0]));
-    assert_eq!(rendered[0], Message::new(0x101, rbl_dbserver::kind::RENDER_HEADER, vec![Argument::Number(1), Argument::Number(0)]));
-    assert_eq!(rendered.last().unwrap().kind, rbl_dbserver::kind::MENU_FOOTER);
+    let Argument::Number(count) = header[0].arguments[1] else {
+        panic!()
+    };
+    let rendered = session.handle(&numbers(
+        rbl_dbserver::kind::RENDER,
+        0x101,
+        &[args[0], 0, count, 0, count, 0xc, 1, 0],
+    ));
+    assert_eq!(
+        rendered[0],
+        Message::new(
+            0x101,
+            rbl_dbserver::kind::RENDER_HEADER,
+            vec![Argument::Number(1), Argument::Number(0)]
+        )
+    );
+    assert_eq!(
+        rendered.last().unwrap().kind,
+        rbl_dbserver::kind::MENU_FOOTER
+    );
     (count, rendered[1..rendered.len() - 1].to_vec())
 }
 
@@ -137,21 +247,167 @@ fn args(item: &Message) -> String {
 }
 
 #[test]
-fn the_root_menu_is_rekordboxs_nine_categories_byte_for_byte() {
+fn the_root_menu_matches_the_live_rekordbox_order() {
     let mut s = session();
     let (count, items) = browse(&mut s, kind::ROOT_MENU, &[CTX, 0, 0x5cf_ffff]);
-    assert_eq!(count, 9);
-    // The first row exactly as captured (transaction 0x180 in the capture).
-    let artist = items[0].clone();
+    assert_eq!(count, 20);
+    let actual: Vec<(u32, String, u32)> = items
+        .iter()
+        .map(|item| {
+            let Argument::Number(id) = item.arguments[1] else {
+                panic!()
+            };
+            let Argument::String(label) = &item.arguments[3] else {
+                panic!()
+            };
+            let Argument::Number(item_type) = item.arguments[6] else {
+                panic!()
+            };
+            (id, label.clone(), item_type)
+        })
+        .collect();
+    let heading = |label: &str| format!("\u{fffa}{label}\u{fffb}");
+    assert_eq!(
+        actual,
+        vec![
+            (4, heading("TRACK"), 0x83),
+            (12, heading("KEY"), 0x8b),
+            (6, heading("BPM"), 0x85),
+            (1, heading("GENRE"), 0x80),
+            (2, heading("ARTIST"), 0x81),
+            (3, heading("ALBUM"), 0x82),
+            (26, heading("MATCHING"), 0xaa),
+            (18, heading("SEARCH"), 0x91),
+            (5, heading("PLAYLIST"), 0x84),
+            (22, heading("HISTORY"), 0x95),
+            (20, heading("BITRATE"), 0x93),
+            (15, heading("COLOR"), 0x8e),
+            (21, heading("FILE NAME"), 0x94),
+            (23, heading("HOT CUE BANK"), 0x98),
+            (10, heading("LABEL"), 0x89),
+            (11, heading("ORIGINAL ARTIST"), 0x8a),
+            (7, heading("RATING"), 0x86),
+            (9, heading("REMIXER"), 0x88),
+            (19, heading("TIME"), 0x92),
+            (8, heading("YEAR"), 0x87),
+        ]
+    );
+    // The artist row exactly as captured (transaction 0x180 in the capture).
+    let artist = items[4].clone();
     let mut captured = artist.clone();
     captured.transaction = 0x180;
     assert_eq!(
         captured.encode(),
         hex("11872349ae11000001801041010f101400000010060606020602060606060606060602061100000000110000000211000000122600000009fffa004100520054004900530054fffb000011000000022600000001000011000000811100000000110000000011000000001100000000110000000011000000001100000002260000000100001100000000")
     );
-    let labels: Vec<String> = items.iter().map(args).collect();
-    assert_eq!(labels[3], "0x0, 0xc, 0xc, \"\\u{fffa}KEY\\u{fffb}\", 0x2, \"\", 0x8b, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(labels[8], "0x0, 0x1b, 0x1a, \"\\u{fffa}DATE ADDED\\u{fffb}\", 0x2, \"\", 0x8c, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+}
+
+#[test]
+fn numeric_filter_menus_use_the_captured_item_types() {
+    let mut s = session();
+    for (request, expected, item_type) in [
+        (kind::BPM_MENU, vec![7_800], 0x0d),
+        (kind::RATING_MENU, vec![1, 0], 0x0a),
+        (kind::BITRATE_MENU, vec![320, 0], 0x10),
+        (kind::TIME_MENU, vec![11, 0], 0x0b),
+        (kind::RELEASE_DECADES, vec![2020, 1990], 0x11),
+    ] {
+        let (count, rows) = browse(&mut s, request, &[CTX, 0]);
+        assert_eq!(count as usize, expected.len());
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.arguments[1].clone())
+                .collect::<Vec<_>>(),
+            expected
+                .into_iter()
+                .map(Argument::Number)
+                .collect::<Vec<_>>()
+        );
+        assert!(rows
+            .iter()
+            .all(|row| row.arguments[6] == Argument::Number(item_type)));
+    }
+
+    let (_, colors) = browse(&mut s, kind::COLOR_MENU, &[CTX, 0]);
+    assert_eq!(colors[0].arguments[3], Argument::String("Pink".into()));
+    assert_eq!(colors[0].arguments[6], Argument::Number(0x14));
+    assert_eq!(colors[1].arguments[3], Argument::String("Purple".into()));
+    assert_eq!(colors[1].arguments[6], Argument::Number(0x1b));
+
+    let (_, ranges) = browse(&mut s, kind::BPM_RANGES, &[CTX, 0, 7_800]);
+    assert_eq!(ranges.len(), 7);
+    assert_eq!(ranges[0].arguments[1], Argument::Number(0));
+    assert_eq!(ranges[6].arguments[1], Argument::Number(6));
+    assert!(ranges
+        .iter()
+        .all(|row| row.arguments[6] == Argument::Number(0x0d)));
+}
+
+#[test]
+fn release_year_file_name_matching_and_label_paths_render() {
+    let mut s = session();
+
+    let (count, years) = browse(&mut s, kind::RELEASE_YEARS, &[CTX, 0, 2020]);
+    assert_eq!(count, 3);
+    assert_eq!(years[0].arguments[1], Argument::Number(u32::MAX));
+    assert_eq!(years[0].arguments[6], Argument::Number(0xa0));
+    assert_eq!(years[1].arguments[1], Argument::Number(2024));
+    assert_eq!(years[1].arguments[6], Argument::Number(0x11));
+
+    let (_, files) = browse(&mut s, kind::FILE_NAME_MENU, &[CTX, 0]);
+    assert_eq!(
+        files[0].arguments[3],
+        Argument::String("70 at your best (you are love).mp3".into())
+    );
+    assert_eq!(browse(&mut s, kind::MATCHING_TRACKS, &[CTX, 0, TRACK]).0, 1);
+
+    let (_, labels) = browse(&mut s, kind::LABEL_MENU, &[CTX, 0]);
+    assert_eq!(labels[0].arguments[6], Argument::Number(0x0e));
+    let (count, artists) = browse(&mut s, kind::LABEL_ARTISTS, &[CTX, 0, 0x1234]);
+    assert_eq!(count, 1, "a single child does not gain an ALL row");
+    assert_eq!(artists[0].arguments[6], Argument::Number(0x07));
+    let (count, albums) = browse(
+        &mut s,
+        kind::LABEL_ARTIST_ALBUMS,
+        &[CTX, 0, 0x1234, AALIYAH],
+    );
+    assert_eq!(count, 1);
+    assert_eq!(albums[0].arguments[6], Argument::Number(0x02));
+    assert_eq!(
+        browse(
+            &mut s,
+            kind::LABEL_ARTIST_ALBUM_TRACKS,
+            &[CTX, 0, 0x1234, AALIYAH, ALBUM],
+        )
+        .0,
+        1
+    );
+}
+
+#[test]
+fn genre_browsing_drills_through_artist_album_and_tracks() {
+    let mut s = session();
+
+    let (count, genres) = browse(&mut s, kind::GENRE_MENU, &[CTX, 0]);
+    assert_eq!(count, 1);
+    assert_eq!(genres[0].arguments[1], Argument::Number(GENRE));
+    assert_eq!(genres[0].arguments[6], Argument::Number(0x06));
+
+    let (count, artists) = browse(&mut s, kind::GENRE_ARTISTS, &[CTX, 0, GENRE]);
+    assert_eq!(count, 1);
+    assert_eq!(artists[0].arguments[1], Argument::Number(AALIYAH));
+
+    let (count, albums) = browse(&mut s, kind::GENRE_ARTIST_ALBUMS, &[CTX, 0, GENRE, AALIYAH]);
+    assert_eq!(count, 1);
+    assert_eq!(albums[0].arguments[1], Argument::Number(ALBUM));
+
+    let (count, tracks) = browse(
+        &mut s,
+        kind::GENRE_ARTIST_ALBUM_TRACKS,
+        &[CTX, 0, GENRE, AALIYAH, ALBUM],
+    );
+    assert_eq!(count, 1);
+    assert_eq!(tracks[0].arguments[1], Argument::Number(TRACK));
 }
 
 #[test]
@@ -164,16 +420,87 @@ fn the_sort_menu_matches_the_capture() {
 }
 
 #[test]
+fn the_sort_menu_uses_the_catalog_configuration() {
+    struct ConfiguredCatalog;
+
+    impl Catalog for ConfiguredCatalog {
+        fn sorts(&self) -> Vec<Sort> {
+            vec![Sort::DateAdded, Sort::Genre, Sort::DjPlayCount]
+        }
+
+        fn list(&self, _: &Query) -> Vec<Row> {
+            Vec::new()
+        }
+
+        fn track_row(&self, _: u32) -> Option<TrackRow> {
+            None
+        }
+
+        fn track(&self, _: u32) -> Option<TrackDetails> {
+            None
+        }
+
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
+            None
+        }
+    }
+
+    let handler = CatalogHandler::new(Arc::new(ConfiguredCatalog));
+    let mut session = handler.open();
+    session.handle(&setup_request(1));
+    let (count, items) = browse(&mut session, kind::SORT_MENU, &[CTX, 0, 0]);
+    assert_eq!(count, 3);
+    assert_eq!(items[0].arguments[1], Argument::Number(0x11));
+    assert_eq!(
+        items[0].arguments[3],
+        Argument::String("\u{fffa}DATE ADDED\u{fffb}".to_owned())
+    );
+    assert_eq!(items[1].arguments[1], Argument::Number(0x06));
+    assert_eq!(
+        items[1].arguments[3],
+        Argument::String("\u{fffa}GENRE\u{fffb}".to_owned())
+    );
+    assert_eq!(items[2].arguments[1], Argument::Number(0x10));
+    assert_eq!(
+        items[2].arguments[3],
+        Argument::String("\u{fffa}DJ PLAY COUNT\u{fffb}".to_owned())
+    );
+    assert_eq!(items[0].arguments[6], Argument::Number(0x8c));
+    assert_eq!(items[1].arguments[6], Argument::Number(0x06));
+    assert_eq!(items[2].arguments[6], Argument::Number(0x97));
+}
+
+#[test]
 fn the_key_menus_match_the_capture() {
     let mut s = session();
     let (count, items) = browse(&mut s, kind::KEY_MENU, &[CTX, 0]);
     assert_eq!(count, 24);
-    assert_eq!(args(&items[0]), "0x0, 0x1, 0x8, \"Abm\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(args(&items[23]), "0x0, 0x18, 0x4, \"E\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        args(&items[0]),
+        "0x0, 0x1, 0x8, \"Abm\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        args(&items[23]),
+        "0x0, 0x18, 0x4, \"E\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
     let (count, items) = browse(&mut s, kind::RELATED_KEYS, &[0x0102_0301, 0, 1]);
     assert_eq!(count, 3);
-    assert_eq!(args(&items[0]), "0x0, 0x1, 0x8, \"Abm\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(args(&items[1]), "0x1, 0x1, 0xe, \"Abm, B\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        args(&items[0]),
+        "0x0, 0x1, 0x8, \"Abm\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        args(&items[1]),
+        "0x1, 0x1, 0xe, \"Abm, B\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
     assert_eq!(args(&items[2]), "0x2, 0x1, 0x22, \"Abm, B, Dbm, Ebm\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
 }
 
@@ -184,12 +511,15 @@ fn artists_albums_and_their_tracks_are_shaped_as_captured() {
     assert_eq!(args(&items[0]), "0x0, 0x6d5c28f2, 0x10, \"Aaliyah\", 0x2, \"\", 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
 
     let (count, items) = browse(&mut s, kind::ARTIST_ALBUMS, &[CTX, 0, AALIYAH]);
-    assert_eq!(count, 2, "⟨ALL⟩ then the album");
-    assert_eq!(args(&items[0]), "0x0, 0xffffffff, 0xc, \"\\u{fffa}ALL\\u{fffb}\", 0x2, \"\", 0xa0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(args(&items[1]), "0x0, 0xdc0d0bca, 0x10, \"Aaliyah\", 0x2, \"\", 0x2, 0x0, 0xdc0d0bca, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(count, 1, "a single album does not need an ALL row");
+    assert_eq!(args(&items[0]), "0x0, 0xdc0d0bca, 0x10, \"Aaliyah\", 0x2, \"\", 0x2, 0x0, 0xdc0d0bca, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
 
     // An artist's tracks carry flag 0x1000000; the album's the track number.
-    let (_, items) = browse(&mut s, kind::ARTIST_ALBUM_TRACKS, &[CTX, 0, AALIYAH, 0xffff_ffff]);
+    let (_, items) = browse(
+        &mut s,
+        kind::ARTIST_ALBUM_TRACKS,
+        &[CTX, 0, AALIYAH, 0xffff_ffff],
+    );
     assert_eq!(args(&items[0]), "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x1000000, 0x475f, 0x0, 0x100, 0x14, 0x14, 0x4, \"D\", 0x1e80");
     let (_, items) = browse(&mut s, kind::ALBUM_TRACKS, &[CTX, 0, ALBUM]);
     assert_eq!(args(&items[0]), "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x1000000, 0x475f, 0x55, 0x100, 0x14, 0x14, 0x4, \"D\", 0x1e80");
@@ -215,11 +545,17 @@ fn playlists_histories_and_dates_are_shaped_as_captured() {
     assert_eq!(args(&items[0]), "0x0, 0x68efcd5c, 0x30, \"LINK HISTORY 2026-09-11\", 0x2, \"\", 0x24, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
 
     let (_, items) = browse(&mut s, kind::YEARS, &[CTX, 0]);
-    assert_eq!(args(&items[0]), "0x0, 0x7ea, 0x2, \"\", 0x2, \"\", 0x2e, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        args(&items[0]),
+        "0x0, 0x7ea, 0x2, \"\", 0x2, \"\", 0x2e, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
     let (count, items) = browse(&mut s, kind::MONTHS, &[CTX, 0, 2026]);
     assert_eq!(count, 3);
     assert_eq!(args(&items[0]), "0x0, 0xffffffff, 0xc, \"\\u{fffa}ALL\\u{fffb}\", 0x2, \"\", 0xa0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(args(&items[1]), "0x0, 0x1, 0x2, \"\", 0x2, \"\", 0x2e, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        args(&items[1]),
+        "0x0, 0x1, 0x2, \"\", 0x2, \"\", 0x2e, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
 }
 
 #[test]
@@ -230,23 +566,50 @@ fn metadata_and_track_info_have_the_captured_rows() {
     let rows: Vec<String> = items.iter().map(args).collect();
     assert_eq!(rows[0], "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x0, 0x475f, 0x0, 0x100, 0x14, 0x14, 0x4, \"D\", 0x1e80");
     assert_eq!(rows[1], "0x1, 0x6d5c28f2, 0x10, \"Aaliyah\", 0x2, \"\", 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[2], "0x1, 0x0, 0x2, \"\", 0x2, \"\", 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[3], "0x0, 0x122, 0x2, \"\", 0x2, \"\", 0xb, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[4], "0x0, 0x1e80, 0x2, \"\", 0x2, \"\", 0xd, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[5], "0x1, 0x14, 0x4, \"D\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        rows[2],
+        "0x1, 0x0, 0x2, \"\", 0x2, \"\", 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[3],
+        "0x0, 0x122, 0x2, \"\", 0x2, \"\", 0xb, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[4],
+        "0x0, 0x1e80, 0x2, \"\", 0x2, \"\", 0xd, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[5],
+        "0x1, 0x18145d65, 0x8, \"11B\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
     assert_eq!(rows[8], "0x0, 0x8b0c83f7, 0x8, \"Pop\", 0x2, \"\", 0x6, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
     assert_eq!(rows[9], "0x1, 0x475f, 0x16, \"2023-08-06\", 0x2, \"\", 0x2e, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
     assert_eq!(rows[10], "0x0, 0x475f, 0x12, \"Em - 156\", 0x2, \"\", 0x23, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[11], "0x0, 0x140, 0x2, \"\", 0x2, \"\", 0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[12], "0x0, 0x7ca, 0x2, \"\", 0x2, \"\", 0x11, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[15], "0x0, 0x0, 0x2, \"\", 0x2, \"\", 0x29, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        rows[11],
+        "0x0, 0x140, 0x2, \"\", 0x2, \"\", 0x11, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[12],
+        "0x0, 0x7ca, 0x2, \"\", 0x2, \"\", 0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[15],
+        "0x0, 0x0, 0x2, \"\", 0x2, \"\", 0x29, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
 
     let (count, items) = browse(&mut s, kind::TRACK_INFO, &[0x0108_0301, TRACK]);
     assert_eq!(count, 7);
     let rows: Vec<String> = items.iter().map(args).collect();
     assert_eq!(rows[4], "0xb11858, 0x475f, 0x90, \"/Volumes/SD/RB/Aaliyah/Unknown Album/70 at your best (you are love).mp3\", 0x2, \"\", 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[5], "0x0, 0x1, 0x2, \"\", 0x2, \"\", 0x2f, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[6], "0x0, 0x14, 0x4, \"D\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        rows[5],
+        "0x0, 0x1, 0x2, \"\", 0x2, \"\", 0x2f, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[6],
+        "0x0, 0x18145d65, 0x8, \"11B\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
 }
 
 /// After loading a track from a rekordbox source a CDJ-3000 asks for the KUVO
@@ -263,7 +626,9 @@ fn the_kuvo_user_info_and_delivery_info_are_answered_as_captured() {
     // rekordbox's header, byte for byte; its blob carried its own account's
     // details (000482820000014d80042428…), ours is 160 zeros.
     let encoded = user[0].encode();
-    let header = hex("11872349ae11000000a2104d020f041400000004060606031100003006110000000011000000a014000000a0");
+    let header = hex(
+        "11872349ae11000000a2104d020f041400000004060606031100003006110000000011000000a014000000a0",
+    );
     assert_eq!(&encoded[..header.len()], &header[..]);
     assert_eq!(encoded.len(), header.len() + 160);
     assert!(encoded[header.len()..].iter().all(|&b| b == 0));
@@ -273,19 +638,46 @@ fn the_kuvo_user_info_and_delivery_info_are_answered_as_captured() {
     let rows: Vec<String> = items.iter().map(args).collect();
     // The captured rows, with the capture's track ("Breaks 2", 0x18e460e, a
     // 13 s WAV at 140 BPM with no key, comment or label) read as ours.
-    assert_eq!(rows[0], "0x0, 0x0, 0x2, \"\", 0x2, \"\", 0x36, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        rows[0],
+        "0x0, 0x0, 0x2, \"\", 0x2, \"\", 0x36, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
     assert_eq!(rows[1], "0x0, 0x6d5c28f2, 0x10, \"Aaliyah\", 0x2, \"\", 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[2], "0x0, 0x14, 0x2, \"\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[3], "0x0, 0x122, 0x2, \"\", 0x2, \"\", 0xb, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        rows[2],
+        "0x0, 0x18145d65, 0x2, \"\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[3],
+        "0x0, 0x122, 0x2, \"\", 0x2, \"\", 0xb, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
     assert_eq!(rows[4], "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x2, \"\", 0x4, 0x1000000, 0x475f, 0x0, 0x100, 0x0, 0x0, 0x2, \"\", 0x1e80");
     assert_eq!(rows[5], "0x0, 0x475f, 0x12, \"Em - 156\", 0x2, \"\", 0x23, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[6], "0x0, 0x0, 0x2, \"\", 0x2, \"\", 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[7], "0x0, 0x1e80, 0x2, \"\", 0x2, \"\", 0xd, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[8], "0x0, 0x475f, 0x2, \"\", 0x2, \"\", 0x37, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[9], "0x0, 0x0, 0x2, \"\", 0x2, \"\", 0xe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[10], "0x0, 0x1, 0x2, \"\", 0x2, \"\", 0x12, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        rows[6],
+        "0x0, 0x0, 0x2, \"\", 0x2, \"\", 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[7],
+        "0x0, 0x1e80, 0x2, \"\", 0x2, \"\", 0xd, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[8],
+        "0x0, 0x475f, 0x2, \"\", 0x2, \"\", 0x37, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[9],
+        "0x0, 0x0, 0x2, \"\", 0x2, \"\", 0xe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
+    assert_eq!(
+        rows[10],
+        "0x0, 0x1, 0x2, \"\", 0x2, \"\", 0x12, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
     assert_eq!(rows[11], "0x0, 0x8b0c83f7, 0x8, \"Pop\", 0x2, \"\", 0x6, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    assert_eq!(rows[12], "0x475f, 0x0, 0x2, \"\", 0x2, \"\", 0x4f, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+    assert_eq!(
+        rows[12],
+        "0x475f, 0x0, 0x2, \"\", 0x2, \"\", 0x4f, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
+    );
 }
 
 /// In the capture the track a player had loaded carried bit 0x100 in every
@@ -294,7 +686,11 @@ fn the_kuvo_user_info_and_delivery_info_are_answered_as_captured() {
 #[test]
 fn a_played_track_carries_the_played_bit_everywhere() {
     let mut s = session_with(Small(true));
-    let (_, items) = browse(&mut s, kind::ARTIST_ALBUM_TRACKS, &[CTX, 0, AALIYAH, 0xffff_ffff]);
+    let (_, items) = browse(
+        &mut s,
+        kind::ARTIST_ALBUM_TRACKS,
+        &[CTX, 0, AALIYAH, 0xffff_ffff],
+    );
     assert!(args(&items[0]).contains("0x2304, 0x1000100, 0x475f, 0x0, 0x100"));
     let (_, items) = browse(&mut s, kind::PLAYLIST_MENU, &[CTX, 0, 0xffb7_d23b, 0]);
     assert!(args(&items[0]).contains("0x2304, 0x1000100, 0x475f, 0x0, 0x100"));
@@ -307,8 +703,15 @@ fn a_played_track_carries_the_played_bit_everywhere() {
 #[test]
 fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
     let mut s = session();
-    let none = s.handle(&numbers(kind::ARTWORK, 0x187, &[0x0108_0301, 0xdc0d_0bca, 1]));
-    assert_eq!(none[0].encode(), hex("11872349ae11000001871040020f04140000000406060603110000200311000000321100000000"));
+    let none = s.handle(&numbers(
+        kind::ARTWORK,
+        0x187,
+        &[0x0108_0301, 0xdc0d_0bca, 1],
+    ));
+    assert_eq!(
+        none[0].encode(),
+        hex("11872349ae11000001871040020f04140000000406060603110000200311000000321100000000")
+    );
     let some = s.handle(&numbers(kind::ARTWORK, 0x1a3, &[0x0108_0301, 0x6272, 1]));
     assert_eq!(args(&some[0]), "0x2003, 0x0, 0x4, blob[4]");
     // Without the size argument the id is the title item's artwork field,
@@ -318,10 +721,18 @@ fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
     let not_a_field = s.handle(&numbers(kind::ARTWORK, 0x1a5, &[0x0108_0301, 0x6272]));
     assert_eq!(args(&not_a_field[0]), "0x2003, 0x32, 0x0, blob[0]");
 
-    let tag = s.handle(&numbers(kind::ANLZ_TAG, 0x197, &[0x0108_0301, TRACK, 0x3456_5750, 0x54_5845]));
+    let tag = s.handle(&numbers(
+        kind::ANLZ_TAG,
+        0x197,
+        &[0x0108_0301, TRACK, 0x3456_5750, 0x54_5845],
+    ));
     assert_eq!(tag[0].kind, kind::ANLZ_TAG_REPLY);
     assert_eq!(args(&tag[0]), "0x2c04, 0x0, 0x7, blob[7], 0x1");
-    let missing = s.handle(&numbers(kind::ANLZ_TAG_2EX, 0x198, &[0x0108_0301, TRACK, 0x3656_5750, 0x58_4532]));
+    let missing = s.handle(&numbers(
+        kind::ANLZ_TAG_2EX,
+        0x198,
+        &[0x0108_0301, TRACK, 0x3656_5750, 0x58_4532],
+    ));
     assert_eq!(args(&missing[0]), "0x2d04, 0x32, 0x0, blob[0], 0x1");
     let grid = s.handle(&numbers(kind::BEAT_GRID, 0x199, &[0x0108_0301, TRACK]));
     assert_eq!(args(&grid[0]), "0x2204, 0x32, 0x0, blob[0], 0x0");
@@ -335,12 +746,24 @@ fn a_page_of_a_long_list_is_the_window_asked_for() {
             (1..=100).map(|id| Row::Track { id, position: 0 }).collect()
         }
         fn track_row(&self, id: u32) -> Option<TrackRow> {
-            Some(TrackRow { id, title: format!("Track {id}"), ..TrackRow::default() })
+            Some(TrackRow {
+                id,
+                title: format!("Track {id}"),
+                ..TrackRow::default()
+            })
         }
-        fn track(&self, _: u32) -> Option<TrackDetails> { None }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
+        fn track(&self, _: u32) -> Option<TrackDetails> {
+            None
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
+            None
+        }
     }
     let handler = CatalogHandler::new(Arc::new(Many));
     let mut s = handler.open();
@@ -349,11 +772,18 @@ fn a_page_of_a_long_list_is_the_window_asked_for() {
     // The deck pages 25 at a time: offset 50, limit 25.
     let page = s.handle(&numbers(kind::RENDER, 2, &[CTX, 50, 25, 0, 100, 0xc, 1, 0]));
     assert_eq!(page.len(), 27);
-    assert_eq!(page[0].arguments, vec![Argument::Number(1), Argument::Number(50)]);
+    assert_eq!(
+        page[0].arguments,
+        vec![Argument::Number(1), Argument::Number(50)]
+    );
     assert_eq!(page[1].arguments[0], Argument::Number(51));
     assert_eq!(page[25].arguments[0], Argument::Number(75));
     // Beyond the end: header and footer only.
-    let past = s.handle(&numbers(kind::RENDER, 3, &[CTX, 100, 25, 0, 100, 0xc, 1, 0]));
+    let past = s.handle(&numbers(
+        kind::RENDER,
+        3,
+        &[CTX, 100, 25, 0, 100, 0xc, 1, 0],
+    ));
     assert_eq!(past.len(), 2);
 }
 
@@ -362,14 +792,23 @@ fn the_setup_reply_and_the_unknown_requests_answer_as_rekordbox_does() {
     let handler = CatalogHandler::new(Arc::new(Small(false)));
     let mut s = handler.open();
     let reply = s.handle(&setup_request(1));
-    assert_eq!(reply[0].encode(), hex("11872349ae11fffffffe1000000f021400000002060611000000111100000014"));
+    assert_eq!(
+        reply[0].encode(),
+        hex("11872349ae11fffffffe1000000f021400000002060611000000111100000014")
+    );
     let after = s.handle(&numbers(0x3007, 0x17e, &[0x0108_0301, 0]));
-    assert_eq!(after[0].encode(), hex("11872349ae110000017e1040000f021400000002060611000030071100000000"));
+    assert_eq!(
+        after[0].encode(),
+        hex("11872349ae110000017e1040000f021400000002060611000030071100000000")
+    );
     browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
     let loaded = s.handle(&numbers(kind::ITEM_POSITION, 0x18d, &[CTX, TRACK, 0, 1]));
-    assert_eq!(loaded[0].encode(), hex("11872349ae110000018d1040000f021400000002060611000031001100000000"));
+    assert_eq!(
+        loaded[0].encode(),
+        hex("11872349ae110000018d1040000f021400000002060611000031001100000000")
+    );
     let matching = s.handle(&numbers(0x1017, 0x3cf, &[0x0102_0301, 0, TRACK]));
-    assert_eq!(args(&matching[0]), "0x1017, 0x0");
+    assert_eq!(args(&matching[0]), "0x1017, 0x1");
 }
 
 #[test]
@@ -381,23 +820,79 @@ fn tracks_are_sorted_the_way_the_player_asked() {
             *self.0.lock().unwrap() = Some(q.clone());
             vec![]
         }
-        fn track_row(&self, _: u32) -> Option<TrackRow> { None }
-        fn track(&self, _: u32) -> Option<TrackDetails> { None }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
+        fn track_row(&self, _: u32) -> Option<TrackRow> {
+            None
+        }
+        fn track(&self, _: u32) -> Option<TrackDetails> {
+            None
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
+            None
+        }
     }
     let spy = Arc::new(Spy(std::sync::Mutex::new(None)));
     let handler = CatalogHandler::new(Arc::clone(&spy) as Arc<dyn Catalog>);
     let mut s = handler.open();
     s.handle(&numbers(kind::TRACK_MENU, 1, &[CTX, 4]));
-    assert_eq!(spy.0.lock().unwrap().clone(), Some(Query::Tracks { scope: TrackScope::All, sort: Sort::Bpm }));
+    assert_eq!(
+        spy.0.lock().unwrap().clone(),
+        Some(Query::Tracks {
+            scope: TrackScope::All,
+            sort: Sort::Bpm
+        })
+    );
     s.handle(&numbers(kind::KEY_TRACKS, 2, &[CTX, 0xc, 3, 2]));
-    assert_eq!(spy.0.lock().unwrap().clone(), Some(Query::Tracks { scope: TrackScope::Key { key: 3, distance: 2 }, sort: Sort::Key }));
-    s.handle(&Message::new(3, kind::SEARCH, vec![Argument::Number(CTX), Argument::Number(0), Argument::Number(8), Argument::String("ACID".into()), Argument::Number(0)]));
-    assert_eq!(spy.0.lock().unwrap().clone(), Some(Query::Tracks { scope: TrackScope::Search("ACID".into()), sort: Sort::Default }));
-    s.handle(&Message::new(4, kind::SEARCH_TRACK, vec![Argument::Number(CTX), Argument::Number(0), Argument::Number(8), Argument::String("ABC".into())]));
-    assert_eq!(spy.0.lock().unwrap().clone(), Some(Query::Tracks { scope: TrackScope::Search("ABC".into()), sort: Sort::Default }));
+    assert_eq!(
+        spy.0.lock().unwrap().clone(),
+        Some(Query::Tracks {
+            scope: TrackScope::Key {
+                key: 3,
+                distance: 2
+            },
+            sort: Sort::Key
+        })
+    );
+    s.handle(&Message::new(
+        3,
+        kind::SEARCH,
+        vec![
+            Argument::Number(CTX),
+            Argument::Number(0),
+            Argument::Number(8),
+            Argument::String("ACID".into()),
+            Argument::Number(0),
+        ],
+    ));
+    assert_eq!(
+        spy.0.lock().unwrap().clone(),
+        Some(Query::Tracks {
+            scope: TrackScope::Search("ACID".into()),
+            sort: Sort::Default
+        })
+    );
+    s.handle(&Message::new(
+        4,
+        kind::SEARCH_TRACK,
+        vec![
+            Argument::Number(CTX),
+            Argument::Number(0),
+            Argument::Number(8),
+            Argument::String("ABC".into()),
+        ],
+    ));
+    assert_eq!(
+        spy.0.lock().unwrap().clone(),
+        Some(Query::Tracks {
+            scope: TrackScope::Search("ABC".into()),
+            sort: Sort::Default
+        })
+    );
 }
 
 #[test]
@@ -409,11 +904,21 @@ fn the_extended_cue_reply_counts_its_entries_not_a_header_word() {
     // deceptively large 0xffff) and once made a deck fault on 65 535 cues.
     struct Cued;
     impl Catalog for Cued {
-        fn list(&self, _: &Query) -> Vec<Row> { Vec::new() }
-        fn track_row(&self, _: u32) -> Option<TrackRow> { None }
-        fn track(&self, _: u32) -> Option<TrackDetails> { None }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn list(&self, _: &Query) -> Vec<Row> {
+            Vec::new()
+        }
+        fn track_row(&self, _: u32) -> Option<TrackRow> {
+            None
+        }
+        fn track(&self, _: u32) -> Option<TrackDetails> {
+            None
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
         fn analysis(&self, _: u32, what: &Analysis) -> Option<Vec<u8>> {
             match what {
                 Analysis::ExtendedCueList => {
@@ -435,7 +940,11 @@ fn the_extended_cue_reply_counts_its_entries_not_a_header_word() {
     let handler = CatalogHandler::new(Arc::new(Cued));
     let mut s = handler.open();
     s.handle(&setup_request(1));
-    let reply = s.handle(&numbers(kind::EXTENDED_CUES, 0x1c0, &[0x0108_0301, TRACK, 0]));
+    let reply = s.handle(&numbers(
+        kind::EXTENDED_CUES,
+        0x1c0,
+        &[0x0108_0301, TRACK, 0],
+    ));
     assert_eq!(args(&reply[0]), "0x2b04, 0x0, 0x30, blob[48], 0x3");
 }
 
@@ -463,14 +972,30 @@ fn background_metadata_does_not_replace_the_browser_menu() {
 }
 
 #[test]
-fn legacy_client_negotiates_and_gets_a_title_in_twelve_field_rows() {
+fn legacy_client_gets_full_track_fields_in_twelve_field_rows() {
     let mut s = session();
     let reply = s.handle(&numbers(kind::SETUP, 0xffff_fffe, &[5]));
-    assert_eq!(reply[0].encode(), hex("11872349ae11fffffffe1040000f021400000002060611000000001100000011"));
+    assert_eq!(
+        reply[0].encode(),
+        hex("11872349ae11fffffffe1040000f021400000002060611000000001100000011")
+    );
     let (_, rows) = browse(&mut s, kind::METADATA, &[CTX, TRACK]);
     assert!(rows.iter().all(|row| row.arguments.len() == 12));
-    assert_eq!(rows[0].arguments[6], Argument::Number(4));
+    assert_eq!(
+        rows[0].arguments[6],
+        Argument::Number(rbl_dbserver::item::item_type::TRACK)
+    );
     assert_eq!(rows[0].arguments[3], Argument::String(the_track().title));
+    assert_eq!(rows[6].arguments[1], Argument::Number(0x1814_5d65));
+    assert_eq!(rows[6].arguments[3], Argument::String("11B".into()));
+    assert_eq!(
+        rows[6].arguments[6],
+        Argument::Number(rbl_dbserver::item::item_type::KEY)
+    );
+    assert_eq!(
+        rows[0].arguments[5],
+        Argument::String(the_track().secondary_text)
+    );
 }
 
 #[test]
@@ -487,7 +1012,17 @@ fn filter_properties_use_the_expected_reply_and_do_not_clobber_browsing() {
     let mut bytes = vec![1, 6, 2, 0];
     bytes.extend_from_slice(&12000_u32.to_le_bytes());
     bytes.extend_from_slice(&13000_u32.to_le_bytes());
-    let update = Message::new(5, 0x3207, vec![Argument::Number(CTX), Argument::Number(6), Argument::Number(0), Argument::Number(12), Argument::Blob(bytes)]);
+    let update = Message::new(
+        5,
+        0x3207,
+        vec![
+            Argument::Number(CTX),
+            Argument::Number(6),
+            Argument::Number(0),
+            Argument::Number(12),
+            Argument::Blob(bytes),
+        ],
+    );
     assert_eq!(s.handle(&update)[0].arguments[1], Argument::Number(0));
     s.handle(&numbers(0x3007, 6, &[CTX, 1]));
     assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
@@ -498,8 +1033,15 @@ fn filter_properties_use_the_expected_reply_and_do_not_clobber_browsing() {
 #[test]
 fn read_only_catalog_refuses_tag_and_rating_edits() {
     let mut s = session();
-    for (kind, args) in [(0x3002, vec![CTX, TRACK, 1]), (0x3202, vec![CTX]), (0x2107, vec![CTX, TRACK, 5])] {
-        assert_eq!(s.handle(&numbers(kind, 1, &args))[0].arguments[1], Argument::Number(1));
+    for (kind, args) in [
+        (0x3002, vec![CTX, TRACK, 1]),
+        (0x3202, vec![CTX]),
+        (0x2107, vec![CTX, TRACK, 5]),
+    ] {
+        assert_eq!(
+            s.handle(&numbers(kind, 1, &args))[0].arguments[1],
+            Argument::Number(1)
+        );
     }
 }
 
@@ -510,29 +1052,67 @@ fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() 
     struct Editable(std::sync::Mutex<(Vec<u32>, u32, i16)>);
     impl Catalog for Editable {
         fn list(&self, q: &Query) -> Vec<Row> {
-            if matches!(q, Query::Tracks { scope: TrackScope::TagList, .. }) {
-                return self.0.lock().unwrap().0.iter().enumerate().map(|(i, &id)| Row::Track { id, position: i as u32 + 1 }).collect();
+            if matches!(
+                q,
+                Query::Tracks {
+                    scope: TrackScope::TagList,
+                    ..
+                }
+            ) {
+                return self
+                    .0
+                    .lock()
+                    .unwrap()
+                    .0
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &id)| Row::Track {
+                        id,
+                        position: i as u32 + 1,
+                    })
+                    .collect();
             }
             Small(false).list(q)
         }
-        fn track_row(&self, id: u32) -> Option<TrackRow> { Small(false).track_row(id) }
-        fn track(&self, id: u32) -> Option<TrackDetails> {
-            Small(false).track(id).map(|mut track| { track.rating = self.0.lock().unwrap().1; track })
+        fn track_row(&self, id: u32) -> Option<TrackRow> {
+            Small(false).track_row(id)
         }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
-        fn tagged(&self, id: u32) -> bool { self.0.lock().unwrap().0.contains(&id) }
-        fn grid_offset(&self, _: u32) -> i16 { self.0.lock().unwrap().2 }
+        fn track(&self, id: u32) -> Option<TrackDetails> {
+            Small(false).track(id).map(|mut track| {
+                track.rating = self.0.lock().unwrap().1;
+                track
+            })
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
+            None
+        }
+        fn tagged(&self, id: u32) -> bool {
+            self.0.lock().unwrap().0.contains(&id)
+        }
+        fn grid_offset(&self, _: u32) -> i16 {
+            self.0.lock().unwrap().2
+        }
         fn edit(&self, edit: &Edit) -> bool {
             let mut state = self.0.lock().unwrap();
             match *edit {
-                Edit::Tag { track, add: true } => { if !state.0.contains(&track) { state.0.push(track); } }
+                Edit::Tag { track, add: true } => {
+                    if !state.0.contains(&track) {
+                        state.0.push(track);
+                    }
+                }
                 Edit::Tag { track, add: false } => state.0.retain(|&id| id != track),
                 Edit::GridOffset { offset_ms, .. } => state.2 = offset_ms,
                 Edit::ClearTags => state.0.clear(),
                 Edit::Rating { stars, .. } => state.1 = u32::from(stars),
-                Edit::HistoryAdd { .. } | Edit::HistoryRemove { .. } | Edit::HistoryDelete { .. } => return false,
+                Edit::HistoryAdd { .. }
+                | Edit::HistoryRemove { .. }
+                | Edit::HistoryDelete { .. } => return false,
             }
             true
         }
@@ -546,15 +1126,29 @@ fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() 
     assert_eq!(count, 1);
     assert_eq!(rows[0].arguments[7], Argument::Number(0x0100_0001));
     let (_, metadata) = browse(&mut two, kind::METADATA, &[0x0102_0301, TRACK]);
-    assert_eq!(metadata[0].arguments[7], Argument::Number(1), "loaded-track metadata must report tag membership too");
+    assert_eq!(
+        metadata[0].arguments[7],
+        Argument::Number(1),
+        "loaded-track metadata must report tag membership too"
+    );
     one.handle(&numbers(0x3002, 2, &[CTX, TRACK, 1]));
     assert_eq!(browse(&mut two, 0x100f, &[CTX, 0]).0, 1);
     one.handle(&numbers(0x2107, 3, &[CTX, TRACK, 4]));
     let (_, rows) = browse(&mut two, kind::METADATA, &[CTX, TRACK]);
-    let rating = rows.iter().find(|row| row.arguments[6] == Argument::Number(10)).unwrap();
+    let rating = rows
+        .iter()
+        .find(|row| row.arguments[6] == Argument::Number(10))
+        .unwrap();
     assert_eq!(rating.arguments[1], Argument::Number(4));
-    assert_eq!(one.handle(&numbers(0x2107, 4, &[CTX, TRACK, 6]))[0].arguments[1], Argument::Number(1));
-    let saved = one.handle(&numbers(kind::SAVE_GRID_OFFSET, 5, &[CTX, TRACK, 0xffff_fe2d]));
+    assert_eq!(
+        one.handle(&numbers(0x2107, 4, &[CTX, TRACK, 6]))[0].arguments[1],
+        Argument::Number(1)
+    );
+    let saved = one.handle(&numbers(
+        kind::SAVE_GRID_OFFSET,
+        5,
+        &[CTX, TRACK, 0xffff_fe2d],
+    ));
     assert_eq!(saved[0].arguments[1], Argument::Number(0));
     let read = two.handle(&numbers(kind::GRID_OFFSET, 6, &[CTX, TRACK]));
     assert_eq!(read[0].arguments[1], Argument::Number(0xfe2d));
@@ -570,12 +1164,24 @@ fn history_commands_reach_the_catalog_and_only_the_removal_is_answered() {
     #[derive(Default)]
     struct Recording(std::sync::Mutex<Vec<Edit>>);
     impl Catalog for Recording {
-        fn list(&self, q: &Query) -> Vec<Row> { Small(false).list(q) }
-        fn track_row(&self, id: u32) -> Option<TrackRow> { Small(false).track_row(id) }
-        fn track(&self, id: u32) -> Option<TrackDetails> { Small(false).track(id) }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
+        fn list(&self, q: &Query) -> Vec<Row> {
+            Small(false).list(q)
+        }
+        fn track_row(&self, id: u32) -> Option<TrackRow> {
+            Small(false).track_row(id)
+        }
+        fn track(&self, id: u32) -> Option<TrackDetails> {
+            Small(false).track(id)
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
+            None
+        }
         fn edit(&self, edit: &Edit) -> bool {
             self.0.lock().unwrap().push(edit.clone());
             !matches!(edit, Edit::HistoryRemove { track: 7 })
@@ -585,32 +1191,51 @@ fn history_commands_reach_the_catalog_and_only_the_removal_is_answered() {
     let mut s = CatalogHandler::new(Arc::clone(&catalog) as Arc<dyn Catalog>).open();
     browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
     // Sent and forgotten: no reply, and the menu being browsed stays.
-    assert!(s.handle(&numbers(kind::INSERT_HISTORY, 2, &[CTX, TRACK])).is_empty());
+    assert!(s
+        .handle(&numbers(kind::INSERT_HISTORY, 2, &[CTX, TRACK]))
+        .is_empty());
     let rendered = s.handle(&numbers(kind::RENDER, 3, &[CTX, 0, 1]));
     assert_eq!(rendered[1].arguments[1], Argument::Number(TRACK));
-    assert!(s.handle(&numbers(kind::DELETE_HISTORY, 4, &[CTX, 0xffff_ffff])).is_empty());
-    assert_eq!(s.handle(&numbers(kind::DELETE_HISTORY_TRACK, 5, &[CTX, TRACK]))[0].arguments,
-        vec![Argument::Number(0x3401), Argument::Number(0)]);
-    assert_eq!(s.handle(&numbers(kind::DELETE_HISTORY_TRACK, 6, &[CTX, 7]))[0].arguments,
-        vec![Argument::Number(0x3401), Argument::Number(0xffff_ffff)]);
+    assert!(s
+        .handle(&numbers(kind::DELETE_HISTORY, 4, &[CTX, 0xffff_ffff]))
+        .is_empty());
+    assert_eq!(
+        s.handle(&numbers(kind::DELETE_HISTORY_TRACK, 5, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3401), Argument::Number(0)]
+    );
+    assert_eq!(
+        s.handle(&numbers(kind::DELETE_HISTORY_TRACK, 6, &[CTX, 7]))[0].arguments,
+        vec![Argument::Number(0x3401), Argument::Number(0xffff_ffff)]
+    );
     // Not a rekordbox track (type 2, a USB track's): left alone, as rekordbox does.
-    assert!(s.handle(&numbers(kind::INSERT_HISTORY, 7, &[0x0101_0302, TRACK])).is_empty());
-    assert_eq!(*catalog.0.lock().unwrap(), vec![
-        Edit::HistoryAdd { track: TRACK },
-        Edit::HistoryDelete { history: 0xffff_ffff },
-        Edit::HistoryRemove { track: TRACK },
-        Edit::HistoryRemove { track: 7 },
-    ]);
+    assert!(s
+        .handle(&numbers(kind::INSERT_HISTORY, 7, &[0x0101_0302, TRACK]))
+        .is_empty());
+    assert_eq!(
+        *catalog.0.lock().unwrap(),
+        vec![
+            Edit::HistoryAdd { track: TRACK },
+            Edit::HistoryDelete {
+                history: 0xffff_ffff
+            },
+            Edit::HistoryRemove { track: TRACK },
+            Edit::HistoryRemove { track: 7 },
+        ]
+    );
 }
 
 #[test]
 fn grid_offset_writes_do_not_claim_success_without_persistence() {
     let mut s = session();
     browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
-    assert_eq!(s.handle(&numbers(kind::SAVE_GRID_OFFSET, 8, &[CTX, TRACK, 234]))[0].arguments,
-        vec![Argument::Number(0x2605), Argument::Number(1)]);
-    assert_eq!(s.handle(&numbers(kind::GRID_OFFSET, 9, &[CTX, TRACK]))[0].arguments,
-        vec![Argument::Number(0x2804), Argument::Number(0)]);
+    assert_eq!(
+        s.handle(&numbers(kind::SAVE_GRID_OFFSET, 8, &[CTX, TRACK, 234]))[0].arguments,
+        vec![Argument::Number(0x2605), Argument::Number(1)]
+    );
+    assert_eq!(
+        s.handle(&numbers(kind::GRID_OFFSET, 9, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x2804), Argument::Number(0)]
+    );
     // An edit acknowledgement must not replace the browser's pending menu.
     let rendered = s.handle(&numbers(kind::RENDER, 10, &[CTX, 0, 1]));
     assert_eq!(rendered[1].arguments[1], Argument::Number(TRACK));

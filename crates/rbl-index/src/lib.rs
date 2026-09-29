@@ -13,6 +13,7 @@
 //!   into `sort_unstable_by_key` over `u32`s.
 
 pub mod cache;
+mod category;
 mod filter;
 pub mod folder;
 pub mod key;
@@ -24,6 +25,7 @@ pub mod testing;
 mod view;
 pub mod xml_export;
 
+pub use category::bpm_bucket;
 pub use filter::{
     whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TrackFilter, COLOR_NAMES,
 };
@@ -387,6 +389,23 @@ pub const ATTRIBUTE_FOLDER: u8 = 1;
 pub const ATTRIBUTE_SMART: u8 = 4;
 
 impl Library {
+    /// Rewrites every audio path in place.
+    ///
+    /// A headless Link Export host can mount the same collection at a
+    /// different absolute path than the rekordbox machine that wrote
+    /// `master.db`. The path sent to a player and the path exported over NFS
+    /// must agree, so consumers apply that translation to the index once,
+    /// before serving it.
+    pub fn map_folder_paths(&mut self, mut map: impl FnMut(&str) -> String) {
+        let mut paths =
+            StrColumn::with_capacity(self.folder_path.len(), self.folder_path.heap_bytes());
+        for row in 0..self.folder_path.len() {
+            paths.push(&map(self.folder_path.get(row)));
+        }
+        self.folder_path = paths;
+        self.by_path = OnceLock::new();
+    }
+
     /// Sets the row count. Only the snapshot reader needs this: every other
     /// path counts rows as it pushes them.
     pub(crate) fn set_count(&mut self, count: usize) {

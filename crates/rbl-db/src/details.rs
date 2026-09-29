@@ -53,15 +53,22 @@ pub struct TrackDetails {
     /// library without the table.
     pub my_tags: Vec<String>,
     pub title: String,
+    pub artist_id: u32,
     pub artist: String,
+    pub album_id: u32,
     pub album: String,
     pub album_artist: String,
+    pub original_artist_id: u32,
     pub original_artist: String,
     pub composer: String,
+    pub remixer_id: u32,
     pub remixer: String,
     pub lyricist: String,
+    pub genre_id: u32,
     pub genre: String,
+    pub label_id: u32,
     pub label: String,
+    pub key_id: u32,
     pub key: String,
     pub comment: String,
     /// `Subtitle` — see the module docs.
@@ -94,7 +101,10 @@ pub struct TrackDetails {
 }
 
 /// Saved notes for the live memory and hot cues of one track.
-pub fn cue_comments(conn: &Connection, id: &str) -> Result<std::collections::HashMap<String, String>> {
+pub fn cue_comments(
+    conn: &Connection,
+    id: &str,
+) -> Result<std::collections::HashMap<String, String>> {
     let mut statement = conn.prepare(
         "SELECT ID, COALESCE(Comment, '') FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0",
     )?;
@@ -104,7 +114,10 @@ pub fn cue_comments(conn: &Connection, id: &str) -> Result<std::collections::Has
 
 /// The `Color` value of each live memory cue. Rekordbox stores 0..7 for the
 /// named palette and 255 for no colour.
-pub fn memory_cue_colours(conn: &Connection, id: &str) -> Result<std::collections::HashMap<String, u8>> {
+pub fn memory_cue_colours(
+    conn: &Connection,
+    id: &str,
+) -> Result<std::collections::HashMap<String, u8>> {
     let mut statement = conn.prepare(
         "SELECT ID, Color FROM djmdCue WHERE ContentID = ?1 AND Kind = 0 AND rb_local_deleted = 0",
     )?;
@@ -117,7 +130,9 @@ pub fn memory_cue_colours(conn: &Connection, id: &str) -> Result<std::collection
 
 /// Reads one live track, or `None` when there is no such track.
 pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
-    let Some(mut details) = track_row(conn, id)? else { return Ok(None) };
+    let Some(mut details) = track_row(conn, id)? else {
+        return Ok(None);
+    };
     details.my_tags = my_tags_of(conn, id);
     Ok(Some(details))
 }
@@ -126,6 +141,35 @@ pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>
 /// read only when that column is visible.
 pub fn browser_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
     track_row(conn, id)
+}
+
+/// Live tracks connected to `seed` by a live recommendation-like relation.
+///
+/// Rekordbox treats `djmdRecommendLike` as bidirectional. Relation row order
+/// is retained so the caller can apply its requested track sort explicitly.
+pub fn matching_ids(conn: &Connection, seed: u32) -> Result<Vec<u32>> {
+    let seed = seed.to_string();
+    let mut statement = conn.prepare(
+        "SELECT CASE WHEN relation.ContentID1 = ?1
+                     THEN relation.ContentID2 ELSE relation.ContentID1 END
+         FROM djmdRecommendLike relation
+         JOIN djmdContent first
+           ON first.ID = relation.ContentID1 AND first.rb_local_deleted = 0
+         JOIN djmdContent second
+           ON second.ID = relation.ContentID2 AND second.rb_local_deleted = 0
+         WHERE relation.rb_local_deleted = 0
+           AND (relation.ContentID1 = ?1 OR relation.ContentID2 = ?1)
+         ORDER BY relation.rowid",
+    )?;
+    let rows = statement.query_map([seed], |row| row.get::<_, Option<String>>(0))?;
+    let mut ids = Vec::new();
+    for id in rows {
+        let Some(id) = id? else { continue };
+        if let Ok(id) = id.parse() {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
 }
 
 /// The My Tags on a track, by id; none on a library without the table.
@@ -147,9 +191,15 @@ pub fn my_tag_names(conn: &Connection, id: &str) -> Vec<String> {
          JOIN djmdMyTag t ON t.ID = s.MyTagID AND t.rb_local_deleted = 0
          WHERE s.ContentID = ?1 AND s.rb_local_deleted = 0
          ORDER BY s.TrackNo, s.MyTagID",
-    ) else { return Vec::new() };
+    ) else {
+        return Vec::new();
+    };
     stmt.query_map([id], |row| row.get::<_, String>(0))
-        .map(|rows| rows.filter_map(std::result::Result::ok).filter(|name| !name.is_empty()).collect())
+        .map(|rows| {
+            rows.filter_map(std::result::Result::ok)
+                .filter(|name| !name.is_empty())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -158,9 +208,10 @@ fn track_row(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
     // reference: seven round trips for one row is seven times the work for
     // no reason, and the joins are on primary keys.
     conn.query_row(
-        "SELECT c.ID, c.Title, artist.Name, album.Name, album_artist.Name,
-                org.Name, composer.Name, remixer.Name, c.Lyricist,
-                genre.Name, label.Name, key.ScaleName, c.Commnt, c.Subtitle,
+        "SELECT c.ID, c.Title, c.ArtistID, artist.Name, c.AlbumID, album.Name,
+                album_artist.Name, c.OrgArtistID, org.Name, composer.Name,
+                c.RemixerID, remixer.Name, c.Lyricist, c.GenreID, genre.Name,
+                c.LabelID, label.Name, c.KeyID, key.ScaleName, c.Commnt, c.Subtitle,
                 c.DeliveryComment, c.ColorID, c.Rating, c.BPM, c.Length,
                 c.ReleaseYear, c.TrackNo, c.DiscNo, c.DJPlayCount, c.FileType,
                 c.FileSize, c.BitRate, c.SampleRate, c.BitDepth, c.DateCreated,
@@ -182,38 +233,45 @@ fn track_row(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
                 id: text(r, 0),
                 my_tags: Vec::new(),
                 title: text(r, 1),
-                artist: text(r, 2),
-                album: text(r, 3),
-                album_artist: text(r, 4),
-                original_artist: text(r, 5),
-                composer: text(r, 6),
-                remixer: text(r, 7),
-                lyricist: text(r, 8),
-                genre: text(r, 9),
-                label: text(r, 10),
-                key: text(r, 11),
-                comment: text(r, 12),
-                mix_name: text(r, 13),
-                message: text(r, 14),
-                color: text(r, 15),
+                artist_id: small(number(r, 2)),
+                artist: text(r, 3),
+                album_id: small(number(r, 4)),
+                album: text(r, 5),
+                album_artist: text(r, 6),
+                original_artist_id: small(number(r, 7)),
+                original_artist: text(r, 8),
+                composer: text(r, 9),
+                remixer_id: small(number(r, 10)),
+                remixer: text(r, 11),
+                lyricist: text(r, 12),
+                genre_id: small(number(r, 13)),
+                genre: text(r, 14),
+                label_id: small(number(r, 15)),
+                label: text(r, 16),
+                key_id: small(number(r, 17)),
+                key: text(r, 18),
+                comment: text(r, 19),
+                mix_name: text(r, 20),
+                message: text(r, 21),
+                color: text(r, 22),
                 // Stars as a count, 0 to 5, as the index reads them.
-                rating: u8::try_from(number(r, 16)).unwrap_or(5).min(5),
-                bpm_x100: small(number(r, 17)),
-                duration_sec: small(number(r, 18)),
-                year: small(number(r, 19)),
-                track_number: small(number(r, 20)),
-                disc_number: small(number(r, 21)),
-                play_count: small(number(r, 22)),
-                file_type: small(number(r, 23)),
-                file_size: u64::try_from(number(r, 24)).unwrap_or(0),
-                bitrate: small(number(r, 25)),
-                sample_rate: small(number(r, 26)),
-                bit_depth: small(number(r, 27)),
-                date_created: text(r, 28),
-                release_date: text(r, 29),
-                path: text(r, 30),
-                hot_cue_auto_load: text(r, 31) == "on",
-                publish: text(r, 32) == "on",
+                rating: u8::try_from(number(r, 23)).unwrap_or(5).min(5),
+                bpm_x100: small(number(r, 24)),
+                duration_sec: small(number(r, 25)),
+                year: small(number(r, 26)),
+                track_number: small(number(r, 27)),
+                disc_number: small(number(r, 28)),
+                play_count: small(number(r, 29)),
+                file_type: small(number(r, 30)),
+                file_size: u64::try_from(number(r, 31)).unwrap_or(0),
+                bitrate: small(number(r, 32)),
+                sample_rate: small(number(r, 33)),
+                bit_depth: small(number(r, 34)),
+                date_created: text(r, 35),
+                release_date: text(r, 36),
+                path: text(r, 37),
+                hot_cue_auto_load: text(r, 38) == "on",
+                publish: text(r, 39) == "on",
             })
         },
     )
@@ -223,7 +281,10 @@ fn track_row(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
 
 /// A text column, with NULL as empty.
 fn text(r: &rusqlite::Row<'_>, index: usize) -> String {
-    r.get::<_, Option<String>>(index).ok().flatten().unwrap_or_default()
+    r.get::<_, Option<String>>(index)
+        .ok()
+        .flatten()
+        .unwrap_or_default()
 }
 
 /// An integer column, with NULL as zero.
@@ -289,9 +350,30 @@ mod tests {
     }
 
     #[test]
+    fn matching_relations_are_bidirectional_live_and_source_ordered() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE djmdContent (ID TEXT, rb_local_deleted INTEGER);
+             CREATE TABLE djmdRecommendLike (
+                 ContentID1 TEXT, ContentID2 TEXT, rb_local_deleted INTEGER
+             );
+             INSERT INTO djmdContent VALUES
+                 ('10', 0), ('20', 0), ('30', 0), ('40', 1), ('50', 0);
+             INSERT INTO djmdRecommendLike VALUES
+                 ('10', '30', 0), ('20', '10', 0), ('10', '40', 0),
+                 ('10', '50', 1);",
+        )
+        .unwrap();
+
+        assert_eq!(matching_ids(&conn, 10).unwrap(), [30, 20]);
+    }
+
+    #[test]
     fn a_bare_fixture_row_reads_with_zeros_and_blanks() {
         let (_dir, library) = open();
-        let details = track_details(library.connection(), &track_id(1)).expect("read").expect("row");
+        let details = track_details(library.connection(), &track_id(1))
+            .expect("read")
+            .expect("row");
         assert_eq!(details.title, "Track 001");
         assert_eq!(details.path, "/fixture/audio/track001.mp3");
         assert_eq!(details.bpm_x100, 12_801);
@@ -319,7 +401,8 @@ mod tests {
                  (ID, MyTagID, ContentID, TrackNo, rb_local_deleted, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)",
                 params![id, tag, track, order, stamp],
-            ).unwrap();
+            )
+            .unwrap();
         }
         assert_eq!(my_tag_names(conn, &track), ["Warm-up", "Peak"]);
     }
@@ -368,7 +451,9 @@ mod tests {
         )
         .expect("update");
 
-        let d = track_details(conn, &track_id(5)).expect("read").expect("row");
+        let d = track_details(conn, &track_id(5))
+            .expect("read")
+            .expect("row");
         assert_eq!(d.artist, "Artist One");
         assert_eq!(d.album, "The Album");
         assert_eq!(d.album_artist, "Album Artist");
@@ -402,8 +487,11 @@ mod tests {
     fn a_deleted_or_unknown_track_is_none_not_an_error() {
         let (_dir, library) = open();
         let conn = library.connection();
-        conn.execute("UPDATE djmdContent SET rb_local_deleted = 1 WHERE ID = ?1", params![track_id(3)])
-            .expect("soft delete");
+        conn.execute(
+            "UPDATE djmdContent SET rb_local_deleted = 1 WHERE ID = ?1",
+            params![track_id(3)],
+        )
+        .expect("soft delete");
         assert_eq!(track_details(conn, &track_id(3)).expect("read"), None);
         assert_eq!(track_details(conn, "no-such-id").expect("read"), None);
     }
@@ -417,8 +505,13 @@ mod tests {
             params![track_id(2)],
         )
         .expect("update");
-        let d = track_details(conn, &track_id(2)).expect("read").expect("row");
+        let d = track_details(conn, &track_id(2))
+            .expect("read")
+            .expect("row");
         assert_eq!(d.bpm_x100, 12_850);
-        assert_eq!(d.play_count, 0, "unparseable text reads as zero rather than failing the row");
+        assert_eq!(
+            d.play_count, 0,
+            "unparseable text reads as zero rather than failing the row"
+        );
     }
 }

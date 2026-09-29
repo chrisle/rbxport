@@ -1,7 +1,12 @@
 //! The beacon against captured packets: a player's keep-alive, its media
 //! query, its `46`, and its status with one of our tracks playing, all sent
 //! from a socket standing in for the player, on loopback.
-#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::sync::{Arc, Mutex};
@@ -14,12 +19,23 @@ const CDJ_KEEP_ALIVE: &str =
     "5173707431576d4a4f4c060043444a2d333030300000000000000000000000000103003601012497ed0b4043c0a80198030000000164";
 const MEDIA_QUERY: &str =
     "5173707431576d4a4f4c0543444a2d33303030000000000000000000000000010001000cc0a801980000001100000003";
-const HANDSHAKE: &str = "5173707431576d4a4f4c4643444a2d333030300000000000000000000000000100010004010400e4";
+const HANDSHAKE: &str =
+    "5173707431576d4a4f4c4643444a2d333030300000000000000000000000000100010004010400e4";
 const STATUS_PLAYING_OURS: &[u8] = include_bytes!("fixtures/cdj-status-playing-ours.bin");
 const STATUS_EMPTY: &[u8] = include_bytes!("fixtures/cdj-status-empty.bin");
+const LINK_DEVICE_NUMBER: u8 = 0x11;
 
 fn hex(s: &str) -> Vec<u8> {
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
+}
+
+fn status_playing_ours() -> Vec<u8> {
+    let mut packet = STATUS_PLAYING_OURS.to_vec();
+    packet[0x28] = LINK_DEVICE_NUMBER;
+    packet
 }
 
 /// Library facts, remembering the tracks the beacon reports loaded.
@@ -53,13 +69,22 @@ fn join(beacon: &Beacon, player: &UdpSocket) {
     assert_eq!(beacon.number(), None);
     let announce = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.announce_port());
     player.send_to(&hex(CDJ_KEEP_ALIVE), announce).unwrap();
-    wait_for_link(beacon, &LinkState::Up { number: 0x11 });
+    wait_for_link(
+        beacon,
+        &LinkState::Up {
+            number: LINK_DEVICE_NUMBER,
+        },
+    );
 }
 
 fn wait_for_link(beacon: &Beacon, wanted: &rbl_link::LinkState) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while beacon.link_state() != *wanted {
-        assert!(Instant::now() < deadline, "the link did not reach {wanted:?}: {:?}", beacon.link_state());
+        assert!(
+            Instant::now() < deadline,
+            "the link did not reach {wanted:?}: {:?}",
+            beacon.link_state()
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -68,7 +93,9 @@ fn wait_for_link(beacon: &Beacon, wanted: &rbl_link::LinkState) {
 fn start_on(interface: Option<String>) -> (Beacon, UdpSocket, Arc<Facts>) {
     let facts = Arc::new(Facts::default());
     let player = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    player.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    player
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
     let beacon = Beacon::start(
         BeaconConfig {
             interface,
@@ -93,7 +120,9 @@ fn receive(player: &UdpSocket, kind: u8) -> Vec<u8> {
     let mut buffer = [0_u8; 2048];
     let deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < deadline {
-        let Ok((len, _)) = player.recv_from(&mut buffer) else { continue };
+        let Ok((len, _)) = player.recv_from(&mut buffer) else {
+            continue;
+        };
         if packet_kind(&buffer[..len]) == Ok(kind) {
             return buffer[..len].to_vec();
         }
@@ -134,9 +163,13 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
     // the slot the player asked about: the emulator's `03` and a current
     // CDJ-3000's `04` alike. The captured query names 192.168.1.152 as the
     // asker; ours has to name us.
-    for slot in [rbl_prolink::SLOT_REKORDBOX_LEGACY, rbl_prolink::SLOT_REKORDBOX] {
+    for slot in [
+        rbl_prolink::SLOT_REKORDBOX_LEGACY,
+        rbl_prolink::SLOT_REKORDBOX,
+    ] {
         let mut query = hex(MEDIA_QUERY);
         query[0x24..0x28].copy_from_slice(&Ipv4Addr::LOCALHOST.octets());
+        query[0x2b] = LINK_DEVICE_NUMBER;
         query[0x2f] = slot;
         player.send_to(&query, status).unwrap();
         let response = receive(&player, 0x06);
@@ -149,11 +182,11 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
     player.send_to(&hex(HANDSHAKE), status).unwrap();
     let reply = receive(&player, 0x47);
     assert_eq!(reply.len(), 0x48);
-    assert_eq!(reply[0x21], 0x11);
+    assert_eq!(reply[0x21], LINK_DEVICE_NUMBER);
 
     // The player's status says what it has loaded from us and whether it is
     // master.
-    player.send_to(STATUS_PLAYING_OURS, status).unwrap();
+    player.send_to(&status_playing_ours(), status).unwrap();
     let players = wait_for(&beacon, |p| p[0].loaded.is_some());
     assert_eq!(players[0].loaded, Some(17_181));
     assert!(players[0].playing);
@@ -197,6 +230,7 @@ fn a_beacon_pinned_to_an_interface_still_hears_and_answers_a_player() {
 
     let mut query = hex(MEDIA_QUERY);
     query[0x24..0x28].copy_from_slice(&Ipv4Addr::LOCALHOST.octets());
+    query[0x2b] = LINK_DEVICE_NUMBER;
     player.send_to(&query, status).unwrap();
     assert_eq!(receive(&player, 0x06).len(), 0xc0);
 
@@ -209,19 +243,29 @@ fn nothing_is_said_until_a_player_is_heard_and_the_join_settles_on_seventeen() {
     let (beacon, player, _) = start_on(None);
     // Silence: no status for a second on an empty network.
     let mut buffer = [0_u8; 2048];
-    player.set_read_timeout(Some(Duration::from_millis(1000))).unwrap();
-    assert!(player.recv_from(&mut buffer).is_err(), "a packet before any player was heard");
-    player.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    player
+        .set_read_timeout(Some(Duration::from_millis(1000)))
+        .unwrap();
+    assert!(
+        player.recv_from(&mut buffer).is_err(),
+        "a packet before any player was heard"
+    );
+    player
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
 
     // The keep-alive starts the join: three claims and six rounds of six
     // probes at 100 ms, then 17 — about four seconds.
     let started = Instant::now();
     join(&beacon, &player);
     let took = started.elapsed();
-    assert!((Duration::from_millis(3500)..Duration::from_millis(6000)).contains(&took), "{took:?}");
-    assert_eq!(beacon.number(), Some(0x11));
+    assert!(
+        (Duration::from_millis(3500)..Duration::from_millis(6000)).contains(&took),
+        "{took:?}"
+    );
+    assert_eq!(beacon.number(), Some(LINK_DEVICE_NUMBER));
     let status = receive(&player, 0x29);
-    assert_eq!(status[0x21], 0x11);
+    assert_eq!(status[0x21], LINK_DEVICE_NUMBER);
     beacon.stop();
 }
 
@@ -232,7 +276,7 @@ fn a_number_answered_for_is_left_to_its_holder() {
     player.send_to(&hex(CDJ_KEEP_ALIVE), announce).unwrap();
     // Another rekordbox holds 17: it answers every probe of it with `03`,
     // sent to the prober. The join skips 17 from then on and takes 18.
-    let in_use = rbl_prolink::number_in_use_reply("rekordbox", 0x11);
+    let in_use = rbl_prolink::number_in_use_reply("rekordbox", LINK_DEVICE_NUMBER);
     let deadline = Instant::now() + Duration::from_millis(1500);
     while Instant::now() < deadline {
         player.send_to(&in_use, announce).unwrap();
@@ -242,7 +286,12 @@ fn a_number_answered_for_is_left_to_its_holder() {
     let status = receive(&player, 0x29);
     assert_eq!(status[0x21], 0x12, "the status carries the number taken");
     // And 18 is answered for when probed.
-    let probe = rbl_prolink::rekordbox_claim_stage2([1, 2, 3, 4, 5, 6], Ipv4Addr::new(127, 0, 0, 2), 0x12, 1);
+    let probe = rbl_prolink::rekordbox_claim_stage2(
+        [1, 2, 3, 4, 5, 6],
+        Ipv4Addr::new(127, 0, 0, 2),
+        0x12,
+        1,
+    );
     player.send_to(&probe, announce).unwrap();
     // The reply goes to the prober's address on the announce port, which
     // on loopback is the beacon's own socket; what can be checked here is
@@ -260,14 +309,26 @@ fn the_status_beacon_runs_at_five_hertz_with_no_tempo_until_a_master_reports() {
     let started = Instant::now();
     assert_eq!(first.len(), 0x38);
     assert_eq!(&first[0x0b..0x14], b"rekordbox");
-    assert_eq!(first[0x21], 0x11);
-    assert_eq!(u16::from_be_bytes([first[0x2e], first[0x2f]]), 0, "no master yet");
+    assert_eq!(first[0x21], LINK_DEVICE_NUMBER);
+    assert_eq!(
+        u16::from_be_bytes([first[0x2e], first[0x2f]]),
+        0,
+        "no master yet"
+    );
     // Four more within a second and a bit: 200 ms apart.
     for _ in 0..4 {
         receive(&player, 0x29);
     }
-    assert!(started.elapsed() < Duration::from_millis(1200), "{:?}", started.elapsed());
-    assert_eq!(beacon.players().len(), 1, "the player whose keep-alive brought the link up");
+    assert!(
+        started.elapsed() < Duration::from_millis(1200),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        beacon.players().len(),
+        1,
+        "the player whose keep-alive brought the link up"
+    );
     beacon.stop();
 }
 
@@ -281,7 +342,9 @@ fn receive_status(player: &UdpSocket, want_master: bool) -> Vec<u8> {
     let mut buffer = [0_u8; 2048];
     let deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < deadline {
-        let Ok((len, _)) = player.recv_from(&mut buffer) else { continue };
+        let Ok((len, _)) = player.recv_from(&mut buffer) else {
+            continue;
+        };
         let packet = &buffer[..len];
         if packet_kind(packet) == Ok(0x29) && (packet[0x27] == 0xe0) == want_master {
             return packet.to_vec();
@@ -312,18 +375,33 @@ fn a_load_command_reaches_the_player_from_our_status_port() {
 
     // The player has to be on the link before it can be told anything.
     player.send_to(&hex(CDJ_KEEP_ALIVE), status).unwrap();
-    player.send_to(STATUS_PLAYING_OURS, status).unwrap();
+    player.send_to(&status_playing_ours(), status).unwrap();
     wait_for(&beacon, |p| p.iter().any(|q| q.number == 1));
 
     beacon.load_track(1, 17_181).unwrap();
     let (packet, from) = receive_from(&player, 0x19);
 
     // It came from our status port, as rekordbox's own replies do.
-    assert_eq!(from.port(), beacon.status_port(), "a command must leave from the port the player knows");
+    assert_eq!(
+        from.port(),
+        beacon.status_port(),
+        "a command must leave from the port the player knows"
+    );
     assert_eq!(packet.len(), rbl_prolink::LOAD_TRACK_LEN);
-    assert_eq!(rbl_prolink::status_device_name(&packet).unwrap(), rbl_prolink::REKORDBOX_NAME);
-    assert_eq!(packet[0x21], rbl_prolink::REKORDBOX_DEVICE_NUMBER, "sent as rekordbox");
-    assert_eq!(packet[0x28], rbl_prolink::REKORDBOX_DEVICE_NUMBER, "the track's source device");
+    assert_eq!(
+        rbl_prolink::status_device_name(&packet).unwrap(),
+        rbl_prolink::REKORDBOX_NAME
+    );
+    assert_eq!(
+        packet[0x21],
+        LINK_DEVICE_NUMBER,
+        "sent as rekordbox"
+    );
+    assert_eq!(
+        packet[0x28],
+        LINK_DEVICE_NUMBER,
+        "the track's source device"
+    );
     assert_eq!(packet[0x29], rbl_prolink::SLOT_REKORDBOX);
     assert_eq!(&packet[0x2c..0x30], &17_181_u32.to_be_bytes());
     assert_eq!(packet[0x40], 0, "player 1, counted from zero");
@@ -338,9 +416,13 @@ fn a_load_command_reaches_the_player_from_our_status_port() {
 /// beats it broadcasts as master can be read.
 fn start_master() -> (Beacon, UdpSocket, UdpSocket) {
     let player = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    player.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    player
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
     let beats = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    beats.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    beats
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
     let beacon = Beacon::start(
         BeaconConfig {
             interface: None,
@@ -374,12 +456,20 @@ fn as_master_the_beacon_drives_beats_and_says_it_is_master() {
     // beat within the bar of 1..4.
     let beat = receive(&beats, rbl_prolink::BEAT_KIND);
     assert_eq!(beat.len(), rbl_prolink::BEAT_LEN);
-    assert_eq!(rbl_prolink::status_device_name(&beat).unwrap(), rbl_prolink::REKORDBOX_NAME);
+    assert_eq!(
+        rbl_prolink::status_device_name(&beat).unwrap(),
+        rbl_prolink::REKORDBOX_NAME
+    );
     let bar_beat = beat[0x5c];
     assert!((1..=4).contains(&bar_beat), "beat within the bar");
     assert_eq!(
         beat,
-        rbl_prolink::beat_packet(rbl_prolink::REKORDBOX_NAME, rbl_prolink::REKORDBOX_DEVICE_NUMBER, 12_800, bar_beat)
+        rbl_prolink::beat_packet(
+            rbl_prolink::REKORDBOX_NAME,
+            LINK_DEVICE_NUMBER,
+            12_800,
+            bar_beat
+        )
     );
 
     // The status now says we are master, at our tempo. Read one addressed to
@@ -394,10 +484,15 @@ fn as_master_the_beacon_drives_beats_and_says_it_is_master() {
     beacon.set_master(false);
     std::thread::sleep(Duration::from_millis(150));
     // Drain, then confirm no fresh beat arrives within a beat's time.
-    beats.set_read_timeout(Some(Duration::from_millis(400))).unwrap();
+    beats
+        .set_read_timeout(Some(Duration::from_millis(400)))
+        .unwrap();
     let mut buffer = [0_u8; 2048];
     while beats.recv_from(&mut buffer).is_ok() {}
-    assert!(beats.recv_from(&mut buffer).is_err(), "no beats once master is off");
+    assert!(
+        beats.recv_from(&mut buffer).is_err(),
+        "no beats once master is off"
+    );
     let s = receive_status(&player, false);
     assert_eq!(s[0x27], 0xc0, "not master again");
 

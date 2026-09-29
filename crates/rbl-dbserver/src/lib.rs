@@ -144,7 +144,11 @@ fn be32(b: &[u8], at: usize) -> u32 {
 
 impl Message {
     pub fn new(transaction: u32, kind: u16, arguments: Vec<Argument>) -> Self {
-        Self { transaction, kind, arguments }
+        Self {
+            transaction,
+            kind,
+            arguments,
+        }
     }
 
     pub fn encode(&self) -> Vec<u8> {
@@ -181,13 +185,20 @@ impl Message {
     /// arriving in one TCP segment, and detect one split across segments.
     pub fn decode(bytes: &[u8]) -> Result<(Self, usize)> {
         if bytes.len() < HEADER_LEN {
-            return Err(DbError::Truncated { wanted: HEADER_LEN, had: bytes.len() });
+            return Err(DbError::Truncated {
+                wanted: HEADER_LEN,
+                had: bytes.len(),
+            });
         }
         // The field tags are checked as part of the magic: a stream that is
         // not at a message boundary fails here rather than misreading a body.
         let magic = be32(bytes, 1);
-        if bytes[0] != 0x11 || magic != MAGIC || bytes[5] != 0x11 || bytes[10] != 0x10
-            || bytes[13] != 0x0f || bytes[15] != 0x14
+        if bytes[0] != 0x11
+            || magic != MAGIC
+            || bytes[5] != 0x11
+            || bytes[10] != 0x10
+            || bytes[13] != 0x0f
+            || bytes[15] != 0x14
         {
             return Err(DbError::BadMagic(magic));
         }
@@ -211,9 +222,15 @@ impl Message {
 
         let mut at = HEADER_LEN + tags;
         if bytes.len() < at {
-            return Err(DbError::Truncated { wanted: at, had: bytes.len() });
+            return Err(DbError::Truncated {
+                wanted: at,
+                had: bytes.len(),
+            });
         }
-        let declared: Vec<u8> = bytes.get(HEADER_LEN..HEADER_LEN + count as usize).unwrap_or(&[]).to_vec();
+        let declared: Vec<u8> = bytes
+            .get(HEADER_LEN..HEADER_LEN + count as usize)
+            .unwrap_or(&[])
+            .to_vec();
         let mut arguments = Vec::with_capacity(count as usize);
         for declared_tag in declared {
             // An empty blob is not sent at all. The number before a blob is
@@ -222,11 +239,15 @@ impl Message {
             // carries three, and a player's metadata request declares five
             // and carries four. [DOC] Deep Symmetry, track_metadata; measured
             // both ways in the capture.
-            if declared_tag == 0x03 && matches!(arguments.last(), Some(Argument::Number(0)) | None) {
+            if declared_tag == 0x03 && matches!(arguments.last(), Some(Argument::Number(0)) | None)
+            {
                 arguments.push(Argument::Blob(Vec::new()));
                 continue;
             }
-            let tag = bytes.get(at).copied().ok_or(DbError::Truncated { wanted: at + 1, had: bytes.len() })?;
+            let tag = bytes.get(at).copied().ok_or(DbError::Truncated {
+                wanted: at + 1,
+                had: bytes.len(),
+            })?;
             at += 1;
             match tag {
                 0x0f..=0x11 => {
@@ -237,7 +258,10 @@ impl Message {
                         _ => 4,
                     };
                     if at + width > bytes.len() {
-                        return Err(DbError::Truncated { wanted: at + width, had: bytes.len() });
+                        return Err(DbError::Truncated {
+                            wanted: at + width,
+                            had: bytes.len(),
+                        });
                     }
                     let value = match width {
                         1 => u32::from(bytes.get(at).copied().unwrap_or(0)),
@@ -254,7 +278,10 @@ impl Message {
                     let len = be32(bytes, at) as usize;
                     at += 4;
                     if at + len > bytes.len() {
-                        return Err(DbError::Truncated { wanted: at + len, had: bytes.len() });
+                        return Err(DbError::Truncated {
+                            wanted: at + len,
+                            had: bytes.len(),
+                        });
                     }
                     arguments.push(Argument::Blob(
                         bytes.get(at..at + len).unwrap_or(&[]).to_vec(),
@@ -285,7 +312,14 @@ impl Message {
             }
         }
 
-        Ok((Self { transaction, kind, arguments }, at))
+        Ok((
+            Self {
+                transaction,
+                kind,
+                arguments,
+            },
+            at,
+        ))
     }
 
     /// Decodes as many whole messages as the buffer holds, returning them and
@@ -318,24 +352,69 @@ pub mod kind {
     pub const TEARDOWN: u16 = 0x0100;
     /// The top-level menu for a media slot.
     pub const ROOT_MENU: u16 = 0x1000;
+    pub const GENRE_MENU: u16 = 0x1001;
     pub const ARTIST_MENU: u16 = 0x1002;
     pub const ALBUM_MENU: u16 = 0x1003;
     /// Every track.
     pub const TRACK_MENU: u16 = 0x1004;
+    /// Distinct rounded BPM values.
+    pub const BPM_MENU: u16 = 0x1006;
+    /// Distinct track ratings.
+    pub const RATING_MENU: u16 = 0x1007;
+    /// Release-year decades.
+    pub const RELEASE_DECADES: u16 = 0x1008;
+    /// Labels referenced by tracks.
+    pub const LABEL_MENU: u16 = 0x100a;
+    /// The fixed eight-colour palette.
+    pub const COLOR_MENU: u16 = 0x100d;
+    /// Track-duration minute buckets.
+    pub const TIME_MENU: u16 = 0x1010;
+    /// Distinct bitrates.
+    pub const BITRATE_MENU: u16 = 0x1011;
     pub const HISTORY_MENU: u16 = 0x1012;
+    /// Every track, named by its file name rather than its title.
+    pub const FILE_NAME_MENU: u16 = 0x1013;
     pub const KEY_MENU: u16 = 0x1014;
+    /// Tracks paired with a seed track in rekordbox's matching table.
+    pub const MATCHING_TRACKS: u16 = 0x1017;
     /// An artist's albums.
+    pub const GENRE_ARTISTS: u16 = 0x1101;
     pub const ARTIST_ALBUMS: u16 = 0x1102;
     /// An album's tracks.
     pub const ALBUM_TRACKS: u16 = 0x1103;
     /// Playlists and folders (last argument 1), or a playlist's tracks (0).
     pub const PLAYLIST_MENU: u16 = 0x1105;
+    /// BPM tolerances from zero through six percent.
+    pub const BPM_RANGES: u16 = 0x1106;
+    /// Tracks with a rating.
+    pub const RATING_TRACKS: u16 = 0x1107;
+    /// Release years in a decade.
+    pub const RELEASE_YEARS: u16 = 0x1108;
+    /// Artists referenced by tracks on a label.
+    pub const LABEL_ARTISTS: u16 = 0x110a;
+    /// Tracks assigned a colour.
+    pub const COLOR_TRACKS: u16 = 0x110d;
+    /// Tracks in a duration minute bucket.
+    pub const TIME_TRACKS: u16 = 0x1110;
+    /// Tracks with a bitrate.
+    pub const BITRATE_TRACKS: u16 = 0x1111;
     /// A session's tracks.
     pub const HISTORY_TRACKS: u16 = 0x1112;
     /// The three related-key rows for a key.
     pub const RELATED_KEYS: u16 = 0x1114;
     /// An artist's tracks, on one album or all.
+    pub const GENRE_ARTIST_ALBUMS: u16 = 0x1201;
     pub const ARTIST_ALBUM_TRACKS: u16 = 0x1202;
+    /// Tracks within a BPM tolerance.
+    pub const BPM_TRACKS: u16 = 0x1206;
+    /// Tracks released in a year.
+    pub const RELEASE_YEAR_TRACKS: u16 = 0x1208;
+    /// Albums referenced by tracks on a label and, optionally, an artist.
+    pub const LABEL_ARTIST_ALBUMS: u16 = 0x120a;
+    /// A genre's tracks, optionally narrowed to an artist and album.
+    pub const GENRE_ARTIST_ALBUM_TRACKS: u16 = 0x1301;
+    /// Tracks on a label, optionally narrowed to an artist and album.
+    pub const LABEL_ARTIST_ALBUM_TRACKS: u16 = 0x130a;
     /// Tracks in a key, widened by a distance.
     pub const KEY_TRACKS: u16 = 0x1214;
     /// Search by text.
@@ -438,9 +517,33 @@ pub mod kind {
             SETUP => "setup".to_owned(),
             TEARDOWN => "teardown".to_owned(),
             ROOT_MENU => "root menu".to_owned(),
+            GENRE_MENU => "genre menu".to_owned(),
+            GENRE_ARTISTS => "genre's artists".to_owned(),
+            GENRE_ARTIST_ALBUMS => "genre artist's albums".to_owned(),
+            GENRE_ARTIST_ALBUM_TRACKS => "genre artist's album tracks".to_owned(),
             ARTIST_MENU => "artist menu".to_owned(),
             ALBUM_MENU => "album menu".to_owned(),
             TRACK_MENU => "track menu".to_owned(),
+            BPM_MENU => "BPM menu".to_owned(),
+            BPM_RANGES => "BPM ranges".to_owned(),
+            BPM_TRACKS => "BPM tracks".to_owned(),
+            RATING_MENU => "rating menu".to_owned(),
+            RATING_TRACKS => "rating tracks".to_owned(),
+            RELEASE_DECADES => "release decades".to_owned(),
+            RELEASE_YEARS => "release years".to_owned(),
+            RELEASE_YEAR_TRACKS => "release-year tracks".to_owned(),
+            LABEL_MENU => "label menu".to_owned(),
+            LABEL_ARTISTS => "label's artists".to_owned(),
+            LABEL_ARTIST_ALBUMS => "label artist's albums".to_owned(),
+            LABEL_ARTIST_ALBUM_TRACKS => "label artist's album tracks".to_owned(),
+            COLOR_MENU => "color menu".to_owned(),
+            COLOR_TRACKS => "color tracks".to_owned(),
+            TIME_MENU => "time menu".to_owned(),
+            TIME_TRACKS => "time tracks".to_owned(),
+            BITRATE_MENU => "bitrate menu".to_owned(),
+            BITRATE_TRACKS => "bitrate tracks".to_owned(),
+            FILE_NAME_MENU => "file-name menu".to_owned(),
+            MATCHING_TRACKS => "matching tracks".to_owned(),
             HISTORY_MENU => "history menu".to_owned(),
             KEY_MENU => "key menu".to_owned(),
             ARTIST_ALBUMS => "artist's albums".to_owned(),
@@ -501,7 +604,6 @@ pub mod kind {
     }
 }
 
-
 /// A requester device number a real database server will answer.
 ///
 /// Servers answer 1 through 6 and silently ignore 7 and above — a client that
@@ -513,7 +615,14 @@ pub fn is_answerable_device(device: u8) -> bool {
 
 /// Builds the setup message a client sends first.
 pub fn setup_request(device: u8) -> Message {
-    Message::new(SETUP_TXID, kind::SETUP, vec![Argument::Number(u32::from(device)), Argument::Number(SETUP_MAGIC)])
+    Message::new(
+        SETUP_TXID,
+        kind::SETUP,
+        vec![
+            Argument::Number(u32::from(device)),
+            Argument::Number(SETUP_MAGIC),
+        ],
+    )
 }
 
 /// The second setup argument, sent by both sides; meaning unknown, value
@@ -527,7 +636,10 @@ pub fn setup_reply(transaction: u32, our_device: u8) -> Message {
     Message::new(
         transaction,
         kind::SETUP,
-        vec![Argument::Number(u32::from(our_device)), Argument::Number(SETUP_MAGIC)],
+        vec![
+            Argument::Number(u32::from(our_device)),
+            Argument::Number(SETUP_MAGIC),
+        ],
     )
 }
 
@@ -543,5 +655,9 @@ pub fn menu_header(transaction: u32, request_kind: u32, item_count: u32) -> Mess
 
 /// Builds the footer that ends a menu.
 pub fn menu_footer(transaction: u32) -> Message {
-    Message::new(transaction, kind::MENU_FOOTER, vec![Argument::Number(0), Argument::Number(0)])
+    Message::new(
+        transaction,
+        kind::MENU_FOOTER,
+        vec![Argument::Number(0), Argument::Number(0)],
+    )
 }

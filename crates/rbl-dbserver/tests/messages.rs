@@ -3,9 +3,17 @@
 //! The framing is checked against bytes captured from rekordbox 7.2.11
 //! serving a CDJ-3000 (`verification/link`, 2026-09-12); the rest against
 //! the encoding rules that capture established.
-#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 
-use rbl_dbserver::{kind, menu_footer, menu_header, setup_reply, setup_request, Argument, DbError, Message, MAGIC, SETUP_TXID};
+use rbl_dbserver::{
+    kind, menu_footer, menu_header, setup_reply, setup_request, Argument, DbError, Message, MAGIC,
+    SETUP_TXID,
+};
 
 /// Header as measured: `11` magic, `11` transaction, `10` kind, `0f` count,
 /// then the tag list as a blob (`14`, length = count, one tag byte each).
@@ -15,7 +23,8 @@ const HEADER_LEN: usize = 1 + 4 + 1 + 4 + 1 + 2 + 1 + 1 + 1 + 4;
 /// (`verification/link`, rekordbox 7.2.11 ↔ CDJ-3000, 2026-09-12).
 const CAPTURED_SETUP: &str = "11872349ae11fffffffe1000000f021400000002060611000000011100000014";
 /// rekordbox's reply to it: our device number is 0x11.
-const CAPTURED_SETUP_REPLY: &str = "11872349ae11fffffffe1000000f021400000002060611000000111100000014";
+const CAPTURED_SETUP_REPLY: &str =
+    "11872349ae11fffffffe1000000f021400000002060611000000111100000014";
 /// The root-menu request: three numbers.
 const CAPTURED_ROOT_MENU: &str =
     "11872349ae110000017f1010000f031400000003060606110101030111000000001105cfffff";
@@ -35,13 +44,20 @@ fn header_declaring(kind: u16, tags: &[u8]) -> Vec<u8> {
 }
 
 fn hex(s: &str) -> Vec<u8> {
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
 }
 
 #[test]
 fn header_layout_is_exact() {
     let bytes = Message::new(0x1234_5678, kind::ROOT_MENU, vec![]).encode();
-    assert_eq!(bytes.len(), HEADER_LEN, "an argument-free message is header only");
+    assert_eq!(
+        bytes.len(),
+        HEADER_LEN,
+        "an argument-free message is header only"
+    );
     assert_eq!(bytes[0], 0x11);
     assert_eq!(&bytes[1..5], &MAGIC.to_be_bytes());
     assert_eq!(bytes[5], 0x11);
@@ -51,7 +67,11 @@ fn header_layout_is_exact() {
     assert_eq!(bytes[13], 0x0f);
     assert_eq!(bytes[14], 0, "argument count");
     assert_eq!(bytes[15], 0x14, "the tag list is itself a blob field");
-    assert_eq!(&bytes[16..20], &0_u32.to_be_bytes(), "one tag byte an argument");
+    assert_eq!(
+        &bytes[16..20],
+        &0_u32.to_be_bytes(),
+        "one tag byte an argument"
+    );
 }
 
 #[test]
@@ -74,7 +94,11 @@ fn the_captured_root_menu_request_decodes_and_re_encodes_byte_for_byte() {
     assert_eq!(request.kind, kind::ROOT_MENU);
     assert_eq!(
         request.arguments,
-        vec![Argument::Number(0x0101_0301), Argument::Number(0), Argument::Number(0x05cf_ffff)]
+        vec![
+            Argument::Number(0x0101_0301),
+            Argument::Number(0),
+            Argument::Number(0x05cf_ffff)
+        ]
     );
     assert_eq!(request.encode(), hex(CAPTURED_ROOT_MENU));
 }
@@ -86,9 +110,18 @@ fn an_empty_trailing_blob_is_absent_on_the_wire_and_present_when_decoded() {
     assert_eq!(used, bytes.len(), "the message ends after the third number");
     assert_eq!(
         reply.arguments,
-        vec![Argument::Number(0x2003), Argument::Number(0x32), Argument::Number(0), Argument::Blob(vec![])]
+        vec![
+            Argument::Number(0x2003),
+            Argument::Number(0x32),
+            Argument::Number(0),
+            Argument::Blob(vec![])
+        ]
     );
-    assert_eq!(reply.encode(), bytes, "and an empty trailing blob is not written");
+    assert_eq!(
+        reply.encode(),
+        bytes,
+        "and an empty trailing blob is not written"
+    );
     // With another message following, the decoder must not eat its magic.
     let mut two = bytes.clone();
     two.extend_from_slice(&bytes);
@@ -102,7 +135,11 @@ fn argument_tags_differ_between_the_header_list_and_the_value() {
     let message = Message::new(
         7,
         kind::SEARCH,
-        vec![Argument::String("a".into()), Argument::Blob(vec![9]), Argument::Number(5)],
+        vec![
+            Argument::String("a".into()),
+            Argument::Blob(vec![9]),
+            Argument::Number(5),
+        ],
     );
     let bytes = message.encode();
     // Header list: string 02, blob 03, number 06.
@@ -136,7 +173,11 @@ fn strings_are_utf16be_with_a_trailing_nul_counted_in_the_length() {
     let bytes = Message::new(1, kind::SEARCH, vec![Argument::String("Hi".into())]).encode();
     let field = &bytes[HEADER_LEN + 1..];
     assert_eq!(field[0], 0x26);
-    assert_eq!(&field[1..5], &3_u32.to_be_bytes(), "two characters plus the NUL");
+    assert_eq!(
+        &field[1..5],
+        &3_u32.to_be_bytes(),
+        "two characters plus the NUL"
+    );
     assert_eq!(&field[5..11], &[0x00, b'H', 0x00, b'i', 0x00, 0x00]);
 }
 
@@ -158,7 +199,10 @@ fn decodes_the_narrow_number_tags_a_player_may_send() {
     bytes.extend_from_slice(&[0x10, 0x01, 0x00]); // two bytes: 256
 
     let (message, used) = Message::decode(&bytes).unwrap();
-    assert_eq!(message.arguments, vec![Argument::Number(123), Argument::Number(256)]);
+    assert_eq!(
+        message.arguments,
+        vec![Argument::Number(123), Argument::Number(256)]
+    );
     assert_eq!(used, bytes.len());
 }
 
@@ -166,7 +210,11 @@ fn decodes_the_narrow_number_tags_a_player_may_send() {
 fn several_messages_in_one_segment_are_all_decoded() {
     let sent = vec![
         menu_header(3, 0x1105, 128),
-        Message::new(3, kind::MENU_ITEM, vec![Argument::String("Melodic Vox".into())]),
+        Message::new(
+            3,
+            kind::MENU_ITEM,
+            vec![Argument::String("Melodic Vox".into())],
+        ),
         menu_footer(3),
     ];
     let mut wire = Vec::new();
@@ -181,7 +229,11 @@ fn several_messages_in_one_segment_are_all_decoded() {
 
 #[test]
 fn a_message_split_across_segments_is_left_for_the_next_read() {
-    let whole = Message::new(9, kind::MENU_ITEM, vec![Argument::String("Tech House".into())]);
+    let whole = Message::new(
+        9,
+        kind::MENU_ITEM,
+        vec![Argument::String("Tech House".into())],
+    );
     let wire = {
         let mut w = menu_header(9, 0x1105, 1).encode();
         w.extend_from_slice(&whole.encode());
@@ -221,7 +273,10 @@ fn a_blob_length_beyond_the_buffer_is_rejected() {
     bytes.extend_from_slice(&0xffff_ffff_u32.to_be_bytes());
     bytes.push(0x14);
     bytes.extend_from_slice(&0xffff_ffff_u32.to_be_bytes()); // lies about its size
-    assert!(matches!(Message::decode(&bytes), Err(DbError::Truncated { .. })));
+    assert!(matches!(
+        Message::decode(&bytes),
+        Err(DbError::Truncated { .. })
+    ));
 }
 
 #[test]
@@ -230,7 +285,10 @@ fn a_string_length_beyond_the_buffer_is_rejected() {
     bytes.push(0x26);
     bytes.extend_from_slice(&0x4000_0000_u32.to_be_bytes());
     // Must not overflow when the count is doubled to a byte length.
-    assert!(matches!(Message::decode(&bytes), Err(DbError::Truncated { .. })));
+    assert!(matches!(
+        Message::decode(&bytes),
+        Err(DbError::Truncated { .. })
+    ));
 }
 
 #[test]
@@ -267,7 +325,13 @@ fn setup_uses_the_reserved_transaction_id() {
     let message = setup_request(2);
     assert_eq!(message.transaction, SETUP_TXID);
     assert_eq!(message.kind, kind::SETUP);
-    assert_eq!(message.arguments, vec![Argument::Number(2), Argument::Number(rbl_dbserver::SETUP_MAGIC)]);
+    assert_eq!(
+        message.arguments,
+        vec![
+            Argument::Number(2),
+            Argument::Number(rbl_dbserver::SETUP_MAGIC)
+        ]
+    );
     assert_eq!(SETUP_TXID, 0xffff_fffe);
 }
 
@@ -276,19 +340,27 @@ fn only_device_numbers_one_to_six_are_answerable() {
     // A real server silently ignores 7 and above: the connection succeeds and
     // then nothing ever arrives, so we reject it where it can be explained.
     for device in 1..=6 {
-        assert!(rbl_dbserver::is_answerable_device(device), "device {device}");
+        assert!(
+            rbl_dbserver::is_answerable_device(device),
+            "device {device}"
+        );
     }
     for device in [0_u8, 7, 8, 17, 255] {
-        assert!(!rbl_dbserver::is_answerable_device(device), "device {device}");
+        assert!(
+            !rbl_dbserver::is_answerable_device(device),
+            "device {device}"
+        );
     }
 }
 
 #[test]
 fn the_port_query_string_is_nul_terminated() {
-    assert_eq!(rbl_dbserver::PORT_QUERY_REQUEST, b"\x00\x00\x00\x0fRemoteDBServer\0");
+    assert_eq!(
+        rbl_dbserver::PORT_QUERY_REQUEST,
+        b"\x00\x00\x00\x0fRemoteDBServer\0"
+    );
     assert_eq!(rbl_dbserver::PORT_QUERY, 12_523);
 }
-
 
 #[test]
 fn a_twelve_byte_zero_padded_tag_list_is_accepted_too() {
@@ -299,6 +371,9 @@ fn a_twelve_byte_zero_padded_tag_list_is_accepted_too() {
     bytes.extend_from_slice(&[0x06, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     bytes.extend_from_slice(&[0x11, 0, 0, 0, 7, 0x11, 0, 0, 0, 9]);
     let (message, used) = Message::decode(&bytes).unwrap();
-    assert_eq!(message.arguments, vec![Argument::Number(7), Argument::Number(9)]);
+    assert_eq!(
+        message.arguments,
+        vec![Argument::Number(7), Argument::Number(9)]
+    );
     assert_eq!(used, bytes.len());
 }

@@ -103,7 +103,11 @@ impl From<&Cue> for ExtendedCue {
         Self {
             position_ms: cue.position_ms,
             out_ms: cue.out_ms,
-            hot_slot: if (1..=8).contains(&hot_slot) { hot_slot } else { 0 },
+            hot_slot: if (1..=8).contains(&hot_slot) {
+                hot_slot
+            } else {
+                0
+            },
             comment: String::new(),
         }
     }
@@ -124,11 +128,16 @@ pub fn extended_cues_blob(cues: &[ExtendedCue]) -> (Vec<u8>, u32) {
     }
     let count = memory.len();
     for (index, cue) in memory.iter().enumerate() {
-        let previous = index.checked_sub(1).map(|i| u16::try_from(i).unwrap_or(u16::MAX));
+        let previous = index
+            .checked_sub(1)
+            .map(|i| u16::try_from(i).unwrap_or(u16::MAX));
         let next = (index + 1 < count).then(|| u16::try_from(index + 1).unwrap_or(u16::MAX));
         out.extend_from_slice(&extended_cue_entry(cue, previous, next));
     }
-    (out, u32::try_from(hot.len() + memory.len()).unwrap_or(u32::MAX))
+    (
+        out,
+        u32::try_from(hot.len() + memory.len()).unwrap_or(u32::MAX),
+    )
 }
 
 /// The length of the plain cue-list reply (`4502`): rekordbox always sends
@@ -154,7 +163,11 @@ fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16
     let comment: Vec<u8> = if cue.comment.is_empty() {
         Vec::new()
     } else {
-        cue.comment.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_le_bytes).collect()
+        cue.comment
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .flat_map(u16::to_le_bytes)
+            .collect()
     };
     // rekordbox wrote 0x90 bytes for an entry with a nine-character comment:
     // 0x2a of zero padding after the colour. Kept relative to the comment.
@@ -173,7 +186,11 @@ fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16
     e[0x20..0x22].copy_from_slice(&link(previous));
     e[0x22..0x24].copy_from_slice(&link(next));
     e[0x34] = EXTENDED_CUE_UNKNOWN;
-    e[0x48..0x4a].copy_from_slice(&u16::try_from(comment.len()).unwrap_or(u16::MAX).to_le_bytes());
+    e[0x48..0x4a].copy_from_slice(
+        &u16::try_from(comment.len())
+            .unwrap_or(u16::MAX)
+            .to_le_bytes(),
+    );
     let mut at = 0x4a;
     e[at..at + comment.len()].copy_from_slice(&comment);
     at += comment.len();
