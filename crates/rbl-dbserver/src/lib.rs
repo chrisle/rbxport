@@ -450,6 +450,14 @@ pub mod kind {
     pub const DATE_TRACKS: u16 = 0x1a08;
     /// Metadata for one track.
     pub const METADATA: u16 = 0x2002;
+    /// The RX3 Hot Cue Bank hierarchy. The top-level browse heading uses
+    /// this request family rather than the older menu opcode.
+    pub const HOT_CUE_BANK: u16 = 0x2001;
+    /// The three 36-byte cue records for a selected Hot Cue Bank.
+    pub const HOT_CUE_BANK_CUES: u16 = 0x2101;
+    /// A player changing one Hot Cue Bank cue. It expects the same cue reply
+    /// as [`HOT_CUE_BANK_CUES`], not a generic menu header.
+    pub const CHANGE_HOT_CUE_BANK: u16 = 0x2201;
     /// Album art.
     pub const ARTWORK: u16 = 0x2003;
     /// Album art resolved from a content id. The RX3 uses this form while
@@ -542,6 +550,8 @@ pub mod kind {
     pub const WAVEFORM_PREVIEW_REPLY: u16 = 0x4402;
     pub const CUES_REPLY: u16 = 0x4502;
     pub const BEAT_GRID_REPLY: u16 = 0x4602;
+    /// The USB and Hot Cue Bank cue-record envelope.
+    pub const HOT_CUE_BANK_REPLY: u16 = 0x4702;
     /// The mobile-source state and its mount-name string.
     pub const REKORDBOX_MOBILE_REPLY: u16 = 0x4b02;
     pub const WAVEFORM_DETAIL_REPLY: u16 = 0x4a02;

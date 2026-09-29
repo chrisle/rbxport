@@ -371,6 +371,30 @@ impl LinkSession {
         Self::blob(message, reply, self.catalog.analysis(track, what), tail)
     }
 
+    /// RX3's `DBSMain_RetCueToClient` failure envelope for a Hot Cue Bank
+    /// request. It is deliberately not the usual unavailable-blob reply:
+    /// `dbcl_WaitCue` requires the eleven-field `4702` layout even when a
+    /// source has no selected bank or rejects a change.
+    fn hot_cue_bank_unavailable(message: &Message) -> Vec<Message> {
+        vec![Message::new(
+            message.transaction,
+            kind::HOT_CUE_BANK_REPLY,
+            vec![
+                Argument::Number(u32::from(message.kind)),
+                Argument::Number(0x32),
+                Argument::Number(0),
+                Argument::Blob(Vec::new()),
+                Argument::Number(0x24),
+                Argument::Number(0),
+                Argument::Number(0),
+                Argument::Number(0),
+                Argument::Blob(Vec::new()),
+                Argument::Number(0),
+                Argument::Blob(Vec::new()),
+            ],
+        )]
+    }
+
     /// A menu of one track's fields: metadata, track info or delivery info,
     /// all `[ctx, track_id]` and all opened the same way.
     fn track_menu(
@@ -854,6 +878,14 @@ impl Session for LinkSession {
                     Argument::String(String::new()),
                 ],
             )],
+            // The firmware's Hot Cue Bank read and change paths both wait
+            // for a `4702` cue envelope. rbxport does not yet retain the
+            // separate Hot Cue Bank point cache, so reject them in that
+            // envelope rather than falsely acknowledging a write or sending
+            // a `4000` menu response the RX3 cannot decode here.
+            kind::HOT_CUE_BANK_CUES | kind::CHANGE_HOT_CUE_BANK => {
+                Self::hot_cue_bank_unavailable(message)
+            }
             kind::GRID_OFFSET => vec![menu_header(
                 tx,
                 u32::from(message.kind),

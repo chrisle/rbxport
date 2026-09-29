@@ -792,6 +792,26 @@ fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
 }
 
 #[test]
+fn rx3_hot_cue_bank_requests_get_their_cue_error_envelope() {
+    // `DBSMain_OnMAnlzClientCmd` routes both `2101` (read) and `2201`
+    // (change) through `DBSMain_RetCueToClient`. The RX3 waits with
+    // `dbcl_WaitCue`; a generic 4000 reply is not an error it can consume.
+    let mut s = session();
+    for request in [kind::HOT_CUE_BANK_CUES, kind::CHANGE_HOT_CUE_BANK] {
+        let reply = s.handle(&numbers(request, 0x1c1, &[CTX, 0, 7]));
+        assert_eq!(reply.len(), 1);
+        assert_eq!(reply[0].kind, kind::HOT_CUE_BANK_REPLY);
+        assert_eq!(
+            args(&reply[0]),
+            format!("{request:#x}, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]")
+        );
+        let (decoded, used) = Message::decode(&reply[0].encode()).unwrap();
+        assert_eq!(used, reply[0].encode().len());
+        assert_eq!(decoded, reply[0]);
+    }
+}
+
+#[test]
 fn a_page_of_a_long_list_is_the_window_asked_for() {
     struct Many;
     impl Catalog for Many {
