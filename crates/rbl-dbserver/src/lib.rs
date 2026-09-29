@@ -483,6 +483,9 @@ pub mod kind {
     /// "Waiting…" for eighteen seconds, retries twice, and gives the source
     /// up. Answered with [`USER_INFO_REPLY`].
     pub const USER_INFO: u16 = 0x3006;
+    /// A track's raw BPM (`djmdContent.BPM`). RX3 asks this as a scalar,
+    /// rather than reading it from a rendered metadata menu.
+    pub const TRACK_BPM: u16 = 0x3008;
     /// The zero-based offset of an item in the current menu.
     pub const ITEM_POSITION: u16 = 0x3100;
     /// A player adding a track to its history (`CMD_INSERT_HISTORY`):
@@ -508,6 +511,11 @@ pub mod kind {
     /// The remote database's browse kind. RX3 asks this if its device
     /// property exchange did not already provide one.
     pub const BROWSE_TYPE: u16 = 0x3303;
+    /// Whether a track has been loaded on a player this session.
+    pub const TRACK_PLAY_STATE: u16 = 0x3b03;
+    /// Asks whether the remote source is rekordbox Mobile. A desktop
+    /// rekordbox export answers false with an empty mount-name string.
+    pub const REKORDBOX_MOBILE: u16 = 0x3e03;
     pub const FILTER_REPLY: u16 = 0x4004;
     /// "Here is how many items your query matched."
     pub const MENU_HEADER: u16 = 0x4000;
@@ -523,6 +531,8 @@ pub mod kind {
     pub const WAVEFORM_PREVIEW_REPLY: u16 = 0x4402;
     pub const CUES_REPLY: u16 = 0x4502;
     pub const BEAT_GRID_REPLY: u16 = 0x4602;
+    /// The mobile-source state and its mount-name string.
+    pub const REKORDBOX_MOBILE_REPLY: u16 = 0x4b02;
     pub const WAVEFORM_DETAIL_REPLY: u16 = 0x4a02;
     /// `CMD_RET_USER_INFO`: `[0x3006, 0, 160, blob[160]]`, as rekordbox
     /// sends it. The player copies the blob's first 32 bytes into the

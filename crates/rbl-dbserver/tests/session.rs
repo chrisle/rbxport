@@ -1292,6 +1292,35 @@ fn rx3_browse_type_fallback_is_database_backed_media() {
 }
 
 #[test]
+fn rx3_scalar_track_and_mobile_queries_use_their_native_reply_shapes() {
+    let mut idle = session();
+    assert_eq!(
+        idle.handle(&numbers(kind::TRACK_BPM, 0x52, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3008), Argument::Number(0x1e80)]
+    );
+    assert_eq!(
+        idle.handle(&numbers(kind::TRACK_PLAY_STATE, 0x53, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3b03), Argument::Number(0)]
+    );
+
+    let mut loaded = session_with(Small(true));
+    assert_eq!(
+        loaded.handle(&numbers(kind::TRACK_PLAY_STATE, 0x54, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3b03), Argument::Number(1)]
+    );
+    let mobile = loaded.handle(&numbers(kind::REKORDBOX_MOBILE, 0x55, &[CTX]));
+    assert_eq!(mobile[0].kind, kind::REKORDBOX_MOBILE_REPLY);
+    assert_eq!(
+        mobile[0].arguments,
+        vec![
+            Argument::Number(0),
+            Argument::Number(2),
+            Argument::String(String::new()),
+        ]
+    );
+}
+
+#[test]
 fn grid_offset_writes_do_not_claim_success_without_persistence() {
     let mut s = session();
     browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);

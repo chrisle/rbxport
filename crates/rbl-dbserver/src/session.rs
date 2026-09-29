@@ -802,6 +802,34 @@ impl Session for LinkSession {
             // database-backed/export-media kind the firmware uses for its
             // ordinary browse flow.
             kind::BROWSE_TYPE => vec![menu_header(tx, u32::from(message.kind), 1)],
+            // RX3's `DBSMain_OnOtherClientCmd` answers these two scalar
+            // queries through the ordinary `0x4000` envelope. The track id
+            // follows the connection context in each request.
+            kind::TRACK_BPM => vec![menu_header(
+                tx,
+                u32::from(message.kind),
+                self.catalog
+                    .track_row(Self::number(message, 1))
+                    .map_or(0, |track| track.bpm_x100),
+            )],
+            kind::TRACK_PLAY_STATE => vec![menu_header(
+                tx,
+                u32::from(message.kind),
+                u32::from(self.catalog.played(Self::number(message, 1))),
+            )],
+            // `dbcl_GetIsRekordboxMobile` waits for a `0x4b02` reply, not a
+            // menu header. rbxport is a desktop rekordbox-export source, so
+            // report false and the empty mobile mount name, just as RX3 does
+            // for a non-mobile source.
+            kind::REKORDBOX_MOBILE => vec![Message::new(
+                tx,
+                kind::REKORDBOX_MOBILE_REPLY,
+                vec![
+                    Argument::Number(0),
+                    Argument::Number(2),
+                    Argument::String(String::new()),
+                ],
+            )],
             kind::GRID_OFFSET => vec![menu_header(
                 tx,
                 u32::from(message.kind),
