@@ -365,6 +365,9 @@ pub mod kind {
     pub const RELEASE_DECADES: u16 = 0x1008;
     /// Labels referenced by tracks.
     pub const LABEL_MENU: u16 = 0x100a;
+    /// The RX3's original flat key menu. Newer players use [`KEY_MENU`] and
+    /// then request related-key distances first.
+    pub const LEGACY_KEY_MENU: u16 = 0x100b;
     /// The fixed eight-colour palette.
     pub const COLOR_MENU: u16 = 0x100d;
     /// Track-duration minute buckets.
@@ -398,6 +401,8 @@ pub mod kind {
     pub const RELEASE_YEARS: u16 = 0x1108;
     /// Artists referenced by tracks on a label.
     pub const LABEL_ARTISTS: u16 = 0x110a;
+    /// Tracks in a key through the RX3's original flat-key route.
+    pub const LEGACY_KEY_TRACKS: u16 = 0x110b;
     /// Tracks assigned a colour.
     pub const COLOR_TRACKS: u16 = 0x110d;
     /// Tracks in a duration minute bucket.
@@ -549,7 +554,9 @@ pub mod kind {
             RELEASE_YEARS => "release years".to_owned(),
             RELEASE_YEAR_TRACKS => "release-year tracks".to_owned(),
             LABEL_MENU => "label menu".to_owned(),
+            LEGACY_KEY_MENU => "legacy key menu".to_owned(),
             LABEL_ARTISTS => "label's artists".to_owned(),
+            LEGACY_KEY_TRACKS => "legacy key's tracks".to_owned(),
             LABEL_ARTIST_ALBUMS => "label artist's albums".to_owned(),
             LABEL_ARTIST_ALBUM_TRACKS => "label artist's album tracks".to_owned(),
             COLOR_MENU => "color menu".to_owned(),

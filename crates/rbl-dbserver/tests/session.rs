@@ -491,6 +491,11 @@ fn the_key_menus_match_the_capture() {
         args(&items[23]),
         "0x0, 0x18, 0x4, \"E\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
     );
+    // The RX3 still uses the original two-level key menu in several browse
+    // flows. It differs only by skipping the related-key distance selector.
+    let (count, items) = browse(&mut s, kind::LEGACY_KEY_MENU, &[CTX, 0]);
+    assert_eq!(count, 24);
+    assert_eq!(items[0].arguments[1], Argument::Number(1));
     let (count, items) = browse(&mut s, kind::RELATED_KEYS, &[0x0102_0301, 0, 1]);
     assert_eq!(count, 3);
     assert_eq!(
@@ -502,6 +507,46 @@ fn the_key_menus_match_the_capture() {
         "0x1, 0x1, 0xe, \"Abm, B\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
     );
     assert_eq!(args(&items[2]), "0x2, 0x1, 0x22, \"Abm, B, Dbm, Ebm\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+}
+
+#[test]
+fn rx3_legacy_key_tracks_are_exact_key_matches() {
+    struct Spy(std::sync::Mutex<Option<Query>>);
+    impl Catalog for Spy {
+        fn list(&self, query: &Query) -> Vec<Row> {
+            *self.0.lock().unwrap() = Some(query.clone());
+            Vec::new()
+        }
+        fn track_row(&self, _: u32) -> Option<TrackRow> {
+            None
+        }
+        fn track(&self, _: u32) -> Option<TrackDetails> {
+            None
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
+            None
+        }
+    }
+    let catalog = Arc::new(Spy(std::sync::Mutex::new(None)));
+    let mut s = CatalogHandler::new(Arc::clone(&catalog) as Arc<dyn Catalog>).open();
+    s.handle(&setup_request(1));
+    s.handle(&numbers(kind::LEGACY_KEY_TRACKS, 2, &[CTX, 0, 0x0c]));
+    assert_eq!(
+        *catalog.0.lock().unwrap(),
+        Some(Query::Tracks {
+            scope: TrackScope::Key {
+                key: 0x0c,
+                distance: 0,
+            },
+            sort: Sort::Default,
+        })
+    );
 }
 
 #[test]

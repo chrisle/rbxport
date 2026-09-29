@@ -503,7 +503,7 @@ impl LinkSession {
             kind::REMIXER_ALBUMS => self.artist_role_albums(message, ArtistRole::Remixer),
             kind::REMIXER_ALBUM_TRACKS => self.artist_role_tracks(message, ArtistRole::Remixer),
             kind::SORT_MENU => self.menu(message, Menu::SortOptions(self.catalog.sorts())),
-            kind::KEY_MENU => self.menu(message, Menu::Keys),
+            kind::KEY_MENU | kind::LEGACY_KEY_MENU => self.menu(message, Menu::Keys),
             kind::RELATED_KEYS => {
                 let key = Self::number(message, 2);
                 self.menu(message, Menu::RelatedKeys(key))
@@ -600,6 +600,15 @@ impl LinkSession {
                 let distance = Self::number(message, 3).min(2);
                 self.tracks(message, TrackScope::Key { key, distance })
             }
+            // The RX3 retains the pre-related-key route: `[ctx, key]`.
+            // It has the same rows as a zero-distance new-key request.
+            kind::LEGACY_KEY_TRACKS => self.tracks(
+                message,
+                TrackScope::Key {
+                    key: Self::number(message, 2),
+                    distance: 0,
+                },
+            ),
             kind::PLAYLIST_MENU => {
                 let id = Self::number(message, 2);
                 if Self::number(message, 3) == 1 {
