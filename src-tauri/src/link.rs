@@ -222,6 +222,13 @@ impl Source for StateSource {
         state.read_db(|db| rbl_db::details::track_details(db.connection(), id)).ok().flatten()
     }
 
+    fn matching_ids(&self, seed: u32) -> Vec<u32> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        state
+            .read_db(|db| rbl_db::details::matching_ids(db.connection(), seed))
+            .unwrap_or_default()
+    }
+
     fn artist_role_names(&self, role: rbl_link::ArtistRole) -> Vec<(u32, String)> {
         let Some(state) = self.0.upgrade() else { return Vec::new() };
         let role = match role {
@@ -715,6 +722,29 @@ mod grid_offset_tests {
 
         assert!(catalog.edit(&rbl_link::Edit::HistoryRemove { track }));
         assert!(catalog.list(&Query::Tracks { scope: TrackScope::History(*session), sort: Sort::Default }).is_empty());
+    }
+
+    #[test]
+    fn matching_relations_reach_link_browse_from_the_live_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let first = rbl_db::fixture::track_id(1);
+        let second = rbl_db::fixture::track_id(2);
+        let stamp = rbl_core::time::now();
+        let writable = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+        writable.connection().execute_batch(&format!(
+            "CREATE TABLE djmdRecommendLike (ID TEXT PRIMARY KEY, ContentID1 TEXT, ContentID2 TEXT, rb_local_deleted INTEGER DEFAULT 0, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL); \
+             INSERT INTO djmdRecommendLike VALUES ('fixture-match', '{first}', '{second}', 0, '{stamp}', '{stamp}');"
+        )).unwrap();
+        drop(writable);
+
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        let source = StateSource(Arc::downgrade(&state), Arc::new(|_, _| {}), false);
+
+        assert_eq!(source.matching_ids(first.parse().unwrap()), [second.parse::<u32>().unwrap()]);
     }
 
     #[test]
