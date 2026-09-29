@@ -240,10 +240,11 @@ pub struct Existing<'a> {
     pub two_ex: Option<&'a Anlz>,
 }
 
-/// The tags an analysis writes afresh, so a carried file's copies of them
-/// are dropped rather than doubled.
-const AUTHORED: [&[u8; 4]; 10] =
-    [b"PPTH", b"PQTZ", b"PWAV", b"PWV2", b"PWV3", b"PWV4", b"PWV5", b"PWV6", b"PWV7", b"PQT2"];
+/// The tags an analysis writes afresh — or, for `PVBR`, places itself (a real
+/// table carried through, or the zero table written when there is none) — so a
+/// carried file's copies of them are dropped rather than doubled.
+const AUTHORED: [&[u8; 4]; 11] =
+    [b"PPTH", b"PVBR", b"PQTZ", b"PWAV", b"PWV2", b"PWV3", b"PWV4", b"PWV5", b"PWV6", b"PWV7", b"PQT2"];
 
 /// Authors the three analysis files for a track.
 ///
@@ -275,6 +276,16 @@ pub fn author_with_overview(
     let dat = {
         let mut builder = AnlzBuilder::new();
         builder.path(audio_path);
+        // `PVBR` sits between the path and the grid in every rekordbox `.DAT`
+        // (1,558 of 1,558 reference files [OBS]); rekordbox 6/7 reject a `.DAT`
+        // that lacks it. A real VBR seek table cannot be re-derived from the
+        // analysis here, so an existing one is carried through unchanged, and a
+        // file that has none gets the zero table rekordbox itself writes for a
+        // track with no VBR frames to index — see [`AnlzBuilder::vbr_table_zero`].
+        match existing.dat.and_then(|file| file.section(b"PVBR")) {
+            Some(pvbr) => { builder.copy_section(pvbr); }
+            None => { builder.vbr_table_zero(); }
+        }
         builder.beat_grid(beats);
         builder.waveform_preview(b"PWAV", &pwav(columns));
         builder.waveform_preview(b"PWV2", &pwv2(columns));
@@ -435,12 +446,46 @@ mod tests {
     }
 
     #[test]
+    fn a_real_vbr_table_is_preserved_across_re_analysis_and_never_doubled() {
+        let beats = beat_grid_of([(1, 12_800, 0)]);
+        let columns = ramp(600);
+        // A previous `.DAT` whose `PVBR` holds a real seek table (a nonzero
+        // payload rekordbox derived from the file's frames), plus a section
+        // this app cannot author.
+        let mut previous = crate::parse(&author("/Music/track.mp3", &beats, &columns, Existing::default()).dat).unwrap();
+        let pvbr = previous.sections.iter_mut().find(|s| s.tag == FourCc::new(b"PVBR")).unwrap();
+        pvbr.payload.iter_mut().enumerate().for_each(|(i, b)| *b = u8::try_from(i % 251).unwrap_or(0));
+        let real_table = previous.section(b"PVBR").unwrap().clone();
+        previous.sections.push(Section::new(b"PVDI", vec![0; 8], vec![7, 7, 7]));
+
+        let again = author("/Music/track.mp3", &beats, &columns, Existing { dat: Some(&previous), ..Existing::default() });
+        let reread = crate::parse(&again.dat).unwrap();
+        // Exactly one `PVBR`, and it is the real table carried through, not the
+        // zero table nor a duplicate.
+        assert_eq!(reread.sections.iter().filter(|s| s.tag == FourCc::new(b"PVBR")).count(), 1);
+        assert_eq!(reread.section(b"PVBR"), Some(&real_table));
+        assert!(reread.section(b"PVDI").is_some(), "sections this app cannot write are still carried");
+    }
+
+    #[test]
     fn authored_files_parse_and_carry_what_they_cannot_write() {
         let beats = beat_grid_of([(1, 12_800, 0), (2, 12_800, 469), (3, 12_800, 938), (4, 12_800, 1406)]);
         let columns = ramp(600);
         let fresh = author("/Music/track.mp3", &beats, &columns, Existing::default());
         let dat = crate::parse(&fresh.dat).unwrap();
         assert_eq!(dat.path().as_deref(), Some("/Music/track.mp3"));
+        // rekordbox writes `PVBR` on every `.DAT` — between the path and the
+        // grid — and rejects one that lacks it. A fresh file gets the zero
+        // table (a zero header word and 401 zero words) rekordbox writes for a
+        // track with no VBR frames to index.
+        let tags: Vec<FourCc> = dat.sections.iter().map(|s| s.tag).collect();
+        assert_eq!(tags[0], FourCc::new(b"PPTH"));
+        assert_eq!(tags[1], FourCc::new(b"PVBR"));
+        assert_eq!(tags[2], FourCc::new(b"PQTZ"));
+        let pvbr = dat.section(b"PVBR").unwrap();
+        assert_eq!(pvbr.len_header(), 16);
+        assert_eq!(pvbr.len_tag(), 1620);
+        assert!(pvbr.header.iter().chain(&pvbr.payload).all(|&b| b == 0));
         assert_eq!(dat.beat_grid().unwrap(), beats);
         assert_eq!(dat.waveform(b"PWAV").unwrap().1.len(), 400);
         assert_eq!(dat.sections.iter().filter(|s| s.is_cue_list()).count(), 2);
