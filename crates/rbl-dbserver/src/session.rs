@@ -538,7 +538,9 @@ impl LinkSession {
                 let album = Self::number(message, 2);
                 self.tracks(message, TrackScope::Album(album))
             }
-            kind::TRACK_MENU => self.tracks(message, TrackScope::All),
+            // RX3 uses `0x1200` for the same all-track list while changing
+            // its load/search depth (`djdsqlGetTrack_Content`).
+            kind::TRACK_MENU | kind::CONTENT_TRACKS => self.tracks(message, TrackScope::All),
             kind::FILE_NAME_MENU => self.tracks(message, TrackScope::FileName),
             kind::MATCHING_TRACKS => {
                 self.tracks(message, TrackScope::Matching(Self::number(message, 2)))

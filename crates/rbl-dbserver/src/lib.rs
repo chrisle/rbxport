@@ -357,6 +357,11 @@ pub mod kind {
     pub const ALBUM_MENU: u16 = 0x1003;
     /// Every track.
     pub const TRACK_MENU: u16 = 0x1004;
+    /// The all-content track list used by RX3 load/search-depth transitions.
+    /// It has the same `[context, sort]` shape and contents as
+    /// [`TRACK_MENU`], but comes from the player-side `dbcl_GetTrack_Content`
+    /// path.
+    pub const CONTENT_TRACKS: u16 = 0x1200;
     /// Distinct rounded BPM values.
     pub const BPM_MENU: u16 = 0x1006;
     /// Distinct track ratings.
@@ -555,6 +560,7 @@ pub mod kind {
             ARTIST_MENU => "artist menu".to_owned(),
             ALBUM_MENU => "album menu".to_owned(),
             TRACK_MENU => "track menu".to_owned(),
+            CONTENT_TRACKS => "content tracks".to_owned(),
             BPM_MENU => "BPM menu".to_owned(),
             BPM_RANGES => "BPM ranges".to_owned(),
             BPM_TRACKS => "BPM tracks".to_owned(),

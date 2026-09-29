@@ -1321,6 +1321,14 @@ fn rx3_scalar_track_and_mobile_queries_use_their_native_reply_shapes() {
 }
 
 #[test]
+fn rx3_content_tracks_is_the_sorted_all_tracks_alias() {
+    let mut s = session();
+    let regular = browse(&mut s, kind::TRACK_MENU, &[CTX, 4]);
+    let content = browse(&mut s, kind::CONTENT_TRACKS, &[CTX, 4]);
+    assert_eq!(content, regular);
+}
+
+#[test]
 fn grid_offset_writes_do_not_claim_success_without_persistence() {
     let mut s = session();
     browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
