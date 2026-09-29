@@ -20,7 +20,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use rbl_anlz::Anlz;
 use rbl_dbserver::catalog::{
-    Analysis as Wanted, ArtistRole, Catalog, Edit, Query, Row, Sort, TrackColumn, TrackDetails, TrackScope,
+    Analysis as Wanted, ArtistRole, Catalog, Edit, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackColumn,
+    TrackDetails, TrackScope,
 };
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::keys;
@@ -54,6 +55,8 @@ pub trait Source: Send + Sync {
     }
     fn artist_role_names(&self, _role: ArtistRole) -> Vec<(u32, String)> { Vec::new() }
     fn artist_role_track_ids(&self, _role: ArtistRole, _artist: u32) -> Vec<u32> { Vec::new() }
+    fn hot_cue_banks(&self, _parent: Option<u32>) -> Vec<rbl_db::details::HotCueBank> { Vec::new() }
+    fn hot_cue_bank_cues(&self, _bank: u32) -> Vec<rbl_db::details::HotCueBankCue> { Vec::new() }
     fn edit(&self, _edit: &Edit) -> bool {
         false
     }
@@ -1130,6 +1133,28 @@ impl Catalog for IndexCatalog {
                 }
             }
         }
+    }
+
+    fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<HotCueBank> {
+        self.source.hot_cue_banks(parent).into_iter().map(|bank| HotCueBank {
+            id: bank.id,
+            name: bank.name,
+            folder: bank.folder,
+        }).collect()
+    }
+
+    fn hot_cue_bank_cues(&self, bank: u32) -> Vec<HotCueBankCue> {
+        self.source.hot_cue_bank_cues(bank).into_iter().map(|cue| HotCueBankCue {
+            slot: cue.slot,
+            content: cue.content,
+            in_ms: cue.in_ms,
+            out_ms: cue.out_ms,
+            color: cue.color,
+            color_table_index: cue.color_table_index,
+            active_loop: cue.active_loop,
+            beat_loop_size: cue.beat_loop_size,
+            cue_microsec: cue.cue_microsec,
+        }).collect()
     }
 
     fn grid_offset(&self, track: u32) -> i16 {

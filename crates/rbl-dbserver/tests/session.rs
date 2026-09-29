@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use rbl_dbserver::catalog::{Analysis, Catalog, Query, Row, Sort, TrackDetails, TrackScope};
+use rbl_dbserver::catalog::{Analysis, Catalog, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackDetails, TrackScope};
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::net::{Handler, Session};
 use rbl_dbserver::session::CatalogHandler;
@@ -167,6 +167,19 @@ impl Catalog for Small {
             file_type: 1,
             ..TrackDetails::default()
         })
+    }
+    fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<HotCueBank> {
+        (parent.is_none())
+            .then(|| vec![HotCueBank { id: 42, name: "WARMUP".into(), folder: false }])
+            .unwrap_or_default()
+    }
+    fn hot_cue_bank_cues(&self, bank: u32) -> Vec<HotCueBankCue> {
+        (bank == 42)
+            .then(|| vec![HotCueBankCue {
+                slot: 1, content: TRACK, in_ms: 1_000, out_ms: Some(2_000), color: 3,
+                color_table_index: 21, active_loop: true, beat_loop_size: 0, cue_microsec: 0,
+            }])
+            .unwrap_or_default()
     }
     fn artwork(&self, id: u32) -> Option<Vec<u8>> {
         (id == 0x14).then(|| vec![0xff, 0xd8, 0xff, 0xe1])
@@ -792,23 +805,21 @@ fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
 }
 
 #[test]
-fn rx3_hot_cue_bank_requests_get_their_cue_error_envelope() {
-    // `DBSMain_OnMAnlzClientCmd` routes both `2101` (read) and `2201`
-    // (change) through `DBSMain_RetCueToClient`. The RX3 waits with
-    // `dbcl_WaitCue`; a generic 4000 reply is not an error it can consume.
+fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
     let mut s = session();
-    for request in [kind::HOT_CUE_BANK_CUES, kind::CHANGE_HOT_CUE_BANK] {
-        let reply = s.handle(&numbers(request, 0x1c1, &[CTX, 0, 7]));
-        assert_eq!(reply.len(), 1);
-        assert_eq!(reply[0].kind, kind::HOT_CUE_BANK_REPLY);
-        assert_eq!(
-            args(&reply[0]),
-            format!("{request:#x}, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]")
-        );
-        let (decoded, used) = Message::decode(&reply[0].encode()).unwrap();
-        assert_eq!(used, reply[0].encode().len());
-        assert_eq!(decoded, reply[0]);
-    }
+    let banks = s.handle(&numbers(kind::HOT_CUE_BANK, 0x1c0, &[CTX, 0, 1]));
+    assert_eq!(banks[0].arguments, vec![Argument::Number(0x2001), Argument::Number(1)]);
+    let items = s.handle(&numbers(kind::RENDER, 0x1c1, &[CTX, 0, 8]));
+    assert_eq!(items[1].arguments[1], Argument::Number(42));
+    let reply = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c2, &[CTX, 42]));
+    assert_eq!(reply.len(), 1);
+    assert_eq!(reply[0].kind, kind::HOT_CUE_BANK_REPLY);
+    assert_eq!(args(&reply[0]), "0x2101, 0x0, 0x24, blob[36], 0x24, 0x1, 0x0, 0x8, blob[8], 0x0, blob[0]");
+    let Argument::Blob(record) = &reply[0].arguments[3] else { panic!("cue record") };
+    assert_eq!(&record[..8], &[0, 4, 0, 1, 0, 0, 0x47, 0x5f]);
+    let (decoded, used) = Message::decode(&reply[0].encode()).unwrap();
+    assert_eq!(used, reply[0].encode().len());
+    assert_eq!(decoded, reply[0]);
 }
 
 #[test]
@@ -1183,6 +1194,7 @@ fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() 
                 Edit::GridOffset { offset_ms, .. } => state.2 = offset_ms,
                 Edit::ClearTags => state.0.clear(),
                 Edit::Rating { stars, .. } => state.1 = u32::from(stars),
+                Edit::HotCueBankCue { .. } => return false,
                 Edit::HistoryAdd { .. }
                 | Edit::HistoryRemove { .. }
                 | Edit::HistoryDelete { .. } => return false,

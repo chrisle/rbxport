@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::catalog::{
-    Analysis, ArtistRole, Catalog, Edit, Query, Row, Sort, TrackDetails, TrackScope,
+    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, Query, Row, Sort, TrackDetails, TrackScope,
 };
 use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
@@ -393,6 +393,110 @@ impl LinkSession {
                 Argument::Blob(Vec::new()),
             ],
         )]
+    }
+
+    /// RX3's `DBSMain_RetCueToClient` success layout.  The firmware reads
+    /// three 36-byte legacy cue records and their paired eight-byte
+    /// millisecond sidecars.  It identifies the slots from bits 16..23 of
+    /// the first word (4, 5, and 6), not from their order in the blob.
+    fn hot_cue_bank_reply(message: &Message, cues: Vec<HotCueBankCue>) -> Vec<Message> {
+        let mut records = Vec::with_capacity(3 * 36);
+        let mut sidecars = Vec::with_capacity(3 * 8);
+        let mut count = 0_u32;
+        for cue in cues.into_iter().filter(|cue| (1..=3).contains(&cue.slot)).take(3) {
+            let flags = u32::from(cue.out_ms.is_some()) | (u32::from(cue.slot) + 3) << 16;
+            let in_frame = cue.in_ms.saturating_mul(3) / 20;
+            let out_frame = cue.out_ms.map_or(u32::MAX, |ms| ms.saturating_mul(3) / 20);
+            for word in [
+                flags,
+                cue.content,
+                0,
+                in_frame,
+                out_frame,
+                cue.color,
+                cue.color_table_index,
+                u32::from(cue.active_loop),
+                cue.beat_loop_size,
+            ] {
+                records.extend_from_slice(&word.to_be_bytes());
+            }
+            sidecars.extend_from_slice(&cue.in_ms.to_be_bytes());
+            sidecars.extend_from_slice(&cue.out_ms.unwrap_or(u32::MAX).to_be_bytes());
+            count += 1;
+        }
+        if count == 0 {
+            return Self::hot_cue_bank_unavailable(message);
+        }
+        vec![Message::new(
+            message.transaction,
+            kind::HOT_CUE_BANK_REPLY,
+            vec![
+                Argument::Number(u32::from(message.kind)),
+                Argument::Number(0),
+                Argument::Number(u32::try_from(records.len()).unwrap_or(u32::MAX)),
+                Argument::Blob(records),
+                Argument::Number(0x24),
+                Argument::Number(count),
+                Argument::Number(0),
+                Argument::Number(u32::try_from(sidecars.len()).unwrap_or(u32::MAX)),
+                Argument::Blob(sidecars),
+                Argument::Number(0),
+                Argument::Blob(Vec::new()),
+            ],
+        )]
+    }
+
+    /// Parses the `0x2201` legacy cue record and its optional timing sidecar.
+    fn hot_cue_bank_edit(message: &Message) -> Option<(u32, HotCueBankCue)> {
+        let bank = Self::number(message, 1);
+        let bytes = match message.arguments.get(3) {
+            Some(Argument::Blob(bytes)) if Self::number(message, 2) == 0x24 && bytes.len() == 0x24 => bytes,
+            _ => return None,
+        };
+        let word = |at: usize| -> Option<u32> {
+            Some(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
+        };
+        let flags = word(0)?;
+        let slot = u8::try_from((flags >> 16) & 0xff).ok()?.checked_sub(3)?;
+        if !(1..=3).contains(&slot) { return None; }
+        let sidecar = match message.arguments.get(5) {
+            Some(Argument::Blob(bytes)) if Self::number(message, 4) <= 8 && bytes.len() >= 8 => Some(bytes),
+            _ => None,
+        };
+        let frame_to_ms = |frame: u32| frame.saturating_mul(20) / 3;
+        let in_ms = sidecar.map_or_else(|| frame_to_ms(word(12).unwrap_or(0)), |bytes| {
+            u32::from_be_bytes(bytes[0..4].try_into().unwrap_or([0; 4]))
+        });
+        let out_ms = (flags & 1 != 0).then(|| sidecar.map_or_else(
+            || frame_to_ms(word(16).unwrap_or(0)),
+            |bytes| u32::from_be_bytes(bytes[4..8].try_into().unwrap_or([0; 4])),
+        ));
+        Some((bank, HotCueBankCue {
+            slot,
+            content: word(4)?,
+            in_ms,
+            out_ms,
+            color: word(20)?,
+            color_table_index: word(24)?,
+            active_loop: word(28)? != 0,
+            beat_loop_size: word(32)?,
+            cue_microsec: 0,
+        }))
+    }
+
+    fn hot_cue_bank_menu(&mut self, message: &Message) -> Vec<Message> {
+        // `0x2001` carries the parent/bank id after the normal connection
+        // context.  A zero id is the root.  Both its legacy list modes are
+        // rendered through the normal 4000/4101/4201 menu sequence.
+        let parent = Self::number(message, 1);
+        let items = self.catalog.hot_cue_banks((parent != 0).then_some(parent)).into_iter().map(|bank| {
+            if bank.folder {
+                Item::named(bank.id, &bank.name, item_type::FOLDER)
+            } else {
+                Item::named(bank.id, &bank.name, item_type::TITLE)
+            }
+        }).collect();
+        self.menu(message, Menu::Selectors(items))
     }
 
     /// A menu of one track's fields: metadata, track info or delivery info,
@@ -878,13 +982,22 @@ impl Session for LinkSession {
                     Argument::String(String::new()),
                 ],
             )],
-            // The firmware's Hot Cue Bank read and change paths both wait
-            // for a `4702` cue envelope. rbxport does not yet retain the
-            // separate Hot Cue Bank point cache, so reject them in that
-            // envelope rather than falsely acknowledging a write or sending
-            // a `4000` menu response the RX3 cannot decode here.
-            kind::HOT_CUE_BANK_CUES | kind::CHANGE_HOT_CUE_BANK => {
-                Self::hot_cue_bank_unavailable(message)
+            // RX3 Hot Cue Banks are their own browse/cue protocol, not an
+            // ordinary track menu.  The device's database service returns
+            // 4000/4101 for `2001`, then 4702 cue envelopes for reads/edits.
+            kind::HOT_CUE_BANK => self.hot_cue_bank_menu(message),
+            kind::HOT_CUE_BANK_CUES => Self::hot_cue_bank_reply(
+                message,
+                self.catalog.hot_cue_bank_cues(Self::number(message, 1)),
+            ),
+            kind::CHANGE_HOT_CUE_BANK => {
+                let Some((bank, cue)) = Self::hot_cue_bank_edit(message) else {
+                    return Self::hot_cue_bank_unavailable(message);
+                };
+                if !self.catalog.edit(&Edit::HotCueBankCue { bank, cue }) {
+                    return Self::hot_cue_bank_unavailable(message);
+                }
+                Self::hot_cue_bank_reply(message, self.catalog.hot_cue_bank_cues(bank))
             }
             kind::GRID_OFFSET => vec![menu_header(
                 tx,

@@ -248,6 +248,31 @@ pub struct TrackDetails {
     pub file_type: u32,
 }
 
+/// One Hot Cue Bank shown by the RX3.  A bank may be a folder containing
+/// banks; leaf banks carry up to three cue points.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HotCueBank {
+    pub id: u32,
+    pub name: String,
+    pub folder: bool,
+}
+
+/// The settled, time-domain representation of one RX3 Hot Cue Bank slot.
+/// The session owns conversion to the legacy 36-byte player record.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HotCueBankCue {
+    /// One-based slot number; the RX3 supports slots 1 through 3.
+    pub slot: u8,
+    pub content: u32,
+    pub in_ms: u32,
+    pub out_ms: Option<u32>,
+    pub color: u32,
+    pub color_table_index: u32,
+    pub active_loop: bool,
+    pub beat_loop_size: u32,
+    pub cue_microsec: u32,
+}
+
 /// The per-track blobs a player asks for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Analysis {
@@ -304,6 +329,16 @@ pub trait Catalog: Send + Sync {
     /// A track's analysis blob, in the layout the reply carries.
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>>;
 
+    /// Hot Cue Banks below `parent`; `None` is the root.
+    fn hot_cue_banks(&self, _parent: Option<u32>) -> Vec<HotCueBank> {
+        Vec::new()
+    }
+
+    /// The up-to-three cue points in one Hot Cue Bank.
+    fn hot_cue_bank_cues(&self, _bank: u32) -> Vec<HotCueBankCue> {
+        Vec::new()
+    }
+
     /// Signed millisecond correction, separate from the original beat times.
     fn grid_offset(&self, _track: u32) -> i16 {
         0
@@ -352,6 +387,11 @@ pub enum Edit {
     GridOffset {
         track: u32,
         offset_ms: i16,
+    },
+    /// A replacement received in RX3's legacy 36-byte Hot Cue Bank record.
+    HotCueBankCue {
+        bank: u32,
+        cue: HotCueBankCue,
     },
     /// A player's play, for the history of this link session.
     HistoryAdd {
