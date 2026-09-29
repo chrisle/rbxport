@@ -224,7 +224,7 @@ fn every_sort_column_produces_a_full_permutation() {
     for column in [
         SortColumn::TrackNo, SortColumn::Title, SortColumn::Artist, SortColumn::Album,
         SortColumn::Genre, SortColumn::Label, SortColumn::Key, SortColumn::Bpm,
-        SortColumn::Duration, SortColumn::Rating, SortColumn::DateAdded, SortColumn::ReleaseDate,
+        SortColumn::Duration, SortColumn::Rating, SortColumn::PlayCount, SortColumn::DateAdded, SortColumn::ReleaseDate,
     ] {
         for descending in [false, true] {
             let view = lib.open_view(&spec(column, descending, ""));

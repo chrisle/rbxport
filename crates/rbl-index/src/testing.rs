@@ -9,6 +9,7 @@ pub struct TestTrack {
     pub title: &'static str,
     pub artist: &'static str,
     pub album: &'static str,
+    pub label: &'static str,
     pub comment: &'static str,
     pub bpm_x100: u32,
     pub length_sec: u32,
@@ -42,7 +43,7 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
         lib.artist.push(lib.artists.push(t.artist));
         lib.album.push(lib.albums.push(t.album));
         lib.genre.push(lib.genres.push(t.genre));
-        lib.label.push(lib.labels.push(""));
+        lib.label.push(lib.labels.push(t.label));
         // One interner entry per track, names repeating, which is what
         // `djmdKey` does on the reference library (`A` under two ids).
         lib.key.push(lib.keys.push(t.key));

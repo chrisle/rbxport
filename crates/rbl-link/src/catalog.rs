@@ -20,7 +20,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use rbl_anlz::Anlz;
 use rbl_dbserver::catalog::{
-    Analysis as Wanted, Catalog, Edit, Query, Row, Sort, TrackColumn, TrackDetails, TrackScope,
+    Analysis as Wanted, ArtistRole, Catalog, Edit, Query, Row, Sort, TrackColumn, TrackDetails, TrackScope,
 };
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::keys;
@@ -52,6 +52,8 @@ pub trait Source: Send + Sync {
     fn matching_ids(&self, _seed: u32) -> Vec<u32> {
         Vec::new()
     }
+    fn artist_role_names(&self, _role: ArtistRole) -> Vec<(u32, String)> { Vec::new() }
+    fn artist_role_track_ids(&self, _role: ArtistRole, _artist: u32) -> Vec<u32> { Vec::new() }
     fn edit(&self, _edit: &Edit) -> bool {
         false
     }
@@ -391,6 +393,14 @@ impl IndexCatalog {
                     })
                     .collect()
             }
+            TrackScope::ArtistRole { role, artist, album } => {
+                let album = album.map(|id| id.wrapping_sub(1));
+                self.source.artist_role_track_ids(*role, *artist).into_iter()
+                    .filter_map(|id| library.row_of_id(u64::from(id)))
+                    .filter(|&row| album.is_none_or(|id| library.album.get(row as usize) == Some(&id)))
+                    .map(|row| (row, 0))
+                    .collect()
+            }
             TrackScope::Artist { artist, album } => {
                 let artist = artist.wrapping_sub(1);
                 let album = album.map(|a| a.wrapping_sub(1));
@@ -627,6 +637,17 @@ impl IndexCatalog {
                 track_label == label && artist.is_none_or(|id| track_artist == id)
             })
             .map(|(_, &album)| album)
+            .collect();
+        Self::album_rows(library, albums)
+    }
+
+    fn role_albums(&self, library: &Library, role: ArtistRole, artist: u32) -> Vec<Row> {
+        let albums = self
+            .source
+            .artist_role_track_ids(role, artist)
+            .into_iter()
+            .filter_map(|id| library.row_of_id(u64::from(id)))
+            .filter_map(|row| library.album.get(row as usize).copied())
             .collect();
         Self::album_rows(library, albums)
     }
@@ -933,6 +954,14 @@ impl Catalog for IndexCatalog {
             Query::LabelArtistAlbums { label, artist } => {
                 Self::label_albums(&library, *label, *artist)
             }
+            Query::ArtistRoleArtists(role) => self
+                .source
+                .artist_role_names(*role)
+                .into_iter()
+                .filter(|(_, name)| !name.is_empty())
+                .map(|(id, name)| Row::Named { id, name })
+                .collect(),
+            Query::ArtistRoleAlbums { role, artist } => self.role_albums(&library, *role, *artist),
             Query::Artists(_) => Self::named(&library.artist, &library.artists),
             Query::Albums(_) => Self::named(&library.album, &library.albums),
             Query::ArtistAlbums(artist) => Self::artist_albums(&library, *artist),

@@ -47,6 +47,13 @@ pub enum TrackColumn {
     DateAdded,
 }
 
+/// The artist-reference field used by an advanced browse category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArtistRole {
+    Original,
+    Remixer,
+}
+
 impl Sort {
     pub const DEFAULTS: [Self; 7] = [
         Self::Default,
@@ -106,6 +113,11 @@ pub enum TrackScope {
         artist: Option<u32>,
         album: Option<u32>,
     },
+    ArtistRole {
+        role: ArtistRole,
+        artist: u32,
+        album: Option<u32>,
+    },
     /// An artist's tracks, on one album or (`None`) all of them.
     Artist {
         artist: u32,
@@ -154,6 +166,11 @@ pub enum Query {
     LabelArtistAlbums {
         label: u32,
         artist: Option<u32>,
+    },
+    ArtistRoleArtists(ArtistRole),
+    ArtistRoleAlbums {
+        role: ArtistRole,
+        artist: u32,
     },
     Artists(Sort),
     Albums(Sort),

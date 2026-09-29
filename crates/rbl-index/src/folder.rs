@@ -274,11 +274,12 @@ impl Library {
         // cheap; the library's rank arrays cannot place a loose file anyway.
         match spec.sort {
             SortColumn::TrackNo => {}
-            SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating | SortColumn::KeyCamelot => {
+            SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating | SortColumn::PlayCount | SortColumn::KeyCamelot => {
                 let key = |entry: &FolderEntry| match *entry {
                     FolderEntry::Track(row) => match spec.sort {
                         SortColumn::Bpm => self.bpm_x100.get(row as usize).copied().unwrap_or(0),
                         SortColumn::Duration => self.length_sec.get(row as usize).copied().unwrap_or(0),
+                        SortColumn::PlayCount => u32::from(self.play_count.get(row as usize).copied().unwrap_or(0)),
                         SortColumn::KeyCamelot => crate::key::camelot_rank(self.key_name(row)),
                         _ => u32::from(self.rating.get(row as usize).copied().unwrap_or(0)),
                     },
@@ -335,7 +336,7 @@ impl Library {
             SortColumn::Comment => self.comment.get(row as usize),
             SortColumn::DateAdded => self.date_added.get(row as usize),
             SortColumn::ReleaseDate => self.release_date.get(row as usize),
-            SortColumn::TrackNo | SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating
+            SortColumn::TrackNo | SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating | SortColumn::PlayCount
             | SortColumn::Key | SortColumn::KeyCamelot => "",
         }
     }

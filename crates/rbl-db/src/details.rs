@@ -37,7 +37,7 @@
 //!   leaves it alone stales nothing.
 
 use rusqlite::types::Value;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::Result;
 
@@ -98,6 +98,45 @@ pub struct TrackDetails {
     pub hot_cue_auto_load: bool,
     /// `DeliveryControl == "on"`.
     pub publish: bool,
+}
+
+/// One of the artist references rekordbox exposes as a browse category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtistRole {
+    Original,
+    Remixer,
+}
+
+impl ArtistRole {
+    fn column(self) -> &'static str {
+        match self {
+            Self::Original => "OrgArtistID",
+            Self::Remixer => "RemixerID",
+        }
+    }
+}
+
+/// The live artists used by an advanced browse category, in rekordbox id space.
+pub fn artist_role_names(conn: &Connection, role: ArtistRole) -> Result<Vec<(u32, String)>> {
+    let sql = format!(
+        "SELECT artist.ID, COALESCE(artist.Name, '') FROM djmdArtist artist
+         WHERE artist.rb_local_deleted = 0 AND EXISTS (
+           SELECT 1 FROM djmdContent content WHERE content.{} = artist.ID AND content.rb_local_deleted = 0
+         ) ORDER BY artist.Name COLLATE NOCASE, artist.ID", role.column());
+    let mut statement = conn.prepare(&sql)?;
+    let rows = statement.query_map([], |row| Ok((small(number(row, 0)), text(row, 1))))?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
+}
+
+/// The live tracks assigned to one original artist or remixer.
+pub fn artist_role_track_ids(conn: &Connection, role: ArtistRole, artist: u32) -> Result<Vec<u32>> {
+    let sql = format!(
+        "SELECT ID FROM djmdContent WHERE {} = ?1 AND rb_local_deleted = 0",
+        role.column()
+    );
+    let mut statement = conn.prepare(&sql)?;
+    let rows = statement.query_map([artist], |row| Ok(small(number(row, 0))))?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
 }
 
 /// Saved notes for the live memory and hot cues of one track.
@@ -325,7 +364,7 @@ fn small(n: i64) -> u32 {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::fixture::{self, track_id, Shape};
+    use crate::fixture::{self, Shape, track_id};
     use crate::{Library, OpenMode};
 
     fn open() -> (tempfile::TempDir, Library) {
@@ -422,7 +461,9 @@ mod tests {
             ("djmdLabel", "l1", "Anjuna"),
         ] {
             conn.execute(
-                &format!("INSERT INTO {table} (ID, Name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)"),
+                &format!(
+                    "INSERT INTO {table} (ID, Name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)"
+                ),
                 params![id, name, stamp],
             )
             .expect("insert");

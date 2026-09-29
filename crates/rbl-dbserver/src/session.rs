@@ -6,13 +6,15 @@
 //! sent a CDJ-3000 (`docs/pre-release/design-notes/link-export-capture.md`).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
-use crate::catalog::{Analysis, Catalog, Edit, Query, Row, Sort, TrackDetails, TrackScope};
-use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
+use crate::catalog::{
+    Analysis, ArtistRole, Catalog, Edit, Query, Row, Sort, TrackDetails, TrackScope,
+};
+use crate::item::{Item, item_type, root_menu, sort_menu, track_flags};
 use crate::net::{Handler, Session};
-use crate::{keys, kind, menu_footer, menu_header, setup_reply, Argument, Message};
+use crate::{Argument, Message, keys, kind, menu_footer, menu_header, setup_reply};
 
 /// Our device number on the link when nothing has settled one: rekordbox's
 /// first choice, so a player treats us as it treats rekordbox.
@@ -450,6 +452,26 @@ impl LinkSession {
         )
     }
 
+    fn artist_role_albums(&mut self, message: &Message, role: ArtistRole) -> Vec<Message> {
+        let artist = Self::number(message, 2);
+        let query = Query::ArtistRoleAlbums { role, artist };
+        let mut rows = self.catalog.list(&query);
+        prepend_all_if_multiple(&mut rows);
+        self.menu(message, Menu::Library { query, rows })
+    }
+
+    fn artist_role_tracks(&mut self, message: &Message, role: ArtistRole) -> Vec<Message> {
+        let album = Self::number(message, 3);
+        self.tracks(
+            message,
+            TrackScope::ArtistRole {
+                role,
+                artist: Self::number(message, 2),
+                album: (album != u32::MAX).then_some(album),
+            },
+        )
+    }
+
     /// The requests that open a menu: a count now, rows on render.
     fn handle_menu(&mut self, message: &Message) -> Vec<Message> {
         match message.kind {
@@ -468,6 +490,18 @@ impl LinkSession {
             kind::LABEL_ARTISTS => self.label_artists(message),
             kind::LABEL_ARTIST_ALBUMS => self.label_albums(message),
             kind::LABEL_ARTIST_ALBUM_TRACKS => self.label_tracks(message),
+            kind::ORIGINAL_ARTIST_MENU => {
+                self.library(message, Query::ArtistRoleArtists(ArtistRole::Original))
+            }
+            kind::ORIGINAL_ARTIST_ALBUMS => self.artist_role_albums(message, ArtistRole::Original),
+            kind::ORIGINAL_ARTIST_ALBUM_TRACKS => {
+                self.artist_role_tracks(message, ArtistRole::Original)
+            }
+            kind::REMIXER_MENU => {
+                self.library(message, Query::ArtistRoleArtists(ArtistRole::Remixer))
+            }
+            kind::REMIXER_ALBUMS => self.artist_role_albums(message, ArtistRole::Remixer),
+            kind::REMIXER_ALBUM_TRACKS => self.artist_role_tracks(message, ArtistRole::Remixer),
             kind::SORT_MENU => self.menu(message, Menu::SortOptions(self.catalog.sorts())),
             kind::KEY_MENU => self.menu(message, Menu::Keys),
             kind::RELATED_KEYS => {

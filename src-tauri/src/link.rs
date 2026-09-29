@@ -221,6 +221,24 @@ impl Source for StateSource {
         let state = self.0.upgrade()?;
         state.read_db(|db| rbl_db::details::track_details(db.connection(), id)).ok().flatten()
     }
+
+    fn artist_role_names(&self, role: rbl_link::ArtistRole) -> Vec<(u32, String)> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        let role = match role {
+            rbl_link::ArtistRole::Original => rbl_db::details::ArtistRole::Original,
+            rbl_link::ArtistRole::Remixer => rbl_db::details::ArtistRole::Remixer,
+        };
+        state.read_db(|db| rbl_db::details::artist_role_names(db.connection(), role)).unwrap_or_default()
+    }
+
+    fn artist_role_track_ids(&self, role: rbl_link::ArtistRole, artist: u32) -> Vec<u32> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        let role = match role {
+            rbl_link::ArtistRole::Original => rbl_db::details::ArtistRole::Original,
+            rbl_link::ArtistRole::Remixer => rbl_db::details::ArtistRole::Remixer,
+        };
+        state.read_db(|db| rbl_db::details::artist_role_track_ids(db.connection(), role, artist)).unwrap_or_default()
+    }
 }
 
 impl StateSource {

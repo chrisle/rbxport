@@ -377,6 +377,12 @@ pub mod kind {
     pub const KEY_MENU: u16 = 0x1014;
     /// Tracks paired with a seed track in rekordbox's matching table.
     pub const MATCHING_TRACKS: u16 = 0x1017;
+    pub const ORIGINAL_ARTIST_MENU: u16 = 0x1302;
+    pub const ORIGINAL_ARTIST_ALBUMS: u16 = 0x1402;
+    pub const ORIGINAL_ARTIST_ALBUM_TRACKS: u16 = 0x1502;
+    pub const REMIXER_MENU: u16 = 0x1602;
+    pub const REMIXER_ALBUMS: u16 = 0x1702;
+    pub const REMIXER_ALBUM_TRACKS: u16 = 0x1802;
     /// An artist's albums.
     pub const GENRE_ARTISTS: u16 = 0x1101;
     pub const ARTIST_ALBUMS: u16 = 0x1102;

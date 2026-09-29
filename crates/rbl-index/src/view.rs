@@ -19,6 +19,7 @@ pub enum SortColumn {
     Bpm,
     Duration,
     Rating,
+    PlayCount,
     DateAdded,
     ReleaseDate,
     /// The key column round the Camelot wheel, for the alphanumeric display:
@@ -27,10 +28,10 @@ pub enum SortColumn {
 }
 
 impl SortColumn {
-    pub(crate) const ALL: [SortColumn; 14] = [
+    pub(crate) const ALL: [SortColumn; 15] = [
         SortColumn::TrackNo, SortColumn::Title, SortColumn::Artist, SortColumn::Album,
         SortColumn::Genre, SortColumn::Label, SortColumn::Comment, SortColumn::Key, SortColumn::Bpm,
-        SortColumn::Duration, SortColumn::Rating, SortColumn::DateAdded, SortColumn::ReleaseDate,
+        SortColumn::Duration, SortColumn::Rating, SortColumn::PlayCount, SortColumn::DateAdded, SortColumn::ReleaseDate,
         SortColumn::KeyCamelot,
     ];
 
@@ -47,9 +48,10 @@ impl SortColumn {
             SortColumn::Bpm => 8,
             SortColumn::Duration => 9,
             SortColumn::Rating => 10,
-            SortColumn::DateAdded => 11,
-            SortColumn::ReleaseDate => 12,
-            SortColumn::KeyCamelot => 13,
+            SortColumn::PlayCount => 11,
+            SortColumn::DateAdded => 12,
+            SortColumn::ReleaseDate => 13,
+            SortColumn::KeyCamelot => 14,
         }
     }
 }
@@ -287,6 +289,7 @@ impl Library {
                 SortColumn::Bpm => order.sort_by_key(|&r| self.bpm_x100.get(r as usize).copied().unwrap_or(0)),
                 SortColumn::Duration => order.sort_by_key(|&r| self.length_sec.get(r as usize).copied().unwrap_or(0)),
                 SortColumn::Rating => order.sort_by_key(|&r| self.rating.get(r as usize).copied().unwrap_or(0)),
+                SortColumn::PlayCount => order.sort_by_key(|&r| self.play_count.get(r as usize).copied().unwrap_or(0)),
                 SortColumn::Title => order.sort_by(|&a, &b| self.title_folded.get(a as usize).cmp(self.title_folded.get(b as usize))),
                 SortColumn::Artist => order.sort_by(|&a, &b| Self::folded_lookup(&self.artists, &self.artist, a).cmp(Self::folded_lookup(&self.artists, &self.artist, b))),
                 SortColumn::Album => order.sort_by(|&a, &b| Self::folded_lookup(&self.albums, &self.album, a).cmp(Self::folded_lookup(&self.albums, &self.album, b))),
