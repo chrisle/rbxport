@@ -442,6 +442,10 @@ pub mod kind {
     pub const METADATA: u16 = 0x2002;
     /// Album art.
     pub const ARTWORK: u16 = 0x2003;
+    /// Album art resolved from a content id. The RX3 uses this form while
+    /// loading a track; it receives the same `0x4002` binary reply as
+    /// [`ARTWORK`].
+    pub const CONTENT_ARTWORK: u16 = 0x2103;
     /// The small waveform preview.
     pub const WAVEFORM_PREVIEW: u16 = 0x2004;
     /// Track information: the path and the copyright text (7 rows).
@@ -486,6 +490,9 @@ pub mod kind {
     /// A player taking a track off its history (`CMD_DEL_HISTORY_TRACK`):
     /// `[r:m:s:t, track]`, answered `[0x3401, 0]`, or `-1` when it failed.
     pub const DELETE_HISTORY_TRACK: u16 = 0x3401;
+    /// A player changes a history entry's on-air state. The RX3 sends this
+    /// without waiting for a reply.
+    pub const SET_ON_AIR: u16 = 0x3201;
     pub const TAG_LIST: u16 = 0x100f;
     pub const CHANGE_TAG: u16 = 0x3002;
     pub const CLEAR_TAGS: u16 = 0x3202;
@@ -493,6 +500,9 @@ pub mod kind {
     pub const FILTER_SWITCH: u16 = 0x3007;
     pub const FILTER_GET: u16 = 0x3107;
     pub const FILTER_SET: u16 = 0x3207;
+    /// The remote database's browse kind. RX3 asks this if its device
+    /// property exchange did not already provide one.
+    pub const BROWSE_TYPE: u16 = 0x3303;
     pub const FILTER_REPLY: u16 = 0x4004;
     /// "Here is how many items your query matched."
     pub const MENU_HEADER: u16 = 0x4000;
@@ -559,6 +569,7 @@ pub mod kind {
             INSERT_HISTORY => "insert history".to_owned(),
             DELETE_HISTORY => "delete history".to_owned(),
             DELETE_HISTORY_TRACK => "delete history track".to_owned(),
+            SET_ON_AIR => "set on-air".to_owned(),
             RELATED_KEYS => "related keys".to_owned(),
             ARTIST_ALBUM_TRACKS => "artist's album tracks".to_owned(),
             KEY_TRACKS => "key's tracks".to_owned(),
@@ -573,6 +584,7 @@ pub mod kind {
             USER_INFO => "user info".to_owned(),
             USER_INFO_REPLY => "user info reply".to_owned(),
             ARTWORK => "artwork".to_owned(),
+            CONTENT_ARTWORK => "content artwork".to_owned(),
             WAVEFORM_PREVIEW => "waveform preview".to_owned(),
             TRACK_INFO => "track info".to_owned(),
             BEAT_GRID => "beat grid".to_owned(),
@@ -592,6 +604,7 @@ pub mod kind {
             FILTER_SWITCH => "filter switch".to_owned(),
             FILTER_GET => "filter properties".to_owned(),
             FILTER_SET => "set filter properties".to_owned(),
+            BROWSE_TYPE => "browse type".to_owned(),
             SEARCH_TRACK => "search track".to_owned(),
             MENU_HEADER => "menu header".to_owned(),
             RENDER_HEADER => "render header".to_owned(),

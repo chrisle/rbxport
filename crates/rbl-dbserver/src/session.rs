@@ -6,15 +6,15 @@
 //! sent a CDJ-3000 (`docs/pre-release/design-notes/link-export-capture.md`).
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 
 use crate::catalog::{
     Analysis, ArtistRole, Catalog, Edit, Query, Row, Sort, TrackDetails, TrackScope,
 };
-use crate::item::{Item, item_type, root_menu, sort_menu, track_flags};
+use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
-use crate::{Argument, Message, keys, kind, menu_footer, menu_header, setup_reply};
+use crate::{keys, kind, menu_footer, menu_header, setup_reply, Argument, Message};
 
 /// Our device number on the link when nothing has settled one: rekordbox's
 /// first choice, so a player treats us as it treats rekordbox.
@@ -687,11 +687,12 @@ impl LinkSession {
                 Some(vec![0; USER_INFO_LEN]),
                 None,
             ),
-            kind::ARTWORK => {
+            kind::ARTWORK | kind::CONTENT_ARTWORK => {
                 let id = Self::number(message, 1);
-                // With the size argument the id is the menu item's own; without
-                // it, the artwork field of a title item (`Catalog::item_artwork`).
-                let art = if message.arguments.len() > 2 {
+                // `0x2003` with the size argument names a menu item's own id,
+                // rather than the artwork field in it. `0x2103` uses that same
+                // content-id lookup directly (RX3 `dbcl_GetImage2`).
+                let art = if message.kind == kind::CONTENT_ARTWORK || message.arguments.len() > 2 {
                     self.catalog.item_artwork(id)
                 } else {
                     self.catalog.artwork(id)
@@ -783,6 +784,15 @@ impl Session for LinkSession {
                 }
             }
             kind::TEARDOWN => Vec::new(),
+            // RX3 `dbcl_SetOnAir` sends this without calling its reply waiter.
+            // Do not let it replace an unrelated pending menu with a spurious
+            // generic `0x4000` response.
+            kind::SET_ON_AIR => Vec::new(),
+            // RX3 `dbcl_GetBrowseType` falls back to this request when the
+            // device-property response has no browse kind. `1` is the
+            // database-backed/export-media kind the firmware uses for its
+            // ordinary browse flow.
+            kind::BROWSE_TYPE => vec![menu_header(tx, u32::from(message.kind), 1)],
             kind::GRID_OFFSET => vec![menu_header(
                 tx,
                 u32::from(message.kind),
@@ -903,6 +913,7 @@ impl Session for LinkSession {
                 vec![menu_header(tx, u32::from(kind::ITEM_POSITION), position)]
             }
             kind::ARTWORK
+            | kind::CONTENT_ARTWORK
             | kind::WAVEFORM_PREVIEW
             | kind::BEAT_GRID
             | kind::CUES

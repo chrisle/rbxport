@@ -714,6 +714,14 @@ fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
     );
     let some = s.handle(&numbers(kind::ARTWORK, 0x1a3, &[0x0108_0301, 0x6272, 1]));
     assert_eq!(args(&some[0]), "0x2003, 0x0, 0x4, blob[4]");
+    // RX3 uses `0x2103` while loading: its content id is resolved as a menu
+    // item's artwork, but the binary reply has the request kind it carried.
+    let by_content = s.handle(&numbers(
+        kind::CONTENT_ARTWORK,
+        0x1a3,
+        &[0x0108_0301, 0x6272, 0],
+    ));
+    assert_eq!(args(&by_content[0]), "0x2103, 0x0, 0x4, blob[4]");
     // Without the size argument the id is the title item's artwork field,
     // not the track's id.
     let by_field = s.handle(&numbers(kind::ARTWORK, 0x1a4, &[0x0108_0301, 0x14]));
@@ -1199,6 +1207,11 @@ fn history_commands_reach_the_catalog_and_only_the_removal_is_answered() {
     assert!(s
         .handle(&numbers(kind::DELETE_HISTORY, 4, &[CTX, 0xffff_ffff]))
         .is_empty());
+    // The RX3 changes on-air state without waiting for a response. Its
+    // command must likewise leave the active browse menu intact.
+    assert!(s
+        .handle(&numbers(kind::SET_ON_AIR, 4, &[CTX, TRACK]))
+        .is_empty());
     assert_eq!(
         s.handle(&numbers(kind::DELETE_HISTORY_TRACK, 5, &[CTX, TRACK]))[0].arguments,
         vec![Argument::Number(0x3401), Argument::Number(0)]
@@ -1221,6 +1234,15 @@ fn history_commands_reach_the_catalog_and_only_the_removal_is_answered() {
             Edit::HistoryRemove { track: TRACK },
             Edit::HistoryRemove { track: 7 },
         ]
+    );
+}
+
+#[test]
+fn rx3_browse_type_fallback_is_database_backed_media() {
+    let mut s = session();
+    assert_eq!(
+        s.handle(&numbers(kind::BROWSE_TYPE, 0x51, &[CTX, 2]))[0].arguments,
+        vec![Argument::Number(0x3303), Argument::Number(1)]
     );
 }
 
