@@ -139,9 +139,10 @@ pub fn volume_id(mount_point: &Path) -> String {
 /// Whether a volume should be offered as somewhere to export to.
 ///
 /// `is_removable` alone is not enough: an external SSD, which is what a lot of
-/// people actually carry, reports false on both platforms. The mount point is
-/// the better signal — macOS puts every non-boot volume under `/Volumes`, and
-/// on Windows anything that is not the system drive is a separate letter.
+/// people actually carry, reports false on every platform. The mount point is
+/// the better signal — macOS puts every non-boot volume under `/Volumes`,
+/// Linux desktop mount services use `/media` or `/run/media`, and on Windows
+/// anything that is not the system drive is a separate letter.
 fn is_offerable(mount_point: &Path, removable: bool) -> bool {
     if removable {
         return true;
@@ -150,7 +151,15 @@ fn is_offerable(mount_point: &Path, removable: bool) -> bool {
     if text == "/" || text.starts_with("/System") || text.starts_with("/private") {
         return false;
     }
-    text.starts_with("/Volumes/") || (is_drive_root(&text) && !text.starts_with('C'))
+    text.starts_with("/Volumes/")
+        || is_linux_mount_point(&text)
+        || (is_drive_root(&text) && !text.starts_with('C'))
+}
+
+/// The paths used by the common Linux desktop mount services. `/mnt` is also
+/// conventional for a volume mounted explicitly by its owner.
+fn is_linux_mount_point(path: &str) -> bool {
+    path.starts_with("/media/") || path.starts_with("/run/media/") || path.starts_with("/mnt/")
 }
 
 /// The name to show. A mount point's last component is the volume name on
@@ -302,6 +311,9 @@ mod tests {
     fn an_external_volume_is_offered_even_when_it_says_it_is_not_removable() {
         // Which is what an external SSD reports, and people do carry those.
         assert!(is_offerable(Path::new("/Volumes/SAMSUNG T7"), false));
+        assert!(is_offerable(Path::new("/media/chris/SAMSUNG T7"), false));
+        assert!(is_offerable(Path::new("/run/media/chris/SAMSUNG T7"), false));
+        assert!(is_offerable(Path::new("/mnt/SAMSUNG T7"), false));
         assert!(is_offerable(Path::new("E:\\"), false));
         // And anything the OS does call removable, wherever it is mounted.
         assert!(is_offerable(Path::new("/mnt/stick"), true));
