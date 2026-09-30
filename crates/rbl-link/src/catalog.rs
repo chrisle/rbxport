@@ -1094,70 +1094,7 @@ impl Catalog for IndexCatalog {
         let Some(library) = self.source.library() else {
             return Vec::new();
         };
-        match query {
-            Query::BpmBuckets => library.bpm_buckets().into_iter().map(Row::Date).collect(),
-            Query::Ratings => library.ratings().into_iter().map(Row::Date).collect(),
-            Query::Bitrates => library.bitrates().into_iter().map(Row::Date).collect(),
-            Query::Colors => library
-                .color_ids()
-                .into_iter()
-                .map(|id| Row::Named {
-                    id,
-                    name: color_name(id).to_owned(),
-                })
-                .collect(),
-            Query::DurationMinutes => library
-                .duration_minute_buckets()
-                .into_iter()
-                .map(Row::Date)
-                .collect(),
-            Query::ReleaseDecades => library
-                .release_decades()
-                .into_iter()
-                .map(Row::Date)
-                .collect(),
-            Query::ReleaseYears(decade) => library
-                .release_years(*decade)
-                .into_iter()
-                .map(Row::Date)
-                .collect(),
-            Query::Genres(_) => Self::named(&library.genre, &library.genres),
-            Query::GenreArtists(genre) => Self::genre_artists(&library, *genre),
-            Query::GenreArtistAlbums { genre, artist } => {
-                Self::genre_albums(&library, *genre, *artist)
-            }
-            Query::Labels(_) => Self::named(&library.label, &library.labels),
-            Query::LabelArtists(label) => Self::label_artists(&library, *label),
-            Query::LabelArtistAlbums { label, artist } => {
-                Self::label_albums(&library, *label, *artist)
-            }
-            Query::ArtistRoleArtists(role) => self
-                .source
-                .artist_role_names(*role)
-                .into_iter()
-                .filter(|(_, name)| !name.is_empty())
-                .map(|(id, name)| Row::Named { id, name })
-                .collect(),
-            Query::ArtistRoleAlbums { role, artist } => self.role_albums(&library, *role, *artist),
-            Query::Artists(_) => Self::named(&library.artist, &library.artists),
-            Query::Albums(_) => Self::named(&library.album, &library.albums),
-            Query::ArtistAlbums(artist) => Self::artist_albums(&library, *artist),
-            Query::Folder(parent) => Self::folder(&library.playlists(), *parent),
-            Query::Histories => self.histories(&library),
-            Query::Years => Self::date_parts(&library, "", 0..4, true),
-            Query::Months(year) => {
-                Self::date_parts(&library, &date_prefix(*year, None, None), 5..7, false)
-            }
-            Query::Days { year, month } => Self::date_parts(
-                &library,
-                &date_prefix(*year, Some(*month), None),
-                8..10,
-                false,
-            ),
-            Query::Tracks { scope, sort } => {
-                self.tracks(&library, scope, *sort, self.source.alphabetical_keys())
-            }
-        }
+        self.cached_list(&library, query)
     }
 
     fn track_row(&self, id: u32) -> Option<TrackRow> {
