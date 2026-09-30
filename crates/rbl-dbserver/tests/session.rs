@@ -823,6 +823,7 @@ fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
     assert_eq!(banks[0].arguments, vec![Argument::Number(0x2001), Argument::Number(1)]);
     let items = s.handle(&numbers(kind::RENDER, 0x1c1, &[CTX, 0, 8]));
     assert_eq!(items[1].arguments[1], Argument::Number(42));
+    assert_eq!(items[1].arguments[6], Argument::Number(0x2b));
     let reply = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c2, &[CTX, 42]));
     assert_eq!(reply.len(), 1);
     assert_eq!(reply[0].kind, kind::HOT_CUE_BANK_REPLY);

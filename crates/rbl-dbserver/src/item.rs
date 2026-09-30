@@ -59,6 +59,9 @@ pub mod item_type {
     pub const ALL: u32 = 0xa0;
     /// The `2f` row in track info; meaning unknown, value copied.
     pub const INFO_UNKNOWN: u32 = 0x2f;
+    /// A leaf Hot Cue Bank in the RX3's `0x2001` hierarchy.  It opens its
+    /// assigned track list with mode 0, unlike a generic title row.
+    pub const HOT_CUE_BANK: u32 = 0x2b;
     /// The path row in track info.
     pub const PATH: u32 = 0x00;
     // Root-menu categories and sort options carry their own codes.

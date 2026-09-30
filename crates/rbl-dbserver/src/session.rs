@@ -544,7 +544,7 @@ impl LinkSession {
                 if bank.folder {
                     Item::named(bank.id, &bank.name, item_type::FOLDER)
                 } else {
-                    Item::named(bank.id, &bank.name, item_type::TITLE)
+                    Item::named(bank.id, &bank.name, item_type::HOT_CUE_BANK)
                 }
             }).collect()
         } else {
