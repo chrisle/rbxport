@@ -185,6 +185,21 @@ describe("SyncManager", () => {
     expect(sync?.disabled).toBe(true);
     expect(status()).toContain("Quit rekordbox to enable synchronization.");
   });
+  it("rechecks selected USB devices before importing or syncing", async () => {
+    click(box("Closing"));
+    click(box("USB B"));
+    await settle();
+
+    // The selected path disappeared after the last device refresh. SYNC must
+    // not pass that stale mount point to either the import or export command.
+    listDevices.mockResolvedValueOnce([stick("USB A")]);
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+    await settle();
+
+    expect(importUsb).not.toHaveBeenCalled();
+    expect(syncDevices).not.toHaveBeenCalled();
+    expect(status()).toContain("selected USB device is no longer connected");
+  });
   it("lists missing source files and requires confirmation before writing", async () => {
     validateExportFiles.mockResolvedValueOnce([
       { title: "Missing One", path: "/Music/missing-one.mp3" },
@@ -560,6 +575,7 @@ it("connection changes refresh only the device list; imports wait for SYNC", asy
   listDevices.mockResolvedValueOnce([...DEVICES, stick("USB C")]);
   act(() => { devicesChanged?.(); });
   await settle();
+  listDevices.mockResolvedValue([...DEVICES, stick("USB C")]);
   expect(box("USB C")).not.toBeNull();
   expect(importUsb).not.toHaveBeenCalled();
   expect(syncDevices).not.toHaveBeenCalled();

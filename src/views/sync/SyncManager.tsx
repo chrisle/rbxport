@@ -461,8 +461,6 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
     if (!canSync) return;
     // In tree order, so the playlists land on the stick as they are filed.
     const playlists = nodes.filter((n) => n.kind === "playlist" && ticked.has(n.id)).map((n) => n.id);
-    const destinations = devices.filter((d) => tickedDevices.has(d.path)).map((d) => d.path);
-    const nameOf = (path: string) => devices.find((d) => d.path === path)?.name ?? path;
     setOperation("sync");
     setCompletedReports(new Map());
     setStatus([t("Preparing for export…")]);
@@ -470,6 +468,16 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
       let stop = () => {};
       try {
         const backend = await getBackend();
+        // The device list can go stale between the last mount notification and
+        // this click. Read it immediately before any import or export so a
+        // stale /Volumes/name path cannot be handed to the sync workers.
+        const currentDevices = await refreshDevices();
+        const destinations = currentDevices.filter((d) => tickedDevices.has(d.path)).map((d) => d.path);
+        const nameOf = (path: string) => currentDevices.find((d) => d.path === path)?.name ?? path;
+        if (destinations.length === 0) {
+          setStatus(["The selected USB device is no longer connected. Refresh and select it again."]);
+          return;
+        }
         // Close the interval between the last poll and the click: rekordbox
         // may have launched while the button was still visibly enabled.
         const summary = await backend.librarySummary();
@@ -527,7 +535,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
         setOperation(null);
       }
     })();
-  }, [canSync, nodes, ticked, devices, tickedDevices, importHistory, importSettings, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
+  }, [canSync, nodes, ticked, tickedDevices, importHistory, importSettings, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
 
   const runUsbImport = (kinds: readonly ImportKind[]) => {
     if (busy || tickedDevices.size === 0 || kinds.length === 0) return;
