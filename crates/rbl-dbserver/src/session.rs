@@ -404,7 +404,9 @@ impl LinkSession {
         let mut sidecars = Vec::with_capacity(3 * 8);
         let mut count = 0_u32;
         for cue in cues.into_iter().filter(|cue| (1..=3).contains(&cue.slot)).take(3) {
-            let flags = u32::from(cue.out_ms.is_some()) | (u32::from(cue.slot) + 3) << 16;
+            // `CueFmt_FmtBnkCue4Player` always receives the paired timing
+            // sidecar and marks that fact with bit 8.
+            let flags = 0x100 | u32::from(cue.out_ms.is_some()) | (u32::from(cue.slot) + 3) << 16;
             let in_frame = cue.in_ms.saturating_mul(3) / 20;
             let out_frame = cue.out_ms.map_or(u32::MAX, |ms| ms.saturating_mul(3) / 20);
             for word in [
@@ -485,17 +487,27 @@ impl LinkSession {
     }
 
     fn hot_cue_bank_menu(&mut self, message: &Message) -> Vec<Message> {
-        // `0x2001` carries the parent/bank id after the normal connection
-        // context.  A zero id is the root.  Both its legacy list modes are
-        // rendered through the normal 4000/4101/4201 menu sequence.
-        let parent = Self::number(message, 1);
-        let items = self.catalog.hot_cue_banks((parent != 0).then_some(parent)).into_iter().map(|bank| {
-            if bank.folder {
-                Item::named(bank.id, &bank.name, item_type::FOLDER)
-            } else {
-                Item::named(bank.id, &bank.name, item_type::TITLE)
-            }
-        }).collect();
+        // `0x2001` carries a parent/bank id and a mode after the connection
+        // context.  Firmware's `DBSMain_GetHCBnkList` uses mode 1 for the
+        // hierarchy and mode 0 for the three tracks in the selected bank.
+        let bank = Self::number(message, 1);
+        let mode = Self::number(message, 2);
+        let items = if mode == 0 {
+            self.catalog.hot_cue_bank_tracks(bank).into_iter()
+                .enumerate()
+                .map(|(position, track)| Item::track(&track, 0, u32::try_from(position).unwrap_or(u32::MAX)))
+                .collect()
+        } else if mode == 1 {
+            self.catalog.hot_cue_banks((bank != 0).then_some(bank)).into_iter().map(|bank| {
+                if bank.folder {
+                    Item::named(bank.id, &bank.name, item_type::FOLDER)
+                } else {
+                    Item::named(bank.id, &bank.name, item_type::TITLE)
+                }
+            }).collect()
+        } else {
+            Vec::new()
+        };
         self.menu(message, Menu::Selectors(items))
     }
 

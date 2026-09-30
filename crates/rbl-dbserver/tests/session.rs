@@ -181,6 +181,9 @@ impl Catalog for Small {
             }])
             .unwrap_or_default()
     }
+    fn hot_cue_bank_tracks(&self, bank: u32) -> Vec<TrackRow> {
+        (bank == 42).then(|| vec![the_track()]).unwrap_or_default()
+    }
     fn artwork(&self, id: u32) -> Option<Vec<u8>> {
         (id == 0x14).then(|| vec![0xff, 0xd8, 0xff, 0xe1])
     }
@@ -816,7 +819,11 @@ fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
     assert_eq!(reply[0].kind, kind::HOT_CUE_BANK_REPLY);
     assert_eq!(args(&reply[0]), "0x2101, 0x0, 0x24, blob[36], 0x24, 0x1, 0x0, 0x8, blob[8], 0x0, blob[0]");
     let Argument::Blob(record) = &reply[0].arguments[3] else { panic!("cue record") };
-    assert_eq!(&record[..8], &[0, 4, 0, 1, 0, 0, 0x47, 0x5f]);
+    assert_eq!(&record[..8], &[0, 4, 1, 1, 0, 0, 0x47, 0x5f]);
+    let tracks = s.handle(&numbers(kind::HOT_CUE_BANK, 0x1c3, &[CTX, 42, 0]));
+    assert_eq!(tracks[0].arguments, vec![Argument::Number(0x2001), Argument::Number(1)]);
+    let track_items = s.handle(&numbers(kind::RENDER, 0x1c4, &[CTX, 0, 8]));
+    assert_eq!(track_items[1].arguments[1], Argument::Number(TRACK));
     let (decoded, used) = Message::decode(&reply[0].encode()).unwrap();
     assert_eq!(used, reply[0].encode().len());
     assert_eq!(decoded, reply[0]);

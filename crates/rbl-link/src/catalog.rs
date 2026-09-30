@@ -57,6 +57,7 @@ pub trait Source: Send + Sync {
     fn artist_role_track_ids(&self, _role: ArtistRole, _artist: u32) -> Vec<u32> { Vec::new() }
     fn hot_cue_banks(&self, _parent: Option<u32>) -> Vec<rbl_db::details::HotCueBank> { Vec::new() }
     fn hot_cue_bank_cues(&self, _bank: u32) -> Vec<rbl_db::details::HotCueBankCue> { Vec::new() }
+    fn hot_cue_bank_track_ids(&self, _bank: u32) -> Vec<u32> { Vec::new() }
     fn edit(&self, _edit: &Edit) -> bool {
         false
     }
@@ -1155,6 +1156,12 @@ impl Catalog for IndexCatalog {
             beat_loop_size: cue.beat_loop_size,
             cue_microsec: cue.cue_microsec,
         }).collect()
+    }
+
+    fn hot_cue_bank_tracks(&self, bank: u32) -> Vec<TrackRow> {
+        self.source.hot_cue_bank_track_ids(bank).into_iter()
+            .filter_map(|id| self.track_row(id))
+            .collect()
     }
 
     fn grid_offset(&self, track: u32) -> i16 {

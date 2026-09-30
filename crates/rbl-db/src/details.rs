@@ -169,6 +169,21 @@ pub fn hot_cue_bank_cues(conn: &Connection, bank: u32) -> Result<Vec<HotCueBankC
     Ok(rows.filter_map(std::result::Result::ok).filter(|cue| (1..=3).contains(&cue.slot)).collect())
 }
 
+/// Content ids assigned to a Hot Cue Bank, in the order the player shows
+/// them.  This is intentionally separate from the cue-point query: the RX3
+/// asks `DsqlHCBnkSong_GetContentID` when opening a bank, before it asks for
+/// its three cue records.
+pub fn hot_cue_bank_track_ids(conn: &Connection, bank: u32) -> Result<Vec<u32>> {
+    let mut statement = conn.prepare(
+        "SELECT ContentID
+         FROM djmdSongHotCueBanklist
+         WHERE HotCueBanklistID = ?1 AND rb_local_deleted = 0
+         ORDER BY TrackNo, ID",
+    )?;
+    let rows = statement.query_map(params![bank.to_string()], |row| Ok(small(number(row, 0))))?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
+}
+
 /// One of the artist references rekordbox exposes as a browse category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtistRole {
@@ -481,6 +496,7 @@ mod tests {
             HotCueBankCue { slot: 1, content: 100, in_ms: 1100, out_ms: Some(1800), color: 2, color_table_index: 20, active_loop: true, beat_loop_size: 262145, cue_microsec: 7 },
             HotCueBankCue { slot: 2, content: 200, in_ms: 2200, out_ms: None, color: 3, color_table_index: 21, active_loop: false, beat_loop_size: 0, cue_microsec: 0 },
         ]);
+        assert_eq!(hot_cue_bank_track_ids(&conn, 10).unwrap(), vec![100, 200, 400]);
     }
 
     #[test]

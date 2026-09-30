@@ -244,6 +244,11 @@ impl Source for StateSource {
         state.read_db(|db| rbl_db::details::hot_cue_bank_cues(db.connection(), bank)).unwrap_or_default()
     }
 
+    fn hot_cue_bank_track_ids(&self, bank: u32) -> Vec<u32> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        state.read_db(|db| rbl_db::details::hot_cue_bank_track_ids(db.connection(), bank)).unwrap_or_default()
+    }
+
     fn matching_ids(&self, seed: u32) -> Vec<u32> {
         let Some(state) = self.0.upgrade() else { return Vec::new() };
         state

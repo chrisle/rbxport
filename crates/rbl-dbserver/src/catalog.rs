@@ -339,6 +339,12 @@ pub trait Catalog: Send + Sync {
         Vec::new()
     }
 
+    /// Tracks assigned to a Hot Cue Bank, in the bank's slot order.  The RX3
+    /// uses this for `0x2001` mode 0; it is not a second bank hierarchy.
+    fn hot_cue_bank_tracks(&self, _bank: u32) -> Vec<TrackRow> {
+        Vec::new()
+    }
+
     /// Signed millisecond correction, separate from the original beat times.
     fn grid_offset(&self, _track: u32) -> i16 {
         0
