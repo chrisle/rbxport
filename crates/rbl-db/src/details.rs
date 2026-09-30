@@ -100,6 +100,108 @@ pub struct TrackDetails {
     pub publish: bool,
 }
 
+/// A Hot Cue Bank row from rekordbox's master database.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HotCueBank {
+    pub id: u32,
+    pub name: String,
+    pub folder: bool,
+}
+
+/// One of the three saved cue points belonging to a Hot Cue Bank.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HotCueBankCue {
+    pub slot: u8,
+    pub content: u32,
+    pub in_ms: u32,
+    pub out_ms: Option<u32>,
+    pub color: u32,
+    pub color_table_index: u32,
+    pub active_loop: bool,
+    pub beat_loop_size: u32,
+    pub cue_microsec: u32,
+}
+
+/// Lists live Hot Cue Banks below `parent`; `None` selects rekordbox's root.
+pub fn hot_cue_banks(conn: &Connection, parent: Option<u32>) -> Result<Vec<HotCueBank>> {
+    let parent = parent.map_or_else(|| "root".to_owned(), |id| id.to_string());
+    let mut statement = conn.prepare(
+        "SELECT ID, COALESCE(Name, ''), COALESCE(Attribute, 0)
+         FROM djmdHotCueBanklist
+         WHERE ParentID = ?1 AND rb_local_deleted = 0
+         ORDER BY Seq, ID",
+    )?;
+    let rows = statement.query_map(params![parent], |row| {
+        Ok(HotCueBank {
+            id: small(number(row, 0)),
+            name: text(row, 1),
+            // rekordbox uses Attribute=1 for a folder, as it does for its
+            // playlist tree; leaf banks have Attribute=0.
+            folder: number(row, 2) == 1,
+        })
+    })?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
+}
+
+/// Reads the up-to-three cue points assigned to a Hot Cue Bank.
+pub fn hot_cue_bank_cues(conn: &Connection, bank: u32) -> Result<Vec<HotCueBankCue>> {
+    let mut statement = conn.prepare(
+        "SELECT TrackNo, ContentID, InMsec, OutMsec, Color, ColorTableIndex,
+                ActiveLoop, BeatLoopSize, CueMicrosec
+         FROM djmdSongHotCueBanklist
+         WHERE HotCueBanklistID = ?1 AND rb_local_deleted = 0
+         ORDER BY TrackNo, ID",
+    )?;
+    let rows = statement.query_map(params![bank.to_string()], |row| {
+        let out: Option<i64> = row.get(3)?;
+        Ok(HotCueBankCue {
+            slot: u8::try_from(number(row, 0)).unwrap_or(0),
+            content: small(number(row, 1)),
+            in_ms: small(number(row, 2)),
+            out_ms: out.filter(|value| *value >= 0).map(small),
+            color: small(number(row, 4)),
+            color_table_index: small(number(row, 5)),
+            active_loop: number(row, 6) != 0,
+            beat_loop_size: small(number(row, 7)),
+            cue_microsec: small(number(row, 8)),
+        })
+    })?;
+    // RX3 asks for slots 1, 2, and 3 separately.  Keep the first row for
+    // each slot in rekordbox order so malformed duplicate rows cannot turn
+    // into duplicate player records.
+    let mut seen = [false; 3];
+    Ok(rows
+        .filter_map(std::result::Result::ok)
+        .filter(|cue| (1..=3).contains(&cue.slot))
+        .filter(|cue| {
+            let slot = usize::from(cue.slot - 1);
+            if seen[slot] {
+                false
+            } else {
+                seen[slot] = true;
+                true
+            }
+        })
+        .collect())
+}
+
+/// Content ids assigned to a Hot Cue Bank, in the order the player shows
+/// them.  This is intentionally separate from the cue-point query: the RX3
+/// asks `DsqlHCBnkSong_GetContentID` when opening a bank, before it asks for
+/// its three cue records.
+pub fn hot_cue_bank_track_ids(conn: &Connection, bank: u32) -> Result<Vec<u32>> {
+    let mut statement = conn.prepare(
+        "SELECT ContentID
+         FROM djmdSongHotCueBanklist
+         WHERE HotCueBanklistID = ?1 AND rb_local_deleted = 0
+         ORDER BY TrackNo, ID",
+    )?;
+    let rows = statement.query_map(params![bank.to_string()], |row| Ok(small(number(row, 0))))?;
+    // `DsqlHCBnkSong_GetContentID` supplies exactly three content-id slots
+    // to the RX3 browse path.
+    Ok(rows.filter_map(std::result::Result::ok).take(3).collect())
+}
+
 /// One of the artist references rekordbox exposes as a browse category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtistRole {
@@ -386,6 +488,34 @@ mod tests {
         assert_eq!(notes["1"], "136 BPM");
         assert_eq!(notes["2"], "136-128 BPM");
         assert_eq!(notes["3"], "");
+    }
+
+    #[test]
+    fn hot_cue_banks_and_slots_follow_rekordbox_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE djmdHotCueBanklist (ID TEXT, Seq INTEGER, Name TEXT, Attribute INTEGER, ParentID TEXT, rb_local_deleted INTEGER);
+             CREATE TABLE djmdSongHotCueBanklist (
+                 ID TEXT, HotCueBanklistID TEXT, TrackNo INTEGER, ContentID TEXT, InMsec INTEGER, OutMsec INTEGER,
+                 Color INTEGER, ColorTableIndex INTEGER, ActiveLoop INTEGER, BeatLoopSize INTEGER, CueMicrosec INTEGER,
+                 rb_local_deleted INTEGER
+             );
+             INSERT INTO djmdHotCueBanklist VALUES ('10', 2, 'Late', 0, 'root', 0), ('9', 1, 'Folder', 1, 'root', 0), ('11', 3, 'gone', 0, 'root', 1);
+             INSERT INTO djmdSongHotCueBanklist VALUES
+               ('a', '10', 2, '200', 2200, NULL, 3, 21, 0, 0, 0, 0),
+               ('b', '10', 1, '100', 1100, 1800, 2, 20, 1, 262145, 7, 0),
+               ('c', '10', 4, '400', 0, NULL, 0, 0, 0, 0, 0, 0),
+               ('d', '10', 5, '500', 0, NULL, 0, 0, 0, 0, 0, 0);",
+        ).unwrap();
+        assert_eq!(hot_cue_banks(&conn, None).unwrap(), vec![
+            HotCueBank { id: 9, name: "Folder".into(), folder: true },
+            HotCueBank { id: 10, name: "Late".into(), folder: false },
+        ]);
+        assert_eq!(hot_cue_bank_cues(&conn, 10).unwrap(), vec![
+            HotCueBankCue { slot: 1, content: 100, in_ms: 1100, out_ms: Some(1800), color: 2, color_table_index: 20, active_loop: true, beat_loop_size: 262145, cue_microsec: 7 },
+            HotCueBankCue { slot: 2, content: 200, in_ms: 2200, out_ms: None, color: 3, color_table_index: 21, active_loop: false, beat_loop_size: 0, cue_microsec: 0 },
+        ]);
+        assert_eq!(hot_cue_bank_track_ids(&conn, 10).unwrap(), vec![100, 200, 400]);
     }
 
     #[test]

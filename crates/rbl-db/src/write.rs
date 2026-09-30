@@ -92,7 +92,12 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use crate::{is_rekordbox_running, DbError, Library, OpenMode, Result};
 
 /// Tables whose `rb_local_usn` participates in the shared counter.
-const USN_TABLES: &[&str] = &["djmdContent", "djmdPlaylist", "djmdSongPlaylist"];
+const USN_TABLES: &[&str] = &[
+    "djmdContent",
+    "djmdPlaylist",
+    "djmdSongPlaylist",
+    "djmdSongHotCueBanklist",
+];
 
 /// `djmdContent.Analysed` for a track analysed here and never by rekordbox:
 /// the value observed on rekordbox's own tracks that carry a grid and
@@ -1280,6 +1285,37 @@ impl Writer {
     }
 
     // ------------------------------------------------------------------ cues
+
+    /// Replaces an existing Hot Cue Bank slot with the value received from a
+    /// player.  A bank has fixed membership in rekordbox, so this refuses to
+    /// invent a row where the selected slot does not already exist.
+    pub fn set_hot_cue_bank_cue(&mut self, bank: &str, cue: &crate::details::HotCueBankCue) -> Result<Changed> {
+        if !(1..=3).contains(&cue.slot) || cue.content == 0 || cue.out_ms.is_some_and(|out| out < cue.in_ms) {
+            return Err(DbError::WriteRefused("invalid Hot Cue Bank cue".into()));
+        }
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let usn = next_usn(&tx)?;
+        let rows = tx.execute(
+            "UPDATE djmdSongHotCueBanklist
+             SET ContentID=?1, InMsec=?2, OutMsec=?3, Color=?4, ColorTableIndex=?5,
+                 ActiveLoop=?6, BeatLoopSize=?7, CueMicrosec=?8,
+                 rb_local_usn=?9, updated_at=?10
+             WHERE HotCueBanklistID=?11 AND TrackNo=?12 AND rb_local_deleted=0",
+            params![
+                cue.content.to_string(), i64::from(cue.in_ms), cue.out_ms.map(i64::from),
+                i64::from(cue.color), i64::from(cue.color_table_index), i64::from(u8::from(cue.active_loop)),
+                i64::from(cue.beat_loop_size), i64::from(cue.cue_microsec), usn, stamp, bank, i64::from(cue.slot),
+            ],
+        )?;
+        if rows != 1 {
+            return Err(DbError::WriteRefused("Hot Cue Bank slot does not exist".into()));
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
 
     /// Adds a cue to a track.
     ///
@@ -2642,6 +2678,14 @@ pub(crate) fn next_usn(conn: &Connection) -> Result<i64> {
         ?;
     let mut highest = counter;
     for table in USN_TABLES {
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [table],
+            |r| r.get(0),
+        )?;
+        if exists == 0 {
+            continue;
+        }
         let max: i64 = conn
             .query_row(&format!("SELECT COALESCE(MAX(rb_local_usn), 0) FROM {table}"), [], |r| {
                 r.get(0)

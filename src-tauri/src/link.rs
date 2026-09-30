@@ -174,6 +174,7 @@ impl Source for StateSource {
             rbl_link::Edit::Tag { .. } | rbl_link::Edit::ClearTags => crate::commands::Touched::TagList,
             rbl_link::Edit::Rating { track, .. } => crate::commands::Touched::Metadata(vec![track.to_string()]),
             rbl_link::Edit::GridOffset { .. } => unreachable!("handled above"),
+            rbl_link::Edit::HotCueBankCue { .. } => crate::commands::Touched::Metadata(Vec::new()),
             // The catalog keeps the link session's history and writes it
             // through the methods below.
             rbl_link::Edit::HistoryAdd { .. } | rbl_link::Edit::HistoryRemove { .. } | rbl_link::Edit::HistoryDelete { .. } => return false,
@@ -184,6 +185,17 @@ impl Source for StateSource {
             rbl_link::Edit::Tag { track, add: false } => writer.tag_list_remove(&[track.to_string()]),
             rbl_link::Edit::ClearTags => writer.tag_list_clear(),
             rbl_link::Edit::Rating { track, stars } => writer.set_rating(&track.to_string(), *stars),
+            rbl_link::Edit::HotCueBankCue { bank, cue } => writer.set_hot_cue_bank_cue(&bank.to_string(), &rbl_db::details::HotCueBankCue {
+                slot: cue.slot,
+                content: cue.content,
+                in_ms: cue.in_ms,
+                out_ms: cue.out_ms,
+                color: cue.color,
+                color_table_index: cue.color_table_index,
+                active_loop: cue.active_loop,
+                beat_loop_size: cue.beat_loop_size,
+                cue_microsec: cue.cue_microsec,
+            }),
             rbl_link::Edit::GridOffset { .. }
             | rbl_link::Edit::HistoryAdd { .. }
             | rbl_link::Edit::HistoryRemove { .. }
@@ -220,6 +232,21 @@ impl Source for StateSource {
     fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails> {
         let state = self.0.upgrade()?;
         state.read_db(|db| rbl_db::details::track_details(db.connection(), id)).ok().flatten()
+    }
+
+    fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<rbl_db::details::HotCueBank> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        state.read_db(|db| rbl_db::details::hot_cue_banks(db.connection(), parent)).unwrap_or_default()
+    }
+
+    fn hot_cue_bank_cues(&self, bank: u32) -> Vec<rbl_db::details::HotCueBankCue> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        state.read_db(|db| rbl_db::details::hot_cue_bank_cues(db.connection(), bank)).unwrap_or_default()
+    }
+
+    fn hot_cue_bank_track_ids(&self, bank: u32) -> Vec<u32> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        state.read_db(|db| rbl_db::details::hot_cue_bank_track_ids(db.connection(), bank)).unwrap_or_default()
     }
 
     fn matching_ids(&self, seed: u32) -> Vec<u32> {

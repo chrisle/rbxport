@@ -20,7 +20,8 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use rbl_anlz::Anlz;
 use rbl_dbserver::catalog::{
-    Analysis as Wanted, ArtistRole, Catalog, Edit, Query, Row, Sort, TrackColumn, TrackDetails, TrackScope,
+    Analysis as Wanted, ArtistRole, Catalog, Edit, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackColumn,
+    TrackDetails, TrackScope, UsbCue,
 };
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::keys;
@@ -54,6 +55,9 @@ pub trait Source: Send + Sync {
     }
     fn artist_role_names(&self, _role: ArtistRole) -> Vec<(u32, String)> { Vec::new() }
     fn artist_role_track_ids(&self, _role: ArtistRole, _artist: u32) -> Vec<u32> { Vec::new() }
+    fn hot_cue_banks(&self, _parent: Option<u32>) -> Vec<rbl_db::details::HotCueBank> { Vec::new() }
+    fn hot_cue_bank_cues(&self, _bank: u32) -> Vec<rbl_db::details::HotCueBankCue> { Vec::new() }
+    fn hot_cue_bank_track_ids(&self, _bank: u32) -> Vec<u32> { Vec::new() }
     fn edit(&self, _edit: &Edit) -> bool {
         false
     }
@@ -400,14 +404,10 @@ impl IndexCatalog {
                 .collect(),
             Query::Genres(_) => Self::named(&library.genre, &library.genres),
             Query::GenreArtists(genre) => Self::genre_artists(library, *genre),
-            Query::GenreArtistAlbums { genre, artist } => {
-                Self::genre_albums(library, *genre, *artist)
-            }
+            Query::GenreArtistAlbums { genre, artist } => Self::genre_albums(library, *genre, *artist),
             Query::Labels(_) => Self::named(&library.label, &library.labels),
             Query::LabelArtists(label) => Self::label_artists(library, *label),
-            Query::LabelArtistAlbums { label, artist } => {
-                Self::label_albums(library, *label, *artist)
-            }
+            Query::LabelArtistAlbums { label, artist } => Self::label_albums(library, *label, *artist),
             Query::ArtistRoleArtists(role) => self
                 .source
                 .artist_role_names(*role)
@@ -422,15 +422,8 @@ impl IndexCatalog {
             Query::Folder(parent) => Self::folder(&library.playlists(), *parent),
             Query::Histories => self.histories(library),
             Query::Years => Self::date_parts(library, "", 0..4, true),
-            Query::Months(year) => {
-                Self::date_parts(library, &date_prefix(*year, None, None), 5..7, false)
-            }
-            Query::Days { year, month } => Self::date_parts(
-                library,
-                &date_prefix(*year, Some(*month), None),
-                8..10,
-                false,
-            ),
+            Query::Months(year) => Self::date_parts(library, &date_prefix(*year, None, None), 5..7, false),
+            Query::Days { year, month } => Self::date_parts(library, &date_prefix(*year, Some(*month), None), 8..10, false),
             Query::Tracks { scope, sort } => {
                 self.tracks(library, scope, *sort, self.source.alphabetical_keys())
             }
@@ -1246,6 +1239,50 @@ impl Catalog for IndexCatalog {
         }
     }
 
+    fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<HotCueBank> {
+        self.source.hot_cue_banks(parent).into_iter().map(|bank| HotCueBank {
+            id: bank.id,
+            name: bank.name,
+            folder: bank.folder,
+        }).collect()
+    }
+
+    fn hot_cue_bank_cues(&self, bank: u32) -> Vec<HotCueBankCue> {
+        self.source.hot_cue_bank_cues(bank).into_iter().map(|cue| HotCueBankCue {
+            slot: cue.slot,
+            content: cue.content,
+            in_ms: cue.in_ms,
+            out_ms: cue.out_ms,
+            color: cue.color,
+            color_table_index: cue.color_table_index,
+            active_loop: cue.active_loop,
+            beat_loop_size: cue.beat_loop_size,
+            cue_microsec: cue.cue_microsec,
+        }).collect()
+    }
+
+    fn hot_cue_bank_tracks(&self, bank: u32) -> Vec<TrackRow> {
+        self.source.hot_cue_bank_track_ids(bank).into_iter()
+            .filter_map(|id| self.track_row(id))
+            .collect()
+    }
+
+    fn usb_cues(&self, track: u32) -> Vec<UsbCue> {
+        let Some(library) = self.source.library() else { return Vec::new() };
+        let Some(row) = Self::row_of(&library, track) else { return Vec::new() };
+        library.cues_of(row).into_iter().filter_map(|cue| {
+            let slot = cue.hot_letter().map_or(0, |letter| letter as u8 - b'A' + 1);
+            // The old USB cue record only has three hot-cue slots.  Later
+            // hot cues are carried by the extended cue protocol instead.
+            (slot <= 3).then_some(UsbCue {
+                slot,
+                in_ms: cue.position_ms,
+                out_ms: (cue.out_ms > cue.position_ms).then_some(cue.out_ms),
+                color_table_index: u32::from(cue.colour),
+            })
+        }).collect()
+    }
+
     fn grid_offset(&self, track: u32) -> i16 {
         let offset = || {
             let library = self.source.library()?;
@@ -1331,7 +1368,8 @@ fn resolve_under(share: &std::path::Path, relative: &str) -> Option<PathBuf> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use rbl_index::testing::{TestTrack, add_folder, add_history, add_playlist, library_from};
+    use rbl_index::Cue;
+    use rbl_index::testing::{add_folder, add_history, add_playlist, library_from, TestTrack};
 
     struct Fixed(Arc<Library>);
 
@@ -2037,6 +2075,23 @@ mod tests {
             c.analysis(10, &Wanted::ExtendedCueList).unwrap(),
             Vec::<u8>::new()
         );
+    }
+
+    #[test]
+    fn usb_cues_keep_only_the_legacy_hot_slots_and_memory_cues() {
+        let lib = library();
+        let row = lib.row_of_id(10).unwrap();
+        lib.set_cues_of(row, vec![
+            Cue { position_ms: 1_000, out_ms: 2_000, kind: 1, colour: 21, ..Cue::default() },
+            Cue { position_ms: 3_000, out_ms: 0, kind: 0, colour: 0, ..Cue::default() },
+            // D is represented only in the extended cue protocol.
+            Cue { position_ms: 4_000, out_ms: 0, kind: 5, colour: 35, ..Cue::default() },
+        ]);
+        let c = IndexCatalog::new(Arc::new(Fixed(Arc::new(lib))), Played::default());
+        assert_eq!(c.usb_cues(10), vec![
+            UsbCue { slot: 1, in_ms: 1_000, out_ms: Some(2_000), color_table_index: 21 },
+            UsbCue { slot: 0, in_ms: 3_000, out_ms: None, color_table_index: 0 },
+        ]);
     }
 
     #[test]
