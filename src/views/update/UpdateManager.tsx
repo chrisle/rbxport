@@ -19,6 +19,7 @@
  */
 import { useEffect, useRef } from "react";
 
+import { useTranslation } from "@/i18n";
 import { formatBytes, parseChangelog, spans, type ChangelogBlock } from "@/lib/changelog";
 import type { UpdaterState } from "@/store/useUpdater";
 import styles from "./UpdateManager.module.css";
@@ -110,8 +111,9 @@ function Progress({ downloaded, total }: { downloaded: number; total: number | n
 
 export function UpdateManager({ state, onCheck, onRetry, onRestart, onClose }: UpdateManagerProps) {
   const panel = useRef<HTMLDivElement>(null);
+  const t = useTranslation();
 
-  const check = state.phase === "downloading" || state.phase === "installing" ||
+  const check = state.phase === "available" || state.phase === "downloading" || state.phase === "installing" ||
     state.phase === "ready" || (state.phase === "failed" && state.check)
     ? state.check
     : null;
@@ -160,7 +162,9 @@ export function UpdateManager({ state, onCheck, onRetry, onRestart, onClose }: U
                 <dt>The latest version</dt>
                 <dd>{check.version}</dd>
               </dl>
-              {state.phase === "downloading" ? (
+              {state.phase === "available" ? (
+                <p className={styles.status}>{t("New update available v{version}.", { version: check.version ?? "?" })}</p>
+              ) : state.phase === "downloading" ? (
                 <>
                   <p className={styles.status}>Downloading…</p>
                   <Progress downloaded={state.progress?.downloaded ?? 0} total={state.progress?.total ?? null} />

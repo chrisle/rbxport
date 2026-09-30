@@ -9,13 +9,16 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(any(target_os = "macos", windows))]
 use std::time::Duration;
 
 /// Pioneer command `0x50`, captured from a working RX3 Link Export session.
+#[cfg(any(target_os = "macos", windows))]
 const ACTIVATE: [u8; 12] = [
     0xf0, 0x00, 0x40, 0x05, 0x00, 0x00, 0x03, 0x0d, 0x00, 0x50, 0x01, 0xf7,
 ];
 /// Safely inside the firmware's one-second certification expiry.
+#[cfg(any(target_os = "macos", windows))]
 const REFRESH_EVERY: Duration = Duration::from_millis(200);
 
 /// An RX3 MIDI output found before the network services are bound.
@@ -53,6 +56,7 @@ pub fn detect() -> Result<Option<Detected>, String> {
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
+#[allow(clippy::unnecessary_wraps)]
 pub fn detect() -> Result<Option<Detected>, String> {
     Ok(None)
 }
@@ -104,6 +108,7 @@ impl Drop for Activation {
     }
 }
 
+#[cfg(any(target_os = "macos", windows))]
 fn is_rx3_port_name(name: &str) -> bool {
     let compact: String = name
         .chars()
@@ -113,7 +118,7 @@ fn is_rx3_port_name(name: &str) -> bool {
     compact.contains("XDJRX3")
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "macos", windows)))]
 mod tests {
     use super::*;
 

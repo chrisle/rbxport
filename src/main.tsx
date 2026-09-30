@@ -4,6 +4,8 @@ import { App } from "./app/App";
 import "./styles/base.css";
 import { Localization } from "./i18n";
 import { syncRekordboxBrowseAtStartup } from "./lib/rekordboxBrowse";
+import { initializeSentry } from "./lib/sentry";
+import * as Sentry from "@sentry/react";
 
 // Suppress the webview's Reload/Inspect menu in every app window. Leave
 // propagation intact so the app's context-menu handlers still receive it.
@@ -11,7 +13,15 @@ window.addEventListener("contextmenu", (event) => event.preventDefault());
 
 const el = document.getElementById("root");
 if (!el) throw new Error("#root missing from index.html");
-const root = createRoot(el);
+initializeSentry();
+const root = createRoot(el, {
+  onCaughtError: (error, errorInfo) => {
+    Sentry.captureReactException(error, { componentStack: errorInfo.componentStack ?? null });
+  },
+  onUncaughtError: (error, errorInfo) => {
+    Sentry.captureReactException(error, { componentStack: errorInfo.componentStack ?? null });
+  },
+});
 
 // The same bundle serves the Preferences and Sync Manager windows: the
 // shell opens them at `#preferences/<pane>` and `#sync`, and that is all

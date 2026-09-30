@@ -4,6 +4,7 @@ dist/
 target/
 .DS_Store
 *.log
+.env.sentry
 
 # Tauri
 src-tauri/gen/
@@ -39,6 +40,8 @@ verification/
 CLAUDE.md
 TODO.md
 work/
+
+iTunes/
 
 # generated / local-only
 test-mp3s/

@@ -1,12 +1,9 @@
 .notice {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  min-height: 34px;
-  padding: 4px 12px;
-  border-top: 1px solid var(--c-accent);
-  background: var(--c-panel);
+  min-width: 0;
   color: var(--c-text);
-  font-size: var(--f-size-sm);
+  font-size: var(--f-size-xs);
 }
 
 .icon {
@@ -17,36 +14,31 @@
   color: var(--c-accent);
 }
 
-.notice p {
-  flex: 1;
-  margin: 0;
-}
+.notice p { margin: 0 2px 0 0; white-space: nowrap; }
 
 .notice strong { color: var(--c-icon-on); }
 
 .notice button {
   flex: none;
-  height: 25px;
-  margin-left: 10px;
-  padding: 0 10px;
-  border-radius: 2px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 3px;
   font: inherit;
-  cursor: default;
+  cursor: pointer;
 }
-
-.link {
-  border: 0;
-  background: transparent;
-  color: var(--c-accent);
-}
-
-.link:hover { text-decoration: underline; }
 
 .restart {
   border: 1px solid var(--c-accent);
   background: var(--c-accent);
   color: var(--c-icon-on);
 }
+
+.whatsNew {
+  border: 0;
+  background: transparent;
+  color: var(--c-accent);
+}
+.whatsNew:hover { text-decoration: underline; }
 
 .notice button:focus-visible {
   outline: 2px solid var(--c-icon-on);

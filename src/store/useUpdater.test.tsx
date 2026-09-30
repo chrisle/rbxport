@@ -117,6 +117,7 @@ describe("useUpdater", () => {
     await settle();
     expect(fetched).toHaveBeenCalledTimes(1);
     expect(updater.state).toEqual({ phase: "ready", check: AVAILABLE, ready: INSTALLED });
+    expect(updater.automatic).toBe(true);
     expect(updater.open).toBe(false);
   });
 
@@ -136,6 +137,7 @@ describe("useUpdater", () => {
     await mount(false);
     act(() => updater.check(true));
     expect(updater.open).toBe(true);
+    expect(updater.automatic).toBe(false);
     expect(updater.state.phase).toBe("checking");
     await settle();
     expect(updater.state).toEqual({ phase: "upToDate", currentVersion: "0.4.0" });

@@ -25,19 +25,47 @@ afterEach(() => {
 });
 
 describe("UpdateReadyNotice", () => {
-  it("announces the downloaded version and offers both next steps", () => {
-    const onWhatsNew = vi.fn();
+  it("announces the downloaded update in the status bar and offers its actions", () => {
     const onRestart = vi.fn();
+    const onWhatsNew = vi.fn();
+    const onDismiss = vi.fn();
     act(() => root.render(
-      <UpdateReadyNotice version="1.2.3" onWhatsNew={onWhatsNew} onRestart={onRestart} />,
+      <UpdateReadyNotice
+        state={{
+          phase: "ready",
+          check: { currentVersion: "1.2.2", version: "1.2.3", date: null, changes: [], ready: null },
+          ready: { version: "1.2.3", installed: true },
+        }}
+        onRestart={onRestart}
+        onWhatsNew={onWhatsNew}
+        onDismiss={onDismiss}
+      />,
     ));
 
-    expect(host.textContent).toContain("rbxport v1.2.3 is ready. Restart to finish updating.");
+    expect(host.textContent).toContain("Update ready. Restart to apply.");
     const buttons = Array.from(host.querySelectorAll("button"));
-    expect(buttons.map((button) => button.textContent)).toEqual(["What’s new?", "Restart now"]);
+    expect(buttons.map((button) => button.textContent)).toEqual(["What's new", "Restart now"]);
     act(() => buttons[0]?.click());
-    act(() => buttons[1]?.click());
     expect(onWhatsNew).toHaveBeenCalledOnce();
+    act(() => buttons[1]?.click());
     expect(onRestart).toHaveBeenCalledOnce();
+  });
+
+  it("dismisses itself after 15 seconds", () => {
+    vi.useFakeTimers();
+    const onDismiss = vi.fn();
+    act(() => root.render(
+      <UpdateReadyNotice
+        state={{ phase: "ready", check: { currentVersion: "1.2.2", version: "1.2.3", date: null, changes: [], ready: null }, ready: { version: "1.2.3", installed: true } }}
+        onRestart={vi.fn()}
+        onWhatsNew={vi.fn()}
+        onDismiss={onDismiss}
+      />,
+    ));
+    act(() => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(onDismiss).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 });

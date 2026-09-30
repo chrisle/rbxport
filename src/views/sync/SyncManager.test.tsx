@@ -11,7 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
-import type { Backend, Device, DeviceSyncState, SyncDeviceReport, SyncProgress, TreeNode, ExportProgress } from "@/ipc/types";
+import type { Backend, Device, DeviceSyncState, ItunesLibrary, SyncDeviceReport, SyncProgress, TreeNode, ExportProgress } from "@/ipc/types";
 import { SyncManager } from "./SyncManager";
 import { PreferencesProvider } from "@/store/usePreferences";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
@@ -65,6 +65,8 @@ let ejectDevice: ReturnType<typeof vi.fn>;
 let progress: ((p: SyncProgress) => void) | null;
 let onClose: ReturnType<typeof vi.fn>;
 let rekordboxOpen: boolean;
+let itunesLibrary: ItunesLibrary | null;
+let importItunesSelected: ReturnType<typeof vi.fn>;
 
 const settle = () =>
   act(async () => {
@@ -95,9 +97,14 @@ beforeEach(async () => {
   );
   validateExportFiles = vi.fn(() => Promise.resolve([]));
   confirmExport = vi.fn(() => Promise.resolve(true));
+  itunesLibrary = null;
+  importItunesSelected = vi.fn(() => Promise.resolve({ imported: 5, existing: 0, skipped: [], playlists: 1, cues: 0, tracks: [] }));
   __setBackend({
     librarySummary: () => Promise.resolve({ trackCount: 3, playlistCount: 3, readOnly: rekordboxOpen, dbVersion: 6000 }),
     playlistTree: () => Promise.resolve(TREE.map((n) => ({ ...n }))),
+    itunesDefaultLibrary: () => Promise.resolve(itunesLibrary),
+    chooseItunesLibrary: () => Promise.resolve(null),
+    importItunesSelected,
     listDevices,
     onDevicesChanged: (listener: () => void) => {
       devicesChanged = listener;
@@ -288,6 +295,43 @@ describe("SyncManager", () => {
     const names = [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
     expect(names).toEqual(["Sets", "Warm Up", "Main Set", "Closing"]);
     expect(host.querySelector('button[aria-label="SYNC"]')).toHaveProperty("disabled", true);
+  });
+
+  it("imports only the ticked iTunes playlists and refreshes the library column", async () => {
+    act(() => root.unmount());
+    itunesLibrary = {
+      path: "/Users/dj/Music/Music/Library.xml",
+      tree: [
+        { id: "itunes:0", name: "Chill Folder", kind: "folder", depth: 1 },
+        { id: "itunes:1", name: "Airplane Mix", kind: "playlist", depth: 2 },
+        { id: "itunes:2", name: "Police Set", kind: "playlist", depth: 1 },
+      ],
+    };
+    root = createRoot(host);
+    act(() => root.render(<SyncManager onClose={onClose} />));
+    await settle();
+
+    const itunesSync = host.querySelector<HTMLButtonElement>('button[aria-label="Import selected iTunes playlists"]');
+    expect(itunesSync?.disabled).toBe(true);
+    // The iTunes column is its own tree, separate from the rekordbox one.
+    expect(host.querySelector('[aria-label="iTunes playlists"]')?.textContent).toContain("Airplane Mix");
+
+    click(box("Airplane Mix"));
+    await settle();
+    expect(host.textContent).toContain("1 of 2 playlists selected");
+    expect(itunesSync?.disabled).toBe(false);
+
+    click(itunesSync);
+    await settle();
+    expect(importItunesSelected).toHaveBeenCalledWith("/Users/dj/Music/Music/Library.xml", ["itunes:1"]);
+    expect(status()).toContain("Imported 1 playlists from iTunes");
+  });
+
+  it("offers a file picker when no iTunes library is detected", () => {
+    expect(host.textContent).toContain("No iTunes or Music library was found");
+    const choose = [...host.querySelectorAll("button")].find((button) => button.textContent === "Choose…");
+    expect(choose).toBeDefined();
+    expect(host.querySelector('button[aria-label="Import selected iTunes playlists"]')).toHaveProperty("disabled", true);
   });
 
   it("shows used space as the filled portion and labels the remaining free space", () => {

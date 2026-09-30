@@ -18,7 +18,7 @@ use crate::dto::{
     EditHistoryDto, ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
-    ExportProgressDto, FilterValuesDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
+    ExportProgressDto, FilterValuesDto, ItunesLibraryDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
     XmlImportReportDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -2929,6 +2929,87 @@ pub async fn import_itunes<R: tauri::Runtime>(
     import_collection(app, state, path, "import_itunes", |text| {
         rbl_db::itunes::parse(text)
             .ok_or_else(|| AppError::new(ErrorKind::Malformed, "That is not an iTunes or Music library file."))
+    })
+    .await
+}
+
+/// The iTunes column's playlist tree: folders and playlists only, flattened
+/// with a 1-based depth to sit beside the rekordbox column, and an
+/// `itunes:<index>` id so a selective import can name the chosen ones.
+fn itunes_tree_dto(library: &rbl_db::xml::XmlLibrary) -> Vec<TreeNodeDto> {
+    library
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| TreeNodeDto {
+            id: format!("itunes:{index}"),
+            name: node.name.clone(),
+            kind: if node.folder { "folder" } else { "playlist" },
+            // Parsed 0-based below ROOT; the Sync Manager draws top-level rows
+            // at depth 1, as it does the rekordbox column.
+            depth: u32::try_from(node.depth + 1).unwrap_or(1),
+            expanded: None,
+            child_count: None,
+        })
+        .collect()
+}
+
+/// The iTunes / Music library at its usual place, for the Sync Manager's iTunes
+/// column. `None` when no shared `Library.xml` is found — Music.app writes one
+/// only when "Share Library XML with other applications" is on — so the column
+/// can offer a file picker instead.
+#[tauri::command]
+pub async fn itunes_default_library() -> AppResult<Option<ItunesLibraryDto>> {
+    blocking("itunes_default_library", move || {
+        let Some(music) = dirs::audio_dir() else { return Ok(None) };
+        for path in rbl_db::itunes::candidate_library_paths(&music) {
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            if let Some(library) = rbl_db::itunes::parse(&text) {
+                return Ok(Some(ItunesLibraryDto {
+                    path: path.to_string_lossy().into_owned(),
+                    tree: itunes_tree_dto(&library),
+                }));
+            }
+        }
+        Ok(None)
+    })
+    .await
+}
+
+/// The iTunes / Music library at a file the DJ chose, for the iTunes column.
+#[tauri::command]
+pub async fn itunes_library_at(path: String) -> AppResult<ItunesLibraryDto> {
+    blocking("itunes_library_at", move || {
+        let text = std::fs::read_to_string(&path).map_err(|e| {
+            AppError::new(ErrorKind::NotFound, "That file could not be read.").with_detail(e.to_string())
+        })?;
+        let library = rbl_db::itunes::parse(&text)
+            .ok_or_else(|| AppError::new(ErrorKind::Malformed, "That is not an iTunes or Music library file."))?;
+        Ok(ItunesLibraryDto { path, tree: itunes_tree_dto(&library) })
+    })
+    .await
+}
+
+/// Imports the ticked iTunes playlists — `itunes:<index>` ids from the tree
+/// [`itunes_library_at`] or [`itunes_default_library`] returned — into the
+/// library: their tracks, the folders above them, and each track's rating and
+/// comment, through the same importer a whole file goes through.
+#[tauri::command]
+pub async fn import_itunes_selected<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    ids: Vec<String>,
+) -> AppResult<XmlImportReportDto> {
+    let keep: std::collections::BTreeSet<usize> =
+        ids.iter().filter_map(|id| id.strip_prefix("itunes:").and_then(|n| n.parse().ok())).collect();
+    if keep.is_empty() {
+        return Err(AppError::new(ErrorKind::Malformed, "Select at least one iTunes playlist to import."));
+    }
+    import_collection(app, state, path, "import_itunes_selected", move |text| {
+        let full = rbl_db::itunes::parse(text)
+            .ok_or_else(|| AppError::new(ErrorKind::Malformed, "That is not an iTunes or Music library file."))?;
+        Ok(rbl_db::xml::subset(&full, &keep))
     })
     .await
 }

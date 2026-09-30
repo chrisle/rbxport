@@ -1,5 +1,6 @@
 import styles from "./StatusBar.module.css";
 import { Bug, Heart } from "lucide-react";
+import type { ReactNode } from "react";
 import { useTooltip } from "@/store/usePreferences";
 import { refusal } from "@/lib/menu";
 import type { ExportProgress } from "@/ipc/types";
@@ -36,6 +37,8 @@ export interface StatusBarProps {
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
   analysisFailures?: number;
+  /** A short-lived status-bar action, such as a downloaded update. */
+  updateNotice?: ReactNode;
 }
 
 export function StatusBar({
@@ -57,6 +60,7 @@ export function StatusBar({
   onOpenLog,
   onCancelAnalysis,
   analysisFailures = 0,
+  updateNotice,
 }: StatusBarProps) {
   const tip = useTooltip();
   const analysisPercent = analysisProgress && analysisProgress.total > 0
@@ -145,6 +149,7 @@ export function StatusBar({
       ) : null}
       <span className={styles.selection}>{selection}</span>
       <span className={styles.actions}>
+        {updateNotice}
         {onSupport ? <button type="button" className={`${styles.reportBug} ${styles.support}`} onClick={onSupport}><Heart size="1em" aria-hidden="true" /> Support rbxport</button> : null}
         {onReportBug ? <button type="button" className={`${styles.reportBug} ${styles.report}`} onClick={onReportBug}><Bug size="1em" aria-hidden="true" /> Report bug</button> : null}
       </span>

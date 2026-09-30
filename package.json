@@ -1,7 +1,7 @@
 {
   "name": "rbxport",
   "private": true,
-  "version": "1.0.0-rc.6",
+  "version": "1.0.0-rc.7",
   "license": "GPL-2.0-or-later",
   "packageManager": "pnpm@10.17.1",
   "type": "module",
@@ -24,6 +24,7 @@
     "locales": "node scripts/build-locales.mjs"
   },
   "dependencies": {
+    "@sentry/react": "^11.0.0",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.12",
     "@tauri-apps/api": "^2.11.1",
@@ -36,6 +37,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
+    "@sentry/vite-plugin": "^5.4.0",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.0",

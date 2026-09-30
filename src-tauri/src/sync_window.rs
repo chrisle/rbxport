@@ -14,9 +14,9 @@ use crate::error::{AppError, AppResult, ErrorKind};
 pub const WINDOW: &str = "sync";
 
 /// The window's content — see design/tokens `syncW`, `syncH`. rekordbox's
-/// dialog is 1146 by 666 with its iTunes column; ours has no such column
-/// and is narrower for it.
-const WIDTH: f64 = 980.0;
+/// dialog is 1146 by 666 with its iTunes column; ours carries the same three
+/// columns, and its two SYNC buttons take a little more width than they do.
+const WIDTH: f64 = 1440.0;
 const HEIGHT: f64 = 620.0;
 
 /// Opens the window, or brings the open one to the front.

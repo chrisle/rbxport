@@ -461,6 +461,7 @@ fn lock(root: &Path) -> std::io::Result<std::fs::File> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn only_an_unsupported_directory_flush_is_optional() {
         assert!(directory_sync_unsupported(&std::io::Error::new(

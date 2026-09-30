@@ -1935,12 +1935,12 @@
       "source": "measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the window y 76..1731 at 2x, title bar included"
     },
     "syncW": {
-      "value": "980px",
-      "source": "rekordbox 7.2.11's Sync Manager dialog is 1146 by 666pt with its iTunes column; ours drops that column and is narrower by about what it took"
+      "value": "1440px",
+      "source": "rekordbox 7.2.11's Sync Manager dialog is 1146 by 666pt with its iTunes column; ours carries the same three columns and opens wider so each has room to read"
     },
     "syncH": {
       "value": "620px",
-      "source": "rekordbox 7.2.11's Sync Manager dialog is 1146 by 666pt, title bar included; ours is a little shorter for the two-column layout"
+      "source": "rekordbox 7.2.11's Sync Manager dialog is 1146 by 666pt, title bar included; ours is a little shorter"
     },
     "prefTitleH": {
       "value": "28px",

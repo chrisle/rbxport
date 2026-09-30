@@ -53,6 +53,11 @@ tauri-plugin-updater = "2"
 uuid = { version = "1", features = ["v4"] }
 semver = "1"
 time = { version = "0.3", features = ["formatting"] }
+# Error and panic reporting only.  Keep optional telemetry features off.
+# rustls, not native-tls: the default `transport` feature pulls in openssl on
+# Linux, which collides with rusqlite's bundled-sqlcipher-vendored-openssl and
+# breaks SQLCipher key handling in the Linux test/build jobs.
+sentry = { version = "0.46", default-features = false, features = ["backtrace", "panic", "reqwest", "rustls"] }
 
 zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 tempfile = "3"

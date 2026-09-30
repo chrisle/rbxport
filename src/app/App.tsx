@@ -432,6 +432,11 @@ function AppBody() {
       .then((backend) => backend.openUrl(`https://rbxport.com/whats-new/${release}`))
       .catch(() => {});
   }, [updater.state]);
+  const [updateNoticeVisible, setUpdateNoticeVisible] = useState(false);
+  useEffect(() => {
+    setUpdateNoticeVisible(updater.state.phase === "ready");
+  }, [updater.state.phase]);
+  const updateNotice = updater.state.phase === "ready" && updateNoticeVisible ? updater.state : null;
   // DJ System in Preferences is what a stick with no settings of its own
   // gets on export; the same shape goes with every export call.
   const stickDefaults = prefs.preferences.djSystem;
@@ -2480,16 +2485,6 @@ function AppBody() {
         />
       </div>
 
-      {updater.state.phase === "ready" ? (
-        <div className={styles.updateReady}>
-          <UpdateReadyNotice
-            version={updater.state.ready.version}
-            onWhatsNew={openWhatsNew}
-            onRestart={updater.restart}
-          />
-        </div>
-      ) : null}
-
       <StatusBar
         exports={(exportRunning ? exportBatch : []).map(job => ({
           ...job, name: devices.find(device => device.path === job.path)?.name ?? job.path.split(/[\\/]/).filter(Boolean).at(-1) ?? job.path,
@@ -2497,6 +2492,14 @@ function AppBody() {
         onReportBug={openReport}
         onSupport={SHOW_MAIN_SUPPORT ? openSupport : undefined}
         onOpenLog={openLog}
+        updateNotice={updateNotice ? (
+          <UpdateReadyNotice
+            state={updateNotice}
+            onRestart={updater.restart}
+            onWhatsNew={openWhatsNew}
+            onDismiss={() => setUpdateNoticeVisible(false)}
+          />
+        ) : null}
         backupActivity={backupJob.error || backupJob.text}
         backupProgress={backupJob.progress.running ? backupJob.progress : undefined}
         version={version}
