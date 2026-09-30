@@ -166,7 +166,23 @@ pub fn hot_cue_bank_cues(conn: &Connection, bank: u32) -> Result<Vec<HotCueBankC
             cue_microsec: small(number(row, 8)),
         })
     })?;
-    Ok(rows.filter_map(std::result::Result::ok).filter(|cue| (1..=3).contains(&cue.slot)).collect())
+    // RX3 asks for slots 1, 2, and 3 separately.  Keep the first row for
+    // each slot in rekordbox order so malformed duplicate rows cannot turn
+    // into duplicate player records.
+    let mut seen = [false; 3];
+    Ok(rows
+        .filter_map(std::result::Result::ok)
+        .filter(|cue| (1..=3).contains(&cue.slot))
+        .filter(|cue| {
+            let slot = usize::from(cue.slot - 1);
+            if seen[slot] {
+                false
+            } else {
+                seen[slot] = true;
+                true
+            }
+        })
+        .collect())
 }
 
 /// Content ids assigned to a Hot Cue Bank, in the order the player shows
@@ -181,7 +197,9 @@ pub fn hot_cue_bank_track_ids(conn: &Connection, bank: u32) -> Result<Vec<u32>> 
          ORDER BY TrackNo, ID",
     )?;
     let rows = statement.query_map(params![bank.to_string()], |row| Ok(small(number(row, 0))))?;
-    Ok(rows.filter_map(std::result::Result::ok).collect())
+    // `DsqlHCBnkSong_GetContentID` supplies exactly three content-id slots
+    // to the RX3 browse path.
+    Ok(rows.filter_map(std::result::Result::ok).take(3).collect())
 }
 
 /// One of the artist references rekordbox exposes as a browse category.
@@ -486,7 +504,8 @@ mod tests {
              INSERT INTO djmdSongHotCueBanklist VALUES
                ('a', '10', 2, '200', 2200, NULL, 3, 21, 0, 0, 0, 0),
                ('b', '10', 1, '100', 1100, 1800, 2, 20, 1, 262145, 7, 0),
-               ('c', '10', 4, '400', 0, NULL, 0, 0, 0, 0, 0, 0);",
+               ('c', '10', 4, '400', 0, NULL, 0, 0, 0, 0, 0, 0),
+               ('d', '10', 5, '500', 0, NULL, 0, 0, 0, 0, 0, 0);",
         ).unwrap();
         assert_eq!(hot_cue_banks(&conn, None).unwrap(), vec![
             HotCueBank { id: 9, name: "Folder".into(), folder: true },
