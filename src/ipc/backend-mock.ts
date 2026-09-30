@@ -2332,6 +2332,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // No picker in a browser, so nothing can be chosen to import or written.
     importFiles: () => wait(null),
+    importFolder: () => wait(null),
     importPaths: (paths) => wait({ imported: 0, skipped: paths.map((p) => `${p}: the mock library takes no files`), tracks: [] }),
     importXml: () => wait(null),
     exportLoopWav: () => wait(null),
