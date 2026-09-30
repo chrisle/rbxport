@@ -10,7 +10,7 @@ import type {
   Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
-  EditHistoryState, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
+  EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
   LinkStatus, MissingExportFile, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
   TreeNode, ViewHandle,
   TrackDetails, TrackLookups,
@@ -144,6 +144,20 @@ async function realBackend(): Promise<Backend> {
       if (!Array.isArray(picked) || picked.length === 0) return null;
       return invoke<ImportReport>("import_files", { paths: picked });
     },
+    importFolder: async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      // A folder picker: the native panel cannot offer files and folders at
+      // once, so choosing a folder is its own action alongside Import. The
+      // backend walks each folder recursively for the audio it recognises.
+      const picked = await open({
+        multiple: true,
+        directory: true,
+        title: "Add a folder of music to the library",
+      });
+      // Cancelling is a normal outcome, not an error.
+      if (!Array.isArray(picked) || picked.length === 0) return null;
+      return invoke<ImportReport>("import_files", { paths: picked });
+    },
     importPaths: (paths) => invoke<ImportReport>("import_files", { paths }),
     exportLoopWav: async (track, title, inMs, outMs) => {
       const { save } = await import("@tauri-apps/plugin-dialog");
@@ -187,6 +201,19 @@ async function realBackend(): Promise<Backend> {
       if (typeof picked !== "string") return null;
       return invoke<XmlImportReport>("import_itunes", { path: picked });
     },
+    itunesDefaultLibrary: () => invoke<ItunesLibrary | null>("itunes_default_library"),
+    chooseItunesLibrary: async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        title: "Choose the iTunes or Music Library.xml",
+        filters: [{ name: "iTunes Library XML", extensions: ["xml"] }],
+      });
+      if (typeof picked !== "string") return null;
+      return invoke<ItunesLibrary>("itunes_library_at", { path: picked });
+    },
+    importItunesSelected: (path, ids) => invoke<XmlImportReport>("import_itunes_selected", { path, ids: [...ids] }),
     exportXml: async () => {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const picked = await save({

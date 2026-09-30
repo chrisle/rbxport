@@ -331,6 +331,15 @@ export interface Backend {
    * tracks should import the rest.
    */
   importFiles(): Promise<ImportReport | null>;
+  /**
+   * Add music from a folder: picks one or more directories and imports every
+   * supported audio file under them, recursively through subfolders.
+   *
+   * Resolves to what happened, or `null` if the picker was cancelled. Reports
+   * per file like {@link importFiles}, so a stray unreadable track in the tree
+   * does not sink the rest.
+   */
+  importFolder(): Promise<ImportReport | null>;
   /** Adds these files to the library: the Explorer's Import To Collection. */
   importPaths(paths: string[]): Promise<ImportReport>;
   /**
@@ -352,6 +361,22 @@ export interface Backend {
   importXml(): Promise<XmlImportReport | null>;
   /** Asks for Music.app's Library.xml and imports its tracks and playlists. */
   importItunes(): Promise<XmlImportReport | null>;
+  /**
+   * The iTunes / Music library at its usual place, for the Sync Manager's
+   * iTunes column. Null when no shared `Library.xml` is found, so the column
+   * can offer {@link chooseItunesLibrary} instead.
+   */
+  itunesDefaultLibrary(): Promise<ItunesLibrary | null>;
+  /**
+   * Picks an iTunes / Music `Library.xml` in the file dialog and reads its
+   * playlist tree. Null when the dialog is cancelled.
+   */
+  chooseItunesLibrary(): Promise<ItunesLibrary | null>;
+  /**
+   * Imports the ticked iTunes playlists — `itunes:<index>` ids from an
+   * {@link ItunesLibrary} tree — into the library, folders above them kept.
+   */
+  importItunesSelected(path: string, ids: readonly string[]): Promise<XmlImportReport>;
   /**
    * Writes the collection as rekordbox's XML where the platform's save
    * dialog says; resolves to how many tracks, or null when cancelled.
@@ -1228,6 +1253,16 @@ export interface ImportReport {
 }
 
 /** What importing a rekordbox XML collection did. */
+/**
+ * An iTunes / Music library read for the Sync Manager's iTunes column: where
+ * its XML is, and its playlist tree to tick from. Nothing is imported yet.
+ */
+export interface ItunesLibrary {
+  path: string;
+  /** Folders and playlists only, ids `itunes:<index>`, top level at depth 1. */
+  tree: TreeNode[];
+}
+
 export interface XmlImportReport {
   imported: number;
   /** Tracks whose file was already in the library, reused as they are. */

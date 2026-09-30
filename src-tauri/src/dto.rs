@@ -404,6 +404,18 @@ pub struct XmlImportReportDto {
     pub tracks: Vec<ImportedTrackDto>,
 }
 
+/// An iTunes / Music library read for the Sync Manager's iTunes column: where
+/// its XML is, and its playlist tree to tick from. Nothing is imported yet.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItunesLibraryDto {
+    /// The file the tree was read from, to pass back with the chosen playlists.
+    pub path: String,
+    /// Folders and playlists only, flattened with a 1-based depth, ids
+    /// `itunes:<index>` so the chosen ones can be named for a selective import.
+    pub tree: Vec<TreeNodeDto>,
+}
+
 /// One explicit library backup, for Preferences › Backups.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -20,7 +20,7 @@ import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
 import {
-  applyClick, clickSettles, emptySelection, modifierFor, pressSelects, type SelectionState,
+  applyClick, clickSettles, emptySelection, modifierFor, pressSelects, selectAll, type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import { trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
@@ -977,6 +977,18 @@ export const TrackTable = memo(function TrackTable({
       // also walk the track list. `dispatch` already yields the text fields.
       const role = target?.getAttribute?.("role");
       if (role === "slider" || role === "spinbutton") return;
+      // Ctrl/⌘+A selects the whole list. The ids come from the backend, which
+      // resolves them for every row of the view — including the ones that were
+      // never scrolled into range and so never fetched. preventDefault stops
+      // the webview's own "select all text" from highlighting the interface
+      // instead, which is what a plain Ctrl+A did before this.
+      if (action === "selectAll") {
+        event.preventDefault();
+        void view.idsInRange(0, view.count).then((ids) => {
+          setSelection((s) => selectAll(s, ids));
+        });
+        return;
+      }
       // The first press with nothing highlighted picks the top visible row;
       // after that the keys step from where the highlight is.
       const start = firstIndex < 0 ? 0 : firstIndex;

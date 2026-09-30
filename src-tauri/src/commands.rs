@@ -18,7 +18,7 @@ use crate::dto::{
     EditHistoryDto, ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
-    ExportProgressDto, FilterValuesDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
+    ExportProgressDto, FilterValuesDto, ItunesLibraryDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
     XmlImportReportDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -2500,11 +2500,74 @@ pub async fn missing_tracks(
     .await
 }
 
+/// How deep a chosen folder is walked. A music library is a handful of levels
+/// deep; a folder that turns out to be a whole drive is not walked to the
+/// bottom. Matches the relocate walk's ceiling.
+const IMPORT_MAX_DEPTH: usize = 16;
+/// How many entries the walk looks at in all, so a folder pointed at the root
+/// of a disk ends rather than running for minutes. Shared across every chosen
+/// path in one import.
+const IMPORT_MAX_ENTRIES: usize = 500_000;
+
+/// Expands the chosen paths into the audio files to import.
+///
+/// A file the user picked is kept as chosen — even a non-audio one, so
+/// `import_file` still reports it as skipped rather than dropping it silently.
+/// A directory is walked breadth-first through its subdirectories, keeping
+/// only the audio files rekordbox plays; a cover-art `.jpg` sitting beside the
+/// tracks is simply not collected, not reported as skipped. Hidden
+/// directories (`.Trashes`, `.Spotlight-V100` and the like) are left alone.
+///
+/// Pure filesystem work, so it runs under `blocking` with the writes below and
+/// never touches the async thread.
+fn expand_import_paths(paths: &[String]) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    let mut seen = 0_usize;
+    for path in paths {
+        let path = std::path::Path::new(path);
+        // Anything that is not a directory is imported exactly as chosen.
+        if !path.is_dir() {
+            files.push(path.to_path_buf());
+            continue;
+        }
+        let mut level = vec![path.to_path_buf()];
+        for _ in 0..IMPORT_MAX_DEPTH {
+            let mut next = Vec::new();
+            for dir in &level {
+                let Ok(entries) = std::fs::read_dir(dir) else { continue };
+                for entry in entries.flatten() {
+                    seen += 1;
+                    if seen > IMPORT_MAX_ENTRIES {
+                        return files;
+                    }
+                    let child = entry.path();
+                    let Ok(kind) = entry.file_type() else { continue };
+                    if kind.is_dir() {
+                        if entry.file_name().to_string_lossy().starts_with('.') {
+                            continue;
+                        }
+                        next.push(child);
+                    } else if kind.is_file() && rbl_db::import::is_audio(&child) {
+                        files.push(child);
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            level = next;
+        }
+    }
+    files
+}
+
 /// Adds files to the library.
 ///
-/// Reports what happened per file rather than failing the whole batch: a
-/// folder of a hundred tracks with two unreadable ones should import
-/// ninety-eight, not nothing.
+/// A chosen path may be a single file or a folder: a folder is walked
+/// recursively for the audio files rekordbox plays (see [`expand_import_paths`]),
+/// so picking a directory imports everything under it. Reports what happened
+/// per file rather than failing the whole batch: a folder of a hundred tracks
+/// with two unreadable ones should import ninety-eight, not nothing.
 #[tauri::command]
 pub async fn import_files<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -2514,13 +2577,13 @@ pub async fn import_files<R: tauri::Runtime>(
     let state_for_edit = Arc::clone(&state);
     let writing = Arc::clone(&state);
     let report = blocking("import_files", move || {
+        let files = expand_import_paths(&paths);
         writing
             .write(|writer| {
                 let mut imported = 0_u32;
                 let mut skipped = Vec::new();
                 let mut tracks = Vec::new();
-                for path in &paths {
-                    let file = std::path::Path::new(path);
+                for file in &files {
                     match writer.import_file(file) {
                         Ok(id) => {
                             imported += 1;
@@ -2533,7 +2596,7 @@ pub async fn import_files<R: tauri::Runtime>(
                             });
                         }
                         Err(rbl_db::DbError::WriteRefused(reason)) => {
-                            skipped.push(format!("{path}: {reason}"));
+                            skipped.push(format!("{}: {reason}", file.display()));
                         }
                         Err(other) => return Err(other),
                     }
@@ -2933,6 +2996,87 @@ pub async fn import_itunes<R: tauri::Runtime>(
     .await
 }
 
+/// The iTunes column's playlist tree: folders and playlists only, flattened
+/// with a 1-based depth to sit beside the rekordbox column, and an
+/// `itunes:<index>` id so a selective import can name the chosen ones.
+fn itunes_tree_dto(library: &rbl_db::xml::XmlLibrary) -> Vec<TreeNodeDto> {
+    library
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| TreeNodeDto {
+            id: format!("itunes:{index}"),
+            name: node.name.clone(),
+            kind: if node.folder { "folder" } else { "playlist" },
+            // Parsed 0-based below ROOT; the Sync Manager draws top-level rows
+            // at depth 1, as it does the rekordbox column.
+            depth: u32::try_from(node.depth + 1).unwrap_or(1),
+            expanded: None,
+            child_count: None,
+        })
+        .collect()
+}
+
+/// The iTunes / Music library at its usual place, for the Sync Manager's iTunes
+/// column. `None` when no shared `Library.xml` is found — Music.app writes one
+/// only when "Share Library XML with other applications" is on — so the column
+/// can offer a file picker instead.
+#[tauri::command]
+pub async fn itunes_default_library() -> AppResult<Option<ItunesLibraryDto>> {
+    blocking("itunes_default_library", move || {
+        let Some(music) = dirs::audio_dir() else { return Ok(None) };
+        for path in rbl_db::itunes::candidate_library_paths(&music) {
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            if let Some(library) = rbl_db::itunes::parse(&text) {
+                return Ok(Some(ItunesLibraryDto {
+                    path: path.to_string_lossy().into_owned(),
+                    tree: itunes_tree_dto(&library),
+                }));
+            }
+        }
+        Ok(None)
+    })
+    .await
+}
+
+/// The iTunes / Music library at a file the DJ chose, for the iTunes column.
+#[tauri::command]
+pub async fn itunes_library_at(path: String) -> AppResult<ItunesLibraryDto> {
+    blocking("itunes_library_at", move || {
+        let text = std::fs::read_to_string(&path).map_err(|e| {
+            AppError::new(ErrorKind::NotFound, "That file could not be read.").with_detail(e.to_string())
+        })?;
+        let library = rbl_db::itunes::parse(&text)
+            .ok_or_else(|| AppError::new(ErrorKind::Malformed, "That is not an iTunes or Music library file."))?;
+        Ok(ItunesLibraryDto { path, tree: itunes_tree_dto(&library) })
+    })
+    .await
+}
+
+/// Imports the ticked iTunes playlists — `itunes:<index>` ids from the tree
+/// [`itunes_library_at`] or [`itunes_default_library`] returned — into the
+/// library: their tracks, the folders above them, and each track's rating and
+/// comment, through the same importer a whole file goes through.
+#[tauri::command]
+pub async fn import_itunes_selected<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    ids: Vec<String>,
+) -> AppResult<XmlImportReportDto> {
+    let keep: std::collections::BTreeSet<usize> =
+        ids.iter().filter_map(|id| id.strip_prefix("itunes:").and_then(|n| n.parse().ok())).collect();
+    if keep.is_empty() {
+        return Err(AppError::new(ErrorKind::Malformed, "Select at least one iTunes playlist to import."));
+    }
+    import_collection(app, state, path, "import_itunes_selected", move |text| {
+        let full = rbl_db::itunes::parse(text)
+            .ok_or_else(|| AppError::new(ErrorKind::Malformed, "That is not an iTunes or Music library file."))?;
+        Ok(rbl_db::xml::subset(&full, &keep))
+    })
+    .await
+}
+
 /// Reads a collection file with `parse` and imports what it holds.
 async fn import_collection<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -3319,4 +3463,67 @@ pub async fn filter_values(
         })
     })
     .await
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::expand_import_paths;
+
+    /// Sorted file names, so a filesystem-dependent walk order does not make
+    /// the assertions flaky.
+    fn names(paths: &[std::path::PathBuf]) -> Vec<String> {
+        let mut out: Vec<String> = paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_directory_is_walked_recursively_for_audio_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // perf-ok: a test's fixture, not a command.
+        std::fs::create_dir_all(root.join("subdir/deep")).unwrap();
+        std::fs::write(root.join("top.mp3"), b"x").unwrap();
+        std::fs::write(root.join("cover.jpg"), b"x").unwrap();
+        std::fs::write(root.join("subdir/mid.flac"), b"x").unwrap();
+        std::fs::write(root.join("subdir/deep/low.m4a"), b"x").unwrap();
+        std::fs::write(root.join("subdir/notes.txt"), b"x").unwrap();
+
+        let files = expand_import_paths(&[root.to_string_lossy().into_owned()]);
+        // Every audio file at every depth is collected; the .jpg and .txt are
+        // silently left out rather than reported as skipped.
+        assert_eq!(names(&files), ["low.m4a", "mid.flac", "top.mp3"]);
+    }
+
+    #[test]
+    fn a_chosen_file_is_kept_even_when_it_is_not_audio() {
+        let dir = tempfile::tempdir().unwrap();
+        let song = dir.path().join("song.mp3");
+        let sheet = dir.path().join("liner.txt");
+        std::fs::write(&song, b"x").unwrap();
+        std::fs::write(&sheet, b"x").unwrap();
+
+        // A file the user picked by hand reaches import_file as chosen, so a
+        // non-audio pick is reported as skipped there rather than dropped here.
+        let files = expand_import_paths(&[
+            song.to_string_lossy().into_owned(),
+            sheet.to_string_lossy().into_owned(),
+        ]);
+        assert_eq!(names(&files), ["liner.txt", "song.mp3"]);
+    }
+
+    #[test]
+    fn hidden_directories_are_passed_over() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".Trashes")).unwrap();
+        std::fs::write(dir.path().join(".Trashes/ghost.mp3"), b"x").unwrap();
+        std::fs::write(dir.path().join("real.mp3"), b"x").unwrap();
+
+        let files = expand_import_paths(&[dir.path().to_string_lossy().into_owned()]);
+        assert_eq!(names(&files), ["real.mp3"]);
+    }
 }

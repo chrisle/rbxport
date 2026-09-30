@@ -45,8 +45,8 @@ impl AppError {
     pub fn internal(detail: impl Into<String>) -> Self {
         let detail = detail.into();
         tracing::error!(error.detail = %detail, "internal error");
-        Self::new(ErrorKind::Internal, "Something went wrong inside rbxport.")
-            .with_detail(detail)
+        crate::sentry::capture_internal_error();
+        Self::new(ErrorKind::Internal, "Something went wrong inside rbxport.").with_detail(detail)
     }
 }
 

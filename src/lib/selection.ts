@@ -83,6 +83,18 @@ export function applyClick(
   }
 }
 
+/**
+ * Selects every row in the view.
+ *
+ * The ids are resolved by the backend for the whole view, so a selection can
+ * cover rows the frontend never fetched. The anchor is kept so a following
+ * shift-click still grows from where it was, and falls back to the top for a
+ * selection made from nothing.
+ */
+export function selectAll(state: SelectionState, ids: readonly string[]): SelectionState {
+  return { ids: new Set(ids), anchorIndex: state.anchorIndex ?? (ids.length > 0 ? 0 : null) };
+}
+
 export function isSelected(state: SelectionState, id: string): boolean {
   return state.ids.has(id);
 }

@@ -2332,10 +2332,23 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // No picker in a browser, so nothing can be chosen to import or written.
     importFiles: () => wait(null),
+    importFolder: () => wait(null),
     importPaths: (paths) => wait({ imported: 0, skipped: paths.map((p) => `${p}: the mock library takes no files`), tracks: [] }),
     importXml: () => wait(null),
     exportLoopWav: () => wait(null),
     importItunes: () => wait(null),
+    itunesDefaultLibrary: () => wait({
+      path: "/Users/dj/Music/Music/Library.xml",
+      tree: [
+        { id: "itunes:0", name: "Chill", kind: "folder", depth: 1 },
+        { id: "itunes:1", name: "Airplane x Coding", kind: "playlist", depth: 2 },
+        { id: "itunes:2", name: "SHOWS", kind: "folder", depth: 1 },
+        { id: "itunes:3", name: "Green Day Essentials", kind: "playlist", depth: 2 },
+        { id: "itunes:4", name: "The Police Essentials", kind: "playlist", depth: 1 },
+      ],
+    }),
+    chooseItunesLibrary: () => wait(null),
+    importItunesSelected: (_path, ids) => wait({ imported: ids.length, existing: 0, skipped: [], playlists: ids.length, cues: 0, tracks: [] }),
     // The mock's phrases are drawn from a table, not a file: nothing to cut.
     editPhrase: () => wait(false),
     exportPlaylistFile: () => wait(null),

@@ -18,10 +18,26 @@
 //! read here rather than through a crate.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use rbl_core::xml::unescape;
 
 use crate::xml::{file_path, stars_of_hundred, XmlLibrary, XmlNode, XmlTrack};
+
+/// The files Music.app and iTunes write their shared library XML to, under the
+/// user's music folder, the newer layout first. Music.app writes
+/// `Music/Library.xml` when "Share Library XML with other applications" is on;
+/// iTunes wrote `iTunes/iTunes Music Library.xml`.
+///
+/// The paths are candidates, not a promise the files are there: the caller
+/// reads the first one that exists and parses.
+#[must_use]
+pub fn candidate_library_paths(music_dir: &Path) -> Vec<PathBuf> {
+    [["Music", "Library.xml"], ["iTunes", "iTunes Music Library.xml"]]
+        .into_iter()
+        .map(|parts| music_dir.join(parts[0]).join(parts[1]))
+        .collect()
+}
 
 /// A property list value, as much of it as the library needs.
 #[derive(Debug, Clone, PartialEq)]
@@ -87,7 +103,8 @@ pub fn parse(text: &str) -> Option<XmlLibrary> {
     }
 
     // The playlists, as a tree by persistent id, then flattened depth
-    // first in the file's order.
+    // first in the file's order, top-level at depth 0 — the same shape and
+    // base [`crate::xml::import`] takes from a rekordbox document.
     let mut lists: Vec<(String, String, XmlNode)> = Vec::new(); // (id, parent, node)
     if let Some(Value::Array(playlists)) = root.get("Playlists") {
         for playlist in playlists {
@@ -121,7 +138,7 @@ pub fn parse(text: &str) -> Option<XmlLibrary> {
             _ => roots.push(i),
         }
     }
-    let mut stack: Vec<(usize, usize)> = roots.iter().rev().map(|&i| (i, 1)).collect();
+    let mut stack: Vec<(usize, usize)> = roots.iter().rev().map(|&i| (i, 0)).collect();
     let mut placed = vec![false; lists.len()];
     while let Some((at, depth)) = stack.pop() {
         if placed[at] {
@@ -354,9 +371,23 @@ mod tests {
         assert_eq!((first.rating, first.comment.as_str()), (4, "a note"));
         assert_eq!(library.tracks[1].path, None, "a stream has no file");
 
+        // Top-level at depth 0, as a rekordbox document flattens — so the
+        // sibling `Loose` lands beside `Sets`, not inside it, when imported.
         let names: Vec<(&str, bool, usize)> = library.nodes.iter().map(|n| (n.name.as_str(), n.folder, n.depth)).collect();
-        assert_eq!(names, vec![("Sets", true, 1), ("Warm Up", false, 2), ("Loose", false, 1)]);
+        assert_eq!(names, vec![("Sets", true, 0), ("Warm Up", false, 1), ("Loose", false, 0)]);
         assert_eq!(library.nodes[1].track_ids, vec!["101", "102"]);
         assert!(parse("<html/>").is_none());
+    }
+
+    #[test]
+    fn candidate_paths_cover_music_app_and_itunes() {
+        let paths = candidate_library_paths(Path::new("/Users/me/Music"));
+        assert_eq!(
+            paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+            vec![
+                "/Users/me/Music/Music/Library.xml".to_owned(),
+                "/Users/me/Music/iTunes/iTunes Music Library.xml".to_owned(),
+            ]
+        );
     }
 }

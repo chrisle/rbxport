@@ -7,9 +7,10 @@
  * where it has got to and whether the window is showing.
  *
  * An update is taken without asking. A check the app starts on its own
- * downloads what it finds and puts it in place with nothing shown: the next
- * launch is the new version, and a download that fails is left for the next
- * launch to try again. A check somebody asked for opens the window at once
+ * downloads what it finds and puts it in place with a compact notification at
+ * the bottom of the app: the next launch is the new version, and a download
+ * that fails is left for the next launch to try again. A check somebody asked
+ * for opens the window at once
  * and shows the same work as it happens, ending with the offer to restart
  * into the new version now rather than later.
  */
@@ -26,6 +27,8 @@ export type UpdaterState =
   | { phase: "idle" }
   | { phase: "checking" }
   | { phase: "upToDate"; currentVersion: string }
+  /** The update was found; the following effect starts its automatic download. */
+  | { phase: "available"; check: UpdateCheck }
   | { phase: "downloading"; check: UpdateCheck; progress: UpdateProgress | null }
   | { phase: "installing"; check: UpdateCheck }
   /** Downloaded and, where the platform allows, already in place. */
@@ -34,6 +37,8 @@ export type UpdaterState =
 
 export interface Updater {
   state: UpdaterState;
+  /** The current work was started by the automatic start-up check. */
+  automatic: boolean;
   /** Whether the Update Manager window is showing. */
   open: boolean;
   /** Ask the server. `manual` opens the window whatever the answer. */
@@ -92,12 +97,14 @@ function noteCheck(nowMs: number): void {
 export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "start"): Updater {
   const [state, setState] = useState<UpdaterState>({ phase: "idle" });
   const [open, setOpen] = useState(false);
+  const [automatic, setAutomatic] = useState(false);
   // The state outside a render, so an action can read it without a side
   // effect inside a state updater.
   const latest = useRef(state);
   latest.current = state;
   // The check that is running, so a slow one does not overwrite a newer one.
   const sequence = useRef(0);
+  const downloadStarted = useRef(0);
   const checkedOnStart = useRef(false);
 
   // The download, and its end: in place, staged, or failed. The backend
@@ -126,6 +133,7 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
       return;
     }
     const mine = ++sequence.current;
+    setAutomatic(!manual);
     setState({ phase: "checking" });
     if (manual) setOpen(true);
     void (async () => {
@@ -138,7 +146,10 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
         } else if (found.ready) {
           setState({ phase: "ready", check: found, ready: found.ready });
         } else {
-          download(found, mine);
+          // Let the bottom notice show that an update was found before its
+          // download starts. The effect below also keeps this transition out
+          // of the check's async callback.
+          setState({ phase: "available", check: found });
         }
       } catch (error) {
         if (mine !== sequence.current) return;
@@ -148,7 +159,18 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
         if (manual) setOpen(true);
       }
     })();
-  }, [download]);
+  }, []);
+
+  // Every update is downloaded automatically. Keeping this as its own render
+  // lets the compact notice report "New update available" before progress
+  // begins, even when React batches the check's state changes.
+  useEffect(() => {
+    if (state.phase !== "available") return;
+    const mine = sequence.current;
+    if (downloadStarted.current === mine) return;
+    downloadStarted.current = mine;
+    download(state.check, mine);
+  }, [state, download]);
 
   const retry = useCallback(() => {
     const current = latest.current;
@@ -209,5 +231,5 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
 
   const dismiss = useCallback(() => setOpen(false), []);
 
-  return { state, open, check, retry, restart, dismiss };
+  return { state, automatic, open, check, retry, restart, dismiss };
 }

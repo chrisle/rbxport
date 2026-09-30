@@ -10,6 +10,7 @@ mod file_drop;
 mod file_drag;
 mod startup;
 mod screen_cache;
+mod sentry;
 pub mod analysis;
 pub mod commands;
 mod usb_import;
@@ -360,6 +361,10 @@ pub fn browser_args() -> Option<String> {
 pub fn run() {
     startup::begin();
     logging::install();
+    // Keep the guard alive until the Tauri event loop exits so a panic has a
+    // chance to be delivered during shutdown.  The build injects the DSN;
+    // without one this intentionally becomes a no-op client.
+    let _sentry = sentry::install();
 
     let mut context = tauri::generate_context!();
     if let Some(args) = browser_args() {
@@ -581,6 +586,9 @@ pub fn run() {
             commands::export_loop_wav,
             commands::import_xml,
             commands::import_itunes,
+            commands::itunes_default_library,
+            commands::itunes_library_at,
+            commands::import_itunes_selected,
             commands::export_xml,
             commands::list_backups,
             commands::backup_directory,

@@ -64,8 +64,8 @@
 }
 .close:hover { color: var(--c-icon-on); }
 
-/* Two columns with the SYNC button between them, as rekordbox lays out the
-   rekordbox and Device columns of its manager. */
+/* Three columns — iTunes, rekordbox, Device — each with a SYNC button before
+   it, as rekordbox lays out its manager. */
 .body {
   flex: 1;
   min-height: 0;
@@ -209,6 +209,15 @@
   flex-direction: column;
   gap: 72px;
 }
+/* The iTunes → rekordbox side has one SYNC and nothing under it, so it is
+   narrower than the device side with its import controls. */
+.middleSlim {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 108px;
+}
 .sync {
   display: inline-flex;
   align-items: center;
@@ -288,6 +297,8 @@
 .status[data-error] { color: var(--c-error); }
 .detailsButton { flex: none; border: 0; background: none; color: var(--c-accent); font: inherit; cursor: pointer; }
 .idleStatus { color: var(--c-text-dim); }
+/* rekordbox holding the database blocks every sync: the reason reads as a warning. */
+.idleStatus[data-warn] { color: var(--c-error); }
 
 .middle .button { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; font-size: var(--f-size-pref-small); }
 .importActions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; }
@@ -312,6 +323,7 @@
 
 @media (max-width: 800px) {
   .middle { width: 136px; }
+  .middleSlim { width: 92px; }
   .headingRow { flex-wrap: wrap; }
 }
 .exportProgress { display: grid; gap: 6px; margin-top: 10px; font-size: var(--f-size-xs); font-variant-numeric: tabular-nums; }

@@ -55,7 +55,6 @@
     auto
     1fr
     auto
-    auto
     var(--s-status-bar-h);
   height: 100%;
   background: var(--c-black);
@@ -70,10 +69,9 @@
 /* The Pro DJ LINK player strip, when LINK is on: its own row above the status
    bar, sized to what it holds, and zero when absent. */
 .window > .linkStrip { grid-row: 5; }
-.window > .updateReady { grid-row: 6; }
 /* The status bar is the last child; Settings between them is fixed, so it
    takes no row. */
-.window > :last-child { grid-row: 7; }
+.window > :last-child { grid-row: 6; }
 
 /* The decks and the measured black gap under them. The gap is real and
    measured: the pad bar ends at 335pt and the track list starts at 338pt. A

@@ -6,15 +6,15 @@
 //! sent a CDJ-3000 (`docs/pre-release/design-notes/link-export-capture.md`).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::catalog::{
     Analysis, ArtistRole, Catalog, Edit, Query, Row, Sort, TrackDetails, TrackScope,
 };
 use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
-use crate::{keys, kind, menu_footer, menu_header, setup_reply, Argument, Message};
+use crate::{Argument, Message, keys, kind, menu_footer, menu_header, setup_reply};
 
 /// Our device number on the link when nothing has settled one: rekordbox's
 /// first choice, so a player treats us as it treats rekordbox.

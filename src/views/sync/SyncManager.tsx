@@ -1,12 +1,13 @@
 /**
  * The Sync Manager: which playlists go to which sticks.
  *
- * rekordbox's has three columns — iTunes, rekordbox, Device — with a SYNC
- * button between the library and the device. Ours has the two that apply:
- * the library's playlists on the left, every connected device on the right,
- * and SYNC between them. More than one device can be ticked, and every
- * ticked device ends up holding exactly the ticked playlists, so two sticks
- * synced together are the same stick twice.
+ * Three columns, as rekordbox's has — iTunes, rekordbox, Device — with a SYNC
+ * button between each pair. The left SYNC imports the ticked iTunes playlists
+ * into the library; the right SYNC writes the ticked library playlists to every
+ * ticked device, so two sticks synced together are the same stick twice.
+ *
+ * The iTunes column reads Music.app's shared `Library.xml` (auto-detected, or
+ * chosen from a file dialog) and imports only the playlists that are ticked.
  *
  * Nothing here holds the library: the tree is the same flat list the shell
  * fetches, and every count and name on a device comes from the backend
@@ -17,7 +18,7 @@ import { ArrowLeft, ArrowRight, LoaderCircle, Search, X } from "lucide-react";
 
 import { EjectIcon, FolderIcon, ListIcon } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
-import type { Device, DeviceSyncState, ExportReport, TreeNode } from "@/ipc/types";
+import type { Device, DeviceSyncState, ExportReport, ItunesLibrary, TreeNode } from "@/ipc/types";
 import { formatSpace } from "@/lib/devices";
 import { errorMessage } from "@/lib/errorMessage";
 import { nodesForSource, subtreeIds, toggle, visibleNodes } from "@/lib/tree";
@@ -120,7 +121,15 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   // of rekordbox's process lock instead of relying on the main window.
   // Unknown is locked: do not briefly enable SYNC before the first check.
   const [rekordboxOpen, setRekordboxOpen] = useState<boolean | null>(null);
-  const [operation, setOperation] = useState<"sync" | "import" | "eject" | null>(null);
+  const [operation, setOperation] = useState<"sync" | "import" | "eject" | "itunes" | null>(null);
+  // The iTunes / Music library shown in the left column, its ticks, and which
+  // of its folders are closed. Null until the auto-detect answers, or when no
+  // shared Library.xml is found and the DJ has not chosen one.
+  const [itunes, setItunes] = useState<ItunesLibrary | null>(null);
+  const [itunesTicked, setItunesTicked] = useState<ReadonlySet<string>>(new Set());
+  const [itunesCollapsed, setItunesCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [itunesLoading, setItunesLoading] = useState(true);
+  const [itunesError, setItunesError] = useState("");
   const [ejectingPath, setEjectingPath] = useState<string | null>(null);
   const busy = operation !== null || [...exportJobs.values()].some(job => ["preparing", "checking", "copying", "database", "verifying", "publishing", "ejecting"].includes(job.state));
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
@@ -315,6 +324,114 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
     });
   }, [nodes, byId]);
 
+  // The iTunes column: the same tree machinery as the rekordbox column, over
+  // its own flat list of folders and playlists.
+  const itunesNodes = useMemo<readonly TreeNode[]>(() => itunes?.tree ?? [], [itunes]);
+  const itunesById = useMemo(() => new Map(itunesNodes.map((n) => [n.id, n] as const)), [itunesNodes]);
+  const itunesPlaylists = useMemo(() => itunesNodes.filter((n) => n.kind === "playlist"), [itunesNodes]);
+  const itunesVisible = useMemo(() => visibleNodes(itunesNodes, itunesCollapsed), [itunesNodes, itunesCollapsed]);
+  const itunesSelectedCount = itunesPlaylists.filter((n) => itunesTicked.has(n.id)).length;
+
+  const itunesTickState = useCallback((node: TreeNode): Tick => {
+    if (node.kind !== "folder") return itunesTicked.has(node.id) ? "on" : "off";
+    const under = playlistsUnder(itunesNodes, node, itunesById);
+    if (under.length === 0) return "off";
+    const on = under.filter((id) => itunesTicked.has(id)).length;
+    return on === 0 ? "off" : on === under.length ? "on" : "some";
+  }, [itunesTicked, itunesNodes, itunesById]);
+
+  const itunesTickNode = useCallback((node: TreeNode, on: boolean) => {
+    const ids = node.kind === "folder" ? playlistsUnder(itunesNodes, node, itunesById) : [node.id];
+    setItunesTicked((current) => {
+      const next = new Set(current);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }, [itunesNodes, itunesById]);
+
+  // A library's folders open one level deep, as the rekordbox column's do.
+  const seedItunesCollapsed = (tree: readonly TreeNode[]) =>
+    new Set(tree.filter((n) => n.kind === "folder" && n.depth > 1).map((n) => n.id));
+
+  // The library at its usual place, read once on open. A miss is normal —
+  // Music.app writes the XML only when sharing is on — and leaves the column
+  // offering a file picker rather than showing an error.
+  useEffect(() => {
+    let live = true;
+    setItunesLoading(true);
+    void getBackend()
+      .then((backend) => backend.itunesDefaultLibrary())
+      .then((library) => {
+        if (!live || !library) return;
+        setItunes(library);
+        setItunesCollapsed(seedItunesCollapsed(library.tree));
+      })
+      .catch(() => { if (live) setItunesError("Couldn’t read the iTunes library."); })
+      .finally(() => { if (live) setItunesLoading(false); });
+    return () => { live = false; };
+  }, []);
+
+  const chooseItunes = useCallback(() => {
+    if (busy) return;
+    setItunesError("");
+    setItunesLoading(true);
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        const library = await backend.chooseItunesLibrary();
+        if (!library) return;
+        setItunes(library);
+        setItunesTicked(new Set());
+        setItunesCollapsed(seedItunesCollapsed(library.tree));
+      } catch (e) {
+        setItunesError(errorMessage(e));
+      } finally {
+        setItunesLoading(false);
+      }
+    })();
+  }, [busy]);
+
+  const canImportItunes = rekordboxOpen === false && itunes !== null && itunesSelectedCount > 0 && !busy;
+
+  const importItunes = useCallback(() => {
+    if (!itunes || !canImportItunes) return;
+    // In tree order, so the playlists land filed as they are in iTunes.
+    const ids = itunesNodes.filter((n) => n.kind === "playlist" && itunesTicked.has(n.id)).map((n) => n.id);
+    setOperation("itunes");
+    setImportFailed(false);
+    setShowStatusDetails(false);
+    setStatus([t("Importing from iTunes…")]);
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        // Close the gap between the last poll and the click: rekordbox holds
+        // the database, and importing writes to it.
+        const summary = await backend.librarySummary();
+        setRekordboxOpen(summary.readOnly);
+        if (summary.readOnly) {
+          setStatus([t("Quit rekordbox to import from iTunes.")]);
+          return;
+        }
+        const report = await backend.importItunesSelected(itunes.path, ids);
+        // Show the imported playlists in the rekordbox column at once.
+        setTree(await backend.playlistTree());
+        setItunesTicked(new Set());
+        const added = report.imported + report.existing;
+        const lines = [`Imported ${report.playlists} playlists from iTunes (${added} tracks, ${report.imported} new).`];
+        if (report.skipped.length > 0) lines.push(`Skipped ${report.skipped.length} tracks.`, ...report.skipped);
+        setStatus(lines);
+      } catch (e) {
+        setImportFailed(true);
+        setStatus([errorMessage(e)]);
+      } finally {
+        setOperation(null);
+      }
+    })();
+  }, [itunes, canImportItunes, itunesNodes, itunesTicked, t]);
+
   const canSync = rekordboxOpen === false && selectedCount > 0 && tickedDevices.size > 0 && !busy && !loadingDevices;
 
   const ejectDevice = async (device: Device) => {
@@ -476,6 +593,70 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
         Sync Manager
       </header>
       <div className={styles.body}>
+        <section className={styles.column} aria-label="iTunes">
+          <div className={styles.headingRow}>
+            <div>
+              <h2 className={styles.heading}>iTunes</h2>
+              <p className={styles.columnNote}>
+                {itunes ? `${itunesSelectedCount} of ${itunesPlaylists.length} playlists selected` : "No iTunes library"}
+              </p>
+            </div>
+            <button type="button" className={styles.refresh} disabled={busy || itunesLoading} onClick={chooseItunes}>
+              {itunes ? "Change…" : "Choose…"}
+            </button>
+          </div>
+          <div className={styles.list} role="tree" aria-label="iTunes playlists">
+            {itunesVisible.map((node) => {
+              const folder = node.kind === "folder";
+              const open = !itunesCollapsed.has(node.id);
+              const state = itunesTickState(node);
+              return (
+                <div
+                  key={node.id}
+                  className={styles.row}
+                  role="treeitem"
+                  aria-expanded={folder ? open : undefined}
+                  aria-selected={state === "on"}
+                  style={{ paddingLeft: `${8 + (node.depth - 1) * 18}px` }}
+                >
+                  <button
+                    type="button"
+                    className={styles.twisty}
+                    data-open={folder && open ? "" : undefined}
+                    data-leaf={folder ? undefined : ""}
+                    aria-label={folder ? (open ? `Collapse ${node.name}` : `Expand ${node.name}`) : undefined}
+                    tabIndex={folder ? 0 : -1}
+                    onClick={() => folder && setItunesCollapsed((current) => toggle(current, node.id))}
+                  />
+                  <label className={styles.rowSelection}>
+                    {folder ? <FolderIcon className={styles.icon} /> : <ListIcon className={styles.icon} />}
+                    <span className={styles.name}>{node.name}</span>
+                    <TickBox state={state} label={node.name} disabled={busy} onChange={(on) => itunesTickNode(node, on)} />
+                  </label>
+                </div>
+              );
+            })}
+            {itunesLoading ? <p className={styles.empty}>Reading iTunes library…</p>
+              : itunesError ? <p className={styles.empty} role="alert">{itunesError}</p>
+              : !itunes ? <p className={styles.empty}>No iTunes or Music library was found. Turn on “Share Library XML with other applications” in Music, then choose the file.</p>
+              : itunesNodes.length === 0 ? <p className={styles.empty}>This iTunes library has no playlists.</p> : null}
+          </div>
+        </section>
+
+        <div className={styles.middleSlim}>
+          <button
+            type="button"
+            className={styles.sync}
+            onClick={importItunes}
+            disabled={!canImportItunes}
+            title={rekordboxOpen ? "Quit rekordbox to import from iTunes." : undefined}
+            aria-label="Import selected iTunes playlists"
+            aria-busy={operation === "itunes" || undefined}
+          >
+            {operation === "itunes" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> Importing…</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
+          </button>
+        </div>
+
         <section className={styles.column} aria-label="rbxport">
           <div className={styles.headingRow}>
             <div><h2 className={styles.heading}>rbxport</h2><p className={styles.columnNote}>{selectedCount} of {playlists.length} playlists selected</p></div>
@@ -659,7 +840,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
           <div className={showStatusDetails ? styles.statusDetails : undefined} title={status.join("\n")}>
           {status.length > 0 ? status.join(" · ") : null}
           {status.length === 0 ? <span className={styles.selectionSummary}>{selectionSummary}</span> : null}
-          {status.length === 0 ? <span id="sync-selection-hint" className={styles.idleStatus}>{syncHint}</span> : null}
+          {status.length === 0 ? <span id="sync-selection-hint" className={styles.idleStatus} data-warn={rekordboxOpen || undefined}>{syncHint}</span> : null}
           </div>
           {status.length > 1 || importFailed ? <button type="button" className={styles.detailsButton} onClick={() => setShowStatusDetails(open => !open)}>
             {showStatusDetails ? "Hide details" : "Show details"}

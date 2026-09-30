@@ -491,8 +491,8 @@
   --s-player-dual-zoom-spread: 50px; /* the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x, both decks loaded; window x 0..1920pt, the pair y 56..477): the + glyph centred on y 240.5 and the − on 290.5, RST between them on the centre line at 266.5: one cluster for the pair, not one per deck */
   --s-pref-w: 798px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the window's content x 114..1709 at 2x */
   --s-pref-h: 828px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the window y 76..1731 at 2x, title bar included */
-  --s-sync-w: 980px; /* rekordbox 7.2.11's Sync Manager dialog is 1146 by 666pt with its iTunes column; ours drops that column and is narrower by about what it took */
-  --s-sync-h: 620px; /* rekordbox 7.2.11's Sync Manager dialog is 1146 by 666pt, title bar included; ours is a little shorter for the two-column layout */
+  --s-sync-w: 1440px; /* rekordbox 7.2.11's Sync Manager dialog is 1146 by 666pt with its iTunes column; ours carries the same three columns and opens wider so each has room to read */
+  --s-sync-h: 620px; /* rekordbox 7.2.11's Sync Manager dialog is 1146 by 666pt, title bar included; ours is a little shorter */
   --s-pref-title-h: 28px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the title bar y 76..131 */
   --s-pref-sidebar-w: 159px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the sidebar x 114..431 */
   --s-pref-sidebar-inset: 7px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the search box and the rows start 14 capture px in from the sidebar's edge */

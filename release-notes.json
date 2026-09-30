@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.0.0-rc.7",
+    "date": "2026-09-29",
+    "changes": [
+      "(New) Import selected iTunes playlists into your library from the Sync Manager.",
+      "(New) The status bar shows a prompt when an update is ready to install.",
+      "(New) Open rbxport's TikTok from a link in the About pane.",
+      "(New) rbxport reports crashes automatically so failures can be diagnosed and fixed.",
+      "(Improved) Browsing a player's menus over LINK a second time is instant, as the menus are now cached."
+    ]
+  },
+  {
     "version": "1.0.0-rc.6",
     "date": "2026-09-26",
     "changes": [

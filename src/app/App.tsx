@@ -16,7 +16,7 @@ import type { TrackSearchField } from "@/lib/search";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { droppedFilePaths, getBackend } from "@/ipc/client";
 import type {
-  Backend, DeckId, Device, LibraryProblem, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
+  Backend, DeckId, Device, ImportReport, LibraryProblem, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
 } from "@/ipc/types";
 import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
 import { clearWaveformPreviewCache } from "@/views/browser/WaveformPreview";
@@ -432,6 +432,11 @@ function AppBody() {
       .then((backend) => backend.openUrl(`https://rbxport.com/whats-new/${release}`))
       .catch(() => {});
   }, [updater.state]);
+  const [updateNoticeVisible, setUpdateNoticeVisible] = useState(false);
+  useEffect(() => {
+    setUpdateNoticeVisible(updater.state.phase === "ready");
+  }, [updater.state.phase]);
+  const updateNotice = updater.state.phase === "ready" && updateNoticeVisible ? updater.state : null;
   // DJ System in Preferences is what a stick with no settings of its own
   // gets on export; the same shape goes with every export call.
   const stickDefaults = prefs.preferences.djSystem;
@@ -1529,29 +1534,45 @@ function AppBody() {
     [readOnly, refuse],
   );
 
-  const importFromMenu = useCallback(async () => {
-    report("Choosing files to import…");
-    try {
-      const backend = await getBackend();
-      const imported = await backend.importFiles();
-      if (imported === null) {
-        setNote(null);
-        return;
+  // Import from a picker: files (Import) or whole folders (Import Folder). Both
+  // land the same way — pick, import, refresh the tree, queue Auto Analysis —
+  // so the only difference is which native picker opens and the status wording.
+  const runImport = useCallback(
+    async (choosing: string, pick: (backend: Backend) => Promise<ImportReport | null>) => {
+      report(choosing);
+      try {
+        const backend = await getBackend();
+        const imported = await pick(backend);
+        if (imported === null) {
+          setNote(null);
+          return;
+        }
+        const total = imported.imported + imported.skipped.length;
+        report(
+          imported.skipped.length === 0
+            ? `Imported ${imported.imported} of ${total} files.`
+            : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped.`,
+        );
+        setTree(await backend.playlistTree());
+        // Auto Analysis in Preferences: what just landed goes straight into
+        // the queue, as rekordbox does unless told not to.
+        if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
+      } catch (e) {
+        refuse(e instanceof Error ? e.message : "Those files could not be imported.");
       }
-      const total = imported.imported + imported.skipped.length;
-      report(
-        imported.skipped.length === 0
-          ? `Imported ${imported.imported} of ${total} files.`
-          : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped.`,
-      );
-      setTree(await backend.playlistTree());
-      // Auto Analysis in Preferences: what just landed goes straight into
-      // the queue, as rekordbox does unless told not to.
-      if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
-    } catch (e) {
-      refuse(e instanceof Error ? e.message : "Those files could not be imported.");
-    }
-  }, [report, refuse, analysisPrefs.auto, analysis]);
+    },
+    [report, refuse, analysisPrefs.auto, analysis],
+  );
+
+  const importFromMenu = useCallback(
+    () => runImport("Choosing files to import…", (backend) => backend.importFiles()),
+    [runImport],
+  );
+
+  const importFolderFromMenu = useCallback(
+    () => runImport("Choosing a folder to import…", (backend) => backend.importFolder()),
+    [runImport],
+  );
 
   const importXmlFromMenu = useCallback(async (source: "rekordbox" | "itunes" = "rekordbox") => {
     report(source === "itunes" ? "Choosing the iTunes Library.xml…" : "Choosing a rekordbox XML file…");
@@ -1620,6 +1641,10 @@ function AppBody() {
       void importFromMenu();
       return;
     }
+    if (outcome.action === "import-folder") {
+      void importFolderFromMenu();
+      return;
+    }
     if (outcome.action === "import-xml") {
       void importXmlFromMenu();
       return;
@@ -1656,7 +1681,7 @@ function AppBody() {
     // The missing-file manager is a pane of Preferences.
     openPreferences(outcome.action === "missing" ? "advanced" : "view");
   }, [
-    readOnly, advancedPrefs.protectLibrary, importFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
+    readOnly, advancedPrefs.protectLibrary, importFromMenu, importFolderFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
     openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider, openReport,
     editHistory, runLibraryHistory,
   ]);
@@ -2480,16 +2505,6 @@ function AppBody() {
         />
       </div>
 
-      {updater.state.phase === "ready" ? (
-        <div className={styles.updateReady}>
-          <UpdateReadyNotice
-            version={updater.state.ready.version}
-            onWhatsNew={openWhatsNew}
-            onRestart={updater.restart}
-          />
-        </div>
-      ) : null}
-
       <StatusBar
         exports={(exportRunning ? exportBatch : []).map(job => ({
           ...job, name: devices.find(device => device.path === job.path)?.name ?? job.path.split(/[\\/]/).filter(Boolean).at(-1) ?? job.path,
@@ -2497,6 +2512,14 @@ function AppBody() {
         onReportBug={openReport}
         onSupport={SHOW_MAIN_SUPPORT ? openSupport : undefined}
         onOpenLog={openLog}
+        updateNotice={updateNotice ? (
+          <UpdateReadyNotice
+            state={updateNotice}
+            onRestart={updater.restart}
+            onWhatsNew={openWhatsNew}
+            onDismiss={() => setUpdateNoticeVisible(false)}
+          />
+        ) : null}
         backupActivity={backupJob.error || backupJob.text}
         backupProgress={backupJob.progress.running ? backupJob.progress : undefined}
         version={version}

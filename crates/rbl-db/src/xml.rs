@@ -224,6 +224,53 @@ pub struct XmlImportReport {
     pub tracks: Vec<(String, String)>,
 }
 
+/// A cut-down copy holding only the playlists at `keep` — indices into
+/// `library.nodes` — the folders they sit inside so their filing survives, and
+/// only the tracks those playlists name.
+///
+/// For a selective import: the Sync Manager's iTunes column, where the DJ ticks
+/// some playlists rather than the whole library. An index out of range, or a
+/// folder with none of its playlists kept, is left out.
+#[must_use]
+pub fn subset(library: &XmlLibrary, keep: &std::collections::BTreeSet<usize>) -> XmlLibrary {
+    // Each node's parent: the nearest node before it a level shallower, which
+    // in a depth-first flattening is exactly its container.
+    let mut parents: Vec<Option<usize>> = Vec::with_capacity(library.nodes.len());
+    let mut ancestors: Vec<usize> = Vec::new();
+    for (index, node) in library.nodes.iter().enumerate() {
+        ancestors.truncate(node.depth);
+        parents.push(ancestors.last().copied());
+        ancestors.push(index);
+    }
+
+    // Every kept playlist and the folders above it, walked up through parents.
+    let mut include = vec![false; library.nodes.len()];
+    for &start in keep {
+        let mut at = (start < library.nodes.len()).then_some(start);
+        while let Some(index) = at {
+            if include[index] {
+                break;
+            }
+            include[index] = true;
+            at = parents[index];
+        }
+    }
+
+    let mut nodes = Vec::new();
+    let mut wanted: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for (index, node) in library.nodes.iter().enumerate() {
+        if !include[index] {
+            continue;
+        }
+        if !node.folder {
+            wanted.extend(node.track_ids.iter().map(String::as_str));
+        }
+        nodes.push(node.clone());
+    }
+    let tracks = library.tracks.iter().filter(|track| wanted.contains(track.id.as_str())).cloned().collect();
+    XmlLibrary { tracks, nodes }
+}
+
 /// Imports a parsed document through the writer.
 ///
 /// `progress` is told how many tracks are done of how many, after each.
@@ -393,6 +440,49 @@ mod tests {
         assert_eq!(names, vec![("Sets", true, 0), ("Warm up", false, 1), ("Loose", false, 0)]);
         assert_eq!(library.nodes[1].track_ids, vec!["1", "2"]);
         assert!(XmlLibrary::parse("<html/>").tracks.is_empty());
+    }
+
+    #[test]
+    fn subset_keeps_the_folders_above_a_playlist_and_only_its_tracks() {
+        let track = |id: &str| XmlTrack {
+            id: id.to_owned(),
+            title: id.to_owned(),
+            artist: String::new(),
+            path: None,
+            rating: 0,
+            comment: String::new(),
+            cues: Vec::new(),
+        };
+        let node = |name: &str, folder: bool, depth: usize, track_ids: &[&str]| XmlNode {
+            name: name.to_owned(),
+            folder,
+            depth,
+            track_ids: track_ids.iter().map(|s| (*s).to_owned()).collect(),
+        };
+        let library = XmlLibrary {
+            tracks: vec![track("1"), track("2"), track("3")],
+            // Sets/ (folder) → Warm up [1,2]; Loose [3] at the top level.
+            nodes: vec![
+                node("Sets", true, 0, &[]),
+                node("Warm up", false, 1, &["1", "2"]),
+                node("Loose", false, 0, &["3"]),
+            ],
+        };
+
+        // Keeping only the nested "Warm up" keeps its "Sets" folder, drops the
+        // top-level "Loose", and carries only tracks 1 and 2.
+        let cut = subset(&library, &std::collections::BTreeSet::from([1]));
+        let names: Vec<(&str, bool, usize)> = cut.nodes.iter().map(|n| (n.name.as_str(), n.folder, n.depth)).collect();
+        assert_eq!(names, vec![("Sets", true, 0), ("Warm up", false, 1)]);
+        assert_eq!(cut.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["1", "2"]);
+
+        // Keeping the top-level "Loose" alone drops the folder and its playlist.
+        let cut = subset(&library, &std::collections::BTreeSet::from([2]));
+        assert_eq!(cut.nodes.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), vec!["Loose"]);
+        assert_eq!(cut.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["3"]);
+
+        // An out-of-range index is ignored rather than panicking.
+        assert!(subset(&library, &std::collections::BTreeSet::from([99])).nodes.is_empty());
     }
 
     #[test]

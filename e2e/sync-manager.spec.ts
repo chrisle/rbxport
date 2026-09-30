@@ -29,7 +29,7 @@ test("eject after syncing removes successfully synced devices", async ({ page })
 
 test("the rail opens it with the library's playlists on the left and the devices on the right", async ({ page }) => {
   const dialog = await openManager(page);
-  const tree = dialog.getByRole("tree", { name: "Playlists" });
+  const tree = dialog.getByRole("tree", { name: "Playlists", exact: true });
   // The mock's top folders, open one level: their playlists show, the third
   // folder is empty.
   await expect(tree.getByRole("treeitem").first()).toHaveText(/CURRENT/);
@@ -44,7 +44,7 @@ test("the rail opens it with the library's playlists on the left and the devices
 
 test("ticking a folder ticks its playlists, and a device shows what it holds", async ({ page }) => {
   const dialog = await openManager(page);
-  const tree = dialog.getByRole("tree", { name: "Playlists" });
+  const tree = dialog.getByRole("tree", { name: "Playlists", exact: true });
   await tree.getByRole("checkbox", { name: "CURRENT" }).check();
   await expect(tree.getByRole("checkbox", { name: "Melodic Vox" })).toBeChecked();
   await expect(tree.getByRole("checkbox", { name: "Hardstyle" })).toBeChecked();
@@ -64,7 +64,7 @@ test("ticking a folder ticks its playlists, and a device shows what it holds", a
 
 test("SYNC writes the ticked playlists to both sticks, reports on each, and Close closes it", async ({ page }) => {
   const dialog = await openManager(page);
-  const tree = dialog.getByRole("tree", { name: "Playlists" });
+  const tree = dialog.getByRole("tree", { name: "Playlists", exact: true });
   await tree.getByRole("checkbox", { name: "Melodic Vox" }).check();
   await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
   await dialog.getByRole("checkbox", { name: "TEST", exact: true }).check();
@@ -94,7 +94,7 @@ test("SYNC writes the ticked playlists to both sticks, reports on each, and Clos
 
 test("ticking a stick again brings back what it was last synced with", async ({ page }) => {
   const dialog = await openManager(page);
-  const tree = dialog.getByRole("tree", { name: "Playlists" });
+  const tree = dialog.getByRole("tree", { name: "Playlists", exact: true });
   await tree.getByRole("checkbox", { name: "Hardstyle" }).check();
   await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
   await dialog.getByRole("button", { name: "SYNC" }).click();
