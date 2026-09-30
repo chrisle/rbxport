@@ -829,7 +829,7 @@ fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
     assert_eq!(reply[0].kind, kind::HOT_CUE_BANK_REPLY);
     assert_eq!(args(&reply[0]), "0x2101, 0x0, 0x24, blob[36], 0x24, 0x1, 0x0, 0x8, blob[8], 0x0, blob[0]");
     let Argument::Blob(record) = &reply[0].arguments[3] else { panic!("cue record") };
-    assert_eq!(&record[..8], &[0, 4, 1, 1, 0, 0, 0x47, 0x5f]);
+    assert_eq!(&record[..8], &[1, 1, 4, 0, 0x5f, 0x47, 0, 0]);
     let tracks = s.handle(&numbers(kind::HOT_CUE_BANK, 0x1c3, &[CTX, 42, 0]));
     assert_eq!(tracks[0].arguments, vec![Argument::Number(0x2001), Argument::Number(1)]);
     let track_items = s.handle(&numbers(kind::RENDER, 0x1c4, &[CTX, 0, 8]));
@@ -837,7 +837,7 @@ fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
 
     let mut changed_record = Vec::new();
     for word in [0x0004_0101, TRACK, 0, 150, 300, 0, 21, 0, 0] {
-        changed_record.extend_from_slice(&word.to_be_bytes());
+        changed_record.extend_from_slice(&word.to_le_bytes());
     }
     let changed = s.handle(&Message::new(
         0x1c5,
@@ -845,18 +845,40 @@ fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
         vec![
             Argument::Number(CTX), Argument::Number(42), Argument::Number(0x24),
             Argument::Blob(changed_record), Argument::Number(8),
-            Argument::Blob([1_000_u32.to_be_bytes(), 2_000_u32.to_be_bytes()].concat()),
+            Argument::Blob([1_000_u32.to_le_bytes(), 2_000_u32.to_le_bytes()].concat()),
         ],
     ));
     assert_eq!(args(&changed[0]), "0x2201, 0x0, 0x48, blob[72], 0x24, 0x1, 0x1, 0x10, blob[16], 0x0, blob[0]");
     let Argument::Blob(reloaded) = &changed[0].arguments[3] else { panic!("USB cue records") };
-    assert_eq!(&reloaded[..8], &[0, 1, 1, 1, 0, 0, 0, 0]);
+    assert_eq!(&reloaded[..8], &[1, 1, 1, 0, 0, 0, 0, 0]);
     let (decoded, used) = Message::decode(&reply[0].encode()).unwrap();
     assert_eq!(used, reply[0].encode().len());
     assert_eq!(decoded, reply[0]);
 
+    // A successful bank edit reloads ordinary USB cues.  An uncued target
+    // still receives the successful, empty `4702` envelope.
+    let mut uncued_record = Vec::new();
+    for word in [0x0004_0101, TRACK + 1, 0, 150, 300, 0, 21, 0, 0] {
+        uncued_record.extend_from_slice(&word.to_le_bytes());
+    }
+    let uncued = s.handle(&Message::new(
+        0x1c5,
+        kind::CHANGE_HOT_CUE_BANK,
+        vec![
+            Argument::Number(CTX), Argument::Number(42), Argument::Number(0x24),
+            Argument::Blob(uncued_record), Argument::Number(8),
+            Argument::Blob([1_000_u32.to_le_bytes(), 2_000_u32.to_le_bytes()].concat()),
+        ],
+    ));
+    assert_eq!(args(&uncued[0]), "0x2201, 0x0, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+
     let missing = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c6, &[CTX, 999]));
-    assert_eq!(args(&missing[0]), "0x2101, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+    assert_eq!(args(&missing[0]), "0x2101, 0x0, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+    let (empty, used) = Message::decode(&missing[0].encode()).unwrap();
+    assert_eq!(used, missing[0].encode().len());
+    assert_eq!(empty, missing[0]);
+    let wrong_context = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c6, &[CTX & !0xff, 42]));
+    assert_eq!(args(&wrong_context[0]), "0x2101, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
     let malformed = s.handle(&numbers(kind::CHANGE_HOT_CUE_BANK, 0x1c7, &[CTX, 42]));
     assert_eq!(args(&malformed[0]), "0x2201, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
 }
