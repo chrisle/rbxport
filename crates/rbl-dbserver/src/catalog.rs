@@ -273,6 +273,18 @@ pub struct HotCueBankCue {
     pub cue_microsec: u32,
 }
 
+/// One ordinary USB cue in the legacy `4702` reply.  The RX3 asks for this
+/// list after applying a Hot Cue Bank edit, so the bank write is followed by
+/// the edited track's own cues rather than by another bank-cue reply.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UsbCue {
+    /// A-C are 1-3; zero denotes a memory cue.
+    pub slot: u8,
+    pub in_ms: u32,
+    pub out_ms: Option<u32>,
+    pub color_table_index: u32,
+}
+
 /// The per-track blobs a player asks for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Analysis {
@@ -342,6 +354,12 @@ pub trait Catalog: Send + Sync {
     /// Tracks assigned to a Hot Cue Bank, in the bank's slot order.  The RX3
     /// uses this for `0x2001` mode 0; it is not a second bank hierarchy.
     fn hot_cue_bank_tracks(&self, _bank: u32) -> Vec<TrackRow> {
+        Vec::new()
+    }
+
+    /// Legacy USB cues for a track, used by the follow-up to an RX3 Hot Cue
+    /// Bank edit.  Only hot cues A-C fit this legacy representation.
+    fn usb_cues(&self, _track: u32) -> Vec<UsbCue> {
         Vec::new()
     }
 

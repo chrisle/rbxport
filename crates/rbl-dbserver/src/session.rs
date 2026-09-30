@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::catalog::{
-    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, Query, Row, Sort, TrackDetails, TrackScope,
+    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, Query, Row, Sort, TrackDetails, TrackScope, UsbCue,
 };
 use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
@@ -440,6 +440,48 @@ impl LinkSession {
                 Argument::Number(0x24),
                 Argument::Number(count),
                 Argument::Number(0),
+                Argument::Number(u32::try_from(sidecars.len()).unwrap_or(u32::MAX)),
+                Argument::Blob(sidecars),
+                Argument::Number(0),
+                Argument::Blob(Vec::new()),
+            ],
+        )]
+    }
+
+    /// RX3's ordinary USB-cue `4702` reply. Firmware uses this after a
+    /// successful `0x2201`: it reloads the target track's cues through
+    /// `DBSMain_GetUsbCue`, so the result is deliberately not a bank list.
+    fn usb_cue_reply(message: &Message, cues: Vec<UsbCue>) -> Vec<Message> {
+        let mut records = Vec::with_capacity(cues.len() * 36);
+        let mut sidecars = Vec::with_capacity(cues.len() * 8);
+        let mut hot = 0_u32;
+        let mut memory = 0_u32;
+        for cue in cues {
+            let flags = 0x100 | u32::from(cue.out_ms.is_some()) | u32::from(cue.slot) << 16;
+            let in_frame = cue.in_ms.saturating_mul(3) / 20;
+            let out_ms = cue.out_ms.unwrap_or(u32::MAX);
+            let out_frame = out_ms.saturating_mul(3) / 20;
+            for word in [flags, 0, 0, in_frame, out_frame, 0, cue.color_table_index, 0, 0] {
+                records.extend_from_slice(&word.to_be_bytes());
+            }
+            sidecars.extend_from_slice(&cue.in_ms.to_be_bytes());
+            sidecars.extend_from_slice(&out_ms.to_be_bytes());
+            if cue.slot == 0 { memory += 1; } else { hot += 1; }
+        }
+        if records.is_empty() {
+            return Self::hot_cue_bank_unavailable(message);
+        }
+        vec![Message::new(
+            message.transaction,
+            kind::HOT_CUE_BANK_REPLY,
+            vec![
+                Argument::Number(u32::from(message.kind)),
+                Argument::Number(0),
+                Argument::Number(u32::try_from(records.len()).unwrap_or(u32::MAX)),
+                Argument::Blob(records),
+                Argument::Number(0x24),
+                Argument::Number(hot),
+                Argument::Number(memory),
                 Argument::Number(u32::try_from(sidecars.len()).unwrap_or(u32::MAX)),
                 Argument::Blob(sidecars),
                 Argument::Number(0),
@@ -1006,10 +1048,11 @@ impl Session for LinkSession {
                 let Some((bank, cue)) = Self::hot_cue_bank_edit(message) else {
                     return Self::hot_cue_bank_unavailable(message);
                 };
+                let track = cue.content;
                 if !self.catalog.edit(&Edit::HotCueBankCue { bank, cue }) {
                     return Self::hot_cue_bank_unavailable(message);
                 }
-                Self::hot_cue_bank_reply(message, self.catalog.hot_cue_bank_cues(bank))
+                Self::usb_cue_reply(message, self.catalog.usb_cues(track))
             }
             kind::GRID_OFFSET => vec![menu_header(
                 tx,

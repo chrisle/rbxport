@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use rbl_dbserver::catalog::{Analysis, Catalog, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackDetails, TrackScope};
+use rbl_dbserver::catalog::{Analysis, Catalog, Edit, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackDetails, TrackScope, UsbCue};
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::net::{Handler, Session};
 use rbl_dbserver::session::CatalogHandler;
@@ -183,6 +183,15 @@ impl Catalog for Small {
     }
     fn hot_cue_bank_tracks(&self, bank: u32) -> Vec<TrackRow> {
         (bank == 42).then(|| vec![the_track()]).unwrap_or_default()
+    }
+    fn usb_cues(&self, track: u32) -> Vec<UsbCue> {
+        (track == TRACK).then(|| vec![
+            UsbCue { slot: 1, in_ms: 3_000, out_ms: Some(4_000), color_table_index: 21 },
+            UsbCue { slot: 0, in_ms: 5_000, out_ms: None, color_table_index: 0 },
+        ]).unwrap_or_default()
+    }
+    fn edit(&self, edit: &Edit) -> bool {
+        matches!(edit, Edit::HotCueBankCue { bank: 42, .. })
     }
     fn artwork(&self, id: u32) -> Option<Vec<u8>> {
         (id == 0x14).then(|| vec![0xff, 0xd8, 0xff, 0xe1])
@@ -824,6 +833,23 @@ fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
     assert_eq!(tracks[0].arguments, vec![Argument::Number(0x2001), Argument::Number(1)]);
     let track_items = s.handle(&numbers(kind::RENDER, 0x1c4, &[CTX, 0, 8]));
     assert_eq!(track_items[1].arguments[1], Argument::Number(TRACK));
+
+    let mut changed_record = Vec::new();
+    for word in [0x0004_0101, TRACK, 0, 150, 300, 0, 21, 0, 0] {
+        changed_record.extend_from_slice(&word.to_be_bytes());
+    }
+    let changed = s.handle(&Message::new(
+        0x1c5,
+        kind::CHANGE_HOT_CUE_BANK,
+        vec![
+            Argument::Number(CTX), Argument::Number(42), Argument::Number(0x24),
+            Argument::Blob(changed_record), Argument::Number(8),
+            Argument::Blob([1_000_u32.to_be_bytes(), 2_000_u32.to_be_bytes()].concat()),
+        ],
+    ));
+    assert_eq!(args(&changed[0]), "0x2201, 0x0, 0x48, blob[72], 0x24, 0x1, 0x1, 0x10, blob[16], 0x0, blob[0]");
+    let Argument::Blob(reloaded) = &changed[0].arguments[3] else { panic!("USB cue records") };
+    assert_eq!(&reloaded[..8], &[0, 1, 1, 1, 0, 0, 0, 0]);
     let (decoded, used) = Message::decode(&reply[0].encode()).unwrap();
     assert_eq!(used, reply[0].encode().len());
     assert_eq!(decoded, reply[0]);
