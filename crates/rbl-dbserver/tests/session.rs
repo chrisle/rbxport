@@ -854,6 +854,11 @@ fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
     let (decoded, used) = Message::decode(&reply[0].encode()).unwrap();
     assert_eq!(used, reply[0].encode().len());
     assert_eq!(decoded, reply[0]);
+
+    let missing = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c6, &[CTX, 999]));
+    assert_eq!(args(&missing[0]), "0x2101, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+    let malformed = s.handle(&numbers(kind::CHANGE_HOT_CUE_BANK, 0x1c7, &[CTX, 42]));
+    assert_eq!(args(&malformed[0]), "0x2201, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
 }
 
 #[test]
