@@ -31,11 +31,19 @@ pub enum AnlzError {
     NotAnlz,
     #[error("file is truncated: {0}")]
     Truncated(&'static str),
+    #[error("file declares {declared} bytes but contains {actual}")]
+    BadFileLength { declared: u64, actual: u64 },
     #[error("section {tag} declares {declared} bytes but only {available} remain")]
     BadSectionLength {
         tag: String,
         declared: u64,
         available: u64,
+    },
+    #[error("section {tag} has header length {declared}, outside its {section_len}-byte frame")]
+    BadSectionHeaderLength {
+        tag: String,
+        declared: u64,
+        section_len: u64,
     },
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -129,8 +137,8 @@ impl Section {
     pub fn waveform_stride(&self) -> Option<u32> {
         match &self.tag.0 {
             // A single byte per column; the header holds a length and flags.
-            b"PWAV" | b"PWV2" | b"PWV6" => Some(1),
-            b"PWV3" | b"PWV4" | b"PWV5" | b"PWV7" => Some(self.header_u4(0).max(1)),
+            b"PWAV" | b"PWV2" => Some(1),
+            b"PWV3" | b"PWV4" | b"PWV5" | b"PWV6" | b"PWV7" => Some(self.header_u4(0).max(1)),
             _ => None,
         }
     }
@@ -433,6 +441,13 @@ pub fn parse(bytes: &[u8]) -> Result<Anlz> {
     if len_header < SECTION_FRAME || len_header > bytes.len() {
         return Err(AnlzError::Truncated("header length"));
     }
+    let file_len = be32(bytes, 8) as usize;
+    if file_len != bytes.len() {
+        return Err(AnlzError::BadFileLength {
+            declared: file_len as u64,
+            actual: bytes.len() as u64,
+        });
+    }
     let header_extra = bytes.get(SECTION_FRAME..len_header).unwrap_or(&[]).to_vec();
 
     let mut sections = Vec::new();
@@ -455,7 +470,14 @@ pub fn parse(bytes: &[u8]) -> Result<Anlz> {
                 available: (bytes.len() - at) as u64,
             });
         }
-        let header_end = (at + section_header.max(SECTION_FRAME)).min(at + section_len);
+        if section_header < SECTION_FRAME || section_header > section_len {
+            return Err(AnlzError::BadSectionHeaderLength {
+                tag: tag.to_string(),
+                declared: section_header as u64,
+                section_len: section_len as u64,
+            });
+        }
+        let header_end = at + section_header;
         sections.push(Section {
             tag,
             header: bytes
@@ -468,6 +490,9 @@ pub fn parse(bytes: &[u8]) -> Result<Anlz> {
                 .to_vec(),
         });
         at += section_len;
+    }
+    if at != bytes.len() {
+        return Err(AnlzError::Truncated("section frame"));
     }
 
     Ok(Anlz {
@@ -655,8 +680,8 @@ impl Anlz {
     /// The file with its beat grid replaced and every other section
     /// byte-for-byte as it was.
     ///
-    /// A file with no `PQTZ` gains one, placed first — which is where every
-    /// real `.DAT` carries it, after `PPTH` [OBS].
+    /// A file with no `PQTZ` gains one after `PPTH` and `PVBR`, matching the
+    /// order in a freshly initialized DAT [OBS].
     #[must_use]
     pub fn with_beat_grid(&self, beats: &[Beat]) -> Vec<u8> {
         let replacement = write::beat_grid_section(beats);
@@ -664,12 +689,11 @@ impl Anlz {
         if let Some(at) = sections.iter().position(|s| s.tag == FourCc::new(b"PQTZ")) {
             sections[at] = replacement;
         } else {
-            let after_path = usize::from(
-                sections
-                    .first()
-                    .is_some_and(|s| s.tag == FourCc::new(b"PPTH")),
-            );
-            sections.insert(after_path, replacement);
+            let after_required_prefix = sections
+                .iter()
+                .take_while(|section| section.tag == FourCc::new(b"PPTH") || section.tag == FourCc::new(b"PVBR"))
+                .count();
+            sections.insert(after_required_prefix, replacement);
         }
         write::render(&self.header_extra, &sections)
     }

@@ -7,6 +7,7 @@
 //! `docs/pre-release/design-notes/link-export-capture.md`); the tests hold
 //! captured rows and check these build them byte for byte.
 
+use crate::catalog::TrackColumn;
 use crate::{kind, Argument, Message};
 
 /// Item types, as the seventh argument names them.
@@ -21,9 +22,19 @@ pub mod item_type {
     pub const TEMPO: u32 = 0x0d;
     pub const LABEL: u32 = 0x0e;
     pub const KEY: u32 = 0x0f;
-    pub const YEAR: u32 = 0x10;
-    pub const BIT_RATE: u32 = 0x11;
+    /// Bitrate in kbps. Live Link Export uses `10` for this row.
+    pub const BIT_RATE: u32 = 0x10;
+    /// Release year. Live Link Export uses `11` for this row.
+    pub const YEAR: u32 = 0x11;
     pub const COLOUR: u32 = 0x13;
+    pub const COLOR_PINK: u32 = 0x14;
+    pub const COLOR_RED: u32 = 0x15;
+    pub const COLOR_ORANGE: u32 = 0x16;
+    pub const COLOR_YELLOW: u32 = 0x17;
+    pub const COLOR_GREEN: u32 = 0x18;
+    pub const COLOR_AQUA: u32 = 0x19;
+    pub const COLOR_BLUE: u32 = 0x1a;
+    pub const COLOR_PURPLE: u32 = 0x1b;
     pub const COMMENT: u32 = 0x23;
     pub const HISTORY: u32 = 0x24;
     pub const ORIGINAL_ARTIST: u32 = 0x28;
@@ -42,25 +53,39 @@ pub mod item_type {
     /// A title-only track row, the shape the delivery info names the
     /// track in (the full row is [`TRACK`]).
     pub const TITLE: u32 = 0x04;
-    /// A track row: title, the comment beside it, key, tempo.
+    /// A comment-secondary track row.
     pub const TRACK: u32 = 0x2304;
     /// The `⟨ALL⟩` row that heads a sub-menu.
     pub const ALL: u32 = 0xa0;
     /// The `2f` row in track info; meaning unknown, value copied.
     pub const INFO_UNKNOWN: u32 = 0x2f;
+    /// A leaf Hot Cue Bank in the RX3's `0x2001` hierarchy.  It opens its
+    /// assigned track list with mode 0, unlike a generic title row.
+    pub const HOT_CUE_BANK: u32 = 0x2b;
     /// The path row in track info.
     pub const PATH: u32 = 0x00;
     // Root-menu categories and sort options carry their own codes.
+    pub const MENU_GENRE: u32 = 0x80;
     pub const MENU_ARTIST: u32 = 0x81;
     pub const MENU_ALBUM: u32 = 0x82;
     pub const MENU_TRACK: u32 = 0x83;
     pub const MENU_PLAYLIST: u32 = 0x84;
     pub const MENU_BPM: u32 = 0x85;
     pub const MENU_RATING: u32 = 0x86;
+    pub const MENU_YEAR: u32 = 0x87;
+    pub const MENU_REMIXER: u32 = 0x88;
+    pub const MENU_LABEL: u32 = 0x89;
+    pub const MENU_ORIGINAL_ARTIST: u32 = 0x8a;
     pub const MENU_KEY: u32 = 0x8b;
     pub const MENU_DATE_ADDED: u32 = 0x8c;
+    pub const MENU_COLOR: u32 = 0x8e;
     pub const MENU_SEARCH: u32 = 0x91;
+    pub const MENU_TIME: u32 = 0x92;
+    pub const MENU_BITRATE: u32 = 0x93;
+    pub const MENU_FILE_NAME: u32 = 0x94;
     pub const MENU_HISTORY: u32 = 0x95;
+    pub const MENU_DJ_PLAY_COUNT: u32 = 0x97;
+    pub const MENU_HOT_CUE_BANK: u32 = 0x98;
     pub const MENU_DEFAULT: u32 = 0xa1;
     pub const MENU_ALPHABET: u32 = 0xa2;
     pub const MENU_MATCHING: u32 = 0xaa;
@@ -133,7 +158,12 @@ impl Item {
 
     /// A heading the player localises: the label wrapped in U+FFFA / U+FFFB.
     pub fn heading(id: u32, label: &str, item_type: u32) -> Self {
-        Self { id, text: format!("\u{fffa}{label}\u{fffb}"), item_type, ..Self::default() }
+        Self {
+            id,
+            text: format!("\u{fffa}{label}\u{fffb}"),
+            item_type,
+            ..Self::default()
+        }
     }
 
     /// The `⟨ALL⟩` row that heads an artist's albums, a year's months and a
@@ -145,13 +175,24 @@ impl Item {
     /// A named row that carries its id again in the ninth slot: an artist or
     /// an album.
     pub fn named_twice(id: u32, name: &str, item_type: u32) -> Self {
-        Self { id, text: name.to_owned(), item_type, c: id, ..Self::default() }
+        Self {
+            id,
+            text: name.to_owned(),
+            item_type,
+            c: id,
+            ..Self::default()
+        }
     }
 
     /// A named row with nothing but its id: a key, a history session, a
     /// genre.
     pub fn named(id: u32, name: &str, item_type: u32) -> Self {
-        Self { id, text: name.to_owned(), item_type, ..Self::default() }
+        Self {
+            id,
+            text: name.to_owned(),
+            item_type,
+            ..Self::default()
+        }
     }
 
     /// A playlist folder or list, with its position under its parent.
@@ -159,7 +200,11 @@ impl Item {
         Self {
             id,
             text: name.to_owned(),
-            item_type: if folder { item_type::FOLDER } else { item_type::PLAYLIST },
+            item_type: if folder {
+                item_type::FOLDER
+            } else {
+                item_type::PLAYLIST
+            },
             d: position,
             ..Self::default()
         }
@@ -167,23 +212,32 @@ impl Item {
 
     /// A year, month or day under DATE ADDED: a number with an empty name.
     pub fn date_part(value: u32) -> Self {
-        Self { id: value, item_type: item_type::DATE_ADDED, ..Self::default() }
+        Self {
+            id: value,
+            item_type: item_type::DATE_ADDED,
+            ..Self::default()
+        }
     }
 
     /// A track row.
     pub fn track(row: &TrackRow, flags: u32, position: u32) -> Self {
+        let (a, art) = if row.column == TrackColumn::Comment {
+            (row.id, if row.artwork == 0 { 1 } else { row.artwork })
+        } else {
+            (row.column_value, row.column_value)
+        };
         Self {
-            a: row.id,
+            a,
             id: row.id,
             text: row.title.clone(),
-            text2: row.comment.clone(),
-            item_type: item_type::TRACK,
+            text2: row.secondary_text.clone(),
+            item_type: track_item_type(row.column, row.column_value),
             flags,
             c: row.id,
             d: position,
             e: 0x100,
             key: row.key,
-            art: if row.artwork == 0 { 1 } else { row.artwork },
+            art,
             text3: row.key_name.clone(),
             f: row.bpm_x100,
         }
@@ -191,7 +245,22 @@ impl Item {
 
     /// A metadata line: `[a, id, text, type]`.
     pub fn line(a: u32, id: u32, text: &str, item_type: u32) -> Self {
-        Self { a, id, text: text.to_owned(), item_type, ..Self::default() }
+        Self {
+            a,
+            id,
+            text: text.to_owned(),
+            item_type,
+            ..Self::default()
+        }
+    }
+
+    /// A numeric selector whose label is formatted by the player.
+    pub fn number(id: u32, item_type: u32) -> Self {
+        Self {
+            id,
+            item_type,
+            ..Self::default()
+        }
     }
 }
 
@@ -201,7 +270,11 @@ pub struct TrackRow {
     /// `djmdContent.ID`.
     pub id: u32,
     pub title: String,
-    pub comment: String,
+    /// Formatted value shown in the right-hand column.
+    pub secondary_text: String,
+    pub column: TrackColumn,
+    /// Raw database id or numeric value backing the selected column.
+    pub column_value: u32,
     /// Camelot index 1–24 (see [`crate::keys`]), 0 when unknown.
     pub key: u32,
     pub key_name: String,
@@ -210,31 +283,126 @@ pub struct TrackRow {
     pub bpm_x100: u32,
 }
 
-/// The nine categories of the root menu, in rekordbox's order.
+fn track_item_type(column: TrackColumn, value: u32) -> u32 {
+    let secondary = match column {
+        TrackColumn::Album => item_type::ALBUM,
+        TrackColumn::Genre => item_type::GENRE,
+        TrackColumn::Artist => item_type::ARTIST,
+        TrackColumn::Rating => item_type::RATING,
+        TrackColumn::Duration => item_type::DURATION,
+        TrackColumn::Bpm => item_type::TEMPO,
+        TrackColumn::Label => item_type::LABEL,
+        TrackColumn::Key => item_type::KEY,
+        TrackColumn::Bitrate => item_type::BIT_RATE,
+        TrackColumn::Color => item_type::COLOUR + value.min(8),
+        TrackColumn::Comment => item_type::COMMENT,
+        TrackColumn::OriginalArtist => item_type::ORIGINAL_ARTIST,
+        TrackColumn::Remixer => item_type::REMIXER,
+        TrackColumn::DjPlayCount => 0x2a,
+        TrackColumn::DateAdded => item_type::DATE_ADDED,
+    };
+    (secondary << 8) | item_type::TITLE
+}
+
+/// The categories and order advertised by the live rekordbox library.
 pub fn root_menu() -> Vec<Item> {
     vec![
-        Item::heading(0x02, "ARTIST", item_type::MENU_ARTIST),
-        Item::heading(0x03, "ALBUM", item_type::MENU_ALBUM),
         Item::heading(0x04, "TRACK", item_type::MENU_TRACK),
         Item::heading(0x0c, "KEY", item_type::MENU_KEY),
+        Item::heading(0x06, "BPM", item_type::MENU_BPM),
+        Item::heading(0x01, "GENRE", item_type::MENU_GENRE),
+        Item::heading(0x02, "ARTIST", item_type::MENU_ARTIST),
+        Item::heading(0x03, "ALBUM", item_type::MENU_ALBUM),
+        Item::heading(0x1a, "MATCHING", item_type::MENU_MATCHING),
+        Item::heading(0x12, "SEARCH", item_type::MENU_SEARCH),
         Item::heading(0x05, "PLAYLIST", item_type::MENU_PLAYLIST),
         Item::heading(0x16, "HISTORY", item_type::MENU_HISTORY),
-        Item::heading(0x12, "SEARCH", item_type::MENU_SEARCH),
-        Item::heading(0x1a, "MATCHING", item_type::MENU_MATCHING),
-        Item::heading(0x1b, "DATE ADDED", item_type::MENU_DATE_ADDED),
+        Item::heading(0x14, "BITRATE", item_type::MENU_BITRATE),
+        Item::heading(0x0f, "COLOR", item_type::MENU_COLOR),
+        Item::heading(0x15, "FILE NAME", item_type::MENU_FILE_NAME),
+        Item::heading(0x17, "HOT CUE BANK", item_type::MENU_HOT_CUE_BANK),
+        Item::heading(0x0a, "LABEL", item_type::MENU_LABEL),
+        Item::heading(0x0b, "ORIGINAL ARTIST", item_type::MENU_ORIGINAL_ARTIST),
+        Item::heading(0x07, "RATING", item_type::MENU_RATING),
+        Item::heading(0x09, "REMIXER", item_type::MENU_REMIXER),
+        Item::heading(0x13, "TIME", item_type::MENU_TIME),
+        Item::heading(0x08, "YEAR", item_type::MENU_YEAR),
     ]
 }
 
 /// The sort options a track list offers, in rekordbox's order. The id is
 /// what a later track-menu request carries as its sort.
-pub fn sort_menu() -> Vec<Item> {
-    vec![
-        Item::heading(0x00, "DEFAULT", item_type::MENU_DEFAULT),
-        Item::heading(0x01, "ALPHABET", item_type::MENU_ALPHABET),
-        Item::heading(0x02, "ARTIST", item_type::MENU_ARTIST),
-        Item::heading(0x03, "ALBUM", item_type::MENU_ALBUM),
-        Item::heading(0x04, "BPM", item_type::MENU_BPM),
-        Item::heading(0x05, "RATING", item_type::MENU_RATING),
-        Item::heading(0x0c, "KEY", item_type::MENU_KEY),
-    ]
+pub fn sort_menu(sorts: &[crate::catalog::Sort]) -> Vec<Item> {
+    use crate::catalog::Sort;
+
+    sorts
+        .iter()
+        .map(|sort| match sort {
+            Sort::Default => Item::heading(0x00, "DEFAULT", item_type::MENU_DEFAULT),
+            Sort::Alphabet => Item::heading(0x01, "ALPHABET", item_type::MENU_ALPHABET),
+            Sort::Artist => Item::heading(0x02, "ARTIST", item_type::MENU_ARTIST),
+            Sort::Album => Item::heading(0x03, "ALBUM", item_type::MENU_ALBUM),
+            Sort::Bpm => Item::heading(0x04, "BPM", item_type::MENU_BPM),
+            Sort::Rating => Item::heading(0x05, "RATING", item_type::MENU_RATING),
+            Sort::Genre => Item::heading(0x06, "GENRE", item_type::GENRE),
+            Sort::Label => Item::heading(0x0a, "LABEL", item_type::MENU_LABEL),
+            Sort::Key => Item::heading(0x0c, "KEY", item_type::MENU_KEY),
+            Sort::DjPlayCount => {
+                Item::heading(0x10, "DJ PLAY COUNT", item_type::MENU_DJ_PLAY_COUNT)
+            }
+            Sort::DateAdded => Item::heading(0x11, "DATE ADDED", item_type::MENU_DATE_ADDED),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn track_columns_use_rekordbox_composite_types() {
+        let columns = [
+            (TrackColumn::Album, 0x0204),
+            (TrackColumn::Genre, 0x0604),
+            (TrackColumn::Artist, 0x0704),
+            (TrackColumn::Rating, 0x0a04),
+            (TrackColumn::Duration, 0x0b04),
+            (TrackColumn::Bpm, 0x0d04),
+            (TrackColumn::Label, 0x0e04),
+            (TrackColumn::Key, 0x0f04),
+            (TrackColumn::Bitrate, 0x1004),
+            (TrackColumn::Color, 0x1a04),
+            (TrackColumn::Comment, 0x2304),
+            (TrackColumn::OriginalArtist, 0x2804),
+            (TrackColumn::Remixer, 0x2904),
+            (TrackColumn::DjPlayCount, 0x2a04),
+            (TrackColumn::DateAdded, 0x2e04),
+        ];
+
+        for (column, expected) in columns {
+            let value = if column == TrackColumn::Color { 7 } else { 0 };
+            assert_eq!(track_item_type(column, value), expected);
+        }
+    }
+
+    #[test]
+    fn a_key_column_carries_its_raw_database_id() {
+        let row = TrackRow {
+            id: 42,
+            title: "Track".into(),
+            secondary_text: "3A - 112.2 bpm".into(),
+            column: TrackColumn::Key,
+            column_value: 3_441_880_869,
+            key: 5,
+            key_name: "Ebm".into(),
+            artwork: 9,
+            bpm_x100: 11_220,
+        };
+        let item = Item::track(&row, 0, 0);
+
+        assert_eq!(item.a, 3_441_880_869);
+        assert_eq!(item.art, 3_441_880_869);
+        assert_eq!(item.item_type, 0x0f04);
+        assert_eq!(item.text2, "3A - 112.2 bpm");
+    }
 }

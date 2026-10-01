@@ -174,6 +174,7 @@ impl Source for StateSource {
             rbl_link::Edit::Tag { .. } | rbl_link::Edit::ClearTags => crate::commands::Touched::TagList,
             rbl_link::Edit::Rating { track, .. } => crate::commands::Touched::Metadata(vec![track.to_string()]),
             rbl_link::Edit::GridOffset { .. } => unreachable!("handled above"),
+            rbl_link::Edit::HotCueBankCue { .. } => crate::commands::Touched::Metadata(Vec::new()),
             // The catalog keeps the link session's history and writes it
             // through the methods below.
             rbl_link::Edit::HistoryAdd { .. } | rbl_link::Edit::HistoryRemove { .. } | rbl_link::Edit::HistoryDelete { .. } => return false,
@@ -184,6 +185,17 @@ impl Source for StateSource {
             rbl_link::Edit::Tag { track, add: false } => writer.tag_list_remove(&[track.to_string()]),
             rbl_link::Edit::ClearTags => writer.tag_list_clear(),
             rbl_link::Edit::Rating { track, stars } => writer.set_rating(&track.to_string(), *stars),
+            rbl_link::Edit::HotCueBankCue { bank, cue } => writer.set_hot_cue_bank_cue(&bank.to_string(), &rbl_db::details::HotCueBankCue {
+                slot: cue.slot,
+                content: cue.content,
+                in_ms: cue.in_ms,
+                out_ms: cue.out_ms,
+                color: cue.color,
+                color_table_index: cue.color_table_index,
+                active_loop: cue.active_loop,
+                beat_loop_size: cue.beat_loop_size,
+                cue_microsec: cue.cue_microsec,
+            }),
             rbl_link::Edit::GridOffset { .. }
             | rbl_link::Edit::HistoryAdd { .. }
             | rbl_link::Edit::HistoryRemove { .. }
@@ -220,6 +232,46 @@ impl Source for StateSource {
     fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails> {
         let state = self.0.upgrade()?;
         state.read_db(|db| rbl_db::details::track_details(db.connection(), id)).ok().flatten()
+    }
+
+    fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<rbl_db::details::HotCueBank> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        state.read_db(|db| rbl_db::details::hot_cue_banks(db.connection(), parent)).unwrap_or_default()
+    }
+
+    fn hot_cue_bank_cues(&self, bank: u32) -> Vec<rbl_db::details::HotCueBankCue> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        state.read_db(|db| rbl_db::details::hot_cue_bank_cues(db.connection(), bank)).unwrap_or_default()
+    }
+
+    fn hot_cue_bank_track_ids(&self, bank: u32) -> Vec<u32> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        state.read_db(|db| rbl_db::details::hot_cue_bank_track_ids(db.connection(), bank)).unwrap_or_default()
+    }
+
+    fn matching_ids(&self, seed: u32) -> Vec<u32> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        state
+            .read_db(|db| rbl_db::details::matching_ids(db.connection(), seed))
+            .unwrap_or_default()
+    }
+
+    fn artist_role_names(&self, role: rbl_link::ArtistRole) -> Vec<(u32, String)> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        let role = match role {
+            rbl_link::ArtistRole::Original => rbl_db::details::ArtistRole::Original,
+            rbl_link::ArtistRole::Remixer => rbl_db::details::ArtistRole::Remixer,
+        };
+        state.read_db(|db| rbl_db::details::artist_role_names(db.connection(), role)).unwrap_or_default()
+    }
+
+    fn artist_role_track_ids(&self, role: rbl_link::ArtistRole, artist: u32) -> Vec<u32> {
+        let Some(state) = self.0.upgrade() else { return Vec::new() };
+        let role = match role {
+            rbl_link::ArtistRole::Original => rbl_db::details::ArtistRole::Original,
+            rbl_link::ArtistRole::Remixer => rbl_db::details::ArtistRole::Remixer,
+        };
+        state.read_db(|db| rbl_db::details::artist_role_track_ids(db.connection(), role, artist)).unwrap_or_default()
     }
 }
 
@@ -697,6 +749,29 @@ mod grid_offset_tests {
 
         assert!(catalog.edit(&rbl_link::Edit::HistoryRemove { track }));
         assert!(catalog.list(&Query::Tracks { scope: TrackScope::History(*session), sort: Sort::Default }).is_empty());
+    }
+
+    #[test]
+    fn matching_relations_reach_link_browse_from_the_live_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let first = rbl_db::fixture::track_id(1);
+        let second = rbl_db::fixture::track_id(2);
+        let stamp = rbl_core::time::now();
+        let writable = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+        writable.connection().execute_batch(&format!(
+            "CREATE TABLE djmdRecommendLike (ID TEXT PRIMARY KEY, ContentID1 TEXT, ContentID2 TEXT, rb_local_deleted INTEGER DEFAULT 0, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL); \
+             INSERT INTO djmdRecommendLike VALUES ('fixture-match', '{first}', '{second}', 0, '{stamp}', '{stamp}');"
+        )).unwrap();
+        drop(writable);
+
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        let source = StateSource(Arc::downgrade(&state), Arc::new(|_, _| {}), false);
+
+        assert_eq!(source.matching_ids(first.parse().unwrap()), [second.parse::<u32>().unwrap()]);
     }
 
     #[test]

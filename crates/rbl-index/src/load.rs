@@ -61,7 +61,10 @@ pub struct LoadStats {
 /// others. Being tolerant here turns a class of crash into a `0`.
 fn num(row: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<i64> {
     use rusqlite::types::ValueRef;
-    #[allow(clippy::match_same_arms, reason = "each arm documents a distinct storage case")]
+    #[allow(
+        clippy::match_same_arms,
+        reason = "each arm documents a distinct storage case"
+    )]
     Ok(match row.get_ref(idx)? {
         ValueRef::Integer(v) => v,
         ValueRef::Null => 0,
@@ -89,7 +92,10 @@ fn load_lookup(
     let mut stmt = conn.prepare(&sql)?;
     let mut map = HashMap::new();
     let rows = stmt.query_map([], |r| {
-        Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?))
+        Ok((
+            r.get::<_, Option<String>>(0)?,
+            r.get::<_, Option<String>>(1)?,
+        ))
     })?;
     for row in rows {
         let (Some(id), name) = row? else { continue };
@@ -160,7 +166,10 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
 /// Startup may supply an independent read-only connection so cue reads overlap
 /// playlist, history and search metadata reads. Ordinary edit reloads keep one
 /// connection, preserving visibility of the writer's transaction.
-pub fn load_with_cue_reader(db: &Db, cue_reader: Option<Db>) -> rusqlite::Result<(Library, LoadStats)> {
+pub fn load_with_cue_reader(
+    db: &Db,
+    cue_reader: Option<Db>,
+) -> rusqlite::Result<(Library, LoadStats)> {
     let conn = db.connection();
     let t0 = Instant::now();
     let mut lib = Library::default();
@@ -203,7 +212,9 @@ pub fn load_with_cue_reader(db: &Db, cue_reader: Option<Db>) -> rusqlite::Result
 
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
-        let Some(id_text): Option<String> = r.get(0)? else { continue };
+        let Some(id_text): Option<String> = r.get(0)? else {
+            continue;
+        };
         let row_index = u32::try_from(lib.ids.len()).unwrap_or(u32::MAX);
 
         let title: String = r.get::<_, Option<String>>(1)?.unwrap_or_default();
@@ -226,21 +237,31 @@ pub fn load_with_cue_reader(db: &Db, cue_reader: Option<Db>) -> rusqlite::Result
         // a place on this disk; resolved here once so every reader sees a
         // file that exists.
         let folder_path = r.get::<_, Option<String>>(11)?.unwrap_or_default();
-        lib.folder_path.push(&rbl_db::resolve_folder_path(&folder_path, cloud_root.as_deref()));
-        lib.file_name.push(&r.get::<_, Option<String>>(12)?.unwrap_or_default());
-        lib.analysis_path.push(&r.get::<_, Option<String>>(13)?.unwrap_or_default());
-        lib.artwork_path.push(&r.get::<_, Option<String>>(19)?.unwrap_or_default());
+        lib.folder_path.push(&rbl_db::resolve_folder_path(
+            &folder_path,
+            cloud_root.as_deref(),
+        ));
+        lib.file_name
+            .push(&r.get::<_, Option<String>>(12)?.unwrap_or_default());
+        lib.analysis_path
+            .push(&r.get::<_, Option<String>>(13)?.unwrap_or_default());
+        lib.artwork_path
+            .push(&r.get::<_, Option<String>>(19)?.unwrap_or_default());
         lib.play_count.push(clamp_u16(num(r, 14)?));
-        lib.date_added.push(&r.get::<_, Option<String>>(15)?.unwrap_or_default());
-        lib.release_date.push(&r.get::<_, Option<String>>(16)?.unwrap_or_default());
-        lib.comment.push(&r.get::<_, Option<String>>(17)?.unwrap_or_default());
+        lib.date_added
+            .push(&r.get::<_, Option<String>>(15)?.unwrap_or_default());
+        lib.release_date
+            .push(&r.get::<_, Option<String>>(16)?.unwrap_or_default());
+        lib.comment
+            .push(&r.get::<_, Option<String>>(17)?.unwrap_or_default());
         // `Analysed` is a bitfield whose values are not yet all understood
         // (105/104/16/17/1 observed); non-zero means rekordbox analysed it.
         lib.analysed.push(u8::from(num(r, 18)? != 0));
         lib.bitrate.push(clamp_u32(num(r, 20)?));
         lib.sample_rate.push(clamp_u32(num(r, 21)?));
         lib.file_size.push(u64::try_from(num(r, 22)?).unwrap_or(0));
-        lib.year.push(u16::try_from(num(r, 23)?.clamp(0, i64::from(u16::MAX))).unwrap_or(0));
+        lib.year
+            .push(u16::try_from(num(r, 23)?.clamp(0, i64::from(u16::MAX))).unwrap_or(0));
 
         // Keyed by the parsed id, not the text: the map is only ever looked
         // up from a membership row, and parsing 75,386 of those is cheaper
@@ -255,17 +276,26 @@ pub fn load_with_cue_reader(db: &Db, cue_reader: Option<Db>) -> rusqlite::Result
         let cue_job = cue_reader.and_then(|reader| {
             let content_row = &content_row;
             let count = lib.len();
-            std::thread::Builder::new().name("startup-cues".into())
-                .spawn_scoped(scope, move || read_cues(reader.connection(), count, content_row)).ok()
+            std::thread::Builder::new()
+                .name("startup-cues".into())
+                .spawn_scoped(scope, move || {
+                    read_cues(reader.connection(), count, content_row)
+                })
+                .ok()
         });
-        if cue_job.is_none() { lib.set_cues(read_cues(conn, lib.len(), &content_row)?); }
+        if cue_job.is_none() {
+            lib.set_cues(read_cues(conn, lib.len(), &content_row)?);
+        }
         load_playlists(conn, &mut lib, &content_row, &mut stats)?;
         load_histories(conn, &mut lib, &content_row, &mut stats)?;
         lib.set_tag_list(read_tag_list(conn, &content_row)?);
         lib.set_my_tags(read_my_tags(conn)?);
         load_search_extra(conn, &mut lib)?;
         if let Some(job) = cue_job {
-            lib.set_cues(job.join().unwrap_or_else(|_| read_cues(conn, lib.len(), &content_row))?);
+            lib.set_cues(
+                job.join()
+                    .unwrap_or_else(|_| read_cues(conn, lib.len(), &content_row))?,
+            );
         }
         Ok(())
     })?;
@@ -281,25 +311,34 @@ pub fn load_with_cue_reader(db: &Db, cue_reader: Option<Db>) -> rusqlite::Result
 
 fn load_search_extra(conn: &Connection, lib: &mut Library) -> rusqlite::Result<()> {
     // Resolve uncommon search metadata once, rather than querying SQLite on each keystroke.
-    let mut extra = conn.prepare("SELECT c.ID, composer.Name, album_artist.Name, remixer.Name, original.Name, c.Subtitle
+    let mut extra = conn.prepare(
+        "SELECT c.ID, composer.Name, album_artist.Name, remixer.Name, original.Name, c.Subtitle
         FROM djmdContent c
         LEFT JOIN djmdAlbum album ON album.ID=c.AlbumID
         LEFT JOIN djmdArtist album_artist ON album_artist.ID=album.AlbumArtistID
         LEFT JOIN djmdArtist composer ON composer.ID=c.ComposerID
         LEFT JOIN djmdArtist remixer ON remixer.ID=c.RemixerID
         LEFT JOIN djmdArtist original ON original.ID=c.OrgArtistID
-        WHERE c.rb_local_deleted=0")?;
+        WHERE c.rb_local_deleted=0",
+    )?;
     let mut by_id = HashMap::new();
     let mut rows = extra.query([])?;
     while let Some(row) = rows.next()? {
         let id = row.get::<_, String>(0)?.parse::<u64>().unwrap_or(0);
         let mut values = Vec::with_capacity(5);
-        for column in 1..=5 { values.push(row.get::<_, Option<String>>(column)?.unwrap_or_default()); }
+        for column in 1..=5 {
+            values.push(row.get::<_, Option<String>>(column)?.unwrap_or_default());
+        }
         by_id.insert(id, values);
     }
     for id in &lib.ids {
         for (index, column) in lib.search_extra.iter_mut().enumerate() {
-            column.push(by_id.get(id).and_then(|values| values.get(index)).map_or("", String::as_str));
+            column.push(
+                by_id
+                    .get(id)
+                    .and_then(|values| values.get(index))
+                    .map_or("", String::as_str),
+            );
         }
     }
     Ok(())
@@ -324,13 +363,19 @@ fn read_cues(
     let mut stmt = conn.prepare(
         "SELECT q.ContentID, q.ID, q.Kind, q.InMsec, q.OutMsec, q.ColorTableIndex
          FROM djmdContent c CROSS JOIN djmdCue q ON q.ContentID = c.ID
-         WHERE c.rb_local_deleted = 0 AND q.rb_local_deleted = 0"
+         WHERE c.rb_local_deleted = 0 AND q.rb_local_deleted = 0",
     )?;
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
-        let Some(content): Option<String> = r.get(0)? else { continue };
-        let Ok(key) = content.parse::<u64>() else { continue };
-        let Some(&row) = content_row.get(&key) else { continue };
+        let Some(content): Option<String> = r.get(0)? else {
+            continue;
+        };
+        let Ok(key) = content.parse::<u64>() else {
+            continue;
+        };
+        let Some(&row) = content_row.get(&key) else {
+            continue;
+        };
         if let Some(list) = per_track.get_mut(row as usize) {
             list.push(read_cue(r, 1)?);
         }
@@ -356,7 +401,13 @@ fn read_cue(r: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Cue> {
     let out_ms = u32::try_from(num(r, first + 3)?.max(0)).unwrap_or(0);
     // NULL and 0 both mean "no colour chosen"; the writer stores 0 too.
     let colour = u8::try_from(num(r, first + 4)?).unwrap_or(0);
-    Ok(Cue { id, position_ms, out_ms, kind, colour })
+    Ok(Cue {
+        id,
+        position_ms,
+        out_ms,
+        kind,
+        colour,
+    })
 }
 
 /// Re-reads one track's cues after an edit, leaving everything else in place.
@@ -366,7 +417,9 @@ fn read_cue(r: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Cue> {
 /// 0.6 ms there against 233 ms for a full reload. A track the index does not
 /// hold is left alone rather than reported: its cues have nowhere to go.
 pub fn reload_cues_of(db: &Db, library: &Library, track_id: &str) -> rusqlite::Result<()> {
-    let Some(row) = library.row_of(track_id) else { return Ok(()) };
+    let Some(row) = library.row_of(track_id) else {
+        return Ok(());
+    };
     let mut stmt = db.connection().prepare(&format!(
         "SELECT {CUE_COLUMNS} FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0"
     ))?;
@@ -423,7 +476,11 @@ fn read_tag_list(conn: &Connection, content_row: &HashMap<u64, Row>) -> rusqlite
     let mut out = Vec::new();
     for content in rows {
         let Some(content) = content? else { continue };
-        if let Some(&row) = content.parse::<u64>().ok().and_then(|id| content_row.get(&id)) {
+        if let Some(&row) = content
+            .parse::<u64>()
+            .ok()
+            .and_then(|id| content_row.get(&id))
+        {
             out.push(row);
         }
     }
@@ -442,8 +499,12 @@ pub fn reload_tag_list(db: &Db, library: &Library) -> rusqlite::Result<Vec<Row>>
 
 /// Re-read history membership without scanning tracks or cues.
 pub fn reload_histories(db: &Db, library: &Library) -> rusqlite::Result<Playlists> {
-    let rows = library.ids.iter().enumerate()
-        .map(|(row, &id)| (id, Row::try_from(row).unwrap_or(Row::MAX))).collect();
+    let rows = library
+        .ids
+        .iter()
+        .enumerate()
+        .map(|(row, &id)| (id, Row::try_from(row).unwrap_or(Row::MAX)))
+        .collect();
     read_lists(db.connection(), &rows, HISTORY_TABLES).map(|(lists, _)| lists)
 }
 
@@ -455,27 +516,45 @@ pub fn reload_metadata(db: &Db, library: &mut Library, ids: &[String]) -> rusqli
     )?;
     let mut updates = Vec::with_capacity(ids.len());
     for id in ids {
-        let row = library.row_of(id).ok_or(rusqlite::Error::QueryReturnedNoRows)? as usize;
-        let fields = statement.query_row([id], |r| Ok((
-            clamp_u8(num(r, 0)?, 5), clamp_u8(num(r, 1)?, u8::MAX), clamp_u16(num(r, 2)?),
-            r.get::<_, Option<String>>(3)?.unwrap_or_default(),
-        )))?;
+        let row = library
+            .row_of(id)
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)? as usize;
+        let fields = statement.query_row([id], |r| {
+            Ok((
+                clamp_u8(num(r, 0)?, 5),
+                clamp_u8(num(r, 1)?, u8::MAX),
+                clamp_u16(num(r, 2)?),
+                r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            ))
+        })?;
         updates.push((row, fields));
     }
     let mut rating_changed = false;
+    let mut play_count_changed = false;
     let mut comments = HashMap::new();
     for (row, (rating, color, plays, comment)) in updates {
         rating_changed |= library.rating[row] != rating;
+        play_count_changed |= library.play_count[row] != plays;
         library.rating[row] = rating;
         library.color[row] = color;
         library.play_count[row] = plays;
-        if library.comment.get(row) != comment { comments.insert(row, comment); }
+        if library.comment.get(row) != comment {
+            comments.insert(row, comment);
+        }
     }
-    if rating_changed { library.rebuild_ranks(&[crate::SortColumn::Rating]); }
+    if rating_changed {
+        library.rebuild_ranks(&[crate::SortColumn::Rating]);
+    }
+    if play_count_changed {
+        library.rebuild_ranks(&[crate::SortColumn::PlayCount]);
+    }
     if !comments.is_empty() {
         library.comment.replace_rows(&comments);
         library.rebuild_ranks(&[crate::SortColumn::Comment]);
-        let search = comments.keys().map(|&row| (row, library.search_text(row))).collect();
+        let search = comments
+            .keys()
+            .map(|&row| (row, library.search_text(row)))
+            .collect();
         library.search.replace_rows(&search);
     }
     Ok(())
@@ -523,12 +602,17 @@ fn read_my_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCategory>> {
     let mut tags: Vec<(String, String)> = Vec::new();
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
-        let Some(id): Option<String> = r.get(0)? else { continue };
+        let Some(id): Option<String> = r.get(0)? else {
+            continue;
+        };
         let name = r.get::<_, Option<String>>(1)?.unwrap_or_default();
         let parent = r.get::<_, Option<String>>(3)?.unwrap_or_default();
         if num(r, 2)? == 1 {
             index_by_id.insert(id, categories.len());
-            categories.push(TagCategory { name, tags: Vec::new() });
+            categories.push(TagCategory {
+                name,
+                tags: Vec::new(),
+            });
         } else {
             tags.push((parent, name));
         }
@@ -560,16 +644,22 @@ pub struct ListTables {
     pub list_key: &'static str,
 }
 
-pub const PLAYLIST_TABLES: ListTables =
-    ListTables { lists: "djmdPlaylist", members: "djmdSongPlaylist", list_key: "PlaylistID" };
+pub const PLAYLIST_TABLES: ListTables = ListTables {
+    lists: "djmdPlaylist",
+    members: "djmdSongPlaylist",
+    list_key: "PlaylistID",
+};
 
 /// Sessions, filed under a folder per year and per month.
 ///
 /// The same two-table shape, and the same `Attribute` convention: 0 is a
 /// session, 1 a folder. Read read-only against the live library — 187 rows in
 /// `djmdHistory`, 8,258 in `djmdSongHistory`.
-pub const HISTORY_TABLES: ListTables =
-    ListTables { lists: "djmdHistory", members: "djmdSongHistory", list_key: "HistoryID" };
+pub const HISTORY_TABLES: ListTables = ListTables {
+    lists: "djmdHistory",
+    members: "djmdSongHistory",
+    list_key: "HistoryID",
+};
 
 fn read_playlists(
     conn: &Connection,
@@ -594,7 +684,9 @@ fn read_smart_lists(
     let mut rules: Vec<Option<String>> = vec![None; playlists.len()];
     let Ok(mut rows) = stmt.query([]) else { return };
     while let Ok(Some(r)) = rows.next() {
-        let (Ok(Some(id)), Ok(Some(xml))) = (r.get::<_, Option<String>>(0), r.get::<_, Option<String>>(1)) else {
+        let (Ok(Some(id)), Ok(Some(xml))) =
+            (r.get::<_, Option<String>>(0), r.get::<_, Option<String>>(1))
+        else {
             continue;
         };
         if let Some(slot) = index_by_id.get(&id).and_then(|&index| rules.get_mut(index)) {
@@ -640,18 +732,24 @@ fn read_lists(
     ))?;
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
-        let Some(id): Option<String> = r.get(0)? else { continue };
+        let Some(id): Option<String> = r.get(0)? else {
+            continue;
+        };
         let numeric_id = id.parse::<u64>().unwrap_or(0);
         index_by_id.insert(id, playlists.ids.len()); // moved, not cloned
         playlists.ids.push(numeric_id);
-        playlists.names.push(&r.get::<_, Option<String>>(1)?.unwrap_or_default());
+        playlists
+            .names
+            .push(&r.get::<_, Option<String>>(1)?.unwrap_or_default());
         // Parent is resolved after every playlist is known.
         playlists.parent.push(NO_ID);
         playlists.seq.push(clamp_u32(num(r, 3)?));
         // 0 a playlist (or a session), 1 a folder, 4 an intelligent
         // playlist; anything else is treated as a playlist, which is the
         // safer reading of a value nobody has seen.
-        playlists.attribute.push(u8::try_from(num(r, 4)?).unwrap_or(0));
+        playlists
+            .attribute
+            .push(u8::try_from(num(r, 4)?).unwrap_or(0));
         playlists.smart.push("");
         playlists.members.push(Vec::new());
     }
@@ -694,9 +792,12 @@ fn read_lists(
     let mut memberships = 0usize;
     while let Some(r) = rows.next()? {
         let (playlist_id, content_id): (Option<String>, Option<String>) = (r.get(0)?, r.get(1)?);
-        let (Some(playlist_id), Some(content_id)) = (playlist_id, content_id) else { continue };
+        let (Some(playlist_id), Some(content_id)) = (playlist_id, content_id) else {
+            continue;
+        };
         let content_key = content_id.parse::<u64>().unwrap_or(0);
-        let (Some(&pi), Some(&row)) = (index_by_id.get(&playlist_id), content_row.get(&content_key))
+        let (Some(&pi), Some(&row)) =
+            (index_by_id.get(&playlist_id), content_row.get(&content_key))
         else {
             continue; // membership pointing at a deleted track
         };
@@ -717,7 +818,8 @@ mod refresh_tests {
     #[test]
     fn parallel_reads_match_serial_and_exclude_deleted_track_cues() {
         let dir = tempfile::tempdir().unwrap();
-        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let location =
+            rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
         let db = Db::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
         let id = rbl_db::fixture::track_id(1);
         db.connection().execute("INSERT INTO djmdCue (ID, ContentID, Kind, InMsec, rb_local_deleted, created_at, updated_at) VALUES ('123', ?1, 1, 500, 0, '2026-01-01', '2026-01-01')", [&id]).unwrap();
@@ -728,12 +830,20 @@ mod refresh_tests {
         assert_eq!(parallel.ranks, serial.ranks);
         assert_eq!(parallel.playlists().members, serial.playlists().members);
         for row in 0..serial.len() {
-            assert_eq!(parallel.cues_of(u32::try_from(row).unwrap_or(0)), serial.cues_of(u32::try_from(row).unwrap_or(0)));
+            assert_eq!(
+                parallel.cues_of(u32::try_from(row).unwrap_or(0)),
+                serial.cues_of(u32::try_from(row).unwrap_or(0))
+            );
             assert_eq!(parallel.search.get(row), serial.search.get(row));
         }
         let live_cues = serial.cues.read().parts().0.len();
         assert!(live_cues > 0);
-        db.connection().execute("UPDATE djmdContent SET rb_local_deleted=1 WHERE ID=?1", [&id]).unwrap();
+        db.connection()
+            .execute(
+                "UPDATE djmdContent SET rb_local_deleted=1 WHERE ID=?1",
+                [&id],
+            )
+            .unwrap();
         let (deleted, _) = load(&db).unwrap();
         assert_eq!(deleted.cues.read().parts().0.len(), live_cues - 1);
     }
@@ -741,7 +851,8 @@ mod refresh_tests {
     #[test]
     fn metadata_refresh_matches_full_load_including_search_sort_and_history() {
         let dir = tempfile::tempdir().unwrap();
-        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let location =
+            rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
         let mut writer = rbl_db::write::Writer::open(location, dir.path().join("backups")).unwrap();
         writer.disable_automatic_backups();
         let (original, _) = load(writer.library()).unwrap();
@@ -749,7 +860,9 @@ mod refresh_tests {
         let ids = [rbl_db::fixture::track_id(1), rbl_db::fixture::track_id(2)];
         for id in &ids {
             writer.set_rating(id, 5).unwrap();
-            writer.set_comment(id, "Café\tnew searchable phrase").unwrap();
+            writer
+                .set_comment(id, "Café\tnew searchable phrase")
+                .unwrap();
             writer.set_color(id, Some("3")).unwrap();
             writer.record_play(id).unwrap();
         }
@@ -764,7 +877,10 @@ mod refresh_tests {
         for row in 0..full.len() {
             assert_eq!(incremental.comment.get(row), full.comment.get(row));
             assert_eq!(incremental.search.get(row), full.search.get(row));
-            assert_eq!(incremental.cues_of(Row::try_from(row).unwrap_or(0)), original.cues_of(Row::try_from(row).unwrap_or(0)));
+            assert_eq!(
+                incremental.cues_of(Row::try_from(row).unwrap_or(0)),
+                original.cues_of(Row::try_from(row).unwrap_or(0))
+            );
         }
         let row = incremental.row_of(&ids[0]).unwrap() as usize;
         assert_ne!(original.comment.get(row), incremental.comment.get(row));
@@ -775,7 +891,12 @@ mod refresh_tests {
             assert!(!incremental.search.get(row).contains("searchable"));
         }
         let before = incremental.rating.clone();
-        assert!(reload_metadata(writer.library(), &mut incremental, &[ids[0].clone(), "missing".into()]).is_err());
+        assert!(reload_metadata(
+            writer.library(),
+            &mut incremental,
+            &[ids[0].clone(), "missing".into()]
+        )
+        .is_err());
         assert_eq!(incremental.rating, before);
     }
 }

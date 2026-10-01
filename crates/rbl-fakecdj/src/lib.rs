@@ -67,7 +67,11 @@ impl RpcClient {
         };
         let socket = UdpSocket::bind(SocketAddr::new(any, 0))?;
         socket.set_read_timeout(Some(TIMEOUT))?;
-        Ok(Self { socket, server, xid: 1 })
+        Ok(Self {
+            socket,
+            server,
+            xid: 1,
+        })
     }
 
     /// The address this client sends to. Used when switching to another port
@@ -81,7 +85,13 @@ impl RpcClient {
     }
 
     /// Makes one call and returns the procedure's results.
-    pub fn call(&mut self, program: u32, version: u32, procedure: u32, arguments: &[u8]) -> Result<Vec<u8>> {
+    pub fn call(
+        &mut self,
+        program: u32,
+        version: u32,
+        procedure: u32,
+        arguments: &[u8],
+    ) -> Result<Vec<u8>> {
         self.xid = self.xid.wrapping_add(1);
         let request = Call {
             xid: self.xid,
@@ -90,7 +100,10 @@ impl RpcClient {
             procedure,
             // The stamp a real player sends. Our server ignores it; rekordbox
             // may not, so the recording path must look like a player.
-            credential: Auth { flavor: rpc::AUTH_UNIX, body: unix_credential() },
+            credential: Auth {
+                flavor: rpc::AUTH_UNIX,
+                body: unix_credential(),
+            },
             verifier: Auth::null(),
             arguments,
         }
@@ -104,7 +117,9 @@ impl RpcClient {
         loop {
             let (len, _) = self.socket.recv_from(&mut buffer)?;
             let bytes = buffer.get(..len).unwrap_or(&[]);
-            let Ok(reply) = Reply::decode(bytes) else { continue };
+            let Ok(reply) = Reply::decode(bytes) else {
+                continue;
+            };
             if reply.xid != self.xid {
                 continue;
             }
@@ -182,7 +197,10 @@ fn get_port(client: &mut RpcClient, program: u32, version: u32) -> Result<u16> {
         &arguments.into_bytes(),
     )?;
     let port = Reader::new(&results).u32()?;
-    u16::try_from(port).ok().filter(|p| *p != 0).ok_or(CdjError::NotRegistered)
+    u16::try_from(port)
+        .ok()
+        .filter(|p| *p != 0)
+        .ok_or(CdjError::NotRegistered)
 }
 
 fn list_exports(client: &mut RpcClient) -> Result<Vec<String>> {
@@ -205,11 +223,19 @@ impl Mounted {
     }
 
     /// Looks up one name in one directory, exactly as a player does.
-    pub fn lookup(&mut self, parent: &[u8; rbl_nfs::HANDLE_LEN], name: &str) -> Result<[u8; rbl_nfs::HANDLE_LEN]> {
+    pub fn lookup(
+        &mut self,
+        parent: &[u8; rbl_nfs::HANDLE_LEN],
+        name: &str,
+    ) -> Result<[u8; rbl_nfs::HANDLE_LEN]> {
         let mut arguments = Writer::new();
         arguments.opaque_fixed(parent).utf16(name);
-        let results =
-            self.nfs.call(PROGRAM_NFS, VERSION_NFS, nfs_proc::LOOKUP, &arguments.into_bytes())?;
+        let results = self.nfs.call(
+            PROGRAM_NFS,
+            VERSION_NFS,
+            nfs_proc::LOOKUP,
+            &arguments.into_bytes(),
+        )?;
         let mut reader = Reader::new(&results);
         let status = reader.u32()?;
         if status != nfs_status::OK {
@@ -270,8 +296,12 @@ impl Mounted {
                 .u32(offset)
                 .u32(u32::try_from(rbl_nfs::MAX_READ).unwrap_or(8192))
                 .u32(0);
-            let results =
-                self.nfs.call(PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, &arguments.into_bytes())?;
+            let results = self.nfs.call(
+                PROGRAM_NFS,
+                VERSION_NFS,
+                nfs_proc::READ,
+                &arguments.into_bytes(),
+            )?;
             let mut reader = Reader::new(&results);
             let status = reader.u32()?;
             if status == nfs_status::ISDIR {
@@ -314,7 +344,9 @@ pub fn database_port(query: SocketAddr) -> Result<u16> {
     stream.set_read_timeout(Some(TIMEOUT))?;
     stream.write_all(PORT_QUERY_REQUEST)?;
     let mut answer = [0_u8; 2];
-    stream.read_exact(&mut answer).map_err(|_| CdjError::NoDatabasePort)?;
+    stream
+        .read_exact(&mut answer)
+        .map_err(|_| CdjError::NoDatabasePort)?;
     Ok(u16::from_be_bytes(answer))
 }
 
@@ -324,7 +356,11 @@ impl Database {
         let stream = TcpStream::connect_timeout(&address, TIMEOUT)?;
         stream.set_read_timeout(Some(TIMEOUT))?;
         stream.set_nodelay(true)?;
-        let mut session = Self { stream, transaction: 0, pending: Vec::new() };
+        let mut session = Self {
+            stream,
+            transaction: 0,
+            pending: Vec::new(),
+        };
         // Greeting first, both ways, as a player does (measured).
         session.stream.write_all(rbl_dbserver::GREETING)?;
         let mut greeting = [0_u8; 5];
@@ -362,7 +398,8 @@ impl Database {
             if len == 0 {
                 return Ok(Vec::new());
             }
-            self.pending.extend_from_slice(chunk.get(..len).unwrap_or(&[]));
+            self.pending
+                .extend_from_slice(chunk.get(..len).unwrap_or(&[]));
         }
     }
 }

@@ -8,7 +8,13 @@
 //!
 //! Typing `load <player> <track id>` on stdin tells that player to load the
 //! track from us, as dropping it onto the player's deck in the app does.
-#![allow(clippy::pedantic, clippy::print_stdout, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::pedantic,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 // perf-ok: a read-only tool run by hand, not shipped code; printing is its point.
 
 use std::sync::Arc;
@@ -23,7 +29,13 @@ fn main() {
     }
     .unwrap_or_else(|| {
         // perf-ok: a tool run by hand.
-        eprintln!("interfaces: {:?}", interfaces.iter().map(|i| format!("{} {}", i.name, i.address)).collect::<Vec<_>>());
+        eprintln!(
+            "interfaces: {:?}",
+            interfaces
+                .iter()
+                .map(|i| format!("{} {}", i.name, i.address))
+                .collect::<Vec<_>>()
+        );
         panic!("no such interface");
     });
 
@@ -32,12 +44,21 @@ fn main() {
     let (library, _) = rbl_index::load(&db).expect("index"); // perf-ok: a tool run by hand.
     let share_root = db.location().share_root.clone();
     // perf-ok: printing is the point of a tool.
-    println!("{} tracks; {} playlists; share {}", library.len(), library.playlists().len(), share_root.display());
+    println!(
+        "{} tracks; {} playlists; share {}",
+        library.len(),
+        library.playlists().len(),
+        share_root.display()
+    );
 
-    let source = Arc::new(rbl_link::StaticSource { library: Arc::new(library), share_root });
+    let source = Arc::new(rbl_link::StaticSource {
+        library: Arc::new(library),
+        share_root,
+    });
     let started = std::time::Instant::now();
     // perf-ok: a tool run by hand; failing to bind is its answer.
-    let link = rbl_link::LinkExport::start(source, interface, rbl_link::Ports::REKORDBOX).expect("start");
+    let link =
+        rbl_link::LinkExport::start(source, interface, rbl_link::Ports::REKORDBOX).expect("start");
     let snapshot = link.snapshot();
     println!(
         "serving as rekordbox on {} ({}) in {:?}; database port {}, query {}, portmap {}",
@@ -66,7 +87,10 @@ fn main() {
                     },
                     ["master", "on"] => {
                         link.set_master(true);
-                        println!("master on at {:.2} BPM", f64::from(link.snapshot().master.bpm_x100) / 100.0); // perf-ok: tool output
+                        println!(
+                            "master on at {:.2} BPM",
+                            f64::from(link.snapshot().master.bpm_x100) / 100.0
+                        ); // perf-ok: tool output
                     }
                     ["master", "off"] => {
                         link.set_master(false);
@@ -78,19 +102,27 @@ fn main() {
                             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                             let target = (bpm * 100.0).round() as i32;
                             link.nudge_master(target - i32::from(now));
-                            println!("bpm {:.2}", f64::from(link.snapshot().master.bpm_x100) / 100.0); // perf-ok: tool output
+                            println!(
+                                "bpm {:.2}",
+                                f64::from(link.snapshot().master.bpm_x100) / 100.0
+                            ); // perf-ok: tool output
                         }
                         Err(_) => println!("usage: bpm <value>"), // perf-ok: tool output
                     },
                     ["recycle"] => {
                         if link.take_master_tempo() {
-                            println!("took the master's tempo: {:.2}", f64::from(link.snapshot().master.bpm_x100) / 100.0); // perf-ok: tool output
+                            println!(
+                                "took the master's tempo: {:.2}",
+                                f64::from(link.snapshot().master.bpm_x100) / 100.0
+                            ); // perf-ok: tool output
                         } else {
                             println!("no player is master"); // perf-ok: tool output
                         }
                     }
                     [] => {}
-                    _ => println!("usage: load <player> <track id> | master on|off | bpm <value> | recycle"), // perf-ok: tool output
+                    _ => println!(
+                        "usage: load <player> <track id> | master on|off | bpm <value> | recycle"
+                    ), // perf-ok: tool output
                 }
             }
         });

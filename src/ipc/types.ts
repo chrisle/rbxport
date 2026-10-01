@@ -331,6 +331,15 @@ export interface Backend {
    * tracks should import the rest.
    */
   importFiles(): Promise<ImportReport | null>;
+  /**
+   * Add music from a folder: picks one or more directories and imports every
+   * supported audio file under them, recursively through subfolders.
+   *
+   * Resolves to what happened, or `null` if the picker was cancelled. Reports
+   * per file like {@link importFiles}, so a stray unreadable track in the tree
+   * does not sink the rest.
+   */
+  importFolder(): Promise<ImportReport | null>;
   /** Adds these files to the library: the Explorer's Import To Collection. */
   importPaths(paths: string[]): Promise<ImportReport>;
   /**

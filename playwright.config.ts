@@ -17,13 +17,11 @@ const viewport = { width: 1800, height: 1130 };
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
-  // Locally a failure is a failure. On a shared runner WebKit dies of its own
-  // accord — `page.goto: WebKit encountered an internal error`, a different
-  // test each run — and a retry is the difference between reporting that and
-  // reporting the app. Two, and `trace: "on-first-retry"` below finally has
-  // something to attach: a test that fails all three times is real, and comes
-  // with its trace.
-  retries: process.env.CI ? 2 : 0,
+  // WebKit can close its browser process before a test has a context, both
+  // locally and on shared runners. Two retries distinguish that transient
+  // runner failure from an application failure; a test that fails all three
+  // times still reports a trace through `trace: "on-first-retry"` below.
+  retries: 2,
   reporter: process.env.CI ? "list" : [["list"]],
   use: {
     baseURL: `http://localhost:${port}`,

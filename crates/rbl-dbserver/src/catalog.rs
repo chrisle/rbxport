@@ -16,9 +16,55 @@ pub enum Sort {
     Bpm,
     Rating,
     Key,
+    Label,
+    Genre,
+    DateAdded,
+    DjPlayCount,
+}
+
+/// The value shown beside a track title in player browse lists.
+///
+/// Rekordbox calls this the sub-column. The selected field determines both the
+/// secondary text and the composite item type; sorting is configured
+/// separately.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TrackColumn {
+    Album,
+    Genre,
+    Artist,
+    Rating,
+    Duration,
+    Bpm,
+    Label,
+    Key,
+    Bitrate,
+    Color,
+    #[default]
+    Comment,
+    OriginalArtist,
+    Remixer,
+    DjPlayCount,
+    DateAdded,
+}
+
+/// The artist-reference field used by an advanced browse category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArtistRole {
+    Original,
+    Remixer,
 }
 
 impl Sort {
+    pub const DEFAULTS: [Self; 7] = [
+        Self::Default,
+        Self::Alphabet,
+        Self::Artist,
+        Self::Album,
+        Self::Bpm,
+        Self::Rating,
+        Self::Key,
+    ];
+
     pub fn from_id(id: u32) -> Self {
         match id {
             1 => Self::Alphabet,
@@ -26,7 +72,11 @@ impl Sort {
             3 => Self::Album,
             4 => Self::Bpm,
             5 => Self::Rating,
+            6 => Self::Genre,
+            0xa => Self::Label,
             0xc => Self::Key,
+            0x10 => Self::DjPlayCount,
+            0x11 => Self::DateAdded,
             _ => Self::Default,
         }
     }
@@ -36,16 +86,57 @@ impl Sort {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TrackScope {
     All,
+    FileName,
+    Matching(u32),
+    Bpm {
+        bpm_x100: u32,
+        tolerance_pct: u32,
+    },
+    Rating(u32),
+    Bitrate(u32),
+    Color(u32),
+    DurationMinute(u32),
+    ReleaseYear {
+        decade: u32,
+        year: Option<u32>,
+    },
     TagList,
+    /// A genre's tracks, optionally narrowed to an artist and album.
+    Genre {
+        genre: u32,
+        artist: Option<u32>,
+        album: Option<u32>,
+    },
+    /// A label's tracks, optionally narrowed to an artist and album.
+    Label {
+        label: u32,
+        artist: Option<u32>,
+        album: Option<u32>,
+    },
+    ArtistRole {
+        role: ArtistRole,
+        artist: u32,
+        album: Option<u32>,
+    },
     /// An artist's tracks, on one album or (`None`) all of them.
-    Artist { artist: u32, album: Option<u32> },
+    Artist {
+        artist: u32,
+        album: Option<u32>,
+    },
     Album(u32),
     /// Tracks in a key, widened by the related-key distance (0–2).
-    Key { key: u32, distance: u32 },
+    Key {
+        key: u32,
+        distance: u32,
+    },
     Playlist(u32),
     History(u32),
     /// Tracks added in a year, a month of it, or a day of that month.
-    DateAdded { year: u32, month: Option<u32>, day: Option<u32> },
+    DateAdded {
+        year: u32,
+        month: Option<u32>,
+        day: Option<u32>,
+    },
     /// A player's text search: the string as typed (upper case).
     Search(String),
 }
@@ -53,6 +144,34 @@ pub enum TrackScope {
 /// A menu whose rows come from the library.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Query {
+    BpmBuckets,
+    Ratings,
+    Bitrates,
+    Colors,
+    DurationMinutes,
+    ReleaseDecades,
+    ReleaseYears(u32),
+    Genres(Sort),
+    /// The artists with tracks in a genre.
+    GenreArtists(u32),
+    /// The albums in a genre, optionally narrowed to an artist.
+    GenreArtistAlbums {
+        genre: u32,
+        artist: Option<u32>,
+    },
+    Labels(Sort),
+    /// The artists with tracks on a label.
+    LabelArtists(u32),
+    /// The albums on a label, optionally narrowed to an artist.
+    LabelArtistAlbums {
+        label: u32,
+        artist: Option<u32>,
+    },
+    ArtistRoleArtists(ArtistRole),
+    ArtistRoleAlbums {
+        role: ArtistRole,
+        artist: u32,
+    },
     Artists(Sort),
     Albums(Sort),
     /// An artist's albums; the server puts `⟨ALL⟩` before them.
@@ -65,8 +184,14 @@ pub enum Query {
     Histories,
     Years,
     Months(u32),
-    Days { year: u32, month: u32 },
-    Tracks { scope: TrackScope, sort: Sort },
+    Days {
+        year: u32,
+        month: u32,
+    },
+    Tracks {
+        scope: TrackScope,
+        sort: Sort,
+    },
 }
 
 /// One row of a library menu.
@@ -75,7 +200,12 @@ pub enum Row {
     /// An artist, album, genre, key or session: id and name.
     Named { id: u32, name: String },
     /// A playlist folder or list, with its position under its parent.
-    List { id: u32, name: String, folder: bool, position: u32 },
+    List {
+        id: u32,
+        name: String,
+        folder: bool,
+        position: u32,
+    },
     /// A year, month or day.
     Date(u32),
     /// A track by id, and its position where the list has one (a playlist's
@@ -88,6 +218,12 @@ pub enum Row {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TrackDetails {
     pub row: TrackRow,
+    /// `djmdContent.Commnt`.
+    pub comment: String,
+    /// Opaque `djmdContent.KeyID`, used by metadata replies.
+    pub key_id: u32,
+    /// `djmdKey.ScaleName`, independent of the browse-list sub-column.
+    pub key_name: String,
     pub artist_id: u32,
     pub artist: String,
     pub album_id: u32,
@@ -112,12 +248,52 @@ pub struct TrackDetails {
     pub file_type: u32,
 }
 
+/// One Hot Cue Bank shown by the RX3.  A bank may be a folder containing
+/// banks; leaf banks carry up to three cue points.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HotCueBank {
+    pub id: u32,
+    pub name: String,
+    pub folder: bool,
+}
+
+/// The settled, time-domain representation of one RX3 Hot Cue Bank slot.
+/// The session owns conversion to the legacy 36-byte player record.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HotCueBankCue {
+    /// One-based slot number; the RX3 supports slots 1 through 3.
+    pub slot: u8,
+    pub content: u32,
+    pub in_ms: u32,
+    pub out_ms: Option<u32>,
+    pub color: u32,
+    pub color_table_index: u32,
+    pub active_loop: bool,
+    pub beat_loop_size: u32,
+    pub cue_microsec: u32,
+}
+
+/// One ordinary USB cue in the legacy `4702` reply.  The RX3 asks for this
+/// list after applying a Hot Cue Bank edit, so the bank write is followed by
+/// the edited track's own cues rather than by another bank-cue reply.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UsbCue {
+    /// A-C are 1-3; zero denotes a memory cue.
+    pub slot: u8,
+    pub in_ms: u32,
+    pub out_ms: Option<u32>,
+    pub color_table_index: u32,
+}
+
 /// The per-track blobs a player asks for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Analysis {
     /// A tag copied whole from the `.EXT` or `.2EX` analysis file, named by
     /// its fourcc (`b"PWV4"`) and the file's extension (`b"EXT"`).
-    Tag { fourcc: [u8; 4], extension: [u8; 3] },
+    Tag {
+        fourcc: [u8; 4],
+        extension: [u8; 3],
+    },
     BeatGrid,
     CueList,
     ExtendedCueList,
@@ -127,13 +303,25 @@ pub enum Analysis {
 
 /// The library, as a player browses it.
 pub trait Catalog: Send + Sync {
+    /// Sort menu entries, in display order.
+    fn sorts(&self) -> Vec<Sort> {
+        Sort::DEFAULTS.to_vec()
+    }
+
     /// Key menu display order; protocol identifiers remain unchanged.
-    fn key_ids(&self) -> Vec<u32> { (1..=24).collect() }
+    fn key_ids(&self) -> Vec<u32> {
+        (1..=24).collect()
+    }
     /// The rows of a menu, whole and in order.
     fn list(&self, query: &Query) -> Vec<Row>;
 
     /// A track row by id, for the rows a list names by id.
     fn track_row(&self, id: u32) -> Option<TrackRow>;
+
+    /// A track row whose primary text is its file name.
+    fn file_name_row(&self, id: u32) -> Option<TrackRow> {
+        self.track_row(id)
+    }
 
     /// The whole record, for metadata and track info.
     fn track(&self, id: u32) -> Option<TrackDetails>;
@@ -153,18 +341,50 @@ pub trait Catalog: Send + Sync {
     /// A track's analysis blob, in the layout the reply carries.
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>>;
 
+    /// Hot Cue Banks below `parent`; `None` is the root.
+    fn hot_cue_banks(&self, _parent: Option<u32>) -> Vec<HotCueBank> {
+        Vec::new()
+    }
+
+    /// The up-to-three cue points in one Hot Cue Bank.
+    fn hot_cue_bank_cues(&self, _bank: u32) -> Vec<HotCueBankCue> {
+        Vec::new()
+    }
+
+    /// Tracks assigned to a Hot Cue Bank, in the bank's slot order.  The RX3
+    /// uses this for `0x2001` mode 0; it is not a second bank hierarchy.
+    fn hot_cue_bank_tracks(&self, _bank: u32) -> Vec<TrackRow> {
+        Vec::new()
+    }
+
+    /// Legacy USB cues for a track, used by the follow-up to an RX3 Hot Cue
+    /// Bank edit.  Only hot cues A-C fit this legacy representation.
+    fn usb_cues(&self, _track: u32) -> Vec<UsbCue> {
+        Vec::new()
+    }
+
     /// Signed millisecond correction, separate from the original beat times.
-    fn grid_offset(&self, _track: u32) -> i16 { 0 }
+    fn grid_offset(&self, _track: u32) -> i16 {
+        0
+    }
 
     /// Apply a player edit. Read-only catalogs refuse it explicitly.
-    fn edit(&self, _edit: &Edit) -> bool { false }
+    fn edit(&self, _edit: &Edit) -> bool {
+        false
+    }
 
-    fn tagged(&self, _track: u32) -> bool { false }
+    fn tagged(&self, _track: u32) -> bool {
+        false
+    }
 
     fn filter_rows(&self, rows: &mut Vec<Row>, filter: &crate::filter::TrackFilter) {
-        if !filter.enabled { return; }
+        if !filter.enabled {
+            return;
+        }
         rows.retain(|row| match row {
-            Row::Track { id, .. } => self.track(*id).is_some_and(|t| filter.matches(t.row.bpm_x100, t.row.key, t.rating, t.colour)),
+            Row::Track { id, .. } => self
+                .track(*id)
+                .is_some_and(|t| filter.matches(t.row.bpm_x100, t.row.key, t.rating, t.colour)),
             _ => true,
         });
     }
@@ -179,14 +399,34 @@ pub trait Catalog: Send + Sync {
 /// Library edits made from a player, acknowledged only after they succeed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Edit {
-    Tag { track: u32, add: bool },
+    Tag {
+        track: u32,
+        add: bool,
+    },
     ClearTags,
-    Rating { track: u32, stars: u8 },
-    GridOffset { track: u32, offset_ms: i16 },
+    Rating {
+        track: u32,
+        stars: u8,
+    },
+    GridOffset {
+        track: u32,
+        offset_ms: i16,
+    },
+    /// A replacement received in RX3's legacy 36-byte Hot Cue Bank record.
+    HotCueBankCue {
+        bank: u32,
+        cue: HotCueBankCue,
+    },
     /// A player's play, for the history of this link session.
-    HistoryAdd { track: u32 },
+    HistoryAdd {
+        track: u32,
+    },
     /// Every play of a track off the link session's history.
-    HistoryRemove { track: u32 },
+    HistoryRemove {
+        track: u32,
+    },
     /// The player deleted a history: `u32::MAX` names the link session's own.
-    HistoryDelete { history: u32 },
+    HistoryDelete {
+        history: u32,
+    },
 }

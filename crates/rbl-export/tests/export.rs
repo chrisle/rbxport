@@ -206,7 +206,9 @@ fn analysis_files_land_where_the_database_says_they_do() {
     let on_disk = dest.path().join(analyze.trim_start_matches('/'));
     assert!(on_disk.is_file(), "the database points at {analyze}, which does not exist");
     // And it must still be a valid analysis file.
-    assert!(rbl_anlz::parse(&std::fs::read(&on_disk).unwrap()).is_ok());
+    let analysis = rbl_anlz::parse(&std::fs::read(&on_disk).unwrap()).unwrap();
+    assert!(analysis.section(b"PVBR").is_some(), "an export repairs pre-RBX-18 DAT files");
+    assert_eq!(analysis.sections.iter().filter(|section| section.tag == rbl_core::FourCc::new(b"PPTH")).count(), 1);
 }
 
 #[test]

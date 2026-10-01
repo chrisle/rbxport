@@ -71,7 +71,7 @@ pub fn sample(system: &mut System) -> Diagnostics {
         // petabytes of resident memory.
         #[allow(clippy::cast_precision_loss, reason = "RSS is nowhere near 2^53 bytes")]
         memory_mb: process.map_or(0.0, |p| p.memory() as f64 / 1024.0 / 1024.0),
-        threads: thread_count(),
+        threads: thread_count(process),
         open_files: open_files(),
         gpu: None,
     }
@@ -109,7 +109,7 @@ fn descriptors() -> Option<Vec<u32>> {
     unsafe_code,
     reason = "mach's task_threads is the only way to count threads on macOS without shelling out"
 )]
-fn thread_count() -> Option<u32> {
+fn thread_count(_process: Option<&sysinfo::Process>) -> Option<u32> {
     use std::ffi::c_uint;
 
     unsafe extern "C" {
@@ -135,10 +135,19 @@ fn thread_count() -> Option<u32> {
     if ok == 0 { Some(count) } else { None }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn thread_count() -> Option<u32> {
-    // Windows would be `Thread32First` over a snapshot; not written until
-    // there is a Windows machine to check it on.
+/// Linux exposes the process's additional task IDs through `/proc`. The main
+/// thread is not included in that set, so add it back before presenting the
+/// process thread count.
+#[cfg(target_os = "linux")]
+fn thread_count(process: Option<&sysinfo::Process>) -> Option<u32> {
+    let tasks = process?.tasks()?;
+    u32::try_from(tasks.len().saturating_add(1)).ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn thread_count(_process: Option<&sysinfo::Process>) -> Option<u32> {
+    // Windows would be `Thread32First` over a snapshot; not used until there
+    // is a Windows machine to verify its accounting.
     None
 }
 
@@ -210,9 +219,9 @@ mod tests {
     }
 
     #[test]
-    fn it_counts_at_least_the_thread_running_the_test() {
-        if let Some(threads) = thread_count() {
-            assert!(threads >= 1);
-        }
+    #[cfg(target_os = "linux")]
+    fn linux_counts_at_least_the_thread_running_the_test() {
+        let mut system = sampler();
+        assert!(sample(&mut system).threads.is_some_and(|threads| threads >= 1));
     }
 }

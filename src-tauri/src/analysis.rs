@@ -244,6 +244,12 @@ fn save_analysis_files(
     length_sec: Option<u32>,
     editor: &crate::grid::GridEditor,
 ) -> AppResult<()> {
+    // A newly created or sparsely imported library has no `djmdKey` rows.
+    // Keep the analyser's canonical result instead of silently leaving the
+    // track blank just because this is the first occurrence of that key.
+    if let Some(key) = detected_key {
+        state.write(|writer| writer.ensure_detected_key(key)).map_err(write_error)?;
+    }
     let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), location, track_id,
         bpm_x100, Some(relative.to_owned()), true, &[
             (dat.to_owned(), files.dat), (rbl_anlz::sibling(dat, "EXT"), files.ext),
@@ -292,11 +298,9 @@ fn analyse_key_only(state: &AppState, library: &rbl_index::Library, row: usize, 
     // A sparse imported library may not contain every recognised key.
     let key = if let Some(key) = key {
         state.write(|writer| {
-            let known: bool = writer.library().connection().query_row(
-                "SELECT EXISTS(SELECT 1 FROM djmdKey WHERE ScaleName = ?1 AND rb_local_deleted = 0)", [&key], |r| r.get(0),
-            )?;
-            if known { writer.set_field(track_id, rbl_db::write::TrackField::Key, &key)?; }
-            Ok(known.then_some(key))
+            writer.ensure_detected_key(&key)?;
+            writer.set_field(track_id, rbl_db::write::TrackField::Key, &key)?;
+            Ok(Some(key))
         }).map_err(write_error)?
     } else { None };
     Ok(AnalysisResultDto {

@@ -39,7 +39,10 @@ impl Watcher {
         let socket = shared_udp(announce_port)?;
         socket.set_broadcast(true)?;
         socket.set_read_timeout(Some(POLL))?;
-        tracing::debug!(port = socket.local_addr().map_or(announce_port, |a| a.port()), "watching the announce port");
+        tracing::debug!(
+            port = socket.local_addr().map_or(announce_port, |a| a.port()),
+            "watching the announce port"
+        );
 
         let stop = Arc::new(AtomicBool::new(false));
         let peers = Arc::new(Mutex::new(Vec::new()));
@@ -56,7 +59,11 @@ impl Watcher {
                         let packet = buffer.get(..len).unwrap_or(&[]);
                         tracing::trace!(%from, len, bytes = %rbl_prolink::hex(packet, 64), "announce port received");
                         if let Ok(keep_alive) = KeepAlive::decode(packet) {
-                            if !table.peers().iter().any(|p| p.device_number == keep_alive.device_number) {
+                            if !table
+                                .peers()
+                                .iter()
+                                .any(|p| p.device_number == keep_alive.device_number)
+                            {
                                 tracing::debug!(
                                     number = keep_alive.device_number,
                                     name = %keep_alive.name,
@@ -97,7 +104,11 @@ impl Watcher {
                 }
             })
         };
-        Ok(Self { stop, thread: Some(thread), peers })
+        Ok(Self {
+            stop,
+            thread: Some(thread),
+            peers,
+        })
     }
 
     /// The devices heard, as of the last report.

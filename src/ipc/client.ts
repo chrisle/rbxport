@@ -144,6 +144,20 @@ async function realBackend(): Promise<Backend> {
       if (!Array.isArray(picked) || picked.length === 0) return null;
       return invoke<ImportReport>("import_files", { paths: picked });
     },
+    importFolder: async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      // A folder picker: the native panel cannot offer files and folders at
+      // once, so choosing a folder is its own action alongside Import. The
+      // backend walks each folder recursively for the audio it recognises.
+      const picked = await open({
+        multiple: true,
+        directory: true,
+        title: "Add a folder of music to the library",
+      });
+      // Cancelling is a normal outcome, not an error.
+      if (!Array.isArray(picked) || picked.length === 0) return null;
+      return invoke<ImportReport>("import_files", { paths: picked });
+    },
     importPaths: (paths) => invoke<ImportReport>("import_files", { paths }),
     exportLoopWav: async (track, title, inMs, outMs) => {
       const { save } = await import("@tauri-apps/plugin-dialog");

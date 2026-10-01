@@ -1,5 +1,10 @@
 //! Packet encoding, decoding, and the device table's expiry rules.
-#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 
 use std::net::Ipv4Addr;
 
@@ -10,11 +15,18 @@ use rbl_prolink::{
 };
 
 fn sample() -> KeepAlive {
-    KeepAlive::rekordbox([0x00, 0x1e, 0x1d, 0x11, 0x22, 0x33], Ipv4Addr::new(192, 168, 1, 42), 2)
+    KeepAlive::rekordbox(
+        [0x00, 0x1e, 0x1d, 0x11, 0x22, 0x33],
+        Ipv4Addr::new(192, 168, 1, 42),
+        2,
+    )
 }
 
 fn hex(s: &str) -> Vec<u8> {
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
 }
 
 /// rekordbox 7.2.11's keep-alive with one player on the network, verbatim
@@ -37,6 +49,12 @@ const CAPTURED_MEDIA_RESPONSE: &str =
     "5173707431576d4a4f4c0672656b6f7264626f780000000000000000000000010111009c000000110000000300720065006b006f007200640062006f007800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009719000001010000027300000000000000000000000000000000";
 const CAPTURED_HANDSHAKE_REPLY: &str =
     "5173707431576d4a4f4c4772656b6f7264626f7800000000000000000000000101110024110400001234567800000001010104010101000002000000000000000000000000000000";
+/// The RX3's SOURCE-eligibility request and rekordbox's reply, captured from
+/// a direct macOS-to-RX3 Link Export session on firmware 1.19.
+const CAPTURED_DEVICE_PROPERTY_QUERY: &str =
+    "5173707431576d4a4f4c3058444a2d5258330000000000000000000000000001030b0000";
+const CAPTURED_DEVICE_PROPERTY_RESPONSE: &str =
+    "5173707431576d4a4f4c3172656b6f7264626f78000000000000000000000001031100080600000000000000";
 /// The packet rekordbox unicasts to a player that has just connected.
 const CAPTURED_CONNECT_GREETING: &str =
     "5173707431576d4a4f4c1672656b6f7264626f7800000000000000000000000101110000000000000000000000000000";
@@ -47,9 +65,16 @@ const CAPTURED_CONNECT_IDENTITY: &str = "5173707431576d4a4f4c1172656b6f7264626f7
 
 #[test]
 fn rekordboxs_keep_alive_is_reproduced_byte_for_byte() {
-    let alive = KeepAlive::rekordbox([0x00, 0xe0, 0x4c, 0xcf, 0x63, 0x2e], Ipv4Addr::new(192, 168, 1, 14), 2);
+    let alive = KeepAlive::rekordbox(
+        [0x00, 0xe0, 0x4c, 0xcf, 0x63, 0x2e],
+        Ipv4Addr::new(192, 168, 1, 14),
+        2,
+    );
     assert_eq!(alive.encode(), hex(CAPTURED_REKORDBOX_KEEP_ALIVE));
-    assert_eq!(KeepAlive::decode(&hex(CAPTURED_REKORDBOX_KEEP_ALIVE)).unwrap(), alive);
+    assert_eq!(
+        KeepAlive::decode(&hex(CAPTURED_REKORDBOX_KEEP_ALIVE)).unwrap(),
+        alive
+    );
 }
 
 #[test]
@@ -82,9 +107,24 @@ fn the_status_beacon_and_the_connect_greeting_match_the_capture() {
 
 #[test]
 fn the_identity_reply_matches_the_capture() {
-    let identity = rbl_prolink::connect_identity(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, "chrisles-MBP");
+    let identity =
+        rbl_prolink::connect_identity(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, "chrisles-MBP");
     assert_eq!(identity.len(), rbl_prolink::CONNECT_IDENTITY_LEN);
     assert_eq!(identity, hex(CAPTURED_CONNECT_IDENTITY));
+}
+
+#[test]
+fn the_rx3_device_property_exchange_matches_the_capture() {
+    let query =
+        rbl_prolink::DevicePropertyQuery::decode(&hex(CAPTURED_DEVICE_PROPERTY_QUERY)).unwrap();
+    assert_eq!(query.name, "XDJ-RX3");
+    assert_eq!(query.requester, 0x0b);
+
+    let response = rbl_prolink::DevicePropertyResponse {
+        name: REKORDBOX_NAME.to_owned(),
+        device_number: REKORDBOX_DEVICE_NUMBER,
+    };
+    assert_eq!(response.encode(), hex(CAPTURED_DEVICE_PROPERTY_RESPONSE));
 }
 
 #[test]
@@ -99,7 +139,11 @@ fn a_keep_alive_round_trips() {
 fn every_packet_starts_with_the_dj_link_magic() {
     for bytes in [
         sample().encode(),
-        Announcement { name: "rekordbox".into(), device_type: DeviceType::Rekordbox }.encode(),
+        Announcement {
+            name: "rekordbox".into(),
+            device_type: DeviceType::Rekordbox,
+        }
+        .encode(),
         Claim {
             stage: AnnounceKind::ClaimStage1,
             name: "rekordbox".into(),
@@ -121,7 +165,10 @@ fn the_device_name_sits_at_a_fixed_offset_and_is_nul_padded() {
     assert_eq!(device_name(&bytes).unwrap(), "rekordbox");
     // Twenty bytes, so the field is padded rather than truncated.
     assert_eq!(&bytes[0x0c..0x0c + 9], b"rekordbox");
-    assert!(bytes[0x15..0x20].iter().all(|&b| b == 0), "name must be NUL-padded");
+    assert!(
+        bytes[0x15..0x20].iter().all(|&b| b == 0),
+        "name must be NUL-padded"
+    );
 }
 
 #[test]
@@ -129,7 +176,11 @@ fn a_long_name_is_truncated_to_the_field_rather_than_overflowing() {
     let mut alive = sample();
     alive.name = "a-very-long-device-name-that-will-not-fit".into();
     let bytes = alive.encode();
-    assert_eq!(bytes.len(), KEEP_ALIVE_LEN, "the packet must stay a fixed size");
+    assert_eq!(
+        bytes.len(),
+        KEEP_ALIVE_LEN,
+        "the packet must stay a fixed size"
+    );
     assert_eq!(device_name(&bytes).unwrap().len(), 20);
 }
 
@@ -139,7 +190,10 @@ fn keep_alive_fields_land_where_the_protocol_says() {
     assert_eq!(bytes[0x0a], 0x06, "kind: keep-alive");
     assert_eq!(bytes[0x21], 0x03, "generation");
     assert_eq!(bytes[0x34], DeviceType::Rekordbox.to_u8());
-    assert_eq!(u16::from_be_bytes([bytes[0x22], bytes[0x23]]) as usize, KEEP_ALIVE_LEN);
+    assert_eq!(
+        u16::from_be_bytes([bytes[0x22], bytes[0x23]]) as usize,
+        KEEP_ALIVE_LEN
+    );
     assert_eq!(bytes[0x24], REKORDBOX_DEVICE_NUMBER);
     assert_eq!(&bytes[0x26..0x2c], &[0x00, 0x1e, 0x1d, 0x11, 0x22, 0x33]);
     assert_eq!(&bytes[0x2c..0x30], &[192, 168, 1, 42]);
@@ -181,7 +235,12 @@ fn announce_kinds_round_trip() {
 
 #[test]
 fn device_types_round_trip() {
-    for kind in [DeviceType::Cdj, DeviceType::Mixer, DeviceType::Rekordbox, DeviceType::Other(9)] {
+    for kind in [
+        DeviceType::Cdj,
+        DeviceType::Mixer,
+        DeviceType::Rekordbox,
+        DeviceType::Other(9),
+    ] {
         assert_eq!(DeviceType::from_u8(kind.to_u8()), kind);
     }
 }
@@ -198,8 +257,15 @@ fn the_first_claim_stage_is_shorter_than_the_later_ones() {
         device_type: DeviceType::Rekordbox,
     };
     let first = base.encode();
-    let second = Claim { stage: AnnounceKind::ClaimStage2, ..base.clone() }.encode();
-    assert!(second.len() > first.len(), "later stages carry the IP and number");
+    let second = Claim {
+        stage: AnnounceKind::ClaimStage2,
+        ..base.clone()
+    }
+    .encode();
+    assert!(
+        second.len() > first.len(),
+        "later stages carry the IP and number"
+    );
     assert_eq!(first[0x0a], 0x00);
     assert_eq!(second[0x0a], 0x02);
     // The device number being claimed appears in the later stages.
@@ -230,7 +296,11 @@ fn a_peer_that_goes_quiet_is_dropped() {
     table.observe(&sample(), 0);
     assert_eq!(table.expire(PEER_TIMEOUT_MS), 0, "still within the timeout");
     assert_eq!(table.len(), 1);
-    assert_eq!(table.expire(PEER_TIMEOUT_MS + 1), 1, "a player unplugged mid-set stops announcing");
+    assert_eq!(
+        table.expire(PEER_TIMEOUT_MS + 1),
+        1,
+        "a player unplugged mid-set stops announcing"
+    );
     assert!(table.is_empty());
 }
 
@@ -244,13 +314,20 @@ fn several_devices_are_tracked_separately() {
         table.observe(&alive, 0);
     }
     assert_eq!(table.len(), 3);
-    assert_eq!(table.free_device_number(17), 18, "17 is taken, so pick the next free one");
+    assert_eq!(
+        table.free_device_number(17),
+        18,
+        "17 is taken, so pick the next free one"
+    );
     assert_eq!(table.free_device_number(20), 20, "20 is free");
 }
 
 #[test]
 fn an_empty_table_hands_back_the_preferred_number() {
-    assert_eq!(DeviceTable::new().free_device_number(REKORDBOX_DEVICE_NUMBER), REKORDBOX_DEVICE_NUMBER);
+    assert_eq!(
+        DeviceTable::new().free_device_number(REKORDBOX_DEVICE_NUMBER),
+        REKORDBOX_DEVICE_NUMBER
+    );
 }
 
 #[test]
@@ -363,9 +440,15 @@ fn the_master_status_matches_the_capture() {
     };
     assert_eq!(status.encode(), hex(CAPTURED_MASTER_STATUS_BEAT_1));
     // The master bit and Mm are the only difference from a mirror status.
-    let mirror = rbl_prolink::Status { master: false, ..status.clone() }.encode();
+    let mirror = rbl_prolink::Status {
+        master: false,
+        ..status.clone()
+    }
+    .encode();
     let master = status.encode();
-    let differing: Vec<usize> = (0..master.len()).filter(|&i| master[i] != mirror[i]).collect();
+    let differing: Vec<usize> = (0..master.len())
+        .filter(|&i| master[i] != mirror[i])
+        .collect();
     assert_eq!(differing, vec![0x27, 0x34]);
 }
 
@@ -382,10 +465,14 @@ const CAPTURED_BEATS: [(&str, u8); 4] = [
 #[test]
 fn the_beat_packet_is_rekordboxs_byte_for_byte_across_a_bar() {
     for (captured, beat) in CAPTURED_BEATS {
-        let packet = rbl_prolink::beat_packet(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 13_000, beat);
+        let packet =
+            rbl_prolink::beat_packet(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 13_000, beat);
         assert_eq!(packet.len(), rbl_prolink::BEAT_LEN);
         assert_eq!(packet, hex(captured), "beat {beat}");
-        assert_eq!(rbl_prolink::packet_kind(&packet).unwrap(), rbl_prolink::BEAT_KIND);
+        assert_eq!(
+            rbl_prolink::packet_kind(&packet).unwrap(),
+            rbl_prolink::BEAT_KIND
+        );
     }
 }
 
@@ -402,10 +489,12 @@ const CAPTURED_LOAD_TRACK_PLAYER_2: &str =
 
 #[test]
 fn the_load_track_command_is_rekordboxs_byte_for_byte() {
-    let to_player_1 = rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 1, 19_925_719);
+    let to_player_1 =
+        rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 1, 19_925_719);
     assert_eq!(to_player_1.len(), rbl_prolink::LOAD_TRACK_LEN);
     assert_eq!(to_player_1, hex(CAPTURED_LOAD_TRACK_PLAYER_1));
-    let to_player_2 = rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 2, 73_561_055);
+    let to_player_2 =
+        rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 2, 73_561_055);
     assert_eq!(to_player_2, hex(CAPTURED_LOAD_TRACK_PLAYER_2));
 }
 
@@ -413,15 +502,37 @@ fn the_load_track_command_is_rekordboxs_byte_for_byte() {
 /// rather than shown as a byte-string diff.
 #[test]
 fn the_load_track_command_names_the_track_and_the_player() {
-    let packet = rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 0x02, 0x1234_5678);
+    let packet =
+        rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 0x02, 0x1234_5678);
     assert_eq!(packet[0x0a], rbl_prolink::LOAD_TRACK_KIND);
-    assert_eq!(rbl_prolink::status_device_name(&packet).unwrap(), REKORDBOX_NAME);
+    assert_eq!(
+        rbl_prolink::status_device_name(&packet).unwrap(),
+        REKORDBOX_NAME
+    );
     assert_eq!(packet[0x21], REKORDBOX_DEVICE_NUMBER, "our device number");
-    assert_eq!(packet[0x28], REKORDBOX_DEVICE_NUMBER, "the track's source device");
-    assert_eq!(packet[0x29], rbl_prolink::SLOT_REKORDBOX, "the rekordbox slot");
-    assert_eq!(packet[0x2a], rbl_prolink::TRACK_TYPE_REKORDBOX, "a rekordbox track");
-    assert_eq!(&packet[0x2c..0x30], &0x1234_5678_u32.to_be_bytes(), "the track id");
-    assert_eq!(packet[0x40], 0x01, "the player to load onto, counted from zero");
+    assert_eq!(
+        packet[0x28], REKORDBOX_DEVICE_NUMBER,
+        "the track's source device"
+    );
+    assert_eq!(
+        packet[0x29],
+        rbl_prolink::SLOT_REKORDBOX,
+        "the rekordbox slot"
+    );
+    assert_eq!(
+        packet[0x2a],
+        rbl_prolink::TRACK_TYPE_REKORDBOX,
+        "a rekordbox track"
+    );
+    assert_eq!(
+        &packet[0x2c..0x30],
+        &0x1234_5678_u32.to_be_bytes(),
+        "the track id"
+    );
+    assert_eq!(
+        packet[0x40], 0x01,
+        "the player to load onto, counted from zero"
+    );
 }
 
 /// What a CDJ-3000 (EP122, player 3) sent back to our status port within a
@@ -437,9 +548,15 @@ const CAPTURED_LOAD_TRACK_ACK_PLAYER_1: &str =
 
 #[test]
 fn a_cdj_3000_acknowledges_a_load_track_command() {
-    for (captured, player) in [(CAPTURED_LOAD_TRACK_ACK, 0x03), (CAPTURED_LOAD_TRACK_ACK_PLAYER_1, 0x01)] {
+    for (captured, player) in [
+        (CAPTURED_LOAD_TRACK_ACK, 0x03),
+        (CAPTURED_LOAD_TRACK_ACK_PLAYER_1, 0x01),
+    ] {
         let bytes = hex(captured);
-        assert_eq!(rbl_prolink::packet_kind(&bytes).unwrap(), rbl_prolink::LOAD_TRACK_ACK_KIND);
+        assert_eq!(
+            rbl_prolink::packet_kind(&bytes).unwrap(),
+            rbl_prolink::LOAD_TRACK_ACK_KIND
+        );
         assert_eq!(rbl_prolink::status_device_name(&bytes).unwrap(), "CDJ-3000");
         assert_eq!(bytes[0x21], player, "the player that accepted it");
     }

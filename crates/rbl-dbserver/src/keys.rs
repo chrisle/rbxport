@@ -5,8 +5,8 @@
 /// Key names by id, `1` first: `1A, 1B, 2A, 2B, … 12A, 12B` as rekordbox
 /// spells them.
 pub const NAMES: [&str; 24] = [
-    "Abm", "B", "Ebm", "F#", "Bbm", "Db", "Fm", "Ab", "Cm", "Eb", "Gm", "Bb", "Dm", "F", "Am",
-    "C", "Em", "G", "Bm", "D", "F#m", "A", "Dbm", "E",
+    "Abm", "B", "Ebm", "F#", "Bbm", "Db", "Fm", "Ab", "Cm", "Eb", "Gm", "Bb", "Dm", "F", "Am", "C",
+    "Em", "G", "Bm", "D", "F#m", "A", "Dbm", "E",
 ];
 
 /// The key's name, or "" for an id off the wheel.
@@ -44,5 +44,9 @@ pub fn related(id: u32, distance: u32) -> Vec<u32> {
 
 /// The related-keys menu row for a distance: the names joined with ", ".
 pub fn related_text(id: u32, distance: u32) -> String {
-    related(id, distance).into_iter().map(name).collect::<Vec<_>>().join(", ")
+    related(id, distance)
+        .into_iter()
+        .map(name)
+        .collect::<Vec<_>>()
+        .join(", ")
 }

@@ -34,10 +34,10 @@ use rbl_dbserver::session::CatalogHandler;
 use rbl_index::Library;
 
 pub use beacon::{LinkState, Player};
-pub use watch::Watcher;
 pub use catalog::{IndexCatalog, Played, Source};
-pub use rbl_dbserver::catalog::Edit;
+pub use rbl_dbserver::catalog::{ArtistRole, Edit, Sort, TrackColumn};
 pub use rbl_prolink::DeviceType;
+pub use watch::Watcher;
 
 /// The ports rekordbox uses, which a player expects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,7 +68,15 @@ impl Ports {
     };
 
     /// Every port ephemeral, for tests on loopback.
-    pub const EPHEMERAL: Self = Self { announce: 0, status: 0, query: 0, database: 0, portmap: 0, mount: 0, nfs: 0 };
+    pub const EPHEMERAL: Self = Self {
+        announce: 0,
+        status: 0,
+        query: 0,
+        database: 0,
+        portmap: 0,
+        mount: 0,
+        nfs: 0,
+    };
 }
 
 /// A network interface link export can run on.
@@ -108,7 +116,9 @@ impl Interface {
 pub fn interface_toward(interfaces: &[Interface], peer: Ipv4Addr) -> Option<Interface> {
     let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
     socket.connect((peer, rbl_prolink::PORT_STATUS)).ok()?;
-    let IpAddr::V4(local) = socket.local_addr().ok()?.ip() else { return None };
+    let IpAddr::V4(local) = socket.local_addr().ok()?.ip() else {
+        return None;
+    };
     interfaces.iter().find(|i| i.address == local).cloned()
 }
 
@@ -118,7 +128,12 @@ pub fn interfaces() -> Vec<Interface> {
     alphatheta_connect::utils::network_interfaces()
         .into_iter()
         .filter(|i| !i.internal)
-        .map(|i| Interface { name: i.name, address: i.address, netmask: i.netmask, mac: i.mac })
+        .map(|i| Interface {
+            name: i.name,
+            address: i.address,
+            netmask: i.netmask,
+            mac: i.mac,
+        })
         .collect()
 }
 
@@ -162,10 +177,14 @@ struct Facts {
 
 impl beacon::LibraryFacts for Facts {
     fn track_count(&self) -> u16 {
-        self.source.library().map_or(0, |l| u16::try_from(l.len()).unwrap_or(u16::MAX))
+        self.source
+            .library()
+            .map_or(0, |l| u16::try_from(l.len()).unwrap_or(u16::MAX))
     }
     fn playlist_count(&self) -> u16 {
-        self.source.library().map_or(0, |l| u16::try_from(l.playlists().len()).unwrap_or(u16::MAX))
+        self.source.library().map_or(0, |l| {
+            u16::try_from(l.playlists().len()).unwrap_or(u16::MAX)
+        })
     }
     fn track_loaded(&self, track: u32) {
         self.played.mark(track);
@@ -178,7 +197,11 @@ impl LinkExport {
     /// The database and file servers listen on every address, as the beacon
     /// must: which interface a player is on decides nothing about which
     /// socket its connection arrives at.
-    pub fn start(source: Arc<dyn Source>, interface: Interface, ports: Ports) -> Result<Self, LinkError> {
+    pub fn start(
+        source: Arc<dyn Source>,
+        interface: Interface,
+        ports: Ports,
+    ) -> Result<Self, LinkError> {
         let library = source.library().ok_or(LinkError::NoLibrary)?;
         let played = Played::default();
         let catalog = Arc::new(IndexCatalog::new(Arc::clone(&source), played.clone()));
@@ -207,9 +230,14 @@ impl LinkExport {
 
         let handler: Arc<dyn rbl_dbserver::net::Handler> =
             Arc::new(CatalogHandler::new(catalog.clone()).with_device(Arc::clone(&number)));
-        let listen_on = if interface.address.is_loopback() { IpAddr::V4(Ipv4Addr::LOCALHOST) } else { IpAddr::V4(Ipv4Addr::UNSPECIFIED) };
-        let database = rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database)
-            .map_err(|e| LinkError::Bind(explain(&e, "TCP", ports.query)))?;
+        let listen_on = if interface.address.is_loopback() {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        } else {
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        };
+        let database =
+            rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database)
+                .map_err(|e| LinkError::Bind(explain(&e, "TCP", ports.query)))?;
         // The mount EXPORT reply must offer the export to the player's subnet,
         // which rekordbox names as its own `<ip>/<netmask>`; without it a CDJ
         // mounts nothing. Loopback tests have no meaningful subnet, so skip it.
@@ -233,7 +261,13 @@ impl LinkExport {
             nfs = %files.nfs_address(),
             "link export started"
         );
-        Ok(Self { interface, beacon, database, files, catalog })
+        Ok(Self {
+            interface,
+            beacon,
+            database,
+            files,
+            catalog,
+        })
     }
 
     /// The beacon's announce and status ports, as bound.
@@ -307,7 +341,12 @@ impl LinkExport {
     /// a drag to a player (`NG mnt not complete`): a load command to a
     /// player with nothing mounted is a command it cannot follow.
     pub fn load_track(&self, player_number: u8, track_id: u32) -> std::io::Result<()> {
-        let address = self.beacon.players().into_iter().find(|p| p.number == player_number).map(|p| p.address);
+        let address = self
+            .beacon
+            .players()
+            .into_iter()
+            .find(|p| p.number == player_number)
+            .map(|p| p.address);
         if let Some(address) = address {
             if !self.files.is_mounted(address) {
                 return Err(std::io::Error::new(
@@ -352,7 +391,9 @@ fn explain(error: &std::io::Error, protocol: &str, port: u16) -> String {
         std::io::ErrorKind::AddrInUse => {
             format!("{protocol} port {port} is already in use — usually by rekordbox itself. Quit it to turn LINK on.")
         }
-        std::io::ErrorKind::PermissionDenied => format!("Not allowed to bind {protocol} port {port}."),
+        std::io::ErrorKind::PermissionDenied => {
+            format!("Not allowed to bind {protocol} port {port}.")
+        }
         _ => format!("Could not bind {protocol} port {port}: {error}"),
     }
 }

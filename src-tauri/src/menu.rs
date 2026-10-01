@@ -67,6 +67,11 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let import = MenuItemBuilder::with_id("import", label("Import"))
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
+    // The folder counterpart of Import: one dialog picks a folder and every
+    // audio file under it, recursively, is added. ⇧⌘O sits beside ⌘O.
+    let import_folder = MenuItemBuilder::with_id("import-folder", "Import Folder…")
+        .accelerator("CmdOrCtrl+Shift+O")
+        .build(app)?;
     let missing = MenuItemBuilder::with_id("missing", label("Missing File Manager")).build(app)?;
     // rekordbox's own two, worded as its File menu words them.
     let import_xml = MenuItemBuilder::with_id("import-xml", "Import rekordbox xml…").build(app)?;
@@ -93,6 +98,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     let file = SubmenuBuilder::new(app, label("File"))
         .item(&import)
+        .item(&import_folder)
         .item(&import_xml)
         .item(&import_itunes)
         .item(&export_xml)

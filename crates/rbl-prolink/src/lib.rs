@@ -196,7 +196,9 @@ pub fn status_device_name(packet: &[u8]) -> Result<String> {
     if packet.get(0..10) != Some(&MAGIC) {
         return Err(PacketError::BadMagic);
     }
-    let raw = packet.get(NAME_AT - 1..NAME_AT - 1 + NAME_LEN).unwrap_or(&[]);
+    let raw = packet
+        .get(NAME_AT - 1..NAME_AT - 1 + NAME_LEN)
+        .unwrap_or(&[]);
     let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
     Ok(String::from_utf8_lossy(raw.get(..end).unwrap_or(&[])).into_owned())
 }
@@ -243,6 +245,8 @@ pub fn status_kind_name(kind: u8) -> String {
         BEAT_KIND => "beat".to_owned(),
         0x29 => "mixer status".to_owned(),
         0x2a => "sync control".to_owned(),
+        DEVICE_PROPERTY_QUERY_KIND => "device property query".to_owned(),
+        DEVICE_PROPERTY_RESPONSE_KIND => "device property response".to_owned(),
         LINK_HANDSHAKE_KIND => "link handshake".to_owned(),
         _ => format!("kind {kind:#04x}"),
     }
@@ -374,7 +378,14 @@ impl Status {
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(STATUS_LEN);
         write_status_header(&mut out, 0x29, &self.name);
-        out.extend_from_slice(&[0x01, 0x01, self.device_number, 0x00, 0x38, self.device_number]);
+        out.extend_from_slice(&[
+            0x01,
+            0x01,
+            self.device_number,
+            0x00,
+            0x38,
+            self.device_number,
+        ]);
         // The status flag (byte `0x27`): `0xc0` playing but not master,
         // `0xe0` as tempo master — the master bit (`0x20`). The byte before
         // the tempo (`0x2c`) is `0x80` when a master tempo is being broadcast
@@ -382,7 +393,11 @@ impl Status {
         // beat 0, playing rekordbox `0x80` with the beat). We broadcast a
         // tempo when a player on the link is master, or when we are.
         let flag = if self.master { 0xe0 } else { 0xc0 };
-        let tempo_valid = if self.master || self.bpm_x100 != 0 { 0x80 } else { 0x00 };
+        let tempo_valid = if self.master || self.bpm_x100 != 0 {
+            0x80
+        } else {
+            0x00
+        };
         out.extend_from_slice(&[0x00, 0x00, flag, 0x00, 0x10, 0x00, 0x00, tempo_valid, 0x00]);
         out.extend_from_slice(&self.bpm_x100.to_be_bytes());
         // `Mm` (byte `0x34`) is `0x01` when this device is the tempo master
@@ -424,7 +439,17 @@ pub const DEVICE_IDENTITY_QUERY_KIND: u8 = 0x10;
 pub fn connect_identity(name: &str, device_number: u8, computer_name: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(CONNECT_IDENTITY_LEN);
     write_status_header(&mut out, 0x11, name);
-    out.extend_from_slice(&[0x01, 0x01, device_number, 0x01, 0x04, device_number, 0x01, 0x00, 0x00]);
+    out.extend_from_slice(&[
+        0x01,
+        0x01,
+        device_number,
+        0x01,
+        0x04,
+        device_number,
+        0x01,
+        0x00,
+        0x00,
+    ]);
     for unit in computer_name.encode_utf16() {
         out.extend_from_slice(&unit.to_be_bytes());
     }
@@ -586,7 +611,12 @@ impl NumberReply {
             return Err(PacketError::WrongKind(kind));
         }
         let at = |i: usize| packet.get(i).copied().unwrap_or(0);
-        Ok(Self { subtype: at(0x0b), name: device_name(packet)?, number: at(0x24), status: at(0x26) })
+        Ok(Self {
+            subtype: at(0x0b),
+            name: device_name(packet)?,
+            number: at(0x24),
+            status: at(0x26),
+        })
     }
 }
 
@@ -676,11 +706,20 @@ impl MediaResponse {
         let mut out = Vec::with_capacity(MEDIA_RESPONSE_LEN);
         write_status_header(&mut out, 0x06, &self.name);
         out.extend_from_slice(&[0x01, 0x01, self.device_number]);
-        out.extend_from_slice(&u16::try_from(MEDIA_RESPONSE_LEN - 0x24).unwrap_or(0).to_be_bytes());
+        out.extend_from_slice(
+            &u16::try_from(MEDIA_RESPONSE_LEN - 0x24)
+                .unwrap_or(0)
+                .to_be_bytes(),
+        );
         out.extend_from_slice(&u32::from(self.device_number).to_be_bytes());
         out.extend_from_slice(&u32::from(self.slot).to_be_bytes());
         // The name as the player shows it, UTF-16BE in a 64-byte field.
-        let mut utf16: Vec<u8> = self.name.encode_utf16().take(31).flat_map(u16::to_be_bytes).collect();
+        let mut utf16: Vec<u8> = self
+            .name
+            .encode_utf16()
+            .take(31)
+            .flat_map(u16::to_be_bytes)
+            .collect();
         utf16.resize(0x40, 0);
         out.extend_from_slice(&utf16);
         // Creation date and the rest: zero for rekordbox.
@@ -691,6 +730,74 @@ impl MediaResponse {
         out.extend_from_slice(&self.playlists.to_be_bytes());
         out.resize(MEDIA_RESPONSE_LEN, 0);
         debug_assert_eq!(out.len(), MEDIA_RESPONSE_LEN);
+        out
+    }
+}
+
+/// The device-property request an XDJ-RX3 sends before it makes a rekordbox
+/// PC visible in SOURCE (`kind 30`, 36 bytes, unicast to port 50002).
+///
+/// Unlike a CDJ-3000 media query, this packet does not name a media slot or
+/// target device. The destination address identifies the rekordbox peer; the
+/// packet names only the requesting logical deck.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DevicePropertyQuery {
+    pub name: String,
+    pub requester: u8,
+}
+
+pub const DEVICE_PROPERTY_QUERY_KIND: u8 = 0x30;
+pub const DEVICE_PROPERTY_QUERY_LEN: usize = 0x24;
+
+impl DevicePropertyQuery {
+    pub fn decode(packet: &[u8]) -> Result<Self> {
+        if packet.len() < DEVICE_PROPERTY_QUERY_LEN {
+            return Err(PacketError::TooShort(packet.len()));
+        }
+        let kind = packet_kind(packet)?;
+        if kind != DEVICE_PROPERTY_QUERY_KIND {
+            return Err(PacketError::WrongKind(kind));
+        }
+        Ok(Self {
+            name: status_device_name(packet)?,
+            requester: packet.get(0x21).copied().unwrap_or(0),
+        })
+    }
+}
+
+/// Rekordbox's answer to an RX3 device-property request (`kind 31`, 44
+/// bytes, unicast to the RX3's status port). Firmware 1.19 uses this reply to
+/// mark the PC-backed media detected; a registered peer without it stays out
+/// of the SOURCE list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DevicePropertyResponse {
+    pub name: String,
+    pub device_number: u8,
+}
+
+pub const DEVICE_PROPERTY_RESPONSE_KIND: u8 = 0x31;
+pub const DEVICE_PROPERTY_RESPONSE_LEN: usize = 0x2c;
+
+impl DevicePropertyResponse {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(DEVICE_PROPERTY_RESPONSE_LEN);
+        write_status_header(&mut out, DEVICE_PROPERTY_RESPONSE_KIND, &self.name);
+        out.extend_from_slice(&[
+            0x01,
+            0x03,
+            self.device_number,
+            0x00,
+            0x08,
+            0x06,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+        ]);
+        debug_assert_eq!(out.len(), DEVICE_PROPERTY_RESPONSE_LEN);
         out
     }
 }
@@ -709,7 +816,17 @@ pub const LINK_HANDSHAKE_REPLY_LEN: usize = 0x48;
 pub fn link_handshake_reply(name: &str, device_number: u8) -> Vec<u8> {
     let mut out = Vec::with_capacity(LINK_HANDSHAKE_REPLY_LEN);
     write_status_header(&mut out, 0x47, name);
-    out.extend_from_slice(&[0x01, 0x01, device_number, 0x00, 0x24, device_number, 0x04, 0x00, 0x00]);
+    out.extend_from_slice(&[
+        0x01,
+        0x01,
+        device_number,
+        0x00,
+        0x24,
+        device_number,
+        0x04,
+        0x00,
+        0x00,
+    ]);
     out.extend_from_slice(&[0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x01]);
     out.extend_from_slice(&[0x01, 0x01, 0x04, 0x01, 0x01, 0x01, 0x00, 0x00, 0x02]);
     out.resize(LINK_HANDSHAKE_REPLY_LEN, 0);
@@ -802,7 +919,16 @@ pub fn load_track_command(name: &str, from_device: u8, to_device: u8, track_id: 
     // 0x1f..0x24: 01, subtype, our number, then the length of what follows.
     out.extend_from_slice(&[0x01, 0x01, from_device, 0x00, 0x34]);
     // 0x24..0x2c: our number, padding, the source device, slot and track type.
-    out.extend_from_slice(&[from_device, 0x00, 0x00, 0x00, from_device, SLOT_REKORDBOX, TRACK_TYPE_REKORDBOX, 0x00]);
+    out.extend_from_slice(&[
+        from_device,
+        0x00,
+        0x00,
+        0x00,
+        from_device,
+        SLOT_REKORDBOX,
+        TRACK_TYPE_REKORDBOX,
+        0x00,
+    ]);
     // 0x2c..0x30: the track.
     out.extend_from_slice(&track_id.to_be_bytes());
     out.resize(LOAD_TRACK_LEN, 0);

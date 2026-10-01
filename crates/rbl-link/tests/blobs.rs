@@ -1,7 +1,12 @@
 //! The analysis blobs against the bytes rekordbox 7.2.11 sent a CDJ-3000 for
 //! the same track (`fixtures/`: the track's `PQTZ`, `PWAV`, `PWV2`, `PWV3`,
 //! `PWV4` and `PQT2` sections, and the captured replies).
-#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 
 use rbl_anlz::Anlz;
 use rbl_index::Cue;
@@ -17,33 +22,67 @@ fn analysis() -> (Anlz, Anlz) {
 #[test]
 fn the_beat_grid_matches_the_capture() {
     let (dat, ext) = analysis();
-    let a = Analysis { dat: Some(&dat), ext: Some(&ext), two_ex: None };
-    assert_eq!(a.beat_grid().unwrap(), include_bytes!("fixtures/captured-beat-grid.bin"));
+    let a = Analysis {
+        dat: Some(&dat),
+        ext: Some(&ext),
+        two_ex: None,
+    };
+    assert_eq!(
+        a.beat_grid().unwrap(),
+        include_bytes!("fixtures/captured-beat-grid.bin")
+    );
 }
 
 #[test]
 fn the_waveform_preview_matches_the_capture() {
     let (dat, ext) = analysis();
-    let a = Analysis { dat: Some(&dat), ext: Some(&ext), two_ex: None };
-    assert_eq!(a.waveform_preview().unwrap(), include_bytes!("fixtures/captured-waveform-preview.bin"));
+    let a = Analysis {
+        dat: Some(&dat),
+        ext: Some(&ext),
+        two_ex: None,
+    };
+    assert_eq!(
+        a.waveform_preview().unwrap(),
+        include_bytes!("fixtures/captured-waveform-preview.bin")
+    );
 }
 
 #[test]
 fn the_waveform_detail_matches_the_capture() {
     let (dat, ext) = analysis();
-    let a = Analysis { dat: Some(&dat), ext: Some(&ext), two_ex: None };
-    assert_eq!(a.waveform_detail().unwrap(), include_bytes!("fixtures/captured-waveform-detail.bin"));
+    let a = Analysis {
+        dat: Some(&dat),
+        ext: Some(&ext),
+        two_ex: None,
+    };
+    assert_eq!(
+        a.waveform_detail().unwrap(),
+        include_bytes!("fixtures/captured-waveform-detail.bin")
+    );
 }
 
 #[test]
 fn analysis_tags_match_the_capture_including_the_padding() {
     let (dat, ext) = analysis();
-    let a = Analysis { dat: Some(&dat), ext: Some(&ext), two_ex: None };
+    let a = Analysis {
+        dat: Some(&dat),
+        ext: Some(&ext),
+        two_ex: None,
+    };
     // PWV4 is a multiple of four already; PQT2 is 810 bytes and goes out as 812.
-    assert_eq!(a.tag(b"PWV4", b"EXT").unwrap(), include_bytes!("fixtures/captured-tag-PWV4.bin"));
-    assert_eq!(a.tag(b"PQT2", b"EXT").unwrap(), include_bytes!("fixtures/captured-tag-PQT2.bin"));
+    assert_eq!(
+        a.tag(b"PWV4", b"EXT").unwrap(),
+        include_bytes!("fixtures/captured-tag-PWV4.bin")
+    );
+    assert_eq!(
+        a.tag(b"PQT2", b"EXT").unwrap(),
+        include_bytes!("fixtures/captured-tag-PQT2.bin")
+    );
     assert!(a.tag(b"PWV6", b"2EX").is_none(), "no .2EX here");
-    assert!(a.tag(b"PSSI", b"EXT").is_none(), "not in the trimmed fixture");
+    assert!(
+        a.tag(b"PSSI", b"EXT").is_none(),
+        "not in the trimmed fixture"
+    );
 }
 
 #[test]
@@ -52,14 +91,22 @@ fn the_plain_cue_list_matches_the_capture() {
     // with no old-format cues. The fixture is the captured blob with the three
     // uninitialised tail bytes rekordbox leaked (0x640..0x643) cleared, since
     // they vary between captures and carry no cue data.
-    assert_eq!(blobs::cue_list_blob(), include_bytes!("fixtures/captured-cue-list.bin"));
+    assert_eq!(
+        blobs::cue_list_blob(),
+        include_bytes!("fixtures/captured-cue-list.bin")
+    );
 }
 
 #[test]
 fn the_extended_cue_list_matches_the_capture() {
     // The track's cues as `djmdCue` holds them: hot cues A–D and four
     // memory cues at the same places (rekordbox's auto cues).
-    let cue = |slot: u8, ms: u32| ExtendedCue { position_ms: ms, out_ms: 0, hot_slot: slot, comment: "CUE(Auto)".into() };
+    let cue = |slot: u8, ms: u32| ExtendedCue {
+        position_ms: ms,
+        out_ms: 0,
+        hot_slot: slot,
+        comment: "CUE(Auto)".into(),
+    };
     // Memory cues in rekordbox's table order, which the reply keeps.
     let cues = vec![
         cue(0, 2004),
@@ -78,9 +125,21 @@ fn the_extended_cue_list_matches_the_capture() {
 
 #[test]
 fn an_index_cue_becomes_an_extended_cue_by_its_hot_letter() {
-    let hot_d = Cue { id: 1, position_ms: 100, out_ms: 0, kind: 5, colour: 0 };
+    let hot_d = Cue {
+        id: 1,
+        position_ms: 100,
+        out_ms: 0,
+        kind: 5,
+        colour: 0,
+    };
     assert_eq!(ExtendedCue::from(&hot_d).hot_slot, 4, "kind 5 is D");
-    let memory = Cue { id: 2, position_ms: 200, out_ms: 900, kind: 0, colour: 0 };
+    let memory = Cue {
+        id: 2,
+        position_ms: 200,
+        out_ms: 900,
+        kind: 0,
+        colour: 0,
+    };
     let e = ExtendedCue::from(&memory);
     assert_eq!((e.hot_slot, e.out_ms), (0, 900));
     // A loop is marked 02 and carries its end.

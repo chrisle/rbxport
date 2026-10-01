@@ -14,7 +14,12 @@
 //! and tempo, so the deck's BPM readout says which one it loaded and the
 //! pytest can tell the first load from the second. Thirty seconds each:
 //! long enough to play for five and still be playing.
-#![allow(clippy::pedantic, clippy::print_stdout, clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::pedantic,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    clippy::expect_used
+)]
 
 use std::f32::consts::TAU;
 use std::path::Path;
@@ -31,9 +36,24 @@ struct Tone {
 
 /// In title order, which is the order the deck's TRACK list shows them.
 const TONES: [Tone; 3] = [
-    Tone { title: "01 Link Tone 220Hz", hz: 220.0, bpm: 124.0, key: "Am" },
-    Tone { title: "02 Link Tone 440Hz", hz: 440.0, bpm: 128.0, key: "Abm" },
-    Tone { title: "03 Link Tone 880Hz", hz: 880.0, bpm: 132.0, key: "B" },
+    Tone {
+        title: "01 Link Tone 220Hz",
+        hz: 220.0,
+        bpm: 124.0,
+        key: "Am",
+    },
+    Tone {
+        title: "02 Link Tone 440Hz",
+        hz: 440.0,
+        bpm: 128.0,
+        key: "Abm",
+    },
+    Tone {
+        title: "03 Link Tone 880Hz",
+        hz: 880.0,
+        bpm: 132.0,
+        key: "B",
+    },
 ];
 const SECONDS: u32 = 30;
 const RATE: u32 = 44_100;
@@ -50,12 +70,18 @@ fn main() {
     let audio_dir = out.join("audio");
     std::fs::create_dir_all(&audio_dir).expect("create the output directory");
 
-    let shape = Shape { tracks: TONES.len(), playlists: 1, tracks_per_playlist: TONES.len(), ..Shape::default() };
+    let shape = Shape {
+        tracks: TONES.len(),
+        playlists: 1,
+        tracks_per_playlist: TONES.len(),
+        ..Shape::default()
+    };
     let location = fixture::build(out, shape).expect("build the fixture");
 
     // Nonalphabetical keys and distinct artists exercise the actual sort and
     // nested BACK controls, not just an anonymous three-row flat list.
-    let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).expect("open fixture metadata");
+    let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite)
+        .expect("open fixture metadata");
     for (i, tone) in TONES.iter().enumerate() {
         let id = (i + 1).to_string();
         let artist = format!("Link Artist {}", i + 1);
@@ -63,7 +89,12 @@ fn main() {
         db.connection().execute("INSERT INTO djmdKey (ID, ScaleName, created_at, updated_at) VALUES (?1, ?2, '2026-09-20', '2026-09-20')", (&id, tone.key)).unwrap();
         db.connection().execute("INSERT INTO djmdArtist (ID, Name, created_at, updated_at) VALUES (?1, ?2, '2026-09-20', '2026-09-20')", (&id, &artist)).unwrap();
         db.connection().execute("INSERT INTO djmdAlbum (ID, Name, AlbumArtistID, created_at, updated_at) VALUES (?1, ?2, ?1, '2026-09-20', '2026-09-20')", (&id, &album)).unwrap();
-        db.connection().execute("UPDATE djmdContent SET KeyID = ?1, ArtistID = ?1, AlbumID = ?1 WHERE ID = ?2", (&id, fixture::track_id(i))).unwrap();
+        db.connection()
+            .execute(
+                "UPDATE djmdContent SET KeyID = ?1, ArtistID = ?1, AlbumID = ?1 WHERE ID = ?2",
+                (&id, fixture::track_id(i)),
+            )
+            .unwrap();
     }
     drop(db);
     let mut tracks = Vec::new();
@@ -81,15 +112,34 @@ fn main() {
             .tempo
             .beats
             .iter()
-            .map(|b| rbl_anlz::Beat { beat_number: b.beat_number, tempo_x100: b.tempo_x100, time_ms: b.time_ms })
+            .map(|b| rbl_anlz::Beat {
+                beat_number: b.beat_number,
+                tempo_x100: b.tempo_x100,
+                time_ms: b.time_ms,
+            })
             .collect();
         let columns: Vec<rbl_anlz::BandColumn> = analysis
             .waveform
             .columns
             .iter()
-            .map(|c| rbl_anlz::BandColumn { low: c.low, mid: c.mid, high: c.high, peak: c.peak })
+            .map(|c| rbl_anlz::BandColumn {
+                low: c.low,
+                mid: c.mid,
+                high: c.high,
+                peak: c.peak,
+            })
             .collect();
-        let files = rbl_anlz::author_with_overview(path, &beats, &columns, analysis.waveform.overview.as_slice().try_into().ok(), rbl_anlz::Existing { dat: None, ext: None, two_ex: None });
+        let files = rbl_anlz::author_with_overview(
+            path,
+            &beats,
+            &columns,
+            analysis.waveform.overview.as_slice().try_into().ok(),
+            rbl_anlz::Existing {
+                dat: None,
+                ext: None,
+                two_ex: None,
+            },
+        );
 
         let relative = format!("/PIONEER/USBANLZ/P{:03}/{:08X}/ANLZ0000.DAT", i, 10_000 + i);
         let dat = rbl_anlz::resolve(&location.share_root, &relative);
@@ -115,8 +165,12 @@ fn main() {
     }
 
     let master_db = out.join("master.db");
-    fixture::write_options_json(&out.join("options.json"), master_db.to_str().unwrap(), FIXTURE_PASSPHRASE)
-        .expect("write options.json");
+    fixture::write_options_json(
+        &out.join("options.json"),
+        master_db.to_str().unwrap(),
+        FIXTURE_PASSPHRASE,
+    )
+    .expect("write options.json");
 
     println!(
         "{}",
@@ -137,7 +191,11 @@ fn write_tone_wav(path: &Path, tone: &Tone) {
     for i in 0..frames {
         let t = i as f32 / RATE as f32;
         let since = i % period.max(1);
-        let click = if since < 600 { 0.7 * (1.0 - since as f32 / 600.0) } else { 0.0 };
+        let click = if since < 600 {
+            0.7 * (1.0 - since as f32 / 600.0)
+        } else {
+            0.0
+        };
         let sample = 0.25 * (TAU * tone.hz * t).sin() + click;
         data.extend_from_slice(&((sample.clamp(-1.0, 1.0) * 32_000.0) as i16).to_le_bytes());
     }

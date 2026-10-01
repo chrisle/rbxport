@@ -8,7 +8,9 @@
 //! looking every couple of seconds is far inside the idle budget, and a stick
 //! is seen within that long of arriving whether or not the window has focus.
 
-use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", test))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,7 +24,7 @@ pub const INTERVAL: Duration = Duration::from_secs(2);
 const SLICE: Duration = Duration::from_millis(250);
 
 /// Where macOS mounts everything that is not the boot volume.
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 const VOLUMES: &str = "/Volumes";
 
 /// A running mount watcher; dropping it stops the thread.
@@ -96,13 +98,26 @@ pub fn mounts() -> Vec<PathBuf> {
     platform_mounts()
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 fn platform_mounts() -> Vec<PathBuf> {
     entries_of(Path::new(VOLUMES))
 }
 
+/// Linux mount points are chosen by the desktop service and are not confined
+/// to one directory (`/media`, `/run/media`, or a manually chosen `/mnt`).
+/// The disk list already knows which of those are usable export volumes, so
+/// use it for the snapshot rather than watching a macOS-only directory.
+#[cfg(target_os = "linux")]
+fn platform_mounts() -> Vec<PathBuf> {
+    super::devices_from(&sysinfo::Disks::new_with_refreshed_list())
+        .into_iter()
+        .map(|device| device.mount_point)
+        .collect()
+}
+
 /// The entries of a volumes directory, sorted. Split out so a test can point
 /// it at a directory of its own.
+#[cfg(any(target_os = "macos", test))]
 fn entries_of(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -118,6 +133,11 @@ fn platform_mounts() -> Vec<PathBuf> {
         .map(|letter| PathBuf::from(format!("{}:\\", char::from(letter))))
         .filter(|root| root.exists())
         .collect()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+fn platform_mounts() -> Vec<PathBuf> {
+    Vec::new()
 }
 
 #[cfg(test)]

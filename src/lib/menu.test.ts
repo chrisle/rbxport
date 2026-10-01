@@ -19,6 +19,14 @@ describe("menu", () => {
     expect(resolveMenu("import", false)).toEqual({ action: "import" });
   });
 
+  it("treats importing a folder as the write it is", () => {
+    expect(menuCommand("import-folder")?.writes).toBe(true);
+    expect(resolveMenu("import-folder", true)).toEqual({
+      refused: "Editing is locked while rekordbox is running. Quit rekordbox to enable editing.",
+    });
+    expect(resolveMenu("import-folder", false)).toEqual({ action: "import-folder" });
+  });
+
   it("checks for updates whatever state the library is in", () => {
     // An update touches nothing in the library, so a read-only one is no
     // reason to refuse — whichever of the two reasons made it read-only.

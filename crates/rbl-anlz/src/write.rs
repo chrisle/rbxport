@@ -88,6 +88,14 @@ impl Default for AnlzBuilder {
     }
 }
 
+/// `PVBR` with no seek table: 401 zero words after a zero header word,
+/// which is what rekordbox itself writes for 65 of 400 reference `.DAT`
+/// files [OBS] — the ones with no VBR frames to index.
+#[must_use]
+pub fn vbr_table_zero_section() -> Section {
+    Section::new(b"PVBR", be32(0).to_vec(), vec![0; 401 * 4])
+}
+
 impl AnlzBuilder {
     pub fn new() -> Self {
         Self { header_extra: DEFAULT_HEADER_EXTRA.to_vec(), sections: Vec::new() }
@@ -150,11 +158,9 @@ impl AnlzBuilder {
         self
     }
 
-    /// `PVBR` with no seek table: 401 zero words after a zero header word,
-    /// which is what rekordbox itself writes for 65 of 400 reference `.DAT`
-    /// files [OBS] — the ones with no VBR frames to index.
+    /// Adds the zero VBR seek table to this builder.
     pub fn vbr_table_zero(&mut self) -> &mut Self {
-        self.sections.push(Section::new(b"PVBR", be32(0).to_vec(), vec![0; 401 * 4]));
+        self.sections.push(vbr_table_zero_section());
         self
     }
 

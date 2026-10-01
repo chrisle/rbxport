@@ -812,8 +812,19 @@ pub fn export_cancellable(
                 let mut parsed = rbl_anlz::parse(bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
                 let path_bytes = rbl_anlz::AnlzBuilder::new().path(&place.audio).finish();
                 let path = rbl_anlz::parse(&path_bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
-                parsed.sections.retain(|s| s.as_path().is_none());
+                // A DAT/EXT/2EX has one PPTH. Drop it by tag rather than by
+                // decoded value, so a malformed legacy path cannot survive
+                // alongside the replacement path.
+                parsed.sections.retain(|s| s.tag != rbl_core::FourCc::new(b"PPTH"));
                 parsed.sections.splice(0..0, path.sections);
+                // Older RBXport analysis files predate the PVBR section. A
+                // freshly initialized Pioneer DAT always writes it between
+                // PPTH and PQTZ, even when there are no VBR frames. Repair
+                // those stale files while exporting rather than asking the
+                // user to re-analyse every affected track.
+                if extension.eq_ignore_ascii_case("DAT") && parsed.section(b"PVBR").is_none() {
+                    parsed.sections.insert(1, rbl_anlz::write::vbr_table_zero_section());
+                }
                 parsed.sections = parsed.sections.iter().map(rbl_anlz::Section::with_export_phrase_mask).collect();
                 if let Some(cues) = &track.cues {
                     if extension == "DAT" || extension == "EXT" {

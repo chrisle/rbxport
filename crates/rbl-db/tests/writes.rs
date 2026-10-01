@@ -664,6 +664,29 @@ fn a_key_is_found_never_made() {
 }
 
 #[test]
+fn a_detected_key_is_added_when_the_library_has_not_seen_it() {
+    let mut f = fixture();
+    let before: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+
+    f.writer.ensure_detected_key("Fm").unwrap();
+    let key: (String, Option<i64>, i64, i64, i64, i64, Option<i64>) = f.conn().query_row(
+        "SELECT ScaleName, Seq, rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced, usn
+         FROM djmdKey WHERE ScaleName = 'Fm'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+    ).unwrap();
+    assert_eq!(key, ("Fm".to_owned(), None, 0, 0, 0, 0, None));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey WHERE ScaleName = 'Fm'"), 1);
+    let after: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    assert_eq!(after, before + 1);
+
+    // A repeat analysis uses the first key row rather than accumulating
+    // identical lookup records.
+    f.writer.ensure_detected_key("Fm").unwrap();
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey WHERE ScaleName = 'Fm'"), 1);
+}
+
+#[test]
 fn every_field_edit_bumps_the_usn_and_the_stamp() {
     let mut f = fixture();
     let t = track_id(9);
@@ -985,6 +1008,40 @@ fn relocating_leaves_the_analysis_and_memberships_alone() {
 }
 
 // ------------------------------------------------------------------- cues
+
+#[test]
+fn a_hot_cue_bank_slot_is_updated_atomically_and_missing_slots_are_refused() {
+    let mut f = fixture();
+    f.conn().execute_batch(
+        "CREATE TABLE djmdSongHotCueBanklist (
+             ID TEXT PRIMARY KEY, HotCueBanklistID TEXT, TrackNo INTEGER, ContentID TEXT,
+             InMsec INTEGER, OutMsec INTEGER, Color INTEGER, ColorTableIndex INTEGER,
+             ActiveLoop INTEGER, BeatLoopSize INTEGER, CueMicrosec INTEGER,
+             rb_local_deleted INTEGER, rb_local_usn INTEGER, updated_at TEXT
+         );
+         INSERT INTO djmdSongHotCueBanklist VALUES
+             ('bank-slot', '42', 1, '1', 100, NULL, 1, 2, 0, 0, 0, 0, 0, 'before');",
+    ).unwrap();
+    let cue = rbl_db::details::HotCueBankCue {
+        slot: 1, content: 2, in_ms: 1_000, out_ms: Some(2_000), color: 3,
+        color_table_index: 21, active_loop: true, beat_loop_size: 262_145, cue_microsec: 7,
+    };
+    let changed = f.writer.set_hot_cue_bank_cue("42", &cue).unwrap();
+    assert_eq!(changed.rows, 1);
+    let stored: (String, i64, Option<i64>, i64, i64, i64, i64, i64, i64, i64) = f.conn().query_row(
+        "SELECT ContentID, InMsec, OutMsec, Color, ColorTableIndex, ActiveLoop,
+                BeatLoopSize, CueMicrosec, rb_local_usn,
+                CAST(updated_at <> 'before' AS INTEGER)
+         FROM djmdSongHotCueBanklist WHERE ID = 'bank-slot'",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?)),
+    ).unwrap();
+    assert_eq!(stored, ("2".into(), 1_000, Some(2_000), 3, 21, 1, 262_145, 7, changed.usn, 1));
+    assert_eq!(f.one::<i64>("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]), changed.usn);
+    let missing = rbl_db::details::HotCueBankCue { slot: 2, ..cue };
+    assert!(matches!(f.writer.set_hot_cue_bank_cue("42", &missing), Err(DbError::WriteRefused(_))));
+    assert_eq!(f.one::<i64>("SELECT COUNT(*) FROM djmdSongHotCueBanklist", &[]), 1);
+}
 
 #[test]
 fn a_cue_is_written_in_the_shape_the_reference_library_shows() {

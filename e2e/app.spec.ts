@@ -479,6 +479,10 @@ test("resizing a column does not also re-sort the table", async ({ page }) => {
 
 test("a column can be dragged to a new position", async ({ page }) => {
   await page.goto("/");
+  // `goto` resolves before React has rendered the table. Establish the
+  // initial layout first so an empty pre-render snapshot cannot be compared
+  // against the post-drag columns.
+  await expect(page.getByRole("columnheader", { name: /BPM/ })).toBeVisible();
   const order = async () =>
     page.getByRole("columnheader").evaluateAll((h) => h.map((c) => c.textContent ?? ""));
 

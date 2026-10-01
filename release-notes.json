@@ -1,5 +1,21 @@
 [
   {
+    "version": "1.0.0-rc.12",
+    "date": "2026-09-30",
+    "changes": [
+      "(New) Import selected iTunes playlists into your library from the Sync Manager.",
+      "(New) The status bar shows a prompt when an update is ready to install.",
+      "(New) Open rbxport's TikTok from a link in the About pane.",
+      "(New) rbxport reports crashes automatically so failures can be diagnosed and fixed.",
+      "(New) Use LINK with the XDJ-RX3 over rear USB and correctly handle all-in-one players whose decks and mixer share one network address.",
+      "(Improved) Browsing a player's menus over LINK a second time is instant, as the menus are now cached.",
+      "(Improved) LINK browsing, sorting, and export compatibility with the XDJ-RX3 are more complete.",
+      "(Fixed) Key analysis now saves its result in new and sparsely imported libraries.",
+      "(Fixed) USB sync on macOS no longer reports a completed export as failed when an exFAT device does not support directory flushing.",
+      "(Fixed) On Linux, USB drives are detected reliably and diagnostics report the app's thread count."
+    ]
+  },
+  {
     "version": "1.0.0-rc.7",
     "date": "2026-09-29",
     "changes": [

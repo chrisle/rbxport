@@ -12,6 +12,8 @@ src-tauri/gen/
 # Private research and captured reference material. Never commit these.
 .agents/
 .claude/
+.codex/
+skills/
 bugs/
 docs/pre-release/
 design/reference/
@@ -38,6 +40,7 @@ crates/rbl-usbtest/
 crates/rbl-analysis/docs/grid-fixtures.md
 verification/
 CLAUDE.md
+AGENTS.md
 TODO.md
 work/
 

@@ -11,6 +11,7 @@
 export type MenuAction =
   | "settings"
   | "import"
+  | "import-folder"
   | "import-xml"
   | "import-itunes"
   | "export-xml"
@@ -34,6 +35,7 @@ export interface MenuCommand {
 const COMMANDS: Record<string, MenuCommand> = {
   settings: { action: "settings", writes: false },
   import: { action: "import", writes: true },
+  "import-folder": { action: "import-folder", writes: true },
   "import-xml": { action: "import-xml", writes: true },
   "import-itunes": { action: "import-itunes", writes: true },
   "export-xml": { action: "export-xml", writes: false },

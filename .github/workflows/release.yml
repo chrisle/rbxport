@@ -52,6 +52,36 @@ env:
   RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
+  release-source:
+    name: Verify release source
+    runs-on: [self-hosted, linux, x64]
+    env:
+      # Tag pushes and explicit tag rebuilds must originate from main. A
+      # preview dispatch intentionally has no release tag and may use any ref.
+      REQUIRE_MAIN: ${{ github.event_name == 'push' || inputs.release_tag != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+          fetch-depth: 0
+
+      - name: Require a mainline release tag
+        run: |
+          set -euo pipefail
+          if [ "$REQUIRE_MAIN" != true ]; then
+            echo "Development preview: no release tag to validate."
+            exit 0
+          fi
+
+          git fetch --no-tags origin main
+          source_commit="$(git rev-parse HEAD)"
+          if ! git merge-base --is-ancestor "$source_commit" origin/main; then
+            echo "Release tag $RELEASE_TAG points to $source_commit, which is not on main." >&2
+            exit 1
+          fi
+
+          echo "Release tag $RELEASE_TAG points to mainline commit $source_commit."
+
   # Gate the builds on the same checks CI used to run separately. Folded in
   # here, not left as their own workflow, so a broken build never publishes:
   # a separate CI run had no dependency GitHub Actions could enforce across
@@ -61,6 +91,7 @@ jobs:
   # them to run one after the other on that host instead of racing it.
   rust:
     name: Rust tests
+    needs: release-source
     runs-on: [self-hosted, linux, x64]
     env:
       # Tests must never be able to open the installed library read-write.
@@ -128,6 +159,7 @@ jobs:
   # Windows-native perl.
   windows:
     name: Win compile check
+    needs: release-source
     runs-on: [self-hosted, windows, x64]
     steps:
       # `shell: bash` resolves bash from PATH, and on a Windows desktop the
@@ -218,6 +250,7 @@ jobs:
   # also the WebKit the number is supposed to be about.
   frontend:
     name: UI tests
+    needs: release-source
     runs-on: [self-hosted, macos, arm64]
     steps:
       - uses: actions/checkout@v4

@@ -146,6 +146,12 @@ fn reads_waveform_stride_from_the_tag_header() {
 }
 
 #[test]
+fn reads_pwv6s_three_byte_stride_from_its_short_header() {
+    let anlz = parse(&build(&[(b"PWV6", vec![0, 0, 0, 3, 0, 0, 0, 2], vec![1; 6])])).unwrap();
+    assert_eq!(anlz.waveform(b"PWV6").map(|(stride, _)| stride), Some(3));
+}
+
+#[test]
 fn a_section_longer_than_the_file_is_reported() {
     let (h, p) = beat_grid_parts(&[(1, 12800, 0)]);
     let mut file = build(&[(b"PQTZ", h, p)]);
@@ -156,6 +162,20 @@ fn a_section_longer_than_the_file_is_reported() {
         parse(&file),
         Err(AnlzError::BadSectionLength { .. })
     ));
+}
+
+#[test]
+fn rejects_a_file_whose_declared_length_does_not_match() {
+    let mut file = build(&[]);
+    file[8..12].copy_from_slice(&27_u32.to_be_bytes());
+    assert!(matches!(parse(&file), Err(AnlzError::BadFileLength { declared: 27, actual: 28 })));
+}
+
+#[test]
+fn rejects_a_section_header_that_runs_past_its_frame() {
+    let mut file = build(&[(b"PWAV", vec![0; 8], vec![1, 2, 3])]);
+    file[32..36].copy_from_slice(&24_u32.to_be_bytes());
+    assert!(matches!(parse(&file), Err(AnlzError::BadSectionHeaderLength { .. })));
 }
 
 #[test]
@@ -346,9 +366,9 @@ fn replacing_the_grid_leaves_every_other_section_alone() {
 }
 
 #[test]
-fn a_file_with_no_grid_gains_one_after_its_path() {
+fn a_file_with_no_grid_gains_one_after_its_required_prefix() {
     let mut builder = rbl_anlz::AnlzBuilder::new();
-    builder.path("/Music/one.mp3");
+    builder.path("/Music/one.mp3").vbr_table_zero();
     builder.waveform_preview(b"PWAV", &[1, 2, 3]);
     let parsed = rbl_anlz::parse(&builder.finish()).unwrap();
     assert!(parsed.beat_grid().is_none());
@@ -360,9 +380,10 @@ fn a_file_with_no_grid_gains_one_after_its_path() {
     };
     let grown = rbl_anlz::parse(&parsed.with_beat_grid(&[beat])).unwrap();
     assert_eq!(grown.beat_grid().unwrap(), vec![beat]);
-    // PPTH first, then the grid — where every real .DAT carries it.
+    // PPTH and PVBR precede the grid in a freshly initialized DAT.
     assert_eq!(grown.sections[0].tag.as_str(), "PPTH");
-    assert_eq!(grown.sections[1].tag.as_str(), "PQTZ");
+    assert_eq!(grown.sections[1].tag.as_str(), "PVBR");
+    assert_eq!(grown.sections[2].tag.as_str(), "PQTZ");
     assert!(!grown.has_extended_grid());
 }
 
