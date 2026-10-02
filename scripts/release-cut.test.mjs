@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { candidateAction, checkpointStatus, journalIdentity, nextVersion, parseArgs, taggedRunAction } from "./release-cut.mjs";
+import { candidateAction, checkpointStatus, journalIdentity, nextVersion, parseArgs, reconcileCheckpoint, taggedRunAction } from "./release-cut.mjs";
 
 test("chooses a new rc exactly once from a tagged source", () => {
   assert.deepEqual(candidateAction({ sourceVersion: "1.0.0-rc.16", tagsAtHead: ["v1.0.0-rc.16"] }), {
@@ -63,4 +63,9 @@ test("mocked journal identity blocks stale sha and manifest version", () => {
 test("mocked partial prepare is preserved and fails closed", () => {
   const before = { "Cargo.toml": "a" };
   assert.equal(checkpointStatus({ state: "preparing", before }, { "Cargo.toml": "partial" }), "refuse");
+});
+
+test("mocked crash checkpoints reconcile only known commit and pre-ff states", () => {
+  assert.equal(reconcileCheckpoint({ state: "prepared", head: "candidate", candidate: "candidate" }), "committed");
+  assert.equal(reconcileCheckpoint({ state: "switching-main", head: "old-main", candidate: "candidate", main: "old-main" }), "fast-forward-main");
 });

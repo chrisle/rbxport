@@ -28,6 +28,11 @@ export function taggedRunAction(runs, sha) {
 export function journalIdentity(record, { head, version, originDev }) {
   return record.sha === head && record.version === version && (originDev === undefined || originDev === record.sha);
 }
+export function reconcileCheckpoint({ state, head, candidate, main }) {
+  if (state === "prepared" && head === candidate) return "committed";
+  if (state === "switching-main" && head === main) return "fast-forward-main";
+  return "continue";
+}
 
 export function nextVersion(version) {
   const match = VERSION.exec(version);
@@ -156,6 +161,15 @@ function finishPrepared(record) {
     record = journal();
   }
   if (record.state === "prepared") {
+    if (!command("git", ["status", "--porcelain"]) && command("git", ["rev-parse", "HEAD"]) !== record.sha) {
+      const message = command("git", ["log", "-1", "--format=%s"]);
+      if (message === `chore(release): prepare ${record.version}` && sourceVersion() === record.version) {
+        record = { ...record, state: "committed", sha: command("git", ["rev-parse", "HEAD"]) };
+        saveJournal(record);
+      }
+    }
+  }
+  if (record.state === "prepared") {
     if (checkpointStatus(record, snapshot()) !== "commit") throw new Error("candidate files changed after preparation; refusing to stage them");
     command("git", ["add", "Cargo.toml", "Cargo.lock", "package.json", "src-tauri/tauri.conf.json", "release-notes.json"]);
     command("git", ["commit", "-m", `chore(release): prepare ${record.version}`]);
@@ -202,7 +216,12 @@ export async function runReleaseCut(options) {
     const branch = command("git", ["branch", "--show-current"]);
     const head = command("git", ["rev-parse", "HEAD"]);
     const originDev = branch === "dev" ? command("git", ["rev-parse", "origin/dev"]) : undefined;
-    if (!journalIdentity(record, { head, version: sourceVersion(), originDev })) throw new Error("journaled candidate SHA/version no longer matches checkout; manual recovery required");
+    if (record.state === "switching-main" && branch === "main" && head !== record.sha && sourceVersion() === record.version) {
+      command("git", ["merge", "--ff-only", record.sha]);
+      command("git", ["push", "origin", "main"]);
+      record = { ...record, state: "main" };
+      saveJournal(record);
+    } else if (!journalIdentity(record, { head, version: sourceVersion(), originDev })) throw new Error("journaled candidate SHA/version no longer matches checkout; manual recovery required");
   }
   if (record && options.resume && record.state === "tagged") {
     if (command("git", ["rev-parse", "origin/main"]) !== record.sha) throw new Error("tagged candidate is not exactly origin/main");
@@ -250,7 +269,9 @@ export async function runReleaseCut(options) {
   const peeled = command("git", ["ls-remote", "--tags", "origin", `refs/tags/${tag}^{}`]);
   if (peeled && !peeled.startsWith(sha)) throw new Error(`${tag} already exists at another commit`);
   if (!peeled) {
-    command("git", ["tag", "-a", tag, "-m", `rbxport ${candidate.version}`, sha]);
+    const local = command("git", ["rev-parse", "-q", "--verify", `${tag}^{}`], { allowFailure: true });
+    if (local && local !== sha) throw new Error(`${tag} exists locally at another commit`);
+    if (!local) command("git", ["tag", "-a", tag, "-m", `rbxport ${candidate.version}`, sha]);
     command("git", ["push", "origin", tag]);
   }
   saveJournal({ ...record, sha, state: "tagged" });
