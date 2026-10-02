@@ -190,7 +190,13 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
  * rows would promise a feature that is not coming, which is a different
  * thing from one not built yet.
  */
-export function treeMenu(kind: "playlist" | "smartPlaylist" | "folder"): readonly MenuRow<TreeAction>[] {
+export function treeMenu(kind: "playlist" | "smartPlaylist" | "folder" | "collection"): readonly MenuRow<TreeAction>[] {
+  if (kind === "collection") {
+    return [
+      { label: "Create New Playlist", action: "createPlaylist" },
+      { label: "Create New Folder", action: "createFolder" },
+    ];
+  }
   const folder = kind === "folder";
   const smart = kind === "smartPlaylist";
   if (folder) {

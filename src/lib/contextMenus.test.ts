@@ -83,6 +83,13 @@ describe("trackMenuFor", () => {
 });
 
 describe("treeMenu", () => {
+  it("offers root creation actions on the Playlists collection", () => {
+    expect(entriesOf(treeMenu("collection")).map((e) => e.label)).toEqual([
+      "Create New Playlist",
+      "Create New Folder",
+    ]);
+  });
+
   it("is rekordbox's own list over a playlist, in its own order, less the cloud", () => {
     // docs/screenshots context-menu-tree@2x: thirteen entries in eight groups.
     // The three cloud rows shared the first group with Export Playlist, and

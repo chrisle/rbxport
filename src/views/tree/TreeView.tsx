@@ -223,7 +223,7 @@ const Row = memo(function Row({
       onContextMenu={(e) => {
         // Only the kinds that have a menu: the fixed roots and the device
         // nodes are not playlists and have nothing to offer.
-        if ((node.kind !== "playlist" && node.kind !== "smartPlaylist" && node.kind !== "folder") || !onMenu) return;
+        if ((node.kind !== "collection" && node.kind !== "playlist" && node.kind !== "smartPlaylist" && node.kind !== "folder") || !onMenu) return;
         e.preventDefault();
         onMenu(node, { x: e.clientX, y: e.clientY });
       }}
@@ -593,9 +593,9 @@ export const TreeView = memo(function TreeView({
           x={menu.x}
           y={menu.y}
           rows={treeMenu(
-            menu.node.kind === "folder" ? "folder" : menu.node.kind === "smartPlaylist" ? "smartPlaylist" : "playlist",
+            menu.node.kind === "collection" ? "collection" : menu.node.kind === "folder" ? "folder" : menu.node.kind === "smartPlaylist" ? "smartPlaylist" : "playlist",
           )}
-          label={menu.node.kind === "folder" ? "Folder" : "Playlist"}
+          label={menu.node.kind === "folder" ? "Folder" : menu.node.kind === "collection" ? "Playlists" : "Playlist"}
           context={{ inPlaylist: true, hasFile: true, readOnly }}
           onChoose={(action) => {
             switch (action) {
