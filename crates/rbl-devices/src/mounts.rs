@@ -154,7 +154,7 @@ mod tests {
         assert_eq!(looked, vec![dir.path().join("ALPHA"), dir.path().join("ZED")]);
         // Somewhere that is not there lists nothing rather than failing: a
         // Mac with no volume mounted has no `/Volumes` entries either.
-        assert!(entries_of(&dir.path().join("missing")).is_empty());
+        assert_eq!(entries_of(&dir.path().join("missing")), [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
