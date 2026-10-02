@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { candidateAction, nextVersion, parseArgs } from "./release-cut.mjs";
+import { candidateAction, checkpointStatus, nextVersion, parseArgs } from "./release-cut.mjs";
 
 test("chooses a new rc exactly once from a tagged source", () => {
   assert.deepEqual(candidateAction({ sourceVersion: "1.0.0-rc.16", tagsAtHead: ["v1.0.0-rc.16"] }), {
@@ -33,4 +33,12 @@ test("rejects ambiguous untagged candidates and invalid notes", () => {
 
 test("dry runs cannot also resume a publish candidate", () => {
   assert.throws(() => parseArgs(["--dry-run", "--resume"]), /cannot be combined/);
+});
+
+test("checkpoint recovery refuses edits even to release-owned files", () => {
+  const before = { "Cargo.toml": "a", "Cargo.lock": "b" };
+  const after = { "Cargo.toml": "c", "Cargo.lock": "d" };
+  assert.equal(checkpointStatus({ state: "preparing", before }, before), "retry");
+  assert.equal(checkpointStatus({ state: "prepared", after }, after), "commit");
+  assert.equal(checkpointStatus({ state: "prepared", after }, { ...after, "Cargo.toml": "user" }), "refuse");
 });
