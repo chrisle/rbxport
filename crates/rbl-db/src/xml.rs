@@ -439,7 +439,7 @@ mod tests {
         let names: Vec<(&str, bool, usize)> = library.nodes.iter().map(|n| (n.name.as_str(), n.folder, n.depth)).collect();
         assert_eq!(names, vec![("Sets", true, 0), ("Warm up", false, 1), ("Loose", false, 0)]);
         assert_eq!(library.nodes[1].track_ids, vec!["1", "2"]);
-        assert!(XmlLibrary::parse("<html/>").tracks.is_empty());
+        assert_eq!(XmlLibrary::parse("<html/>").tracks, [] as [XmlTrack; 0]);
     }
 
     #[test]
@@ -482,7 +482,7 @@ mod tests {
         assert_eq!(cut.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["3"]);
 
         // An out-of-range index is ignored rather than panicking.
-        assert!(subset(&library, &std::collections::BTreeSet::from([99])).nodes.is_empty());
+        assert_eq!(subset(&library, &std::collections::BTreeSet::from([99])).nodes, [] as [XmlNode; 0]);
     }
 
     #[test]

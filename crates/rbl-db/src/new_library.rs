@@ -406,7 +406,7 @@ mod tests {
         let backups = tempfile::tempdir().unwrap();
         let mut writer = crate::write::Writer::open(location, backups.path()).unwrap();
         let id = writer.create_playlist("First", "root").unwrap();
-        assert!(!id.is_empty());
+        assert_ne!(id, "");
         let usn: i64 = writer
             .library()
             .connection()

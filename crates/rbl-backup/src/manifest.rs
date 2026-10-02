@@ -70,7 +70,7 @@ mod tests {
     fn older_manifests_default_the_newer_fields_and_unknown_files_are_refused() {
         let old = Manifest::parse(br#"{"version":1,"library":"/lib/master.db","created_at":5,"bytes":9}"#).unwrap();
         assert!(!old.includes_artwork);
-        assert!(old.library_files.is_empty());
+        assert_eq!(old.library_files, [] as [std::path::PathBuf; 0]);
         assert!(Manifest::parse(br#"{"version":3,"library":"/l","created_at":5,"bytes":9}"#).is_err());
         assert!(Manifest::parse(br#"{"version":2,"library":"/l","created_at":5,"bytes":9,"library_files":["../x"]}"#).is_err());
         assert!(Manifest::parse(b"not json").is_err());
