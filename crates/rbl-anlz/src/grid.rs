@@ -235,6 +235,6 @@ mod tests {
         assert!(validate(&grid(),None,Edit::Tempo{bpm_x100:3999,anchor_ms:0}).is_err());
         let fast: Vec<_> = grid().iter().map(|b|Beat{tempo_x100:25000,..*b}).collect();
         assert!(validate(&fast,None,Edit::Double).is_err());
-        assert!(apply(&[],Edit::Double).is_empty());
+        assert_eq!(apply(&[],Edit::Double), [] as [Beat; 0]);
     }
 }

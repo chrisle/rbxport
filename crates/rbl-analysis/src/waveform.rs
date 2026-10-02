@@ -315,7 +315,7 @@ mod pack_tests {
         let w = wave(&[(0, 0, 0, 10), (0, 0, 0, 200), (0, 0, 0, 30), (0, 0, 0, 40)]);
         let r = w.reduced(2);
         assert_eq!(r.iter().map(|c| c.peak).collect::<Vec<_>>(), vec![200, 40]);
-        assert!(w.reduced(0).is_empty());
+        assert_eq!(w.reduced(0), [] as [WaveformColumn; 0]);
         assert_eq!(w.reduced(8).len(), 8, "more buckets than columns still yields every bucket");
     }
 

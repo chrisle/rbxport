@@ -273,7 +273,7 @@ mod tests {
             },
         ];
         let dat = sections(&cues, false);
-        assert!(dat[0].payload.is_empty());
+        assert_eq!(dat[0].payload, [] as [u8; 0]);
         assert_eq!(&dat[1].payload[16..20], &4_u32.to_be_bytes());
         let ext = sections(&cues, true);
         let decoded = ext[2].as_cue_entries().unwrap();

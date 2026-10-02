@@ -401,7 +401,7 @@ mod tests {
         assert_eq!(overview.len(), 1200);
         assert_eq!(overview[600].peak, 200, "the kick survives the resample");
         assert_eq!(resample(&[], 4), vec![BandColumn::default(); 4]);
-        assert!(resample(&columns, 0).is_empty());
+        assert_eq!(resample(&columns, 0), [] as [BandColumn; 0]);
     }
 
     #[test]
