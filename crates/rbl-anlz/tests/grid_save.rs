@@ -25,8 +25,8 @@ fn renumbering_preserves_payload_and_updates_checksum() {
 fn retiming_or_an_invalid_old_checksum_clears_payload() {
     let (file,old)=fixture();let mut new=old.clone();new[1].time_ms+=1;
     let saved=parse(&file.with_extended_grid_edit(&old,&new,0).unwrap()).unwrap();
-    assert!(saved.section(b"PQT2").unwrap().payload.is_empty());
+    assert_eq!(saved.section(b"PQT2").unwrap().payload, [] as [u8; 0]);
     let mut bad=file.clone();bad.sections[0].header[32]=1;
     let saved=parse(&bad.with_extended_grid_edit(&old,&old,0).unwrap()).unwrap();
-    assert!(saved.section(b"PQT2").unwrap().payload.is_empty());
+    assert_eq!(saved.section(b"PQT2").unwrap().payload, [] as [u8; 0]);
 }

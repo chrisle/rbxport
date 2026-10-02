@@ -2154,7 +2154,10 @@ mod tests {
         // Silence or tiny background fluctuations cannot replace those hits.
         for level in [0.0, 0.001] {
             let quiet: Vec<f64> = values.iter().map(|v| if *v > 0.0 { level } else { 0.0 }).collect();
-            assert!(walk_beats(Reader { values: &quiet, ..reader }, a, b, 1000, end).is_empty());
+            assert_eq!(
+                walk_beats(Reader { values: &quiet, ..reader }, a, b, 1000, end),
+                [] as [(f64, f64); 0]
+            );
         }
     }
 

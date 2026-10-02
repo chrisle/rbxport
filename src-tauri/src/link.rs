@@ -726,7 +726,7 @@ mod grid_offset_tests {
         let catalog = rbl_link::IndexCatalog::new(Arc::new(source), rbl_link::Played::default());
         // The fixture's own histories are not the menu.
         assert!(!state.library().unwrap().histories().is_empty());
-        assert!(catalog.list(&Query::Histories).is_empty());
+        assert_eq!(catalog.list(&Query::Histories), [] as [rbl_dbserver::catalog::Row; 0]);
 
         let id = rbl_db::fixture::track_id(1);
         let track: u32 = id.parse().unwrap();
@@ -748,7 +748,7 @@ mod grid_offset_tests {
         assert_eq!(histories.members[index].len(), 1);
 
         assert!(catalog.edit(&rbl_link::Edit::HistoryRemove { track }));
-        assert!(catalog.list(&Query::Tracks { scope: TrackScope::History(*session), sort: Sort::Default }).is_empty());
+        assert_eq!(catalog.list(&Query::Tracks { scope: TrackScope::History(*session), sort: Sort::Default }), [] as [rbl_dbserver::catalog::Row; 0]);
     }
 
     #[test]

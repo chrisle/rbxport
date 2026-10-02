@@ -500,9 +500,9 @@ mod tests {
 
     #[test]
     fn up_to_date_or_ahead_gives_nothing() {
-        assert!(changes_between(LOG, &v("0.4.0"), &v("0.4.0")).is_empty());
-        assert!(changes_between(LOG, &v("0.5.0"), &v("0.4.0")).is_empty());
-        assert!(changes_between("", &v("0.1.0"), &v("0.4.0")).is_empty());
+        assert_eq!(changes_between(LOG, &v("0.4.0"), &v("0.4.0")), [] as [ChangeDto; 0]);
+        assert_eq!(changes_between(LOG, &v("0.5.0"), &v("0.4.0")), [] as [ChangeDto; 0]);
+        assert_eq!(changes_between("", &v("0.1.0"), &v("0.4.0")), [] as [ChangeDto; 0]);
     }
 
     #[test]
@@ -557,7 +557,7 @@ mod tests {
         assert_eq!(changes[0].version, "0.2.0");
         // A target the changelog has no section for: nothing to show, and
         // nothing older shown in its place.
-        assert!(changes_between(LOG, &v("0.4.0"), &v("0.4.1")).is_empty());
+        assert_eq!(changes_between(LOG, &v("0.4.0"), &v("0.4.1")), [] as [ChangeDto; 0]);
     }
 
     #[test]

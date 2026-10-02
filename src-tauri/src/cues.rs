@@ -333,7 +333,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.kind, ErrorKind::Malformed);
         f.reload(&track);
-        assert!(f.cues(&track).is_empty());
+        assert_eq!(f.cues(&track), [] as [rbl_index::Cue; 0]);
     }
 
     #[test]
@@ -365,7 +365,7 @@ mod tests {
         let deleted = apply(&mut f.writer, CueEdit::Delete { cue: added.cue.clone() }).unwrap();
         assert_eq!(deleted.track, track);
         f.reload(&deleted.track);
-        assert!(f.cues(&track).is_empty());
+        assert_eq!(f.cues(&track), [] as [rbl_index::Cue; 0]);
     }
 
     #[test]
@@ -446,7 +446,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.kind, ErrorKind::ReadOnly);
         f.reload(&track);
-        assert!(f.cues(&track).is_empty());
+        assert_eq!(f.cues(&track), [] as [rbl_index::Cue; 0]);
     }
 
     #[test]
@@ -488,6 +488,6 @@ mod tests {
         // Sixteen slots: the seventeenth memory cue has nowhere to go.
         let many: Vec<Cue> = (0..17).map(|i| cue(i, 0, i * 1000, 0)).collect();
         assert_eq!(conversion_plan(&many).len(), 16);
-        assert!(conversion_plan(&[cue(1, 1, 0, 0)]).is_empty());
+        assert_eq!(conversion_plan(&[cue(1, 1, 0, 0)]), [] as [(char, u32, u32); 0]);
     }
 }

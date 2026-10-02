@@ -754,7 +754,7 @@ mod tests {
         assert!(beats.iter().any(|b| b.time_ms == 500), "the anchor remains, with one preceding beat filled");
         assert_eq!(beats[2].time_ms, 900);
         assert!(beats.iter().all(|b| b.tempo_x100 == 15_000));
-        assert!(f.ext().section(b"PQT2").unwrap().payload.is_empty());
+        assert_eq!(f.ext().section(b"PQT2").unwrap().payload, [] as [u8; 0]);
         let bpm: u32 = state.read_db(|db| Ok(db.connection().query_row(
             "SELECT BPM FROM djmdContent WHERE ID=?1", [Fixture::track()], |r| r.get(0))?)).unwrap();
         assert_eq!(bpm, 15_000);
@@ -813,7 +813,7 @@ mod tests {
     fn a_nudge_rewrites_the_grid_empties_the_extended_grid_and_leaves_the_row() {
         let mut f = open();
         let before_ext = f.ext();
-        assert!(!before_ext.section(b"PQT2").unwrap().payload.is_empty());
+        assert_ne!(before_ext.section(b"PQT2").unwrap().payload, [] as [u8; 0]);
 
         let outcome = f.edit(GridEdit::Nudge { ms: 20 });
         assert!(outcome.written);
@@ -829,7 +829,7 @@ mod tests {
         assert_eq!(dat.path().as_deref(), Some("/x.mp3"));
         assert_eq!(dat.sections.len(), 5);
         let ext = f.ext();
-        assert!(ext.section(b"PQT2").unwrap().payload.is_empty());
+        assert_eq!(ext.section(b"PQT2").unwrap().payload, [] as [u8; 0]);
         assert_eq!(ext.sections.len(), before_ext.sections.len());
         assert_eq!(ext.sections[0], before_ext.sections[0]);
     }
