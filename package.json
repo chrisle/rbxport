@@ -22,7 +22,8 @@
     "budget": "tsx scripts/check-bundle-size.ts",
     "icons": "tsx scripts/build-ui-icons.ts",
     "locales": "node scripts/build-locales.mjs",
-    "release:preflight": "node scripts/release-preflight.mjs"
+    "release:preflight": "node scripts/release-preflight.mjs",
+    "release:cut": "node scripts/release-cut.mjs"
   },
   "dependencies": {
     "@sentry/react": "^11.0.0",

@@ -198,6 +198,24 @@ retry the same source; do not bump the version merely to retry. If the source
 needs a correction, make a new validated version commit and tag that new
 immutable version.
 
+For an operator starting from a ready, clean, synchronized `dev`, use one
+command instead of performing those steps by hand:
+
+```sh
+pnpm release:cut -- --note "(Fixed) Describe the shipped change"
+```
+
+It chooses the next unused `-rc.N` once (rc16 becomes rc17), writes and commits
+the version and notes, dispatches and waits for the non-publishing Validate
+workflow for that exact SHA, fast-forwards `main`, tags once, waits for Release,
+and verifies the public feed and installer URLs. `--version X.Y.Z-rc.N` selects
+an explicit candidate and `--dry-run` performs only prerequisite/candidate
+inspection. If a process stopped after preparing an untagged candidate, use
+`--resume`; it never bumps again. A failed or partial tag publication is
+fail-closed: inspect and either fix the source in a new version or rerun the
+existing Release tag manually for a transient failure. The command never merges
+pull requests, force-pushes, prints secrets, or changes Jira.
+
 `pnpm build` obfuscates the app's own JavaScript and omits source maps.
 `pnpm dev` stays readable. Obfuscation makes the bundle harder to read but
 protects no secrets, so none go in the frontend.
