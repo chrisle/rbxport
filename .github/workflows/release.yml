@@ -259,6 +259,12 @@ jobs:
     name: Rust tests
     needs: [prepare, release-source]
     runs-on: [self-hosted, linux, x64]
+    # apt and the host package database are shared by ARC's otherwise
+    # isolated runners, so parallel validation runs cannot safely provision
+    # them at the same time.
+    concurrency:
+      group: rbxport-validation-linux
+      cancel-in-progress: false
     env:
       # Tests must never be able to open the installed library read-write.
       # This is the same switch the writer checks.
@@ -326,6 +332,9 @@ jobs:
     # concurrently by two jobs from the same validation run.
     needs: [prepare, rust]
     runs-on: [self-hosted, linux, x64]
+    concurrency:
+      group: rbxport-validation-linux
+      cancel-in-progress: false
     env:
       RB_LITE_TEST: "1"
     steps:
@@ -373,6 +382,9 @@ jobs:
     name: Win compile check
     needs: [prepare, release-source]
     runs-on: [self-hosted, windows, x64]
+    concurrency:
+      group: rbxport-validation-windows
+      cancel-in-progress: false
     steps:
       # `shell: bash` resolves bash from PATH, and on a Windows desktop the
       # WindowsApps WSL stub shadows Git's bash. WSL bash cannot see the
@@ -466,6 +478,11 @@ jobs:
     name: UI tests
     needs: [prepare, release-source]
     runs-on: [self-hosted, macos, arm64]
+    # Playwright's configured preview port is host-global. One UI test job
+    # at a time prevents separate ARC runners from competing for it.
+    concurrency:
+      group: rbxport-validation-macos
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
