@@ -8,6 +8,12 @@ test("chooses a new rc exactly once from a tagged source", () => {
   });
 });
 
+test("chooses the next rc when dev is ahead of an older source-version tag", () => {
+  assert.deepEqual(candidateAction({ sourceVersion: "1.0.0-rc.16", tagsAtHead: [], usedTags: ["v1.0.0-rc.16"] }), {
+    action: "prepare", version: "1.0.0-rc.17",
+  });
+});
+
 test("resumes an untagged candidate without another version bump", () => {
   assert.deepEqual(candidateAction({ sourceVersion: "1.0.0-rc.17", tagsAtHead: [], resume: true }), {
     action: "resume", version: "1.0.0-rc.17",

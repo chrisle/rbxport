@@ -30,12 +30,13 @@ export function parseArgs(args) {
   return options;
 }
 
-export function candidateAction({ sourceVersion, tagsAtHead, version, resume }) {
+export function candidateAction({ sourceVersion, tagsAtHead, usedTags = tagsAtHead, version, resume }) {
   const candidate = version ?? nextVersion(sourceVersion);
   if (tagsAtHead.includes(`v${sourceVersion}`)) {
     if (resume) return { action: "resume-tag", version: sourceVersion };
     return { action: "prepare", version: candidate };
   }
+  if (usedTags.includes(`v${sourceVersion}`)) return { action: "prepare", version: candidate };
   if (resume || version === sourceVersion) return { action: "resume", version: sourceVersion };
   throw new Error(`HEAD is already an untagged ${sourceVersion} candidate; use --resume or --version ${sourceVersion}`);
 }
@@ -117,7 +118,8 @@ export async function runReleaseCut(options) {
   assertReady();
   const source = sourceVersion();
   const tags = command("git", ["tag", "--points-at", "HEAD", "--list", "v*"]).split("\n").filter(Boolean);
-  const candidate = candidateAction({ sourceVersion: source, tagsAtHead: tags, version: options.version, resume: options.resume });
+  const usedTags = command("git", ["tag", "--list", `v${source}`]).split("\n").filter(Boolean);
+  const candidate = candidateAction({ sourceVersion: source, tagsAtHead: tags, usedTags, version: options.version, resume: options.resume });
   console.log(`${candidate.action} candidate v${candidate.version}`);
   if (options.dryRun) return;
   if (candidate.action === "resume-tag") {
