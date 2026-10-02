@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readReleaseNotes } from "./release-notes.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const VERSION = /^(\d+)\.(\d+)\.(\d+)-rc\.(\d+)$/;
 const CHANGE = /^\((New|Fixed|Improved)\)\s+\S/;
+const JOURNAL = new URL("../.git/rbxport-release-cut.json", import.meta.url);
+const PREPARED_FILES = new Set(["Cargo.toml", "Cargo.lock", "package.json", "src-tauri/tauri.conf.json", "release-notes.json"]);
 
 export function nextVersion(version) {
   const match = VERSION.exec(version);
@@ -63,11 +65,19 @@ function sourceVersion() {
 function date() { return new Date().toISOString().slice(0, 10); }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-function assertReady() {
-  if (command("git", ["status", "--porcelain"])) throw new Error("working tree is dirty");
-  if (command("git", ["branch", "--show-current"]) !== "dev") throw new Error("run release:cut from checked-out dev");
+function journal() { return existsSync(JOURNAL) ? JSON.parse(readFileSync(JOURNAL, "utf8")) : null; }
+function saveJournal(record) { writeFileSync(JOURNAL, `${JSON.stringify(record, null, 2)}\n`); }
+function clearJournal() { if (existsSync(JOURNAL)) unlinkSync(JOURNAL); }
+
+function assertReady(resume, record) {
+  const dirty = command("git", ["status", "--porcelain"]);
+  const changed = dirty.split("\n").filter(Boolean).map((line) => line.slice(3));
+  const recoverableDirty = resume && record?.state === "prepared" && changed.length > 0 && changed.every((path) => PREPARED_FILES.has(path));
+  if (dirty && !recoverableDirty) throw new Error("working tree is dirty outside this release candidate");
+  const branch = command("git", ["branch", "--show-current"]);
+  if (branch !== "dev" && !(resume && record && branch === "main")) throw new Error("run release:cut from checked-out dev");
   command("git", ["fetch", "origin", "dev", "main", "--tags"]);
-  if (command("git", ["rev-parse", "HEAD"]) !== command("git", ["rev-parse", "origin/dev"])) {
+  if (!record && command("git", ["rev-parse", "HEAD"]) !== command("git", ["rev-parse", "origin/dev"])) {
     throw new Error("local dev is not exactly origin/dev");
   }
   const active = JSON.parse(command("gh", ["run", "list", "--workflow", "Release", "--limit", "30", "--json", "status,databaseId"]) || "[]")
@@ -78,14 +88,19 @@ function assertReady() {
 function prepare(version, notes, dryRun) {
   if (!notes.length) throw new Error("a new version needs at least one --note; the command will not invent release notes");
   if (dryRun) return;
+  saveJournal({ version, state: "preparing" });
   const path = new URL("../release-notes.json", import.meta.url);
   const existing = readReleaseNotes(path);
   if (existing.some((entry) => entry.version === version)) throw new Error(`release-notes.json already contains ${version}`);
   writeFileSync(path, `${JSON.stringify([{ version, date: date(), changes: notes }, ...existing], null, 2)}\n`);
   command("node", ["scripts/sync-version.mjs", "--version", version]);
+  saveJournal({ version, state: "prepared" });
   command("git", ["add", "Cargo.toml", "Cargo.lock", "package.json", "src-tauri/tauri.conf.json", "release-notes.json"]);
   command("git", ["commit", "-m", `chore(release): prepare ${version}`]);
+  saveJournal({ version, state: "committed", sha: command("git", ["rev-parse", "HEAD"]) });
   command("git", ["push", "origin", "dev"]);
+  const record = journal();
+  saveJournal({ ...record, state: "pushed" });
 }
 
 async function waitForRun(workflow, sha, event) {
@@ -114,25 +129,69 @@ async function verifyPublished(version) {
   }
 }
 
+function finishPrepared(record) {
+  if (record.state === "prepared" || record.state === "preparing") {
+    command("git", ["add", "Cargo.toml", "Cargo.lock", "package.json", "src-tauri/tauri.conf.json", "release-notes.json"]);
+    command("git", ["commit", "-m", `chore(release): prepare ${record.version}`]);
+    record = { ...record, state: "committed", sha: command("git", ["rev-parse", "HEAD"]) };
+    saveJournal(record);
+  }
+  if (record.state === "committed") {
+    if (command("git", ["branch", "--show-current"]) !== "dev") command("git", ["switch", "dev"]);
+    if (command("git", ["rev-parse", "HEAD"]) !== record.sha) throw new Error("candidate commit changed; manual recovery required");
+    if (command("git", ["rev-parse", "origin/dev"]) !== record.sha) command("git", ["push", "origin", "dev"]);
+    record = { ...record, state: "pushed" };
+    saveJournal(record);
+  }
+  return record;
+}
+
+async function resumePublishedTag(record) {
+  const tag = `v${record.version}`;
+  const runs = JSON.parse(command("gh", ["run", "list", "--workflow", "Release", "--commit", record.sha, "--limit", "20", "--json", "databaseId,status,conclusion,headSha"]) || "[]")
+    .filter((run) => run.headSha === record.sha);
+  const active = runs.find((run) => ["queued", "in_progress", "waiting", "pending"].includes(run.status));
+  if (active) command("gh", ["run", "watch", String(active.databaseId), "--exit-status"]);
+  else if (!runs.some((run) => run.conclusion === "success")) {
+    // GitHub supports rebuilding/publishing an existing immutable tag. This is
+    // the only automatic retry; no tag is moved and no new version is chosen.
+    command("gh", ["workflow", "run", "Release", "-f", `release_tag=${tag}`]);
+    await waitForRun("Release", record.sha, "workflow_dispatch");
+  }
+  await verifyPublished(record.version);
+  clearJournal();
+}
+
 export async function runReleaseCut(options) {
-  assertReady();
+  let record = journal();
+  assertReady(options.resume, record);
+  if (record && !options.resume) throw new Error(`candidate ${record.version} is interrupted; rerun with --resume`);
+  if (record && options.version && options.version !== record.version) throw new Error(`journaled candidate is ${record.version}, not ${options.version}`);
+  if (record && options.resume && ["preparing", "prepared", "committed"].includes(record.state)) record = finishPrepared(record);
+  if (record && options.resume && record.state === "tagged") {
+    if (command("git", ["rev-parse", "origin/main"]) !== record.sha) throw new Error("tagged candidate is not exactly origin/main");
+    await resumePublishedTag(record);
+    command("git", ["switch", "dev"]);
+    console.log(`Released ${record.version} from ${record.sha}.`);
+    return;
+  }
   const source = sourceVersion();
   const tags = command("git", ["tag", "--points-at", "HEAD", "--list", "v*"]).split("\n").filter(Boolean);
   const usedTags = command("git", ["tag", "--list", `v${source}`]).split("\n").filter(Boolean);
-  const candidate = candidateAction({ sourceVersion: source, tagsAtHead: tags, usedTags, version: options.version, resume: options.resume });
+  const candidate = record ? { action: "resume", version: record.version } : candidateAction({ sourceVersion: source, tagsAtHead: tags, usedTags, version: options.version, resume: options.resume });
   console.log(`${candidate.action} candidate v${candidate.version}`);
   if (options.dryRun) return;
   if (candidate.action === "resume-tag") {
     const sha = command("git", ["rev-parse", "HEAD"]);
     if (command("git", ["rev-parse", "origin/main"]) !== sha) throw new Error("tagged candidate is not exactly origin/main");
-    await waitForRun("Release", sha, "push");
-    await verifyPublished(candidate.version);
+    await resumePublishedTag({ version: candidate.version, sha, state: "tagged" });
     console.log(`Released ${candidate.version} from ${sha}.`);
     return;
   }
   if (candidate.action === "prepare") prepare(candidate.version, options.notes, false);
   command("pnpm", ["release:preflight", "--", "--expect-untagged"]);
   const sha = command("git", ["rev-parse", "HEAD"]);
+  record = journal() ?? { version: candidate.version, sha, state: "pushed" };
   if (candidate.action === "prepare") {
     // Pushing dev already starts the exact-SHA validation workflow.
     await waitForRun("Validate", sha, "push");
@@ -145,10 +204,12 @@ export async function runReleaseCut(options) {
   command("git", ["fetch", "origin", "dev", "main", "--tags"]);
   if (command("git", ["rev-parse", "origin/dev"]) !== sha) throw new Error("dev moved during validation");
   command("git", ["merge-base", "--is-ancestor", "origin/main", sha]);
+  saveJournal({ ...record, sha, state: "switching-main" });
   command("git", ["switch", "main"]);
   command("git", ["merge", "--ff-only", sha]);
   command("git", ["push", "origin", "main"]);
   if (command("git", ["rev-parse", "origin/main"]) !== sha) throw new Error("main did not fast-forward to the validated SHA");
+  saveJournal({ ...record, sha, state: "main" });
   const tag = `v${candidate.version}`;
   const peeled = command("git", ["ls-remote", "--tags", "origin", `refs/tags/${tag}^{}`]);
   if (peeled && !peeled.startsWith(sha)) throw new Error(`${tag} already exists at another commit`);
@@ -156,8 +217,8 @@ export async function runReleaseCut(options) {
     command("git", ["tag", "-a", tag, "-m", `rbxport ${candidate.version}`, sha]);
     command("git", ["push", "origin", tag]);
   }
-  await waitForRun("Release", sha, "push");
-  await verifyPublished(candidate.version);
+  saveJournal({ ...record, sha, state: "tagged" });
+  await resumePublishedTag({ ...record, sha, state: "tagged" });
   command("git", ["switch", "dev"]);
   console.log(`Released ${candidate.version} from ${sha}.`);
 }
