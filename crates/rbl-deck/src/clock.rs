@@ -195,6 +195,7 @@ impl DeckClock {
     }
 
     pub fn pass_pre_roll(&self, frames: u64) {
+        #[allow(deprecated)] // `try_update` requires Rust 1.95; the workspace MSRV is 1.85.
         let _ = self
             .pre_roll
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
