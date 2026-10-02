@@ -15,12 +15,12 @@ name: Release
 # Supplying an existing release_tag rebuilds that source with this workflow
 # and publishes it, without moving the source tag.
 #
-# Nothing builds until `rust`, `windows` and `frontend` pass: clippy, the
-# Rust test suite, a Windows-native `cargo check`, and the frontend's lint,
-# typecheck, unit tests, bundle budget and Playwright e2e. These used to be
-# a separate CI workflow on the same tag trigger; folded in here so a broken
-# build can never publish — a dependency across two workflow files is not
-# one GitHub Actions can enforce.
+# Nothing builds until the shared validation gate passes: pinned Clippy, the
+# Rust test suite and MSRV check, a Windows-native `cargo check`, and the
+# frontend's lint, typecheck, unit tests, bundle budget and Playwright e2e.
+# `.github/workflows/ci.yml` calls this workflow in validation-only mode for
+# pull requests and dev pushes; a release still owns the dependency directly,
+# so a separate CI run can never accidentally authorize publication.
 #
 # Every job runs on the `arc` self-hosted fleet (`self-hosted, <os>, <arch>`),
 # one host per platform: an Apple Silicon Mac, a Windows desktop and a Linux
@@ -36,6 +36,20 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      # CI passes an immutable SHA so its validation cannot drift while a
+      # branch is being updated. Release dispatches continue to use a tag or
+      # their selected ref below.
+      source_ref:
+        required: false
+        type: string
+      # Reuse the exact release gates before a tag exists. This deliberately
+      # skips installer builds, signing, R2 and Discord.
+      validate_only:
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       release_tag:
@@ -50,6 +64,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+  SOURCE_REF: ${{ inputs.source_ref || inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
 
 jobs:
   release-source:
@@ -62,8 +77,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+          ref: ${{ env.SOURCE_REF }}
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify release metadata
+        run: |
+          set -euo pipefail
+          if [ "$REQUIRE_MAIN" = true ]; then
+            node scripts/release-preflight.mjs --version "${RELEASE_TAG#v}" --require-tag
+          else
+            node scripts/release-preflight.mjs
+          fi
 
       - name: Require a mainline release tag
         run: |
@@ -100,7 +128,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+          ref: ${{ env.SOURCE_REF }}
 
       - name: Install the Linux build dependencies
         # The webview ones are only for the Tauri shell; the rbl-* crates build
@@ -132,6 +160,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.99.0
           components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
@@ -148,6 +177,48 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace
+
+  # The pinned current toolchain above makes Clippy reproducible. Keep a
+  # separate compile lane for the workspace's declared Rust MSRV so advancing
+  # lint tooling does not silently change compatibility policy.
+  msrv:
+    name: Rust MSRV check
+    needs: release-source
+    runs-on: [self-hosted, linux, x64]
+    env:
+      RB_LITE_TEST: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+
+      - name: Install the Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev libasound2-dev
+
+      - name: Ensure rustup
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Give cargo a home of its own
+        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+
+      - name: Check the declared MSRV
+        run: cargo +1.85.0 check --workspace --all-targets
 
   # Check Windows-specific code on the same tags that trigger release builds.
   # `check` catches the platform-specific code; the release builds the installer.
@@ -178,7 +249,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+          ref: ${{ env.SOURCE_REF }}
 
       - name: Ensure rustup
         # Same reason as the Linux job. The desktop had a rustup-less Rust in
@@ -232,6 +303,8 @@ jobs:
           "CARGO_TARGET_DIR=C:/rbl-target" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
 
       # No rust-cache here: C:/rbl-target and ~/.cargo both persist on this
       # host, and rust-cache's save step deletes ~/.cargo/registry/src —
@@ -255,7 +328,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+          ref: ${{ env.SOURCE_REF }}
 
       # setup-node, never the host's node: the arc hosts have node under nvm or
       # not at all, and the runner's environment does not see a shell profile.
@@ -317,7 +390,8 @@ jobs:
     # Serialize only the Macs: both may share a signing keychain search list.
     # Matrix limits keep the run discoverable by arc (job concurrency marks
     # the whole run pending, which arc does not currently discover).
-    needs: [rust, windows, frontend]
+    if: inputs.validate_only != true
+    needs: [rust, msrv, windows, frontend]
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -340,14 +414,15 @@ jobs:
       target: ${{ matrix.target }}
       bundles: ${{ matrix.bundles }}
       slug: ${{ matrix.slug }}
-      source_ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      source_ref: ${{ inputs.source_ref || inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
       release_tag: ${{ inputs.release_tag || github.ref_name }}
       preview: ${{ github.event_name != 'push' && inputs.release_tag == '' }}
 
   build-other:
     name: Build ${{ matrix.platform }}
     # Windows and Linux build alongside the serialized Mac jobs.
-    needs: [rust, windows, frontend]
+    if: inputs.validate_only != true
+    needs: [rust, msrv, windows, frontend]
     strategy:
       fail-fast: false
       matrix:
@@ -369,7 +444,7 @@ jobs:
       target: ${{ matrix.target }}
       bundles: ${{ matrix.bundles }}
       slug: ${{ matrix.slug }}
-      source_ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      source_ref: ${{ inputs.source_ref || inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
       release_tag: ${{ inputs.release_tag || github.ref_name }}
       preview: ${{ github.event_name != 'push' && inputs.release_tag == '' }}
 
@@ -377,7 +452,7 @@ jobs:
     name: Publish to R2
     # Publish tag pushes and explicitly requested rebuilds of existing tags.
     # A manual run without release_tag builds without publishing.
-    if: github.event_name == 'push' || inputs.release_tag != ''
+    if: inputs.validate_only != true && (github.event_name == 'push' || inputs.release_tag != '')
     needs: [build-macos, build-other]
     runs-on: [self-hosted, linux, x64]
     steps:
@@ -388,7 +463,7 @@ jobs:
       # on `ls: cannot access 'out'` after both builds had passed.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+          ref: ${{ env.SOURCE_REF }}
           sparse-checkout: |
             release-notes.json
             scripts/release-notes.mjs

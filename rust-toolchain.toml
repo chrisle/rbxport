@@ -1,0 +1,6 @@
+[toolchain]
+# Pin lint and build behavior. Update this deliberately in its own validated
+# change; the MSRV lane in release.yml independently checks Cargo.toml's 1.85.
+channel = "1.99.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

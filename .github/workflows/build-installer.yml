@@ -173,6 +173,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.99.0
           targets: ${{ inputs.target }}
 
       - uses: Swatinem/rust-cache@v2
