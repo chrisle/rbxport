@@ -183,7 +183,10 @@ jobs:
   # lint tooling does not silently change compatibility policy.
   msrv:
     name: Rust MSRV check
-    needs: release-source
+    # This shares the Linux ARC host with the current-toolchain Rust gate.
+    # Run after it so apt, rustup, and the host cargo cache are never mutated
+    # concurrently by two jobs from the same validation run.
+    needs: rust
     runs-on: [self-hosted, linux, x64]
     env:
       RB_LITE_TEST: "1"
