@@ -170,7 +170,7 @@ pub fn apply_with_duration(beats: &[Beat], from_ms: Option<u32>, edit: Edit, end
         Edit::Halve => {
             let mut out = beats[..start].to_vec();
             let original = beats[start].beat_number;
-            let skip = usize::from(original % 2 == 0);
+            let skip = usize::from(original.is_multiple_of(2));
             out.extend(beats[start + skip..].iter().step_by(2).map(|b| Beat { tempo_x100: b.tempo_x100 / 2, ..*b }));
             let value = if original == 1 || original == 4 { 1 } else { 4 };
             renumber(&mut out, start, value);

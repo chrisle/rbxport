@@ -123,7 +123,7 @@ impl Section {
         // The beat count is the last field of the tag header.
         let count = self.header_u4(8) as usize;
         let mut beats = Vec::with_capacity(count.min(self.payload.len() / 8));
-        for chunk in self.payload.chunks_exact(8).take(count) {
+        for chunk in self.payload.as_chunks::<8>().0.iter().take(count) {
             beats.push(Beat {
                 beat_number: u16::from_be_bytes([chunk[0], chunk[1]]),
                 tempo_x100: u16::from_be_bytes([chunk[2], chunk[3]]),
@@ -503,7 +503,9 @@ pub fn parse(bytes: &[u8]) -> Result<Anlz> {
 
 fn utf16be_to_string(raw: &[u8]) -> String {
     let units: Vec<u16> = raw
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_be_bytes([c[0], c[1]]))
         .take_while(|&u| u != 0)
         .collect();
