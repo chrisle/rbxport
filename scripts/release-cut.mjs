@@ -18,10 +18,10 @@ export function checkpointStatus(record, current) {
   if (record.state === "prepared") return JSON.stringify(record.after) === JSON.stringify(current) ? "commit" : "refuse";
   return "none";
 }
-export function taggedRunAction(runs, sha) {
+export function taggedRunAction(runs, sha, tag) {
   const active = runs.filter((run) => ["queued", "in_progress", "waiting", "pending"].includes(run.status));
-  if (active.some((run) => run.headSha !== sha)) return "block";
-  const matching = runs.filter((run) => run.headSha === sha);
+  if (active.some((run) => run.headSha !== sha || run.headBranch !== tag)) return "block";
+  const matching = runs.filter((run) => run.headSha === sha && run.headBranch === tag);
   if (matching.some((run) => ["queued", "in_progress", "waiting", "pending"].includes(run.status))) return "attach";
   return matching.some((run) => run.conclusion === "success") ? "verify" : "rerun";
 }
@@ -105,9 +105,10 @@ function assertReady(resume, record) {
   if (!record && command("git", ["rev-parse", "HEAD"]) !== command("git", ["rev-parse", "origin/dev"])) {
     throw new Error("local dev is not exactly origin/dev");
   }
-  const active = JSON.parse(command("gh", ["run", "list", "--workflow", "Release", "--limit", "30", "--json", "status,databaseId,headSha"]) || "[]")
+  const active = JSON.parse(command("gh", ["run", "list", "--workflow", "Release", "--limit", "30", "--json", "status,databaseId,headSha,headBranch"]) || "[]")
     .filter((run) => ["queued", "in_progress", "waiting", "pending"].includes(run.status));
-  if (active.length && !(resume && record?.state === "tagged" && active.every((run) => run.headSha === record.sha))) throw new Error(`a release is already active: ${active.map((run) => run.databaseId).join(", ")}`);
+  const tag = record && `v${record.version}`;
+  if (active.length && !(resume && record?.state === "tagged" && active.every((run) => run.headSha === record.sha && run.headBranch === tag))) throw new Error(`a release is already active: ${active.map((run) => run.databaseId).join(", ")}`);
 }
 
 function prepare(version, notes, dryRun) {
@@ -189,17 +190,16 @@ function finishPrepared(record) {
 
 async function resumePublishedTag(record) {
   const tag = `v${record.version}`;
-  const runs = JSON.parse(command("gh", ["run", "list", "--workflow", "Release", "--commit", record.sha, "--limit", "20", "--json", "databaseId,status,conclusion,headSha"]) || "[]")
-    .filter((run) => run.headSha === record.sha);
-  const action = taggedRunAction(runs, record.sha);
+  const runs = JSON.parse(command("gh", ["run", "list", "--workflow", "Release", "--commit", record.sha, "--limit", "20", "--json", "databaseId,status,conclusion,headSha,headBranch"]) || "[]");
+  const action = taggedRunAction(runs, record.sha, tag);
   if (action === "block") throw new Error("another release is active; refusing to attach the candidate");
   if (action === "attach") {
-    const active = runs.find((run) => run.headSha === record.sha && ["queued", "in_progress", "waiting", "pending"].includes(run.status));
+    const active = runs.find((run) => run.headSha === record.sha && run.headBranch === tag && ["queued", "in_progress", "waiting", "pending"].includes(run.status));
     command("gh", ["run", "watch", String(active.databaseId), "--exit-status"]);
   } else if (action === "rerun") {
     // GitHub supports rebuilding/publishing an existing immutable tag. This is
     // the only automatic retry; no tag is moved and no new version is chosen.
-    command("gh", ["workflow", "run", "Release", "-f", `release_tag=${tag}`]);
+    command("gh", ["workflow", "run", "Release", "--ref", tag, "-f", `release_tag=${tag}`]);
     await waitForRun("Release", record.sha, "workflow_dispatch");
   }
   await verifyPublished(record.version);
