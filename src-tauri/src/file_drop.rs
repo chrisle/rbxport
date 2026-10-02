@@ -90,7 +90,7 @@ mod tests {
         assert!(
             board.setString_forType(&NSString::from_str("https://example.com/a.mp3"), file_type)
         );
-        assert!(super::pasteboard_paths(&board).is_empty());
+        assert_eq!(super::pasteboard_paths(&board), Vec::<String>::new());
         board.clearContents();
     }
 

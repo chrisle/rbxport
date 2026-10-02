@@ -259,12 +259,6 @@ jobs:
     name: Rust tests
     needs: [prepare, release-source]
     runs-on: [self-hosted, linux, x64]
-    # apt and the host package database are shared by ARC's otherwise
-    # isolated runners, so parallel validation runs cannot safely provision
-    # them at the same time.
-    concurrency:
-      group: rbxport-validation-linux
-      cancel-in-progress: false
     env:
       # Tests must never be able to open the installed library read-write.
       # This is the same switch the writer checks.
@@ -281,9 +275,13 @@ jobs:
         # `alsa-sys` build script panics outright without the headers, so the
         # whole workspace failed to compile on Linux without this line.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf libgtk-3-dev libasound2-dev
+          # ARC runners are isolated, but the host package database is not.
+          # Serialize only this host-global provisioning operation; the
+          # independent cargo builds can still run concurrently afterwards.
+          sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
+            apt-get update && \
+            apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+              librsvg2-dev patchelf libgtk-3-dev libasound2-dev'
 
       # dtolnay/rust-toolchain drives rustup; it does not install it. Hosted
       # images ship rustup, an arc host need not — so install it on first use
@@ -332,9 +330,6 @@ jobs:
     # concurrently by two jobs from the same validation run.
     needs: [prepare, rust]
     runs-on: [self-hosted, linux, x64]
-    concurrency:
-      group: rbxport-validation-linux
-      cancel-in-progress: false
     env:
       RB_LITE_TEST: "1"
     steps:
@@ -344,9 +339,10 @@ jobs:
 
       - name: Install the Linux build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf libgtk-3-dev libasound2-dev
+          sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
+            apt-get update && \
+            apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+              librsvg2-dev patchelf libgtk-3-dev libasound2-dev'
 
       - name: Ensure rustup
         run: |
@@ -382,9 +378,6 @@ jobs:
     name: Win compile check
     needs: [prepare, release-source]
     runs-on: [self-hosted, windows, x64]
-    concurrency:
-      group: rbxport-validation-windows
-      cancel-in-progress: false
     steps:
       # `shell: bash` resolves bash from PATH, and on a Windows desktop the
       # WindowsApps WSL stub shadows Git's bash. WSL bash cannot see the
@@ -478,11 +471,6 @@ jobs:
     name: UI tests
     needs: [prepare, release-source]
     runs-on: [self-hosted, macos, arm64]
-    # Playwright's configured preview port is host-global. One UI test job
-    # at a time prevents separate ARC runners from competing for it.
-    concurrency:
-      group: rbxport-validation-macos
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -534,7 +522,9 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium webkit
 
       - name: End-to-end
-        run: pnpm e2e
+        # Each ARC runner has an isolated checkout but shares the macOS
+        # network stack. Give each workflow run its own port pair.
+        run: E2E_PORT="$((20000 + GITHUB_RUN_NUMBER % 10000))" pnpm e2e
 
       - uses: actions/upload-artifact@v4
         if: failure()

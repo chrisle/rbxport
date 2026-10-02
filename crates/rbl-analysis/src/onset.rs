@@ -187,8 +187,8 @@ fn decimation_for(band: Band, sample_rate: u32, frame: usize) -> usize {
     let mut d = 1usize;
     while d < 64
         && f64::from(sample_rate) / (d * 2) as f64 >= 4.0 * f64::from(band.high_hz)
-        && frame % (d * 2) == 0
-        && HOP % (d * 2) == 0
+        && frame.is_multiple_of(d * 2)
+        && HOP.is_multiple_of(d * 2)
         && frame / (d * 2) >= 64
     {
         d *= 2;
@@ -298,4 +298,3 @@ fn normalise(values: &mut [f32]) {
         }
     }
 }
-

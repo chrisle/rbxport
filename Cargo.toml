@@ -39,6 +39,11 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+# `chunks_exact` intentionally exposes/ignores a remainder where relevant;
+# `as_chunks` hides that distinction and adds no safety for these call sites.
+chunks_exact_to_as_chunks = "allow"
+# Existing protocol parsers use the explicit modulo form where it reads best.
+manual_is_multiple_of = "allow"
 
 [profile.release]
 opt-level = 3
