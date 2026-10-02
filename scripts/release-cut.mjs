@@ -133,8 +133,15 @@ export async function runReleaseCut(options) {
   if (candidate.action === "prepare") prepare(candidate.version, options.notes, false);
   command("pnpm", ["release:preflight", "--", "--expect-untagged"]);
   const sha = command("git", ["rev-parse", "HEAD"]);
-  command("gh", ["workflow", "run", "Validate", "--ref", "dev", "-f", `source_ref=${sha}`]);
-  await waitForRun("Validate", sha, "workflow_dispatch");
+  if (candidate.action === "prepare") {
+    // Pushing dev already starts the exact-SHA validation workflow.
+    await waitForRun("Validate", sha, "push");
+  } else {
+    // A candidate prepared before this command may not have an observable
+    // current validation run, so resume it with an explicit no-publish run.
+    command("gh", ["workflow", "run", "Validate", "--ref", "dev", "-f", `source_ref=${sha}`]);
+    await waitForRun("Validate", sha, "workflow_dispatch");
+  }
   command("git", ["fetch", "origin", "dev", "main", "--tags"]);
   if (command("git", ["rev-parse", "origin/dev"]) !== sha) throw new Error("dev moved during validation");
   command("git", ["merge-base", "--is-ancestor", "origin/main", sha]);
