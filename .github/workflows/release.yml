@@ -58,8 +58,10 @@ on:
         type: string
 
 concurrency:
-  group: release-installers
-  cancel-in-progress: false
+  # Validation-only callers never package or publish, so superseded PR/dev
+  # runs may be cancelled. Keep real release runs serialized and immutable.
+  group: ${{ inputs.validate_only && format('validate-{0}', github.ref) || 'release-installers' }}
+  cancel-in-progress: ${{ inputs.validate_only }}
 
 env:
   CARGO_TERM_COLOR: always
