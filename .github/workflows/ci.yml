@@ -14,7 +14,11 @@ on:
         type: string
 
 permissions:
-  contents: read
+  # The reusable release workflow declares contents: write for a real release.
+  # A caller cannot grant a reusable workflow more than its own token, even
+  # when the validation-only path never writes. Keep the upper bound here so
+  # GitHub can initialize that workflow; fork PRs remain excluded below.
+  contents: write
 
 jobs:
   validate:
