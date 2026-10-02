@@ -178,10 +178,25 @@ version from the newest `v*` tag merged into your checkout. After a bump
 that is not tagged yet, it rewrites those files back to the tagged version,
 so don't commit them from a `pnpm dev` session.
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`. It runs the checks
-above, builds and signs the macOS, Windows and Linux installers on
-self-hosted runners, and publishes them with `latest.json` to the download
-bucket. The pipeline creates no GitHub Release.
+`.github/workflows/ci.yml` runs the complete non-publishing release gate for
+same-repository pull requests to `dev` and every `dev` push: pinned-current
+Rust/Clippy, a separate Rust 1.85 MSRV compile check, Windows compilation, and
+the frontend lint, build, unit, budget, generated-file, and Playwright checks.
+Fork pull requests intentionally do not run on the self-hosted runners. A
+manual Validate dispatch can preflight an exact SHA without building or
+publishing installers.
+
+Cut a release only from an already-green `dev` commit. First make one final
+version and release-notes commit, then run `pnpm release:preflight --
+--expect-untagged` and the manual Validate preflight on that exact commit.
+Fast-forward `main` to the same SHA and create the immutable `vX.Y.Z` tag.
+Pushing that tag runs `.github/workflows/release.yml`, which repeats the gate,
+then builds, signs, and publishes installers with `latest.json` to the download
+bucket. The pipeline creates no GitHub Release. If a tagged run has a transient
+CI or publishing failure, dispatch Release with that existing `release_tag` to
+retry the same source; do not bump the version merely to retry. If the source
+needs a correction, make a new validated version commit and tag that new
+immutable version.
 
 `pnpm build` obfuscates the app's own JavaScript and omits source maps.
 `pnpm dev` stays readable. Obfuscation makes the bundle harder to read but
