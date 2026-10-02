@@ -458,7 +458,7 @@ mod tests {
         assert_eq!(fs::read(&fixture.art).unwrap(), b"original art");
         assert_eq!(fs::read(&fixture.selections).unwrap(), b"original selections");
         assert!(!journal::pending(&state(&fixture)));
-        assert!(leftovers(&fixture).is_empty());
+        assert_eq!(leftovers(&fixture), [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
@@ -480,7 +480,7 @@ mod tests {
 
         run(&fixture, Parts { library_files: true, ..Parts::default() }).unwrap();
         assert_eq!(fs::read(&fixture.selections).unwrap(), b"original selections");
-        assert!(leftovers(&fixture).is_empty());
+        assert_eq!(leftovers(&fixture), [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(calls.get(), 2);
         assert_eq!(testing::rating(&fixture.location), 1);
         assert_eq!(fs::read(&fixture.grid).unwrap(), b"edited grid");
-        assert!(leftovers(&fixture).is_empty());
+        assert_eq!(leftovers(&fixture), [] as [std::path::PathBuf; 0]);
         assert!(!journal::pending(&state(&fixture)));
     }
 
@@ -556,7 +556,7 @@ mod tests {
         assert!(run(&fixture, Parts::ALL).is_err());
         assert_eq!(testing::rating(&fixture.location), 1);
         assert_eq!(fs::read(&fixture.grid).unwrap(), b"edited grid");
-        assert!(leftovers(&fixture).is_empty());
+        assert_eq!(leftovers(&fixture), [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
