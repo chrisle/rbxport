@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { candidateAction, checkpointStatus, nextVersion, parseArgs } from "./release-cut.mjs";
+import { candidateAction, checkpointStatus, journalIdentity, nextVersion, parseArgs, taggedRunAction } from "./release-cut.mjs";
 
 test("chooses a new rc exactly once from a tagged source", () => {
   assert.deepEqual(candidateAction({ sourceVersion: "1.0.0-rc.16", tagsAtHead: ["v1.0.0-rc.16"] }), {
@@ -41,4 +41,26 @@ test("checkpoint recovery refuses edits even to release-owned files", () => {
   assert.equal(checkpointStatus({ state: "preparing", before }, before), "retry");
   assert.equal(checkpointStatus({ state: "prepared", after }, after), "commit");
   assert.equal(checkpointStatus({ state: "prepared", after }, { ...after, "Cargo.toml": "user" }), "refuse");
+});
+
+test("mocked tagged release attaches only to its matching active run", () => {
+  assert.equal(taggedRunAction([{ headSha: "a", status: "in_progress" }], "a"), "attach");
+  assert.equal(taggedRunAction([{ headSha: "b", status: "in_progress" }], "a"), "block");
+});
+
+test("mocked failed tagged release reruns its immutable candidate", () => {
+  assert.equal(taggedRunAction([{ headSha: "a", status: "completed", conclusion: "failure" }], "a"), "rerun");
+  assert.equal(taggedRunAction([{ headSha: "a", status: "completed", conclusion: "success" }], "a"), "verify");
+});
+
+test("mocked journal identity blocks stale sha and manifest version", () => {
+  const record = { sha: "a", version: "1.0.0-rc.17" };
+  assert.equal(journalIdentity(record, { head: "a", version: record.version, originDev: "a" }), true);
+  assert.equal(journalIdentity(record, { head: "b", version: record.version, originDev: "b" }), false);
+  assert.equal(journalIdentity(record, { head: "a", version: "1.0.0-rc.18", originDev: "a" }), false);
+});
+
+test("mocked partial prepare is preserved and fails closed", () => {
+  const before = { "Cargo.toml": "a" };
+  assert.equal(checkpointStatus({ state: "preparing", before }, { "Cargo.toml": "partial" }), "refuse");
 });

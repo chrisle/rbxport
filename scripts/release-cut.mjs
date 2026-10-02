@@ -18,6 +18,16 @@ export function checkpointStatus(record, current) {
   if (record.state === "prepared") return JSON.stringify(record.after) === JSON.stringify(current) ? "commit" : "refuse";
   return "none";
 }
+export function taggedRunAction(runs, sha) {
+  const active = runs.filter((run) => ["queued", "in_progress", "waiting", "pending"].includes(run.status));
+  if (active.some((run) => run.headSha !== sha)) return "block";
+  const matching = runs.filter((run) => run.headSha === sha);
+  if (matching.some((run) => ["queued", "in_progress", "waiting", "pending"].includes(run.status))) return "attach";
+  return matching.some((run) => run.conclusion === "success") ? "verify" : "rerun";
+}
+export function journalIdentity(record, { head, version, originDev }) {
+  return record.sha === head && record.version === version && (originDev === undefined || originDev === record.sha);
+}
 
 export function nextVersion(version) {
   const match = VERSION.exec(version);
@@ -90,9 +100,9 @@ function assertReady(resume, record) {
   if (!record && command("git", ["rev-parse", "HEAD"]) !== command("git", ["rev-parse", "origin/dev"])) {
     throw new Error("local dev is not exactly origin/dev");
   }
-  const active = JSON.parse(command("gh", ["run", "list", "--workflow", "Release", "--limit", "30", "--json", "status,databaseId"]) || "[]")
+  const active = JSON.parse(command("gh", ["run", "list", "--workflow", "Release", "--limit", "30", "--json", "status,databaseId,headSha"]) || "[]")
     .filter((run) => ["queued", "in_progress", "waiting", "pending"].includes(run.status));
-  if (active.length && !(resume && record?.state === "tagged")) throw new Error(`a release is already active: ${active.map((run) => run.databaseId).join(", ")}`);
+  if (active.length && !(resume && record?.state === "tagged" && active.every((run) => run.headSha === record.sha))) throw new Error(`a release is already active: ${active.map((run) => run.databaseId).join(", ")}`);
 }
 
 function prepare(version, notes, dryRun) {
@@ -167,9 +177,12 @@ async function resumePublishedTag(record) {
   const tag = `v${record.version}`;
   const runs = JSON.parse(command("gh", ["run", "list", "--workflow", "Release", "--commit", record.sha, "--limit", "20", "--json", "databaseId,status,conclusion,headSha"]) || "[]")
     .filter((run) => run.headSha === record.sha);
-  const active = runs.find((run) => ["queued", "in_progress", "waiting", "pending"].includes(run.status));
-  if (active) command("gh", ["run", "watch", String(active.databaseId), "--exit-status"]);
-  else if (!runs.some((run) => run.conclusion === "success")) {
+  const action = taggedRunAction(runs, record.sha);
+  if (action === "block") throw new Error("another release is active; refusing to attach the candidate");
+  if (action === "attach") {
+    const active = runs.find((run) => run.headSha === record.sha && ["queued", "in_progress", "waiting", "pending"].includes(run.status));
+    command("gh", ["run", "watch", String(active.databaseId), "--exit-status"]);
+  } else if (action === "rerun") {
     // GitHub supports rebuilding/publishing an existing immutable tag. This is
     // the only automatic retry; no tag is moved and no new version is chosen.
     command("gh", ["workflow", "run", "Release", "-f", `release_tag=${tag}`]);
@@ -188,8 +201,8 @@ export async function runReleaseCut(options) {
   if (record && ["pushed", "switching-main", "main", "tagged"].includes(record.state)) {
     const branch = command("git", ["branch", "--show-current"]);
     const head = command("git", ["rev-parse", "HEAD"]);
-    if (head !== record.sha || sourceVersion() !== record.version) throw new Error("journaled candidate SHA/version no longer matches checkout; manual recovery required");
-    if (branch === "dev" && command("git", ["rev-parse", "origin/dev"]) !== record.sha) throw new Error("origin/dev no longer matches journaled candidate; manual recovery required");
+    const originDev = branch === "dev" ? command("git", ["rev-parse", "origin/dev"]) : undefined;
+    if (!journalIdentity(record, { head, version: sourceVersion(), originDev })) throw new Error("journaled candidate SHA/version no longer matches checkout; manual recovery required");
   }
   if (record && options.resume && record.state === "tagged") {
     if (command("git", ["rev-parse", "origin/main"]) !== record.sha) throw new Error("tagged candidate is not exactly origin/main");
