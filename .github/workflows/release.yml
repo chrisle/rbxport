@@ -216,14 +216,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85.0
+          toolchain: 1.89.0
 
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
 
       - name: Check the declared MSRV
-        run: cargo +1.85.0 check --workspace --all-targets
+        run: cargo +1.89.0 check --workspace --all-targets
 
   # Check Windows-specific code on the same tags that trigger release builds.
   # `check` catches the platform-specific code; the release builds the installer.

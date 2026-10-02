@@ -15,7 +15,7 @@ and [waveform scrubbing](docs/waveform-scrubbing.md).
 
 You need:
 
-- Rust stable (the workspace's minimum is 1.85).
+- Rust stable (the workspace's minimum is 1.89).
 - Node 24 and pnpm 10 (`corepack enable` picks up the pinned version).
 - The Tauri 2 prerequisites for your OS. On Linux that is
   `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libasound2-dev`.
@@ -180,7 +180,7 @@ so don't commit them from a `pnpm dev` session.
 
 `.github/workflows/ci.yml` runs the complete non-publishing release gate for
 same-repository pull requests to `dev` and every `dev` push: pinned-current
-Rust/Clippy, a separate Rust 1.85 MSRV compile check, Windows compilation, and
+Rust/Clippy, a separate Rust 1.89 MSRV compile check, Windows compilation, and
 the frontend lint, build, unit, budget, generated-file, and Playwright checks.
 Fork pull requests intentionally do not run on the self-hosted runners. A
 manual Validate dispatch can preflight an exact SHA without building or

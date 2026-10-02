@@ -91,7 +91,7 @@ impl PageBuilder {
     ///
     /// Rows are aligned to four bytes, as rekordbox's own files are.
     pub fn push_row(&mut self, row: &[u8]) -> u16 {
-        while self.heap.len() % 4 != 0 {
+        while !self.heap.len().is_multiple_of(4) {
             self.heap.push(0);
         }
         let offset = u16::try_from(self.heap.len()).unwrap_or(u16::MAX);
@@ -447,4 +447,3 @@ pub fn replace_single_page_table(file: &[u8], page_type: u32, rows: &[Vec<u8>]) 
     out.get_mut(data_at..data_at + page_size)?.copy_from_slice(&page);
     Some(out)
 }
-
