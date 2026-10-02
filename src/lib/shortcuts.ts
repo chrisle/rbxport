@@ -139,6 +139,8 @@ export interface KeyChord {
 export interface Platform {
   /** True on macOS, where Command is the modifier rather than Control. */
   mac: boolean;
+  /** True on Linux, where the window manager owns the title bar. */
+  linux?: boolean;
 }
 
 /** Whether the platform's primary modifier is held, and only it. */
@@ -535,5 +537,5 @@ export function detectPlatform(): Platform {
   // `platform` is deprecated but is the only reliable signal in WKWebView;
   // userAgent carries "Macintosh" there too, so either answers.
   const hint = `${navigator.platform ?? ""} ${navigator.userAgent}`;
-  return { mac: /Mac|iPhone|iPad/.test(hint) };
+  return { mac: /Mac|iPhone|iPad/.test(hint), linux: /Linux/.test(hint) };
 }

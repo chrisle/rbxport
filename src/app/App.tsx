@@ -2145,7 +2145,7 @@ function AppBody() {
   return (
     <PreferencesProvider value={prefs}>
     <MasterOutputConnection mode={viewPrefs.vuMeter} />
-    <div className={styles.window}>
+    <div className={styles.window} data-platform={platform.linux ? "linux" : platform.mac ? "mac" : "windows"}>
       <div
         className={styles.titleBar}
         data-testid="title-bar"

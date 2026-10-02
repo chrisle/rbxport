@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   actionFor, beatLoopLength, BINDINGS, chordFromEvent, describeChord, dispatch, hotCuePad, isTyping,
-  matchBinding, memoryCueNumber, menuAccelerator, sameChord, type Platform,
+  detectPlatform, matchBinding, memoryCueNumber, menuAccelerator, sameChord, type Platform,
 } from "./shortcuts";
 
 const MAC: Platform = { mac: true };
@@ -71,6 +71,18 @@ describe("actionFor", () => {
     ]) {
       expect(actionFor(chord, MAC)).toBeNull();
     }
+  });
+});
+
+describe("detectPlatform", () => {
+  it("identifies Linux separately from macOS and Windows", () => {
+    const originalPlatform = navigator.platform;
+    const originalUserAgent = navigator.userAgent;
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Linux armv8l" });
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Mozilla/5.0 Linux" });
+    expect(detectPlatform()).toEqual({ mac: false, linux: true });
+    Object.defineProperty(navigator, "platform", { configurable: true, value: originalPlatform });
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: originalUserAgent });
   });
 });
 

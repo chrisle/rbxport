@@ -59,6 +59,20 @@
   height: 100%;
   background: var(--c-black);
 }
+
+/* Linux window managers provide the title bar and its close button. Keeping
+   the macOS-shaped webview strip there puts an overlay over KDE's native
+   controls, which can make the close button ignore its first click. */
+.window[data-platform="linux"] {
+  grid-template-rows:
+    0
+    var(--s-top-bar-h)
+    auto
+    1fr
+    auto
+    var(--s-status-bar-h);
+}
+.window[data-platform="linux"] > .titleBar { display: none; }
 /* Each region on its own row, named rather than taken in turn. Full Browser
    draws no deck block at all, and auto-placement then slid the body up into
    the deck row — sized to its content — and the status bar into the body's,
