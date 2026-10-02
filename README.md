@@ -179,42 +179,20 @@ that is not tagged yet, it rewrites those files back to the tagged version,
 so don't commit them from a `pnpm dev` session.
 
 `.github/workflows/ci.yml` runs the complete non-publishing release gate for
-same-repository pull requests to `dev` and every `dev` push: pinned-current
-Rust/Clippy, a separate Rust 1.89 MSRV compile check, Windows compilation, and
-the frontend lint, build, unit, budget, generated-file, and Playwright checks.
-Fork pull requests intentionally do not run on the self-hosted runners. A
-manual Validate dispatch can preflight an exact SHA without building or
-publishing installers.
+same-repository pull requests to `dev`: pinned-current Rust/Clippy, a separate
+Rust 1.89 MSRV compile check, Windows compilation, and the frontend lint,
+build, unit, budget, generated-file, and Playwright checks. Fork pull requests
+intentionally do not run on the self-hosted runners.
 
-Cut a release only from an already-green `dev` commit. First make one final
-version and release-notes commit, then run `pnpm release:preflight --
---expect-untagged` and the manual Validate preflight on that exact commit.
-Fast-forward `main` to the same SHA and create the immutable `vX.Y.Z` tag.
-Pushing that tag runs `.github/workflows/release.yml`, which repeats the gate,
-then builds, signs, and publishes installers with `latest.json` to the download
-bucket. The pipeline creates no GitHub Release. If a tagged run has a transient
-CI or publishing failure, dispatch Release with that existing `release_tag` to
-retry the same source; do not bump the version merely to retry. If the source
-needs a correction, make a new validated version commit and tag that new
-immutable version.
-
-For an operator starting from a ready, clean, synchronized `dev`, use one
-command instead of performing those steps by hand:
-
-```sh
-pnpm release:cut -- --note "(Fixed) Describe the shipped change"
-```
-
-It chooses the next unused `-rc.N` once (rc16 becomes rc17), writes and commits
-the version and notes, dispatches and waits for the non-publishing Validate
-workflow for that exact SHA, fast-forwards `main`, tags once, waits for Release,
-and verifies the public feed and installer URLs. `--version X.Y.Z-rc.N` selects
-an explicit candidate and `--dry-run` performs only prerequisite/candidate
-inspection. If a process stopped after preparing an untagged candidate, use
-`--resume`; it never bumps again. A failed or partial tag publication is
-fail-closed: inspect and either fix the source in a new version or rerun the
-existing Release tag manually for a transient failure. The command never merges
-pull requests, force-pushes, prints secrets, or changes Jira.
+Releases are server-side and manual. In GitHub, open **Actions → Release → Run
+workflow**, select `dev`, and enter one release note beginning with `(New)`,
+`(Improved)`, or `(Fixed)`. The workflow chooses the next unused release
+candidate unless an explicit version is supplied; commits the version and
+notes; validates that exact SHA; fast-forwards `main`; creates the immutable
+tag; builds, signs, publishes, and verifies the public update feed. To retry a
+transient failure after tagging, run the same workflow from `dev` with only the
+existing `retry_tag`; it rebuilds and republishes that immutable candidate
+without choosing another version. The pipeline creates no GitHub Release.
 
 `pnpm build` obfuscates the app's own JavaScript and omits source maps.
 `pnpm dev` stays readable. Obfuscation makes the bundle harder to read but
