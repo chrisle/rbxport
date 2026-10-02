@@ -1933,7 +1933,7 @@ mod tests {
         let source = Arc::new(Writable(Arc::new(library())));
         let c = IndexCatalog::new(Arc::clone(&source) as Arc<dyn Source>, Played::default());
         // The library's own sessions are not offered; nothing is until a play.
-        assert!(history_menu(&c).is_empty());
+        assert_eq!(history_menu(&c), [] as [String; 0]);
 
         assert!(c.edit(&Edit::HistoryAdd { track: 11 }));
         assert!(
@@ -1968,7 +1968,7 @@ mod tests {
 
         // Deleted from a player: the next play starts another session.
         assert!(c.edit(&Edit::HistoryDelete { history: u32::MAX }));
-        assert!(history_menu(&c).is_empty());
+        assert_eq!(history_menu(&c), [] as [String; 0]);
         assert!(
             !c.edit(&Edit::HistoryRemove { track: 10 }),
             "no session to take it off"
@@ -1987,7 +1987,7 @@ mod tests {
     fn a_library_that_cannot_be_written_keeps_the_history_menu_empty() {
         let c = catalog();
         assert!(!c.edit(&Edit::HistoryAdd { track: 11 }));
-        assert!(history_menu(&c).is_empty());
+        assert_eq!(history_menu(&c), [] as [String; 0]);
     }
 
     #[test]
@@ -2041,12 +2041,13 @@ mod tests {
             })),
             [12, 10]
         );
-        assert!(c
-            .list(&Query::Tracks {
+        assert_eq!(
+            c.list(&Query::Tracks {
                 scope: TrackScope::Search("nothing".into()),
                 sort: Sort::Default
-            })
-            .is_empty());
+            }),
+            [] as [rbl_dbserver::catalog::Row; 0]
+        );
     }
 
     #[test]

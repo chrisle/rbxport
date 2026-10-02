@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(playlist(&library, top).unwrap().kind, KIND_PLAYLIST);
         // In the playlist's own order, not the collection's.
         assert_eq!(playlist_tracks(&library, top), vec![9, 7]);
-        assert!(playlist_tracks(&library, folder).is_empty());
+        assert_eq!(playlist_tracks(&library, folder), [] as [u64; 0]);
     }
 
     #[test]
