@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.0-rc.13",
+    "date": "2026-10-02",
+    "changes": [
+      "(Fixed) USB Sync refreshes connected destinations immediately before it starts, so a disconnected USB drive is never used for import or export.",
+      "(Fixed) Export repairs legacy analysis files into Pioneer-compatible section order and rejects malformed analysis framing before it reaches a device."
+    ]
+  },
+  {
     "version": "1.0.0-rc.12",
     "date": "2026-09-30",
     "changes": [
