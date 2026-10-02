@@ -79,9 +79,6 @@ concurrency:
   group: ${{ inputs.validate_only && format('validate-{0}', github.ref) || 'release-installers' }}
   cancel-in-progress: ${{ inputs.validate_only }}
 
-permissions:
-  contents: write
-
 env:
   CARGO_TERM_COLOR: always
 
@@ -89,6 +86,11 @@ jobs:
   prepare:
     name: Prepare release candidate
     runs-on: [self-hosted, linux, x64]
+    # Only the real release preparation path pushes the candidate to dev.
+    # Validation callers may provide this capability so the reusable workflow
+    # is valid, but validate_only exits before any mutating command.
+    permissions:
+      contents: write
     outputs:
       release: ${{ steps.candidate.outputs.release }}
       promote: ${{ steps.candidate.outputs.promote }}
@@ -233,6 +235,8 @@ jobs:
     name: Verify release source
     needs: prepare
     runs-on: [self-hosted, linux, x64]
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -259,6 +263,8 @@ jobs:
     name: Rust tests
     needs: [prepare, release-source]
     runs-on: [self-hosted, linux, x64]
+    permissions:
+      contents: read
     env:
       # Tests must never be able to open the installed library read-write.
       # This is the same switch the writer checks.
@@ -326,6 +332,8 @@ jobs:
     # concurrently by two jobs from the same validation run.
     needs: [prepare, rust]
     runs-on: [self-hosted, linux, x64]
+    permissions:
+      contents: read
     env:
       RB_LITE_TEST: "1"
     steps:
@@ -373,6 +381,8 @@ jobs:
     name: Win compile check
     needs: [prepare, release-source]
     runs-on: [self-hosted, windows, x64]
+    permissions:
+      contents: read
     steps:
       # `shell: bash` resolves bash from PATH, and on a Windows desktop the
       # WindowsApps WSL stub shadows Git's bash. WSL bash cannot see the
@@ -466,6 +476,8 @@ jobs:
     name: UI tests
     needs: [prepare, release-source]
     runs-on: [self-hosted, macos, arm64]
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -575,6 +587,8 @@ jobs:
     # the whole run pending, which arc does not currently discover).
     if: needs.prepare.outputs.release == 'true'
     needs: [prepare, promote]
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -606,6 +620,8 @@ jobs:
     # Windows and Linux build alongside the serialized Mac jobs.
     if: needs.prepare.outputs.release == 'true'
     needs: [prepare, promote]
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -636,6 +652,8 @@ jobs:
     if: needs.prepare.outputs.release == 'true'
     needs: [prepare, build-macos, build-other]
     runs-on: [self-hosted, linux, x64]
+    permissions:
+      contents: read
     env:
       RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
     steps:

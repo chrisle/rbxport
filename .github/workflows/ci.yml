@@ -13,9 +13,6 @@ on:
         required: false
         type: string
 
-permissions:
-  contents: read
-
 jobs:
   validate:
     # Self-hosted runners must never execute untrusted fork code. Same-repo
@@ -23,6 +20,11 @@ jobs:
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
+    # The called workflow also serves the manual release path, whose prepare
+    # job needs to push the candidate. Its validation jobs explicitly
+    # downgrade to read-only; validate_only skips every release mutation.
+    permissions:
+      contents: write
     uses: ./.github/workflows/release.yml
     with:
       source_ref: ${{ inputs.source_ref || github.event.pull_request.head.sha || github.sha }}
