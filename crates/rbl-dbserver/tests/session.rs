@@ -11,7 +11,10 @@
 
 use std::sync::Arc;
 
-use rbl_dbserver::catalog::{Analysis, Catalog, Edit, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackDetails, TrackScope, UsbCue};
+use rbl_dbserver::catalog::{
+    Analysis, Catalog, Edit, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackColumn,
+    TrackDetails, TrackScope, UsbCue,
+};
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::net::{Handler, Session};
 use rbl_dbserver::session::CatalogHandler;
@@ -139,14 +142,30 @@ impl Catalog for Small {
             _ => vec![],
         }
     }
-    fn track_row(&self, id: u32) -> Option<TrackRow> {
-        (id == TRACK).then(the_track)
-    }
-    fn file_name_row(&self, id: u32) -> Option<TrackRow> {
-        (id == TRACK).then(|| TrackRow {
-            title: "70 at your best (you are love).mp3".into(),
-            ..the_track()
+    fn track_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow> {
+        (id == TRACK).then(|| {
+            let mut track = the_track();
+            if let Some(column) = column {
+                track.column = column;
+                match column {
+                    TrackColumn::Artist => {
+                        track.column_value = AALIYAH;
+                        track.secondary_text = "Aaliyah".into();
+                    }
+                    TrackColumn::Title => {
+                        track.column_value = 0;
+                        track.secondary_text.clear();
+                    }
+                    _ => {}
+                }
+            }
+            track
         })
+    }
+    fn file_name_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow> {
+        let mut track = self.track_row(id, column)?;
+        track.title = "70 at your best (you are love).mp3".into();
+        Some(track)
     }
     fn track(&self, id: u32) -> Option<TrackDetails> {
         (id == TRACK).then(|| TrackDetails {
@@ -465,7 +484,7 @@ fn the_sort_menu_uses_the_catalog_configuration() {
             Vec::new()
         }
 
-        fn track_row(&self, _: u32) -> Option<TrackRow> {
+        fn track_row(&self, _: u32, _: Option<TrackColumn>) -> Option<TrackRow> {
             None
         }
 
@@ -550,7 +569,7 @@ fn rx3_legacy_key_tracks_are_exact_key_matches() {
             *self.0.lock().unwrap() = Some(query.clone());
             Vec::new()
         }
-        fn track_row(&self, _: u32) -> Option<TrackRow> {
+        fn track_row(&self, _: u32, _: Option<TrackColumn>) -> Option<TrackRow> {
             None
         }
         fn track(&self, _: u32) -> Option<TrackDetails> {
@@ -604,6 +623,24 @@ fn artists_albums_and_their_tracks_are_shaped_as_captured() {
     // In TRACK the flags are 0.
     let (_, items) = browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
     assert_eq!(args(&items[0]), "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x0, 0x475f, 0x0, 0x100, 0x14, 0x18145d65, 0x4, \"D\", 0x1e80");
+}
+
+#[test]
+fn render_override_selects_the_requested_track_column() {
+    let mut s = session();
+    let header = s.handle(&numbers(kind::TRACK_MENU, 1, &[CTX, 2]));
+    assert_eq!(header[0].arguments[1], Argument::Number(1));
+
+    let rendered = s.handle(&numbers(
+        kind::RENDER,
+        2,
+        &[CTX, 0, 1, 0, 1, 12, 1, 2],
+    ));
+    let row = &rendered[1].arguments;
+    assert_eq!(row[0], Argument::Number(AALIYAH));
+    assert_eq!(row[5], Argument::String("Aaliyah".into()));
+    assert_eq!(row[6], Argument::Number(0x0704));
+    assert_eq!(row[12], Argument::Number(0x1814_5d65));
 }
 
 #[test]
@@ -898,7 +935,7 @@ fn a_page_of_a_long_list_is_the_window_asked_for() {
         fn list(&self, _: &Query) -> Vec<Row> {
             (1..=100).map(|id| Row::Track { id, position: 0 }).collect()
         }
-        fn track_row(&self, id: u32) -> Option<TrackRow> {
+        fn track_row(&self, id: u32, _: Option<TrackColumn>) -> Option<TrackRow> {
             Some(TrackRow {
                 id,
                 title: format!("Track {id}"),
@@ -973,7 +1010,7 @@ fn tracks_are_sorted_the_way_the_player_asked() {
             *self.0.lock().unwrap() = Some(q.clone());
             vec![]
         }
-        fn track_row(&self, _: u32) -> Option<TrackRow> {
+        fn track_row(&self, _: u32, _: Option<TrackColumn>) -> Option<TrackRow> {
             None
         }
         fn track(&self, _: u32) -> Option<TrackDetails> {
@@ -1060,7 +1097,7 @@ fn the_extended_cue_reply_counts_its_entries_not_a_header_word() {
         fn list(&self, _: &Query) -> Vec<Row> {
             Vec::new()
         }
-        fn track_row(&self, _: u32) -> Option<TrackRow> {
+        fn track_row(&self, _: u32, _: Option<TrackColumn>) -> Option<TrackRow> {
             None
         }
         fn track(&self, _: u32) -> Option<TrackDetails> {
@@ -1227,8 +1264,8 @@ fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() 
             }
             Small(false).list(q)
         }
-        fn track_row(&self, id: u32) -> Option<TrackRow> {
-            Small(false).track_row(id)
+        fn track_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow> {
+            Small(false).track_row(id, column)
         }
         fn track(&self, id: u32) -> Option<TrackDetails> {
             Small(false).track(id).map(|mut track| {
@@ -1321,8 +1358,8 @@ fn history_commands_reach_the_catalog_and_only_the_removal_is_answered() {
         fn list(&self, q: &Query) -> Vec<Row> {
             Small(false).list(q)
         }
-        fn track_row(&self, id: u32) -> Option<TrackRow> {
-            Small(false).track_row(id)
+        fn track_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow> {
+            Small(false).track_row(id, column)
         }
         fn track(&self, id: u32) -> Option<TrackDetails> {
             Small(false).track(id)

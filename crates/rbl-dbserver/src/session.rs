@@ -10,7 +10,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::catalog::{
-    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, Query, Row, Sort, TrackDetails, TrackScope, UsbCue,
+    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, Query, Row, Sort, TrackColumn, TrackDetails,
+    TrackScope, UsbCue,
 };
 use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
@@ -171,7 +172,13 @@ impl LinkSession {
     }
 
     /// The items for a window of the current menu.
-    fn items(&self, location: u8, offset: u32, limit: u32) -> Vec<Item> {
+    fn items(
+        &self,
+        location: u8,
+        offset: u32,
+        limit: u32,
+        column: Option<TrackColumn>,
+    ) -> Vec<Item> {
         let offset = offset as usize;
         let limit = limit as usize;
         let window = |all: Vec<Item>| all.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
@@ -203,7 +210,7 @@ impl LinkSession {
                 .iter()
                 .skip(offset)
                 .take(limit)
-                .filter_map(|row| self.item(query, row))
+                .filter_map(|row| self.item(query, row, column))
                 .collect(),
             Menu::Metadata(details) => window(metadata_rows(
                 details,
@@ -220,13 +227,15 @@ impl LinkSession {
     fn render(&self, message: &Message) -> Vec<Message> {
         let offset = Self::number(message, 1);
         let limit = Self::number(message, 2);
+        let column = (Self::number(message, 6) != 0 && Self::number(message, 7) != 0)
+            .then(|| TrackColumn::from_id(Self::number(message, 7)));
         let mut out = vec![Message::new(
             message.transaction,
             kind::RENDER_HEADER,
             vec![Argument::Number(1), Argument::Number(offset)],
         )];
         out.extend(
-            self.items(Self::menu_location(message), offset, limit)
+            self.items(Self::menu_location(message), offset, limit, column)
                 .iter()
                 .map(|item| {
                     let mut reply = item.message(message.transaction);
@@ -245,7 +254,7 @@ impl LinkSession {
     }
 
     /// One library row as the item its menu draws it as.
-    fn item(&self, query: &Query, row: &Row) -> Option<Item> {
+    fn item(&self, query: &Query, row: &Row, column: Option<TrackColumn>) -> Option<Item> {
         Some(match (query, row) {
             (Query::BpmBuckets, Row::Date(value)) => Item::number(*value, item_type::TEMPO),
             (Query::Ratings, Row::Date(value)) => Item::number(*value, item_type::RATING),
@@ -305,9 +314,9 @@ impl LinkSession {
             }
             (Query::Tracks { scope, .. }, Row::Track { id, position }) => {
                 let track = if matches!(scope, TrackScope::FileName) {
-                    self.catalog.file_name_row(*id)?
+                    self.catalog.file_name_row(*id, column)?
                 } else {
-                    self.catalog.track_row(*id)?
+                    self.catalog.track_row(*id, column)?
                 };
                 let listed = match scope {
                     TrackScope::Genre { .. }
@@ -1006,7 +1015,7 @@ impl Session for LinkSession {
                 tx,
                 u32::from(message.kind),
                 self.catalog
-                    .track_row(Self::number(message, 1))
+                    .track_row(Self::number(message, 1), None)
                     .map_or(0, |track| track.bpm_x100),
             )],
             kind::TRACK_PLAY_STATE => vec![menu_header(
@@ -1033,7 +1042,7 @@ impl Session for LinkSession {
                 tx,
                 u32::from(message.kind),
                 self.catalog
-                    .track_row(Self::number(message, 1))
+                    .track_row(Self::number(message, 1), None)
                     .map_or(0, |track| track.key),
             )],
             // `dbcl_GetIsRekordboxMobile` waits for a `0x4b02` reply, not a
@@ -1183,7 +1192,7 @@ impl Session for LinkSession {
                         | Row::Date(item) => *item == id,
                     }),
                     _ => self
-                        .items(location, 0, u32::MAX)
+                        .items(location, 0, u32::MAX, None)
                         .iter()
                         .position(|item| item.id == id),
                 }

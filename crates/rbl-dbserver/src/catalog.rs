@@ -29,6 +29,7 @@ pub enum Sort {
 /// separately.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TrackColumn {
+    Title,
     Album,
     Genre,
     Artist,
@@ -45,6 +46,30 @@ pub enum TrackColumn {
     Remixer,
     DjPlayCount,
     DateAdded,
+}
+
+impl TrackColumn {
+    /// The render-time selector used by rekordbox track-list requests.
+    pub fn from_id(id: u32) -> Self {
+        match id {
+            2 => Self::Artist,
+            3 => Self::Album,
+            4 => Self::Bpm,
+            5 => Self::Rating,
+            6 => Self::Genre,
+            7 => Self::Comment,
+            8 => Self::Duration,
+            9 => Self::Remixer,
+            10 => Self::Label,
+            11 => Self::OriginalArtist,
+            12 => Self::Key,
+            13 => Self::Bitrate,
+            15 => Self::Color,
+            16 => Self::DjPlayCount,
+            17 => Self::DateAdded,
+            _ => Self::Title,
+        }
+    }
 }
 
 /// The artist-reference field used by an advanced browse category.
@@ -315,12 +340,12 @@ pub trait Catalog: Send + Sync {
     /// The rows of a menu, whole and in order.
     fn list(&self, query: &Query) -> Vec<Row>;
 
-    /// A track row by id, for the rows a list names by id.
-    fn track_row(&self, id: u32) -> Option<TrackRow>;
+    /// A track row by id, optionally using a render-time column override.
+    fn track_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow>;
 
     /// A track row whose primary text is its file name.
-    fn file_name_row(&self, id: u32) -> Option<TrackRow> {
-        self.track_row(id)
+    fn file_name_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow> {
+        self.track_row(id, column)
     }
 
     /// The whole record, for metadata and track info.

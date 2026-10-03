@@ -221,7 +221,10 @@ impl Item {
 
     /// A track row.
     pub fn track(row: &TrackRow, flags: u32, position: u32) -> Self {
-        let a = if row.column == TrackColumn::Comment {
+        let a = if matches!(
+            row.column,
+            TrackColumn::Comment | TrackColumn::DateAdded
+        ) {
             row.id
         } else {
             row.column_value
@@ -285,6 +288,7 @@ pub struct TrackRow {
 
 fn track_item_type(column: TrackColumn, value: u32) -> u32 {
     let secondary = match column {
+        TrackColumn::Title => 0,
         TrackColumn::Album => item_type::ALBUM,
         TrackColumn::Genre => item_type::GENRE,
         TrackColumn::Artist => item_type::ARTIST,
@@ -362,6 +366,7 @@ mod tests {
     #[test]
     fn track_columns_use_rekordbox_composite_types() {
         let columns = [
+            (TrackColumn::Title, 0x0004),
             (TrackColumn::Album, 0x0204),
             (TrackColumn::Genre, 0x0604),
             (TrackColumn::Artist, 0x0704),
@@ -413,5 +418,12 @@ mod tests {
         assert_eq!(item.a, row.id);
         assert_eq!(item.art, 3_441_880_869);
         assert_eq!(item.item_type, 0x2304);
+
+        row.column = TrackColumn::DateAdded;
+        row.secondary_text = "2026-10-02".into();
+        let item = Item::track(&row, 0, 0);
+
+        assert_eq!(item.a, row.id);
+        assert_eq!(item.item_type, 0x2e04);
     }
 }

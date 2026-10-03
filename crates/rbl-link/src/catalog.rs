@@ -970,6 +970,7 @@ fn secondary_column(
     library: &Library,
     row: rbl_index::Row,
     column: TrackColumn,
+    preserve_cached_text: bool,
     details: Option<&rbl_db::details::TrackDetails>,
 ) -> (String, u32) {
     let at = row as usize;
@@ -977,6 +978,7 @@ fn secondary_column(
     let named = |name: &str, value: u32| (name.to_owned(), value);
 
     match column {
+        TrackColumn::Title => (String::new(), 0),
         TrackColumn::Album => details.map_or_else(
             || named(library.album_name(row), 0),
             |d| named(&d.album, d.album_id),
@@ -991,13 +993,24 @@ fn secondary_column(
         ),
         TrackColumn::Rating => {
             let rating = u32::from(library.rating.get(at).copied().unwrap_or(0));
-            ("★".repeat(rating as usize), rating)
+            let text = preserve_cached_text
+                .then(|| "★".repeat(rating as usize))
+                .unwrap_or_default();
+            (text, rating)
         }
         TrackColumn::Duration => {
             let seconds = library.length_sec.get(at).copied().unwrap_or(0);
-            (format!("{}:{:02}", seconds / 60, seconds % 60), seconds)
+            let text = preserve_cached_text
+                .then(|| format!("{}:{:02}", seconds / 60, seconds % 60))
+                .unwrap_or_default();
+            (text, seconds)
         }
-        TrackColumn::Bpm => (format_bpm(bpm), bpm),
+        TrackColumn::Bpm => (
+            preserve_cached_text
+                .then(|| format_bpm(bpm))
+                .unwrap_or_default(),
+            bpm,
+        ),
         TrackColumn::Label => details.map_or_else(
             || named(library.label_name(row), 0),
             |d| named(&d.label, d.label_id),
@@ -1007,7 +1020,7 @@ fn secondary_column(
             let value = details.map_or(0, |d| d.key_id);
             let text = if key == 0 {
                 String::new()
-            } else if bpm == 0 {
+            } else if bpm == 0 || !preserve_cached_text {
                 camelot_name(key)
             } else {
                 format!("{} - {}", camelot_name(key), format_bpm(bpm))
@@ -1016,7 +1029,10 @@ fn secondary_column(
         }
         TrackColumn::Bitrate => {
             let bitrate = library.bitrate.get(at).copied().unwrap_or(0);
-            (format_nonzero(bitrate, " kbps"), bitrate)
+            let text = preserve_cached_text
+                .then(|| format_nonzero(bitrate, " kbps"))
+                .unwrap_or_default();
+            (text, bitrate)
         }
         TrackColumn::Color => {
             let color = u32::from(library.color.get(at).copied().unwrap_or(0));
@@ -1032,7 +1048,10 @@ fn secondary_column(
         }
         TrackColumn::DjPlayCount => {
             let count = u32::from(library.play_count.get(at).copied().unwrap_or(0));
-            (count.to_string(), count)
+            let text = preserve_cached_text
+                .then(|| count.to_string())
+                .unwrap_or_default();
+            (text, count)
         }
         TrackColumn::DateAdded => (library.date_added.get(at).to_owned(), 0),
     }
@@ -1089,14 +1108,20 @@ impl Catalog for IndexCatalog {
         self.cached_list(&library, query)
     }
 
-    fn track_row(&self, id: u32) -> Option<TrackRow> {
+    fn track_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow> {
         let library = self.source.library()?;
         let row = Self::row_of(&library, id)?;
         let at = row as usize;
-        let column = self.source.track_column();
+        let configured_column = self.source.track_column();
+        let column = column.unwrap_or(configured_column);
         let details = self.source.details(&id.to_string());
-        let (secondary_text, column_value) =
-            secondary_column(&library, row, column, details.as_ref());
+        let (secondary_text, column_value) = secondary_column(
+            &library,
+            row,
+            column,
+            column == configured_column,
+            details.as_ref(),
+        );
         let key = Self::key_id(&library, row);
         Some(TrackRow {
             id,
@@ -1115,10 +1140,10 @@ impl Catalog for IndexCatalog {
         })
     }
 
-    fn file_name_row(&self, id: u32) -> Option<TrackRow> {
+    fn file_name_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow> {
         let library = self.source.library()?;
         let row = Self::row_of(&library, id)?;
-        let mut item = self.track_row(id)?;
+        let mut item = self.track_row(id, column)?;
         library.file_name.get(row as usize).clone_into(&mut item.title);
         Some(item)
     }
@@ -1142,7 +1167,7 @@ impl Catalog for IndexCatalog {
             .or_else(|| std::fs::metadata(&path).ok().map(|m| m.len()))
             .unwrap_or(0);
         Some(TrackDetails {
-            row: self.track_row(id)?,
+            row: self.track_row(id, None)?,
             comment: library.comment.get(at).to_owned(),
             key_id: details.as_ref().map_or(0, |d| d.key_id),
             key_name: details
@@ -1245,7 +1270,7 @@ impl Catalog for IndexCatalog {
 
     fn hot_cue_bank_tracks(&self, bank: u32) -> Vec<TrackRow> {
         self.source.hot_cue_bank_track_ids(bank).into_iter()
-            .filter_map(|id| self.track_row(id))
+            .filter_map(|id| self.track_row(id, None))
             .collect()
     }
 
@@ -1780,9 +1805,9 @@ mod tests {
     fn keys_are_camelot_ids_and_related_keys_widen_the_list() {
         let c = catalog();
         // Abm is 1A = id 1; B is 1B = id 2; Am is 8A = id 15.
-        assert_eq!(c.track_row(11).unwrap().key, 1);
-        assert_eq!(c.track_row(12).unwrap().key, 2);
-        assert_eq!(c.track_row(10).unwrap().key, 15);
+        assert_eq!(c.track_row(11, None).unwrap().key, 1);
+        assert_eq!(c.track_row(12, None).unwrap().key, 2);
+        assert_eq!(c.track_row(10, None).unwrap().key, 15);
         assert_eq!(
             ids(&c.list(&Query::Tracks {
                 scope: TrackScope::Key {

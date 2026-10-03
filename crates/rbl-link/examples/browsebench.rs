@@ -42,7 +42,7 @@ fn main() {
     let started = Instant::now();
     for &offset in &offsets {
         for &id in ids.iter().skip(offset).take(12) {
-            let _ = catalog.track_row(id);
+            let _ = catalog.track_row(id, None);
         }
     }
     let cold_rows = started.elapsed();
@@ -50,7 +50,7 @@ fn main() {
         let started = Instant::now();
         for &offset in &offsets {
             for &id in ids.iter().skip(offset).take(12) {
-                let _ = catalog.track_row(id);
+                let _ = catalog.track_row(id, None);
             }
         }
         started.elapsed()
