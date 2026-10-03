@@ -152,6 +152,10 @@ impl Catalog for Small {
                         track.column_value = AALIYAH;
                         track.secondary_text = "Aaliyah".into();
                     }
+                    TrackColumn::Bpm => {
+                        track.column_value = track.bpm_x100;
+                        track.secondary_text.clear();
+                    }
                     TrackColumn::Title => {
                         track.column_value = 0;
                         track.secondary_text.clear();
@@ -641,6 +645,51 @@ fn render_override_selects_the_requested_track_column() {
     assert_eq!(row[5], Argument::String("Aaliyah".into()));
     assert_eq!(row[6], Argument::Number(0x0704));
     assert_eq!(row[12], Argument::Number(0x1814_5d65));
+}
+
+#[test]
+fn rx3_render_uses_the_active_sort_as_the_track_column() {
+    let mut s = session();
+    let header = s.handle(&numbers(kind::TRACK_MENU, 1, &[CTX, 2]));
+    assert_eq!(header[0].arguments[1], Argument::Number(1));
+
+    let rendered = s.handle(&numbers(kind::RENDER, 2, &[CTX, 0, 1, 0, 1, 12]));
+    let row = &rendered[1].arguments;
+    assert_eq!(row[0], Argument::Number(AALIYAH));
+    assert_eq!(row[5], Argument::String("Aaliyah".into()));
+    assert_eq!(row[6], Argument::Number(0x0704));
+    assert_eq!(row[12], Argument::Number(0x1814_5d65));
+}
+
+#[test]
+fn rx3_bpm_sort_renders_bpm_before_key() {
+    let mut s = session();
+    let header = s.handle(&numbers(kind::TRACK_MENU, 1, &[CTX, 4]));
+    assert_eq!(header[0].arguments[1], Argument::Number(1));
+
+    let rendered = s.handle(&numbers(kind::RENDER, 2, &[CTX, 0, 1, 0, 1, 12]));
+    let row = &rendered[1].arguments;
+    assert_eq!(row[0], Argument::Number(0x1e80));
+    assert_eq!(row[5], Argument::String("78.1 bpm - D".into()));
+    assert_eq!(row[6], Argument::Number(0x0d04));
+    assert_eq!(row[12], Argument::Number(0x1814_5d65));
+    assert_eq!(row[15], Argument::Number(0x1e80));
+}
+
+#[test]
+fn extended_render_without_an_override_uses_the_configured_column() {
+    let mut s = session();
+    let header = s.handle(&numbers(kind::TRACK_MENU, 1, &[CTX, 2]));
+    assert_eq!(header[0].arguments[1], Argument::Number(1));
+
+    let rendered = s.handle(&numbers(
+        kind::RENDER,
+        2,
+        &[CTX, 0, 1, 0, 1, 12, 1, 0],
+    ));
+    let row = &rendered[1].arguments;
+    assert_eq!(row[5], Argument::String("Em - 156".into()));
+    assert_eq!(row[6], Argument::Number(0x2304));
 }
 
 #[test]

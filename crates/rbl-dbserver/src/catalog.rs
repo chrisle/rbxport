@@ -90,6 +90,22 @@ impl Sort {
         Self::Key,
     ];
 
+    /// The secondary column an RX3 displays while this sort is active.
+    pub fn track_column(self) -> Option<TrackColumn> {
+        match self {
+            Self::Default | Self::Alphabet => None,
+            Self::Artist => Some(TrackColumn::Artist),
+            Self::Album => Some(TrackColumn::Album),
+            Self::Bpm => Some(TrackColumn::Bpm),
+            Self::Rating => Some(TrackColumn::Rating),
+            Self::Key => Some(TrackColumn::Key),
+            Self::Label => Some(TrackColumn::Label),
+            Self::Genre => Some(TrackColumn::Genre),
+            Self::DateAdded => Some(TrackColumn::DateAdded),
+            Self::DjPlayCount => Some(TrackColumn::DjPlayCount),
+        }
+    }
+
     pub fn from_id(id: u32) -> Self {
         match id {
             1 => Self::Alphabet,

@@ -178,6 +178,7 @@ impl LinkSession {
         offset: u32,
         limit: u32,
         column: Option<TrackColumn>,
+        use_sort_column: bool,
     ) -> Vec<Item> {
         let offset = offset as usize;
         let limit = limit as usize;
@@ -210,7 +211,7 @@ impl LinkSession {
                 .iter()
                 .skip(offset)
                 .take(limit)
-                .filter_map(|row| self.item(query, row, column))
+                .filter_map(|row| self.item(query, row, column, use_sort_column))
                 .collect(),
             Menu::Metadata(details) => window(metadata_rows(
                 details,
@@ -229,13 +230,20 @@ impl LinkSession {
         let limit = Self::number(message, 2);
         let column = (Self::number(message, 6) != 0 && Self::number(message, 7) != 0)
             .then(|| TrackColumn::from_id(Self::number(message, 7)));
+        let use_sort_column = message.arguments.len() == 6;
         let mut out = vec![Message::new(
             message.transaction,
             kind::RENDER_HEADER,
             vec![Argument::Number(1), Argument::Number(offset)],
         )];
         out.extend(
-            self.items(Self::menu_location(message), offset, limit, column)
+            self.items(
+                Self::menu_location(message),
+                offset,
+                limit,
+                column,
+                use_sort_column,
+            )
                 .iter()
                 .map(|item| {
                     let mut reply = item.message(message.transaction);
@@ -254,7 +262,13 @@ impl LinkSession {
     }
 
     /// One library row as the item its menu draws it as.
-    fn item(&self, query: &Query, row: &Row, column: Option<TrackColumn>) -> Option<Item> {
+    fn item(
+        &self,
+        query: &Query,
+        row: &Row,
+        column: Option<TrackColumn>,
+        use_sort_column: bool,
+    ) -> Option<Item> {
         Some(match (query, row) {
             (Query::BpmBuckets, Row::Date(value)) => Item::number(*value, item_type::TEMPO),
             (Query::Ratings, Row::Date(value)) => Item::number(*value, item_type::RATING),
@@ -312,12 +326,17 @@ impl LinkSession {
                     Item::date_part(*value)
                 }
             }
-            (Query::Tracks { scope, .. }, Row::Track { id, position }) => {
-                let track = if matches!(scope, TrackScope::FileName) {
+            (Query::Tracks { scope, sort }, Row::Track { id, position }) => {
+                let column = column
+                    .or_else(|| use_sort_column.then(|| sort.track_column()).flatten());
+                let mut track = if matches!(scope, TrackScope::FileName) {
                     self.catalog.file_name_row(*id, column)?
                 } else {
                     self.catalog.track_row(*id, column)?
                 };
+                if use_sort_column {
+                    track.format_sort_column();
+                }
                 let listed = match scope {
                     TrackScope::Genre { .. }
                     | TrackScope::Label { .. }
@@ -1192,7 +1211,7 @@ impl Session for LinkSession {
                         | Row::Date(item) => *item == id,
                     }),
                     _ => self
-                        .items(location, 0, u32::MAX, None)
+                        .items(location, 0, u32::MAX, None, false)
                         .iter()
                         .position(|item| item.id == id),
                 }

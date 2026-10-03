@@ -286,6 +286,38 @@ pub struct TrackRow {
     pub bpm_x100: u32,
 }
 
+impl TrackRow {
+    /// Formats the paired Key/BPM summary used for an RX3's active sort
+    /// column. Explicit render overrides retain their raw extractor shape.
+    pub fn format_sort_column(&mut self) {
+        let bpm = format_bpm(self.bpm_x100);
+        let key = if self.key == 0 { "" } else { &self.key_name };
+
+        self.secondary_text = match self.column {
+            TrackColumn::Bpm => join_secondary(&bpm, key),
+            TrackColumn::Key => join_secondary(key, &bpm),
+            _ => return,
+        };
+    }
+}
+
+fn format_bpm(bpm_x100: u32) -> String {
+    if bpm_x100 == 0 {
+        return String::new();
+    }
+
+    let tenths = bpm_x100.saturating_add(5) / 10;
+    format!("{}.{:01} bpm", tenths / 10, tenths % 10)
+}
+
+fn join_secondary(primary: &str, secondary: &str) -> String {
+    match (primary.is_empty(), secondary.is_empty()) {
+        (true, _) => secondary.to_owned(),
+        (_, true) => primary.to_owned(),
+        (false, false) => format!("{primary} - {secondary}"),
+    }
+}
+
 fn track_item_type(column: TrackColumn, value: u32) -> u32 {
     let secondary = match column {
         TrackColumn::Title => 0,
@@ -425,5 +457,27 @@ mod tests {
 
         assert_eq!(item.a, row.id);
         assert_eq!(item.item_type, 0x2e04);
+    }
+
+    #[test]
+    fn rx3_key_and_bpm_sorts_use_opposite_composite_order() {
+        let mut row = TrackRow {
+            id: 42,
+            title: "Track".into(),
+            secondary_text: String::new(),
+            column: TrackColumn::Bpm,
+            column_value: 13_000,
+            key: 5,
+            key_id: 5001,
+            key_name: "3A".into(),
+            bpm_x100: 13_000,
+        };
+
+        row.format_sort_column();
+        assert_eq!(row.secondary_text, "130.0 bpm - 3A");
+
+        row.column = TrackColumn::Key;
+        row.format_sort_column();
+        assert_eq!(row.secondary_text, "3A - 130.0 bpm");
     }
 }
