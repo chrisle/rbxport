@@ -16,8 +16,8 @@ name: Release
 # Nothing builds until the shared validation gate passes: pinned Clippy, the
 # Rust test suite and MSRV check, a Windows-native `cargo check`, and the
 # frontend's lint, typecheck, unit tests, bundle budget and Playwright e2e.
-# `.github/workflows/ci.yml` calls this workflow in validation-only mode for
-# pull requests; a release still owns the dependency directly,
+# `.github/workflows/ci.yml` calls this workflow in validation-only mode when
+# manually dispatched; a release still owns the dependency directly,
 # so a separate CI run can never accidentally authorize publication.
 #
 # Every job runs on the `arc` self-hosted fleet (`self-hosted, <os>, <arch>`),

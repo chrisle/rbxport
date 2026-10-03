@@ -4,8 +4,6 @@ name: Validate
 # publication. The callable release workflow owns the validation jobs so CI
 # and a release cannot accidentally diverge.
 on:
-  pull_request:
-    branches: [dev]
   workflow_dispatch:
     inputs:
       source_ref:
@@ -22,12 +20,7 @@ permissions:
 
 jobs:
   validate:
-    # Self-hosted runners must never execute untrusted fork code. Same-repo
-    # pull requests use the complete release gate.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
     uses: ./.github/workflows/release.yml
     with:
-      source_ref: ${{ inputs.source_ref || github.event.pull_request.head.sha || github.sha }}
+      source_ref: ${{ inputs.source_ref || github.sha }}
       validate_only: true
