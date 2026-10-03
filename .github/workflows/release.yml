@@ -522,9 +522,14 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium webkit
 
       - name: End-to-end
-        # Each ARC runner has an isolated checkout but shares the macOS
-        # network stack. Give each workflow run its own port pair.
-        run: E2E_PORT="$((20000 + GITHUB_RUN_NUMBER % 10000))" pnpm e2e
+        # Each ARC runner has an isolated checkout but shares one Mac. Give
+        # every run a port pair, then serialize the browser-heavy suite so
+        # concurrent WebKit/Chromium runs do not starve each other.
+        run: |
+          lock=/tmp/rbxport-playwright.lock
+          until mkdir "$lock" 2>/dev/null; do sleep 2; done
+          trap 'rmdir "$lock"' EXIT
+          E2E_PORT="$((20000 + GITHUB_RUN_NUMBER % 10000))" pnpm e2e
 
       - uses: actions/upload-artifact@v4
         if: failure()
