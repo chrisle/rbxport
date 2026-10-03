@@ -1094,19 +1094,7 @@ impl Catalog for IndexCatalog {
         let row = Self::row_of(&library, id)?;
         let at = row as usize;
         let column = self.source.track_column();
-        let needs_raw_lookup = matches!(
-            column,
-            TrackColumn::Album
-                | TrackColumn::Genre
-                | TrackColumn::Artist
-                | TrackColumn::Label
-                | TrackColumn::Key
-                | TrackColumn::OriginalArtist
-                | TrackColumn::Remixer
-        );
-        let details = needs_raw_lookup
-            .then(|| self.source.details(&id.to_string()))
-            .flatten();
+        let details = self.source.details(&id.to_string());
         let (secondary_text, column_value) =
             secondary_column(&library, row, column, details.as_ref());
         let key = Self::key_id(&library, row);
@@ -1117,15 +1105,11 @@ impl Catalog for IndexCatalog {
             column,
             column_value,
             key,
+            key_id: details.as_ref().map_or(0, |details| details.key_id),
             key_name: if column == TrackColumn::Key {
                 camelot_name(key)
             } else {
                 library.key_name(row).to_owned()
-            },
-            artwork: if library.artwork_path.get(at).is_empty() {
-                0
-            } else {
-                row.saturating_add(2)
             },
             bpm_x100: library.bpm_x100.get(at).copied().unwrap_or(0),
         })

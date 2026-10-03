@@ -1340,7 +1340,7 @@ fn track_info_rows(t: &TrackDetails) -> Vec<Item> {
             item_type: item_type::TRACK,
             e: 0x100,
             key: t.row.key,
-            art: if t.row.artwork == 0 { 1 } else { t.row.artwork },
+            art: t.row.key_id,
             text3: t.row.key_name.clone(),
             f: t.row.bpm_x100,
             ..Item::default()

@@ -221,10 +221,10 @@ impl Item {
 
     /// A track row.
     pub fn track(row: &TrackRow, flags: u32, position: u32) -> Self {
-        let (a, art) = if row.column == TrackColumn::Comment {
-            (row.id, if row.artwork == 0 { 1 } else { row.artwork })
+        let a = if row.column == TrackColumn::Comment {
+            row.id
         } else {
-            (row.column_value, row.column_value)
+            row.column_value
         };
         Self {
             a,
@@ -237,7 +237,7 @@ impl Item {
             d: position,
             e: 0x100,
             key: row.key,
-            art,
+            art: row.key_id,
             text3: row.key_name.clone(),
             f: row.bpm_x100,
         }
@@ -277,9 +277,9 @@ pub struct TrackRow {
     pub column_value: u32,
     /// Camelot index 1–24 (see [`crate::keys`]), 0 when unknown.
     pub key: u32,
+    /// Original `djmdContent.KeyID`, independent of the selected column.
+    pub key_id: u32,
     pub key_name: String,
-    /// `djmdContent.ArtworkID`; 0 when there is none.
-    pub artwork: u32,
     pub bpm_x100: u32,
 }
 
@@ -386,16 +386,16 @@ mod tests {
     }
 
     #[test]
-    fn a_key_column_carries_its_raw_database_id() {
-        let row = TrackRow {
+    fn every_track_column_carries_the_raw_database_key_id() {
+        let mut row = TrackRow {
             id: 42,
             title: "Track".into(),
             secondary_text: "3A - 112.2 bpm".into(),
             column: TrackColumn::Key,
             column_value: 3_441_880_869,
             key: 5,
+            key_id: 3_441_880_869,
             key_name: "Ebm".into(),
-            artwork: 9,
             bpm_x100: 11_220,
         };
         let item = Item::track(&row, 0, 0);
@@ -404,5 +404,14 @@ mod tests {
         assert_eq!(item.art, 3_441_880_869);
         assert_eq!(item.item_type, 0x0f04);
         assert_eq!(item.text2, "3A - 112.2 bpm");
+
+        row.column = TrackColumn::Comment;
+        row.column_value = row.id;
+        row.secondary_text = "note".into();
+        let item = Item::track(&row, 0, 0);
+
+        assert_eq!(item.a, row.id);
+        assert_eq!(item.art, 3_441_880_869);
+        assert_eq!(item.item_type, 0x2304);
     }
 }

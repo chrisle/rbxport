@@ -45,8 +45,8 @@ fn the_track() -> TrackRow {
         column: Default::default(),
         column_value: 0,
         key: 0x14,
+        key_id: 0x1814_5d65,
         key_name: "D".into(),
-        artwork: 0x14,
         bpm_x100: 0x1e80,
     }
 }
@@ -598,12 +598,12 @@ fn artists_albums_and_their_tracks_are_shaped_as_captured() {
         kind::ARTIST_ALBUM_TRACKS,
         &[CTX, 0, AALIYAH, 0xffff_ffff],
     );
-    assert_eq!(args(&items[0]), "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x1000000, 0x475f, 0x0, 0x100, 0x14, 0x14, 0x4, \"D\", 0x1e80");
+    assert_eq!(args(&items[0]), "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x1000000, 0x475f, 0x0, 0x100, 0x14, 0x18145d65, 0x4, \"D\", 0x1e80");
     let (_, items) = browse(&mut s, kind::ALBUM_TRACKS, &[CTX, 0, ALBUM]);
-    assert_eq!(args(&items[0]), "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x1000000, 0x475f, 0x55, 0x100, 0x14, 0x14, 0x4, \"D\", 0x1e80");
+    assert_eq!(args(&items[0]), "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x1000000, 0x475f, 0x55, 0x100, 0x14, 0x18145d65, 0x4, \"D\", 0x1e80");
     // In TRACK the flags are 0.
     let (_, items) = browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
-    assert_eq!(args(&items[0]), "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x0, 0x475f, 0x0, 0x100, 0x14, 0x14, 0x4, \"D\", 0x1e80");
+    assert_eq!(args(&items[0]), "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x0, 0x475f, 0x0, 0x100, 0x14, 0x18145d65, 0x4, \"D\", 0x1e80");
 }
 
 #[test]
@@ -642,7 +642,7 @@ fn metadata_and_track_info_have_the_captured_rows() {
     let (count, items) = browse(&mut s, kind::METADATA, &[0x0102_0301, TRACK]);
     assert_eq!(count, 16);
     let rows: Vec<String> = items.iter().map(args).collect();
-    assert_eq!(rows[0], "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x0, 0x475f, 0x0, 0x100, 0x14, 0x14, 0x4, \"D\", 0x1e80");
+    assert_eq!(rows[0], "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x0, 0x475f, 0x0, 0x100, 0x14, 0x18145d65, 0x4, \"D\", 0x1e80");
     assert_eq!(rows[1], "0x1, 0x6d5c28f2, 0x10, \"Aaliyah\", 0x2, \"\", 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
     assert_eq!(
         rows[2],
