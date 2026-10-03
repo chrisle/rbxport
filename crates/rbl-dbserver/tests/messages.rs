@@ -228,6 +228,15 @@ fn several_messages_in_one_segment_are_all_decoded() {
 }
 
 #[test]
+fn the_extended_menu_footer_has_no_arguments() {
+    let footer = menu_footer(3);
+
+    assert_eq!(footer.kind, kind::MENU_FOOTER);
+    assert!(footer.arguments.is_empty());
+    assert_eq!(Message::decode(&footer.encode()).unwrap().0, footer);
+}
+
+#[test]
 fn a_message_split_across_segments_is_left_for_the_next_read() {
     let whole = Message::new(
         9,

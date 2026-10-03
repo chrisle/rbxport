@@ -714,11 +714,7 @@ pub fn menu_header(transaction: u32, request_kind: u32, item_count: u32) -> Mess
     )
 }
 
-/// Builds the footer that ends a menu.
+/// Builds the zero-argument footer that ends an extended menu.
 pub fn menu_footer(transaction: u32) -> Message {
-    Message::new(
-        transaction,
-        kind::MENU_FOOTER,
-        vec![Argument::Number(0), Argument::Number(0)],
-    )
+    Message::new(transaction, kind::MENU_FOOTER, vec![])
 }
