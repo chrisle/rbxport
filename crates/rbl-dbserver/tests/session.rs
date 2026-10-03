@@ -359,6 +359,53 @@ fn the_root_menu_matches_the_live_rekordbox_order() {
 }
 
 #[test]
+fn the_root_menu_honors_the_players_capability_mask() {
+    let expected = [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (4, 6),
+        (5, 7),
+        (6, 8),
+        (7, 9),
+        (8, 10),
+        (9, 11),
+        (10, 12),
+        (12, 15),
+        (13, 19),
+        (14, 20),
+        (15, 21),
+        (16, 5),
+        (17, 23),
+        (18, 22),
+        (19, 18),
+        (26, 26),
+    ];
+
+    for (bit, id) in expected {
+        let (count, items) = browse(&mut session(), kind::ROOT_MENU, &[CTX, 0, 1 << bit]);
+
+        assert_eq!(count, 1, "capability bit {bit}");
+        assert_eq!(items[0].arguments[1], Argument::Number(id));
+    }
+
+    for bit in [11, 20, 21, 22, 23, 24, 25] {
+        assert_eq!(
+            browse(&mut session(), kind::ROOT_MENU, &[CTX, 0, 1 << bit]).0,
+            0,
+            "unused capability bit {bit}",
+        );
+    }
+
+    let (_, legacy) = browse(&mut session(), kind::ROOT_MENU, &[CTX, 0, 0x00ff_ffff]);
+    assert_eq!(legacy.len(), 19);
+    assert!(legacy
+        .iter()
+        .all(|item| item.arguments[1] != Argument::Number(26)));
+}
+
+#[test]
 fn numeric_filter_menus_use_the_captured_item_types() {
     let mut s = session();
     for (request, expected, item_type) in [

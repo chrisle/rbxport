@@ -340,30 +340,49 @@ fn track_item_type(column: TrackColumn, value: u32) -> u32 {
     (secondary << 8) | item_type::TITLE
 }
 
-/// The categories and order advertised by the live rekordbox library.
-pub fn root_menu() -> Vec<Item> {
-    vec![
-        Item::heading(0x04, "TRACK", item_type::MENU_TRACK),
-        Item::heading(0x0c, "KEY", item_type::MENU_KEY),
-        Item::heading(0x06, "BPM", item_type::MENU_BPM),
-        Item::heading(0x01, "GENRE", item_type::MENU_GENRE),
-        Item::heading(0x02, "ARTIST", item_type::MENU_ARTIST),
-        Item::heading(0x03, "ALBUM", item_type::MENU_ALBUM),
-        Item::heading(0x1a, "MATCHING", item_type::MENU_MATCHING),
-        Item::heading(0x12, "SEARCH", item_type::MENU_SEARCH),
-        Item::heading(0x05, "PLAYLIST", item_type::MENU_PLAYLIST),
-        Item::heading(0x16, "HISTORY", item_type::MENU_HISTORY),
-        Item::heading(0x14, "BITRATE", item_type::MENU_BITRATE),
-        Item::heading(0x0f, "COLOR", item_type::MENU_COLOR),
-        Item::heading(0x15, "FILE NAME", item_type::MENU_FILE_NAME),
-        Item::heading(0x17, "HOT CUE BANK", item_type::MENU_HOT_CUE_BANK),
-        Item::heading(0x0a, "LABEL", item_type::MENU_LABEL),
-        Item::heading(0x0b, "ORIGINAL ARTIST", item_type::MENU_ORIGINAL_ARTIST),
-        Item::heading(0x07, "RATING", item_type::MENU_RATING),
-        Item::heading(0x09, "REMIXER", item_type::MENU_REMIXER),
-        Item::heading(0x13, "TIME", item_type::MENU_TIME),
-        Item::heading(0x08, "YEAR", item_type::MENU_YEAR),
+/// The categories advertised by the capability mask in a root-menu request,
+/// in rekordbox's display order.
+pub fn root_menu(capabilities: u32) -> Vec<Item> {
+    [
+        (3, Item::heading(0x04, "TRACK", item_type::MENU_TRACK)),
+        (10, Item::heading(0x0c, "KEY", item_type::MENU_KEY)),
+        (4, Item::heading(0x06, "BPM", item_type::MENU_BPM)),
+        (0, Item::heading(0x01, "GENRE", item_type::MENU_GENRE)),
+        (1, Item::heading(0x02, "ARTIST", item_type::MENU_ARTIST)),
+        (2, Item::heading(0x03, "ALBUM", item_type::MENU_ALBUM)),
+        (
+            26,
+            Item::heading(0x1a, "MATCHING", item_type::MENU_MATCHING),
+        ),
+        (19, Item::heading(0x12, "SEARCH", item_type::MENU_SEARCH)),
+        (
+            16,
+            Item::heading(0x05, "PLAYLIST", item_type::MENU_PLAYLIST),
+        ),
+        (18, Item::heading(0x16, "HISTORY", item_type::MENU_HISTORY)),
+        (14, Item::heading(0x14, "BITRATE", item_type::MENU_BITRATE)),
+        (12, Item::heading(0x0f, "COLOR", item_type::MENU_COLOR)),
+        (
+            15,
+            Item::heading(0x15, "FILE NAME", item_type::MENU_FILE_NAME),
+        ),
+        (
+            17,
+            Item::heading(0x17, "HOT CUE BANK", item_type::MENU_HOT_CUE_BANK),
+        ),
+        (8, Item::heading(0x0a, "LABEL", item_type::MENU_LABEL)),
+        (
+            9,
+            Item::heading(0x0b, "ORIGINAL ARTIST", item_type::MENU_ORIGINAL_ARTIST),
+        ),
+        (5, Item::heading(0x07, "RATING", item_type::MENU_RATING)),
+        (7, Item::heading(0x09, "REMIXER", item_type::MENU_REMIXER)),
+        (13, Item::heading(0x13, "TIME", item_type::MENU_TIME)),
+        (6, Item::heading(0x08, "YEAR", item_type::MENU_YEAR)),
     ]
+    .into_iter()
+    .filter_map(|(bit, item)| (capabilities & (1 << bit) != 0).then_some(item))
+    .collect()
 }
 
 /// The sort options a track list offers, in rekordbox's order. The id is
