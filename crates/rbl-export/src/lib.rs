@@ -178,6 +178,7 @@ const COLORS: [&str; 8] =
 /// or album longer than this is cut, not the file name [OBS 7.2.11, four
 /// albums cut at exactly 48 on the reference export].
 const DIR_NAME_MAX: usize = 48;
+const FILE_NAME_MAX: usize = 120;
 
 /// A directory component under `Contents/`: FAT-safe and cut to rekordbox's
 /// length, trailing spaces and dots dropped after the cut too.
@@ -195,8 +196,9 @@ fn dir_name(name: &str) -> String {
 
 /// Makes a name safe for FAT32, which is what a DJ stick is formatted as.
 fn fat_safe(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
     let mut out: String = name
-        .chars()
+        .nfc()
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
             c if (c as u32) < 0x20 => '_',
@@ -210,11 +212,29 @@ fn fat_safe(name: &str) -> String {
     if out.is_empty() {
         out.push_str("Unknown");
     }
-    let mut end = out.len().min(120);
-    while !out.is_char_boundary(end) { end -= 1; }
-    out.truncate(end);
-    while out.ends_with(['.', ' ']) { out.pop(); }
     out
+}
+
+/// A rekordbox-style audio filename: FAT-safe and short enough for the player,
+/// while retaining the extension that identifies the audio format [OBS: the
+/// RBX-21 reporter's rekordbox export shortened the stem and kept `.aiff`].
+/// macOS can expose decomposed Unicode names, so `fat_safe` normalizes before
+/// the byte limit is applied and staged and published paths stay identical.
+fn fat_file_name(name: &str) -> String {
+    let safe = fat_safe(name);
+    if safe.len() <= FILE_NAME_MAX {
+        return safe;
+    }
+    let (stem, suffix) = safe
+        .rsplit_once('.')
+        .filter(|(stem, extension)| !stem.is_empty() && !extension.is_empty() && extension.len() < FILE_NAME_MAX)
+        .map_or((safe.as_str(), String::new()), |(stem, extension)| (stem, format!(".{extension}")));
+    let mut end = stem.len().min(FILE_NAME_MAX.saturating_sub(suffix.len()));
+    while !stem.is_char_boundary(end) { end -= 1; }
+    let mut shortened = stem[..end].trim_end_matches(['.', ' ']).to_owned();
+    if shortened.is_empty() { shortened.push_str("Unknown"); }
+    shortened.push_str(&suffix);
+    shortened
 }
 
 /// The lookup tables an export builds as it walks the tracks.
@@ -284,7 +304,7 @@ fn layout(track: &SourceTrack, export_id: u32) -> Layout {
         .source_path
         .file_name()
         .map_or_else(|| format!("track-{export_id}.mp3"), |n| n.to_string_lossy().into_owned());
-    let file_name = fat_safe(&on_disk);
+    let file_name = fat_file_name(&on_disk);
     let artist_dir = dir_name(if track.artist.is_empty() { "UnknownArtist" } else { &track.artist });
     let album_dir = dir_name(if track.album.is_empty() { "UnknownAlbum" } else { &track.album });
     Layout {
@@ -711,7 +731,7 @@ pub fn export_cancellable(
         };
         if let Some(target) = conversion {
             let stem = Path::new(&place.file_name).file_stem().unwrap_or_default().to_string_lossy();
-            let name = fat_safe(&format!("{stem}-rbx-cdj-{export_id}.{}", target.extension()));
+            let name = fat_file_name(&format!("{stem}-rbx-cdj-{export_id}.{}", target.extension()));
             let parent = place.audio.rsplit_once('/').map_or("/Contents", |(parent, _)| parent);
             place.audio = format!("{parent}/{name}");
             place.file_name = name;
@@ -1677,6 +1697,19 @@ mod tests {
         assert_eq!(fat_safe("   "), "Unknown");
         // Unicode is fine on FAT32 long names.
         assert_eq!(fat_safe("Ébano — Tiësto"), "Ébano — Tiësto");
+        assert_eq!(fat_safe("Kesa\u{308} (On Kaunis).aiff"), "Kesä (On Kaunis).aiff");
+    }
+
+    #[test]
+    fn long_fat_filenames_keep_their_audio_extension() {
+        let original = format!("Relative Progress , Steve Nash , 120 Dance Moves {}.aiff", "extended ".repeat(20));
+        let shortened = fat_file_name(&original);
+        assert!(shortened.len() <= FILE_NAME_MAX);
+        assert!(Path::new(&shortened)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("aiff")));
+        assert_eq!(fat_file_name("Omega - The Hidden Beauty Of Dutch House '94-'98 - 04 Le Rève.aiff"),
+            "Omega - The Hidden Beauty Of Dutch House '94-'98 - 04 Le Rève.aiff");
     }
 
     #[test]
