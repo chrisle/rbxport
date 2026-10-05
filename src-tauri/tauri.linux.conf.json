@@ -4,7 +4,8 @@
       {
         "titleBarStyle": "Visible",
         "hiddenTitle": false,
-        "decorations": true
+        "decorations": true,
+        "dragDropEnabled": true
       }
     ]
   }

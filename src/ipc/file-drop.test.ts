@@ -1,13 +1,44 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+const { invoke, onDragDropEvent, scaleFactor, unlisten } = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  onDragDropEvent: vi.fn(),
+  scaleFactor: vi.fn(),
+  unlisten: vi.fn(),
+}));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ onDragDropEvent }),
+}));
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ scaleFactor }),
+}));
 
 beforeEach(() => {
   vi.resetModules();
   invoke.mockReset();
+  onDragDropEvent.mockReset();
+  scaleFactor.mockReset();
+  unlisten.mockReset();
   Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+});
+
+it("converts native Linux drop coordinates to CSS pixels", async () => {
+  let handler: ((event: { payload: unknown }) => void) | undefined;
+  scaleFactor.mockResolvedValue(2);
+  onDragDropEvent.mockImplementation((next) => {
+    handler = next;
+    return Promise.resolve(unlisten);
+  });
+  const { subscribeNativeFileDrops } = await import("./client");
+  const received = vi.fn();
+  const stop = subscribeNativeFileDrops(received);
+  await vi.waitFor(() => expect(handler).toBeTypeOf("function"));
+  handler?.({ payload: { type: "drop", paths: ["/Music/a.mp3"], position: { x: 240, y: 100 } } });
+  expect(received).toHaveBeenCalledWith({ paths: ["/Music/a.mp3"], x: 120, y: 50 });
+  stop();
+  expect(unlisten).toHaveBeenCalledOnce();
 });
 
 it("resolves ordinary WKWebView Files through the native bridge", async () => {

@@ -47,6 +47,43 @@ export async function droppedFilePaths(files: File[]): Promise<string[]> {
   }
 }
 
+export interface NativeFileDrop {
+  paths: string[];
+  /** Drop position in CSS pixels, relative to the webview. */
+  x: number;
+  y: number;
+}
+
+/**
+ * Receives native OS file drops on platforms whose webview does not expose
+ * filesystem paths through DOM `File` objects (notably Linux WebKitGTK).
+ */
+export function subscribeNativeFileDrops(listener: (drop: NativeFileDrop) => void): () => void {
+  if (!isTauri) return () => {};
+  let live = true;
+  let stop: (() => void) | undefined;
+  void Promise.all([
+    import("@tauri-apps/api/webview"),
+    import("@tauri-apps/api/window"),
+  ]).then(async ([{ getCurrentWebview }, { getCurrentWindow }]) => {
+    const scale = await getCurrentWindow().scaleFactor();
+    const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type !== "drop" || event.payload.paths.length === 0) return;
+      listener({
+        paths: event.payload.paths,
+        x: event.payload.position.x / scale,
+        y: event.payload.position.y / scale,
+      });
+    });
+    if (live) stop = unlisten;
+    else unlisten();
+  });
+  return () => {
+    live = false;
+    stop?.();
+  };
+}
+
 /** Keep the native Edit menu in sync with the focused editor's history. */
 export async function setHistoryMenu(undo: string | null, redo: string | null): Promise<void> {
   if (!isTauri) return;

@@ -15,7 +15,7 @@ import { useEventCallback } from "@/store/useEventCallback";
 import type { TrackSearchField } from "@/lib/search";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { droppedFilePaths, getBackend } from "@/ipc/client";
+import { droppedFilePaths, getBackend, subscribeNativeFileDrops } from "@/ipc/client";
 import type {
   Backend, DeckId, Device, ImportReport, LibraryProblem, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
 } from "@/ipc/types";
@@ -911,19 +911,16 @@ function AppBody() {
    * a playlist: imported, then added to that playlist, the way a dragged
    * track already is.
    */
-  const importDroppedFilesTo = useCallback(
-    (playlistId: string, files: File[]) => {
+  const importDroppedPathsTo = useCallback(
+    (playlistId: string, paths: string[]) => {
       if (advancedPrefs.protectLibrary) {
         refuse(refusal(true));
         return;
       }
       const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
-      report(`Importing ${files.length} track${files.length === 1 ? "" : "s"} into ${name}…`);
+      report(`Importing ${paths.length} item${paths.length === 1 ? "" : "s"} into ${name}…`);
       void (async () => {
         try {
-          // Resolve immediately, before any other async work: macOS's drag
-          // pasteboard belongs to the current OS drag, not to the File object.
-          const paths = await droppedFilePaths(files);
           const backend = await getBackend();
           const imported = await backend.importPaths(paths);
           if (imported.tracks.length > 0) {
@@ -944,6 +941,28 @@ function AppBody() {
     },
     [tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis],
   );
+
+  const importDroppedFilesTo = useCallback(
+    (playlistId: string, files: File[]) => {
+      // Resolve immediately: macOS's drag pasteboard belongs to the current
+      // OS drag, not to the File object retained by this callback.
+      void droppedFilePaths(files)
+        .then((paths) => importDroppedPathsTo(playlistId, paths))
+        .catch((e: unknown) => refuse(e instanceof Error ? e.message : "Those files could not be imported."));
+    },
+    [importDroppedPathsTo, refuse],
+  );
+
+  useEffect(() => subscribeNativeFileDrops((drop) => {
+    const target = document.elementFromPoint(drop.x, drop.y);
+    const row = target?.closest<HTMLElement>("[data-file-drop-playlist]");
+    const playlistId = row?.dataset.fileDropPlaylist
+      ?? (target?.closest('[data-testid="track-scroll"]') && selectedNode?.kind === "playlist"
+        ? selectedNode.id
+        : undefined);
+    if (playlistId) importDroppedPathsTo(playlistId, drop.paths);
+    else refuse("Drop files or folders onto a playlist to import them.");
+  }), [selectedNode, importDroppedPathsTo, refuse]);
 
   /**
    * The same drop, for files dropped straight into the open playlist's own

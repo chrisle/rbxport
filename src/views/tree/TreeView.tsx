@@ -145,6 +145,7 @@ const Row = memo(function Row({
       className={styles.node}
       data-selected={selected || undefined}
       data-kind={node.kind}
+      data-file-drop-playlist={fileDroppable ? node.id : undefined}
       data-ejecting={ejecting || undefined}
       style={{ paddingLeft: `${14 + node.depth * 20}px` }}
       // A note is information, not a place: nothing to select.
