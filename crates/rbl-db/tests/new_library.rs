@@ -2,9 +2,12 @@
 //! a track added, analysed, and put in a playlist.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use rbl_db::new_library::{create, plan_at, use_existing_at};
+use std::path::{Path, PathBuf};
+
+use rbl_db::locate::{locate_with, Located, Origin, Sources};
+use rbl_db::new_library::{create, plan_with, use_existing_with};
 use rbl_db::write::{AnalysisRegistration, Writer};
-use rbl_db::{detect_from, Library, OpenMode};
+use rbl_db::{Library, LibraryLocation, OpenMode};
 
 /// One second of silence as a 16-bit mono WAV.
 fn write_wav(path: &std::path::Path) {
@@ -30,11 +33,11 @@ fn write_wav(path: &std::path::Path) {
 #[test]
 fn a_new_library_takes_a_track_its_analysis_and_a_playlist() {
     let root = tempfile::tempdir().unwrap();
-    let options = root.path().join("rekordboxAgent/storage/options.json");
-    let plan = plan_at(&options, &root.path().join("rekordbox")).unwrap().unwrap();
+    let sources = Sources::under(root.path());
+    let plan = plan_with(&sources).unwrap().unwrap();
     create(&plan).unwrap();
 
-    let mut location = detect_from(&options).unwrap();
+    let mut location = found(&sources);
     // A temp directory is not the user's install; the test gate allows it.
     location.is_real_install = false;
     let backups = tempfile::tempdir().unwrap();
@@ -70,47 +73,64 @@ fn a_new_library_takes_a_track_its_analysis_and_a_playlist() {
     assert_eq!(members, 1);
 }
 
+fn found(sources: &Sources) -> LibraryLocation {
+    match locate_with(sources).unwrap() {
+        Located::Found { location, .. } => location,
+        other => panic!("expected a library, got {other:?}"),
+    }
+}
+
+/// A library rekordbox's way, in `dir` on a pretend drive.
+fn library_on_drive(root: &Path, dir: &Path) -> PathBuf {
+    let mut maker = Sources::under(&root.join("maker"));
+    maker.default_dir = dir.to_path_buf();
+    create(&plan_with(&maker).unwrap().unwrap()).unwrap().master_db
+}
+
 #[test]
 fn an_existing_external_library_can_be_selected_without_changing_it() {
     let root = tempfile::tempdir().unwrap();
-    let original_options = root.path().join("source/options.json");
-    let external = root.path().join("mounted-drive/rekordbox");
-    let made = create(&plan_at(&original_options, &external).unwrap().unwrap()).unwrap();
-    let before = std::fs::read(&made.master_db).unwrap();
-    std::fs::remove_file(&original_options).unwrap();
+    let master_db = library_on_drive(root.path(), &root.path().join("media/ryan/T7/PIONEER/Master"));
+    let before = std::fs::read(&master_db).unwrap();
+    let sources = Sources::under(&root.path().join("machine"));
 
-    let installed_options = root.path().join("installed-agent/options.json");
-    let selected = use_existing_at(&installed_options, &made.master_db).unwrap();
+    let selected = use_existing_with(&sources, &master_db).unwrap();
 
-    assert_eq!(selected.master_db, made.master_db);
-    assert_eq!(selected.share_root, external.join("share"));
+    assert_eq!(selected.master_db, master_db);
+    assert_eq!(selected.share_root, master_db.parent().unwrap().join("share"));
     assert_eq!(std::fs::read(&selected.master_db).unwrap(), before);
-    assert_eq!(detect_from(&installed_options).unwrap().master_db, selected.master_db);
-    Library::open(selected, OpenMode::ReadOnly).unwrap();
+    assert!(!sources.agent_options.as_deref().unwrap().exists(), "rekordbox's options.json is not written");
+    assert!(!sources.rekordbox_settings.as_deref().unwrap().exists(), "nor its settings");
+    let next = locate_with(&sources).unwrap();
+    let Located::Found { location, origin } = next else { panic!("not found: {next:?}") };
+    assert_eq!((location.master_db, origin), (master_db, Origin::Rbxport));
 }
 
 #[test]
 fn selecting_an_invalid_database_does_not_persist_it() {
     let root = tempfile::tempdir().unwrap();
-    let options = root.path().join("installed-agent/options.json");
+    let sources = Sources::under(&root.path().join("machine"));
     let invalid = root.path().join("mounted-drive/master.db");
     std::fs::create_dir_all(invalid.parent().unwrap()).unwrap();
     std::fs::write(&invalid, b"not a rekordbox database").unwrap();
 
-    assert!(use_existing_at(&options, &invalid).is_err());
-    assert!(!options.exists());
+    assert!(use_existing_with(&sources, &invalid).is_err());
+    assert!(!sources.choice.as_deref().unwrap().exists());
 }
 
 #[test]
-fn selecting_a_library_never_replaces_existing_agent_options() {
+fn a_choice_that_rekordbox_s_own_library_would_override_is_refused() {
     let root = tempfile::tempdir().unwrap();
-    let first_options = root.path().join("first/options.json");
-    let first = create(&plan_at(&first_options, &root.path().join("first/library")).unwrap().unwrap()).unwrap();
-    let second_options = root.path().join("second/options.json");
-    let second = create(&plan_at(&second_options, &root.path().join("second/library")).unwrap().unwrap()).unwrap();
-    let before = std::fs::read(&first_options).unwrap();
+    let sources = Sources::under(&root.path().join("machine"));
+    let rekordbox = create(&plan_with(&sources).unwrap().unwrap()).unwrap().master_db;
+    let other = library_on_drive(root.path(), &root.path().join("Volumes/B/PIONEER/Master"));
 
-    assert!(use_existing_at(&first_options, &second.master_db).is_err());
-    assert_eq!(std::fs::read(&first_options).unwrap(), before);
-    assert_eq!(detect_from(&first_options).unwrap().master_db, first.master_db);
+    let refused = use_existing_with(&sources, &other).unwrap_err().to_string();
+    assert!(refused.contains("rekordbox is set to use"), "{refused}");
+    assert!(!sources.choice.as_deref().unwrap().exists());
+    assert_eq!(found(&sources).master_db, rekordbox);
+
+    // Choosing rekordbox's own library is fine, and needs nothing saved.
+    assert_eq!(use_existing_with(&sources, &rekordbox).unwrap().master_db, rekordbox);
+    assert!(!sources.choice.as_deref().unwrap().exists());
 }

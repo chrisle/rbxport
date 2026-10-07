@@ -17,6 +17,7 @@ pub mod fixture;
 pub mod import;
 pub mod itunes;
 pub mod key;
+pub mod locate;
 pub mod new_library;
 pub mod write;
 pub mod xml;
@@ -105,20 +106,8 @@ pub enum OpenMode {
 /// see `scripts/e2e-win/`. Unset in ordinary use.
 pub const OPTIONS_ENV: &str = "RBXPORT_OPTIONS";
 
-/// The agent's options file, which holds the db path and the wrapped passphrase.
-fn options_path() -> Result<PathBuf> {
-    let path = options_location()?;
-    if path.is_file() {
-        return Ok(path);
-    }
-    Err(DbError::NotInstalled(if std::env::var_os(OPTIONS_ENV).is_some() {
-        format!("{OPTIONS_ENV} names {}, which is not a file", path.display())
-    } else {
-        format!("{} not found", path.display())
-    }))
-}
-
-/// Where the agent's options file is, or goes when there is none yet.
+/// Where rekordbox's agent keeps `options.json`. rekordbox writes it; this
+/// application only reads it.
 pub(crate) fn options_location() -> Result<PathBuf> {
     if let Some(chosen) = std::env::var_os(OPTIONS_ENV) {
         return Ok(PathBuf::from(chosen));
@@ -145,12 +134,30 @@ pub(crate) fn default_library_dir() -> Result<PathBuf> {
         .ok_or_else(|| DbError::NotInstalled("no home directory".into()))
 }
 
-/// Finds the installed library and unwraps its passphrase.
+/// Finds the library to open and unwraps its passphrase: the one rekordbox
+/// is set to use, else the one chosen in this application. See
+/// [`locate`](mod@locate) for the order and what happens when it is missing.
 pub fn detect() -> Result<LibraryLocation> {
-    detect_from(&options_path()?)
+    match locate::locate()? {
+        locate::Located::Found { location, .. } => Ok(location),
+        locate::Located::Unavailable { master_db, .. } => {
+            Err(DbError::NotInstalled(format!("{} is not there; is its drive connected?", master_db.display())))
+        }
+        locate::Located::Absent { master_db } => Err(DbError::NotInstalled(format!("{} not found", master_db.display()))),
+    }
 }
 
-pub fn detect_from(options_json: &Path) -> Result<LibraryLocation> {
+/// The entries of rekordbox's agent `options.json` this application reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AgentOptions {
+    /// `db-path`: the `master.db` rekordbox last started with.
+    pub db_path: Option<PathBuf>,
+    /// `dp`: the wrapped database passphrase.
+    pub dp: Option<String>,
+}
+
+/// Reads `db-path` and `dp` from an agent `options.json`, never writing it.
+pub(crate) fn read_agent_options(options_json: &Path) -> Result<AgentOptions> {
     let text = std::fs::read_to_string(options_json)?;
     let parsed: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| DbError::NotInstalled(format!("options.json is not valid JSON: {e}")))?;
@@ -161,7 +168,7 @@ pub fn detect_from(options_json: &Path) -> Result<LibraryLocation> {
         .and_then(|v| v.as_array())
         .ok_or_else(|| DbError::NotInstalled("options.json has no `options` array".into()))?;
 
-    let mut db_path: Option<String> = None;
+    let mut db_path: Option<PathBuf> = None;
     let mut dp: Option<String> = None;
     for entry in entries {
         let Some(pair) = entry.as_array() else { continue };
@@ -169,15 +176,18 @@ pub fn detect_from(options_json: &Path) -> Result<LibraryLocation> {
             continue;
         };
         match k {
-            "db-path" => db_path = v.as_str().map(str::to_owned),
-            "dp" => dp = v.as_str().map(str::to_owned),
+            "db-path" => db_path = v.as_str().filter(|s| !s.is_empty()).map(PathBuf::from),
+            "dp" => dp = v.as_str().filter(|s| !s.is_empty()).map(str::to_owned),
             _ => {}
         }
     }
+    Ok(AgentOptions { db_path, dp })
+}
 
-    let master_db = PathBuf::from(
-        db_path.ok_or_else(|| DbError::NotInstalled("options.json has no db-path".into()))?,
-    );
+/// The library an agent `options.json` names, with its passphrase.
+pub fn detect_from(options_json: &Path) -> Result<LibraryLocation> {
+    let AgentOptions { db_path, dp } = read_agent_options(options_json)?;
+    let master_db = db_path.ok_or_else(|| DbError::NotInstalled("options.json has no db-path".into()))?;
     let passphrase = key::derive_password(
         &dp.ok_or_else(|| DbError::NotInstalled("options.json has no dp".into()))?,
     )?;
@@ -342,11 +352,7 @@ impl Library {
 /// setting, in which case such a track has no file this machine can see.
 #[must_use]
 pub fn cloud_contents_root() -> Option<PathBuf> {
-    let settings = std::fs::read_to_string(rbl_core::paths::rekordbox_settings_dir()?.join("rekordbox3.settings")).ok()?;
-    let marker = "<VALUE name=\"DropboxSharingPath\" val=\"";
-    let start = settings.find(marker)? + marker.len();
-    let end = settings[start..].find('"')? + start;
-    let value = settings[start..end].replace("&amp;", "&");
+    let value = rbl_core::paths::rekordbox_setting("DropboxSharingPath")?;
     if value.is_empty() {
         return None;
     }

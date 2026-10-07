@@ -17,6 +17,14 @@ const MAGIC: &[u8] = b"ZOwUlUZYqe9Rdm6j";
 
 const BLOCK: usize = 8;
 
+/// rekordbox's wrapped passphrase, as its agent writes it into `options.json`
+/// under `dp`. Byte-for-byte the same on macOS 7.2.11 and Windows 7.2.14, and
+/// in a library rekordbox 7.2.14 made afresh [OBS 2026-09-24], so a library
+/// found without an `options.json` beside it — on a drive, or on a machine
+/// rekordbox is not installed on — is opened with it.
+pub const REKORDBOX_DP: &str =
+    "FJ9s0iA+hiPZgURNVQNg+Aj/UQ41IlitwloFsPnU3sISVHn5EVNQwthYGuUdAryEcCzJZHnZ5Q7JoupTY9FDRw==";
+
 /// Decrypts the `dp` field from `options.json` into the `SQLCipher` passphrase.
 ///
 /// Note there is **no PKCS padding** on rekordbox 6/7 databases: the plaintext
