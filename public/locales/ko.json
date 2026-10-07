@@ -1432,5 +1432,6 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "제거되는 트랙은 여전히 USB 기록에서 참조됩니다. 먼저 rekordbox에서 해당 기록을 가져오고 삭제하십시오.",
   "Thank you for your report.": "보고해 주셔서 감사합니다.",
   "Bookmark this URL and check back to get updates of your report.": "이 URL을 북마크해 두었다가 나중에 다시 방문하여 보고서의 진행 상황을 확인하세요.",
-  "Open in browser": "브라우저에서 열기"
+  "Open in browser": "브라우저에서 열기",
+  "What you write here is posted publicly on GitHub. Your email and the log are kept private.": "여기에 작성한 내용은 GitHub에 공개적으로 게시됩니다. 이메일 주소와 로그는 비공개로 유지됩니다."
 }

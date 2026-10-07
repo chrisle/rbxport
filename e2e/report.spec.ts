@@ -18,6 +18,7 @@ test("bug reports include diagnostics by default and open the attachment externa
   await expect.poll(() => framedFor).toBe(new URL(page.url()).origin);
   await expect(report.getByRole("checkbox")).toBeChecked();
   await expect(report).toContainText("Reports are sent to TRIODE. I read every report, but please don’t expect a personal reply.");
+  await expect(report).toContainText("What you write here is posted publicly on GitHub. Your email and the log are kept private.");
   await expect(report.getByRole("button", { name: "Send report" })).toBeDisabled();
   await report.getByLabel("What happened?").fill("Playback stopped after loading a track.");
   await expect(report.getByRole("button", { name: "Send report" })).toBeEnabled();

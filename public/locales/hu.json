@@ -1432,5 +1432,6 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Az USB-előzmények továbbra is hivatkoznak az eltávolítandó műsorszámra. Először importálja és törölje az előzményeket a rekordboxból.",
   "Thank you for your report.": "Köszönjük a bejelentését.",
   "Bookmark this URL and check back to get updates of your report.": "Mentse el ezt az URL-t könyvjelzőként, és nézzen vissza később a bejelentésével kapcsolatos frissítésekért.",
-  "Open in browser": "Megnyitás böngészőben"
+  "Open in browser": "Megnyitás böngészőben",
+  "What you write here is posted publicly on GitHub. Your email and the log are kept private.": "Amit ide ír, nyilvánosan megjelenik a GitHubon. Az e-mail-címe és a napló privát marad."
 }

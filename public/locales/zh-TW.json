@@ -1437,5 +1437,6 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 歷史記錄仍會引用已刪除的曲目。首先匯入並清除 rekordbox 中的歷史記錄。",
   "Thank you for your report.": "感謝你的報告。",
   "Bookmark this URL and check back to get updates of your report.": "請將此網址加入書籤，之後回來查看報告的最新進度。",
-  "Open in browser": "在瀏覽器中開啟"
+  "Open in browser": "在瀏覽器中開啟",
+  "What you write here is posted publicly on GitHub. Your email and the log are kept private.": "你在此處填寫的內容會公開發佈到 GitHub。你的電子郵件地址和記錄檔會保密。"
 }

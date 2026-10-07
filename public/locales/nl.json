@@ -1430,5 +1430,6 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Naar een track die wordt verwijderd, wordt nog steeds verwezen in de USB-geschiedenis. Importeer en wis die geschiedenis eerst in rekordbox.",
   "Thank you for your report.": "Bedankt voor je melding.",
   "Bookmark this URL and check back to get updates of your report.": "Zet een bladwijzer voor deze URL en kom later terug voor updates over je melding.",
-  "Open in browser": "Openen in browser"
+  "Open in browser": "Openen in browser",
+  "What you write here is posted publicly on GitHub. Your email and the log are kept private.": "Wat je hier schrijft, wordt openbaar op GitHub geplaatst. Je e-mailadres en het logboek blijven privé."
 }

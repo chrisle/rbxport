@@ -1432,5 +1432,6 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Une piste en cours de suppression est toujours référencée par l'historique USB. Importez et effacez d’abord cet historique dans rekordbox.",
   "Thank you for your report.": "Merci pour votre signalement.",
   "Bookmark this URL and check back to get updates of your report.": "Ajoutez cette URL à vos favoris et revenez-y pour suivre l’évolution de votre signalement.",
-  "Open in browser": "Ouvrir dans le navigateur"
+  "Open in browser": "Ouvrir dans le navigateur",
+  "What you write here is posted publicly on GitHub. Your email and the log are kept private.": "Ce que vous écrivez ici est publié publiquement sur GitHub. Votre e-mail et le journal restent privés."
 }

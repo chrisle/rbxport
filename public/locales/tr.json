@@ -1433,5 +1433,6 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Kaldırılan bir parçaya USB geçmişi tarafından hâlâ başvurulmaktadır. Öncelikle bu geçmişi rekordbox'a aktarın ve temizleyin.",
   "Thank you for your report.": "Raporunuz için teşekkürler.",
   "Bookmark this URL and check back to get updates of your report.": "Bu URL’yi yer imlerinize ekleyin ve raporunuzla ilgili güncellemeler için daha sonra tekrar bakın.",
-  "Open in browser": "Tarayıcıda aç"
+  "Open in browser": "Tarayıcıda aç",
+  "What you write here is posted publicly on GitHub. Your email and the log are kept private.": "Buraya yazdıklarınız GitHub’da herkese açık olarak yayımlanır. E-posta adresiniz ve günlük gizli tutulur."
 }

@@ -141,6 +141,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
           <label className={styles.description}>What happened?
             <textarea required maxLength={30000} rows={7} placeholder="What were you doing, what went wrong, and what did you expect?" value={description} onChange={e => setDescription(e.target.value)} />
           </label>
+          <p className={styles.hint}>What you write here is posted publicly on GitHub. Your email and the log are kept private.</p>
           <div className={styles.attachments}>
             <div className={styles.attachmentControls}>
               <label className={styles.toggle}><input type="checkbox" checked={include} onChange={e => setInclude(e.target.checked)} />Attach log and system information</label>
