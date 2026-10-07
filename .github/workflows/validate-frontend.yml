@@ -79,7 +79,11 @@ jobs:
             pnpm lint
             exit 0
           fi
-          mapfile -t files < <(grep -E '^(src|e2e)/.*\.[cm]?[jt]sx?$' "$changed" || true)
+          # macOS runners ship bash 3.2, which has no mapfile.
+          files=()
+          while IFS= read -r file; do
+            files+=("$file")
+          done < <(grep -E '^(src|e2e)/.*\.[cm]?[jt]sx?$' "$changed" || true)
           if [ "${#files[@]}" -gt 0 ]; then
             pnpm exec eslint "${files[@]}" --max-warnings 0
           fi
