@@ -48,9 +48,9 @@ afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(
 it("captures each batch's settings before preference changes or another batch", async () => {
   await act(async () => { root.render(<Harness preferences={{ mode: "rekordbox", concurrentTracks: 1, auto: true }} />); await Promise.resolve(); });
   await act(async () => { analysis.add([{ id: "a", title: "First" }, { id: "b", title: "Waiting" }]); await Promise.resolve(); });
-  const defaults = { mode: "rekordbox", bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180 };
+  const defaults = { mode: "rekordbox", waveform: true, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180 };
   expect(held.analyseTrack).toHaveBeenCalledWith("a", "rekordbox", defaults);
-  const chosen = { mode: "rbxport" as const, bpmGrid: false, key: true, highPrecision: false, minBpm: 98, maxBpm: 195 };
+  const chosen = { mode: "rbxport" as const, waveform: false, bpmGrid: false, key: true, highPrecision: false, minBpm: 98, maxBpm: 195 };
   await act(async () => {
     root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true }} />);
     analysis.add([{ id: "c", title: "Key only" }], chosen);

@@ -2306,7 +2306,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const row = all[index];
       if (!row) return Promise.reject(new Error("That track is not in the library."));
       if (gridOf(trackId)?.locked) return Promise.reject(new Error("This track's analysis is locked. Unlock it to analyze."));
-      if (settings && !settings.bpmGrid && !settings.key) return Promise.reject(new Error("Select BPM / Grid or KEY to analyze."));
+      if (settings && !settings.waveform && !settings.bpmGrid && !settings.key) {
+        return Promise.reject(new Error("Select WAVEFORM, BPM / Grid, or KEY to analyze."));
+      }
       // Every seventh track fails, so the failure path is exercised too.
       if (index % 7 === 6) {
         return Promise.reject(new Error("That file could not be decoded."));

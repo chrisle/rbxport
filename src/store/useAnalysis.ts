@@ -87,7 +87,7 @@ export function useAnalysis(
   const add = useCallback((items: readonly QueueItem[], settings?: QueueItem["analysis"]) => {
     // Capture settings at enqueue time, including automatic imports. Later
     // preference changes must not alter tracks still waiting in this batch.
-    const chosen = settings ?? { mode, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180 };
+    const chosen = settings ?? { mode, waveform: true, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180 };
     setState((s) => enqueue(reset(s), items.map(item => ({ ...item, analysis: { ...chosen } }))));
   }, [mode]);
   const cancel = useCallback(() => setState(cancelQueue), []);

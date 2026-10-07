@@ -240,11 +240,20 @@ pub struct Existing<'a> {
     pub two_ex: Option<&'a Anlz>,
 }
 
-/// The tags an analysis writes afresh — or, for `PVBR`, places itself (a real
-/// table carried through, or the zero table written when there is none) — so a
-/// carried file's copies of them are dropped rather than doubled.
-const AUTHORED: [&[u8; 4]; 11] =
-    [b"PPTH", b"PVBR", b"PQTZ", b"PWAV", b"PWV2", b"PWV3", b"PWV4", b"PWV5", b"PWV6", b"PWV7", b"PQT2"];
+/// Which independently replaceable sections an analysis should author.
+/// Rekordbox 7.2.14 exposes analysis components independently [OBS UI];
+/// components left false are carried through from existing files unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Components {
+    pub beat_grid: bool,
+    pub waveforms: bool,
+}
+
+impl Default for Components {
+    fn default() -> Self {
+        Self { beat_grid: true, waveforms: true }
+    }
+}
 
 /// Authors the three analysis files for a track.
 ///
@@ -273,6 +282,17 @@ pub fn author_with_overview(
     audio_path: &str, beats: &[Beat], columns: &[BandColumn],
     overview: Option<&[[u8; 3]; OVERVIEW_COLUMNS]>, existing: Existing<'_>,
 ) -> AnalysisFiles {
+    author_selected_with_overview(audio_path, beats, columns, overview, Components::default(), existing)
+}
+
+/// Authors only the selected grid and waveform components, carrying every
+/// unselected existing section through unchanged.
+#[must_use]
+pub fn author_selected_with_overview(
+    audio_path: &str, beats: &[Beat], columns: &[BandColumn],
+    overview: Option<&[[u8; 3]; OVERVIEW_COLUMNS]>, components: Components,
+    existing: Existing<'_>,
+) -> AnalysisFiles {
     let dat = {
         let mut builder = AnlzBuilder::new();
         builder.path(audio_path);
@@ -286,10 +306,12 @@ pub fn author_with_overview(
             Some(pvbr) => { builder.copy_section(pvbr); }
             None => { builder.vbr_table_zero(); }
         }
-        builder.beat_grid(beats);
-        builder.waveform_preview(b"PWAV", &pwav(columns));
-        builder.waveform_preview(b"PWV2", &pwv2(columns));
-        carry_or(&mut builder, existing.dat, |b| {
+        if components.beat_grid { builder.beat_grid(beats); }
+        if components.waveforms {
+            builder.waveform_preview(b"PWAV", &pwav(columns));
+            builder.waveform_preview(b"PWV2", &pwv2(columns));
+        }
+        carry_or(&mut builder, existing.dat, components, |b| {
             b.empty_cue_list_of(false, 0);
             b.empty_cue_list_of(false, 1);
         });
@@ -298,10 +320,12 @@ pub fn author_with_overview(
     let ext = {
         let mut builder = AnlzBuilder::new();
         builder.path(audio_path);
-        builder.waveform_scroll(b"PWV3", 1, &pwv3(columns));
-        builder.waveform_scroll(b"PWV4", 6, &pwv4(columns));
-        builder.waveform_scroll(b"PWV5", 2, &pwv5(columns));
-        carry_or(&mut builder, existing.ext, |b| {
+        if components.waveforms {
+            builder.waveform_scroll(b"PWV3", 1, &pwv3(columns));
+            builder.waveform_scroll(b"PWV4", 6, &pwv4(columns));
+            builder.waveform_scroll(b"PWV5", 2, &pwv5(columns));
+        }
+        carry_or(&mut builder, existing.ext, components, |b| {
             b.empty_cue_list_of(true, 0);
             b.empty_cue_list_of(true, 1);
         });
@@ -310,10 +334,12 @@ pub fn author_with_overview(
     let two_ex = {
         let mut builder = AnlzBuilder::new();
         builder.path(audio_path);
-        let preview = overview.map_or_else(|| pwv6(columns), |bands| bands.iter().flatten().map(|v| (*v).min(127)).collect());
-        builder.waveform_scroll(b"PWV6", 3, &preview);
-        builder.waveform_scroll(b"PWV7", 3, &pwv7(columns));
-        carry_or(&mut builder, existing.two_ex, |_| {});
+        if components.waveforms {
+            let preview = overview.map_or_else(|| pwv6(columns), |bands| bands.iter().flatten().map(|v| (*v).min(127)).collect());
+            builder.waveform_scroll(b"PWV6", 3, &preview);
+            builder.waveform_scroll(b"PWV7", 3, &pwv7(columns));
+        }
+        carry_or(&mut builder, existing.two_ex, components, |_| {});
         builder.finish()
     };
     AnalysisFiles { dat, ext, two_ex }
@@ -321,11 +347,11 @@ pub fn author_with_overview(
 
 /// Copies an existing file's other sections, or writes the defaults for a
 /// file that has none.
-fn carry_or(builder: &mut AnlzBuilder, existing: Option<&Anlz>, defaults: impl FnOnce(&mut AnlzBuilder)) {
+fn carry_or(builder: &mut AnlzBuilder, existing: Option<&Anlz>, components: Components, defaults: impl FnOnce(&mut AnlzBuilder)) {
     match existing {
         Some(file) => {
             builder.header_extra(&file.header_extra);
-            for section in file.sections.iter().filter(|s| !is_authored(s)) {
+            for section in file.sections.iter().filter(|s| !is_replaced(s, components)) {
                 builder.copy_section(section);
             }
         }
@@ -333,8 +359,13 @@ fn carry_or(builder: &mut AnlzBuilder, existing: Option<&Anlz>, defaults: impl F
     }
 }
 
-fn is_authored(section: &Section) -> bool {
-    AUTHORED.iter().any(|tag| section.tag == FourCc::new(tag))
+fn is_replaced(section: &Section, components: Components) -> bool {
+    let tag = section.tag;
+    tag == FourCc::new(b"PPTH")
+        || tag == FourCc::new(b"PVBR")
+        || (components.beat_grid && [b"PQTZ", b"PQT2"].iter().any(|candidate| tag == FourCc::new(candidate)))
+        || (components.waveforms && [b"PWAV", b"PWV2", b"PWV3", b"PWV4", b"PWV5", b"PWV6", b"PWV7"]
+            .iter().any(|candidate| tag == FourCc::new(candidate)))
 }
 
 /// The grid as `Beat`s from the analyser's own beat list, which shares the

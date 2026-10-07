@@ -33,7 +33,9 @@ const DECODE_CAP_SECS: f64 = 1800.0;
 /// preserve the defaults used by imports and older callers.
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools, reason = "the fields mirror independent analysis-component checkboxes over IPC")]
 pub struct AnalysisSettings {
+    pub waveform: bool,
     pub bpm_grid: bool,
     pub key: bool,
     pub high_precision: bool,
@@ -43,14 +45,14 @@ pub struct AnalysisSettings {
 
 impl Default for AnalysisSettings {
     fn default() -> Self {
-        Self { bpm_grid: true, key: true, high_precision: true, min_bpm: 70.0, max_bpm: 180.0 }
+        Self { waveform: true, bpm_grid: true, key: true, high_precision: true, min_bpm: 70.0, max_bpm: 180.0 }
     }
 }
 
 impl AnalysisSettings {
     fn options(self, preset: rbl_analysis::AnalysisPreset) -> AppResult<rbl_analysis::AnalysisOptions> {
-        if !self.bpm_grid && !self.key {
-            return Err(AppError::new(ErrorKind::Malformed, "Select BPM / Grid or KEY to analyze."));
+        if !self.waveform && !self.bpm_grid && !self.key {
+            return Err(AppError::new(ErrorKind::Malformed, "Select WAVEFORM, BPM / Grid, or KEY to analyze."));
         }
         if !self.min_bpm.is_finite() || !self.max_bpm.is_finite()
             || self.min_bpm < 40.0 || self.max_bpm > 300.0 || self.min_bpm >= self.max_bpm {
@@ -158,7 +160,7 @@ fn analyse_and_save(
         AppError::new(ErrorKind::Malformed, "That file could not be decoded.")
             .with_detail(e.to_string())
     })?;
-    if !settings.bpm_grid {
+    if !settings.waveform && !settings.bpm_grid {
         return analyse_key_only(state, library, row, track_id, &audio, editor, started);
     }
     let analysis = rbl_analysis::analyse_with(&audio.samples, audio.sample_rate, options);
@@ -196,17 +198,18 @@ fn analyse_and_save(
         .iter()
         .map(|c| rbl_anlz::BandColumn { low: c.low, mid: c.mid, high: c.high, peak: c.peak })
         .collect();
-    let files = rbl_anlz::author_with_overview(
+    let files = rbl_anlz::author_selected_with_overview(
         path,
         &beats,
         &columns,
         analysis.waveform.overview.as_slice().try_into().ok(),
+        rbl_anlz::Components { beat_grid: settings.bpm_grid, waveforms: settings.waveform },
         rbl_anlz::Existing { dat: existing[0].as_ref(), ext: existing[1].as_ref(), two_ex: existing[2].as_ref() },
     );
     // Clamp before narrowing so the conversion cannot truncate.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped into 0..=u32::MAX on the line above")]
     let to_u32 = |v: f64| v.round().clamp(0.0, f64::from(u32::MAX)) as u32;
-    let bpm_x100 = to_u32(analysis.tempo.bpm * 100.0);
+    let bpm_x100 = if settings.bpm_grid { to_u32(analysis.tempo.bpm * 100.0) } else { library.bpm_x100.get(row).copied().unwrap_or(0) };
     let detected_key = settings.key.then(|| analysis.key.map(|k| k.name)).flatten();
     let key = detected_key.clone().unwrap_or_else(|| library.keys.name(library.key.get(row).copied().unwrap_or(0)).to_owned());
     let duration_sec = to_u32(audio.duration_secs());
@@ -221,7 +224,12 @@ fn analyse_and_save(
         analysed: 1,
         bpm_x100,
         key,
-        beats: u32::try_from(beats.len()).unwrap_or(u32::MAX),
+        beats: if settings.bpm_grid {
+            u32::try_from(beats.len()).unwrap_or(u32::MAX)
+        } else {
+            existing[0].as_ref().and_then(rbl_anlz::Anlz::beat_grid)
+                .map_or(0, |beats| u32::try_from(beats.len()).unwrap_or(u32::MAX))
+        },
         peak: analysis.peak,
         duration_sec,
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -552,7 +560,7 @@ mod tests {
             |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?)),
         ).unwrap();
         let before = metadata();
-        let key_only = AnalysisSettings { bpm_grid: false, ..settings };
+        let key_only = AnalysisSettings { waveform: false, bpm_grid: false, ..settings };
         let result = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_only, &editor).unwrap();
         assert_eq!(metadata(), before);
         assert_eq!(result.bpm_x100, again.bpm_x100);
@@ -560,10 +568,39 @@ mod tests {
 
         // Unchecking KEY must leave its database reference untouched.
         let key_before: Option<String> = db.connection().query_row("SELECT KeyID FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| r.get(0)).unwrap();
-        let grid_only = AnalysisSettings { key: false, ..settings };
+        let grid_only = AnalysisSettings { waveform: false, key: false, ..settings };
+        let waveforms_before = [
+            rbl_anlz::Anlz::read(&dat_path).unwrap().section(b"PWAV").cloned(),
+            rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat_path, "EXT")).unwrap().section(b"PWV5").cloned(),
+            rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat_path, "2EX")).unwrap().section(b"PWV7").cloned(),
+        ];
         analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &grid_only, &editor).unwrap();
         let key_after: Option<String> = db.connection().query_row("SELECT KeyID FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| r.get(0)).unwrap();
         assert_eq!(key_after, key_before);
+        let waveforms_after = [
+            rbl_anlz::Anlz::read(&dat_path).unwrap().section(b"PWAV").cloned(),
+            rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat_path, "EXT")).unwrap().section(b"PWV5").cloned(),
+            rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat_path, "2EX")).unwrap().section(b"PWV7").cloned(),
+        ];
+        assert_eq!(waveforms_after, waveforms_before, "grid-only analysis preserves every existing waveform section");
+
+        // Waveform-only analysis preserves a hand-edited grid and BPM/key metadata.
+        let custom_grid = vec![
+            rbl_anlz::Beat { beat_number: 1, tempo_x100: 13_700, time_ms: 321 },
+            rbl_anlz::Beat { beat_number: 2, tempo_x100: 13_700, time_ms: 759 },
+        ];
+        std::fs::write(&dat_path, rbl_anlz::Anlz::read(&dat_path).unwrap().with_beat_grid(&custom_grid)).unwrap();
+        let (fresh, _) = rbl_index::load(&db).unwrap();
+        let row_before: (i64, Option<String>) = db.connection().query_row(
+            "SELECT BPM, KeyID FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        let waveform_only = AnalysisSettings { bpm_grid: false, key: false, ..settings };
+        analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &waveform_only, &editor).unwrap();
+        let row_after: (i64, Option<String>) = db.connection().query_row(
+            "SELECT BPM, KeyID FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(row_after, row_before);
+        assert_eq!(rbl_anlz::Anlz::read(&dat_path).unwrap().beat_grid(), Some(custom_grid));
 
         // Locks refuse both kinds of analysis before any files are rewritten.
         editor.set_locked(&track_id(0), true).unwrap();
@@ -580,7 +617,7 @@ mod tests {
         assert_eq!(options.tempo.placement, rbl_analysis::tempo::Placement::Envelope);
         assert!((options.tempo.min_bpm - 98.0).abs() < f64::EPSILON);
         assert!((options.tempo.max_bpm - 195.0).abs() < f64::EPSILON);
-        assert!(AnalysisSettings { bpm_grid: false, key: false, ..defaults }.options(preset).is_err());
+        assert!(AnalysisSettings { waveform: false, bpm_grid: false, key: false, ..defaults }.options(preset).is_err());
         for (min_bpm, max_bpm) in [(180.0, 70.0), (70.0, 70.0), (0.0, 180.0), (70.0, 301.0), (f64::NAN, 180.0)] {
             assert!(AnalysisSettings { min_bpm, max_bpm, ..defaults }.options(preset).is_err());
         }

@@ -1219,6 +1219,7 @@ export interface ExportProgress {
 
 /** Results selected for replacement, and timing options for this batch. */
 export interface AnalysisSettings {
+  waveform: boolean;
   bpmGrid: boolean;
   key: boolean;
   highPrecision: boolean;

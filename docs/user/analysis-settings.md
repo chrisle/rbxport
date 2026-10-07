@@ -11,17 +11,22 @@ Changing the browser selection while the dialog is open does not change it.
 
 | Control | Effect |
 | --- | --- |
-| BPM / Grid | Replaces tempo/grid analysis and regenerates waveforms. Disabling it also disables the timing controls. |
+| Waveform | Regenerates waveform sections without changing BPM, the beat grid, or key. |
+| BPM / Grid | Replaces tempo/grid analysis without changing waveforms unless Waveform is also selected. Disabling it also disables the timing controls. |
 | High precision analysis | Uses attack detection for beat placement; otherwise uses the onset envelope. Enabled by default. |
 | Analysis Mode | Normal (`rekordbox`) and RBXport (`rbxport`) currently select the same underlying RBXport options. A separate Normal implementation is not present. Initially follows Preferences. |
 | BPM Range | Limits tempo search to 70–180 (default), 98–195, 118–236, or 58–115. |
 | KEY | Updates detected key; disabling it preserves the existing key. |
 
-Select at least BPM / Grid or KEY. Phrase labels, vocal detection, and automatic
+Select at least Waveform, BPM / Grid, or KEY. Phrase labels, vocal detection, and automatic
 cue generation are not available in this dialog. Full analysis preserves
 existing cues and other supported sections via the existing-file inputs.
 
 ## Preservation and locks
+
+Waveform-only analysis replaces the waveform sections while carrying existing
+beat-grid sections through byte-for-byte and preserving BPM and key metadata.
+Grid-only analysis similarly carries existing waveform sections through.
 
 Key-only analysis changes key metadata without regenerating files, moving
 beats, changing BPM, or marking an unanalysed track as grid-analysed. If no
@@ -37,7 +42,7 @@ Each queued track holds a copy of its settings. Later preference changes or
 other batches cannot alter pending work. Manual choices apply to that batch
 and do not overwrite global preferences.
 
-Automatic imports queue directly with the preferred preset, BPM/grid and key
+Automatic imports queue directly with the preferred preset, waveform, BPM/grid and key
 enabled, high precision enabled, and the 70–180 range. Eligible tempo
 transitions use the automatic transient fallback with either preset; see
 [Beat grid](../../crates/rbl-analysis/docs/algorithms/beat.md#6-grid-the-change).
