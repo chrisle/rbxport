@@ -20,6 +20,10 @@ test("desktop shell changes use focused Rust checks before deploy", () => {
   assert.deepEqual(enabled("src-tauri/src/lib.rs"), ["rust"]);
 });
 
+test("Windows installer resources add the Windows-native check", () => {
+  assert.deepEqual(enabled("src-tauri/windows/install-update-task.ps1"), ["rust", "windows_rust"]);
+});
+
 test("frontend test-only changes skip browser and bundle checks", () => {
   assert.deepEqual(enabled("src/lib/cues.test.ts"), [
     "frontend_lint",

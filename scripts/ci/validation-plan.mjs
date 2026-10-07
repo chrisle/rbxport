@@ -76,6 +76,8 @@ export function planValidation(paths, { all = false } = {}) {
 
     if (path.startsWith("src-tauri/")) {
       enable(plan, "rust");
+      // Installer hooks and scripts only ever run on Windows.
+      if (path.startsWith("src-tauri/windows/")) enable(plan, "windows_rust");
       continue;
     }
 
