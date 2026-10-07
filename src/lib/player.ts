@@ -108,6 +108,43 @@ export function jumpStepSeconds(size: JumpSize, bpmX100: number): number {
   return size.beats > 0 ? jumpSeconds(size.beats, bpmX100) : FINE_JUMP_SECONDS;
 }
 
+/** Pixels of wheel travel that make one zoom step: about one mouse notch. */
+export const WHEEL_STEP_PX = 100;
+/** After a step, further wheel input is ignored this long (ms), so a trackpad's
+ * stream and its inertia tail do not run through every zoom level. */
+export const WHEEL_COOLDOWN_MS = 150;
+/** A pause this long (ms) starts a new gesture and drops any partial travel. */
+export const WHEEL_IDLE_MS = 250;
+
+/**
+ * Turns a stream of wheel events into zoom steps.
+ *
+ * A mouse notch is one event of about a hundred pixels; a trackpad swipe is
+ * dozens of small events plus an inertia tail. Distance is accumulated to a
+ * step and each step is followed by a short cooldown, so a swipe is a step or
+ * two rather than the whole zoom range. Returns -1 (zoom in), 1 (zoom out)
+ * or 0 (no step yet).
+ */
+export function createWheelZoomGate() {
+  let travel = 0;
+  let lastEvent = Number.NEGATIVE_INFINITY;
+  let lastStep = Number.NEGATIVE_INFINITY;
+  return (deltaPx: number, now: number): -1 | 0 | 1 => {
+    if (deltaPx === 0 || !Number.isFinite(deltaPx)) return 0;
+    if (now - lastEvent > WHEEL_IDLE_MS) travel = 0;
+    lastEvent = now;
+    // Reversing direction discards travel in the old one.
+    if (travel !== 0 && Math.sign(travel) !== Math.sign(deltaPx)) travel = 0;
+    if (now - lastStep < WHEEL_COOLDOWN_MS) return 0;
+    travel += deltaPx;
+    if (Math.abs(travel) < WHEEL_STEP_PX) return 0;
+    const direction = travel > 0 ? 1 : -1;
+    travel = 0;
+    lastStep = now;
+    return direction;
+  };
+}
+
 /**
  * The zoom a wheel gesture lands on.
  *

@@ -27,7 +27,7 @@ describe("clampWidth", () => {
   });
 
   it("gives the panel its floor when the window cannot satisfy both", () => {
-    // 500 wide: the list alone wants 360, leaving 140, under the 180 floor.
+    // 500 wide: the list alone wants 360, leaving 140, at the 140 floor.
     // The panel takes the floor and the list scrolls.
     const bounds = { ...TREE_BOUNDS, available: 500 };
     expect(clampWidth(300, bounds)).toBe(TREE_BOUNDS.min);

@@ -42,6 +42,7 @@ import {
   jumpSizeById,
   jumpStepSeconds,
   zoomBy,
+  createWheelZoomGate,
   needsRedraw,
   OVERDRAW,
   scrollOffset,
@@ -1044,14 +1045,18 @@ export const Player = memo(function Player({
   /**
    * The wheel zooms, over the waveform it is pointing at.
    *
-   * One step per gesture whatever the device: a mouse notch arrives as about a
-   * hundred pixels and a trackpad as a stream of ones, so the size of the
-   * delta says nothing useful and only its sign is read.
+   * Travel is accumulated and rate-limited (see `createWheelZoomGate`): a
+   * trackpad streams many small events plus inertia, and a step per event
+   * ran through the whole zoom range in one swipe.
    */
+  const wheelGate = useRef(createWheelZoomGate());
   const wheelZoom = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     if (event.deltaY === 0) return;
     event.preventDefault();
-    setBars((current) => zoomBy(current, event.deltaY > 0 ? 1 : -1));
+    // Line and page modes (mice on some platforms) report lines, not pixels.
+    const px = event.deltaY * (event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 400 : 1);
+    const direction = wheelGate.current(px, event.timeStamp);
+    if (direction !== 0) setBars((current) => zoomBy(current, direction));
   }, [setBars]);
 
   const zoom = useCallback((by: number) => {

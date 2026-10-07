@@ -30,6 +30,7 @@ import {
   isClick,
   ZOOM_STEPS,
   zoomBy,
+  createWheelZoomGate,
   tempoChangeAtMs,
   phraseKind,
   phraseSpans,
@@ -931,5 +932,31 @@ describe("tempoAnnotations", () => {
     expect(tempoAnnotations(gridOf([17400, 17400, 17400, 17400, 16500, 15000, 12800]))[1])
       .toEqual({ fromMs: 2000, toMs: 3000, fromBpmX100: 17400, toBpmX100: 12800 });
     expect(tempoAnnotations(NO_BEATS)).toEqual([]);
+  });
+});
+
+describe("createWheelZoomGate", () => {
+  it("steps once for a mouse notch", () => {
+    const gate = createWheelZoomGate();
+    expect(gate(100, 0)).toBe(1);
+    expect(gate(-120, 1000)).toBe(-1);
+  });
+
+  it("turns a trackpad swipe and its inertia tail into one or two steps", () => {
+    const gate = createWheelZoomGate();
+    let steps = 0;
+    // 80 events of 8px over 800ms, 16ms apart.
+    for (let i = 0; i < 80; i++) steps += Math.abs(gate(8, i * 10));
+    expect(steps).toBeGreaterThan(0);
+    expect(steps).toBeLessThanOrEqual(6);
+  });
+
+  it("drops partial travel after a pause or a reversal", () => {
+    const gate = createWheelZoomGate();
+    expect(gate(60, 0)).toBe(0);
+    expect(gate(60, 1000)).toBe(0);
+    expect(gate(-60, 1010)).toBe(0);
+    // The old direction's travel was discarded, not netted against.
+    expect(gate(-60, 1020)).toBe(-1);
   });
 });

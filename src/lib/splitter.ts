@@ -18,7 +18,7 @@ export interface SplitterBounds {
 
 export const TREE_BOUNDS: SplitterBounds = {
   available: 0,
-  min: 180,
+  min: 140,
   maxFraction: 0.5,
   minOther: 360,
 };

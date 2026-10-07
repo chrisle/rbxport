@@ -209,7 +209,7 @@
 /* The gutter between the tree and the browser, which is also the drag handle.
    Black, and narrower than the capture's seven points by request. Painting it
    the tree's own colour, as it was, left no visible gap at all; the `::after`
-   below keeps the grab target three points wider on each side than the gutter
+   below keeps the grab target five points wider on each side than the gutter
    is drawn, so narrowing it does not make it harder to catch. */
 .splitter {
   position: relative;
@@ -222,6 +222,6 @@
 .splitter::after {
   content: "";
   position: absolute;
-  inset: 0 -3px;
+  inset: 0 -5px;
 }
 .splitter:hover { background: var(--c-raised); }
