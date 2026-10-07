@@ -1337,9 +1337,38 @@ fn an_intelligent_playlist_is_made_from_a_rule_and_its_rule_is_edited() {
         s.state(),
         "Nope".to_owned(),
         ROOT.to_owned(),
-        SmartRuleDto { logic: "all".to_owned(), conditions: vec![condition("myTag", "1", "x", "")] }
+        SmartRuleDto { logic: "all".to_owned(), conditions: vec![condition("hotCueCount", "1", "x", "")] }
     ))
     .is_err());
+}
+
+#[test]
+fn an_intelligent_playlist_on_a_my_tag_holds_the_tracks_carrying_it() {
+    // Issue #84: a rule on a My Tag opened empty and read back with no
+    // property, which the editor drew as "Album artist".
+    use rbl_db::fixture::MY_TAG_PEAK;
+    use rbxport_lib::dto::{SmartConditionDto, SmartRuleDto};
+    let s = shell();
+    run(details::set_my_tags(s.handle(), s.state(), track_id(3), vec![MY_TAG_PEAK.to_owned()])).unwrap();
+    run(details::set_my_tags(s.handle(), s.state(), track_id(5), vec![MY_TAG_PEAK.to_owned()])).unwrap();
+    let rule = SmartRuleDto {
+        logic: "all".to_owned(),
+        conditions: vec![SmartConditionDto {
+            property: "myTag".to_owned(),
+            operator: "8".to_owned(),
+            left: MY_TAG_PEAK.to_owned(),
+            right: String::new(),
+            unit: String::new(),
+        }],
+    };
+    run(commands::create_smart_playlist(s.handle(), s.state(), "Peak".to_owned(), ROOT.to_owned(), rule)).unwrap();
+    let node = s.node("Peak");
+    assert_eq!(s.playlist_rows(&node.id).len(), 2);
+    let read = run(commands::smart_rule(s.state(), node.id.clone())).unwrap();
+    assert_eq!(
+        (read.conditions[0].property.as_str(), read.conditions[0].operator.as_str(), read.conditions[0].left.as_str()),
+        ("myTag", "8", MY_TAG_PEAK)
+    );
 }
 
 #[test]

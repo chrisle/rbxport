@@ -145,17 +145,82 @@ describe("what the dialog opens on", () => {
     expect(rule.conditions[0]?.left).toBe("x");
   });
 
-  it("draws the properties the index cannot answer, but will not let one be chosen", () => {
+  it("offers every property rekordbox's dialog lists, under the names SmartList holds", () => {
     open();
     const options = [...(sel(1, "Property")?.options ?? [])];
     expect(options).toHaveLength(23);
     expect(options[0]?.textContent).toBe("Album");
-    const barred = options.filter((o) => o.disabled);
-    expect(barred.map((o) => o.textContent)).toEqual([
-      "Album artist", "Composer", "Mix name", "My Tag", "Original artist", "Remixer",
-    ]);
-    // They are drawn with no name to send, which is what makes them unusable.
-    for (const option of barred) expect(option.value).toBe("");
+    expect(options.filter((o) => o.disabled)).toEqual([]);
+    const byText = Object.fromEntries(options.map((o) => [o.textContent, o.value]));
+    expect(byText).toMatchObject({
+      "Album artist": "albumArtist",
+      Composer: "producer",
+      "Mix name": "mixName",
+      "My Tag": "myTag",
+      "Original artist": "originalArtist",
+      Remixer: "remixedBy",
+    });
+  });
+
+  it("shows a property it does not know as it is, not as the first in the list", () => {
+    // Issue #84: an unreadable property arrived as "" and a select showed
+    // the first option carrying that value, "Album artist".
+    open({ rule: { logic: "all", conditions: [{ property: "", operator: "8", left: "12", right: "", unit: "" }] } });
+    const property = sel(1, "Property")!;
+    expect(property.value).toBe("");
+    expect(property.selectedOptions[0]?.textContent).toBe("—");
+    expect(property.selectedOptions[0]?.disabled).toBe(true);
+  });
+});
+
+describe("a My Tag condition", () => {
+  const myTags = [
+    { name: "Subgenre", tags: [{ id: "101", name: "Deep" }, { id: "102", name: "Tech" }] },
+    { name: "Situation", tags: [{ id: "201", name: "Peak" }] },
+  ];
+
+  it("opens on the tag a saved rule names, with the two operators rekordbox answers", () => {
+    open({
+      myTags,
+      rule: { logic: "all", conditions: [{ property: "myTag", operator: "8", left: "102", right: "", unit: "" }] },
+    });
+    expect(sel(1, "Property")?.value).toBe("myTag");
+    expect([...(sel(1, "Operator")?.options ?? [])].map((o) => o.value)).toEqual(["8", "9"]);
+    const value = sel(1, "Value")!;
+    expect(value.tagName).toBe("SELECT");
+    expect(value.value).toBe("102");
+    expect(value.selectedOptions[0]?.textContent).toBe("Tech");
+    expect([...value.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Subgenre", "Situation"]);
+  });
+
+  it("keeps a tag id the library no longer has rather than picking another", () => {
+    open({
+      myTags,
+      rule: { logic: "all", conditions: [{ property: "myTag", operator: "9", left: "999", right: "", unit: "" }] },
+    });
+    expect(sel(1, "Value")?.value).toBe("999");
+    expect(saved().conditions[0]).toEqual({ property: "myTag", operator: "9", left: "999", right: "", unit: "" });
+  });
+
+  it("picks a tag by id and saves it", () => {
+    open({ myTags, name: "Peak" });
+    set(inp(1, "Value")!, "Daft Punk");
+    set(sel(1, "Property")!, "myTag");
+    // Typed text names no tag, so it is not carried over.
+    expect(sel(1, "Value")?.value).toBe("");
+    expect(button("OK").disabled).toBe(true);
+    set(sel(1, "Value")!, "201");
+    expect(saved().conditions[0]).toEqual({ property: "myTag", operator: "8", left: "201", right: "", unit: "" });
+  });
+
+  it("does not carry a tag id into a text property", () => {
+    open({
+      myTags,
+      rule: { logic: "all", conditions: [{ property: "myTag", operator: "8", left: "101", right: "", unit: "" }] },
+    });
+    set(sel(1, "Property")!, "genre");
+    expect(inp(1, "Value")?.value).toBe("");
+    expect(sel(1, "Operator")?.value).toBe("8");
   });
 });
 

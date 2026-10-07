@@ -14,14 +14,17 @@
  * and is not in the last. The dialog has no Update automatically
  * control; the rule is always live.
  *
- * The property list is rekordbox's, in its order; the six the index does
- * not hold (Album artist, Composer, Mix name, My Tag, Original artist,
- * Remixer) are drawn and cannot be chosen, so a rule made here is one the
- * playlist can answer.
+ * The property list is rekordbox's, in its order, each under the name
+ * `SmartList` holds for it. My Tag picks one of the library's tags and
+ * stores its `djmdMyTag.ID`; rekordbox answers it only with "contains" and
+ * "does not contain" (operators 8 and 9) [OBS: static, rekordbox 7.2.19
+ * `db::operate`], so those are the two offered [ASSUME: the words its own
+ * dialog uses for them]. A property this list does not know — one a newer
+ * rekordbox wrote — is shown as it is and cannot be chosen again.
  */
 import { useEffect, useRef, useState } from "react";
 
-import type { SmartCondition, SmartRule } from "@/ipc/types";
+import type { SmartCondition, SmartRule, TrackLookups } from "@/ipc/types";
 import styles from "./SmartPlaylistEditor.module.css";
 
 export interface SmartPlaylistEditorProps {
@@ -29,23 +32,27 @@ export interface SmartPlaylistEditorProps {
   title: string;
   name: string;
   rule: SmartRule;
+  /** The library's My Tags by category, for a My Tag condition's value. */
+  myTags?: TrackLookups["myTagCategories"];
   onSave: (name: string, rule: SmartRule) => void;
   onCancel: () => void;
 }
 
+type Kind = "text" | "number" | "date" | "tag";
+
 /**
  * The properties, in rekordbox's order and words [OBS 7.2.11]. `value` is
- * the name `SmartList` holds; an empty one is a property the index cannot
- * evaluate, drawn but not offered.
+ * the name `SmartList` holds [OBS: static, the names rekordbox 7.2.19's
+ * `db::getSmartlistCondition` compares against].
  */
-const PROPERTIES: readonly { value: string; label: string; kind: "text" | "number" | "date" }[] = [
+const PROPERTIES: readonly { value: string; label: string; kind: Kind }[] = [
   { value: "album", label: "Album", kind: "text" },
-  { value: "", label: "Album artist", kind: "text" },
+  { value: "albumArtist", label: "Album artist", kind: "text" },
   { value: "artist", label: "Artist", kind: "text" },
   { value: "bpm", label: "BPM", kind: "number" },
   { value: "grouping", label: "Color", kind: "text" },
   { value: "comments", label: "Comments", kind: "text" },
-  { value: "", label: "Composer", kind: "text" },
+  { value: "producer", label: "Composer", kind: "text" },
   { value: "stockDate", label: "Date Added", kind: "date" },
   { value: "dateCreated", label: "Date Created", kind: "date" },
   { value: "counter", label: "DJ play count", kind: "number" },
@@ -53,19 +60,19 @@ const PROPERTIES: readonly { value: string; label: string; kind: "text" | "numbe
   { value: "genre", label: "Genre", kind: "text" },
   { value: "key", label: "Key", kind: "text" },
   { value: "label", label: "Label", kind: "text" },
-  { value: "", label: "Mix name", kind: "text" },
-  { value: "", label: "My Tag", kind: "text" },
-  { value: "", label: "Original artist", kind: "text" },
+  { value: "mixName", label: "Mix name", kind: "text" },
+  { value: "myTag", label: "My Tag", kind: "tag" },
+  { value: "originalArtist", label: "Original artist", kind: "text" },
   { value: "rating", label: "Rating", kind: "number" },
   { value: "dateReleased", label: "Release Date", kind: "date" },
-  { value: "", label: "Remixer", kind: "text" },
+  { value: "remixedBy", label: "Remixer", kind: "text" },
   { value: "duration", label: "Time", kind: "number" },
   { value: "name", label: "Track Title", kind: "text" },
   { value: "year", label: "Year", kind: "number" },
 ];
 
 /** The operators, numbered as rekordbox numbers them and drawn as it draws them [OBS 7.2.11]. */
-const OPERATORS: readonly { value: string; label: string; for: readonly ("text" | "number" | "date")[] }[] = [
+const OPERATORS: readonly { value: string; label: string; for: readonly Kind[] }[] = [
   { value: "1", label: "=", for: ["text", "number", "date"] },
   { value: "2", label: "≠", for: ["text", "number", "date"] },
   { value: "3", label: ">", for: ["number", "date"] },
@@ -73,8 +80,8 @@ const OPERATORS: readonly { value: string; label: string; for: readonly ("text" 
   { value: "6", label: "is in the last", for: ["date"] },
   { value: "7", label: "is not in the last", for: ["date"] },
   { value: "5", label: "is in the range", for: ["number", "date"] },
-  { value: "8", label: "contains", for: ["text"] },
-  { value: "9", label: "does not contain", for: ["text"] },
+  { value: "8", label: "contains", for: ["text", "tag"] },
+  { value: "9", label: "does not contain", for: ["text", "tag"] },
   { value: "10", label: "starts with", for: ["text"] },
   { value: "11", label: "ends with", for: ["text"] },
 ];
@@ -86,8 +93,18 @@ const UNITS: readonly { value: string; label: string }[] = [
   { value: "year", label: "year(s)" },
 ];
 
-function kindOf(property: string): "text" | "number" | "date" {
+function kindOf(property: string): Kind {
   return PROPERTIES.find((p) => p.value === property)?.kind ?? "text";
+}
+
+/**
+ * A My Tag id as rekordbox compares it: a 32-bit signed integer, so a rule
+ * value rekordbox rewrote into that form still names its tag. Mirrors
+ * `rbl_index::smart::my_tag_key`.
+ */
+function tagKey(id: string): number {
+  const match = /^\s*([+-]?\d+)/.exec(id);
+  return match?.[1] ? Number(BigInt.asIntN(32, BigInt(match[1]))) : 0;
 }
 
 /** A fresh condition: Artist = (empty), as rekordbox's new row is [OBS 7.2.11]. */
@@ -95,7 +112,7 @@ export function emptyCondition(): SmartCondition {
   return { property: "artist", operator: "1", left: "", right: "", unit: "" };
 }
 
-export function SmartPlaylistEditor({ title, name: initialName, rule: initialRule, onSave, onCancel }: SmartPlaylistEditorProps) {
+export function SmartPlaylistEditor({ title, name: initialName, rule: initialRule, myTags = [], onSave, onCancel }: SmartPlaylistEditorProps) {
   const [name, setName] = useState(initialName);
   const [logic, setLogic] = useState<"all" | "any">(initialRule.logic === "any" ? "any" : "all");
   const [conditions, setConditions] = useState<SmartCondition[]>(
@@ -122,7 +139,15 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
     const current = conditions[at];
     const keep = current && OPERATORS.some((o) => o.value === current.operator && o.for.includes(kind));
     const operator = keep ? current.operator : (OPERATORS.find((o) => o.for.includes(kind))?.value ?? "1");
-    update(at, { property, operator, unit: operator === "6" || operator === "7" ? "day" : "" });
+    // A tag is picked, not typed: text carried into it would name no tag,
+    // and a tag id carried out of it is not a word anyone wrote.
+    const crossesTag = current !== undefined && (kind === "tag") !== (kindOf(current.property) === "tag");
+    update(at, {
+      property,
+      operator,
+      unit: operator === "6" || operator === "7" ? "day" : "",
+      ...(crossesTag ? { left: "", right: "" } : {}),
+    });
   };
 
   const changeOperator = (at: number, operator: string) => {
@@ -185,6 +210,11 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
             {conditions.map((condition, at) => {
               const kind = kindOf(condition.property);
               const relative = condition.operator === "6" || condition.operator === "7";
+              const known = PROPERTIES.some((p) => p.value === condition.property);
+              const pickedTag =
+                kind === "tag" && condition.left !== ""
+                  ? myTags.flatMap((c) => c.tags).find((t) => tagKey(t.id) === tagKey(condition.left))
+                  : undefined;
               return (
                 // Rows have no identity of their own; their place is what tells them apart.
                 <div key={at} className={styles.condition} role="group" aria-label={`Condition ${at + 1}`}>
@@ -194,8 +224,13 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                     value={condition.property}
                     onChange={(e) => changeProperty(at, e.target.value)}
                   >
+                    {known ? null : (
+                      <option value={condition.property} disabled>
+                        {condition.property || "—"}
+                      </option>
+                    )}
                     {PROPERTIES.map((p) => (
-                      <option key={p.label} value={p.value} disabled={p.value === ""}>{p.label}</option>
+                      <option key={p.label} value={p.value}>{p.label}</option>
                     ))}
                   </select>
                   <select
@@ -208,13 +243,39 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                   </select>
-                  <input
-                    className={styles.input}
-                    aria-label="Value"
-                    type={kind === "number" || relative ? "number" : kind === "date" ? "date" : "text"}
-                    value={condition.left}
-                    onChange={(e) => update(at, { left: e.target.value })}
-                  />
+                  {kind === "tag" ? (
+                    <select
+                      className={styles.select}
+                      aria-label="Value"
+                      value={pickedTag?.id ?? condition.left}
+                      onChange={(e) => update(at, { left: e.target.value })}
+                    >
+                      <option value="" disabled />
+                      {condition.left !== "" && pickedTag === undefined ? (
+                        // A tag the library no longer has: kept as it is
+                        // rather than silently swapped for another.
+                        <option value={condition.left} disabled>
+                          {condition.left}
+                        </option>
+                      ) : null}
+                      {myTags.map((category, c) => (
+                        // Category names repeat ("Empty Category"), so their place keys them.
+                        <optgroup key={c} label={category.name}>
+                          {category.tags.map((tag) => (
+                            <option key={tag.id} value={tag.id}>{tag.name}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      className={styles.input}
+                      aria-label="Value"
+                      type={kind === "number" || relative ? "number" : kind === "date" ? "date" : "text"}
+                      value={condition.left}
+                      onChange={(e) => update(at, { left: e.target.value })}
+                    />
+                  )}
                   {condition.operator === "5" ? (
                     <>
                       <span>to</span>

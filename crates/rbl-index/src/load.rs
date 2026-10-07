@@ -345,6 +345,7 @@ pub fn load_with_cue_reader(
         load_histories(conn, &mut lib, &content_row, &mut stats)?;
         lib.set_tag_list(read_tag_list(conn, &content_row)?);
         lib.set_my_tags(read_my_tags(conn)?);
+        lib.set_track_my_tags(read_track_my_tags(conn, &content_row)?);
         load_search_extra(conn, &mut lib)?;
         if let Some(job) = cue_job {
             lib.set_cues(
@@ -644,8 +645,8 @@ pub fn reload_playlists(db: &Db, library: &Library) -> rusqlite::Result<Playlist
 /// under its category's id. Read-only on the reference library: 181 rows, 99
 /// live, four categories — `Lexicon Tags` and three named `Empty Category`,
 /// which is rekordbox's own name for an unused slot, not a placeholder of
-/// ours. Memberships (`djmdSongMyTag`) are deliberately not read; see
-/// `Library::my_tags`.
+/// ours. Memberships (`djmdSongMyTag`) are read separately, by
+/// `read_track_my_tags`.
 ///
 /// A library without the table opens with no categories rather than an error.
 fn read_my_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCategory>> {
@@ -686,6 +687,30 @@ fn read_my_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCategory>> {
         }
     }
     Ok(categories)
+}
+
+/// Reads which tracks carry which My Tag, for the intelligent playlists'
+/// `myTag` conditions: one `(row, tag)` pair per live `djmdSongMyTag` row
+/// whose track is in the collection, the tag id read as rekordbox compares
+/// it ([`crate::smart::my_tag_key`]). A library without the table has none.
+fn read_track_my_tags(conn: &Connection, content_row: &HashMap<u64, Row>) -> rusqlite::Result<Vec<(Row, i32)>> {
+    if !has_table(conn, "djmdSongMyTag") {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT ContentID, MyTagID FROM djmdSongMyTag WHERE rb_local_deleted = 0",
+    )?;
+    let mut rows = stmt.query([])?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next()? {
+        let (Some(content), Some(tag)) = (text(r, 0)?, text(r, 1)?) else {
+            continue;
+        };
+        if let Some(&row) = content.parse::<u64>().ok().and_then(|id| content_row.get(&id)) {
+            out.push((row, crate::smart::my_tag_key(&tag)));
+        }
+    }
+    Ok(out)
 }
 
 /// Which pair of tables a list tree is read from.

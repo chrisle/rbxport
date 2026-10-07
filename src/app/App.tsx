@@ -69,7 +69,7 @@ import { NewLibraryDialog } from "@/views/library/NewLibraryDialog";
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus, SmartRule } from "@/ipc/types";
+import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus, SmartRule, TrackLookups } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
 import { nativeMenuLabels } from "@/lib/nativeMenu";
@@ -1103,6 +1103,23 @@ function AppBody() {
   const [smartEditor, setSmartEditor] = useState<
     { mode: "create"; parent: string; name: string; rule: SmartRule } | { mode: "edit"; id: string; name: string; rule: SmartRule } | null
   >(null);
+  // The My Tags a rule can name, read each time the editor opens so a tag
+  // made since is there to pick.
+  const [smartTags, setSmartTags] = useState<TrackLookups["myTagCategories"]>([]);
+  const smartEditorOpen = smartEditor !== null;
+  useEffect(() => {
+    if (!smartEditorOpen) return;
+    let live = true;
+    void getBackend()
+      .then((b) => b.trackLookups())
+      .then((l) => {
+        if (live) setSmartTags(l.myTagCategories);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [smartEditorOpen]);
   const createSmartPlaylistIn = useCallback(
     (node: TreeNode) => {
       setSmartEditor({
@@ -2520,6 +2537,7 @@ function AppBody() {
           title={smartEditor.mode === "create" ? "Create New Intelligent Playlist" : "Edit the Intelligent Playlist"}
           name={smartEditor.name}
           rule={smartEditor.rule}
+          myTags={smartTags}
           onSave={saveSmartPlaylist}
           onCancel={() => setSmartEditor(null)}
         />

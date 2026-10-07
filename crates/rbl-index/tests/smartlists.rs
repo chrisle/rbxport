@@ -238,9 +238,14 @@ fn all_and_any_combine_and_invalid_rules_admit_nothing() {
         ],
     );
     assert_eq!(rows_of(&lib, &either), vec![1, 2]);
+    // A My Tag is answered only by "contains" and "does not contain"; these
+    // tracks carry none, so "=" admits nothing and the rule is understood.
     let tagged = rule(1, &[("myTag", 1, "7", "", "")]);
     assert!(rows_of(&lib, &tagged).is_empty());
-    assert_eq!(SmartRule::parse(&tagged).unwrap().unsupported(), 1);
+    assert_eq!(SmartRule::parse(&tagged).unwrap().unsupported(), 0);
+    let unknown = rule(1, &[("hotCueCount", 1, "7", "", "")]);
+    assert!(rows_of(&lib, &unknown).is_empty());
+    assert_eq!(SmartRule::parse(&unknown).unwrap().unsupported(), 1);
     assert!(rows_of(&lib, "<NODE LogicalOperator=\"1\"/>").is_empty());
     assert!(rows_of(&lib, "<NODE LogicalOperator=\"2\"/>").is_empty());
     assert!(rows_of(

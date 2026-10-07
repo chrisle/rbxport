@@ -45,8 +45,9 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// metadata, derived indexes and a checksum; earlier caches rebuild once. 10
 /// preserves the database IDs of named lookup rows for Link Export. 11 adds
 /// the columns behind the remaining sortable browser headings and their
-/// ranks.
-pub const FORMAT: u32 = 11;
+/// ranks. 12 adds which My Tags each track carries: formats 1 to 11 left
+/// them out, so an intelligent playlist on a My Tag opened empty.
+pub const FORMAT: u32 = 12;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -303,6 +304,10 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
     w.u64(library.ranks.len() as u64);
     for rank in &library.ranks { w.u32s(rank); }
     w.strings(&library.search);
+    // Format 12: each track's My Tags, as bounds and ids (bit-cast to u32).
+    let (bounds, keys) = library.my_tag_parts();
+    w.u32s(bounds);
+    w.u32s(&keys.iter().map(|&k| u32::from_ne_bytes(k.to_ne_bytes())).collect::<Vec<_>>());
     w.u32(crc32fast::hash(&w.0));
     w.0
 }
@@ -547,6 +552,11 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
         lib.ranks.push(rank);
     }
     lib.search = r.strings()?;
+    let tag_bounds = r.u32s()?;
+    let tag_keys = r.u32s()?.into_iter().map(|k| i32::from_ne_bytes(k.to_ne_bytes())).collect();
+    if !lib.set_my_tag_parts(tag_bounds, tag_keys) {
+        return None;
+    }
     if lib.search.len() != count || lib.bitrate.len() != count
         || lib.sample_rate.len() != count || lib.file_size.len() != count
         || lib.track_number.len() != count || lib.disc_no.len() != count

@@ -195,8 +195,8 @@ pub struct FilterValues {
     /// Key names present, in Camelot order; names the wheel does not know
     /// follow alphabetically. Tracks without a key are left out.
     pub keys: Vec<Counted<String>>,
-    /// The My Tag categories, for the bar's tag columns. Inert: memberships
-    /// are not read (see [`Library::my_tags`]).
+    /// The My Tag categories, for the bar's tag columns. Inert: the bar does
+    /// not filter on the tracks' tags (see [`Library::my_tags`]).
     pub tags: Vec<TagCategory>,
 }
 
