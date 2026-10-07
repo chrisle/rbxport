@@ -26,10 +26,23 @@ export interface HoldHandlers {
 export function useHoldRepeat(): (action: (held?: boolean) => void) => HoldHandlers {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stop = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
+    if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
   }, []);
-  useEffect(() => stop, [stop]);
+  useEffect(() => {
+    // A release delivered outside the button does not reach its React handler.
+    // Listen at the window so release anywhere in the webview always ends the
+    // timeout chain.
+    window.addEventListener("pointerup", stop, true);
+    window.addEventListener("pointercancel", stop, true);
+    window.addEventListener("blur", stop);
+    return () => {
+      window.removeEventListener("pointerup", stop, true);
+      window.removeEventListener("pointercancel", stop, true);
+      window.removeEventListener("blur", stop);
+      stop();
+    };
+  }, [stop]);
 
   return useCallback(
     (action: (held?: boolean) => void): HoldHandlers => {
