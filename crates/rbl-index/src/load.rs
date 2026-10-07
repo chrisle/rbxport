@@ -12,6 +12,29 @@ use rusqlite::Connection;
 
 use crate::{strings::StrColumn, Cue, Cues, Library, Playlists, Row, TagCategory, NO_ID};
 
+/// Reads text without letting one malformed library value abort the index.
+///
+/// SQLite does not require bytes stored with TEXT affinity to be valid UTF-8,
+/// and real rekordbox libraries can contain such values. The interface can
+/// still browse the rest of the library if the invalid sequence is replaced
+/// for display, which is the same boundary behavior used by the diagnostic
+/// and database inspection tools.
+fn text(row: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<Option<String>> {
+    use rusqlite::types::ValueRef;
+    Ok(match row.get_ref(idx)? {
+        ValueRef::Null => None,
+        ValueRef::Text(value) | ValueRef::Blob(value) => {
+            Some(String::from_utf8_lossy(value).into_owned())
+        }
+        ValueRef::Integer(value) => Some(value.to_string()),
+        ValueRef::Real(value) => Some(value.to_string()),
+    })
+}
+
+fn text_or_default(row: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<String> {
+    Ok(text(row, idx)?.unwrap_or_default())
+}
+
 /// Converts a REAL to an integer without a lossy cast: NaN becomes 0 and
 /// out-of-range values saturate.
 #[allow(
@@ -92,12 +115,7 @@ fn load_lookup(
     let sql = format!("SELECT ID, {name_column} FROM {table}");
     let mut stmt = conn.prepare(&sql)?;
     let mut map = HashMap::new();
-    let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, Option<String>>(0)?,
-            r.get::<_, Option<String>>(1)?,
-        ))
-    })?;
+    let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?)))?;
     for row in rows {
         let (Some(id), name) = row? else { continue };
         let dense = interner.push(name.as_deref().unwrap_or(""));
@@ -239,20 +257,20 @@ pub fn load_with_cue_reader(
 
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
-        let Some(id_text): Option<String> = r.get(0)? else {
+        let Some(id_text) = text(r, 0)? else {
             continue;
         };
         let row_index = u32::try_from(lib.ids.len()).unwrap_or(u32::MAX);
 
-        let title: String = r.get::<_, Option<String>>(1)?.unwrap_or_default();
+        let title = text_or_default(r, 1)?;
         lib.title_folded.push(&crate::strings::fold(&title));
         lib.title.push(&title);
 
-        lib.artist.push(lookup(&artists, r.get(2)?));
-        lib.album.push(lookup(&albums, r.get(3)?));
-        lib.genre.push(lookup(&genres, r.get(4)?));
-        lib.label.push(lookup(&labels, r.get(5)?));
-        lib.key.push(lookup(&keys, r.get(6)?));
+        lib.artist.push(lookup(&artists, text(r, 2)?));
+        lib.album.push(lookup(&albums, text(r, 3)?));
+        lib.genre.push(lookup(&genres, text(r, 4)?));
+        lib.label.push(lookup(&labels, text(r, 5)?));
+        lib.key.push(lookup(&keys, text(r, 6)?));
 
         // BPM is stored x100; Length is whole seconds.
         lib.bpm_x100.push(clamp_u32(num(r, 7)?));
@@ -263,24 +281,18 @@ pub fn load_with_cue_reader(
         // A cloud-library track's path names rekordbox's Dropbox folder, not
         // a place on this disk; resolved here once so every reader sees a
         // file that exists.
-        let folder_path = r.get::<_, Option<String>>(11)?.unwrap_or_default();
+        let folder_path = text_or_default(r, 11)?;
         lib.folder_path.push(&rbl_db::resolve_folder_path(
             &folder_path,
             cloud_root.as_deref(),
         ));
-        lib.file_name
-            .push(&r.get::<_, Option<String>>(12)?.unwrap_or_default());
-        lib.analysis_path
-            .push(&r.get::<_, Option<String>>(13)?.unwrap_or_default());
-        lib.artwork_path
-            .push(&r.get::<_, Option<String>>(19)?.unwrap_or_default());
+        lib.file_name.push(&text_or_default(r, 12)?);
+        lib.analysis_path.push(&text_or_default(r, 13)?);
+        lib.artwork_path.push(&text_or_default(r, 19)?);
         lib.play_count.push(clamp_u16(num(r, 14)?));
-        lib.date_added
-            .push(&r.get::<_, Option<String>>(15)?.unwrap_or_default());
-        lib.release_date
-            .push(&r.get::<_, Option<String>>(16)?.unwrap_or_default());
-        lib.comment
-            .push(&r.get::<_, Option<String>>(17)?.unwrap_or_default());
+        lib.date_added.push(&text_or_default(r, 15)?);
+        lib.release_date.push(&text_or_default(r, 16)?);
+        lib.comment.push(&text_or_default(r, 17)?);
         // `Analysed` is a bitfield whose values are not yet all understood
         // (105/104/16/17/1 observed); non-zero means rekordbox analysed it.
         lib.analysed.push(u8::from(num(r, 18)? != 0));
@@ -351,10 +363,10 @@ fn load_search_extra(conn: &Connection, lib: &mut Library) -> rusqlite::Result<(
     let mut by_id = HashMap::new();
     let mut rows = extra.query([])?;
     while let Some(row) = rows.next()? {
-        let id = row.get::<_, String>(0)?.parse::<u64>().unwrap_or(0);
+        let id = text_or_default(row, 0)?.parse::<u64>().unwrap_or(0);
         let mut values = Vec::with_capacity(5);
         for column in 1..=5 {
-            values.push(row.get::<_, Option<String>>(column)?.unwrap_or_default());
+            values.push(text_or_default(row, column)?);
         }
         by_id.insert(id, values);
     }
@@ -394,7 +406,7 @@ fn read_cues(
     )?;
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
-        let Some(content): Option<String> = r.get(0)? else {
+        let Some(content) = text(r, 0)? else {
             continue;
         };
         let Ok(key) = content.parse::<u64>() else {
@@ -417,8 +429,7 @@ const CUE_COLUMNS: &str = "ID, Kind, InMsec, OutMsec, ColorTableIndex";
 fn read_cue(r: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Cue> {
     // An id that is not a number under 2^32 — none in the reference library
     // is — reads as 0, which the interface shows but will not edit.
-    let id = r
-        .get::<_, Option<String>>(first)?
+    let id = text(r, first)?
         .and_then(|text| text.parse::<u32>().ok())
         .unwrap_or(0);
     let kind = u8::try_from(num(r, first + 1)?).unwrap_or(0);
@@ -499,7 +510,7 @@ fn read_tag_list(conn: &Connection, content_row: &HashMap<u64, Row>) -> rusqlite
     let mut stmt = conn.prepare(
         "SELECT ContentID FROM djmdSongTagList WHERE rb_local_deleted = 0 ORDER BY TrackNo, created_at",
     )?;
-    let rows = stmt.query_map([], |r| r.get::<_, Option<String>>(0))?;
+    let rows = stmt.query_map([], |r| text(r, 0))?;
     let mut out = Vec::new();
     for content in rows {
         let Some(content) = content? else { continue };
@@ -551,7 +562,7 @@ pub fn reload_metadata(db: &Db, library: &mut Library, ids: &[String]) -> rusqli
                 clamp_u8(num(r, 0)?, 5),
                 clamp_u8(num(r, 1)?, u8::MAX),
                 clamp_u16(num(r, 2)?),
-                r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                text_or_default(r, 3)?,
             ))
         })?;
         updates.push((row, fields));
@@ -629,11 +640,11 @@ fn read_my_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCategory>> {
     let mut tags: Vec<(String, String)> = Vec::new();
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
-        let Some(id): Option<String> = r.get(0)? else {
+        let Some(id) = text(r, 0)? else {
             continue;
         };
-        let name = r.get::<_, Option<String>>(1)?.unwrap_or_default();
-        let parent = r.get::<_, Option<String>>(3)?.unwrap_or_default();
+        let name = text_or_default(r, 1)?;
+        let parent = text_or_default(r, 3)?;
         if num(r, 2)? == 1 {
             index_by_id.insert(id, categories.len());
             categories.push(TagCategory {
@@ -711,9 +722,7 @@ fn read_smart_lists(
     let mut rules: Vec<Option<String>> = vec![None; playlists.len()];
     let Ok(mut rows) = stmt.query([]) else { return };
     while let Ok(Some(r)) = rows.next() {
-        let (Ok(Some(id)), Ok(Some(xml))) =
-            (r.get::<_, Option<String>>(0), r.get::<_, Option<String>>(1))
-        else {
+        let (Ok(Some(id)), Ok(Some(xml))) = (text(r, 0), text(r, 1)) else {
             continue;
         };
         if let Some(slot) = index_by_id.get(&id).and_then(|&index| rules.get_mut(index)) {
@@ -759,15 +768,13 @@ fn read_lists(
     ))?;
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
-        let Some(id): Option<String> = r.get(0)? else {
+        let Some(id) = text(r, 0)? else {
             continue;
         };
         let numeric_id = id.parse::<u64>().unwrap_or(0);
         index_by_id.insert(id, playlists.ids.len()); // moved, not cloned
         playlists.ids.push(numeric_id);
-        playlists
-            .names
-            .push(&r.get::<_, Option<String>>(1)?.unwrap_or_default());
+        playlists.names.push(&text_or_default(r, 1)?);
         // Parent is resolved after every playlist is known.
         playlists.parent.push(NO_ID);
         playlists.seq.push(clamp_u32(num(r, 3)?));
@@ -795,8 +802,8 @@ fn read_lists(
     ))?;
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
-        let id: Option<String> = r.get(0)?;
-        let parent: Option<String> = r.get(1)?;
+        let id = text(r, 0)?;
+        let parent = text(r, 1)?;
         let Some(id) = id else { continue };
         let (Some(&child), Some(parent_index)) = (
             index_by_id.get(&id),
@@ -818,7 +825,7 @@ fn read_lists(
     let mut rows = stmt.query([])?;
     let mut memberships = 0usize;
     while let Some(r) = rows.next()? {
-        let (playlist_id, content_id): (Option<String>, Option<String>) = (r.get(0)?, r.get(1)?);
+        let (playlist_id, content_id) = (text(r, 0)?, text(r, 1)?);
         let (Some(playlist_id), Some(content_id)) = (playlist_id, content_id) else {
             continue;
         };
@@ -841,6 +848,36 @@ fn read_lists(
 mod refresh_tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn malformed_utf8_is_replaced_instead_of_aborting_the_library_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let location =
+            rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = Db::open(location, rbl_db::OpenMode::ReadWrite).unwrap();
+        let track = rbl_db::fixture::track_id(0);
+        db.connection()
+            .execute_batch(
+                "INSERT INTO djmdArtist
+                    (ID, Name, rb_local_deleted, created_at, updated_at)
+                 VALUES ('malformed-artist', CAST(X'417274FF697374' AS TEXT), 0,
+                         '2026-01-01', '2026-01-01');
+                 UPDATE djmdContent
+                 SET Title = CAST(X'5469746C65FF' AS TEXT), ArtistID = 'malformed-artist'
+                 WHERE ID = '10000';
+                 UPDATE djmdPlaylist
+                 SET Name = CAST(X'4C697374FF' AS TEXT)
+                 WHERE ID = '900000';",
+            )
+            .unwrap();
+
+        let (library, stats) = load(&db).unwrap();
+        let row = library.row_of(&track).unwrap();
+        assert_eq!(library.title.get(row as usize), "Title�");
+        assert_eq!(library.artist_name(row), "Art�ist");
+        assert_eq!(library.playlists().name(0), "List�");
+        assert_eq!(stats.tracks, 40);
+    }
 
     #[test]
     fn parallel_reads_match_serial_and_exclude_deleted_track_cues() {
