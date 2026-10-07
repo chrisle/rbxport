@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  browseListVars,
   browseScale,
   BROWSE_SCALE_DEFAULT,
   DEFAULT_PREFERENCES,
@@ -169,4 +170,22 @@ it("defaults compatibility conversion to off and WAV, and preserves MP3 selectio
     .toMatchObject({ maximumCompatibility: true, conversionFormat: "mp3" });
   expect(sanitisePreferences({ usbExport: { maximumCompatibility: "yes", conversionFormat: "flac" } }).usbExport)
     .toMatchObject({ maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false });
+});
+
+describe("browseListVars", () => {
+  it("scales row height and font size from the Browse sliders", () => {
+    const v = { browseFontSize: 4, browseLineSpace: 0, browseBold: true };
+    const vars = browseListVars(v, 25);
+    expect(vars["--s-row-height"]).toBe("20px");
+    expect(vars["--f-size-ui"]).toBe("calc(1.3 * var(--f-size-ui-base))");
+    expect(vars["--browse-weight"]).toBe(700);
+  });
+  it("is the measured size at the default stops", () => {
+    const vars = browseListVars(
+      { browseFontSize: BROWSE_SCALE_DEFAULT, browseLineSpace: BROWSE_SCALE_DEFAULT, browseBold: false },
+      25,
+    );
+    expect(vars["--s-row-height"]).toBe("25px");
+    expect(vars["--browse-weight"]).toBe(400);
+  });
 });

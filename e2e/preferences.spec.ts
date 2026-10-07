@@ -469,3 +469,17 @@ test("Show BPM changes controls waveform annotations and persists", async ({page
   await reopened.getByRole("tab", {name:"Layout", exact:true}).click();
   await expect(reopened.getByRole("checkbox", {name:"Show BPM changes", exact:true})).not.toBeChecked();
 });
+
+test("Browse › FontSize and Line Space apply to the playlist tree", async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("rbl.preferences", JSON.stringify({ view: { browseFontSize: 4, browseLineSpace: 4 } })));
+  await open(page);
+  const node = page.getByRole("treeitem").first();
+  const { height, size } = await node.evaluate((el) => {
+    const css = getComputedStyle(el);
+    return { height: parseFloat(css.height), size: parseFloat(css.fontSize) };
+  });
+  const base = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--f-size-ui-base")) || 0);
+  expect(height).toBe(33);
+  if (base) expect(size).toBeCloseTo(base * 1.3, 1);
+});

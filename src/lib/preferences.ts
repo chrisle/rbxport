@@ -70,6 +70,22 @@ export function browseScale(step: number): number {
   return BROWSE_SCALES[step] ?? 1;
 }
 
+/**
+ * Browse › FontSize, Bold and Line Space as the CSS custom properties the
+ * browser's lists draw with, so the track table and the playlist tree share
+ * one rule. `rowBase` is the measured row height in px (`--s-row-height`).
+ */
+export function browseListVars(
+  view: { browseFontSize: number; browseLineSpace: number; browseBold: boolean },
+  rowBase: number,
+): Record<string, string | number> {
+  return {
+    "--s-row-height": `${Math.round(rowBase * browseScale(view.browseLineSpace))}px`,
+    "--f-size-ui": `calc(${browseScale(view.browseFontSize)} * var(--f-size-ui-base))`,
+    "--browse-weight": view.browseBold ? 700 : 400,
+  };
+}
+
 export type VuMeterMode = "normal" | "fabulous";
 
 export const LOCALES = [

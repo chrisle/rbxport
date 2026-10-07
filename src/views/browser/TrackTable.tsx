@@ -32,7 +32,7 @@ import { RatingStar } from "@/components/RatingStar";
 import { RecordIcon } from "@/components/icons";
 import { EXTRA_COLUMNS, type ColumnKey, type ColumnSpec } from "@/lib/columns";
 import { COLOR_NAMES } from "@/lib/trackFilter";
-import { browseScale, formatKey } from "@/lib/preferences";
+import { browseListVars, browseScale, formatKey } from "@/lib/preferences";
 import { trafficLightLit, type TrafficLightReach } from "@/lib/camelot";
 import { TickIcon } from "@/components/icons";
 import type { TrafficLightSource } from "@/lib/session";
@@ -824,7 +824,6 @@ export const TrackTable = memo(function TrackTable({
   const clickToEdit = !preferences.advanced.doubleClickToEdit;
   // Browse › FontSize and Line Space scale the measured tokens; the
   // virtualizer has to be told the same height the CSS draws.
-  const fontScale = browseScale(preferences.view.browseFontSize);
   const rowH = Math.round(ROW_H * browseScale(preferences.view.browseLineSpace));
 
   // Hand the top of the view up once it is real, for the next start's opening
@@ -1306,9 +1305,7 @@ export const TrackTable = memo(function TrackTable({
         // Browse › FontSize, Bold and Line Space, scoped to the list: the
         // tokens are the measured sizes, and these are the slider's multiples
         // of them.
-        ["--s-row-height" as string]: `${rowH}px`,
-        ["--f-size-ui" as string]: `calc(${fontScale} * var(--f-size-ui-base))`,
-        ["--browse-weight" as string]: preferences.view.browseBold ? 700 : 400,
+        ...browseListVars(preferences.view, ROW_H),
       }}
       data-file-over={fileOver || undefined}
       onDragOver={(e) => {
