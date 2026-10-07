@@ -1612,7 +1612,13 @@ fn write_export_with_phase(
     if rbl_db::is_rekordbox_running() {
         return Err(AppError::internal("Quit rekordbox before syncing this USB so only one application writes its libraries."));
     }
-    let export_root = rbl_export::export_root(destination);
+    let preferred_root = rbl_devices::list()
+        .into_iter()
+        .find(|device| device.mount_point == destination)
+        .and_then(|device| rbl_export::ExportRoot::for_file_system(&device.file_system));
+    let root_name = rbl_export::export_root_name_with(destination, preferred_root)
+        .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+    let export_root = destination.join(root_name);
     let settings_root = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("rbxport/usb-settings");
     let imported_settings: Vec<_> = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"].into_iter()
         .filter(|name| !export_root.join(name).exists())
@@ -1623,7 +1629,12 @@ fn write_export_with_phase(
         &selection.tracks,
         &selection.playlists,
         &selection.my_tags,
-        &rbl_export::ExportOptions { defaults: library_defaults.as_ref(), sync: Some(&selection.sync), compatibility: compatibility_format },
+        &rbl_export::ExportOptions {
+            defaults: library_defaults.as_ref(),
+            sync: Some(&selection.sync),
+            compatibility: compatibility_format,
+            root: preferred_root,
+        },
         progress,
         cancelled,
     )

@@ -854,7 +854,9 @@ test requires two explicitly selected FAT32 test volumes.
 Select whichever root already holds `rekordbox/export.pdb`,
 `rekordbox/exportLibrary.db` or `DEVSETTING.DAT`; a stick with both is a hard
 `Conflict` rather than a guess. Every `/PIONEER/` literal written into a
-database row is rewritten to the chosen root.
+database row is rewritten to the chosen root. On a blank HFS+ volume, match
+rekordbox by selecting `.PIONEER` [OBS: HFS+ export report, 2026-10-07];
+other blank volumes start with `PIONEER`.
 
 #### Initial directory creation
 

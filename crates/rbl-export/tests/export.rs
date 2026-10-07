@@ -58,6 +58,37 @@ fn writes_a_tree_a_player_can_browse() {
 }
 
 #[test]
+fn hfs_export_uses_hidden_filesystem_and_database_paths() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let tracks = [track(src.path(), 1, "Hidden", "Artist")];
+    rbl_export::export_with_options(
+        dest.path(),
+        &tracks,
+        &[],
+        &[],
+        &rbl_export::ExportOptions {
+            root: Some(rbl_export::ExportRoot::Hidden),
+            ..Default::default()
+        },
+        &mut |_| {},
+    )
+    .unwrap();
+
+    assert!(dest.path().join(".PIONEER/rekordbox/export.pdb").is_file());
+    assert!(dest.path().join(".PIONEER/rekordbox/exportLibrary.db").is_file());
+    assert!(dest.path().join(".PIONEER/USBANLZ").is_dir());
+    assert!(!dest.path().join("PIONEER").exists());
+
+    let snapshot = rbl_export::snapshot::Snapshot::read(dest.path()).unwrap();
+    let legacy = snapshot.legacy.unwrap();
+    let one = snapshot.one.unwrap();
+    assert_eq!(legacy, one, "both exported databases use the same paths");
+    assert!(legacy.tracks[0].analysis.starts_with("/.PIONEER/USBANLZ/"), "{}", legacy.tracks[0].analysis);
+    assert!(rbl_export::verify(dest.path()).unwrap().is_ok());
+}
+
+#[test]
 fn metadata_survives_the_round_trip() {
     let src = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();
@@ -328,6 +359,23 @@ fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
 }
 
 #[test]
+fn a_blank_hfs_stick_gets_only_the_hidden_rekordbox_root() {
+    let stick = tempfile::tempdir().unwrap();
+    assert!(rbl_export::create_library_with_root(
+        stick.path(),
+        None,
+        &[],
+        None,
+        Some(rbl_export::ExportRoot::Hidden),
+    )
+    .unwrap());
+    assert!(stick.path().join(".PIONEER/rekordbox/export.pdb").is_file());
+    assert!(stick.path().join(".PIONEER/rekordbox/exportLibrary.db").is_file());
+    assert!(stick.path().join(".PIONEER/USBANLZ").is_dir());
+    assert!(!stick.path().join("PIONEER").exists());
+}
+
+#[test]
 fn directory_names_are_cut_where_rekordbox_cuts_them_and_the_file_name_is_not() {
     let source = tempfile::tempdir().unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -381,6 +429,13 @@ fn my_settings_are_copied_from_rekordbox_and_a_sticks_own_are_kept() {
     let empty = tempfile::tempdir().unwrap();
     let other = tempfile::tempdir().unwrap();
     assert_eq!(rbl_export::copy_my_settings(other.path(), empty.path()).unwrap(), 0);
+
+    let hidden = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(hidden.path().join(".PIONEER")).unwrap();
+    std::fs::write(hidden.path().join(".PIONEER/DEVSETTING.DAT"), b"hidden library").unwrap();
+    assert_eq!(rbl_export::copy_my_settings(hidden.path(), source.path()).unwrap(), 4);
+    assert!(hidden.path().join(".PIONEER/MYSETTING.DAT").is_file());
+    assert!(!hidden.path().join("PIONEER").exists());
 }
 
 #[test]

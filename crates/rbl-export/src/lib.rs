@@ -51,6 +51,40 @@ pub enum ExportError {
 
 pub type Result<T> = std::result::Result<T, ExportError>;
 
+/// Which rekordbox library root a fresh volume should use.
+///
+/// Existing exports always keep their spelling; this preference only decides
+/// the root when neither library exists yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportRoot {
+    Standard,
+    Hidden,
+}
+
+impl ExportRoot {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Standard => "PIONEER",
+            Self::Hidden => ".PIONEER",
+        }
+    }
+
+    /// Rekordbox uses the hidden root on HFS+ volumes [OBS]. Filesystem names
+    /// differ by OS and API, so accept the forms returned by sysinfo, Disk
+    /// Utility and common mount tools.
+    #[must_use]
+    pub fn for_file_system(file_system: &str) -> Option<Self> {
+        let normalized: String = file_system
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '+')
+            .flat_map(char::to_uppercase)
+            .collect();
+        matches!(normalized.as_str(), "HFS" | "HFS+" | "HFSPLUS")
+            .then_some(Self::Hidden)
+            .or_else(|| normalized.starts_with("MACOSEXTENDED").then_some(Self::Hidden))
+    }
+}
+
 /// `DeviceSQL` page size rekordbox uses.
 const PAGE_SIZE: usize = 4096;
 
@@ -318,6 +352,11 @@ fn layout(track: &SourceTrack, export_id: u32) -> Layout {
 
 /// Resolve both layouts without creating a second, competing library.
 pub fn export_root_name(root: &Path) -> Result<&'static str> {
+    export_root_name_with(root, None)
+}
+
+/// Resolve an existing library first, then use `preferred` for a blank volume.
+pub fn export_root_name_with(root: &Path, preferred: Option<ExportRoot>) -> Result<&'static str> {
     let present = |name: &str| {
         let p = root.join(name);
         p.join("rekordbox/export.pdb").exists() || p.join("rekordbox/exportLibrary.db").exists() || p.join("DEVSETTING.DAT").exists()
@@ -325,7 +364,8 @@ pub fn export_root_name(root: &Path) -> Result<&'static str> {
     match (present("PIONEER"), present(".PIONEER")) {
         (true, true) => Err(ExportError::Conflict("Both PIONEER and .PIONEER contain libraries. Reconcile them before syncing.".into())),
         (false, true) => Ok(".PIONEER"),
-        _ => Ok("PIONEER"),
+        (true, false) => Ok("PIONEER"),
+        (false, false) => Ok(preferred.unwrap_or(ExportRoot::Standard).name()),
     }
 }
 pub fn export_root(root: &Path) -> PathBuf {
@@ -567,7 +607,7 @@ pub fn export_full(
     sync: Option<&SyncSource>,
     progress: &mut dyn FnMut(&ExportProgress),
 ) -> Result<ExportReport> {
-    export_with_options(destination, tracks, playlists, my_tags, &ExportOptions { defaults, sync, compatibility: None }, progress)
+    export_with_options(destination, tracks, playlists, my_tags, &ExportOptions { defaults, sync, compatibility: None, root: None }, progress)
 }
 
 #[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize)]
@@ -584,6 +624,7 @@ pub struct ExportOptions<'a> {
     pub defaults: Option<&'a rbl_onelibrary::settings::StickSettings>,
     pub sync: Option<&'a SyncSource>,
     pub compatibility: Option<CompatibilityFormat>,
+    pub root: Option<ExportRoot>,
 }
 
 /// Export with optional conversion of audio outside the common CDJ formats.
@@ -613,12 +654,12 @@ pub fn export_cancellable(
     cancelled: &dyn Fn() -> bool,
 ) -> Result<ExportReport> {
     if cancelled() { return Err(ExportError::Cancelled); }
-    let &ExportOptions { defaults, sync, compatibility } = options;
+    let &ExportOptions { defaults, sync, compatibility, root } = options;
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
     }
 
-    let root_name = export_root_name(destination)?;
+    let root_name = export_root_name_with(destination, root)?;
     let contents = destination.join("Contents");
     let anlz_root = destination.join(root_name).join("USBANLZ");
     let db_dir = destination.join(root_name).join("rekordbox");
@@ -919,7 +960,11 @@ pub fn export_cancellable(
             size,
             modified,
             analysis: analysis_hash,
-            artwork: if artwork_id == 0 { String::new() } else { artwork_path(artwork_id, "a", false) },
+            artwork: if artwork_id == 0 {
+                String::new()
+            } else {
+                artwork_path(artwork_id, "a", false).replacen("/PIONEER/", &format!("/{root_name}/"), 1)
+            },
             conversion: profile.to_owned(),
             conversion_source_hash: source_hash,
             audio_hash,
@@ -1220,7 +1265,7 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
 }
 
 /// Writes the database folders an empty stick gets, as rekordbox does the
-/// moment a drive is connected: `PIONEER/rekordbox/export.pdb` with the
+/// moment a drive is connected: the selected root's `rekordbox/export.pdb` with the
 /// twenty tables and no tracks, `exportLibrary.db` holding `defaults` (or
 /// the reference rows), and the `USBANLZ` and `Contents` directories. With
 /// these in place the device's settings can be edited before anything is
@@ -1231,11 +1276,22 @@ pub fn create_library(
     my_tags: &[SourceMyTag],
     sync: Option<&SyncSource>,
 ) -> Result<bool> {
+    create_library_with_root(destination, defaults, my_tags, sync, None)
+}
+
+/// [`create_library`], choosing the rekordbox root for a blank volume.
+pub fn create_library_with_root(
+    destination: &Path,
+    defaults: Option<&rbl_onelibrary::settings::StickSettings>,
+    my_tags: &[SourceMyTag],
+    sync: Option<&SyncSource>,
+    preferred_root: Option<ExportRoot>,
+) -> Result<bool> {
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
     }
     let publication = rbl_core::durable::Publication::new(destination, PUBLICATION)?;
-    let root_name = export_root_name(destination)?;
+    let root_name = export_root_name_with(destination, preferred_root)?;
     let db_dir = destination.join(root_name).join("rekordbox");
     let legacy = db_dir.join("export.pdb").exists();
     let one = db_dir.join("exportLibrary.db").exists();
@@ -1250,7 +1306,7 @@ pub fn create_library(
         return Ok(true);
     }
     rbl_core::durable::create_dir_all(destination.join("Contents"))?;
-    rbl_core::durable::create_dir_all(destination.join("PIONEER/USBANLZ"))?;
+    rbl_core::durable::create_dir_all(destination.join(root_name).join("USBANLZ"))?;
     rbl_core::durable::create_dir_all(&db_dir)?;
     let db_dir = publication.stage().join(root_name).join("rekordbox");
     rbl_core::durable::create_dir_all(&db_dir)?;
@@ -1618,7 +1674,7 @@ pub const MY_SETTINGS_FILES: [&str; 4] = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJ
 /// empty writes none, which is not an error — a machine without rekordbox
 /// has none to give.
 pub fn copy_my_settings(destination: &Path, source: &Path) -> Result<usize> {
-    let pioneer = destination.join("PIONEER");
+    let pioneer = export_root(destination);
     let mut written = 0;
     for name in MY_SETTINGS_FILES {
         let from = source.join(name);
@@ -1687,6 +1743,16 @@ mod tests {
     fn analysis_paths_match_independent_rekordbox_exports() {
         assert_eq!(analysis_directory("/Contents/Hosanna, Westend/Drum Death - Extended Mix/20130688_drum_death_(extended_mix).mp3", "PIONEER"), "/PIONEER/USBANLZ/P002/0002583E");
         assert_eq!(analysis_directory("/Contents/Meduza, Aya Anne, GENESI (ITA)/Freak EP/20063130_freak_(feat._aya_anne)_(feat._aya_a.mp3", "PIONEER"), "/PIONEER/USBANLZ/P018/00008F82");
+    }
+
+    #[test]
+    fn hfs_names_select_the_hidden_rekordbox_root() {
+        for name in ["hfs", "HFS+", "hfsplus", "Mac OS Extended (Journaled)"] {
+            assert_eq!(ExportRoot::for_file_system(name), Some(ExportRoot::Hidden), "{name}");
+        }
+        for name in ["FAT32", "exFAT", "APFS", "ext4", ""] {
+            assert_eq!(ExportRoot::for_file_system(name), None, "{name}");
+        }
     }
 
     #[test]

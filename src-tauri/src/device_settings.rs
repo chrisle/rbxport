@@ -326,7 +326,11 @@ pub async fn ensure_device_library(
             .unwrap_or_default();
         let my_tags: Vec<rbl_export::SourceMyTag> = my_tags.iter().map(crate::commands::source_my_tag).collect();
         let sync = rbl_export::SyncSource { db_id, tree: Vec::new(), automatic: false };
-        rbl_export::create_library(mount, library.as_ref(), &my_tags, Some(&sync))
+        let preferred_root = rbl_devices::list()
+            .into_iter()
+            .find(|device| device.mount_point == mount)
+            .and_then(|device| rbl_export::ExportRoot::for_file_system(&device.file_system));
+        rbl_export::create_library_with_root(mount, library.as_ref(), &my_tags, Some(&sync), preferred_root)
             .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
         if let Some(defaults) = &defaults {
             write_dev_defaults(mount, defaults)?;
