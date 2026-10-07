@@ -433,6 +433,29 @@ test("detail columns display row metadata after being enabled", async ({ page })
   await expect(page.locator('[role="gridcell"][data-col="albumArtist"]').first()).not.toBeEmpty();
 });
 
+test("DJ Play Count sorts numerically in both directions", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "DJ Play Count", exact: true }).click();
+
+  const header = page.getByRole("columnheader", { name: /^DJ Play Count/ });
+  const values = page.locator('[role="gridcell"][data-col="djPlayCount"]');
+  await header.click();
+  await expect(header).toHaveAttribute("data-sorted", "true");
+  await expect.poll(async () => {
+    const visible = (await values.allInnerTexts()).map((value) => value === "" ? 0 : Number(value));
+    return visible.every((value, index) => index === 0 || (visible[index - 1] ?? 0) <= value);
+  }).toBe(true);
+
+  await header.click();
+  await expect(values.first()).toHaveText("6");
+  await expect.poll(async () => {
+    const visible = (await values.allInnerTexts()).map((value) => value === "" ? 0 : Number(value));
+    return visible.every((value, index) => index === 0 || (visible[index - 1] ?? 0) >= value);
+  }).toBe(true);
+});
+
 test("column menu highlights each field as the pointer moves", async ({ page }) => {
   await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
   const menu = page.getByRole("menu", { name: "Columns" });

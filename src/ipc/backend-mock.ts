@@ -325,6 +325,7 @@ function compare(a: RowDto, b: RowDto, col: SortKey): number {
     case "bpm": return a.bpmX100 - b.bpmX100;
     case "duration": return a.durationSec - b.durationSec;
     case "rating": return a.rating - b.rating;
+    case "djPlayCount": return Number(a.extra?.djPlayCount ?? 0) - Number(b.extra?.djPlayCount ?? 0);
     case "title": return collator.compare(a.title, b.title);
     case "artist": return collator.compare(a.artist, b.artist);
     case "album": return collator.compare(a.album, b.album);

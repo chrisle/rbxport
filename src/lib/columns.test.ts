@@ -75,8 +75,9 @@ describe("the catalogue", () => {
     }
   });
 
-  it("allows the Comments heading to sort the view", () => {
+  it("allows every index-backed optional heading to sort the view", () => {
     expect(specOf("comment")?.sortable).toBe(true);
+    expect(specOf("djPlayCount")?.sortable).toBe(true);
   });
 });
 

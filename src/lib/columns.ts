@@ -18,7 +18,7 @@ export type ColumnKey =
   | "size" | "discNo" | "albumArtist" | "composer" | "lyricist" | "fileType"
   | "year" | "mixName" | "remixer" | "originalArtist" | "sampleRate"
   | "bitrate" | "bitDepth" | "location" | "dateCreated" | "hotCue"
-  | "publishTrackInfo" | "message" | "color" | "djPlayCount" | "myTag"
+  | "publishTrackInfo" | "message" | "color" | "myTag"
   | "trackNumber" | "cloud" | "fileName";
 
 export interface ColumnSpec {
@@ -89,7 +89,7 @@ export const CATALOGUE: readonly ColumnSpec[] = [
   { key: "publishTrackInfo", label: "Publish track information", width: 180, sortable: false },
   { key: "message", label: "Message", width: 180, sortable: false },
   { key: "color", label: "Color", width: 90, sortable: false },
-  { key: "djPlayCount", label: "DJ Play Count", width: 120, align: "right", sortable: false },
+  { key: "djPlayCount", label: "DJ Play Count", width: 120, align: "right", sortable: true },
   { key: "myTag", label: "My Tag", width: 180, sortable: false },
   { key: "album", label: "Album", width: 240, sortable: true },
   { key: "genre", label: "Genre", width: 160, sortable: true },

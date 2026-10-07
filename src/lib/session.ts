@@ -113,7 +113,7 @@ export const DEFAULT_SESSION: Session = {
 
 const SORT_COLUMNS: readonly string[] = [
   "trackNo", "title", "artist", "album", "genre", "label", "comment",
-  "bpm", "key", "duration", "rating", "dateAdded", "releaseDate",
+  "bpm", "key", "duration", "rating", "djPlayCount", "dateAdded", "releaseDate",
 ];
 
 function sortOrDefault(value: unknown): SortState {

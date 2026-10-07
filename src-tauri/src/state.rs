@@ -568,6 +568,7 @@ pub fn sort_from_wire(name: &str) -> SortColumn {
         "bpm" => SortColumn::Bpm,
         "duration" => SortColumn::Duration,
         "rating" => SortColumn::Rating,
+        "djPlayCount" => SortColumn::PlayCount,
         "dateAdded" => SortColumn::DateAdded,
         "releaseDate" => SortColumn::ReleaseDate,
         _ => SortColumn::TrackNo,
@@ -728,9 +729,9 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
     use rbl_index::testing::{library_from, TestTrack};
-    use rbl_index::Cue;
+    use rbl_index::{Cue, SortColumn};
 
-    use super::rows_to_dto;
+    use super::{rows_to_dto, sort_from_wire};
 
     fn cue(kind: u8, position_ms: u32, colour: u8) -> Cue {
         Cue { position_ms, kind, colour, ..Cue::default() }
@@ -755,6 +756,11 @@ mod tests {
             json["hotCues"],
             serde_json::json!([["A", 46, "#3CEB50"], ["B", 165_046, "#E02823"], ["C", 2000, null], ["E", 24, "#10B176"]])
         );
+    }
+
+    #[test]
+    fn the_dj_play_count_wire_key_uses_the_numeric_index() {
+        assert_eq!(sort_from_wire("djPlayCount"), SortColumn::PlayCount);
     }
 
     #[test]

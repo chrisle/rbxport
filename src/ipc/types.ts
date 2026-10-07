@@ -65,7 +65,8 @@ export type RelatedCriterion = "bpmKey" | "genreRecent" | "artist" | "suggestion
 
 export type SortColumn =
   | "trackNo" | "title" | "artist" | "album" | "genre" | "label"
-  | "comment" | "bpm" | "key" | "duration" | "rating" | "dateAdded" | "releaseDate";
+  | "comment" | "bpm" | "key" | "duration" | "rating" | "djPlayCount"
+  | "dateAdded" | "releaseDate";
 
 /**
  * What the backend sorts by. The columns, plus the key round the Camelot

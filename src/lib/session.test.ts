@@ -83,6 +83,10 @@ describe("sanitiseSession", () => {
       column: "bpm",
       descending: false,
     });
+    expect(sanitiseSession({ sort: { column: "djPlayCount", descending: true } }).sort).toEqual({
+      column: "djPlayCount",
+      descending: true,
+    });
   });
 
   it("treats a missing panel flag as closed", () => {
