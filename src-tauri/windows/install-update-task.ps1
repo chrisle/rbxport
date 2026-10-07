@@ -11,10 +11,42 @@ $ErrorActionPreference = "Stop"
 $taskName = "rbxport Silent Update"
 $stagingDirectory = Join-Path $env:ProgramData "rbxport\updates"
 
+function New-StagingAcl {
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($rule in @(
+        [System.Security.AccessControl.FileSystemAccessRule]::new(
+            "SYSTEM",
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        ),
+        [System.Security.AccessControl.FileSystemAccessRule]::new(
+            "BUILTIN\Administrators",
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        ),
+        [System.Security.AccessControl.FileSystemAccessRule]::new(
+            "NT AUTHORITY\Authenticated Users",
+            [System.Security.AccessControl.FileSystemRights]::Modify,
+            [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        )
+    )) {
+        $acl.AddAccessRule($rule)
+    }
+    return $acl
+}
+
 if ($ValidateOnly) {
     if ([string]::IsNullOrWhiteSpace($InstallDirectory)) {
         throw "InstallDirectory is required."
     }
+    $null = New-StagingAcl
     exit 0
 }
 
@@ -33,33 +65,7 @@ if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
 # into Program Files. The helper verifies the updater's minisign signature and
 # target version before that copy, so write access does not grant elevation.
 New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
-$acl = New-Object System.Security.AccessControl.DirectorySecurity
-$acl.SetAccessRuleProtection($true, $false)
-foreach ($rule in @(
-    [System.Security.AccessControl.FileSystemAccessRule]::new(
-        "SYSTEM",
-        [System.Security.AccessControl.FileSystemRights]::FullControl,
-        [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
-        [System.Security.AccessControl.PropagationFlags]::None,
-        [System.Security.AccessControl.AccessControlType]::Allow
-    ),
-    [System.Security.AccessControl.FileSystemAccessRule]::new(
-        "BUILTIN\Administrators",
-        [System.Security.AccessControl.FileSystemRights]::FullControl,
-        [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
-        [System.Security.AccessControl.PropagationFlags]::None,
-        [System.Security.AccessControl.AccessControlType]::Allow
-    ),
-    [System.Security.AccessControl.FileSystemAccessRule]::new(
-        "NT AUTHORITY\Authenticated Users",
-        [System.Security.AccessControl.FileSystemRights]::Modify,
-        [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
-        [System.Security.AccessControl.PropagationFlags]::None,
-        [System.Security.AccessControl.AccessControlType]::Allow
-    )
-)) {
-    $acl.AddAccessRule($rule)
-}
+$acl = New-StagingAcl
 Set-Acl -LiteralPath $stagingDirectory -AclObject $acl
 
 $action = New-ScheduledTaskAction -Execute $helper -Argument "--apply-staged-update"
