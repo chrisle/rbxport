@@ -36,14 +36,26 @@ New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
 $acl = New-Object System.Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true, $false)
 foreach ($rule in @(
-    New-Object System.Security.AccessControl.FileSystemAccessRule(
-        "SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
+    [System.Security.AccessControl.FileSystemAccessRule]::new(
+        "SYSTEM",
+        [System.Security.AccessControl.FileSystemRights]::FullControl,
+        [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
+        [System.Security.AccessControl.PropagationFlags]::None,
+        [System.Security.AccessControl.AccessControlType]::Allow
     ),
-    New-Object System.Security.AccessControl.FileSystemAccessRule(
-        "BUILTIN\Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
+    [System.Security.AccessControl.FileSystemAccessRule]::new(
+        "BUILTIN\Administrators",
+        [System.Security.AccessControl.FileSystemRights]::FullControl,
+        [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
+        [System.Security.AccessControl.PropagationFlags]::None,
+        [System.Security.AccessControl.AccessControlType]::Allow
     ),
-    New-Object System.Security.AccessControl.FileSystemAccessRule(
-        "NT AUTHORITY\Authenticated Users", "Modify", "ContainerInherit,ObjectInherit", "None", "Allow"
+    [System.Security.AccessControl.FileSystemAccessRule]::new(
+        "NT AUTHORITY\Authenticated Users",
+        [System.Security.AccessControl.FileSystemRights]::Modify,
+        [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
+        [System.Security.AccessControl.PropagationFlags]::None,
+        [System.Security.AccessControl.AccessControlType]::Allow
     )
 )) {
     $acl.AddAccessRule($rule)
