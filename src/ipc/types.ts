@@ -408,7 +408,7 @@ export interface Backend {
     /** Remove RBXport-exported music outside the playlists being synced. */
     deleteUnlistedMusic?: boolean,
     /** Convert incompatible USB copies; undefined preserves the source format. */
-    compatibilityFormat?: "wav" | "mp3",
+    compatibilityFormat?: "wav" | "aiff" | "mp3",
   ): Promise<ExportReport | null>;
 
   /**
@@ -416,7 +416,7 @@ export interface Backend {
    * beside what the stick already holds. A later sync keeps them unless
    * deleteUnlistedMusic is enabled.
    */
-  exportTracksToDevice(tracks: string[], destination: string, defaults?: StickDefaults, compatibilityFormat?: "wav" | "mp3"): Promise<ExportReport>;
+  exportTracksToDevice(tracks: string[], destination: string, defaults?: StickDefaults, compatibilityFormat?: "wav" | "aiff" | "mp3"): Promise<ExportReport>;
 
   /**
    * rekordbox's reference browse categories and sort options: what a
@@ -735,7 +735,7 @@ export interface Backend {
     /** Remove RBXport-exported music outside the playlists being synced. */
     deleteUnlistedMusic?: boolean,
     /** Convert incompatible USB copies; undefined preserves the source format. */
-    compatibilityFormat?: "wav" | "mp3",
+    compatibilityFormat?: "wav" | "aiff" | "mp3",
   ): Promise<SyncDeviceReport[]>;
 
   /** Missing source audio in the exact playlists selected for USB export. */

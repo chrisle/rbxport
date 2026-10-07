@@ -1429,5 +1429,8 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Dvě existující knihovny zařízení nesouhlasí. Uspořádejte je v softwaru rekordbox před jejich první synchronizací zde.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Toto USB patří do jiné nebo starší neověřené hlavní knihovny. Importujte jeho obsah do rekordboxu před změnou jeho vlastnictví.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary obsahuje záznamy cue, které by tento export nahradil. Nejprve importujte podněty do softwaru rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Odstraňovaná skladba je stále odkazována historií USB. Nejprve importujte a vymažte historii v softwaru rekordbox."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Odstraňovaná skladba je stále odkazována historií USB. Nejprve importujte a vymažte historii v softwaru rekordbox.",
+  "AIFF — larger files": "AIFF — larger files",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.",
+  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files."
 }

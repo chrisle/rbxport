@@ -161,12 +161,14 @@ it("requires an explicit boolean to enable USB music cleanup", () => {
   expect(sanitisePreferences({ usbExport: { deleteUnlistedMusic: "true" } }).usbExport.deleteUnlistedMusic).toBe(false);
 });
 
-it("defaults compatibility conversion to off and WAV, and preserves MP3 selection", () => {
+it("defaults compatibility conversion to off and WAV, and preserves AIFF and MP3 selections", () => {
   const defaults = sanitisePreferences({}).usbExport;
   expect(defaults.maximumCompatibility).toBe(false);
   expect(defaults.conversionFormat).toBe("wav");
   expect(sanitisePreferences({ usbExport: { maximumCompatibility: true, conversionFormat: "mp3" } }).usbExport)
     .toMatchObject({ maximumCompatibility: true, conversionFormat: "mp3" });
+  expect(sanitisePreferences({ usbExport: { maximumCompatibility: true, conversionFormat: "aiff" } }).usbExport)
+    .toMatchObject({ maximumCompatibility: true, conversionFormat: "aiff" });
   expect(sanitisePreferences({ usbExport: { maximumCompatibility: "yes", conversionFormat: "flac" } }).usbExport)
     .toMatchObject({ maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false });
 });

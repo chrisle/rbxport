@@ -612,10 +612,14 @@ pub fn export_full(
 
 #[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum CompatibilityFormat { Wav, Mp3 }
+pub enum CompatibilityFormat { Wav, Aiff, Mp3 }
 impl CompatibilityFormat {
     fn audio(self) -> rbl_audio::compatibility::Format {
-        match self { Self::Wav => rbl_audio::compatibility::Format::Wav, Self::Mp3 => rbl_audio::compatibility::Format::Mp3 }
+        match self {
+            Self::Wav => rbl_audio::compatibility::Format::Wav,
+            Self::Aiff => rbl_audio::compatibility::Format::Aiff,
+            Self::Mp3 => rbl_audio::compatibility::Format::Mp3,
+        }
     }
 }
 

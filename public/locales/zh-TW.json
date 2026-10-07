@@ -1434,5 +1434,8 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "现有的两个设备库不一致。在首次同步之前在 rekordbox 中對它們進行協調。",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "此 USB 屬於不同的或較舊的未經驗證的主庫。在更改其所有權之前，將其內容匯入 rekordbox。",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary 包含此匯出將取代的提示記錄。首先导入 rekordbox 中的提示。",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 歷史記錄仍會引用已刪除的曲目。首先匯入並清除 rekordbox 中的歷史記錄。"
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 歷史記錄仍會引用已刪除的曲目。首先匯入並清除 rekordbox 中的歷史記錄。",
+  "AIFF — larger files": "AIFF — larger files",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.",
+  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files."
 }

@@ -75,3 +75,23 @@ it("sets what Sync Manager's Import has ticked when it opens", () => {
   act(() => toggle("Import CDJ/mixer settings").click());
   expect(update).toHaveBeenCalledWith("usbExport", { importButtonSettings: true });
 });
+
+it("offers AIFF as a compatibility conversion target", () => {
+  const update = vi.fn();
+  const preferences = {
+    ...DEFAULT_PREFERENCES,
+    usbExport: { ...DEFAULT_PREFERENCES.usbExport, maximumCompatibility: true },
+  };
+  act(() => root.render(
+    <PreferencesProvider value={{ preferences, update, reset: vi.fn() }}>
+      <UsbExportPane />
+    </PreferencesProvider>,
+  ));
+  const select = host.querySelector<HTMLSelectElement>('select[id$="-format"]')!;
+  expect([...select.options].map(option => [option.value, option.textContent])).toContainEqual(["aiff", "AIFF — larger files"]);
+  act(() => {
+    select.value = "aiff";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(update).toHaveBeenCalledWith("usbExport", { conversionFormat: "aiff" });
+});

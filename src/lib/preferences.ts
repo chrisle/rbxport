@@ -222,7 +222,7 @@ export interface Preferences {
   advanced: AdvancedPreferences;
   keyboard: KeyboardPreferences;
   usbExport: {
-    importSettings: boolean; importHistory: boolean; deleteUnlistedMusic: boolean; maximumCompatibility: boolean; conversionFormat: "wav" | "mp3";
+    importSettings: boolean; importHistory: boolean; deleteUnlistedMusic: boolean; maximumCompatibility: boolean; conversionFormat: "wav" | "aiff" | "mp3";
     /** What Sync Manager's Import button has ticked when the window opens. */
     importButtonCues: boolean; importButtonHistory: boolean; importButtonSettings: boolean;
   };
@@ -401,7 +401,7 @@ export function sanitisePreferences(value: unknown): Preferences {
   const d = DEFAULT_PREFERENCES;
   return {
     rekordbox: { syncBrowseSettings: bool(rekordbox.syncBrowseSettings, true) },
-    usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true), deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: usb.conversionFormat === "mp3" ? "mp3" : "wav", importButtonCues: bool(usb.importButtonCues, true), importButtonHistory: bool(usb.importButtonHistory, true), importButtonSettings: bool(usb.importButtonSettings, false) },
+    usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true), deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: oneOf(usb.conversionFormat, ["wav", "aiff", "mp3"] as const, "wav"), importButtonCues: bool(usb.importButtonCues, true), importButtonHistory: bool(usb.importButtonHistory, true), importButtonSettings: bool(usb.importButtonSettings, false) },
     view: {
       locale: oneOf(view.locale, LOCALES, d.view.locale),
       showBpmChanges: bool(view.showBpmChanges, d.view.showBpmChanges),

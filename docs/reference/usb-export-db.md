@@ -838,10 +838,10 @@ that canonicalises outside the volume.
 
 **Formats.** Compatible MP3 and integer-PCM WAV/AIFF at 44.1 or 48 kHz are
 copied as-is. With Maximum CDJ compatibility on, anything else is converted
-to 16-bit 44.1 kHz stereo WAV or 320 kbps CBR MP3 and renamed
+to 16-bit 44.1 kHz stereo WAV/AIFF or 320 kbps CBR MP3 and renamed
 `{stem}-rbx-cdj-{export_id}.{ext}`. A duplicate produced
 *by* conversion is a `Conflict`, not a silent overwrite. Surround audio is
-refused rather than downmixed; a WAV past the RIFF 4 GB limit is refused.
+refused rather than downmixed; WAV or AIFF past its 32-bit container limit is refused.
 
 #### Filesystem validation
 

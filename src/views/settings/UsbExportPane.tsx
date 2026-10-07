@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { useTranslation } from "@/i18n";
 import { usePreferencesContext } from "@/store/usePreferences";
 import { Section } from "./controls";
 import layout from "./PaneLayout.module.css";
@@ -6,6 +7,7 @@ import controls from "./Preferences.module.css";
 import styles from "./UsbExportPane.module.css";
 
 export function UsbExportPane() {
+  const t = useTranslation();
   const { preferences, update } = usePreferencesContext();
   const id = useId();
   return <Section title="USB Export">
@@ -89,8 +91,8 @@ export function UsbExportPane() {
     <div className={`${layout.summary} ${styles.conversion}`}>
       <label className={styles.conversionToggle}>
         <span className={styles.details}>
-          <strong id={`${id}-compatibility`}>Maximum CDJ compatibility</strong>
-          <span id={`${id}-compatibility-help`} className={styles.description}>Save formats like FLAC and M4A as WAV or MP3 on your USB stick for older CDJ models. Originals stay untouched.</span>
+          <strong id={`${id}-compatibility`}>{t("Maximum CDJ compatibility")}</strong>
+          <span id={`${id}-compatibility-help`} className={styles.description}>{t("Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.")}</span>
         </span>
         <input type="checkbox" role="switch" className={controls.toggle}
           aria-labelledby={`${id}-compatibility`} aria-describedby={`${id}-compatibility-help`}
@@ -98,15 +100,16 @@ export function UsbExportPane() {
           onChange={event => update("usbExport", { maximumCompatibility: event.target.checked })} />
       </label>
       <div className={styles.format}>
-        <label htmlFor={`${id}-format`}>Convert to</label>
+        <label htmlFor={`${id}-format`}>{t("Convert to")}</label>
         <select id={`${id}-format`} disabled={!preferences.usbExport.maximumCompatibility}
           value={preferences.usbExport.conversionFormat}
-          onChange={event => update("usbExport", { conversionFormat: event.target.value === "mp3" ? "mp3" : "wav" })}>
-          <option value="wav">WAV — larger files</option>
-          <option value="mp3">MP3 — 320 kbps</option>
+          onChange={event => update("usbExport", { conversionFormat: event.target.value === "mp3" || event.target.value === "aiff" ? event.target.value : "wav" })}>
+          <option value="wav">{t("WAV — larger files")}</option>
+          <option value="aiff">{t("AIFF — larger files")}</option>
+          <option value="mp3">{t("MP3 — 320 kbps")}</option>
         </select>
       </div>
-      <p className={styles.description}>WAV: 16-bit / 44.1 kHz. MP3: smaller, lossy files.</p>
+      <p className={styles.description}>{t("WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.")}</p>
     </div>
   </Section>;
 }

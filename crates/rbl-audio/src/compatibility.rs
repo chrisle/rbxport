@@ -23,24 +23,27 @@ const CHUNK: usize = 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Wav,
+    Aiff,
     Mp3,
 }
 impl Format {
     pub fn extension(self) -> &'static str {
         match self {
             Self::Wav => "wav",
+            Self::Aiff => "aiff",
             Self::Mp3 => "mp3",
         }
     }
     pub fn profile(self) -> &'static str {
         match self {
             Self::Wav => "pcm16-44100-stereo-v1",
+            Self::Aiff => "pcm16be-44100-stereo-v1",
             Self::Mp3 => "mp3-320-44100-stereo-v1",
         }
     }
     pub fn bitrate(self) -> u32 {
         match self {
-            Self::Wav => 1411,
+            Self::Wav | Self::Aiff => 1411,
             Self::Mp3 => 320,
         }
     }
@@ -96,6 +99,7 @@ pub fn needs_conversion(path: &Path) -> Result<bool> {
 
 struct Output {
     file: BufWriter<File>,
+    format: Format,
     encoder: Option<mp3lame_encoder::Encoder>,
     bytes: Vec<u8>,
     frames: u64,
@@ -125,11 +129,17 @@ impl Output {
                     .map_err(error)?,
             )
         } else {
-            file.write_all(&[0; 44])?;
+            let header = match format {
+                Format::Wav => 44,
+                Format::Aiff => 54,
+                Format::Mp3 => 0,
+            };
+            file.write_all(&vec![0; header])?;
             None
         };
         Ok(Self {
             file,
+            format,
             encoder,
             bytes: Vec::with_capacity(16384),
             frames: 0,
@@ -144,15 +154,24 @@ impl Output {
                 .encode_to_vec(mp3lame_encoder::DualPcm { left, right }, &mut self.bytes)
                 .map_err(error)?;
         } else {
-            if (self.frames + left.len() as u64) * 4 > u64::from(u32::MAX - 36) {
-                return Err(error("converted WAV exceeds the 4 GB RIFF limit"));
+            let (overhead, message) = match self.format {
+                Format::Wav => (36, "converted WAV exceeds the 4 GB RIFF limit"),
+                Format::Aiff => (46, "converted AIFF exceeds the 4 GB FORM limit"),
+                Format::Mp3 => (0, "converted PCM exceeds its container limit"),
+            };
+            if (self.frames + left.len() as u64) * 4 > u64::from(u32::MAX - overhead) {
+                return Err(error(message));
             }
             for (&l, &r) in left.iter().zip(right) {
                 for sample in [l, r] {
                     let pcm = (sample.clamp(-1.0, 1.0) * 32768.0)
                         .round()
                         .clamp(-32768.0, 32767.0) as i16;
-                    self.bytes.extend_from_slice(&pcm.to_le_bytes());
+                    let bytes = match self.format {
+                        Format::Aiff => pcm.to_be_bytes(),
+                        Format::Wav | Format::Mp3 => pcm.to_le_bytes(),
+                    };
+                    self.bytes.extend_from_slice(&bytes);
                 }
             }
         }
@@ -182,18 +201,39 @@ impl Output {
         } else {
             let size = u32::try_from(self.frames * 4).map_err(error)?;
             self.file.seek(SeekFrom::Start(0))?;
-            self.file.write_all(b"RIFF")?;
-            self.file.write_all(&(size + 36).to_le_bytes())?;
-            self.file.write_all(b"WAVEfmt ")?;
-            self.file.write_all(&16_u32.to_le_bytes())?;
-            self.file.write_all(&1_u16.to_le_bytes())?;
-            self.file.write_all(&2_u16.to_le_bytes())?;
-            self.file.write_all(&RATE.to_le_bytes())?;
-            self.file.write_all(&(RATE * 4).to_le_bytes())?;
-            self.file.write_all(&4_u16.to_le_bytes())?;
-            self.file.write_all(&16_u16.to_le_bytes())?;
-            self.file.write_all(b"data")?;
-            self.file.write_all(&size.to_le_bytes())?;
+            match self.format {
+                Format::Wav => {
+                    self.file.write_all(b"RIFF")?;
+                    self.file.write_all(&(size + 36).to_le_bytes())?;
+                    self.file.write_all(b"WAVEfmt ")?;
+                    self.file.write_all(&16_u32.to_le_bytes())?;
+                    self.file.write_all(&1_u16.to_le_bytes())?;
+                    self.file.write_all(&2_u16.to_le_bytes())?;
+                    self.file.write_all(&RATE.to_le_bytes())?;
+                    self.file.write_all(&(RATE * 4).to_le_bytes())?;
+                    self.file.write_all(&4_u16.to_le_bytes())?;
+                    self.file.write_all(&16_u16.to_le_bytes())?;
+                    self.file.write_all(b"data")?;
+                    self.file.write_all(&size.to_le_bytes())?;
+                }
+                Format::Aiff => {
+                    let frames = u32::try_from(self.frames).map_err(error)?;
+                    self.file.write_all(b"FORM")?;
+                    self.file.write_all(&(size + 46).to_be_bytes())?;
+                    self.file.write_all(b"AIFFCOMM")?;
+                    self.file.write_all(&18_u32.to_be_bytes())?;
+                    self.file.write_all(&2_u16.to_be_bytes())?;
+                    self.file.write_all(&frames.to_be_bytes())?;
+                    self.file.write_all(&16_u16.to_be_bytes())?;
+                    // 44,100 as an IEEE 754 80-bit extended float.
+                    self.file.write_all(&[0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0])?;
+                    self.file.write_all(b"SSND")?;
+                    self.file.write_all(&(size + 8).to_be_bytes())?;
+                    self.file.write_all(&0_u32.to_be_bytes())?;
+                    self.file.write_all(&0_u32.to_be_bytes())?;
+                }
+                Format::Mp3 => return Err(error("MP3 encoder did not initialize")),
+            }
         }
         self.file.flush()?;
         self.file.get_ref().sync_all()?;
@@ -397,6 +437,25 @@ mod tests {
             44 + 11025 * 4,
             "LAME delay and padding must be recoverable"
         );
+    }
+
+    #[test]
+    fn flac_to_aiff_is_big_endian_pcm_at_cd_rate() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("converted.aiff");
+        let size = convert(&fixture(), &dest, Format::Aiff).unwrap();
+        assert_eq!(size, 54 + 11025 * 4);
+        assert!(!needs_conversion(&dest).unwrap());
+        let bytes = std::fs::read(&dest).unwrap();
+        assert_eq!(&bytes[..12], b"FORM\0\0\xacrAIFF");
+        assert_eq!(&bytes[12..20], b"COMM\0\0\0\x12");
+        assert_eq!(&bytes[20..28], &[0, 2, 0, 0, 43, 17, 0, 16]);
+        assert_eq!(&bytes[28..38], &[0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(&bytes[38..54], b"SSND\0\0\xacL\0\0\0\0\0\0\0\0");
+        let audio = crate::decode_mono(&dest, None).unwrap();
+        assert_eq!(audio.sample_rate, RATE);
+        assert_eq!(audio.source_channels, 2);
+        assert!(audio.samples.iter().any(|sample| sample.abs() > 0.1));
     }
 
     #[test]
