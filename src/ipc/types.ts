@@ -1263,6 +1263,8 @@ export interface ImportReport {
   skipped: string[];
   /** The tracks that landed, so they can be queued for analysis. */
   tracks: { id: string; title: string }[];
+  /** Files that were already in the library, with their existing track ids. */
+  existing: { id: string; title: string }[];
 }
 
 /** What importing a rekordbox XML collection did. */

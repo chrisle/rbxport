@@ -1341,6 +1341,21 @@ fn an_import_records_where_the_file_is_and_how_long_it_runs() {
 }
 
 #[test]
+fn an_imported_file_is_found_again_by_its_path() {
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Track.wav");
+    write_wav(&path, 1);
+    let other = audio.path().join("Other.wav");
+    write_wav(&other, 1);
+
+    let mut f = fixture();
+    assert_eq!(f.writer.track_id_at(&path).unwrap(), None);
+    let id = f.writer.import_file(&path).unwrap();
+    assert_eq!(f.writer.track_id_at(&path).unwrap(), Some(id));
+    assert_eq!(f.writer.track_id_at(&other).unwrap(), None);
+}
+
+#[test]
 fn importing_the_same_file_twice_is_refused() {
     // One file with two rows leaves every playlist pointing at the wrong one.
     let audio = tempfile::tempdir().unwrap();

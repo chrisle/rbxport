@@ -271,6 +271,9 @@ pub struct ImportReportDto {
     pub skipped: Vec<String>,
     /// The tracks that landed, so they can be queued for analysis.
     pub tracks: Vec<ImportedTrackDto>,
+    /// Files that were already in the library, with their existing track ids.
+    /// Not counted as imported or skipped.
+    pub existing: Vec<ImportedTrackDto>,
 }
 
 /// One track an import added.

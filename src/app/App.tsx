@@ -929,14 +929,17 @@ function AppBody() {
         try {
           const backend = await getBackend();
           const imported = await backend.importPaths(paths);
-          if (imported.tracks.length > 0) {
-            await backend.edits.addTracksToPlaylist(playlistId, imported.tracks.map((t) => t.id));
+          // Files the library already held still belong in the playlist.
+          const toAdd = [...imported.tracks, ...imported.existing];
+          if (toAdd.length > 0) {
+            await backend.edits.addTracksToPlaylist(playlistId, toAdd.map((t) => t.id));
           }
           const total = imported.imported + imported.skipped.length;
+          const already = imported.existing.length > 0 ? `; ${imported.existing.length} already in the library` : "";
           report(
             imported.skipped.length === 0
-              ? `Imported ${imported.imported} of ${total} files into ${name}.`
-              : `Imported ${imported.imported} of ${total} files into ${name}; ${imported.skipped.length} skipped.`,
+              ? `Imported ${imported.imported} of ${total} files into ${name}${already}.`
+              : `Imported ${imported.imported} of ${total} files into ${name}; ${imported.skipped.length} skipped${already}.`,
           );
           setTree(await backend.playlistTree());
           if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
@@ -1389,10 +1392,11 @@ function AppBody() {
         try {
           const imported = await backend.importPaths(paths);
           const total = imported.imported + imported.skipped.length;
+          const already = imported.existing.length > 0 ? `; ${imported.existing.length} already in the library` : "";
           await afterWrite(
             imported.skipped.length === 0
-              ? `Imported ${imported.imported} of ${total} files.`
-              : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped.`,
+              ? `Imported ${imported.imported} of ${total} files${already}.`
+              : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped${already}.`,
           );
           if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
         } catch (e) {
@@ -1603,10 +1607,11 @@ function AppBody() {
           return;
         }
         const total = imported.imported + imported.skipped.length;
+        const already = imported.existing.length > 0 ? `; ${imported.existing.length} already in the library` : "";
         report(
           imported.skipped.length === 0
-            ? `Imported ${imported.imported} of ${total} files.`
-            : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped.`,
+            ? `Imported ${imported.imported} of ${total} files${already}.`
+            : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped${already}.`,
         );
         setTree(await backend.playlistTree());
         // Auto Analysis in Preferences: what just landed goes straight into

@@ -1074,6 +1074,28 @@ impl Writer {
 
     // ---------------------------------------------------------------- import
 
+    /// The id of the live track already imported from `path`, if any.
+    ///
+    /// Read-only. It lets a caller that was handed a file that is already in
+    /// the library (a drop onto a playlist) use the existing row rather than
+    /// treat the file as unimportable. The path is cleaned the same way
+    /// [`Self::import_file`] cleans it, so the two agree on what "already
+    /// there" means.
+    pub fn track_id_at(&self, path: &Path) -> Result<Option<String>> {
+        let path = normalized(path);
+        let folder = path.to_string_lossy().into_owned();
+        let id = self
+            .library
+            .connection()
+            .query_row(
+                "SELECT ID FROM djmdContent WHERE FolderPath = ?1 AND rb_local_deleted = 0 ORDER BY ID LIMIT 1",
+                params![folder],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(id)
+    }
+
     /// Adds a file to the library, returning the new track's id.
     ///
     /// The row shape is the one the reference library shows for a track made
