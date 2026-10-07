@@ -35,7 +35,7 @@ function validateWindowsUpdater() {
   if (nsis?.installMode !== "perMachine") {
     throw new Error("the Windows installer must remain perMachine for the protected update task");
   }
-  if (nsis?.installerHooks !== "windows/installer-hooks.nsh") {
+  if (nsis?.installerHooks !== "windows/hooks.nsh") {
     throw new Error("the Windows installer must install the protected update task");
   }
   if (config.bundle?.resources?.["windows/install-update-task.ps1"] !== "install-update-task.ps1") {
