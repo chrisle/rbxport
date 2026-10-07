@@ -14,10 +14,12 @@
  * Nothing here holds audio state of its own. The engine owns the strip — see
  * `crates/rbl-deck/src/mixer.rs` — and these are the knobs that reach it.
  */
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DeckId, EqBand } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
+import { detectPlatform, dispatchBinding, eqKillBand } from "@/lib/shortcuts";
+import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./MixerStrip.module.css";
 
 /** High to low, as the strip is drawn and as the mixer names them. */
@@ -85,6 +87,22 @@ const Channel = memo(function Channel({
     },
     [deck],
   );
+
+  // The Keyboard pane's kill keys for this deck (unbound until assigned).
+  const platform = useMemo(detectPlatform, []);
+  const overrides = usePreferencesContext().preferences.keyboard.overrides;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const hit = dispatchBinding(event, platform, event.target as HTMLElement | null, overrides);
+      if (hit?.action === undefined || hit.deck !== deck) return;
+      const band = eqKillBand(hit.action);
+      if (band === null) return;
+      event.preventDefault();
+      if (!event.repeat) toggle(band);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deck, overrides, platform, toggle]);
 
   const onKnobDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {

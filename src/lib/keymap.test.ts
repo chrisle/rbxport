@@ -56,6 +56,10 @@ describe("the Export key map", () => {
     const own = rowsFor("Player A", true, { loopIn: { key: "l", shiftKey: true }, loopOut: { key: "" } });
     expect(own.find((r) => r.label === "Loop In")).toMatchObject({ key: "shift + L", changed: true });
     expect(own.find((r) => r.label === "Loop Out")).toMatchObject({ key: null, changed: true });
+    // The kill buttons have no rekordbox command; they are this app's rows,
+    // listed unbound under each deck and assignable.
+    expect(rows.find((r) => r.label === "Low Kill")).toMatchObject({ key: null, built: true, bindingId: "a.eqKillLow" });
+    expect(rowsFor("Player B", true).find((r) => r.label === "High Kill")).toMatchObject({ bindingId: "b.eqKillHigh" });
     const browse = rowsFor("Browse", true);
     expect(browse.find((r) => r.label === "Search for tracks in the track list")?.built).toBe(true);
     expect(browse.find((r) => r.label === "Select All")).toMatchObject({ key: "command + A", built: true });

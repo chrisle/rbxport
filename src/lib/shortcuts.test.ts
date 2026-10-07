@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   actionFor, beatLoopLength, BINDINGS, chordFromEvent, describeChord, dispatch, hotCuePad, isTyping,
-  detectPlatform, matchBinding, memoryCueNumber, menuAccelerator, sameChord, type Platform,
+  detectPlatform, eqKillBand, matchBinding, memoryCueNumber, menuAccelerator, sameChord, type Platform,
 } from "./shortcuts";
 
 const MAC: Platform = { mac: true };
@@ -291,7 +291,7 @@ describe("the Keyboard pane's bindings", () => {
   it("lists only chords the map actually answers to, under the deck and the browser", () => {
     // The menu accelerators are the shell's, and A is the track list's own
     // key for analysis; neither goes through the map.
-    const mapped = BINDINGS.filter((b) => b.group !== "Menu");
+    const mapped = BINDINGS.filter((b) => b.group !== "Menu" && b.chord.key !== "");
     for (const binding of mapped) {
       const chord = { ...binding.chord, metaKey: binding.chord.metaKey ?? false };
       expect(actionFor(chord, mac), binding.label).not.toBeNull();
@@ -333,5 +333,30 @@ describe("the GRID panel's keys", () => {
     for (const id of ["303e", "3043", "3044", "3045"]) expect(ids).toContain(id);
     expect(describeChord({ key: "\\", metaKey: true, altKey: true }, MAC)).toBe("option + command + \\");
     expect(describeChord({ key: "ArrowLeft", metaKey: true }, WIN)).toBe("ctrl + cursor left");
+  });
+});
+
+describe("the mixer's EQ kill keys", () => {
+  it("are listed for both decks but start unbound, rekordbox's preset having none", () => {
+    const kills = BINDINGS.filter((b) => eqKillBand(b.action ?? "cue") !== null);
+    expect(kills.map((b) => `${b.deck}:${b.action}`).sort()).toEqual([
+      "a:eqKillHigh", "a:eqKillLow", "a:eqKillMid", "b:eqKillHigh", "b:eqKillLow", "b:eqKillMid",
+    ]);
+    for (const kill of kills) expect(kill.chord.key).toBe("");
+    // An unbound row matches no key, not even an empty one.
+    expect(actionFor({ key: "" }, MAC)).toBeNull();
+  });
+
+  it("answer to the key the person gives them, for the deck it is filed under", () => {
+    const overrides = { "b.eqKillMid": { key: "u", shiftKey: true } };
+    expect(matchBinding({ key: "U", shiftKey: true }, MAC, overrides)).toMatchObject({ action: "eqKillMid", deck: "b" });
+    expect(matchBinding({ key: "u", shiftKey: true }, MAC)).toBeNull();
+  });
+
+  it("names the band an action toggles", () => {
+    expect(eqKillBand("eqKillLow")).toBe("low");
+    expect(eqKillBand("eqKillMid")).toBe("mid");
+    expect(eqKillBand("eqKillHigh")).toBe("high");
+    expect(eqKillBand("cue")).toBeNull();
   });
 });

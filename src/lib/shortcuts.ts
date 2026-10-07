@@ -97,7 +97,23 @@ export type Action =
   | "adjustGrid"
   | "shiftGridLeft"
   | "shiftGridRight"
-  | "shiftGridToCenter";
+  | "shiftGridToCenter"
+  // The mixer's kill buttons, one per band and deck. rekordbox's Export preset
+  // binds nothing to them [OBS: no EQ command in keymap.ts], so these rows are
+  // this app's own and start unbound; the Keyboard pane assigns them.
+  | "eqKillLow"
+  | "eqKillMid"
+  | "eqKillHigh";
+
+/** The mixer band an EQ kill action toggles, or `null` for any other action. */
+export function eqKillBand(action: Action): "low" | "mid" | "high" | null {
+  switch (action) {
+    case "eqKillLow": return "low";
+    case "eqKillMid": return "mid";
+    case "eqKillHigh": return "high";
+    default: return null;
+  }
+}
 
 /**
  * The pad a hot cue action names, and whether it clears rather than sets.
@@ -365,7 +381,7 @@ export interface Binding {
    */
   command?: string;
   /** Where the Keyboard pane files a binding that is this app's own. */
-  pane?: "Browse" | "View" | "Track" | "File" | "General";
+  pane?: "Browse" | "View" | "Track" | "File" | "General" | "Player A" | "Player B";
   /** A second chord for the same thing, not listed in the pane. */
   alias?: true;
 }
@@ -461,6 +477,18 @@ export const BINDINGS: readonly Binding[] = [
   ...PLAYER_A.filter((row) =>
     row.action !== "metronomeSound" && row.action !== "adjustGrid" && hotCuePad(row.action ?? "cue")?.clear !== true)
     .map(playerB),
+  // The mixer's kill buttons: this app's own, unbound until the person picks a
+  // key (an empty chord matches nothing).
+  ...(["a", "b"] as const).flatMap((deck): Binding[] =>
+    ([["Low", "eqKillLow"], ["Mid", "eqKillMid"], ["High", "eqKillHigh"]] as const).map(([band, action]) => ({
+      id: `${deck}.${action}`,
+      group: deck === "a" ? "Player A" : "Player B",
+      label: `${band} Kill`,
+      chord: { key: "" },
+      action,
+      deck,
+      pane: deck === "a" ? "Player A" : "Player B",
+    }))),
   { id: "volumeUp", group: "General", label: "Volume", chord: { key: "F12", metaKey: true }, action: "volumeUp", command: "3003" },
   { id: "volumeDown", group: "General", label: "Volume Down", chord: { key: "F11", metaKey: true }, action: "volumeDown", command: "3004" },
   { id: "mute", group: "General", label: "Mute", chord: { key: "F10", metaKey: true }, action: "mute", command: "3005" },
