@@ -56,10 +56,19 @@ pub fn start(state: std::sync::Arc<AppState>) -> AppResult<()> {
         match result {
             Ok(path) => { progress.phase = "complete".into(); progress.path = Some(path); }
             Err(e) if e.kind == crate::error::ErrorKind::Cancelled => { progress.phase = "cancelled".into(); }
-            Err(e) => { progress.phase = "failed".into(); progress.error = Some(e.message); }
+            Err(e) => { progress.phase = "failed".into(); progress.error = Some(failure_message(&e)); }
         }
     });
     Ok(())
+}
+
+/// The background job reports through `BackupProgress.error`, not a rejected
+/// command, so carry the detail that `errorMessage` would otherwise append.
+fn failure_message(error: &AppError) -> String {
+    match error.detail.as_deref().map(str::trim) {
+        Some(detail) if !detail.is_empty() && detail != error.message => format!("{} {detail}", error.message),
+        _ => error.message.clone(),
+    }
 }
 
 pub fn cancel(state: &AppState) {
@@ -291,7 +300,9 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
         drop(snapshot);
         let mut bytes = fs::metadata(partial.join("master.db")).map_err(error)?.len();
         let database_bytes = bytes + library_bytes;
-        fs::File::open(partial.join("master.db")).map_err(error)?.sync_all().map_err(error)?;
+        // FlushFileBuffers needs GENERIC_WRITE on Windows; a read-only handle
+        // fails with "Access is denied" (os error 5) on every backup.
+        fs::OpenOptions::new().write(true).open(partial.join("master.db")).map_err(error)?.sync_all().map_err(error)?;
         copied_file(bytes, Some(&location.master_db))?;
         for (plan, directory) in [(plan, "analysis"), (art_plan, "artwork")] {
         if let Some(plan) = plan {
@@ -710,6 +721,14 @@ mod tests {
         assert!(list(&state).unwrap().is_empty());
         assert!(fs::read_dir(state.backup_dir()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".partial-")));
         assert_eq!(fs::metadata(file).unwrap().len(), 3 * 1024 * 1024);
+    }
+
+    #[test]
+    fn a_failed_background_backup_reports_what_went_wrong() {
+        let failed = error("Access is denied. (os error 5)");
+        assert_eq!(failure_message(&failed), "Something went wrong inside rbxport. Backup: Access is denied. (os error 5)");
+        let plain = AppError::new(crate::error::ErrorKind::NotFound, "The library could not be found.");
+        assert_eq!(failure_message(&plain), "The library could not be found.");
     }
 
     #[test]
