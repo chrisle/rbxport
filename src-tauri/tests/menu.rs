@@ -5,10 +5,14 @@
 //! menu with no window at all, which settles the part that actually breaks:
 //! whether it constructs, and whether the ids the frontend switches on are
 //! the ids the items carry.
-#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 // No harness means no test runner to report to; printing is the report.
 #![allow(clippy::print_stdout)]
-
 
 fn main() {
     // Not `#[test]`: on macOS a menu item can only be built on the main
@@ -17,7 +21,8 @@ fn main() {
     {
         the_menu_builds_and_carries_the_ids_the_frontend_switches_on();
         the_menu_offers_the_clipboard_items_a_text_field_needs();
-        println!("2 menu checks passed");
+        the_menu_rebuilds_with_translated_labels();
+        println!("3 menu checks passed");
     }
     #[cfg(not(target_os = "macos"))]
     println!("skipped: the menu bar is macOS-shaped and untested elsewhere");
@@ -29,7 +34,9 @@ fn ids(app: &tauri::AppHandle<tauri::test::MockRuntime>) -> Vec<String> {
     let menu = rbxport_lib::menu::build(app).expect("the menu builds");
     let mut out = Vec::new();
     for item in menu.items().expect("top level") {
-        let Some(submenu) = item.as_submenu() else { continue };
+        let Some(submenu) = item.as_submenu() else {
+            continue;
+        };
         for child in submenu.items().expect("submenu items") {
             out.push(child.id().0.clone());
         }
@@ -44,8 +51,19 @@ fn the_menu_builds_and_carries_the_ids_the_frontend_switches_on() {
 
     // These three are the contract with src/lib/menu.ts. A rename on either
     // side turns a menu item into one that silently does nothing.
-    for id in ["settings", "import", "import-folder", "missing", "info", "sub", "fullscreen"] {
-        assert!(found.iter().any(|f| f == id), "no item with id {id}; got {found:?}");
+    for id in [
+        "settings",
+        "import",
+        "import-folder",
+        "missing",
+        "info",
+        "sub",
+        "fullscreen",
+    ] {
+        assert!(
+            found.iter().any(|f| f == id),
+            "no item with id {id}; got {found:?}"
+        );
     }
 }
 
@@ -61,7 +79,47 @@ fn the_menu_offers_the_clipboard_items_a_text_field_needs() {
         .iter()
         .filter_map(|item| item.as_submenu().and_then(|s| s.text().ok()))
         .collect();
-    assert!(titles.iter().any(|t| t == "Edit"), "no Edit menu; got {titles:?}");
-    assert!(titles.iter().any(|t| t == "File"), "no File menu; got {titles:?}");
-    assert!(titles.iter().any(|t| t == "View"), "no View menu; got {titles:?}");
+    assert!(
+        titles.iter().any(|t| t == "Edit"),
+        "no Edit menu; got {titles:?}"
+    );
+    assert!(
+        titles.iter().any(|t| t == "File"),
+        "no File menu; got {titles:?}"
+    );
+    assert!(
+        titles.iter().any(|t| t == "View"),
+        "no View menu; got {titles:?}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+fn the_menu_rebuilds_with_translated_labels() {
+    use std::collections::HashMap;
+
+    let app = tauri::test::mock_app();
+    app.set_menu(rbxport_lib::menu::build(&app.handle().clone()).expect("English menu builds"))
+        .expect("English menu installs");
+    let labels = HashMap::from([
+        ("File".to_owned(), "Datei".to_owned()),
+        ("Edit".to_owned(), "Bearbeiten".to_owned()),
+        ("View".to_owned(), "Ansicht".to_owned()),
+        ("Help".to_owned(), "Hilfe".to_owned()),
+    ]);
+    rbxport_lib::menu::set_menu_labels(app.handle().clone(), labels)
+        .expect("translated menu installs");
+
+    let menu = app.menu().expect("installed menu");
+    let titles: Vec<String> = menu
+        .items()
+        .expect("top level")
+        .iter()
+        .filter_map(|item| item.as_submenu().and_then(|submenu| submenu.text().ok()))
+        .collect();
+    for translated in ["Datei", "Bearbeiten", "Ansicht", "Hilfe"] {
+        assert!(
+            titles.iter().any(|title| title == translated),
+            "no {translated} menu; got {titles:?}"
+        );
+    }
 }

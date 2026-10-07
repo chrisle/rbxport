@@ -2267,6 +2267,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         delete w.__menu;
       };
     },
+    setMenuLabels: () => wait(undefined),
 
     // No network in a browser, so LINK cannot turn on. Saying why is better
     // than a switch that silently does nothing.

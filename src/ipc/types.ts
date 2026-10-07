@@ -470,6 +470,9 @@ export interface Backend {
    */
   onMenu(listener: (id: string) => void): () => void;
 
+  /** Rebuilds the native application menu with the active UI translations. */
+  setMenuLabels(labels: Readonly<Record<string, string>>): Promise<void>;
+
   /**
    * AppleScript's requests to the window: each is run with `handle` and its
    * reply sent back, and the backend is told once they can be heard.

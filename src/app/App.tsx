@@ -71,6 +71,8 @@ import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
 import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus, SmartRule } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
+import { useTranslation } from "@/i18n";
+import { nativeMenuLabels } from "@/lib/nativeMenu";
 
 /**
  * The metadata fields a row already carries, so an edit to one can be shown
@@ -117,8 +119,12 @@ export function App() {
 }
 
 function AppBody() {
+  const t = useTranslation();
   useShowWindowWhenReady();
   useEffect(() => { reportStartupPaint("shell-painted"); }, []);
+  useEffect(() => {
+    void getBackend().then((backend) => backend.setMenuLabels(nativeMenuLabels(t))).catch(() => undefined);
+  }, [t]);
   useEffect(() => {
     // Native file drags can land anywhere, including outside a drop target.
     // Cancel WebKit's file navigation without stopping playlist/deck handlers.

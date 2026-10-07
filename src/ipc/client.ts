@@ -367,6 +367,7 @@ async function realBackend(): Promise<Backend> {
     onAnalysisChanged: (listener) => subscribe<string>("analysis:changed", listener),
     reloadLibrary: () => invoke<number>("reload_library"),
     onMenu: (listener) => subscribe<string>("menu", listener),
+    setMenuLabels: (labels) => invoke<void>("set_menu_labels", { labels }),
     serveScripts: (handle) => {
       // Ready only once the listener is in: a request sent before then would
       // reach nobody and wait out its timeout.
