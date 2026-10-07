@@ -28,7 +28,8 @@
 }:
 
 let
-  pname = "rbxport";
+  common = import ./common.nix { inherit lib makeDesktopItem; };
+
   version = (fromTOML (builtins.readFile ../../Cargo.toml)).workspace.package.version;
 
   src = lib.cleanSourceWith {
@@ -48,23 +49,10 @@ let
         "playwright-report"
       ]);
   };
-
-  desktopItem = makeDesktopItem {
-    name = pname;
-    desktopName = pname;
-    comment = "DJ library and USB export manager";
-    exec = pname;
-    icon = pname;
-    startupWMClass = pname;
-    terminal = false;
-    categories = [
-      "Audio"
-      "Music"
-    ];
-  };
 in
 rustPlatform.buildRustPackage {
-  inherit pname version src;
+  pname = common.pname + "-source";
+  inherit version src;
 
   cargoLock = {
     lockFile = ../../Cargo.lock;
@@ -75,13 +63,14 @@ rustPlatform.buildRustPackage {
 
   cargoBuildFlags = [
     "-p"
-    pname
+    common.pname
   ];
 
   buildFeatures = [ "tauri/custom-protocol" ];
 
   pnpmDeps = fetchPnpmDeps {
-    inherit pname version src;
+    pname = common.pname;
+    inherit version src;
     pnpm = pnpm_10;
     fetcherVersion = 4;
     hash = "sha256-D9yTAZ/D4+oZfRtPhk9NvNFweU1o7qe6z7HJkNjmP2w=";
@@ -121,30 +110,10 @@ rustPlatform.buildRustPackage {
     pnpm build
   '';
 
-  postInstall = ''
-    install -Dm644 "${desktopItem}/share/applications/rbxport.desktop" \
-      "$out/share/applications/rbxport.desktop"
-
-    install -Dm644 "$src/src-tauri/icons/32x32.png" \
-      "$out/share/icons/hicolor/32x32/apps/rbxport.png"
-    install -Dm644 "$src/src-tauri/icons/128x128.png" \
-      "$out/share/icons/hicolor/128x128/apps/rbxport.png"
-    install -Dm644 "$src/src-tauri/icons/128x128@2x.png" \
-      "$out/share/icons/hicolor/256x256@2/apps/rbxport.png"
-
+  postInstall = common.installDesktop + ''
     rm -f "$out"/lib/librbxport_lib.*
     rmdir "$out/lib" 2>/dev/null || true
   '';
 
-  meta = {
-    description = "Rekordbox-compatible export-mode library manager";
-    longDescription = ''
-      Manage a DJ library, analyze tracks, write USB exports, and serve a
-      library to supported players over a local network.
-    '';
-    homepage = "https://rbxport.com";
-    license = lib.licenses.gpl2Plus;
-    mainProgram = "rbxport";
-    platforms = lib.platforms.linux;
-  };
+  meta = common.meta;
 }
