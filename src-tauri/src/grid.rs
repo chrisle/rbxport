@@ -806,7 +806,22 @@ mod tests {
         let edit: GridEdit = serde_json::from_str(r#"{"kind":"tempo","bpmX100":12800,"anchorMs":500}"#).unwrap();
         assert_eq!(edit, GridEdit::Tempo { bpm_x100: 12_800, anchor_ms: 500 });
         assert!(serde_json::from_str::<GridEdit>(r#"{"kind":"reset"}"#).is_err());
+        // Times are unsigned: the panel clamps a playhead before the track's
+        // start to zero, because Tauri refuses this with a bare string (#107).
+        assert!(serde_json::from_str::<GridEdit>(r#"{"kind":"downbeat","timeMs":-120}"#).is_err());
         assert_eq!(Edit::from(GridEdit::Halve), Edit::Halve);
+    }
+
+    #[test]
+    fn a_downbeat_at_the_start_puts_beat_one_at_zero() {
+        // What the panel sends for "set 1st beat" with the playhead before
+        // the track: rekordbox puts the bar's first beat at the very start
+        // (as reported in #107).
+        let mut f = open();
+        f.edit(GridEdit::Downbeat { time_ms: 0 });
+        let beats = f.dat().beat_grid().unwrap();
+        assert_eq!((beats[0].time_ms, beats[0].beat_number), (0, 1));
+        assert_eq!(beats[1].time_ms, 500);
     }
 
     #[test]
