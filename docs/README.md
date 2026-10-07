@@ -26,6 +26,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 
 ## Technical references
 
+- [Library location](reference/library-location.md): which rekordbox library opens, drive discovery, and missing drives.
 - [USB export format](reference/usb-export-db.md): files, binary records, implementation, verification, and unknowns.
 - [LINK behavior and hardware coverage](reference/link-testing.md): device dialects, behavior catalog, and physical checks.
 - [Analysis crate](../crates/rbl-analysis/README.md): algorithm reading path and evaluation tools.
