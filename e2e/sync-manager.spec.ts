@@ -34,6 +34,7 @@ test("the rail opens it with the library's playlists on the left and the devices
   // folder is empty.
   await expect(tree.getByRole("treeitem").first()).toHaveText(/CURRENT/);
   await expect(tree.getByRole("checkbox", { name: "Melodic Vox" })).toBeVisible();
+  await expect(tree.getByRole("checkbox", { name: "Fresh 128s" })).toBeVisible();
   await expect(tree.getByRole("treeitem", { name: /All Tracks/ })).toHaveCount(0);
   const devices = dialog.getByRole("tree", { name: "Devices" });
   await expect(devices.getByRole("checkbox", { name: "DJ STICK", exact: true })).toBeVisible();
@@ -48,6 +49,7 @@ test("ticking a folder ticks its playlists, and a device shows what it holds", a
   await tree.getByRole("checkbox", { name: "CURRENT" }).check();
   await expect(tree.getByRole("checkbox", { name: "Melodic Vox" })).toBeChecked();
   await expect(tree.getByRole("checkbox", { name: "Hardstyle" })).toBeChecked();
+  await expect(tree.getByRole("checkbox", { name: "Fresh 128s" })).toBeChecked();
   await tree.getByRole("checkbox", { name: "Hardstyle" }).uncheck();
   await expect(tree.getByRole("checkbox", { name: "CURRENT" })).toHaveAttribute("aria-checked", "mixed");
 

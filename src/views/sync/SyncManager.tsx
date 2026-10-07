@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, LoaderCircle, Search, X } from "lucide-react";
 
-import { EjectIcon, FolderIcon, ListIcon } from "@/components/icons";
+import { EjectIcon, FolderIcon, ListIcon, SmartListIcon } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
 import type { Device, DeviceSyncState, ExportReport, ItunesLibrary, TreeNode } from "@/ipc/types";
 import { formatSpace } from "@/lib/devices";
@@ -55,14 +55,22 @@ const IMPORT_KINDS: readonly { kind: ImportKind; label: string; noun: string }[]
  * because neither is a thing a stick can be given.
  */
 function playlistNodes(tree: readonly TreeNode[]): TreeNode[] {
-  return nodesForSource(tree, "playlists").filter((n) => n.kind === "folder" || n.kind === "playlist");
+  return nodesForSource(tree, "playlists").filter(
+    (n) => n.kind === "folder" || n.kind === "playlist" || n.kind === "smartPlaylist",
+  );
+}
+
+/** A playlist that can be materialized onto a device, whether stored or rule-based. */
+function isExportablePlaylist(node: TreeNode): boolean {
+  return node.kind === "playlist" || node.kind === "smartPlaylist";
 }
 
 /** Every playlist under `folder`, itself excluded. */
 function playlistsUnder(nodes: readonly TreeNode[], folder: TreeNode, byId: ReadonlyMap<string, TreeNode>): string[] {
   const out: string[] = [];
   for (const id of subtreeIds(nodes, folder)) {
-    if (id !== folder.id && byId.get(id)?.kind === "playlist") out.push(id);
+    const node = byId.get(id);
+    if (id !== folder.id && node && isExportablePlaylist(node)) out.push(id);
   }
   return out;
 }
@@ -164,7 +172,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   const compatibilityFormat = preferences.usbExport.maximumCompatibility ? preferences.usbExport.conversionFormat : undefined;
 
   const nodes = useMemo(() => playlistNodes(tree), [tree]);
-  const playlists = useMemo(() => nodes.filter(node => node.kind === "playlist"), [nodes]);
+  const playlists = useMemo(() => nodes.filter(isExportablePlaylist), [nodes]);
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n] as const)), [nodes]);
   const search = query.trim().toLocaleLowerCase();
   const visible = useMemo(() => search
@@ -399,7 +407,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   const importItunes = useCallback(() => {
     if (!itunes || !canImportItunes) return;
     // In tree order, so the playlists land filed as they are in iTunes.
-    const ids = itunesNodes.filter((n) => n.kind === "playlist" && itunesTicked.has(n.id)).map((n) => n.id);
+    const ids = itunesNodes.filter((n) => isExportablePlaylist(n) && itunesTicked.has(n.id)).map((n) => n.id);
     setOperation("itunes");
     setImportFailed(false);
     setShowStatusDetails(false);
@@ -460,7 +468,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   const sync = useCallback(() => {
     if (!canSync) return;
     // In tree order, so the playlists land on the stick as they are filed.
-    const playlists = nodes.filter((n) => n.kind === "playlist" && ticked.has(n.id)).map((n) => n.id);
+    const playlists = nodes.filter((n) => isExportablePlaylist(n) && ticked.has(n.id)).map((n) => n.id);
     setOperation("sync");
     setCompletedReports(new Map());
     setStatus([t("Preparing for export…")]);
@@ -700,7 +708,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
                     onClick={() => folder && setCollapsed((current) => toggle(current, node.id))}
                   />
                   <label className={styles.rowSelection}>
-                  {folder ? <FolderIcon className={styles.icon} /> : <ListIcon className={styles.icon} />}
+                  {folder ? <FolderIcon className={styles.icon} />
+                    : node.kind === "smartPlaylist" ? <SmartListIcon className={styles.icon} />
+                    : <ListIcon className={styles.icon} />}
                   <span className={styles.name}>{node.name}</span>
                   <TickBox state={state} label={node.name} disabled={busy} onChange={(on) => tickNode(node, on)} />
                   </label>

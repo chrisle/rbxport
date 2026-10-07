@@ -28,6 +28,7 @@ const TREE: TreeNode[] = [
   { id: "f1", name: "Sets", kind: "folder", depth: 1, expanded: true },
   { id: "p1", name: "Warm Up", kind: "playlist", depth: 2 },
   { id: "p2", name: "Main Set", kind: "playlist", depth: 2 },
+  { id: "s1", name: "Peak Time", kind: "smartPlaylist", depth: 2 },
   { id: "p3", name: "Closing", kind: "playlist", depth: 1 },
   { id: "histories", name: "Histories", kind: "histories", depth: 0 },
 ];
@@ -309,8 +310,18 @@ describe("SyncManager", () => {
 
   it("lists the playlists and folders, not All Tracks or the heading", () => {
     const names = [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
-    expect(names).toEqual(["Sets", "Warm Up", "Main Set", "Closing"]);
+    expect(names).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "Closing"]);
     expect(host.querySelector('button[aria-label="SYNC"]')).toHaveProperty("disabled", true);
+  });
+
+  it("selects an intelligent playlist and sends it to sync", async () => {
+    click(box("Peak Time"));
+    click(box("USB B"));
+    await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+    await settle();
+    expect(validateExportFiles).toHaveBeenCalledWith(["s1"]);
+    expect(syncDevices.mock.calls[0]?.[0]).toEqual(["s1"]);
   });
 
   it("imports only the ticked iTunes playlists and refreshes the library column", async () => {
@@ -393,6 +404,7 @@ describe("SyncManager", () => {
     click(box("Sets"));
     expect(box("Warm Up")?.checked).toBe(true);
     expect(box("Main Set")?.checked).toBe(true);
+    expect(box("Peak Time")?.checked).toBe(true);
     expect(box("Closing")?.checked).toBe(false);
     expect(box("Sets")?.getAttribute("aria-checked")).toBe("true");
 
@@ -409,6 +421,7 @@ describe("SyncManager", () => {
     click(box("Sets"));
     expect(box("Warm Up")?.checked).toBe(false);
     expect(box("Main Set")?.checked).toBe(false);
+    expect(box("Peak Time")?.checked).toBe(false);
   });
 
   it("ticking a device restores its selection without expanding it", async () => {
@@ -459,7 +472,7 @@ describe("SyncManager", () => {
     await settle();
     expect(syncDevices).toHaveBeenCalledTimes(1);
     const [playlists, destinations, , automatic] = syncDevices.mock.calls[0] as [string[], string[], unknown, boolean];
-    expect(playlists).toEqual(["p1", "p2", "p3"]);
+    expect(playlists).toEqual(["p1", "p2", "s1", "p3"]);
     expect(destinations).toEqual(["/Volumes/USB A", "/Volumes/USB B"]);
     expect(automatic).toBe(false);
     expect(syncDevices.mock.calls[0]?.[4]).toBe(false);

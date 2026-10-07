@@ -1341,3 +1341,49 @@ fn an_intelligent_playlist_is_made_from_a_rule_and_its_rule_is_edited() {
     ))
     .is_err());
 }
+
+#[test]
+fn export_selection_materializes_an_intelligent_playlist_from_its_rule() {
+    use rbxport_lib::dto::{SmartConditionDto, SmartRuleDto};
+
+    let s = shell();
+    let audio = write_wav(&s._dir.path().join("Smart Export Match.wav"), 1);
+    let imported = run(commands::import_files(
+        s.handle(),
+        s.state(),
+        vec![audio.display().to_string()],
+    ))
+    .unwrap();
+    assert_eq!(imported.imported, 1);
+
+    let rule = SmartRuleDto {
+        logic: "all".to_owned(),
+        conditions: vec![SmartConditionDto {
+            property: "name".to_owned(),
+            operator: "11".to_owned(),
+            left: "Smart Export Match".to_owned(),
+            right: String::new(),
+            unit: String::new(),
+        }],
+    };
+    run(commands::create_smart_playlist(
+        s.handle(),
+        s.state(),
+        "Rule Export".to_owned(),
+        ROOT.to_owned(),
+        rule,
+    ))
+    .unwrap();
+    let node = s.node("Rule Export");
+    assert_eq!(node.kind, "smartPlaylist");
+    assert_eq!(s.playlist_rows(&node.id).len(), 1);
+    let missing = run(commands::validate_export_files(s.state(), vec![node.id.clone()]))
+        .unwrap_or_else(|error| panic!("selection failed: {:?}", error.detail));
+    assert!(missing.is_empty());
+    std::fs::remove_file(&audio).unwrap();
+    let missing = run(commands::validate_export_files(s.state(), vec![node.id]))
+        .unwrap_or_else(|error| panic!("selection failed: {:?}", error.detail));
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0].title, "Smart Export Match");
+    assert_eq!(missing[0].path, audio.display().to_string());
+}
