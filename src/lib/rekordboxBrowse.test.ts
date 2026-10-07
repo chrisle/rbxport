@@ -10,7 +10,7 @@ describe("rekordbox browse settings", () => {
         <COLUMN id="68" visible="1" width="200"/>
         <COLUMN id="60" visible="0" width="80"/>
         <COLUMN id="21" visible="1" width="351"/>
-        <COLUMN id="33" visible="1" width="128"/>
+        <COLUMN id="65" visible="1" width="128"/>
         <COLUMN id="29" visible="1" width="80"/>
       </TABLELAYOUT></VALUE>
       <VALUE name="TableHeader-CollectionTracks"><TABLELAYOUT>
@@ -24,6 +24,21 @@ describe("rekordbox browse settings", () => {
     expect(parsed.collection?.order).toEqual(["title", "genre"]);
     expect(parsed.collection?.widths.title).toBe(527);
     expect(parsed.history).toBeUndefined();
+  });
+
+  it("imports every column whose rekordbox ID names a known field", () => {
+    const ids = [
+      "21", "1", "23", "26", "28", "30", "31", "32", "33", "35", "36", "37", "38", "39", "41", "42",
+      "43", "46", "47", "48", "49", "52", "66", "67", "72",
+    ];
+    const xml = `<VALUE name="TableHeader-CollectionTracks">${
+      ids.map((id) => `<COLUMN id="${id}" visible="1" width="90"/>`).join("")}</VALUE>`;
+    expect(parseRekordboxBrowse(xml).collection?.order).toEqual([
+      "title", "dateAdded", "album", "year", "djPlayCount", "trackNumber", "remixer", "composer",
+      "label", "color", "fileType", "bitrate", "location", "dateCreated", "fileName", "size",
+      "sampleRate", "albumArtist", "discNo", "mixName", "originalArtist", "bitDepth",
+      "publishTrackInfo", "message", "lyricist",
+    ]);
   });
 
   it("ignores malformed XML and incomplete layouts", () => {

@@ -6,13 +6,23 @@ import { loadSession, saveSession } from "./session";
 
 export type BrowseContext = "collection" | "playlist" | "history" | "subBrowser" | "folder";
 
-// Verified numeric IDs from the measured rekordbox headers. Unknown IDs must
-// stay unknown: the XML has numeric IDs only, so guessing would map a visible
-// rekordbox field onto the wrong RBXport column.
+// Numeric column IDs, from the measured rekordbox headers and from the
+// comparator rekordbox 7.2.11 binds to each ID in
+// `browse::ListViewSorter::setCompFunc` [OBS: static analysis of the macOS
+// binary; every ID the headers had already verified names the same field
+// there]. Unknown IDs must stay unknown: the XML has numeric IDs only, so
+// guessing would map a visible rekordbox field onto the wrong RBXport column.
+// 65 is left out on purpose: rekordbox paints and sorts it by Hot Cue Auto
+// Load, which RBXport's Hot Cue column does not show.
 const IDS: Readonly<Record<string, ColumnKey>> = {
-  "20": "trackNo", "21": "title", "22": "artist", "24": "genre", "25": "comment",
-  "27": "rating", "29": "bpm", "34": "key", "44": "duration", "53": "releaseDate",
-  "60": "artwork", "68": "preview",
+  "1": "dateAdded", "20": "trackNo", "21": "title", "22": "artist", "23": "album",
+  "24": "genre", "25": "comment", "26": "year", "27": "rating", "28": "djPlayCount",
+  "29": "bpm", "30": "trackNumber", "31": "remixer", "32": "composer", "33": "label",
+  "34": "key", "35": "color", "36": "fileType", "37": "bitrate", "38": "location",
+  "39": "dateCreated", "41": "fileName", "42": "size", "43": "sampleRate",
+  "44": "duration", "46": "albumArtist", "47": "discNo", "48": "mixName",
+  "49": "originalArtist", "52": "bitDepth", "53": "releaseDate", "60": "artwork",
+  "66": "publishTrackInfo", "67": "message", "68": "preview", "72": "lyricist",
 };
 
 const SOURCES: Readonly<Record<BrowseContext, readonly string[]>> = {
