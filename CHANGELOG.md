@@ -8,9 +8,10 @@ the version numbers [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- On Windows, quitting after an update no longer opens an installer or UAC
-  prompt after the first migration update. That one update installs a
-  signature-checking elevated helper; later updates apply silently at quit.
+- On Windows, installing a downloaded update at quit no longer asks for
+  administrator approval (UAC). The first update after this release still
+  asks once, because it installs the signature-checking helper that applies
+  later updates.
 - Connecting a USB only refreshes the device list. Automatic history and
   settings imports now wait until SYNC is clicked in Sync Manager, before
   exporting to the selected devices. Device discovery no longer runs export
