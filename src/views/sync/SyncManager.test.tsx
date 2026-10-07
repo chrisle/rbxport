@@ -369,6 +369,16 @@ describe("SyncManager", () => {
     expect(warning?.querySelector("svg")?.getAttribute("aria-label")).toBe("Pioneer DJ recommends FAT32");
   });
 
+  it("does not warn when Linux reports a FAT32 stick through the vfat driver", async () => {
+    listDevices.mockResolvedValueOnce([{ ...stick("USB A"), fileSystem: "vfat" }]);
+    act(() => root.unmount());
+    root = createRoot(host);
+    act(() => root.render(<SyncManager onClose={onClose} />));
+    await settle();
+
+    expect(host.querySelector('[title="Pioneer DJ recommends FAT32"]')).toBeNull();
+  });
+
   it("requests post-sync ejection and distinguishes eject errors from sync errors", async () => {
     syncDevices.mockResolvedValueOnce([
       { ...report("/Volumes/USB A", 5), ejected: true },

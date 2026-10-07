@@ -779,7 +779,10 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
               const read = states.get(device.path);
               const job = exportJobs.get(device.path);
               const fileSystem = device.fileSystem?.toUpperCase().replace(/^VFAT$|^MSDOS$/, "FAT") || "Unknown filesystem";
-              const fat32Recommended = device.fileSystem?.trim().toUpperCase() !== "FAT32";
+              // Linux exposes FAT volumes through the `vfat` driver, even when the
+              // volume itself is FAT32. Treat that kernel driver name as compatible
+              // so the same stick does not get a warning only on Linux.
+              const fat32Recommended = !["FAT32", "VFAT"].includes(device.fileSystem?.trim().toUpperCase() ?? "");
               const free = device.totalBytes > 0 ? `${device.freeBytes === 0 ? "0.0 GB" : formatSpace(device.freeBytes)} free (${Math.round(device.freeBytes / device.totalBytes * 100)}%)` : "Space unknown";
               const freePercent = device.totalBytes > 0 ? Math.max(0, Math.min(100, device.freeBytes / device.totalBytes * 100)) : null;
               const usedPercent = freePercent === null ? null : 100 - freePercent;
