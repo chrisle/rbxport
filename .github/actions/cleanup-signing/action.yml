@@ -1,0 +1,28 @@
+name: Clean up installer signing
+description: Remove ephemeral Apple and Azure signing state.
+
+runs:
+  using: composite
+  steps:
+    - name: Tear down the signing keychain
+      if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
+      shell: bash
+      run: |
+        KEYCHAIN="$RUNNER_TEMP/rbxport-signing.keychain-db"
+        others="$(security list-keychains -d user | sed 's/^ *"//;s/"$//' | grep -vxF "$KEYCHAIN" || true)"
+        # shellcheck disable=SC2086
+        security list-keychains -d user -s $others || true
+        security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+        rm -f "$RUNNER_TEMP/cert.p12"
+
+    - name: Tear down the Azure login
+      if: runner.os == 'Windows' && env.HAVE_AZURE == 'true'
+      shell: pwsh
+      env:
+        AZURE_CORE_ENCRYPT_TOKEN_CACHE: "false"
+      run: |
+        $az = "$env:ProgramFiles\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+        if (Test-Path $az) { & $az account clear --only-show-errors 2>$null }
+        foreach ($f in "msal_token_cache.json", "service_principal_entries.json", "msal_http_cache.json") {
+          Remove-Item "$env:USERPROFILE\.azure\$f" -Force -ErrorAction SilentlyContinue
+        }

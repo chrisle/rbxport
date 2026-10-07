@@ -1,0 +1,223 @@
+name: Publish release
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+      release_tag:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to R2
+    runs-on: [self-hosted, linux, x64]
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      # Checkout must precede artifact download because it cleans the workspace.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          sparse-checkout: |
+            release-notes.json
+            scripts/release-notes.mjs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: out
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Ensure the AWS CLI
+        run: |
+          set -euo pipefail
+          if ! command -v aws >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/aws" ]; then
+            curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+            unzip -qo /tmp/awscliv2.zip -d /tmp
+            /tmp/aws/install --update -i "$HOME/.local/aws-cli" -b "$HOME/.local/bin"
+            rm -rf /tmp/aws /tmp/awscliv2.zip
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Publish to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ vars.R2_BUCKET }}
+          CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          test -n "$BUCKET"
+          ls -l out
+
+          # Upload immutable payloads before the mutable feed. The Store MSIX
+          # stays in Actions because Partner Center applies its signature.
+          for f in out/*; do
+            case "$f" in *.msix) continue ;; esac
+            aws s3 cp "$f" "s3://$BUCKET/$(basename "$f")" \
+              --endpoint-url "$ENDPOINT" --no-progress \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+
+          test -s release-notes.json
+          node scripts/release-notes.mjs validate release-notes.json "$version"
+          node scripts/release-notes.mjs markdown release-notes.json release-notes.md
+          node -e '
+            const fs = require("fs");
+            const [, version, base] = process.argv;
+            const files = fs.readdirSync("out");
+            const url = (file) => (base ? base + "/" + file : undefined);
+            const signed = (payload, optional = false) => {
+              const file = files.find(payload);
+              if (!file) return null;
+              const sig = file + ".sig";
+              if (!files.includes(sig)) {
+                if (optional) return null;
+                throw new Error("no updater signature beside " + file);
+              }
+              return { url: url(file), signature: fs.readFileSync("out/" + sig, "utf8").trim() };
+            };
+            const macArm = signed((f) => f.endsWith("-darwin-aarch64.app.tar.gz"));
+            const macIntel = signed((f) => f.endsWith("-darwin-x86_64.app.tar.gz"));
+            if (!macArm || !macIntel) throw new Error("both Mac updater builds are required");
+            const win = signed((f) => f.endsWith("-setup.exe"));
+            const linux = signed((f) => f.endsWith(".AppImage"));
+            const deb = signed((f) => f.endsWith(".deb"), true);
+            const platforms = {};
+            platforms["darwin-aarch64"] = macArm;
+            platforms["darwin-x86_64"] = macIntel;
+            if (win) platforms["windows-x86_64"] = win;
+            if (linux) platforms["linux-x86_64"] = linux;
+            if (deb) platforms["linux-x86_64-deb"] = deb;
+            const downloads = {};
+            for (const [slug, match] of [
+              ["darwin-aarch64", (f) => f.endsWith("-darwin-aarch64.dmg")],
+              ["darwin-x86_64", (f) => f.endsWith("-darwin-x86_64.dmg")],
+              ["windows-x86_64", (f) => f.endsWith("-setup.exe")],
+              ["linux-x86_64", (f) => f.endsWith(".AppImage")],
+              ["linux-x86_64-deb", (f) => f.endsWith(".deb")],
+            ]) {
+              const file = files.find(match);
+              if (file) downloads[slug] = { file, url: url(file) };
+            }
+            const feed = {
+              version,
+              pub_date: new Date().toISOString(),
+              notes: fs.readFileSync("release-notes.md", "utf8"),
+              platforms,
+              downloads,
+            };
+            fs.writeFileSync("latest.json", JSON.stringify(feed, null, 2) + "\n");
+            const { notes, ...shown } = feed;
+            console.log(JSON.stringify({ ...shown, notes: notes.length + " bytes" }, null, 2));
+          ' "$version" "${CDN_BASE_URL:-}"
+
+          aws s3 cp release-notes.json "s3://$BUCKET/release-notes.json" \
+            --endpoint-url "$ENDPOINT" --no-progress \
+            --content-type application/json --cache-control "public, max-age=60"
+          aws s3 cp latest.json "s3://$BUCKET/latest.json" \
+            --endpoint-url "$ENDPOINT" --no-progress \
+            --content-type application/json --cache-control "public, max-age=60"
+
+      - name: Re-fetch what was just published
+        if: vars.CDN_BASE_URL != ''
+        env:
+          CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            "$CDN_BASE_URL/latest.json" -o published.json
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            "$CDN_BASE_URL/release-notes.json" -o published-release-notes.json
+          cat published.json
+          test "$(node -p 'require("./published.json").version')" = "$version"
+          test "$(node -p 'require("./published-release-notes.json")[0].version')" = "$version"
+
+          for url in $(node -p '
+            const feed = require("./published.json");
+            [...Object.values(feed.platforms), ...Object.values(feed.downloads)].map((p) => p.url).join("\n")
+          '); do
+            curl -fsI --retry 5 --retry-all-errors --retry-delay 5 "$url" > /dev/null
+          done
+
+      - name: Prune old versions
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          aws s3api list-objects-v2 --bucket "$BUCKET" --endpoint-url "$ENDPOINT" \
+            --query 'Contents[].Key' --output json > /tmp/keys.json
+          node -e '
+            const fs = require("fs");
+            const keys = JSON.parse(fs.readFileSync("/tmp/keys.json", "utf8")) || [];
+            const versions = new Set();
+            for (const key of keys) {
+              const m = /^rbxport-(\d+\.\d+\.\d+)-/.exec(key);
+              if (m) versions.add(m[1]);
+            }
+            const sorted = [...versions].sort((a, b) => {
+              const pa = a.split(".").map(Number);
+              const pb = b.split(".").map(Number);
+              for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pb[i] - pa[i];
+              return 0;
+            });
+            const keep = new Set(sorted.slice(0, 5));
+            const drop = keys.filter((key) => {
+              const m = /^rbxport-(\d+\.\d+\.\d+)-/.exec(key);
+              return m && !keep.has(m[1]);
+            });
+            console.log("keeping", sorted.slice(0, 5).join(", ") || "(nothing published yet)");
+            console.log("deleting", drop.length, "objects from", sorted.slice(5).join(", ") || "(nothing to prune)");
+            fs.writeFileSync("/tmp/delete.json", JSON.stringify({ Objects: drop.map((Key) => ({ Key })), Quiet: true }));
+          '
+          if [ "$(node -p 'require("/tmp/delete.json").Objects.length')" -gt 0 ]; then
+            aws s3api delete-objects --bucket "$BUCKET" --endpoint-url "$ENDPOINT" \
+              --delete file:///tmp/delete.json
+          fi
+
+      - name: Send release notes to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$DISCORD_WEBHOOK_URL"
+          version="${RELEASE_TAG#v}"
+
+          node scripts/release-notes.mjs discord release-notes.json "$version" \
+            /tmp/discord-release.json https://rbxport.com/whats-new/
+
+          status="$(curl -sS -o /tmp/discord-response.txt -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/discord-release.json \
+            "$DISCORD_WEBHOOK_URL?wait=true")"
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "Discord webhook failed with HTTP $status"
+            sed -n '1,10p' /tmp/discord-response.txt
+            exit 1
+          fi
+          echo "Release notes sent to Discord channel 1552182049832439838"

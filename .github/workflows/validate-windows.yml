@@ -1,0 +1,94 @@
+name: Validate Windows
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+      check_rust:
+        required: false
+        default: false
+        type: boolean
+      check_file_drop:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Win compile check
+    runs-on: [self-hosted, windows, x64]
+    steps:
+      - name: Put Git Bash ahead of the WSL stub
+        shell: pwsh
+        run: |
+          $gitBin = "$env:ProgramFiles\Git\bin"
+          if (-not (Test-Path "$gitBin\bash.exe")) {
+            throw "Git for Windows is not installed at $gitBin - bash steps cannot run."
+          }
+          $gitBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Ensure rustup
+        if: inputs.check_rust
+        shell: pwsh
+        run: |
+          $cargoBin = "$env:USERPROFILE\.cargo\bin"
+          if (-not (Test-Path "$cargoBin\rustup.exe")) {
+            $init = "$env:TEMP\rustup-init.exe"
+            Invoke-WebRequest -UseBasicParsing https://win.rustup.rs/x86_64 -OutFile $init
+            & $init -y --no-modify-path --profile minimal --default-toolchain stable
+            if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with exit code $LASTEXITCODE" }
+          }
+          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+
+      - name: Ensure perl for the vendored OpenSSL
+        if: inputs.check_rust
+        shell: pwsh
+        run: |
+          $perl = "C:\Strawberry\perl\bin\perl.exe"
+          if (-not (Test-Path $perl)) {
+            winget install --id StrawberryPerl.StrawberryPerl --exact --silent `
+              --accept-package-agreements --accept-source-agreements --disable-interactivity
+            if (-not (Test-Path $perl)) { throw "Strawberry Perl installed but $perl is missing" }
+          }
+          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+
+      - name: Keep the Windows target directory short
+        if: inputs.check_rust
+        shell: pwsh
+        run: |
+          "CARGO_TARGET_DIR=C:/rbl-target" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.check_rust
+        with:
+          toolchain: 1.99.0
+
+      - name: Check
+        if: inputs.check_rust
+        run: cargo check --workspace --all-targets
+
+      - uses: pnpm/action-setup@v4
+        if: inputs.check_file_drop
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+      - uses: actions/setup-node@v4
+        if: inputs.check_file_drop
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: inputs.check_file_drop
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Windows desktop file paths
+        if: inputs.check_file_drop
+        run: pnpm exec vitest run src/ipc/file-drop.test.ts

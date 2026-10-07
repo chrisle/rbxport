@@ -1,8 +1,9 @@
 name: Validate
 
 # This workflow never receives deployment secrets and never runs packaging or
-# publication. The callable release workflow owns the validation jobs so CI
-# and a release cannot accidentally diverge.
+# publication. It detects which parts of a pull request changed, then asks the
+# shared validation workflow to run only the matching lanes. Manual validation
+# and real releases still run every lane.
 on:
   pull_request:
     branches: [dev, main]
@@ -14,30 +15,81 @@ on:
         type: string
 
 permissions:
-  # The reusable release workflow declares contents: write for a real release.
-  # A caller cannot grant a reusable workflow more than its own token, even
-  # when the validation-only path never writes. Keep the upper bound here so
-  # GitHub can initialize that workflow; fork PRs remain excluded below.
+  # Same-repository PRs may receive deterministic autofix commits. The shared
+  # validation workflow itself is read-only; fork PRs remain excluded below.
   contents: write
 
 jobs:
+  changes:
+    name: Detect affected validation lanes
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64]
+    outputs:
+      base_ref: ${{ steps.paths.outputs.base_ref }}
+      frontend: ${{ steps.paths.outputs.frontend }}
+      frontend_lint: ${{ steps.paths.outputs.frontend_lint }}
+      frontend_typecheck: ${{ steps.paths.outputs.frontend_typecheck }}
+      frontend_build: ${{ steps.paths.outputs.frontend_build }}
+      frontend_unit: ${{ steps.paths.outputs.frontend_unit }}
+      frontend_e2e: ${{ steps.paths.outputs.frontend_e2e }}
+      frontend_budget: ${{ steps.paths.outputs.frontend_budget }}
+      scripts: ${{ steps.paths.outputs.scripts }}
+      rust: ${{ steps.paths.outputs.rust }}
+      windows_rust: ${{ steps.paths.outputs.windows_rust }}
+      windows_file_drop: ${{ steps.paths.outputs.windows_file_drop }}
+      linux_window: ${{ steps.paths.outputs.linux_window }}
+      macos_intel: ${{ steps.paths.outputs.macos_intel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.source_ref || github.sha }}
+          fetch-depth: 0
+
+      - id: paths
+        name: Classify changed files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          plan="$RUNNER_TEMP/validation-plan"
+          if [ "${{ github.event_name }}" != pull_request ]; then
+            node scripts/ci/validation-plan.mjs --all > "$plan"
+            echo "base_ref=" >> "$plan"
+          else
+            git diff --name-only -z "$BASE_SHA...$HEAD_SHA" \
+              | node scripts/ci/validation-plan.mjs > "$plan"
+            echo "base_ref=$BASE_SHA" >> "$plan"
+          fi
+          cat "$plan" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Validation lanes"
+            while IFS='=' read -r lane enabled; do
+              case "$lane" in frontend|base_ref) continue ;; esac
+              # shellcheck disable=SC2016 # Markdown backticks are literal.
+              printf -- '- `%s`: %s\n' "$lane" "$enabled"
+            done < "$plan"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   autofix:
     name: Apply safe merge fixes
     # A fork's token is read-only and must never be used to modify its branch.
     # Same-repository PRs get deterministic Clippy rewrites and English locale
     # fallbacks, then this run validates the resulting exact SHA.
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: changes
     runs-on: [self-hosted, linux, x64]
     outputs:
       source_ref: ${{ steps.commit.outputs.source_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: true
 
       - name: Install the Linux build dependencies
+        if: needs.changes.outputs.rust == 'true'
         run: |
           sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
             apt-get update && \
@@ -45,6 +97,7 @@ jobs:
               librsvg2-dev patchelf libgtk-3-dev libasound2-dev'
 
       - name: Ensure rustup
+        if: needs.changes.outputs.rust == 'true'
         run: |
           if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
@@ -53,21 +106,26 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Give cargo a home of its own
+        if: needs.changes.outputs.rust == 'true'
         run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.rust == 'true'
         with:
           toolchain: 1.99.0
           components: clippy
 
       - name: Apply Clippy's machine-applicable fixes
+        if: needs.changes.outputs.rust == 'true'
         run: cargo clippy --fix --allow-dirty --allow-staged --workspace --all-targets -- -D warnings
 
       - uses: actions/setup-node@v4
+        if: needs.changes.outputs.frontend == 'true'
         with:
           node-version: 24
 
       - name: Add missing locale fallbacks
+        if: needs.changes.outputs.frontend == 'true'
         run: node scripts/fill-missing-locales.mjs
 
       - id: commit
@@ -82,7 +140,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates public/locales
+          git add crates src-tauri public/locales
           git commit -m "chore: apply merge fixes" \
             -m "Apply Clippy rewrites and locale fallbacks before validation."
           git push origin "HEAD:$PR_HEAD_REF"
@@ -91,9 +149,26 @@ jobs:
   validate:
     # GITHUB_TOKEN pushes do not start another workflow run. Validate the SHA
     # written by autofix here, and never execute untrusted fork code on ARC.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    needs: autofix
-    uses: ./.github/workflows/release.yml
+    if: >-
+      always() && needs.changes.result == 'success' &&
+      (needs.autofix.result == 'success' || needs.autofix.result == 'skipped') &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    needs: [changes, autofix]
+    uses: ./.github/workflows/validation.yml
     with:
       source_ref: ${{ needs.autofix.outputs.source_ref || inputs.source_ref || github.sha }}
-      validate_only: true
+      base_ref: ${{ needs.changes.outputs.base_ref }}
+      full: ${{ github.event_name != 'pull_request' }}
+      validate_rust: ${{ needs.changes.outputs.rust == 'true' }}
+      validate_windows_rust: ${{ needs.changes.outputs.windows_rust == 'true' }}
+      validate_windows_file_drop: ${{ needs.changes.outputs.windows_file_drop == 'true' }}
+      validate_linux: ${{ needs.changes.outputs.linux_window == 'true' }}
+      validate_macos: ${{ needs.changes.outputs.macos_intel == 'true' }}
+      validate_scripts: ${{ needs.changes.outputs.scripts == 'true' }}
+      validate_frontend_lint: ${{ needs.changes.outputs.frontend_lint == 'true' }}
+      validate_frontend_typecheck: ${{ needs.changes.outputs.frontend_typecheck == 'true' }}
+      validate_frontend_build: ${{ needs.changes.outputs.frontend_build == 'true' }}
+      validate_frontend_unit: ${{ needs.changes.outputs.frontend_unit == 'true' }}
+      validate_frontend_e2e: ${{ needs.changes.outputs.frontend_e2e == 'true' }}
+      validate_frontend_budget: ${{ needs.changes.outputs.frontend_budget == 'true' }}

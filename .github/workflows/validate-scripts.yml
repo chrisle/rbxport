@@ -1,0 +1,31 @@
+name: Validate Node scripts
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  scripts:
+    name: Node script tests
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Run dependency-free script tests
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find scripts -name '*.test.mjs' ! -name 'cleanup.test.mjs' -print | sort)
+          test "${#tests[@]}" -gt 0
+          node --test "${tests[@]}"

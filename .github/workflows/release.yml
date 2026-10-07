@@ -1,37 +1,7 @@
 name: Release
 
-# A manual dispatch from dev is the release authority. It validates the exact source,
-# creates its immutable version tag and release notes on dev, then
-# fast-forwards main. Builders use only that promoted main commit before R2
-# publication, verification, retention, and the Discord announcement.
-# `rbxport-1.2.3-<platform>.<ext>` — flat keys, the version in the
-# name — plus `latest.json`, so a page can find the newest version without
-# a folder listing. Only the 5 most recently published versions are kept;
-# publish prunes older ones once the new one is confirmed live.
-#
-# R2 is the only place a release is published. No GitHub Release is created;
-# the bucket is the download and the tag is the source record. Keeping a single
-# publication target also makes retention and `latest.json` updates atomic.
-#
-# Nothing builds until the shared validation gate passes: pinned Clippy, the
-# Rust test suite and MSRV check, a Windows-native compile and desktop-path
-# check, a Linux Tauri-window smoke test, and the frontend's lint, typecheck,
-# unit tests, bundle budget, Playwright e2e and Intel-macOS runtime smoke.
-# `.github/workflows/ci.yml` calls this workflow in validation-only mode for
-# pull requests. That path has no release authority and never creates metadata
-# or a tag.
-#
-# Every job runs on the `arc` self-hosted fleet (`self-hosted, <os>, <arch>`),
-# one host per platform: an Apple Silicon Mac, a Windows desktop and a Linux
-# VM. A hosted image preinstalls a toolchain; an arc host is somebody's actual
-# machine, so anything a job needs it installs itself in an idempotent
-# "Ensure …" step — a no-op on the second run, and the record of what the host
-# needs if it is ever rebuilt.
-#
-# The signing identity is imported into a throwaway keychain under RUNNER_TEMP
-# and removed on the way out rather than being left in a login keychain.
-# Discord release announcements use the channel-bound
-# `DISCORD_RELEASE_WEBHOOK_URL` repository secret.
+# Release coordinator. Validation, packaging, publication, and Store submission
+# are reusable workflows so this file only describes the release state machine.
 on:
   workflow_dispatch:
     inputs:
@@ -45,29 +15,14 @@ on:
         required: false
         default: false
         type: boolean
-  workflow_call:
-    inputs:
-      # CI passes an immutable SHA so its validation cannot drift while a
-      # pull request branch is being updated.
-      source_ref:
-        required: false
-        type: string
-      # Reuse the exact release gates before a tag exists. This deliberately
-      # skips installer builds, signing, R2 and Discord.
-      validate_only:
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
-  group: ${{ inputs.validate_only && format('validate-{0}', inputs.source_ref) || 'release-dev' }}
-  cancel-in-progress: ${{ inputs.validate_only || false }}
+  group: release-dev
+  cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: write
-
-env:
-  CARGO_TERM_COLOR: always
 
 jobs:
   prepare:
@@ -83,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: true
 
@@ -98,13 +53,6 @@ jobs:
           source="$(git rev-parse HEAD)"
           skip_tests="${{ inputs.skip_tests || false }}"
           skip_version_bump="${{ inputs.skip_version_bump || false }}"
-          if [ "${{ inputs.validate_only }}" = true ]; then
-            {
-              echo "release=false"
-              echo "source_ref=$source"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           if [ "${{ github.ref_name }}" != dev ]; then
             echo "::error::Run Release from the dev branch."
             exit 1
@@ -150,465 +98,31 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.source_ref }}
           fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-
       - name: Verify release metadata
-        run: |
-          set -euo pipefail
-          node scripts/release-preflight.mjs
+        run: node scripts/release-preflight.mjs
 
-  # Gate the builds on the same checks CI used to run separately. Folded in
-  # here, not left as their own workflow, so a broken build never publishes:
-  # a separate CI run had no dependency GitHub Actions could enforce across
-  # workflow files. Each of these shares a physical host with a build job
-  # below (rust/linux with build-other's Linux leg, windows with its Windows
-  # leg, frontend/macos with build-macos) — `needs` on the build jobs forces
-  # them to run one after the other on that host instead of racing it.
-  rust:
-    name: Rust tests
+  validation:
+    name: Run shared validation
     needs: [prepare, release-source]
-    if: needs.prepare.outputs.skip_tests != 'true'
-    runs-on: [self-hosted, linux, x64]
-    env:
-      # Tests must never be able to open the installed library read-write.
-      # This is the same switch the writer checks.
-      RBXPORT_TEST: "1"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
-
-      - name: Install the Linux build dependencies
-        # The webview ones are only for the Tauri shell; the rbl-* crates build
-        # without a webview, which is the point of keeping tauri out of them.
-        # ALSA is not in that category: `rbl-deck` depends on cpal, whose
-        # `alsa-sys` build script panics outright without the headers, so the
-        # whole workspace failed to compile on Linux without this line.
-        run: |
-          # ARC runners are isolated, but the host package database is not.
-          # Serialize only this host-global provisioning operation; the
-          # independent cargo builds can still run concurrently afterwards.
-          sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
-            apt-get update && \
-            apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-              librsvg2-dev patchelf libgtk-3-dev libasound2-dev'
-
-      # dtolnay/rust-toolchain drives rustup; it does not install it. Hosted
-      # images ship rustup, an arc host need not — so install it on first use
-      # and put it on PATH for the rest of the job.
-      - name: Ensure rustup
-        run: |
-          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Give cargo a home of its own
-        # The host's ~/.cargo is shared with every other job on it, and
-        # rust-cache deletes its registry sources when a job ends. See the
-        # same step in build-installer.yml.
-        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.99.0
-          components: clippy, rustfmt
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # cache-bin caches ~/.cargo/bin and prunes it on restore, which on a
-          # self-hosted host means deleting the rustup the step above installed
-          # — and the shims every later step resolves through.
-          cache-bin: false
-
-      - name: Clippy
-        # The workspace denies the lints that matter (unwrap, panic, print,
-        # the perf group), so a warning here is a real finding.
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Tests
-        run: cargo test --workspace
-
-  # The pinned current toolchain above makes Clippy reproducible. Keep a
-  # separate compile lane for the workspace's declared Rust MSRV so advancing
-  # lint tooling does not silently change compatibility policy.
-  msrv:
-    name: Rust MSRV check
-    # This shares the Linux ARC host with the current-toolchain Rust gate.
-    # Run after it so apt, rustup, and the host cargo cache are never mutated
-    # concurrently by two jobs from the same validation run.
-    needs: [prepare, rust]
-    if: needs.prepare.outputs.skip_tests != 'true'
-    runs-on: [self-hosted, linux, x64]
-    env:
-      RBXPORT_TEST: "1"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
-
-      - name: Install the Linux build dependencies
-        run: |
-          sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
-            apt-get update && \
-            apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-              librsvg2-dev patchelf libgtk-3-dev libasound2-dev'
-
-      - name: Ensure rustup
-        run: |
-          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Give cargo a home of its own
-        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.89.0
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-bin: false
-
-      - name: Check the declared MSRV
-        run: cargo +1.89.0 check --workspace --all-targets
-
-  # Check Windows-specific code on the same candidates that may be released.
-  # The Rust check catches native code, while the focused frontend test verifies
-  # that a WebView2 File path such as C:\\Music\\track.mp3 reaches IPC unchanged.
-  #
-  # It has to run on Windows. Cross-checking from macOS gets as far as the
-  # audio and protocol crates — `cargo check -p rbl-deck -p rbl-core
-  # -p rbl-prolink -p rbl-pdb --target x86_64-pc-windows-msvc` passes — and
-  # then stops at rusqlite's vendored OpenSSL, whose build wants a
-  # Windows-native perl.
-  windows:
-    name: Win compile check
-    needs: [prepare, release-source]
-    if: needs.prepare.outputs.skip_tests != 'true'
-    runs-on: [self-hosted, windows, x64]
-    steps:
-      # `shell: bash` resolves bash from PATH, and on a Windows desktop the
-      # WindowsApps WSL stub shadows Git's bash. WSL bash cannot see the
-      # runner's workspace under its Windows path, so a bash step would fail on
-      # a path that plainly exists. Nothing below uses bash today, but a step
-      # added later would inherit the trap, and this costs a second.
-      - name: Put Git Bash ahead of the WSL stub
-        shell: pwsh
-        run: |
-          $gitBin = "$env:ProgramFiles\Git\bin"
-          if (-not (Test-Path "$gitBin\bash.exe")) {
-            throw "Git for Windows is not installed at $gitBin - bash steps cannot run."
-          }
-          $gitBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
-
-      - name: Ensure rustup
-        # Same reason as the Linux job. The desktop had a rustup-less Rust in
-        # ~/.cargo/bin, which is exactly the shape dtolnay/rust-toolchain
-        # cannot work with.
-        shell: pwsh
-        run: |
-          $cargoBin = "$env:USERPROFILE\.cargo\bin"
-          if (-not (Test-Path "$cargoBin\rustup.exe")) {
-            $init = "$env:TEMP\rustup-init.exe"
-            Invoke-WebRequest -UseBasicParsing https://win.rustup.rs/x86_64 -OutFile $init
-            & $init -y --no-modify-path --profile minimal --default-toolchain stable
-            if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with exit code $LASTEXITCODE" }
-          }
-          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
-
-      - name: Ensure perl for the vendored OpenSSL
-        # rusqlite's `bundled-sqlcipher-vendored-openssl` builds OpenSSL from
-        # source, and OpenSSL is configured by a perl script. `cargo check`
-        # runs build scripts, so this is needed here and not only at release.
-        #
-        # Strawberry rather than the perl inside Git for Windows: OpenSSL's
-        # Configure emits msys-style paths under that one and the MSVC build
-        # then cannot find its own files. OPENSSL_SRC_PERL is read by
-        # openssl-src and points it at this interpreter specifically.
-        #
-        # nasm is deliberately not installed: openssl-src falls back to
-        # `no-asm` when it is absent, which is slower crypto in a build that
-        # only ever opens a local SQLite file.
-        shell: pwsh
-        run: |
-          $perl = "C:\Strawberry\perl\bin\perl.exe"
-          if (-not (Test-Path $perl)) {
-            winget install --id StrawberryPerl.StrawberryPerl --exact --silent `
-              --accept-package-agreements --accept-source-agreements --disable-interactivity
-            if (-not (Test-Path $perl)) { throw "Strawberry Perl installed but $perl is missing" }
-          }
-          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
-          "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
-
-      - name: Keep the Windows target directory short
-        # The runner's workspace is ~95 characters deep, and openssl-src's
-        # copy of the OpenSSL tree underneath `target` pushes its deepest
-        # files past MAX_PATH, where they silently fail to copy and Configure
-        # reports them "missing". The release build hit this first; the
-        # `check` profile's paths are ~30 characters shorter and happened to
-        # fit, which is luck, not margin. Same directory as the release uses,
-        # and it doubles as this host's persistent build cache.
-        shell: pwsh
-        run: |
-          "CARGO_TARGET_DIR=C:/rbl-target" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.99.0
-
-      # No rust-cache here: C:/rbl-target and ~/.cargo both persist on this
-      # host, and rust-cache's save step deletes ~/.cargo/registry/src —
-      # which left the release's cached build scripts linking against source
-      # trees that no longer existed (LNK1181). See release.yml.
-
-      - name: Check
-        run: cargo check --workspace --all-targets
-
-      - uses: pnpm/action-setup@v4
-        with:
-          # ARC hosts are shared; keep pnpm's setup outside the host-global
-          # default directory so this validation cannot race another job.
-          dest: ${{ runner.temp }}/setup-pnpm
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-
-      - name: Check Windows desktop file paths
-        # Do not invoke the full suite here: the browser/UI lane below owns it.
-        # This is a Windows-native assertion of the exact File.path bridge
-        # behavior that a WebView2 drop supplies.
-        run: pnpm exec vitest run src/ipc/file-drop.test.ts
-
-  # Linux's WebKitGTK shell is distinct from both browser E2E and macOS
-  # WKWebView. Build the real binary with tauri.linux.conf.json auto-merged,
-  # then require its native window to appear in an isolated Xvfb display.
-  linux-window:
-    name: Linux Tauri window smoke
-    # The Linux ARC host is shared with the Rust and MSRV gates. Run after
-    # both rather than competing with them for apt, cargo and WebKit resources.
-    needs: [prepare, msrv]
-    if: needs.prepare.outputs.skip_tests != 'true'
-    runs-on: [self-hosted, linux, x64]
-    env:
-      RBXPORT_TEST: "1"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
-
-      - name: Install Linux window dependencies
-        run: |
-          sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
-            apt-get update && \
-            apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-              librsvg2-dev patchelf libgtk-3-dev libasound2-dev xvfb xauth x11-utils'
-
-      - uses: pnpm/action-setup@v4
-        with:
-          dest: ${{ runner.temp }}/setup-pnpm
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-
-      - name: Ensure rustup
-        run: |
-          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Give cargo a home of its own
-        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.99.0
-
-      - name: Build the Linux shell without bundling
-        run: pnpm tauri build --debug --no-bundle --ci
-
-      - name: Require a native Linux window
-        run: |
-          set -euo pipefail
-          export XDG_CONFIG_HOME="$RUNNER_TEMP/xdg-config"
-          export XDG_DATA_HOME="$RUNNER_TEMP/xdg-data"
-          log="$RUNNER_TEMP/rbxport-linux-window.log"
-          # shellcheck disable=SC2016 # $1/$2 expand in the child shell below.
-          xvfb-run -a bash -c '
-            set -euo pipefail
-            "$1" >"$2" 2>&1 &
-            pid=$!
-            trap "kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true" EXIT
-            for _ in $(seq 1 20); do
-              if xwininfo -root -tree | grep -Fq "rbxport"; then exit 0; fi
-              if ! kill -0 "$pid" 2>/dev/null; then break; fi
-              sleep 1
-            done
-            cat "$2"
-            echo "::error::rbxport did not create a Linux window"
-            exit 1
-          ' _ target/debug/rbxport "$log"
-
-  # Run WebKit on macOS, where it represents the WKWebView the app ships.
-  # Environment-sensitive frame-cost gates are deliberately excluded from this
-  # parallel suite and run through the single-worker `npm run perf:gate` command.
-  frontend:
-    name: UI tests
-    needs: [prepare, release-source]
-    if: needs.prepare.outputs.skip_tests != 'true'
-    runs-on: [self-hosted, macos, arm64]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
-
-      # setup-node, never the host's node: the arc hosts have node under nvm or
-      # not at all, and the runner's environment does not see a shell profile.
-      - uses: pnpm/action-setup@v4
-        with:
-          # Its default is `~/setup-pnpm`, one fixed path per host. Two jobs on
-          # the same Mac — a CI run and a release, say — both installing there
-          # at once is how the first release's macOS build failed before it had
-          # done anything: `ENOTEMPTY: directory not empty` from the loser of
-          # the race. RUNNER_TEMP belongs to one runner, and each arc runner is
-          # its own throwaway.
-          dest: ${{ runner.temp }}/setup-pnpm
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Lint
-        # eslint.config.js encodes the frontend architecture rules: no polling,
-        # no deep clones of rows, invoke only in src/ipc, and no sorting or
-        # filtering a row array in a view.
-        run: pnpm lint
-
-      - name: Typecheck and build
-        run: pnpm build
-
-      - name: Unit tests
-        run: pnpm test
-
-      - name: Bundle budget
-        # perf-budgets.json is enforced, not aspirational.
-        run: pnpm budget
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium webkit
-
-      - name: End-to-end
-        # Each ARC runner has an isolated checkout but shares one Mac. Give
-        # every run a port pair, then serialize the browser-heavy suite so
-        # concurrent WebKit/Chromium runs do not starve each other.
-        run: |
-          lock=/tmp/rbxport-playwright.lock
-          until mkdir "$lock" 2>/dev/null; do sleep 2; done
-          trap 'rmdir "$lock"' EXIT
-          E2E_PORT="$((20000 + GITHUB_RUN_NUMBER % 10000))" pnpm e2e
-
-      - name: Prepare the Intel macOS runtime smoke
-        # The only macOS ARC host is Apple Silicon. Rosetta is therefore the
-        # runtime gate for the x86_64 build; an arm64 build alone cannot prove
-        # that an Intel user can launch the binary we ship.
-        env:
-          RBXPORT_TEST: "1"
-          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config-intel
-          XDG_DATA_HOME: ${{ runner.temp }}/xdg-data-intel
-        run: |
-          set -euo pipefail
-          if ! arch -x86_64 /usr/bin/true; then
-            echo "::error::Rosetta is required to validate the Intel macOS build."
-            exit 1
-          fi
-          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.99.0
-          targets: x86_64-apple-darwin
-
-      - name: Build the Intel macOS shell without bundling
-        run: pnpm tauri build --target x86_64-apple-darwin --debug --no-bundle --ci
-
-      - name: Require the Intel macOS shell to stay running
-        env:
-          RBXPORT_TEST: "1"
-          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config-intel
-          XDG_DATA_HOME: ${{ runner.temp }}/xdg-data-intel
-        run: |
-          set -euo pipefail
-          binary=target/x86_64-apple-darwin/debug/rbxport
-          log="$RUNNER_TEMP/rbxport-intel-window.log"
-          arch -x86_64 "$binary" >"$log" 2>&1 &
-          pid=$!
-          # shellcheck disable=SC2064 # pid must be resolved when the trap runs.
-          trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
-          sleep 10
-          if ! kill -0 "$pid" 2>/dev/null; then
-            cat "$log"
-            echo "::error::Intel macOS shell exited before the runtime smoke completed"
-            exit 1
-          fi
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
-
-  validated:
-    name: Validation complete
-    needs: [prepare, rust, msrv, windows, linux-window, frontend]
     if: >-
       always() && needs.prepare.result == 'success' &&
-      (needs.prepare.outputs.skip_tests == 'true' ||
-      (needs.rust.result == 'success' && needs.msrv.result == 'success' &&
-      needs.windows.result == 'success' && needs.linux-window.result == 'success' &&
-      needs.frontend.result == 'success'))
-    runs-on: [self-hosted, linux, x64]
-    steps:
-      - run: |
-          if [ "${{ needs.prepare.outputs.skip_tests }}" = true ]; then
-            echo "Tests were explicitly skipped for previously validated ${{ needs.prepare.outputs.source_ref }}."
-          else
-            echo "All validation gates passed for ${{ needs.prepare.outputs.source_ref }}."
-          fi
+      (needs.prepare.outputs.skip_tests == 'true' || needs.release-source.result == 'success')
+    uses: ./.github/workflows/validation.yml
+    with:
+      source_ref: ${{ needs.prepare.outputs.source_ref }}
+      skip_tests: ${{ needs.prepare.outputs.skip_tests == 'true' }}
+      full: true
 
   record:
     name: Record and tag version number
-    # Explicit status checks prevent skipped test ancestors from implicitly
-    # skipping the release chain. Only successful required jobs may advance.
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.release == 'true' && needs.validated.result == 'success' &&
+      needs.prepare.outputs.release == 'true' && needs.validation.result == 'success' &&
       needs.prepare.outputs.skip_version_bump != 'true'
-    needs: [prepare, validated]
+    needs: [prepare, validation]
     runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
@@ -621,11 +135,9 @@ jobs:
           ref: ${{ needs.prepare.outputs.source_ref }}
           fetch-depth: 0
           persist-credentials: true
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-
       - id: record
         env:
           SOURCE_REF: ${{ needs.prepare.outputs.source_ref }}
@@ -649,15 +161,14 @@ jobs:
           git rev-parse --verify "refs/tags/$previous^{commit}"
           git merge-base --is-ancestor "$previous" "$SOURCE_REF"
           node scripts/sync-version.mjs --version "$version"
-          # The workflow derives release notes from the immutable source range.
-          # workflow_dispatch inputs are defined from the default branch, so a
-          # dev-only optional payload can otherwise be silently dropped.
-          VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" node scripts/generate-release-notes.mjs
+          VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" \
+            node scripts/generate-release-notes.mjs
           node scripts/release-preflight.mjs --version "$version" --expect-untagged
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock package.json src-tauri/tauri.conf.json release-notes.json
-          git commit -m "chore(release): cut $version" -m "Record the version and generated release notes after validation passed."
+          git commit -m "chore(release): cut $version" \
+            -m "Record the version and generated release notes after validation passed."
           final="$(git rev-parse HEAD)"
           git tag -a "$RELEASE_TAG" -m "rbxport $version" "$final"
           git push --atomic origin HEAD:dev "$RELEASE_TAG"
@@ -670,10 +181,10 @@ jobs:
     name: Fast-forward main
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.release == 'true' && needs.validated.result == 'success' &&
+      needs.prepare.outputs.release == 'true' && needs.validation.result == 'success' &&
       (needs.record.result == 'success' ||
       (needs.prepare.outputs.skip_version_bump == 'true' && needs.record.result == 'skipped'))
-    needs: [prepare, validated, record]
+    needs: [prepare, validation, record]
     runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
@@ -686,7 +197,6 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: true
-
       - id: promote
         env:
           SOURCE_REF: ${{ needs.record.outputs.source_ref || needs.prepare.outputs.source_ref }}
@@ -704,9 +214,6 @@ jobs:
 
   build-macos:
     name: Build ${{ matrix.platform }}
-    # Serialize only the Macs: both may share a signing keychain search list.
-    # Matrix limits keep the run discoverable by arc (job concurrency marks
-    # the whole run pending, which arc does not currently discover).
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
       needs.prepare.outputs.release == 'true' &&
@@ -740,7 +247,6 @@ jobs:
 
   build-other:
     name: Build ${{ matrix.platform }}
-    # Windows and Linux build alongside the serialized Mac jobs.
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
       needs.prepare.outputs.release == 'true' &&
@@ -772,380 +278,26 @@ jobs:
       preview: false
 
   publish:
-    name: Publish to R2
+    name: Publish release
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
       needs.prepare.outputs.release == 'true' &&
       needs.promote.result == 'success' && needs.build-macos.result == 'success' &&
       needs.build-other.result == 'success'
     needs: [prepare, promote, build-macos, build-other]
-    runs-on: [self-hosted, linux, x64]
-    env:
-      RELEASE_TAG: ${{ needs.promote.outputs.release_tag }}
-    steps:
-      # The checked-in release notes feed the app, website, and Discord.
-      # Nothing else here needs the tree. FIRST, before
-      # the installers are downloaded: checkout cleans the workspace, and
-      # placed after the download it deleted `out/` — 0.5.1's publish died
-      # on `ls: cannot access 'out'` after both builds had passed.
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.promote.outputs.source_ref }}
-          fetch-depth: 0
-          sparse-checkout: |
-            release-notes.json
-            scripts/release-notes.mjs
-          sparse-checkout-cone-mode: false
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: installers-*
-          merge-multiple: true
-          path: out
-
-      # The steps below build and read latest.json with node. The checkout
-      # above puts nothing on PATH, and the arc Linux host's own node is not
-      # something a job should depend on.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Ensure the AWS CLI
-        # A hosted Ubuntu image ships it; the arc Linux host does not. Into
-        # ~/.local so no step here needs sudo.
-        run: |
-          set -euo pipefail
-          if ! command -v aws >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/aws" ]; then
-            curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
-            unzip -qo /tmp/awscliv2.zip -d /tmp
-            /tmp/aws/install --update -i "$HOME/.local/aws-cli" -b "$HOME/.local/bin"
-            rm -rf /tmp/aws /tmp/awscliv2.zip
-          fi
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Publish to R2
-        # S3-compatible, so the AWS CLI is the whole client. The endpoint is
-        # the account's; the bucket is a variable so this file names no account
-        # of anyone's.
-        #
-        # Object keys are FLAT — no `<version>/` or `latest/` prefix, ever. The
-        # version is already in every filename, so a folder per version buys
-        # nothing and costs a URL nobody can read, type or grep for; one
-        # namespace also means a stale prefix cannot shadow a new upload. The
-        # build job has already named the files
-        # `rbxport-<semver>-<platform>[-setup].<ext>`.
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          # Recent AWS CLI versions attach CRC32 integrity headers that R2
-          # rejects with a 400 whose message says nothing useful.
-          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          BUCKET: ${{ vars.R2_BUCKET }}
-          CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
-        run: |
-          set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          test -n "$BUCKET"
-          ls -l out
-
-          # Payloads first, feed second: latest.json must never name a file
-          # that has not finished uploading. Immutable caching is safe because
-          # a name is never reused — a new version is a new key.
-          for f in out/*; do
-            # The Partner Center MSIX deliberately has the Store publisher
-            # identity and no local signature. Keep it in the Actions
-            # artifact for submission; an unsigned package is not a usable
-            # direct download and must not be advertised from the CDN.
-            case "$f" in *.msix) continue ;; esac
-            aws s3 cp "$f" "s3://$BUCKET/$(basename "$f")" \
-              --endpoint-url "$ENDPOINT" --no-progress \
-              --cache-control "public, max-age=31536000, immutable"
-          done
-
-          # The one fixed path in the bucket, and what replaces the `latest/`
-          # folder. Two readers: the app's updater, which wants `platforms`
-          # in its own shape — one entry per `{os}-{arch}` it runs as, each
-          # a signed URL, and `notes` for what changed — and a person or a
-          # page, which wants `downloads`: the installers by the platform
-          # names the files carry. They are separate because the updater
-          # refuses a `platforms` entry without a signature, and a DMG has
-          # none. Each Mac architecture gets its own payload and signature.
-          # The updater looks for
-          # `{os}-{arch}-{installer}` before `{os}-{arch}`, so on Linux the
-          # AppImage sits under the plain key and the .deb, when the
-          # bundler signed it, under `linux-x86_64-deb`: an app installed
-          # from the package takes the package, one run as an AppImage takes
-          # the AppImage.
-          test -s release-notes.json
-          node scripts/release-notes.mjs validate release-notes.json "$version"
-          node scripts/release-notes.mjs markdown release-notes.json release-notes.md
-          node -e '
-            const fs = require("fs");
-            const [, version, base] = process.argv;
-            const files = fs.readdirSync("out");
-            const url = (file) => (base ? base + "/" + file : undefined);
-            const signed = (payload, optional = false) => {
-              const file = files.find(payload);
-              if (!file) return null;
-              const sig = file + ".sig";
-              if (!files.includes(sig)) {
-                if (optional) return null;
-                throw new Error("no updater signature beside " + file);
-              }
-              return { url: url(file), signature: fs.readFileSync("out/" + sig, "utf8").trim() };
-            };
-            const macArm = signed((f) => f.endsWith("-darwin-aarch64.app.tar.gz"));
-            const macIntel = signed((f) => f.endsWith("-darwin-x86_64.app.tar.gz"));
-            if (!macArm || !macIntel) throw new Error("both Mac updater builds are required");
-            const win = signed((f) => f.endsWith("-setup.exe"));
-            const linux = signed((f) => f.endsWith(".AppImage"));
-            const deb = signed((f) => f.endsWith(".deb"), true);
-            const platforms = {};
-            platforms["darwin-aarch64"] = macArm;
-            platforms["darwin-x86_64"] = macIntel;
-            if (win) platforms["windows-x86_64"] = win;
-            if (linux) platforms["linux-x86_64"] = linux;
-            if (deb) platforms["linux-x86_64-deb"] = deb;
-            const downloads = {};
-            for (const [slug, match] of [
-              ["darwin-aarch64", (f) => f.endsWith("-darwin-aarch64.dmg")],
-              ["darwin-x86_64", (f) => f.endsWith("-darwin-x86_64.dmg")],
-              ["windows-x86_64", (f) => f.endsWith("-setup.exe")],
-              ["linux-x86_64", (f) => f.endsWith(".AppImage")],
-              ["linux-x86_64-deb", (f) => f.endsWith(".deb")],
-            ]) {
-              const file = files.find(match);
-              if (file) downloads[slug] = { file, url: url(file) };
-            }
-            const feed = {
-              version,
-              pub_date: new Date().toISOString(),
-              notes: fs.readFileSync("release-notes.md", "utf8"),
-              platforms,
-              downloads,
-            };
-            fs.writeFileSync("latest.json", JSON.stringify(feed, null, 2) + "\n");
-            const { notes, ...shown } = feed;
-            console.log(JSON.stringify({ ...shown, notes: notes.length + " bytes" }, null, 2));
-          ' "$version" "${CDN_BASE_URL:-}"
-
-          # The public website proxies this canonical history and keeps a
-          # checked-in copy only as a fallback for a transient CDN outage.
-          aws s3 cp release-notes.json "s3://$BUCKET/release-notes.json" \
-            --endpoint-url "$ENDPOINT" --no-progress \
-            --content-type application/json --cache-control "public, max-age=60"
-
-          # Short TTL: this is the file anything checking for a new version
-          # reads, and a long one delays the rollout by exactly that much.
-          aws s3 cp latest.json "s3://$BUCKET/latest.json" \
-            --endpoint-url "$ENDPOINT" --no-progress \
-            --content-type application/json --cache-control "public, max-age=60"
-
-      - name: Re-fetch what was just published
-        # The same request a download page makes, so a bucket that uploaded
-        # fine but serves nothing fails the release instead of being found by
-        # the first person who clicks a link. Only possible once the bucket has
-        # a public base URL; without one there is nothing to fetch.
-        if: vars.CDN_BASE_URL != ''
-        env:
-          CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
-        run: |
-          set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          # A few retries: a freshly written object is readable at once, but a
-          # public domain enabled minutes ago answered 401 for its first ten
-          # seconds, and that is a wait, not a failure.
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
-            "$CDN_BASE_URL/latest.json" -o published.json
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
-            "$CDN_BASE_URL/release-notes.json" -o published-release-notes.json
-          cat published.json
-          test "$(node -p 'require("./published.json").version')" = "$version"
-          test "$(node -p 'require("./published-release-notes.json")[0].version')" = "$version"
-          for url in $(node -p '
-            const feed = require("./published.json");
-            [...Object.values(feed.platforms), ...Object.values(feed.downloads)].map((p) => p.url).join("\n")
-          '); do
-            curl -fsI --retry 5 --retry-all-errors --retry-delay 5 "$url" > /dev/null
-          done
-
-      - name: Prune old versions
-        # Only the 5 most recent versions stay in the bucket; run after the
-        # re-fetch check so a broken publish never costs an old, working
-        # version. latest.json and anything not named
-        # rbxport-<semver>-... are never touched.
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          BUCKET: ${{ vars.R2_BUCKET }}
-        run: |
-          set -euo pipefail
-          aws s3api list-objects-v2 --bucket "$BUCKET" --endpoint-url "$ENDPOINT" \
-            --query 'Contents[].Key' --output json > /tmp/keys.json
-          node -e '
-            const fs = require("fs");
-            const keys = JSON.parse(fs.readFileSync("/tmp/keys.json", "utf8")) || [];
-            const versions = new Set();
-            for (const key of keys) {
-              const m = /^rbxport-(\d+\.\d+\.\d+)-/.exec(key);
-              if (m) versions.add(m[1]);
-            }
-            const sorted = [...versions].sort((a, b) => {
-              const pa = a.split(".").map(Number);
-              const pb = b.split(".").map(Number);
-              for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pb[i] - pa[i];
-              return 0;
-            });
-            const keep = new Set(sorted.slice(0, 5));
-            const drop = keys.filter((key) => {
-              const m = /^rbxport-(\d+\.\d+\.\d+)-/.exec(key);
-              return m && !keep.has(m[1]);
-            });
-            console.log("keeping", sorted.slice(0, 5).join(", ") || "(nothing published yet)");
-            console.log("deleting", drop.length, "objects from", sorted.slice(5).join(", ") || "(nothing to prune)");
-            fs.writeFileSync("/tmp/delete.json", JSON.stringify({ Objects: drop.map((Key) => ({ Key })), Quiet: true }));
-          '
-          if [ "$(node -p 'require("/tmp/delete.json").Objects.length')" -gt 0 ]; then
-            aws s3api delete-objects --bucket "$BUCKET" --endpoint-url "$ENDPOINT" \
-              --delete file:///tmp/delete.json
-          fi
-
-      # Last on purpose: the release has passed every build, signing, upload,
-      # and public-download check before Discord hears about it.
-      - name: Send release notes to Discord
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
-        run: |
-          set -euo pipefail
-          test -n "$DISCORD_WEBHOOK_URL"
-          version="${RELEASE_TAG#v}"
-
-          node scripts/release-notes.mjs discord release-notes.json "$version" \
-            /tmp/discord-release.json https://rbxport.com/whats-new/
-
-          status="$(curl -sS -o /tmp/discord-response.txt -w '%{http_code}' \
-            -H 'Content-Type: application/json' \
-            --data-binary @/tmp/discord-release.json \
-            "$DISCORD_WEBHOOK_URL?wait=true")"
-          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
-            echo "Discord webhook failed with HTTP $status"
-            sed -n '1,10p' /tmp/discord-response.txt
-            exit 1
-          fi
-          echo "Release notes sent to Discord channel 1552182049832439838"
+    uses: ./.github/workflows/release-publish.yml
+    secrets: inherit
+    with:
+      source_ref: ${{ needs.promote.outputs.source_ref }}
+      release_tag: ${{ needs.promote.outputs.release_tag }}
 
   store-submit:
     name: Submit Microsoft Store update
-    # Runs only after the signed release is publicly available from R2. The
-    # Store still performs certification asynchronously after submission.
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
       needs.prepare.outputs.release == 'true' &&
       needs.promote.result == 'success' && needs.build-other.result == 'success' &&
       needs.publish.result == 'success'
     needs: [prepare, promote, build-other, publish]
-    runs-on: [self-hosted, windows, x64]
-    environment: microsoft-store
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Download the Windows release artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: installers-x86_64-pc-windows-msvc
-          path: out
-
-      - name: Verify the Store package identity
-        id: package
-        shell: pwsh
-        run: |
-          $packages = @(Get-ChildItem out\*.msix)
-          if ($packages.Count -ne 1) {
-            throw "Expected exactly one MSIX package, found $($packages.Count)."
-          }
-
-          $windowsKits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-          $makeAppx = Get-ChildItem -LiteralPath $windowsKits -Filter makeappx.exe -Recurse -File |
-            Where-Object { $_.Directory.Name -eq "x64" } |
-            Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
-            Select-Object -First 1
-          if (-not $makeAppx) { throw "makeappx.exe was not found under $windowsKits." }
-
-          $unpacked = Join-Path $env:RUNNER_TEMP "rbxport-store-verify"
-          Remove-Item $unpacked -Recurse -Force -ErrorAction SilentlyContinue
-          & $makeAppx.FullName unpack /o /p $packages[0].FullName /d $unpacked
-          if ($LASTEXITCODE -ne 0) { throw "MakeAppx could not unpack the MSIX." }
-
-          [xml]$manifest = Get-Content (Join-Path $unpacked "AppxManifest.xml")
-          $identity = $manifest.Package.Identity
-          if ($identity.Name -ne "TRIODE.rbxport") {
-            throw "Unexpected MSIX identity name: $($identity.Name)"
-          }
-          if ($identity.Publisher -ne "CN=1A596007-9476-4408-86AC-A8062FB89DF1") {
-            throw "Unexpected MSIX publisher: $($identity.Publisher)"
-          }
-          if ($identity.ProcessorArchitecture -ne "x64") {
-            throw "Unexpected MSIX architecture: $($identity.ProcessorArchitecture)"
-          }
-          $expectedLanguages = @(
-            "en-us", "fr-fr", "de-de", "es-es", "it-it", "nl-nl", "ru-ru", "pt-pt", "sv-se",
-            "da-dk", "tr-tr", "el-gr", "hu-hu", "cs-cz", "zh-cn", "zh-tw", "ko-kr", "ja-jp"
-          )
-          $actualLanguages = @($manifest.Package.Resources.Resource | ForEach-Object { $_.Language })
-          if ((Compare-Object $expectedLanguages $actualLanguages).Count -ne 0) {
-            throw "Unexpected MSIX languages: $($actualLanguages -join ', ')"
-          }
-
-          "path=$($packages[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Submitting $($packages[0].Name), version $($identity.Version)"
-
-      # microsoft-store-apppublisher@v1.4 delegates extraction to the runner's
-      # Node tool-cache. On our self-hosted Windows runner, Node 24 downloads
-      # the archive to an extensionless temporary filename, which PowerShell's
-      # Expand-Archive rejects. Fetch the same official CLI release explicitly
-      # so the ZIP keeps its extension and verify its published checksum.
-      - name: Install Microsoft Store Developer CLI
-        shell: pwsh
-        run: |
-          $version = 'v0.4.3'
-          $archive = Join-Path $env:RUNNER_TEMP 'MSStoreCLI-win-x64.zip'
-          $installDir = Join-Path $env:RUNNER_TEMP 'msstore-cli'
-          $expectedSha256 = 'c5fb008b616f96b1b55f1d52e4e0a5dd8f6c156129b5f52f9b97ec0eed11bd57'
-          $url = "https://github.com/microsoft/msstore-cli/releases/download/$version/MSStoreCLI-win-x64.zip"
-
-          Invoke-WebRequest -Uri $url -OutFile $archive
-          $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
-          if ($actualSha256 -ne $expectedSha256) {
-            throw "Microsoft Store CLI checksum mismatch: expected $expectedSha256, got $actualSha256."
-          }
-
-          Expand-Archive -LiteralPath $archive -DestinationPath $installDir -Force
-          $cli = Join-Path $installDir 'msstore.exe'
-          if (-not (Test-Path -LiteralPath $cli)) { throw "msstore.exe was not found after extraction." }
-          $installDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          & $cli --version
-
-      - name: Configure Partner Center credentials
-        shell: pwsh
-        run: |
-          msstore reconfigure `
-            --tenantId '${{ secrets.PARTNER_CENTER_TENANT_ID }}' `
-            --sellerId '${{ secrets.PARTNER_CENTER_SELLER_ID }}' `
-            --clientId '${{ secrets.PARTNER_CENTER_CLIENT_ID }}' `
-            --clientSecret '${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}'
-
-      - name: Submit package for certification
-        shell: pwsh
-        run: |
-          # Omitting --noCommit submits the package instead of leaving a draft.
-          msstore publish '${{ steps.package.outputs.path }}' `
-            --appId '${{ vars.MS_STORE_PRODUCT_ID }}'
-          msstore submission status '${{ vars.MS_STORE_PRODUCT_ID }}'
+    uses: ./.github/workflows/release-store.yml
+    secrets: inherit

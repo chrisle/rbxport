@@ -1,0 +1,146 @@
+name: Package installer
+description: Build and collect one platform's release artifacts.
+
+inputs:
+  target:
+    description: Rust compilation target.
+    required: true
+  bundles:
+    description: Comma-separated Tauri bundle formats.
+    required: true
+  slug:
+    description: Platform slug used in published filenames.
+    required: true
+  apple_signing_identity:
+    description: Developer ID identity selected by Tauri.
+    required: false
+  apple_id:
+    description: Apple account used for notarization.
+    required: false
+  apple_password:
+    description: App-specific Apple account password.
+    required: false
+  apple_team_id:
+    description: Apple developer team identifier.
+    required: false
+  azure_tenant_id:
+    description: Azure service principal tenant.
+    required: false
+  azure_client_id:
+    description: Azure service principal client identifier.
+    required: false
+  azure_client_secret:
+    description: Azure service principal secret.
+    required: false
+  tauri_signing_private_key:
+    description: Private key for Tauri updater signatures.
+    required: false
+  tauri_signing_private_key_password:
+    description: Password for the Tauri updater key.
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Clear prior bundle artifacts
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        bundle_dir="${CARGO_TARGET_DIR:-target}/$TARGET/release/bundle"
+        case "$bundle_dir" in
+          */release/bundle) rm -rf "$bundle_dir" ;;
+          *) echo "::error::refusing unexpected bundle directory: $bundle_dir"; exit 1 ;;
+        esac
+
+    - name: Build
+      uses: tauri-apps/tauri-action@v0
+      env:
+        APPLE_SIGNING_IDENTITY: ${{ inputs.apple_signing_identity }}
+        APPLE_ID: ${{ inputs.apple_id }}
+        APPLE_PASSWORD: ${{ inputs.apple_password }}
+        APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+        AZURE_TENANT_ID: ${{ inputs.azure_tenant_id }}
+        AZURE_CLIENT_ID: ${{ inputs.azure_client_id }}
+        AZURE_CLIENT_SECRET: ${{ inputs.azure_client_secret }}
+        TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.tauri_signing_private_key }}
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.tauri_signing_private_key_password }}
+        CI: "true"
+        TAURI_BUNDLER_DMG_IGNORE_CI: "false"
+        AZURE_CORE_ENCRYPT_TOKEN_CACHE: "false"
+        APPIMAGE_EXTRACT_AND_RUN: "1"
+      with:
+        args: --target ${{ inputs.target }} --bundles ${{ inputs.bundles }} --verbose
+
+    - name: Verify Mac architecture
+      if: runner.os == 'macOS'
+      shell: bash
+      env:
+        EXPECTED_ARCH: ${{ inputs.slug == 'darwin-aarch64' && 'arm64' || 'x86_64' }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        binary="${CARGO_TARGET_DIR:-target}/$TARGET/release/bundle/macos/rbxport.app/Contents/MacOS/rbxport"
+        actual="$(lipo -archs "$binary")"
+        if [ "$actual" != "$EXPECTED_ARCH" ]; then
+          echo "::error::Expected $EXPECTED_ARCH, got $actual"
+          exit 1
+        fi
+
+    - name: Build the Microsoft Store MSIX package
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $bundle = "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/bundle/msix"
+        $msix = "$bundle/rbxport_${env:RELEASE_VERSION}_x64.msix"
+        .\scripts\package-msix.ps1 `
+          -Executable "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/rbxport.exe" `
+          -Version $env:RELEASE_VERSION `
+          -Output $msix
+
+    - name: Collect the installers
+      shell: bash
+      env:
+        SLUG: ${{ inputs.slug }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        mkdir -p out
+        find "${CARGO_TARGET_DIR:-target}/$TARGET/release/bundle" -type f ! -name 'rw.*' \
+          \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \
+             -o -path '*/bundle/nsis/*-setup.exe.sig' \
+             -o -path '*/bundle/msix/*.msix' \
+             -o -path '*/bundle/macos/*.app.tar.gz' -o -path '*/bundle/macos/*.app.tar.gz.sig' \
+             -o -path '*/bundle/appimage/*.AppImage' -o -path '*/bundle/appimage/*.AppImage.sig' \
+             -o -path '*/bundle/deb/*.deb' -o -path '*/bundle/deb/*.deb.sig' \) \
+          -exec cp {} out/ \; 2>/dev/null || true
+
+        for f in out/*; do
+          case "$f" in
+            *.dmg)            want="out/rbxport-${RELEASE_VERSION}-${SLUG}.dmg" ;;
+            *.app.tar.gz)     want="out/rbxport-${RELEASE_VERSION}-${SLUG}.app.tar.gz" ;;
+            *.app.tar.gz.sig) want="out/rbxport-${RELEASE_VERSION}-${SLUG}.app.tar.gz.sig" ;;
+            *-setup.exe)      want="out/rbxport-${RELEASE_VERSION}-${SLUG}-setup.exe" ;;
+            *-setup.exe.sig)  want="out/rbxport-${RELEASE_VERSION}-${SLUG}-setup.exe.sig" ;;
+            *.msix)           want="out/rbxport-${RELEASE_VERSION}-${SLUG}.msix" ;;
+            *.AppImage)       want="out/rbxport-${RELEASE_VERSION}-${SLUG}.AppImage" ;;
+            *.AppImage.sig)   want="out/rbxport-${RELEASE_VERSION}-${SLUG}.AppImage.sig" ;;
+            *.deb)            want="out/rbxport-${RELEASE_VERSION}-${SLUG}.deb" ;;
+            *.deb.sig)        want="out/rbxport-${RELEASE_VERSION}-${SLUG}.deb.sig" ;;
+            *) echo "::error::unexpected bundle $f"; exit 1 ;;
+          esac
+          [ "$f" = "$want" ] || mv "$f" "$want"
+        done
+        ls -l out
+
+        case "$SLUG" in
+          darwin-*)  sig="out/rbxport-${RELEASE_VERSION}-${SLUG}.app.tar.gz.sig" ;;
+          windows-*) sig="out/rbxport-${RELEASE_VERSION}-${SLUG}-setup.exe.sig" ;;
+          linux-*)   sig="out/rbxport-${RELEASE_VERSION}-${SLUG}.AppImage.sig" ;;
+        esac
+        if [ ! -s "$sig" ]; then
+          echo "::error::no updater signature at $sig"
+          exit 1
+        fi
+        test "$(find out -type f | wc -l)" -gt 0

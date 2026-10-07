@@ -1,0 +1,170 @@
+name: Shared validation
+
+# Coordinates independently selectable validation lanes. Pull requests pass a
+# path-derived plan; releases use the defaults and therefore run every lane.
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: "Immutable commit SHA or ref to validate"
+        required: true
+        type: string
+      base_ref:
+        description: "PR base SHA used to narrow affected tests"
+        required: false
+        default: ""
+        type: string
+      full:
+        description: "Run exhaustive deploy validation instead of focused PR checks"
+        required: false
+        default: true
+        type: boolean
+      skip_tests:
+        required: false
+        default: false
+        type: boolean
+      validate_rust:
+        required: false
+        default: true
+        type: boolean
+      validate_windows_rust:
+        required: false
+        default: true
+        type: boolean
+      validate_windows_file_drop:
+        required: false
+        default: true
+        type: boolean
+      validate_linux:
+        required: false
+        default: true
+        type: boolean
+      validate_macos:
+        required: false
+        default: true
+        type: boolean
+      validate_scripts:
+        required: false
+        default: true
+        type: boolean
+      validate_frontend_lint:
+        required: false
+        default: true
+        type: boolean
+      validate_frontend_typecheck:
+        required: false
+        default: true
+        type: boolean
+      validate_frontend_build:
+        required: false
+        default: true
+        type: boolean
+      validate_frontend_unit:
+        required: false
+        default: true
+        type: boolean
+      validate_frontend_e2e:
+        required: false
+        default: true
+        type: boolean
+      validate_frontend_budget:
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust checks
+    if: ${{ !inputs.skip_tests && inputs.validate_rust }}
+    uses: ./.github/workflows/validate-rust.yml
+    with:
+      source_ref: ${{ inputs.source_ref }}
+      base_ref: ${{ inputs.base_ref }}
+      full: ${{ inputs.full }}
+
+  windows:
+    name: Windows
+    if: >-
+      !inputs.skip_tests &&
+      (inputs.validate_windows_rust || inputs.validate_windows_file_drop)
+    uses: ./.github/workflows/validate-windows.yml
+    with:
+      source_ref: ${{ inputs.source_ref }}
+      check_rust: ${{ inputs.validate_windows_rust }}
+      check_file_drop: ${{ inputs.validate_windows_file_drop }}
+
+  linux-window:
+    name: Linux window
+    needs: rust
+    if: >-
+      always() && !inputs.skip_tests && inputs.validate_linux &&
+      (!inputs.validate_rust || needs.rust.result == 'success')
+    uses: ./.github/workflows/validate-linux.yml
+    with:
+      source_ref: ${{ inputs.source_ref }}
+
+  scripts:
+    name: Node scripts
+    if: ${{ !inputs.skip_tests && inputs.validate_scripts }}
+    uses: ./.github/workflows/validate-scripts.yml
+    with:
+      source_ref: ${{ inputs.source_ref }}
+
+  frontend:
+    name: Frontend
+    if: >-
+      !inputs.skip_tests && (inputs.validate_frontend_lint ||
+      inputs.validate_frontend_typecheck || inputs.validate_frontend_build ||
+      inputs.validate_frontend_unit ||
+      inputs.validate_frontend_e2e || inputs.validate_frontend_budget)
+    uses: ./.github/workflows/validate-frontend.yml
+    with:
+      source_ref: ${{ inputs.source_ref }}
+      base_ref: ${{ inputs.base_ref }}
+      full: ${{ inputs.full }}
+      run_lint: ${{ inputs.validate_frontend_lint }}
+      run_typecheck: ${{ inputs.validate_frontend_typecheck }}
+      run_build: ${{ inputs.validate_frontend_build }}
+      run_unit: ${{ inputs.validate_frontend_unit }}
+      run_e2e: ${{ inputs.validate_frontend_e2e }}
+      run_budget: ${{ inputs.validate_frontend_budget }}
+
+  macos-intel:
+    name: Intel macOS
+    needs: frontend
+    if: >-
+      always() && !inputs.skip_tests && inputs.validate_macos &&
+      (!(inputs.validate_frontend_lint || inputs.validate_frontend_typecheck ||
+      inputs.validate_frontend_build ||
+      inputs.validate_frontend_unit || inputs.validate_frontend_e2e ||
+      inputs.validate_frontend_budget) || needs.frontend.result == 'success')
+    uses: ./.github/workflows/validate-macos.yml
+    with:
+      source_ref: ${{ inputs.source_ref }}
+
+  validated:
+    name: Validation complete
+    needs: [rust, windows, linux-window, scripts, frontend, macos-intel]
+    if: >-
+      always() && (inputs.skip_tests ||
+      ((!inputs.validate_rust || needs.rust.result == 'success') &&
+      (!(inputs.validate_windows_rust || inputs.validate_windows_file_drop) ||
+      needs.windows.result == 'success') &&
+      (!inputs.validate_linux || needs.linux-window.result == 'success') &&
+      (!inputs.validate_scripts || needs.scripts.result == 'success') &&
+      (!(inputs.validate_frontend_lint || inputs.validate_frontend_typecheck ||
+      inputs.validate_frontend_build ||
+      inputs.validate_frontend_unit || inputs.validate_frontend_e2e ||
+      inputs.validate_frontend_budget) || needs.frontend.result == 'success') &&
+      (!inputs.validate_macos || needs.macos-intel.result == 'success')))
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - run: |
+          if [ "${{ inputs.skip_tests }}" = true ]; then
+            echo "Tests were explicitly skipped for previously validated ${{ inputs.source_ref }}."
+          else
+            echo "Requested validation gates passed for ${{ inputs.source_ref }}."
+          fi

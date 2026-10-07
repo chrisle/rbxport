@@ -1,0 +1,143 @@
+name: Validate Rust
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+      base_ref:
+        required: false
+        default: ""
+        type: string
+      full:
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RBXPORT_TEST: "1"
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Install the Linux build dependencies
+        run: |
+          sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
+            apt-get update && \
+            apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+              librsvg2-dev patchelf libgtk-3-dev libasound2-dev'
+
+      - name: Ensure rustup
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Give cargo a home of its own
+        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+
+      - name: Resolve affected packages
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          FULL: ${{ inputs.full }}
+        run: |
+          set -euo pipefail
+          if [ "$FULL" = true ] || [ -z "$BASE_REF" ]; then
+            echo "RUST_PACKAGES=--workspace" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          metadata="$RUNNER_TEMP/cargo-metadata.json"
+          cargo metadata --format-version 1 --no-deps > "$metadata"
+          mapfile -t packages < <(
+            git diff --name-only -z "$BASE_REF...HEAD" \
+              | node scripts/ci/affected-rust-packages.mjs "$metadata"
+          )
+          echo "RUST_PACKAGES=${packages[*]}" >> "$GITHUB_ENV"
+
+      - name: Clippy
+        run: |
+          read -ra packages <<< "$RUST_PACKAGES"
+          if [ "${packages[0]}" = --workspace ]; then
+            cargo clippy --workspace --all-targets -- -D warnings
+          else
+            args=()
+            for package in "${packages[@]}"; do args+=(-p "$package"); done
+            printf 'Linting affected Rust packages: %s\n' "${packages[*]}"
+            cargo clippy "${args[@]}" --all-targets -- -D warnings
+          fi
+
+      - name: Tests
+        run: |
+          set -euo pipefail
+          read -ra packages <<< "$RUST_PACKAGES"
+          if [ "${packages[0]}" = --workspace ]; then
+            cargo test --workspace
+            exit 0
+          fi
+          args=()
+          for package in "${packages[@]}"; do args+=(-p "$package"); done
+          printf 'Testing affected Rust packages: %s\n' "${packages[*]}"
+          cargo test "${args[@]}"
+
+  msrv:
+    name: Rust MSRV check
+    needs: rust
+    if: inputs.full
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Install the Linux build dependencies
+        run: |
+          sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
+            apt-get update && \
+            apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+              librsvg2-dev patchelf libgtk-3-dev libasound2-dev'
+
+      - name: Ensure rustup
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Give cargo a home of its own
+        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.89.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+
+      - name: Check the declared MSRV
+        run: cargo +1.89.0 check --workspace --all-targets

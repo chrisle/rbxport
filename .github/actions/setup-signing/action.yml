@@ -1,0 +1,93 @@
+name: Set up installer signing
+description: Configure ephemeral Apple and Azure signing state.
+
+inputs:
+  azure_endpoint:
+    description: Azure Artifact Signing endpoint.
+    required: false
+  azure_account_name:
+    description: Azure Artifact Signing account.
+    required: false
+  azure_cert_profile:
+    description: Azure Artifact Signing certificate profile.
+    required: false
+  apple_certificate:
+    description: Base64-encoded Apple signing certificate.
+    required: false
+  apple_certificate_password:
+    description: Password for the Apple signing certificate.
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure the Azure CLI
+      if: runner.os == 'Windows' && env.HAVE_AZURE == 'true'
+      shell: pwsh
+      run: |
+        $az = "$env:ProgramFiles\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+        if (-not (Test-Path $az)) {
+          winget install --id Microsoft.AzureCLI --exact --silent `
+            --accept-package-agreements --accept-source-agreements --disable-interactivity
+          if (-not (Test-Path $az)) { throw "Azure CLI installed but $az is missing" }
+        }
+
+    - name: Teach the Windows bundler to sign
+      if: runner.os == 'Windows'
+      shell: bash
+      env:
+        AZURE_SIGNING_ENDPOINT: ${{ inputs.azure_endpoint }}
+        AZURE_SIGNING_ACCOUNT_NAME: ${{ inputs.azure_account_name }}
+        AZURE_SIGNING_CERT_PROFILE: ${{ inputs.azure_cert_profile }}
+      run: |
+        set -euo pipefail
+        if [ -z "${AZURE_SIGNING_ACCOUNT_NAME:-}" ]; then
+          echo "No Azure signing account — the installer will be unsigned."
+          exit 0
+        fi
+        cargo install artifact-signing-cli --version 0.11.0 --locked
+        node -e '
+          const fs = require("fs");
+          const file = "src-tauri/tauri.conf.json";
+          const json = JSON.parse(fs.readFileSync(file, "utf8"));
+          json.bundle.windows.signCommand = {
+            cmd: "artifact-signing-cli",
+            args: [
+              "-e", process.env.AZURE_SIGNING_ENDPOINT,
+              "-a", process.env.AZURE_SIGNING_ACCOUNT_NAME,
+              "-c", process.env.AZURE_SIGNING_CERT_PROFILE,
+              "%1",
+            ],
+          };
+          fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+        '
+
+    - name: Set up the signing keychain
+      if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
+      shell: bash
+      env:
+        APPLE_CERTIFICATE: ${{ inputs.apple_certificate }}
+        APPLE_CERTIFICATE_PASSWORD: ${{ inputs.apple_certificate_password }}
+      run: |
+        set -euo pipefail
+        KEYCHAIN="$RUNNER_TEMP/rbxport-signing.keychain-db"
+        KEYCHAIN_PASSWORD="$(uuidgen)"
+        echo "::add-mask::$KEYCHAIN_PASSWORD"
+        security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+        security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN"
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+        trap 'rm -f "$RUNNER_TEMP/cert.p12"' EXIT
+        printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+        chmod 600 "$RUNNER_TEMP/cert.p12"
+        security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+          -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+        security set-key-partition-list -S apple-tool:,apple:,codesign: \
+          -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+        others="$(security list-keychains -d user | sed 's/^ *"//;s/"$//' |
+          while IFS= read -r k; do
+            if [ -f "$k" ] && [ "$k" != "$KEYCHAIN" ]; then printf '%s\n' "$k"; fi
+          done)"
+        # shellcheck disable=SC2086
+        security list-keychains -d user -s "$KEYCHAIN" $others
+        security find-identity -v -p codesigning "$KEYCHAIN"

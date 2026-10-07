@@ -1,0 +1,76 @@
+name: Validate Intel macOS
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RBXPORT_TEST: "1"
+
+jobs:
+  intel-runtime:
+    name: Intel macOS runtime smoke
+    runs-on: [self-hosted, macos, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Prepare the Intel macOS runtime smoke
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config-intel
+          XDG_DATA_HOME: ${{ runner.temp }}/xdg-data-intel
+        run: |
+          set -euo pipefail
+          if ! arch -x86_64 /usr/bin/true; then
+            echo "::error::Rosetta is required to validate the Intel macOS build."
+            exit 1
+          fi
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+          targets: x86_64-apple-darwin
+
+      - name: Build the Intel macOS shell without bundling
+        run: pnpm tauri build --target x86_64-apple-darwin --debug --no-bundle --ci
+
+      - name: Require the Intel macOS shell to stay running
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config-intel
+          XDG_DATA_HOME: ${{ runner.temp }}/xdg-data-intel
+        run: |
+          set -euo pipefail
+          binary=target/x86_64-apple-darwin/debug/rbxport
+          log="$RUNNER_TEMP/rbxport-intel-window.log"
+          arch -x86_64 "$binary" >"$log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
+          sleep 10
+          if ! kill -0 "$pid" 2>/dev/null; then
+            cat "$log"
+            echo "::error::Intel macOS shell exited before the runtime smoke completed"
+            exit 1
+          fi

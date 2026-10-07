@@ -1,5 +1,7 @@
 name: Build installer
 
+# Platform-agnostic coordinator. The local actions below own toolchain setup,
+# ephemeral signing state, packaging, and verification independently.
 on:
   workflow_call:
     inputs:
@@ -25,25 +27,18 @@ on:
         required: true
         type: boolean
 
-env:
-  CARGO_TERM_COLOR: always
-  RELEASE_TAG: ${{ inputs.release_tag }}
-  PREVIEW: ${{ inputs.preview }}
+permissions:
+  contents: read
 
 jobs:
   build:
     name: Package
     runs-on: ${{ fromJSON(inputs.host) }}
     env:
-      # `secrets` is not a context a step `if:` can read, so whether there is
-      # anything to sign with is decided once, here.
+      CARGO_TERM_COLOR: always
       HAVE_APPLE: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
       HAVE_AZURE: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME != '' }}
     steps:
-      # First, before any `shell: bash` step: bash resolves from PATH, and on a
-      # Windows desktop the WindowsApps WSL stub shadows Git's bash. WSL bash
-      # cannot see the runner's workspace under its Windows path, so the
-      # version step below would fail on a path that plainly exists.
       - name: Put Git Bash ahead of the WSL stub
         if: runner.os == 'Windows'
         shell: pwsh
@@ -58,620 +53,51 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
 
-      - name: Install the Linux build dependencies
-        # CI's Linux list, which is what proves the workspace compiles there
-        # — the webview and tray libraries the Tauri shell links against,
-        # patchelf for the AppImage's rewritten library paths, ALSA for
-        # rbl-deck's cpal — plus what bundling needs on top of compiling:
-        # xdg-utils, because the AppImage bundler copies /usr/bin/xdg-open
-        # into the image for the opener plugin and fails outright without
-        # it (the first Linux dispatch, on a VM without a desktop, died on
-        # exactly that line after the .deb had already been written), and
-        # file, which linuxdeploy calls to classify what it bundles.
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf libgtk-3-dev libasound2-dev xdg-utils file
-
-      # setup-node, never the host's node: the arc hosts have node under nvm or
-      # in a location the runner's environment does not see.
-      - uses: pnpm/action-setup@v4
+      - name: Set up builder
+        uses: ./.github/actions/setup-builder
         with:
-          # Its default is `~/setup-pnpm`, one fixed path per host. Two jobs on
-          # the same Mac — a CI run and a release, say — both installing there
-          # at once is how the first release's macOS build failed before it had
-          # done anything: `ENOTEMPTY: directory not empty` from the loser of
-          # the race. RUNNER_TEMP belongs to one runner, and each arc runner is
-          # its own throwaway.
-          dest: ${{ runner.temp }}/setup-pnpm
-      - uses: actions/setup-node@v4
+          target: ${{ inputs.target }}
+          release_tag: ${{ inputs.release_tag }}
+          preview: ${{ inputs.preview }}
+
+      - name: Set up signing
+        uses: ./.github/actions/setup-signing
         with:
-          node-version: 24
-          cache: pnpm
+          azure_endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          azure_account_name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          azure_cert_profile: ${{ secrets.AZURE_SIGNING_CERT_PROFILE }}
+          apple_certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          apple_certificate_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
-      # dtolnay/rust-toolchain drives rustup; it does not install it. Hosted
-      # images ship rustup, an arc host need not — the Windows desktop had a
-      # rustup-less Rust in ~/.cargo/bin, which is exactly the shape that
-      # action cannot work with.
-      - name: Ensure rustup
-        if: runner.os != 'Windows'
-        run: |
-          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Give cargo a home of its own
-        # rustup and its shims stay in ~/.cargo/bin (above); the registry and
-        # git checkouts move to this runner's temp directory. ~/.cargo is
-        # shared by every job on the host, including other repositories'
-        # jobs, and rust-cache deletes ~/.cargo/registry/src when a job ends.
-        # In v1.0.0-rc.4 an rbx-restore job finished during this build, and
-        # the Mac ARM build failed on a serde source file that was no longer
-        # there. rust-cache reads CARGO_HOME, so it caches this directory.
-        if: runner.os != 'Windows'
-        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
-
-      - name: Ensure rustup
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $cargoBin = "$env:USERPROFILE\.cargo\bin"
-          if (-not (Test-Path "$cargoBin\rustup.exe")) {
-            $init = "$env:TEMP\rustup-init.exe"
-            Invoke-WebRequest -UseBasicParsing https://win.rustup.rs/x86_64 -OutFile $init
-            & $init -y --no-modify-path --profile minimal --default-toolchain stable
-            if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with exit code $LASTEXITCODE" }
-          }
-          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
-
-      - name: Ensure perl for the vendored OpenSSL
-        # rusqlite's `bundled-sqlcipher-vendored-openssl` builds OpenSSL from
-        # source, and OpenSSL is configured by a perl script.
-        #
-        # Strawberry rather than the perl inside Git for Windows: OpenSSL's
-        # Configure emits msys-style paths under that one and the MSVC build
-        # then cannot find its own files. OPENSSL_SRC_PERL is read by
-        # openssl-src and points it at this interpreter specifically.
-        #
-        # nasm is deliberately not installed: openssl-src falls back to
-        # `no-asm` when it is absent, which is slower crypto in a build that
-        # only ever opens a local SQLite file.
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $perl = "C:\Strawberry\perl\bin\perl.exe"
-          if (-not (Test-Path $perl)) {
-            winget install --id StrawberryPerl.StrawberryPerl --exact --silent `
-              --accept-package-agreements --accept-source-agreements --disable-interactivity
-            if (-not (Test-Path $perl)) { throw "Strawberry Perl installed but $perl is missing" }
-          }
-          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
-          "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
-
-      - name: Keep the Windows target directory short
-        # The first release died here with OpenSSL's Configure reporting
-        # dozens of its own source files "missing". They were not missing;
-        # their paths were too long. The runner's workspace already sits ~95
-        # characters deep (`C:\Users\…\.arc\instances\windows\<runner>\_work\
-        # rbxport\rbxport`), openssl-src copies its tree under
-        # `target\<triple>\release\build\openssl-sys-<hash>\out\openssl-build\`
-        # on top of that, and the deepest files then cross MAX_PATH (260) and
-        # silently fail to copy. A short target directory outside the
-        # workspace keeps the longest path near 180.
-        #
-        # It is also this host's build cache: the directory outlives the
-        # ephemeral runner, so the second release does not rebuild OpenSSL.
-        # rust-cache cannot cache it (it only knows paths relative to the
-        # workspace), and does not need to.
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          "CARGO_TARGET_DIR=C:/rbl-target" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
-
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Package installer
+        uses: ./.github/actions/package-installer
         with:
-          toolchain: 1.99.0
-          targets: ${{ inputs.target }}
+          target: ${{ inputs.target }}
+          bundles: ${{ inputs.bundles }}
+          slug: ${{ inputs.slug }}
+          apple_signing_identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          apple_id: ${{ secrets.APPLE_ID }}
+          apple_password: ${{ secrets.APPLE_PASSWORD }}
+          apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          tauri_signing_private_key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          tauri_signing_private_key_password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - uses: Swatinem/rust-cache@v2
-        # Not on Windows. That host builds into a persistent C:/rbl-target
-        # (above) with a persistent ~/.cargo beside it, so it already has
-        # both caches; rust-cache adds nothing there and takes something
-        # away: on save it deletes ~/.cargo/registry/src, and the next build
-        # finds the target directory "fresh" while the source trees its
-        # cached build-script outputs link against are gone —
-        # `LNK1181: cannot open input file 'windows.0.52.0.lib'`. On the Mac
-        # the workspace is wiped with the runner, so the cache is the only
-        # thing that carries `target` from one release to the next.
-        if: runner.os != 'Windows'
+      - name: Verify installer
+        uses: ./.github/actions/verify-installer
         with:
-          # No `workspaces:` — this repo's workspace root is the repository
-          # root and it builds into `target` there, which is the default.
-          # `src-tauri` used to be named here, which made the action look for
-          # `src-tauri/target` and cache nothing.
-          #
-          # cache-bin caches ~/.cargo/bin and prunes it on restore, which on a
-          # self-hosted host means deleting the rustup the step above installed
-          # — and the shims every later step resolves through.
-          cache-bin: false
-          key: ${{ inputs.target }}
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: The version comes from the tag
-        # One source of truth. A build whose installer says 0.1.0 because a
-        # file was not bumped is worse than a build that fails here.
-        shell: bash
-        run: |
-          version="${RELEASE_TAG#v}"
-          if [ "$PREVIEW" == "true" ]; then
-            version="0.0.0-dev"
-          fi
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::invalid release version"; exit 1
-          fi
-          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-          node scripts/sync-version.mjs --version "$version"
-
-      - name: Ensure the Azure CLI for the signing tool
-        # artifact-signing-cli does not authenticate on its own: it shells out
-        # to `az`, and without it fails with "azure cli … does not exist",
-        # which the bundler reports only as "failed to run
-        # artifact-signing-cli". Hosted images ship the Azure CLI; the
-        # desktop did not, and the second release attempt died on exactly
-        # that line after a ten-minute build.
-        if: runner.os == 'Windows' && env.HAVE_AZURE == 'true'
-        shell: pwsh
-        run: |
-          $az = "$env:ProgramFiles\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
-          if (-not (Test-Path $az)) {
-            winget install --id Microsoft.AzureCLI --exact --silent `
-              --accept-package-agreements --accept-source-agreements --disable-interactivity
-            if (-not (Test-Path $az)) { throw "Azure CLI installed but $az is missing" }
-          }
-
-      - name: Teach the Windows bundler to sign
-        # Tauri has no Windows equivalent of `APPLE_CERTIFICATE`: checked
-        # against the CLI binary (2.11.4) and against `tauri-action`, and
-        # neither contains the string `WINDOWS_CERTIFICATE` at all. A pair of
-        # env vars by that name used to sit on the build step below and signed
-        # nothing. Windows signing is a `bundle.windows.signCommand`, and the
-        # certificate is Azure Artifact Signing — an HSM, so there is no `.pfx`
-        # for a thumbprint to point at.
-        #
-        # The command is written into the config here rather than checked in,
-        # so a build with no signing account still bundles, and so this file
-        # names no signing account of anyone's.
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
-          AZURE_SIGNING_CERT_PROFILE: ${{ secrets.AZURE_SIGNING_CERT_PROFILE }}
-        run: |
-          set -euo pipefail
-          if [ -z "${AZURE_SIGNING_ACCOUNT_NAME:-}" ]; then
-            echo "No Azure signing account — the installer will be unsigned."
-            exit 0
-          fi
-          # An Azure Artifact Signing certificate lives about three days, so
-          # the signature only outlives the week because the tool timestamps
-          # every file it signs.
-          cargo install artifact-signing-cli --version 0.11.0 --locked
-          node -e '
-            const fs = require("fs");
-            const file = "src-tauri/tauri.conf.json";
-            const json = JSON.parse(fs.readFileSync(file, "utf8"));
-            json.bundle.windows.signCommand = {
-              cmd: "artifact-signing-cli",
-              args: [
-                "-e", process.env.AZURE_SIGNING_ENDPOINT,
-                "-a", process.env.AZURE_SIGNING_ACCOUNT_NAME,
-                "-c", process.env.AZURE_SIGNING_CERT_PROFILE,
-                "%1",
-              ],
-            };
-            fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
-          '
-
-      - name: Set up the signing keychain
-        # Put the Developer ID identity somewhere codesign can reach it
-        # UNATTENDED. Without a partition list on the imported key, codesign
-        # asks the window server for permission and nobody ever answers: the
-        # job hangs for about five minutes and then fails with
-        # errSecInternalComponent.
-        #
-        # The keychain is created under RUNNER_TEMP, prepended to the search list
-        # rather than made the default — codesign searches the whole list, so
-        # there is no reason to displace what the machine's owner has set — and
-        # the teardown step below takes it off again.
-        #
-        # The search list is one per user, and other repositories' release
-        # jobs sign on the same Mac at the same time with the same scheme. So
-        # this job never snapshots the list and puts the snapshot back later:
-        # it edits the list as it stands at that moment and touches only its
-        # own entry. The snapshot version is what broke v1.0.0-rc.4. An
-        # rbx-restore job took its snapshot before this job's keychain was
-        # added and restored it mid-build, which removed this job's keychain
-        # from the list. codesign then found the same identity in a stale,
-        # locked keychain further down the list and failed with
-        # errSecInternalComponent.
-        if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          set -euo pipefail
-          KEYCHAIN="$RUNNER_TEMP/rbxport-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(uuidgen)"
-          echo "::add-mask::$KEYCHAIN_PASSWORD"
-
-          # A keychain left behind by a killed run would still be on the list,
-          # holding a password this run cannot know.
-          security delete-keychain "$KEYCHAIN" 2>/dev/null || true
-
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          # The default idle lock is five minutes, and notarisation alone
-          # outlasts that while the keychain sits untouched.
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-
-          # On a trap, not a trailing rm: with `set -e` a failed import would
-          # otherwise leave the Developer ID private key in a temp directory on
-          # a machine that is somebody's daily driver.
-          trap 'rm -f "$RUNNER_TEMP/cert.p12"' EXIT
-          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          chmod 600 "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
-            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-
-          # The line that fixes errSecInternalComponent.
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
-
-          # Prepended to the list as it is now, with the machine's own
-          # keychains kept after it. Entries whose file no longer exists are
-          # dropped. Killed jobs leave those behind, and they do nothing
-          # except make the list longer.
-          others="$(security list-keychains -d user | sed 's/^ *"//;s/"$//' |
-            while IFS= read -r k; do
-              if [ -f "$k" ] && [ "$k" != "$KEYCHAIN" ]; then printf '%s\n' "$k"; fi
-            done)"
-          # shellcheck disable=SC2086
-          security list-keychains -d user -s "$KEYCHAIN" $others
-
-          echo "Identities visible to codesign:"
-          security find-identity -v -p codesigning "$KEYCHAIN"
-
-      - name: Clear prior bundle artifacts
-        # `C:/rbl-target` persists on the Windows host to avoid MAX_PATH in
-        # OpenSSL. Tauri leaves prior installers beside a new bundle there;
-        # collecting every matching file published an old rekordbox-lite
-        # installer under a new rbxport release name. Only the final bundle
-        # directory is disposable, never the compiled target cache.
-        shell: bash
-        run: |
-          set -euo pipefail
-          bundle_dir="${CARGO_TARGET_DIR:-target}/${{ inputs.target }}/release/bundle"
-          case "$bundle_dir" in
-            */release/bundle) rm -rf "$bundle_dir" ;;
-            *) echo "::error::refusing unexpected bundle directory: $bundle_dir"; exit 1 ;;
-          esac
-
-      - name: Build
-        uses: tauri-apps/tauri-action@v0
-        env:
-          # Note what is NOT here: APPLE_CERTIFICATE. On a hosted runner Tauri
-          # imports it into a keychain of its own, which is fine on a machine
-          # that exists for one build. Here the identity is already on the
-          # search list, and letting Tauri import it a second time recreates
-          # the unattended-signing hang the step above just solved — observed
-          # as a 5m39s stall ending in errSecInternalComponent, after Tauri had
-          # printed a perfectly healthy "Signing with identity" line.
-          #
-          # APPLE_SIGNING_IDENTITY stays: it is what Tauri matches against the
-          # keychain. It is present only on the repository, so a fork builds
-          # unsigned rather than failing.
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # What the sign command above authenticates with. Azure's
-          # `EnvironmentCredential` looks for exactly these three names, which
-          # is why they lose the `_SIGNING` the vault stores them under.
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          # The in-app updater's own signature, over and above the OS ones:
-          # the bundler writes `.sig` beside each updater artifact (the
-          # `.app.tar.gz` on macOS, the setup .exe on Windows) with this
-          # minisign key, and the app refuses a download whose signature
-          # does not match the public key in tauri.conf.json. The key pair
-          # must remain stable; losing it prevents shipped apps from accepting
-          # another update.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # The DMG bundler arranges the disk image's window by driving
-          # Finder with AppleScript unless `CI` is "true", when it skips
-          # that. A hosted runner sets CI; an arc runner does not pass it on,
-          # and on chris-m2-mac — where arc is a LaunchAgent nobody has
-          # granted Automation consent — the AppleEvent to Finder times out
-          # (-1712) and every macOS release built there died at
-          # bundle_dmg.sh (0.5.1, three times). The disk image keeps the app
-          # and its Applications link; only the icon layout is default.
-          #
-          # Both lines are needed. tauri-action sets
-          # TAURI_BUNDLER_DMG_IGNORE_CI=true on macOS unless it is already
-          # set, which tells the bundler to ignore CI and drive Finder
-          # anyway — so CI=true alone changed nothing (found in its dist).
-          CI: "true"
-          TAURI_BUNDLER_DMG_IGNORE_CI: "false"
-          # artifact-signing-cli logs in with `az`, and on Windows `az` keeps
-          # its token cache DPAPI-encrypted — a key that exists only for a
-          # console logon with a password behind it. The runner is started
-          # by a scheduled task or over ssh, neither of which has one, so
-          # the login died on "Decryption failed: Key not valid for use in
-          # specified state" (a release on 2026-09-10, after the host had
-          # rebooted unattended). Plain files instead; the step below
-          # removes them once the installer is signed.
-          AZURE_CORE_ENCRYPT_TOKEN_CACHE: "false"
-          # The AppImage bundler downloads linuxdeploy, itself an AppImage,
-          # and runs it. An AppImage mounts itself with FUSE, which a VM's
-          # kernel or a distribution without libfuse2 may not offer; with
-          # this set it unpacks to a temp directory and runs from there
-          # instead, on any host.
-          APPIMAGE_EXTRACT_AND_RUN: "1"
-        with:
-          # `--verbose` is for the bundlers' own scripts: without it the DMG
-          # step's `bundle_dmg.sh` fails with "failed to run" and not a word
-          # of why, which is all the 0.5.1 log had when hdiutil gave up on
-          # the second Mac. With it, hdiutil's messages are in the log.
-          args: --target ${{ inputs.target }} --bundles ${{ inputs.bundles }} --verbose
-
-      - name: Verify Mac architecture
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          EXPECTED_ARCH: ${{ inputs.slug == 'darwin-aarch64' && 'arm64' || 'x86_64' }}
-        run: |
-          set -euo pipefail
-          binary="${CARGO_TARGET_DIR:-target}/${{ inputs.target }}/release/bundle/macos/rbxport.app/Contents/MacOS/rbxport"
-          actual="$(lipo -archs "$binary")"
-          if [ "$actual" != "$EXPECTED_ARCH" ]; then
-            echo "::error::Expected $EXPECTED_ARCH, got $actual"
-            exit 1
-          fi
-
-      - name: Build the Microsoft Store MSIX package
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $bundle = "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/bundle/msix"
-          $msix = "$bundle/rbxport_${env:RELEASE_VERSION}_x64.msix"
-          .\scripts\package-msix.ps1 `
-            -Executable "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/rbxport.exe" `
-            -Version $env:RELEASE_VERSION `
-            -Output $msix
-
-      - name: Collect the installers
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          # Collect only this target's bundles, never another architecture's
-          # cached output. Windows sets CARGO_TARGET_DIR outside the workspace.
-          # By path, and never the bundler's own working files: a failed DMG
-          # run leaves `rw.NNNNN.<name>.dmg` scratch images beside the real
-          # one, and a plain *.dmg glob picks those up. Found locally, with
-          # two of them sitting in the bundle directory.
-          # The updater's payloads come along: on macOS the app as a
-          # tarball (the DMG is for people, the tarball is what the app
-          # swaps itself for), on Windows the same setup .exe, on Linux the
-          # AppImage (the .deb is for people) — and the `.sig` the bundler
-          # wrote beside each. The MSIX is an additional human-facing Windows
-          # package; the NSIS installer remains the Tauri updater payload.
-          find "${CARGO_TARGET_DIR:-target}/${{ inputs.target }}/release/bundle" -type f ! -name 'rw.*' \
-            \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \
-               -o -path '*/bundle/nsis/*-setup.exe.sig' \
-               -o -path '*/bundle/msix/*.msix' \
-               -o -path '*/bundle/macos/*.app.tar.gz' -o -path '*/bundle/macos/*.app.tar.gz.sig' \
-               -o -path '*/bundle/appimage/*.AppImage' -o -path '*/bundle/appimage/*.AppImage.sig' \
-               -o -path '*/bundle/deb/*.deb' -o -path '*/bundle/deb/*.deb.sig' \) \
-            -exec cp {} out/ \; 2>/dev/null || true
-
-          # Renamed here, not at upload time, so the artifact and the object in
-          # the bucket carry the same name. The bundlers produce
-          # `rbxport_0.1.0_aarch64.dmg`, `rbxport_0.1.0_x64-setup.exe` and
-          # `rbxport_0.1.0_amd64.AppImage`; what gets published is
-          # `rbxport-<semver>-<platform>[-setup].<ext>`, which is the
-          # one shape a person can read, type and grep. Bare semver, because
-          # the leading `v` belongs to the tag and nothing else.
-          for f in out/*; do
-            case "$f" in
-              *.dmg)            want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.dmg" ;;
-              *.app.tar.gz)     want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.app.tar.gz" ;;
-              *.app.tar.gz.sig) want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.app.tar.gz.sig" ;;
-              *-setup.exe)      want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}-setup.exe" ;;
-              *-setup.exe.sig)  want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}-setup.exe.sig" ;;
-              *.msix)           want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.msix" ;;
-              *.AppImage)       want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.AppImage" ;;
-              *.AppImage.sig)   want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.AppImage.sig" ;;
-              *.deb)            want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.deb" ;;
-              *.deb.sig)        want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.deb.sig" ;;
-              *) echo "::error::unexpected bundle $f"; exit 1 ;;
-            esac
-            [ "$f" = "$want" ] || mv "$f" "$want"
-          done
-
-          ls -l out
-
-          # An installer without its updater signature is a release the app
-          # cannot take; better to find that here than in the feed. Said out
-          # loud: a bare `test -s` failed the first 0.5.0 build with nothing
-          # in the log but an exit code.
-          case "${{ inputs.slug }}" in
-            darwin-*)  sig="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.app.tar.gz.sig" ;;
-            windows-*) sig="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}-setup.exe.sig" ;;
-            linux-*)   sig="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.AppImage.sig" ;;
-          esac
-          if [ ! -s "$sig" ]; then
-            echo "::error::no updater signature at $sig — was the updater artifact bundled and TAURI_SIGNING_PRIVATE_KEY set?"
-            exit 1
-          fi
-          # A release that uploads nothing is worse than one that fails: it
-          # looks like it worked.
-          test "$(find out -type f | wc -l)" -gt 0
-
-      - name: Verify the Windows installer identity
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $installers = @(Get-ChildItem out\*-setup.exe)
-          if ($installers.Count -ne 1) { throw "Expected one Windows installer, found $($installers.Count)." }
-          $name = $installers[0].VersionInfo.ProductName
-          if ($name -ne "rbxport") { throw "Expected installer product name rbxport, got $name." }
-          $packages = @(Get-ChildItem out\*.msix)
-          if ($packages.Count -ne 1) { throw "Expected one MSIX package, found $($packages.Count)." }
-          $unpacked = Join-Path $env:RUNNER_TEMP "rbxport-msix-verify"
-          Remove-Item $unpacked -Recurse -Force -ErrorAction SilentlyContinue
-          $windowsKits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-          $makeAppx = Get-ChildItem -LiteralPath $windowsKits -Filter makeappx.exe -Recurse -File |
-            Where-Object { $_.Directory.Name -eq "x64" } |
-            Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
-            Select-Object -First 1
-          if (-not $makeAppx) { throw "makeappx.exe was not found under $windowsKits." }
-          & $makeAppx.FullName unpack /o /p $packages[0].FullName /d $unpacked
-          if ($LASTEXITCODE -ne 0) { throw "MakeAppx could not unpack the MSIX." }
-          [xml]$manifest = Get-Content (Join-Path $unpacked "AppxManifest.xml")
-          $identity = $manifest.Package.Identity
-          if ($identity.Name -ne "TRIODE.rbxport") { throw "Unexpected MSIX identity name: $($identity.Name)" }
-          if ($identity.Publisher -ne "CN=1A596007-9476-4408-86AC-A8062FB89DF1") {
-            throw "Unexpected MSIX publisher: $($identity.Publisher)"
-          }
-          if ($manifest.Package.Properties.PublisherDisplayName -ne "TRIODE") {
-            throw "Unexpected publisher display name: $($manifest.Package.Properties.PublisherDisplayName)"
-          }
-          $expectedLanguages = @(
-            "en-us", "fr-fr", "de-de", "es-es", "it-it", "nl-nl", "ru-ru", "pt-pt", "sv-se",
-            "da-dk", "tr-tr", "el-gr", "hu-hu", "cs-cz", "zh-cn", "zh-tw", "ko-kr", "ja-jp"
-          )
-          $actualLanguages = @($manifest.Package.Resources.Resource | ForEach-Object { $_.Language })
-          if ((Compare-Object $expectedLanguages $actualLanguages).Count -ne 0) {
-            throw "Unexpected MSIX languages: $($actualLanguages -join ', ')"
-          }
-
-      - name: The disk image is notarised too, not just the app inside it
-        # Tauri notarises and staples the `.app`, then puts it in a `.dmg` and
-        # signs that — and stops. The image a user actually downloads is
-        # therefore a signed but unnotarised Developer ID artifact, which
-        # Gatekeeper refuses on first open. Caught by the check below, which
-        # said `source=Unnotarized Developer ID` on an otherwise valid image.
-        #
-        # Notarising the copy in `out/` rather than the one under `target/` is
-        # deliberate: that is the file that gets uploaded.
-        if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
-        shell: bash
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          for dmg in out/*.dmg; do
-            xcrun notarytool submit "$dmg" \
-              --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
-              --wait
-            # Stapling is what makes it work for someone with no network.
-            xcrun stapler staple "$dmg"
-          done
-
-      # Signing failures are routinely non-fatal to a bundler, so a run that
-      # goes green is not evidence of a signed installer. Both checks below are
-      # gates only where there was a credential to sign with: without one the
-      # build is deliberately unsigned and has nothing to check.
-      - name: The macOS signature is checked, not assumed
-        if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          for dmg in out/*.dmg; do
-            codesign --verify --strict --verbose=2 "$dmg"
-            # The notarisation ticket, not just the signature. `open` is the
-            # right policy for a downloaded disk image; `install` is for pkgs.
-            spctl --assess --type open --context context:primary-signature -vv "$dmg"
-          done
-          # The updater's tarball is what an installed app swaps itself for,
-          # so the app inside it must carry the same signature as the DMG's.
-          for tarball in out/*.app.tar.gz; do
-            unpacked="$(mktemp -d)"
-            tar -xzf "$tarball" -C "$unpacked"
-            codesign --verify --strict --deep --verbose=2 "$unpacked"/*.app
-            rm -rf "$unpacked"
-          done
-
-      - name: The Windows signature is checked, not assumed
-        if: runner.os == 'Windows' && env.HAVE_AZURE == 'true'
-        shell: pwsh
-        run: |
-          $bad = 0
-          # Only the direct-download NSIS installer is Azure-signed here. The
-          # MSIX carries the Partner Center publisher identity and remains
-          # unsigned so the Microsoft Store can apply its own signature.
-          Get-ChildItem out\*.exe | ForEach-Object {
-            $sig = Get-AuthenticodeSignature $_.FullName
-            Write-Host "$($_.Name): $($sig.Status) $($sig.SignerCertificate.Subject)"
-            if ($sig.Status -ne "Valid") { $bad = 1 }
-            # An Artifact Signing certificate lives about three days, so an
-            # untimestamped signature is broken by the weekend.
-            if (-not $sig.TimeStamperCertificate) {
-              Write-Host "  no timestamp - this signature dies with the certificate"
-              $bad = 1
-            }
-          }
-          exit $bad
+          apple_id: ${{ secrets.APPLE_ID }}
+          apple_password: ${{ secrets.APPLE_PASSWORD }}
+          apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: installers-${{ inputs.target }}
           path: out/
-          # The Store MSIX is deliberately not published to R2. Keep enough
-          # history here to stage a submission or recover a prior package
-          # without rebuilding a release tag.
           retention-days: 90
 
-      - name: Tear down the signing keychain
-        # Always, and last: the search list is machine-wide state on a Mac
-        # somebody else uses, so leaving a deleted keychain listed — or a live
-        # one holding a Developer ID key — is not an option, whatever the build
-        # did.
-        if: always() && runner.os == 'macOS' && env.HAVE_APPLE == 'true'
-        shell: bash
-        run: |
-          KEYCHAIN="$RUNNER_TEMP/rbxport-signing.keychain-db"
-          # Only this job's entry comes off. Keychains other jobs added since
-          # setup stay on the list (see the setup step).
-          others="$(security list-keychains -d user | sed 's/^ *"//;s/"$//' | grep -vxF "$KEYCHAIN" || true)"
-          # shellcheck disable=SC2086
-          security list-keychains -d user -s $others || true
-          security delete-keychain "$KEYCHAIN" 2>/dev/null || true
-          rm -f "$RUNNER_TEMP/cert.p12"
-
-      - name: Tear down the Azure login
-        # Always, and last, for the same reason as the keychain above: with
-        # the cache unencrypted (see the build step) `az login` leaves the
-        # service principal's secret and a token in plain files under the
-        # desktop owner's ~/.azure. They are for this job only.
-        if: always() && runner.os == 'Windows' && env.HAVE_AZURE == 'true'
-        shell: pwsh
-        env:
-          AZURE_CORE_ENCRYPT_TOKEN_CACHE: "false"
-        run: |
-          $az = "$env:ProgramFiles\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
-          if (Test-Path $az) { & $az account clear --only-show-errors 2>$null }
-          foreach ($f in "msal_token_cache.json", "service_principal_entries.json", "msal_http_cache.json") {
-            Remove-Item "$env:USERPROFILE\.azure\$f" -Force -ErrorAction SilentlyContinue
-          }
+      - name: Clean up signing
+        if: always()
+        uses: ./.github/actions/cleanup-signing

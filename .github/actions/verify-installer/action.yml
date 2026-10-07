@@ -1,0 +1,102 @@
+name: Verify installer
+description: Verify package identity, signatures, and notarization.
+
+inputs:
+  apple_id:
+    description: Apple account used for notarization.
+    required: false
+  apple_password:
+    description: App-specific Apple account password.
+    required: false
+  apple_team_id:
+    description: Apple developer team identifier.
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Verify the Windows installer identity
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $installers = @(Get-ChildItem out\*-setup.exe)
+        if ($installers.Count -ne 1) { throw "Expected one Windows installer, found $($installers.Count)." }
+        $name = $installers[0].VersionInfo.ProductName
+        if ($name -ne "rbxport") { throw "Expected installer product name rbxport, got $name." }
+        $packages = @(Get-ChildItem out\*.msix)
+        if ($packages.Count -ne 1) { throw "Expected one MSIX package, found $($packages.Count)." }
+        $unpacked = Join-Path $env:RUNNER_TEMP "rbxport-msix-verify"
+        Remove-Item $unpacked -Recurse -Force -ErrorAction SilentlyContinue
+        $windowsKits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+        $makeAppx = Get-ChildItem -LiteralPath $windowsKits -Filter makeappx.exe -Recurse -File |
+          Where-Object { $_.Directory.Name -eq "x64" } |
+          Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
+          Select-Object -First 1
+        if (-not $makeAppx) { throw "makeappx.exe was not found under $windowsKits." }
+        & $makeAppx.FullName unpack /o /p $packages[0].FullName /d $unpacked
+        if ($LASTEXITCODE -ne 0) { throw "MakeAppx could not unpack the MSIX." }
+        [xml]$manifest = Get-Content (Join-Path $unpacked "AppxManifest.xml")
+        $identity = $manifest.Package.Identity
+        if ($identity.Name -ne "TRIODE.rbxport") { throw "Unexpected MSIX identity name: $($identity.Name)" }
+        if ($identity.Publisher -ne "CN=1A596007-9476-4408-86AC-A8062FB89DF1") {
+          throw "Unexpected MSIX publisher: $($identity.Publisher)"
+        }
+        if ($manifest.Package.Properties.PublisherDisplayName -ne "TRIODE") {
+          throw "Unexpected publisher display name: $($manifest.Package.Properties.PublisherDisplayName)"
+        }
+        $expectedLanguages = @(
+          "en-us", "fr-fr", "de-de", "es-es", "it-it", "nl-nl", "ru-ru", "pt-pt", "sv-se",
+          "da-dk", "tr-tr", "el-gr", "hu-hu", "cs-cz", "zh-cn", "zh-tw", "ko-kr", "ja-jp"
+        )
+        $actualLanguages = @($manifest.Package.Resources.Resource | ForEach-Object { $_.Language })
+        if ((Compare-Object $expectedLanguages $actualLanguages).Count -ne 0) {
+          throw "Unexpected MSIX languages: $($actualLanguages -join ', ')"
+        }
+
+    - name: Notarize the disk image
+      if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
+      shell: bash
+      env:
+        APPLE_ID: ${{ inputs.apple_id }}
+        APPLE_PASSWORD: ${{ inputs.apple_password }}
+        APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+      run: |
+        set -euo pipefail
+        for dmg in out/*.dmg; do
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
+        done
+
+    - name: Verify macOS signatures
+      if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        for dmg in out/*.dmg; do
+          codesign --verify --strict --verbose=2 "$dmg"
+          spctl --assess --type open --context context:primary-signature -vv "$dmg"
+        done
+        for tarball in out/*.app.tar.gz; do
+          unpacked="$(mktemp -d)"
+          tar -xzf "$tarball" -C "$unpacked"
+          codesign --verify --strict --deep --verbose=2 "$unpacked"/*.app
+          rm -rf "$unpacked"
+        done
+
+    - name: Verify Windows signatures
+      if: runner.os == 'Windows' && env.HAVE_AZURE == 'true'
+      shell: pwsh
+      run: |
+        $bad = 0
+        Get-ChildItem out\*.exe | ForEach-Object {
+          $sig = Get-AuthenticodeSignature $_.FullName
+          Write-Host "$($_.Name): $($sig.Status) $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne "Valid") { $bad = 1 }
+          if (-not $sig.TimeStamperCertificate) {
+            Write-Host "  no timestamp - this signature dies with the certificate"
+            $bad = 1
+          }
+        }
+        exit $bad

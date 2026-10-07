@@ -1,0 +1,101 @@
+name: Submit Microsoft Store package
+
+on:
+  workflow_call:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  submit:
+    name: Submit Microsoft Store update
+    runs-on: [self-hosted, windows, x64]
+    environment: microsoft-store
+    steps:
+      - name: Download the Windows release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: installers-x86_64-pc-windows-msvc
+          path: out
+
+      - name: Verify the Store package identity
+        id: package
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem out\*.msix)
+          if ($packages.Count -ne 1) {
+            throw "Expected exactly one MSIX package, found $($packages.Count)."
+          }
+
+          $windowsKits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+          $makeAppx = Get-ChildItem -LiteralPath $windowsKits -Filter makeappx.exe -Recurse -File |
+            Where-Object { $_.Directory.Name -eq "x64" } |
+            Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
+            Select-Object -First 1
+          if (-not $makeAppx) { throw "makeappx.exe was not found under $windowsKits." }
+
+          $unpacked = Join-Path $env:RUNNER_TEMP "rbxport-store-verify"
+          Remove-Item $unpacked -Recurse -Force -ErrorAction SilentlyContinue
+          & $makeAppx.FullName unpack /o /p $packages[0].FullName /d $unpacked
+          if ($LASTEXITCODE -ne 0) { throw "MakeAppx could not unpack the MSIX." }
+
+          [xml]$manifest = Get-Content (Join-Path $unpacked "AppxManifest.xml")
+          $identity = $manifest.Package.Identity
+          if ($identity.Name -ne "TRIODE.rbxport") {
+            throw "Unexpected MSIX identity name: $($identity.Name)"
+          }
+          if ($identity.Publisher -ne "CN=1A596007-9476-4408-86AC-A8062FB89DF1") {
+            throw "Unexpected MSIX publisher: $($identity.Publisher)"
+          }
+          if ($identity.ProcessorArchitecture -ne "x64") {
+            throw "Unexpected MSIX architecture: $($identity.ProcessorArchitecture)"
+          }
+          $expectedLanguages = @(
+            "en-us", "fr-fr", "de-de", "es-es", "it-it", "nl-nl", "ru-ru", "pt-pt", "sv-se",
+            "da-dk", "tr-tr", "el-gr", "hu-hu", "cs-cz", "zh-cn", "zh-tw", "ko-kr", "ja-jp"
+          )
+          $actualLanguages = @($manifest.Package.Resources.Resource | ForEach-Object { $_.Language })
+          if ((Compare-Object $expectedLanguages $actualLanguages).Count -ne 0) {
+            throw "Unexpected MSIX languages: $($actualLanguages -join ', ')"
+          }
+
+          "path=$($packages[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Submitting $($packages[0].Name), version $($identity.Version)"
+
+      - name: Install Microsoft Store Developer CLI
+        shell: pwsh
+        run: |
+          $version = 'v0.4.3'
+          $archive = Join-Path $env:RUNNER_TEMP 'MSStoreCLI-win-x64.zip'
+          $installDir = Join-Path $env:RUNNER_TEMP 'msstore-cli'
+          $expectedSha256 = 'c5fb008b616f96b1b55f1d52e4e0a5dd8f6c156129b5f52f9b97ec0eed11bd57'
+          $url = "https://github.com/microsoft/msstore-cli/releases/download/$version/MSStoreCLI-win-x64.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "Microsoft Store CLI checksum mismatch: expected $expectedSha256, got $actualSha256."
+          }
+
+          Expand-Archive -LiteralPath $archive -DestinationPath $installDir -Force
+          $cli = Join-Path $installDir 'msstore.exe'
+          if (-not (Test-Path -LiteralPath $cli)) { throw "msstore.exe was not found after extraction." }
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & $cli --version
+
+      - name: Configure Partner Center credentials
+        shell: pwsh
+        run: |
+          msstore reconfigure `
+            --tenantId '${{ secrets.PARTNER_CENTER_TENANT_ID }}' `
+            --sellerId '${{ secrets.PARTNER_CENTER_SELLER_ID }}' `
+            --clientId '${{ secrets.PARTNER_CENTER_CLIENT_ID }}' `
+            --clientSecret '${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}'
+
+      - name: Submit package for certification
+        shell: pwsh
+        run: |
+          msstore publish '${{ steps.package.outputs.path }}' `
+            --appId '${{ vars.MS_STORE_PRODUCT_ID }}'
+          msstore submission status '${{ vars.MS_STORE_PRODUCT_ID }}'

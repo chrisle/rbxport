@@ -1,0 +1,80 @@
+name: Validate Linux window
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RBXPORT_TEST: "1"
+
+jobs:
+  linux-window:
+    name: Linux Tauri window smoke
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Install Linux window dependencies
+        run: |
+          sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
+            apt-get update && \
+            apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+              librsvg2-dev patchelf libgtk-3-dev libasound2-dev xvfb xauth x11-utils'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Ensure rustup
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Give cargo a home of its own
+        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+
+      - name: Build the Linux shell without bundling
+        run: pnpm tauri build --debug --no-bundle --ci
+
+      - name: Require a native Linux window
+        run: |
+          set -euo pipefail
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/xdg-config"
+          export XDG_DATA_HOME="$RUNNER_TEMP/xdg-data"
+          log="$RUNNER_TEMP/rbxport-linux-window.log"
+          # shellcheck disable=SC2016 # $1/$2 expand in the child shell below.
+          xvfb-run -a bash -c '
+            set -euo pipefail
+            "$1" >"$2" 2>&1 &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true" EXIT
+            for _ in $(seq 1 20); do
+              if xwininfo -root -tree | grep -Fq "rbxport"; then exit 0; fi
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            cat "$2"
+            echo "::error::rbxport did not create a Linux window"
+            exit 1
+          ' _ target/debug/rbxport "$log"

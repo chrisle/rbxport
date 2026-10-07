@@ -1,0 +1,145 @@
+name: Validate frontend
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+      base_ref:
+        required: false
+        default: ""
+        type: string
+      full:
+        required: false
+        default: true
+        type: boolean
+      run_lint:
+        required: false
+        default: false
+        type: boolean
+      run_typecheck:
+        required: false
+        default: false
+        type: boolean
+      run_build:
+        required: false
+        default: false
+        type: boolean
+      run_unit:
+        required: false
+        default: false
+        type: boolean
+      run_e2e:
+        required: false
+        default: false
+        type: boolean
+      run_budget:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend checks
+    runs-on: [self-hosted, macos, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        if: inputs.run_lint
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          FULL: ${{ inputs.full }}
+        run: |
+          if [ "$FULL" = true ] || [ -z "$BASE_REF" ]; then
+            pnpm lint
+            exit 0
+          fi
+
+          changed="$RUNNER_TEMP/frontend-lint-paths"
+          git diff --name-only --diff-filter=ACMR "$BASE_REF...HEAD" > "$changed"
+          if grep -Eq '^(package\.json|pnpm-lock\.yaml|eslint\.config\.|tsconfig)' "$changed"; then
+            pnpm lint
+            exit 0
+          fi
+          mapfile -t files < <(grep -E '^(src|e2e)/.*\.[cm]?[jt]sx?$' "$changed" || true)
+          if [ "${#files[@]}" -gt 0 ]; then
+            pnpm exec eslint "${files[@]}" --max-warnings 0
+          fi
+
+      - name: Typecheck
+        if: inputs.run_typecheck
+        run: pnpm typecheck
+
+      - name: Production build
+        if: inputs.run_build || inputs.run_e2e || inputs.run_budget
+        run: pnpm exec vite build
+
+      - name: Unit tests
+        if: inputs.run_unit
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          FULL: ${{ inputs.full }}
+        run: |
+          if [ "$FULL" = true ] || [ -z "$BASE_REF" ]; then
+            pnpm test
+          else
+            pnpm exec vitest run --changed "$BASE_REF" --passWithNoTests
+          fi
+
+      - name: Bundle budget
+        if: inputs.run_budget
+        run: pnpm budget
+
+      - name: Install Playwright browsers
+        if: inputs.run_e2e
+        run: pnpm exec playwright install --with-deps chromium webkit
+
+      - name: End-to-end
+        if: inputs.run_e2e
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          FULL: ${{ inputs.full }}
+        run: |
+          lock=/tmp/rbxport-playwright.lock
+          until mkdir "$lock" 2>/dev/null; do sleep 2; done
+          trap 'rmdir "$lock"' EXIT
+          port="$((20000 + GITHUB_RUN_NUMBER % 10000))"
+          if [ "$FULL" = true ] || [ -z "$BASE_REF" ]; then
+            E2E_PORT="$port" pnpm e2e
+            exit 0
+          fi
+
+          changed="$RUNNER_TEMP/frontend-changed-paths"
+          git diff --name-only "$BASE_REF...HEAD" > "$changed"
+          if grep -Fxq playwright.config.ts "$changed" || \
+            grep '^e2e/' "$changed" | grep -vqE '\.spec\.[cm]?[jt]s$'; then
+            E2E_PORT="$port" pnpm e2e
+          else
+            E2E_PORT="$port" pnpm exec playwright test \
+              --only-changed "$BASE_REF" --pass-with-no-tests
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: failure() && inputs.run_e2e
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
