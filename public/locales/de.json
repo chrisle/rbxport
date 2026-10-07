@@ -1109,11 +1109,12 @@
   "Delete music not in any playlist": "Löschen Sie Musik, die sich in keiner Wiedergabeliste befindet",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Geben Sie Speicherplatz auf Ihrem USB-Stick frei, indem Sie Songs entfernen, die sich in keiner Playlist befinden.",
   "Maximum CDJ compatibility": "Maximale CDJ-Kompatibilität",
-  "Save formats like FLAC and M4A as WAV or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Speichern Sie Formate wie FLAC und M4A als WAV oder MP3 auf Ihrem USB-Stick für ältere CDJ-Modelle. Originale bleiben unberührt.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Speichern Sie Formate wie FLAC und M4A als WAV, AIFF oder MP3 auf Ihrem USB-Stick für ältere CDJ-Modelle. Originale bleiben unberührt.",
   "Convert to": "Konvertieren zu",
   "WAV — larger files": "WAV – größere Dateien",
+  "AIFF — larger files": "AIFF – größere Dateien",
   "MP3 — 320 kbps": "MP3 – 320 kbit/s",
-  "WAV: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV: 16-Bit / 44,1 kHz. MP3: kleinere, verlustbehaftete Dateien.",
+  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-Bit / 44,1 kHz. MP3: kleinere, verlustbehaftete Dateien.",
   "Display Type": "Anzeigetyp",
   "Appearance": "Aussehen",
   "dark": "dunkel",
@@ -1426,8 +1427,5 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Die beiden vorhandenen Gerätebibliotheken sind anderer Meinung. Hier können Sie sie vor der ersten Synchronisierung in rekordbox abgleichen.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Dieser USB-Stick gehört zu einer anderen oder älteren, nicht verifizierten Master-Bibliothek. Importieren Sie den Inhalt in rekordbox, bevor Sie den Besitzer ändern.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary enthält Cue-Datensätze, die dieser Export ersetzen würde. Importieren Sie zuerst die Cues in rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Auf einen Titel, der entfernt wird, wird weiterhin im USB-Verlauf verwiesen. Importieren und löschen Sie diesen Verlauf zunächst in rekordbox.",
-  "AIFF — larger files": "AIFF — larger files",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.",
-  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Auf einen Titel, der entfernt wird, wird weiterhin im USB-Verlauf verwiesen. Importieren und löschen Sie diesen Verlauf zunächst in rekordbox."
 }

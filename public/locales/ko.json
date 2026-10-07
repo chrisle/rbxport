@@ -1102,11 +1102,12 @@
   "Delete music not in any playlist": "재생목록에 없는 음악 삭제",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "재생 목록에 없는 노래를 제거하여 USB 스틱에 여유 공간을 확보하세요.",
   "Maximum CDJ compatibility": "최대 CDJ 호환성",
-  "Save formats like FLAC and M4A as WAV or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "구형 CDJ 모델의 경우 FLAC 및 M4A와 같은 형식을 USB 스틱에 WAV 또는 MP3로 저장하세요. 원본은 그대로 유지됩니다.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "구형 CDJ 모델의 경우 FLAC 및 M4A와 같은 형식을 USB 스틱에 WAV, AIFF 또는 MP3로 저장하세요. 원본은 그대로 유지됩니다.",
   "Convert to": "다음으로 변환",
   "WAV — larger files": "WAV — 더 큰 파일",
+  "AIFF — larger files": "AIFF — 더 큰 파일",
   "MP3 — 320 kbps": "MP3 — 320kbps",
-  "WAV: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV: 16비트/44.1kHz. MP3: 더 작고 손실이 많은 파일.",
+  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16비트/44.1kHz. MP3: 더 작고 손실이 많은 파일.",
   "Display Type": "디스플레이 유형",
   "Appearance": "외관",
   "dark": "어두운",
@@ -1429,8 +1430,5 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "두 개의 기존 장치 라이브러리가 일치하지 않습니다. 여기에서 처음 동기화하기 전에 rekordbox에서 조정하십시오.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "이 USB는 다른 또는 이전의 확인되지 않은 마스터 라이브러리에 속합니다. 소유권을 변경하기 전에 rekordbox에 해당 콘텐츠를 가져오십시오.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary에는 이 내보내기가 대체할 큐 레코드가 포함되어 있습니다. 먼저 rekordbox에 큐를 가져오십시오.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "제거되는 트랙은 여전히 USB 기록에서 참조됩니다. 먼저 rekordbox에서 해당 기록을 가져오고 삭제하십시오.",
-  "AIFF — larger files": "AIFF — larger files",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.",
-  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "제거되는 트랙은 여전히 USB 기록에서 참조됩니다. 먼저 rekordbox에서 해당 기록을 가져오고 삭제하십시오."
 }

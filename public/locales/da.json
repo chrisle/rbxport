@@ -1105,11 +1105,12 @@
   "Delete music not in any playlist": "Slet musik, der ikke er på nogen afspilningsliste",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Frigør plads på din USB-stick ved at fjerne sange, der ikke er på nogen afspilningsliste.",
   "Maximum CDJ compatibility": "Maksimal CDJ-kompatibilitet",
-  "Save formats like FLAC and M4A as WAV or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Gem formater som FLAC og M4A som WAV eller MP3 på din USB-stick til ældre CDJ-modeller. Originaler forbliver uberørte.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Gem formater som FLAC og M4A som WAV, AIFF eller MP3 på din USB-stick til ældre CDJ-modeller. Originaler forbliver uberørte.",
   "Convert to": "Konverter til",
   "WAV — larger files": "WAV — større filer",
+  "AIFF — larger files": "AIFF — større filer",
   "MP3 — 320 kbps": "MP3 - 320 kbps",
-  "WAV: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV: 16-bit / 44,1 kHz. MP3: mindre filer med tab.",
+  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44,1 kHz. MP3: mindre filer med tab.",
   "Display Type": "Display Type",
   "Appearance": "Udseende",
   "dark": "mørkt",
@@ -1423,8 +1424,5 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "De to eksisterende enhedsbiblioteker er uenige. Afstem dem i rekordbox før deres første synkronisering her.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Denne USB tilhører et andet eller ældre ubekræftet masterbibliotek. Importer dets indhold i rekordbox, før du ændrer dets ejerskab.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary indeholder stikordsposter, som denne eksport ville erstatte. Importér signalerne i rekordbox først.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Et spor, der fjernes, henvises stadig til af USB-historikken. Importer og ryd den historie i rekordbox først.",
-  "AIFF — larger files": "AIFF — larger files",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.",
-  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Et spor, der fjernes, henvises stadig til af USB-historikken. Importer og ryd den historie i rekordbox først."
 }

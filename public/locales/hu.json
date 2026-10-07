@@ -1112,11 +1112,12 @@
   "Delete music not in any playlist": "A lejátszási listákon nem szereplő zenék törlése",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Szabadítson fel helyet az USB-meghajtón, ha eltávolítja a lejátszási listákon nem szereplő dalokat.",
   "Maximum CDJ compatibility": "Maximális CDJ kompatibilitás",
-  "Save formats like FLAC and M4A as WAV or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "A régebbi CDJ modellekhez mentse az olyan formátumokat, mint a FLAC és M4A WAV vagy MP3 formátumban az USB-meghajtóra. Az eredetiek érintetlenek maradnak.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "A régebbi CDJ modellekhez mentse az olyan formátumokat, mint a FLAC és M4A WAV, AIFF vagy MP3 formátumban az USB-meghajtóra. Az eredetiek érintetlenek maradnak.",
   "Convert to": "Konvertálás erre",
   "WAV — larger files": "WAV – nagyobb fájlok",
+  "AIFF — larger files": "AIFF – nagyobb fájlok",
   "MP3 — 320 kbps": "MP3 – 320 kbps",
-  "WAV: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV: 16 bit / 44,1 kHz. MP3: kisebb, veszteséges fájlok.",
+  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16 bit / 44,1 kHz. MP3: kisebb, veszteséges fájlok.",
   "Display Type": "Kijelző típusa",
   "Appearance": "Megjelenés",
   "dark": "sötét",
@@ -1429,8 +1430,5 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "A két meglévő eszközkönyvtár nem ért egyet. Egyeztesd őket a rekordboxban az első szinkronizálás előtt.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Ez az USB egy másik vagy régebbi, ellenőrizetlen főkönyvtárhoz tartozik. Importálja a tartalmát a rekordboxba, mielőtt megváltoztatná a tulajdonjogát.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "A OneLibrary cue rekordokat tartalmaz, amelyeket ez az exportálás lecserélne. Először importálja a jelzéseket a rekordboxba.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Az USB-előzmények továbbra is hivatkoznak az eltávolítandó műsorszámra. Először importálja és törölje az előzményeket a rekordboxból.",
-  "AIFF — larger files": "AIFF — larger files",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.",
-  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Az USB-előzmények továbbra is hivatkoznak az eltávolítandó műsorszámra. Először importálja és törölje az előzményeket a rekordboxból."
 }

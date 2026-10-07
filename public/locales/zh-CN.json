@@ -1122,11 +1122,12 @@
   "Delete music not in any playlist": "删除不在任何播放列表中的音乐",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "通过删除不在任何播放列表中的歌曲来释放 USB 记忆棒上的空间。",
   "Maximum CDJ compatibility": "最大的 CDJ 兼容性",
-  "Save formats like FLAC and M4A as WAV or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "对于旧版 CDJ 型号，可将 FLAC 和 M4A 等格式另存为 WAV 或 MP3 到 U 盘上。原件保持不变。",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "对于旧版 CDJ 型号，可将 FLAC 和 M4A 等格式另存为 WAV、AIFF 或 MP3 到 U 盘上。原件保持不变。",
   "Convert to": "转换为",
   "WAV — larger files": "WAV — 较大的文件",
+  "AIFF — larger files": "AIFF — 较大的文件",
   "MP3 — 320 kbps": "MP3 — 320 kbps",
-  "WAV: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV：16 位/44.1 kHz。 MP3：较小的有损文件。",
+  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF：16 位/44.1 kHz。 MP3：较小的有损文件。",
   "Display Type": "显示类型",
   "Appearance": "外观",
   "dark": "黑暗",
@@ -1434,8 +1435,5 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "现有的两个设备库不一致。在首次同步之前在 rekordbox 中对它们进行协调。",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "此 USB 属于不同的或更旧的未经验证的主库。在更改其所有权之前，将其内容导入 rekordbox。",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary 包含此导出将替换的提示记录。首先导入 rekordbox 中的提示。",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 历史记录仍会引用被删除的曲目。首先导入并清除 rekordbox 中的历史记录。",
-  "AIFF — larger files": "AIFF — larger files",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.",
-  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 历史记录仍会引用被删除的曲目。首先导入并清除 rekordbox 中的历史记录。"
 }

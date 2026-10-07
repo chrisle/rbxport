@@ -1115,11 +1115,12 @@
   "Delete music not in any playlist": "Διαγραφή μουσικής όχι σε καμία λίστα αναπαραγωγής",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Ελευθερώστε χώρο στο USB stick αφαιρώντας τραγούδια που δεν υπάρχουν σε καμία λίστα αναπαραγωγής.",
   "Maximum CDJ compatibility": "Μέγιστη συμβατότητα CDJ",
-  "Save formats like FLAC and M4A as WAV or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Αποθηκεύστε μορφές όπως FLAC και M4A ως WAV ή MP3 στο USB stick για παλαιότερα μοντέλα CDJ. Τα πρωτότυπα μένουν ανέγγιχτα.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Αποθηκεύστε μορφές όπως FLAC και M4A ως WAV, AIFF ή MP3 στο USB stick για παλαιότερα μοντέλα CDJ. Τα πρωτότυπα μένουν ανέγγιχτα.",
   "Convert to": "Μετατροπή σε",
   "WAV — larger files": "WAV — μεγαλύτερα αρχεία",
+  "AIFF — larger files": "AIFF — μεγαλύτερα αρχεία",
   "MP3 — 320 kbps": "MP3 — 320 kbps",
-  "WAV: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV: 16-bit / 44,1 kHz. MP3: μικρότερα αρχεία με απώλειες.",
+  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44,1 kHz. MP3: μικρότερα αρχεία με απώλειες.",
   "Display Type": "Τύπος οθόνης",
   "Appearance": "Εμφάνιση",
   "dark": "σκοτεινός",
@@ -1431,8 +1432,5 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Οι δύο υπάρχουσες βιβλιοθήκες συσκευών διαφωνούν. Συμφιλιώστε τα στο rekordbox πριν από τον πρώτο συγχρονισμό τους εδώ.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Αυτό το USB ανήκει σε διαφορετική ή παλαιότερη μη επαληθευμένη κύρια βιβλιοθήκη. Εισαγάγετε τα περιεχόμενά του στο rekordbox πριν αλλάξετε την ιδιοκτησία του.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "Η OneLibrary περιέχει εγγραφές υπόδειξης που θα αντικαταστήσει αυτή η εξαγωγή. Εισαγάγετε πρώτα τα συνθήματα στο rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Ένα κομμάτι που αφαιρείται εξακολουθεί να αναφέρεται από το ιστορικό USB. Εισαγάγετε και διαγράψτε πρώτα αυτό το ιστορικό στο rekordbox.",
-  "AIFF — larger files": "AIFF — larger files",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.",
-  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.": "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Ένα κομμάτι που αφαιρείται εξακολουθεί να αναφέρεται από το ιστορικό USB. Εισαγάγετε και διαγράψτε πρώτα αυτό το ιστορικό στο rekordbox."
 }
