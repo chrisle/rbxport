@@ -21,6 +21,10 @@ with symbols present.
   agent. `CloudAgentAPI::Agent::start` deletes and rewrites it from
   `masterDbDirectory` on every launch, and rekordbox never reads `db-path`
   back to choose a library. Writing it does not move rekordbox's library.
+  In the 7.2.11 binary (x86_64 slice) the `"db-path"` string has one code
+  reference, in `Agent::start`, where it is quoted into the JSON text that
+  `FileOutputStream::writeText` writes after `File::deleteFile`; no code
+  reads it as a key.
 - [OBS] rekordbox has no library picker at startup. Preferences > Advanced >
   Database management has a Drive list that offers only drives already
   holding `<volume>/PIONEER/Master/master.db`, or
