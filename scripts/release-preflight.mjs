@@ -29,6 +29,23 @@ function jsonVersion(file) {
   return value;
 }
 
+function validateWindowsUpdater() {
+  const config = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+  const nsis = config.bundle?.windows?.nsis;
+  if (nsis?.installMode !== "perMachine") {
+    throw new Error("the Windows installer must remain perMachine for the protected update task");
+  }
+  if (nsis?.installerHooks !== "windows/installer-hooks.nsh") {
+    throw new Error("the Windows installer must install the protected update task");
+  }
+  if (config.bundle?.resources?.["windows/install-update-task.ps1"] !== "install-update-task.ps1") {
+    throw new Error("the Windows installer must bundle the protected update task script");
+  }
+  if (config.plugins?.updater?.windows?.installMode !== "quiet") {
+    throw new Error("Windows updates must use the non-interactive installer mode");
+  }
+}
+
 function tagsAtHead() {
   return execFileSync("git", ["tag", "--points-at", "HEAD", "--list", "v*"], {
     cwd: root,
@@ -61,6 +78,7 @@ function main(args) {
   ]) {
     if (actual !== expected) throw new Error(`${file} is ${actual}; expected ${expected}`);
   }
+  validateWindowsUpdater();
   const notes = readReleaseNotes(new URL("../release-notes.json", import.meta.url));
   releaseForVersion(notes, expected);
   if (notes[0].version !== expected) {

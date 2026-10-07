@@ -50,6 +50,8 @@ sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 parking_lot = "0.12"
 dirs = "5"
 tauri-plugin-updater = "2"
+base64 = "0.22"
+minisign-verify = "0.2"
 uuid = { version = "1", features = ["v4"] }
 semver = "1"
 time = { version = "0.3", features = ["formatting"] }

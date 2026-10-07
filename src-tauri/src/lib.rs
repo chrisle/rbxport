@@ -45,9 +45,15 @@ pub mod dto;
 mod error;
 pub mod state;
 mod test_port;
+mod elevated_update;
 mod update;
 
 pub use error::{AppError, AppResult, ErrorKind};
+
+/// Runs the protected Windows update entry point before Tauri starts.
+pub fn run_elevated_update_helper_if_requested() -> Option<i32> {
+    update::run_elevated_helper_if_requested()
+}
 
 use state::AppState;
 use std::sync::Arc;

@@ -42,6 +42,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
+use crate::elevated_update;
 use crate::error::{AppError, AppResult, ErrorKind};
 
 /// The event a download's progress goes out on.
@@ -83,6 +84,9 @@ pub struct Updates {
 impl Updates {
     /// Where a staged installer is kept between the download and the quit.
     fn staging_dir(app: &AppHandle) -> Option<PathBuf> {
+        if let Some(dir) = elevated_update::shared_staging_dir().filter(|dir| dir.is_dir()) {
+            return Some(dir);
+        }
         app.path().app_cache_dir().ok().map(|dir| dir.join("update"))
     }
 
@@ -91,8 +95,11 @@ impl Updates {
     /// is the safe side: the signature was checked on the bytes that came
     /// down, not on a file that has sat in a cache since.
     pub fn clear_stale(app: &AppHandle) {
+        elevated_update::clear_shared_staging();
         if let Some(dir) = Self::staging_dir(app) {
-            let _ = std::fs::remove_dir_all(dir);
+            if elevated_update::shared_staging_dir().as_deref() != Some(dir.as_path()) {
+                let _ = std::fs::remove_dir_all(dir);
+            }
         }
     }
 }
@@ -308,12 +315,25 @@ async fn place(app: &AppHandle, update: &Update, bytes: Vec<u8>) -> AppResult<Pl
     }
     let dir = Updates::staging_dir(app)
         .ok_or_else(|| AppError::new(ErrorKind::Internal, "There is nowhere to keep the update."))?;
-    // A fresh directory: whatever an earlier download of another version
-    // left is not what the quit should run.
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| updater_error("The update could not be kept.", e))?;
-    let path = dir.join(format!("{}.update", update.version));
+    let shared = elevated_update::shared_staging_dir().as_deref() == Some(dir.as_path());
+    // Preserve the installer-created ACL on the shared directory. Only its
+    // known candidate files are disposable; the fallback cache directory can
+    // still be replaced wholesale.
+    if shared {
+        elevated_update::clear_shared_staging();
+    } else {
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| updater_error("The update could not be kept.", e))?;
+    }
+    let path = if shared {
+        dir.join("pending.update")
+    } else {
+        dir.join(format!("{}.update", update.version))
+    };
     std::fs::write(&path, &bytes).map_err(|e| updater_error("The update could not be kept.", e))?;
+    elevated_update::stage(&path, &update.version, &update.signature)
+        .map_err(|e| updater_error("The update could not be kept.", e))?;
     Ok(Placement::Staged(path))
 }
 
@@ -346,6 +366,11 @@ pub async fn restart_to_update(
             // quit that follows must not run the same installer again.
             if let Some(pending) = updates.pending.lock().as_mut() {
                 pending.placement = None;
+            }
+            match elevated_update::launch(&path, true) {
+                Ok(true) => std::process::exit(0),
+                Ok(false) => {}
+                Err(error) => tracing::warn!(%error, "the protected update task could not start"),
             }
             let bytes = std::fs::read(&path).map_err(|e| updater_error("The update could not be read back.", e))?;
             // On Windows this spawns the installer and ends the process; a
@@ -380,6 +405,11 @@ pub fn on_exit(app: &AppHandle) {
         }
     };
     let Some((update, path)) = staged else { return };
+    match elevated_update::launch(&path, false) {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "the protected update task could not start at quit"),
+    }
     match std::fs::read(&path) {
         Ok(bytes) => {
             // `install` spawns the installer and ends this process itself.
@@ -389,6 +419,12 @@ pub fn on_exit(app: &AppHandle) {
         }
         Err(e) => tracing::warn!(error = %e, "the staged update could not be read back at quit"),
     }
+}
+
+/// Returns the process exit code when Windows started this binary as the
+/// protected update helper, or `None` for an ordinary application launch.
+pub fn run_elevated_helper_if_requested() -> Option<i32> {
+    elevated_update::run_if_requested()
 }
 
 /// The release-note sections newer than `current` and no newer than `target`,

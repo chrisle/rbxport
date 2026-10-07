@@ -59,8 +59,12 @@
     },
     "windows": {
       "nsis": {
-        "installMode": "perMachine"
+        "installMode": "perMachine",
+        "installerHooks": "windows/installer-hooks.nsh"
       }
+    },
+    "resources": {
+      "windows/install-update-task.ps1": "install-update-task.ps1"
     },
     "createUpdaterArtifacts": true
   },
