@@ -2510,6 +2510,11 @@ function AppBody() {
             // The ready event that follows loads it like any other start.
             setMissingLibrary(null);
           }}
+          onChoose={async (title, filterName) => {
+            const selected = await (await getBackend()).chooseExistingLibrary(title, filterName);
+            if (selected) setMissingLibrary(null);
+            return selected;
+          }}
           onQuit={() => { void getBackend().then(backend => backend.closeWindow()); }} />
       ) : null}
       {analysisSelection !== null ? (

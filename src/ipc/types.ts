@@ -286,6 +286,12 @@ export interface Backend {
   createLibrary(): Promise<void>;
 
   /**
+   * Lets the user choose an existing `master.db`, validates and remembers it,
+   * and starts loading it. Returns false when the native picker is cancelled.
+   */
+  chooseExistingLibrary(title: string, filterName: string): Promise<boolean>;
+
+  /**
    * Fires after a cue edit with the id of the track whose cues changed.
    * A deck showing that track refetches its cues; nothing else has to move.
    */

@@ -2,7 +2,7 @@
 //! a track added, analysed, and put in a playlist.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use rbl_db::new_library::{create, plan_at};
+use rbl_db::new_library::{create, plan_at, use_existing_at};
 use rbl_db::write::{AnalysisRegistration, Writer};
 use rbl_db::{detect_from, Library, OpenMode};
 
@@ -68,4 +68,49 @@ fn a_new_library_takes_a_track_its_analysis_and_a_playlist() {
         .query_row("SELECT COUNT(*) FROM djmdSongPlaylist WHERE PlaylistID = ?1", [&playlist], |r| r.get(0))
         .unwrap();
     assert_eq!(members, 1);
+}
+
+#[test]
+fn an_existing_external_library_can_be_selected_without_changing_it() {
+    let root = tempfile::tempdir().unwrap();
+    let original_options = root.path().join("source/options.json");
+    let external = root.path().join("mounted-drive/rekordbox");
+    let made = create(&plan_at(&original_options, &external).unwrap().unwrap()).unwrap();
+    let before = std::fs::read(&made.master_db).unwrap();
+    std::fs::remove_file(&original_options).unwrap();
+
+    let installed_options = root.path().join("installed-agent/options.json");
+    let selected = use_existing_at(&installed_options, &made.master_db).unwrap();
+
+    assert_eq!(selected.master_db, made.master_db);
+    assert_eq!(selected.share_root, external.join("share"));
+    assert_eq!(std::fs::read(&selected.master_db).unwrap(), before);
+    assert_eq!(detect_from(&installed_options).unwrap().master_db, selected.master_db);
+    Library::open(selected, OpenMode::ReadOnly).unwrap();
+}
+
+#[test]
+fn selecting_an_invalid_database_does_not_persist_it() {
+    let root = tempfile::tempdir().unwrap();
+    let options = root.path().join("installed-agent/options.json");
+    let invalid = root.path().join("mounted-drive/master.db");
+    std::fs::create_dir_all(invalid.parent().unwrap()).unwrap();
+    std::fs::write(&invalid, b"not a rekordbox database").unwrap();
+
+    assert!(use_existing_at(&options, &invalid).is_err());
+    assert!(!options.exists());
+}
+
+#[test]
+fn selecting_a_library_never_replaces_existing_agent_options() {
+    let root = tempfile::tempdir().unwrap();
+    let first_options = root.path().join("first/options.json");
+    let first = create(&plan_at(&first_options, &root.path().join("first/library")).unwrap().unwrap()).unwrap();
+    let second_options = root.path().join("second/options.json");
+    let second = create(&plan_at(&second_options, &root.path().join("second/library")).unwrap().unwrap()).unwrap();
+    let before = std::fs::read(&first_options).unwrap();
+
+    assert!(use_existing_at(&first_options, &second.master_db).is_err());
+    assert_eq!(std::fs::read(&first_options).unwrap(), before);
+    assert_eq!(detect_from(&first_options).unwrap().master_db, first.master_db);
 }

@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection};
 
-use crate::{DbError, LibraryLocation, Result};
+use crate::{DbError, Library, LibraryLocation, OpenMode, Result};
 
 /// rekordbox's wrapped passphrase, as its agent writes it into `options.json`.
 const REKORDBOX_DP: &str =
@@ -194,6 +194,46 @@ pub fn create(plan: &Plan) -> Result<LibraryLocation> {
     })
 }
 
+/// Points this installation at an existing rekordbox database.
+///
+/// rekordbox itself remembers a library on another drive through `db-path`
+/// in its agent's `options.json` [OBS macOS 7.2.11, Windows 7.2.14]. When no
+/// agent configuration exists, this writes the same three entries as a fresh
+/// rekordbox library after proving the selected database opens with
+/// rekordbox's standard key. An existing configuration is never replaced.
+pub fn use_existing(master_db: &Path) -> Result<LibraryLocation> {
+    use_existing_at(&crate::options_location()?, master_db)
+}
+
+/// [`use_existing`] for a given agent options file.
+pub fn use_existing_at(options_json: &Path, master_db: &Path) -> Result<LibraryLocation> {
+    if options_json.exists() {
+        let found = crate::detect_from(options_json)?;
+        if found.master_db == master_db {
+            return Ok(found);
+        }
+        return Err(DbError::Open(format!("{} already names a different library", options_json.display())));
+    }
+    if !master_db.is_file() {
+        return Err(DbError::NotInstalled(format!("{} is not a database file", master_db.display())));
+    }
+    let dir = master_db
+        .parent()
+        .ok_or_else(|| DbError::Open(format!("{} has no folder", master_db.display())))?;
+    let location = LibraryLocation {
+        master_db: master_db.to_path_buf(),
+        share_root: dir.join("share"),
+        passphrase: crate::key::derive_password(REKORDBOX_DP)?,
+        is_real_install: true,
+    };
+
+    // Validate both the key and the schema before persisting this choice. A
+    // failed selection therefore cannot strand the next startup on it.
+    drop(Library::open(location.clone(), OpenMode::ReadOnly)?);
+    write_options(options_json, master_db, &location.share_root)?;
+    Ok(location)
+}
+
 /// The empty database: the schema and the rows rekordbox's browser and
 /// this application's writer expect to find.
 fn build(path: &Path, passphrase: &str, share_root: &Path) -> Result<()> {
@@ -341,7 +381,7 @@ fn write_options(to: &Path, master_db: &Path, share_root: &Path) -> Result<()> {
     let mut staged = tempfile::NamedTempFile::new_in(to.parent().unwrap_or_else(|| Path::new(".")))?;
     std::io::Write::write_all(&mut staged, &bytes)?;
     staged.as_file().sync_all()?;
-    staged.persist(to).map_err(|e| DbError::Io(e.error))?;
+    staged.persist_noclobber(to).map_err(|e| DbError::Io(e.error))?;
     Ok(())
 }
 

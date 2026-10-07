@@ -1386,5 +1386,12 @@
   "日本語",
   "简体中文",
   "繁體中文",
-  "한국어"
+  "한국어",
+  "Choose Existing…",
+  "Choose an existing rekordbox library",
+  "Could not create the database.",
+  "Could not open the database.",
+  "Create New",
+  "RBXport could not find a configured rekordbox database. Create a new one or choose an existing master.db.",
+  "rekordbox database"
 ]

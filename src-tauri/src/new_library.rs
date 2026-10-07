@@ -1,7 +1,7 @@
 //! Starting with no rekordbox library: what the window asks at startup, and
 //! making the library when it is told to.
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use tauri::{Manager, State};
 
@@ -35,6 +35,24 @@ pub async fn create_library(app: tauri::AppHandle) -> AppResult<()> {
             })?;
             tracing::info!(path = %made.master_db.display(), "made a new library");
         }
+        handle.state::<Arc<AppState>>().set_library_problem(None);
+        crate::spawn_library_load(handle);
+        Ok(())
+    })
+    .await
+}
+
+/// Validates an existing rekordbox database selected by the user, remembers
+/// it through the same agent options file rekordbox uses, then loads it.
+#[tauri::command]
+pub async fn use_existing_library(app: tauri::AppHandle, path: String) -> AppResult<()> {
+    let handle = app.clone();
+    blocking("use_existing_library", move || {
+        let selected = rbl_db::new_library::use_existing(&PathBuf::from(path)).map_err(|e| {
+            AppError::new(ErrorKind::NotFound, format!("Could not use that rekordbox library: {e}"))
+                .with_detail(e.to_string())
+        })?;
+        tracing::info!(path = %selected.master_db.display(), "selected an existing library");
         handle.state::<Arc<AppState>>().set_library_problem(None);
         crate::spawn_library_load(handle);
         Ok(())

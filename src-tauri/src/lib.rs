@@ -484,6 +484,7 @@ pub fn run() {
             commands::disable_read_only,
             new_library::library_problem,
             new_library::create_library,
+            new_library::use_existing_library,
             commands::playlist_tree,
             commands::open_view,
             commands::fetch_rows,

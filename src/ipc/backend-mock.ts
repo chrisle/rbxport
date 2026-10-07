@@ -2325,6 +2325,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       ready = true;
       for (const listener of readyListeners) listener();
     },
+    chooseExistingLibrary: async () => {
+      await wait(undefined);
+      missing = false;
+      ready = true;
+      for (const listener of readyListeners) listener();
+      return true;
+    },
 
     // A browser has no native menu bar. The mock exposes the listener so a
     // test can fire an item the way the shell would; this is the mock, which

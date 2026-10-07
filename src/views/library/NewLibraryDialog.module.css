@@ -30,9 +30,9 @@
   overflow-wrap: anywhere;
 }
 .error { margin: 0 12px 22px; color: var(--c-error); line-height: 1.5; }
-.buttons { display: flex; justify-content: center; gap: 64px; }
+.buttons { display: flex; justify-content: center; gap: 16px; }
 .buttons button {
-  min-width: 88px;
+  min-width: 104px;
   height: var(--s-pref-button-h);
   border: 1px solid var(--c-pref-button-border);
   border-radius: 2px;
@@ -44,5 +44,5 @@
 .buttons button:hover:not(:disabled) { border-color: var(--c-accent); }
 .dialog :focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
 @media (max-width: 480px) {
-  .buttons { gap: 24px; }
+  .buttons { flex-direction: column; }
 }

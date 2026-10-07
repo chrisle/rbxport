@@ -1452,5 +1452,12 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Die beiden vorhandenen Gerätebibliotheken sind anderer Meinung. Hier können Sie sie vor der ersten Synchronisierung in rekordbox abgleichen.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Dieser USB-Stick gehört zu einer anderen oder älteren, nicht verifizierten Master-Bibliothek. Importieren Sie den Inhalt in rekordbox, bevor Sie den Besitzer ändern.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary enthält Cue-Datensätze, die dieser Export ersetzen würde. Importieren Sie zuerst die Cues in rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Auf einen Titel, der entfernt wird, wird weiterhin im USB-Verlauf verwiesen. Importieren und löschen Sie diesen Verlauf zunächst in rekordbox."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Auf einen Titel, der entfernt wird, wird weiterhin im USB-Verlauf verwiesen. Importieren und löschen Sie diesen Verlauf zunächst in rekordbox.",
+  "Choose Existing…": "Choose Existing…",
+  "Choose an existing rekordbox library": "Choose an existing rekordbox library",
+  "Could not create the database.": "Could not create the database.",
+  "Could not open the database.": "Could not open the database.",
+  "Create New": "Create New",
+  "RBXport could not find a configured rekordbox database. Create a new one or choose an existing master.db.": "RBXport could not find a configured rekordbox database. Create a new one or choose an existing master.db.",
+  "rekordbox database": "rekordbox database"
 }
