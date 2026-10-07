@@ -12,7 +12,6 @@
   ${If} $0 != 0
     DetailPrint "Could not install the silent update task (exit $0): $1"
   ${EndIf}
-  Delete /REBOOTOK "$INSTDIR\rbxport-update-installer.exe"
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
