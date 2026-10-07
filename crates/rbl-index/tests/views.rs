@@ -221,11 +221,7 @@ fn an_empty_library_sorts_and_searches_without_panicking() {
 #[test]
 fn every_sort_column_produces_a_full_permutation() {
     let lib = library_from(&sample());
-    for column in [
-        SortColumn::TrackNo, SortColumn::Title, SortColumn::Artist, SortColumn::Album,
-        SortColumn::Genre, SortColumn::Label, SortColumn::Key, SortColumn::Bpm,
-        SortColumn::Duration, SortColumn::Rating, SortColumn::PlayCount, SortColumn::DateAdded, SortColumn::ReleaseDate,
-    ] {
+    for column in SortColumn::ALL {
         for descending in [false, true] {
             let view = lib.open_view(&spec(column, descending, ""));
             let mut rows = view.rows.clone();
@@ -310,4 +306,130 @@ fn the_collection_in_its_own_order_is_the_row_order() {
     let library = library_from(&sample());
     let rows = library.open_view(&spec(SortColumn::TrackNo, false, "")).rows;
     assert_eq!(rows, vec![0_u32, 1, 2, 3, 4]);
+}
+
+/// Rows in view order, read through `value`.
+fn ordered<T>(lib: &rbl_index::Library, column: SortColumn, descending: bool, value: impl Fn(usize) -> T) -> Vec<T> {
+    lib.open_view(&spec(column, descending, "")).rows.iter().map(|&row| value(row as usize)).collect()
+}
+
+#[test]
+fn numeric_detail_columns_sort_by_number_with_blanks_first() {
+    // rekordbox 7.2.11's comparators for these subtract the two numbers
+    // [OBS: `ListViewSorter::compareFileSize` and its neighbours].
+    let values = [10_u16, 9, 100, 0];
+    let tracks: Vec<TestTrack> = values.iter().enumerate().map(|(index, &value)| TestTrack {
+        id: index as u64 + 1,
+        title: "t",
+        file_size: u64::from(value) * 1_000_000_000,
+        year: value,
+        sample_rate: u32::from(value),
+        bitrate: u32::from(value),
+        disc_no: value,
+        track_number: u32::from(value),
+        bit_depth: value,
+        ..TestTrack::default()
+    }).collect();
+    let lib = library_from(&tracks);
+    let checks: [(SortColumn, &dyn Fn(usize) -> u64); 7] = [
+        (SortColumn::Size, &|row| lib.file_size[row] / 1_000_000_000),
+        (SortColumn::Year, &|row| u64::from(lib.year[row])),
+        (SortColumn::SampleRate, &|row| u64::from(lib.sample_rate[row])),
+        (SortColumn::Bitrate, &|row| u64::from(lib.bitrate[row])),
+        (SortColumn::DiscNo, &|row| u64::from(lib.disc_no[row])),
+        (SortColumn::TrackNumber, &|row| u64::from(lib.track_number[row])),
+        (SortColumn::BitDepth, &|row| u64::from(lib.bit_depth[row])),
+    ];
+    for (column, value) in checks {
+        assert_eq!(ordered(&lib, column, false, value), [0, 9, 10, 100], "{column:?}");
+        assert_eq!(ordered(&lib, column, true, value), [100, 10, 9, 0], "{column:?} descending");
+    }
+}
+
+#[test]
+fn the_tag_track_number_is_not_the_views_own_order() {
+    let tracks: Vec<TestTrack> = [3_u32, 1, 2].iter().enumerate()
+        .map(|(index, &track_number)| TestTrack { id: index as u64 + 1, title: "t", track_number, ..TestTrack::default() })
+        .collect();
+    let lib = library_from(&tracks);
+    assert_eq!(lib.open_view(&spec(SortColumn::TrackNo, false, "")).rows, [0, 1, 2]);
+    assert_eq!(lib.open_view(&spec(SortColumn::TrackNumber, false, "")).rows, [1, 2, 0]);
+}
+
+#[test]
+fn colour_sorts_in_palette_order_not_by_name() {
+    // `compareColor` subtracts `ColorID`s: no colour, then pink (1) to purple (8).
+    let tracks: Vec<TestTrack> = [8_u8, 0, 2, 1].iter().enumerate()
+        .map(|(index, &color)| TestTrack { id: index as u64 + 1, title: "t", color, ..TestTrack::default() })
+        .collect();
+    let lib = library_from(&tracks);
+    assert_eq!(ordered(&lib, SortColumn::Color, false, |row| lib.color[row]), [0, 1, 2, 8]);
+}
+
+#[test]
+fn file_type_sorts_by_rekordbox_s_code_not_its_name() {
+    // `compareFileType` subtracts the type codes: MP3 1, M4A 4, FLAC 5, WAV 11, AIFF 12.
+    let tracks: Vec<TestTrack> = [12_u8, 1, 11, 5, 4].iter().enumerate()
+        .map(|(index, &file_type)| TestTrack { id: index as u64 + 1, title: "t", file_type, ..TestTrack::default() })
+        .collect();
+    let lib = library_from(&tracks);
+    assert_eq!(ordered(&lib, SortColumn::FileType, false, |row| lib.file_type[row]), [1, 4, 5, 11, 12]);
+}
+
+#[test]
+fn publish_track_information_puts_ticked_tracks_first() {
+    // `comparePublic` returns `b` when `a` is off and `b - 1` when it is on.
+    let tracks: Vec<TestTrack> = [false, true, false, true].iter().enumerate()
+        .map(|(index, &publish)| TestTrack { id: index as u64 + 1, title: "t", publish, ..TestTrack::default() })
+        .collect();
+    let lib = library_from(&tracks);
+    assert_eq!(lib.open_view(&spec(SortColumn::PublishTrackInfo, false, "")).rows, [1, 3, 0, 2]);
+    assert_eq!(lib.open_view(&spec(SortColumn::PublishTrackInfo, true, "")).rows, [2, 0, 3, 1]);
+}
+
+#[test]
+fn detail_text_columns_fold_case_and_accents_with_blanks_first() {
+    let words = ["Zebra", "", "apple", "Ébano"];
+    let tracks: Vec<TestTrack> = words.iter().enumerate().map(|(index, &word)| TestTrack {
+        id: index as u64 + 1,
+        title: "t",
+        composer: word,
+        album_artist: word,
+        remixer: word,
+        original_artist: word,
+        mix_name: word,
+        lyricist: word,
+        message: word,
+        ..TestTrack::default()
+    }).collect();
+    let lib = library_from(&tracks);
+    for column in [
+        SortColumn::Composer, SortColumn::AlbumArtist, SortColumn::Remixer, SortColumn::OriginalArtist,
+        SortColumn::MixName, SortColumn::Lyricist, SortColumn::Message,
+    ] {
+        assert_eq!(ordered(&lib, column, false, |row| words[row]), ["", "apple", "Ébano", "Zebra"], "{column:?}");
+    }
+}
+
+#[test]
+fn location_keeps_a_folders_tracks_together() {
+    // The general fold drops `/`, which would put `AB/a.mp3` between two
+    // tracks of folder `A`.
+    let paths = ["/m/AB/a.mp3", "/m/A/z.mp3", "/m/a/b.mp3"];
+    let tracks: Vec<TestTrack> = paths.iter().enumerate()
+        .map(|(index, &path)| TestTrack { id: index as u64 + 1, title: "t", path, ..TestTrack::default() })
+        .collect();
+    let lib = library_from(&tracks);
+    assert_eq!(ordered(&lib, SortColumn::Location, false, |row| paths[row]), ["/m/a/b.mp3", "/m/A/z.mp3", "/m/AB/a.mp3"]);
+    assert_eq!(ordered(&lib, SortColumn::FileName, false, |row| lib.file_name.get(row).to_owned()), ["a.mp3", "b.mp3", "z.mp3"]);
+}
+
+#[test]
+fn date_created_sorts_as_the_date_reads() {
+    let dates = ["2024-11-02", "", "2023-01-30", "2024-02-15"];
+    let tracks: Vec<TestTrack> = dates.iter().enumerate()
+        .map(|(index, &date_created)| TestTrack { id: index as u64 + 1, title: "t", date_created, ..TestTrack::default() })
+        .collect();
+    let lib = library_from(&tracks);
+    assert_eq!(ordered(&lib, SortColumn::DateCreated, false, |row| dates[row]), ["", "2023-01-30", "2024-02-15", "2024-11-02"]);
 }

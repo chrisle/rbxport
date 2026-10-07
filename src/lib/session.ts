@@ -111,10 +111,17 @@ export const DEFAULT_SESSION: Session = {
   waveformZoom: { a: DETAIL_BARS, b: DETAIL_BARS },
 };
 
-const SORT_COLUMNS: readonly string[] = [
-  "trackNo", "title", "artist", "album", "genre", "label", "comment",
-  "bpm", "key", "duration", "rating", "djPlayCount", "dateAdded", "releaseDate",
-];
+/** Every sort column, so a new one cannot be left out of what is restored. */
+const SORTABLE: Readonly<Record<SortColumn, true>> = {
+  trackNo: true, title: true, artist: true, album: true, genre: true, label: true,
+  comment: true, bpm: true, key: true, duration: true, rating: true, djPlayCount: true,
+  dateAdded: true, releaseDate: true, size: true, year: true, sampleRate: true,
+  bitrate: true, color: true, fileName: true, location: true, composer: true,
+  albumArtist: true, remixer: true, originalArtist: true, mixName: true, discNo: true,
+  trackNumber: true, fileType: true, bitDepth: true, lyricist: true, dateCreated: true,
+  publishTrackInfo: true, message: true,
+};
+const SORT_COLUMNS: readonly string[] = Object.keys(SORTABLE);
 
 function sortOrDefault(value: unknown): SortState {
   if (typeof value !== "object" || value === null) return DEFAULT_SORT;

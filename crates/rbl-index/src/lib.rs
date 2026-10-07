@@ -68,6 +68,12 @@ pub struct Library {
     pub artwork_path: StrColumn,
     pub date_added: StrColumn,
     pub release_date: StrColumn,
+    /// `djmdContent.DateCreated`, `YYYY-MM-DD` as stored.
+    pub date_created: StrColumn,
+    /// `djmdContent.Lyricist`, plain text on the track.
+    pub lyricist: StrColumn,
+    /// `djmdContent.DeliveryComment`, the browser's Message column.
+    pub message: StrColumn,
 
     pub artist: Vec<u32>,
     pub album: Vec<u32>,
@@ -90,6 +96,18 @@ pub struct Library {
     /// `djmdContent.ReleaseYear`; 0 when unknown. Two bytes a row, for the
     /// intelligent playlists that ask for a year.
     pub year: Vec<u16>,
+    /// `djmdContent.TrackNo`: the tag's track number, not the view's `#`.
+    pub track_number: Vec<u32>,
+    /// `djmdContent.DiscNo`.
+    pub disc_no: Vec<u16>,
+    /// `djmdContent.FileType`, rekordbox's own code: 1 MP3, 4 M4A, 5 FLAC,
+    /// 11 WAV, 12 AIFF.
+    pub file_type: Vec<u8>,
+    /// `djmdContent.BitDepth`.
+    pub bit_depth: Vec<u16>,
+    /// 1 where `djmdContent.DeliveryControl` is `"on"`: the browser's
+    /// Publish track information box.
+    pub publish: Vec<u8>,
 
     pub artists: Interner,
     pub albums: Interner,
@@ -164,6 +182,9 @@ impl Clone for Library {
             artwork_path: self.artwork_path.clone(),
             date_added: self.date_added.clone(),
             release_date: self.release_date.clone(),
+            date_created: self.date_created.clone(),
+            lyricist: self.lyricist.clone(),
+            message: self.message.clone(),
             artist: self.artist.clone(),
             album: self.album.clone(),
             genre: self.genre.clone(),
@@ -179,6 +200,11 @@ impl Clone for Library {
             sample_rate: self.sample_rate.clone(),
             file_size: self.file_size.clone(),
             year: self.year.clone(),
+            track_number: self.track_number.clone(),
+            disc_no: self.disc_no.clone(),
+            file_type: self.file_type.clone(),
+            bit_depth: self.bit_depth.clone(),
+            publish: self.publish.clone(),
             artists: self.artists.clone(),
             albums: self.albums.clone(),
             genres: self.genres.clone(),
@@ -614,14 +640,23 @@ impl Library {
                 + self.key.capacity()
                 + self.bpm_x100.capacity()
                 + self.length_sec.capacity()
-                + self.play_count.capacity())
+                + self.bitrate.capacity()
+                + self.sample_rate.capacity()
+                + self.track_number.capacity())
                 * 4
+            + self.file_size.capacity() * 8
             + (self.artist_ids.capacity()
                 + self.album_ids.capacity()
                 + self.genre_ids.capacity()
                 + self.label_ids.capacity())
                 * 4
-            + self.year.capacity() * 2
+            + (self.year.capacity()
+                + self.play_count.capacity()
+                + self.disc_no.capacity()
+                + self.bit_depth.capacity())
+                * 2
+            + self.file_type.capacity()
+            + self.publish.capacity()
             + self.rating.capacity()
             + self.color.capacity()
             + self.analysed.capacity();
@@ -634,6 +669,9 @@ impl Library {
             + self.artwork_path.heap_bytes()
             + self.date_added.heap_bytes()
             + self.release_date.heap_bytes()
+            + self.date_created.heap_bytes()
+            + self.lyricist.heap_bytes()
+            + self.message.heap_bytes()
             + self.search.heap_bytes()
             + self
                 .search_extra

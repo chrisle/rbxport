@@ -6,6 +6,13 @@
 
 use crate::{filter::TrackFilter, strings::fold, Library, Row};
 
+/// A column the browser can order rows by.
+///
+/// rekordbox 7.2.11's `browse::BrowseHeaderManager::isSortableColumn` and
+/// `browse::ListViewSorter::setCompFunc` decide which of its columns sort and
+/// by what [OBS: static analysis of the macOS arm64 binary]. Each variant
+/// below notes the comparator it follows. Ties break on row order, and an
+/// empty text sorts first, as `ListViewSorter::compareJuceString` puts it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SortColumn {
     TrackNo,
@@ -25,14 +32,66 @@ pub enum SortColumn {
     /// The key column round the Camelot wheel, for the alphanumeric display:
     /// rekordbox sorts the column by what it shows.
     KeyCamelot,
+    /// `compareFileSize`: the stored byte count.
+    Size,
+    /// `compareReleaseYear`: the year as a number, 0 (none) first.
+    Year,
+    /// `compareSampleRate`: Hz as a number.
+    SampleRate,
+    /// `compareBitrate`: kbps as a number.
+    Bitrate,
+    /// `compareColor`: the `ColorID` number, so the colours sort in
+    /// rekordbox's palette order (pink first) rather than by name, and no
+    /// colour (0) sorts first.
+    Color,
+    /// `compareFileName`: the file's name.
+    FileName,
+    /// `compareFilePath`: the whole path, so a folder's tracks sort together.
+    Location,
+    /// `compareComposer`.
+    Composer,
+    /// `compareAlbumArtist`.
+    AlbumArtist,
+    /// `compareRemixer`.
+    Remixer,
+    /// `compareOrgArtist`.
+    OriginalArtist,
+    /// `compareMixName`: `djmdContent.Subtitle`.
+    MixName,
+    /// `compareDiscNo`.
+    DiscNo,
+    /// `compareTrackNo`: the tag's track number. Not the `#` column, which is
+    /// [`SortColumn::TrackNo`] and means the view's own order.
+    TrackNumber,
+    /// `compareFileType`: rekordbox's file type code (1 MP3, 4 M4A, 5 FLAC,
+    /// 11 WAV, 12 AIFF), not the name it prints.
+    FileType,
+    /// `compareBitDepth`.
+    BitDepth,
+    /// `compareLyricist`.
+    Lyricist,
+    /// `compareDateCreated`: the stored `YYYY-MM-DD` text.
+    DateCreated,
+    /// `comparePublic`: rekordbox returns `b` when `a` is off and `b - 1`
+    /// when it is on, so ascending puts the ticked tracks first.
+    PublishTrackInfo,
+    /// `comparePublicComment`: `djmdContent.DeliveryComment`.
+    Message,
 }
 
 impl SortColumn {
-    pub(crate) const ALL: [SortColumn; 15] = [
+    /// Every column, in rank-slot order. Public so the wire mapping's tests
+    /// can check that each one is reachable.
+    pub const ALL: [SortColumn; 35] = [
         SortColumn::TrackNo, SortColumn::Title, SortColumn::Artist, SortColumn::Album,
         SortColumn::Genre, SortColumn::Label, SortColumn::Comment, SortColumn::Key, SortColumn::Bpm,
         SortColumn::Duration, SortColumn::Rating, SortColumn::PlayCount, SortColumn::DateAdded, SortColumn::ReleaseDate,
-        SortColumn::KeyCamelot,
+        SortColumn::KeyCamelot, SortColumn::Size, SortColumn::Year, SortColumn::SampleRate,
+        SortColumn::Bitrate, SortColumn::Color, SortColumn::FileName, SortColumn::Location,
+        SortColumn::Composer, SortColumn::AlbumArtist, SortColumn::Remixer, SortColumn::OriginalArtist,
+        SortColumn::MixName, SortColumn::DiscNo, SortColumn::TrackNumber, SortColumn::FileType,
+        SortColumn::BitDepth, SortColumn::Lyricist, SortColumn::DateCreated,
+        SortColumn::PublishTrackInfo, SortColumn::Message,
     ];
 
     pub(crate) fn rank_slot(self) -> usize {
@@ -52,6 +111,39 @@ impl SortColumn {
             SortColumn::DateAdded => 12,
             SortColumn::ReleaseDate => 13,
             SortColumn::KeyCamelot => 14,
+            SortColumn::Size => 15,
+            SortColumn::Year => 16,
+            SortColumn::SampleRate => 17,
+            SortColumn::Bitrate => 18,
+            SortColumn::Color => 19,
+            SortColumn::FileName => 20,
+            SortColumn::Location => 21,
+            SortColumn::Composer => 22,
+            SortColumn::AlbumArtist => 23,
+            SortColumn::Remixer => 24,
+            SortColumn::OriginalArtist => 25,
+            SortColumn::MixName => 26,
+            SortColumn::DiscNo => 27,
+            SortColumn::TrackNumber => 28,
+            SortColumn::FileType => 29,
+            SortColumn::BitDepth => 30,
+            SortColumn::Lyricist => 31,
+            SortColumn::DateCreated => 32,
+            SortColumn::PublishTrackInfo => 33,
+            SortColumn::Message => 34,
+        }
+    }
+
+    /// The `search_extra` slot a column reads its text from, for the five
+    /// uncommon text fields that live there.
+    pub(crate) fn extra_slot(self) -> Option<usize> {
+        match self {
+            SortColumn::Composer => Some(0),
+            SortColumn::AlbumArtist => Some(1),
+            SortColumn::Remixer => Some(2),
+            SortColumn::OriginalArtist => Some(3),
+            SortColumn::MixName => Some(4),
+            _ => None,
         }
     }
 }
@@ -312,40 +404,105 @@ impl Library {
     }
 
     fn column_rank(&self, column: SortColumn) -> Vec<u32> {
-            let n = self.count;
-            let mut order: Vec<Row> = (0..u32::try_from(n).unwrap_or(u32::MAX)).collect();
-            // Ties break on row order so a sort is reproducible.
-            match column {
-                SortColumn::TrackNo => {}
-                SortColumn::Bpm => order.sort_by_key(|&r| self.bpm_x100.get(r as usize).copied().unwrap_or(0)),
-                SortColumn::Duration => order.sort_by_key(|&r| self.length_sec.get(r as usize).copied().unwrap_or(0)),
-                SortColumn::Rating => order.sort_by_key(|&r| self.rating.get(r as usize).copied().unwrap_or(0)),
-                SortColumn::PlayCount => order.sort_by_key(|&r| self.play_count.get(r as usize).copied().unwrap_or(0)),
-                SortColumn::Title => order.sort_by(|&a, &b| self.title_folded.get(a as usize).cmp(self.title_folded.get(b as usize))),
-                SortColumn::Artist => order.sort_by(|&a, &b| Self::folded_lookup(&self.artists, &self.artist, a).cmp(Self::folded_lookup(&self.artists, &self.artist, b))),
-                SortColumn::Album => order.sort_by(|&a, &b| Self::folded_lookup(&self.albums, &self.album, a).cmp(Self::folded_lookup(&self.albums, &self.album, b))),
-                SortColumn::Genre => order.sort_by(|&a, &b| Self::folded_lookup(&self.genres, &self.genre, a).cmp(Self::folded_lookup(&self.genres, &self.genre, b))),
-                SortColumn::Label => order.sort_by(|&a, &b| Self::folded_lookup(&self.labels, &self.label, a).cmp(Self::folded_lookup(&self.labels, &self.label, b))),
-                SortColumn::Comment => order.sort_by_cached_key(|&r| fold(self.comment.get(r as usize))),
-                // By the key's own rule, not the fold: the fold drops `#`,
-                // which put F and F# on top of each other.
-                SortColumn::Key => order.sort_by(|&a, &b| crate::key::cmp_names(self.key_name(a), self.key_name(b))),
-                SortColumn::KeyCamelot => order.sort_by(|&a, &b| {
-                    crate::key::camelot_rank(self.key_name(a))
-                        .cmp(&crate::key::camelot_rank(self.key_name(b)))
-                        .then_with(|| crate::key::cmp_names(self.key_name(a), self.key_name(b)))
-                }),
-                SortColumn::DateAdded => order.sort_by(|&a, &b| self.date_added.get(a as usize).cmp(self.date_added.get(b as usize))),
-                SortColumn::ReleaseDate => order.sort_by(|&a, &b| self.release_date.get(a as usize).cmp(self.release_date.get(b as usize))),
+        let n = self.count;
+        let mut order: Vec<Row> = (0..u32::try_from(n).unwrap_or(u32::MAX)).collect();
+        // Ties break on row order so a sort is reproducible: every sort here
+        // is stable and starts from row order.
+        match column {
+            SortColumn::TrackNo => {}
+            SortColumn::Title => order.sort_by(|&a, &b| self.title_folded.get(a as usize).cmp(self.title_folded.get(b as usize))),
+            SortColumn::Artist => order.sort_by(|&a, &b| Self::folded_lookup(&self.artists, &self.artist, a).cmp(Self::folded_lookup(&self.artists, &self.artist, b))),
+            SortColumn::Album => order.sort_by(|&a, &b| Self::folded_lookup(&self.albums, &self.album, a).cmp(Self::folded_lookup(&self.albums, &self.album, b))),
+            SortColumn::Genre => order.sort_by(|&a, &b| Self::folded_lookup(&self.genres, &self.genre, a).cmp(Self::folded_lookup(&self.genres, &self.genre, b))),
+            SortColumn::Label => order.sort_by(|&a, &b| Self::folded_lookup(&self.labels, &self.label, a).cmp(Self::folded_lookup(&self.labels, &self.label, b))),
+            // By the key's own rule, not the fold: the fold drops `#`,
+            // which put F and F# on top of each other.
+            SortColumn::Key => order.sort_by(|&a, &b| crate::key::cmp_names(self.key_name(a), self.key_name(b))),
+            SortColumn::KeyCamelot => order.sort_by(|&a, &b| {
+                crate::key::camelot_rank(self.key_name(a))
+                    .cmp(&crate::key::camelot_rank(self.key_name(b)))
+                    .then_with(|| crate::key::cmp_names(self.key_name(a), self.key_name(b)))
+            }),
+            // Text that is a name or prose: the same fold as the artist and
+            // comment columns.
+            SortColumn::Comment | SortColumn::Composer | SortColumn::AlbumArtist | SortColumn::Remixer
+            | SortColumn::OriginalArtist | SortColumn::MixName | SortColumn::Lyricist | SortColumn::Message => {
+                order.sort_by_cached_key(|&r| fold(self.sort_text(r, column)));
             }
-            let mut rank = vec![0_u32; n];
-            for (position, &row) in order.iter().enumerate() {
-                if let Some(slot) = rank.get_mut(row as usize) {
-                    *slot = u32::try_from(position).unwrap_or(u32::MAX);
-                }
+            // A path keeps its separators and punctuation, which the general
+            // fold drops: without them `A/z.mp3` would sort after `AB/a.mp3`
+            // and a folder's tracks would no longer sit together.
+            SortColumn::FileName | SortColumn::Location => {
+                order.sort_by_cached_key(|&r| crate::strings::fold_smart(self.sort_text(r, column)));
             }
+            // Dates are stored as `YYYY-MM-DD` text, which orders as it reads.
+            SortColumn::DateAdded | SortColumn::ReleaseDate | SortColumn::DateCreated => {
+                order.sort_by(|&a, &b| self.sort_text(a, column).cmp(self.sort_text(b, column)));
+            }
+            SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating | SortColumn::PlayCount | SortColumn::Size
+            | SortColumn::Year | SortColumn::SampleRate | SortColumn::Bitrate | SortColumn::Color
+            | SortColumn::DiscNo | SortColumn::TrackNumber | SortColumn::FileType | SortColumn::BitDepth
+            | SortColumn::PublishTrackInfo => {
+                order.sort_by_key(|&r| self.sort_number(r, column));
+            }
+        }
+        let mut rank = vec![0_u32; n];
+        for (position, &row) in order.iter().enumerate() {
+            if let Some(slot) = rank.get_mut(row as usize) {
+                *slot = u32::try_from(position).unwrap_or(u32::MAX);
+            }
+        }
+        rank
+    }
 
-            rank
+    /// A row's text under a text column, as stored. Empty for a numeric
+    /// column, or a lookup column whose text lives in an interner.
+    pub(crate) fn sort_text(&self, row: Row, column: SortColumn) -> &str {
+        let row = row as usize;
+        if let Some(slot) = column.extra_slot() {
+            return self.search_extra.get(slot).map_or("", |values| values.get(row));
+        }
+        match column {
+            SortColumn::Comment => self.comment.get(row),
+            SortColumn::FileName => self.file_name.get(row),
+            // The resolved path. A cloud-library track's resolves to its
+            // local copy, where the Location cell prints the `/contents_`
+            // path rekordbox stores; every other track's is the same text.
+            SortColumn::Location => self.folder_path.get(row),
+            SortColumn::Lyricist => self.lyricist.get(row),
+            SortColumn::Message => self.message.get(row),
+            SortColumn::DateAdded => self.date_added.get(row),
+            SortColumn::ReleaseDate => self.release_date.get(row),
+            SortColumn::DateCreated => self.date_created.get(row),
+            _ => "",
+        }
+    }
+
+    /// A row's value under a numeric column, widened so one key type serves
+    /// them all. 0 for a text column.
+    pub(crate) fn sort_number(&self, row: Row, column: SortColumn) -> u64 {
+        fn at<T: Copy + Into<u64>>(values: &[T], row: usize) -> u64 {
+            values.get(row).map_or(0, |&value| value.into())
+        }
+        let row = row as usize;
+        match column {
+            SortColumn::Bpm => at(&self.bpm_x100, row),
+            SortColumn::Duration => at(&self.length_sec, row),
+            SortColumn::Rating => at(&self.rating, row),
+            SortColumn::PlayCount => at(&self.play_count, row),
+            SortColumn::Size => at(&self.file_size, row),
+            SortColumn::Year => at(&self.year, row),
+            SortColumn::SampleRate => at(&self.sample_rate, row),
+            SortColumn::Bitrate => at(&self.bitrate, row),
+            SortColumn::Color => at(&self.color, row),
+            SortColumn::DiscNo => at(&self.disc_no, row),
+            SortColumn::TrackNumber => at(&self.track_number, row),
+            SortColumn::FileType => at(&self.file_type, row),
+            SortColumn::BitDepth => at(&self.bit_depth, row),
+            // Ticked first, as `comparePublic` orders it.
+            SortColumn::PublishTrackInfo => u64::from(at(&self.publish, row) == 0),
+            _ => 0,
+        }
     }
 
     /// Free function: it reads only its arguments, not `self`.

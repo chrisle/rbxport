@@ -75,9 +75,15 @@ describe("the catalogue", () => {
     }
   });
 
-  it("allows every index-backed optional heading to sort the view", () => {
-    expect(specOf("comment")?.sortable).toBe(true);
-    expect(specOf("djPlayCount")?.sortable).toBe(true);
+  it("sorts by every heading rekordbox sorts by the field it shows", () => {
+    // rekordbox 7.2.11's `BrowseHeaderManager::isSortableColumn`: everything
+    // but Artwork, Preview, My Tag, Attribute and Cloud. Hot Cue is left out
+    // here because rekordbox sorts it by Hot Cue Auto Load, which this
+    // column does not show.
+    const unsortable = ["attr", "preview", "artwork", "hotCue", "myTag", "cloud"];
+    for (const column of CATALOGUE) {
+      expect(column.sortable, column.key).toBe(!unsortable.includes(column.key));
+    }
   });
 });
 

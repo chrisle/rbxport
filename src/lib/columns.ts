@@ -14,12 +14,7 @@ import type { SortColumn } from "@/ipc/types";
 /** Keys that name a real column. Sortable ones match `SortColumn`. */
 export type ColumnKey =
   | SortColumn
-  | "attr" | "preview" | "artwork" | "comment"
-  | "size" | "discNo" | "albumArtist" | "composer" | "lyricist" | "fileType"
-  | "year" | "mixName" | "remixer" | "originalArtist" | "sampleRate"
-  | "bitrate" | "bitDepth" | "location" | "dateCreated" | "hotCue"
-  | "publishTrackInfo" | "message" | "color" | "myTag"
-  | "trackNumber" | "cloud" | "fileName";
+  | "attr" | "preview" | "artwork" | "hotCue" | "myTag" | "cloud";
 
 export interface ColumnSpec {
   key: ColumnKey;
@@ -68,34 +63,38 @@ export const CATALOGUE: readonly ColumnSpec[] = [
   { key: "comment", label: "Comments", width: 210, sortable: true },
   { key: "label", label: "Label", width: 128, sortable: true },
   // Unmeasured from here down: none of these has been visible in a capture.
-  { key: "size", label: "Size", width: 90, align: "right", sortable: false },
-  { key: "discNo", label: "Disc number", width: 90, align: "right", sortable: false },
-  { key: "albumArtist", label: "Album Artist", width: 200, sortable: false },
-  { key: "composer", label: "Composer", width: 180, sortable: false },
-  { key: "lyricist", label: "Lyricist", width: 180, sortable: false },
-  { key: "fileType", label: "File Type", width: 90, sortable: false },
-  { key: "year", label: "Year", width: 70, align: "right", sortable: false },
-  { key: "mixName", label: "Mix Name", width: 180, sortable: false },
-  { key: "remixer", label: "Remixer", width: 180, sortable: false },
-  { key: "originalArtist", label: "Original Artist", width: 200, sortable: false },
-  { key: "sampleRate", label: "Sample Rate", width: 110, align: "right", sortable: false },
-  { key: "bitrate", label: "Bitrate", width: 90, align: "right", sortable: false },
-  { key: "bitDepth", label: "Bitdepth", width: 90, align: "right", sortable: false },
-  { key: "location", label: "Location", width: 320, sortable: false },
+  { key: "size", label: "Size", width: 90, align: "right", sortable: true },
+  { key: "discNo", label: "Disc number", width: 90, align: "right", sortable: true },
+  { key: "albumArtist", label: "Album Artist", width: 200, sortable: true },
+  { key: "composer", label: "Composer", width: 180, sortable: true },
+  { key: "lyricist", label: "Lyricist", width: 180, sortable: true },
+  { key: "fileType", label: "File Type", width: 90, sortable: true },
+  { key: "year", label: "Year", width: 70, align: "right", sortable: true },
+  { key: "mixName", label: "Mix Name", width: 180, sortable: true },
+  { key: "remixer", label: "Remixer", width: 180, sortable: true },
+  { key: "originalArtist", label: "Original Artist", width: 200, sortable: true },
+  { key: "sampleRate", label: "Sample Rate", width: 110, align: "right", sortable: true },
+  { key: "bitrate", label: "Bitrate", width: 90, align: "right", sortable: true },
+  { key: "bitDepth", label: "Bitdepth", width: 90, align: "right", sortable: true },
+  { key: "location", label: "Location", width: 320, sortable: true },
   { key: "dateAdded", label: "Date Added", width: 128, align: "right", sortable: true },
   { key: "releaseDate", label: "Release Date", width: 128, align: "right", sortable: true },
-  { key: "dateCreated", label: "Date Created", width: 128, align: "right", sortable: false },
+  { key: "dateCreated", label: "Date Created", width: 128, align: "right", sortable: true },
+  // rekordbox sorts its Hot Cue column, but by Hot Cue Auto Load, the tick
+  // it paints there (`ListViewer::paintCheckBoxColumn`, `compareAutoHotCue`).
+  // This column shows the hot cue letters instead, so it stays unsortable
+  // until it shows what rekordbox's does.
   { key: "hotCue", label: "Hot Cue", width: 110, sortable: false },
-  { key: "publishTrackInfo", label: "Publish track information", width: 180, sortable: false },
-  { key: "message", label: "Message", width: 180, sortable: false },
-  { key: "color", label: "Color", width: 90, sortable: false },
+  { key: "publishTrackInfo", label: "Publish track information", width: 180, sortable: true },
+  { key: "message", label: "Message", width: 180, sortable: true },
+  { key: "color", label: "Color", width: 90, sortable: true },
   { key: "djPlayCount", label: "DJ Play Count", width: 120, align: "right", sortable: true },
   { key: "myTag", label: "My Tag", width: 180, sortable: false },
   { key: "album", label: "Album", width: 240, sortable: true },
   { key: "genre", label: "Genre", width: 160, sortable: true },
-  { key: "trackNumber", label: "Track number", width: 90, align: "right", sortable: false },
+  { key: "trackNumber", label: "Track number", width: 90, align: "right", sortable: true },
   { key: "cloud", label: "Cloud", width: 80, sortable: false },
-  { key: "fileName", label: "File Name", width: 260, sortable: false },
+  { key: "fileName", label: "File Name", width: 260, sortable: true },
 ];
 
 /** Ticked in the header menu when nothing has been customised. */

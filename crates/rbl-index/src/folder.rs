@@ -229,8 +229,8 @@ impl Library {
     /// `files` is the folder's audio files as listed, name and path each,
     /// already in name order — that order is what `TrackNo` keeps. The sort
     /// and the search treat both kinds alike where they can: a loose file
-    /// sorts by its name where a track sorts by its title, and by nothing
-    /// under every other column, since its tags are not read until its
+    /// sorts by its name where a track sorts by its title or file name, by
+    /// its path under Location, and by nothing under every other column, since its tags are not read until its
     /// window is fetched [ASSUME: what rekordbox sorts unimported files by
     /// is not captured].
     #[must_use]
@@ -274,18 +274,24 @@ impl Library {
         // cheap; the library's rank arrays cannot place a loose file anyway.
         match spec.sort {
             SortColumn::TrackNo => {}
-            SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating | SortColumn::PlayCount | SortColumn::KeyCamelot => {
+            SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating | SortColumn::PlayCount | SortColumn::Size
+            | SortColumn::Year | SortColumn::SampleRate | SortColumn::Bitrate | SortColumn::Color
+            | SortColumn::DiscNo | SortColumn::TrackNumber | SortColumn::FileType | SortColumn::BitDepth
+            | SortColumn::PublishTrackInfo => {
                 let key = |entry: &FolderEntry| match *entry {
-                    FolderEntry::Track(row) => match spec.sort {
-                        SortColumn::Bpm => self.bpm_x100.get(row as usize).copied().unwrap_or(0),
-                        SortColumn::Duration => self.length_sec.get(row as usize).copied().unwrap_or(0),
-                        SortColumn::PlayCount => u32::from(self.play_count.get(row as usize).copied().unwrap_or(0)),
-                        SortColumn::KeyCamelot => crate::key::camelot_rank(self.key_name(row)),
-                        _ => u32::from(self.rating.get(row as usize).copied().unwrap_or(0)),
-                    },
-                    // A loose file has no key or number; it goes with the
-                    // blanks, which is last for a key and first for a number.
-                    FolderEntry::File(_) => if spec.sort == SortColumn::KeyCamelot { u32::MAX } else { 0 },
+                    FolderEntry::Track(row) => self.sort_number(row, spec.sort),
+                    // A loose file has no number; it goes with the blanks,
+                    // which is first.
+                    FolderEntry::File(_) => 0,
+                };
+                view.entries.sort_by_key(key);
+            }
+            SortColumn::KeyCamelot => {
+                let key = |entry: &FolderEntry| match *entry {
+                    FolderEntry::Track(row) => crate::key::camelot_rank(self.key_name(row)),
+                    // A loose file has no key; it goes with the blanks, which
+                    // is last for a key.
+                    FolderEntry::File(_) => u32::MAX,
                 };
                 view.entries.sort_by_key(key);
             }
@@ -302,15 +308,23 @@ impl Library {
                     match *entry {
                         FolderEntry::Track(row) => self.folded_text(row, column),
                         FolderEntry::File(index) => match column {
-                            SortColumn::Title => files.get(index).map_or("", |f| f.name.as_str()),
+                            SortColumn::Title | SortColumn::FileName => files.get(index).map_or("", |f| f.name.as_str()),
+                            SortColumn::Location => files.get(index).and_then(|f| f.path.to_str()).unwrap_or(""),
                             _ => "",
                         },
                     }
                 };
+                // The same folds the collection's ranks use, so a folder
+                // orders the way the collection does.
+                let folded = |text: &str| match column {
+                    SortColumn::FileName | SortColumn::Location => crate::strings::fold_smart(text),
+                    SortColumn::DateAdded | SortColumn::ReleaseDate | SortColumn::DateCreated => text.to_owned(),
+                    _ => fold(text),
+                };
                 let mut keyed: Vec<(String, FolderEntry)> = view
                     .entries
                     .iter()
-                    .map(|entry| (fold(key(entry)), *entry))
+                    .map(|entry| (folded(key(entry)), *entry))
                     .collect();
                 keyed.sort_by(|a, b| a.0.cmp(&b.0));
                 view.entries = keyed.into_iter().map(|(_, entry)| entry).collect();
@@ -333,11 +347,7 @@ impl Library {
             SortColumn::Album => self.albums.folded(id(&self.album)),
             SortColumn::Genre => self.genres.folded(id(&self.genre)),
             SortColumn::Label => self.labels.folded(id(&self.label)),
-            SortColumn::Comment => self.comment.get(row as usize),
-            SortColumn::DateAdded => self.date_added.get(row as usize),
-            SortColumn::ReleaseDate => self.release_date.get(row as usize),
-            SortColumn::TrackNo | SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating | SortColumn::PlayCount
-            | SortColumn::Key | SortColumn::KeyCamelot => "",
+            column => self.sort_text(row, column),
         }
     }
 }
@@ -418,6 +428,23 @@ mod tests {
         let lib = library();
         let view = lib.open_folder(listed(&["zebra.mp3", "loose.mp3", "Café Del Mar.mp3"]), &spec(SortColumn::Bpm, false, ""));
         assert_eq!(view.entries, [FolderEntry::File(0), FolderEntry::Track(0), FolderEntry::Track(1)]);
+    }
+
+    #[test]
+    fn sorting_by_a_detail_column_orders_tracks_as_the_collection_does() {
+        let lib = library_from(&[
+            TestTrack { id: 1, title: "Zebra", path: "/music/zebra.mp3", track_number: 9, ..TestTrack::default() },
+            TestTrack { id: 2, title: "Apple", path: "/music/Café Del Mar.mp3", track_number: 2, ..TestTrack::default() },
+        ]);
+        let files = || listed(&["zebra.mp3", "loose.mp3", "Café Del Mar.mp3"]);
+        // A loose file has no track number, so it goes with the blanks.
+        let view = lib.open_folder(files(), &spec(SortColumn::TrackNumber, false, ""));
+        assert_eq!(view.entries, [FolderEntry::File(0), FolderEntry::Track(1), FolderEntry::Track(0)]);
+        // Under File Name and Location a loose file sorts by its own.
+        let view = lib.open_folder(files(), &spec(SortColumn::FileName, false, ""));
+        assert_eq!(view.entries, [FolderEntry::Track(1), FolderEntry::File(0), FolderEntry::Track(0)]);
+        let view = lib.open_folder(files(), &spec(SortColumn::Location, true, ""));
+        assert_eq!(view.entries, [FolderEntry::Track(0), FolderEntry::File(0), FolderEntry::Track(1)]);
     }
 
     #[test]

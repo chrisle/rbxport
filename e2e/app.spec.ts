@@ -456,6 +456,55 @@ test("DJ Play Count sorts numerically in both directions", async ({ page }) => {
   }).toBe(true);
 });
 
+test("Color sorts in rekordbox's palette order, not by name", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Color", exact: true }).click();
+
+  const palette = ["", "Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"];
+  const header = page.getByRole("columnheader", { name: /^Color/ });
+  const values = page.locator('[role="gridcell"][data-col="color"]');
+  await header.click();
+  await expect(header).toHaveAttribute("data-sorted", "true");
+  await expect(values.first()).toHaveText("");
+  await expect.poll(async () => {
+    const visible = (await values.allInnerTexts()).map((value) => palette.indexOf(value));
+    return visible.every((value, index) => value >= 0 && (index === 0 || (visible[index - 1] ?? 0) <= value));
+  }).toBe(true);
+
+  await header.click();
+  await expect(values.first()).toHaveText("Purple");
+  await expect.poll(async () => {
+    const visible = (await values.allInnerTexts()).map((value) => palette.indexOf(value));
+    return visible.every((value, index) => value >= 0 && (index === 0 || (visible[index - 1] ?? 0) >= value));
+  }).toBe(true);
+});
+
+test("Track number sorts by the tag's number, apart from the # column", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Track number", exact: true }).click();
+
+  const header = page.getByRole("columnheader", { name: /^Track number/ });
+  const values = page.locator('[role="gridcell"][data-col="trackNumber"]');
+  await header.click();
+  await expect(header).toHaveAttribute("data-sorted", "true");
+  await expect(values.first()).toHaveText("1");
+  await expect.poll(async () => {
+    const visible = (await values.allInnerTexts()).map(Number);
+    return visible.every((value, index) => index === 0 || (visible[index - 1] ?? 0) <= value);
+  }).toBe(true);
+
+  await header.click();
+  await expect(values.first()).toHaveText("12");
+  await expect.poll(async () => {
+    const visible = (await values.allInnerTexts()).map(Number);
+    return visible.every((value, index) => index === 0 || (visible[index - 1] ?? 0) >= value);
+  }).toBe(true);
+});
+
 test("column menu highlights each field as the pointer moves", async ({ page }) => {
   await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
   const menu = page.getByRole("menu", { name: "Columns" });

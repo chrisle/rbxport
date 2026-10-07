@@ -63,10 +63,19 @@ export type TrackSource =
 /** The Related Tracks section's criteria: rekordbox's own three. */
 export type RelatedCriterion = "bpmKey" | "genreRecent" | "artist" | "suggestion";
 
+/**
+ * The browser columns the backend can order by: every column rekordbox
+ * 7.2.11's own list sorts (its `BrowseHeaderManager::isSortableColumn`),
+ * except Hot Cue, whose rekordbox sort is by a field this column does not
+ * show. Each name is the column's own key.
+ */
 export type SortColumn =
   | "trackNo" | "title" | "artist" | "album" | "genre" | "label"
   | "comment" | "bpm" | "key" | "duration" | "rating" | "djPlayCount"
-  | "dateAdded" | "releaseDate";
+  | "dateAdded" | "releaseDate" | "size" | "year" | "sampleRate" | "bitrate"
+  | "color" | "fileName" | "location" | "composer" | "albumArtist" | "remixer"
+  | "originalArtist" | "mixName" | "discNo" | "trackNumber" | "fileType"
+  | "bitDepth" | "lyricist" | "dateCreated" | "publishTrackInfo" | "message";
 
 /**
  * What the backend sorts by. The columns, plus the key round the Camelot

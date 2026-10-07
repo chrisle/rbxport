@@ -310,6 +310,18 @@ function makeTree(playlistFixture: PlaylistFixture): TreeNode[] {
 
 const collator = new Intl.Collator("en", { sensitivity: "base", numeric: true });
 
+/** A detail field as a number, 0 when the row does not carry it. */
+function extraNumber(row: RowDto, field: string): number {
+  const value = row.extra?.[field];
+  return typeof value === "number" ? value : 0;
+}
+
+/** A detail field as text, empty when the row does not carry it. */
+function extraText(row: RowDto, field: string): string {
+  const value = row.extra?.[field];
+  return typeof value === "string" ? value : "";
+}
+
 function compare(a: RowDto, b: RowDto, col: SortKey): number {
   switch (col) {
     case "keyCamelot": {
@@ -325,7 +337,15 @@ function compare(a: RowDto, b: RowDto, col: SortKey): number {
     case "bpm": return a.bpmX100 - b.bpmX100;
     case "duration": return a.durationSec - b.durationSec;
     case "rating": return a.rating - b.rating;
-    case "djPlayCount": return Number(a.extra?.djPlayCount ?? 0) - Number(b.extra?.djPlayCount ?? 0);
+    case "djPlayCount": case "size": case "year": case "sampleRate": case "bitrate": case "color":
+    case "discNo": case "trackNumber": case "fileType": case "bitDepth":
+      return extraNumber(a, col) - extraNumber(b, col);
+    // Ticked first, as rekordbox's `comparePublic` orders the box.
+    case "publishTrackInfo": return Number(b.extra?.publishTrackInfo === true) - Number(a.extra?.publishTrackInfo === true);
+    case "fileName": return collator.compare(a.fileName ?? "", b.fileName ?? "");
+    case "location": case "composer": case "albumArtist": case "remixer": case "originalArtist":
+    case "mixName": case "lyricist": case "message": case "dateCreated":
+      return collator.compare(extraText(a, col), extraText(b, col));
     case "title": return collator.compare(a.title, b.title);
     case "artist": return collator.compare(a.artist, b.artist);
     case "album": return collator.compare(a.album, b.album);

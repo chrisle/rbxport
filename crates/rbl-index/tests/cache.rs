@@ -131,6 +131,35 @@ fn the_persisted_ranks_and_search_still_work() {
 }
 
 #[test]
+fn a_snapshot_keeps_the_detail_columns_the_browser_sorts_by() {
+    let tracks = vec![
+        TestTrack {
+            id: 1, title: "One", track_number: 7, disc_no: 2, file_type: 11, bit_depth: 24,
+            lyricist: "Words", date_created: "2024-05-01", publish: true, message: "hello",
+            ..TestTrack::default()
+        },
+        TestTrack { id: 2, title: "Two", track_number: 3, file_type: 1, ..TestTrack::default() },
+    ];
+    let original = library_from(&tracks);
+    let restored = decode(&encode(&original, fingerprint()), fingerprint()).expect("decodes");
+    assert_eq!(restored.track_number, original.track_number);
+    assert_eq!(restored.disc_no, original.disc_no);
+    assert_eq!(restored.file_type, original.file_type);
+    assert_eq!(restored.bit_depth, original.bit_depth);
+    assert_eq!(restored.publish, original.publish);
+    for row in 0..original.len() {
+        assert_eq!(restored.lyricist.get(row), original.lyricist.get(row));
+        assert_eq!(restored.date_created.get(row), original.date_created.get(row));
+        assert_eq!(restored.message.get(row), original.message.get(row));
+    }
+    let spec = ViewSpec {
+        source: TrackSource::Collection, sort: SortColumn::TrackNumber, descending: false,
+        query: String::new(), filter: Default::default(),
+    };
+    assert_eq!(restored.open_view(&spec).rows, vec![1, 0]);
+}
+
+#[test]
 fn prepared_snapshot_requires_live_validation() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("library.snapshot");
