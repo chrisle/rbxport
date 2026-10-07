@@ -33,10 +33,34 @@ pub struct DriveLibrary {
 /// The libraries on the drives mounted now, in drive order.
 #[must_use]
 pub fn discover() -> Vec<DriveLibrary> {
-    discover_in(&volumes())
+    let mut found = discover_in(&volumes());
+    // A Windows drive letter carries no name of its own; its label is in the
+    // disk list. That list is refreshed only when a library is on such a
+    // drive, as one refresh can take seconds while a card reader wakes.
+    if found.iter().any(|library| crate::is_drive_root(&library.volume.to_string_lossy())) {
+        let disks = sysinfo::Disks::new_with_refreshed_list();
+        let labels: Vec<(PathBuf, String)> = disks
+            .list()
+            .iter()
+            .map(|disk| (disk.mount_point().to_owned(), disk.name().to_string_lossy().into_owned()))
+            .collect();
+        label(&mut found, &labels);
+    }
+    found
 }
 
-/// The libraries on the given volumes.
+/// Names each library on a drive root after the drive's label, where the
+/// label is known and not empty.
+fn label(found: &mut [DriveLibrary], labels: &[(PathBuf, String)]) {
+    for library in found {
+        if let Some((_, name)) = labels.iter().find(|(mount, name)| *mount == library.volume && !name.is_empty()) {
+            library.name = crate::display_name(&library.volume, name);
+        }
+    }
+}
+
+/// The libraries on the given volumes, each named after its mount point's
+/// folder, or the drive itself (`E:\`) for a drive root.
 #[must_use]
 pub fn discover_in(volumes: &[PathBuf]) -> Vec<DriveLibrary> {
     let mut found: Vec<DriveLibrary> = Vec::new();
@@ -50,7 +74,7 @@ pub fn discover_in(volumes: &[PathBuf]) -> Vec<DriveLibrary> {
                 continue;
             }
             seen.push(identity);
-            found.push(DriveLibrary { name: crate::display_name(volume, "Volume"), volume: volume.clone(), master_db });
+            found.push(DriveLibrary { name: crate::display_name(volume, ""), volume: volume.clone(), master_db });
         }
     }
     found
@@ -149,6 +173,23 @@ mod tests {
         // A folder named master.db is not a database file.
         std::fs::create_dir_all(stick.join(".PIONEER/Master/master.db")).unwrap();
         assert_eq!(discover_in(&[stick]), []);
+    }
+
+    #[test]
+    fn a_drive_root_is_named_after_its_label_or_its_letter() {
+        let found = |volume: &str| DriveLibrary {
+            name: crate::display_name(Path::new(volume), ""),
+            volume: PathBuf::from(volume),
+            master_db: Path::new(volume).join("PIONEER/Master/master.db"),
+        };
+        let mut libraries = [found("E:\\"), found("F:\\"), found("G:\\")];
+        assert_eq!(libraries[0].name, "E:\\", "unlabelled, the drive is named by its letter");
+        label(
+            &mut libraries,
+            &[(PathBuf::from("E:\\"), "DJ SSD".into()), (PathBuf::from("F:\\"), String::new())],
+        );
+        let names: Vec<&str> = libraries.iter().map(|library| library.name.as_str()).collect();
+        assert_eq!(names, ["DJ SSD", "F:\\", "G:\\"]);
     }
 
     #[test]
