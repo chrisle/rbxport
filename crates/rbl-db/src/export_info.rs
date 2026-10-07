@@ -52,7 +52,10 @@ pub fn my_tags(conn: &Connection) -> Result<Vec<MyTagRow>> {
             parent: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
         })
     })?;
-    Ok(rows.filter_map(std::result::Result::ok).filter(|t| !t.id.is_empty()).collect())
+    Ok(rows
+        .filter_map(std::result::Result::ok)
+        .filter(|t| !t.id.is_empty())
+        .collect())
 }
 
 /// `djmdProperty.DBID`, the library's own id, which a stick's sync record
@@ -124,26 +127,37 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
         }
         if has_table(conn, "djmdCue") {
             let mut stmt = conn.prepare(&format!(
-                "SELECT ContentID, Kind, InMsec, OutMsec, Color, ColorTableIndex, Comment, ActiveLoop, BeatLoopSize
-                 FROM djmdCue WHERE rb_local_deleted=0 AND Kind IN (0,1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17)
-                 AND ContentID IN ({marks}) ORDER BY rowid DESC"
+                "SELECT q.ContentID, q.Kind, q.InMsec, q.OutMsec, q.Color, q.ColorTableIndex,
+                        q.Comment, q.ActiveLoop, q.BeatLoopSize, c.BPM
+                 FROM djmdCue q JOIN djmdContent c ON c.ID = q.ContentID
+                 WHERE q.rb_local_deleted=0 AND q.Kind IN (0,1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17)
+                 AND q.ContentID IN ({marks}) ORDER BY q.rowid DESC"
             ))?;
             let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
                 let kind = r.get::<_, Option<u8>>(1)?.unwrap_or(0);
                 let color = r.get::<_, Option<i64>>(4)?.unwrap_or(255);
                 let end = r.get::<_, Option<i64>>(3)?.unwrap_or(-1);
                 let beats = r.get::<_, Option<u32>>(8)?.unwrap_or(0);
-                Ok((r.get::<_, String>(0)?, rbl_anlz::cues::ExportCue {
-                    kind,
-                    time_ms: r.get::<_, Option<u32>>(2)?.unwrap_or(0),
-                    loop_time_ms: u32::try_from(end).ok(),
-                    color_id: if kind == 0 { u8::try_from(color).ok().filter(|c| *c != 255).unwrap_or(0) } else {0},
-                    color_code: r.get::<_, Option<u8>>(5)?.unwrap_or(0),
-                    comment: r.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                    active_loop: r.get::<_, Option<i64>>(7)?.unwrap_or(0) != 0,
-                    loop_numerator: u16::try_from(beats >> 16).unwrap_or(0),
-                    loop_denominator: u16::try_from(beats & 0xffff).unwrap_or(0),
-                }))
+                let time_ms = r.get::<_, Option<u32>>(2)?.unwrap_or(0);
+                let bpm_x100 = r.get::<_, Option<u32>>(9)?.unwrap_or(0);
+                Ok((
+                    r.get::<_, String>(0)?,
+                    rbl_anlz::cues::ExportCue {
+                        kind,
+                        time_ms,
+                        loop_time_ms: loop_end(time_ms, end, beats, bpm_x100),
+                        color_id: if kind == 0 {
+                            u8::try_from(color).ok().filter(|c| *c != 255).unwrap_or(0)
+                        } else {
+                            0
+                        },
+                        color_code: r.get::<_, Option<u8>>(5)?.unwrap_or(0),
+                        comment: r.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                        active_loop: r.get::<_, Option<i64>>(7)?.unwrap_or(0) != 0,
+                        loop_numerator: u16::try_from(beats >> 16).unwrap_or(0),
+                        loop_denominator: u16::try_from(beats & 0xffff).unwrap_or(0),
+                    },
+                ))
             })?;
             for row in rows {
                 let (id, cue) = row?;
@@ -170,4 +184,83 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
         }
     }
     Ok(out)
+}
+
+/// Returns a cue's explicit end, or derives one from rekordbox's beat-loop
+/// fraction and track tempo when the end is absent.
+///
+/// `[OBS]` Issue #45 shows active loops becoming plain exported cues with no
+/// end. `BeatLoopSize` is `(numerator << 16) | denominator`; measured loops'
+/// `OutMsec - InMsec` spans that fraction of a beat at `djmdContent.BPM`, so
+/// those stored fields supply the missing end without inventing a loop length.
+fn loop_end(start_ms: u32, stored_end: i64, beat_loop_size: u32, bpm_x100: u32) -> Option<u32> {
+    if let Ok(end) = u32::try_from(stored_end) {
+        if end > start_ms {
+            return Some(end);
+        }
+    }
+    let numerator = u64::from(beat_loop_size >> 16);
+    let denominator = u64::from(beat_loop_size & 0xffff);
+    if numerator == 0 || denominator == 0 || bpm_x100 == 0 {
+        return None;
+    }
+    // BPM is stored times 100, hence 6,000,000 milliseconds per beat.
+    let divisor = denominator.saturating_mul(u64::from(bpm_x100));
+    let duration_ms = numerator
+        .saturating_mul(6_000_000)
+        .saturating_add(divisor / 2)
+        / divisor;
+    u32::try_from(u64::from(start_ms).saturating_add(duration_ms)).ok()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::track_extras;
+
+    #[test]
+    fn an_active_beat_loop_without_an_out_point_is_exported_as_a_loop() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE djmdContent (
+                ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
+                TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM INTEGER
+             );
+             CREATE TABLE djmdCue (
+                ContentID TEXT, Kind INTEGER, InMsec INTEGER, OutMsec INTEGER,
+                Color INTEGER, ColorTableIndex INTEGER, Comment TEXT, ActiveLoop INTEGER,
+                BeatLoopSize INTEGER, rb_local_deleted INTEGER
+             );
+             INSERT INTO djmdContent (ID, BPM) VALUES ('42', 12800);
+             INSERT INTO djmdCue VALUES
+                ('42', 0, 27851, -1, 255, 0, 'CUE(Auto)', 1, 262145, 0),
+                ('42', 1, 40000, 42000, -1, 21, '', 0, 0, 0),
+                ('42', 2, 50000, -1, -1, 21, '', 0, 0, 0);",
+        )
+        .unwrap();
+
+        let extras = track_extras(&conn, &["42".to_owned()]).unwrap();
+        let cues = &extras.get("42").unwrap().cues;
+        assert_eq!(cues.len(), 3);
+        let active = cues.iter().find(|cue| cue.active_loop).unwrap();
+        assert_eq!(active.time_ms, 27_851);
+        assert_eq!(active.loop_time_ms, Some(29_726));
+        assert_eq!((active.loop_numerator, active.loop_denominator), (4, 1));
+        let sections = rbl_anlz::cues::sections(std::slice::from_ref(active), true);
+        let exported = sections[3].as_cue_entries().unwrap();
+        assert_eq!(exported.len(), 1);
+        assert_eq!(exported[0].kind, 2, "PCP2 loop, not a plain CUE(Auto)");
+        assert_eq!(exported[0].loop_time_ms, 29_726);
+        assert_eq!(
+            cues.iter().find(|cue| cue.kind == 1).unwrap().loop_time_ms,
+            Some(42_000)
+        );
+        assert_eq!(
+            cues.iter().find(|cue| cue.kind == 2).unwrap().loop_time_ms,
+            None
+        );
+    }
 }
