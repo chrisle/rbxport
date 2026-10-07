@@ -122,7 +122,8 @@ export const WHEEL_IDLE_MS = 250;
  * A mouse notch is one event of about a hundred pixels; a trackpad swipe is
  * dozens of small events plus an inertia tail. Distance is accumulated to a
  * step and each step is followed by a short cooldown, so a swipe is a step or
- * two rather than the whole zoom range. Returns -1 (zoom in), 1 (zoom out)
+ * two rather than the whole zoom range. Whole-step events (mouse notches)
+ * always step. Returns -1 (zoom in), 1 (zoom out)
  * or 0 (no step yet).
  */
 export function createWheelZoomGate() {
@@ -135,6 +136,14 @@ export function createWheelZoomGate() {
     lastEvent = now;
     // Reversing direction discards travel in the old one.
     if (travel !== 0 && Math.sign(travel) !== Math.sign(deltaPx)) travel = 0;
+    // A single event of a full step or more is a discrete mouse notch: it is
+    // a deliberate click of the wheel, so it always steps and is never held
+    // back by the cooldown that tames a trackpad's stream of small deltas.
+    if (Math.abs(deltaPx) >= WHEEL_STEP_PX) {
+      travel = 0;
+      lastStep = now;
+      return deltaPx > 0 ? 1 : -1;
+    }
     if (now - lastStep < WHEEL_COOLDOWN_MS) return 0;
     travel += deltaPx;
     if (Math.abs(travel) < WHEEL_STEP_PX) return 0;
