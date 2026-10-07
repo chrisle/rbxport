@@ -716,10 +716,9 @@ fn master_tempo_holds_the_pitch_and_without_it_the_pitch_moves() {
         h.engine.set_tempo(Deck::A, 1.5);
         h.engine.play(Deck::A);
 
-        // Pulled at about the rate a device would, because the frequency is
-        // counted over the whole window: drained faster than the decode thread
-        // can fill the stretcher, most of it would be silence and the count
-        // would measure the gaps rather than the tone.
+        // Pulled at about the rate a device would: drained faster than the
+        // decode thread can fill the stretcher, most of it would be silence
+        // and there would be too little tone to measure.
         let mut out = Vec::new();
         for _ in 0..80 {
             out.extend(h.sink.pull(512));
@@ -733,10 +732,7 @@ fn master_tempo_holds_the_pitch_and_without_it_the_pitch_moves() {
             "the deck was mostly silent: {sounding} of {} samples",
             left.len(),
         );
-        let crossings = left.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
-        #[allow(clippy::cast_precision_loss)]
-        let hz = crossings as f32 * RATE as f32 / left.len() as f32;
-        heard.push(hz);
+        heard.push(tone_hz(&left, RATE));
     }
 
     let (locked, free) = (heard[0], heard[1]);
@@ -851,12 +847,30 @@ fn the_metronome_clicks_on_the_grid_and_only_while_playing() {
     assert!(tail.iter().all(|s| s.abs() < 1e-4), "a paused deck does not click");
 }
 
-/// Frequency from rising zero crossings over the settled middle of a tone.
+/// Frequency of a tone from the median spacing of its rising zero crossings.
+///
+/// The median rather than a count over the window, because these tests pull
+/// the null sink from a thread that can be descheduled on a busy machine. Each
+/// underrun leaves a run of silence and a broken cycle either side of it, and
+/// a count over the window measures those as well as the tone. The cycles the
+/// deck did play are still the right length, and they are most of them.
+fn tone_hz(left: &[f32], rate: u32) -> f32 {
+    let rising: Vec<usize> = left
+        .windows(2)
+        .enumerate()
+        .filter(|(_, w)| w[0] <= 0.0 && w[1] > 0.0)
+        .map(|(i, _)| i)
+        .collect();
+    let mut periods: Vec<usize> = rising.windows(2).map(|w| w[1] - w[0]).collect();
+    assert!(periods.len() >= 8, "too few cycles to measure: {}", periods.len());
+    periods.sort_unstable();
+    rate as f32 / periods[periods.len() / 2] as f32
+}
+
+/// Frequency over the settled middle of a tone, left channel.
 fn hz_of(out: &[f32], rate: u32) -> f32 {
     let left: Vec<f32> = out.chunks_exact(2).map(|f| f[0]).collect();
-    let mid = &left[left.len() / 4..left.len() * 3 / 4];
-    let crossings = mid.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
-    crossings as f32 * rate as f32 / mid.len() as f32
+    tone_hz(&left[left.len() / 4..left.len() * 3 / 4], rate)
 }
 
 #[test]
@@ -886,7 +900,9 @@ fn a_key_shift_of_an_octave_doubles_the_pitch_and_keeps_the_tempo() {
     let hz = hz_of(&out[out.len() * 3 / 4..], RATE);
     assert!((hz - 440.0).abs() < 8.0, "an octave up from 220 Hz reads {hz} Hz");
     // Two seconds of track took about two seconds of output: the tempo held.
-    let frames_out = out.len() / 2;
+    // Only frames that carry audio count, since an underrun on a busy machine
+    // pads the output with silence that is not the deck playing slower.
+    let frames_out = out.chunks_exact(2).filter(|f| f[0] != 0.0 || f[1] != 0.0).count();
     assert!((frames_out as f32 / RATE as f32 - 2.0).abs() < 0.25, "{frames_out} output frames for two seconds of track");
 
     // Back to the track's own key, still at its own speed.
