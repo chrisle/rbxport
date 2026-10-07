@@ -9,11 +9,15 @@
 //!
 //! A third, [`MountWatcher`], notices a volume arriving or leaving so the
 //! panel can refresh itself without waiting for focus or a click.
+//!
+//! [`libraries`] finds rekordbox libraries kept on a connected drive, where
+//! rekordbox's own Database management looks for them.
 
 pub mod settings;
 pub mod explorer;
 pub mod mounts;
 pub mod eject;
+pub mod libraries;
 
 pub use mounts::MountWatcher;
 
