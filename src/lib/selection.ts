@@ -98,3 +98,21 @@ export function selectAll(state: SelectionState, ids: readonly string[]): Select
 export function isSelected(state: SelectionState, id: string): boolean {
   return state.ids.has(id);
 }
+
+/**
+ * The tracks behind a selection, for queueing analysis.
+ *
+ * Every selected id is returned, whether or not its row is on a fetched page.
+ * The row cache is a bounded LRU (about 6,400 rows), so resolving the
+ * selection through cached rows silently dropped everything beyond it: select
+ * all on 30,000 tracks queued about 6,000. A title is only a label; an id the
+ * cache no longer holds is labelled by the id.
+ */
+export function selectedTracks(
+  ids: ReadonlySet<string>,
+  titles: ReadonlyMap<string, string>,
+): { id: string; title: string }[] {
+  const tracks: { id: string; title: string }[] = [];
+  for (const id of ids) tracks.push({ id, title: titles.get(id) ?? id });
+  return tracks;
+}

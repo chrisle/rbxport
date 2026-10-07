@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyClick, clickSettles, emptySelection, modifierFor, pressSelects, selectAll } from "./selection";
+import { applyClick, clickSettles, emptySelection, modifierFor, pressSelects, selectAll, selectedTracks } from "./selection";
 
 describe("selection", () => {
   it("reads the modifier from the event", () => {
@@ -74,5 +74,15 @@ describe("selection", () => {
     // An anchor already set is left where it was.
     const anchored = applyClick(emptySelection, { id: "b", index: 3 }, "none");
     expect(selectAll(anchored, ["a", "b", "c"]).anchorIndex).toBe(3);
+  });
+
+  it("reports every selected track even when most rows are not cached", () => {
+    // 30,000 selected, titles known for only the ~6,400 the row cache holds.
+    const ids = Array.from({ length: 30_000 }, (_, i) => String(100000 + i));
+    const titles = new Map(ids.slice(0, 6400).map((id) => [id, `Title ${id}`]));
+    const tracks = selectedTracks(selectAll(emptySelection, ids).ids, titles);
+    expect(tracks).toHaveLength(30_000);
+    expect(tracks[0]).toEqual({ id: "100000", title: "Title 100000" });
+    expect(tracks[29_999]).toEqual({ id: "129999", title: "129999" });
   });
 });

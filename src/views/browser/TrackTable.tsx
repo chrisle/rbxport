@@ -20,7 +20,7 @@ import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
 import {
-  applyClick, clickSettles, emptySelection, modifierFor, pressSelects, selectAll, type SelectionState,
+  applyClick, clickSettles, emptySelection, modifierFor, pressSelects, selectAll, selectedTracks, type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import { trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
@@ -1211,11 +1211,14 @@ export const TrackTable = memo(function TrackTable({
   const reportedSelection = useRef("");
   useEffect(() => {
     if (!onSelectedTracks) return;
-    const tracks: { id: string; title: string }[] = [];
-    for (let i = 0; i < view.count && tracks.length < selection.ids.size; i++) {
+    // Titles come from whatever pages are cached; the ids are the whole
+    // selection, cached or not.
+    const titles = new Map<string, string>();
+    for (let i = 0; i < view.count && titles.size < selection.ids.size; i++) {
       const row = view.rowAt(i);
-      if (row && selection.ids.has(row.id)) tracks.push({ id: row.id, title: row.title });
+      if (row && selection.ids.has(row.id)) titles.set(row.id, row.title);
     }
+    const tracks = selectedTracks(selection.ids, titles);
     // Only when it has actually changed. This hands a new array upwards, and
     // the app holds it in state: sending an equal one re-renders the window,
     // which renders this table, which runs this effect again.
