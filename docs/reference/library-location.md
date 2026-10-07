@@ -47,13 +47,19 @@ with symbols present.
 2. rekordbox's library: `masterDbDirectory`, else `options.json`'s `db-path`
    when the settings file says nothing, else the default folder. It is used
    whenever its `master.db` exists, because rbxport must work on the library
-   rekordbox uses.
+   rekordbox uses. The default folder counts as rekordbox's only when
+   rekordbox has run on the machine, which leaves `rekordbox3.settings` or
+   `options.json` behind (the agent rewrites `options.json` at every launch).
+   Without either, a library there was made by rbxport and is handled in
+   step 4.
 3. The library chosen in rbxport, saved as `library.json` in rbxport's data
    folder (`~/Library/Application Support/rbxport/` on macOS,
    `%APPDATA%\rbxport\` on Windows, `~/.local/share/rbxport/` on Linux). It
    is used when it exists and rekordbox's library does not, for example on a
    machine without rekordbox, or when rekordbox's drive is not connected.
-4. Otherwise nothing is opened and the window asks:
+4. On a machine where rekordbox has not run, a library in the default folder,
+   unless a saved choice names a library elsewhere.
+5. Otherwise nothing is opened and the window asks:
    - A configured library that is missing is reported as unavailable. The
      window asks for the drive to be connected (Try Again), offers the
      default folder's library (opened if there, created if not), libraries

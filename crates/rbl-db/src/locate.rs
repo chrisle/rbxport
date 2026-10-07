@@ -35,10 +35,17 @@
 //! 2. rekordbox's library: `masterDbDirectory`, else `options.json`'s
 //!    `db-path`, else the default folder. Used when its `master.db` exists,
 //!    because this application must work on the library rekordbox uses.
+//!    The default folder counts as rekordbox's only when rekordbox has run
+//!    on this machine, which leaves `rekordbox3.settings` or the agent's
+//!    `options.json` behind (the agent rewrites `options.json` at every
+//!    launch [OBS 7.2.11]). Without either, a library there was made by this
+//!    application, and is treated as its own (step 4).
 //! 3. The library chosen in this application, saved in its own data folder
 //!    ([`choice_file`]). Used when it exists and rekordbox's does not: a
 //!    machine without rekordbox, or rekordbox's drive not connected.
-//! 4. Otherwise nothing is opened. A configured location that is missing is
+//! 4. Without rekordbox, a library in the default folder, once no choice
+//!    names somewhere else.
+//! 5. Otherwise nothing is opened. A configured location that is missing is
 //!    [`Located::Unavailable`], and no library is ever made there; with
 //!    nothing configured it is [`Located::Absent`] and one may be made in the
 //!    default folder.
@@ -53,9 +60,11 @@ use crate::{DbError, LibraryLocation, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Origin {
-    /// rekordbox's settings, its agent's `options.json`, or its default folder.
+    /// rekordbox's settings, its agent's `options.json`, or its default
+    /// folder on a machine where rekordbox has run.
     Rekordbox,
-    /// The choice saved in this application.
+    /// The choice saved in this application, or the default folder on a
+    /// machine where rekordbox has not run.
     Rbxport,
     /// [`OPTIONS_ENV`](crate::OPTIONS_ENV).
     Override,
@@ -152,6 +161,16 @@ impl Sources {
         }
     }
 
+    /// Whether rekordbox has run on this machine: its settings file or its
+    /// agent's `options.json` is there. Until then the default folder is
+    /// not rekordbox's library.
+    #[must_use]
+    pub fn rekordbox_has_run(&self) -> bool {
+        [&self.rekordbox_settings, &self.agent_options]
+            .into_iter()
+            .any(|file| file.as_deref().is_some_and(Path::is_file))
+    }
+
     /// The library saved in this application, if one was.
     #[must_use]
     pub fn chosen_master_db(&self) -> Option<PathBuf> {
@@ -241,7 +260,8 @@ pub fn locate_with(sources: &Sources) -> Result<Located> {
     }
 
     let (rekordbox, configured) = sources.rekordbox_master_db();
-    if rekordbox.is_file() {
+    let rekordbox_owns = configured || sources.rekordbox_has_run();
+    if rekordbox_owns && rekordbox.is_file() {
         return Ok(Located::Found { location: sources.location_of(&rekordbox)?, origin: Origin::Rekordbox });
     }
     let chosen = sources.chosen_master_db();
@@ -255,6 +275,9 @@ pub fn locate_with(sources: &Sources) -> Result<Located> {
     }
     if let Some(chosen) = chosen.filter(|path| *path != default_master_db) {
         return Ok(Located::Unavailable { master_db: chosen, origin: Origin::Rbxport, default_master_db });
+    }
+    if default_master_db.is_file() {
+        return Ok(Located::Found { location: sources.location_of(&default_master_db)?, origin: Origin::Rbxport });
     }
     Ok(Located::Absent { master_db: default_master_db })
 }
@@ -281,6 +304,14 @@ mod tests {
             format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\n<PROPERTIES>\n  <VALUE name=\"masterDbDirectory\" val=\"{dir}\"/>\n</PROPERTIES>\n"),
         )
         .unwrap();
+    }
+
+    /// rekordbox has run here, with nothing set: a settings file with no
+    /// `masterDbDirectory`.
+    fn rekordbox_ran(sources: &Sources) {
+        let file = sources.rekordbox_settings.as_deref().unwrap();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\n<PROPERTIES>\n</PROPERTIES>\n").unwrap();
     }
 
     fn options(sources: &Sources, master_db: &Path) {
@@ -335,11 +366,54 @@ mod tests {
     #[test]
     fn the_default_folder_is_found_with_nothing_configured() {
         let (_root, sources) = machine();
+        rekordbox_ran(&sources);
         database(&sources.default_master_db());
         let Located::Found { location, origin } = locate_with(&sources).unwrap() else { panic!("not found") };
         assert_eq!(location.master_db, sources.default_master_db());
         assert_eq!(origin, Origin::Rekordbox);
         assert_eq!(location.passphrase, crate::key::derive_password(crate::key::REKORDBOX_DP).unwrap());
+    }
+
+    #[test]
+    fn without_rekordbox_the_default_folder_is_this_application_s() {
+        let (_root, sources) = machine();
+        database(&sources.default_master_db());
+        let (master_db, origin) = found(locate_with(&sources).unwrap());
+        assert_eq!(master_db, sources.default_master_db());
+        assert_eq!(origin, Origin::Rbxport);
+    }
+
+    #[test]
+    fn without_rekordbox_the_saved_choice_wins_over_the_default_folder() {
+        let (root, sources) = machine();
+        let chosen = root.path().join("media/ryan/T7/PIONEER/Master/master.db");
+        database(&sources.default_master_db());
+        database(&chosen);
+        remember(sources.choice.as_deref().unwrap(), &chosen).unwrap();
+        assert_eq!(found(locate_with(&sources).unwrap()), (chosen, Origin::Rbxport));
+    }
+
+    #[test]
+    fn without_rekordbox_a_missing_choice_is_unavailable_not_the_default() {
+        let (root, sources) = machine();
+        let chosen = root.path().join("media/ryan/T7/PIONEER/Master/master.db");
+        database(&sources.default_master_db());
+        remember(sources.choice.as_deref().unwrap(), &chosen).unwrap();
+        assert!(matches!(
+            locate_with(&sources).unwrap(),
+            Located::Unavailable { origin: Origin::Rbxport, .. }
+        ));
+    }
+
+    #[test]
+    fn rekordbox_s_default_folder_wins_over_the_saved_choice() {
+        let (root, sources) = machine();
+        let chosen = root.path().join("Volumes/B/PIONEER/Master/master.db");
+        rekordbox_ran(&sources);
+        database(&sources.default_master_db());
+        database(&chosen);
+        remember(sources.choice.as_deref().unwrap(), &chosen).unwrap();
+        assert_eq!(found(locate_with(&sources).unwrap()), (sources.default_master_db(), Origin::Rekordbox));
     }
 
     #[test]

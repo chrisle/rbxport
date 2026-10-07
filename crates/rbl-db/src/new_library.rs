@@ -238,7 +238,7 @@ pub fn use_existing_with(sources: &Sources, master_db: &Path) -> Result<LibraryL
                 return Ok(location);
             }
             return Err(DbError::Open(format!(
-                "rekordbox is set to use the library at {}, which is opened instead",
+                "rekordbox is set to use the library at {}, which is opened at startup",
                 location.master_db.display()
             )));
         }

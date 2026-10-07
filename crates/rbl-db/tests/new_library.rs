@@ -122,6 +122,7 @@ fn selecting_an_invalid_database_does_not_persist_it() {
 fn a_choice_that_rekordbox_s_own_library_would_override_is_refused() {
     let root = tempfile::tempdir().unwrap();
     let sources = Sources::under(&root.path().join("machine"));
+    rekordbox_ran(&sources);
     let rekordbox = create(&plan_with(&sources).unwrap().unwrap()).unwrap().master_db;
     let other = library_on_drive(root.path(), &root.path().join("Volumes/B/PIONEER/Master"));
 
@@ -133,4 +134,29 @@ fn a_choice_that_rekordbox_s_own_library_would_override_is_refused() {
     // Choosing rekordbox's own library is fine, and needs nothing saved.
     assert_eq!(use_existing_with(&sources, &rekordbox).unwrap().master_db, rekordbox);
     assert!(!sources.choice.as_deref().unwrap().exists());
+}
+
+#[test]
+fn without_rekordbox_a_default_library_made_here_can_be_replaced_by_a_drive_library() {
+    // Issue #49: a machine with no rekordbox where an earlier build made an
+    // empty library in the default folder, while the real one is on a drive.
+    let root = tempfile::tempdir().unwrap();
+    let sources = Sources::under(&root.path().join("machine"));
+    let made = create(&plan_with(&sources).unwrap().unwrap()).unwrap().master_db;
+    assert_eq!(found(&sources).master_db, made);
+    let drive = library_on_drive(root.path(), &root.path().join("media/ryan/T7/PIONEER/Master"));
+
+    assert_eq!(use_existing_with(&sources, &drive).unwrap().master_db, drive);
+    let next = locate_with(&sources).unwrap();
+    let Located::Found { location, origin } = next else { panic!("not found: {next:?}") };
+    assert_eq!((location.master_db, origin), (drive, Origin::Rbxport));
+    assert!(!sources.rekordbox_settings.as_deref().unwrap().exists(), "rekordbox's settings are not written");
+}
+
+/// rekordbox has run on the machine with nothing set: its settings file is
+/// there without a `masterDbDirectory`.
+fn rekordbox_ran(sources: &Sources) {
+    let file = sources.rekordbox_settings.as_deref().unwrap();
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\n<PROPERTIES>\n</PROPERTIES>\n").unwrap();
 }
