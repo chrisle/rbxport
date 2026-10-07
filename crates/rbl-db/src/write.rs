@@ -68,13 +68,13 @@
 //! recoverable by undo. See [`Unsupported`].
 //! [`Writer::set_analysis`] registers an analysis this app made: the BPM,
 //! the key, where the files went, and the length. `Analysed` is a bitfield
-//! whose bits are not all explained (`analysed_bits`): 105 on 37,652 of the
-//! reference library's 38,681 tracks, and that value comes with `PSSI`,
-//! which this app cannot produce. So a track analysed here for the first
-//! time is marked 1 — the value rekordbox itself leaves on a track with a
-//! grid and waveforms and nothing more [ASSUME] — and a track rekordbox had
-//! already analysed keeps the value it had, since its `PSSI` is carried
-//! through the rewritten files.
+//! whose individual bits are not all explained (`analysed_bits`), but its
+//! complete compatible value is settled: 105 on 37,652 of the reference
+//! library's 38,681 tracks and every sampled row whose files are present;
+//! 1 and 17 appeared only on rows whose files were missing [OBS]. The
+//! registered-copy test also showed rekordbox accepting 105 without `PSSI`,
+//! keeping the RBX-authored grid and generating its remaining files [OBS].
+//! A track rekordbox had already analysed keeps any other value it carried.
 //!
 //! # What this deliberately will not do
 //!
@@ -99,10 +99,11 @@ const USN_TABLES: &[&str] = &[
     "djmdSongHotCueBanklist",
 ];
 
-/// `djmdContent.Analysed` for a track analysed here and never by rekordbox:
-/// the value observed on rekordbox's own tracks that carry a grid and
-/// waveforms but no phrases [ASSUME — see the module doc].
-pub const ANALYSED_BY_THIS_APP: i64 = 1;
+/// `djmdContent.Analysed` for a complete RBX-authored analysis.
+///
+/// Kept as a named alias for callers that distinguish the author, although
+/// the compatible stored value is the same as [`ANALYSED_FULL`].
+pub const ANALYSED_BY_THIS_APP: i64 = ANALYSED_FULL;
 
 /// Local-file registration written by rekordbox when it first opens an
 /// RBX-imported track (0x2c0600). A NULL `ContentLink` suppresses its browser
@@ -2440,7 +2441,11 @@ impl Writer {
                 KeyID = COALESCE(?2, KeyID),
                 AnalysisDataPath = ?3,
                 Length = COALESCE(?4, Length),
-                Analysed = CASE WHEN COALESCE(Analysed, 0) = 0 THEN ?5 ELSE Analysed END,
+                Analysed = CASE
+                    WHEN (COALESCE(Analysed, 0) & 127) IN (0, 1)
+                    THEN (COALESCE(Analysed, 0) & 128) | ?5
+                    ELSE Analysed
+                END,
                 ContentLink = COALESCE(ContentLink, ?9),
                 AnalysisUpdated = CAST(COALESCE(AnalysisUpdated, '0') AS INTEGER) + 1,
                 rb_local_usn = ?7,

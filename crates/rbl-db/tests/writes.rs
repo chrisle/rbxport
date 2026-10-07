@@ -1625,6 +1625,14 @@ fn an_analysis_is_registered_on_the_track_with_the_usual_bookkeeping() {
     assert_eq!(f.one::<String>("SELECT AnalysisUpdated FROM djmdContent WHERE ID = ?1", &[&track_id(1)]), "8");
     assert_eq!(f.one::<i64>("SELECT ContentLink FROM djmdContent WHERE ID = ?1", &[&track_id(1)]), 3_999_246);
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey"), 1);
+
+    // Releases before this fix wrote 1, which rekordbox uses only when the
+    // files are missing. Re-analysis promotes it without losing the lock bit.
+    f.conn().execute("UPDATE djmdContent SET Analysed = 129 WHERE ID = ?1", [track_id(2)]).unwrap();
+    f.writer
+        .set_analysis(&track_id(2), &AnalysisWrite { bpm_x100: 12_900, key: None, analysis_path: "/PIONEER/USBANLZ/old/path/ANLZ0000.DAT", length_sec: None })
+        .unwrap();
+    assert_eq!(f.one::<i64>("SELECT Analysed FROM djmdContent WHERE ID = ?1", &[&track_id(2)]), ANALYSED_BY_THIS_APP | 128);
 }
 
 #[test]

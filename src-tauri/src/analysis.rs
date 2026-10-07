@@ -169,11 +169,12 @@ fn analyse_and_save(
     let location = state.location()?;
     crate::file_journal::recover(state.backup_dir(), &location)?;
     state.write(|writer| writer.import_artwork(track_id)).map_err(write_error)?;
-    // The files: where the row already points, or a fresh place.
+    // The files: where the row already points, or the UUID-derived place
+    // rekordbox uses for desktop-library analysis [OBS: rbl-db::write].
     let relative = {
         let current = library.analysis_path.get(row);
         if current.is_empty() {
-            new_analysis_path(library.ids.get(row).copied().unwrap_or(0))
+            state.write(|writer| writer.analysis_data_path_for(track_id)).map_err(write_error)?
         } else {
             current.to_owned()
         }
@@ -218,7 +219,7 @@ fn analyse_and_save(
 
     Ok(AnalysisResultDto {
         track_id: track_id.to_owned(),
-        analysed: 1,
+        analysed: u8::try_from(rbl_db::write::ANALYSED_BY_THIS_APP).unwrap_or(u8::MAX),
         bpm_x100,
         key,
         beats: u32::try_from(beats.len()).unwrap_or(u32::MAX),
@@ -374,19 +375,6 @@ fn library_locked(state: &AppState) -> bool {
     state.location().is_ok_and(|location| location.is_real_install) && rbl_db::is_rekordbox_running()
 }
 
-/// A share-relative path for a track's analysis files, in rekordbox's
-/// shape: `/PIONEER/USBANLZ/P<nnn>/<8 hex>/ANLZ0000.DAT`.
-///
-/// rekordbox's own folder names are deterministic per track but not any
-/// hash of anything tried so far (todo: unsolved), so ours are the track's
-/// id: unique in the library, stable across re-analyses, and easy to trace
-/// back. The thousand folders spread the files as rekordbox's do.
-fn new_analysis_path(content_id: u64) -> String {
-    let folder = content_id % 1000;
-    let name = u32::try_from(content_id & 0xFFFF_FFFF).unwrap_or(u32::MAX);
-    format!("/PIONEER/USBANLZ/P{folder:03}/{name:08X}/ANLZ0000.DAT")
-}
-
 /// Writes the three files beside `dat`, each through a temporary name so a
 /// reader never sees a half-written one.
 ///
@@ -418,13 +406,6 @@ fn write_analysis_files(dat: &std::path::Path, files: &rbl_anlz::AnalysisFiles) 
 )]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_new_analysis_path_has_rekordboxs_shape_and_follows_the_id() {
-        assert_eq!(new_analysis_path(251_354_036), "/PIONEER/USBANLZ/P036/0EFB5BB4/ANLZ0000.DAT");
-        assert_eq!(new_analysis_path(7), "/PIONEER/USBANLZ/P007/00000007/ANLZ0000.DAT");
-        assert_ne!(new_analysis_path(1), new_analysis_path(2));
-    }
 
     #[test]
     fn the_files_land_beside_the_dat_with_no_temporaries_left() {
@@ -501,8 +482,12 @@ mod tests {
         let settings = AnalysisSettings::default();
         let result = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).expect("analysed");
         assert_eq!(result.track_id, track_id(0));
-        assert!(result.analysis_path.starts_with("/PIONEER/USBANLZ/P"), "{}", result.analysis_path);
-        assert!(result.analysis_path.ends_with("/ANLZ0000.DAT"));
+        assert_eq!(result.analysed, 105);
+        assert_eq!(
+            result.analysis_path,
+            "/PIONEER/USBANLZ/fix/ture-content-00000000-0000-4000-8000-000000000000/ANLZ0000.DAT",
+            "new desktop analyses use the row UUID just as rekordbox does"
+        );
         assert!(result.bpm_x100 > 0, "a click track has a tempo");
         assert_eq!(result.duration_sec, 20);
 
