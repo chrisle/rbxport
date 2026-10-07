@@ -1430,5 +1430,8 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Le due librerie di dispositivi esistenti non sono d'accordo. Riconciliali in rekordbox prima della prima sincronizzazione qui.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Questa USB appartiene a una libreria master diversa o precedente non verificata. Importa i suoi contenuti in rekordbox prima di cambiarne la proprietà.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary contiene record cue che questa esportazione sostituirà. Importare prima i cue in rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Una traccia rimossa viene ancora referenziata dalla cronologia USB. Importa e cancella prima la cronologia in rekordbox."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Una traccia rimossa viene ancora referenziata dalla cronologia USB. Importa e cancella prima la cronologia in rekordbox.",
+  "Thank you for your report.": "Grazie per la segnalazione.",
+  "Bookmark this URL and check back to get updates of your report.": "Aggiungi questo URL ai segnalibri e torna a controllarlo per ricevere aggiornamenti sulla tua segnalazione.",
+  "Open in browser": "Apri nel browser"
 }

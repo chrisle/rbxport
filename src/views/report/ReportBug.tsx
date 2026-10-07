@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import { formatBugReportAttachment, submitBugReport } from "@/lib/bugReport";
+import { formatBugReportAttachment, submitBugReport, type BugReportReceipt } from "@/lib/bugReport";
 import { loadPreferences } from "@/lib/preferences";
 import { startWindowDrag } from "@/lib/windowDrag";
 import styles from "./ReportBug.module.css";
@@ -66,6 +66,34 @@ function Turnstile({ onToken, onError, resetCount }: { onToken: (token: string) 
   );
 }
 
+/** What the reporter sees once the report is in: where to follow it. */
+function ReportSent({ receipt, onClose }: { receipt: BugReportReceipt; onClose: () => void }) {
+  const [error, setError] = useState("");
+  const { url } = receipt;
+  return (
+    <div className={styles.form}>
+      <div className={styles.fields}>
+        <p className={styles.thanks}>Thank you for your report.</p>
+        {url ? (
+          <label>Bookmark this URL and check back to get updates of your report.
+            <input readOnly value={url} onFocus={e => e.currentTarget.select()} autoFocus />
+          </label>
+        ) : <p>Report {receipt.key} submitted.</p>}
+        {receipt.attachmentAdded ? null : <p>The log attachment could not be added.</p>}
+        {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      </div>
+      <footer className={styles.sentFooter}>
+        {url ? <button type="button" className={styles.open} onClick={() => {
+          setError("");
+          void getBackend().then(backend => backend.openUrl(url))
+            .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+        }}>Open in browser</button> : null}
+        <button type="button" className={styles.save} onClick={onClose}>Close</button>
+      </footer>
+    </div>
+  );
+}
+
 export function ReportBug({ onClose, windowed = false }: { onClose: () => void; windowed?: boolean }) {
   const [email, setEmail] = useState("");
   const [description, setDescription] = useState("");
@@ -75,7 +103,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
-  const [receipt, setReceipt] = useState<{ key: string; attachmentAdded: boolean } | null>(null);
+  const [receipt, setReceipt] = useState<BugReportReceipt | null>(null);
   const [resetCount, setResetCount] = useState(0);
   const receiveTurnstileToken = useCallback((token: string) => { setTurnstileToken(token); if (token) setError(""); }, []);
   // Turnstile's own code, so a report of this message says which failure it was.
@@ -94,7 +122,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
         Report bug
         {windowed ? null : <button type="button" aria-label="Close report" onClick={onClose}>×</button>}
       </header>
-      <form className={styles.form} onSubmit={event => {
+      {receipt ? <ReportSent receipt={receipt} onClose={onClose} /> : <form className={styles.form} onSubmit={event => {
         event.preventDefault();
         if (busy || (include && attachment === null)) return;
         setBusy(true); setError(""); setReceipt(null);
@@ -132,14 +160,13 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
           </div>
           <Turnstile onToken={receiveTurnstileToken} onError={reportTurnstileError} resetCount={resetCount} />
           {error ? <p className={styles.error} role="alert">{error}</p> : null}
-          {receipt ? <p role="status">Report {receipt.key} submitted.{receipt.attachmentAdded ? "" : " The log attachment could not be added."}</p> : null}
         </div>
         <footer>
           <span className={styles.hint}>Reports are sent to TRIODE. I read every report, but please don’t expect a personal reply.</span>
           <button type="button" onClick={onClose}>Close</button>
           <button className={styles.save} type="submit" disabled={busy || !turnstileToken || !description.trim() || (include && attachment === null)}>{busy ? "Sending…" : "Send report"}</button>
         </footer>
-      </form>
+      </form>}
     </section>
   );
   return windowed ? body : <div className={styles.backdrop}>{body}</div>;

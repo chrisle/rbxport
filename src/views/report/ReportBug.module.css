@@ -48,6 +48,9 @@
 .form footer button { flex: 0 0 96px; width: 96px; height: 40px; padding: 0; white-space: nowrap; }
 .dialog .save { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-icon-on); }
 .form .error { color: var(--c-error); }
+.form .thanks { font-size: var(--f-size-pref-window-title); font-weight: 700; }
+.form .sentFooter { justify-content: flex-end; }
+.form footer .open { flex: 0 0 auto; width: auto; padding: 0 14px; }
 @media (max-width: 480px) {
   .fields { padding: 14px; }
   .form footer { padding: 12px 14px; flex-wrap: wrap; justify-content: flex-end; }

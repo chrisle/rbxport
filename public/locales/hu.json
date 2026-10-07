@@ -1429,5 +1429,8 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "A két meglévő eszközkönyvtár nem ért egyet. Egyeztesd őket a rekordboxban az első szinkronizálás előtt.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Ez az USB egy másik vagy régebbi, ellenőrizetlen főkönyvtárhoz tartozik. Importálja a tartalmát a rekordboxba, mielőtt megváltoztatná a tulajdonjogát.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "A OneLibrary cue rekordokat tartalmaz, amelyeket ez az exportálás lecserélne. Először importálja a jelzéseket a rekordboxba.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Az USB-előzmények továbbra is hivatkoznak az eltávolítandó műsorszámra. Először importálja és törölje az előzményeket a rekordboxból."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Az USB-előzmények továbbra is hivatkoznak az eltávolítandó műsorszámra. Először importálja és törölje az előzményeket a rekordboxból.",
+  "Thank you for your report.": "Köszönjük a bejelentését.",
+  "Bookmark this URL and check back to get updates of your report.": "Mentse el ezt az URL-t könyvjelzőként, és nézzen vissza később a bejelentésével kapcsolatos frissítésekért.",
+  "Open in browser": "Megnyitás böngészőben"
 }

@@ -10,8 +10,13 @@ export interface BugReportSubmission {
 
 export interface BugReportReceipt {
   key: string;
+  /** The report's public issue page; absent from report services that predate it. */
+  url?: string;
   attachmentAdded: boolean;
 }
+
+/** Only an issue on the app's own repository is shown to the reporter or opened. */
+const ISSUE_URL = /^https:\/\/github\.com\/chrisle\/rbxport\/issues\/[1-9]\d*$/;
 
 /** Add the reporter-provided identity and current, sanitised app settings. */
 export function formatBugReportAttachment(base: string, email: string, preferences: object): string {
@@ -28,6 +33,17 @@ function isReceipt(value: unknown): value is BugReportReceipt {
     typeof (value as { attachmentAdded?: unknown }).attachmentAdded === "boolean";
 }
 
+/** The receipt as the app uses it: an issue URL it does not recognise is dropped. */
+export function readReceipt(value: unknown): BugReportReceipt | null {
+  if (!isReceipt(value)) return null;
+  const url = (value as { url?: unknown }).url;
+  return {
+    key: value.key,
+    attachmentAdded: value.attachmentAdded,
+    ...(typeof url === "string" && ISSUE_URL.test(url) ? { url } : {}),
+  };
+}
+
 export async function submitBugReport(submission: BugReportSubmission): Promise<BugReportReceipt> {
   const response = await fetch(REPORT_URL, {
     method: "POST",
@@ -40,8 +56,9 @@ export async function submitBugReport(submission: BugReportSubmission): Promise<
       ? body.error : "The report could not be submitted. Please try again later.";
     throw new Error(message);
   }
-  if (!isReceipt(body)) {
+  const receipt = readReceipt(body);
+  if (!receipt) {
     throw new Error("The report service returned an invalid response.");
   }
-  return body;
+  return receipt;
 }

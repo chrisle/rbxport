@@ -1434,5 +1434,8 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "现有的两个设备库不一致。在首次同步之前在 rekordbox 中对它们进行协调。",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "此 USB 属于不同的或更旧的未经验证的主库。在更改其所有权之前，将其内容导入 rekordbox。",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary 包含此导出将替换的提示记录。首先导入 rekordbox 中的提示。",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 历史记录仍会引用被删除的曲目。首先导入并清除 rekordbox 中的历史记录。"
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 历史记录仍会引用被删除的曲目。首先导入并清除 rekordbox 中的历史记录。",
+  "Thank you for your report.": "感谢你的报告。",
+  "Bookmark this URL and check back to get updates of your report.": "请将此网址加入书签，之后回来查看报告的最新进展。",
+  "Open in browser": "在浏览器中打开"
 }

@@ -1430,5 +1430,8 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Mevcut iki cihaz kütüphanesi aynı fikirde değil. Buradaki ilk senkronizasyondan önce bunları rekordbox'ta uzlaştırın.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Bu USB, farklı veya daha eski, doğrulanmamış bir ana kitaplığa ait. Sahipliğini değiştirmeden önce içeriğini rekordbox'a aktarın.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary, bu dışa aktarımın yerini alacağı işaret kayıtlarını içerir. Önce ipuçlarını rekordbox'a aktarın.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Kaldırılan bir parçaya USB geçmişi tarafından hâlâ başvurulmaktadır. Öncelikle bu geçmişi rekordbox'a aktarın ve temizleyin."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Kaldırılan bir parçaya USB geçmişi tarafından hâlâ başvurulmaktadır. Öncelikle bu geçmişi rekordbox'a aktarın ve temizleyin.",
+  "Thank you for your report.": "Raporunuz için teşekkürler.",
+  "Bookmark this URL and check back to get updates of your report.": "Bu URL’yi yer imlerinize ekleyin ve raporunuzla ilgili güncellemeler için daha sonra tekrar bakın.",
+  "Open in browser": "Tarayıcıda aç"
 }
