@@ -37,6 +37,14 @@ let
       marker="$data/.nix-seed-version"
       seed_version="@version@"
 
+      # The built-in updater replaces the AppImage with rename(2), which fails
+      # with EXDEV when the temp directory and the AppImage are on different
+      # mounts (as /tmp is inside appimage-run's sandbox), so keep temp files
+      # beside the AppImage it is replacing.
+      tmpdir="$data/tmp"
+      mkdir -p "$tmpdir"
+      export TMPDIR="$tmpdir"
+
       # Seed the writable AppImage the built-in updater replaces in place,
       # but only when it is missing. An existing one is kept as-is, so a Nix
       # update cannot downgrade an app the updater has already advanced; the
