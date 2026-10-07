@@ -84,6 +84,14 @@ jobs:
           & ./src-tauri/windows/install-update-task.ps1 `
             -InstallDirectory "$env:RUNNER_TEMP/rbxport" -ValidateOnly
 
+      # Backups write, flush and rename files, which Windows treats differently
+      # from Unix (handle access rights, open-file locking). Run them natively.
+      - name: Backup tests
+        if: inputs.check_rust
+        env:
+          RB_LITE_TEST: "1"
+        run: cargo test -p rbxport --lib backup
+
       - uses: pnpm/action-setup@v4
         if: inputs.check_file_drop
         with:

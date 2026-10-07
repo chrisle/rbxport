@@ -24,6 +24,11 @@ test("Windows installer resources add the Windows-native check", () => {
   assert.deepEqual(enabled("src-tauri/windows/install-update-task.ps1"), ["rust", "windows_rust"]);
 });
 
+test("backup changes also run the Windows-native Rust lane", () => {
+  assert.deepEqual(enabled("src-tauri/src/backups.rs"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("crates/rbl-backup/src/restore.rs"), ["rust", "windows_rust"]);
+});
+
 test("frontend test-only changes skip browser and bundle checks", () => {
   assert.deepEqual(enabled("src/lib/cues.test.ts"), [
     "frontend_lint",

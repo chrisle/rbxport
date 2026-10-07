@@ -74,6 +74,12 @@ export function planValidation(paths, { all = false } = {}) {
       continue;
     }
 
+    // Backups flush and rename files, which Windows handles differently.
+    if (/^(src-tauri\/src\/backup|crates\/rbl-backup\/|crates\/rbl-core\/src\/durable\.rs$)/.test(path)) {
+      enable(plan, "rust", "windows_rust");
+      continue;
+    }
+
     if (path.startsWith("src-tauri/")) {
       enable(plan, "rust");
       // Installer hooks and scripts only ever run on Windows.
