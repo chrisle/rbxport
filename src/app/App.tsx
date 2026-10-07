@@ -66,7 +66,7 @@ import type { PreferencePane } from "@/lib/preferences";
 import { answer, deckNumber, setPlaying, whenLoaded, withSetting, type ScriptHandler } from "@/lib/scripting";
 import { useAnalysis } from "@/store/useAnalysis";
 import { AnalysisDialog } from "@/views/analysis/AnalysisDialog";
-import { NewLibraryDialog } from "@/views/library/NewLibraryDialog";
+import { NewLibraryDialog, type LibraryQuestion } from "@/views/library/NewLibraryDialog";
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
@@ -176,8 +176,9 @@ function AppBody() {
   // Why the library is not there, when it is not. Shown instead of "Loading…",
   // which is a lie once the load has failed.
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Where a new library would go, when there is none at all to load.
-  const [missingLibrary, setMissingLibrary] = useState<string | null>(null);
+  // What to ask when there is no library to load: none anywhere, or one
+  // configured on a drive that is not connected.
+  const [missingLibrary, setMissingLibrary] = useState<LibraryQuestion | null>(null);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
   // Do not write the empty bootstrap selection over the session while the
   // backend is still restoring the node that was open at exit. WebKit gets
@@ -614,8 +615,13 @@ function AppBody() {
       });
       const applyProblem = (problem: LibraryProblem | null) => {
         if (cancelled || problem === null) return;
-        if (problem.kind === "missing") setMissingLibrary(problem.masterDb);
-        else setLoadError(problem.message);
+        if (problem.kind === "failed") {
+          // A library that is there and would not open is reported, not asked about.
+          setMissingLibrary(null);
+          setLoadError(problem.message);
+        } else {
+          setMissingLibrary(problem);
+        }
       };
       stopProblem = backend.onLibraryProblem(applyProblem);
       // Asked as well: with no library at all the backend gives up before
@@ -2504,10 +2510,24 @@ function AppBody() {
         />
       ) : null}
       {missingLibrary !== null ? (
-        <NewLibraryDialog masterDb={missingLibrary}
+        <NewLibraryDialog problem={missingLibrary}
+          onDiscover={async () => (await getBackend()).discoverLibraries()}
+          onDrivesChanged={(listener) => {
+            let stop: (() => void) | undefined;
+            let live = true;
+            void getBackend().then((backend) => { if (live) stop = backend.onDevicesChanged(listener); });
+            return () => {
+              live = false;
+              stop?.();
+            };
+          }}
+          onOpen={async (masterDb) => {
+            await (await getBackend()).openLibrary(masterDb);
+            // The ready event that follows loads it like any other start.
+            setMissingLibrary(null);
+          }}
           onCreate={async () => {
             await (await getBackend()).createLibrary();
-            // The ready event that follows loads it like any other start.
             setMissingLibrary(null);
           }}
           onChoose={async (title, filterName) => {
@@ -2515,6 +2535,9 @@ function AppBody() {
             if (selected) setMissingLibrary(null);
             return selected;
           }}
+          // Closed by the ready event when the library is found, or asked
+          // again by the problem event when it still is not.
+          onRetry={async () => (await getBackend()).retryLibrary()}
           onQuit={() => { void getBackend().then(backend => backend.closeWindow()); }} />
       ) : null}
       {analysisSelection !== null ? (

@@ -110,10 +110,32 @@ pub struct LimiterDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LibraryProblemDto {
-    /// No library here at all, and one can be made at `master_db`.
+    /// No library configured anywhere, and one can be made at `master_db`.
     Missing { master_db: String },
+    /// A library is configured at `master_db` and is not there — most often
+    /// a drive that is not connected. Nothing is made in its place; the
+    /// default folder's `default_master_db` is offered instead, opened when
+    /// `default_exists`, else made.
+    Unavailable {
+        master_db: String,
+        /// `rekordbox` when rekordbox's settings name it, `rbxport` when it
+        /// was chosen in this application.
+        configured_by: rbl_db::locate::Origin,
+        default_master_db: String,
+        default_exists: bool,
+    },
     /// There is a library, or something in its place, and it would not open.
     Failed { message: String },
+}
+
+/// A rekordbox library found on a connected drive.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveLibraryDto {
+    /// The drive's name.
+    pub name: String,
+    pub volume: String,
+    pub master_db: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

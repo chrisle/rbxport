@@ -29,9 +29,34 @@
   color: var(--c-text-dim);
   overflow-wrap: anywhere;
 }
+.drives { margin: 0 12px 18px; }
+.drivesTitle {
+  margin: 0 0 8px;
+  font-size: inherit;
+  font-weight: 400;
+}
+.driveList { margin: 0; padding: 0; list-style: none; }
+.drive {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name open" "path open";
+  align-items: center;
+  column-gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--c-text-dim);
+}
+.drive:last-child { border-bottom: 1px solid var(--c-text-dim); }
+.driveName { grid-area: name; }
+.drivePath {
+  grid-area: path;
+  color: var(--c-text-dim);
+  overflow-wrap: anywhere;
+}
+.drive button { grid-area: open; }
+.hint { margin: 0 12px 22px; color: var(--c-text-dim); line-height: 1.5; }
 .error { margin: 0 12px 22px; color: var(--c-error); line-height: 1.5; }
-.buttons { display: flex; justify-content: center; gap: 16px; }
-.buttons button {
+.buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+.buttons button, .drive button {
   min-width: 104px;
   height: var(--s-pref-button-h);
   border: 1px solid var(--c-pref-button-border);
@@ -40,8 +65,8 @@
   color: inherit;
   font: inherit;
 }
-.buttons button:disabled { opacity: .4; }
-.buttons button:hover:not(:disabled) { border-color: var(--c-accent); }
+.buttons button:disabled, .drive button:disabled { opacity: .4; }
+.buttons button:hover:not(:disabled), .drive button:hover:not(:disabled) { border-color: var(--c-accent); }
 .dialog :focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
 @media (max-width: 480px) {
   .buttons { flex-direction: column; }

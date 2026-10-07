@@ -183,12 +183,12 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
             }
             Err(e) => {
                 // Nothing to open, as against something that would not open:
-                // offered as a new library rather than reported as a failure.
-                if let Ok(Some(plan)) = rbl_db::new_library::plan() {
-                    tracing::info!(path = %plan.master_db.display(), error = %e, "no library here; offering to make one");
-                    report_problem(&app, dto::LibraryProblemDto::Missing {
-                        master_db: plan.master_db.display().to_string(),
-                    });
+                // no library anywhere, or one configured on a drive that is
+                // not connected. Both are questions for the window rather
+                // than failures.
+                if let Some(problem) = rbl_db::locate::locate().ok().as_ref().and_then(new_library::problem_from) {
+                    tracing::info!(?problem, error = %e, "no library to open; asking");
+                    report_problem(&app, problem);
                     return;
                 }
                 tracing::error!(error = %e, "could not open the library");
@@ -485,6 +485,8 @@ pub fn run() {
             new_library::library_problem,
             new_library::create_library,
             new_library::use_existing_library,
+            new_library::discover_libraries,
+            new_library::retry_library,
             commands::playlist_tree,
             commands::open_view,
             commands::fetch_rows,

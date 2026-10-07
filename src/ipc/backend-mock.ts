@@ -14,7 +14,7 @@ import theme from "@/styles/theme";
 
 import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
-  EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
+  DriveLibrary, EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
@@ -649,12 +649,37 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    */
   /**
    * `?nolibrary` is a machine with no rekordbox library at all: nothing loads
-   * until `createLibrary`, and `libraryProblem` says so.
+   * until `createLibrary` or `openLibrary`, and `libraryProblem` says so.
+   * `?libraryunavailable` is rekordbox set to a library on a drive that is
+   * not connected. `?drivelibrary` puts a library on a connected drive for
+   * `discoverLibraries` to find; with `?libraryunavailable` it is the drive
+   * rekordbox is set to, so `retryLibrary` finds it.
    */
-  let missing = readFlagFromUrl("nolibrary");
+  const driveConnected = readFlagFromUrl("drivelibrary");
+  const driveLibraries: DriveLibrary[] = driveConnected
+    ? [{ name: "DJ SSD", volume: "/Volumes/DJ SSD", masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db" }]
+    : [];
+  let problem: LibraryProblem | null = readFlagFromUrl("libraryunavailable")
+    ? {
+      kind: "unavailable",
+      masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db",
+      configuredBy: "rekordbox",
+      defaultMasterDb: "/Users/you/Library/Pioneer/rekordbox/master.db",
+      defaultExists: false,
+    }
+    : readFlagFromUrl("nolibrary")
+      ? { kind: "missing", masterDb: "/Users/you/Library/Pioneer/rekordbox/master.db" }
+      : null;
   let ready =
-    !missing && (typeof location === "undefined" || !new URLSearchParams(location.search).has("slow"));
+    problem === null && (typeof location === "undefined" || !new URLSearchParams(location.search).has("slow"));
   const readyListeners = new Set<() => void>();
+  const problemListeners = new Set<(problem: LibraryProblem) => void>();
+  /** The library is there now: the window loads it like any other start. */
+  const libraryFound = () => {
+    problem = null;
+    ready = true;
+    for (const listener of readyListeners) listener();
+  };
   if (typeof window !== "undefined") {
     (window as unknown as { __libraryReady: () => void }).__libraryReady = () => {
       ready = true;
@@ -2314,23 +2339,37 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       readyListeners.add(listener);
       return () => readyListeners.delete(listener);
     },
-    onLibraryProblem: () => () => undefined,
-    libraryProblem: () =>
-      wait<LibraryProblem | null>(
-        missing ? { kind: "missing", masterDb: "/Users/you/Library/Pioneer/rekordbox/master.db" } : null,
-      ),
+    onLibraryProblem: (listener) => {
+      problemListeners.add(listener);
+      return () => problemListeners.delete(listener);
+    },
+    libraryProblem: () => wait<LibraryProblem | null>(problem),
     createLibrary: async () => {
       await wait(undefined);
-      missing = false;
-      ready = true;
-      for (const listener of readyListeners) listener();
+      libraryFound();
+    },
+    discoverLibraries: () => wait(driveLibraries.map((library) => ({ ...library }))),
+    openLibrary: async (masterDb) => {
+      await wait(undefined);
+      if (!masterDb.endsWith("master.db")) {
+        throw new Error(`Could not use that rekordbox library: ${masterDb} is not a database file`);
+      }
+      libraryFound();
     },
     chooseExistingLibrary: async () => {
       await wait(undefined);
-      missing = false;
-      ready = true;
-      for (const listener of readyListeners) listener();
+      libraryFound();
       return true;
+    },
+    retryLibrary: async () => {
+      await wait(undefined);
+      if (problem?.kind === "unavailable" && driveConnected) {
+        libraryFound();
+        return;
+      }
+      // Reported afresh, as the real backend's second look reports it.
+      const current = problem;
+      if (current !== null) for (const listener of problemListeners) listener({ ...current });
     },
 
     // A browser has no native menu bar. The mock exposes the listener so a
