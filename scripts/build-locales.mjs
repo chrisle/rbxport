@@ -25,13 +25,61 @@ const locales = {
 };
 
 // Product terminology that should differ from rekordbox's untranslated loanwords
-// or from a generic machine translation.
+// or from a generic machine translation. Machine translation also tends to
+// give singular keys a plural form; those corrections live here too.
 const overrides = {
+  cs: {
+    "{size} total · {count} track": "{size} celkem · {count} skladba",
+  },
+  da: {
+    "{size} total · {count} track": "{size} i alt · {count} nummer",
+  },
   de: {
     "Backups": "Sicherungen",
     "Check for updates": "Nach Updates suchen",
     "No backups yet.": "Noch keine Sicherungen.",
     "Backups unavailable": "Sicherungen nicht verfügbar",
+    "{count} minute ago": "vor {count} Minute",
+    "{count} minutes ago": "vor {count} Minuten",
+    "{count} hour ago": "vor {count} Stunde",
+    "{count} hours ago": "vor {count} Stunden",
+    "{count} day ago": "vor {count} Tag",
+    "{count} days ago": "vor {count} Tagen",
+    "{size} total · {count} track": "{size} insgesamt · {count} Titel",
+  },
+  es: {
+    "{count} minute ago": "hace {count} minuto",
+    "{count} minutes ago": "hace {count} minutos",
+    "{count} hour ago": "hace {count} hora",
+    "{count} hours ago": "hace {count} horas",
+    "{count} day ago": "hace {count} día",
+    "{count} days ago": "hace {count} días",
+  },
+  fr: {
+    "{count} minute ago": "il y a {count} minute",
+    "{count} minutes ago": "il y a {count} minutes",
+    "{count} hour ago": "il y a {count} heure",
+    "{count} hours ago": "il y a {count} heures",
+    "{count} day ago": "il y a {count} jour",
+    "{count} days ago": "il y a {count} jours",
+  },
+  ja: {
+    "{count} minute ago": "{count} 分前",
+  },
+  pt: {
+    "{size} total · {count} track": "{size} total · {count} faixa",
+  },
+  ru: {
+    "{size} total · {count} track": "Всего {size} · {count} трек",
+  },
+  tr: {
+    "{size} total · {count} track": "toplam {size} · {count} parça",
+  },
+  "zh-CN": {
+    "{size} total · {count} track": "总计 {size} · {count} 首曲目",
+  },
+  "zh-TW": {
+    "{size} total · {count} track": "總計 {size} · {count} 首曲目",
   },
 };
 

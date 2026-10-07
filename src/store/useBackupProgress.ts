@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { BackupProgress } from "@/ipc/types";
 import { formatBytes } from "@/lib/format";
+import { useTranslation } from "@/i18n";
 
 const EMPTY: BackupProgress = { running: false, phase: "", copiedBytes: 0, totalBytes: 0, error: null, path: null };
 
@@ -12,22 +13,32 @@ function unchanged(a: BackupProgress, b: BackupProgress): boolean {
     && (a.currentItem ?? null) === (b.currentItem ?? null);
 }
 
-export function backupStatus(progress: BackupProgress): string {
+type Translate = ReturnType<typeof useTranslation>;
+
+export function backupStatus(progress: BackupProgress, t: Translate): string {
   switch (progress.phase) {
-    case "preparing": return "Preparing backup…";
-    case "copying": return `Creating backup: ${progress.totalBytes > 0 ? Math.min(100, Math.floor(progress.copiedBytes / progress.totalBytes * 100)) : 0}% — ${formatBytes(progress.copiedBytes)} of ${formatBytes(progress.totalBytes)}${progress.currentItem ? ` · ${progress.currentItem}` : ""}`;
-    case "compressing": return "Compressing backup…";
-    case "validating": return "Verifying backup…";
-    case "stopping": return "Stopping backup…";
-    case "complete": return "Backup created.";
-    case "cancelled": return "Backup stopped.";
-    case "failed": return progress.error ?? "Backup failed.";
+    case "preparing": return t("Preparing backup…");
+    case "copying": {
+      const status = t("Creating backup: {percent}% — {copied} of {total}", {
+        percent: progress.totalBytes > 0 ? Math.min(100, Math.floor(progress.copiedBytes / progress.totalBytes * 100)) : 0,
+        copied: formatBytes(progress.copiedBytes),
+        total: formatBytes(progress.totalBytes),
+      });
+      return progress.currentItem ? `${status} · ${progress.currentItem}` : status;
+    }
+    case "compressing": return t("Compressing backup…");
+    case "validating": return t("Verifying backup…");
+    case "stopping": return t("Stopping backup…");
+    case "complete": return t("Backup created.");
+    case "cancelled": return t("Backup stopped.");
+    case "failed": return progress.error ?? t("Backup failed.");
     default: return "";
   }
 }
 
 /** The backend owns the job; every window can reconnect without restarting it. */
 export function useBackupProgress() {
+  const t = useTranslation();
   const [progress, setProgress] = useState(EMPTY);
   const [requestError, setRequestError] = useState("");
   const pending = useRef(false);
@@ -69,5 +80,5 @@ export function useBackupProgress() {
       setProgress(await backend.backupProgress());
     } catch (e) { setRequestError(errorMessage(e)); }
   }, []);
-  return { progress, start, stop, text: backupStatus(progress), error: requestError || progress.error };
+  return { progress, start, stop, text: backupStatus(progress, t), error: requestError || progress.error };
 }

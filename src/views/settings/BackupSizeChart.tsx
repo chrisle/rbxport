@@ -3,6 +3,7 @@ import { LoaderCircle } from "lucide-react";
 import { getBackend } from "@/ipc/client";
 import type { BackupSizes } from "@/ipc/types";
 import { formatBytes } from "@/lib/format";
+import { useTranslation } from "@/i18n";
 import { Button } from "./controls";
 import styles from "./BackupsPane.module.css";
 
@@ -26,6 +27,7 @@ function size(bytes: number): string {
 }
 
 function UpdatedTime({ timestamp }: { timestamp: number }) {
+  const t = useTranslation();
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -33,12 +35,15 @@ function UpdatedTime({ timestamp }: { timestamp: number }) {
   }, []);
   const minutes = Math.max(0, Math.floor((now - timestamp) / 60_000));
   const count = minutes < 60 ? minutes : minutes < 1440 ? Math.floor(minutes / 60) : Math.floor(minutes / 1440);
-  const unit = minutes < 60 ? "minute" : minutes < 1440 ? "hour" : "day";
-  const label = minutes === 0 ? "just now" : `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  const label = minutes === 0 ? t("just now")
+    : minutes < 60 ? t(count === 1 ? "{count} minute ago" : "{count} minutes ago", { count })
+      : minutes < 1440 ? t(count === 1 ? "{count} hour ago" : "{count} hours ago", { count })
+        : t(count === 1 ? "{count} day ago" : "{count} days ago", { count });
   return <time dateTime={new Date(timestamp).toISOString()} title={new Date(timestamp).toLocaleString()}>{label}</time>;
 }
 
 export function BackupSizeChart() {
+  const t = useTranslation();
   const [sizes, setSizes] = useState<BackupSizes | null>(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -62,32 +67,32 @@ export function BackupSizeChart() {
     return () => window.clearTimeout(timer);
   }, [sizes, loading, failed]);
   const total = sizes ? PARTS.reduce((sum, part) => sum + sizes[part.key], 0) : 0;
-  return <figure className={styles.breakdown} aria-label="Backup contents">
+  return <figure className={styles.breakdown} aria-label={t("Backup contents")}>
     <figcaption className={styles.breakdownHeading}>
-      <strong>Rekordbox Data</strong>
-      {sizes ? <span>{size(total)} total · {sizes.trackCount.toLocaleString()} {sizes.trackCount === 1 ? "track" : "tracks"}</span> : null}
+      <strong>{t("Rekordbox Data")}</strong>
+      {sizes ? <span>{t(sizes.trackCount === 1 ? "{size} total · {count} track" : "{size} total · {count} tracks", { size: size(total), count: sizes.trackCount.toLocaleString() })}</span> : null}
     </figcaption>
     <div className={styles.sizeBarFrame} aria-busy={loading}>
-      <div className={styles.sizeBar} role="img" aria-label={!sizes ? "Rekordbox data size not calculated yet" : total === 0 ? "No data to back up" : PARTS.map(part => `${part.label}: ${size(sizes[part.key])}`).join(", ")}>
+      <div className={styles.sizeBar} role="img" aria-label={!sizes ? t("Rekordbox data size not calculated yet") : total === 0 ? t("No data to back up") : PARTS.map(part => `${t(part.label)}: ${size(sizes[part.key])}`).join(", ")}>
         {sizes && total > 0 ? PARTS.filter(part => sizes[part.key] > 0).map(part => <span key={part.key}
-          title={`${part.label}: ${size(sizes[part.key])} (${(sizes[part.key] / total * 100).toFixed(1)}%)`}
+          title={`${t(part.label)}: ${size(sizes[part.key])} (${(sizes[part.key] / total * 100).toFixed(1)}%)`}
           style={{ width: `${sizes[part.key] / total * 100}%`, backgroundColor: part.color }} />) : null}
       </div>
       {loading ? <div className={styles.sizeCalculating} role="status">
         <LoaderCircle size={16} className={styles.sizeSpinner} aria-hidden="true" />
-        Calculating Rekordbox data size
+        {t("Calculating Rekordbox data size")}
       </div> : null}
     </div>
-    <ul className={styles.sizeLegend} aria-label="Backup size breakdown">
+    <ul className={styles.sizeLegend} aria-label={t("Backup size breakdown")}>
       {PARTS.map(part => <li key={part.key}>
         <span className={styles.sizeDot} style={{ backgroundColor: part.color }} aria-hidden="true" />
-        <span>{part.label}</span><span className={styles.sizeValue}>{sizes ? size(sizes[part.key]) : "—"}</span>
+        <span>{t(part.label)}</span><span className={styles.sizeValue}>{sizes ? size(sizes[part.key]) : "—"}</span>
       </li>)}
     </ul>
-    {failed ? <p className={styles.error} role="alert">Couldn’t calculate Rekordbox data size. Click Refresh to try again.</p> : null}
+    {failed ? <p className={styles.error} role="alert">{t("Couldn’t calculate Rekordbox data size. Click Refresh to try again.")}</p> : null}
     <div className={styles.sizeFooter}>
-      <span>Updates sizes weekly · Last updated: {sizes ? <UpdatedTime key={sizes.updatedAt} timestamp={sizes.updatedAt} /> : "—"}</span>
-      <Button className={styles.backupButton} disabled={loading} onClick={() => { setLoading(true); setRequest(value => ({ attempt: value.attempt + 1, force: true })); }}>Refresh</Button>
+      <span>{t("Updates sizes weekly · Last updated:")} {sizes ? <UpdatedTime key={sizes.updatedAt} timestamp={sizes.updatedAt} /> : "—"}</span>
+      <Button className={styles.backupButton} disabled={loading} onClick={() => { setLoading(true); setRequest(value => ({ attempt: value.attempt + 1, force: true })); }}>{t("Refresh")}</Button>
     </div>
   </figure>;
 }
