@@ -30,6 +30,8 @@ let pads: HotCueActions;
 /** Every cue command the backend was given, in order. */
 let sent: string[];
 let seeked: number[];
+/** What the pads did to the deck, in order: `seek:<s>` and `play`. */
+let transport: string[];
 
 const hot = (id: string, letter: string, positionMs: number): Cue => ({
   id, positionMs, outMs: 0, letter, memory: false, colour: null,
@@ -72,7 +74,11 @@ function mount(deck: Partial<HotCueDeck> = {}) {
     trackId: "track-1",
     cues: [],
     positionSeconds: () => 0,
-    seek: (seconds: number) => seeked.push(seconds),
+    seek: (seconds: number) => {
+      seeked.push(seconds);
+      transport.push(`seek:${seconds}`);
+    },
+    play: () => transport.push("play"),
     quantiseTo: null,
     readOnly: false,
     ...deck,
@@ -91,6 +97,7 @@ beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   sent = [];
   seeked = [];
+  transport = [];
   __setBackend(stubBackend());
   host = document.createElement("div");
   document.body.append(host);
@@ -109,8 +116,10 @@ describe("pressing an empty pad", () => {
     act(() => pads.press("A"));
     await settle();
     expect(sent).toEqual(["add:track-1:A:1235"]);
-    // Setting a cue is not a jump: the playhead was already there.
+    // Setting a cue is not a jump: the playhead was already there. Nor does
+    // it start a stopped deck; only calling a set cue plays.
     expect(seeked).toEqual([]);
+    expect(transport).toEqual([]);
   });
 
   it("snaps to the nearest beat when quantize is on", async () => {
@@ -166,6 +175,17 @@ describe("pressing a pad that is already set", () => {
     expect(sent).toEqual([]);
   });
 
+  it("plays from the cue, so a paused deck starts there", async () => {
+    // rekordbox 7 manual, EXPORT mode, "Calling and playing saved hot cue
+    // points" (p.102): "Select a hot cue point. Playback starts from the
+    // selected hot cue point." Gate Cue, the one exception, is not offered.
+    // The jump comes first, so the deck starts at the cue and not before it.
+    mount({ cues, positionSeconds: () => 1 });
+    act(() => pads.press("A"));
+    await settle();
+    expect(transport).toEqual(["seek:30", "play"]);
+  });
+
   it("calls it read-only too, since a jump is not a write", async () => {
     mount({ cues, positionSeconds: () => 1, readOnly: true });
     act(() => pads.press("A"));
@@ -182,6 +202,7 @@ describe("pressing a pad that is already set", () => {
     await settle();
     expect(sent).toEqual(["add:track-1:A:2000"]);
     expect(seeked).toEqual([]);
+    expect(transport).toEqual([]);
   });
 });
 
@@ -199,6 +220,8 @@ describe("clearing a pad", () => {
     act(() => pads.clear("A"));
     await settle();
     expect(sent).toEqual(["delete:cue-a"]);
+    // A clear is not a call: the deck neither moves nor starts.
+    expect(transport).toEqual([]);
   });
 
   it("does nothing for an empty pad", async () => {

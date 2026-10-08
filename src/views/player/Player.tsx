@@ -1198,9 +1198,15 @@ export const Player = memo(function Player({
     trackId: playback.idle ? null : track?.id ?? null,
     cues, positionSeconds, seek, setLoop: playback.setLoop, cuePoint, setCuePoint, readOnly, onError,
   });
+  // A called hot cue plays from its point, as rekordbox does from pause. It
+  // goes through PLAY, so a synced deck starts on the master's beat too.
+  const playFromCue = useEventCallback(() => {
+    if (!playback.playing) togglePlay();
+  });
   const hot = useHotCues({
     trackId: playback.idle ? null : track?.id ?? null,
-    cues, positionSeconds, seek, quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
+    cues, positionSeconds, seek, play: playFromCue,
+    quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
   });
   // The hooks own editability, so the disabled state and its explanation
   // must come from that same result. Keeping a second readOnly-only branch

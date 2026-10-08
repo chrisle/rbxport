@@ -135,16 +135,26 @@ test("each hot cue on the detail is its lettered square in its colour, centred o
 
 test("a memory cue beside a hot cue is the red triangle over the badge, with no line of its own", async ({ page }) => {
   await load(page, "?writable=1");
-  // Quantize off, so CUE lands exactly on the hot cue rather than the beat
-  // beside it, and MEMORY stores the cue point rekordbox keeps beside a hot cue.
+  // Quantize off, so CUE and the new hot cue both land exactly on the
+  // playhead rather than the beat beside it. Stopped mid-track, away from the
+  // mock's memory cue near the start, CUE takes the playhead as the cue
+  // point, MEMORY stores it, and the empty pad E sets a hot cue on the same
+  // spot. (Calling a set pad would not do: it plays from the cue, as
+  // rekordbox does, so the head does not stay on it.)
   await player(page).getByRole("button", { name: "Quantize" }).click();
-  await pad(page, "B").click();
+  const overview = await page.getByTestId("player-overview").boundingBox();
+  await page.mouse.click(
+    (overview?.x ?? 0) + (overview?.width ?? 0) * 0.45,
+    (overview?.y ?? 0) + (overview?.height ?? 0) / 2,
+  );
+  await expect(player(page).getByRole("button", { name: "Play", exact: true })).toBeVisible();
   await page.keyboard.press("c");
   await player(page).getByRole("button", { name: "Set memory cue" }).click();
+  await pad(page, "E").click();
 
   const marker = detail(page).locator('[data-cue=""]');
   await expect(marker).toHaveCount(1);
-  const hot = await detailMarker(page, "B");
+  const hot = await detailMarker(page, "E");
   const memory = await marker.evaluate((el) => {
     const band = el.closest('[data-testid="player-detail"]')!.getBoundingClientRect();
     const head = el.querySelector("i")!.getBoundingClientRect();

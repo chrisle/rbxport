@@ -7,6 +7,13 @@
  * does follows from that: an empty pad takes the playhead, a set one calls
  * its cue. The HOT CUE list beside the deck has a ✕ per set row.
  *
+ * Calling a set pad also starts a stopped deck. rekordbox 7's manual, EXPORT
+ * mode "Calling and playing saved hot cue points" (p.102): "Select a hot cue
+ * point. Playback starts from the selected hot cue point." The only
+ * exception it names is the Gate Cue preference ("Gate playback during Pause
+ * (Gate Cue)", p.248), which rbx does not offer, so a call from pause plays
+ * and keeps playing [OBS manual].
+ *
  * A set pad is never set over. What rekordbox does with the old row when a
  * slot is filled twice — a soft delete and a new row, or an update in place
  * — has not been recorded [UNKNOWN], so the pad calls rather than replaces,
@@ -27,6 +34,11 @@ export interface HotCueDeck {
   positionSeconds: () => number;
   seek: (seconds: number) => void;
   /**
+   * Starts the deck from where `seek` put it, as PLAY does; nothing when it
+   * is already playing. A called hot cue plays from its point in rekordbox.
+   */
+  play: () => void;
+  /**
    * The grid to snap a new hot cue to, when Q is on, or `null`. The same
    * rule CUE follows: with Q on a cue lands on the nearest beat, which is
    * why a CDJ's cues sit on the grid whatever the finger did.
@@ -42,14 +54,17 @@ export interface HotCueActions {
   canEdit: boolean;
   /** The cue in a slot, or `null` for an empty pad. */
   at: (letter: string) => Cue | null;
-  /** A pad press: `Set Hot Cue <letter>` on an empty pad, a call on a set one. */
+  /**
+   * A pad press: `Set Hot Cue <letter>` on an empty pad, a call on a set one.
+   * A call plays from the cue; setting a cue leaves the transport alone.
+   */
   press: (letter: string) => void;
   /** `Clear Hot Cue <letter>`: the ✕ on a list row, and `command + 1`-`3`. */
   clear: (letter: string) => void;
 }
 
 export function useHotCues(deck: HotCueDeck): HotCueActions {
-  const { trackId, cues, positionSeconds, seek, quantiseTo, readOnly, onError } = deck;
+  const { trackId, cues, positionSeconds, seek, play, quantiseTo, readOnly, onError } = deck;
   const canEdit = trackId !== null && !readOnly;
   const write = useCueWriter(onError);
 
@@ -59,9 +74,12 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
     (letter: string) => {
       const cue = hotCue(cues, letter);
       if (cue) {
-        // Calling a hot cue is a jump and nothing else: unlike a memory cue
-        // it does not become the cue point, on a CDJ or in rekordbox [REF].
+        // Calling a hot cue is a jump that plays: from pause rekordbox starts
+        // playback at the cue (manual p.102), and a playing deck carries on
+        // from it. Unlike a memory cue it does not become the cue point, on a
+        // CDJ or in rekordbox [REF].
         seek(cue.positionMs / 1000);
+        play();
         return;
       }
       if (!canEdit || trackId === null) return;
@@ -69,7 +87,7 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
       const positionMs = Math.round(quantiseTo ? nearestBeatMs(quantiseTo, at) : at);
       write((edits) => edits.addCue(trackId, { hot: letter }, positionMs));
     },
-    [cues, seek, canEdit, trackId, positionSeconds, quantiseTo, write],
+    [cues, seek, play, canEdit, trackId, positionSeconds, quantiseTo, write],
   );
 
   const clear = useCallback(
