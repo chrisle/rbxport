@@ -1500,7 +1500,10 @@ export const TrackTable = memo(function TrackTable({
         <ContextMenu
           x={trackMenu.x}
           y={trackMenu.y}
-          rows={trackMenuFor(players, playlists, devices, { tagList: spec.source.kind === "tagList" })}
+          rows={trackMenuFor(players, playlists, devices, {
+            tagList: spec.source.kind === "tagList",
+            explorer: spec.source.kind === "folder",
+          })}
           label="Track"
           context={{
             inPlaylist: spec.source.kind === "playlist",

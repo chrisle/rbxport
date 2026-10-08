@@ -79,6 +79,11 @@ export interface MenuEntry<A> {
   items?: readonly MenuRow<A>[];
   /** A rule beyond "we have it": no playlist to remove from, and so on. */
   needs?: "playlist" | "history" | "file" | "loose" | "track";
+  /**
+   * Live over files the library does not hold as well: the files are
+   * imported first, then the entry runs on the tracks they became.
+   */
+  importsLoose?: boolean;
   /** In a submenu of choices, the one in force: drawn with a tick. */
   checked?: boolean;
 }
@@ -105,10 +110,17 @@ export type MenuRow<A> = MenuEntry<A> | typeof SEPARATOR;
  * not coming. `Analyze Track` writes the result to the library — the grid,
  * the waveforms, the BPM and the key — so it is a write, greyed while
  * rekordbox holds the file. `Import To Collection` is live over a file the
- * Explorer lists and greyed over a track, which is already in. What is live
- * follows the rows' state, not the view: an imported file's menu in the
- * Explorer is a track's [ASSUME: rekordbox's Explorer menu after an import
- * has not been captured].
+ * Explorer lists and greyed over a track, which is already in.
+ *
+ * What is live follows the rows' state, not the view [OBS rekordbox 7,
+ * Winrig 2026-10-08, issue #105]. In the Explorer, a file the collection
+ * holds gets a track's menu: Import To Collection greyed, Analyze Track,
+ * Analysis Lock and Remove from Collection live. A file it does not hold
+ * gets the reverse of those four, and Add To Playlist stays live, importing
+ * the file on the way in. rekordbox also leaves Add To Tag List, Reload Tag,
+ * Export Track, Reset DJ Play Count and Show information live over such a
+ * file; what each does to it there has not been observed [UNKNOWN], so
+ * they stay greyed here until it has.
  */
 export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   { label: "Load", action: null, submenu: true },
@@ -398,7 +410,9 @@ export function enabled<A extends string>(
   if (entry.items) return entriesOf(entry.items).some((row) => enabled(row, context));
   if (entry.action === null) return false;
   if (context.readOnly && (WRITES.has(entry.action) || entry.action.startsWith("addToPlaylist:"))) return false;
-  if (context.loose === true && entry.needs !== "loose" && entry.needs !== "file") return entry.action.startsWith("loadPlayer");
+  if (context.loose === true && entry.needs !== "loose" && entry.needs !== "file" && entry.importsLoose !== true) {
+    return entry.action.startsWith("loadPlayer");
+  }
   if (entry.needs === "playlist") return context.inPlaylist;
   if (entry.needs === "history") return context.inHistory === true;
   if (entry.needs === "file") return context.hasFile;
@@ -433,7 +447,9 @@ export function trackMenuFor(
   devices: readonly MenuTarget[] = [],
   // Over the Tag List, "Remove from Playlist" is "Remove from Tag List"
   // [ASSUME: the capture is over a playlist].
-  options: { tagList?: boolean } = {},
+  // In the Explorer, rekordbox draws no Convert Memory Cues to Hot Cues row,
+  // over an imported file or a loose one [OBS 7, Winrig 2026-10-08].
+  options: { tagList?: boolean; explorer?: boolean } = {},
 ): readonly MenuRow<TrackAction>[] {
   const every: MenuRow<TrackAction>[] = [
     { label: "Load track to player 1", action: "loadPlayer1" },
@@ -443,14 +459,17 @@ export function trackMenuFor(
   const lists: MenuRow<TrackAction>[] = playlists.map((p) => ({
     label: p.name,
     action: `addToPlaylist:${p.id}` as const,
-    needs: "track" as const,
+    importsLoose: true,
   }));
   const sticks: MenuRow<TrackAction>[] = devices.map((d) => ({
     label: d.name,
     action: `exportTrack:${d.id}` as const,
     needs: "track" as const,
   }));
-  return TRACK_MENU.map((row) => {
+  const rows = options.explorer === true
+    ? TRACK_MENU.filter((row) => row === SEPARATOR || row.action !== "convertMemoryCues")
+    : TRACK_MENU;
+  return rows.map((row) => {
     if (row === SEPARATOR) return row;
     if (row.label === "Load" && decks.length > 0) return { ...row, items: decks };
     if (row.label === "Add To Playlist" && lists.length > 0) return { ...row, items: lists };

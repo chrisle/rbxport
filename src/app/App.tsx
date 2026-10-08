@@ -52,7 +52,7 @@ import { RightRail } from "@/views/browser/RightRail";
 import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
-import { isLooseId } from "@/lib/explorer";
+import { importLoose, isLooseId } from "@/lib/explorer";
 import { childrenOf, containerOf, parentFor, withSources } from "@/lib/tree";
 import { JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
@@ -894,7 +894,6 @@ function AppBody() {
       const ids = draggedTracks?.ids;
       setDraggedTracks(null);
       if (!ids || ids.length === 0) return;
-      if (ids.some(refuseLoose)) return;
       if (advancedPrefs.protectLibrary) {
         refuse(refusal(true));
         return;
@@ -902,9 +901,19 @@ function AppBody() {
       void (async () => {
         const backend = await getBackend();
         try {
-          await backend.edits.addTracksToPlaylist(playlistId, [...ids]);
+          // Rows dragged out of the Explorer that the library does not hold
+          // are imported on the way in, as Add To Playlist does with them.
+          const { ids: trackIds, report: imported } = await importLoose(ids, (paths) => backend.importPaths(paths));
+          if (imported && analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
           const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
-          report(`Added ${ids.length} track${ids.length === 1 ? "" : "s"} to ${name}.`);
+          const skipped = imported?.skipped.length ?? 0;
+          const tail = skipped > 0 ? `; ${skipped} skipped` : "";
+          if (trackIds.length === 0) {
+            refuse(`Nothing added to ${name}${tail}.`);
+            return;
+          }
+          await backend.edits.addTracksToPlaylist(playlistId, trackIds);
+          report(`Added ${trackIds.length} track${trackIds.length === 1 ? "" : "s"} to ${name}${tail}.`);
         } catch (e) {
           // The refusal that matters is Rekordbox holding the database; say so
           // rather than letting the drop look as if it worked.
@@ -912,7 +921,7 @@ function AppBody() {
         }
       })();
     },
-    [draggedTracks, tree, report, refuse, refuseLoose, advancedPrefs.protectLibrary],
+    [draggedTracks, tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis],
   );
 
   /**
@@ -1428,16 +1437,26 @@ function AppBody() {
     [report, refuse],
   );
 
+  // Add To Playlist. Files the Explorer lists that the library does not hold
+  // are imported first, as rekordbox's menu offers it over them [OBS 7,
+  // Winrig 2026-10-08] and as a file dropped on a playlist already is.
   const addToPlaylist = useCallback(
     (playlist: string, ids: readonly string[]) => {
       if (ids.length === 0) return;
       const name = tree.find((n) => n.id === playlist)?.name ?? "the playlist";
       write(async (backend) => {
-        const added = await backend.edits.addTracksToPlaylist(playlist, [...ids]);
-        return added === 0 ? `Already in ${name}.` : `Added ${ids.length} track${ids.length === 1 ? "" : "s"} to ${name}.`;
+        const { ids: trackIds, report: imported } = await importLoose(ids, (paths) => backend.importPaths(paths));
+        if (imported && analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
+        const skipped = imported?.skipped.length ?? 0;
+        const tail = skipped > 0 ? `; ${skipped} skipped` : "";
+        if (trackIds.length === 0) return `Nothing added to ${name}${tail}.`;
+        const added = await backend.edits.addTracksToPlaylist(playlist, trackIds);
+        return added === 0
+          ? `Already in ${name}${tail}.`
+          : `Added ${trackIds.length} track${trackIds.length === 1 ? "" : "s"} to ${name}${tail}.`;
       });
     },
-    [write, tree],
+    [write, tree, analysisPrefs.auto, analysis],
   );
 
   const addToTagList = useCallback(

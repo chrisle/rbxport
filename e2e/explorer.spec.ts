@@ -5,6 +5,7 @@
  * files — which has the shape of the 9.10.55 PM capture.
  */
 import { expect, test } from "@playwright/test";
+import process from "node:process";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -184,4 +185,39 @@ test("a folder cut at the backend's cap says how many folders were left out", as
   await note.click();
   await expect(note).toHaveAttribute("aria-selected", "false");
   await expect(item("Explorer")).toHaveAttribute("aria-selected", "true");
+});
+
+test("the track menu follows each file's import state, as rekordbox's Explorer menu does", async ({ page }, info) => {
+  // rekordbox 7 [OBS Winrig 2026-10-08, issue #105]: over a file the
+  // collection holds, Import To Collection is greyed and Analyze Track and
+  // Remove from Collection are live; over one it does not, the reverse, with
+  // Add To Playlist live either way. Neither draws Convert Memory Cues.
+  await page.goto("/?writable=1");
+  await expect(page.getByRole("treeitem", { name: /Melodic Vox/ })).toBeVisible();
+  const { rail, item, open, rows } = parts(page);
+  await rail.getByRole("tab", { name: "Explorer" }).click();
+  await open("Music").click();
+  await item("Downloads").click();
+  await expect(rows).toHaveCount(12);
+
+  const menu = page.getByRole("menu", { name: "Track" });
+  const entry = (name: string) => menu.getByRole("menuitem", { name, exact: true });
+  const shots = process.env.RBX_PARITY_DIR;
+
+  await rows.nth(0).click({ button: "right" });
+  await expect(entry("Import To Collection")).toBeDisabled();
+  await expect(entry("Analyze Track")).toBeEnabled();
+  await expect(entry("Remove from Collection")).toBeEnabled();
+  await expect(entry("Add To Playlist")).toBeEnabled();
+  await expect(entry("Convert Memory Cues to Hot Cues")).toHaveCount(0);
+  if (shots) await page.screenshot({ path: `${shots}/rbx-after-menu-imported-${info.project.name}.png` });
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+
+  await rows.nth(6).click({ button: "right" });
+  await expect(entry("Import To Collection")).toBeEnabled();
+  await expect(entry("Analyze Track")).toBeDisabled();
+  await expect(entry("Remove from Collection")).toBeDisabled();
+  await expect(entry("Add To Playlist")).toBeEnabled();
+  if (shots) await page.screenshot({ path: `${shots}/rbx-after-menu-not-imported-${info.project.name}.png` });
 });

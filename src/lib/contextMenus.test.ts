@@ -224,6 +224,69 @@ describe("enabled", () => {
   });
 });
 
+describe("the Explorer's track menu, against rekordbox's", () => {
+  // rekordbox 7, right-clicking a file in the Explorer [OBS Winrig
+  // 2026-10-08, issue #105]: a file the collection does not hold
+  // (Music/RBX-ARTWORK-TEST, rekordbox-06-menu-not-imported.png) and one it
+  // does (the sampler's 4-Floor Breaks Kit, rekordbox-17-menu-imported.png).
+  // Live entries only; every other row was drawn greyed. Cloud Library Sync
+  // is left out here on purpose, and Show in Explorer is Show in Finder.
+  const REKORDBOX_LIVE = {
+    loose: [
+      "Import To Collection", "Add To Playlist", "Add To Tag List", "Reload Tag", "Get Info from iTunes",
+      "Export Track", "Auto Load Hot Cue", "Reset DJ Play Count", "Show information", "Show in Finder",
+      "Track information",
+    ],
+    imported: [
+      "Analyze Track", "Analysis Lock", "Add To Playlist", "Add To Tag List", "Reload Tag",
+      "Get Info from iTunes", "Export Track", "Auto Load Hot Cue", "Reset DJ Play Count",
+      "Remove from Collection", "Show information", "Show in Finder", "Track information",
+    ],
+  };
+  // Where this still differs, and why. In every view: rows this does not do
+  // (iTunes, Auto Load, KUVO) and Load, which rekordbox greyed in its Export
+  // layout. Over a loose file only: entries rekordbox leaves live whose effect
+  // on a file outside the collection has not been observed [UNKNOWN].
+  const EVERY_VIEW = ["Load", "Get Info from iTunes", "Auto Load Hot Cue", "Track information"];
+  const LOOSE_UNOBSERVED = ["Add To Tag List", "Reload Tag", "Export Track", "Reset DJ Play Count", "Show information"];
+
+  const rows = trackMenuFor(2, [{ id: "p1", name: "Warm Up" }], [{ id: "/Volumes/USB", name: "USB" }], { explorer: true });
+  const explorer: MenuContext = { inPlaylist: false, inHistory: false, hasFile: true, readOnly: false };
+  const live = (loose: boolean) =>
+    entriesOf(rows).filter((e) => enabled(e, { ...explorer, loose })).map((e) => e.label);
+
+  it("draws rekordbox's rows, with no Convert Memory Cues to Hot Cues", () => {
+    expect(entriesOf(rows).map((e) => e.label)).toEqual([
+      "Load", "Import To Collection", "Analyze Track", "Analysis Lock", "Add To Playlist", "Add To Tag List",
+      "Reload Tag", "Get Info from iTunes", "Track Type", "Export Track", "Auto Load Hot Cue",
+      "Reset DJ Play Count", "Add New Analysis Data", "Remove from Playlist", "Remove from Collection",
+      "Remove from History", "Show information", "Show in Finder", "Track information",
+    ]);
+    expect(rows.filter((row) => row === SEPARATOR)).toHaveLength(7);
+    // The rest of the browser keeps it, as rekordbox's Collection does.
+    expect(entriesOf(trackMenuFor(2)).map((e) => e.label)).toContain("Convert Memory Cues to Hot Cues");
+  });
+
+  it("over an imported file, is a track's menu: the one rekordbox draws", () => {
+    const differs = new Set(EVERY_VIEW);
+    expect(live(false).filter((l) => !differs.has(l))).toEqual(
+      REKORDBOX_LIVE.imported.filter((l) => !differs.has(l)),
+    );
+  });
+
+  it("over a file the library does not hold, imports it and adds it to a playlist", () => {
+    const differs = new Set([...EVERY_VIEW, ...LOOSE_UNOBSERVED]);
+    expect(live(true).filter((l) => !differs.has(l))).toEqual(
+      REKORDBOX_LIVE.loose.filter((l) => !differs.has(l)),
+    );
+    // Pinned so closing a gap is a deliberate edit here.
+    expect(live(true).filter((l) => differs.has(l))).toEqual(["Load"]);
+    const add = entriesOf(rows).find((e) => e.label === "Add To Playlist");
+    expect(entriesOf(add?.items ?? []).every((e) => enabled(e, { ...explorer, loose: true }))).toBe(true);
+    expect(enabled(add ?? { label: "", action: null }, { ...explorer, loose: true, readOnly: true })).toBe(false);
+  });
+});
+
 describe("deckMenu", () => {
   const state = { waveformColor: "3band" as const, beatCount: "position" as const, waveformClick: true };
 
