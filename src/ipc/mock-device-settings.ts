@@ -81,6 +81,7 @@ export function referenceDeviceSettings(deviceName: string, withLibrary: boolean
     hasLibrarySettings: withLibrary,
     deviceName: withLibrary ? deviceName : "",
     backgroundColorType: 0,
+    deviceLibraryBackgroundColorType: withLibrary ? 0 : null,
     categories: slots(CATEGORIES),
     sorts: slots(SORTS),
     subColumn: null,

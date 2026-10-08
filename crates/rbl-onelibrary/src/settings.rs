@@ -26,9 +26,15 @@
 //!   stick `build.rs` was transcribed from has it set on `COMMENTS`, so the
 //!   column is the flag; what rekordbox lists as choices is `[ASSUME]` the
 //!   sort options, since that is the table the flag lives in.
-//! - `property.backGroundColorType` is 0 while both Background Color menus
-//!   show "Default Color". Which menu it belongs to and what the other values
-//!   are is `[UNKNOWN]`; it is read and carried, never changed here.
+//! - `property.backGroundColorType` is "Background Color : `OneLibrary`"
+//!   [OBS rekordbox 7.2.14, 2026-10-08]. It was 0 while the menu showed
+//!   "Default Color" and 8 for Purple. It stayed 8 while "Background
+//!   Color : Device Library" was changed twice; that menu is a byte of
+//!   `export.pdb`'s `property` row (`rbl_pdb::rows::PdbProperty`). Both
+//!   menus use the track-colour order: 0 Default, 1 Pink, 2 Red, 3 Orange,
+//!   4 Yellow, 5 Green, 6 Aqua, 7 Blue, 8 Purple. Purple (8), Yellow (4)
+//!   and Blue (7) were observed; the other values are `[ASSUME]` from that
+//!   order.
 
 use std::path::Path;
 
@@ -63,7 +69,8 @@ pub struct ColorName {
 pub struct StickSettings {
     /// `property.deviceName`.
     pub device_name: String,
-    /// `property.backGroundColorType`, carried as read. See the module notes.
+    /// `property.backGroundColorType`: "Background Color : `OneLibrary`",
+    /// 0 Default to 8 Purple. See the module notes.
     pub background_color_type: i64,
     /// Every `category` row, in `category_id` order.
     pub categories: Vec<MenuSlot>,
@@ -209,7 +216,10 @@ impl StickSettings {
 
         crate::durable_writes(&conn)?;
         let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute("UPDATE property SET deviceName = ?1", params![self.device_name])?;
+        tx.execute(
+            "UPDATE property SET deviceName = ?1, backGroundColorType = ?2",
+            params![self.device_name, self.background_color_type],
+        )?;
         // rekordbox numbers the visible rows 1.. in their order and gives a
         // hidden row 0 [OBS 7.2.11, BPM taken off the sort list]; the same
         // change made here and there then leaves the same rows.

@@ -1472,5 +1472,6 @@
   "Database management": "Gestión de base de datos",
   "Select a drive": "Seleccione una unidad",
   "Add memory cue at first beat": "Add memory cue at first beat",
-  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
+  "Export to this device first to set its background color.": "Exporte primero a este dispositivo para configurar su color de fondo."
 }

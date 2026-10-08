@@ -7,8 +7,9 @@
  * has none. The General tab is `DEVSETTING.DAT`; Category, Sort and Column
  * are `exportLibrary.db`'s rows.
  *
- * Not here: the account nickname (no account), the background colour (its
- * choices have not been seen), the jog image (not written), My Settings
+ * Not here: the account nickname (no account), the background colours
+ * (where rekordbox keeps their defaults has not been recorded; each stick's
+ * own are set on its General tab), the jog image (not written), My Settings
  * (`MYSETTING.DAT` is not written), and the Device tab (history import is
  * not built). PRO DJ LINK, in place of rekordbox's Others tab, holds the
  * LINK switch and the network interface it runs on.

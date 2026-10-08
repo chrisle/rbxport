@@ -1474,5 +1474,6 @@
   "Database management": "数据库管理",
   "Select a drive": "选择驱动器",
   "Add memory cue at first beat": "Add memory cue at first beat",
-  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
+  "Export to this device first to set its background color.": "请先导出到此设备，然后才能设置其背景颜色。"
 }

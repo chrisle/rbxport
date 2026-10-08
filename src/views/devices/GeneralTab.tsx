@@ -11,10 +11,13 @@
  *   capture too, so shown and not offered.
  * - Waveform Divisions: drawn, inert. Its byte is `[UNKNOWN]` — see
  *   `crates/rbl-devices/src/settings.rs`.
- * - Background Color, Image On-Jog Display: drawn, inert. Where either is
- *   kept on the stick is `[UNKNOWN]`; `property.backGroundColorType` exists
- *   and reads 0 for "Default Color" but which of the two menus it is, and
- *   what the other values are, has not been recorded.
+ * - Background Color : OneLibrary: `property.backGroundColorType` in
+ *   `exportLibrary.db`. Background Color : Device Library: byte 9 of the
+ *   `property` row in `export.pdb`. Both use the track-colour order, 0
+ *   Default to 8 Purple [OBS rekordbox 7.2.14]. Each is offered when the
+ *   stick has the database that holds it.
+ * - Image On-Jog Display: drawn, inert. Where it is kept on the stick is
+ *   `[UNKNOWN]`.
  * - The space table is real, and the sync control that the panel had before
  *   the captures lives beneath it, since that is the only place rekordbox's
  *   layout leaves for it.
@@ -100,11 +103,53 @@ const JOG_IMAGES = [
 
 const UNKNOWN_DIVISIONS =
   "Not written yet: which byte of DEVSETTING.DAT holds Waveform Divisions has not been recorded.";
-const UNKNOWN_BACKGROUND =
-  "Not written yet: where the stick keeps this colour has not been recorded.";
+/** The background colours, by the value the stick stores: the track colours after Default. */
+const BACKGROUND_COLORS = [
+  { value: 0, label: "Default Color" },
+  { value: 1, label: "Pink" },
+  { value: 2, label: "Red" },
+  { value: 3, label: "Orange" },
+  { value: 4, label: "Yellow" },
+  { value: 5, label: "Green" },
+  { value: 6, label: "Aqua" },
+  { value: 7, label: "Blue" },
+  { value: 8, label: "Purple" },
+] as const;
+const NO_BACKGROUND_HINT = "Export to this device first to set its background color.";
 const UNKNOWN_IMAGE =
   "Not written yet: where the stick keeps the on-jog image has not been recorded.";
 const NO_LIBRARY = "This device has no library to hold a name; export something to it first.";
+
+interface BackgroundSelectProps {
+  label: string;
+  /** The stored value, or null when the stick has no database to hold it. */
+  value: number | null;
+  onChange: (value: number) => void;
+}
+
+function BackgroundSelect({ label, value, onChange }: BackgroundSelectProps) {
+  const tip = useTooltip();
+  const disabled = value === null;
+  const current = value ?? 0;
+  // A value from a newer rekordbox is shown as its number and kept.
+  const unknown = current < 0 || current >= BACKGROUND_COLORS.length;
+  return (
+    <label className={styles.field} title={tip(disabled ? NO_BACKGROUND_HINT : undefined)}>
+      <span className={styles.caption}>{label}</span>
+      <select
+        className={styles.select}
+        value={current}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+      >
+        {BACKGROUND_COLORS.map((color) => (
+          <option key={color.value} value={color.value}>{color.label}</option>
+        ))}
+        {unknown && <option value={current}>{current}</option>}
+      </select>
+    </label>
+  );
+}
 
 export interface GeneralTabProps {
   device: Device;
@@ -172,18 +217,17 @@ export function GeneralTab({
         />
       </label>
 
-      <label className={styles.field} title={tip(UNKNOWN_BACKGROUND)}>
-        <span className={styles.caption}>Background Color : OneLibrary</span>
-        <select className={styles.select} value="default" disabled aria-disabled>
-          <option value="default">Default Color</option>
-        </select>
-      </label>
-      <label className={styles.field} title={tip(UNKNOWN_BACKGROUND)}>
-        <span className={styles.caption}>Background Color : Device Library</span>
-        <select className={styles.select} value="default" disabled aria-disabled>
-          <option value="default">Default Color</option>
-        </select>
-      </label>
+      <BackgroundSelect
+        label="Background Color : OneLibrary"
+        value={settings.hasLibrarySettings ? settings.backgroundColorType : null}
+        onChange={(backgroundColorType) => onChange({ ...settings, backgroundColorType })}
+      />
+      <BackgroundSelect
+        label="Background Color : Device Library"
+        value={settings.deviceLibraryBackgroundColorType}
+        onChange={(deviceLibraryBackgroundColorType) =>
+          onChange({ ...settings, deviceLibraryBackgroundColorType })}
+      />
 
       <RadioGroup
         label="Waveform color"

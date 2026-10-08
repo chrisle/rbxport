@@ -5,8 +5,12 @@
 //! - `PIONEER/DEVSETTING.DAT` — the display settings a player reads: waveform
 //!   colour, current-position marker, overview waveform type, key display.
 //! - `PIONEER/rekordbox/exportLibrary.db` — the device name, the browse
-//!   categories and sort options, the sub-column and the colour comments.
-//!   Read and written by [`rbl_onelibrary::settings::StickSettings`].
+//!   categories and sort options, the sub-column, the colour comments and
+//!   "Background Color : `OneLibrary`". Read and written by
+//!   [`rbl_onelibrary::settings::StickSettings`].
+//! - `PIONEER/rekordbox/export.pdb` — copies of the device name and colour
+//!   comments, and "Background Color : Device Library" in its `property`
+//!   row ([`rbl_pdb::rows::PdbProperty`]).
 //!
 //! `DEVSETTING.DAT` is 140 bytes and its layout was checked byte for byte
 //! against the file on a real rekordbox 7.2.8 export [OBS], and against the
@@ -252,6 +256,10 @@ pub struct DeviceSettings {
     pub dev: Option<DevSetting>,
     /// `exportLibrary.db`'s settings, or `None` when the stick has none.
     pub library: Option<StickSettings>,
+    /// "Background Color : Device Library": byte 9 of `export.pdb`'s
+    /// `property` row, 0 Default to 8 Purple. `None` when the stick has no
+    /// `export.pdb` or the row cannot be read.
+    pub device_library_background: Option<u8>,
     /// Whether `export.pdb` is there — "Device Library" in rekordbox's words.
     pub has_device_library: bool,
     /// Whether `exportLibrary.db` is there — "`OneLibrary`".
@@ -272,7 +280,13 @@ pub enum SettingsError {
 pub fn read(mount_point: &Path) -> DeviceSettings {
     if let Err(e) = recover(mount_point) {
         tracing::error!(error = %e, "device recovery failed; settings unavailable");
-        return DeviceSettings { dev: None, library: None, has_device_library: false, has_one_library: false };
+        return DeviceSettings {
+            dev: None,
+            library: None,
+            device_library_background: None,
+            has_device_library: false,
+            has_one_library: false,
+        };
     }
     read_files(mount_point)
 }
@@ -291,12 +305,17 @@ fn read_files(mount_point: &Path) -> DeviceSettings {
     } else {
         None
     };
-    DeviceSettings {
-        dev,
-        library,
-        has_device_library: root.join("rekordbox/export.pdb").is_file(),
-        has_one_library,
-    }
+    let pdb_path = root.join("rekordbox/export.pdb");
+    let has_device_library = pdb_path.is_file();
+    let device_library_background = if has_device_library {
+        std::fs::read(&pdb_path)
+            .ok()
+            .and_then(|bytes| rbl_pdb::Pdb::parse(&bytes).ok()?.property())
+            .map(|property| property.background_color)
+    } else {
+        None
+    };
+    DeviceSettings { dev, library, device_library_background, has_device_library, has_one_library }
 }
 
 /// Writes the settings back.
@@ -335,7 +354,9 @@ fn write_changes_recovered(
         .library
         .as_ref()
         .is_some_and(|next| current.library.as_ref() != Some(next));
-    if !dev_changed && !library_changed {
+    let background_changed = settings.device_library_background.is_some()
+        && settings.device_library_background != current.device_library_background;
+    if !dev_changed && !library_changed && !background_changed {
         return Ok(());
     }
 
@@ -362,26 +383,61 @@ fn write_changes_recovered(
                 library.write(&staged)?;
                 files.extend([relative.join("rekordbox/exportLibrary.db-wal"), relative.join("rekordbox/exportLibrary.db-shm"), relative.join("rekordbox/exportLibrary.db")]);
             }
-            // The colour comments live in both databases; rekordbox renames them
-            // in `export.pdb` too, and a player reads its names from there.
-            let pdb_path = root.join("rekordbox/export.pdb");
-            if let Ok(bytes) = std::fs::read(&pdb_path) {
-                let rows: Vec<Vec<u8>> = library
-                    .colors
-                    .iter()
-                    .map(|c| rbl_pdb::rows::color_row(u16::try_from(c.id).unwrap_or(0), &c.name))
-                    .collect();
-                if let Some(next) = rbl_pdb::build::replace_single_page_table(&bytes, 6, &rows) {
-                    if next != bytes {
-                        rbl_core::durable::write(&staged_root.join("rekordbox/export.pdb"), &next)?;
-                        files.push(relative.join("rekordbox/export.pdb"));
-                    }
-                }
+        }
+    }
+    if library_changed || background_changed {
+        let pdb_path = root.join("rekordbox/export.pdb");
+        if let Ok(bytes) = std::fs::read(&pdb_path) {
+            let next = updated_pdb(&bytes, library_changed.then_some(settings.library.as_ref()).flatten(), settings.device_library_background);
+            if next != bytes {
+                rbl_core::durable::write(&staged_root.join("rekordbox/export.pdb"), &next)?;
+                files.push(relative.join("rekordbox/export.pdb"));
             }
         }
     }
     publication.commit(&files)?;
     Ok(())
+}
+
+/// `export.pdb` with the device panel's changes applied.
+///
+/// The colour comments and the device name live in both databases.
+/// rekordbox renames a colour comment in `export.pdb` too, and a player reads
+/// its names from there [OBS 7.2.11]. The `property` row carries the device
+/// name beside the Device Library background colour [OBS 7.2.14]. A table
+/// that cannot be replaced is left as it was.
+fn updated_pdb(bytes: &[u8], library: Option<&StickSettings>, background: Option<u8>) -> Vec<u8> {
+    let mut next = bytes.to_vec();
+    if let Some(library) = library {
+        let rows: Vec<Vec<u8>> = library
+            .colors
+            .iter()
+            .map(|c| rbl_pdb::rows::color_row(u16::try_from(c.id).unwrap_or(0), &c.name))
+            .collect();
+        if let Some(replaced) = rbl_pdb::build::replace_single_page_table(&next, 6, &rows) {
+            next = replaced;
+        }
+    }
+    let property = rbl_pdb::Pdb::parse(&next).ok().and_then(|pdb| pdb.property());
+    if let Some(current) = property {
+        let mut property = current.clone();
+        if let Some(library) = library {
+            property.device_name.clone_from(&library.device_name);
+        }
+        if let Some(background) = background {
+            property.background_color = background;
+        }
+        // An unchanged row keeps rekordbox's page as it was.
+        if property == current {
+            return next;
+        }
+        let replaced = rbl_pdb::rows::property_row(&property)
+            .and_then(|row| rbl_pdb::build::replace_single_page_table(&next, 19, &[row]));
+        if let Some(replaced) = replaced {
+            next = replaced;
+        }
+    }
+    next
 }
 
 /// Recover all device publication journals before exposing database files.
@@ -491,6 +547,7 @@ mod tests {
         let current = DeviceSettings {
             dev: Some(DevSetting::default()),
             library: Some(StickSettings::default()),
+            device_library_background: None,
             has_device_library: true,
             has_one_library: true,
         };
@@ -509,6 +566,52 @@ mod tests {
         let written = read(stick.path()).dev.expect("the display file remains readable");
         assert_eq!(written.color, WaveformColor::Rgb);
         assert!(!stick.path().join("PIONEER/rekordbox/exportLibrary.db").exists());
+    }
+
+    #[test]
+    fn both_background_colours_are_written_where_rekordbox_keeps_them() {
+        let stick = tempfile::tempdir().unwrap();
+        assert!(rbl_export::create_library(stick.path(), None, &[], None).unwrap());
+        let current = read(stick.path());
+        assert_eq!(current.device_library_background, Some(0));
+        assert_eq!(current.library.as_ref().unwrap().background_color_type, 0);
+
+        // OneLibrary Purple, Device Library Yellow, and a new name.
+        let mut next = current.clone();
+        let library = next.library.as_mut().unwrap();
+        library.background_color_type = 8;
+        library.device_name = "FRIDAY".to_owned();
+        next.device_library_background = Some(4);
+        write_changes(stick.path(), &current, &next).unwrap();
+
+        let back = read(stick.path());
+        assert_eq!(back.library.as_ref().unwrap().background_color_type, 8);
+        assert_eq!(back.device_library_background, Some(4));
+        let bytes = std::fs::read(stick.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+        let property = rbl_pdb::Pdb::parse(&bytes).unwrap().property().unwrap();
+        assert_eq!(property.device_name, "FRIDAY");
+        assert_eq!(property.background_color, 4);
+
+        // Only the Device Library colour: exportLibrary.db is not rewritten.
+        let library_path = stick.path().join("PIONEER/rekordbox/exportLibrary.db");
+        let library_before = std::fs::read(&library_path).unwrap();
+        let mut blue = back.clone();
+        blue.device_library_background = Some(7);
+        write_changes(stick.path(), &back, &blue).unwrap();
+        assert_eq!(read(stick.path()).device_library_background, Some(7));
+        assert_eq!(std::fs::read(&library_path).unwrap(), library_before);
+    }
+
+    #[test]
+    fn a_library_change_leaves_an_unchanged_property_page_alone() {
+        let current = StickSettings::default();
+        let property = rbl_pdb::rows::PdbProperty { created_date: "2026-05-08".to_owned(), ..Default::default() };
+        let mut file = rbl_pdb::build::FileBuilder::new(4096);
+        file.add_table(19, &[rbl_pdb::rows::property_row(&property).unwrap()]);
+        let bytes = file.finish();
+        assert_eq!(updated_pdb(&bytes, Some(&current), None), bytes);
+        assert_eq!(updated_pdb(&bytes, None, Some(0)), bytes);
+        assert_ne!(updated_pdb(&bytes, None, Some(5)), bytes);
     }
 
     #[test]

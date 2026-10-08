@@ -966,7 +966,11 @@ there rather than publishing an empty sibling over it.
 
 An export carries `property.backGroundColorType` from the stick's
 `exportLibrary.db` and the background byte from its `export.pdb` `property`
-row. A stick without one starts at 0.
+row. A stick without one starts at 0. The device panel's General tab writes
+each colour to its own database: the OneLibrary colour with the other
+`exportLibrary.db` settings, the Device Library colour by replacing the
+`export.pdb` `property` row. A device-name change is copied to that row
+too. A value outside 0–8 that the stick already holds is kept.
 
 #### DeviceSQL writer policies
 

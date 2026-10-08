@@ -1471,5 +1471,6 @@
   "Database management": "Διαχείριση βάσης δεδομένων",
   "Select a drive": "Επιλέξτε οδηγό",
   "Add memory cue at first beat": "Add memory cue at first beat",
-  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
+  "Export to this device first to set its background color.": "Κάντε πρώτα εξαγωγή σε αυτή τη συσκευή για να ορίσετε το χρώμα φόντου της."
 }

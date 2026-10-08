@@ -58,7 +58,12 @@ pub struct DeviceSettingsDto {
     /// has no `exportLibrary.db` and they are not written.
     pub has_library_settings: bool,
     pub device_name: String,
+    /// "Background Color : `OneLibrary`": `property.backGroundColorType`,
+    /// 0 Default, 1 Pink .. 8 Purple.
     pub background_color_type: i64,
+    /// "Background Color : Device Library", from `export.pdb`'s `property`
+    /// row, same values. `None` when the stick has no such row.
+    pub device_library_background_color_type: Option<i64>,
     pub categories: Vec<MenuSlotDto>,
     pub sorts: Vec<MenuSlotDto>,
     pub sub_column: Option<i64>,
@@ -118,6 +123,7 @@ pub fn to_dto(settings: &DeviceSettings) -> DeviceSettingsDto {
         has_library_settings: settings.library.is_some(),
         device_name: library.device_name.clone(),
         background_color_type: library.background_color_type,
+        device_library_background_color_type: settings.device_library_background.map(i64::from),
         categories: library.categories.iter().map(slot_dto).collect(),
         sorts: library.sorts.iter().map(slot_dto).collect(),
         sub_column: library.sub_column,
@@ -159,23 +165,40 @@ pub fn apply(current: &DeviceSettings, dto: &DeviceSettingsDto) -> AppResult<Dev
     };
 
     // Library settings only go to a stick that has a library to hold them.
-    let library = current.library.as_ref().map(|existing| StickSettings {
-        device_name: dto.device_name.trim().to_owned(),
-        // Never changed by the tabs: its values are not understood.
-        background_color_type: existing.background_color_type,
-        categories: dto.categories.iter().map(slot_from).collect(),
-        sorts: dto.sorts.iter().map(slot_from).collect(),
-        sub_column: dto.sub_column,
-        colors: dto
-            .colors
-            .iter()
-            .map(|c| ColorName { id: c.id, name: c.name.clone() })
-            .collect(),
-    });
+    let library = match current.library.as_ref() {
+        Some(existing) => Some(StickSettings {
+            device_name: dto.device_name.trim().to_owned(),
+            background_color_type: background(
+                "Background Color : OneLibrary",
+                dto.background_color_type,
+                existing.background_color_type,
+            )?,
+            categories: dto.categories.iter().map(slot_from).collect(),
+            sorts: dto.sorts.iter().map(slot_from).collect(),
+            sub_column: dto.sub_column,
+            colors: dto
+                .colors
+                .iter()
+                .map(|c| ColorName { id: c.id, name: c.name.clone() })
+                .collect(),
+        }),
+        None => None,
+    };
+    // Only a stick whose `export.pdb` has a `property` row can hold it.
+    let device_library_background =
+        match (current.device_library_background, dto.device_library_background_color_type) {
+            (Some(existing), Some(wanted)) => {
+                let value =
+                    background("Background Color : Device Library", wanted, i64::from(existing))?;
+                Some(u8::try_from(value).unwrap_or(existing))
+            }
+            (existing, _) => existing,
+        };
 
     Ok(DeviceSettings {
         dev: Some(dev),
         library,
+        device_library_background,
         has_device_library: current.has_device_library,
         has_one_library: current.has_one_library,
     })
@@ -286,6 +309,20 @@ pub fn write_dev_defaults(mount: &Path, dto: &StickDefaultsDto) -> AppResult<()>
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))
 }
 
+/// The highest background colour: 0 Default, 1 Pink .. 8 Purple.
+const MAX_BACKGROUND: i64 = 8;
+
+/// A background colour from the wire. A value the stick already holds is
+/// kept even when it is not one of the nine, so a newer rekordbox's value
+/// survives a save that did not touch it.
+fn background(field: &str, wanted: i64, existing: i64) -> AppResult<i64> {
+    if wanted == existing || (0..=MAX_BACKGROUND).contains(&wanted) {
+        Ok(wanted)
+    } else {
+        Err(bad_value(field, &wanted.to_string()))
+    }
+}
+
 fn bad_value(field: &str, value: &str) -> AppError {
     AppError::new(ErrorKind::Malformed, format!("{field}: {value:?} is not a choice."))
 }
@@ -380,6 +417,7 @@ mod tests {
         let empty = DeviceSettings {
             dev: None,
             library: None,
+            device_library_background: None,
             has_device_library: false,
             has_one_library: false,
         };
@@ -404,6 +442,7 @@ mod tests {
         let stick = DeviceSettings {
             dev: Some(DevSetting::default()),
             library: Some(StickSettings::default()),
+            device_library_background: Some(0),
             has_device_library: true,
             has_one_library: true,
         };
@@ -416,9 +455,14 @@ mod tests {
         dto.categories[0].seq = 11;
         dto.sub_column = Some(2);
         dto.key_display = "alphanumeric".to_owned();
+        assert_eq!(dto.device_library_background_color_type, Some(0));
+        dto.background_color_type = 8;
+        dto.device_library_background_color_type = Some(4);
 
         let next = apply(&stick, &dto).unwrap();
+        assert_eq!(next.device_library_background, Some(4));
         let library = next.library.unwrap();
+        assert_eq!(library.background_color_type, 8);
         assert_eq!(library.colors[0].name, "Vocal");
         assert!(library.categories[0].visible);
         assert_eq!(library.sub_column, Some(2));
@@ -430,12 +474,40 @@ mod tests {
         let stick = DeviceSettings {
             dev: None,
             library: None,
+            device_library_background: None,
             has_device_library: false,
             has_one_library: false,
         };
         let mut dto = to_dto(&stick);
         dto.waveform_color = "plaid".to_owned();
         assert!(apply(&stick, &dto).is_err());
+    }
+
+    #[test]
+    fn a_background_colour_outside_the_nine_is_refused_unless_the_stick_has_it() {
+        let stick = DeviceSettings {
+            dev: None,
+            library: Some(StickSettings { background_color_type: 12, ..StickSettings::default() }),
+            device_library_background: Some(0),
+            has_device_library: true,
+            has_one_library: true,
+        };
+        let dto = to_dto(&stick);
+        // The stick's own value goes back as it was.
+        assert_eq!(apply(&stick, &dto).unwrap().library.unwrap().background_color_type, 12);
+
+        let mut bad = dto.clone();
+        bad.background_color_type = 9;
+        assert!(apply(&stick, &bad).is_err());
+        let mut bad = dto.clone();
+        bad.device_library_background_color_type = Some(-1);
+        assert!(apply(&stick, &bad).is_err());
+
+        // A stick without the row is not given one.
+        let no_row = DeviceSettings { device_library_background: None, ..stick };
+        let mut dto = to_dto(&no_row);
+        dto.device_library_background_color_type = Some(3);
+        assert_eq!(apply(&no_row, &dto).unwrap().device_library_background, None);
     }
 
     fn defaults() -> StickDefaultsDto {

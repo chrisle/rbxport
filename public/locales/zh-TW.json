@@ -1474,5 +1474,6 @@
   "Database management": "資料庫管理",
   "Select a drive": "選擇磁碟",
   "Add memory cue at first beat": "Add memory cue at first beat",
-  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
+  "Export to this device first to set its background color.": "請先匯出至此裝置，才能設定其背景顏色。"
 }

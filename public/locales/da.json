@@ -1463,5 +1463,8 @@
   "Database management": "Databasestyring",
   "Select a drive": "Vælg et drev",
   "Add memory cue at first beat": "Add memory cue at first beat",
-  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
+  "Aqua": "Aqua",
+  "Orange": "Orange",
+  "Export to this device first to set its background color.": "Eksportér først til denne enhed for at indstille dens baggrundsfarve."
 }

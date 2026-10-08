@@ -1758,8 +1758,10 @@ export interface DeviceSettings {
   /** The library rows were read; when false they are the reference rows and are not written. */
   hasLibrarySettings: boolean;
   deviceName: string;
-  /** `property.backGroundColorType`, carried but not understood. */
+  /** Background Color : OneLibrary — `property.backGroundColorType`, 0 Default, 1 Pink … 8 Purple. */
   backgroundColorType: number;
+  /** Background Color : Device Library — `export.pdb`'s `property` row, same values; null without one. */
+  deviceLibraryBackgroundColorType: number | null;
   categories: MenuSlot[];
   sorts: MenuSlot[];
   /** `menuItem` of the sort option shown beside the track name, or null for Not Specified. */

@@ -61,6 +61,23 @@ test("General shows the stick's display settings and the space table", async ({ 
   await expect(page.getByRole("region", { name: "Device TEST" }).getByRole("radio", { name: "RGB" })).toBeChecked();
 });
 
+test("General sets the two background colours separately", async ({ page }) => {
+  const panel = await openTest(page);
+  const oneLibrary = panel.getByRole("combobox", { name: "Background Color : OneLibrary" });
+  const deviceLibrary = panel.getByRole("combobox", { name: "Background Color : Device Library" });
+  await expect(oneLibrary).toBeEnabled();
+  await expect(oneLibrary).toHaveValue("0");
+  await expect(deviceLibrary).toHaveValue("0");
+
+  await oneLibrary.selectOption({ label: "Purple" });
+  await deviceLibrary.selectOption({ label: "Blue" });
+  await page.getByRole("treeitem", { name: /DJ STICK/ }).click();
+  await page.getByRole("treeitem", { name: /TEST/ }).click();
+  const back = page.getByRole("region", { name: "Device TEST" });
+  await expect(back.getByRole("combobox", { name: "Background Color : OneLibrary" })).toHaveValue("8");
+  await expect(back.getByRole("combobox", { name: "Background Color : Device Library" })).toHaveValue("7");
+});
+
 test("Category lists what the stick has, greys the fixed items, and moves them all", async ({ page }) => {
   const panel = await openTest(page);
   await panel.getByRole("tab", { name: "Category" }).click();

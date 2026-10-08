@@ -1470,5 +1470,7 @@
   "Database management": "Gestion base de données",
   "Select a drive": "Sélection disque",
   "Add memory cue at first beat": "Add memory cue at first beat",
-  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
+  "Orange": "Orange",
+  "Export to this device first to set its background color.": "Exportez d'abord vers cet appareil pour définir sa couleur d'arrière-plan."
 }

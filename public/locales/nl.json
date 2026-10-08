@@ -1467,5 +1467,6 @@
   "Database management": "Databasebeheer",
   "Select a drive": "Station selecteren",
   "Add memory cue at first beat": "Add memory cue at first beat",
-  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
+  "Export to this device first to set its background color.": "Exporteer eerst naar dit apparaat om de achtergrondkleur in te stellen."
 }

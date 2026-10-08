@@ -1466,5 +1466,8 @@
   "Database management": "Datenbankverwaltung",
   "Select a drive": "Laufwerk wählen",
   "Add memory cue at first beat": "Add memory cue at first beat",
-  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
+  "Aqua": "Aqua",
+  "Orange": "Orange",
+  "Export to this device first to set its background color.": "Exportieren Sie zuerst auf dieses Gerät, um seine Hintergrundfarbe festzulegen."
 }
