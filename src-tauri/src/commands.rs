@@ -3257,7 +3257,7 @@ async fn import_collection<R: tauri::Runtime>(
     let state_for_reload = Arc::clone(&state);
     let writing = Arc::clone(&state);
     let progress_app = app.clone();
-    let report = blocking(name, move || {
+    let (report, added_to_playlists) = blocking(name, move || {
         let text = std::fs::read_to_string(&path).map_err(|e| {
             AppError::new(ErrorKind::NotFound, "That file could not be read.").with_detail(e.to_string())
         })?;
@@ -3279,17 +3279,20 @@ async fn import_collection<R: tauri::Runtime>(
         let report = writing
             .write(|writer| rbl_db::xml::import(writer, &document, &mut on_progress))
             .map_err(write_error)?;
-        Ok(XmlImportReportDto {
+        // A re-import reuses the playlists already there (#152), and may
+        // still have added tracks to them: that, too, needs a reload.
+        let added_to_playlists = report.playlist_tracks > 0;
+        Ok((XmlImportReportDto {
             imported: u32::try_from(report.imported).unwrap_or(u32::MAX),
             existing: u32::try_from(report.existing).unwrap_or(u32::MAX),
             skipped: report.skipped,
             playlists: u32::try_from(report.playlists).unwrap_or(u32::MAX),
             cues: u32::try_from(report.cues).unwrap_or(u32::MAX),
             tracks: report.tracks.into_iter().map(|(id, title)| crate::dto::ImportedTrackDto { id, title }).collect(),
-        })
+        }, added_to_playlists))
     })
     .await?;
-    if report.imported > 0 || report.playlists > 0 {
+    if report.imported > 0 || report.playlists > 0 || added_to_playlists {
         reload(app, state_for_reload).await?;
     }
     Ok(report)

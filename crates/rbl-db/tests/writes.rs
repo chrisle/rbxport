@@ -1793,6 +1793,138 @@ fn a_rekordbox_xml_document_is_imported_with_its_playlists_and_cues() {
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0 AND FolderPath LIKE '%One.wav'"), 1);
 }
 
+/// Issue #152: importing the same rekordbox.xml twice must not double the
+/// library. The second run reuses the tracks, the folders and the playlists
+/// the first one made, and adds no membership row twice.
+#[test]
+fn importing_the_same_rekordbox_xml_twice_doubles_nothing() {
+    use rbl_db::xml::{self, XmlLibrary};
+    let audio = tempfile::tempdir().unwrap();
+    let one = audio.path().join("One.wav");
+    let two = audio.path().join("Two.wav");
+    let three = audio.path().join("Three.wav");
+    for path in [&one, &two, &three] {
+        write_wav(path, 2);
+    }
+    let location = |p: &std::path::Path| format!("file://localhost{}", p.to_string_lossy().replace(' ', "%20"));
+    // Two sibling playlists share a name, as rekordbox allows; each keeps its
+    // own tracks on every import rather than the two folding together.
+    let doc = |extra: &str| {
+        format!(
+            r#"<?xml version="1.0"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="3">
+            <TRACK TrackID="1" Name="One" Location="{}"><POSITION_MARK Name="" Type="0" Start="0.5" Num="0"/></TRACK>
+            <TRACK TrackID="2" Name="Two" Location="{}"/>
+            <TRACK TrackID="3" Name="Three" Location="{}"/>
+            </COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="3">
+            <NODE Name="Sets" Type="0" Count="2">
+              <NODE Name="Warm up" Type="1" KeyType="0" Entries="2"><TRACK Key="1"/><TRACK Key="2"/>{extra}</NODE>
+              <NODE Name="Inner" Type="0" Count="1"><NODE Name="Deep" Type="1" KeyType="0" Entries="1"><TRACK Key="3"/></NODE></NODE>
+            </NODE>
+            <NODE Name="Same" Type="1" KeyType="0" Entries="1"><TRACK Key="1"/></NODE>
+            <NODE Name="Same" Type="1" KeyType="0" Entries="1"><TRACK Key="2"/></NODE>
+            </NODE></PLAYLISTS></DJ_PLAYLISTS>"#,
+            location(&one),
+            location(&two),
+            location(&three),
+        )
+    };
+    let parsed = XmlLibrary::parse(&doc(""));
+
+    let mut f = fixture();
+    let before_tracks = f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0");
+    let before_nodes = f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0");
+    let before_members = f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 0");
+
+    let first = xml::import(&mut f.writer, &parsed, &mut |_, _| {}).unwrap();
+    assert_eq!((first.imported, first.existing, first.playlists, first.cues), (3, 0, 6, 1));
+    let snapshot = |f: &Fixture| {
+        (
+            f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"),
+            f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0"),
+            f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 0"),
+            f.count("SELECT COUNT(*) FROM djmdCue WHERE rb_local_deleted = 0"),
+        )
+    };
+    let after_first = snapshot(&f);
+    assert_eq!(
+        (after_first.0 - before_tracks, after_first.1 - before_nodes, after_first.2 - before_members),
+        (3, 6, 5),
+    );
+
+    let second = xml::import(&mut f.writer, &parsed, &mut |_, _| {}).unwrap();
+    assert_eq!((second.imported, second.existing, second.playlists, second.cues), (0, 3, 0, 0));
+    assert_eq!(second.playlists_existing, 6);
+    assert_eq!(second.playlist_tracks, 0);
+    assert_eq!(snapshot(&f), after_first, "a second import of the same file adds no row");
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Sets'"), 1);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Warm up'"), 1);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Same'"), 2);
+
+    // The two same-named siblings each still hold only their own track.
+    let same: Vec<String> = f
+        .children(ROOT)
+        .into_iter()
+        .filter(|id| f.one::<String>("SELECT Name FROM djmdPlaylist WHERE ID = ?1", &[id]) == "Same")
+        .collect();
+    let members = |f: &Fixture, playlist: &str| -> Vec<String> {
+        let mut stmt = f
+            .conn()
+            .prepare(
+                "SELECT c.FolderPath FROM djmdSongPlaylist s JOIN djmdContent c ON c.ID = s.ContentID
+                 WHERE s.PlaylistID = ?1 AND s.rb_local_deleted = 0 ORDER BY s.TrackNo",
+            )
+            .unwrap();
+        stmt.query_map([playlist], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    };
+    assert_eq!(members(&f, &same[0]), vec![one.to_string_lossy().into_owned()]);
+    assert_eq!(members(&f, &same[1]), vec![two.to_string_lossy().into_owned()]);
+
+    // A newer export of the same collection with a track added to a playlist
+    // lands that one track in the playlist already there, and nothing else.
+    let grown = XmlLibrary::parse(&doc(r#"<TRACK Key="3"/>"#));
+    let third = xml::import(&mut f.writer, &grown, &mut |_, _| {}).unwrap();
+    assert_eq!((third.imported, third.playlists, third.playlists_existing, third.playlist_tracks), (0, 0, 6, 1));
+    let warm_up: String = f.one("SELECT ID FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Warm up'", &[]);
+    assert_eq!(
+        members(&f, &warm_up),
+        vec![
+            one.to_string_lossy().into_owned(),
+            two.to_string_lossy().into_owned(),
+            three.to_string_lossy().into_owned()
+        ],
+    );
+    assert_eq!(f.track_numbers(&warm_up), vec![1, 2, 3]);
+}
+
+/// A file named in the document by a path that is not in its plain form
+/// (`/./`, `a/../`) is the library's track at the plain path: reused for the
+/// playlist, not skipped as "already in the library".
+#[test]
+fn an_xml_track_at_an_unclean_path_is_reused_for_its_playlist() {
+    use rbl_db::xml::{self, XmlLibrary};
+    let audio = tempfile::tempdir().unwrap();
+    let one = audio.path().join("One.wav");
+    write_wav(&one, 2);
+    std::fs::create_dir(audio.path().join("sub")).unwrap();
+    let unclean = format!("{}/sub/../One.wav", audio.path().to_string_lossy());
+    let doc = format!(
+        r#"<?xml version="1.0"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="1">
+        <TRACK TrackID="1" Name="One" Location="file://localhost{unclean}"/>
+        </COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="1">
+        <NODE Name="List" Type="1" KeyType="0" Entries="1"><TRACK Key="1"/></NODE>
+        </NODE></PLAYLISTS></DJ_PLAYLISTS>"#,
+    );
+    let parsed = XmlLibrary::parse(&doc);
+
+    let mut f = fixture();
+    let id = f.writer.import_file(&one).unwrap();
+    let report = xml::import(&mut f.writer, &parsed, &mut |_, _| {}).unwrap();
+    assert_eq!((report.imported, report.existing, report.skipped.len()), (0, 1, 0), "{:?}", report.skipped);
+    let list: String = f.one("SELECT ID FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'List'", &[]);
+    let member: String = f.one("SELECT ContentID FROM djmdSongPlaylist WHERE PlaylistID = ?1 AND rb_local_deleted = 0", &[&list]);
+    assert_eq!(member, id);
+}
+
 #[test]
 fn a_bpm_typed_over_retimes_the_grid_and_sets_the_column() {
     let mut f = fixture();
