@@ -24,6 +24,7 @@ import {
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import { trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
+import { hasLooseId } from "@/lib/explorer";
 import { previewFromClick, WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 import { FilterIcon, SortDownIcon, SortUpIcon } from "@/components/icons";
@@ -1505,7 +1506,7 @@ export const TrackTable = memo(function TrackTable({
             inPlaylist: spec.source.kind === "playlist",
             inHistory: spec.source.kind === "history",
             hasFile: true,
-            loose: spec.source.kind === "folder",
+            loose: hasLooseId(selection.ids),
             readOnly,
           }}
           onChoose={(action) => {

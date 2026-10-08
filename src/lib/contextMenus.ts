@@ -105,7 +105,10 @@ export type MenuRow<A> = MenuEntry<A> | typeof SEPARATOR;
  * not coming. `Analyze Track` writes the result to the library — the grid,
  * the waveforms, the BPM and the key — so it is a write, greyed while
  * rekordbox holds the file. `Import To Collection` is live over a file the
- * Explorer lists and greyed over a track, which is already in.
+ * Explorer lists and greyed over a track, which is already in. What is live
+ * follows the rows' state, not the view: an imported file's menu in the
+ * Explorer is a track's [ASSUME: rekordbox's Explorer menu after an import
+ * has not been captured].
  */
 export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   { label: "Load", action: null, submenu: true },

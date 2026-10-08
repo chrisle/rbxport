@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  EXPLORER_ROOT_ID, explorerId, explorerNodes, explorerPath, isLooseId, joinPath, moreNote,
+  EXPLORER_ROOT_ID, explorerId, explorerNodes, explorerPath, hasLooseId, isLooseId, joinPath, moreNote,
 } from "./explorer";
 
 const ROOTS = [
@@ -22,6 +22,10 @@ describe("explorer ids", () => {
   it("tells a loose file's row from a track's", () => {
     expect(isLooseId("file:/Users/x/Music/a.mp3")).toBe(true);
     expect(isLooseId("100001")).toBe(false);
+    // The menu follows the rows: an imported file is a track in the Explorer too.
+    expect(hasLooseId(["100001", "100002"])).toBe(false);
+    expect(hasLooseId(["100001", "file:/m/a.flac"])).toBe(true);
+    expect(hasLooseId([])).toBe(false);
   });
 });
 

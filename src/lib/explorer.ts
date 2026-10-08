@@ -24,6 +24,18 @@ export function isLooseId(id: string): boolean {
   return id.startsWith("file:");
 }
 
+/**
+ * Whether a menu over these rows should treat them as files the library
+ * does not hold. It follows the rows, not the view: a file the Explorer
+ * lists stops being loose once imported, and its menu is a track's again
+ * without leaving the Explorer. Any loose row in a mixed selection makes it
+ * loose, so no write is offered that the loose file would turn away.
+ */
+export function hasLooseId(ids: Iterable<string>): boolean {
+  for (const id of ids) if (isLooseId(id)) return true;
+  return false;
+}
+
 const PREFIX = "dir:";
 const ID = /^dir:(\d+):([^]*)$/;
 
