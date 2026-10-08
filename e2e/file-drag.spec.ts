@@ -117,3 +117,62 @@ test("a native file drag below the last row is accepted and appends the track", 
   expect(accepted).toEqual({ over: true, drop: true });
   await expect.poll(titles).toEqual([...before.slice(1), before[0]]);
 });
+
+/**
+ * A folder from Finder dropped onto the Playlists root or a playlist folder
+ * becomes a playlist named after it, as in rekordbox 7
+ * (`TreeViewer::treeMessageImportExternalFoldersToList`). The browser has no
+ * file system, so the drop carries paths the way other desktop hosts do, and
+ * the mock makes the playlist empty.
+ */
+const folderDrop = (page: import("@playwright/test").Page, paths: string[]) =>
+  page.evaluateHandle((paths) => {
+    const transfer = new DataTransfer();
+    for (const path of paths) {
+      const name = path.split("/").pop() ?? path;
+      transfer.items.add(new File([], name));
+    }
+    // `dataTransfer.files` hands back the File objects added; give each the
+    // path a desktop host would carry.
+    Array.from(transfer.files).forEach((file, i) => Object.defineProperty(file, "path", { value: paths[i] }));
+    return transfer;
+  }, paths);
+
+test("a folder dropped on the Playlists root becomes a playlist named after it", async ({ page }) => {
+  await page.goto("/?writable=1");
+  const root = page.getByRole("treeitem").filter({ hasText: /^Playlists/ }).first();
+  await expect(root).toHaveAttribute("data-file-drop-folder", "root");
+  const drop = await folderDrop(page, ["/Music/Friday Set"]);
+  await root.dispatchEvent("dragover", { dataTransfer: drop });
+  await root.dispatchEvent("drop", { dataTransfer: drop });
+  await expect(page.getByRole("contentinfo")).toContainText("Made playlists: Friday Set.");
+  const made = page.getByRole("treeitem").filter({ hasText: "Friday Set" });
+  await expect(made).toHaveCount(1);
+  await expect(made).toHaveAttribute("data-kind", "playlist");
+
+  // Again: rekordbox's question, answered yes by the mock, replaces it.
+  const again = await folderDrop(page, ["/Music/Friday Set"]);
+  await root.dispatchEvent("drop", { dataTransfer: again });
+  await expect(page.getByRole("contentinfo")).toContainText("Made playlists: Friday Set.");
+  await expect(page.getByRole("treeitem").filter({ hasText: "Friday Set" })).toHaveCount(1);
+});
+
+test("a folder dropped on a playlist folder lands inside it; loose files are ignored", async ({ page }) => {
+  await page.goto("/?writable=1");
+  const folder = page.locator('[role="treeitem"][data-kind="folder"]').first();
+  const id = await folder.getAttribute("data-file-drop-folder");
+  expect(id).toBeTruthy();
+  const drop = await folderDrop(page, ["/Music/Warm Up"]);
+  await folder.dispatchEvent("drop", { dataTransfer: drop });
+  await expect(page.getByRole("contentinfo")).toContainText("Made playlists: Warm Up.");
+  const made = page.getByRole("treeitem").filter({ hasText: "Warm Up" });
+  const depth = async (row: import("@playwright/test").Locator) =>
+    row.evaluate((el) => Number.parseFloat((el as HTMLElement).style.paddingLeft));
+  expect(await depth(made)).toBeGreaterThan(await depth(folder));
+
+  const loose = await folderDrop(page, ["/Music/track.mp3"]);
+  await folder.dispatchEvent("drop", { dataTransfer: loose });
+  await expect(page.getByRole("contentinfo")).toContainText(
+    "Drop folders onto Playlists or a playlist folder to make playlists of them.",
+  );
+});

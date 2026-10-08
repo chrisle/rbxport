@@ -409,6 +409,15 @@ export interface Backend {
   /** Adds these files to the library: the Explorer's Import To Collection. */
   importPaths(paths: string[]): Promise<ImportReport>;
   /**
+   * A folder from Finder or Explorer dropped onto the Playlists root or a
+   * playlist folder: one playlist under `parent` named after the folder,
+   * holding every audio file under it with subfolders flattened, as
+   * rekordbox does. A same-named sibling stops it with nothing written and
+   * comes back as `conflict`; call again with `replace` set to that id once
+   * the user agrees to replace it.
+   */
+  importFolderPlaylist(path: string, parent: string, replace?: string): Promise<FolderPlaylistReport>;
+  /**
    * Export Loop As WAV: asks where, then writes the loop's stretch of the
    * track as a WAV. Resolves to the frames written, or null when cancelled.
    */
@@ -1460,6 +1469,24 @@ export interface ImportReport {
   tracks: { id: string; title: string }[];
   /** Files that were already in the library, with their existing track ids. */
   existing: { id: string; title: string }[];
+}
+
+/** What dropping one folder onto the playlist tree did. */
+export interface FolderPlaylistReport {
+  /** The folder's name, which is the playlist's. */
+  name: string;
+  /** The playlist made, or null when nothing was written. */
+  playlist: string | null;
+  /** A same-named sibling awaiting the user's answer; nothing was written. */
+  conflict: string | null;
+  /** False for a loose file: rekordbox ignores those on a folder drop. */
+  folder: boolean;
+  imported: number;
+  skipped: string[];
+  /** The tracks that landed, so they can be queued for analysis. */
+  tracks: { id: string; title: string }[];
+  /** How many of the folder's files the library already held. */
+  existing: number;
 }
 
 /** What importing a rekordbox XML collection did. */

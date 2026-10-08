@@ -1531,5 +1531,16 @@
   "Would you like RBXport to find other missing file using the location of this track ?": "この曲の場所を使って他のファイルを検索しますか ?",
   "RBXport found {count} files.": "ファイルを {count} 個見つけました。",
   "Load error. The file could not be found.": "ロードエラー。 ファイルが見つかりません。",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "古い CDJ モデルの場合は、FLAC や M4A などの形式を WAV、AIFF または MP3 として USB スティックに保存します。一部のプレーヤーで速く再生されてしまう、サンプルレートの低い MP3 (16、22.05、24 kHz) も変換します。オリジナルはそのまま残ります。"
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "古い CDJ モデルの場合は、FLAC や M4A などの形式を WAV、AIFF または MP3 として USB スティックに保存します。一部のプレーヤーで速く再生されてしまう、サンプルレートの低い MP3 (16、22.05、24 kHz) も変換します。オリジナルはそのまま残ります。",
+  "1 file skipped.": "1 file skipped.",
+  "Do you want to replace them with the one you're importing?": "インポートしようとしているリストまたはフォルダで置き換えますか？",
+  "Drop folders onto Playlists or a playlist folder to make playlists of them.": "Drop folders onto Playlists or a playlist folder to make playlists of them.",
+  "Importing 1 folder…": "Importing 1 folder…",
+  "Importing {count} folders…": "Importing {count} folders…",
+  "Made playlists: {names}.": "Made playlists: {names}.",
+  "No playlist was made.": "No playlist was made.",
+  "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
+  "One or several lists with the same name already exist.": "同じ名前のリストまたはフォルダが既に存在します。",
+  "[data-file-drop-folder]": "[data-file-drop-folder]",
+  "{count} files skipped.": "{count} files skipped."
 }

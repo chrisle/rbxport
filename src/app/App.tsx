@@ -1067,8 +1067,88 @@ function AppBody() {
     [importDroppedPathsTo, refuse],
   );
 
+  /**
+   * Folders dragged in from outside the app and dropped on the Playlists root
+   * or a playlist folder: each becomes a playlist there, named after it and
+   * holding every audio file under it, subfolders flattened in. This is what
+   * rekordbox 7 does (`TreeViewer::treeMessageImportExternalFoldersToList`):
+   * a loose file in the drop is ignored, a folder with no audio makes
+   * nothing, and a playlist that already has the name is replaced only if
+   * the user says so, with rekordbox's own question.
+   */
+  const importDroppedFolderPaths = useCallback(
+    (parent: string, paths: string[]) => {
+      if (advancedPrefs.protectLibrary) {
+        refuse(refusal(true));
+        return;
+      }
+      report(paths.length === 1
+        ? t("Importing 1 folder…")
+        : t("Importing {count} folders…", { count: paths.length }));
+      void (async () => {
+        try {
+          const backend = await getBackend();
+          const made: string[] = [];
+          const tracks: { id: string; title: string }[] = [];
+          let folders = 0;
+          let skipped = 0;
+          let kept = 0;
+          for (const path of paths) {
+            let result = await backend.importFolderPlaylist(path, parent);
+            if (result.folder) folders += 1;
+            if (result.conflict) {
+              const replace = await backend.confirm(
+                `${t("One or several lists with the same name already exist.")}\n${t("Do you want to replace them with the one you're importing?")}`,
+              );
+              if (!replace) {
+                kept += 1;
+                continue;
+              }
+              result = await backend.importFolderPlaylist(path, parent, result.conflict);
+            }
+            if (result.playlist) made.push(result.name);
+            tracks.push(...result.tracks);
+            skipped += result.skipped.length;
+          }
+          setTree(await backend.playlistTree());
+          if (folders === 0) {
+            refuse(t("Drop folders onto Playlists or a playlist folder to make playlists of them."));
+            return;
+          }
+          const tail = skipped === 0
+            ? ""
+            : ` ${skipped === 1 ? t("1 file skipped.") : t("{count} files skipped.", { count: skipped })}`;
+          report(
+            made.length === 0
+              ? `${kept > 0 ? t("No playlist was made.") : t("No playlist was made: the folders hold no audio files.")}${tail}`
+              : `${t("Made playlists: {names}.", { names: made.join(", ") })}${tail}`,
+          );
+          if (analysisPrefs.auto && tracks.length > 0) analysis.add(tracks);
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "Those folders could not be imported.");
+        }
+      })();
+    },
+    [report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis, t],
+  );
+
+  const importDroppedFolders = useCallback(
+    (parent: string, files: File[]) => {
+      // Resolved at once, for the same reason as a drop onto a playlist.
+      void droppedFilePaths(files)
+        .then((paths) => importDroppedFolderPaths(parent, paths))
+        .catch((e: unknown) => refuse(e instanceof Error ? e.message : "Those folders could not be imported."));
+    },
+    [importDroppedFolderPaths, refuse],
+  );
+
   useEffect(() => subscribeNativeFileDrops((drop) => {
     const target = document.elementFromPoint(drop.x, drop.y);
+    const folder = target?.closest<HTMLElement>("[data-file-drop-folder]")?.dataset.fileDropFolder;
+    if (folder) {
+      importDroppedFolderPaths(folder, drop.paths);
+      return;
+    }
     const row = target?.closest<HTMLElement>("[data-file-drop-playlist]");
     const playlistId = row?.dataset.fileDropPlaylist
       ?? (target?.closest('[data-testid="track-scroll"]') && selectedNode?.kind === "playlist"
@@ -1076,7 +1156,7 @@ function AppBody() {
         : undefined);
     if (playlistId) importDroppedPathsTo(playlistId, drop.paths);
     else refuse("Drop files or folders onto a playlist to import them.");
-  }), [selectedNode, importDroppedPathsTo, refuse]);
+  }), [selectedNode, importDroppedPathsTo, importDroppedFolderPaths, refuse]);
 
   /**
    * The same drop, for files dropped straight into the open playlist's own
@@ -2525,6 +2605,7 @@ function AppBody() {
   const subTree = useMemo(() => ({
     dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
     onDropFiles: readOnly ? undefined : importDroppedFilesTo,
+    onDropFolders: readOnly ? undefined : importDroppedFolders,
     onExport: exportPlaylist, exportDevices: menuDevices, onExportFile: exportPlaylistFile, onCreatePlaylist: createPlaylistIn,
     onCreateFolder: createFolderIn, onDeleteNode: deleteNode, onRenameNode: renameNode,
     onMoveNode: readOnly ? undefined : moveNode, onExpand: expandNode,
@@ -2534,7 +2615,7 @@ function AppBody() {
     onEjectDevice: (node: TreeNode) => { void ejectDeviceFromTree(node); },
     ejectingDeviceId, deviceBusy: syncing || exportRunning || ejectingDeviceId !== null, readOnly,
   }), [
-    draggedTracks, addDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, menuDevices, exportPlaylistFile,
+    draggedTracks, addDraggedTo, readOnly, importDroppedFilesTo, importDroppedFolders, exportPlaylist, menuDevices, exportPlaylistFile,
     createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, expandNode,
     viewPrefs.playlistCounts, openSyncManager, createSmartPlaylistIn, editSmartPlaylist,
     addPlaylistArtwork, addToShortcut, sortItems, ejectDeviceFromTree, ejectingDeviceId, syncing,
@@ -2710,6 +2791,7 @@ function AppBody() {
           dragging={draggedTracks !== null}
           onDropTracks={addDraggedTo}
           onDropFiles={readOnly ? undefined : importDroppedFilesTo}
+          onDropFolders={readOnly ? undefined : importDroppedFolders}
           onExport={exportPlaylist}
           exportDevices={menuDevices}
           onExportFile={exportPlaylistFile}

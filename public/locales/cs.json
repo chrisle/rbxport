@@ -1525,5 +1525,16 @@
   "Would you like RBXport to find other missing file using the location of this track ?": "Chcete, aby aplikace RBXport pomocí umístění této stopy našla jiný chybějící soubor?",
   "RBXport found {count} files.": "Aplikace RBXport našla {count} souborů.",
   "Load error. The file could not be found.": "Chyba při načítání. Soubor chybí. ",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "U starších modelů CDJ uložte formáty jako FLAC a M4A jako WAV, AIFF nebo MP3 na USB flash disk. Převede i MP3 s nízkým vzorkovacím kmitočtem (16, 22,05 nebo 24 kHz), které některé přehrávače hrají příliš rychle. Originály zůstávají nedotčeny."
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "U starších modelů CDJ uložte formáty jako FLAC a M4A jako WAV, AIFF nebo MP3 na USB flash disk. Převede i MP3 s nízkým vzorkovacím kmitočtem (16, 22,05 nebo 24 kHz), které některé přehrávače hrají příliš rychle. Originály zůstávají nedotčeny.",
+  "1 file skipped.": "1 file skipped.",
+  "Do you want to replace them with the one you're importing?": "Chcete je nahradit importovanými?",
+  "Drop folders onto Playlists or a playlist folder to make playlists of them.": "Drop folders onto Playlists or a playlist folder to make playlists of them.",
+  "Importing 1 folder…": "Importing 1 folder…",
+  "Importing {count} folders…": "Importing {count} folders…",
+  "Made playlists: {names}.": "Made playlists: {names}.",
+  "No playlist was made.": "No playlist was made.",
+  "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
+  "One or several lists with the same name already exist.": "Již existuje jeden nebo více seznamů se stejným názvem.",
+  "[data-file-drop-folder]": "[data-file-drop-folder]",
+  "{count} files skipped.": "{count} files skipped."
 }

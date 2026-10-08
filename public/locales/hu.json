@@ -1524,5 +1524,16 @@
   "Would you like RBXport to find other missing file using the location of this track ?": "Szeretné, hogy a RBXport megkeresse a többi hiányzó fájlt e szám helye alapján?",
   "RBXport found {count} files.": "A RBXport {count} fájlt talált.",
   "Load error. The file could not be found.": "Betöltési hiba. A fájl hiányzik. ",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "A régebbi CDJ modellekhez mentse az olyan formátumokat, mint a FLAC és M4A WAV, AIFF vagy MP3 formátumban az USB-meghajtóra. Átalakítja az alacsony mintavételezési frekvenciájú MP3-fájlokat (16, 22,05 vagy 24 kHz) is, amelyeket egyes lejátszók túl gyorsan játszanak le. Az eredetiek érintetlenek maradnak."
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "A régebbi CDJ modellekhez mentse az olyan formátumokat, mint a FLAC és M4A WAV, AIFF vagy MP3 formátumban az USB-meghajtóra. Átalakítja az alacsony mintavételezési frekvenciájú MP3-fájlokat (16, 22,05 vagy 24 kHz) is, amelyeket egyes lejátszók túl gyorsan játszanak le. Az eredetiek érintetlenek maradnak.",
+  "1 file skipped.": "1 file skipped.",
+  "Do you want to replace them with the one you're importing?": "Ki akarja cserélni ezeket az importált elemekkel?",
+  "Drop folders onto Playlists or a playlist folder to make playlists of them.": "Drop folders onto Playlists or a playlist folder to make playlists of them.",
+  "Importing 1 folder…": "Importing 1 folder…",
+  "Importing {count} folders…": "Importing {count} folders…",
+  "Made playlists: {names}.": "Made playlists: {names}.",
+  "No playlist was made.": "No playlist was made.",
+  "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
+  "One or several lists with the same name already exist.": "Ugyanazzal a névvel már létezik egy vagy több lejátszási lista.",
+  "[data-file-drop-folder]": "[data-file-drop-folder]",
+  "{count} files skipped.": "{count} files skipped."
 }

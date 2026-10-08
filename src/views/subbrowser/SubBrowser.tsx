@@ -42,7 +42,7 @@ import styles from "./SubBrowser.module.css";
 export type SubTreeProps = Pick<
   TreeViewProps,
   "dragging" | "onDropTracks" | "onExport" | "exportDevices" | "onExportFile" | "onCreatePlaylist" | "onCreateFolder"
-  | "onDeleteNode" | "onRenameNode" | "onMoveNode" | "onDropFiles" | "onExpand" | "showCounts"
+  | "onDeleteNode" | "onRenameNode" | "onMoveNode" | "onDropFiles" | "onDropFolders" | "onExpand" | "showCounts"
   | "onOpenSync" | "onCreateSmartPlaylist" | "onEditSmartPlaylist" | "onAddArtwork"
   | "onAddToShortcut" | "onSortItems" | "onEjectDevice" | "ejectingDeviceId" | "deviceBusy"
   | "readOnly"

@@ -15,7 +15,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::link::LinkStatusDto;
 use crate::dto::{
     cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
-    EditHistoryDto, ImportReportDto, LibrarySummaryDto, LimiterDto, PhraseDto, RowDto, UnanalysedTrackDto, UnanalysedTracksDto,
+    EditHistoryDto, FolderPlaylistDto, ImportReportDto, LibrarySummaryDto, LimiterDto, PhraseDto, RowDto, UnanalysedTrackDto, UnanalysedTracksDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
     ExportProgressDto, FilterValuesDto, ItunesLibraryDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
@@ -2725,16 +2725,16 @@ const IMPORT_MAX_ENTRIES: usize = 500_000;
 ///
 /// A file the user picked is kept as chosen — even a non-audio one, so
 /// `import_file` still reports it as skipped rather than dropping it silently.
-/// A directory is walked breadth-first through its subdirectories, keeping
+/// A directory is walked the way rekordbox walks one (depth first, name order,
+/// hidden entries left alone; see [`rbl_db::import::audio_files_in`]), keeping
 /// only the audio files rekordbox plays; a cover-art `.jpg` sitting beside the
-/// tracks is simply not collected, not reported as skipped. Hidden
-/// directories (`.Trashes`, `.Spotlight-V100` and the like) are left alone.
+/// tracks is simply not collected, not reported as skipped.
 ///
 /// Pure filesystem work, so it runs under `blocking` with the writes below and
 /// never touches the async thread.
 fn expand_import_paths(paths: &[String]) -> Vec<std::path::PathBuf> {
     let mut files = Vec::new();
-    let mut seen = 0_usize;
+    let mut budget = rbl_db::import::WalkBudget::new(IMPORT_MAX_DEPTH, IMPORT_MAX_ENTRIES);
     for path in paths {
         let path = std::path::Path::new(path);
         // Anything that is not a directory is imported exactly as chosen.
@@ -2742,33 +2742,10 @@ fn expand_import_paths(paths: &[String]) -> Vec<std::path::PathBuf> {
             files.push(path.to_path_buf());
             continue;
         }
-        let mut level = vec![path.to_path_buf()];
-        for _ in 0..IMPORT_MAX_DEPTH {
-            let mut next = Vec::new();
-            for dir in &level {
-                let Ok(entries) = std::fs::read_dir(dir) else { continue };
-                for entry in entries.flatten() {
-                    seen += 1;
-                    if seen > IMPORT_MAX_ENTRIES {
-                        return files;
-                    }
-                    let child = entry.path();
-                    let Ok(kind) = entry.file_type() else { continue };
-                    if kind.is_dir() {
-                        if entry.file_name().to_string_lossy().starts_with('.') {
-                            continue;
-                        }
-                        next.push(child);
-                    } else if kind.is_file() && rbl_db::import::is_audio(&child) {
-                        files.push(child);
-                    }
-                }
-            }
-            if next.is_empty() {
-                break;
-            }
-            level = next;
+        if budget.exhausted() {
+            break;
         }
+        files.extend(rbl_db::import::audio_files_in(path, &mut budget));
     }
     files
 }
@@ -2836,6 +2813,78 @@ pub async fn import_files<R: tauri::Runtime>(
     // changed the library.
     if report.imported > 0 {
         reload(app, state_for_edit).await?;
+    }
+    Ok(report)
+}
+
+/// A folder from Finder or Explorer dropped onto the Playlists root or a
+/// playlist folder: one playlist named after it, holding every audio file
+/// under it, subfolders flattened, the way rekordbox does it (see
+/// [`rbl_db::write::Writer::import_folder_as_playlist`]).
+///
+/// One folder per call, because a same-named sibling stops that folder until
+/// the user says whether to replace it: the clash comes back in `conflict`
+/// with nothing written, and the call is repeated with `replace` set to it.
+#[tauri::command]
+pub async fn import_folder_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    parent: String,
+    replace: Option<String>,
+) -> AppResult<FolderPlaylistDto> {
+    let writing = Arc::clone(&state);
+    let report = blocking("import_folder_playlist", move || {
+        let dir = std::path::PathBuf::from(&path);
+        let name = dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut report = FolderPlaylistDto {
+            name: name.clone(),
+            playlist: None,
+            conflict: None,
+            folder: dir.is_dir(),
+            imported: 0,
+            skipped: Vec::new(),
+            tracks: Vec::new(),
+            existing: 0,
+        };
+        if !report.folder || name.is_empty() {
+            return Ok(report);
+        }
+        let mut budget = rbl_db::import::WalkBudget::new(IMPORT_MAX_DEPTH, IMPORT_MAX_ENTRIES);
+        let files = rbl_db::import::audio_files_in(&dir, &mut budget);
+        let outcome = writing
+            .write(|writer| writer.import_folder_as_playlist(&name, &parent, &files, replace.as_deref()))
+            .map_err(write_error)?;
+        report.playlist = outcome.playlist;
+        report.conflict = outcome.conflict;
+        report.imported = u32::try_from(outcome.imported.len()).unwrap_or(u32::MAX);
+        report.existing = u32::try_from(outcome.existing.len()).unwrap_or(u32::MAX);
+        report.skipped = outcome.skipped;
+        report.tracks = outcome
+            .imported
+            .into_iter()
+            .map(|(id, file)| crate::dto::ImportedTrackDto {
+                id,
+                title: file
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            })
+            .collect();
+        if report.playlist.is_some() {
+            // An edit outside the undo history starts a new branch.
+            writing.edit_history.lock().clear_redo();
+        }
+        Ok(report)
+    })
+    .await?;
+
+    // Both the tree and, usually, the collection changed.
+    if report.playlist.is_some() {
+        reload(app, Arc::clone(&state)).await?;
     }
     Ok(report)
 }

@@ -9,7 +9,7 @@ import { SearchField } from "@/components/SearchField";
 import { TREE_SEARCH_OPTIONS } from "@/lib/search";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { TreeNode } from "@/ipc/types";
+import { TREE_ROOT, type TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
 import { DeviceIcon, EjectIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon, SmartListIcon } from "@/components/icons";
 import { ContextMenu } from "@/components/ContextMenu";
@@ -70,8 +70,8 @@ function RenameField({ name, onCommit, onCancel }: {
 }
 
 const Row = memo(function Row({
-  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onDropFiles, onMenu, count,
-  renaming, onRename, onRenameEnd, onRenameStart, doubleClickToEdit,
+  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onDropFiles, onDropFolders, onMenu,
+  count, renaming, onRename, onRenameEnd, onRenameStart, doubleClickToEdit,
   movable, moveEdge, onMoveStart, onMoveOver, onMoveDrop, onMoveEnd,
   onEjectDevice, ejecting, deviceBusy,
 }: {
@@ -101,6 +101,11 @@ const Row = memo(function Row({
   onDropTracks: ((playlistId: string) => void) | undefined;
   /** Files dragged in from outside the app, dropped on this row. */
   onDropFiles: ((playlistId: string, files: File[]) => void) | undefined;
+  /**
+   * Folders dragged in from outside the app, dropped on the Playlists root or
+   * a playlist folder: each becomes a playlist under it, as in rekordbox.
+   */
+  onDropFolders: ((parentId: string, files: File[]) => void) | undefined;
   onMenu: ((node: TreeNode, at: { x: number; y: number }) => void) | undefined;
   /** Whether anything sits under this node, so it can be opened at all. */
   branch: boolean;
@@ -138,7 +143,16 @@ const Row = memo(function Row({
   // (nothing inside the app started that drag), so it is its own path: any
   // playlist row that was given `onDropFiles` takes one, gated on the
   // browser's own file-drag signal instead.
-  const fileDroppable = node.kind === "playlist" && Boolean(onDropFiles);
+  // The Playlists root and a playlist folder take folders rather than files:
+  // rekordbox makes a playlist of each one dropped there.
+  const folderParent = !onDropFolders
+    ? undefined
+    : node.kind === "folder"
+      ? node.id
+      : node.kind === "collection" && node.id === "playlists"
+        ? TREE_ROOT
+        : undefined;
+  const fileDroppable = (node.kind === "playlist" && Boolean(onDropFiles)) || folderParent !== undefined;
   useEffect(() => {
     if (!droppable && !fileDroppable) setOver(false);
   }, [droppable, fileDroppable]);
@@ -147,7 +161,8 @@ const Row = memo(function Row({
       className={styles.node}
       data-selected={selected || undefined}
       data-kind={node.kind}
-      data-file-drop-playlist={fileDroppable ? node.id : undefined}
+      data-file-drop-playlist={fileDroppable && folderParent === undefined ? node.id : undefined}
+      data-file-drop-folder={folderParent}
       data-ejecting={ejecting || undefined}
       style={{ paddingLeft: `${14 + node.depth * 20}px` }}
       // A note is information, not a place: nothing to select.
@@ -215,7 +230,9 @@ const Row = memo(function Row({
         }
         if (!droppable && fileDroppable && e.dataTransfer.files.length > 0) {
           e.preventDefault();
-          onDropFiles?.(node.id, Array.from(e.dataTransfer.files));
+          const files = Array.from(e.dataTransfer.files);
+          if (folderParent !== undefined) onDropFolders?.(folderParent, files);
+          else onDropFiles?.(node.id, files);
           return;
         }
         if (!droppable) return;
@@ -350,6 +367,11 @@ export interface TreeViewProps {
   /** Files dragged in from outside the app (Finder, Explorer), dropped onto a playlist. */
   onDropFiles?: ((playlistId: string, files: File[]) => void) | undefined;
   /**
+   * Folders dragged in from outside the app, dropped onto the Playlists root
+   * (`TREE_ROOT`) or a playlist folder: a playlist per folder, as in rekordbox.
+   */
+  onDropFolders?: ((parentId: string, files: File[]) => void) | undefined;
+  /**
    * A lazy node was opened: read what is under it. The Explorer's folders,
    * whose children are not known until somebody looks.
    */
@@ -387,7 +409,7 @@ export interface TreeViewProps {
 }
 
 export const TreeView = memo(function TreeView({
-  nodes, selectedId, onSelect, dragging, onDropTracks, onDropFiles, onExport, exportDevices, onExportFile,
+  nodes, selectedId, onSelect, dragging, onDropTracks, onDropFiles, onDropFolders, onExport, exportDevices, onExportFile,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
   initialExpansion, onExpansionChange,
@@ -598,6 +620,7 @@ export const TreeView = memo(function TreeView({
             droppable={Boolean(dragging) && node.kind === "playlist"}
             onDropTracks={onDropTracks}
             onDropFiles={onDropFiles}
+            onDropFolders={onDropFolders}
             onMenu={(node, at) => setMenu({ ...at, node })}
             count={showCounts && (node.kind === "playlist" || node.kind === "devicePlaylist") ? node.childCount : undefined}
             renaming={!readOnly && node.id === renamingId}

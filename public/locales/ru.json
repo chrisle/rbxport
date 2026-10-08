@@ -1527,5 +1527,16 @@
   "Would you like RBXport to find other missing file using the location of this track ?": "Нужно-ли запустить поиск на RBXport других недостающих файлов, \nиспользуя месторасположение данной дорожки?",
   "RBXport found {count} files.": "RBXport обнаружил {count} файлов.",
   "Load error. The file could not be found.": "Ошибка загрузки. Не найден исходный.",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "Сохраняйте такие форматы, как FLAC и M4A, как WAV, AIFF или MP3 на USB-накопителе для старых моделей CDJ. Также конвертирует MP3 с низкой частотой дискретизации (16, 22,05 или 24 кГц), которые некоторые плееры воспроизводят слишком быстро. Оригиналы остаются нетронутыми."
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "Сохраняйте такие форматы, как FLAC и M4A, как WAV, AIFF или MP3 на USB-накопителе для старых моделей CDJ. Также конвертирует MP3 с низкой частотой дискретизации (16, 22,05 или 24 кГц), которые некоторые плееры воспроизводят слишком быстро. Оригиналы остаются нетронутыми.",
+  "1 file skipped.": "1 file skipped.",
+  "Do you want to replace them with the one you're importing?": "Хотите заменить их импортируемым?",
+  "Drop folders onto Playlists or a playlist folder to make playlists of them.": "Drop folders onto Playlists or a playlist folder to make playlists of them.",
+  "Importing 1 folder…": "Importing 1 folder…",
+  "Importing {count} folders…": "Importing {count} folders…",
+  "Made playlists: {names}.": "Made playlists: {names}.",
+  "No playlist was made.": "No playlist was made.",
+  "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
+  "One or several lists with the same name already exist.": "Уже существует один или несколько списков с таким названием.",
+  "[data-file-drop-folder]": "[data-file-drop-folder]",
+  "{count} files skipped.": "{count} files skipped."
 }

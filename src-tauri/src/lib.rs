@@ -572,6 +572,7 @@ pub fn run() {
             commands::unanalysed_tracks,
             commands::find_duplicates,
             commands::import_files,
+            commands::import_folder_playlist,
             commands::relocate_track,
             relocate::auto_relocate,
             relocate::relocation_targets,

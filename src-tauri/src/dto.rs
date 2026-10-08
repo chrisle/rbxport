@@ -320,6 +320,28 @@ pub struct ImportReportDto {
     pub existing: Vec<ImportedTrackDto>,
 }
 
+/// What dropping one folder onto the playlist tree did.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderPlaylistDto {
+    /// The folder's name, which is the playlist's.
+    pub name: String,
+    /// The playlist made, or `None` when nothing was written.
+    pub playlist: Option<String>,
+    /// A same-named sibling the user must agree to replace; nothing was
+    /// written. Call again with `replace` set to this id to replace it.
+    pub conflict: Option<String>,
+    /// False when the path was not a folder: rekordbox ignores loose files
+    /// dropped onto the Playlists root or a folder.
+    pub folder: bool,
+    pub imported: u32,
+    pub skipped: Vec<String>,
+    /// The tracks that landed, so they can be queued for analysis.
+    pub tracks: Vec<ImportedTrackDto>,
+    /// How many of the folder's files the library already held.
+    pub existing: u32,
+}
+
 /// One track an import added.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

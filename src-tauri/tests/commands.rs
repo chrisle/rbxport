@@ -1821,3 +1821,61 @@ fn export_selection_materializes_an_intelligent_playlist_from_its_rule() {
     assert_eq!(missing[0].title, "Smart Export Match");
     assert_eq!(missing[0].path, audio.display().to_string());
 }
+
+/// A folder from Finder dropped onto the Playlists root: one playlist named
+/// after it with the whole subtree flattened in, as rekordbox 7.2.19 does
+/// (`TreeViewer::treeMessageImportExternalFoldersToList`) [OBS, static]; a
+/// second drop of a same-named folder asks first; a loose file is ignored.
+#[test]
+fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
+    let s = shell();
+    let folder = s._dir.path().join("Warm Up");
+    std::fs::create_dir_all(folder.join("Extras")).unwrap();
+    write_wav(&folder.join("b.wav"), 1);
+    write_wav(&folder.join("a.wav"), 1);
+    write_wav(&folder.join("Extras/c.wav"), 1);
+    let path = folder.display().to_string();
+
+    let report =
+        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None)).unwrap();
+    assert!(report.folder);
+    assert_eq!(report.name, "Warm Up");
+    assert_eq!(report.imported, 3);
+    assert_eq!(report.conflict, None);
+    let playlist = report.playlist.clone().unwrap();
+    let node = s.node("Warm Up");
+    let top = s.node("Playlist 0").depth;
+    assert_eq!((node.id.as_str(), node.kind, node.depth), (playlist.as_str(), "playlist", top));
+    let titles: Vec<String> = s.playlist_rows(&playlist).into_iter().map(|r| r.title).collect();
+    assert_eq!(titles, ["a", "b", "c"]);
+
+    // The same folder again: nothing written until the replacement is agreed.
+    let asked =
+        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None)).unwrap();
+    assert_eq!(asked.conflict.as_deref(), Some(playlist.as_str()));
+    assert_eq!(asked.playlist, None);
+    let replaced = run(commands::import_folder_playlist(
+        s.handle(),
+        s.state(),
+        path,
+        "root".into(),
+        Some(playlist.clone()),
+    ))
+    .unwrap();
+    assert_eq!(replaced.existing, 3, "the files are reused, not imported twice");
+    let new_id = replaced.playlist.unwrap();
+    assert_ne!(new_id, playlist);
+    assert_eq!(s.tree().iter().filter(|n| n.name == "Warm Up").count(), 1);
+    assert_eq!(s.playlist_rows(&new_id).len(), 3);
+
+    let loose = run(commands::import_folder_playlist(
+        s.handle(),
+        s.state(),
+        folder.join("a.wav").display().to_string(),
+        "root".into(),
+        None,
+    ))
+    .unwrap();
+    assert!(!loose.folder);
+    assert_eq!(loose.playlist, None);
+}

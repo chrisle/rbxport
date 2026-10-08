@@ -1527,5 +1527,16 @@
   "Would you like RBXport to find other missing file using the location of this track ?": "其他曲目也按照这个位置进行搜索吗？",
   "RBXport found {count} files.": "找到 {count} 个文件。",
   "Load error. The file could not be found.": "加载错误。文件不存在。",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "对于旧版 CDJ 型号，可将 FLAC 和 M4A 等格式另存为 WAV、AIFF 或 MP3 到 U 盘上。还会转换部分播放器播放过快的低采样率 MP3(16、22.05 或 24 kHz)。原件保持不变。"
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "对于旧版 CDJ 型号，可将 FLAC 和 M4A 等格式另存为 WAV、AIFF 或 MP3 到 U 盘上。还会转换部分播放器播放过快的低采样率 MP3(16、22.05 或 24 kHz)。原件保持不变。",
+  "1 file skipped.": "1 file skipped.",
+  "Do you want to replace them with the one you're importing?": "想用即将导入的播放列表或文件夹替换原播放列表或文件夹吗？",
+  "Drop folders onto Playlists or a playlist folder to make playlists of them.": "Drop folders onto Playlists or a playlist folder to make playlists of them.",
+  "Importing 1 folder…": "Importing 1 folder…",
+  "Importing {count} folders…": "Importing {count} folders…",
+  "Made playlists: {names}.": "Made playlists: {names}.",
+  "No playlist was made.": "No playlist was made.",
+  "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
+  "One or several lists with the same name already exist.": "已经存在同名的播放列表或文件夹",
+  "[data-file-drop-folder]": "[data-file-drop-folder]",
+  "{count} files skipped.": "{count} files skipped."
 }

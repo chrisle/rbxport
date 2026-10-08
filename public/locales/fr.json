@@ -1524,5 +1524,16 @@
   "Would you like RBXport to find other missing file using the location of this track ?": "Souhaitez-vous que RBXport recherche d'autres fichiers manquants \nen utilisant l'emplacement de ce morceau ?",
   "RBXport found {count} files.": "RBXport a trouvé {count} fichiers.",
   "Load error. The file could not be found.": "Erreur de chargement. Le fichier est introuvable.",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "Enregistrez des formats tels que FLAC et M4A au format WAV, AIFF ou MP3 sur votre clé USB pour les anciens modèles de CDJ. Convertit aussi les MP3 à faible fréquence d'échantillonnage (16, 22,05 ou 24 kHz) que certains lecteurs jouent trop vite. Les originaux restent intacts."
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "Enregistrez des formats tels que FLAC et M4A au format WAV, AIFF ou MP3 sur votre clé USB pour les anciens modèles de CDJ. Convertit aussi les MP3 à faible fréquence d'échantillonnage (16, 22,05 ou 24 kHz) que certains lecteurs jouent trop vite. Les originaux restent intacts.",
+  "1 file skipped.": "1 file skipped.",
+  "Do you want to replace them with the one you're importing?": "Voulez-vous les remplacer par celles que vous importez?",
+  "Drop folders onto Playlists or a playlist folder to make playlists of them.": "Drop folders onto Playlists or a playlist folder to make playlists of them.",
+  "Importing 1 folder…": "Importing 1 folder…",
+  "Importing {count} folders…": "Importing {count} folders…",
+  "Made playlists: {names}.": "Made playlists: {names}.",
+  "No playlist was made.": "No playlist was made.",
+  "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
+  "One or several lists with the same name already exist.": "Une ou plusieurs listes avec le même nom existent déjà.",
+  "[data-file-drop-folder]": "[data-file-drop-folder]",
+  "{count} files skipped.": "{count} files skipped."
 }
