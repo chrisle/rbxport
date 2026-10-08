@@ -305,6 +305,146 @@ mod tests {
         assert_eq!(import(&state, &editor, &usb, true, false, false).unwrap().skipped, 1);
     }
 
+    /// A cue as the master database holds it (`Kind` 0 memory, 1-3 A-C,
+    /// 5-17 D-P), for the stick's analysis files.
+    fn stick_cue(kind: u8, time_ms: u32, loop_end: Option<u32>, color_code: u8, comment: &str) -> rbl_anlz::cues::ExportCue {
+        rbl_anlz::cues::ExportCue { kind, time_ms, loop_time_ms: loop_end, color_code, comment: comment.into(), ..Default::default() }
+    }
+
+    /// Writes a stick's `.DAT` and `.EXT` the way an export lays them out:
+    /// memory cues and A-C in `PCOB`, D-P and the full lists in `PCO2`, over
+    /// one fixed grid.
+    fn write_stick(dir: &Path, cues: &[rbl_anlz::cues::ExportCue]) {
+        let grid = [rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 250 }];
+        let mut dat = rbl_anlz::write::AnlzBuilder::new();
+        dat.path("/usb.mp3").beat_grid(&grid);
+        for section in rbl_anlz::cues::sections(cues, false) { dat.copy_section(&section); }
+        std::fs::write(dir.join("ANLZ0000.DAT"), dat.finish()).unwrap();
+        let mut ext = rbl_anlz::write::AnlzBuilder::new();
+        ext.path("/usb.mp3");
+        for section in rbl_anlz::cues::sections(cues, true) { ext.copy_section(&section); }
+        std::fs::write(dir.join("ANLZ0000.EXT"), ext.finish()).unwrap();
+    }
+
+    /// The "unchanged" check on a track with real cues: every mapping from a
+    /// stick entry to a `djmdCue` row (slot E and later shifted by one, a
+    /// cue's missing end, the colour index, an empty comment) has to agree,
+    /// or every real track would be rewritten again on each import (#134);
+    /// and a stick or library that differs only in its cues must still be
+    /// written.
+    #[test]
+    fn unchanged_check_compares_real_cues_both_ways() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        let id = rbl_db::fixture::track_id(0);
+        let source_path: String = db.connection().query_row("SELECT FolderPath FROM djmdContent WHERE ID=?1", [&id], |r| r.get(0)).unwrap();
+        drop(db);
+        let relative = state.write(|w| w.analysis_data_path_for(&id)).unwrap();
+        state.write(|w| w.register_analysis(&id, &rbl_db::write::AnalysisRegistration { bpm_x100: 12800, key: None, analysis_data_path: &relative })).unwrap();
+        let target = rbl_anlz::resolve(&location.share_root, &relative);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let mut dat = rbl_anlz::write::AnlzBuilder::new();
+        dat.path("/original.mp3").waveform_preview(b"PWAV", &[1, 2, 3]).beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 250 }]).cue_lists(false);
+        std::fs::write(&target, dat.finish()).unwrap();
+        let mut ext = rbl_anlz::write::AnlzBuilder::new();
+        ext.path("/original.mp3").waveform_preview(b"PWV3", &[4, 5, 6]).cue_lists(true);
+        std::fs::write(target.with_extension("EXT"), ext.finish()).unwrap();
+
+        let usb = dir.path().join("usb");
+        let anlz = "PIONEER/USBANLZ/test";
+        std::fs::create_dir_all(usb.join(anlz)).unwrap();
+        let mut cues = vec![
+            stick_cue(0, 1000, None, 0, ""),               // a memory cue
+            stick_cue(1, 2000, None, 22, "Drop"),          // hot cue A, coloured, with a comment
+            stick_cue(6, 3000, None, 1, ""),               // hot cue E: Kind 6, slot 5
+            stick_cue(0, 4000, Some(8000), 0, ""),         // a memory loop
+        ];
+        write_stick(&usb.join(anlz), &cues);
+        rbl_export::Manifest { db_id: 0, baseline: None, version: 1, written: String::new(), playlists: vec![], loose: vec![], tracks: vec![rbl_export::manifest::ManifestTrack { analysis_hashes: std::collections::BTreeMap::new(), analysis_extensions: vec!["DAT".into(), "EXT".into()], audio_hash: 0,
+            export_id: 1, library_id: id.parse().unwrap(), source: source_path, audio: "audio.mp3".into(), anlz_dir: anlz.into(), size: 0, modified: 0, analysis: 0, artwork: String::new(), conversion: String::new(), conversion_source_hash: 0,
+        }] }.save(&usb).unwrap();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let rows = |state: &AppState| state.read_db(|db| {
+            let mut q = db.connection().prepare("SELECT InMsec, OutMsec, Kind, ColorTableIndex, Comment FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0 ORDER BY InMsec")?;
+            let rows = q.query_map([&id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, Option<String>>(4)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        }).unwrap();
+        let snapshot = |state: &AppState| (
+            state.read_db(|db| Ok(db.connection().query_row(
+                "SELECT AnalysisUpdated, rb_local_usn FROM djmdContent WHERE ID=?1", [&id],
+                |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<i64>>(1)?)))?)).unwrap(),
+            std::fs::read(&target).unwrap(),
+            std::fs::read(target.with_extension("EXT")).unwrap(),
+            rows(state),
+        );
+        let import_cues = || import(&state, &editor, &usb, true, false, false).unwrap();
+        // Imports once, then asserts the same stick is a no-op that touches
+        // no file, row or counter.
+        let import_then_unchanged = |why: &str| {
+            let first = import_cues();
+            assert_eq!((first.tracks, first.unchanged, first.skipped), (1, 0, 0), "{why}: the change is written");
+            let before = snapshot(&state);
+            let again = import_cues();
+            assert_eq!((again.tracks, again.unchanged, again.skipped), (0, 1, 0), "{why}: the same stick again is unchanged");
+            assert_eq!(again.changed, Vec::<String>::new());
+            assert_eq!(snapshot(&state), before, "{why}: nothing is touched");
+        };
+
+        // (a) and (b): the first import writes the cues, the second is a no-op.
+        import_then_unchanged("first import");
+        assert_eq!(rows(&state), vec![
+            (1000, None, 0, 0, Some(String::new())),
+            (2000, None, 1, 22, Some("Drop".into())),
+            (3000, None, 6, 1, Some(String::new())),
+            (4000, Some(8000), 0, 0, Some(String::new())),
+        ]);
+        let written = rbl_anlz::Anlz::read(&target).unwrap();
+        assert_eq!(written.waveform(b"PWAV").unwrap().1, &[1, 2, 3]);
+
+        // (c): one cue's time, colour or comment changes on the stick, the
+        // grid does not; each is written, and then settles.
+        cues[2].time_ms = 3500;
+        write_stick(&usb.join(anlz), &cues);
+        import_then_unchanged("hot cue E moved");
+        cues[1].color_code = 46;
+        write_stick(&usb.join(anlz), &cues);
+        import_then_unchanged("hot cue A recoloured");
+        cues[1].comment = "Break".into();
+        write_stick(&usb.join(anlz), &cues);
+        import_then_unchanged("hot cue A renamed");
+        // A memory cue's colour row lives only in the analysis files (the
+        // row keeps `Color` 255), so only the file comparison can see it.
+        cues[0].color_id = 3;
+        write_stick(&usb.join(anlz), &cues);
+        import_then_unchanged("memory cue colour row changed");
+        assert!(rows(&state).contains(&(2000, None, 1, 46, Some("Break".into()))));
+        assert!(rows(&state).contains(&(3500, None, 6, 1, Some(String::new()))));
+
+        // A row rekordbox wrote keeps a cue's end as -1 and may leave its
+        // comment NULL: that is the same cue, not a change.
+        let writable = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+        assert_eq!(writable.connection().execute("UPDATE djmdCue SET OutMsec=-1 WHERE ContentID=?1 AND rb_local_deleted=0 AND OutMsec IS NULL", [&id]).unwrap(), 3);
+        assert_eq!(writable.connection().execute("UPDATE djmdCue SET Comment=NULL WHERE ContentID=?1 AND rb_local_deleted=0 AND Comment=''", [&id]).unwrap(), 3);
+        drop(writable);
+        let again = import_cues();
+        assert_eq!((again.tracks, again.unchanged), (0, 1), "rekordbox's -1 end and NULL comment match the stick");
+
+        // (d): only the library's cue row changes, the analysis files are
+        // identical; the stick's cue is written back.
+        let memory: String = state.read_db(|db| Ok(db.connection().query_row(
+            "SELECT ID FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0 AND InMsec=1000", [&id], |r| r.get(0))?)).unwrap();
+        state.write(|w| w.move_cue(&memory, 1200)).unwrap();
+        let files = (std::fs::read(&target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap());
+        import_then_unchanged("library cue moved");
+        assert!(rows(&state).contains(&(1000, None, 0, 0, Some(String::new()))));
+        assert_eq!((std::fs::read(&target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap()), files);
+    }
+
     /// A player's `MYSETTING.DAT`: the 104-byte header, a 40-byte body and
     /// CRC-16/XMODEM over the body, as a rekordbox stick carries it.
     fn my_setting(body_byte: u8) -> Vec<u8> {
