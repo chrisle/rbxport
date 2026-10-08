@@ -19,6 +19,7 @@ import { memo, type ReactNode } from "react";
 
 import type { RowDto } from "@/ipc/types";
 import { LoopInIcon, LoopOutIcon, MagnifierMinusIcon, MagnifierPlusIcon } from "@/components/icons";
+import { LOOP_BEATS_MAX, LOOP_BEATS_MIN, loopBeatsLabel } from "@/lib/player";
 import { READ_ONLY_REASON } from "./useMemoryCues";
 import styles from "./DualDeck.module.css";
 import { TempoToggle } from "./TempoToggle";
@@ -147,7 +148,7 @@ export interface DualLoop {
   /** AU: a beat loop of `beats` from the head. MA: IN and OUT by hand. */
   mode: "auto" | "manual";
   onMode: (mode: "auto" | "manual") => void;
-  /** The beat loop length, 1/4 to 32 beats. */
+  /** The beat loop length, LOOP_BEATS_MIN to LOOP_BEATS_MAX beats. */
   beats: number;
   onShorter: () => void;
   onLonger: () => void;
@@ -237,20 +238,20 @@ export const DualControls = memo(function DualControls({
           german.lang. The field starts a loop of that length, or exits the
           loop that plays; a step changes the length of a playing loop. */}
       <div className={styles.loopLength} role="group" aria-label="Beat loop length">
-        <button type="button" className={styles.step} aria-label="Shorter loop" disabled={loop.beats <= 0.25} onClick={loop.onShorter}>‹</button>
+        <button type="button" className={styles.step} aria-label="Shorter loop" disabled={loop.beats <= LOOP_BEATS_MIN} onClick={loop.onShorter}>‹</button>
         <button
           type="button"
           className={styles.loopField}
           data-on={loop.active || undefined}
           aria-pressed={loop.active}
           aria-label={loop.active ? "Exit loop" : `${loop.beats} beat loop`}
-          title={tip(loop.active ? "Exit the loop" : `Loop ${loop.beats} beat${loop.beats === 1 ? "" : "s"} from here`)}
+          title={tip(loop.active ? "Exit the loop" : `${loopBeatsLabel(loop.beats)} Beat Loop`)}
           disabled={!loop.canLoop}
           onClick={loop.onToggle}
         >
-          {loop.beats < 1 ? `1/${Math.round(1 / loop.beats)}` : loop.beats}
+          {loopBeatsLabel(loop.beats)}
         </button>
-        <button type="button" className={styles.step} aria-label="Longer loop" disabled={loop.beats >= 32} onClick={loop.onLonger}>›</button>
+        <button type="button" className={styles.step} aria-label="Longer loop" disabled={loop.beats >= LOOP_BEATS_MAX} onClick={loop.onLonger}>›</button>
       </div>
 
       {/* Loop In and Loop Out — german.lang's names. In AU, IN starts a beat
@@ -263,7 +264,7 @@ export const DualControls = memo(function DualControls({
           aria-label="Loop in"
           data-on={loop.active || loop.pendingIn || undefined}
           disabled={loop.mode === "auto" ? !loop.canLoop : loop.idle}
-          title={tip(loop.mode === "auto" ? `Loop ${loop.beats} beat${loop.beats === 1 ? "" : "s"} from here` : "Loop In")}
+          title={tip(loop.mode === "auto" ? `${loopBeatsLabel(loop.beats)} Beat Loop` : "Loop In")}
           onClick={loop.onIn}
         >
           <LoopInIcon className={styles.loopGlyph} />

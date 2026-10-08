@@ -195,6 +195,18 @@ test("the control row loops the chosen number of beats, and the steps resize it"
   // IN waits for its OUT, lit.
   await row.getByRole("button", { name: "Loop in" }).click();
   await expect(row.getByRole("button", { name: "Loop in" })).toHaveAttribute("data-on", "true");
+  // A change of mode drops the waiting IN.
+  await row.getByRole("button", { name: "AU", exact: true }).click();
+  await expect(row.getByRole("button", { name: "Loop in" })).not.toHaveAttribute("data-on");
+  await manual.click();
+
+  // OUT, with the head moved on from IN, plays the loop between them.
+  await page.getByRole("group", { name: "Deck A transport" }).getByRole("button", { name: "Play", exact: true }).click();
+  await row.getByRole("button", { name: "Loop in" }).click();
+  await page.waitForTimeout(1_500);
+  await row.getByRole("button", { name: "Loop out" }).click();
+  await expect(exit).toHaveAttribute("aria-pressed", "true");
+  await expect(a.getByTestId("player-overview").locator('[class*="loopBand"][data-active]')).toHaveCount(1);
 });
 
 test("deck B reads the other way up, and its detail meets deck A's at the centre line", async ({ page }) => {

@@ -878,6 +878,55 @@ export function beatLoopRange(
   return end > start ? [start, end] : null;
 }
 
+/** The shortest and the longest beat loop, in beats. */
+export const LOOP_BEATS_MIN = 0.25;
+export const LOOP_BEATS_MAX = 32;
+
+export function clampLoopBeats(beats: number): number {
+  return Math.min(Math.max(beats, LOOP_BEATS_MIN), LOOP_BEATS_MAX);
+}
+
+/** The beat loop length as rekordbox writes it: "1/4", "1/2", "1", "2" and up. */
+export function loopBeatsLabel(beats: number): string {
+  return beats < 1 ? `1/${Math.round(1 / beats)}` : String(beats);
+}
+
+/**
+ * The loop `fromMs`–`toMs` at `factor` times its length, from the same in
+ * point. A beat loop of `beats` stays on the grid as `beatLoopRange` counts
+ * it, and `beats` changes with it. A loop of another length, such as a
+ * manual loop, scales in time and keeps `beats`. The new length stays
+ * within LOOP_BEATS_MIN and LOOP_BEATS_MAX beats. Null with no grid.
+ */
+export function resizedLoopRange(
+  grid: BeatGrid,
+  fromMs: number,
+  toMs: number,
+  beats: number,
+  factor: number,
+): { range: [number, number]; beats: number } | null {
+  const asBeatLoop = beatLoopRange(grid, null, fromMs, beats);
+  if (asBeatLoop && Math.abs(asBeatLoop[1] - toMs) < 1) {
+    const next = clampLoopBeats(beats * factor);
+    const range = beatLoopRange(grid, null, fromMs, next);
+    return range && { range, beats: next };
+  }
+  const shortest = beatLoopRange(grid, null, fromMs, LOOP_BEATS_MIN);
+  const longest = beatLoopRange(grid, null, fromMs, LOOP_BEATS_MAX);
+  if (!shortest || !longest) return null;
+  const length = Math.min(Math.max((toMs - fromMs) * factor, shortest[1] - fromMs), longest[1] - fromMs);
+  return { range: [fromMs, fromMs + length], beats };
+}
+
+/**
+ * The head after its loop changes to `from`–`to`. A head at or past the
+ * end goes back by whole loops, so it keeps its place in the beat. A head
+ * before the end stays.
+ */
+export function wrapIntoLoop(head: number, from: number, to: number): number {
+  return head >= to && to > from ? from + ((head - from) % (to - from)) : head;
+}
+
 /**
  * The beat the head is on, 1-based on the grid as `PQTZ` numbers them: the
  * last beat at or before `ms`, or the first when the head is before it.
