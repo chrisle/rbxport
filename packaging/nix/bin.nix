@@ -1,3 +1,6 @@
+let
+  pin = builtins.fromJSON (builtins.readFile ./pin.json);
+in
 {
   lib,
   stdenv,
@@ -6,17 +9,18 @@
   makeDesktopItem,
   appimage-run,
   coreutils,
+  # Overridable so CI can smoke-test a locally built release AppImage before
+  # it is published and the pin is bumped.
+  appimage ? fetchurl {
+    url = "https://download.rbxport.com/rbxport-${pin.version}-linux-x86_64.AppImage";
+    hash = pin.hash;
+  },
 }:
 
 let
   common = import ./common.nix { inherit lib makeDesktopItem; };
 
-  version = "1.0.0";
-
-  appimage = fetchurl {
-    url = "https://download.rbxport.com/rbxport-${version}-linux-x86_64.AppImage";
-    hash = "sha256-LjEARgBBO/cdJtcxcLH8WHfHQ73YsTgZeimX5nPap0Y=";
-  };
+  version = pin.version;
 
   appimageRunner = appimage-run.override {
     extraPkgs = pkgs: [
@@ -56,9 +60,8 @@ let
       fi
       printf '%s' "$seed_version" > "$marker"
 
-      # Patch the AppImage by dropping the its bundled GTK/WebKit, 
-      # if it hasn't already. The generic stack has troubles with
-      # EGL display creation on Nix/NixOS, so the host
+      # Extract each version once, dropping the AppImage's bundled GTK/WebKit:
+      # that generic stack cannot create an EGL display on NixOS, so the host
       # libraries (provided by appimage-run) are used instead.
       hash="$(sha256sum "$mutable" | cut -d' ' -f1)"
       extracted="$cache/$hash"

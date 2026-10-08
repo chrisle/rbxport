@@ -43,6 +43,6 @@ in
     homepage = "https://rbxport.com";
     license = lib.licenses.gpl2Plus;
     mainProgram = pname;
-    platforms = lib.platforms.linux;
+    platforms = [ "x86_64-linux" ];
   };
 }
