@@ -68,6 +68,8 @@ export interface Session {
   trafficLight: TrafficLightSource;
   /** Bars visible across each deck's detail waveform. */
   waveformZoom: { a: number; b: number };
+  /** Whether DUAL CONTROL, which links both decks' zoom and beat jump, was on. */
+  dualControl: boolean;
 }
 
 /**
@@ -109,6 +111,7 @@ export const DEFAULT_SESSION: Session = {
   subTreeWidth: DEFAULT_SUB_TREE_WIDTH,
   trafficLight: "master",
   waveformZoom: { a: DETAIL_BARS, b: DETAIL_BARS },
+  dualControl: false,
 };
 
 /** Every sort column, so a new one cannot be left out of what is restored. */
@@ -206,6 +209,7 @@ export function sanitiseSession(value: unknown): Session {
             b: zoomOrDefault((raw.waveformZoom as { b?: unknown }).b),
           }
         : { a: DETAIL_BARS, b: DETAIL_BARS },
+    dualControl: raw.dualControl === true,
   };
 }
 

@@ -2552,6 +2552,29 @@ test("dual control links what both decks are showing", async ({ page }) => {
   await expect(sizes.last()).toHaveText(/8Bars/);
 });
 
+test("dual control is remembered across a restart", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  const dual = page.getByRole("button", { name: "Dual control" });
+  await expect(dual).toHaveAttribute("aria-pressed", "false");
+  await dual.click();
+  await expect(dual).toHaveAttribute("aria-pressed", "true");
+
+  // The layout is restored too, so the same button comes back still on.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks");
+  await expect(dual).toHaveAttribute("aria-pressed", "true");
+
+  // Switching it off is remembered as well.
+  await dual.click();
+  await expect(dual).toHaveAttribute("aria-pressed", "false");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks");
+  await expect(dual).toHaveAttribute("aria-pressed", "false");
+});
+
 test("the mixer belongs to the two-deck layouts and to nothing else", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

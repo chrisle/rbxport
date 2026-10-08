@@ -30,6 +30,7 @@ describe("sanitiseSession", () => {
       subTreeWidth: 240,
       trafficLight: "b",
       waveformZoom: { a: 4, b: 32 },
+      dualControl: true,
     };
     expect(sanitiseSession(session)).toEqual(session);
   });
@@ -131,5 +132,12 @@ describe("sanitiseSession", () => {
       DEFAULT_SESSION.waveformZoom,
     );
     expect(sanitiseSession({}).waveformZoom).toEqual(DEFAULT_SESSION.waveformZoom);
+  });
+
+  it("remembers DUAL CONTROL across sessions, off unless it was left on", () => {
+    expect(sanitiseSession({ dualControl: true }).dualControl).toBe(true);
+    expect(sanitiseSession({}).dualControl).toBe(false);
+    expect(sanitiseSession({ dualControl: "yes" }).dualControl).toBe(false);
+    expect(DEFAULT_SESSION.dualControl).toBe(false);
   });
 });

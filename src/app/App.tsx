@@ -309,7 +309,8 @@ function AppBody() {
     zoomA.current(by);
     zoomB.current(by);
   }, []);
-  const [dual, setDual] = useState(false);
+  // Remembered across runs: a DUAL CONTROL left on comes back on.
+  const [dual, setDual] = useState(restored.dualControl);
   const [waveformZoom, setWaveformZoom] = useState(restored.waveformZoom);
   const setZoomA = useCallback((bars: number) => {
     setWaveformZoom((zoom) => zoom.a === bars ? zoom : { ...zoom, a: bars });
@@ -2136,8 +2137,9 @@ function AppBody() {
       subTreeWidth,
       trafficLight,
       waveformZoom,
+      dualControl: dual,
     });
-  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom]);
+  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom, dual]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
