@@ -44,6 +44,8 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use semver::Version;
 use serde::Serialize;
+use tauri::utils::config::BundleType;
+use tauri::utils::platform::bundle_type;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -112,8 +114,6 @@ impl Updates {
 /// Whether the bundle this process runs from can be swapped on disk while
 /// it runs, so an update is in place the moment it is downloaded.
 fn swaps_in_place() -> bool {
-    use tauri::utils::config::BundleType;
-    use tauri::utils::platform::bundle_type;
     matches!(bundle_type(), Some(BundleType::App | BundleType::AppImage))
 }
 
@@ -162,6 +162,32 @@ fn store_install() -> bool {
 
 fn store_refusal() -> AppError {
     AppError::new(ErrorKind::Internal, "The Microsoft Store installs this copy of rbxport's updates.")
+}
+
+/// Why this build cannot replace itself, if it cannot, mirroring the refusal
+/// the interface already shows for a development build.
+///
+/// A release build whose bundle marker is absent is one a distribution or
+/// package manager installed (a Linux source build, `.deb`/`.rpm`, or a Nix
+/// store build): it cannot write its own executable, so it must say so rather
+/// than download and fail on every launch. Taking the two facts as arguments
+/// keeps the decision testable.
+fn self_update_refusal(debug: bool, bundle: Option<&BundleType>) -> Option<AppError> {
+    if debug {
+        return Some(AppError::new(
+            ErrorKind::Internal,
+            "A development build cannot be updated in place.",
+        ));
+    }
+    // `cfg!` rather than an attribute keeps `bundle` used on every platform,
+    // where the workspace denies warnings.
+    if cfg!(target_os = "linux") && bundle.is_none() {
+        return Some(AppError::new(
+            ErrorKind::Internal,
+            "This build does not manage its own updates; use the package manager it was installed with.",
+        ));
+    }
+    None
 }
 
 /// One release's entry in the published release notes.
@@ -323,11 +349,8 @@ pub async fn download_update(
     app: AppHandle,
     updates: tauri::State<'_, std::sync::Arc<Updates>>,
 ) -> AppResult<UpdateReadyDto> {
-    if cfg!(debug_assertions) {
-        return Err(AppError::new(
-            ErrorKind::Internal,
-            "A development build cannot be updated in place.",
-        ));
+    if let Some(refusal) = self_update_refusal(cfg!(debug_assertions), bundle_type().as_ref()) {
+        return Err(refusal);
     }
     if store_install() {
         return Err(store_refusal());
@@ -738,5 +761,26 @@ See [the notes](https://example.com) — and `[x]: y` inline is prose.\n";
         let from_lf = changes_between(LOG, &v("0.1.0"), &v("0.4.0"));
         assert_eq!(from_crlf, from_lf);
         assert!(from_crlf.iter().all(|c| !c.body.contains('\r')), "a carriage return leaked");
+    }
+
+    #[test]
+    fn a_release_linux_build_without_a_bundle_refuses_to_update_in_place() {
+        // A from-source or package-managed Linux build has no bundle for the
+        // updater to swap, so it must refuse rather than download and fail on
+        // every launch.
+        #[cfg(target_os = "linux")]
+        {
+            assert!(
+                self_update_refusal(false, None).is_some(),
+                "a bundleless Linux release must refuse"
+            );
+            assert!(
+                self_update_refusal(false, Some(&BundleType::AppImage)).is_none(),
+                "an AppImage build may replace itself"
+            );
+        }
+        // A development build refuses whatever the bundle is.
+        assert!(self_update_refusal(true, None).is_some());
+        assert!(self_update_refusal(true, Some(&BundleType::AppImage)).is_some());
     }
 }
