@@ -2018,6 +2018,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // One device, so the panel has something to show. A browser cannot see a
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device, fileSystem: "FAT32" }))),
+    onImportProgress: () => () => {},
     onExportProgress: (listener) => { exportListeners.add(listener); return () => { exportListeners.delete(listener); }; },
     exportProgress: () => wait([...exportJobs.values()]),
     cancelExport: (path) => { cancelledExports.add(path); return Promise.resolve(); },

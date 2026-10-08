@@ -3275,6 +3275,7 @@ async fn import_collection<R: tauri::Runtime>(
                 },
             );
         };
+        on_progress(0, document.tracks.len());
         let report = writing
             .write(|writer| rbl_db::xml::import(writer, &document, &mut on_progress))
             .map_err(write_error)?;
