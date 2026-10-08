@@ -1712,8 +1712,8 @@ function AppBody() {
         if (finished) return;
         setNote({
           text: p.total > 0
-            ? `Importing ${p.done.toLocaleString()} of ${p.total.toLocaleString()} tracks…`
-            : "Importing…",
+            ? t("Importing {done} of {total} tracks…", { done: p.done.toLocaleString(), total: p.total.toLocaleString() })
+            : t("Importing…"),
           failed: false,
           busy: true,
         });
@@ -1739,7 +1739,7 @@ function AppBody() {
       finished = true;
       stopProgress();
     }
-  }, [report, refuse, analysisPrefs.auto, analysis]);
+  }, [t, report, refuse, analysisPrefs.auto, analysis]);
 
   const exportXmlFromMenu = useCallback(async () => {
     report("Choosing where to write the XML…");

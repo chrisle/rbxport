@@ -518,6 +518,7 @@
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.",
   "Import the ticked items from the selected USB devices to rbxport",
   "Importing from iTunes…",
+  "Importing {done} of {total} tracks…",
   "Importing…",
   "In use",
   "Information",

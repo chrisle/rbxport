@@ -1471,5 +1471,6 @@
   "Select a drive": "Bir sürücü seç",
   "Add memory cue at first beat": "Add memory cue at first beat",
   "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
-  "Export to this device first to set its background color.": "Arka plan rengini ayarlamak için önce bu cihaza dışa aktarın."
+  "Export to this device first to set its background color.": "Arka plan rengini ayarlamak için önce bu cihaza dışa aktarın.",
+  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…"
 }

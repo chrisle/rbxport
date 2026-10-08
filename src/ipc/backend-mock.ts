@@ -1575,6 +1575,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     clock = setTimeout(step, TICK_MS);
   };
 
+  const importListeners = new Set<(progress: ExportProgress) => void>();
   const wait = <T>(value: T): Promise<T> =>
     latency > 0 ? new Promise((r) => setTimeout(() => r(value), latency)) : Promise.resolve(value);
 
@@ -2018,7 +2019,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // One device, so the panel has something to show. A browser cannot see a
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device, fileSystem: "FAT32" }))),
-    onImportProgress: () => () => {},
+    onImportProgress: (listener) => { importListeners.add(listener); return () => { importListeners.delete(listener); }; },
     onExportProgress: (listener) => { exportListeners.add(listener); return () => { exportListeners.delete(listener); }; },
     exportProgress: () => wait([...exportJobs.values()]),
     cancelExport: (path) => { cancelledExports.add(path); return Promise.resolve(); },
@@ -2508,7 +2509,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     importFiles: () => wait(null),
     importFolder: () => wait(null),
     importPaths: (paths) => wait({ imported: 0, skipped: paths.map((p) => `${p}: the mock library takes no files`), tracks: [], existing: [] }),
-    importXml: () => wait(null),
+    // Emits progress, then holds until `window.__finishImport()` so a test
+    // can watch the status line while an import is still running.
+    importXml: async () => {
+      const emit = (done: number) => importListeners.forEach((listener) =>
+        listener({ path: "", state: "copying", done, total: 3, title: "" }));
+      emit(0);
+      emit(1);
+      await new Promise<void>((resolve) => {
+        (window as unknown as { __finishImport?: () => void }).__finishImport = resolve;
+      });
+      return null;
+    },
     exportLoopWav: () => wait(null),
     importItunes: () => wait(null),
     itunesDefaultLibrary: () => wait({

@@ -1466,5 +1466,6 @@
   "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
   "Aqua": "Aqua",
   "Orange": "Orange",
-  "Export to this device first to set its background color.": "Eksportér først til denne enhed for at indstille dens baggrundsfarve."
+  "Export to this device first to set its background color.": "Eksportér først til denne enhed for at indstille dens baggrundsfarve.",
+  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…"
 }

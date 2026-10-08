@@ -1471,5 +1471,6 @@
   "Add memory cue at first beat": "Add memory cue at first beat",
   "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
   "Aqua": "Aqua",
-  "Export to this device first to set its background color.": "Nejprve exportujte do tohoto zařízení, abyste mohli nastavit jeho barvu pozadí."
+  "Export to this device first to set its background color.": "Nejprve exportujte do tohoto zařízení, abyste mohli nastavit jeho barvu pozadí.",
+  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…"
 }
