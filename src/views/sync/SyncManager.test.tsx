@@ -669,6 +669,34 @@ it("says where imported CDJ/mixer settings go", async () => {
   expect(status()).toContain("USB A: imported 3 CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.");
 });
 
+it("counts one updated track, history entry or settings file in the singular", async () => {
+  await renderWith({ importButtonCues: true, importButtonHistory: true, importButtonSettings: true });
+  importUsb
+    .mockResolvedValueOnce({ tracks: 1, histories: 0, settings: 0, skipped: 0, unchanged: 0 })
+    .mockResolvedValueOnce({ tracks: 0, histories: 1, settings: 0, skipped: 0 })
+    .mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 1, skipped: 0 });
+  click(box("USB A"));
+  await settle();
+  click(importButton());
+  await settle();
+  expect(status()).toContain("USB A: updated 1 track.");
+  expect(status()).toContain("USB A: imported 1 play-history entry.");
+  expect(status()).toContain("USB A: imported 1 CDJ/mixer settings file. Sync gives it to USB devices that have no settings of their own.");
+});
+
+it("says when a stick has no history or settings to import", async () => {
+  await renderWith({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
+  importUsb
+    .mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, skipped: 0 })
+    .mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, skipped: 0 });
+  click(box("USB A"));
+  await settle();
+  click(importButton());
+  await settle();
+  expect(status()).toContain("USB A: no new play-history entries.");
+  expect(status()).toContain("USB A: no CDJ/mixer settings files found.");
+});
+
 it("starts Import's ticks at the Preferences defaults and imports each ticked kind", async () => {
   await renderWith({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
   expect(importTick("Cues and beat grids")?.checked).toBe(false);

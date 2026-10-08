@@ -1481,5 +1481,11 @@
   "{count} already up to date": "{count} already up to date",
   "{device}: cues and beat grids already match your library; nothing was changed.": "{device}: cues and beat grids already match your library; nothing was changed.",
   "{device}: imported {count} CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.": "{device}: imported {count} CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.",
-  "{device}: updated {count} tracks": "{device}: updated {count} tracks"
+  "{device}: updated {count} tracks": "{device}: updated {count} tracks",
+  "{device}: imported {count} CDJ/mixer settings file. Sync gives it to USB devices that have no settings of their own.": "{device}: imported {count} CDJ/mixer settings file. Sync gives it to USB devices that have no settings of their own.",
+  "{device}: imported {count} play-history entries.": "{device}: imported {count} play-history entries.",
+  "{device}: imported {count} play-history entry.": "{device}: imported {count} play-history entry.",
+  "{device}: no CDJ/mixer settings files found.": "{device}: no CDJ/mixer settings files found.",
+  "{device}: no new play-history entries.": "{device}: no new play-history entries.",
+  "{device}: updated {count} track": "{device}: updated {count} track"
 }
