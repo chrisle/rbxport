@@ -41,6 +41,8 @@ pub fn library_trees(root: &Path) -> AppResult<Vec<DeviceLibraryTreeDto>> {
 #[serde(rename_all="camelCase")]
 pub struct ImportReport {
     tracks: usize, histories: usize, settings: usize, skipped: usize,
+    /// Tracks whose cues and grid on the stick already match the library.
+    unchanged: usize,
     warnings: Vec<String>,
     #[serde(skip)] changed: Vec<String>,
 }
@@ -122,14 +124,24 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             let beats = source_dat.beat_grid().unwrap_or_default();
             let previous_bpm = state.read_db(|db| Ok(db.connection().query_row("SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [id], |r| r.get::<_,u32>(0))?)).map_err(write_error)?;
             let bpm = beats.first().map_or(previous_bpm, |b| u32::from(b.tempo_x100));
+            let bpm_changed = bpm != previous_bpm;
             let relative = state.write(|w| w.analysis_data_path_for(id)).map_err(write_error)?;
             let target = rbl_anlz::resolve(&location.share_root, &relative);
             let mut files = Vec::new();
+            // A stick that carries the cues and grid the library already has
+            // is not a change: rewriting it would bump the track's analysis,
+            // drop its grid undo history and reload the whole library for
+            // nothing, and the next sync would copy it all back (#134).
+            let mut differs = false;
             for extension in ["DAT", "EXT"] {
                 let target = target.with_extension(extension);
                 if !target.exists() { continue; }
                 let mut dest = rbl_anlz::Anlz::read(&target).map_err(err)?;
                 let src = if extension == "DAT" { &source_dat } else { &source_cues };
+                differs |= !dest.sections.iter().filter(|s| s.is_cue_list()).eq(src.sections.iter().filter(|s| s.is_cue_list()));
+                if extension == "DAT" && !beats.is_empty() {
+                    differs |= !dest.sections.iter().filter(|s| s.as_beat_grid().is_some()).eq(source_dat.section(b"PQTZ"));
+                }
                 dest.sections.retain(|s| !s.is_cue_list());
                 dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
                 if extension == "DAT" && !beats.is_empty() {
@@ -140,6 +152,7 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
                 files.push((target, bytes));
             }
             if files.is_empty() { report.skipped += 1; continue; }
+            if !differs && !bpm_changed && database_cues_match(state, id, &entries)? { report.unchanged += 1; continue; }
             let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, id, bpm, None, true, &files)?;
             if let Err(e) = journal.publish() { journal.rollback()?; return Err(e); }
             if let Err(e) = state.write(|w| w.import_usb_cues(id, &entries, bpm)) { journal.reconcile(&location)?; return Err(write_error(e)); }
@@ -182,6 +195,29 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         }
     }
     Ok(report)
+}
+
+/// Whether the library's cue rows for `id` are the ones `import_usb_cues`
+/// would write for `entries`. Compared as a set: the order rows were
+/// inserted in carries no meaning.
+fn database_cues_match(state: &AppState, id: &str, entries: &[rbl_anlz::CueEntry]) -> AppResult<bool> {
+    type Row = (i64, Option<i64>, i64, i64, String);
+    let mut wanted: Vec<Row> = entries.iter().map(|cue| {
+        let kind = if cue.hot_cue >= 4 { cue.hot_cue + 1 } else { cue.hot_cue };
+        let end = (cue.kind == 2).then_some(i64::from(cue.loop_time_ms));
+        (i64::from(cue.time_ms), end, i64::from(kind), i64::from(cue.color_code.unwrap_or(cue.color_id)), cue.comment.clone().unwrap_or_default())
+    }).collect();
+    let mut stored: Vec<Row> = state.read_db(|db| {
+        let mut q = db.connection().prepare(
+            "SELECT COALESCE(InMsec,0), OutMsec, COALESCE(Kind,0), COALESCE(ColorTableIndex,0), COALESCE(Comment,'') FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0",
+        )?;
+        let rows = q.query_map([id], |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.filter(|end| *end >= 0), r.get(2)?, r.get(3)?, r.get(4)?)))?
+            .collect::<Result<Vec<Row>, _>>()?;
+        Ok(rows)
+    }).map_err(write_error)?;
+    wanted.sort();
+    stored.sort();
+    Ok(wanted == stored)
 }
 
 fn validate_settings(name: &str, bytes: &[u8]) -> Result<(), String> {
@@ -238,6 +274,17 @@ mod tests {
         assert_eq!(result.waveform(b"PWAV").unwrap().1, &[1,2,3]);
         assert_eq!(result.beat_grid().unwrap()[0].time_ms, 250);
         assert_eq!(result.beat_grid().unwrap()[0].tempo_x100, 12800);
+        // The same stick again carries nothing new: no file, row or analysis
+        // counter is touched, so nothing reloads and the next sync has nothing
+        // to copy back (#134).
+        let stamp = |state: &AppState| state.read_db(|db| Ok(db.connection().query_row(
+            "SELECT AnalysisUpdated, rb_local_usn FROM djmdContent WHERE ID=?1", [&id],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<i64>>(1)?)))?)).unwrap();
+        let before = (stamp(&state), std::fs::read(&target).unwrap());
+        let again = import(&state, &editor, &usb, true, false, false).unwrap();
+        assert_eq!((again.tracks, again.unchanged, again.skipped), (0, 1, 0));
+        assert_eq!(again.changed, Vec::<String>::new());
+        assert_eq!((stamp(&state), std::fs::read(&target).unwrap()), before);
         editor.set_locked(&id, true).unwrap();
         assert_eq!(import(&state, &editor, &usb, true, false, false).unwrap().skipped, 1);
         editor.set_locked(&id, false).unwrap();

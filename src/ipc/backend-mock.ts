@@ -1990,7 +1990,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     validateExportFiles: () => wait([]),
     smartRule: (playlist) => wait(smartRules.get(playlist) ?? { logic: "all", conditions: [] }),
-    importUsb: () => Promise.resolve({ tracks: 0, histories: 0, settings: 0, skipped: 0 }),
+    importUsb: () => Promise.resolve({ tracks: 0, histories: 0, settings: 0, skipped: 0, unchanged: 0 }),
     ejectDevice: async (path) => {
       const index = devices.findIndex(device => device.path === path);
       if (index < 0) throw new Error("That device is no longer connected.");

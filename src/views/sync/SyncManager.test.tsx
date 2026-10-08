@@ -638,6 +638,27 @@ it("imports cue/grid information from selected devices only", async () => {
   expect(status()).toContain("updated 2 tracks");
 });
 
+it("says a stick whose cues already match changed nothing, rather than counting them as updated (#134)", async () => {
+  await renderWith({ importButtonCues: true, importButtonHistory: false, importButtonSettings: false });
+  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, skipped: 0, unchanged: 5 });
+  click(box("USB A"));
+  await settle();
+  click(importButton());
+  await settle();
+  expect(status()).toContain("USB A: cues and beat grids already match your library; nothing was changed.");
+  expect(status()).not.toContain("updated");
+});
+
+it("reports changed and already-matching tracks apart", async () => {
+  await renderWith({ importButtonCues: true, importButtonHistory: false, importButtonSettings: false });
+  importUsb.mockResolvedValueOnce({ tracks: 2, histories: 0, settings: 0, skipped: 1, unchanged: 3 });
+  click(box("USB A"));
+  await settle();
+  click(importButton());
+  await settle();
+  expect(status()).toContain("USB A: updated 2 tracks; 3 already up to date; skipped 1.");
+});
+
 it("starts Import's ticks at the Preferences defaults and imports each ticked kind", async () => {
   await renderWith({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
   expect(importTick("Cues and beat grids")?.checked).toBe(false);

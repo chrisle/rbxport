@@ -573,6 +573,18 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
     })();
   }, [canSync, nodes, ticked, tickedDevices, importHistory, importSettings, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
 
+  /** One line for a cue import: what changed, and what already matched. */
+  const cuesResult = (device: string, result: { tracks: number; skipped: number; unchanged?: number }) => {
+    const unchanged = result.unchanged ?? 0;
+    if (result.tracks === 0 && unchanged > 0 && result.skipped === 0) {
+      return t("{device}: cues and beat grids already match your library; nothing was changed.", { device });
+    }
+    const parts = [t("{device}: updated {count} tracks", { device, count: result.tracks })];
+    if (unchanged > 0) parts.push(t("{count} already up to date", { count: unchanged }));
+    if (result.skipped > 0) parts.push(t("skipped {count}", { count: result.skipped }));
+    return `${parts.join("; ")}.`;
+  };
+
   const runUsbImport = (kinds: readonly ImportKind[]) => {
     if (busy || tickedDevices.size === 0 || kinds.length === 0) return;
     setOperation("import");
@@ -592,7 +604,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
             setStatus([t("Waiting for USB activity to finish, then importing {kind} from {device}…", { kind: noun, device: device.name })]);
             try {
               const result = await backend.importUsb(device.path, kind === "cues", kind === "history", kind === "settings");
-              if (kind === "cues") results.push(`${device.name}: updated ${result.tracks} tracks${result.skipped ? `; skipped ${result.skipped}` : ""}.`);
+              if (kind === "cues") results.push(cuesResult(device.name, result));
               else if (kind === "history") results.push(result.histories ? `${device.name}: imported ${result.histories} play-history entries.` : `${device.name}: no new play-history entries.`);
               else results.push(result.settings ? `${device.name}: imported ${result.settings} CDJ/mixer settings files.` : `${device.name}: no CDJ/mixer settings files found.`);
               if (result.warnings?.length) results.push(...result.warnings.map(warning => `${device.name}: ${warning}`));

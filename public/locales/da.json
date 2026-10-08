@@ -1467,5 +1467,9 @@
   "Aqua": "Aqua",
   "Orange": "Orange",
   "Export to this device first to set its background color.": "Eksportér først til denne enhed for at indstille dens baggrundsfarve.",
-  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…"
+  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…",
+  "skipped {count}": "skipped {count}",
+  "{count} already up to date": "{count} already up to date",
+  "{device}: cues and beat grids already match your library; nothing was changed.": "{device}: cues and beat grids already match your library; nothing was changed.",
+  "{device}: updated {count} tracks": "{device}: updated {count} tracks"
 }

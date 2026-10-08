@@ -1471,5 +1471,9 @@
   "Add memory cue at first beat": "Add memory cue at first beat",
   "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
   "Export to this device first to set its background color.": "배경색을 설정하려면 먼저 이 장치로 내보내십시오.",
-  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…"
+  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…",
+  "skipped {count}": "skipped {count}",
+  "{count} already up to date": "{count} already up to date",
+  "{device}: cues and beat grids already match your library; nothing was changed.": "{device}: cues and beat grids already match your library; nothing was changed.",
+  "{device}: updated {count} tracks": "{device}: updated {count} tracks"
 }

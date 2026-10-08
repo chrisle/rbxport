@@ -1476,5 +1476,9 @@
   "Add memory cue at first beat": "Add memory cue at first beat",
   "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
   "Export to this device first to set its background color.": "请先导出到此设备，然后才能设置其背景颜色。",
-  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…"
+  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…",
+  "skipped {count}": "skipped {count}",
+  "{count} already up to date": "{count} already up to date",
+  "{device}: cues and beat grids already match your library; nothing was changed.": "{device}: cues and beat grids already match your library; nothing was changed.",
+  "{device}: updated {count} tracks": "{device}: updated {count} tracks"
 }
