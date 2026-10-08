@@ -43,10 +43,12 @@
 //! rest of the file is left byte for byte as it was. It is not written while
 //! rekordbox runs, as rekordbox writes its settings back when it quits.
 //!
-//! On Windows `rekordbox3.settings` is `%APPDATA%\Pioneer\rekordbox6\`; that
-//! it holds the same `masterDbDirectory` is [ASSUME], as the Windows binary
-//! was not analysed. A missing or unreadable value falls through to
-//! `options.json` and then the default.
+//! On Windows `rekordbox3.settings` is `%APPDATA%\Pioneer\rekordbox6\` and
+//! holds the same `masterDbDirectory`, written with forward slashes
+//! (`C:/Users/chris/AppData/Roaming/Pioneer/rekordbox`) [OBS rekordbox 7.2.x,
+//! chris-win11 2026-10-08, file read only]; the Windows binary was not
+//! analysed. A missing or unreadable value falls through to `options.json`
+//! and then the default.
 //!
 //! # The order used here
 //!
@@ -189,9 +191,11 @@ impl Sources {
             .rekordbox_settings
             .as_deref()
             .ok_or_else(|| DbError::Open("there is no rekordbox settings folder here".into()))?;
-        let value = dir
-            .to_str()
-            .ok_or_else(|| DbError::Open(format!("{} is not a path rekordbox can store", dir.display())))?;
+        let value = setting_path(
+            dir.to_str()
+                .ok_or_else(|| DbError::Open(format!("{} is not a path rekordbox can store", dir.display())))?,
+            cfg!(windows),
+        );
         let existing = match std::fs::read(file) {
             Ok(bytes) => Some(String::from_utf8(bytes).map_err(|_| {
                 DbError::Open(format!("{} is not text; it was left as it is", file.display()))
@@ -199,7 +203,7 @@ impl Sources {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e.into()),
         };
-        let text = rbl_core::paths::with_setting_value(existing.as_deref(), MASTER_DB_DIRECTORY, value)
+        let text = rbl_core::paths::with_setting_value(existing.as_deref(), MASTER_DB_DIRECTORY, &value)
             .ok_or_else(|| DbError::Open(format!("{} is not a settings file; it was left as it is", file.display())))?;
         if let Some(folder) = file.parent() {
             rbl_core::durable::create_dir_all(folder)?;
@@ -207,6 +211,13 @@ impl Sources {
         rbl_core::durable::write(file, text.as_bytes())?;
         Ok(())
     }
+}
+
+/// A folder as rekordbox writes it into `masterDbDirectory`: with forward
+/// slashes on Windows, `C:/Users/chris/AppData/Roaming/Pioneer/rekordbox`
+/// [OBS rekordbox 7.2.x, chris-win11 2026-10-08].
+fn setting_path(dir: &str, windows: bool) -> String {
+    if windows { dir.replace('\\', "/") } else { dir.to_owned() }
 }
 
 /// Which library to open on this machine; see the module docs for the order.
@@ -496,6 +507,16 @@ mod tests {
         assert!(!drive.exists(), "nothing is made on the missing drive");
         assert!(!sources.default_master_db().exists(), "nor in the default folder");
         assert!(matches!(locate_with(&sources).unwrap(), Located::Absent { .. }));
+    }
+
+    #[test]
+    fn windows_folders_are_written_with_forward_slashes_as_rekordbox_writes_them() {
+        assert_eq!(setting_path("E:\\PIONEER\\Master", true), "E:/PIONEER/Master");
+        assert_eq!(
+            setting_path("C:\\Users\\chris\\AppData\\Roaming\\Pioneer\\rekordbox", true),
+            "C:/Users/chris/AppData/Roaming/Pioneer/rekordbox",
+        );
+        assert_eq!(setting_path("/Volumes/DJ SSD/PIONEER/Master", false), "/Volumes/DJ SSD/PIONEER/Master");
     }
 
     #[test]

@@ -59,11 +59,11 @@ Evidence is static analysis of `/Applications/rekordbox 7` 7.2.11 on macOS
   `masterDbDirectory` on every launch, and rekordbox never reads `db-path`
   back: in the x86_64 slice the `"db-path"` string has one code reference,
   where it is quoted into the JSON that `FileOutputStream::writeText` writes.
-- [UNKNOWN] The Windows binary was not analysed. [ASSUME] Windows keeps the
-  same `masterDbDirectory` in `%APPDATA%\Pioneer\rekordbox6\rekordbox3.settings`
-  (the file rbxport already reads `DropboxSharingPath` from), with the
-  folder written as a Windows path. A missing value falls through to the
-  next source rather than failing.
+- [OBS] Windows keeps the same `masterDbDirectory` in
+  `%APPDATA%\Pioneer\rekordbox6\rekordbox3.settings`, written with forward
+  slashes: `C:/Users/chris/AppData/Roaming/Pioneer/rekordbox` on chris-win11
+  (file read only, 2026-10-08). rbxport writes Windows folders the same way.
+  [UNKNOWN] The Windows binary itself was not analysed.
 
 ## What rbxport does
 
