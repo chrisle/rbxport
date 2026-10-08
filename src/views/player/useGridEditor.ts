@@ -38,6 +38,10 @@ export interface GridEditorActions {
   toggleLock: () => void;
 }
 function describe(error: unknown): string {
+  // Tauri rejects with a bare string when a call never reaches a command
+  // (unknown command, refused permission, arguments it cannot read); saying
+  // it beats a generic failure nobody can trace (#107).
+  if (typeof error === "string" && error.trim()) return error;
   if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string" && error.message.trim()) return error.message;
   return "The beat grid could not be saved.";
 }
@@ -92,9 +96,12 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     if (transaction) options.transaction = transaction;
     run(async edits => {
       if ((change.kind === "stretch" || change.kind === "tempo") && isDynamicFrom?.(boundary)) {
-        // The backend's dialog, not window.confirm: WKWebView answers
-        // window.confirm with Cancel when the host draws no panel, so on
-        // macOS the edit silently did nothing.
+        // The backend's dialog, not window.confirm. tauri-plugin-dialog's
+        // init script replaces window.confirm with a call to a
+        // `plugin:dialog|confirm` command that 2.7 no longer registers, so it
+        // rejected with a bare string and no dialog was ever drawn: on Linux
+        // every tempo edit over tempo changes failed with "could not be
+        // saved" (#107; the macOS edit that did nothing in #86 fits too).
         const question = t("This section has tempo changes. Replace them with a constant tempo?");
         const allowed = await (confirmDynamic?.() ?? (await getBackend()).confirm(question));
         if (!allowed) return state;

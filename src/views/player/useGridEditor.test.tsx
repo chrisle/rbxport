@@ -197,6 +197,12 @@ describe("recovered grid control behavior", () => {
     act(() => grid.tap()); tick(500); act(() => grid.tap()); await settle();
     expect(edits.gridEdit.mock.calls.at(-1)?.[1]).toEqual({ kind: "tap", bpm: 120, anchorMs: 0 });
   });
+  it("says why a call Tauri refused before any command ran", async () => {
+    // Tauri rejects with a bare string, e.g. for a plugin command it does not
+    // register; that used to read as "The beat grid could not be saved." (#107).
+    edits.gridEdit.mockRejectedValue("Command confirm not found"); mount();
+    act(() => grid.double()); await settle(); expect(onError).toHaveBeenCalledWith("Command confirm not found");
+  });
   it("reports failed writes", async () => {
     edits.gridEdit.mockRejectedValue({message: "write failed"}); mount();
     act(() => grid.double()); await settle(); expect(onError).toHaveBeenCalledWith("write failed");

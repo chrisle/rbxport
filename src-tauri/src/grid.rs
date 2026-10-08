@@ -812,6 +812,49 @@ mod tests {
         assert_eq!(Edit::from(GridEdit::Halve), Edit::Halve);
     }
 
+    /// 200 BPM from 100 ms for ten beats, then a tempo change to 100 BPM:
+    /// the grid in the #107 recording.
+    fn with_tempo_change(f: &Fixture) {
+        let mut beats: Vec<Beat> = (0..10_u16).map(|i| Beat { beat_number: (i % 4) + 1, tempo_x100: 20_000, time_ms: 100 + u32::from(i) * 300 }).collect();
+        beats.extend((0..10_u16).map(|i| Beat { beat_number: ((10 + i) % 4) + 1, tempo_x100: 10_000, time_ms: 3100 + u32::from(i) * 600 }));
+        let mut file = AnlzBuilder::new();
+        file.path("/x.mp3").beat_grid(&beats).vbr_table_zero().cue_lists(false);
+        std::fs::write(rbl_anlz::resolve(&f.location.share_root, RELATIVE), file.finish()).unwrap();
+    }
+
+    fn confirmed(f: &Fixture, edit: GridEdit, from_ms: Option<u32>, allow_dynamic: bool) -> AppResult<GridOutcome> {
+        let options = GridOptions { allow_dynamic, duration_ms: Some(9100), ..GridOptions::default() };
+        apply_options(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Edit { edit, from_ms }, &options, &mut |_| Ok(()))
+    }
+
+    #[test]
+    fn a_confirmed_tempo_edit_over_tempo_changes_replaces_them() {
+        // #107 rows 2 and 3: rekordbox asks, then deletes the tempo changes in
+        // scope. Unconfirmed, the backend refuses with a reason; confirmed, the
+        // whole track (or everything from the scope point) takes one tempo.
+        let f = open();
+        with_tempo_change(&f);
+        let refused = confirmed(&f, GridEdit::Stretch { by_ms: -1, time_ms: 400 }, None, false).unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::Malformed);
+        assert_ne!(refused.message, "");
+
+        confirmed(&f, GridEdit::Stretch { by_ms: -1, time_ms: 400 }, None, true).unwrap();
+        let beats = f.dat().beat_grid().unwrap();
+        assert!(beats.iter().all(|b| b.tempo_x100 == beats[0].tempo_x100), "no tempo change survives");
+        assert_eq!(beats[0].time_ms, 100);
+
+        with_tempo_change(&f);
+        confirmed(&f, GridEdit::Tempo { bpm_x100: 12_000, anchor_ms: 0 }, None, true).unwrap();
+        assert!(f.dat().beat_grid().unwrap().iter().all(|b| b.tempo_x100 == 12_000));
+
+        // From a beat inside the first section: the head before it stays.
+        with_tempo_change(&f);
+        confirmed(&f, GridEdit::Tempo { bpm_x100: 15_000, anchor_ms: 1000 }, Some(1000), true).unwrap();
+        let beats = f.dat().beat_grid().unwrap();
+        assert!(beats.iter().filter(|b| b.time_ms < 1000).all(|b| b.tempo_x100 == 20_000));
+        assert!(beats.iter().filter(|b| b.time_ms >= 1000).all(|b| b.tempo_x100 == 15_000));
+    }
+
     #[test]
     fn a_downbeat_at_the_start_puts_beat_one_at_zero() {
         // What the panel sends for "set 1st beat" with the playhead before

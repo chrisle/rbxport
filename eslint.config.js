@@ -31,6 +31,13 @@ const BANNED_SYNTAX = [
       "CallExpression[callee.object.name='JSON'][callee.property.name='parse'] > CallExpression[callee.object.name='JSON'][callee.property.name='stringify']",
     message: "JSON.parse(JSON.stringify(x)) is a deep clone in disguise.",
   },
+  {
+    // tauri-plugin-dialog replaces these with calls to plugin commands it no
+    // longer registers, so they reject instead of asking (#107, #86).
+    selector:
+      "CallExpression[callee.object.name='window'][callee.property.name=/^(alert|confirm|prompt)$/], CallExpression[callee.name=/^(alert|confirm|prompt)$/]",
+    message: "Use getBackend().confirm (the native dialog); window dialogs fail in the Tauri app.",
+  },
 ];
 
 export default tseslint.config(
