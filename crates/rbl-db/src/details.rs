@@ -314,12 +314,17 @@ pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>
 impl crate::Library {
     /// [`track_details`] with `path` as rekordbox shows and opens it: through
     /// the library's drive substitution ([`crate::DriveMapping`]), the way
-    /// rekordbox's `get_file_path` goes through `replaceDrivePath`.
+    /// rekordbox's `get_file_path` goes through `replaceDrivePath`, and for a
+    /// cloud-shared track to its local copy or cloud folder
+    /// ([`crate::TrackPaths`]).
     pub fn track_details(&self, id: &str) -> Result<Option<TrackDetails>> {
-        Ok(track_details(self.connection(), id)?.map(|mut d| {
-            d.path = self.real_folder_path(&d.path);
-            d
-        }))
+        let Some(mut details) = track_details(self.connection(), id)? else {
+            return Ok(None);
+        };
+        if let Some(stored) = self.stored_path(id)? {
+            details.path = self.track_paths().resolve(&stored);
+        }
+        Ok(Some(details))
     }
 }
 

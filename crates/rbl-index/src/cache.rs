@@ -50,7 +50,10 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// resolves a drive library's track paths through `BaseDBDrive` /
 /// `CurrentDBDrive`: formats 1 to 12 kept the stored `FolderPath`, so a
 /// drive that now mounts under another name kept serving its old paths.
-pub const FORMAT: u32 = 13;
+/// 14 reads a cloud-shared track uploaded from this library's device from
+/// its `OrgFolderPath`, as rekordbox does: formats 1 to 13 kept the
+/// `/contents_` path, so such a track played as missing.
+pub const FORMAT: u32 = 14;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 

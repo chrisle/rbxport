@@ -22,6 +22,7 @@ pub mod new_library;
 pub mod write;
 pub mod xml;
 mod schema;
+pub mod track_path;
 
 use std::{
     path::{Path, PathBuf},
@@ -60,6 +61,7 @@ pub fn test_mode() -> bool {
 use serde::{Deserialize, Serialize};
 
 pub use schema::{SchemaProbe, SchemaSupport};
+pub use track_path::{StoredPath, TrackPaths};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -352,11 +354,15 @@ impl Library {
 /// setting, in which case such a track has no file this machine can see.
 #[must_use]
 pub fn cloud_contents_root() -> Option<PathBuf> {
-    let value = rbl_core::paths::rekordbox_setting("DropboxSharingPath")?;
-    if value.is_empty() {
-        return None;
-    }
-    Some(PathBuf::from(value).join("rekordbox"))
+    Some(PathBuf::from(dropbox_sharing_path()?).join("rekordbox"))
+}
+
+/// This machine's Dropbox folder as rekordbox knows it: the
+/// `DropboxSharingPath` setting, which `DropBox::checklocalPublicPath`
+/// reads [OBS 7.2.19 macOS arm64, static, @0x10102ce20]. `None` when unset.
+#[must_use]
+pub fn dropbox_sharing_path() -> Option<String> {
+    rbl_core::paths::rekordbox_setting("DropboxSharingPath").filter(|value| !value.is_empty())
 }
 
 /// rekordbox's drive substitution for a library kept on an external drive.
@@ -474,6 +480,36 @@ impl Library {
         let is_default = default_library_dir().is_ok_and(|d| d == folder);
         let current = current_drive(&folder.to_string_lossy(), is_default, stored.as_deref())?;
         DriveMapping::new(&base?, &current)
+    }
+
+    /// `djmdProperty.DeviceID`: the device this library belongs to, which
+    /// rekordbox compares a cloud-shared track's `DeviceID` with
+    /// ([`track_path`]).
+    pub fn own_device_id(&self) -> Option<String> {
+        self.conn
+            .query_row("SELECT DeviceID FROM djmdProperty LIMIT 1", [], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten()
+            .filter(|id| !id.is_empty())
+    }
+
+    /// Everything [`TrackPaths::resolve`] needs from this library and this
+    /// machine, read once.
+    pub fn track_paths(&self) -> TrackPaths {
+        TrackPaths::new(self.drive_mapping(), dropbox_sharing_path(), self.own_device_id())
+    }
+
+    /// The path columns of one live track, or `None` when there is none.
+    pub fn stored_path(&self, id: &str) -> Result<Option<StoredPath>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {} FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0", StoredPath::COLUMNS),
+                [id],
+                StoredPath::from_row,
+            )
+            .optional()?)
     }
 
     /// A stored `FolderPath` as rekordbox reads it: through the drive

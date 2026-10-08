@@ -178,6 +178,18 @@ fn mix(acc: u64, a: i64, b: i64) -> u64 {
         .wrapping_add(b.unsigned_abs())
 }
 
+/// The path columns of a `load` row: `FolderPath`, then the four selected
+/// last.
+fn stored_path(r: &rusqlite::Row<'_>) -> rusqlite::Result<rbl_db::StoredPath> {
+    Ok(rbl_db::StoredPath {
+        folder_path: text_or_default(r, 11)?,
+        org_folder_path: text_or_default(r, 32)?,
+        content_link: num(r, 33)?,
+        service_id: num(r, 34)?,
+        device_id: text_or_default(r, 35)?,
+    })
+}
+
 /// Builds the index from an open (read-only is fine) library.
 pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     load_with_cue_reader(db, None)
@@ -193,8 +205,7 @@ pub fn load_with_cue_reader(
     let conn = db.connection();
     let t0 = Instant::now();
     let mut lib = Library::default();
-    let cloud_root = rbl_db::cloud_contents_root();
-    let drive = db.drive_mapping();
+    let track_paths = db.track_paths();
     let mut stats = LoadStats::default();
 
     let artists = load_lookup(
@@ -234,7 +245,8 @@ pub fn load_with_cue_reader(
                 AnalysisDataPath, DJPlayCount, StockDate, ReleaseDate, Commnt, Analysed,
                 ImagePath, BitRate, SampleRate, FileSize, ReleaseYear,
                 TrackNo, DiscNo, FileType, BitDepth, Lyricist, DateCreated,
-                DeliveryControl, DeliveryComment
+                DeliveryControl, DeliveryComment,
+                OrgFolderPath, ContentLink, ServiceID, DeviceID
          FROM djmdContent
          WHERE rb_local_deleted = 0",
     )?;
@@ -285,13 +297,12 @@ pub fn load_with_cue_reader(
         lib.rating.push(clamp_u8(num(r, 9)?, 5));
         lib.color.push(clamp_u8(num(r, 10)?, u8::MAX));
 
-        // A cloud-library track's path names rekordbox's Dropbox folder, and
-        // a drive library's paths name the drive as it was mounted when the
-        // library was made; both resolved here once so every reader sees a
-        // file that exists.
-        let folder_path = text_or_default(r, 11)?;
-        let folder_path = drive.as_ref().map_or(folder_path.as_str().into(), |d| d.apply(&folder_path));
-        lib.folder_path.push(&rbl_db::resolve_folder_path(&folder_path, cloud_root.as_deref()));
+        // A cloud-library track's path names rekordbox's Dropbox folder (or,
+        // on the machine that uploaded it, its local copy), and a drive
+        // library's paths name the drive as it was mounted when the library
+        // was made; all resolved here once, as rekordbox resolves them, so
+        // every reader sees the file rekordbox would open.
+        lib.folder_path.push(&track_paths.resolve(&stored_path(r)?));
         lib.file_name.push(&text_or_default(r, 12)?);
         lib.analysis_path.push(&text_or_default(r, 13)?);
         lib.artwork_path.push(&text_or_default(r, 19)?);

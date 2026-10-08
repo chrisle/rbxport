@@ -348,12 +348,17 @@ fn enrich_rows(state: &AppState, rows: &mut [RowDto], columns: &[String]) -> App
     let wanted: Vec<&str> = columns.iter().map(String::as_str).filter(|column| FIELDS.contains(column)).collect();
     if wanted.is_empty() { return Ok(()); }
     state.read_db(|db| {
-        // The location rekordbox shows: the stored path through the drive substitution.
-        let drive = db.drive_mapping();
+        // The location rekordbox shows: the stored path through the drive
+        // substitution, and a cloud-shared track's local copy or cloud folder.
+        let track_paths = wanted.contains(&"location").then(|| db.track_paths());
         for row in rows {
             if row.id.starts_with("file:") { continue; }
-            let Some(mut details) = rbl_db::details::browser_details(db.connection(), &row.id)? else { continue };
-            if let Some(drive) = &drive { details.path = drive.apply(&details.path).into_owned(); }
+            let Some(details) = rbl_db::details::browser_details(db.connection(), &row.id)? else { continue };
+            let cloud = details.path.starts_with("/contents_");
+            let location = match &track_paths {
+                Some(paths) => db.stored_path(&row.id)?.map_or_else(|| details.path.clone(), |stored| paths.resolve(&stored)),
+                None => String::new(),
+            };
             let mut values = serde_json::Map::new();
             for &column in &wanted {
                 let value: Value = match column {
@@ -370,7 +375,7 @@ fn enrich_rows(state: &AppState, rows: &mut [RowDto], columns: &[String]) -> App
                     "sampleRate" => json!(details.sample_rate),
                     "bitrate" => json!(details.bitrate),
                     "bitDepth" => json!(details.bit_depth),
-                    "location" => json!(details.path),
+                    "location" => json!(location),
                     "dateCreated" => json!(details.date_created),
                     "publishTrackInfo" => json!(details.publish),
                     "message" => json!(details.message),
@@ -378,7 +383,7 @@ fn enrich_rows(state: &AppState, rows: &mut [RowDto], columns: &[String]) -> App
                     "djPlayCount" => json!(details.play_count),
                     "myTag" => json!(rbl_db::details::my_tag_names(db.connection(), &row.id).join(", ")),
                     "trackNumber" => json!(details.track_number),
-                    "cloud" => json!(details.path.starts_with("/contents_")),
+                    "cloud" => json!(cloud),
                     _ => continue,
                 };
                 values.insert(column.to_owned(), value);
