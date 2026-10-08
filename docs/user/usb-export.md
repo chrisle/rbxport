@@ -6,6 +6,18 @@ USB export writes player libraries and audio copies to a device. These
 preferences apply to playlist export and Sync Manager; compatibility
 conversion also applies to individual track export.
 
+## What a selection exports
+
+- A playlist exports its tracks. An intelligent playlist exports the tracks
+  its rule admits at the time of export.
+- **Export Folder** exports every playlist and intelligent playlist under the
+  folder, at any depth. The device gets the folder, its subfolders (including
+  empty ones), and the folders above it, with each playlist inside its folder.
+- Sync Manager lists playlists, intelligent playlists, and folders. Ticking a
+  folder ticks every playlist and intelligent playlist under it. The list
+  updates when the library changes while the window is open; ticks on
+  deleted playlists are removed.
+
 ## Delete music outside playlists
 
 Off by default. When enabled, export removes RBXport-exported audio outside

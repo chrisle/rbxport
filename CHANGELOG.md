@@ -5,6 +5,16 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Export Folder now writes the folder with its playlists and intelligent
+  playlists inside it. Previously the device got one empty playlist named
+  after the folder.
+- Sync Manager lists intelligent playlists, and ticking a folder includes
+  them. Playlists and folders created while Sync Manager is open now appear
+  without reopening it.
+
 ## [1.2.0] — 2026-10-08
 
 ### Added
