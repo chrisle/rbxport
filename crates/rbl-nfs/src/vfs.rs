@@ -245,6 +245,21 @@ impl Handle {
     }
 }
 
+/// The handle as the three file-id words and the trailing bytes in hex,
+/// `00000001.00000001.00000001.0000…`, so a log line names exactly what a
+/// player sent when a handle is refused.
+impl std::fmt::Display for Handle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (at, byte) in self.0.iter().enumerate() {
+            if at == 4 || at == 8 || at == 12 {
+                f.write_str(".")?;
+            }
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
 /// Node attributes, as `NFSv2` reports them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Attributes {

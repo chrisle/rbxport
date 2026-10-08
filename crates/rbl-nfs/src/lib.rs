@@ -477,7 +477,7 @@ impl Server {
                             hosts.push(from);
                         }
                         let now: usize = mounts.values().map(Vec::len).sum();
-                        tracing::info!(xid = call.xid, host = %from, %path, mounts = now, "player mounted an export");
+                        tracing::info!(xid = call.xid, host = %from, %path, mounts = now, %handle, "player mounted an export");
                         writer.u32(nfs_status::OK).opaque_fixed(handle.as_bytes());
                     }
                     Some(_) => {
@@ -577,6 +577,7 @@ impl Server {
             return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
         };
         let Some((vfs, index)) = self.locate(&handle) else {
+            tracing::warn!(xid = call.xid, handle = %handle, "getattr of a stale handle");
             return Self::status_only(call.xid, nfs_status::STALE);
         };
         let Some(attributes) = vfs.attributes(index) else {
@@ -601,7 +602,7 @@ impl Server {
             return Self::status_only(call.xid, nfs_status::NAMETOOLONG);
         }
         let Some((vfs, parent)) = self.locate(&handle) else {
-            tracing::warn!(xid = call.xid, %name, "lookup under a stale handle");
+            tracing::warn!(xid = call.xid, %name, handle = %handle, "lookup under a stale handle");
             return Self::status_only(call.xid, nfs_status::STALE);
         };
         if vfs.kind(parent) != Some(NodeKind::Directory) {
@@ -631,7 +632,7 @@ impl Server {
             return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
         };
         let Some((vfs, index)) = self.locate(&handle) else {
-            tracing::warn!(xid = call.xid, offset, count, "read through a stale handle");
+            tracing::warn!(xid = call.xid, offset, count, handle = %handle, "read through a stale handle");
             return Self::status_only(call.xid, nfs_status::STALE);
         };
         if vfs.kind(index) == Some(NodeKind::Directory) {
@@ -696,6 +697,7 @@ impl Server {
             return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
         };
         let Some((vfs, index)) = self.locate(&handle) else {
+            tracing::warn!(xid = call.xid, handle = %handle, "readdir of a stale handle");
             return Self::status_only(call.xid, nfs_status::STALE);
         };
         if vfs.kind(index) != Some(NodeKind::Directory) {
@@ -754,6 +756,7 @@ impl Server {
             return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
         };
         let Some((vfs, index)) = self.locate(&handle) else {
+            tracing::warn!(xid = call.xid, handle = %handle, "statfs of a stale handle");
             return Self::status_only(call.xid, nfs_status::STALE);
         };
         // The host filesystem's own figures, as libFilSiNE reports them:

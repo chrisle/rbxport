@@ -532,6 +532,19 @@ fn a_forged_handle_is_stale_not_a_node() {
 }
 
 #[test]
+fn a_handle_displays_as_its_words_and_trailing_bytes() {
+    // A stale-handle warning carries the handle a player sent, so a log
+    // shows which of the three ids, or which trailing byte, differed from
+    // the one the mount issued (#43).
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    assert_eq!(
+        root.to_string(),
+        format!("00000001.00000001.00000001.{}", "00".repeat(HANDLE_LEN - 12))
+    );
+}
+
+#[test]
 fn attributes_describe_a_read_only_tree() {
     let (_dir, server) = fixture();
     let root = mount_root(&server);
