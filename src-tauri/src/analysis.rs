@@ -631,6 +631,22 @@ mod tests {
         let key_with_cue = AnalysisSettings { bpm_grid: false, first_beat_cue: true, ..settings };
         assert!(!analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_with_cue, &editor).unwrap().added_first_beat_cue);
 
+        // A refused cue write says the analysis was saved and only the cue
+        // is missing, keeps the cause for the log, and adds nothing.
+        let marker = dir.path().join("backups").join(rbl_backup::journal::NAME);
+        std::fs::write(&marker, b"{}").unwrap();
+        let refused = add_first_beat_cue(&state, &fresh, &track_id(0), first_beat + 1_000).unwrap_err();
+        std::fs::remove_file(&marker).unwrap();
+        assert_eq!(refused.kind, ErrorKind::ReadOnly);
+        assert_eq!(refused.message, "The analysis was saved, but the first-beat memory cue could not be added.");
+        assert!(refused.detail.as_deref().is_some_and(|detail| detail.contains("library restore is unfinished")), "{:?}", refused.detail);
+        let memory: Vec<u32> = cues(&fresh).iter().filter(|cue| cue.is_memory()).map(|cue| cue.position_ms).collect();
+        assert_eq!(memory, [first_beat], "the index is unchanged");
+        let stored: i64 = db.connection().query_row(
+            "SELECT COUNT(*) FROM djmdCue WHERE ContentID = ?1 AND Kind = 0 AND rb_local_deleted = 0", [track_id(0)], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(stored, 1, "the database is unchanged");
+
         // Locks refuse both kinds of analysis before any files are rewritten.
         editor.set_locked(&track_id(0), true).unwrap();
         assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).is_err());
