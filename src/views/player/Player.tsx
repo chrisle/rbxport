@@ -1413,11 +1413,14 @@ export const Player = memo(function Player({
    */
   const togglePlay = useCallback(() => {
     // PLAY while a CUE preview is held: the preview becomes real playback, so
-    // letting go of CUE no longer snaps back to the cue point. The deck is
-    // already running; pausing it here would defeat the gesture.
-    if (previewing.current && playback.playing) {
+    // letting go of CUE no longer snaps back to the cue point. A running deck
+    // stays running; pausing it here would defeat the gesture. One whose
+    // preview ran out at the end of the track is started, as any stopped deck
+    // is, and stays where it is when CUE comes up. rekordbox 7 does both
+    // [OBS chris-win11, parity/issue-202].
+    if (previewing.current) {
       previewing.current = false;
-      return;
+      if (playback.playing) return;
     }
     if (!playback.playing && synced && quantize) {
       const leader = peerSync?.();

@@ -101,8 +101,11 @@ test("a preview ends even if the key is let go somewhere else", async ({ page })
 });
 
 test("pressing Space while C is held keeps playing after C is released", async ({ page }) => {
-  // Hold CUE, press PLAY, let go of CUE: the preview latches into playback, as
-  // on a CDJ. Releasing without PLAY still snaps back (first test above).
+  // Hold CUE, press PLAY, let go of CUE: the preview latches into playback.
+  // rekordbox 7 does this with the C key and with the on-screen CUE held by
+  // the mouse [OBS chris-win11 2026-10-08: 00:01.7 held, Space, released,
+  // then 00:04.9 -> 00:07.0 -> 00:09.1 still playing]. Releasing without PLAY
+  // still snaps back (first test above).
   await page.goto("/");
   await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
   const play = page.getByRole("button", { name: "Play", exact: true });
@@ -126,4 +129,36 @@ test("pressing Space while C is held keeps playing after C is released", async (
   await page.waitForTimeout(400);
   await expect(clock).not.toHaveText(after ?? "");
   await expect(clock).not.toHaveText(atCue ?? "");
+});
+
+test("Space after a held preview ran out at the end stays there when C is released", async ({ page }) => {
+  // rekordbox 7 [OBS chris-win11 2026-10-08]: cue set at 02:51.1 of 02:52.4,
+  // C held past the end, Space, C released: the deck stays at 02:52.4. With
+  // no Space, the same release goes back to 02:51.1.
+  await page.goto("/");
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+  const play = page.getByRole("button", { name: "Play", exact: true });
+  await expect(play).toBeEnabled();
+
+  // A cue point a moment before the end: seek there, then C sets it.
+  const overview = await page.getByTestId("player-overview").boundingBox();
+  await page.mouse.click(
+    (overview?.x ?? 0) + (overview?.width ?? 0) * 0.997,
+    (overview?.y ?? 0) + (overview?.height ?? 0) / 2,
+  );
+  const clock = page.getByTestId("player-time");
+  await page.keyboard.press("c");
+  const atCue = await clock.textContent();
+
+  // Held until the track runs out and the deck stops by itself.
+  await page.keyboard.down("c");
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expect(play).toBeVisible({ timeout: 10_000 });
+  const atEnd = await clock.textContent();
+  expect(atEnd).not.toBe(atCue);
+
+  await page.keyboard.press("Space");
+  await page.keyboard.up("c");
+  await page.waitForTimeout(300);
+  await expect(clock).toHaveText(atEnd ?? "");
 });
