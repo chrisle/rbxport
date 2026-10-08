@@ -101,3 +101,15 @@ jobs:
       - name: Clean up signing
         if: always()
         uses: ./.github/actions/cleanup-signing
+
+  # Opt-in (PACKAGING_NIX): prove the freshly built AppImage that the Nix `bin`
+  # package ships runs before a release can publish. Only for the Linux build;
+  # the job inside nix.yml is gated on the repository variable.
+  nix-smoke:
+    name: Nix AppImage smoke test
+    needs: build
+    if: inputs.slug == 'linux-x86_64'
+    uses: ./.github/workflows/nix.yml
+    with:
+      artifact: installers-${{ inputs.target }}
+      source_ref: ${{ inputs.source_ref }}

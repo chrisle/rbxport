@@ -12,7 +12,7 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -23,16 +23,13 @@ jobs:
       RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       # Checkout must precede artifact download because it cleans the workspace.
+      # Full checkout with credentials so the Nix seed step can commit pin.json
+      # back to dev.
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
-          sparse-checkout: |
-            release-notes.json
-            scripts/release-notes.mjs
-            scripts/support-sync.mjs
-            scripts/support-status.mjs
-          sparse-checkout-cone-mode: false
+          persist-credentials: true
 
       - uses: actions/download-artifact@v4
         with:
@@ -231,3 +228,33 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           RBX_DISCORD_BOT_TOKEN: ${{ secrets.RBX_DISCORD_BOT_TOKEN }}
         run: node scripts/support-sync.mjs --release
+
+      # Opt-in (PACKAGING_NIX): point the Nix package at the AppImage just
+      # published, so `github:chrisle/rbxport/dev` always carries the newest
+      # seed and first launch self-updates from there. Main and tags lag one
+      # seed by design.
+      - name: Seed the Nix package
+        if: vars.PACKAGING_NIX == 'true'
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          file="out/rbxport-${version}-linux-x86_64.AppImage"
+          test -f "$file"
+          hash="sha256-$(openssl dgst -sha256 -binary "$file" | base64 -w0)"
+          git fetch origin dev
+          git checkout dev
+          mkdir -p packaging/nix
+          printf '{\n  "version": "%s",\n  "hash": "%s"\n}\n' "$version" "$hash" \
+            > packaging/nix/pin.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3 4 5; do
+            git add packaging/nix/pin.json
+            git commit -m "chore(nix): seed ${version}" \
+              -m "Point packaging/nix/pin.json at the published ${version} AppImage."
+            if git push origin HEAD:dev; then exit 0; fi
+            git fetch origin dev
+            git rebase origin/dev || { git rebase --abort; exit 1; }
+          done
+          echo "::error::could not push the Nix seed"
+          exit 1
