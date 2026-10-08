@@ -13,19 +13,31 @@ fn set_drives(location: &rbl_db::LibraryLocation, base: &str, current: &str) {
         .unwrap();
 }
 
+/// The `CurrentDBDrive` rekordbox reads a fixture library in `folder`
+/// through: off `/Volumes` on macOS and Linux the stored one; on Windows
+/// the folder's drive letter (`getDrivePathFromFilePath` gives `C:/`).
+fn current_drive_for(folder: &std::path::Path, stored: &str) -> String {
+    if cfg!(windows) {
+        format!("{}/", &folder.to_string_lossy()[..2])
+    } else {
+        stored.to_owned()
+    }
+}
+
 #[test]
-fn a_drive_library_reads_track_paths_under_the_drive_it_was_opened_from() {
+fn a_drive_library_reads_track_paths_under_the_drives_current_mount() {
     let root = tempfile::tempdir().unwrap();
-    // The drive is mounted as "Music 1"; the library was made on "Music".
-    let drive = root.path().join("Music 1");
-    let location = fixture::build(&drive.join("PIONEER").join("Master"), fixture::Shape::default()).unwrap();
+    // The library was made on "Music"; the drive now mounts as "Music 1".
+    // The fixture folder is not under /Volumes, so rekordbox's
+    // getDrivePathFromFilePath gives "/" and the stored CurrentDBDrive
+    // stands (the /Volumes cases are rbl-db's `current_drive` unit tests).
+    let location = fixture::build(&root.path().join("PIONEER").join("Master"), fixture::Shape::default()).unwrap();
     fixture::point_at_audio(&location, 0, "/Volumes/Music/Tracks/a.mp3", 300).unwrap();
     fixture::point_at_audio(&location, 1, "/Users/dj/Music/b.mp3", 300).unwrap();
-    // A stale CurrentDBDrive loses to where the library actually is.
-    set_drives(&location, "/Volumes/Music/", "/Volumes/Elsewhere/");
+    set_drives(&location, "/Volumes/Music/", "/Volumes/Music 1/");
 
     let db = Library::open(location.clone(), OpenMode::ReadOnly).unwrap();
-    let expected_drive = format!("{}/", drive.to_string_lossy().replace('\\', "/"));
+    let expected_drive = current_drive_for(root.path(), "/Volumes/Music 1/");
     let (index, _) = rbl_index::load(&db).unwrap();
     let path_of = |i: usize| {
         let id: u64 = fixture::track_id(i).parse().unwrap();
@@ -41,6 +53,8 @@ fn a_drive_library_reads_track_paths_under_the_drive_it_was_opened_from() {
         .query_row("SELECT FolderPath FROM djmdContent WHERE ID = ?1", [fixture::track_id(0)], |r| r.get(0))
         .unwrap();
     assert_eq!(stored, "/Volumes/Music/Tracks/a.mp3");
+    // The Info panel's Location reads the same way.
+    assert_eq!(db.track_details(&fixture::track_id(0)).unwrap().unwrap().path, format!("{expected_drive}Tracks/a.mp3"));
 }
 
 #[test]
@@ -51,10 +65,11 @@ fn a_library_without_drive_values_reads_paths_as_stored() {
     let db = Library::open(location.clone(), OpenMode::ReadOnly).unwrap();
     assert!(db.drive_mapping().is_none());
 
-    // Not on a drive layout: the stored CurrentDBDrive is what rekordbox uses.
+    // Off /Volumes: the stored CurrentDBDrive is what rekordbox uses.
     set_drives(&location, "/Volumes/Music/", "/Volumes/Music 1/");
     let db = Library::open(location, OpenMode::ReadOnly).unwrap();
     let mapping = db.drive_mapping().unwrap();
-    assert_eq!(mapping.apply("/volumes/music/x.mp3"), "/Volumes/Music 1/x.mp3", "the prefix compares ignoring case");
+    let expected_drive = current_drive_for(root.path(), "/Volumes/Music 1/");
+    assert_eq!(mapping.apply("/volumes/music/x.mp3"), format!("{expected_drive}x.mp3"), "the prefix compares ignoring case");
     assert_eq!(mapping.apply("/Volumes/Music 2/x.mp3"), "/Volumes/Music 2/x.mp3");
 }

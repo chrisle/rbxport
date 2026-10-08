@@ -46,8 +46,11 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// preserves the database IDs of named lookup rows for Link Export. 11 adds
 /// the columns behind the remaining sortable browser headings and their
 /// ranks. 12 adds which My Tags each track carries: formats 1 to 11 left
-/// them out, so an intelligent playlist on a My Tag opened empty.
-pub const FORMAT: u32 = 12;
+/// them out, so an intelligent playlist on a My Tag opened empty. 13
+/// resolves a drive library's track paths through `BaseDBDrive` /
+/// `CurrentDBDrive`: formats 1 to 12 kept the stored `FolderPath`, so a
+/// drive that now mounts under another name kept serving its old paths.
+pub const FORMAT: u32 = 13;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 

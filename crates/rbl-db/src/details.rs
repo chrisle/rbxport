@@ -311,6 +311,18 @@ pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>
     Ok(Some(details))
 }
 
+impl crate::Library {
+    /// [`track_details`] with `path` as rekordbox shows and opens it: through
+    /// the library's drive substitution ([`crate::DriveMapping`]), the way
+    /// rekordbox's `get_file_path` goes through `replaceDrivePath`.
+    pub fn track_details(&self, id: &str) -> Result<Option<TrackDetails>> {
+        Ok(track_details(self.connection(), id)?.map(|mut d| {
+            d.path = self.real_folder_path(&d.path);
+            d
+        }))
+    }
+}
+
 /// Browser page enrichment omits the separate My Tag id query. Its names are
 /// read only when that column is visible.
 pub fn browser_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {

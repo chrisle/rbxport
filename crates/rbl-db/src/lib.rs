@@ -356,21 +356,22 @@ pub fn cloud_contents_root() -> Option<PathBuf> {
 /// rekordbox's drive substitution for a library kept on an external drive.
 ///
 /// [OBS 7.2.x macOS arm64, static] `djmdProperty` holds `BaseDBDrive` and
-/// `CurrentDBDrive` (`AppSyncDBController::getDriveInfo` selects both).
-/// When rekordbox opens a library outside its default folder,
-/// `DatabaseMediator::execSelectLibrary` stores the drive of the library
-/// folder as `CurrentDBDrive` (`setCurrentDbDrive`, which appends `/`).
-/// Track paths are then read through `convertToRealPath`: when both values
-/// are non-empty and differ, `replaceDrivePath(path, BaseDBDrive,
-/// CurrentDBDrive)` swaps a leading `BaseDBDrive` (compared ignoring case)
-/// for `CurrentDBDrive`. So a library made while its drive was mounted at
+/// `CurrentDBDrive` (`AppSyncDBController::getDriveInfo` @0x100a83b68 runs
+/// `select BaseDBDrive, CurrentDBDrive from djmdProperty`). Track paths are
+/// read through `convertToRealPath` @0x10150f54c: when both values are
+/// non-empty and differ, `db::replaceDrivePath(path, BaseDBDrive,
+/// CurrentDBDrive)` @0x10199898c swaps a leading `BaseDBDrive` (juce
+/// `startsWithIgnoreCase`) for `CurrentDBDrive`, cutting `BaseDBDrive`'s
+/// length in characters. So a library made while its drive was mounted at
 /// `/Volumes/Music/` keeps that prefix in `FolderPath` even after the drive
 /// mounts at `/Volumes/Music 1/`; rekordbox finds the files, a reader of the
-/// raw column does not.
+/// raw column does not. How `CurrentDBDrive` is chosen: [`current_drive`].
 ///
-/// [ASSUME] The drive of a library at `<drive>/PIONEER/Master/master.db` (or
-/// `.PIONEER`) is `<drive>/` with forward slashes. [UNKNOWN] The Windows
-/// binary was not analysed; the same columns exist there.
+/// [ASSUME] juce compares ignoring case one character at a time through the
+/// platform's wide-character case mapping; this compares each character's
+/// Rust lowercase mapping, which agrees for every letter that maps to a
+/// single character (`Ä`/`ä` included). [UNKNOWN] The Windows binary was
+/// not analysed; the same columns exist there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriveMapping {
     base: String,
@@ -390,47 +391,92 @@ impl DriveMapping {
     /// rekordbox's `replaceDrivePath` does; anything else unchanged.
     #[must_use]
     pub fn apply<'a>(&self, path: &'a str) -> std::borrow::Cow<'a, str> {
-        let n = self.base.len();
-        if path.len() >= n && path.is_char_boundary(n) && path[..n].eq_ignore_ascii_case(&self.base) {
-            std::borrow::Cow::Owned(format!("{}{}", self.current, &path[n..]))
-        } else {
-            std::borrow::Cow::Borrowed(path)
+        let mut rest = path.char_indices();
+        for want in self.base.chars() {
+            match rest.next() {
+                Some((_, got)) if got == want || got.to_lowercase().eq(want.to_lowercase()) => {}
+                _ => return std::borrow::Cow::Borrowed(path),
+            }
         }
+        let tail = rest.next().map_or("", |(i, _)| &path[i..]);
+        std::borrow::Cow::Owned(format!("{}{tail}", self.current))
     }
 }
 
-/// The drive a library at `<drive>/PIONEER/Master/master.db` (or
-/// `.PIONEER`) lives on, in rekordbox's slash-terminated form.
-fn library_drive(master_db: &Path) -> Option<String> {
-    let master = master_db.parent()?;
-    if master.file_name()? != "Master" {
-        return None;
+/// rekordbox's `tools::UnifiedFilePath::getDrivePathFromFilePath(path, true)`
+/// [OBS 7.2.x macOS arm64, static, @0x1014dc3e4]: `X:/` for a path whose
+/// second character is `:`; for a path starting with `/`, the mount point
+/// `/Volumes/<name>/` when it starts with `/Volumes/` (ignoring case, the
+/// path's own spelling kept), otherwise `/`; anything else empty.
+/// [ASSUME] rekordbox's `toUnifiedFilePath` turns `\` into `/` first.
+fn drive_of(path: &str) -> String {
+    const VOLUMES: &str = "/Volumes/";
+    let path = path.replace('\\', "/");
+    if path.chars().nth(1) == Some(':') {
+        let letter: String = path.chars().take(2).collect();
+        return format!("{letter}/");
     }
-    let pioneer = master.parent()?;
-    let name = pioneer.file_name()?;
-    if name != "PIONEER" && name != ".PIONEER" {
-        return None;
+    if !path.starts_with('/') {
+        return String::new();
     }
-    let mut drive = pioneer.parent()?.to_string_lossy().replace('\\', "/");
-    if !drive.ends_with('/') {
-        drive.push('/');
+    if !path.get(..VOLUMES.len()).is_some_and(|p| p.eq_ignore_ascii_case(VOLUMES)) {
+        return "/".to_owned();
     }
-    Some(drive)
+    match path[VOLUMES.len()..].find('/') {
+        Some(i) => format!("{}/", &path[..VOLUMES.len() + i]),
+        None => format!("{path}/"),
+    }
+}
+
+/// The `CurrentDBDrive` rekordbox reads a library's paths through, given
+/// the folder the library was opened from and the stored value.
+///
+/// [OBS 7.2.x macOS arm64, static] `DatabaseMediator::execSelectLibrary`
+/// @0x100581888: for a library folder other than
+/// `getDefaultLibraryFolderPath()`, it reads the stored drives
+/// (`getMasterDbDriveInfo`); when the folder starts with the stored
+/// `CurrentDBDrive` (case-sensitive juce `startsWith`, which is true for an
+/// empty value) nothing changes; otherwise it takes
+/// `getDrivePathFromFilePath(folder, true)` and, unless that is `/`, stores
+/// it with `setCurrentDbDrive`. In every other case the stored value stands.
+/// [ASSUME] the second `getMasterDbDriveInfo` out-parameter is
+/// `CurrentDBDrive`, as in `getDriveInfo`.
+fn current_drive(folder: &str, is_default_folder: bool, stored: Option<&str>) -> Option<String> {
+    let stored_value = stored.unwrap_or("");
+    if is_default_folder || folder.starts_with(stored_value) {
+        return stored.map(str::to_owned);
+    }
+    let drive = drive_of(folder);
+    if drive == "/" {
+        stored.map(str::to_owned)
+    } else {
+        Some(drive)
+    }
 }
 
 impl Library {
     /// rekordbox's drive substitution for this library's track paths, if it
-    /// makes one. The current drive is where this library was opened from
-    /// when that is a drive's `PIONEER/Master` folder (what rekordbox records
-    /// when it opens such a library), otherwise the stored `CurrentDBDrive`.
-    /// Read-only.
+    /// makes one, with `CurrentDBDrive` chosen as rekordbox chooses it when
+    /// it opens this library ([`current_drive`]). Read-only: the stored
+    /// value is not updated.
     pub fn drive_mapping(&self) -> Option<DriveMapping> {
         let (base, stored): (Option<String>, Option<String>) = self
             .conn
             .query_row("SELECT BaseDBDrive, CurrentDBDrive FROM djmdProperty", [], |r| Ok((r.get(0)?, r.get(1)?)))
             .ok()?;
-        let current = library_drive(&self.location.master_db).or(stored)?;
+        let folder = self.location.master_db.parent()?;
+        let is_default = default_library_dir().is_ok_and(|d| d == folder);
+        let current = current_drive(&folder.to_string_lossy(), is_default, stored.as_deref())?;
         DriveMapping::new(&base?, &current)
+    }
+
+    /// A stored `FolderPath` as rekordbox reads it: through the drive
+    /// substitution, if this library has one.
+    pub fn real_folder_path(&self, folder_path: &str) -> String {
+        match self.drive_mapping() {
+            Some(m) => m.apply(folder_path).into_owned(),
+            None => folder_path.to_owned(),
+        }
     }
 }
 
@@ -477,10 +523,39 @@ mod tests {
     }
 
     #[test]
-    fn a_library_drive_is_the_folder_holding_pioneer_master() {
-        assert_eq!(library_drive(Path::new("/Volumes/A 1/PIONEER/Master/master.db")).as_deref(), Some("/Volumes/A 1/"));
-        assert_eq!(library_drive(Path::new("/Volumes/A/.PIONEER/Master/master.db")).as_deref(), Some("/Volumes/A/"));
-        assert_eq!(library_drive(Path::new("/Users/me/Library/Pioneer/rekordbox/master.db")), None);
+    fn drive_mapping_folds_case_beyond_ascii_like_juce() {
+        let m = DriveMapping::new("/Volumes/Äb/", "/Volumes/Äb 1/").unwrap();
+        assert_eq!(m.apply("/volumes/äB/x.mp3"), "/Volumes/Äb 1/x.mp3");
+        assert_eq!(m.apply("/Volumes/Äb"), "/Volumes/Äb");
+    }
+
+    #[test]
+    fn the_drive_of_a_path_is_its_mount_point_as_rekordbox_takes_it() {
+        assert_eq!(drive_of("/Volumes/X/sub/PIONEER/Master"), "/Volumes/X/");
+        assert_eq!(drive_of("/volumes/Music 1/PIONEER/Master"), "/volumes/Music 1/");
+        assert_eq!(drive_of("/Volumes/X"), "/Volumes/X/");
+        assert_eq!(drive_of("/Users/me/PIONEER/Master"), "/");
+        assert_eq!(drive_of("/VolumesX/a"), "/");
+        assert_eq!(drive_of("D:\\PIONEER\\Master"), "D:/");
+        assert_eq!(drive_of("relative/path"), "");
+    }
+
+    #[test]
+    fn current_drive_follows_exec_select_library() {
+        let stored = Some("/Volumes/Old/");
+        // A library under /Volumes records that mount, not the folder above PIONEER/Master.
+        assert_eq!(current_drive("/Volumes/X/sub/PIONEER/Master", false, stored).as_deref(), Some("/Volumes/X/"));
+        assert_eq!(current_drive("/Volumes/Music 1/PIONEER/Master", false, stored).as_deref(), Some("/Volumes/Music 1/"));
+        // Off /Volumes the drive is "/", and rekordbox keeps the stored value.
+        assert_eq!(current_drive("/Users/me/PIONEER/Master", false, stored).as_deref(), Some("/Volumes/Old/"));
+        assert_eq!(current_drive("/Users/me/PIONEER/Master", false, None), None);
+        // The default library folder never updates it.
+        assert_eq!(current_drive("/Volumes/X/rekordbox", true, stored).as_deref(), Some("/Volumes/Old/"));
+        // A folder already under the stored drive (case-sensitive) keeps it.
+        assert_eq!(current_drive("/Volumes/Old/PIONEER/Master", false, stored).as_deref(), Some("/Volumes/Old/"));
+        assert_eq!(current_drive("/Volumes/old/PIONEER/Master", false, stored).as_deref(), Some("/Volumes/old/"));
+        // An empty stored value: juce startsWith("") is true, so nothing changes.
+        assert_eq!(current_drive("/Volumes/X/PIONEER/Master", false, Some("")).as_deref(), Some(""));
     }
 
     #[test]
