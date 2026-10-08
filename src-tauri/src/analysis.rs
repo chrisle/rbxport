@@ -29,21 +29,31 @@ use crate::state::AppState;
 /// longer than that is analysed up to the cap and drawn that far.
 const DECODE_CAP_SECS: f64 = 1800.0;
 
+/// How near an existing memory cue has to be to the first beat to count as
+/// one already there. Re-analysing with the same settings places the first
+/// beat on the same millisecond, so this only absorbs rounding; a beat that
+/// moved further is a new place and gets its own cue.
+const FIRST_BEAT_CUE_TOLERANCE_MS: u32 = 5;
+
 /// Per-batch choices from the Analysis Setting dialog. Missing settings
 /// preserve the defaults used by imports and older callers.
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools, reason = "the dialog's independent checkboxes, sent together")]
 pub struct AnalysisSettings {
     pub bpm_grid: bool,
     pub key: bool,
     pub high_precision: bool,
     pub min_bpm: f64,
     pub max_bpm: f64,
+    /// Add a memory cue on the first beat of the new grid, unless one is
+    /// already there. Only a BPM / Grid pass has a grid to place it on.
+    pub first_beat_cue: bool,
 }
 
 impl Default for AnalysisSettings {
     fn default() -> Self {
-        Self { bpm_grid: true, key: true, high_precision: true, min_bpm: 70.0, max_bpm: 180.0 }
+        Self { bpm_grid: true, key: true, high_precision: true, min_bpm: 70.0, max_bpm: 180.0, first_beat_cue: false }
     }
 }
 
@@ -84,6 +94,10 @@ pub struct AnalysisResultDto {
     pub elapsed_ms: u64,
     /// Where the analysis files went, share-relative.
     pub analysis_path: String,
+    /// Whether this pass added a memory cue on the first beat, so the
+    /// command can tell decks showing the track to refetch its cues.
+    #[serde(skip)]
+    pub added_first_beat_cue: bool,
 }
 
 /// Analyses one track and keeps the result: the files in the share tree,
@@ -118,6 +132,9 @@ pub async fn analyse_track<R: tauri::Runtime>(
     // The track's id, well inside the 1 KB event cap: a deck showing the
     // track redraws its waveform and grid from the new files.
     let _ = tauri::Emitter::emit(&app, "analysis:changed", &result.track_id);
+    if result.added_first_beat_cue {
+        let _ = tauri::Emitter::emit(&app, "cues:changed", &result.track_id);
+    }
     Ok(result)
 }
 
@@ -216,6 +233,10 @@ fn analyse_and_save(
     let length_sec = (audio.duration_secs() < DECODE_CAP_SECS - 1.0).then_some(duration_sec);
 
     save_analysis_files(state, &location, track_id, &dat, files, bpm_x100, detected_key.as_deref(), &relative, length_sec, editor)?;
+    let added_first_beat_cue = match beats.first() {
+        Some(first) if settings.first_beat_cue => add_first_beat_cue(state, library, track_id, first.time_ms)?,
+        _ => false,
+    };
 
     Ok(AnalysisResultDto {
         track_id: track_id.to_owned(),
@@ -227,7 +248,44 @@ fn analyse_and_save(
         duration_sec,
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         analysis_path: relative,
+        added_first_beat_cue,
     })
+}
+
+/// Adds a memory cue at `first_beat_ms` unless a memory cue is already
+/// there, and re-reads the track's cues into the index. Resolves to whether
+/// a cue was added.
+///
+/// Runs after the analysis is published, so a refusal here leaves the new
+/// grid in place; the error says the analysis was saved and only the cue
+/// is missing.
+fn add_first_beat_cue(
+    state: &AppState,
+    library: &rbl_index::Library,
+    track_id: &str,
+    first_beat_ms: u32,
+) -> AppResult<bool> {
+    // The index is current: every cue edit re-reads its track's cues.
+    let Some(row) = library.row_of(track_id) else { return Ok(false) };
+    if !needs_first_beat_cue(&library.cues_of(row), first_beat_ms) {
+        return Ok(false);
+    }
+    state
+        .write_then(
+            |writer| writer.add_cue(track_id, rbl_index::Cue::MEMORY, first_beat_ms),
+            |db, _cue| rbl_index::reload_cues_of(db, library, track_id).map_err(rbl_db::DbError::from),
+        )
+        .map_err(|e| {
+            let cause = write_error(e);
+            AppError::new(cause.kind, "The analysis was saved, but the first-beat memory cue could not be added.")
+                .with_detail(cause.message)
+        })?;
+    Ok(true)
+}
+
+/// Whether no memory cue (or memory loop) already starts on the first beat.
+fn needs_first_beat_cue(cues: &[rbl_index::Cue], first_beat_ms: u32) -> bool {
+    !cues.iter().any(|cue| cue.is_memory() && cue.position_ms.abs_diff(first_beat_ms) <= FIRST_BEAT_CUE_TOLERANCE_MS)
 }
 
 /// Journals, publishes and registers a fresh analysis — the on-disk half of
@@ -314,6 +372,7 @@ fn analyse_key_only(state: &AppState, library: &rbl_index::Library, row: usize, 
         duration_sec: library.length_sec.get(row).copied().unwrap_or(0),
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         analysis_path: library.analysis_path.get(row).to_owned(),
+        added_first_beat_cue: false,
     })
 }
 
@@ -550,10 +609,43 @@ mod tests {
         let key_after: Option<String> = db.connection().query_row("SELECT KeyID FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| r.get(0)).unwrap();
         assert_eq!(key_after, key_before);
 
+        // No cue unless asked for: the passes above left the track's cues alone.
+        let cues = |library: &rbl_index::Library| library.cues_of(library.row_of(&track_id(0)).unwrap());
+        assert!(cues(&fresh).iter().all(|cue| !cue.is_memory()));
+
+        // Asked for, a memory cue lands on the grid's first beat, once: a
+        // second pass finds it there and adds nothing.
+        let first_beat = rbl_anlz::Anlz::read(&dat_path).unwrap().beat_grid().unwrap()[0].time_ms;
+        let with_cue = AnalysisSettings { first_beat_cue: true, ..settings };
+        let result = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &with_cue, &editor).unwrap();
+        assert!(result.added_first_beat_cue);
+        let memory: Vec<u32> = cues(&fresh).iter().filter(|cue| cue.is_memory()).map(|cue| cue.position_ms).collect();
+        assert_eq!(memory, [first_beat], "the index follows without a reload");
+        let again = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &with_cue, &editor).unwrap();
+        assert!(!again.added_first_beat_cue);
+        let stored: i64 = db.connection().query_row(
+            "SELECT COUNT(*) FROM djmdCue WHERE ContentID = ?1 AND Kind = 0 AND rb_local_deleted = 0", [track_id(0)], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(stored, 1);
+        // Key-only has no grid to place it on.
+        let key_with_cue = AnalysisSettings { bpm_grid: false, first_beat_cue: true, ..settings };
+        assert!(!analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_with_cue, &editor).unwrap().added_first_beat_cue);
+
         // Locks refuse both kinds of analysis before any files are rewritten.
         editor.set_locked(&track_id(0), true).unwrap();
         assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).is_err());
         assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_only, &editor).is_err());
+    }
+
+    #[test]
+    fn a_memory_cue_near_the_first_beat_counts_and_hot_cues_do_not() {
+        let cue = |kind: u8, position_ms: u32, out_ms: u32| rbl_index::Cue { id: 1, position_ms, out_ms, kind, colour: 0 };
+        assert!(needs_first_beat_cue(&[], 120));
+        assert!(!needs_first_beat_cue(&[cue(0, 120, 0)], 120));
+        assert!(!needs_first_beat_cue(&[cue(0, 125, 0)], 120), "within the tolerance");
+        assert!(!needs_first_beat_cue(&[cue(0, 120, 4_000)], 120), "a memory loop marks the beat too");
+        assert!(needs_first_beat_cue(&[cue(0, 126, 0)], 120));
+        assert!(needs_first_beat_cue(&[cue(1, 120, 0)], 120), "a hot cue is not a memory cue");
     }
 
     #[test]
