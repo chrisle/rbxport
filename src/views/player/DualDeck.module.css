@@ -356,3 +356,9 @@
   color: var(--c-text);
   line-height: 1;
 }
+
+/* A playing loop, or an IN that waits for its OUT: the pad blue. */
+.loopField[data-on],
+.icon[data-on] { background: var(--c-pad-active); color: var(--c-icon-on); }
+.icon[data-on] .loopGlyph { color: var(--c-icon-on); }
+.loopField:disabled { color: var(--c-pad-label); }

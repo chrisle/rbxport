@@ -139,6 +139,32 @@ export interface DualControlsProps {
   };
   quantize: boolean;
   onQuantize: () => void;
+  /** The loop controls. `Player` owns the loop; the row only draws it. */
+  loop: DualLoop;
+}
+
+export interface DualLoop {
+  /** AU: a beat loop of `beats` from the head. MA: IN and OUT by hand. */
+  mode: "auto" | "manual";
+  onMode: (mode: "auto" | "manual") => void;
+  /** The beat loop length, 1/4 to 32 beats. */
+  beats: number;
+  onShorter: () => void;
+  onLonger: () => void;
+  /** A loop is playing. */
+  active: boolean;
+  /** MA: an IN is set and waits for its OUT. */
+  pendingIn: boolean;
+  /** A track with a grid to count beats on. */
+  canLoop: boolean;
+  /** No track to loop. */
+  idle: boolean;
+  /** A loop range exists, playing or not. */
+  hasLoop: boolean;
+  /** The length field: start a beat loop, or exit the one that plays. */
+  onToggle: () => void;
+  onIn: () => void;
+  onOut: () => void;
 }
 
 /**
@@ -147,10 +173,10 @@ export interface DualControlsProps {
  * Left to right, as the capture has it: the three grid-shift buttons, MEMORY,
  * AU | MA, the loop length with a step either side,
  * the two loop buttons; then at the right, Q. The grid buttons
- * use the shared grid editor; the loop placeholders remain disabled.
+ * use the shared grid editor, and the loop buttons drive `Player`'s loop.
  */
 export const DualControls = memo(function DualControls({
-  gridEditor, readOnly, memory, quantize, onQuantize,
+  gridEditor, readOnly, memory, quantize, onQuantize, loop,
 }: DualControlsProps) {
   const hold = useHoldRepeat();
   const gridReason = "Edit the beat grid";
@@ -183,25 +209,74 @@ export const DualControls = memo(function DualControls({
         MEMORY
       </button>
 
-      <div className={styles.group} role="group" aria-label="Cue mode">
-        <button type="button" className={styles.chip} data-on aria-pressed>AU</button>
-        <button type="button" className={styles.chip} aria-pressed={false}>MA</button>
+      {/* AU | MA: "Change Auto Beat Loop/Manual Loop display" in german.lang. */}
+      <div className={styles.group} role="group" aria-label="Loop mode">
+        <button
+          type="button"
+          className={styles.chip}
+          data-on={loop.mode === "auto" || undefined}
+          aria-pressed={loop.mode === "auto"}
+          title={tip("Auto Beat Loop")}
+          onClick={() => loop.onMode("auto")}
+        >
+          AU
+        </button>
+        <button
+          type="button"
+          className={styles.chip}
+          data-on={loop.mode === "manual" || undefined}
+          aria-pressed={loop.mode === "manual"}
+          title={tip("Manual Loop")}
+          onClick={() => loop.onMode("manual")}
+        >
+          MA
+        </button>
       </div>
 
-      {/* The auto beat loop's length in beats — "Switch the page of beat
-          length" in german.lang. Loops are not built, so it is inert. */}
-      <div className={styles.loopLength} aria-label="Beat loop length">
-        <button type="button" className={styles.step} aria-label="Shorter loop" disabled>‹</button>
-        <span className={styles.loopField}>2</span>
-        <button type="button" className={styles.step} aria-label="Longer loop" disabled>›</button>
+      {/* The beat loop length — "Switch the page of beat length" in
+          german.lang. The field starts a loop of that length, or exits the
+          loop that plays; a step changes the length of a playing loop. */}
+      <div className={styles.loopLength} role="group" aria-label="Beat loop length">
+        <button type="button" className={styles.step} aria-label="Shorter loop" disabled={loop.beats <= 0.25} onClick={loop.onShorter}>‹</button>
+        <button
+          type="button"
+          className={styles.loopField}
+          data-on={loop.active || undefined}
+          aria-pressed={loop.active}
+          aria-label={loop.active ? "Exit loop" : `${loop.beats} beat loop`}
+          title={tip(loop.active ? "Exit the loop" : `Loop ${loop.beats} beat${loop.beats === 1 ? "" : "s"} from here`)}
+          disabled={!loop.canLoop}
+          onClick={loop.onToggle}
+        >
+          {loop.beats < 1 ? `1/${Math.round(1 / loop.beats)}` : loop.beats}
+        </button>
+        <button type="button" className={styles.step} aria-label="Longer loop" disabled={loop.beats >= 32} onClick={loop.onLonger}>›</button>
       </div>
 
-      {/* Loop In and Loop Out — german.lang's names. Not built. */}
+      {/* Loop In and Loop Out — german.lang's names. In AU, IN starts a beat
+          loop of the length above; in MA, IN and OUT set its ends. OUT with
+          no IN waiting is RELOOP/EXIT. */}
       <div className={styles.loops} role="group" aria-label="Loop">
-        <button type="button" className={styles.icon} aria-label="Loop in" disabled title={tip("Loops are not built yet.")}>
+        <button
+          type="button"
+          className={styles.icon}
+          aria-label="Loop in"
+          data-on={loop.active || loop.pendingIn || undefined}
+          disabled={loop.mode === "auto" ? !loop.canLoop : loop.idle}
+          title={tip(loop.mode === "auto" ? `Loop ${loop.beats} beat${loop.beats === 1 ? "" : "s"} from here` : "Loop In")}
+          onClick={loop.onIn}
+        >
           <LoopInIcon className={styles.loopGlyph} />
         </button>
-        <button type="button" className={styles.icon} aria-label="Loop out" disabled title={tip("Loops are not built yet.")}>
+        <button
+          type="button"
+          className={styles.icon}
+          aria-label="Loop out"
+          data-on={loop.active || undefined}
+          disabled={!loop.pendingIn && !loop.hasLoop}
+          title={tip(loop.pendingIn ? "Loop Out" : "Reloop/Exit")}
+          onClick={loop.onOut}
+        >
           <LoopOutIcon className={styles.loopGlyph} />
         </button>
       </div>

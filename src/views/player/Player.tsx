@@ -1286,11 +1286,11 @@ export const Player = memo(function Player({
     }
     loopOfBeats(loopBeats);
   }, [playback, activeLoop, loopOfBeats, loopBeats]);
-  /** The head in seconds. A locked deck puts it on the nearest whole beat. */
+  /** The head in seconds, on the loop snap grid when Q is on. */
   const loopPoint = useCallback(() => {
     const ms = playback.positionNow() * 1000;
-    return (phaseLocked && grid.times.length > 0 ? nearestBeatMs(grid, ms) : ms) / 1000;
-  }, [playback, phaseLocked, grid]);
+    return (loopSnap && loopSnap.times.length > 0 ? nearestBeatMs(loopSnap, ms) : ms) / 1000;
+  }, [playback, loopSnap]);
   const markLoopIn = useCallback(() => {
     if (playback.idle) return;
     setLoopIn(loopPoint());
@@ -1305,6 +1305,48 @@ export const Player = memo(function Player({
     if (!playback.loop) return;
     playback.setLoopActive(!playback.loop.active);
   }, [playback]);
+  /**
+   * The beat loop length, from ‹ › or the half and double keys. A loop that
+   * is playing takes the new length at once, from its own in point. A head
+   * past the new out point keeps its place in the beat: it goes back by
+   * whole loops, not to the in point.
+   */
+  const resizeLoop = useCallback((beats: number) => {
+    const next = Math.min(Math.max(beats, 0.25), 32);
+    setLoopBeats(next);
+    const loop = playback.loop;
+    if (!loop?.active || playback.idle) return;
+    const range = beatLoopRange(grid, null, loop.inSeconds * 1000, next);
+    if (!range) return;
+    const [from, to] = [range[0] / 1000, range[1] / 1000];
+    playback.setLoop(from, to);
+    const head = playback.positionNow();
+    if (head >= to) playback.seek(from + ((head - from) % (to - from)));
+  }, [playback, grid]);
+  /** OUT: the end of a waiting IN, or else RELOOP/EXIT. Both layouts. */
+  const loopOut = useCallback(() => {
+    if (loopIn !== null) markLoopOut();
+    else reloopOrExit();
+  }, [loopIn, markLoopOut, reloopOrExit]);
+  // The two-deck control row: AU starts a loop of the chosen length from
+  // the head and MA takes IN and OUT by hand, both on the grid when Q is on.
+  // The handlers are the one-deck layout's, so the two behave the same.
+  const dualLoop = useMemo(() => ({
+    mode: loopMode,
+    onMode: setLoopMode,
+    beats: loopBeats,
+    onShorter: () => resizeLoop(loopBeats / 2),
+    onLonger: () => resizeLoop(loopBeats * 2),
+    active: activeLoop,
+    pendingIn: loopIn !== null,
+    canLoop: !playback.idle && grid.times.length >= 2,
+    idle: playback.idle,
+    onToggle: autoLoop,
+    onIn: loopMode === "auto" ? () => loopOfBeats(loopBeats) : markLoopIn,
+    onOut: loopOut,
+    hasLoop: playback.loop !== null,
+  }), [loopMode, loopBeats, resizeLoop, activeLoop, loopIn, playback.idle, playback.loop, grid.times.length,
+    autoLoop, loopOfBeats, markLoopIn, loopOut]);
   // A play is recorded after a minute of the track sounding, once per load,
   // when Preferences › Advanced › History says so and the library can be
   // written. rekordbox's own threshold is not recorded; a minute is what
@@ -1699,11 +1741,11 @@ export const Player = memo(function Player({
           if (!event.repeat) reloopOrExit();
           break;
         case "loopHalf":
-          setLoopBeats((beats) => Math.max(0.25, beats / 2));
+          resizeLoop(loopBeats / 2);
           break;
         case "loopDouble":
           event.preventDefault();
-          setLoopBeats((beats) => Math.min(32, beats * 2));
+          resizeLoop(loopBeats * 2);
           break;
         case "sync":
           event.preventDefault();
@@ -2185,6 +2227,7 @@ export const Player = memo(function Player({
             memory={memory}
             quantize={quantize}
             onQuantize={() => setQuantize((on) => !on)}
+            loop={dualLoop}
           />
         ) : null}
 
@@ -2452,7 +2495,7 @@ export const Player = memo(function Player({
                   className={styles.step}
                   aria-label="Shorter loop"
                   disabled={loopBeats <= 0.25}
-                  onClick={() => setLoopBeats((beats) => Math.max(0.25, beats / 2))}
+                  onClick={() => resizeLoop(loopBeats / 2)}
                 >
                   ‹
                 </button>
@@ -2473,7 +2516,7 @@ export const Player = memo(function Player({
                   className={styles.step}
                   aria-label="Longer loop"
                   disabled={loopBeats >= 32}
-                  onClick={() => setLoopBeats((beats) => Math.min(32, beats * 2))}
+                  onClick={() => resizeLoop(loopBeats * 2)}
                 >
                   ›
                 </button>
@@ -2495,9 +2538,9 @@ export const Player = memo(function Player({
                   type="button"
                   className={styles.memoryLabel}
                   aria-label="Loop out"
-                  title={tip("Loop Out")}
-                  disabled={playback.idle || loopIn === null}
-                  onClick={markLoopOut}
+                  title={tip(loopIn !== null ? "Loop Out" : "Reloop/Exit")}
+                  disabled={loopIn === null && !playback.loop}
+                  onClick={loopOut}
                 >
                   OUT
                 </button>
