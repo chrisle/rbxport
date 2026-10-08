@@ -1465,5 +1465,7 @@
   "This operation may require long time.": "Deze handeling kan lang duren.",
   "Failed to switch Master Database.": "Kan Masterdatabase niet schakelen.",
   "Database management": "Databasebeheer",
-  "Select a drive": "Station selecteren"
+  "Select a drive": "Station selecteren",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

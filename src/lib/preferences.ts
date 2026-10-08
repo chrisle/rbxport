@@ -169,6 +169,8 @@ export interface AnalysisPreferences {
   concurrentTracks: number;
   /** Auto Analysis: analyse a track when it is added to the library. */
   auto: boolean;
+  /** Add a memory cue on the first beat; also the Analysis Setting default. */
+  firstBeatCue: boolean;
 }
 
 /**
@@ -291,6 +293,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     mode: "rbxport",
     concurrentTracks: SLOTS,
     auto: false,
+    firstBeatCue: false,
   },
   djSystem: {
     waveformColor: "3band",
@@ -458,6 +461,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       mode: oneOf(analysis.mode, ["rekordbox", "rbxport"], d.analysis.mode),
       concurrentTracks: oneOfNumber(analysis.concurrentTracks, ANALYSIS_SLOTS, SLOTS),
       auto: bool(analysis.auto, d.analysis.auto),
+      firstBeatCue: bool(analysis.firstBeatCue, d.analysis.firstBeatCue),
     },
     djSystem: {
       waveformColor: oneOf(dj.waveformColor, WAVEFORM_COLORS, d.djSystem.waveformColor),

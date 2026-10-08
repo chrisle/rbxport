@@ -33,6 +33,10 @@ export function AnalysisPane(_: { tab: AnalysisTab }) {
       <div className={styles.analysisAuto}>
         <Toggle label="Automatic analysis" checked={auto} onChange={(enabled) => update("analysis", { auto: enabled })} />
       </div>
+      <div className={styles.analysisAuto}>
+        <Toggle label="Add memory cue at first beat" checked={preferences.analysis.firstBeatCue}
+          onChange={(firstBeatCue) => update("analysis", { firstBeatCue })} />
+      </div>
     </Section>
   );
 }

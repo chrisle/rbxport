@@ -1461,5 +1461,7 @@
   "This operation may require long time.": "Denne operation kan vare længe.",
   "Failed to switch Master Database.": "Kunne ikke skifte Master Database.",
   "Database management": "Databasestyring",
-  "Select a drive": "Vælg et drev"
+  "Select a drive": "Vælg et drev",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

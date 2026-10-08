@@ -1472,5 +1472,7 @@
   "This operation may require long time.": "Данная операция может занять длительное время.",
   "Failed to switch Master Database.": "Ошибка переключения на главную базу данных.",
   "Database management": "Упр-е базами данных",
-  "Select a drive": "Выбр. диск"
+  "Select a drive": "Выбр. диск",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

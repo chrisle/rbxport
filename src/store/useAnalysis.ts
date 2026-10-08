@@ -41,7 +41,7 @@ export function useAnalysis(
   preferences?: AnalysisPreferences,
 ): Analysis {
   const storedPreferences = usePreferences().analysis;
-  const { mode, concurrentTracks } = preferences ?? storedPreferences;
+  const { mode, concurrentTracks, firstBeatCue } = preferences ?? storedPreferences;
   const [state, setState] = useState<QueueState>(emptyQueue);
   // The tracks whose request is in flight, so the effect below never sends
   // one twice.
@@ -87,9 +87,9 @@ export function useAnalysis(
   const add = useCallback((items: readonly QueueItem[], settings?: QueueItem["analysis"]) => {
     // Capture settings at enqueue time, including automatic imports. Later
     // preference changes must not alter tracks still waiting in this batch.
-    const chosen = settings ?? { mode, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180 };
+    const chosen = settings ?? { mode, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180, firstBeatCue };
     setState((s) => enqueue(reset(s), items.map(item => ({ ...item, analysis: { ...chosen } }))));
-  }, [mode]);
+  }, [mode, firstBeatCue]);
   const cancel = useCallback(() => setState(cancelQueue), []);
   const clear = useCallback(() => setState(reset), []);
 

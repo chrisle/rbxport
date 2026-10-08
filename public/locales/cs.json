@@ -1467,5 +1467,7 @@
   "This operation may require long time.": "Tato operace může trvat dlouho.",
   "Failed to switch Master Database.": "Přepnutí hlavní databáze se nezdařilo.",
   "Database management": "Správa databází",
-  "Select a drive": "Vyberte jednotku"
+  "Select a drive": "Vyberte jednotku",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

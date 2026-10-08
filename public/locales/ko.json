@@ -1467,5 +1467,7 @@
   "This operation may require long time.": "본 조작은 오랜 시간을 소요합니다.",
   "Failed to switch Master Database.": "마스터 데이터베이스 전환에 실패했습니다.",
   "Database management": "데이터베이스 관리",
-  "Select a drive": "드라이브 선택"
+  "Select a drive": "드라이브 선택",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

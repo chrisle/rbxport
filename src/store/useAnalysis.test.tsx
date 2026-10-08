@@ -24,7 +24,7 @@ beforeEach(() => {
 it("appends to a running batch, stops waiting work, and starts the next run fresh", async () => {
   const finish = new Map<string, (result: AnalysisResult) => void>();
   held.analyseTrack.mockImplementation((id: string) => new Promise<AnalysisResult>(resolve => { finish.set(id, resolve); }));
-  await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true }} />); await Promise.resolve(); });
+  await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true, firstBeatCue: false }} />); await Promise.resolve(); });
   await act(async () => { analysis.add([{ id: "a", title: "First" }, { id: "b", title: "Second" }]); await Promise.resolve(); });
   await act(async () => { analysis.add([{ id: "a", title: "First" }, { id: "c", title: "Added" }]); await Promise.resolve(); });
   expect(analysis.total).toBe(3);
@@ -46,20 +46,28 @@ it("appends to a running batch, stops waiting work, and starts the next run fres
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
 it("captures each batch's settings before preference changes or another batch", async () => {
-  await act(async () => { root.render(<Harness preferences={{ mode: "rekordbox", concurrentTracks: 1, auto: true }} />); await Promise.resolve(); });
+  await act(async () => { root.render(<Harness preferences={{ mode: "rekordbox", concurrentTracks: 1, auto: true, firstBeatCue: false }} />); await Promise.resolve(); });
   await act(async () => { analysis.add([{ id: "a", title: "First" }, { id: "b", title: "Waiting" }]); await Promise.resolve(); });
-  const defaults = { mode: "rekordbox", bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180 };
+  const defaults = { mode: "rekordbox", bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180, firstBeatCue: false };
   expect(held.analyseTrack).toHaveBeenCalledWith("a", "rekordbox", defaults);
-  const chosen = { mode: "rbxport" as const, bpmGrid: false, key: true, highPrecision: false, minBpm: 98, maxBpm: 195 };
+  const chosen = { mode: "rbxport" as const, bpmGrid: false, key: true, highPrecision: false, minBpm: 98, maxBpm: 195, firstBeatCue: true };
   await act(async () => {
-    root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true }} />);
+    root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true, firstBeatCue: false }} />);
     analysis.add([{ id: "c", title: "Key only" }], chosen);
     await Promise.resolve();
   });
   chosen.key = false;
   expect(analysis.state.pending.map(item => item.analysis)).toEqual([defaults, { ...chosen, key: true }]);
   // Once more slots open, both waiting tracks use their own saved choices.
-  await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 3, auto: true }} />); await Promise.resolve(); });
+  await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 3, auto: true, firstBeatCue: false }} />); await Promise.resolve(); });
   expect(held.analyseTrack).toHaveBeenCalledWith("b", "rekordbox", defaults);
   expect(held.analyseTrack).toHaveBeenCalledWith("c", "rbxport", { ...chosen, key: true });
+});
+
+it("queues automatic batches with the first-beat cue preference captured", async () => {
+  await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true, firstBeatCue: true }} />); await Promise.resolve(); });
+  await act(async () => { analysis.add([{ id: "a", title: "Imported" }, { id: "b", title: "Waiting" }]); await Promise.resolve(); });
+  expect(held.analyseTrack).toHaveBeenCalledWith("a", "rbxport", expect.objectContaining({ firstBeatCue: true }));
+  await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true, firstBeatCue: false }} />); await Promise.resolve(); });
+  expect(analysis.state.pending[0]?.analysis?.firstBeatCue).toBe(true);
 });

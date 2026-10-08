@@ -1474,5 +1474,7 @@
   "This operation may require long time.": "この操作には時間がかかる場合があります。",
   "Failed to switch Master Database.": "マスターデータベースの切り替えに失敗しました。",
   "Database management": "データベースの管理",
-  "Select a drive": "ドライブを選択"
+  "Select a drive": "ドライブを選択",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

@@ -1463,5 +1463,7 @@
   "This operation may require long time.": "Denna åtgärd kan ta lång tid.",
   "Failed to switch Master Database.": "Master-databasen kunde inte bytas.",
   "Database management": "Databashantering",
-  "Select a drive": "Välj en enhet"
+  "Select a drive": "Välj en enhet",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

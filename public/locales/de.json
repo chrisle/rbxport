@@ -1464,5 +1464,7 @@
   "This operation may require long time.": "Dieser Vorgang kann längere Zeit dauern.",
   "Failed to switch Master Database.": "Wechseln der Master-Datenbank fehlgeschlagen.",
   "Database management": "Datenbankverwaltung",
-  "Select a drive": "Laufwerk wählen"
+  "Select a drive": "Laufwerk wählen",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

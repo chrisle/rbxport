@@ -1472,5 +1472,7 @@
   "This operation may require long time.": "此操作可能會花點時間。",
   "Failed to switch Master Database.": "無法切換主資料庫。",
   "Database management": "資料庫管理",
-  "Select a drive": "選擇磁碟"
+  "Select a drive": "選擇磁碟",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

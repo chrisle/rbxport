@@ -1469,5 +1469,7 @@
   "This operation may require long time.": "Η λειτουργία αυτή μπορεί να χρειαστεί πολλή ώρα.",
   "Failed to switch Master Database.": "Αποτυχία αλλαγής της Κύριας βάσης δεδομένων",
   "Database management": "Διαχείριση βάσης δεδομένων",
-  "Select a drive": "Επιλέξτε οδηγό"
+  "Select a drive": "Επιλέξτε οδηγό",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

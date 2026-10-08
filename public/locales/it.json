@@ -1468,5 +1468,7 @@
   "This operation may require long time.": "Questa operazione può richiedere molto tempo.",
   "Failed to switch Master Database.": "Cambio database principale non riuscito.",
   "Database management": "Gestione database",
-  "Select a drive": "Seleziona unità"
+  "Select a drive": "Seleziona unità",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

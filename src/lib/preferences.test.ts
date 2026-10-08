@@ -48,6 +48,13 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({ analysis: { auto: "yes" } }).analysis.auto).toBe(false);
     expect(sanitisePreferences({ analysis: { auto: true } }).analysis.auto).toBe(true);
   });
+
+  it("leaves the first-beat memory cue off unless it is explicitly enabled", () => {
+    expect(DEFAULT_PREFERENCES.analysis.firstBeatCue).toBe(false);
+    expect(sanitisePreferences({ analysis: { firstBeatCue: "yes" } }).analysis.firstBeatCue).toBe(false);
+    expect(sanitisePreferences({ analysis: { firstBeatCue: true } }).analysis.firstBeatCue).toBe(true);
+  });
+
   it("keeps the browser key-sort choice and preserves the old display-based ordering", () => {
     expect(sanitisePreferences({view: {keySort: "musical"}}).view.keySort).toBe("musical");
     expect(sanitisePreferences({view: {keySort: "invalid"}}).view.keySort).toBe("alphabetical");

@@ -1292,6 +1292,8 @@ export interface AnalysisSettings {
   highPrecision: boolean;
   minBpm: number;
   maxBpm: number;
+  /** Add a memory cue on the new grid's first beat unless one is there. */
+  firstBeatCue: boolean;
 }
 
 /** What analysing one track found, now written to the library. */

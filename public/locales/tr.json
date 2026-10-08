@@ -1468,5 +1468,7 @@
   "This operation may require long time.": "Bu işlem uzun zaman gerektirebilir.",
   "Failed to switch Master Database.": "Ana Veritabanı değiştirilemedi.",
   "Database management": "Veritabanı yönetimi",
-  "Select a drive": "Bir sürücü seç"
+  "Select a drive": "Bir sürücü seç",
+  "Add memory cue at first beat": "Add memory cue at first beat",
+  "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added."
 }

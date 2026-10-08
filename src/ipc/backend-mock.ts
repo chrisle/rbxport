@@ -2437,6 +2437,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
             if (settings?.key !== false) row.key ||= "Am";
             // As the shell says it: a deck showing the track redraws.
             for (const listener of analysisListeners) listener(trackId);
+            const firstBeatMs = settings?.bpmGrid !== false && settings?.firstBeatCue
+              ? gridOf(trackId)?.beats[0]?.timeMs : undefined;
+            const cues = cuesOf(trackId);
+            if (firstBeatMs !== undefined && !cues.some(cue => cue.memory && Math.abs(cue.positionMs - firstBeatMs) <= 5)) {
+              cues.push({ id: `cue-${nextCueId++}`, positionMs: firstBeatMs, outMs: 0, letter: "", memory: true, colour: null });
+              void cuesChanged(trackId, null);
+            }
             resolve({
             trackId,
             analysed: row.analysed,

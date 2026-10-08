@@ -5,14 +5,17 @@ import styles from "./AnalysisDialog.module.css";
 
 export type AnalysisChoice = AnalysisSettings & { mode: AnalysisMode };
 
-export function AnalysisDialog({ count, initialMode, onConfirm, onCancel }: {
+export function AnalysisDialog({ count, initialMode, initialFirstBeatCue, onConfirm, onCancel }: {
   count: number;
   initialMode: AnalysisMode;
+  /** The Preferences default; changing the box here applies to this batch only. */
+  initialFirstBeatCue: boolean;
   onConfirm: (settings: AnalysisChoice) => void;
   onCancel: () => void;
 }) {
   const [settings, setSettings] = useState<AnalysisChoice>(() => ({
     mode: initialMode, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180,
+    firstBeatCue: initialFirstBeatCue,
   }));
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -61,6 +64,10 @@ export function AnalysisDialog({ count, initialMode, onConfirm, onCancel }: {
                   <option key={min} value={`${min}-${max}`}>{min}–{max}</option>
                 ))}
               </select>
+            </label>
+            <label className={styles.check}>
+              <input type="checkbox" checked={settings.firstBeatCue} onChange={event => update({ firstBeatCue: event.target.checked })} />
+              Add memory cue at first beat
             </label>
           </fieldset>
           <label className={styles.check}>
