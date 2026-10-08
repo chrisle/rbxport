@@ -1692,8 +1692,9 @@ test("the waveforms follow the window rather than stretching a fixed canvas", as
     .toBeGreaterThan(narrow);
 });
 
-test("a playlist offers export, and a folder does not", async ({ page }) => {
-  // A folder holds playlists, so exporting one would have to invent which.
+test("right-clicking a playlist or a folder starts no export", async ({ page }) => {
+  // Both offer export (Export Playlist, Export Folder), but only from the
+  // menu: opening it must not start one.
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
 
