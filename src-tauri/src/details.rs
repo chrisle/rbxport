@@ -105,7 +105,7 @@ pub async fn track_details(
         let library = state.library()?;
         let has_artwork = library.artwork_path_of(&track).is_some_and(|p| !p.is_empty());
         let details = state
-            .read_db(|db| rbl_db::details::track_details(db.connection(), &track))
+            .read_db(|db| db.track_details(&track))
             .map_err(write_error)?;
         let Some(d) = details else {
             return Err(AppError::new(ErrorKind::NotFound, "That track is no longer in the library.")

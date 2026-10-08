@@ -260,7 +260,7 @@ impl Source for StateSource {
 
     fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails> {
         let state = self.0.upgrade()?;
-        state.read_db(|db| rbl_db::details::track_details(db.connection(), id)).ok().flatten()
+        state.read_db(|db| db.track_details(id)).ok().flatten()
     }
 
     fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<rbl_db::details::HotCueBank> {

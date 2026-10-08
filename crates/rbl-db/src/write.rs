@@ -2287,13 +2287,10 @@ impl Writer {
         self.touch_content(content, "KeyID", &Value::Text(id))
     }
 
-    /// A stored `FolderPath` as rekordbox reads it: through the library's
-    /// drive substitution, if it has one. See [`crate::DriveMapping`].
+    /// A stored `FolderPath` as rekordbox reads it. See
+    /// [`crate::Library::real_folder_path`].
     fn real_path(&self, folder_path: &str) -> String {
-        match self.library.drive_mapping() {
-            Some(drive) => drive.apply(folder_path).into_owned(),
-            None => folder_path.to_owned(),
-        }
+        self.library.real_folder_path(folder_path)
     }
 
     /// Points a track at a different file.

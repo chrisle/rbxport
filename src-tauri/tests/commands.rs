@@ -869,6 +869,39 @@ fn a_cue_added_through_the_command_is_read_back_and_announced() {
     assert!(announced.iter().all(|t| *t == track));
 }
 
+/// A drive library's Location, in the Info panel and the browser column, is
+/// the path rekordbox shows: the stored `FolderPath` with `BaseDBDrive`
+/// swapped for `CurrentDBDrive` (`replaceDrivePath`), not the raw column.
+#[test]
+fn a_drive_librarys_location_reads_under_the_drives_current_mount() {
+    let s = shell();
+    let track = track_id(3);
+    let location = s.state().location().unwrap();
+    fixture::point_at_audio(&location, 3, "/Volumes/Music/Tracks/a.mp3", 300).unwrap();
+    let writer = rbl_db::write::Writer::open(location, s._dir.path().join("drive-backups")).unwrap();
+    writer
+        .library()
+        .connection()
+        .execute("UPDATE djmdProperty SET BaseDBDrive = '/Volumes/Music/', CurrentDBDrive = '/Volumes/Music 1/'", [])
+        .unwrap();
+    drop(writer);
+
+    // On Windows a fixture folder off the default sits on a lettered drive,
+    // which rekordbox takes as the current drive instead.
+    let expected = if cfg!(windows) {
+        format!("{}/Tracks/a.mp3", &s._dir.path().to_string_lossy()[..2])
+    } else {
+        "/Volumes/Music 1/Tracks/a.mp3".to_owned()
+    };
+    let record = run(details::track_details(s.state(), track.clone())).unwrap();
+    assert_eq!(record.path, expected);
+
+    let (view, _) = s.open(collection_spec());
+    let rows = run(commands::fetch_rows(s.state(), view, 0, commands::MAX_ROWS, Some(vec!["location".into()]))).unwrap();
+    let row = rows.iter().find(|r| r.id == track).unwrap();
+    assert_eq!(row.extra.as_ref().unwrap()["location"], expected.as_str());
+}
+
 #[test]
 fn a_cue_added_outside_the_app_appears_without_reloading_the_library() {
     let s = shell();
