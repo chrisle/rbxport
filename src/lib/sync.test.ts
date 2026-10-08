@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { BEATS_PER_BAR, NO_BEATS } from "./player";
 import {
-  barAt, beatNudgeFor, beatWait, MAX_TEMPO, MIN_TEMPO, nudgeFor, syncTo, tempoFor, type Deck,
+  barAt, beatNudgeFor, beatWait, inPhaseAt, loopPeriodBeats, MAX_TEMPO, MIN_TEMPO, nudgeFor, syncTo, tempoFor, type Deck,
 } from "./sync";
 
 /** A grid at a steady `bpm`, starting `offsetMs` in. */
@@ -175,6 +175,56 @@ describe("beatNudgeFor", () => {
     }
     const unknown: Deck = { bpmX100: 0, position: 1, grid: NO_BEATS };
     expect(beatNudgeFor(unknown, deck(128, 4))).toBe(0);
+  });
+
+  it("measures the phase in a part of a beat for a short loop", () => {
+    // A half-beat loop at 120 BPM repeats every quarter second. The leader is
+    // a quarter second past a beat, which is on the loop's period, so the
+    // follower on a beat does not move.
+    expect(beatNudgeFor(deck(120, 4.25), deck(120, 5.0), 0.5)).toBeCloseTo(0, 3);
+    expect(beatNudgeFor(deck(120, 4.3), deck(120, 5.0), 0.5)).toBeCloseTo(0.05, 3);
+  });
+});
+
+describe("inPhaseAt", () => {
+  // 120 BPM throughout: a half-second beat, a two-second bar.
+  const leader = deck(120, 4.1);
+
+  it("puts a move on the leader's beat, half a beat away at most", () => {
+    // A hot cue on a beat, with the leader a tenth of a second past one.
+    expect(inPhaseAt(leader, deck(120, 0), 8, null)).toBeCloseTo(8.1, 3);
+    // A FINE jump of a tenth of a beat goes back onto the beat.
+    expect(inPhaseAt(leader, deck(120, 0), 8.15, null)).toBeCloseTo(8.1, 3);
+  });
+
+  it("keeps a landing near the out point inside the loop, by whole loops", () => {
+    // A one-beat loop from 8 to 8.5. The leader asks for 0.1 s past a beat,
+    // so a head at 8.49 goes forward past the out point and comes back in.
+    const at = inPhaseAt(leader, deck(120, 0), 8.49, { inSeconds: 8, outSeconds: 8.5 });
+    expect(at).toBeCloseTo(8.1, 3);
+  });
+
+  it("measures a half-beat loop in its own period", () => {
+    // The leader at 0.1 s past a beat is 0.1 s into a quarter-second period.
+    const at = inPhaseAt(leader, deck(120, 0), 8.2, { inSeconds: 8, outSeconds: 8.25 });
+    expect(at).toBeCloseTo(8.1, 3);
+  });
+
+  it("leaves a loop that cannot stay in phase alone", () => {
+    // One and a half beats: each repeat is half a beat off.
+    expect(inPhaseAt(leader, deck(120, 0), 8.3, { inSeconds: 8, outSeconds: 8.75 })).toBe(8.3);
+  });
+});
+
+describe("loopPeriodBeats", () => {
+  it("is one beat for whole beats, the length for a part beat, and null for the rest", () => {
+    expect(loopPeriodBeats(2, 0.5)).toBe(1);
+    expect(loopPeriodBeats(0.5, 0.5)).toBe(1);
+    expect(loopPeriodBeats(0.25, 0.5)).toBe(0.5);
+    expect(loopPeriodBeats(0.125, 0.5)).toBe(0.25);
+    expect(loopPeriodBeats(0.75, 0.5)).toBeNull();
+    expect(loopPeriodBeats(0.3, 0.5)).toBeNull();
+    expect(loopPeriodBeats(1, 0)).toBeNull();
   });
 });
 

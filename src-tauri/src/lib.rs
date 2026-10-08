@@ -520,6 +520,7 @@ pub fn run() {
             commands::deck_play_after,
             commands::deck_pause,
             commands::deck_seek,
+            commands::deck_move,
             commands::deck_scrub_begin,
             commands::deck_scrub_to,
             commands::deck_scrub_end,

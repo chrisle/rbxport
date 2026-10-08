@@ -1415,6 +1415,24 @@ fn the_metronome_keeps_its_volume_when_the_master_is_turned_down() {
 }
 
 #[test]
+fn a_move_counts_from_the_head_and_keeps_the_pre_roll() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("move.wav");
+    flat(&path, RATE as usize * 2);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.seek_ms(Deck::A, 1_000.0);
+    h.engine.move_ms(Deck::A, 250.0);
+    assert_eq!(h.position(Deck::A), u64::from(RATE) * 5 / 4);
+    // Moved back past zero, the head goes into the pre-roll, not to zero.
+    h.engine.seek_ms(Deck::A, -2_000.0);
+    h.engine.move_ms(Deck::A, 500.0);
+    assert_eq!(h.engine.snapshot().a.pre_roll_frames, u64::from(RATE) * 3 / 2);
+    assert_eq!(h.position(Deck::A), 0);
+}
+
+#[test]
 fn negative_seek_is_bounded_pauses_and_plays_through_zero() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("lead-in.wav");

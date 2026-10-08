@@ -2000,6 +2000,19 @@ pub async fn deck_seek<R: tauri::Runtime>(
     Ok(())
 }
 
+/// Moves a deck's playhead by `by_ms` from where the engine has it.
+#[tauri::command]
+pub async fn deck_move(
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    by_ms: f64,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.move_ms(crate::player::deck_of(&deck), by_ms);
+    }
+    Ok(())
+}
+
 /// Sets a deck's loop between two points and turns it on; a head already
 /// past the out point goes back to the in point.
 #[tauri::command]

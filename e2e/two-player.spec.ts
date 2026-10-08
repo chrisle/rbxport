@@ -349,3 +349,69 @@ test("an empty sleeve shows the record in every layout, and the row's too", asyn
   const loaded = page.getByRole("button", { name: "Eject" }).first();
   expect(await loaded.locator("svg").first().locator("path").getAttribute("d")).toBe(RECORD);
 });
+
+/**
+ * BEAT SYNC and Q on: deck B stays on the master's beat. Both decks hold the
+ * same track, so "on the beat" is a distance between the two heads of whole
+ * beats. The mock counts frames, so this reads them, not the screen.
+ */
+test("a synced deck with Q on stays on the master's beat after jumps and in a loop", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  const first = page.locator('[role="gridcell"][data-col="title"]').first();
+  await first.dblclick();
+  await first.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Track" });
+  await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
+  await menu.getByRole("menuitem", { name: "Load track to player 2" }).click();
+  const b = page.getByRole("region", { name: "Preview player B" });
+  await expect(b.getByTestId("player-title")).not.toHaveText("");
+
+  /** How far B is from A's beat, in seconds: 0 is on it. */
+  const offBeat = () =>
+    page.evaluate(() => {
+      const { a, b, beat } = (window as unknown as {
+        __deckSeconds: () => { a: number; b: number; beat: number };
+      }).__deckSeconds();
+      const into = (((a - b) % beat) + beat) % beat;
+      return Math.min(into, beat - into);
+    });
+
+  // A is the master by default and Q is on: B follows.
+  await b.getByRole("button", { name: "Beat sync" }).click();
+  await expect(b.getByRole("button", { name: "Beat sync" })).toHaveAttribute("aria-pressed", "true");
+  const play = page.getByRole("button", { name: "Play", exact: true });
+  await play.first().click();
+  await page.waitForTimeout(700);
+  await play.first().click();
+  await expect.poll(offBeat, { timeout: 3000 }).toBeLessThan(0.012);
+
+  // FINE jumps on the master take it off B's beat; the lock brings B back.
+  const sizes = page.getByRole("button", { name: "Beat jump size" });
+  await sizes.first().click();
+  await page.getByRole("menu", { name: "Beat jump size" }).getByRole("menuitemradio", { name: "Fine" }).click();
+  const forward = page.getByRole("button", { name: "Beat jump forward" });
+  for (let n = 0; n < 8; n++) await forward.first().click();
+  await expect.poll(offBeat, { timeout: 3000 }).toBeLessThan(0.012);
+
+  // A FINE jump on B lands back on the beat.
+  await sizes.last().click();
+  await page.getByRole("menu", { name: "Beat jump size" }).getByRole("menuitemradio", { name: "Fine" }).click();
+  for (let n = 0; n < 8; n++) await forward.last().click();
+  await expect.poll(offBeat, { timeout: 3000 }).toBeLessThan(0.012);
+
+  // A hand-made loop on B, from Player B's LOOP IN and LOOP OUT keys. IN and
+  // OUT go on whole beats, so B is on the beat through each repeat.
+  await page.keyboard.press("Shift+I");
+  await page.waitForTimeout(900);
+  await page.keyboard.press("Shift+O");
+  await expect.poll(() => page.evaluate(() => (window as unknown as {
+    __deckSeconds: () => { looping: boolean };
+  }).__deckSeconds().looping)).toBe(true);
+  for (let n = 0; n < 5; n++) {
+    await page.waitForTimeout(400);
+    await expect.poll(offBeat, { timeout: 1000 }).toBeLessThan(0.012);
+  }
+});

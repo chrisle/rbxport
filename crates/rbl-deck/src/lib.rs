@@ -718,6 +718,19 @@ impl Engine {
         handle.clock().set_loop(None);
     }
 
+    /// Moves the playhead by `ms` from where it is now. The move is worked
+    /// out here, from the clock, so it does not land late by the time the
+    /// command took to arrive. The phase lock of a synced deck uses it. A
+    /// head in the pre-roll before zero moves from there, as `seek_ms` puts
+    /// it.
+    pub fn move_ms(&self, deck: Deck, ms: f64) {
+        let Some(handle) = self.deck(deck) else { return };
+        let clock = handle.clock();
+        #[allow(clippy::cast_precision_loss, reason = "a track is far under 2^52 frames")]
+        let frames = clock.position() as f64 - clock.pre_roll() as f64;
+        self.seek_ms(deck, frames * 1000.0 / f64::from(self.sample_rate) + ms);
+    }
+
     pub fn seek_ms(&self, deck: Deck, ms: f64) {
         let frames = (ms.max(0.0) * f64::from(self.sample_rate) / 1000.0) as u64;
         let pre_roll = ((-ms).clamp(0.0, 5000.0) * f64::from(self.sample_rate) / 1000.0) as u64;

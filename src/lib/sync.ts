@@ -150,21 +150,80 @@ export function nudgeFor(leader: Deck, follower: Deck): number {
  * beat, whichever beat of the bar that is — the bar is the DJ's to choose, by
  * where the cue was set. At most half a beat either way, as `nudgeFor` is at
  * most half a bar.
+ *
+ * `periodBeats` measures the phase in a part of a beat. A loop of a half
+ * beat repeats twice in each beat of the master, so its phase is in a half
+ * beat, and the nudge is at most a quarter beat.
  */
-export function beatNudgeFor(leader: Deck, follower: Deck): number {
+export function beatNudgeFor(leader: Deck, follower: Deck, periodBeats = 1): number {
   const lead = barAt(leader, leader.position);
   const follow = barAt(follower, follower.position);
-  if (!lead || !follow || lead.length <= 0 || follow.length <= 0) return 0;
-  const beatOf = (bar: { start: number; length: number }, at: number) => {
-    const beat = bar.length / BEATS_PER_BAR;
-    const into = (at - bar.start) / beat;
-    return { fraction: into - Math.floor(into), beat };
+  if (!lead || !follow || lead.length <= 0 || follow.length <= 0 || !(periodBeats > 0)) return 0;
+  const phaseOf = (bar: { start: number; length: number }, at: number) => {
+    const period = (bar.length / BEATS_PER_BAR) * periodBeats;
+    const into = (at - bar.start) / period;
+    return { fraction: into - Math.floor(into), period };
   };
-  const leadBeat = beatOf(lead, leader.position);
-  const followBeat = beatOf(follow, follower.position);
-  const gap = leadBeat.fraction - followBeat.fraction;
+  const leadPhase = phaseOf(lead, leader.position);
+  const followPhase = phaseOf(follow, follower.position);
+  const gap = leadPhase.fraction - followPhase.fraction;
   const wrapped = gap - Math.round(gap);
-  return wrapped * followBeat.beat;
+  return wrapped * followPhase.period;
+}
+
+/**
+ * The period that a loop keeps in phase with the master, in beats, or null
+ * when the loop cannot stay in phase.
+ *
+ * A loop of whole beats starts again on a beat, so its period is one beat. A
+ * loop of 1/2, 1/4 or 1/8 beat starts again on each part of a beat, so its
+ * period is its length. Any other length (1.5 beats, for example) moves the
+ * deck off the beat on each repeat.
+ */
+export function loopPeriodBeats(loopSeconds: number, beatSeconds: number): number | null {
+  if (!(loopSeconds > 0) || !(beatSeconds > 0)) return null;
+  const beats = loopSeconds / beatSeconds;
+  const near = (a: number, b: number) => Math.abs(a - b) <= LOOP_TOLERANCE * Math.max(1, b);
+  if (beats >= 1 - LOOP_TOLERANCE) return near(beats, Math.round(beats)) ? 1 : null;
+  for (let part = 2; part <= 32; part *= 2) {
+    if (near(beats, 1 / part)) return 1 / part;
+  }
+  return null;
+}
+
+/** How far a loop length can be from a whole or part beat, as a fraction of a beat. */
+const LOOP_TOLERANCE = 0.02;
+
+/** A loop that plays, in seconds. */
+export interface PlayingLoop {
+  inSeconds: number;
+  outSeconds: number;
+}
+
+/**
+ * Where a move of the follower to `at` lands, in phase with the leader.
+ *
+ * The landing moves by half a period at most, so the bar the hand chose
+ * stays the bar that plays. Inside a loop the period is the loop's (see
+ * `loopPeriodBeats`), and a landing past an end goes back into the loop by
+ * whole loops. A loop of a length that cannot stay in phase leaves `at` as
+ * it is: a move on each repeat would be worse than the loop itself.
+ */
+export function inPhaseAt(leader: Deck, follower: Deck, at: number, loop: PlayingLoop | null): number {
+  const length = loop ? loop.outSeconds - loop.inSeconds : 0;
+  const inside = (time: number) =>
+    loop !== null && length > 0 && time >= loop.inSeconds && time < loop.outSeconds;
+  let period: number | null = 1;
+  if (loop && inside(at)) {
+    const bar = barAt(follower, loop.inSeconds);
+    period = bar ? loopPeriodBeats(length, bar.length / BEATS_PER_BAR) : null;
+  }
+  if (period === null) return at;
+  let to = at + beatNudgeFor(leader, { ...follower, position: at }, period);
+  if (loop && inside(at) && !inside(to)) {
+    to = loop.inSeconds + ((((to - loop.inSeconds) % length) + length) % length);
+  }
+  return to;
 }
 
 /**
