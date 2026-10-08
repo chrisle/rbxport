@@ -187,6 +187,82 @@ pub fn is_audio(path: &Path) -> bool {
         .is_some_and(|e| AUDIO_EXTENSIONS.contains(&e.as_str()))
 }
 
+/// How far one import may walk into the folders it was given, shared across
+/// every folder of that import. A music library is a handful of levels deep;
+/// a folder that turns out to be a whole drive ends rather than running for
+/// minutes.
+#[derive(Debug, Clone)]
+pub struct WalkBudget {
+    max_depth: usize,
+    entries_left: usize,
+}
+
+impl WalkBudget {
+    #[must_use]
+    pub fn new(max_depth: usize, max_entries: usize) -> Self {
+        Self { max_depth, entries_left: max_entries }
+    }
+
+    /// Whether the walk stopped early because it ran out of entries.
+    #[must_use]
+    pub fn exhausted(&self) -> bool {
+        self.entries_left == 0
+    }
+}
+
+/// The audio files under `dir`, in the order rekordbox collects them.
+///
+/// rekordbox walks a dropped or imported folder with JUCE's recursive
+/// `RangedDirectoryIterator` (`FindChildFiles::run` and
+/// `TreeViewer::treeMessageImportExternalFoldersToList` in rekordbox 7.2.19)
+/// [OBS, static]: depth first, a subfolder's files listed where the
+/// subfolder itself sits, hidden files and folders left out. The entry order
+/// is the file system's; on Windows (NTFS) that is the name order with case
+/// ignored, which is what is used here on every platform so the result does
+/// not depend on the disk. [ASSUME: NTFS upper-cased ordinal collation.]
+///
+/// Only the files rekordbox plays are kept: a cover `.jpg` beside the tracks
+/// is not collected, not reported. A folder that cannot be read is skipped.
+#[must_use]
+pub fn audio_files_in(dir: &Path, budget: &mut WalkBudget) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    walk(dir, 0, budget, &mut files);
+    files
+}
+
+fn walk(dir: &Path, depth: usize, budget: &mut WalkBudget, files: &mut Vec<std::path::PathBuf>) {
+    if depth >= budget.max_depth {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut entries: Vec<_> = entries
+        .flatten()
+        .map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            (name.to_uppercase(), name, entry)
+        })
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    for (_, name, entry) in entries {
+        if budget.entries_left == 0 {
+            return;
+        }
+        budget.entries_left -= 1;
+        // `.Trashes`, `.Spotlight-V100`, and the `._Track.mp3` AppleDouble
+        // files macOS leaves on non-Apple disks: hidden, so not walked.
+        if name.starts_with('.') {
+            continue;
+        }
+        let Ok(kind) = entry.file_type() else { continue };
+        let path = entry.path();
+        if kind.is_dir() {
+            walk(&path, depth + 1, budget, files);
+        } else if kind.is_file() && is_audio(&path) {
+            files.push(path);
+        }
+    }
+}
+
 /// Reads embedded artwork separately from the fast Explorer tag probe.
 /// Prefer a front cover across all tags, then the first available picture.
 pub fn read_artwork(path: &Path) -> Result<Option<Vec<u8>>, ImportError> {
@@ -303,6 +379,58 @@ mod tests {
         for bad in ["a.txt", "a.jpg", "a", "a.mp4", "a.mp3.txt"] {
             assert!(!is_audio(Path::new(bad)), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_folder_is_walked_depth_first_in_name_order_like_rekordbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for path in [
+            "b.mp3",
+            "A.mp3",
+            "c.wav",
+            "cover.jpg",
+            "._b.mp3",
+            "B Side/2.mp3",
+            "B Side/1.flac",
+            "B Side/Deeper/x.aiff",
+            ".hidden/secret.mp3",
+            "Empty/notes.txt",
+        ] {
+            let full = root.join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(full, b"x").unwrap();
+        }
+        let mut budget = WalkBudget::new(16, 1000);
+        let found: Vec<String> = audio_files_in(root, &mut budget)
+            .iter()
+            .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        // Case is ignored, and a space (0x20) sorts before a dot (0x2E), so
+        // "B Side" and everything in it come before "b.mp3".
+        assert_eq!(
+            found,
+            ["A.mp3", "B Side/1.flac", "B Side/2.mp3", "B Side/Deeper/x.aiff", "b.mp3", "c.wav"]
+        );
+        assert!(!budget.exhausted());
+    }
+
+    #[test]
+    fn a_walk_stops_at_its_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.mp3", "b.mp3", "c.mp3"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        let mut budget = WalkBudget::new(16, 2);
+        assert_eq!(audio_files_in(dir.path(), &mut budget).len(), 2);
+        assert!(budget.exhausted());
+
+        let deep = dir.path().join("1/2");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("d.mp3"), b"x").unwrap();
+        let mut shallow = WalkBudget::new(2, 1000);
+        let found = audio_files_in(dir.path(), &mut shallow);
+        assert_eq!(found.len(), 3, "a folder two levels down is past a depth of 2");
     }
 
     #[test]

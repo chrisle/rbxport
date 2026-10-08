@@ -286,6 +286,23 @@ pub struct PlaylistDeletion {
     pub membership_ids: Vec<String>,
 }
 
+/// What [`Writer::import_folder_as_playlist`] did with one folder.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FolderPlaylist {
+    /// The playlist made; `None` when nothing was written, either because the
+    /// folder held no audio or because of [`Self::conflict`].
+    pub playlist: Option<String>,
+    /// A sibling with the folder's name, to be replaced only once the user
+    /// agrees. Nothing is written while this is set.
+    pub conflict: Option<String>,
+    /// Tracks added to the library, with the file each came from.
+    pub imported: Vec<(String, PathBuf)>,
+    /// Tracks the library already held, now in the playlist too.
+    pub existing: Vec<String>,
+    /// Files that could not be imported, each with the reason.
+    pub skipped: Vec<String>,
+}
+
 /// One playlist or folder move, with both positions counted among the
 /// destination parent's live children.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -830,6 +847,81 @@ impl Writer {
         }
         tx.commit()?;
         Ok(Changed { rows, usn })
+    }
+
+    /// The live playlist, folder or intelligent playlist under `parent` named
+    /// exactly `name`, if there is one.
+    pub fn child_named(&self, parent: &str, name: &str) -> Result<Option<String>> {
+        Ok(self.library.connection().query_row(
+            "SELECT ID FROM djmdPlaylist
+             WHERE ParentID = ?1 AND Name = ?2 AND rb_local_deleted = 0
+             ORDER BY Seq, ID LIMIT 1",
+            params![parent, name],
+            |r| r.get::<_, String>(0),
+        ).optional()?)
+    }
+
+    /// A folder from disk dropped onto the playlist tree: one playlist named
+    /// after it, holding every audio file found under it.
+    ///
+    /// What rekordbox 7.2.19 does for a folder dropped onto the Playlists root
+    /// or a playlist folder (`TreeViewer::treeMessageImportExternalFoldersToList`)
+    /// [OBS, static]: nothing at all when the folder holds no file it plays;
+    /// otherwise a playlist under the drop target named after the folder, its
+    /// subfolders flattened into it rather than made into playlists of their
+    /// own, with new files imported and files already in the library reused.
+    ///
+    /// `files` is the folder's contents in the order they belong in the
+    /// playlist (see [`crate::import::audio_files_in`]).
+    ///
+    /// A sibling with the same name is the one question rekordbox asks
+    /// ("One or several lists with the same name already exist. Do you want
+    /// to replace them with the one you're importing?",
+    /// `TreeViewer::showReplaceListAlert`). Nothing is written until it is
+    /// answered: the clash comes back in [`FolderPlaylist::conflict`], and the
+    /// caller calls again with `replace` set to that id to replace it.
+    pub fn import_folder_as_playlist(
+        &mut self,
+        name: &str,
+        parent: &str,
+        files: &[PathBuf],
+        replace: Option<&str>,
+    ) -> Result<FolderPlaylist> {
+        let mut outcome = FolderPlaylist::default();
+        if files.is_empty() {
+            return Ok(outcome);
+        }
+        if let Some(clash) = self.child_named(parent, name)? {
+            if replace != Some(clash.as_str()) {
+                outcome.conflict = Some(clash);
+                return Ok(outcome);
+            }
+            self.delete_playlist(&clash)?;
+        }
+        let playlist = self.create_playlist(name, parent)?;
+        let mut members = Vec::with_capacity(files.len());
+        for file in files {
+            if let Some(id) = self.track_id_at(file)? {
+                outcome.existing.push(id.clone());
+                members.push(id);
+                continue;
+            }
+            match self.import_file(file) {
+                Ok(id) => {
+                    outcome.imported.push((id.clone(), file.clone()));
+                    members.push(id);
+                }
+                Err(DbError::WriteRefused(reason)) => {
+                    outcome.skipped.push(format!("{}: {reason}", file.display()));
+                }
+                Err(other) => return Err(other),
+            }
+        }
+        if !members.is_empty() {
+            self.add_tracks(&playlist, &members)?;
+        }
+        outcome.playlist = Some(playlist);
+        Ok(outcome)
     }
 
     /// Removes tracks from a playlist and closes the gaps in `TrackNo`.

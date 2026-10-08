@@ -2577,3 +2577,117 @@ fn reload_tag_reads_a_cloud_tracks_local_copy() {
     let title: String = f.one("SELECT Title FROM djmdContent WHERE ID = ?1", &[&id]);
     assert_eq!(title, "From The Local Copy");
 }
+
+/// The member paths of a playlist, as file names, in `TrackNo` order.
+fn member_files(f: &Fixture, playlist: &str) -> Vec<String> {
+    let mut stmt = f
+        .conn()
+        .prepare(
+            "SELECT c.FolderPath FROM djmdSongPlaylist s JOIN djmdContent c ON c.ID = s.ContentID
+             WHERE s.PlaylistID = ?1 AND s.rb_local_deleted = 0 ORDER BY s.TrackNo",
+        )
+        .unwrap();
+    stmt.query_map(params![playlist], |r| r.get::<_, String>(0))
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|p| std::path::Path::new(&p).file_name().unwrap().to_string_lossy().into_owned())
+        .collect()
+}
+
+/// A folder dropped onto the Playlists root, the way rekordbox 7.2.19 handles
+/// one (`TreeViewer::treeMessageImportExternalFoldersToList`) [OBS, static]:
+/// one playlist named after the folder, at the end of the target, its
+/// subfolders flattened into it in walk order, new files imported and files
+/// already in the library reused.
+#[test]
+fn a_dropped_folder_becomes_one_flat_playlist_named_after_it() {
+    let audio = tempfile::tempdir().unwrap();
+    let folder = audio.path().join("Friday Set");
+    std::fs::create_dir_all(folder.join("B Side/Deeper")).unwrap();
+    for name in ["b.wav", "A.wav", "B Side/2.wav", "B Side/1.wav", "B Side/Deeper/x.wav"] {
+        write_wav(&folder.join(name), 1);
+    }
+    std::fs::write(folder.join("cover.jpg"), b"x").unwrap();
+
+    let mut f = fixture();
+    // One of them is in the library already.
+    let known = f.writer.import_file(&folder.join("b.wav")).unwrap();
+    let before = f.children(ROOT);
+
+    let mut budget = rbl_db::import::WalkBudget::new(16, 1000);
+    let files = rbl_db::import::audio_files_in(&folder, &mut budget);
+    let outcome = f.writer.import_folder_as_playlist("Friday Set", ROOT, &files, None).unwrap();
+
+    let playlist = outcome.playlist.clone().expect("a playlist is made");
+    assert_eq!(outcome.conflict, None);
+    assert_eq!(outcome.existing, vec![known]);
+    assert_eq!(outcome.imported.len(), 4);
+    assert!(outcome.skipped.is_empty());
+
+    let after = f.children(ROOT);
+    assert_eq!(after[..before.len()], before[..], "existing order kept");
+    assert_eq!(after.last(), Some(&playlist), "appended at the end of the target");
+    assert_eq!(after.len(), before.len() + 1, "subfolders are not made into playlists");
+    assert_eq!(
+        f.one::<String>("SELECT Name FROM djmdPlaylist WHERE ID = ?1", &[&playlist]),
+        "Friday Set"
+    );
+    assert_eq!(
+        f.one::<i64>("SELECT Attribute FROM djmdPlaylist WHERE ID = ?1", &[&playlist]),
+        ATTRIBUTE_PLAYLIST
+    );
+    assert_eq!(member_files(&f, &playlist), ["A.wav", "1.wav", "2.wav", "x.wav", "b.wav"]);
+    assert_eq!(f.track_numbers(&playlist), [1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn a_folder_dropped_on_a_playlist_folder_lands_inside_it() {
+    let audio = tempfile::tempdir().unwrap();
+    write_wav(&audio.path().join("t.wav"), 1);
+    let mut f = fixture();
+    let crate_folder = f.writer.create_folder("Crates", ROOT).unwrap();
+    let files = vec![audio.path().join("t.wav")];
+    let outcome = f.writer.import_folder_as_playlist("Techno", &crate_folder, &files, None).unwrap();
+    let playlist = outcome.playlist.unwrap();
+    assert_eq!(f.children(&crate_folder), [playlist]);
+}
+
+#[test]
+fn a_folder_without_audio_makes_nothing() {
+    let mut f = fixture();
+    let before = f.children(ROOT);
+    let outcome = f.writer.import_folder_as_playlist("Artwork", ROOT, &[], None).unwrap();
+    assert_eq!(outcome, rbl_db::write::FolderPlaylist::default());
+    assert_eq!(f.children(ROOT), before);
+}
+
+/// rekordbox asks before replacing a same-named list
+/// (`TreeViewer::showReplaceListAlert`) [OBS, static]; nothing is written
+/// until the caller comes back with the answer.
+#[test]
+fn a_name_clash_writes_nothing_until_the_replacement_is_agreed() {
+    let audio = tempfile::tempdir().unwrap();
+    write_wav(&audio.path().join("t.wav"), 1);
+    let files = vec![audio.path().join("t.wav")];
+    let mut f = fixture();
+    let clash = playlist_id(0);
+    let before = f.children(ROOT);
+    let tracks_before = f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0");
+
+    let asked = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, None).unwrap();
+    assert_eq!(asked.conflict, Some(clash.clone()));
+    assert_eq!(asked.playlist, None);
+    assert_eq!(f.children(ROOT), before);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"), tracks_before);
+
+    let replaced = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, Some(&clash)).unwrap();
+    let playlist = replaced.playlist.unwrap();
+    assert_eq!(replaced.conflict, None);
+    assert_eq!(
+        f.one::<i64>("SELECT rb_local_deleted FROM djmdPlaylist WHERE ID = ?1", &[&clash]),
+        1,
+        "the old list is gone"
+    );
+    assert_eq!(f.writer.child_named(ROOT, "Playlist 0").unwrap(), Some(playlist.clone()));
+    assert_eq!(member_files(&f, &playlist), ["t.wav"]);
+}
