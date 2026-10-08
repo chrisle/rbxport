@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { applyEditFrom, tapTempo, tapTimeout, withTap, roundEven, validateEdit, type EditableBeat } from "./gridEdit";
+import { applyEditFrom, nudgeGrid, tapTempo, tapTimeout, withTap, roundEven, validateEdit, type EditableBeat } from "./gridEdit";
 const grid = (): EditableBeat[] => Array.from({length: 9}, (_, i) => ({timeMs: i * 500, number: i % 4 + 1, tempoX100: 12000}));
 const times = (beats: EditableBeat[]) => beats.map(b => b.timeMs);
 describe("Ghidra-derived beat-grid vectors", () => {
+  it("nudges a deck's grid as the saved edit will", () => {
+    const beats = grid();
+    const deck = { times: Uint32Array.from(times(beats)), numbers: Uint8Array.from(beats, b => b.number), tempos: Uint16Array.from(beats, b => b.tempoX100) };
+    const saved = applyEditFrom(beats, null, {kind: "nudge", ms: 7}, 4500);
+    const out = nudgeGrid(deck, 7, 4500);
+    expect(Array.from(out.times)).toEqual(times(saved));
+    expect(Array.from(out.numbers)).toEqual(saved.map(b => b.number));
+  });
   it("keeps time zero and extends to the supplied duration", () => {
     expect(times(applyEditFrom(grid(), null, {kind: "nudge", ms: -1}, 4500))).toEqual([499,999,1499,1999,2499,2999,3499,3999,4499]);
   });

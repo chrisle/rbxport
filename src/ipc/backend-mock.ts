@@ -2268,6 +2268,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(undefined);
     },
     deckMetronome: () => wait(undefined),
+    setMetronomeGrid: () => wait(undefined),
     deckKeyShift: (deck, semitones) => {
       (deck === "b" ? deckB : deckA).keyShift = Math.max(-12, Math.min(12, Math.round(semitones)));
       sendTick();

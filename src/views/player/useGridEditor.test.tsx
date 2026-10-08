@@ -33,6 +33,7 @@ let clock: number;
 let setState: ReturnType<typeof vi.fn>;
 let onError: ReturnType<typeof vi.fn>;
 let confirm: ReturnType<typeof vi.fn>;
+let onNudge: ReturnType<typeof vi.fn>;
 let edits: {
   gridEdit: ReturnType<typeof vi.fn>;
   gridUndo: ReturnType<typeof vi.fn>;
@@ -58,6 +59,7 @@ function Probe({ trackId, state, readOnly, dynamic = false }: ProbeProps) {
     readOnly,
     onError,
     isDynamicFrom: () => dynamic,
+    onNudge,
   });
   return null;
 }
@@ -97,6 +99,7 @@ beforeEach(() => {
   playhead = 0;
   setState = vi.fn();
   onError = vi.fn();
+  onNudge = vi.fn();
   edits = {
     gridEdit: vi.fn(() => Promise.resolve(gridState())),
     gridUndo: vi.fn(() => Promise.resolve(gridState())),
@@ -121,12 +124,36 @@ afterEach(() => {
 describe("recovered grid control behavior", () => {
   it("sends click and held shifts and stretches with the playhead", async () => {
     mount(); playhead = 2500;
-    act(() => { grid.shift(-1); grid.shift(1, true); grid.stretch(1); });
-    await settle(); await settle(); await settle();
+    act(() => grid.shift(-1)); await settle();
+    act(() => grid.shift(1, true)); await settle();
+    act(() => grid.stretch(1)); await settle();
     expect(edits.gridEdit.mock.calls.map(call => call[1] as GridEdit)).toEqual([
       { kind: "nudge", ms: -SHIFT_MS }, { kind: "nudge", ms: HELD_SHIFT_MS },
       { kind: "stretch", byMs: -1, timeMs: 2500 },
     ]);
+  });
+  it("plays each shift at once and saves the presses made during a save as one", async () => {
+    let finish: (state: GridState) => void = () => {};
+    edits.gridEdit.mockImplementationOnce(() => new Promise<GridState>(resolve => { finish = resolve; }));
+    mount();
+    act(() => grid.shift(1)); await settle();
+    expect(grid.nudging).toBe(true);
+    act(() => { grid.shift(1, true); grid.shift(1, true); grid.shift(-1); });
+    expect(onNudge.mock.calls.map(call => call[0] as number)).toEqual([SHIFT_MS, HELD_SHIFT_MS, HELD_SHIFT_MS, -SHIFT_MS]);
+    await settle();
+    expect(edits.gridEdit).toHaveBeenCalledTimes(1);
+    act(() => finish(gridState())); await settle();
+    expect(edits.gridEdit.mock.calls.map(call => call[1] as GridEdit)).toEqual([
+      { kind: "nudge", ms: SHIFT_MS }, { kind: "nudge", ms: 2 * HELD_SHIFT_MS - SHIFT_MS },
+    ]);
+    expect(edits.gridEdit.mock.calls.every(call => (call[2] as { deck?: string }).deck === undefined)).toBe(true);
+    expect(grid.nudging).toBe(false);
+  });
+  it("saves nothing when the presses cancel out", async () => {
+    mount();
+    act(() => { grid.shift(1); grid.shift(-1); }); await settle();
+    expect(edits.gridEdit).not.toHaveBeenCalled();
+    expect(grid.nudging).toBe(false);
   });
   it("aligns from here, suppresses whole-grid controls, and clears scope without a write", async () => {
     mount(); playhead = 2400;

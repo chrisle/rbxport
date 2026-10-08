@@ -85,6 +85,7 @@ import { useTrackCues } from "./useTrackCues";
 import { useTrackDetails } from "./useTrackDetails";
 import { useTrackGrid } from "./useTrackGrid";
 import { useGridEditor } from "./useGridEditor";
+import { nudgeGrid } from "@/lib/gridEdit";
 import { listenEditHistory } from "@/lib/editHistory";
 import { registerDeck } from "@/lib/scripting";
 import { useHoldRepeat } from "./useHoldRepeat";
@@ -214,6 +215,13 @@ export interface PlayerProps {
   leaderBpmX100?: number | null;
   /** What this deck is playing at, for the shell to hand to a synced deck. */
   onPlayingBpm?: ((bpmX100: number | null) => void) | undefined;
+  /**
+   * A grid shift on this deck, in milliseconds, for the shell to hand to the
+   * other deck: a deck synced to this one moves with it. `publishGridFollow`
+   * registers what the shell calls on this deck when the other one shifts.
+   */
+  onGridNudge?: ((ms: number) => void) | undefined;
+  publishGridFollow?: ((follow: (ms: number) => void) => void) | undefined;
   /**
    * Load whatever the browser has selected.
    *
@@ -749,7 +757,7 @@ export const Player = memo(function Player({
   simple = false, transportSlot, flipped = false, dual = false, publishZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
   publishSync, peerSync, isMaster = false, onMaster, synced = false, onSyncToggle,
-  leaderBpmX100 = null, onPlayingBpm, readOnly = false,
+  leaderBpmX100 = null, onPlayingBpm, onGridNudge, publishGridFollow, readOnly = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck, false);
   // The waveforms follow their containers, which change with the window and
@@ -769,7 +777,13 @@ export const Player = memo(function Player({
   const barsLabel = useRef<HTMLSpanElement>(null);
   // The grid and the GRID panel's state, kept current by the backend: an
   // edit from any deck refetches both — see `useTrackGrid`.
-  const { grid, state: gridState, setState: setGridState } = useTrackGrid(track);
+  const { grid: savedGrid, state: gridState, setState: setGridState } = useTrackGrid(track);
+  // A grid shift plays before its save ends: the shifted grid stands in for
+  // the saved one until the save comes back. Kept with its track, so a
+  // track change drops it.
+  const [nudge, setNudge] = useState<{ track: string; grid: TrackBeatGrid } | null>(null);
+  const nudgePreview = nudge !== null && nudge.track === track?.id ? nudge.grid : null;
+  const grid = nudgePreview ?? savedGrid;
   // The tempo, from the grid where there is one: an edit that changes it
   // reaches here before the browser's row is re-read.
   const bpmX100 = gridState?.bpmX100 ?? track?.bpmX100 ?? 0;
@@ -1194,11 +1208,43 @@ export const Player = memo(function Player({
     const start = Math.max(0, grid.times.findIndex(time => time >= startTime));
     return grid.tempos.slice(start).some(tempo => tempo !== grid.tempos[start]);
   }, [grid]);
+  /**
+   * BEAT SYNC lit: the deck moves `ms` of its own track with a grid shift,
+   * so it keeps its place against the master's beat. A move by the shift,
+   * not a new match, so an offset the DJ chose stays.
+   */
+  const followShift = useCallback((ms: number) => {
+    if (!synced || !playback.playing || advancedPrefs.syncType === "bpm") return;
+    playback.moveBy(ms / 1000);
+  }, [synced, playback, advancedPrefs.syncType]);
+  // The master's grid moved `ms` of its track later: its beat comes that
+  // much later in time, so this deck goes back by the same time, measured
+  // at the two decks' tempos.
+  const followMaster = useEventCallback((ms: number) => {
+    followShift(-ms * playback.tempo / (peerSync?.()?.tempo ?? 1));
+  });
+  useEffect(() => {
+    publishGridFollow?.(followMaster);
+  }, [publishGridFollow, followMaster]);
+  const totalMs = Math.round(total * 1000);
+  const onNudge = useCallback((ms: number) => {
+    const id = track?.id;
+    if (id === undefined) return;
+    setNudge(p => ({ track: id, grid: nudgeGrid(p?.track === id ? p.grid : savedGrid, ms, totalMs) }));
+    followShift(ms);
+    onGridNudge?.(ms);
+  }, [track?.id, savedGrid, totalMs, followShift, onGridNudge]);
+  // A save that fails leaves the saved grid as it was, so the deck goes back to it.
+  const onGridError = useCallback((message: string | null) => {
+    if (message !== null) setNudge(null);
+    onError?.(message);
+  }, [onError]);
   const gridEditor = useGridEditor({
     trackId: playback.idle ? null : track?.id ?? null,
-    deck, state: gridState, setState: setGridState, positionMs, readOnly, onError,
-    durationMs: Math.round(total * 1000),
+    deck, state: gridState, setState: setGridState, positionMs, readOnly, onError: onGridError,
+    durationMs: totalMs,
     isDynamicFrom,
+    onNudge,
   });
   const { state: historyState, undo: undoGrid, redo: redoGrid } = gridEditor;
   useEffect(() => {
@@ -1498,6 +1544,42 @@ export const Player = memo(function Player({
     );
     if (Math.abs(tempo - playback.tempo) > 1e-4) playback.setTempo(tempo);
   }, [synced, leaderBpmX100, fileBpmX100, advancedPrefs.syncDoubleHalf, playback]);
+
+  // The metronome clicks on the grid the deck shows: a shift press at once,
+  // the saved grid when the save comes back. The first grid is the load's,
+  // which gives it to the engine itself.
+  const metronomeGrid = useRef(grid);
+  useEffect(() => {
+    if (metronomeGrid.current === grid) return;
+    metronomeGrid.current = grid;
+    const pairs = Array.from(grid.times, (ms, i): [number, boolean] => [ms, grid.numbers[i] === 1]);
+    void getBackend().then(backend => backend.setMetronomeGrid(deck, pairs)).catch(() => {});
+  }, [grid, deck]);
+
+  // The stand-in goes once nothing is left to save and the saved grid has
+  // caught up: equal to it, or changed since the last save ended (an undo,
+  // or an edit from the other deck). A refetch that does not come in a
+  // second is not waited for.
+  const savedWhenIdle = useRef<TrackBeatGrid | null>(null);
+  useEffect(() => {
+    if (gridEditor.nudging || nudgePreview === null) {
+      savedWhenIdle.current = null;
+      return;
+    }
+    const drop = () => {
+      savedWhenIdle.current = null;
+      setNudge(null);
+    };
+    savedWhenIdle.current ??= savedGrid;
+    const same = savedGrid.times.length === nudgePreview.times.length
+      && savedGrid.times.every((ms, i) => ms === nudgePreview.times[i]);
+    if (same || savedGrid !== savedWhenIdle.current) {
+      drop();
+      return;
+    }
+    const late = setTimeout(drop, 1000);
+    return () => clearTimeout(late);
+  }, [gridEditor.nudging, nudgePreview, savedGrid]);
 
   const [tempoResetLocked, setTempoResetLocked] = useState(true);
 

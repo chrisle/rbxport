@@ -613,6 +613,11 @@ export interface Backend {
   deckMasterTempo(deck: DeckId, on: boolean): Promise<void>;
   /** A click on every beat of the deck's grid while it plays. */
   deckMetronome(deck: DeckId, on: boolean): Promise<void>;
+  /**
+   * The grid the deck's metronome clicks on, as milliseconds and whether
+   * each beat is a downbeat. Nothing is saved.
+   */
+  setMetronomeGrid(deck: DeckId, beats: [number, boolean][]): Promise<void>;
   /** The key, in semitones from the track's own; −12 to 12. */
   deckKeyShift(deck: DeckId, semitones: number): Promise<void>;
   /** Preferences › Audio › Metronome: which click (1 to 3) and how loud. */

@@ -539,6 +539,7 @@ pub fn run() {
             update::restart_to_update,
             commands::deck_tempo,
             commands::deck_metronome,
+            commands::deck_metronome_grid,
             commands::deck_key_shift,
             commands::set_metronome,
             commands::set_audio_config,

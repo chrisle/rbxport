@@ -1,5 +1,6 @@
 /** Grid arithmetic mirrored from rbl-anlz; see the Ghidra pre-release audit. */
 import type { GridEdit } from "@/ipc/types";
+import type { BeatGrid } from "./player";
 export interface EditableBeat { number: number; tempoX100: number; timeMs: number }
 export const SHIFT_MS = 1;
 export const HELD_SHIFT_MS = 10;
@@ -147,4 +148,17 @@ export function applyEditFrom(beats: readonly EditableBeat[], fromMs: number | n
       return fit(out, endMs);
     }
   }
+}
+/**
+ * The grid shifted by `ms`, as the saved nudge will make it. The deck plays
+ * this grid while the save runs, so the shift sounds on the press.
+ */
+export function nudgeGrid(grid: BeatGrid, ms: number, endMs: number): BeatGrid {
+  const beats = Array.from(grid.times, (timeMs, i) => ({ timeMs, number: grid.numbers[i] ?? 1, tempoX100: grid.tempos[i] ?? 0 }));
+  const out = applyEditFrom(beats, null, { kind: "nudge", ms }, endMs);
+  return {
+    times: Uint32Array.from(out, b => b.timeMs),
+    numbers: Uint8Array.from(out, b => b.number),
+    tempos: Uint16Array.from(out, b => b.tempoX100),
+  };
 }

@@ -287,6 +287,28 @@ function AppBody() {
     [],
   );
   /**
+   * A grid shift on one deck, handed to the other: a deck synced to the
+   * shifted one moves with it. Each deck decides by its own BEAT SYNC
+   * whether it moves.
+   */
+  const followA = useRef<(ms: number) => void>(() => {});
+  const followB = useRef<(ms: number) => void>(() => {});
+  const publishGridFollow = useMemo(
+    () => ({
+      a: (follow: (ms: number) => void) => {
+        followA.current = follow;
+      },
+      b: (follow: (ms: number) => void) => {
+        followB.current = follow;
+      },
+    }),
+    [],
+  );
+  const gridNudged = useMemo(
+    () => ({ a: (ms: number) => followB.current(ms), b: (ms: number) => followA.current(ms) }),
+    [],
+  );
+  /**
    * The zoom cluster the two-deck layout shares, registered the same way:
    * one + RST − over the line where the two details meet, and a press
    * zooms both decks. DUAL CONTROL off, each deck still keeps its own zoom
@@ -2287,6 +2309,8 @@ function AppBody() {
             onSyncToggle={deckCount(layout) > 1 ? toggleSync.a : undefined}
             leaderBpmX100={syncMaster === "a" ? null : leaderBpmX100}
             onPlayingBpm={reportPlayingBpm.a}
+            publishGridFollow={publishGridFollow.a}
+            onGridNudge={gridNudged.a}
             readOnly={readOnly}
           />
           {deckCount(layout) > 1 ? (
@@ -2318,6 +2342,8 @@ function AppBody() {
               onSyncToggle={toggleSync.b}
               leaderBpmX100={syncMaster === "b" ? null : leaderBpmX100}
               onPlayingBpm={reportPlayingBpm.b}
+              publishGridFollow={publishGridFollow.b}
+              onGridNudge={gridNudged.b}
               readOnly={readOnly}
             />
           ) : null}

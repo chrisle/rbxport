@@ -333,6 +333,7 @@ async function realBackend(): Promise<Backend> {
     deckTempo: (deck, tempo) => invoke<void>("deck_tempo", { deck, tempo }),
     deckMasterTempo: (deck, on) => invoke<void>("deck_master_tempo", { deck, on }),
     deckMetronome: (deck, on) => invoke<void>("deck_metronome", { deck, on }),
+    setMetronomeGrid: (deck, beats) => invoke<void>("deck_metronome_grid", { deck, beats }),
     deckKeyShift: (deck, semitones) => invoke<void>("deck_key_shift", { deck, semitones }),
     setMetronome: (sound, volume) => invoke<void>("set_metronome", { sound, volume }),
     setAudioConfig: (sampleRate, bufferFrames) =>

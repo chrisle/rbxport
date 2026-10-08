@@ -16,9 +16,16 @@ export interface GridEditorDeck {
   isDynamicFrom?: (fromMs: number | null) => boolean;
   confirmDynamic?: () => boolean | Promise<boolean>;
   onError?: ((message: string | null) => void) | undefined;
+  /**
+   * Called on each shift press with its milliseconds, before the save. The
+   * deck plays the shifted grid from here, so the shift sounds at once.
+   */
+  onNudge?: ((ms: number) => void) | undefined;
 }
 export interface GridEditorActions {
   state: GridState | null;
+  /** True while a shift press is not saved yet. */
+  nudging: boolean;
   hasGrid: boolean;
   canEdit: boolean;
   fromMs: number | null;
@@ -42,7 +49,7 @@ function describe(error: unknown): string {
   return "The beat grid could not be saved.";
 }
 export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
-  const { trackId, deck: deckId, state, setState, positionMs, readOnly, onError, isDynamicFrom, confirmDynamic } = deck;
+  const { trackId, deck: deckId, state, setState, positionMs, readOnly, onError, isDynamicFrom, confirmDynamic, onNudge } = deck;
   const t = useTranslation();
   // The playhead can sit up to five seconds before the track starts, but the
   // grid has no time before zero and the command takes unsigned
@@ -60,6 +67,12 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   const session = useRef(crypto.randomUUID());
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queue = useRef(Promise.resolve());
+  // The shift presses not saved yet. One save runs at a time and the presses
+  // that come during it go out together in the next, so a held button never
+  // queues more than one save behind the one in flight.
+  const pendingNudge = useRef(0);
+  const nudgeQueued = useRef(false);
+  const [nudging, setNudging] = useState(false);
   const currentTrack = useRef(trackId);
   currentTrack.current = trackId;
   const cancelTaps = useCallback(() => {
@@ -68,20 +81,28 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     tapsRef.current = [];
     setTaps([]);
   }, []);
+  useEffect(() => {
+    pendingNudge.current = 0;
+    nudgeQueued.current = false;
+    setNudging(false);
+  }, [trackId]);
   useEffect(() => { setFromMs(null); cancelTaps(); return () => { if (tapTimer.current) clearTimeout(tapTimer.current); }; }, [trackId, cancelTaps]);
   useEffect(() => { if (readOnly || state?.locked) cancelTaps(); }, [readOnly, state?.locked, cancelTaps]);
 
-  const run = useCallback((action: (edits: Awaited<ReturnType<typeof getBackend>>["edits"]) => Promise<GridState>, after?: () => void) => {
+  // A null result is an action that had nothing to send.
+  const run = useCallback((action: (edits: Awaited<ReturnType<typeof getBackend>>["edits"]) => Promise<GridState | null>,
+    after?: () => void, done?: () => void) => {
     queue.current = queue.current.then(async () => {
-      if (currentTrack.current !== trackId) return;
       try {
+        if (currentTrack.current !== trackId) return;
         const backend = await getBackend();
         const next = await action(backend.edits);
-        if (currentTrack.current !== trackId) return;
+        if (currentTrack.current !== trackId || next === null) return;
         setState(next);
         after?.();
         onError?.(null);
       } catch (error) { if (currentTrack.current === trackId) onError?.(describe(error)); }
+      finally { done?.(); }
     });
   }, [trackId, setState, onError]);
   const edit = useCallback((change: GridEdit, boundary = fromMs, transaction?: string, after?: () => void) => {
@@ -105,8 +126,24 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   }, [canEdit, trackId, deckId, fromMs, run, isDynamicFrom, confirmDynamic, state, deck.durationMs, t]);
   const mark = useCallback(() => { if (fromMs === null) edit({ kind: "downbeat", timeMs: playheadMs() }); }, [edit, fromMs, playheadMs]);
   const shift = useCallback((direction: -1 | 1, held = false) => {
-    if (fromMs === null) edit({ kind: "nudge", ms: direction * (held ? HELD_SHIFT_MS : SHIFT_MS) });
-  }, [edit, fromMs]);
+    if (fromMs !== null || !canEdit || trackId === null) return;
+    const ms = direction * (held ? HELD_SHIFT_MS : SHIFT_MS);
+    onNudge?.(ms);
+    pendingNudge.current += ms;
+    if (nudgeQueued.current) return;
+    nudgeQueued.current = true;
+    setNudging(true);
+    // No deck: the deck already plays the shifted grid, and a save that ends
+    // behind newer presses must not put an older grid on its metronome.
+    const options: GridEditOptions = {};
+    if (deck.durationMs !== undefined) options.durationMs = deck.durationMs;
+    run(edits => {
+      nudgeQueued.current = false;
+      const sum = pendingNudge.current;
+      pendingNudge.current = 0;
+      return sum === 0 ? Promise.resolve(null) : edits.gridEdit(trackId, { kind: "nudge", ms: sum }, options);
+    }, undefined, () => { if (!nudgeQueued.current) setNudging(false); });
+  }, [fromMs, canEdit, trackId, onNudge, deck.durationMs, run]);
   const stretch = useCallback((direction: -1 | 1, held = false) => {
     edit({ kind: "stretch", byMs: -direction * (held ? HELD_SHIFT_MS : SHIFT_MS), timeMs: playheadMs() });
   }, [edit, playheadMs]);
@@ -141,5 +178,5 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   const toggleLock = useCallback(() => {
     if (hasGrid && !readOnly && trackId !== null && state !== null) { cancelTaps(); run(edits => edits.gridLock(trackId, !state.locked)); }
   }, [hasGrid, readOnly, trackId, state, cancelTaps, run]);
-  return { state, hasGrid, canEdit, fromMs, tapBpmX100: tapTempo(taps), tap, mark, shift, stretch, double, halve, adjustAll, adjustFrom, align, setBpm, undo, redo, toggleLock };
+  return { state, nudging, hasGrid, canEdit, fromMs, tapBpmX100: tapTempo(taps), tap, mark, shift, stretch, double, halve, adjustAll, adjustFrom, align, setBpm, undo, redo, toggleLock };
 }

@@ -216,3 +216,57 @@ test("two-player grid controls edit the loaded track and sound selection is avai
   await player(page).getByRole("tab",{name:"GRID",exact:true}).click();
   await expect(button(page,"Undo the last grid edit")).toBeEnabled();
 });
+
+/**
+ * A grid shift on a synced pair sounds at once: the follower moves with its
+ * own grid, and follows the master's. Q is off, so the phase lock does not
+ * do the move. Both decks hold the same track, so the change in the
+ * distance between the two heads is the shift.
+ */
+test("a grid shift moves a synced deck with the grid at once", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  const first = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  await first.dblclick();
+  await first.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Track" });
+  await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
+  await menu.getByRole("menuitem", { name: "Load track to player 2" }).click();
+  const a = page.getByRole("region", { name: "Preview player", exact: true });
+  const b = page.getByRole("region", { name: "Preview player B" });
+  await expect(b.getByTestId("player-title")).not.toHaveText("");
+
+  /** How far B's head is past A's beat, in seconds, from −½ to ½ a beat. */
+  const offBeat = () =>
+    page.evaluate(() => {
+      const { a, b, beat } = (window as unknown as {
+        __deckSeconds: () => { a: number; b: number; beat: number };
+      }).__deckSeconds();
+      const into = (((b - a) % beat) + beat) % beat;
+      return into > beat / 2 ? into - beat : into;
+    });
+
+  await b.getByRole("button", { name: "Quantize" }).click();
+  await expect(b.getByRole("button", { name: "Quantize" })).toHaveAttribute("aria-pressed", "false");
+  const play = page.getByRole("button", { name: "Play", exact: true });
+  await play.first().click();
+  await play.first().click();
+  await b.getByRole("button", { name: "Beat sync" }).click();
+  await expect(b.getByRole("button", { name: "Beat sync" })).toHaveAttribute("aria-pressed", "true");
+  // The match is a seek; it lands a tick or two later.
+  await page.waitForTimeout(500);
+  const start = await offBeat();
+
+  // Ten presses on B's grid, 1 ms each: B's head moves 10 ms with it.
+  const later = (deck: typeof a) => deck.getByRole("button", { name: "Shift the grid later" });
+  await expect(later(b)).toBeEnabled();
+  for (let n = 0; n < 10; n++) await later(b).click();
+  await expect.poll(async () => (await offBeat()) - start, { timeout: 1000 }).toBeGreaterThan(0.006);
+  expect((await offBeat()) - start).toBeLessThan(0.014);
+
+  // The same on the master's grid: B follows it back to where it was.
+  for (let n = 0; n < 10; n++) await later(a).click();
+  await expect.poll(async () => Math.abs((await offBeat()) - start), { timeout: 1000 }).toBeLessThan(0.004);
+});

@@ -720,9 +720,9 @@ impl Engine {
 
     /// Moves the playhead by `ms` from where it is now. The move is worked
     /// out here, from the clock, so it does not land late by the time the
-    /// command took to arrive. The phase lock of a synced deck uses it. A
-    /// head in the pre-roll before zero moves from there, as `seek_ms` puts
-    /// it.
+    /// command took to arrive. The phase lock and a grid shift on a synced
+    /// deck use it. A head in the pre-roll before zero moves from there, as
+    /// `seek_ms` puts it.
     pub fn move_ms(&self, deck: Deck, ms: f64) {
         let Some(handle) = self.deck(deck) else { return };
         let clock = handle.clock();
