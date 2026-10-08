@@ -1477,5 +1477,6 @@
   "Select a drive": "ドライブを選択",
   "Add memory cue at first beat": "Add memory cue at first beat",
   "The analysis was saved, but the first-beat memory cue could not be added.": "The analysis was saved, but the first-beat memory cue could not be added.",
-  "Export to this device first to set its background color.": "背景色を設定するには、まずこのデバイスにエクスポートしてください。"
+  "Export to this device first to set its background color.": "背景色を設定するには、まずこのデバイスにエクスポートしてください。",
+  "Importing {done} of {total} tracks…": "Importing {done} of {total} tracks…"
 }
