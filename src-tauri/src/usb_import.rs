@@ -125,8 +125,10 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             if analysis.is_empty() { report.skipped += 1; continue; }
             let source = within(root, analysis)?;
             let source_dat = rbl_anlz::Anlz::read(&source).map_err(err)?;
-            let source_ext = source.with_extension("EXT");
-            let source_cues = if source_ext.exists() { rbl_anlz::Anlz::read(&within(root, &source_ext.strip_prefix(root).map_err(err)?.to_string_lossy())?).map_err(err)? } else { source_dat.clone() };
+            // `source` is canonical and `root` need not be (a symlinked mount),
+            // so the `.EXT` is found from the relative path, not by stripping.
+            let ext_relative = Path::new(analysis).with_extension("EXT");
+            let source_cues = if source.with_extension("EXT").exists() { rbl_anlz::Anlz::read(&within(root, &ext_relative.to_string_lossy())?).map_err(err)? } else { source_dat.clone() };
             if source_cues.section(b"PCO2").is_none() { report.skipped += 1; continue; }
             let entries = source_cues.cue_entries();
             let beats = source_dat.beat_grid().unwrap_or_default();
