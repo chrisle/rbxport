@@ -638,6 +638,15 @@ export interface Backend {
   setEqCurve(isolator: boolean): Promise<void>;
   /** Both decks now, to anchor the interface when it starts. */
   deckState(): Promise<Tick>;
+  /**
+   * The browser's preview player: a click on a row's waveform plays the track
+   * from there without loading it onto a deck, and pauses the decks, as
+   * rekordbox does outside PERFORMANCE mode. Its own player, so it has no
+   * tick: the interface asks `previewState` while it plays.
+   */
+  previewPlay(trackId: string, positionMs: number): Promise<void>;
+  previewStop(): Promise<void>;
+  previewState(): Promise<PreviewState>;
   /** Both decks, ten times a second, and only while something is playing. */
   onDeckTick(listener: (tick: Tick) => void): () => void;
   /**
@@ -817,6 +826,15 @@ export interface Backend {
 
 /** Which deck. Two, named rather than indexed, as the mixer is. */
 export type DeckId = "a" | "b";
+
+/** The browser's preview player. */
+export interface PreviewState {
+  /** The track it holds, or null before anything was previewed. */
+  track: string | null;
+  playing: boolean;
+  positionMs: number;
+  durationMs: number;
+}
 
 /** Something an AppleScript asks of the window; see `src/lib/scripting.ts`. */
 export interface ScriptRequest {

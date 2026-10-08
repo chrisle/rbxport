@@ -633,7 +633,8 @@ export type PreviewCue = readonly [letter: string, positionMs: number, colour: s
 /**
  * Canvas measurements and colours come from the same theme source as CSS.
  */
-const PREVIEW_BADGE = 7; // --s-preview-cue-badge
+/** A hot cue badge over a row's waveform, square, in CSS pixels. */
+export const PREVIEW_BADGE = 7; // --s-preview-cue-badge
 const PREVIEW_BADGE_FONT = 6; // --f-size-preview-cue
 const CUE_HOT = theme.color.cueHot.value;
 const CUE_HOT_TEXT = theme.color.cueHotText.value;
@@ -675,6 +676,37 @@ export function drawPreviewCues(
     ctx.fillStyle = CUE_HOT_TEXT;
     ctx.fillText(letter, x + size / 2, size / 2);
   }
+}
+
+/**
+ * Where a click on a row's waveform starts the preview, in milliseconds.
+ *
+ * rekordbox: a click on a hot cue's badge starts from the cue itself
+ * (`PreviewComponent::cueRegionMouseDown`); anywhere else, from the click's
+ * fraction of the width, clamped to it (`PreviewComponent::clickWave`). The
+ * badges are where `drawPreviewCues` puts them, and the last drawn — the one
+ * on top — wins. `x` and `y` are CSS pixels from the waveform's top left.
+ */
+export function previewClickMs(
+  x: number,
+  y: number,
+  width: number,
+  durationMs: number,
+  cues: readonly PreviewCue[],
+): number {
+  if (width <= 0 || durationMs <= 0) return 0;
+  if (y >= 0 && y < PREVIEW_BADGE) {
+    for (let i = cues.length - 1; i >= 0; i--) {
+      const cue = cues[i];
+      if (!cue) continue;
+      const positionMs = cue[1];
+      const at = Math.min(Math.max(positionMs / durationMs, 0), 1);
+      const left = Math.min(at * width, width - PREVIEW_BADGE);
+      if (x >= left && x < left + PREVIEW_BADGE) return Math.min(Math.max(positionMs, 0), durationMs);
+    }
+  }
+  const fraction = Math.min(Math.max(x / width, 0), 1);
+  return fraction * durationMs;
 }
 
 /** Memory cues use centered red downward triangles, below hot-cue badges. */

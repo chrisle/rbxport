@@ -1449,6 +1449,22 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   let clock: ReturnType<typeof setTimeout> | null = null;
   let clockAt = 0;
 
+  /*
+   * The preview player: its own clock, kept as a start time and an offset
+   * rather than a ticking timer, because nothing listens to it — the
+   * interface asks where it is.
+   */
+  const previewed = { track: null as string | null, playing: false, positionMs: 0, durationMs: 0, since: 0 };
+  const previewNow = (): number => {
+    if (!previewed.playing) return previewed.positionMs;
+    const at = previewed.positionMs + (performance.now() - previewed.since);
+    if (at < previewed.durationMs) return at;
+    // Played to the end: it stops there, as the engine's deck does.
+    previewed.playing = false;
+    previewed.positionMs = previewed.durationMs;
+    return previewed.positionMs;
+  };
+
   /** The master level, which a browser can hold even with nothing to apply it to. */
   // −1 dB, the knob at 10: what the engine starts at.
   let master = 0.891_250_9;
@@ -2242,6 +2258,34 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }),
 
     deckState: () => wait(tick()),
+    previewPlay: (trackId, positionMs) => {
+      const row = all[Number.parseInt(trackId, 10) - 100000];
+      if (!row) return notFound("That track's file could not be found.");
+      // rekordbox outside PERFORMANCE mode pauses the decks for a preview.
+      if (deckA.playing || deckB.playing) {
+        deckA.playing = false;
+        deckB.playing = false;
+        stopClock();
+        sendTick();
+      }
+      previewed.track = trackId;
+      previewed.durationMs = row.durationSec * 1000;
+      previewed.positionMs = Math.min(Math.max(0, positionMs), previewed.durationMs);
+      previewed.since = performance.now();
+      previewed.playing = previewed.positionMs < previewed.durationMs;
+      return wait(undefined);
+    },
+    previewStop: () => {
+      previewed.positionMs = previewNow();
+      previewed.playing = false;
+      return wait(undefined);
+    },
+    previewState: () => {
+      const positionMs = previewNow();
+      return wait({
+        track: previewed.track, playing: previewed.playing, positionMs, durationMs: previewed.durationMs,
+      });
+    },
     onDeckTick: (listener) => {
       deckTickListeners.add(listener);
       return () => deckTickListeners.delete(listener);

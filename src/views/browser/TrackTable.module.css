@@ -353,6 +353,33 @@
   align-items: flex-start;
 }
 
+/* The row's waveform, and what the preview draws over it while it plays the
+   row's track. [UNKNOWN] rekordbox's own preview playhead and stop button have
+   not been captured; a plain line and a square stand in for them. */
+.previewWave { position: relative; display: block; flex: none; cursor: pointer; }
+.previewWave canvas { display: block; }
+.previewHead {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 100%;
+  background: var(--c-text);
+  pointer-events: none;
+}
+.previewStop {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  background: var(--c-text);
+  cursor: pointer;
+}
+
 /* Stands in for a cell's text while its page loads: a dim bar on the row's
    ground, so a fast scroll reads as content arriving rather than blank rows. */
 .skeleton {

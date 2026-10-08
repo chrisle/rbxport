@@ -175,6 +175,10 @@ pub struct Player {
     /// would go back to the default every time.
     limiter: Mutex<LimiterDto>,
     master_level: Mutex<f32>,
+    /// Whether the engine's load events go to the interface as `deck:*`.
+    /// The browser's preview player is a second engine and keeps quiet: its
+    /// deck A is not the player's deck A.
+    emits_deck_events: bool,
 }
 
 impl Default for Player {
@@ -204,7 +208,15 @@ impl Player {
                 ceiling_db: rbl_deck::DEFAULT_CEILING_DB,
                 release_ms: rbl_deck::DEFAULT_RELEASE_MS,
             }),
+            emits_deck_events: true,
         }
+    }
+
+    /// The same player, with its load events kept to itself.
+    #[must_use]
+    pub fn quiet(mut self) -> Self {
+        self.emits_deck_events = false;
+        self
     }
 }
 
@@ -231,8 +243,11 @@ impl Player {
             return Ok(Arc::clone(engine));
         }
         let handle = app.clone();
+        let emits = self.emits_deck_events;
         let events: rbl_deck::EventSink = Arc::new(move |event: DeckEvent| {
-            emit_deck_event(&handle, &event);
+            if emits {
+                emit_deck_event(&handle, &event);
+            }
         });
         let device = self.device.lock().clone();
         let wish = *self.wish.lock();

@@ -187,3 +187,32 @@ describe("USB music cleanup", () => {
     expect(exported).toMatchObject({ tracks: 1, removed: 2 });
   });
 });
+
+describe("mock preview", () => {
+  it("previews a track from a point, pauses the deck, and stops where it is", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.deckLoad("a", "100001", 1);
+    await backend.deckPlay("a");
+    expect((await backend.deckState()).a.playing).toBe(true);
+
+    await backend.previewPlay("100002", 12_000);
+    // Outside PERFORMANCE mode rekordbox pauses the decks for a preview.
+    expect((await backend.deckState()).a.playing).toBe(false);
+    const playing = await backend.previewState();
+    expect(playing.track).toBe("100002");
+    expect(playing.playing).toBe(true);
+    expect(playing.positionMs).toBeGreaterThanOrEqual(12_000);
+    expect(playing.durationMs).toBeGreaterThan(12_000);
+
+    await backend.previewStop();
+    const stopped = await backend.previewState();
+    expect(stopped.playing).toBe(false);
+    expect(stopped.positionMs).toBeGreaterThanOrEqual(12_000);
+  });
+
+  it("refuses a track that is not there", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await expect(backend.previewPlay("no-such-track", 0)).rejects.toMatchObject({ kind: "notFound" });
+    expect((await backend.previewState()).track).toBeNull();
+  });
+});

@@ -23,6 +23,7 @@ use rbxport_lib::cues::{self, CueKind};
 use rbxport_lib::details;
 use rbxport_lib::dto::{RowDto, TrackFilterDto, TrackSourceDto, TreeNodeDto, ViewSpecDto};
 use rbxport_lib::player::{Player, TickDto};
+use rbxport_lib::preview::{Preview, PreviewStateDto};
 use rbxport_lib::state::AppState;
 use rbxport_lib::ErrorKind;
 use tauri::test::MockRuntime;
@@ -37,6 +38,8 @@ struct Shell {
     app: tauri::App<MockRuntime>,
     /// The engine's output, once a deck command has opened it.
     sink: Arc<Mutex<Option<Arc<NullSink>>>>,
+    /// The preview player's output, once something has been previewed.
+    preview_sink: Arc<Mutex<Option<Arc<NullSink>>>>,
     /// Every `library:changed` generation the interface would have seen.
     changes: Arc<Mutex<Vec<u32>>>,
     /// How many `tag-list:changed` the interface would have seen.
@@ -66,9 +69,18 @@ fn shell_with_shape(shape: Shape) -> Shell {
         Ok(opened as Arc<dyn Sink>)
     }));
 
+    let preview_sink: Arc<Mutex<Option<Arc<NullSink>>>> = Arc::new(Mutex::new(None));
+    let preview_slot = Arc::clone(&preview_sink);
+    let preview = Preview::with_sink(Box::new(move |render, _device, _wish| {
+        let opened = Arc::new(NullSink::new(RATE, render));
+        *preview_slot.lock().unwrap() = Some(Arc::clone(&opened));
+        Ok(opened as Arc<dyn Sink>)
+    }));
+
     let app = tauri::test::mock_app();
     app.manage(Arc::new(state));
     app.manage(Arc::new(player));
+    app.manage(Arc::new(preview));
 
     let changes: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&changes);
@@ -82,7 +94,7 @@ fn shell_with_shape(shape: Shape) -> Shell {
     let tagged = Arc::clone(&tag_list_changes);
     app.listen("tag-list:changed", move |_| *tagged.lock().unwrap() += 1);
 
-    Shell { _dir: dir, app, sink, changes, tag_list_changes }
+    Shell { _dir: dir, app, sink, preview_sink, changes, tag_list_changes }
 }
 
 /// Runs a command the way the invoke handler does: to completion, on the
@@ -139,6 +151,30 @@ impl Shell {
 
     fn deck_state(&self) -> TickDto {
         run(commands::deck_state(self.player())).unwrap()
+    }
+
+    fn preview(&self) -> State<'_, Arc<Preview>> {
+        self.app.state::<Arc<Preview>>()
+    }
+
+    fn preview_state(&self) -> PreviewStateDto {
+        run(commands::preview_state(self.preview())).unwrap()
+    }
+
+    /// Pulls the preview's output until the condition holds, or gives up.
+    fn pull_preview_until(&self, what: &str, mut done: impl FnMut(&PreviewStateDto) -> bool) -> PreviewStateDto {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let state = self.preview_state();
+            if done(&state) {
+                return state;
+            }
+            assert!(Instant::now() < deadline, "gave up waiting for {what}: {state:?}");
+            if let Some(sink) = self.preview_sink.lock().unwrap().clone() {
+                sink.pull(512);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     /// Pulls the sink until the condition holds, or gives up. The engine
@@ -1057,6 +1093,54 @@ fn the_two_decks_play_independently_and_the_master_level_is_the_engine_s() {
     let ended = s.pull_until("deck A to reach its end", |t| !t.a.playing && t.a.frames > 0);
     assert!(ended.b.playing);
     assert!(ended.b.frames > ended.a.frames);
+}
+
+#[test]
+fn a_waveform_click_previews_the_track_without_loading_a_deck() {
+    let s = shell();
+    let a = write_wav(&s._dir.path().join("deck.wav"), 3);
+    let b = write_wav(&s._dir.path().join("preview.wav"), 4);
+    let report = run(commands::import_files(
+        s.handle(),
+        s.state(),
+        vec![a.display().to_string(), b.display().to_string()],
+    ))
+    .unwrap();
+    let (on_deck, previewed) = (report.tracks[0].id.clone(), report.tracks[1].id.clone());
+
+    // Nothing previewed yet: no preview output opened, and an idle state.
+    assert_eq!(s.preview_state(), PreviewStateDto { track: None, playing: false, position_ms: 0.0, duration_ms: 0.0 });
+    assert!(s.preview_sink.lock().unwrap().is_none());
+
+    // Deck A is playing something else.
+    run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), on_deck.clone(), 1)).unwrap();
+    s.pull_until("deck A to load", |t| t.a.loaded);
+    run(commands::deck_play(s.handle(), s.player(), "a".into())).unwrap();
+    s.pull_until("deck A to play", |t| t.a.playing && t.a.frames > 0);
+
+    // A click halfway across the second track's waveform.
+    run(commands::preview_play(s.handle(), s.state(), s.player(), s.preview(), previewed.clone(), 2_000.0)).unwrap();
+    // rekordbox outside PERFORMANCE mode pauses the decks for a preview.
+    let decks = s.pull_until("deck A to pause", |t| !t.a.playing);
+    assert_eq!(decks.a.load_id, 1, "the deck keeps its own track; the preview did not load onto it");
+    let playing = s.pull_preview_until("the preview to move past the click", |p| p.playing && p.position_ms > 2_050.0);
+    assert_eq!(playing.track.as_deref(), Some(previewed.as_str()));
+    assert!((playing.duration_ms - 4_000.0).abs() < 1.0);
+    assert!(playing.position_ms < 3_000.0, "started at the click, not the top: {playing:?}");
+
+    // A click on the same track moves it rather than reloading it.
+    run(commands::preview_play(s.handle(), s.state(), s.player(), s.preview(), previewed.clone(), 500.0)).unwrap();
+    let moved = s.pull_preview_until("the preview to move back", |p| p.playing && p.position_ms < 1_500.0);
+    assert!(moved.position_ms >= 500.0);
+
+    // Stopped where it is.
+    run(commands::preview_stop(s.preview())).unwrap();
+    s.pull_preview_until("the preview to stop", |p| !p.playing);
+
+    // A track whose file is not there is refused, as rekordbox refuses it.
+    std::fs::remove_file(&a).unwrap();
+    let err = run(commands::preview_play(s.handle(), s.state(), s.player(), s.preview(), on_deck, 0.0)).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::NotFound);
 }
 
 #[test]

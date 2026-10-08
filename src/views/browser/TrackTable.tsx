@@ -24,7 +24,7 @@ import {
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import { trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
-import { WaveformPreview } from "./WaveformPreview";
+import { previewFromClick, WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 import { FilterIcon, SortDownIcon, SortUpIcon } from "@/components/icons";
 import { Artwork } from "@/components/Artwork";
@@ -455,6 +455,9 @@ const TrackRow = memo(function TrackRow({
       onClick={(e) => {
         if (suppressClick.current) return;
         if (clickSettles(e, selected)) onSelect(index, row.id, e);
+        // A click on the waveform also previews the track from there; the
+        // row is selected as well, as rekordbox's is.
+        if (row.analysed) previewFromClick(e, row.id, row.durationSec, previewCues ? row.hotCues : NO_CUES);
       }}
       onDoubleClick={() => onOpen(index)}
       onContextMenu={(e) => {

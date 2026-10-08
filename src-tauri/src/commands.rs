@@ -2367,6 +2367,45 @@ pub async fn deck_state(
     }))
 }
 
+/// Previews a track from `position_ms` without loading it onto a deck: a
+/// click on the waveform in the browser's Preview column. See `preview.rs`
+/// for what rekordbox does and how that was established.
+#[tauri::command]
+pub async fn preview_play<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    player: State<'_, Arc<crate::player::Player>>,
+    preview: State<'_, Arc<crate::preview::Preview>>,
+    track: String,
+    position_ms: f64,
+) -> AppResult<()> {
+    let library = state.library()?;
+    let Some(path) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
+        return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
+            .with_detail(format!("track {track}")));
+    };
+    let decks = Arc::clone(&player);
+    let preview = Arc::clone(&preview);
+    // Waits on the file opening, which may be a disk waking up: off the
+    // async runtime.
+    blocking("preview_play", move || preview.play(&app, &decks, &track, &path, position_ms)).await
+}
+
+/// Stops the preview where it is.
+#[tauri::command]
+pub async fn preview_stop(preview: State<'_, Arc<crate::preview::Preview>>) -> AppResult<()> {
+    preview.stop();
+    Ok(())
+}
+
+/// The preview's track, whether it is playing, and where.
+#[tauri::command]
+pub async fn preview_state(
+    preview: State<'_, Arc<crate::preview::Preview>>,
+) -> AppResult<crate::preview::PreviewStateDto> {
+    Ok(preview.state())
+}
+
 /// A track's cue points.
 ///
 /// A hot cue's colour is what rekordbox paints for its `ColorTableIndex`,

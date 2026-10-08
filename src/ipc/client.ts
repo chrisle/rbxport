@@ -11,7 +11,7 @@ import type {
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
-  LinkStatus, MissingExportFile, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
+  LinkStatus, MissingExportFile, MissingTracks, PreviewState, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
   TreeNode, ViewHandle,
   TrackDetails, TrackLookups,
 } from "./types";
@@ -310,6 +310,9 @@ async function realBackend(): Promise<Backend> {
     deckPlayAfter: (deck, delayMs) => invoke<void>("deck_play_after", { deck, delayMs }),
     deckPause: (deck) => invoke<void>("deck_pause", { deck }),
     deckSeek: (deck, positionMs) => invoke<void>("deck_seek", { deck, positionMs }),
+    previewPlay: (track, positionMs) => invoke<void>("preview_play", { track, positionMs }),
+    previewStop: () => invoke<void>("preview_stop"),
+    previewState: () => invoke<PreviewState>("preview_state"),
     deckSetLoop: (deck, inMs, outMs) => invoke<void>("deck_set_loop", { deck, inMs, outMs }),
     deckLoopActive: (deck, on) => invoke<void>("deck_loop_active", { deck, on }),
     deckClearLoop: (deck) => invoke<void>("deck_clear_loop", { deck }),

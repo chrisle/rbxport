@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  BAND_HIGH, BAND_LOW, BAND_MID, bandColour, bandStops, drawBands, drawColumns, drawPreviewCues, drawPreviewMemoryCues, ramp, segments,
+  BAND_HIGH, BAND_LOW, BAND_MID, bandColour, bandStops, drawBands, drawColumns, drawPreviewCues, drawPreviewMemoryCues, PREVIEW_BADGE, previewClickMs, ramp, segments,
   strideOf, waveformKindOf,
 } from "./waveform";
 
@@ -448,5 +448,41 @@ describe("preview memory cues", () => {
     expect(ctx.fillStyle).toBe("#EA3323");
     expect(points).toEqual([[44,0],[56,0],[50,8]]);
     expect(fills).toBe(1);
+  });
+});
+
+describe("a click on a row preview", () => {
+  // rekordbox: PreviewComponent::clickWave starts at the click's fraction of
+  // the width, clamped; cueRegionMouseDown starts at a clicked badge's cue.
+  it("starts at the click's fraction of the track", () => {
+    expect(previewClickMs(50, 10, 200, 300_000, [])).toBe(75_000);
+    expect(previewClickMs(0, 10, 200, 300_000, [])).toBe(0);
+  });
+
+  it("clamps a click past either end to the track", () => {
+    expect(previewClickMs(-4, 10, 200, 300_000, [])).toBe(0);
+    expect(previewClickMs(260, 10, 200, 300_000, [])).toBe(300_000);
+  });
+
+  it("starts at a hot cue when its badge is clicked", () => {
+    const cues = [["A", 30_000, null], ["B", 150_000, "#ff0000"]] as const;
+    // B's badge is drawn from x = 100 for PREVIEW_BADGE pixels.
+    expect(previewClickMs(100 + PREVIEW_BADGE - 1, 2, 200, 300_000, cues)).toBe(150_000);
+    // Below the badges the same x is just a place in the track.
+    expect(previewClickMs(100 + PREVIEW_BADGE - 1, PREVIEW_BADGE + 1, 200, 300_000, cues)).toBeCloseTo(159_000);
+  });
+
+  it("gives an overlapping click to the badge drawn on top", () => {
+    const cues = [["A", 100_000, null], ["B", 101_000, null]] as const;
+    expect(previewClickMs(68, 1, 200, 300_000, cues)).toBe(101_000);
+  });
+
+  it("finds the badge pushed in from the right edge", () => {
+    const cues = [["H", 300_000, null]] as const;
+    expect(previewClickMs(200 - PREVIEW_BADGE, 1, 200, 300_000, cues)).toBe(300_000);
+  });
+
+  it("is the top for a track with no length", () => {
+    expect(previewClickMs(50, 1, 200, 0, [])).toBe(0);
   });
 });

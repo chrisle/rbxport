@@ -22,7 +22,11 @@ declare global {
 let host: HTMLDivElement;
 let root: Root;
 let asked: string[];
+let previews: Array<[string, number]>;
+let stops: number;
+let previewRefusal: Error | null;
 let WaveformPreview: typeof import("./WaveformPreview").WaveformPreview;
+let previewFromClick: typeof import("./WaveformPreview").previewFromClick;
 /**
  * Taken from the same module graph the component imports.
  *
@@ -47,6 +51,9 @@ beforeEach(async () => {
   vi.useFakeTimers();
   vi.resetModules();
   asked = [];
+  previews = [];
+  stops = 0;
+  previewRefusal = null;
   ({ __setBackend: setBackend } = await import("@/ipc/client"));
   // A backend that records the request and never answers: what is under test
   // is whether the call is made at all.
@@ -57,8 +64,17 @@ beforeEach(async () => {
     },
     // The module subscribes once on load; nothing is re-analysed here.
     onAnalysisChanged: () => () => undefined,
+    previewPlay: (trackId: string, positionMs: number) => {
+      previews.push([trackId, positionMs]);
+      return previewRefusal ? Promise.reject(previewRefusal) : Promise.resolve();
+    },
+    previewStop: () => {
+      stops += 1;
+      return Promise.resolve();
+    },
+    previewState: () => new Promise(() => {}),
   } as unknown as Backend);
-  ({ WaveformPreview } = await import("./WaveformPreview"));
+  ({ WaveformPreview, previewFromClick } = await import("./WaveformPreview"));
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -114,5 +130,83 @@ describe("WaveformPreview", () => {
     // bound below a screen's worth still holds.
     expect(asked.length).toBeGreaterThan(0);
     expect(asked.length).toBeLessThan(20);
+  });
+});
+
+describe("a click on a row's waveform", () => {
+  /** A preview cell the way the row lays it out, clicked the way the row hands it on. */
+  function cell(cues: readonly (readonly [string, number, string | null])[] = []) {
+    act(() =>
+      root.render(
+        <div
+          data-col="preview"
+          onClick={(e) => previewFromClick(e, "7", 200, cues)}
+        >
+          <WaveformPreview trackId="7" width={100} height={15} hotCues={cues} durationSec={200} />
+        </div>,
+      ),
+    );
+    const canvas = host.querySelector("canvas")!;
+    // jsdom lays nothing out: the waveform is put 100 px wide at x = 20.
+    canvas.getBoundingClientRect = () => ({ left: 20, top: 5, width: 100, height: 15, right: 120, bottom: 20, x: 20, y: 5, toJSON: () => ({}) });
+    return canvas;
+  }
+
+  const click = (target: Element, init: MouseEventInit = {}) =>
+    act(() => {
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0, detail: 1, clientX: 45, clientY: 15, ...init }));
+    });
+
+  it("previews the track from where it was clicked", async () => {
+    const canvas = cell();
+    click(canvas);
+    await settle();
+    // A quarter of the way across a 200-second track.
+    expect(previews).toEqual([["7", 50_000]]);
+  });
+
+  it("starts at a hot cue when its badge is clicked", async () => {
+    const canvas = cell([["A", 120_000, null]]);
+    // The badge sits at 60 % across, at the top of the waveform.
+    click(canvas, { clientX: 20 + 61, clientY: 5 + 2 });
+    await settle();
+    expect(previews).toEqual([["7", 120_000]]);
+  });
+
+  it("leaves a Shift or Command click, and a double click, to the selection and the deck", async () => {
+    const canvas = cell();
+    click(canvas, { shiftKey: true });
+    click(canvas, { metaKey: true });
+    click(canvas, { ctrlKey: true });
+    click(canvas, { detail: 2 });
+    click(canvas, { button: 2 });
+    await settle();
+    expect(previews).toEqual([]);
+  });
+
+  it("shows a stop button on the previewing row, which stops it", async () => {
+    const canvas = cell();
+    click(canvas);
+    await settle();
+    const stop = host.querySelector("button");
+    expect(stop).not.toBeNull();
+    click(stop!);
+    await settle();
+    expect(stops).toBe(1);
+    // Stopping is not another preview, and the button goes with it.
+    expect(previews).toHaveLength(1);
+    expect(host.querySelector("button")).toBeNull();
+  });
+
+  it("reports a refusal and draws nothing", async () => {
+    previewRefusal = Object.assign(new Error("gone"), { message: "That track's file could not be found." });
+    const { onPreviewError } = await import("@/store/usePreview");
+    const told: string[] = [];
+    onPreviewError((message) => told.push(message));
+    const canvas = cell();
+    click(canvas);
+    await settle();
+    expect(told).toEqual(["That track's file could not be found."]);
+    expect(host.querySelector("button")).toBeNull();
   });
 });

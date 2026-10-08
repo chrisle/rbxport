@@ -33,6 +33,7 @@ mod network_labels;
 pub mod logging;
 pub mod menu;
 pub mod player;
+pub mod preview;
 mod preferences;
 mod browse_settings;
 mod protocol;
@@ -403,6 +404,7 @@ pub fn run() {
         .plugin(window_geometry())
         .manage(Arc::new(AppState::new()))
         .manage(Arc::new(crate::player::Player::default()))
+        .manage(Arc::new(crate::preview::Preview::default()))
         .manage(Arc::new(crate::grid::GridEditor::default()))
         .manage(Arc::new(crate::update::Updates::default()))
         .manage(crate::test_port::TestPort::default())
@@ -546,6 +548,9 @@ pub fn run() {
             commands::set_crossfade,
             commands::set_eq_curve,
             commands::deck_state,
+            commands::preview_play,
+            commands::preview_stop,
+            commands::preview_state,
             commands::track_cues,
             // The GRID panel: every one rewrites the track's analysis files
             // and is refused while rekordbox runs, like the edits above.
