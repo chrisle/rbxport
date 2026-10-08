@@ -2,13 +2,15 @@
  * Advanced: Database, Browse and Others. Captures docs/screenshots 9.49.32
  * to 9.49.51 PM.
  *
- * Database holds the library's own facts and the missing-file manager,
- * with rekordbox's Auto Relocate Search Folders feeding it. Browse holds
+ * Database holds the library's own facts, rekordbox's Database management
+ * (the one place rekordbox chooses which library it works on), and the
+ * missing-file manager, with rekordbox's Auto Relocate Search Folders
+ * feeding it. Browse holds
  * Library Protection and Edit Library. Others holds BEAT/BPM SYNC, the
  * quantize beat value and play history.
  *
  * Not here: iTunes and rekordbox xml (neither is read), Auto Export and
- * Database management (neither is built), My Tag, colour names, display
+ * Database management's Move Database (neither is built), My Tag, colour names, display
  * speed, the long-press menu and the Tag List (none exist here), the
  * export name (link export is not built), hot cue GATE, loop export,
  * Recordings, and every streaming service.
@@ -16,7 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { Duplicates, LibrarySummary, MissingTracks, RelocateReport } from "@/ipc/types";
+import type { DatabaseDrive, Duplicates, LibrarySummary, MissingTracks, RelocateReport } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
 import { QUANTIZE_BEATS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
@@ -194,7 +196,77 @@ export function AdvancedPane({ tab, summary }: {
         />
       ) : null}
       <DuplicatesSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
+      {/* Last, as in rekordbox, under the external-drive settings. */}
+      <DatabaseManagementSection readOnly={summary?.readOnly ?? false} />
     </>
+  );
+}
+
+/**
+ * rekordbox's Database management: which drive's Master Database the
+ * library is. The list is the default drive when it holds a library, then
+ * every connected drive holding `PIONEER/Master/master.db` (or
+ * `.PIONEER/Master` on HFS), named by volume label (`C:BOOTCAMP` on
+ * Windows), and it is greyed out while there is only one; choosing one asks
+ * "Are you sure you want to switch Master Database?" and switches
+ * (`DetailDatabaseManagement::setup`, `comboBoxChanged`, `selectDrive`)
+ * [OBS rekordbox 7.2.11, static analysis; Windows layout observed on
+ * chris-win11 2026-10-08]. Its "?" help and Move Database are not built.
+ * Here the switch sets rekordbox's
+ * own `masterDbDirectory` and the app starts again on the chosen library.
+ * Not while rekordbox runs: it puts its own setting back when it quits.
+ */
+function DatabaseManagementSection({ readOnly }: { readOnly: boolean }) {
+  const t = useTranslation();
+  const [drives, setDrives] = useState<DatabaseDrive[]>([]);
+  const [switching, setSwitching] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void getBackend()
+      .then((backend) => backend.databaseDrives())
+      .then((found) => { if (live) setDrives(found); })
+      .catch(() => { if (live) setDrives([]); });
+    return () => { live = false; };
+  }, []);
+
+  const current = drives.find((drive) => drive.current)?.masterDb ?? drives[0]?.masterDb ?? "";
+  const choose = async (masterDb: string) => {
+    if (masterDb === current) return;
+    const backend = await getBackend();
+    const sure = await backend.confirm(
+      [t("Are you sure you want to switch Master Database?"), t("This operation may require long time.")].join("\n"),
+      { yes: t("OK"), no: t("Cancel") },
+    );
+    if (!sure) return;
+    setSwitching(true);
+    setFailed(null);
+    try {
+      await backend.switchLibrary(masterDb);
+      setDrives((all) => all.map((drive) => ({ ...drive, current: drive.masterDb === masterDb })));
+    } catch {
+      // rekordbox says only this; the reason is in the log.
+      setFailed(t("Failed to switch Master Database."));
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  return (
+    <Section title="Database management">
+      <Sub>Select a drive</Sub>
+      <Select
+        label="Select a drive"
+        nested
+        value={current}
+        choices={drives.map((drive) => ({ value: drive.masterDb, label: drive.name }))}
+        preserveChoiceLabels
+        disabled={readOnly || switching || drives.length < 2}
+        onChange={(masterDb) => { void choose(masterDb); }}
+      />
+      {failed ? <Note failed>{failed}</Note> : null}
+    </Section>
   );
 }
 
