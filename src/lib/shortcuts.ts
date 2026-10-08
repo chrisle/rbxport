@@ -70,13 +70,26 @@ export type Action =
   | "loopDouble"
   // The hot cue pads: the Export preset binds `1`, `2` and `3` to `Set Hot
   // Cue A` to `C` and `command + 1`-`3` to `Clear Hot Cue A` to `C`, and
-  // nothing to D onwards.
+  // nothing to D onwards. rekordbox's command table does carry `Set Hot Cue
+  // D`-`P` and `Clear Hot Cue D`-`P` labels [OBS: strings in the rekordbox 7
+  // binary], so D to H are this app's own rows, unbound until the Keyboard
+  // pane assigns them.
   | "hotCueA"
   | "hotCueB"
   | "hotCueC"
+  | "hotCueD"
+  | "hotCueE"
+  | "hotCueF"
+  | "hotCueG"
+  | "hotCueH"
   | "clearHotCueA"
   | "clearHotCueB"
   | "clearHotCueC"
+  | "clearHotCueD"
+  | "clearHotCueE"
+  | "clearHotCueF"
+  | "clearHotCueG"
+  | "clearHotCueH"
   // The tempo: F1 SYNC, F2 MASTER TEMPO, F3 resets the slider, F6 and F7
   // step it, F9 changes the metronome's sound.
   | "sync"
@@ -120,9 +133,9 @@ export function eqKillBand(action: Action): "low" | "mid" | "high" | null {
  * `null` for any other action.
  */
 export function hotCuePad(action: Action): { letter: string; clear: boolean } | null {
-  const set = /^hotCue([A-C])$/.exec(action);
+  const set = /^hotCue([A-H])$/.exec(action);
   if (set) return { letter: set[1] ?? "", clear: false };
-  const clear = /^clearHotCue([A-C])$/.exec(action);
+  const clear = /^clearHotCue([A-H])$/.exec(action);
   if (clear) return { letter: clear[1] ?? "", clear: true };
   return null;
 }
@@ -489,6 +502,26 @@ export const BINDINGS: readonly Binding[] = [
       deck,
       pane: deck === "a" ? "Player A" : "Player B",
     }))),
+  // Hot cue pads D to H, and Player B's clears: this app's own and unbound,
+  // since the Export preset binds nothing to them. The person picks the keys.
+  ...(["a", "b"] as const).flatMap((deck): Binding[] => {
+    const group = deck === "a" ? "Player A" : "Player B";
+    const own = (kind: "hotCue" | "clearHotCue", letter: string): Binding => ({
+      id: `${deck === "a" ? "" : "b."}${kind}${letter}`,
+      group,
+      label: `${kind === "hotCue" ? "Set" : "Clear"} Hot Cue ${letter}`,
+      chord: { key: "" },
+      action: `${kind}${letter}` as Action,
+      deck,
+      pane: group,
+    });
+    const letters = ["D", "E", "F", "G", "H"];
+    return [
+      ...letters.map((letter) => own("hotCue", letter)),
+      ...(deck === "b" ? ["A", "B", "C"] : []).map((letter) => own("clearHotCue", letter)),
+      ...letters.map((letter) => own("clearHotCue", letter)),
+    ];
+  }),
   { id: "volumeUp", group: "General", label: "Volume", chord: { key: "F12", metaKey: true }, action: "volumeUp", command: "3003" },
   { id: "volumeDown", group: "General", label: "Volume Down", chord: { key: "F11", metaKey: true }, action: "volumeDown", command: "3004" },
   { id: "mute", group: "General", label: "Mute", chord: { key: "F10", metaKey: true }, action: "mute", command: "3005" },

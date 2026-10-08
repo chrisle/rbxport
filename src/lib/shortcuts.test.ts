@@ -200,6 +200,33 @@ describe("rekordbox's own Export key map", () => {
     expect(hotCuePad("cue")).toBeNull();
   });
 
+  it("lists hot cue pads D to H and every clear as unbound rows the pane can assign", () => {
+    const own = BINDINGS.filter((b) => b.pane !== undefined && hotCuePad(b.action ?? "cue") !== null);
+    const names = (deck: "a" | "b") => own.filter((b) => b.deck === deck).map((b) => b.action).sort();
+    const letters = ["D", "E", "F", "G", "H"];
+    const setD2H = letters.map((l) => `hotCue${l}`);
+    const clearD2H = letters.map((l) => `clearHotCue${l}`);
+    expect(names("a")).toEqual([...clearD2H, ...setD2H].sort());
+    // The preset gives Player B no clears at all, so A to C are added there too.
+    expect(names("b")).toEqual([...clearD2H, ...setD2H, "clearHotCueA", "clearHotCueB", "clearHotCueC"].sort());
+    for (const row of own) expect(row.chord.key).toBe("");
+    expect(new Set(BINDINGS.map((b) => b.id)).size).toBe(BINDINGS.length);
+    expect(hotCuePad("hotCueH")).toEqual({ letter: "H", clear: false });
+    expect(hotCuePad("clearHotCueF")).toEqual({ letter: "F", clear: true });
+    // Nothing fires until a key is assigned.
+    expect(actionFor({ key: "" }, mac)).toBeNull();
+  });
+
+  it("fires a pad D to H or a Player B clear once the person assigns a key", () => {
+    const overrides = {
+      hotCueH: { key: "8", altKey: true },
+      "b.clearHotCueA": { key: "x", shiftKey: true, metaKey: true },
+    };
+    expect(matchBinding({ key: "8", altKey: true }, mac, overrides)).toMatchObject({ action: "hotCueH", deck: "a" });
+    expect(matchBinding({ key: "x", shiftKey: true, metaKey: true }, mac, overrides))
+      .toMatchObject({ action: "clearHotCueA", deck: "b" });
+  });
+
   it("gives the loop I, O and R, the beat loops 4 to 9, and / and option + \\ the length", () => {
     expect(actionFor({ key: "i" }, mac)).toBe("loopIn");
     expect(actionFor({ key: "o" }, mac)).toBe("loopOut");
