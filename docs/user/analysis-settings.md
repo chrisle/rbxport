@@ -15,11 +15,17 @@ Changing the browser selection while the dialog is open does not change it.
 | High precision analysis | Uses attack detection for beat placement; otherwise uses the onset envelope. Enabled by default. |
 | Analysis Mode | Normal (`rekordbox`) and RBXport (`rbxport`) currently select the same underlying RBXport options. A separate Normal implementation is not present. Initially follows Preferences. |
 | BPM Range | Limits tempo search to 70–180 (default), 98–195, 118–236, or 58–115. |
+| Add memory cue at first beat | Adds a memory cue on the first beat of the new grid. Skipped when a memory cue or memory loop already starts within 5 ms of that beat, so re-analysis does not stack duplicates. Requires BPM / Grid. Initially follows Preferences; off by default. |
 | KEY | Updates detected key; disabling it preserves the existing key. |
 
-Select at least BPM / Grid or KEY. Phrase labels, vocal detection, and automatic
-cue generation are not available in this dialog. Full analysis preserves
-existing cues and other supported sections via the existing-file inputs.
+Select at least BPM / Grid or KEY. Phrase labels, vocal detection, and other
+automatic cue generation are not available in this dialog. Full analysis
+preserves existing cues and other supported sections via the existing-file
+inputs.
+
+The first-beat cue is written to the library after the analysis files are
+published. If that write is refused, the new grid stays and the track is
+reported as failed with a message saying the cue was not added.
 
 ## Preservation and locks
 
@@ -38,7 +44,8 @@ other batches cannot alter pending work. Manual choices apply to that batch
 and do not overwrite global preferences.
 
 Automatic imports queue directly with the preferred preset, BPM/grid and key
-enabled, high precision enabled, and the 70–180 range. Eligible tempo
+enabled, high precision enabled, the 70–180 range, and the Preferences
+first-beat memory cue choice. Eligible tempo
 transitions use the automatic transient fallback with either preset; see
 [Beat grid](../../crates/rbl-analysis/docs/algorithms/beat.md#6-grid-the-change).
 
