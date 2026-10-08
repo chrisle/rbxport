@@ -1388,6 +1388,7 @@
   "{count} playlists",
   "{count} selected tracks have missing audio files and will be skipped.",
   "{device}: cues and beat grids already match your library; nothing was changed.",
+  "{device}: imported {count} CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.",
   "{device}: updated {count} tracks",
   "{playlists} → {devices}",
   "{size} total · {count} track",

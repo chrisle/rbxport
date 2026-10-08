@@ -659,6 +659,16 @@ it("reports changed and already-matching tracks apart", async () => {
   expect(status()).toContain("USB A: updated 2 tracks; 3 already up to date; skipped 1.");
 });
 
+it("says where imported CDJ/mixer settings go", async () => {
+  await renderWith({ importButtonCues: false, importButtonHistory: false, importButtonSettings: true });
+  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 3, skipped: 0 });
+  click(box("USB A"));
+  await settle();
+  click(importButton());
+  await settle();
+  expect(status()).toContain("USB A: imported 3 CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.");
+});
+
 it("starts Import's ticks at the Preferences defaults and imports each ticked kind", async () => {
   await renderWith({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
   expect(importTick("Cues and beat grids")?.checked).toBe(false);

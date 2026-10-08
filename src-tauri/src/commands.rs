@@ -1676,7 +1676,7 @@ fn write_export_with_phase(
     let root_name = rbl_export::export_root_name_with(destination, preferred_root)
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
     let export_root = destination.join(root_name);
-    let settings_root = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("rbxport/usb-settings");
+    let settings_root = crate::usb_import::settings_stash(&rbl_backup::state_dir());
     let imported_settings: Vec<_> = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"].into_iter()
         .filter(|name| !export_root.join(name).exists())
         .filter_map(|name| std::fs::read(settings_root.join(name)).ok().map(|bytes| (name, bytes))).collect();

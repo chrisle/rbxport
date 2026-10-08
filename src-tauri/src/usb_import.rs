@@ -37,6 +37,14 @@ pub fn library_trees(root: &Path) -> AppResult<Vec<DeviceLibraryTreeDto>> {
     Ok(libraries)
 }
 
+/// Where My Settings imported from a stick are kept: beside the state
+/// directory `state_dir` (the backups' recovery folder). Export reads the same
+/// folder to give them to a stick that has none, so both sides must agree,
+/// including under `RBXPORT_STATE_DIR`.
+pub(crate) fn settings_stash(state_dir: &Path) -> PathBuf {
+    state_dir.parent().unwrap_or(state_dir).join("usb-settings")
+}
+
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct ImportReport {
@@ -182,7 +190,7 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         }
     }
     if settings {
-        let destination = state.backup_dir().parent().unwrap_or(state.backup_dir()).join("usb-settings");
+        let destination = settings_stash(state.backup_dir());
         for name in ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"] {
             let source = export.join(name);
             if !source.exists() { continue; }
@@ -293,6 +301,45 @@ mod tests {
         manifest.save(&usb).unwrap();
         // Identity remains available for history even without cue analysis.
         assert_eq!(import(&state, &editor, &usb, true, false, false).unwrap().skipped, 1);
+    }
+
+    /// A player's `MYSETTING.DAT`: the 104-byte header, a 40-byte body and
+    /// CRC-16/XMODEM over the body, as a rekordbox stick carries it.
+    fn my_setting(body_byte: u8) -> Vec<u8> {
+        let mut bytes = vec![0u8; 104];
+        bytes[0] = 96;
+        bytes[4..14].copy_from_slice(b"PIONEER DJ");
+        bytes[100] = 40;
+        bytes.extend([body_byte; 40]);
+        let mut crc = 0u16;
+        for byte in &bytes[104..] {
+            crc ^= u16::from(*byte) << 8;
+            for _ in 0..8 { crc = if crc & 0x8000 == 0 { crc << 1 } else { (crc << 1) ^ 0x1021 }; }
+        }
+        bytes.extend(crc.to_le_bytes());
+        bytes.extend([0, 0]);
+        bytes
+    }
+
+    #[test]
+    fn imported_settings_land_where_export_reads_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        drop(db);
+        let state = AppState::with_backups(dir.path().join("state/backups"));
+        state.set_library(library, false, None, 0, location);
+        let usb = dir.path().join("usb");
+        std::fs::create_dir_all(usb.join("PIONEER")).unwrap();
+        let file = my_setting(7);
+        std::fs::write(usb.join("PIONEER/MYSETTING.DAT"), &file).unwrap();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let report = import(&state, &editor, &usb, false, false, true).unwrap();
+        assert_eq!(report.settings, 1);
+        // The folder the export reads from, for the same state directory.
+        assert_eq!(settings_stash(state.backup_dir()), dir.path().join("state/usb-settings"));
+        assert_eq!(std::fs::read(settings_stash(state.backup_dir()).join("MYSETTING.DAT")).unwrap(), file);
     }
 
     #[test]

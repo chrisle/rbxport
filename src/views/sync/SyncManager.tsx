@@ -606,7 +606,13 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
               const result = await backend.importUsb(device.path, kind === "cues", kind === "history", kind === "settings");
               if (kind === "cues") results.push(cuesResult(device.name, result));
               else if (kind === "history") results.push(result.histories ? `${device.name}: imported ${result.histories} play-history entries.` : `${device.name}: no new play-history entries.`);
-              else results.push(result.settings ? `${device.name}: imported ${result.settings} CDJ/mixer settings files.` : `${device.name}: no CDJ/mixer settings files found.`);
+              // Kept as RBXport's My Settings: a stick synced later that has
+              // none of its own is given them, as rekordbox's imported My
+              // Settings go to the sticks it writes. Nothing in the library
+              // changes, so say where they went rather than imply an update.
+              else results.push(result.settings
+                ? t("{device}: imported {count} CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.", { device: device.name, count: result.settings })
+                : `${device.name}: no CDJ/mixer settings files found.`);
               if (result.warnings?.length) results.push(...result.warnings.map(warning => `${device.name}: ${warning}`));
             } catch (e) {
               setImportFailed(true);

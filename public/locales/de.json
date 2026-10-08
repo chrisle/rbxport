@@ -1474,5 +1474,6 @@
   "skipped {count}": "skipped {count}",
   "{count} already up to date": "{count} already up to date",
   "{device}: cues and beat grids already match your library; nothing was changed.": "{device}: cues and beat grids already match your library; nothing was changed.",
+  "{device}: imported {count} CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.": "{device}: imported {count} CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.",
   "{device}: updated {count} tracks": "{device}: updated {count} tracks"
 }
