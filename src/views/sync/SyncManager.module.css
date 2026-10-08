@@ -159,13 +159,6 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.filesystemWarning {
-  display: grid;
-  place-items: center;
-  flex: none;
-  color: var(--c-error);
-}
-.filesystemWarning svg { width: 13px; height: 13px; }
 
 /* The checkbox rekordbox draws: a square that fills blue when ticked, and a
    dash when a folder is only partly ticked. */

@@ -472,26 +472,15 @@ describe("SyncManager", () => {
     expect(meter?.querySelector("span")?.style.width).toBe("25%");
   });
 
-  it("warns beside a USB stick that is not FAT32", async () => {
+  it("does not warn about the filesystem of a USB stick", async () => {
     listDevices.mockResolvedValueOnce([{ ...stick("USB A"), fileSystem: "exFAT" }]);
     act(() => root.unmount());
     root = createRoot(host);
     act(() => root.render(<SyncManager onClose={onClose} />));
     await settle();
 
-    const warning = host.querySelector('[title="Pioneer DJ recommends FAT32"]');
-    expect(warning?.querySelector("svg")).not.toBeNull();
-    expect(warning?.querySelector("svg")?.getAttribute("aria-label")).toBe("Pioneer DJ recommends FAT32");
-  });
-
-  it("does not warn when Linux reports a FAT32 stick through the vfat driver", async () => {
-    listDevices.mockResolvedValueOnce([{ ...stick("USB A"), fileSystem: "vfat" }]);
-    act(() => root.unmount());
-    root = createRoot(host);
-    act(() => root.render(<SyncManager onClose={onClose} />));
-    await settle();
-
-    expect(host.querySelector('[title="Pioneer DJ recommends FAT32"]')).toBeNull();
+    expect(host.textContent).toContain("USB A");
+    expect(host.querySelector(".filesystemWarning, [title*='FAT32']")).toBeNull();
   });
 
   it("requests post-sync ejection and distinguishes eject errors from sync errors", async () => {
