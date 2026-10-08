@@ -99,3 +99,31 @@ test("a preview ends even if the key is let go somewhere else", async ({ page })
   await expect(clock).toHaveText(atCue ?? "");
   await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
 });
+
+test("pressing Space while C is held keeps playing after C is released", async ({ page }) => {
+  // Hold CUE, press PLAY, let go of CUE: the preview latches into playback, as
+  // on a CDJ. Releasing without PLAY still snaps back (first test above).
+  await page.goto("/");
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+  const play = page.getByRole("button", { name: "Play", exact: true });
+  await expect(play).toBeEnabled();
+
+  const clock = page.getByTestId("player-time");
+  await play.click();
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.keyboard.press("c");
+  const atCue = await clock.textContent();
+
+  await page.keyboard.down("c");
+  await expect(clock).not.toHaveText(atCue ?? "");
+  await page.keyboard.press("Space");
+  await page.keyboard.up("c");
+
+  // Still playing, past the cue point.
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  const after = await clock.textContent();
+  await page.waitForTimeout(400);
+  await expect(clock).not.toHaveText(after ?? "");
+  await expect(clock).not.toHaveText(atCue ?? "");
+});

@@ -1412,6 +1412,13 @@ export const Player = memo(function Player({
    * playing, or one following nothing, simply toggles.
    */
   const togglePlay = useCallback(() => {
+    // PLAY while a CUE preview is held: the preview becomes real playback, so
+    // letting go of CUE no longer snaps back to the cue point. The deck is
+    // already running; pausing it here would defeat the gesture.
+    if (previewing.current && playback.playing) {
+      previewing.current = false;
+      return;
+    }
     if (!playback.playing && synced && quantize) {
       const leader = peerSync?.();
       const follower = syncState.current();
