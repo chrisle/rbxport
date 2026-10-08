@@ -94,9 +94,12 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
     }
     // Our manifest also works on legacy-only exports; validate its source path against master.db.
     if let Some(manifest) = rbl_export::Manifest::load(root).filter(|m| m.db_id == 0 || m.db_id == db_id) {
+        // The manifest records the path as the index resolved it.
+        let drive = state.read_db(|db| Ok(db.drive_mapping())).map_err(write_error)?;
         for t in manifest.tracks {
             let id = t.library_id.to_string();
-            let matched = state.read_db(|db| Ok(db.connection().query_row("SELECT FolderPath FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [&id], |r| r.get::<_,String>(0)).ok().as_deref() == Some(t.source.as_str()))).map_err(write_error)?;
+            let stored = state.read_db(|db| Ok(db.connection().query_row("SELECT FolderPath FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [&id], |r| r.get::<_,String>(0)).ok())).map_err(write_error)?;
+            let matched = stored.is_some_and(|p| drive.as_ref().map_or(std::borrow::Cow::Borrowed(p.as_str()), |d| d.apply(&p)) == t.source.as_str());
             if matched {
                 let analysis = if t.anlz_dir.is_empty() { String::new() } else { format!("{}/ANLZ0000.DAT", t.anlz_dir) };
                 tracks.entry(t.export_id).or_insert((id, analysis));

@@ -194,6 +194,7 @@ pub fn load_with_cue_reader(
     let t0 = Instant::now();
     let mut lib = Library::default();
     let cloud_root = rbl_db::cloud_contents_root();
+    let drive = db.drive_mapping();
     let mut stats = LoadStats::default();
 
     let artists = load_lookup(
@@ -284,14 +285,13 @@ pub fn load_with_cue_reader(
         lib.rating.push(clamp_u8(num(r, 9)?, 5));
         lib.color.push(clamp_u8(num(r, 10)?, u8::MAX));
 
-        // A cloud-library track's path names rekordbox's Dropbox folder, not
-        // a place on this disk; resolved here once so every reader sees a
+        // A cloud-library track's path names rekordbox's Dropbox folder, and
+        // a drive library's paths name the drive as it was mounted when the
+        // library was made; both resolved here once so every reader sees a
         // file that exists.
         let folder_path = text_or_default(r, 11)?;
-        lib.folder_path.push(&rbl_db::resolve_folder_path(
-            &folder_path,
-            cloud_root.as_deref(),
-        ));
+        let folder_path = drive.as_ref().map_or(folder_path.as_str().into(), |d| d.apply(&folder_path));
+        lib.folder_path.push(&rbl_db::resolve_folder_path(&folder_path, cloud_root.as_deref()));
         lib.file_name.push(&text_or_default(r, 12)?);
         lib.analysis_path.push(&text_or_default(r, 13)?);
         lib.artwork_path.push(&text_or_default(r, 19)?);

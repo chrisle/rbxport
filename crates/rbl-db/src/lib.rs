@@ -353,6 +353,87 @@ pub fn cloud_contents_root() -> Option<PathBuf> {
     Some(PathBuf::from(value).join("rekordbox"))
 }
 
+/// rekordbox's drive substitution for a library kept on an external drive.
+///
+/// [OBS 7.2.x macOS arm64, static] `djmdProperty` holds `BaseDBDrive` and
+/// `CurrentDBDrive` (`AppSyncDBController::getDriveInfo` selects both).
+/// When rekordbox opens a library outside its default folder,
+/// `DatabaseMediator::execSelectLibrary` stores the drive of the library
+/// folder as `CurrentDBDrive` (`setCurrentDbDrive`, which appends `/`).
+/// Track paths are then read through `convertToRealPath`: when both values
+/// are non-empty and differ, `replaceDrivePath(path, BaseDBDrive,
+/// CurrentDBDrive)` swaps a leading `BaseDBDrive` (compared ignoring case)
+/// for `CurrentDBDrive`. So a library made while its drive was mounted at
+/// `/Volumes/Music/` keeps that prefix in `FolderPath` even after the drive
+/// mounts at `/Volumes/Music 1/`; rekordbox finds the files, a reader of the
+/// raw column does not.
+///
+/// [ASSUME] The drive of a library at `<drive>/PIONEER/Master/master.db` (or
+/// `.PIONEER`) is `<drive>/` with forward slashes. [UNKNOWN] The Windows
+/// binary was not analysed; the same columns exist there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriveMapping {
+    base: String,
+    current: String,
+}
+
+impl DriveMapping {
+    /// The substitution, or `None` when rekordbox would not make one: either
+    /// value empty, or the two equal.
+    #[must_use]
+    pub fn new(base: &str, current: &str) -> Option<Self> {
+        (!base.is_empty() && !current.is_empty() && base != current)
+            .then(|| Self { base: base.to_owned(), current: current.to_owned() })
+    }
+
+    /// `path` with a leading `BaseDBDrive` replaced by `CurrentDBDrive`, as
+    /// rekordbox's `replaceDrivePath` does; anything else unchanged.
+    #[must_use]
+    pub fn apply<'a>(&self, path: &'a str) -> std::borrow::Cow<'a, str> {
+        let n = self.base.len();
+        if path.len() >= n && path.is_char_boundary(n) && path[..n].eq_ignore_ascii_case(&self.base) {
+            std::borrow::Cow::Owned(format!("{}{}", self.current, &path[n..]))
+        } else {
+            std::borrow::Cow::Borrowed(path)
+        }
+    }
+}
+
+/// The drive a library at `<drive>/PIONEER/Master/master.db` (or
+/// `.PIONEER`) lives on, in rekordbox's slash-terminated form.
+fn library_drive(master_db: &Path) -> Option<String> {
+    let master = master_db.parent()?;
+    if master.file_name()? != "Master" {
+        return None;
+    }
+    let pioneer = master.parent()?;
+    let name = pioneer.file_name()?;
+    if name != "PIONEER" && name != ".PIONEER" {
+        return None;
+    }
+    let mut drive = pioneer.parent()?.to_string_lossy().replace('\\', "/");
+    if !drive.ends_with('/') {
+        drive.push('/');
+    }
+    Some(drive)
+}
+
+impl Library {
+    /// rekordbox's drive substitution for this library's track paths, if it
+    /// makes one. The current drive is where this library was opened from
+    /// when that is a drive's `PIONEER/Master` folder (what rekordbox records
+    /// when it opens such a library), otherwise the stored `CurrentDBDrive`.
+    /// Read-only.
+    pub fn drive_mapping(&self) -> Option<DriveMapping> {
+        let (base, stored): (Option<String>, Option<String>) = self
+            .conn
+            .query_row("SELECT BaseDBDrive, CurrentDBDrive FROM djmdProperty", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .ok()?;
+        let current = library_drive(&self.location.master_db).or(stored)?;
+        DriveMapping::new(&base?, &current)
+    }
+}
+
 /// A library `FolderPath` as a path on this machine: a cloud-library path
 /// (`/contents_<id>/…`) placed under the cloud root when one is known,
 /// anything else as it is.
@@ -381,6 +462,26 @@ pub fn configure_durability(conn: &Connection) -> Result<()> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drive_mapping_follows_rekordboxs_replace_drive_path_conditions() {
+        assert!(DriveMapping::new("", "/Volumes/A/").is_none());
+        assert!(DriveMapping::new("/Volumes/A/", "").is_none());
+        assert!(DriveMapping::new("/Volumes/A/", "/Volumes/A/").is_none());
+        let m = DriveMapping::new("/Volumes/A/", "/Volumes/A 1/").unwrap();
+        assert_eq!(m.apply("/Volumes/A/x/y.mp3"), "/Volumes/A 1/x/y.mp3");
+        assert_eq!(m.apply("/VOLUMES/a/y.mp3"), "/Volumes/A 1/y.mp3");
+        assert_eq!(m.apply("/Volumes/AB/y.mp3"), "/Volumes/AB/y.mp3");
+        assert_eq!(m.apply("/Vol"), "/Vol");
+        assert_eq!(m.apply("/Volumes/Ä"), "/Volumes/Ä");
+    }
+
+    #[test]
+    fn a_library_drive_is_the_folder_holding_pioneer_master() {
+        assert_eq!(library_drive(Path::new("/Volumes/A 1/PIONEER/Master/master.db")).as_deref(), Some("/Volumes/A 1/"));
+        assert_eq!(library_drive(Path::new("/Volumes/A/.PIONEER/Master/master.db")).as_deref(), Some("/Volumes/A/"));
+        assert_eq!(library_drive(Path::new("/Users/me/Library/Pioneer/rekordbox/master.db")), None);
+    }
 
     #[test]
     fn detect_from_reports_a_missing_options_file_clearly() {

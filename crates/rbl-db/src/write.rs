@@ -2069,6 +2069,7 @@ impl Writer {
         if image.is_some_and(|p| !p.is_empty()) {
             return Ok(false);
         }
+        let path = self.real_path(&path);
         let Some(bytes) = crate::import::read_artwork(Path::new(&path))
             .map_err(|e| DbError::WriteRefused(e.to_string()))? else {
             return Ok(false);
@@ -2134,7 +2135,7 @@ impl Writer {
         let Some(folder) = folder else {
             return Err(DbError::WriteRefused(format!("no track {content}")));
         };
-        let path = crate::resolve_folder_path(&folder, None);
+        let path = crate::resolve_folder_path(&self.real_path(&folder), None);
         let tags = crate::import::read_tags(Path::new(&path))
             .map_err(|e| DbError::WriteRefused(e.to_string()))?;
         let stamp = time::now();
@@ -2284,6 +2285,15 @@ impl Writer {
             )));
         };
         self.touch_content(content, "KeyID", &Value::Text(id))
+    }
+
+    /// A stored `FolderPath` as rekordbox reads it: through the library's
+    /// drive substitution, if it has one. See [`crate::DriveMapping`].
+    fn real_path(&self, folder_path: &str) -> String {
+        match self.library.drive_mapping() {
+            Some(drive) => drive.apply(folder_path).into_owned(),
+            None => folder_path.to_owned(),
+        }
     }
 
     /// Points a track at a different file.
