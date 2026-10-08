@@ -35,7 +35,7 @@ export type TrackAction =
   | "loadPlayer2";
 
 export type TreeAction =
-  | "export"
+  | `exportTo:${string}`
   | "exportM3u8"
   | "exportTxt"
   | "createPlaylist"
@@ -205,7 +205,19 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
  * rows would promise a feature that is not coming, which is a different
  * thing from one not built yet.
  */
-export function treeMenu(kind: "playlist" | "smartPlaylist" | "folder" | "collection"): readonly MenuRow<TreeAction>[] {
+export function treeMenu(
+  kind: "playlist" | "smartPlaylist" | "folder" | "collection",
+  devices: readonly MenuTarget[] = [],
+): readonly MenuRow<TreeAction>[] {
+  // `Export Playlist` and `Export Folder` list the connected drives and write
+  // to the one chosen; there is no folder picker behind them [OBS rekordbox 7
+  // on Windows, Winrig 2026-10-08, issue #142: the submenu held one row,
+  // "D:ssd", for the one drive besides C:]. With nothing connected the arrow
+  // is greyed over nothing, as Export Track's is [ASSUME: the capture had a
+  // drive connected].
+  const exportRow = (label: string): MenuEntry<TreeAction> => devices.length > 0
+    ? { label, action: null, submenu: true, items: devices.map((d) => ({ label: d.name, action: `exportTo:${d.id}` as const })) }
+    : { label, action: null, submenu: true };
   if (kind === "collection") {
     return [
       { label: "Create New Playlist", action: "createPlaylist" },
@@ -220,7 +232,7 @@ export function treeMenu(kind: "playlist" | "smartPlaylist" | "folder" | "collec
     // name order. Rename is not in it either (a double click on the row);
     // it is kept here beside Delete as on a playlist [ASSUME].
     return [
-      { label: "Export Folder", action: "export", submenu: true },
+      exportRow("Export Folder"),
       SEPARATOR,
       { label: "Create New Playlist", action: "createPlaylist" },
       { label: "Create New Folder", action: "createFolder" },
@@ -238,7 +250,7 @@ export function treeMenu(kind: "playlist" | "smartPlaylist" | "folder" | "collec
   // An intelligent playlist is exported, renamed and deleted like any other;
   // what it cannot do is take tracks by hand, which its rows never offer.
   return [
-    { label: "Export Playlist", action: "export", submenu: true },
+    exportRow("Export Playlist"),
     SEPARATOR,
     { label: "Create New Playlist", action: "createPlaylist" },
     ...(smart ? [{ label: "Edit Intelligent Playlist", action: "editSmartPlaylist" as const }] : []),
@@ -420,7 +432,7 @@ export function enabled<A extends string>(
   return true;
 }
 
-/** A playlist the Add To Playlist submenu offers, and a stick Export Track offers. */
+/** A playlist the Add To Playlist submenu offers, and a stick Export Track and Export Playlist offer. */
 export interface MenuTarget {
   id: string;
   name: string;

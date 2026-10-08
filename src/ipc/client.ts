@@ -261,27 +261,14 @@ async function realBackend(): Promise<Backend> {
       if (typeof picked !== "string") return null;
       return invoke<number>("export_xml", { path: picked });
     },
-    exportPlaylist: async (playlistId, destination, defaults, deleteUnlistedMusic, compatibilityFormat) => {
-      let target = destination;
-      if (target === undefined) {
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        const picked = await open({
-          multiple: false,
-          directory: true,
-          title: "Choose where to write the export",
-        });
-        // Cancelling is a normal outcome, not an error.
-        if (typeof picked !== "string") return null;
-        target = picked;
-      }
-      return invoke<ExportReport>("export_playlist", {
+    exportPlaylist: (playlistId, destination, defaults, deleteUnlistedMusic, compatibilityFormat) =>
+      invoke<ExportReport>("export_playlist", {
         playlist: playlistId,
-        destination: target,
+        destination,
         defaults: defaults ?? null,
         deleteUnlistedMusic: deleteUnlistedMusic ?? false,
         compatibilityFormat: compatibilityFormat ?? null,
-      });
-    },
+      }),
     exportTracksToDevice: (tracks, destination, defaults, compatibilityFormat) =>
       invoke<ExportReport>("export_tracks_to_device", { tracks, destination, defaults: defaults ?? null, compatibilityFormat: compatibilityFormat ?? null }),
     referenceStickSettings: () => invoke<ReferenceStickSettings>("reference_stick_settings"),

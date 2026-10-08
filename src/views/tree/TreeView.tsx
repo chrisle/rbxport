@@ -13,7 +13,7 @@ import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
 import { DeviceIcon, EjectIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon, SmartListIcon } from "@/components/icons";
 import { ContextMenu } from "@/components/ContextMenu";
-import { treeMenu } from "@/lib/contextMenus";
+import { treeMenu, type MenuTarget } from "@/lib/contextMenus";
 import {
   branchIds, childrenOf, containerOf, emptySources, newlyClosed, nodesForSource, sourceOf,
   subtreeIds, toggle, visibleNodes, searchTree, type TreeSearchScope, type Source,
@@ -310,8 +310,10 @@ export interface TreeViewProps {
   nodes: readonly TreeNode[];
   selectedId: string | null;
   onSelect: (node: TreeNode) => void;
-  /** Write a playlist to a stick. */
-  onExport?: (node: TreeNode) => void;
+  /** Write a playlist or folder to the stick mounted at `path`. */
+  onExport?: (node: TreeNode, path: string) => void;
+  /** The sticks Export Playlist and Export Folder list, by mount path. */
+  exportDevices?: readonly MenuTarget[];
   /** Export a playlist to a file: an m3u8 or rekordbox's tab-separated txt. */
   onExportFile?: (node: TreeNode, format: "m3u8" | "txt") => void;
   /** Create, delete and rename, which the shell owns because they write. */
@@ -367,7 +369,7 @@ export interface TreeViewProps {
 }
 
 export const TreeView = memo(function TreeView({
-  nodes, selectedId, onSelect, dragging, onDropTracks, onDropFiles, onExport, onExportFile,
+  nodes, selectedId, onSelect, dragging, onDropTracks, onDropFiles, onExport, exportDevices, onExportFile,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
   initialExpansion, onExpansionChange,
@@ -601,14 +603,16 @@ export const TreeView = memo(function TreeView({
           y={menu.y}
           rows={treeMenu(
             menu.node.kind === "collection" ? "collection" : menu.node.kind === "folder" ? "folder" : menu.node.kind === "smartPlaylist" ? "smartPlaylist" : "playlist",
+            exportDevices,
           )}
           label={menu.node.kind === "folder" ? "Folder" : menu.node.kind === "collection" ? "Playlists" : "Playlist"}
           context={{ inPlaylist: true, hasFile: true, readOnly }}
           onChoose={(action) => {
+            if (action.startsWith("exportTo:")) {
+              onExport?.(menu.node, action.slice("exportTo:".length));
+              return;
+            }
             switch (action) {
-              case "export":
-                onExport?.(menu.node);
-                break;
               case "exportM3u8":
                 onExportFile?.(menu.node, "m3u8");
                 break;

@@ -183,7 +183,7 @@ describe("USB music cleanup", () => {
     const cleaned = await backend.syncDevices([a, b], [destination!], undefined, false, false, true);
     expect(cleaned[0]?.report).toMatchObject({ tracks: 2, removed: 1 });
     await backend.exportTracksToDevice(["100002"], destination!);
-    const exported = await backend.exportPlaylist(a, destination, undefined, true);
+    const exported = await backend.exportPlaylist(a, destination!, undefined, true);
     expect(exported).toMatchObject({ tracks: 1, removed: 2 });
   });
 });
