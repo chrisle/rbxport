@@ -8,6 +8,10 @@ the version numbers [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Related Tracks' BPM + KEY list now matches rekordbox's own preset: tracks
+  within 5% of the track's BPM, or of half or double it (so a 174 BPM track
+  finds 87 BPM ones), in the same key, its relative or a key either side on
+  the wheel. It used to take 6% and no half or double tempo.
 - On Windows, installing a downloaded update at quit no longer asks for
   administrator approval (UAC). The first update after this release still
   asks once, because it installs the signature-checking helper that applies

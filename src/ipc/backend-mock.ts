@@ -426,8 +426,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     membership.get(id)?.length ?? mockPlaylistSize(id);
 
   /**
-   * Related Tracks, as the index picks them: within six percent of the
-   * track's BPM and in its key or one beside it on the wheel, the same
+   * Related Tracks, as the index picks them: within five percent of the
+   * track's BPM or of half or double it, and in its key or one beside it on
+   * the wheel, the same
    * genre added in the last thirty days, or the same artist. The track
    * itself is left out. No track, no rows.
    */
@@ -441,13 +442,23 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     };
     const together = (a: number, b: number) =>
       a >= 0 && b >= 0 && (a === b || (a ^ 1) === b || ((a & 1) === (b & 1) && ((a + 2) % 24 === b || (b + 2) % 24 === a)));
+    // rekordbox's window: 5% either side, ends rounded ties to even, at the
+    // track's tempo, half it and double it.
+    const roundEven = (x: number) => {
+      const r = Math.round(x);
+      return Math.abs(x % 1) === 0.5 && r % 2 !== 0 ? r - 1 : r;
+    };
+    const within = (centre: number, bpm: number) =>
+      bpm >= roundEven(Math.max(centre * (1 - 0.05), 0)) && bpm <= roundEven(centre * (0.05 + 1));
+    const bpmMatches = (centre: number, bpm: number) =>
+      within(centre, bpm) || within(roundEven(centre * 0.5), bpm) || within(centre * 2, bpm);
     const since = Date.parse("2026-09-18") - 30 * 86_400_000;
     return all.flatMap((row, i) => {
       if (i === at) return [];
       switch (criterion) {
         case "bpmKey": {
           if (track.bpmX100 === 0 && rank(track.key) < 0) return [];
-          if (track.bpmX100 !== 0 && Math.abs(row.bpmX100 - track.bpmX100) > track.bpmX100 * 0.06) return [];
+          if (track.bpmX100 !== 0 && !bpmMatches(track.bpmX100, row.bpmX100)) return [];
           if (rank(track.key) >= 0 && !together(rank(track.key), rank(row.key))) return [];
           return [i];
         }
@@ -459,7 +470,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         // and key matches, as the real backend's are without one.
         case "suggestion": {
           if (track.bpmX100 === 0 && rank(track.key) < 0) return [];
-          if (track.bpmX100 !== 0 && Math.abs(row.bpmX100 - track.bpmX100) > track.bpmX100 * 0.06) return [];
+          if (track.bpmX100 !== 0 && !bpmMatches(track.bpmX100, row.bpmX100)) return [];
           if (rank(track.key) >= 0 && !together(rank(track.key), rank(row.key))) return [];
           return [i];
         }
