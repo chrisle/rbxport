@@ -137,28 +137,23 @@ export type LibraryProblem =
   /** No library configured anywhere; one can be made at `masterDb`. */
   | { kind: "missing"; masterDb: string }
   /**
-   * A library is configured at `masterDb` and is not there, most often
-   * because its drive is not connected. Nothing is made in its place.
-   * `configuredBy` says whether rekordbox's settings or this app named it;
-   * `defaultMasterDb` is the default folder's library, opened when
-   * `defaultExists` and made otherwise.
+   * A library is configured at `masterDb`, not the default folder, and is
+   * not there, most often because its drive is not connected: rekordbox's
+   * "Cannot find Master Database" question. Nothing is made in its place;
+   * `useDefaultLibrary` switches to `defaultMasterDb`'s folder instead.
    */
-  | {
-    kind: "unavailable";
-    masterDb: string;
-    configuredBy: "rekordbox" | "rbxport";
-    defaultMasterDb: string;
-    defaultExists: boolean;
-  }
+  | { kind: "unavailable"; masterDb: string; defaultMasterDb: string }
   /** A library, or something in its place, that would not open. */
   | { kind: "failed"; message: string };
 
-/** A rekordbox library found on a connected drive. */
-export interface DriveLibrary {
-  /** The drive's name. */
+/** One entry of Database management's drive list. */
+export interface DatabaseDrive {
+  /** The drive's name: its volume label, as rekordbox shows it. */
   name: string;
-  volume: string;
+  /** The library's `master.db` on that drive. */
   masterDb: string;
+  /** Whether it is the library open now. */
+  current: boolean;
 }
 
 export interface LibrarySummary {
@@ -301,32 +296,31 @@ export interface Backend {
   libraryProblem(): Promise<LibraryProblem | null>;
 
   /**
-   * Uses the library in rekordbox's default folder, making a new, empty one
-   * when there is none, and loads it; `onLibraryReady` fires when it is up.
-   * Only after `libraryProblem` said `missing` or `unavailable`; a library
-   * that has appeared since is loaded, not replaced, and nothing is made on
-   * a missing drive.
+   * Makes a new, empty library where rekordbox keeps one and loads it;
+   * `onLibraryReady` fires when it is up. Only when `libraryProblem` said
+   * `missing`; a library that has appeared since is loaded, not replaced.
    */
   createLibrary(): Promise<void>;
 
-  /** The rekordbox libraries on connected drives. Nothing is opened. */
-  discoverLibraries(): Promise<DriveLibrary[]>;
+  /**
+   * The Yes of "Cannot find Master Database", once confirmed: sets
+   * rekordbox's library location to the default folder and loads what is
+   * there, or reports `missing` when there is nothing to load.
+   */
+  useDefaultLibrary(): Promise<void>;
 
   /**
-   * Opens an existing `master.db` after checking it opens with rekordbox's
-   * key, saves it as this app's library, and starts loading it. Rejects with
-   * the reason when it is not a usable library.
+   * Database management's drive list: the default drive when it holds a
+   * library, and every connected drive holding a rekordbox library.
    */
-  openLibrary(masterDb: string): Promise<void>;
+  databaseDrives(): Promise<DatabaseDrive[]>;
 
   /**
-   * Lets the user pick an existing `master.db`, then does what `openLibrary`
-   * does. Returns false when the native picker is cancelled.
+   * Switches to the library on a drive from `databaseDrives`, as choosing it
+   * in rekordbox's Database management does, and starts the app again on
+   * it. Rejects with the reason when it cannot.
    */
-  chooseExistingLibrary(title: string, filterName: string): Promise<boolean>;
-
-  /** Looks for the library again, after its drive has been connected. */
-  retryLibrary(): Promise<void>;
+  switchLibrary(masterDb: string): Promise<void>;
 
   /**
    * Fires after a cue edit with the id of the track whose cues changed.

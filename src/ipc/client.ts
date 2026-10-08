@@ -10,7 +10,7 @@ import type {
   Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
-  DriveLibrary, EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
+  DatabaseDrive, EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
   LinkStatus, MissingExportFile, MissingTracks, PreviewState, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
   TreeNode, ViewHandle,
   TrackDetails, TrackLookups,
@@ -365,21 +365,9 @@ async function realBackend(): Promise<Backend> {
     onLibraryProblem: (listener) => subscribe<LibraryProblem>("library:problem", listener),
     libraryProblem: () => invoke<LibraryProblem | null>("library_problem"),
     createLibrary: () => invoke<void>("create_library"),
-    discoverLibraries: () => invoke<DriveLibrary[]>("discover_libraries"),
-    openLibrary: (masterDb) => invoke<void>("use_existing_library", { path: masterDb }),
-    chooseExistingLibrary: async (title, filterName) => {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const picked = await open({
-        multiple: false,
-        directory: false,
-        title,
-        filters: [{ name: filterName, extensions: ["db"] }],
-      });
-      if (typeof picked !== "string") return false;
-      await invoke<void>("use_existing_library", { path: picked });
-      return true;
-    },
-    retryLibrary: () => invoke<void>("retry_library"),
+    useDefaultLibrary: () => invoke<void>("use_default_library"),
+    databaseDrives: () => invoke<DatabaseDrive[]>("database_drives"),
+    switchLibrary: (masterDb) => invoke<void>("switch_library", { masterDb }),
     onCuesChanged: (listener) => subscribe<string>("cues:changed", listener),
     onGridChanged: (listener) => subscribe<string>("grid:changed", listener),
     onAnalysisChanged: (listener) => subscribe<string>("analysis:changed", listener),

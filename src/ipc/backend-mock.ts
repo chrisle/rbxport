@@ -14,7 +14,7 @@ import theme from "@/styles/theme";
 
 import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
-  DriveLibrary, EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
+  DatabaseDrive, EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
@@ -649,26 +649,23 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    */
   /**
    * `?nolibrary` is a machine with no rekordbox library at all: nothing loads
-   * until `createLibrary` or `openLibrary`, and `libraryProblem` says so.
+   * until `createLibrary`, and `libraryProblem` says so.
    * `?libraryunavailable` is rekordbox set to a library on a drive that is
-   * not connected. `?drivelibrary` puts a library on a connected drive for
-   * `discoverLibraries` to find; with `?libraryunavailable` it is the drive
-   * rekordbox is set to, so `retryLibrary` finds it.
+   * not connected; `useDefaultLibrary` then leaves the default folder, which
+   * is empty, to be made. `?drivelibrary` puts a library on a connected
+   * drive for Database management to list.
    */
-  const driveConnected = readFlagFromUrl("drivelibrary");
-  const driveLibraries: DriveLibrary[] = driveConnected
-    ? [{ name: "DJ SSD", volume: "/Volumes/DJ SSD", masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db" }]
-    : [];
+  const defaultMasterDb = "/Users/you/Library/Pioneer/rekordbox/master.db";
+  const databaseDrives: DatabaseDrive[] = [
+    { name: "Macintosh HD", masterDb: defaultMasterDb, current: true },
+    ...(readFlagFromUrl("drivelibrary")
+      ? [{ name: "DJ SSD", masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db", current: false }]
+      : []),
+  ];
   let problem: LibraryProblem | null = readFlagFromUrl("libraryunavailable")
-    ? {
-      kind: "unavailable",
-      masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db",
-      configuredBy: "rekordbox",
-      defaultMasterDb: "/Users/you/Library/Pioneer/rekordbox/master.db",
-      defaultExists: false,
-    }
+    ? { kind: "unavailable", masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db", defaultMasterDb }
     : readFlagFromUrl("nolibrary")
-      ? { kind: "missing", masterDb: "/Users/you/Library/Pioneer/rekordbox/master.db" }
+      ? { kind: "missing", masterDb: defaultMasterDb }
       : null;
   let ready =
     problem === null && (typeof location === "undefined" || !new URLSearchParams(location.search).has("slow"));
@@ -2348,28 +2345,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       await wait(undefined);
       libraryFound();
     },
-    discoverLibraries: () => wait(driveLibraries.map((library) => ({ ...library }))),
-    openLibrary: async (masterDb) => {
+    useDefaultLibrary: async () => {
       await wait(undefined);
-      if (!masterDb.endsWith("master.db")) {
-        throw new Error(`Could not use that rekordbox library: ${masterDb} is not a database file`);
-      }
-      libraryFound();
+      // The default folder is empty here, so it is offered to be made, as
+      // the real backend's next look reports.
+      problem = { kind: "missing", masterDb: defaultMasterDb };
+      for (const listener of problemListeners) listener({ ...problem });
     },
-    chooseExistingLibrary: async () => {
+    databaseDrives: () => wait(databaseDrives.map((drive) => ({ ...drive }))),
+    switchLibrary: async (masterDb) => {
       await wait(undefined);
-      libraryFound();
-      return true;
-    },
-    retryLibrary: async () => {
-      await wait(undefined);
-      if (problem?.kind === "unavailable" && driveConnected) {
-        libraryFound();
-        return;
+      if (!databaseDrives.some((drive) => drive.masterDb === masterDb)) {
+        throw new Error(`${masterDb} is not a master.db`);
       }
-      // Reported afresh, as the real backend's second look reports it.
-      const current = problem;
-      if (current !== null) for (const listener of problemListeners) listener({ ...current });
+      // The real app starts again on it; the mock marks it open.
+      for (const drive of databaseDrives) drive.current = drive.masterDb === masterDb;
     },
 
     // A browser has no native menu bar. The mock exposes the listener so a

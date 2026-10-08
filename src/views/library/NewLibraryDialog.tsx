@@ -1,165 +1,108 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/i18n";
-import type { DriveLibrary, LibraryProblem } from "@/ipc/types";
+import type { LibraryProblem } from "@/ipc/types";
 import styles from "./NewLibraryDialog.module.css";
 
 /** The startup problems the window asks about rather than reports. */
 export type LibraryQuestion = Exclude<LibraryProblem, { kind: "failed" }>;
 
-type Busy = "create" | "choose" | "open" | "retry" | null;
-
 /**
- * The question asked when there is no library to open.
+ * The question asked when there is no library to open. Nothing else in the
+ * window works without a library, so Escape does nothing.
  *
- * With nothing configured (`missing`): open a library found on a connected
- * drive, pick a `master.db`, or create a new one. With a configured library
- * that is not there (`unavailable`, most often a drive that is not
- * connected), what rekordbox itself offers: connect the drive and try again,
- * or use the default location instead — never a new library on the missing
- * drive. Libraries on connected drives are listed first, found where
- * rekordbox's own Database management looks, and the list follows drives
- * being connected while the question is open. Nothing else in the window
- * works without a library, so Escape does nothing.
+ * `missing`: no library anywhere; make one, or quit.
+ *
+ * `unavailable`: rekordbox's library is set to a drive that is not there.
+ * This is rekordbox's own `MasterDbMissingWindow`, word for word: "Cannot
+ * find Master Database…", Yes or No. Yes confirms "Location of Master
+ * Database will be changed to the default drive…" (OK or Cancel) and then
+ * uses the default drive; No ends the launch. Nothing is ever made on the
+ * missing drive [OBS rekordbox 7.2.11, static analysis].
  */
-export function NewLibraryDialog({
-  problem, onDiscover, onDrivesChanged, onOpen, onChoose, onCreate, onRetry, onQuit,
-}: {
+export function NewLibraryDialog({ problem, onCreate, onUseDefault, onConfirm, onQuit }: {
   problem: LibraryQuestion;
-  onDiscover: () => Promise<DriveLibrary[]>;
-  /** Calls the listener when a drive is connected or removed; returns the unsubscribe. */
-  onDrivesChanged: (listener: () => void) => () => void;
-  onOpen: (masterDb: string) => Promise<void>;
-  onChoose: (title: string, filterName: string) => Promise<boolean>;
   onCreate: () => Promise<void>;
-  onRetry: () => Promise<void>;
+  onUseDefault: () => Promise<void>;
+  /** rekordbox's OK/Cancel confirmation; resolves true for OK. */
+  onConfirm: (message: string, labels: { yes: string; no: string }) => Promise<boolean>;
   onQuit: () => void;
 }) {
   const t = useTranslation();
-  const [busy, setBusy] = useState<Busy>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [drives, setDrives] = useState<DriveLibrary[]>([]);
   const dialog = useRef<HTMLDialogElement>(null);
-  const retrying = useRef(false);
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
     return () => element?.close();
   }, []);
-
+  // A new question (the default drive turned out to be empty) starts afresh.
   useEffect(() => {
-    let live = true;
-    const look = () => {
-      onDiscover().then(
-        (found) => { if (live) setDrives(found); },
-        () => { if (live) setDrives([]); },
-      );
-    };
-    look();
-    const stop = onDrivesChanged(look);
-    return () => {
-      live = false;
-      stop();
-    };
-    // Looked for on opening and whenever a drive comes or goes; a new
-    // callback identity from the parent is not a reason to look again.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // A retry that still finds nothing reports the problem afresh.
-  useEffect(() => {
-    if (!retrying.current) return;
-    retrying.current = false;
-    setBusy(null);
-    setError(t("The library is still not there. Check that its drive is connected."));
-  }, [problem, t]);
-
-  /** Runs one action with every button off until it settles. */
-  const run = (which: Exclude<Busy, null>, action: () => Promise<unknown>, fallback: string) => {
-    setBusy(which);
+    setBusy(false);
     setError("");
-    action()
-      .then((done) => { if (done === false) setBusy(null); })
-      .catch((e: unknown) => {
-        setBusy(null);
-        setError(t(errorText(e, fallback)));
-      });
+  }, [problem]);
+
+  const run = (action: () => Promise<void>, fallback: string) => {
+    setBusy(true);
+    setError("");
+    action().catch((e: unknown) => {
+      setBusy(false);
+      setError(errorText(e, fallback));
+    });
   };
 
-  const create = () => run("create", onCreate, t("Could not create the database."));
-  const choose = () => run(
-    "choose",
-    () => onChoose(t("Choose an existing rekordbox library"), t("rekordbox database")),
-    t("Could not open the database."),
-  );
-  const open = (masterDb: string) => run("open", () => onOpen(masterDb), t("Could not open the database."));
-  const retry = () => {
-    retrying.current = true;
-    run("retry", onRetry, t("Could not open the database."));
-  };
+  if (problem.kind === "unavailable") {
+    const switchToDefault = () => run(async () => {
+      const sure = await onConfirm(
+        [
+          t("Location of Master Database will be changed to the default drive."),
+          t("The location can be changed at [Advanced] tab of [Preferences] window."),
+        ].join("\n"),
+        { yes: t("OK"), no: t("Cancel") },
+      );
+      if (!sure) {
+        setBusy(false);
+        return;
+      }
+      await onUseDefault();
+    }, t("Failed to switch Master Database."));
+    return (
+      <dialog ref={dialog} className={styles.dialog} aria-labelledby="master-db-missing-text"
+        onCancel={event => event.preventDefault()}
+        onKeyDown={event => event.stopPropagation()}>
+        <form onSubmit={event => { event.preventDefault(); if (!busy) switchToDefault(); }}>
+          <p id="master-db-missing-text" className={styles.message}>
+            <span>{t("Cannot find Master Database.")}</span>
+            <span>{t("Launch RBXport after connecting a drive where Master Database is stored.")}</span>
+            <span>{t("Do you want to open Master Database in the default drive?")}</span>
+          </p>
+          {error ? <p className={styles.error} role="alert">{error}</p> : null}
+          <div className={styles.buttons}>
+            <button type="submit" disabled={busy} autoFocus>{t("Yes")}</button>
+            <button type="button" onClick={onQuit} disabled={busy}>{t("No")}</button>
+          </div>
+        </form>
+      </dialog>
+    );
+  }
 
-  const unavailable = problem.kind === "unavailable";
-  const text = !unavailable
-    ? t("RBXport could not find a rekordbox library on this computer. Open one on a connected drive, choose a master.db, or create a new library.")
-    : problem.configuredBy === "rekordbox"
-      ? t("rekordbox is set to use a library that cannot be found. Connect the drive it is stored on and click Try Again, or use the library in the default location instead.")
-      : t("The library chosen in RBXport cannot be found. Connect the drive it is stored on and click Try Again, or use the library in the default location instead.");
-
+  const create = () => run(onCreate, t("Could not create the database."));
   return (
     <dialog ref={dialog} className={styles.dialog} aria-labelledby="new-library-title"
       aria-describedby="new-library-text"
       onCancel={event => event.preventDefault()}
       onKeyDown={event => event.stopPropagation()}>
-      <form onSubmit={event => {
-        event.preventDefault();
-        if (busy !== null) return;
-        if (unavailable) retry(); else create();
-      }}>
-        <h2 id="new-library-title" className={styles.title}>
-          {unavailable ? t("Cannot Find Library") : t("No rekordbox Library")}
-        </h2>
-        <p id="new-library-text" className={styles.text}>{text}</p>
-        <p className={styles.path} title={problem.masterDb}>{problem.masterDb}</p>
-        {drives.length > 0 ? (
-          <section className={styles.drives} aria-labelledby="new-library-drives">
-            <h3 id="new-library-drives" className={styles.drivesTitle}>{t("Libraries on connected drives")}</h3>
-            <ul className={styles.driveList}>
-              {drives.map((drive) => (
-                <li key={drive.masterDb} className={styles.drive}>
-                  <span className={styles.driveName}>{drive.name}</span>
-                  <span className={styles.drivePath} title={drive.masterDb}>{drive.masterDb}</span>
-                  <button type="button" disabled={busy !== null} onClick={() => open(drive.masterDb)}
-                    aria-label={t("Open the library on {drive}", { drive: drive.name })}>
-                    {t("Open")}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-        <p className={styles.hint}>
-          {t("RBXport remembers a library you choose here. rekordbox sets its own library in Preferences > Advanced > Database management.")}
+      <form onSubmit={event => { event.preventDefault(); if (!busy) create(); }}>
+        <h2 id="new-library-title" className={styles.title}>No rekordbox Library</h2>
+        <p id="new-library-text" className={styles.text}>
+          rekordbox isn&apos;t installed and there is no rekordbox database.
+          Would you like to create a new database?
         </p>
+        <p className={styles.path} title={problem.masterDb}>{problem.masterDb}</p>
         {error ? <p className={styles.error} role="alert">{error}</p> : null}
         <div className={styles.buttons}>
-          {unavailable ? (
-            <>
-              <button type="submit" disabled={busy !== null} autoFocus>
-                {busy === "retry" ? t("Checking…") : t("Try Again")}
-              </button>
-              <button type="button" onClick={create} disabled={busy !== null} title={problem.defaultMasterDb}>
-                {busy === "create"
-                  ? (problem.defaultExists ? t("Opening…") : t("Creating…"))
-                  : (problem.defaultExists ? t("Use Default Library") : t("Create in Default Location"))}
-              </button>
-            </>
-          ) : null}
-          <button type="button" onClick={choose} disabled={busy !== null} autoFocus={!unavailable}>
-            {busy === "choose" || busy === "open" ? t("Opening…") : t("Choose master.db…")}
-          </button>
-          {unavailable ? null : (
-            <button type="submit" disabled={busy !== null}>{busy === "create" ? t("Creating…") : t("Create New")}</button>
-          )}
-          <button type="button" onClick={onQuit} disabled={busy !== null}>{t("Quit")}</button>
+          <button type="submit" disabled={busy} autoFocus>{busy ? "Creating…" : "Create"}</button>
+          <button type="button" onClick={onQuit} disabled={busy}>Quit</button>
         </div>
       </form>
     </dialog>

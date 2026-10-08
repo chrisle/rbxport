@@ -2510,34 +2510,16 @@ function AppBody() {
         />
       ) : null}
       {missingLibrary !== null ? (
-        <NewLibraryDialog problem={missingLibrary}
-          onDiscover={async () => (await getBackend()).discoverLibraries()}
-          onDrivesChanged={(listener) => {
-            let stop: (() => void) | undefined;
-            let live = true;
-            void getBackend().then((backend) => { if (live) stop = backend.onDevicesChanged(listener); });
-            return () => {
-              live = false;
-              stop?.();
-            };
-          }}
-          onOpen={async (masterDb) => {
-            await (await getBackend()).openLibrary(masterDb);
+        <NewLibraryDialog key={missingLibrary.kind} problem={missingLibrary}
+          onCreate={async () => {
+            await (await getBackend()).createLibrary();
             // The ready event that follows loads it like any other start.
             setMissingLibrary(null);
           }}
-          onCreate={async () => {
-            await (await getBackend()).createLibrary();
-            setMissingLibrary(null);
-          }}
-          onChoose={async (title, filterName) => {
-            const selected = await (await getBackend()).chooseExistingLibrary(title, filterName);
-            if (selected) setMissingLibrary(null);
-            return selected;
-          }}
-          // Closed by the ready event when the library is found, or asked
-          // again by the problem event when it still is not.
-          onRetry={async () => (await getBackend()).retryLibrary()}
+          // Closed by the ready event when the default folder has a library,
+          // or asked again by the problem event when it is empty.
+          onUseDefault={async () => (await getBackend()).useDefaultLibrary()}
+          onConfirm={async (message, labels) => (await getBackend()).confirm(message, labels)}
           onQuit={() => { void getBackend().then(backend => backend.closeWindow()); }} />
       ) : null}
       {analysisSelection !== null ? (
