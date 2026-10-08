@@ -61,7 +61,7 @@ test("General shows the stick's display settings and the space table", async ({ 
   await expect(page.getByRole("region", { name: "Device TEST" }).getByRole("radio", { name: "RGB" })).toBeChecked();
 });
 
-test("Category lists what the stick has, greys the fixed items, and moves the rest", async ({ page }) => {
+test("Category lists what the stick has, greys the fixed items, and moves them all", async ({ page }) => {
   const panel = await openTest(page);
   await panel.getByRole("tab", { name: "Category" }).click();
   const inactive = panel.getByRole("listbox", { name: "Inactive Categories" });
@@ -76,11 +76,16 @@ test("Category lists what the stick has, greys the fixed items, and moves the re
     "DATE ADDED",
   ]);
   for (const fixed of ["TRACK", "PLAYLIST", "HISTORY", "SEARCH", "FOLDER"]) {
-    await expect(active.getByRole("option", { name: fixed, exact: true })).toHaveAttribute("aria-disabled", "true");
+    await expect(active.getByRole("option", { name: fixed, exact: true })).toHaveAttribute("data-fixed", "true");
   }
-  // A fixed item cannot be picked, so nothing lights up.
-  await active.getByRole("option", { name: "TRACK", exact: true }).click({ force: true });
+  // A fixed item can be picked and moved Up / Down, but not taken out.
+  await active.getByRole("option", { name: "TRACK", exact: true }).click();
+  await expect(active.getByRole("option", { name: "TRACK", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(panel.getByRole("button", { name: "Remove from Active Categories" })).toBeDisabled();
+  await panel.getByRole("button", { name: "Up" }).click();
+  await expect(active.getByRole("option").nth(1)).toHaveText("TRACK");
+  await panel.getByRole("button", { name: "Down" }).click();
+  await expect(active.getByRole("option").nth(2)).toHaveText("TRACK");
 
   // Right arrow: GENRE goes to the end of the Active list.
   await inactive.getByRole("option", { name: "GENRE" }).click();
@@ -107,8 +112,8 @@ test("Sort greys DEFAULT and ALPHABET/TRACK NAME and keeps the stick's order", a
   await expect(active.getByRole("option")).toHaveText([
     "DEFAULT", "ALPHABET/TRACK NAME", "ARTIST", "ALBUM", "BPM", "RATING", "KEY",
   ]);
-  await expect(active.getByRole("option", { name: "DEFAULT" })).toHaveAttribute("aria-disabled", "true");
-  await expect(active.getByRole("option", { name: "ALPHABET/TRACK NAME" })).toHaveAttribute("aria-disabled", "true");
+  await expect(active.getByRole("option", { name: "DEFAULT" })).toHaveAttribute("data-fixed", "true");
+  await expect(active.getByRole("option", { name: "ALPHABET/TRACK NAME" })).toHaveAttribute("data-fixed", "true");
   await expect(panel.getByRole("listbox", { name: "Inactive Sort Options" }).getByRole("option")).toHaveText([
     "BITRATE", "COLOR", "COMMENTS", "DATE ADDED", "DJ PLAY COUNT", "GENRE", "LABEL",
     "ORIGINAL ARTIST", "REMIXER", "TIME",

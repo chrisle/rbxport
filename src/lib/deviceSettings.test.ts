@@ -58,6 +58,16 @@ describe("the Category and Sort lists", () => {
     expect(deactivate("category", before, 4)).toEqual(before);
   });
 
+  it("a fixed item still moves Up and Down within the Active list", () => {
+    const slots = categories();
+    expect(names(activeSlots(shift(slots, 4, -1)))).toEqual([
+      "ARTIST", "TRACK", "ALBUM", "KEY", "PLAYLIST", "HISTORY", "FOLDER",
+    ]);
+    expect(names(activeSlots(shift(slots, 17, -1)))).toEqual([
+      "ARTIST", "ALBUM", "TRACK", "KEY", "PLAYLIST", "FOLDER", "HISTORY",
+    ]);
+  });
+
   it("Up and Down swap with the neighbour and stop at the ends", () => {
     const slots = categories();
     expect(names(activeSlots(shift(slots, 12, -1)))).toEqual([

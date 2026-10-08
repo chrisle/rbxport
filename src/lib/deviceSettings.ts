@@ -43,9 +43,10 @@ export const MENU_ITEM = {
 } as const;
 
 /**
- * Items rekordbox greys in the Active list and will not move: the browse
- * categories a player always has, and the two sorts every list starts with
- * [OBS: greyed in the captures]. Greyed means fixed, not hidden.
+ * Items rekordbox greys in the Active list: the browse categories a player
+ * always has, and the two sorts every list starts with [OBS: greyed in the
+ * captures]. Greyed means they cannot leave the Active list; they can still
+ * be reordered with Up / Down.
  */
 const FIXED_CATEGORIES: ReadonlySet<number> = new Set([
   MENU_ITEM.TRACK,

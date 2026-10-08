@@ -5,7 +5,8 @@
  *
  * One selection across both lists, as in rekordbox: clicking an item in
  * either list picks it, and the arrows and Up / Down act on it. Greyed
- * items are the ones rekordbox fixes in place; they cannot be picked.
+ * items are the ones a player always has: they can be picked and moved
+ * Up / Down, but never taken out of the Active list.
  *
  * Every move is a write to the stick, through `onChange`.
  */
@@ -64,12 +65,12 @@ export function ListPairTab({ kind, slots, disabled, onChange }: ListPairTabProp
               key={slot.id}
               role="option"
               aria-selected={slot.id === selected}
-              aria-disabled={fixed || disabled || undefined}
+              aria-disabled={disabled || undefined}
               className={styles.item}
               data-fixed={fixed || undefined}
               data-on={slot.id === selected || undefined}
               onClick={() => {
-                if (!fixed && !disabled) setSelected(slot.id);
+                if (!disabled) setSelected(slot.id);
               }}
             >
               {displayName(slot)}
