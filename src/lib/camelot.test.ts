@@ -72,3 +72,15 @@ describe("the Traffic Light's reach", () => {
     expect(trafficLightLit("", "Ebm", "related3")).toBe(false);
   });
 });
+
+describe("a library that stores Camelot codes", () => {
+  it("reads the code as the key it names", () => {
+    expect(toCamelot("7A")).toBe("7A");
+    expect(toCamelot("08a")).toBe("8A");
+    expect(toCamelot("13A")).toBe("");
+    // A row in 9A lights against a loaded track in Am, which is 8A.
+    expect(trafficLightLit("9A", "Am", "related3")).toBe(true);
+    expect(trafficLightLit("Em", "8A", "related3")).toBe(true);
+    expect(trafficLightLit("7A", "7A", "same")).toBe(true);
+  });
+});

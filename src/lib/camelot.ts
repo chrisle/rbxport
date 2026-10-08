@@ -17,9 +17,16 @@ export function normalizeKey(key: string): string {
   return ALIASES[k] ?? k;
 }
 
-/** `Ebm` -> `2A`, `C` -> `8B`. Empty string when the key is not recognised. */
+/**
+ * `Ebm` -> `2A`, `C` -> `8B`. Empty string when the key is not recognised.
+ *
+ * A key that is already a Camelot code comes back as that code. Some
+ * libraries store `ScaleName` as `7A` rather than `Am`, as Mixed In Key and
+ * rekordbox set to Alphanumeric can write it.
+ */
 export function toCamelot(key: string): string {
-  const k = normalizeKey(key);
+  const classical = fromCamelot(key);
+  const k = classical || normalizeKey(key);
   const minor = MINOR.indexOf(k);
   if (minor >= 0) return `${minor + 1}A`;
   const major = MAJOR.indexOf(k);

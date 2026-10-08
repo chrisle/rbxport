@@ -215,6 +215,8 @@ export interface PlayerProps {
   leaderBpmX100?: number | null;
   /** What this deck is playing at, for the shell to hand to a synced deck. */
   onPlayingBpm?: ((bpmX100: number | null) => void) | undefined;
+  /** This deck's key shift in semitones, for the shell's Traffic Light. */
+  onKeyShift?: ((semitones: number) => void) | undefined;
   /**
    * A grid shift on this deck, in milliseconds, for the shell to hand to the
    * other deck: a deck synced to this one moves with it. `publishGridFollow`
@@ -757,7 +759,7 @@ export const Player = memo(function Player({
   simple = false, transportSlot, flipped = false, dual = false, publishZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
   publishSync, peerSync, isMaster = false, onMaster, synced = false, onSyncToggle,
-  leaderBpmX100 = null, onPlayingBpm, onGridNudge, publishGridFollow, readOnly = false,
+  leaderBpmX100 = null, onPlayingBpm, onKeyShift, onGridNudge, publishGridFollow, readOnly = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck, false);
   // The waveforms follow their containers, which change with the window and
@@ -1498,6 +1500,13 @@ export const Player = memo(function Player({
   useEffect(() => {
     onPlayingBpm?.(playingBpmX100);
   }, [onPlayingBpm, playingBpmX100]);
+
+  // The key this deck sounds in moves with its key shift, and so does the
+  // set of keys the Traffic Light lights against it.
+  const keyShift = track ? playback.keyShift : 0;
+  useEffect(() => {
+    onKeyShift?.(keyShift);
+  }, [onKeyShift, keyShift]);
 
   /** Match this deck to the other one: its tempo, then its bar. */
   const matchLeader = useCallback(() => {
