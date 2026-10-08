@@ -12,6 +12,19 @@ pub fn compressed_path(path: &Path) -> PathBuf {
     name.into()
 }
 
+/// Files a volume's own OS drops into a staging folder: `AppleDouble` `._*`
+/// companions (macOS on exFAT/FAT/network drives), `.DS_Store`, `Thumbs.db`,
+/// `desktop.ini`. They are not backup content and are never compressed, so
+/// `assemble` must skip them rather than fail with "Uncompressed backup entry".
+fn is_os_metadata(path: &Path) -> bool {
+    path.file_name().and_then(|n| n.to_str()).is_some_and(|name| {
+        name.starts_with("._")
+            || name == ".DS_Store"
+            || name.eq_ignore_ascii_case("Thumbs.db")
+            || name.eq_ignore_ascii_case("desktop.ini")
+    })
+}
+
 pub fn compress_file(
     source: &Path,
     target: &Path,
@@ -67,6 +80,9 @@ pub fn assemble(
         for entry in fs::read_dir(&directory)? {
             check()?;
             let path = entry?.path();
+            if is_os_metadata(&path) {
+                continue;
+            }
             let meta = fs::symlink_metadata(&path)?;
             if meta.file_type().is_symlink() {
                 return Err(io::Error::other("Unexpected symbolic link"));
@@ -136,6 +152,36 @@ mod tests {
         assert_eq!(read("analysis/ANLZ.DAT"), data);
         assert_eq!(read("summary.json"), b"{\"version\":1}");
         assert!(zip.by_name("analysis/empty/").unwrap().is_dir());
+    }
+
+    #[test]
+    fn assembly_skips_os_metadata_files_from_external_drives() {
+        let dir = tempfile::tempdir().unwrap();
+        let stage = dir.path().join("stage");
+        fs::create_dir_all(stage.join("analysis")).unwrap();
+        let source = dir.path().join("source");
+        fs::write(&source, b"data").unwrap();
+        compress_file(&source, &stage.join("analysis/ANLZ.DAT"), &mut |_| Ok(())).unwrap();
+        fs::write(stage.join("manifest.json"), b"{}").unwrap();
+        for junk in ["._manifest.json", "._master.db.zip", ".DS_Store", "analysis/._ANLZ.DAT", "Thumbs.db", "desktop.ini"] {
+            fs::write(stage.join(junk), b"\0\x05\x16\x07junk").unwrap();
+        }
+        let archive = dir.path().join("backup.zip");
+        assemble(&stage, &archive, &mut || Ok(())).unwrap();
+        let zip = ZipArchive::new(fs::File::open(&archive).unwrap()).unwrap();
+        let mut names: Vec<_> = zip.file_names().map(str::to_owned).collect();
+        names.sort();
+        assert_eq!(names, ["analysis/", "analysis/ANLZ.DAT", "manifest.json"]);
+    }
+
+    #[test]
+    fn unknown_uncompressed_entries_still_fail() {
+        let dir = tempfile::tempdir().unwrap();
+        let stage = dir.path().join("stage");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join("stray.bin"), b"x").unwrap();
+        let err = assemble(&stage, &dir.path().join("b.zip"), &mut || Ok(())).unwrap_err();
+        assert!(err.to_string().contains("Uncompressed"));
     }
 
     #[test]
