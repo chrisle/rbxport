@@ -1413,6 +1413,53 @@ fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them
 }
 
 #[test]
+fn exporting_a_folder_writes_the_folder_with_its_playlists_inside() {
+    use rbxport_lib::dto::{SmartConditionDto, SmartRuleDto};
+    let s = shell();
+    let audio = s._dir.path().join("Folder Song.wav");
+    write_wav(&audio, 2);
+    let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
+    let song = report.tracks[0].id.clone();
+
+    run(commands::create_folder(s.handle(), s.state(), "Set".into(), ROOT.into())).unwrap();
+    let set = s.node("Set");
+    run(commands::create_playlist(s.handle(), s.state(), "Inside".into(), set.id.clone())).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), s.node("Inside").id, vec![song])).unwrap();
+    run(commands::create_folder(s.handle(), s.state(), "Later".into(), set.id.clone())).unwrap();
+    let rule = SmartRuleDto {
+        logic: "all".to_owned(),
+        conditions: vec![SmartConditionDto {
+            property: "name".to_owned(), operator: "11".to_owned(), left: "Folder Song".to_owned(), right: String::new(), unit: String::new(),
+        }],
+    };
+    run(commands::create_smart_playlist(s.handle(), s.state(), "Songs".into(), set.id.clone(), rule)).unwrap();
+
+    let stick = tempfile::tempdir().unwrap();
+    let written = run(commands::export_playlist(
+        s.handle(), s.state(), set.id.clone(), stick.path().display().to_string(), None, None, None,
+    ))
+    .unwrap();
+    assert_eq!(written.tracks, 1, "one track, however many playlists hold it");
+
+    let snapshot = rbl_export::snapshot::Snapshot::read(stick.path()).unwrap();
+    for library in [snapshot.one.expect("exportLibrary.db"), snapshot.legacy.expect("export.pdb")] {
+        let named = |name: &str| library.playlists.iter().find(|p| p.name == name).unwrap_or_else(|| panic!("no {name} in {:?}", library.playlists));
+        let set = named("Set");
+        assert!(set.folder, "the folder is a folder on the stick, not an empty playlist");
+        assert_eq!(set.parent, 0);
+        let later = named("Later");
+        assert!(later.folder && later.parent == set.id, "an empty folder under it keeps its place");
+        for name in ["Inside", "Songs"] {
+            let playlist = named(name);
+            assert!(!playlist.folder);
+            assert_eq!(playlist.parent, set.id);
+            assert_eq!(playlist.tracks.len(), 1, "{name}");
+        }
+        assert_eq!(library.playlists.len(), 4);
+    }
+}
+
+#[test]
 fn an_intelligent_playlist_is_made_from_a_rule_and_its_rule_is_edited() {
     use rbxport_lib::dto::{SmartConditionDto, SmartRuleDto};
     let s = shell();

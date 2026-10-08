@@ -1248,11 +1248,46 @@ pub(crate) struct ExportSelection {
     pub sync: rbl_export::SyncSource,
 }
 
+/// What exporting the folder at `folder` writes, in tree order: the
+/// playlists (plain and intelligent) under it at any depth, and the folder
+/// itself with every folder under it, so empty ones keep their place.
+fn folder_contents(playlists: &rbl_index::Playlists, folder: usize) -> (Vec<usize>, Vec<usize>) {
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); playlists.len()];
+    for index in 0..playlists.len() {
+        if let Some(parent) = playlists.parent.get(index).copied().filter(|&p| p != rbl_index::NO_ID) {
+            if let Some(bucket) = children.get_mut(parent as usize) {
+                bucket.push(index);
+            }
+        }
+    }
+    let (mut leaves, mut folders) = (Vec::new(), Vec::new());
+    // Iterative, with a visited set, as the tree builder is: a corrupt
+    // parent cycle must not loop forever.
+    let mut visited = vec![false; playlists.len()];
+    let mut stack = vec![folder];
+    while let Some(index) = stack.pop() {
+        match visited.get_mut(index) {
+            Some(seen) if !*seen => *seen = true,
+            _ => continue,
+        }
+        if playlists.is_folder(index) {
+            folders.push(index);
+            if let Some(under) = children.get(index) {
+                stack.extend(under.iter().rev());
+            }
+        } else {
+            leaves.push(index);
+        }
+    }
+    (leaves, folders)
+}
+
 impl ExportSelection {
     /// The union of these playlists, each track read once however many of
     /// them hold it. Ids are the tree's numeric playlist ids. An intelligent
     /// playlist is exported as what its rule admits now, which is what
-    /// rekordbox writes to a stick for one too.
+    /// rekordbox writes to a stick for one too. A folder stands for every
+    /// playlist under it, and goes on the stick as a folder with them inside.
     pub(crate) fn from_playlists(
         state: &AppState,
         library: &rbl_index::Library,
@@ -1281,18 +1316,35 @@ impl ExportSelection {
         // Named first and read after: `source_rows` takes the playlists
         // itself, so the guard is let go before it is asked.
         let mut named: Vec<(u64, String, rbl_index::TrackSource)> = Vec::with_capacity(playlist_ids.len());
+        // Folders asked for by name, kept on the stick even when nothing
+        // under them is a playlist.
+        let mut chosen_folders: Vec<u64> = Vec::new();
         {
             let playlists = library.playlists();
+            let mut seen = std::collections::HashSet::new();
             for id in playlist_ids {
                 let Some(index) = id.parse::<u64>().ok().and_then(|numeric| playlists.index_of(numeric)) else {
                     return Err(AppError::new(ErrorKind::NotFound, "That playlist is not in the library."));
                 };
-                let source = if playlists.is_smart(index) {
-                    rbl_index::TrackSource::SmartPlaylist(index)
+                // A folder has no tracks of its own: exported as a playlist
+                // it would land on the stick empty.
+                let (leaves, folders) = if playlists.is_folder(index) {
+                    folder_contents(&playlists, index)
                 } else {
-                    rbl_index::TrackSource::Playlist(index)
+                    (vec![index], Vec::new())
                 };
-                named.push((playlists.ids.get(index).copied().unwrap_or(0), playlists.name(index).to_owned(), source));
+                chosen_folders.extend(folders.into_iter().filter_map(|folder| playlists.ids.get(folder).copied()));
+                for index in leaves {
+                    if !seen.insert(index) {
+                        continue;
+                    }
+                    let source = if playlists.is_smart(index) {
+                        rbl_index::TrackSource::SmartPlaylist(index)
+                    } else {
+                        rbl_index::TrackSource::Playlist(index)
+                    };
+                    named.push((playlists.ids.get(index).copied().unwrap_or(0), playlists.name(index).to_owned(), source));
+                }
             }
         }
         let rows_of: Vec<Vec<u32>> = named.iter().map(|(_, _, source)| library.source_rows(source)).collect();
@@ -1370,6 +1422,12 @@ impl ExportSelection {
             let mut parent = p.parent_id;
             while parent != 0 && ancestors.insert(parent) {
                 parent = sync.tree.iter().find(|n| n.id == parent).map_or(0, |n| n.parent);
+            }
+        }
+        for folder in chosen_folders {
+            let mut next = folder;
+            while next != 0 && ancestors.insert(next) {
+                next = sync.tree.iter().find(|n| n.id == next).map_or(0, |n| n.parent);
             }
         }
         let mut folders = Vec::new();
