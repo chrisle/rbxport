@@ -49,13 +49,58 @@ pub fn discover() -> Vec<DriveLibrary> {
     found
 }
 
+/// The name of the drive `dir` is on, for the default drive's entry in the
+/// Database management list: rekordbox names it after the volume label of
+/// `/` (`File::getVolumeLabel` in `DetailDatabaseManagement::setup`)
+/// [OBS macOS 7.2.11]. The label of the mounted disk holding `dir`, or that
+/// disk's mount point when it has no label worth showing.
+#[must_use]
+pub fn drive_name_of(dir: &Path) -> String {
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let mounts: Vec<(PathBuf, String)> = disks
+        .list()
+        .iter()
+        .map(|disk| (disk.mount_point().to_owned(), disk.name().to_string_lossy().into_owned()))
+        .collect();
+    name_from_mounts(dir, &mounts)
+}
+
+fn name_from_mounts(dir: &Path, mounts: &[(PathBuf, String)]) -> String {
+    let Some((mount, name)) = mounts
+        .iter()
+        .filter(|(mount, _)| dir.starts_with(mount))
+        .max_by_key(|(mount, _)| mount.components().count())
+    else {
+        return dir.ancestors().last().unwrap_or(dir).display().to_string();
+    };
+    if crate::is_drive_root(&mount.to_string_lossy()) {
+        drive_label(mount, name)
+    } else if name.is_empty() || name.starts_with("/dev/") {
+        mount.display().to_string()
+    } else {
+        name.clone()
+    }
+}
+
 /// Names each library on a drive root after the drive's label, where the
-/// label is known and not empty.
+/// label is known.
 fn label(found: &mut [DriveLibrary], labels: &[(PathBuf, String)]) {
     for library in found {
-        if let Some((_, name)) = labels.iter().find(|(mount, name)| *mount == library.volume && !name.is_empty()) {
-            library.name = crate::display_name(&library.volume, name);
+        if let Some((_, name)) = labels.iter().find(|(mount, _)| *mount == library.volume) {
+            library.name = drive_label(&library.volume, name);
         }
+    }
+}
+
+/// A drive as Database management lists it. A Windows drive is its letter
+/// and its label run together, `C:BOOTCAMP` [OBS rekordbox 7.2.x on Windows,
+/// chris-win11 2026-10-08]; elsewhere the volume's name.
+#[must_use]
+pub fn drive_label(volume: &Path, label: &str) -> String {
+    let text = volume.to_string_lossy();
+    match text.chars().next() {
+        Some(letter) if crate::is_drive_root(&text) => format!("{}:{label}", letter.to_ascii_uppercase()),
+        _ => crate::display_name(volume, label),
     }
 }
 
@@ -74,7 +119,7 @@ pub fn discover_in(volumes: &[PathBuf]) -> Vec<DriveLibrary> {
                 continue;
             }
             seen.push(identity);
-            found.push(DriveLibrary { name: crate::display_name(volume, ""), volume: volume.clone(), master_db });
+            found.push(DriveLibrary { name: drive_label(volume, ""), volume: volume.clone(), master_db });
         }
     }
     found
@@ -178,18 +223,40 @@ mod tests {
     #[test]
     fn a_drive_root_is_named_after_its_label_or_its_letter() {
         let found = |volume: &str| DriveLibrary {
-            name: crate::display_name(Path::new(volume), ""),
+            name: drive_label(Path::new(volume), ""),
             volume: PathBuf::from(volume),
             master_db: Path::new(volume).join("PIONEER/Master/master.db"),
         };
         let mut libraries = [found("E:\\"), found("F:\\"), found("G:\\")];
-        assert_eq!(libraries[0].name, "E:\\", "unlabelled, the drive is named by its letter");
+        assert_eq!(libraries[0].name, "E:", "unlabelled, the drive is named by its letter");
         label(
             &mut libraries,
             &[(PathBuf::from("E:\\"), "DJ SSD".into()), (PathBuf::from("F:\\"), String::new())],
         );
         let names: Vec<&str> = libraries.iter().map(|library| library.name.as_str()).collect();
-        assert_eq!(names, ["DJ SSD", "F:\\", "G:\\"]);
+        assert_eq!(names, ["E:DJ SSD", "F:", "G:"], "as rekordbox lists C:BOOTCAMP");
+    }
+
+    #[test]
+    fn the_default_drive_is_named_after_the_disk_holding_it() {
+        let mounts = [
+            (PathBuf::from("/"), "Macintosh HD".to_owned()),
+            (PathBuf::from("/System/Volumes/Data"), "Data".to_owned()),
+            (PathBuf::from("/home"), "/dev/sda2".to_owned()),
+        ];
+        assert_eq!(name_from_mounts(Path::new("/Users/x/Library/Pioneer/rekordbox"), &mounts), "Macintosh HD");
+        assert_eq!(name_from_mounts(Path::new("/System/Volumes/Data/Users/x"), &mounts), "Data");
+        assert_eq!(name_from_mounts(Path::new("/home/ryan/Library/Pioneer/rekordbox"), &mounts), "/home");
+        assert_eq!(name_from_mounts(Path::new("/srv/x"), &mounts[1..]), "/");
+    }
+
+    /// A Windows mount is a prefix of a path only where `Path` reads
+    /// backslashes.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_default_drive_is_its_letter_and_label() {
+        let windows = [(PathBuf::from("C:\\"), "BOOTCAMP".to_owned())];
+        assert_eq!(name_from_mounts(Path::new("C:\\Users\\chris\\AppData\\Roaming\\Pioneer\\rekordbox"), &windows), "C:BOOTCAMP");
     }
 
     #[test]

@@ -4,8 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use rbl_db::locate::{locate_with, Located, Origin, Sources};
-use rbl_db::new_library::{create, plan_with, use_existing_with};
+use rbl_db::locate::{locate_with, switch_with, use_default_with, Located, Sources, MASTER_DB_DIRECTORY};
+use rbl_db::new_library::{create, plan_with};
 use rbl_db::write::{AnalysisRegistration, Writer};
 use rbl_db::{Library, LibraryLocation, OpenMode};
 
@@ -87,57 +87,51 @@ fn library_on_drive(root: &Path, dir: &Path) -> PathBuf {
     create(&plan_with(&maker).unwrap().unwrap()).unwrap().master_db
 }
 
-#[test]
-fn an_existing_external_library_can_be_selected_without_changing_it() {
-    let root = tempfile::tempdir().unwrap();
-    let master_db = library_on_drive(root.path(), &root.path().join("media/ryan/T7/PIONEER/Master"));
-    let before = std::fs::read(&master_db).unwrap();
-    let sources = Sources::under(&root.path().join("machine"));
-
-    let selected = use_existing_with(&sources, &master_db).unwrap();
-
-    assert_eq!(selected.master_db, master_db);
-    assert_eq!(selected.share_root, master_db.parent().unwrap().join("share"));
-    assert_eq!(std::fs::read(&selected.master_db).unwrap(), before);
-    assert!(!sources.agent_options.as_deref().unwrap().exists(), "rekordbox's options.json is not written");
-    assert!(!sources.rekordbox_settings.as_deref().unwrap().exists(), "nor its settings");
-    let next = locate_with(&sources).unwrap();
-    let Located::Found { location, origin } = next else { panic!("not found: {next:?}") };
-    assert_eq!((location.master_db, origin), (master_db, Origin::Rbxport));
+fn master_db_directory(sources: &Sources) -> Option<String> {
+    let text = std::fs::read_to_string(sources.rekordbox_settings.as_deref()?).ok()?;
+    rbl_core::paths::setting_value(&text, MASTER_DB_DIRECTORY)
 }
 
 #[test]
-fn selecting_an_invalid_database_does_not_persist_it() {
-    let root = tempfile::tempdir().unwrap();
-    let sources = Sources::under(&root.path().join("machine"));
-    let invalid = root.path().join("mounted-drive/master.db");
-    std::fs::create_dir_all(invalid.parent().unwrap()).unwrap();
-    std::fs::write(&invalid, b"not a rekordbox database").unwrap();
-
-    assert!(use_existing_with(&sources, &invalid).is_err());
-    assert!(!sources.choice.as_deref().unwrap().exists());
-}
-
-#[test]
-fn a_choice_that_rekordbox_s_own_library_would_override_is_refused() {
+fn switching_to_a_drive_library_changes_rekordbox_s_setting_and_not_the_library() {
     let root = tempfile::tempdir().unwrap();
     let sources = Sources::under(&root.path().join("machine"));
     rekordbox_ran(&sources);
     let rekordbox = create(&plan_with(&sources).unwrap().unwrap()).unwrap().master_db;
-    let other = library_on_drive(root.path(), &root.path().join("Volumes/B/PIONEER/Master"));
-
-    let refused = use_existing_with(&sources, &other).unwrap_err().to_string();
-    assert!(refused.contains("rekordbox is set to use"), "{refused}");
-    assert!(!sources.choice.as_deref().unwrap().exists());
+    let drive_dir = root.path().join("Volumes/B/PIONEER/Master");
+    let drive = library_on_drive(root.path(), &drive_dir);
+    let before = std::fs::read(&drive).unwrap();
     assert_eq!(found(&sources).master_db, rekordbox);
 
-    // Choosing rekordbox's own library is fine, and needs nothing saved.
-    assert_eq!(use_existing_with(&sources, &rekordbox).unwrap().master_db, rekordbox);
-    assert!(!sources.choice.as_deref().unwrap().exists());
+    let switched = switch_with(&sources, &drive).unwrap();
+    assert_eq!(switched.master_db, drive);
+    assert_eq!(switched.share_root, drive_dir.join("share"));
+    assert_eq!(std::fs::read(&drive).unwrap(), before, "the library is only read");
+    assert_eq!(master_db_directory(&sources).as_deref(), drive_dir.to_str());
+    assert!(!sources.agent_options.as_deref().unwrap().exists(), "options.json is rekordbox's to write");
+    assert_eq!(found(&sources).master_db, drive, "the next start opens it");
+
+    // And back to the default, as choosing the default drive does.
+    switch_with(&sources, &rekordbox).unwrap();
+    assert_eq!(found(&sources).master_db, rekordbox);
 }
 
 #[test]
-fn without_rekordbox_a_default_library_made_here_can_be_replaced_by_a_drive_library() {
+fn switching_to_a_database_that_is_not_a_library_changes_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let sources = Sources::under(&root.path().join("machine"));
+    rekordbox_ran(&sources);
+    let settings = std::fs::read(sources.rekordbox_settings.as_deref().unwrap()).unwrap();
+    let invalid = root.path().join("Volumes/X/PIONEER/Master/master.db");
+    std::fs::create_dir_all(invalid.parent().unwrap()).unwrap();
+    std::fs::write(&invalid, b"not a rekordbox database").unwrap();
+
+    assert!(switch_with(&sources, &invalid).is_err());
+    assert_eq!(std::fs::read(sources.rekordbox_settings.as_deref().unwrap()).unwrap(), settings);
+}
+
+#[test]
+fn without_rekordbox_an_empty_default_library_made_here_gives_way_to_a_drive_library() {
     // Issue #49: a machine with no rekordbox where an earlier build made an
     // empty library in the default folder, while the real one is on a drive.
     let root = tempfile::tempdir().unwrap();
@@ -146,11 +140,29 @@ fn without_rekordbox_a_default_library_made_here_can_be_replaced_by_a_drive_libr
     assert_eq!(found(&sources).master_db, made);
     let drive = library_on_drive(root.path(), &root.path().join("media/ryan/T7/PIONEER/Master"));
 
-    assert_eq!(use_existing_with(&sources, &drive).unwrap().master_db, drive);
-    let next = locate_with(&sources).unwrap();
-    let Located::Found { location, origin } = next else { panic!("not found: {next:?}") };
-    assert_eq!((location.master_db, origin), (drive, Origin::Rbxport));
-    assert!(!sources.rekordbox_settings.as_deref().unwrap().exists(), "rekordbox's settings are not written");
+    switch_with(&sources, &drive).unwrap();
+    assert_eq!(found(&sources).master_db, drive);
+    let settings = std::fs::read_to_string(sources.rekordbox_settings.as_deref().unwrap()).unwrap();
+    assert!(settings.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\n<PROPERTIES>\n"));
+}
+
+#[test]
+fn a_missing_drive_is_unavailable_until_the_default_is_chosen_and_nothing_is_made_on_it() {
+    let root = tempfile::tempdir().unwrap();
+    let sources = Sources::under(&root.path().join("machine"));
+    let drive_dir = root.path().join("Volumes/Gone/PIONEER/Master");
+    let drive = library_on_drive(root.path(), &drive_dir);
+    switch_with(&sources, &drive).unwrap();
+    std::fs::remove_dir_all(root.path().join("Volumes")).unwrap();
+
+    assert!(matches!(locate_with(&sources).unwrap(), Located::Unavailable { .. }));
+    assert_eq!(plan_with(&sources).unwrap(), None, "no library is offered on the missing drive");
+
+    use_default_with(&sources).unwrap();
+    assert_eq!(master_db_directory(&sources).as_deref(), sources.default_dir.to_str());
+    assert!(!root.path().join("Volumes").exists());
+    let plan = plan_with(&sources).unwrap().expect("the default folder is offered once chosen");
+    assert_eq!(plan.master_db, sources.default_master_db());
 }
 
 /// rekordbox has run on the machine with nothing set: its settings file is
@@ -158,5 +170,5 @@ fn without_rekordbox_a_default_library_made_here_can_be_replaced_by_a_drive_libr
 fn rekordbox_ran(sources: &Sources) {
     let file = sources.rekordbox_settings.as_deref().unwrap();
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\n<PROPERTIES>\n</PROPERTIES>\n").unwrap();
+    std::fs::write(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\n<PROPERTIES>\n  <VALUE name=\"ColorType\" val=\"3\"/>\n</PROPERTIES>\n").unwrap();
 }

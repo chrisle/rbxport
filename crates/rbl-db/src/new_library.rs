@@ -1,5 +1,5 @@
-//! A new, empty library, and choosing an existing one, for a machine on
-//! which [`locate`](crate::locate) found nothing to open.
+//! A new, empty library, for a machine on which
+//! [`locate`](crate::locate) found nothing to open.
 //!
 //! A new library is made where rekordbox makes one when nothing says
 //! otherwise — `master.db` and `share/` in its default folder — so the
@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection};
 
-use crate::locate::{locate_with, remember, Located, Origin, Sources};
-use crate::{DbError, Library, LibraryLocation, OpenMode, Result};
+use crate::locate::{locate_with, Located, Sources};
+use crate::{DbError, LibraryLocation, Result};
 
 /// Every `CREATE` statement in rekordbox's `master.db`.
 const SCHEMA: &str = include_str!("master_schema.sql");
@@ -121,16 +121,15 @@ pub fn plan() -> Result<Option<Plan>> {
 
 /// Where a new library would go, if one may be made.
 ///
-/// `None` when there is a library to open. With nothing configured, the
-/// default folder. When the configured library is missing — a drive not
-/// connected — the default folder as well, never the missing location; and
-/// `None` when the default folder already holds a database, which is opened
-/// rather than replaced.
+/// The default folder, when nothing is configured there or elsewhere and it
+/// holds no database. `None` when there is a library to open, and when the
+/// configured library is on a drive that is missing: rekordbox asks for the
+/// drive instead, and only its "open Master Database in the default drive"
+/// (`locate::use_default`) leads back here.
 pub fn plan_with(sources: &Sources) -> Result<Option<Plan>> {
     let master_db = match locate_with(sources)? {
-        Located::Found { .. } => return Ok(None),
+        Located::Found { .. } | Located::Unavailable { .. } => return Ok(None),
         Located::Absent { master_db } => master_db,
-        Located::Unavailable { default_master_db, .. } => default_master_db,
     };
     if master_db.exists() {
         return Ok(None);
@@ -175,95 +174,6 @@ pub fn create(plan: &Plan) -> Result<LibraryLocation> {
         passphrase: plan.passphrase.clone(),
         is_real_install: true,
     })
-}
-
-/// Uses the library in the default folder, making it when there is none;
-/// see [`use_default_with`].
-pub fn use_default() -> Result<LibraryLocation> {
-    use_default_with(&Sources::installed()?)
-}
-
-/// Uses the library in rekordbox's default folder: the answer to "no
-/// library", and rekordbox's own offer when the configured one cannot be
-/// found ("open Master Database in the default drive").
-///
-/// A library that is there is opened, never replaced, including one that
-/// appeared since the question was asked. When the configured library is
-/// missing, the default one is saved as this application's choice so the
-/// next start opens it too; rekordbox's own setting is left as it is.
-pub fn use_default_with(sources: &Sources) -> Result<LibraryLocation> {
-    match locate_with(sources)? {
-        Located::Found { location, .. } => Ok(location),
-        Located::Absent { master_db } => create(&Plan { master_db, passphrase: sources.passphrase()? }),
-        Located::Unavailable { default_master_db, .. } => {
-            let location = if default_master_db.exists() {
-                let location = sources.location_of(&default_master_db)?;
-                drop(Library::open(location.clone(), OpenMode::ReadOnly)?);
-                location
-            } else {
-                create(&Plan { master_db: default_master_db.clone(), passphrase: sources.passphrase()? })?
-            };
-            remember(choice_file(sources)?, &default_master_db)?;
-            Ok(location)
-        }
-    }
-}
-
-/// Opens an existing library chosen in this application; see
-/// [`use_existing_with`].
-pub fn use_existing(master_db: &Path) -> Result<LibraryLocation> {
-    use_existing_with(&Sources::installed()?, master_db)
-}
-
-/// Makes an existing `master.db` this application's library: on a drive
-/// found by drive discovery (`rbl_devices::libraries`) or picked by hand.
-///
-/// This is this application's own setting, saved in its data folder; it is
-/// not how rekordbox chooses a library. rekordbox's equivalent is
-/// Preferences › Advanced › Database management, and the library rekordbox
-/// is set to use always comes first (see [`locate`](crate::locate)), so a
-/// choice that rekordbox's own library would override is refused rather
-/// than saved to no effect.
-///
-/// The database is opened with rekordbox's key and its schema checked
-/// before anything is saved, so a wrong file cannot strand the next start
-/// on it. Nothing in the selected library or in rekordbox's files changes.
-pub fn use_existing_with(sources: &Sources, master_db: &Path) -> Result<LibraryLocation> {
-    if !master_db.is_file() {
-        return Err(DbError::NotInstalled(format!("{} is not a database file", master_db.display())));
-    }
-    if let Located::Found { location, origin } = locate_with(sources)? {
-        if origin != Origin::Rbxport {
-            if same_file(&location.master_db, master_db) {
-                return Ok(location);
-            }
-            return Err(DbError::Open(format!(
-                "rekordbox is set to use the library at {}, which is opened at startup",
-                location.master_db.display()
-            )));
-        }
-    }
-    let location = sources.location_of(master_db)?;
-    // Both the key and the schema are proved before the choice is kept.
-    drop(Library::open(location.clone(), OpenMode::ReadOnly)?);
-    remember(choice_file(sources)?, master_db)?;
-    Ok(location)
-}
-
-fn choice_file(sources: &Sources) -> Result<&Path> {
-    sources
-        .choice
-        .as_deref()
-        .ok_or_else(|| DbError::Open("there is nowhere to save the chosen library".into()))
-}
-
-/// Whether two paths name the same file, following links and case where
-/// the filesystem does.
-fn same_file(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
-    }
 }
 
 /// The empty database: the schema and the rows rekordbox's browser and
@@ -535,51 +445,25 @@ mod tests {
 
     #[test]
     fn a_missing_configured_drive_is_never_where_a_library_is_made() {
-        let (root, sources, library) = fresh();
+        let (root, sources, _library) = fresh();
         let drive = root.path().join("Volumes/DJ SSD/PIONEER/Master");
         rekordbox_settings(&sources, &drive);
-
-        let plan = plan_with(&sources).unwrap().expect("the default folder is offered");
-        assert_eq!(plan.master_db, library.join("master.db"));
-        let made = use_default_with(&sources).unwrap();
-        assert_eq!(made.master_db, library.join("master.db"));
-        assert!(!root.path().join("Volumes").exists(), "nothing is made on the missing drive");
-
-        // The default is now this application's choice, so the next start
-        // opens it while the drive stays away; rekordbox's setting is kept.
-        let next = locate_with(&sources).unwrap();
-        assert!(matches!(next, Located::Found { origin: Origin::Rbxport, .. }), "{next:?}");
-        let settings = std::fs::read_to_string(sources.rekordbox_settings.as_deref().unwrap()).unwrap();
-        assert!(settings.contains("DJ SSD"));
+        assert_eq!(plan_with(&sources).unwrap(), None, "rekordbox asks for the drive instead");
+        assert!(!root.path().join("Volumes").exists());
     }
 
     #[test]
-    fn an_options_file_naming_a_missing_drive_is_not_where_a_library_is_made() {
-        let (root, sources, library) = fresh();
+    fn an_options_file_naming_a_missing_library_is_not_where_one_is_made() {
+        let (root, sources, _library) = fresh();
         let elsewhere = root.path().join("elsewhere/master.db");
         let options = sources.agent_options.clone().unwrap();
         std::fs::create_dir_all(options.parent().unwrap()).unwrap();
         crate::fixture::write_options_json(&options, &elsewhere.to_string_lossy(), "their-own-key").unwrap();
         let before = std::fs::read(&options).unwrap();
 
-        let plan = plan_with(&sources).unwrap().unwrap();
-        assert_eq!(plan.master_db, library.join("master.db"));
-        create(&plan).unwrap();
+        assert_eq!(plan_with(&sources).unwrap(), None);
         assert!(!elsewhere.parent().unwrap().exists());
         assert_eq!(std::fs::read(&options).unwrap(), before, "options.json is only read");
-    }
-
-    #[test]
-    fn using_the_default_opens_one_that_is_there_rather_than_replacing_it() {
-        let (root, sources, library) = fresh();
-        let made = create(&plan_with(&sources).unwrap().unwrap()).unwrap();
-        let before = std::fs::read(&made.master_db).unwrap();
-        rekordbox_settings(&sources, &root.path().join("Volumes/Gone/PIONEER/Master"));
-
-        assert_eq!(plan_with(&sources).unwrap(), None);
-        let used = use_default_with(&sources).unwrap();
-        assert_eq!(used.master_db, library.join("master.db"));
-        assert_eq!(std::fs::read(&made.master_db).unwrap(), before);
     }
 
     #[test]

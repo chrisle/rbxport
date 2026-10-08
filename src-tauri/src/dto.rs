@@ -112,30 +112,25 @@ pub struct LimiterDto {
 pub enum LibraryProblemDto {
     /// No library configured anywhere, and one can be made at `master_db`.
     Missing { master_db: String },
-    /// A library is configured at `master_db` and is not there — most often
-    /// a drive that is not connected. Nothing is made in its place; the
-    /// default folder's `default_master_db` is offered instead, opened when
-    /// `default_exists`, else made.
-    Unavailable {
-        master_db: String,
-        /// `rekordbox` when rekordbox's settings name it, `rbxport` when it
-        /// was chosen in this application.
-        configured_by: rbl_db::locate::Origin,
-        default_master_db: String,
-        default_exists: bool,
-    },
+    /// A library is configured at `master_db`, not the default folder, and
+    /// is not there — most often a drive that is not connected. rekordbox's
+    /// "Cannot find Master Database" question: nothing is made in its place,
+    /// and Yes sets the default folder's `default_master_db` instead.
+    Unavailable { master_db: String, default_master_db: String },
     /// There is a library, or something in its place, and it would not open.
     Failed { message: String },
 }
 
-/// A rekordbox library found on a connected drive.
+/// One entry of Database management's drive list.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DriveLibraryDto {
-    /// The drive's name.
+pub struct DatabaseDriveDto {
+    /// The drive's name: its volume label, as rekordbox shows it.
     pub name: String,
-    pub volume: String,
+    /// The library's `master.db` on that drive.
     pub master_db: String,
+    /// Whether it is the library open now.
+    pub current: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
