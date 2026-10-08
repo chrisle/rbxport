@@ -213,22 +213,50 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
     };
   }, []);
 
-  // The same tree the shell fetches, once, on open. Its folders open one
-  // level deep, as rekordbox's manager opens them: the top folders show,
-  // and what is inside them waits to be asked for.
+  // The same tree the shell fetches, on open and again whenever the library
+  // changes, so a playlist made while this is open can be ticked. Its
+  // folders open one level deep, as rekordbox's manager opens them: the top
+  // folders show, and what is inside them waits to be asked for. A re-read
+  // keeps the folders as they were opened or closed; only folders it has
+  // not seen before start closed.
   useEffect(() => {
     let live = true;
-    void getBackend()
-      .then((backend) => backend.playlistTree())
-      .then((read) => {
-        if (!live) return;
-        setTree(read);
-        setCollapsed(new Set(playlistNodes(read).filter((n) => n.kind === "folder" && n.depth > 1).map((n) => n.id)));
-      })
-      .catch(() => { if (live) setTreeError("Couldn’t load playlists. Reopen Sync Manager to try again."); })
-      .finally(() => { if (live) setLoadingTree(false); });
+    let stop: (() => void) | undefined;
+    const seen = new Set<string>();
+    // Each read is numbered so a slow one cannot overwrite a newer one.
+    let latest = 0;
+    const read = async () => {
+      const mine = ++latest;
+      try {
+        const backend = await getBackend();
+        const tree = await backend.playlistTree();
+        if (!live || mine !== latest) return;
+        const nodes = playlistNodes(tree);
+        const fresh = nodes.filter((n) => n.kind === "folder" && n.depth > 1 && !seen.has(n.id)).map((n) => n.id);
+        for (const node of nodes) seen.add(node.id);
+        const present = new Set(nodes.map((n) => n.id));
+        setTree(tree);
+        setTreeError("");
+        setCollapsed((current) => new Set([...[...current].filter((id) => present.has(id)), ...fresh]));
+        // A deleted playlist is not something SYNC can be asked for.
+        setTicked((current) => {
+          const kept = [...current].filter((id) => present.has(id));
+          return kept.length === current.size ? current : new Set(kept);
+        });
+      } catch {
+        if (live && mine === latest) setTreeError("Couldn’t load playlists. Reopen Sync Manager to try again.");
+      } finally {
+        if (live && mine === latest) setLoadingTree(false);
+      }
+    };
+    void read();
+    void getBackend().then((backend) => {
+      if (!live) return;
+      stop = backend.onLibraryChanged(() => { void read(); });
+    });
     return () => {
       live = false;
+      stop?.();
     };
   }, []);
 

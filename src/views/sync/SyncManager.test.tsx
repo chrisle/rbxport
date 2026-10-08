@@ -58,6 +58,8 @@ const report = (path: string, tracks: number): SyncDeviceReport => ({
 let host: HTMLDivElement;
 let root: Root;
 let devicesChanged: (() => void) | undefined;
+let libraryChanged: (() => void) | undefined;
+let tree: TreeNode[];
 let listDevices: ReturnType<typeof vi.fn>;
 let importUsb: ReturnType<typeof vi.fn>;
 let syncDevices: ReturnType<typeof vi.fn>;
@@ -87,6 +89,8 @@ const status = () => host.querySelector('[role="status"]')?.textContent ?? "";
 beforeEach(async () => {
   cancelExport.mockClear();
   devicesChanged = undefined;
+  libraryChanged = undefined;
+  tree = TREE;
   listDevices = vi.fn(() => Promise.resolve(DEVICES.map(d => ({ ...d }))));
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   progress = null;
@@ -103,7 +107,11 @@ beforeEach(async () => {
   importItunesSelected = vi.fn(() => Promise.resolve({ imported: 5, existing: 0, skipped: [], playlists: 1, cues: 0, tracks: [] }));
   __setBackend({
     librarySummary: () => Promise.resolve({ trackCount: 3, playlistCount: 3, readOnly: rekordboxOpen, dbVersion: 6000 }),
-    playlistTree: () => Promise.resolve(TREE.map((n) => ({ ...n }))),
+    playlistTree: () => Promise.resolve(tree.map((n) => ({ ...n }))),
+    onLibraryChanged: (listener: () => void) => {
+      libraryChanged = listener;
+      return () => { libraryChanged = undefined; };
+    },
     itunesDefaultLibrary: () => Promise.resolve(itunesLibrary),
     chooseItunesLibrary: () => Promise.resolve(null),
     importItunesSelected,
@@ -322,6 +330,29 @@ describe("SyncManager", () => {
     await settle();
     expect(validateExportFiles).toHaveBeenCalledWith(["s1"]);
     expect(syncDevices.mock.calls[0]?.[0]).toEqual(["s1"]);
+  });
+
+  it("sends an intelligent playlist with the folder it is in", async () => {
+    click(box("Sets"));
+    expect(box("Peak Time")?.checked).toBe(true);
+    click(box("USB B"));
+    await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+    await settle();
+    expect(syncDevices.mock.calls[0]?.[0]).toEqual(["p1", "p2", "s1"]);
+  });
+
+  it("follows library changes while open, keeping ticks on playlists still there", async () => {
+    click(box("Warm Up"));
+    click(box("Closing"));
+    tree = [...TREE.filter((n) => n.id !== "p3").slice(0, 6), { id: "p4", name: "New Playlist", kind: "playlist", depth: 1 }, ...TREE.slice(7)];
+    act(() => libraryChanged?.());
+    await settle();
+
+    const names = [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
+    expect(names).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "New Playlist"]);
+    expect(box("Warm Up")?.checked).toBe(true);
+    expect(host.textContent).toContain("1 of 4 playlists selected");
   });
 
   it("imports only the ticked iTunes playlists and refreshes the library column", async () => {
