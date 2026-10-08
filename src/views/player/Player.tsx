@@ -2231,7 +2231,11 @@ export const Player = memo(function Player({
             beatMs={beatMs}
             labels={viewPrefs.phraseLabels}
           />
-        ) : null}
+        ) : (
+          // Keep the phrase row's grid track: the rows are placed by
+          // auto-flow, so omitting it shifts the detail into a fixed-height track.
+          <div className={styles.phrase} data-testid="player-phrase-off" aria-hidden />
+        )}
 
         {/* The control row comes before the detail in the two-deck body, as
             the capture has it: the detail is the last row, and takes what is
