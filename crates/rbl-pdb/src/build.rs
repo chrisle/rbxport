@@ -250,7 +250,7 @@ impl FileBuilder {
     /// table's further data pages and its empty candidate are allocated
     /// when it is written, so a table written early has its candidate
     /// before a later table's overflow. Types not named here follow the
-    /// named ones in table order. Without this, `history` (type 19) is
+    /// named ones in table order. Without this, `property` (type 19) is
     /// written first and the rest in table order, as `export.pdb` has it
     /// [OBS 7.2.11]; `exportExt.pdb` writes its type 7 before its type 3.
     pub fn write_order(&mut self, order: &[u32]) {
@@ -333,7 +333,7 @@ impl FileBuilder {
             }
         }
         // Then each table's further pages and its candidate, in the order
-        // the tables were written: as asked, else `history` (type 19)
+        // the tables were written: as asked, else `property` (type 19)
         // first and the rest in table order.
         let order = |page_type: u32| -> (usize, u32) {
             match self.write_order.iter().position(|&t| t == page_type) {

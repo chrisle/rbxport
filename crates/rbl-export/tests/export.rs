@@ -319,6 +319,41 @@ fn a_fresh_stick_takes_the_defaults_it_is_given_and_keeps_them_after() {
 }
 
 #[test]
+fn the_pdb_property_row_names_the_stick_and_keeps_its_background_colour() {
+    use rbl_onelibrary::settings::StickSettings;
+
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let tracks = vec![track(src.path(), 1, "One", "A"), track(src.path(), 2, "Two", "B")];
+    let defaults = StickSettings { device_name: "FRIDAY".into(), ..StickSettings::default() };
+    rbl_export::export_with(dest.path(), &tracks, &[], Some(&defaults)).unwrap();
+
+    let pdb_path = dest.path().join("PIONEER/rekordbox/export.pdb");
+    let bytes = std::fs::read(&pdb_path).unwrap();
+    let property = rbl_pdb::Pdb::parse(&bytes).unwrap().property().expect("a property row");
+    // The same name and count as exportLibrary.db's property row.
+    assert_eq!(property.device_name, "FRIDAY");
+    assert_eq!(property.contents, 2);
+    assert_eq!(property.db_version, "1000");
+    assert_eq!(property.created_date.len(), 10);
+    assert_eq!(property.background_color, 0);
+
+    // rekordbox sets "Background Color : Device Library" to Blue.
+    let blue = rbl_pdb::rows::PdbProperty { background_color: 7, ..property };
+    let row = rbl_pdb::rows::property_row(&blue).unwrap();
+    let patched = rbl_pdb::build::replace_single_page_table(&bytes, 19, &[row]).unwrap();
+    std::fs::write(&pdb_path, patched).unwrap();
+
+    // A sync rebuilds export.pdb and keeps the colour.
+    rbl_export::export_with(dest.path(), &tracks[..1], &[], None).unwrap();
+    let bytes = std::fs::read(&pdb_path).unwrap();
+    let kept = rbl_pdb::Pdb::parse(&bytes).unwrap().property().unwrap();
+    assert_eq!(kept.background_color, 7);
+    assert_eq!(kept.device_name, "FRIDAY");
+    assert_eq!(kept.contents, 1);
+}
+
+#[test]
 fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
     let stick = tempfile::tempdir().unwrap();
     assert!(rbl_export::create_library(stick.path(), None, &[], None).expect("create"), "a blank stick gets a database");
@@ -338,7 +373,7 @@ fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
             3 => rbl_pdb::PageType::Albums, 4 => rbl_pdb::PageType::Labels, 5 => rbl_pdb::PageType::Keys,
             6 => rbl_pdb::PageType::Colors, 7 => rbl_pdb::PageType::PlaylistTree, 8 => rbl_pdb::PageType::PlaylistEntries,
             13 => rbl_pdb::PageType::Artwork, 16 => rbl_pdb::PageType::Columns, 17 => rbl_pdb::PageType::HistoryPlaylists,
-            18 => rbl_pdb::PageType::HistoryEntries, 19 => rbl_pdb::PageType::History, other => rbl_pdb::PageType::Other(other),
+            18 => rbl_pdb::PageType::HistoryEntries, 19 => rbl_pdb::PageType::Property, other => rbl_pdb::PageType::Other(other),
         })).unwrap_or(u32::MAX),
     }).collect();
     assert_eq!(types, (0..20).collect::<Vec<u32>>());
@@ -348,7 +383,7 @@ fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
     assert_eq!(census.get("columns"), Some(&27));
     assert_eq!(census.get("history_playlists"), Some(&22));
     assert_eq!(census.get("history_entries"), Some(&17));
-    assert_eq!(census.get("history"), Some(&1));
+    assert_eq!(census.get("property"), Some(&1));
 
     // Its settings can be read and written like any stick's.
     let settings = rbl_onelibrary::settings::StickSettings::read(&stick.path().join("PIONEER/rekordbox/exportLibrary.db")).expect("settings");

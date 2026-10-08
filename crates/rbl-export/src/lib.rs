@@ -1109,6 +1109,8 @@ pub fn export_cancellable(
         artwork: &artwork_rows,
         history: &before.history,
         colors: settings.as_ref().or(defaults).map_or(&[], |s| &s.colors),
+        device_name: settings.as_ref().or(defaults).map_or("", |s| s.device_name.as_str()),
+        background: before.legacy_background,
     });
     report.pdb_bytes = pdb.len();
     let staged_db = publication.stage().join(root_name).join("rekordbox");
@@ -1208,14 +1210,19 @@ struct PdbTables<'a> {
     artwork: &'a [Vec<u8>],
     history: &'a [snapshot::History],
     colors: &'a [rbl_onelibrary::settings::ColorName],
+    /// `property.deviceName` in `exportLibrary.db`; the PDB carries a copy.
+    device_name: &'a str,
+    /// "Background Color : Device Library", carried from the stick.
+    background: u8,
 }
 
 /// Builds `export.pdb` with the twenty tables rekordbox writes, in its
 /// order: the eight the library fills, the eight colours, the artwork
 /// (type 13) among six that are always empty (types 9 to 15), the browse column
 /// names and the History menu's two tables (`rbl_pdb::reference`), and the
-/// one `history` row that carries the export's date [OBS 7.2.11]. A player
-/// looks the table list up by type, so the empty ones have to be there.
+/// one `property` row: device name, track count, the export's date and the
+/// Device Library background colour [OBS 7.2.14]. A player looks the table
+/// list up by type, so the empty ones have to be there.
 fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
     use rbl_pdb::reference;
     let mut file = FileBuilder::new(PAGE_SIZE);
@@ -1262,9 +1269,14 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
     file.add_table(17, &constant(reference::HISTORY_PLAYLISTS));
     file.add_table(18, &constant(reference::HISTORY_ENTRIES));
     // The local day, as rekordbox dates the export where the machine is.
-    let today = rbl_core::time::local_date();
-    let history = reference::history_row(&today).map_or_else(Vec::new, |row| vec![row]);
-    file.add_table(19, &history);
+    let property = rbl_pdb::rows::PdbProperty {
+        device_name: tables.device_name.to_owned(),
+        contents: u32::try_from(tables.tracks.len()).unwrap_or(u32::MAX),
+        created_date: rbl_core::time::local_date(),
+        background_color: tables.background,
+        ..rbl_pdb::rows::PdbProperty::default()
+    };
+    file.add_table(19, &rbl_pdb::rows::property_row(&property).map_or_else(Vec::new, |row| vec![row]));
     file.finish()
 }
 
@@ -1326,6 +1338,8 @@ pub fn create_library_with_root(
         artwork: &[],
         history: &[],
         colors: defaults.map_or(&[], |s| &s.colors),
+        device_name: defaults.map_or("", |s| s.device_name.as_str()),
+        background: 0,
     });
     rbl_core::durable::write(&db_dir.join("export.pdb"), &pdb)?;
     // The library's tags go on even a stick with no tracks [OBS 7.2.11:

@@ -44,7 +44,9 @@ pub enum PageType {
     Columns,
     HistoryPlaylists,
     HistoryEntries,
-    History,
+    /// Type 19: the device name, track count, date and Device Library
+    /// background colour. See [`rows::PdbProperty`].
+    Property,
     Other(u32),
 }
 
@@ -64,7 +66,7 @@ impl PageType {
             16 => Self::Columns,
             17 => Self::HistoryPlaylists,
             18 => Self::HistoryEntries,
-            19 => Self::History,
+            19 => Self::Property,
             other => Self::Other(other),
         }
     }
@@ -84,7 +86,7 @@ impl PageType {
             Self::Columns => "columns".into(),
             Self::HistoryPlaylists => "history_playlists".into(),
             Self::HistoryEntries => "history_entries".into(),
-            Self::History => "history".into(),
+            Self::Property => "property".into(),
             Self::Other(v) => format!("unknown_{v}"),
         }
     }
@@ -505,5 +507,44 @@ impl Pdb<'_> {
     /// Finds a table by kind.
     pub fn table(&self, kind: PageType) -> Option<&TableRef> {
         self.tables.iter().find(|t| t.page_type == kind)
+    }
+
+    /// The live `property` row (type 19). `None` when the table or its row
+    /// is missing, or the row does not have the known layout. When more
+    /// than one row is live, the last one is used: rekordbox adds a row for
+    /// each change.
+    #[must_use]
+    pub fn property(&self) -> Option<rows::PdbProperty> {
+        let row = *self.rows(self.table(PageType::Property)?).last()?;
+        if self.u2_at(row, 0) != 0x0280 {
+            return None;
+        }
+        let date_at = row.offset + rows::PROPERTY_DATE_AT;
+        let gap_at = date_at + self.string_len_at(date_at)?;
+        if self.bytes.get(gap_at..gap_at + 2)? != rows::PROPERTY_GAP {
+            return None;
+        }
+        let version_at = gap_at + 2;
+        let name_at = version_at + self.string_len_at(version_at)?;
+        self.string_len_at(name_at)?;
+        Some(rows::PdbProperty {
+            device_name: self.string_at(name_at),
+            db_version: self.string_at(version_at),
+            contents: self.u4_at(row, 4),
+            created_date: self.string_at(date_at),
+            background_color: self.u1_at(row, rows::PROPERTY_COLOR_AT),
+        })
+    }
+
+    /// The encoded length of the `DeviceSQL` string at `offset`, header
+    /// included. `None` when the header is not a string header or the
+    /// string runs past the end of the file.
+    fn string_len_at(&self, offset: usize) -> Option<usize> {
+        let len = match *self.bytes.get(offset)? {
+            0x40 | 0x90 => usize::from(u2(self.bytes, offset + 1)),
+            mangled if mangled % 2 == 1 => usize::from(mangled.saturating_sub(1) / 2),
+            _ => return None,
+        };
+        (len > 0 && offset + len <= self.bytes.len()).then_some(len)
     }
 }

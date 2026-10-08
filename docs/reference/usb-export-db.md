@@ -226,11 +226,12 @@ type, so the empty ones have to exist.
 | 4 | labels | 16 | columns (browse) |
 | 5 | keys | 17 | history playlists |
 | 6 | colors | 18 | history entries |
-| 7 | playlist tree | 19 | history |
+| 7 | playlist tree | 19 | property |
 | 8 | playlist entries | 9–10 | empty |
 
 The reader's enum names 17/18 "history", but they are browse settings; the
-real play history is 11/12.
+real play history is 11/12. Type 19 was once named "history" too; it is the
+Device Library's `property` row (below).
 
 ### Rows within a page
 
@@ -324,9 +325,38 @@ The exact rows are embedded in Appendix A.
 
 `columns`, `history_playlists` and `history_entries` are written as captured
 rekordbox bytes rather than re-encoded, to stop drift;
-the column names are UTF-16 wrapped in `0xfffa`/`0xfffb` markers. The single
-type-19 history row is a byte template with only the 10-character
-`YYYY-MM-DD` at offset 13 overwritten, and the encoded date occupies exactly ten ASCII bytes.
+the column names are UTF-16 wrapped in `0xfffa`/`0xfffb` markers.
+
+### `property` row (type 19)
+
+One live row: the Device Library's copy of `exportLibrary.db`'s `property`
+row, plus the Device Library's own background colour. Read from rekordbox
+7.2.14 on a 1317-track stick [OBS 2026-10-08]: the count, date, version and
+name matched that stick's `exportLibrary.db` `property` row, and changing
+only "Background Color : Device Library" from Yellow to Blue changed only
+byte `0x09`, from 4 to 7.
+
+| Offset | Bytes | Contents |
+|---|---|---|
+| `0x00` | `80 02` | Constant |
+| `0x02` | u16 | Index shift, row index × 32 |
+| `0x04` | u32 | `numberOfContents` |
+| `0x08` | `00` | Constant |
+| `0x09` | u8 | Background Color : Device Library, values below |
+| `0x0a` | `00 00` | Constant |
+| `0x0c` | string | `createdDate`, `YYYY-MM-DD` |
+| | `19 1e` | Constant [UNKNOWN] |
+| | string | `dbVersion`, `1000` |
+| | string | `deviceName` |
+| | 8 bytes | Zero, then padding to a multiple of four |
+
+rekordbox does not change the row in place. It adds a new row and clears
+the old row's presence bit, so a used stick has dead rows on the page with
+earlier values. rbxport writes one row and replaces it in place.
+
+Both background colours use the track-colour order: 0 Default Color, 1
+Pink, 2 Red, 3 Orange, 4 Yellow, 5 Green, 6 Aqua, 7 Blue, 8 Purple. Purple,
+Yellow and Blue were observed; the other values are [ASSUME] from that order.
 
 ## 5. `exportExt.pdb` — My Tags
 
@@ -385,7 +415,8 @@ rows. Several tables are required to exist while empty. `dbVersion` is
   `history_content`; `cue`; `hotCueBankList*`; `recommendedLike`.
 - `property` — one row: `deviceName`, `dbVersion`, `numberOfContents`,
   `createdDate` (a date, `YYYY-MM-DD`, not a timestamp),
-  `backGroundColorType`, `myTagMasterDBID`.
+  `backGroundColorType` (Background Color : OneLibrary, values as in the
+  [`property` row](#property-row-type-19)), `myTagMasterDBID`.
 - **`menuItem`, `category`, `sort`** — the browse columns and sort options a
   player offers, and their order. An export without them opens but browses
   wrong. Menu names are wrapped in U+FFFA/U+FFFB
@@ -781,7 +812,8 @@ the pad recalls the saved cue.
   Category/Sort/Color tabs and writes inconsistently at `0x78`.
 - `Dev_ID`, `Lib_Type`, `AllPlaylists`, `IncludeCue`, `ForcedSync` in the
   sync record, and what a fully ticked folder gets.
-- `property.backGroundColorType` in `exportLibrary.db`.
+- The two constant bytes `19 1e` between the date and the version in
+  `export.pdb`'s `property` row.
 - The embedded schema contains twenty-two tables while
   a separate real-stick observation counted twenty-six. Not reconciled — it may be a version or a
   counting difference.
@@ -930,9 +962,11 @@ category survives. If exactly one of `export.pdb` and
 `exportLibrary.db` exists, the export converts by reading the one that is
 there rather than publishing an empty sibling over it.
 
-#### Uninterpreted OneLibrary property
+#### Background colours
 
-Read and carry property.backGroundColorType without changing it.
+An export carries `property.backGroundColorType` from the stick's
+`exportLibrary.db` and the background byte from its `export.pdb` `property`
+row. A stick without one starts at 0.
 
 #### DeviceSQL writer policies
 
@@ -1270,10 +1304,11 @@ apply. Their unknown bytes are included rather than guessed.
 | 16 | `0600050000060000` |
 | 17 | `0B000C0000070000` |
 
-### Type 19: history row
+### Type 19: property row
 
-Replace exactly ten ASCII bytes starting at byte offset 13 with the export
-date in `YYYY-MM-DD` format; preserve every other byte.
+The row for a blank stick dated `2026-09-17` [OBS 7.2.11]. An export fills
+the fields in [the `property` row](#property-row-type-19) table: the track
+count, the export date, the device name and the background colour.
 
 ```text
 80020000000000000000000017323032362D30392D3137191E0B3130303003000000000000000000

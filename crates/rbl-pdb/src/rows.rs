@@ -206,6 +206,86 @@ pub fn color_row(id: u16, name: &str) -> Vec<u8> {
     row
 }
 
+/// The `dbVersion` rekordbox writes in both `property` tables [OBS 7.2.11,
+/// 7.2.14].
+pub const PROPERTY_DB_VERSION: &str = "1000";
+
+/// The one live row of `property`, page type 19: the Device Library's copy
+/// of `exportLibrary.db`'s `property` row, plus the Device Library's own
+/// background colour.
+///
+/// The layout was read from rekordbox 7.2.14's rows on a 1317-track stick
+/// [OBS 2026-10-08]. The count, date, version and name matched that stick's
+/// `exportLibrary.db` `property` row. Changing only "Background Color :
+/// Device Library" from Yellow to Blue changed only byte 9, from 4 to 7:
+///
+/// ```text
+/// 0x00  80 02        constant
+/// 0x02  u16          index shift, row index << 5
+/// 0x04  u32          numberOfContents
+/// 0x08  00           constant
+/// 0x09  u8           background colour, 0 Default, 1..8 Pink..Purple
+/// 0x0a  00 00        constant
+/// 0x0c  string       createdDate, YYYY-MM-DD
+///       19 1e        constant [UNKNOWN]
+///       string       dbVersion
+///       string       deviceName
+///       8 zero bytes, then padding to a multiple of four
+/// ```
+///
+/// rekordbox does not change the row in place. It adds a new row and clears
+/// the old row's presence bit, so the page holds one live row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PdbProperty {
+    pub device_name: String,
+    pub db_version: String,
+    pub contents: u32,
+    pub created_date: String,
+    pub background_color: u8,
+}
+
+impl Default for PdbProperty {
+    fn default() -> Self {
+        Self {
+            device_name: String::new(),
+            db_version: PROPERTY_DB_VERSION.to_owned(),
+            contents: 0,
+            created_date: String::new(),
+            background_color: 0,
+        }
+    }
+}
+
+/// The bytes between the date and the version string [OBS, UNKNOWN].
+pub(crate) const PROPERTY_GAP: [u8; 2] = [0x19, 0x1e];
+/// Offset of the date string in a `property` row.
+pub(crate) const PROPERTY_DATE_AT: usize = 0x0c;
+/// Offset of the background colour in a `property` row.
+pub(crate) const PROPERTY_COLOR_AT: usize = 0x09;
+
+/// Encodes the `property` row as row 0 of its page. Returns `None` when the
+/// date is not ten ASCII bytes or the version is not ASCII. A row with a
+/// wrong date length is refused, not written.
+#[must_use]
+pub fn property_row(property: &PdbProperty) -> Option<Vec<u8>> {
+    let date = &property.created_date;
+    if date.len() != 10 || !date.is_ascii() || !property.db_version.is_ascii() {
+        return None;
+    }
+    let mut row = vec![0x80, 0x02, 0x00, 0x00];
+    row.extend_from_slice(&property.contents.to_le_bytes());
+    row.extend_from_slice(&[0x00, property.background_color, 0x00, 0x00]);
+    row.extend_from_slice(&crate::build::short_ascii(date));
+    row.extend_from_slice(&PROPERTY_GAP);
+    row.extend_from_slice(&crate::build::short_ascii(&property.db_version));
+    row.extend_from_slice(&device_sql_string(&property.device_name));
+    row.extend_from_slice(&[0; 8]);
+    while !row.len().is_multiple_of(4) {
+        row.push(0);
+    }
+    Some(row)
+}
+
 /// `artists`: the name is located by a one-byte offset from the row start.
 pub fn artist_row(id: u32, name: &str) -> Vec<u8> {
     let mut row = vec![0_u8; 10];

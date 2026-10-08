@@ -61,6 +61,10 @@ pub struct Snapshot {
     pub my_tags: Vec<crate::SourceMyTag>,
     #[serde(default)]
     pub tag_memberships: BTreeMap<u32, Vec<u64>>,
+    /// "Background Color : Device Library": byte 9 of `export.pdb`'s
+    /// `property` row, 0 when the stick has no such row.
+    #[serde(default)]
+    pub legacy_background: u8,
 }
 fn sql(e: impl std::fmt::Display) -> ExportError {
     ExportError::OneLibrary(e.to_string())
@@ -235,6 +239,7 @@ fn read_legacy_into(out: &mut Snapshot, pdb: &Path) -> Result<()> {
     let bytes = std::fs::read(pdb)?;
     let parsed = rbl_pdb::Pdb::parse(&bytes)
         .map_err(|e| ExportError::Conflict(format!("Cannot read Device Library: {e}")))?;
+    out.legacy_background = parsed.property().map_or(0, |p| p.background_color);
     let tracks = parsed
         .table(PageType::Tracks)
         .map(|t| parsed.track_rows(t))
