@@ -1359,16 +1359,28 @@ export const Player = memo(function Player({
     playback.scrubTo(held.at + dragSeconds(event.clientX - held.x, box.width, span, total));
   };
 
+  /**
+   * Where a drag on a playing deck with BEAT SYNC lit and Q on lets go: in
+   * phase with the master, as PLAY starts it. The landing moves by at most
+   * half a beat, so the bar the hand chose stays the bar that plays.
+   */
+  const snapToLeader = (at: number) => {
+    const leader = peerSync?.();
+    const follower = syncState.current();
+    if (!leader || !follower) return at;
+    return at + beatNudgeFor(leader, { ...follower, position: at });
+  };
+
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     const held = grab.current;
     grab.current = null;
-    playback.scrubEnd();
+    const click = held !== null && event.type === "pointerup" && isClick(event.clientX - held.x, event.clientY - held.y);
+    // A click is PLAY or CUE, not a move, so it is left where it is.
+    playback.scrubEnd(!click && synced && quantize && playback.playing ? snapToLeader : undefined);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    if (held && event.type === "pointerup" && isClick(event.clientX - held.x, event.clientY - held.y)) {
-      clickDetail();
-    }
+    if (click) clickDetail();
   };
 
   // A beat's length, for phrases whose time the grid did not resolve.
