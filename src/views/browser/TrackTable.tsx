@@ -20,7 +20,7 @@ import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
 import {
-  applyClick, clickSettles, emptySelection, modifierFor, pressSelects, selectAll, selectedTracks, type SelectionState,
+  applyClick, clickSettles, emptySelection, pressModifier, pressSelects, selectAll, selectedTracks, type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import { trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
@@ -46,6 +46,8 @@ import { detectPlatform, dispatch } from "@/lib/shortcuts";
 const ROW_H = 25; // --s-row-height
 /** One frozen empty list, so a row without cues does not re-render for a new one. */
 const NO_CUES: RowDto["hotCues"] = [];
+/** macOS, where a Control-click is the context menu's press, not a toggle. */
+const MAC = detectPlatform().mac;
 /**
  * Rows to fetch beyond the rendered window in each direction, so a fast scroll
  * lands on pages that are already cached instead of on blank rows. Two pages
@@ -431,7 +433,7 @@ const TrackRow = memo(function TrackRow({
       data-even={index % 2 === 1 || undefined}
       style={{ transform: `translate3d(0, ${top}px, 0)` }}
       onMouseDown={(e) => {
-        if (pressSelects(e, selected)) onSelect(index, row.id, e);
+        if (pressSelects(e, selected, MAC)) onSelect(index, row.id, e);
       }}
       onPointerDown={(e) => {
         suppressClick.current = false;
@@ -455,7 +457,7 @@ const TrackRow = memo(function TrackRow({
       // release has shown it was not a drag.
       onClick={(e) => {
         if (suppressClick.current) return;
-        if (clickSettles(e, selected)) onSelect(index, row.id, e);
+        if (clickSettles(e, selected, MAC)) onSelect(index, row.id, e);
         // A click on the waveform also previews the track from there; the
         // row is selected as well, as rekordbox's is.
         if (row.analysed) previewFromClick(e, row.id, row.durationSec, previewCues ? row.hotCues : NO_CUES);
@@ -1140,7 +1142,7 @@ export const TrackTable = memo(function TrackTable({
 
   const handleSelect = useEventCallback(
     (index: number, id: string, e: React.MouseEvent) => {
-      const modifier = modifierFor(e);
+      const modifier = pressModifier(e, MAC);
       if (modifier === "range" && selection.anchorIndex !== null) {
         const anchor = selection.anchorIndex;
         void view.idsInRange(anchor, index).then((ids) => {

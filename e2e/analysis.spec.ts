@@ -71,3 +71,20 @@ test("the first-beat memory cue follows Preferences and can be changed per batch
   await page.keyboard.press("Shift+Meta+A");
   await expect(cue).toBeChecked();
 });
+
+test("a macOS Control-click menu analyses the whole selection (#135)", async ({ page }) => {
+  await page.goto("/?writable=1");
+  // Control-click is the secondary click only on macOS; elsewhere it toggles.
+  test.skip(!(await page.evaluate(() => /Mac/.test(navigator.platform))), "macOS only");
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  await rows.nth(2).click();
+  await rows.nth(4).click({ modifiers: ["Shift"] });
+  // Playwright sends what macOS does: a left press with Control, then contextmenu.
+  await rows.nth(3).click({ modifiers: ["Control"] });
+  await page.getByRole("menuitem", { name: "Analyze Track" }).click();
+  const dialog = page.getByRole("dialog", { name: "Analysis Setting" });
+  await expect(dialog).toContainText("3 tracks selected");
+  await page.screenshot({ path: test.info().outputPath("control-click-analyse.png") });
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(rows.and(page.locator("[data-selected]"))).toHaveCount(3);
+});

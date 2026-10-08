@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyClick, clickSettles, emptySelection, modifierFor, pressSelects, selectAll, selectedTracks } from "./selection";
+import {
+  applyClick, clickSettles, contextPress, emptySelection, modifierFor, pressModifier, pressSelects, selectAll, selectedTracks,
+} from "./selection";
 
 describe("selection", () => {
   it("reads the modifier from the event", () => {
@@ -28,6 +30,25 @@ describe("selection", () => {
     expect(pressSelects(right, true)).toBe(false);
     expect(clickSettles(right, true)).toBe(false);
     expect(pressSelects(right, false)).toBe(true);
+  });
+
+  it("a macOS Control-click is the menu's press: it keeps the selection it lands in (#135)", () => {
+    // What WebKit and Chromium send on macOS before the contextmenu event.
+    const controlClick = { button: 0, shiftKey: false, metaKey: false, ctrlKey: true };
+    expect(contextPress(controlClick, true)).toBe(true);
+    expect(pressSelects(controlClick, true, true)).toBe(false);
+    expect(clickSettles(controlClick, true, true)).toBe(false);
+    // Outside the selection it selects that row alone, as a right-click does.
+    expect(pressSelects(controlClick, false, true)).toBe(true);
+    expect(pressModifier(controlClick, true)).toBe("none");
+    // Elsewhere Control is the toggle, as before.
+    expect(contextPress(controlClick, false)).toBe(false);
+    expect(pressSelects(controlClick, true, false)).toBe(true);
+    expect(pressModifier(controlClick, false)).toBe("toggle");
+    // ⌘ still toggles on macOS.
+    const command = { ...controlClick, ctrlKey: false, metaKey: true };
+    expect(contextPress(command, true)).toBe(false);
+    expect(pressModifier(command, true)).toBe("toggle");
   });
 
   it("a plain click replaces the selection and moves the anchor", () => {
