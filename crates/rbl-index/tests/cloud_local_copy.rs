@@ -22,38 +22,52 @@ fn share(location: &rbl_db::LibraryLocation, index: usize, service: i64, device:
     writer.library().connection().execute("UPDATE djmdProperty SET DeviceID = ?1", [OWN]).unwrap();
 }
 
+fn path_of(index: &rbl_index::Library, i: usize) -> String {
+    let id: u64 = fixture::track_id(i).parse().unwrap();
+    let row = index.ids.iter().position(|x| *x == id).unwrap();
+    index.folder_path.get(row).to_owned()
+}
+
 #[test]
 fn an_own_cloud_track_opens_and_shows_its_local_copy() {
     let root = tempfile::tempdir().unwrap();
     let location = fixture::build(root.path(), fixture::Shape::default()).unwrap();
     // Service 3 takes OrgFolderPath without consulting this machine's cloud
-    // folder, so the result does not depend on the test machine's settings.
+    // folder.
     share(&location, 0, rbl_db::track_path::SERVICE_GOOGLE_DRIVE, OWN);
     // Uploaded from another machine: never its OrgFolderPath.
-    share(&location, 1, rbl_db::track_path::SERVICE_GOOGLE_DRIVE, "another-device");
-    // Dropbox: OrgFolderPath when this machine has a Dropbox folder for
-    // rekordbox, as there the shared-desktop test passes; with none,
-    // rekordbox's share path is empty and the cloud path stands.
+    share(&location, 1, rbl_db::track_path::SERVICE_DROPBOX, "another-device");
+    // Dropbox, uploaded here: OrgFolderPath when this machine has a
+    // Dropbox folder (the shared-desktop test then passes).
     share(&location, 2, rbl_db::track_path::SERVICE_DROPBOX, OWN);
 
+    // The Dropbox folder is fixed so the test does not depend on this
+    // machine's rekordbox settings or Dropbox app.
+    let dropbox = "/Users/dj/Library/CloudStorage/Dropbox";
     let db = Library::open(location.clone(), OpenMode::ReadOnly).unwrap();
+    assert!(db.set_dropbox_folder(Some(dropbox.to_owned())));
     let (index, _) = rbl_index::load(&db).unwrap();
-    let path_of = |i: usize| {
-        let id: u64 = fixture::track_id(i).parse().unwrap();
-        let row = index.ids.iter().position(|x| *x == id).unwrap();
-        index.folder_path.get(row).to_owned()
-    };
-    assert_eq!(path_of(0), LOCAL);
-    assert_ne!(path_of(1), LOCAL);
-    let dropbox_expected = if rbl_db::dropbox_sharing_path().is_some() { LOCAL.to_owned() } else { CLOUD.to_owned() };
-    assert_eq!(path_of(2), dropbox_expected);
+    assert_eq!(path_of(&index, 0), LOCAL);
+    assert_eq!(path_of(&index, 1), format!("{dropbox}/rekordbox{CLOUD}"));
+    assert_eq!(path_of(&index, 2), LOCAL);
 
-    // The Info panel's Location reads the same way, and the stored column
-    // is untouched.
+    // The Info panel's Location: the local copy for this machine's track,
+    // the stored cloud path for another device's (as before).
     assert_eq!(db.track_details(&fixture::track_id(0)).unwrap().unwrap().path, LOCAL);
+    assert_eq!(db.track_details(&fixture::track_id(1)).unwrap().unwrap().path, CLOUD);
+    assert_eq!(db.track_details(&fixture::track_id(2)).unwrap().unwrap().path, LOCAL);
     let stored: String = db
         .connection()
         .query_row("SELECT FolderPath FROM djmdContent WHERE ID = ?1", [fixture::track_id(0)], |r| r.get(0))
         .unwrap();
     assert_eq!(stored, CLOUD);
+
+    // No Dropbox folder at all (no setting, no Dropbox app): rekordbox's
+    // share path is empty, the Dropbox track counts as a shared desktop
+    // app track, and its cloud path stands.
+    let db = Library::open(location, OpenMode::ReadOnly).unwrap();
+    assert!(db.set_dropbox_folder(None));
+    let (index, _) = rbl_index::load(&db).unwrap();
+    assert_eq!(path_of(&index, 0), LOCAL);
+    assert_eq!(path_of(&index, 2), CLOUD);
 }

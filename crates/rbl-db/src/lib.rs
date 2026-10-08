@@ -12,6 +12,7 @@
 //!   user's library even by mistake.
 
 pub mod details;
+pub mod dropbox;
 pub mod export_info;
 pub mod fixture;
 pub mod import;
@@ -248,6 +249,9 @@ pub struct Library {
     mode: OpenMode,
     location: LibraryLocation,
     schema: SchemaProbe,
+    /// This machine's Dropbox folder, found once per handle as rekordbox
+    /// caches it ([`dropbox::local_public_path`]).
+    dropbox: std::sync::OnceLock<Option<String>>,
 }
 
 impl Library {
@@ -297,7 +301,7 @@ impl Library {
         }
         let schema = SchemaProbe::probe(&conn)?;
 
-        Ok(Self { conn, mode, location, schema })
+        Ok(Self { conn, mode, location, schema, dropbox: std::sync::OnceLock::new() })
     }
 
     /// Convenience: detect and open the installed library read-only.
@@ -349,20 +353,13 @@ impl Library {
 
 /// Where a track whose `FolderPath` starts with `/contents_<id>/` really
 /// is: rekordbox's Cloud Library Sync keeps those under
-/// `<DropboxSharingPath>/rekordbox/`, and `DropboxSharingPath` is a value
-/// in `rekordbox3.settings` [OBS 7.2.11]. `None` when there is no such
-/// setting, in which case such a track has no file this machine can see.
+/// `<Dropbox folder>/rekordbox/` [OBS 7.2.11]. The Dropbox folder is the
+/// `DropboxSharingPath` setting when that is a real, non-symlinked folder,
+/// else the Dropbox app's own folder ([`dropbox`]). `None` when there is
+/// none, in which case such a track has no file this machine can see.
 #[must_use]
 pub fn cloud_contents_root() -> Option<PathBuf> {
-    Some(PathBuf::from(dropbox_sharing_path()?).join("rekordbox"))
-}
-
-/// This machine's Dropbox folder as rekordbox knows it: the
-/// `DropboxSharingPath` setting, which `DropBox::checklocalPublicPath`
-/// reads [OBS 7.2.19 macOS arm64, static, @0x10102ce20]. `None` when unset.
-#[must_use]
-pub fn dropbox_sharing_path() -> Option<String> {
-    rbl_core::paths::rekordbox_setting("DropboxSharingPath").filter(|value| !value.is_empty())
+    Some(PathBuf::from(dropbox::local_public_path()?).join("rekordbox"))
 }
 
 /// rekordbox's drive substitution for a library kept on an external drive.
@@ -496,7 +493,21 @@ impl Library {
     /// Everything [`TrackPaths::resolve`] needs from this library and this
     /// machine, read once.
     pub fn track_paths(&self) -> TrackPaths {
-        TrackPaths::new(self.drive_mapping(), dropbox_sharing_path(), self.own_device_id())
+        TrackPaths::new(self.drive_mapping(), self.dropbox_folder(), self.own_device_id())
+    }
+
+    /// This machine's Dropbox folder as rekordbox uses it
+    /// ([`dropbox::local_public_path`]), found on first use and kept for
+    /// the life of this handle, as rekordbox keeps it for its session.
+    pub fn dropbox_folder(&self) -> Option<String> {
+        self.dropbox.get_or_init(dropbox::local_public_path).clone()
+    }
+
+    /// Fixes [`Self::dropbox_folder`] instead of looking it up, so a test
+    /// does not depend on the machine it runs on. `false` when the folder
+    /// was already looked up or fixed.
+    pub fn set_dropbox_folder(&self, folder: Option<String>) -> bool {
+        self.dropbox.set(folder).is_ok()
     }
 
     /// The path columns of one live track, or `None` when there is none.

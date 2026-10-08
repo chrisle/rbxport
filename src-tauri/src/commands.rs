@@ -349,14 +349,14 @@ fn enrich_rows(state: &AppState, rows: &mut [RowDto], columns: &[String]) -> App
     if wanted.is_empty() { return Ok(()); }
     state.read_db(|db| {
         // The location rekordbox shows: the stored path through the drive
-        // substitution, and a cloud-shared track's local copy or cloud folder.
+        // substitution, or this machine's own cloud-shared track's local copy.
         let track_paths = wanted.contains(&"location").then(|| db.track_paths());
         for row in rows {
             if row.id.starts_with("file:") { continue; }
             let Some(details) = rbl_db::details::browser_details(db.connection(), &row.id)? else { continue };
             let cloud = details.path.starts_with("/contents_");
             let location = match &track_paths {
-                Some(paths) => db.stored_path(&row.id)?.map_or_else(|| details.path.clone(), |stored| paths.resolve(&stored)),
+                Some(paths) => db.stored_path(&row.id)?.map_or_else(|| details.path.clone(), |stored| paths.location(&stored)),
                 None => String::new(),
             };
             let mut values = serde_json::Map::new();

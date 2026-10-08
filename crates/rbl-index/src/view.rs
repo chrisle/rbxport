@@ -465,8 +465,10 @@ impl Library {
         match column {
             SortColumn::Comment => self.comment.get(row),
             SortColumn::FileName => self.file_name.get(row),
-            // The resolved path, which is also what the Location cell
-            // prints (`rbl_db::TrackPaths`).
+            // The resolved path. A cloud track from another device resolves
+            // to its Dropbox copy, where the Location cell prints the
+            // `/contents_` path rekordbox stores; every other track's is the
+            // same text (`rbl_db::TrackPaths::location`).
             SortColumn::Location => self.folder_path.get(row),
             SortColumn::Lyricist => self.lyricist.get(row),
             SortColumn::Message => self.message.get(row),

@@ -25,9 +25,20 @@
 //!
 //! `ServiceID` picks the cloud folder (`getCloudSharedPath` @0x100ebeb90,
 //! jump table at 0x1037bbf98): 1 the library's `share` folder, 2
-//! `DropBox::localPublicPath()` + `/rekordbox` (from the
-//! `DropboxSharingPath` setting, `checklocalPublicPath` @0x10102ce20), 3
-//! Google Drive, 4 `OneDrive` (each + `/rekordbox`).
+//! `DropBox::localPublicPath()` + `/rekordbox`, 3 Google Drive, 4
+//! `OneDrive` (each + `/rekordbox`). The Dropbox folder is the
+//! `DropboxSharingPath` setting only when that names a real, non-symlinked
+//! folder; otherwise rekordbox takes the Dropbox app's own folder from
+//! `~/.dropbox/info.json` ([`crate::dropbox`]).
+//!
+//! The Location column is not always the opened path:
+//! `browse::ListViewer::getLocationString` @0x1003ec478 [OBS static] prints
+//! the working path plainly for this machine's tracks, but for a track
+//! from another device prefixes the sharing device's name
+//! (`getSharingDeviceName`) or, for a cloud track, the service name with
+//! the path from the service folder on. [`TrackPaths::location`] keeps the
+//! stored path for those, as rbxport did before; [UNKNOWN] the exact text
+//! rekordbox prints for them.
 //!
 //! [UNKNOWN] The `CLSSyncMethod` 0 branch (download-on-demand, which reads
 //! `ExtInfo.ClsInfo.Download` and the "Moved from Cloud" folder) and the
@@ -112,7 +123,8 @@ pub struct TrackPaths {
 }
 
 impl TrackPaths {
-    /// `dropbox` is the `DropboxSharingPath` setting (without `/rekordbox`);
+    /// `dropbox` is this machine's Dropbox folder as rekordbox finds it
+    /// ([`crate::dropbox::local_public_path`], without `/rekordbox`);
     /// `own_device` is `djmdProperty.DeviceID`.
     #[must_use]
     pub fn new(drive: Option<DriveMapping>, dropbox: Option<String>, own_device: Option<String>) -> Self {
@@ -132,6 +144,20 @@ impl TrackPaths {
         let path = self.drive.as_ref().map_or(Cow::Borrowed(row.folder_path.as_str()), |d| d.apply(&row.folder_path));
         let cloud_root = self.dropbox.as_ref().map(|d| PathBuf::from(d).join("rekordbox"));
         crate::resolve_folder_path(&path, cloud_root.as_deref())
+    }
+
+    /// The path the browser's Location column and the Info panel show: the
+    /// local copy of this machine's own cloud-shared track (the path the
+    /// reporter of issue #176 saw rekordbox show), else the stored path
+    /// through the drive substitution, as before. A cloud track from
+    /// another device keeps its `/contents_` path here rather than the
+    /// Dropbox copy [`Self::resolve`] opens (see the module docs).
+    #[must_use]
+    pub fn location(&self, row: &StoredPath) -> String {
+        if let Some(local) = self.own_local_copy(row) {
+            return local.to_owned();
+        }
+        self.drive.as_ref().map_or_else(|| row.folder_path.clone(), |d| d.apply(&row.folder_path).into_owned())
     }
 
     /// `OrgFolderPath` when rekordbox would read a cloud-shared track from
@@ -160,7 +186,8 @@ impl TrackPaths {
     /// a `/contents_` path; or `OrgFolderPath` ends with `FolderPath` and is
     /// not under the "Moved from Cloud" download folder.
     ///
-    /// For Dropbox the folder is `DropboxSharingPath`; with no such setting
+    /// For Dropbox the folder is this machine's Dropbox folder as rekordbox
+    /// finds it; with none at all (no usable setting and no Dropbox app)
     /// rekordbox's share path is empty, and every path starts with it.
     /// [ASSUME] Other services' folders are not known here, so that test is
     /// skipped for them; and an `OrgFolderPath` that ends with `FolderPath`
@@ -256,10 +283,27 @@ mod tests {
         // OrgFolderPath ending with the cloud path, ignoring case.
         let row = shared("/contents_1/a.mp3", "/Volumes/N/CONTENTS_1/A.MP3", SERVICE_DROPBOX, OWN);
         assert_eq!(dropbox.resolve(&row), "/Users/dj/Dropbox/rekordbox/contents_1/a.mp3");
-        // With no Dropbox folder rekordbox's share path is empty, which
-        // every path starts with.
+        // With no Dropbox folder at all (no usable DropboxSharingPath and
+        // no Dropbox app record, `crate::dropbox`) rekordbox's share path
+        // is empty, which every path starts with. With the setting empty
+        // but Dropbox installed, the folder is the app's, as above.
         let row = shared("/contents_1/a.mp3", "/Volumes/N/a.mp3", SERVICE_DROPBOX, OWN);
         assert_eq!(paths(None).resolve(&row), "/contents_1/a.mp3");
+    }
+
+    #[test]
+    fn the_location_column_shows_the_local_copy_or_the_stored_path() {
+        let drive = DriveMapping::new("/Volumes/Music/", "/Volumes/Music 1/");
+        let resolver = TrackPaths::new(drive, Some("/D".into()), Some(OWN.into()));
+        let own = shared("/contents_1/a.mp3", "/Volumes/Music/a.mp3", SERVICE_DROPBOX, OWN);
+        assert_eq!(resolver.location(&own), "/Volumes/Music/a.mp3");
+        // Another device's track: the stored cloud path, not the Dropbox
+        // copy that is opened.
+        let other = shared("/contents_1/a.mp3", "/Volumes/X/a.mp3", SERVICE_DROPBOX, "other");
+        assert_eq!(resolver.location(&other), "/contents_1/a.mp3");
+        assert_eq!(resolver.resolve(&other), "/D/rekordbox/contents_1/a.mp3");
+        let plain = StoredPath { folder_path: "/Volumes/Music/b.mp3".into(), ..StoredPath::default() };
+        assert_eq!(resolver.location(&plain), "/Volumes/Music 1/b.mp3");
     }
 
     #[test]
