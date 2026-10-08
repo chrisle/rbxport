@@ -406,3 +406,19 @@ test("deck B reads bottom-up, and its waveforms are the mirror of deck A's", asy
   expect(isUpright(await transform(b, "player-overview"))).toBe(true);
   expect(isUpright(await transform(a, "player-detail"))).toBe(true);
 });
+
+test("hiding the full-waveform phrase bar keeps the detail waveform and its height", async ({ page }) => {
+  // #179: omitting the phrase bar let the grid's auto-placement shift every
+  // later row up one track, so the detail landed in a fixed-height track.
+  const on = await page.getByTestId("player-detail").boundingBox();
+  expect(on?.height).toBeGreaterThan(20);
+
+  await page.addInitScript(() =>
+    localStorage.setItem("rbl.preferences", JSON.stringify({ view: { phraseFull: false } })),
+  );
+  await page.reload();
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.getByTestId("player-phrase")).toHaveCount(0);
+  const off = await page.getByTestId("player-detail").boundingBox();
+  expect(off?.height).toBeCloseTo(on?.height ?? 0, 0);
+});
