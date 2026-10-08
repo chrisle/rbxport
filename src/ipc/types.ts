@@ -500,6 +500,8 @@ export interface Backend {
   /** Called after each track of an export, while one runs. Returns its own unsubscribe. */
   onExportProgress(listener: (progress: ExportProgress) => void): () => void;
   exportProgress(): Promise<ExportProgress[]>;
+  /** Called per track while an XML collection is being imported (done of total). */
+  onImportProgress(listener: (progress: ExportProgress) => void): () => void;
   cancelExport(path: string): Promise<void>;
   /** A yes-or-no question in the platform's own dialog; false when dismissed. */
   confirm(message: string, labels?: { yes: string; no: string }): Promise<boolean>;

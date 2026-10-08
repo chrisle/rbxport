@@ -274,6 +274,7 @@ async function realBackend(): Promise<Backend> {
     referenceStickSettings: () => invoke<ReferenceStickSettings>("reference_stick_settings"),
     listDevices: () => invoke<Device[]>("list_devices"),
     onExportProgress: (listener) => subscribe<ExportProgress>("export:progress", listener),
+    onImportProgress: (listener) => subscribe<ExportProgress>("import:progress", listener),
     exportProgress: () => invoke<ExportProgress[]>("export_progress"),
     cancelExport: (path) => invoke<void>("cancel_export", { path }),
     listBackups: () => invoke<Backup[]>("list_backups"),

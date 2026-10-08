@@ -558,7 +558,7 @@ function AppBody() {
    * the library is open read-only" arrive the same way and are not the same
    * kind of news.
    */
-  const [note, setNote] = useState<{ text: string; failed: boolean } | null>(null);
+  const [note, setNote] = useState<{ text: string; failed: boolean; busy?: boolean } | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
@@ -1628,7 +1628,7 @@ function AppBody() {
 
   // Clear the note after a moment: it reports an action, not a state.
   useEffect(() => {
-    if (note === null) return;
+    if (note === null || note.busy) return;
     const timer = setTimeout(() => setNote(null), note.failed ? 10000 : 4000);
     return () => {
       clearTimeout(timer);
@@ -1704,8 +1704,20 @@ function AppBody() {
 
   const importXmlFromMenu = useCallback(async (source: "rekordbox" | "itunes" = "rekordbox") => {
     report(source === "itunes" ? "Choosing the iTunes Library.xml…" : "Choosing a rekordbox XML file…");
+    let stopProgress = () => {};
+    let finished = false;
     try {
       const backend = await getBackend();
+      stopProgress = backend.onImportProgress((p) => {
+        if (finished) return;
+        setNote({
+          text: p.total > 0
+            ? `Importing ${p.done.toLocaleString()} of ${p.total.toLocaleString()} tracks…`
+            : "Importing…",
+          failed: false,
+          busy: true,
+        });
+      });
       const imported = source === "itunes" ? await backend.importItunes() : await backend.importXml();
       if (imported === null) {
         setNote(null);
@@ -1723,6 +1735,9 @@ function AppBody() {
       if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
     } catch (e) {
       refuse(e instanceof Error ? e.message : "That XML could not be imported.");
+    } finally {
+      finished = true;
+      stopProgress();
     }
   }, [report, refuse, analysisPrefs.auto, analysis]);
 
