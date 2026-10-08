@@ -51,6 +51,10 @@ is configured, publication checks the live feeds' versions and installer URLs.
 Only after publication succeeds does it prune old versioned artifacts, keeping
 the five newest versions, and announce the notes on Discord.
 
+When `PACKAGING_NIX` is set, the publish job also writes `packaging/nix/pin.json`
+(the published Linux AppImage's version and SRI hash) and pushes
+`chore(nix): seed <version>` to `dev`, so the Nix package seeds that release.
+
 ## Microsoft Store
 
 The `store-submit` job runs after the release publication job succeeds. It

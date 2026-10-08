@@ -23,6 +23,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 - [Backups](user/backups.md): backup contents, storage, and restoration.
 - [Waveform scrubbing](user/waveform-scrubbing.md): drag behavior and its audio filter.
 - [AppleScript](user/applescript.md): macOS automation, objects, commands, and examples.
+- [Nix](user/nix.md): installing, running, developing, and removing the flake.
 
 ## Technical references
 
