@@ -60,6 +60,7 @@ let root: Root;
 let devicesChanged: (() => void) | undefined;
 let libraryChanged: (() => void) | undefined;
 let tree: TreeNode[];
+let readTree: () => Promise<TreeNode[]>;
 let listDevices: ReturnType<typeof vi.fn>;
 let importUsb: ReturnType<typeof vi.fn>;
 let syncDevices: ReturnType<typeof vi.fn>;
@@ -91,6 +92,7 @@ beforeEach(async () => {
   devicesChanged = undefined;
   libraryChanged = undefined;
   tree = TREE;
+  readTree = () => Promise.resolve(tree.map((n) => ({ ...n })));
   listDevices = vi.fn(() => Promise.resolve(DEVICES.map(d => ({ ...d }))));
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   progress = null;
@@ -107,7 +109,7 @@ beforeEach(async () => {
   importItunesSelected = vi.fn(() => Promise.resolve({ imported: 5, existing: 0, skipped: [], playlists: 1, cues: 0, tracks: [] }));
   __setBackend({
     librarySummary: () => Promise.resolve({ trackCount: 3, playlistCount: 3, readOnly: rekordboxOpen, dbVersion: 6000 }),
-    playlistTree: () => Promise.resolve(tree.map((n) => ({ ...n }))),
+    playlistTree: () => readTree(),
     onLibraryChanged: (listener: () => void) => {
       libraryChanged = listener;
       return () => { libraryChanged = undefined; };
@@ -353,6 +355,77 @@ describe("SyncManager", () => {
     expect(names).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "New Playlist"]);
     expect(box("Warm Up")?.checked).toBe(true);
     expect(host.textContent).toContain("1 of 4 playlists selected");
+  });
+
+  it("keeps open and closed folders as they were across a re-read", async () => {
+    act(() => root.unmount());
+    const nested: TreeNode[] = [
+      ...TREE.slice(0, 3),
+      { id: "f2", name: "Archive", kind: "folder", depth: 2 },
+      { id: "p5", name: "Old Set", kind: "playlist", depth: 3 },
+      ...TREE.slice(3, 7),
+      { id: "f3", name: "Gigs", kind: "folder", depth: 1 },
+      { id: "p6", name: "Friday", kind: "playlist", depth: 2 },
+      ...TREE.slice(7),
+    ];
+    tree = nested;
+    root = createRoot(host);
+    act(() => root.render(<SyncManager onClose={onClose} />));
+    await settle();
+    const names = () => [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
+    // Top folders open; deeper ones start closed.
+    expect(names()).toEqual(["Sets", "Archive", "Warm Up", "Main Set", "Peak Time", "Closing", "Gigs", "Friday"]);
+
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand Archive"]'));
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="Collapse Gigs"]'));
+    expect(names()).toEqual(["Sets", "Archive", "Old Set", "Warm Up", "Main Set", "Peak Time", "Closing", "Gigs"]);
+
+    // A new nested folder starts closed; the folders already seen stay as the user left them.
+    tree = [
+      ...nested.slice(0, 8),
+      { id: "f4", name: "Later", kind: "folder", depth: 2 },
+      { id: "p7", name: "Encore", kind: "playlist", depth: 3 },
+      ...nested.slice(8),
+    ];
+    act(() => libraryChanged?.());
+    await settle();
+    expect(names()).toEqual(["Sets", "Archive", "Old Set", "Warm Up", "Main Set", "Peak Time", "Later", "Closing", "Gigs"]);
+    expect(host.querySelector('[role="treeitem"][aria-expanded="true"] input[aria-label="Archive"]')).not.toBeNull();
+    expect(host.querySelector('[role="treeitem"][aria-expanded="false"] input[aria-label="Gigs"]')).not.toBeNull();
+    expect(host.querySelector('[role="treeitem"][aria-expanded="false"] input[aria-label="Later"]')).not.toBeNull();
+  });
+
+  it("ignores a playlist read that answers after a newer one", async () => {
+    const held: { resolve: (tree: TreeNode[]) => void; reject: (error: Error) => void }[] = [];
+    readTree = () => new Promise((resolve, reject) => { held.push({ resolve, reject }); });
+    const stale = [...TREE.slice(0, 7), { id: "p4", name: "Stale Playlist", kind: "playlist" as const, depth: 1 }, ...TREE.slice(7)];
+    const fresh = [...TREE.slice(0, 7), { id: "p5", name: "Fresh Playlist", kind: "playlist" as const, depth: 1 }, ...TREE.slice(7)];
+    const names = () => [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
+
+    act(() => libraryChanged?.());
+    await settle();
+    act(() => libraryChanged?.());
+    await settle();
+    expect(held).toHaveLength(2);
+
+    // The newer read answers first, then the older one: the older is dropped.
+    act(() => { held[1]?.resolve(fresh); });
+    await settle();
+    act(() => { held[0]?.resolve(stale); });
+    await settle();
+    expect(names()).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "Closing", "Fresh Playlist"]);
+
+    // Nor does an older read that fails replace the list with an error.
+    act(() => libraryChanged?.());
+    await settle();
+    act(() => libraryChanged?.());
+    await settle();
+    act(() => { held[3]?.resolve(fresh); });
+    await settle();
+    act(() => { held[2]?.reject(new Error("gone")); });
+    await settle();
+    expect(host.querySelector('[aria-label="Playlists"] [role="alert"]')).toBeNull();
+    expect(names()).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "Closing", "Fresh Playlist"]);
   });
 
   it("imports only the ticked iTunes playlists and refreshes the library column", async () => {
