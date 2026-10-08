@@ -152,6 +152,29 @@ describe("treeMenu", () => {
     expect(tagged).not.toContain("Remove from Playlist");
   });
 
+  it("lists the connected sticks under Export Playlist and Export Folder, with no folder picker", () => {
+    // #142: Export Playlist opened a folder picker. rekordbox's submenu is
+    // the connected drives, one row each [OBS rekordbox 7, Winrig 2026-10-08].
+    const sticks = [{ id: "E:\\", name: "USB" }, { id: "/Volumes/DJ STICK", name: "DJ STICK" }];
+    for (const [kind, label] of [["playlist", "Export Playlist"], ["smartPlaylist", "Export Playlist"], ["folder", "Export Folder"]] as const) {
+      const row = entriesOf(treeMenu(kind, sticks)).find((e) => e.label === label);
+      expect(row?.submenu).toBe(true);
+      expect(row?.action).toBeNull();
+      expect(row?.items && entriesOf(row.items).map((e) => [e.label, e.action])).toEqual([
+        ["USB", "exportTo:E:\\"],
+        ["DJ STICK", "exportTo:/Volumes/DJ STICK"],
+      ]);
+      expect(enabled(row ?? { label, action: null }, OPEN)).toBe(true);
+      // An export writes the stick, not the library: it stays live while
+      // rekordbox holds the library.
+      expect(enabled(row ?? { label, action: null }, { ...OPEN, readOnly: true })).toBe(true);
+    }
+    // With nothing connected the arrow is there and greyed, not a picker.
+    const bare = entriesOf(treeMenu("playlist")).find((e) => e.label === "Export Playlist");
+    expect(bare?.items).toBeUndefined();
+    expect(enabled(bare ?? { label: "", action: null }, OPEN)).toBe(false);
+  });
+
   it("a folder's menu is rekordbox's own: no artwork or file export, and Sort Items", () => {
     expect(entriesOf(treeMenu("folder")).map((e) => e.label)).toEqual([
       "Export Folder",

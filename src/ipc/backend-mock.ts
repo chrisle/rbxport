@@ -1918,11 +1918,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // No filesystem in a browser, so nothing is written — but the counts are
     // answered so the device panel's reporting can be driven end to end.
     exportPlaylist: (playlistId, destination, defaults, deleteUnlistedMusic) => {
-      if (destination === undefined) return wait(null);
       const device = devices.find((d) => d.path === destination);
       if (!device) {
-        // The counts are still answered for a folder picked by hand: a
-        // browser has no picker, so the panel's flow is what is driven.
+        // The counts are still answered for a path no mock stick is at, so
+        // a script's export can be driven end to end.
         const tracks = playlistSize(playlistId);
         return wait({
           tracks, playlists: 1, bytesCopied: tracks * 8_000_000, analysisFiles: tracks,

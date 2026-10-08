@@ -2048,8 +2048,8 @@ function AppBody() {
       try {
         const backend = await getBackend();
         const written = await backend.exportPlaylist(playlistId, device.path, stickDefaults, deleteUnlistedMusic, compatibilityFormat);
-        const said = written === null ? "Nothing was written." : exportSummary(device.name, written);
-        if (written !== null) report(said);
+        const said = exportSummary(device.name, written);
+        report(said);
         setDevices(await backend.listDevices());
         return said;
       } catch (e) {
@@ -2138,23 +2138,13 @@ function AppBody() {
     })();
   }, [report, refuse]);
 
-  const exportPlaylist = useCallback((node: TreeNode) => {
-    void (async () => {
-      const backend = await getBackend();
-      report(`Exporting ${node.name}…`);
-      try {
-        const written = await backend.exportPlaylist(node.id, undefined, stickDefaults, deleteUnlistedMusic, compatibilityFormat);
-        if (written === null) {
-          setNote(null);
-          return;
-        }
-        report(exportSummary(node.name, written));
-      } catch (e) {
-        if (e && typeof e === "object" && "kind" in e && e.kind === "cancelled" || e instanceof Error && e.message === "Export stopped.") report("Export stopped.");
-        else refuse(e instanceof Error ? e.message : "That export could not be written.");
-      }
-    })();
-  }, [report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat]);
+  // Export Playlist / Export Folder › a stick: the tree menu lists the
+  // connected sticks, so the export goes straight to the one chosen.
+  const exportPlaylist = useCallback((node: TreeNode, path: string) => {
+    const device = devices.find((d) => d.path === path) ?? { name: path, path };
+    // Said in the note already; nothing else to do with it here.
+    void writeToDevice(node.id, device).catch(() => undefined);
+  }, [devices, writeToDevice]);
 
   // The top of the current view, kept only to write the next start's opening
   // screen. The library itself still lives entirely in Rust.
@@ -2235,7 +2225,7 @@ function AppBody() {
   const subTree = useMemo(() => ({
     dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
     onDropFiles: readOnly ? undefined : importDroppedFilesTo,
-    onExport: exportPlaylist, onExportFile: exportPlaylistFile, onCreatePlaylist: createPlaylistIn,
+    onExport: exportPlaylist, exportDevices: menuDevices, onExportFile: exportPlaylistFile, onCreatePlaylist: createPlaylistIn,
     onCreateFolder: createFolderIn, onDeleteNode: deleteNode, onRenameNode: renameNode,
     onMoveNode: readOnly ? undefined : moveNode, onExpand: explorer.expand,
     showCounts: viewPrefs.playlistCounts, onOpenSync: openSyncManager,
@@ -2244,7 +2234,7 @@ function AppBody() {
     onEjectDevice: (node: TreeNode) => { void ejectDeviceFromTree(node); },
     ejectingDeviceId, deviceBusy: syncing || exportRunning || ejectingDeviceId !== null, readOnly,
   }), [
-    draggedTracks, addDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, exportPlaylistFile,
+    draggedTracks, addDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, menuDevices, exportPlaylistFile,
     createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, explorer.expand,
     viewPrefs.playlistCounts, openSyncManager, createSmartPlaylistIn, editSmartPlaylist,
     addPlaylistArtwork, addToShortcut, sortItems, ejectDeviceFromTree, ejectingDeviceId, syncing,
@@ -2419,6 +2409,7 @@ function AppBody() {
           onDropTracks={addDraggedTo}
           onDropFiles={readOnly ? undefined : importDroppedFilesTo}
           onExport={exportPlaylist}
+          exportDevices={menuDevices}
           onExportFile={exportPlaylistFile}
           onCreatePlaylist={createPlaylistIn}
           onCreateFolder={createFolderIn}

@@ -149,6 +149,19 @@ test("the greyed entries are said to be disabled, and the live ones are not", as
   expect(await colour("Export Playlist")).toBe("rgb(255, 255, 255)");
 });
 
+test("Export Playlist lists the connected sticks and writes to the one chosen", async ({ page }) => {
+  // #142: it opened a folder picker. rekordbox's Export Playlist submenu is
+  // the connected drives [OBS rekordbox 7, Winrig 2026-10-08], and the mock
+  // has two sticks.
+  const menu = await openTreeMenu(page);
+  await menu.getByRole("menuitem", { name: "Export Playlist" }).hover();
+  const sticks = page.getByRole("menuitem", { name: "DJ STICK", exact: true });
+  await expect(sticks).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "TEST", exact: true })).toBeVisible();
+  await sticks.click();
+  await expect(page.getByRole("contentinfo")).toContainText(/DJ STICK: Updated \d+ tracks/);
+});
+
 test("the track menu is the same panel, with rekordbox's entries less the cloud", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

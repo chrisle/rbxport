@@ -431,22 +431,24 @@ export interface Backend {
   exportXml(): Promise<number | null>;
 
   /**
-   * Writes a playlist to `destination`, asking for one when none is given.
+   * Writes a playlist (or a folder's playlists) to the stick mounted at
+   * `destination`, one of `listDevices`'s paths. rekordbox exports to a
+   * connected device and never asks for a folder, and neither does this
+   * (#142).
    *
-   * Resolves to what was written, or `null` if the picker was cancelled. A
-   * destination that already holds one of our exports is synced rather than
-   * rewritten.
+   * Resolves to what was written. A destination that already holds one of
+   * our exports is synced rather than rewritten.
    */
   exportPlaylist(
     playlistId: string,
-    destination?: string,
+    destination: string,
     /** What a stick with no settings of its own is given; see `StickDefaults`. */
     defaults?: StickDefaults,
     /** Remove RBXport-exported music outside the playlists being synced. */
     deleteUnlistedMusic?: boolean,
     /** Convert incompatible USB copies; undefined preserves the source format. */
     compatibilityFormat?: "wav" | "aiff" | "mp3",
-  ): Promise<ExportReport | null>;
+  ): Promise<ExportReport>;
 
   /**
    * Export Track: puts tracks on a stick on their own, in no playlist,
