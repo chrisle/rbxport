@@ -22,6 +22,69 @@ beforeEach(() => {
   scaleFactor.mockReset();
   unlisten.mockReset();
   Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+  delete (window as { chrome?: unknown }).chrome;
+});
+
+/** A stand-in for WebView2's `window.chrome.webview` and its host. */
+function fakeWebView2(answer: (request: Record<string, unknown>, files: File[]) => Record<string, unknown> | undefined) {
+  const listeners = new Set<(event: { data: unknown }) => void>();
+  const webview = {
+    postMessageWithAdditionalObjects: vi.fn((message: Record<string, unknown>, files: File[]) => {
+      const reply = answer(message, files);
+      // The host answers asynchronously, after other pages' traffic.
+      queueMicrotask(() => {
+        for (const listener of [...listeners]) listener({ data: { unrelated: true } });
+        if (reply) for (const listener of [...listeners]) listener({ data: reply });
+      });
+    }),
+    addEventListener: vi.fn((_: "message", listener: (event: { data: unknown }) => void) => listeners.add(listener)),
+    removeEventListener: vi.fn((_: "message", listener: (event: { data: unknown }) => void) => listeners.delete(listener)),
+  };
+  Object.defineProperty(window, "chrome", { value: { webview }, configurable: true });
+  return { webview, listeners };
+}
+
+it("resolves Explorer drops through WebView2's additional objects on Windows", async () => {
+  const { webview, listeners } = fakeWebView2((request, files) => ({
+    ...request,
+    paths: files.map((file) => `C:\\Users\\dj\\Music\\${file.name}`),
+  }));
+  const { droppedFilePaths } = await import("./client");
+  const files = [new File([], "é #.mp3"), new File([], "b.mp3")];
+  expect(await droppedFilePaths(files)).toEqual(["C:\\Users\\dj\\Music\\é #.mp3", "C:\\Users\\dj\\Music\\b.mp3"]);
+  const [request, posted] = webview.postMessageWithAdditionalObjects.mock.calls[0] ?? [];
+  // An object, not a string, so wry hands it to neither Tauri nor its IPC.
+  expect(request).toEqual({ rbxportDroppedFiles: expect.any(String) });
+  expect(posted).toBe(files);
+  expect(invoke).not.toHaveBeenCalled();
+  expect(listeners.size).toBe(0);
+});
+
+it("reports the host's refusal of a WebView2 drop", async () => {
+  fakeWebView2((request) => ({ ...request, error: "This platform did not provide the dropped files' locations." }));
+  const { droppedFilePaths } = await import("./client");
+  await expect(droppedFilePaths([new File([], "a.mp3")])).rejects.toThrow("did not provide");
+});
+
+it("refuses a WebView2 answer that leaves a file without a path", async () => {
+  fakeWebView2((request) => ({ ...request, paths: ["C:\\Music\\a.mp3"] }));
+  const { droppedFilePaths } = await import("./client");
+  await expect(droppedFilePaths([new File([], "a.mp3"), new File([], "b.mp3")])).rejects.toThrow("did not provide");
+});
+
+it("gives up on a WebView2 host that never answers", async () => {
+  vi.useFakeTimers();
+  try {
+    const { listeners } = fakeWebView2(() => undefined);
+    const { droppedFilePaths } = await import("./client");
+    const result = droppedFilePaths([new File([], "a.mp3")]);
+    const settled = expect(result).rejects.toThrow("did not provide");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settled;
+    expect(listeners.size).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("converts native Linux drop coordinates to CSS pixels", async () => {
