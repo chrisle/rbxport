@@ -395,6 +395,8 @@ export interface TreeViewProps {
   onDeviceCreate?: (parent: TreeNode, folder: boolean) => void;
   onDeviceRename?: (node: TreeNode, name: string) => void;
   onDeviceDelete?: (node: TreeNode) => void;
+  /** Import Playlist: a stick's playlist copied into the collection. */
+  onDeviceImport?: (node: TreeNode) => void;
   ejectingDeviceId?: string | null;
   deviceBusy?: boolean;
 }
@@ -407,7 +409,7 @@ export const TreeView = memo(function TreeView({
   onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems,
   railShortcuts, onOpenShortcut, onDeleteShortcut,
   onEjectDevice, ejectingDeviceId, deviceBusy = false,
-  onDeviceCreate, onDeviceRename, onDeviceDelete,
+  onDeviceCreate, onDeviceRename, onDeviceDelete, onDeviceImport,
 }: TreeViewProps) {
   const { advanced: { doubleClickToEdit }, view } = usePreferences();
   // Browse › FontSize and Line Space apply to the tree as they do the list.
@@ -656,6 +658,9 @@ export const TreeView = memo(function TreeView({
                 break;
               case "deviceDelete":
                 onDeviceDelete?.(menu.node);
+                break;
+              case "deviceImportPlaylist":
+                onDeviceImport?.(menu.node);
                 break;
             }
           }}

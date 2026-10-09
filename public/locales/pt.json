@@ -1625,5 +1625,12 @@
   "play history": "histórico de reprodução",
   "Key Analysis": "Deteção de tonalidade",
   "Write the value to the ID3 tag": "Escrever o valor na etiqueta ID3",
-  "Store the detected key in the ID3 tag.": "Guarda a tonalidade detetada na etiqueta ID3."
+  "Store the detected key in the ID3 tag.": "Guarda a tonalidade detetada na etiqueta ID3.",
+  "Cannot import the playlist:": "Não é possível importar a lista de reprodução:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Todas as canções na lista não existem na Coleção ou a lista está vazia.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "O nome da lista de reprodução foi alterado porque que existia uma lista de reprodução com o mesmo nome na sua coleção.",
+  "Imported {name}.": "Importado {name}.",
+  "{count} track is not in the collection and was left out.": "{count} faixa não está na coleção e foi omitida.",
+  "{count} tracks are not in the collection and were left out.": "{count} faixas não estão na coleção e foram omitidas.",
+  "The playlist could not be imported.": "Não foi possível importar a lista de reprodução."
 }

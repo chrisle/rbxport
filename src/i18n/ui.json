@@ -1560,5 +1560,12 @@
   "日本語",
   "简体中文",
   "繁體中文",
-  "한국어"
+  "한국어",
+  "All songs in the list do not exist in Collection or the list is empty.",
+  "Cannot import the playlist:",
+  "Imported {name}.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.",
+  "The playlist could not be imported.",
+  "{count} track is not in the collection and was left out.",
+  "{count} tracks are not in the collection and were left out."
 ]

@@ -1623,5 +1623,12 @@
   "play history": "historique de lecture",
   "Key Analysis": "Détection de la tonalité",
   "Write the value to the ID3 tag": "Sauvegarder la valeur dans le tag ID3",
-  "Store the detected key in the ID3 tag.": "Enregistre la tonalité détectée dans le tag ID3."
+  "Store the detected key in the ID3 tag.": "Enregistre la tonalité détectée dans le tag ID3.",
+  "Cannot import the playlist:": "Impossible d'importer la liste de lecture:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Les morceaux dans la liste n'existent pas dans la Collection ou la liste est vide.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "Le nom de la liste de lecture a changé parce qu’une liste de lecture portant le même nom figurait dans votre collection.",
+  "Imported {name}.": "Importé {name}.",
+  "{count} track is not in the collection and was left out.": "{count} piste n'est pas dans la collection et a été ignorée.",
+  "{count} tracks are not in the collection and were left out.": "{count} pistes ne sont pas dans la collection et ont été ignorées.",
+  "The playlist could not be imported.": "La liste de lecture n'a pas pu être importée."
 }
