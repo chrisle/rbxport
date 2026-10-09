@@ -1367,9 +1367,19 @@ export const Player = memo(function Player({
     const ms = playback.positionNow() * 1000;
     return (loopSnap && loopSnap.times.length > 0 ? nearestBeatMs(loopSnap, ms) : ms) / 1000;
   }, [playback, loopSnap]);
+  /**
+   * IN: the loop's in point, and the cue point too — rekordbox's Real-Time
+   * Cue, which is how a playing deck gets a cue point for MEMORY to store.
+   * [OBS] rekordbox 7.2.19 `UiPlayer::eventLoopIn` @0x102258ff0 calls the
+   * deck's `setCurrentCue` at the head (snapped to the beat with Q on, as the
+   * manual's Real-Time Cue says), playing or paused; with a loop running it
+   * adjusts the loop instead, so the cue point stays.
+   */
   const markLoopIn = useCallback(() => {
     if (playback.idle) return;
-    setLoopIn(loopPoint());
+    const at = loopPoint();
+    setLoopIn(at);
+    if (!playback.loop?.active) setCuePoint(at);
   }, [playback, loopPoint]);
   const markLoopOut = useCallback(() => {
     if (playback.idle || loopIn === null) return;

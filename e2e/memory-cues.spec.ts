@@ -15,6 +15,11 @@ const player = (page: Page) => page.getByRole("region", { name: "Preview player"
 const memoryRows = (page: Page) =>
   page.getByRole("complementary", { name: "Cue list" }).getByRole("button", { name: /^Delete memory cue \d\d:\d\d:\d\d\d$/ });
 const elapsed = (page: Page) => player(page).locator('[class*="elapsed"]');
+/** A MEMORY row's `mm:ss:mmm`, in seconds. */
+const seconds = (time: string) => {
+  const [m, s, ms] = time.split(":").map(Number) as [number, number, number];
+  return m * 60 + s + ms / 1000;
+};
 
 /** Loads the fourth row — analysed, so it carries the mock's cues. */
 async function load(page: Page, query = "") {
@@ -105,6 +110,48 @@ test("the M and X keys are MEMORY and its ✕, and a row's ✕ deletes that row"
   await memoryRows(page).first().click();
   await expect(memoryRows(page)).toHaveCount(0);
   await expect(page.getByTestId("player-overview").locator('[data-cue=""]')).toHaveCount(0);
+});
+
+test("M stores the cue point, and IN puts the cue point at the head, playing or paused", async ({ page }) => {
+  // rekordbox 7.2.19: MEMORY stores the deck's current cue, never the play
+  // position (`UiPlayer::eventMemoryCue`), and IN is Real-Time Cue, which
+  // moves the current cue to the head (`UiPlayer::eventLoopIn`). So I then M
+  // is how a playing deck gets a memory cue where it is.
+  await load(page, "?writable=1");
+  const deck = player(page);
+  const times = () =>
+    page.getByRole("complementary", { name: "Cue list" }).getByText(/^\d\d:\d\d:\d\d\d$/).allTextContents();
+  await expect(memoryRows(page)).toHaveCount(1);
+  const [own] = await times();
+
+  // Playing away from the cue point: M alone stores the cue point, which is
+  // the track's own memory cue, so nothing new is written.
+  await deck.getByRole("button", { name: "Play", exact: true }).click();
+  await page.waitForTimeout(1200);
+  await page.keyboard.press("m");
+  await page.waitForTimeout(200);
+  await expect(memoryRows(page)).toHaveCount(1);
+
+  // I while playing, then M: the new cue is where the head was (a second or
+  // so in, before the track's own cue at 2%), and the deck plays on.
+  await page.keyboard.press("i");
+  await page.keyboard.press("m");
+  await expect(memoryRows(page)).toHaveCount(2);
+  await expect(deck.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  const playing = seconds((await times()).find((t) => t !== own)!);
+  expect(playing).toBeGreaterThan(0.5);
+  expect(playing).toBeLessThan(3);
+
+  // Paused further on: I then M stores there too, and the deck stays paused.
+  await page.waitForTimeout(1200);
+  await deck.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.keyboard.press("i");
+  await page.keyboard.press("m");
+  await expect(memoryRows(page)).toHaveCount(3);
+  const paused = (await times()).map(seconds).filter((t) => t !== seconds(own!) && t !== playing);
+  expect(paused).toHaveLength(1);
+  expect(paused[0]).toBeGreaterThan(playing + 0.5);
+  await expect(deck.getByRole("button", { name: "Play", exact: true })).toBeVisible();
 });
 
 test("◀ and ▶ call the memory cue either side of the playhead", async ({ page }) => {
