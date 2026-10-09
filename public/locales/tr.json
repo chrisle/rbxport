@@ -1483,5 +1483,17 @@
   "{device}: imported {count} play-history entry.": "{device}: imported {count} play-history entry.",
   "{device}: no CDJ/mixer settings files found.": "{device}: no CDJ/mixer settings files found.",
   "{device}: no new play-history entries.": "{device}: no new play-history entries.",
-  "{device}: updated {count} track": "{device}: updated {count} track"
+  "{device}: updated {count} track": "{device}: updated {count} track",
+  "Automatically import track ratings when syncing": "Automatically import track ratings when syncing",
+  "Import changed track ratings from the selected USB devices? Device ratings replace library ratings, including ratings edited in both places.": "Import changed track ratings from the selected USB devices? Device ratings replace library ratings, including ratings edited in both places.",
+  "Import device rating changes before SYNC. Device ratings win when a track was also rated in your library.": "Import device rating changes before SYNC. Device ratings win when a track was also rated in your library.",
+  "Import track ratings": "Import track ratings",
+  "Quit rekordbox to import track ratings.": "Quit rekordbox to import track ratings.",
+  "Track ratings": "Track ratings",
+  "Turn off Library Protection to import track ratings.": "Turn off Library Protection to import track ratings.",
+  "track ratings": "track ratings",
+  "{device}: imported {count} track rating.": "{device}: imported {count} track rating.",
+  "{device}: imported {count} track ratings.": "{device}: imported {count} track ratings.",
+  "{device}: importing from USB…": "{device}: importing from USB…",
+  "{device}: no new track ratings.": "{device}: no new track ratings."
 }

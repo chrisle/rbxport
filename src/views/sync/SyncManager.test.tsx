@@ -98,7 +98,7 @@ beforeEach(async () => {
   progress = null;
   rekordboxOpen = false;
   onClose = vi.fn();
-  importUsb = vi.fn(() => Promise.resolve({ tracks: 2, histories: 0, settings: 0, skipped: 0 }));
+  importUsb = vi.fn(() => Promise.resolve({ tracks: 2, histories: 0, settings: 0, ratings: 0, skipped: 0 }));
   ejectDevice = vi.fn(() => Promise.resolve());
   syncDevices = vi.fn((playlists: string[], destinations: string[]) =>
     Promise.resolve(destinations.map((path) => report(path, playlists.length * 10))),
@@ -148,7 +148,8 @@ beforeEach(async () => {
   document.body.append(host);
   root = createRoot(host);
   act(() => {
-    root.render(<SyncManager onClose={onClose} />);
+    const preferences = { ...DEFAULT_PREFERENCES, advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary: false } };
+    root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}><SyncManager onClose={onClose} /></PreferencesProvider>);
   });
   await settle();
 });
@@ -302,7 +303,7 @@ describe("SyncManager", () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Device disconnected");
   });
   it("passes cleanup and the chosen compatibility format to sync", async () => {
-    const preferences = { ...DEFAULT_PREFERENCES, usbExport: {
+    const preferences = { ...DEFAULT_PREFERENCES, advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary: false }, usbExport: {
       ...DEFAULT_PREFERENCES.usbExport, deleteUnlistedMusic: true,
       maximumCompatibility: true, conversionFormat: "mp3" as const,
     } };
@@ -617,7 +618,7 @@ const importButton = () => [...host.querySelectorAll("button")].find(b => b.text
 const renderWith = async (usbExport: Partial<typeof DEFAULT_PREFERENCES.usbExport>, protectLibrary = false) => {
   const preferences = {
     ...DEFAULT_PREFERENCES,
-    usbExport: { ...DEFAULT_PREFERENCES.usbExport, ...usbExport },
+    usbExport: { ...DEFAULT_PREFERENCES.usbExport, importButtonRatings: false, ...usbExport },
     advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary },
   };
   act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
@@ -633,14 +634,14 @@ it("imports cue/grid information from selected devices only", async () => {
   await settle();
   click(importButton());
   await settle();
-  expect(importUsb).toHaveBeenCalledWith("/Volumes/USB A", true, false, false);
+  expect(importUsb).toHaveBeenCalledWith("/Volumes/USB A", true, false, false, false);
   expect(importUsb).toHaveBeenCalledTimes(1);
   expect(status()).toContain("updated 2 tracks");
 });
 
 it("says a stick whose cues already match changed nothing, rather than counting them as updated (#134)", async () => {
   await renderWith({ importButtonCues: true, importButtonHistory: false, importButtonSettings: false });
-  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, skipped: 0, unchanged: 5 });
+  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, ratings: 0, skipped: 0, unchanged: 5 });
   click(box("USB A"));
   await settle();
   click(importButton());
@@ -651,7 +652,7 @@ it("says a stick whose cues already match changed nothing, rather than counting 
 
 it("reports changed and already-matching tracks apart", async () => {
   await renderWith({ importButtonCues: true, importButtonHistory: false, importButtonSettings: false });
-  importUsb.mockResolvedValueOnce({ tracks: 2, histories: 0, settings: 0, skipped: 1, unchanged: 3 });
+  importUsb.mockResolvedValueOnce({ tracks: 2, histories: 0, settings: 0, ratings: 0, skipped: 1, unchanged: 3 });
   click(box("USB A"));
   await settle();
   click(importButton());
@@ -661,7 +662,7 @@ it("reports changed and already-matching tracks apart", async () => {
 
 it("says where imported CDJ/mixer settings go", async () => {
   await renderWith({ importButtonCues: false, importButtonHistory: false, importButtonSettings: true });
-  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 3, skipped: 0 });
+  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 3, ratings: 0, skipped: 0 });
   click(box("USB A"));
   await settle();
   click(importButton());
@@ -672,9 +673,9 @@ it("says where imported CDJ/mixer settings go", async () => {
 it("counts one updated track, history entry or settings file in the singular", async () => {
   await renderWith({ importButtonCues: true, importButtonHistory: true, importButtonSettings: true });
   importUsb
-    .mockResolvedValueOnce({ tracks: 1, histories: 0, settings: 0, skipped: 0, unchanged: 0 })
-    .mockResolvedValueOnce({ tracks: 0, histories: 1, settings: 0, skipped: 0 })
-    .mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 1, skipped: 0 });
+    .mockResolvedValueOnce({ tracks: 1, histories: 0, settings: 0, ratings: 0, skipped: 0, unchanged: 0 })
+    .mockResolvedValueOnce({ tracks: 0, histories: 1, settings: 0, ratings: 0, skipped: 0 })
+    .mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 1, ratings: 0, skipped: 0 });
   click(box("USB A"));
   await settle();
   click(importButton());
@@ -687,8 +688,8 @@ it("counts one updated track, history entry or settings file in the singular", a
 it("says when a stick has no history or settings to import", async () => {
   await renderWith({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
   importUsb
-    .mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, skipped: 0 })
-    .mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, skipped: 0 });
+    .mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, ratings: 0, skipped: 0 })
+    .mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, ratings: 0, skipped: 0 });
   click(box("USB A"));
   await settle();
   click(importButton());
@@ -709,8 +710,8 @@ it("starts Import's ticks at the Preferences defaults and imports each ticked ki
   click(importButton());
   await settle();
   expect(importUsb.mock.calls).toEqual([
-    ["/Volumes/USB A", true, false, false],
-    ["/Volumes/USB A", false, true, false],
+    ["/Volumes/USB A", true, false, false, false],
+    ["/Volumes/USB A", false, true, false, false],
   ]);
 });
 
@@ -729,7 +730,7 @@ it("library protection leaves only settings to import", async () => {
   await settle();
   click(importButton());
   await settle();
-  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB A", false, false, true);
+  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB A", false, false, true, false);
 });
 
 it("imports history explicitly and offers details and retry after a failure", async () => {
@@ -739,7 +740,7 @@ it("imports history explicitly and offers details and retry after a failure", as
   importUsb.mockRejectedValueOnce(new Error("Could not read play history: damaged database"));
   click(importButton());
   await settle();
-  expect(importUsb).toHaveBeenCalledWith("/Volumes/USB A", false, true, false);
+  expect(importUsb).toHaveBeenCalledWith("/Volumes/USB A", false, true, false, false);
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("damaged database");
   expect([...host.querySelectorAll("button")].some(button => button.textContent?.includes("Show details"))).toBe(true);
   const retry = [...host.querySelectorAll("button")].find(button => button.textContent?.includes("Retry import"));
@@ -747,7 +748,7 @@ it("imports history explicitly and offers details and retry after a failure", as
   click(retry);
   await settle();
   expect(importUsb).toHaveBeenCalledTimes(2);
-  expect(importUsb).toHaveBeenLastCalledWith("/Volumes/USB A", false, true, false);
+  expect(importUsb).toHaveBeenLastCalledWith("/Volumes/USB A", false, true, false, false);
 });
 
 it("expanding a USB does not select it for synchronization", async () => {
@@ -773,7 +774,7 @@ it("connection changes refresh only the device list; imports wait for SYNC", asy
   expect(importUsb).not.toHaveBeenCalled();
   click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
   await settle();
-  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB C", false, true, false);
+  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB C", false, true, false, true);
   expect(importUsb.mock.invocationCallOrder[0]).toBeLessThan(syncDevices.mock.invocationCallOrder[0]!);
 });
 
@@ -790,7 +791,7 @@ it("does not export when the pre-sync import fails", async () => {
 
 it("honors disabled imports when syncing", async () => {
   const preferences = { ...DEFAULT_PREFERENCES, usbExport: {
-    ...DEFAULT_PREFERENCES.usbExport, importHistory: false, importSettings: false,
+    ...DEFAULT_PREFERENCES.usbExport, importHistory: false, importSettings: false, importRatings: false,
   } };
   act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
     <SyncManager onClose={onClose} />
@@ -808,7 +809,7 @@ it("honors disabled imports when syncing", async () => {
 
 it("imports settings during SYNC only when enabled", async () => {
   const preferences = { ...DEFAULT_PREFERENCES, usbExport: {
-    ...DEFAULT_PREFERENCES.usbExport, importHistory: false, importSettings: true,
+    ...DEFAULT_PREFERENCES.usbExport, importHistory: false, importSettings: true, importRatings: false,
   } };
   act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
     <SyncManager onClose={onClose} />
@@ -820,6 +821,83 @@ it("imports settings during SYNC only when enabled", async () => {
   await settle();
   click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
   await settle();
-  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB B", false, false, true);
+  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB B", false, false, true, false);
   expect(importUsb.mock.invocationCallOrder[0]).toBeLessThan(syncDevices.mock.invocationCallOrder[0]!);
+});
+
+it("confirms rating import, reports cleared ratings and respects cancellation", async () => {
+  await renderWith({ importButtonCues: false, importButtonHistory: false, importButtonSettings: false, importButtonRatings: true });
+  click(box("USB A"));
+  await settle();
+  confirmExport.mockResolvedValueOnce(false);
+  click(importButton());
+  await settle();
+  expect(importUsb).not.toHaveBeenCalled();
+  expect(confirmExport).toHaveBeenCalledWith(expect.stringContaining("Device ratings replace library ratings"));
+  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, ratings: 1, skipped: 0 });
+  click(importButton());
+  await settle();
+  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB A", false, false, false, true);
+  expect(status()).toContain("USB A: imported 1 track rating.");
+  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, ratings: 0, skipped: 0 });
+  click(importButton());
+  await settle();
+  expect(status()).toContain("USB A: no new track ratings.");
+});
+
+it("blocks rating imports under Library Protection and while rekordbox is open", async () => {
+  const options = { importButtonCues: false, importButtonHistory: false, importButtonSettings: false, importButtonRatings: true };
+  await renderWith(options, true);
+  expect(importTick("Track ratings")?.disabled).toBe(true);
+  click(box("USB A"));
+  await settle();
+  expect(importButton().disabled).toBe(true);
+  rekordboxOpen = true;
+  act(() => root.unmount());
+  root = createRoot(host);
+  await renderWith(options);
+  expect(importTick("Track ratings")?.disabled).toBe(true);
+  expect(importUsb).not.toHaveBeenCalled();
+});
+
+it("rechecks rekordbox after confirming a rating import", async () => {
+  await renderWith({ importButtonCues: false, importButtonHistory: false, importButtonSettings: false, importButtonRatings: true });
+  click(box("USB A"));
+  await settle();
+  confirmExport.mockImplementationOnce(() => { rekordboxOpen = true; return Promise.resolve(true); });
+  click(importButton());
+  await settle();
+  expect(importUsb).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("Quit rekordbox to import track ratings.");
+});
+
+it("imports ratings before SYNC and stops publication on a rating conflict", async () => {
+  await renderWith({ importHistory: false, importSettings: false, importRatings: true });
+  click(box("Closing"));
+  click(box("USB B"));
+  await settle();
+  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, ratings: 2, skipped: 0 });
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+  await settle();
+  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB B", false, false, false, true);
+  expect(importUsb.mock.invocationCallOrder[0]).toBeLessThan(syncDevices.mock.invocationCallOrder[0]!);
+  expect(status()).toContain("USB B: imported 2 track ratings.");
+  syncDevices.mockClear();
+  importUsb.mockRejectedValueOnce(new Error("The device libraries disagree on the rating"));
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+  await settle();
+  expect(syncDevices).not.toHaveBeenCalled();
+  expect(status()).toContain("disagree on the rating");
+});
+
+it("stops automatic rating imports under Library Protection", async () => {
+  await renderWith({ importHistory: false, importSettings: false, importRatings: true }, true);
+  click(box("Closing"));
+  click(box("USB B"));
+  await settle();
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+  await settle();
+  expect(importUsb).not.toHaveBeenCalled();
+  expect(syncDevices).not.toHaveBeenCalled();
+  expect(status()).toContain("Turn off Library Protection to import track ratings.");
 });

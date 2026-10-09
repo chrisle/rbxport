@@ -1590,8 +1590,8 @@ fn add_tracks(
                 master_db_id: i64::try_from(track.master_db_id).unwrap_or(0),
                 master_content_id: i64::try_from(track.library_id).unwrap_or(0),
                 analysis_path: track.analysis_path.clone(),
-                // Stars are multiples of 51 here as everywhere else.
-                rating: i64::from(track.rating) * 51,
+                // OneLibrary stores star counts; XML's 51 scale does not apply.
+                rating: i64::from(track.rating),
                 comment: track.comment.clone(),
                 date_added: track.date_added.clone(),
                 image_id: (track.image_id != 0).then_some(i64::from(track.image_id)),

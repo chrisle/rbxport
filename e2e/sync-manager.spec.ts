@@ -27,6 +27,16 @@ test("eject after syncing removes successfully synced devices", async ({ page })
   await expect(dialog.getByRole("checkbox", { name: "TEST", exact: true })).toBeVisible();
 });
 
+test("imports ratings independently of cues, history and settings", async ({ page }) => {
+  const dialog = await openManager(page);
+  await dialog.getByRole("checkbox", { name: "Cues and beat grids", exact: true }).uncheck();
+  await dialog.getByRole("checkbox", { name: "Play history", exact: true }).uncheck();
+  await expect(dialog.getByRole("checkbox", { name: "Track ratings", exact: true })).toBeChecked();
+  await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
+  await dialog.getByRole("button", { name: "Import", exact: true }).click();
+  await expect(dialog.getByRole("status")).toContainText("DJ STICK: no new track ratings.");
+});
+
 test("the rail opens it with the library's playlists on the left and the devices on the right", async ({ page }) => {
   const dialog = await openManager(page);
   const tree = dialog.getByRole("tree", { name: "Playlists", exact: true });

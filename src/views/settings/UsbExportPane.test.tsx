@@ -56,7 +56,7 @@ it("explains the sync options and shows their defaults", () => {
   expect(host.textContent).toContain("Add new play-history entries from selected USB devices to your library when you click SYNC in Sync Manager.");
   expect(host.textContent).toContain("Free space on your USB stick by removing songs that aren't in any playlist.");
   expect([...host.querySelectorAll(`.${styles.default}`)].map(node => node.textContent)).toEqual([
-    "Default: Off", "Default: On", "Default: On", "Default: On", "Default: Off", "Default: Off",
+    "Default: Off", "Default: On", "Default: On", "Default: On", "Default: On", "Default: Off", "Default: On", "Default: Off",
   ]);
 });
 
@@ -72,8 +72,14 @@ it("sets what Sync Manager's Import has ticked when it opens", () => {
   expect(toggle("Import cues and beat grids").checked).toBe(true);
   expect(toggle("Import play history").checked).toBe(true);
   expect(toggle("Import CDJ/mixer settings").checked).toBe(false);
+  expect(toggle("Import track ratings").checked).toBe(true);
+  expect(toggle("Automatically import track ratings when syncing").checked).toBe(true);
   act(() => toggle("Import CDJ/mixer settings").click());
   expect(update).toHaveBeenCalledWith("usbExport", { importButtonSettings: true });
+  act(() => toggle("Import track ratings").click());
+  expect(update).toHaveBeenCalledWith("usbExport", { importButtonRatings: false });
+  act(() => toggle("Automatically import track ratings when syncing").click());
+  expect(update).toHaveBeenCalledWith("usbExport", { importRatings: false });
 });
 
 it("offers AIFF as a compatibility conversion target", () => {
