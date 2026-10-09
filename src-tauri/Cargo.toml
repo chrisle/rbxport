@@ -99,4 +99,4 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 
 [target.'cfg(windows)'.dependencies]
 midir = "0.11"
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_Foundation"] }

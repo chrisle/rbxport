@@ -22,6 +22,11 @@
 //! - A Linux package (`.deb`, `.rpm`): installing needs a password prompt,
 //!   which is not quiet, so the download is staged and installed only from
 //!   the Update Manager's Restart Now.
+//! - The Microsoft Store (an MSIX package): the Store installs its updates,
+//!   so nothing here downloads or installs one. The NSIS installer would put
+//!   a second, separate copy next to the Store's, and Windows would go on
+//!   launching the Store's older one (#189). A check says the Store keeps
+//!   this copy up to date instead, without asking the download server.
 //!
 //! What has changed is worked out here, not in the interface: the notes are
 //! the full published release history, and the part that matters is the sections newer
@@ -112,6 +117,53 @@ fn swaps_in_place() -> bool {
     matches!(bundle_type(), Some(BundleType::App | BundleType::AppImage))
 }
 
+/// `GetCurrentPackageFullName` results, as `winerror.h` numbers them. Kept
+/// here rather than taken from `windows-sys` so the decision below is the
+/// same code, and tested, on every platform.
+#[cfg(any(windows, test))]
+const ERROR_SUCCESS: u32 = 0;
+#[cfg(any(windows, test))]
+const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
+#[cfg(test)]
+const APPMODEL_ERROR_NO_PACKAGE: u32 = 15_700;
+
+/// Whether a `GetCurrentPackageFullName` result means the process runs with
+/// a package identity: installed from an MSIX package, which on Windows
+/// rbxport only ships through the Microsoft Store.
+///
+/// Asked with an empty buffer, a packaged process gets
+/// `ERROR_INSUFFICIENT_BUFFER` (the name does not fit) and an unpackaged one
+/// `APPMODEL_ERROR_NO_PACKAGE`. Any other answer is not a package identity
+/// Windows vouched for, and the app keeps its own updater.
+#[cfg(any(windows, test))]
+fn has_package_identity(status: u32) -> bool {
+    matches!(status, ERROR_SUCCESS | ERROR_INSUFFICIENT_BUFFER)
+}
+
+/// Whether this process was installed by the Microsoft Store, which then
+/// owns its updates.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn store_install() -> bool {
+    use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
+    let mut length: u32 = 0;
+    // SAFETY: a zero length with a null buffer is the documented way to ask
+    // only whether there is a package name and how long it is; nothing is
+    // written through the null pointer.
+    let status = unsafe { GetCurrentPackageFullName(&raw mut length, std::ptr::null_mut()) };
+    has_package_identity(status)
+}
+
+/// Only Windows has Store packages.
+#[cfg(not(windows))]
+fn store_install() -> bool {
+    false
+}
+
+fn store_refusal() -> AppError {
+    AppError::new(ErrorKind::Internal, "The Microsoft Store installs this copy of rbxport's updates.")
+}
+
 /// One release's entry in the published release notes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,6 +189,9 @@ pub struct UpdateCheckDto {
     /// The version on offer is already downloaded this run: in place, or
     /// staged for the quit. Nothing to fetch again.
     pub ready: Option<UpdateReadyDto>,
+    /// This copy came from the Microsoft Store, which installs its updates;
+    /// the check did not ask the download server, and `version` is `None`.
+    pub store_install: bool,
 }
 
 /// A downloaded update, and whether it is already in the app's place.
@@ -173,6 +228,10 @@ pub async fn check_for_update(
     updates: tauri::State<'_, std::sync::Arc<Updates>>,
 ) -> AppResult<UpdateCheckDto> {
     let current_version = app.package_info().version.to_string();
+    if store_install() {
+        *updates.pending.lock() = None;
+        return Ok(store_check(current_version));
+    }
     let found = app
         .updater()
         .map_err(|e| updater_error("The updater is not configured.", e))?
@@ -182,7 +241,14 @@ pub async fn check_for_update(
 
     let Some(update) = found else {
         *updates.pending.lock() = None;
-        return Ok(UpdateCheckDto { current_version, version: None, date: None, changes: Vec::new(), ready: None });
+        return Ok(UpdateCheckDto {
+            current_version,
+            version: None,
+            date: None,
+            changes: Vec::new(),
+            ready: None,
+            store_install: false,
+        });
     };
 
     let changes = match (Version::parse(&update.current_version), Version::parse(&update.version)) {
@@ -208,9 +274,29 @@ pub async fn check_for_update(
         version: update.version.clone(),
         installed: *p == Placement::Installed,
     });
-    let dto = UpdateCheckDto { current_version, version: Some(update.version.clone()), date, changes, ready };
+    let dto = UpdateCheckDto {
+        current_version,
+        version: Some(update.version.clone()),
+        date,
+        changes,
+        ready,
+        store_install: false,
+    };
     *pending = Some(Pending { update, placement });
     Ok(dto)
+}
+
+/// What a check answers in a Microsoft Store install: nothing on offer from
+/// the download server, and the Store named as what updates this copy.
+fn store_check(current_version: String) -> UpdateCheckDto {
+    UpdateCheckDto {
+        current_version,
+        version: None,
+        date: None,
+        changes: Vec::new(),
+        ready: None,
+        store_install: true,
+    }
 }
 
 /// The update already downloaded in this run, without a network check.
@@ -242,6 +328,9 @@ pub async fn download_update(
             ErrorKind::Internal,
             "A development build cannot be updated in place.",
         ));
+    }
+    if store_install() {
+        return Err(store_refusal());
     }
     let (update, placement) = {
         let pending = updates.pending.lock();
@@ -347,6 +436,9 @@ pub async fn restart_to_update(
     app: AppHandle,
     updates: tauri::State<'_, std::sync::Arc<Updates>>,
 ) -> AppResult<()> {
+    if store_install() {
+        return Err(store_refusal());
+    }
     let (update, placement) = {
         let pending = updates.pending.lock();
         let Some(pending) = pending.as_ref() else {
@@ -390,7 +482,7 @@ pub async fn restart_to_update(
 /// quit can run; a Linux package would prompt for a password, and stays for
 /// [`restart_to_update`].
 pub fn on_exit(app: &AppHandle) {
-    if !cfg!(windows) {
+    if !cfg!(windows) || store_install() {
         return;
     }
     let Some(updates) = app.try_state::<std::sync::Arc<Updates>>() else { return };
@@ -509,6 +601,36 @@ mod tests {
 
     fn v(s: &str) -> Version {
         Version::parse(s).unwrap()
+    }
+
+    #[test]
+    fn a_packaged_process_is_a_store_install_and_an_unpackaged_one_is_not() {
+        // GetCurrentPackageFullName with an empty buffer: a package name
+        // that does not fit means there is one.
+        assert!(has_package_identity(ERROR_INSUFFICIENT_BUFFER));
+        assert!(has_package_identity(ERROR_SUCCESS));
+        // The NSIS install, a portable copy, a development run.
+        assert!(!has_package_identity(APPMODEL_ERROR_NO_PACKAGE));
+        // Anything else is not an identity Windows vouched for.
+        assert!(!has_package_identity(87), "ERROR_INVALID_PARAMETER");
+    }
+
+    #[test]
+    fn a_store_check_offers_nothing_and_names_the_store() {
+        let dto = store_check("1.2.0".to_owned());
+        assert!(dto.store_install);
+        assert_eq!(dto.version, None);
+        assert!(dto.ready.is_none() && dto.changes.is_empty());
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["storeInstall"], serde_json::Value::Bool(true));
+        assert_eq!(json["currentVersion"], "1.2.0");
+    }
+
+    #[test]
+    fn this_platform_is_not_a_store_install_off_windows() {
+        if !cfg!(windows) {
+            assert!(!store_install());
+        }
     }
 
     #[test]
