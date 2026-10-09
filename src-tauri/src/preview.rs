@@ -122,13 +122,15 @@ impl Preview {
             }
         }
 
-        // The device the decks use, and their level, so a preview is heard
-        // where and as loud as they are.
+        // The device the decks use, their level and their limiter, so a
+        // preview is heard where and as loud as they are. The level is the
+        // one the master knob last set, whether or not a deck has opened the
+        // device yet: reading it off a running deck engine left a preview
+        // started before any deck at full level.
         self.player.set_device(decks.device());
         self.player.set_wish(decks.wish());
-        if let Some(level) = decks.opened().map(|engine| engine.master().gain()) {
-            self.player.set_master_level(level);
-        }
+        self.player.set_master_level(decks.master_level());
+        self.player.set_limiter(decks.limiter());
         let engine = self.player.engine(app)?;
 
         let snapshot = engine.snapshot().a;
@@ -159,6 +161,18 @@ impl Preview {
         engine.seek_ms(PREVIEW_DECK, position_ms);
         engine.play(PREVIEW_DECK);
         Ok(())
+    }
+
+    /// Follows the master knob. The preview has an engine of its own, so a
+    /// level set on the decks alone left a playing preview as loud as it
+    /// started, whatever the knob did after (#207).
+    pub fn set_master_level(&self, level: f32) {
+        self.player.set_master_level(level);
+    }
+
+    /// Follows the master limiter, for the same reason as the level.
+    pub fn set_limiter(&self, limiter: crate::dto::LimiterDto) {
+        self.player.set_limiter(limiter);
     }
 
     /// Stops the preview where it is. The track stays held, so a click on it

@@ -276,6 +276,12 @@ impl Player {
         }
     }
 
+    /// The master level as the interface last set it, whether or not the
+    /// engine has been built yet.
+    pub fn master_level(&self) -> f32 {
+        *self.master_level.lock()
+    }
+
     fn apply_limiter(settings: &rbl_deck::LimiterSettings, wanted: LimiterDto) {
         settings.set_input_gain_db(wanted.input_gain_db);
         settings.set_enabled(wanted.enabled);

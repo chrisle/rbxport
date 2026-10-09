@@ -2162,10 +2162,14 @@ pub async fn deck_clear_loop<R: tauri::Runtime>(
 pub async fn set_master_level<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
+    preview: State<'_, Arc<crate::preview::Preview>>,
     level: f32,
 ) -> AppResult<()> {
     player.engine(&app)?;
     player.set_master_level(level);
+    // The browser's preview plays through its own engine and follows the
+    // same knob.
+    preview.set_master_level(level);
     Ok(())
 }
 
@@ -2339,9 +2343,12 @@ pub async fn master_limiter(
 #[tauri::command]
 pub async fn set_master_limiter(
     player: State<'_, Arc<crate::player::Player>>,
+    preview: State<'_, Arc<crate::preview::Preview>>,
     limiter: LimiterDto,
 ) -> AppResult<LimiterDto> {
-    Ok(player.set_limiter(limiter))
+    let set = player.set_limiter(limiter);
+    preview.set_limiter(set);
+    Ok(set)
 }
 
 /// Shows a track's file in the Finder.

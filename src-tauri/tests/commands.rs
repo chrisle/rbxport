@@ -1214,7 +1214,7 @@ fn the_two_decks_play_independently_and_the_master_level_is_the_engine_s() {
     run(commands::deck_load(s.handle(), s.state(), s.player(), "b".into(), id_b, 2)).unwrap();
     s.pull_until("both decks to load", |t| t.a.loaded && t.b.loaded);
 
-    run(commands::set_master_level(s.handle(), s.player(), 0.5)).unwrap();
+    run(commands::set_master_level(s.handle(), s.player(), s.preview(), 0.5)).unwrap();
     assert!((s.deck_state().master - 0.5).abs() < 1e-6);
 
     run(commands::deck_play(s.handle(), s.player(), "b".into())).unwrap();
@@ -1276,6 +1276,34 @@ fn a_waveform_click_previews_the_track_without_loading_a_deck() {
     std::fs::remove_file(&a).unwrap();
     let err = run(commands::preview_play(s.handle(), s.state(), s.player(), s.preview(), on_deck, 0.0)).unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
+}
+
+#[test]
+fn the_preview_follows_the_master_knob_and_limiter() {
+    let s = shell();
+    let a = write_wav(&s._dir.path().join("preview.wav"), 4);
+    let report = run(commands::import_files(s.handle(), s.state(), vec![a.display().to_string()])).unwrap();
+    let track = report.tracks[0].id.clone();
+
+    // The knob was turned down before any deck opened the device: the
+    // preview starts at that level rather than at full (#207).
+    s.player().set_master_level(0.25);
+    assert!(s.player().opened().is_none());
+    run(commands::preview_play(s.handle(), s.state(), s.player(), s.preview(), track, 0.0)).unwrap();
+    s.pull_preview_until("the preview to play", |p| p.playing && p.position_ms > 0.0);
+    let engine = s.preview().opened().expect("the preview opened its engine");
+    assert!((engine.master().gain() - 0.25).abs() < 1e-6, "started at {}", engine.master().gain());
+
+    // Turning the knob while it plays turns the preview too.
+    run(commands::set_master_level(s.handle(), s.player(), s.preview(), 0.6)).unwrap();
+    assert!((engine.master().gain() - 0.6).abs() < 1e-6, "followed to {}", engine.master().gain());
+
+    // And the limiter set on the decks is the preview's as well.
+    let wanted = rbxport_lib::dto::LimiterDto { input_gain_db: 3.0, enabled: true, ceiling_db: -1.0, release_ms: 120.0 };
+    let set = run(commands::set_master_limiter(s.player(), s.preview(), wanted)).unwrap();
+    assert!(engine.limiter().enabled());
+    assert!((engine.limiter().ceiling_db() - set.ceiling_db).abs() < 1e-6);
+    assert!((engine.limiter().input_gain_db() - set.input_gain_db).abs() < 1e-6);
 }
 
 #[test]
