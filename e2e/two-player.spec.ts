@@ -548,3 +548,12 @@ test("a track loaded onto a playing synced deck carries on in phase", async ({ p
   await expect.poll(offBeat, { timeout: 3000 }).toBeLessThan(ON_BEAT);
   await expect(b.getByRole("button", { name: "Beat sync" })).toHaveAttribute("aria-pressed", "true");
 });
+
+test("a new track on the master deck hands MASTER to the other deck", async ({ page }) => {
+  const { a, b, titles, twin } = await syncedPair(page);
+  await expect(a.getByRole("button", { name: "Sync master" })).toHaveAttribute("aria-pressed", "true");
+  await titles.nth(twin).dblclick();
+  await expect(a.getByTestId("player-title")).toHaveText((await titles.nth(twin).textContent()) ?? "");
+  await expect(b.getByRole("button", { name: "Sync master" })).toHaveAttribute("aria-pressed", "true");
+  await expect(a.getByRole("button", { name: "Sync master" })).toHaveAttribute("aria-pressed", "false");
+});

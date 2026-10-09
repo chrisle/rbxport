@@ -492,6 +492,26 @@ function AppBody() {
   const [trafficLight, setTrafficLight] = useState<TrafficLightSource>(restored.trafficLight);
   const activeTrafficLight = trafficLight === "b" && deckCount(layout) < 2 ? "a" : trafficLight;
   const trafficDeck: DeckId = deckCount(layout) < 2 ? "a" : activeTrafficLight === "master" ? syncMaster : activeTrafficLight;
+  /*
+   * A new track on the master deck, or none, hands MASTER to the other deck
+   * when that one holds a track, as rekordbox does: the deck that was
+   * following keeps the tempo it was playing at, rather than jumping to the
+   * new track's BPM [OBS rekordbox 7 Export, chris-win11, parity/issue-128;
+   * manual p.168 "When changing or unloading a track on the deck of the sync
+   * master the sync master is switched to the other deck"]. Its BEAT SYNC is
+   * left as it was, so it follows again if MASTER comes back.
+   */
+  const masterTrackId = (syncMaster === "b" ? playerTrackB : playerTrack)?.id ?? null;
+  const otherTrackId = (syncMaster === "b" ? playerTrack : playerTrackB)?.id ?? null;
+  const twoDecks = deckCount(layout) >= 2;
+  const masterHeld = useRef({ deck: syncMaster, track: masterTrackId });
+  useEffect(() => {
+    const held = masterHeld.current;
+    masterHeld.current = { deck: syncMaster, track: masterTrackId };
+    if (held.deck !== syncMaster || held.track === null || held.track === masterTrackId) return;
+    if (!twoDecks || otherTrackId === null) return;
+    setSyncMasterState(syncMaster === "a" ? "b" : "a");
+  }, [syncMaster, masterTrackId, otherTrackId, twoDecks]);
   const trafficTrack = trafficDeck === "b" ? playerTrackB : playerTrack;
   const trafficKey = trafficTrack ? transposeKey(trafficTrack.key, keyShift[trafficDeck]) : null;
   const master = useMasterControls();
