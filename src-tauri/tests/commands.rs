@@ -601,6 +601,41 @@ fn removing_from_collection_is_permanent_and_clears_history() {
     assert_eq!(error.kind, ErrorKind::NotFound);
 }
 
+/// A multi-selection removed from the collection (#136) takes every selected
+/// track out of the collection and out of each playlist it was in, and leaves
+/// the rest alone. rekordbox's Delete key and Remove from Collection both pass
+/// the whole selection to `DatabaseIF::removeFromCollection` [OBS static,
+/// rekordbox 7.2.19 `browse::ListViewer::deleteKeyPressed` @0x1004069b8].
+#[test]
+fn removing_several_tracks_from_the_collection_removes_every_one() {
+    let s = shell();
+    run(commands::create_playlist(s.handle(), s.state(), "Set".into(), ROOT.into())).unwrap();
+    let playlist = s.node("Set").id;
+    let members = vec![track_id(1), track_id(2), track_id(3), track_id(4)];
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist.clone(), members.clone())).unwrap();
+
+    let (view, before) = s.open(collection_spec());
+    let all = s.rows(view);
+    assert_eq!(all.len(), before as usize);
+
+    let selected = vec![track_id(2), track_id(3), track_id(9)];
+    run(commands::remove_from_collection(s.handle(), s.state(), selected.clone())).unwrap();
+
+    let (view, after) = s.open(collection_spec());
+    let left = s.rows(view);
+    assert_eq!(after as usize, before as usize - selected.len(), "every selected track leaves");
+    for id in &selected {
+        assert!(!ids(&left).contains(&id.as_str()), "{id} is still in the collection");
+    }
+    let kept: Vec<&str> = ids(&all).into_iter().filter(|id| !selected.iter().any(|s| s == id)).collect();
+    assert_eq!(ids(&left), kept, "the other tracks stay, in order");
+    assert_eq!(
+        ids(&s.playlist_rows(&playlist)),
+        [members[0].as_str(), members[3].as_str()],
+        "the removed tracks leave the playlist too",
+    );
+}
+
 #[test]
 fn every_edit_bumps_the_generation_and_tells_the_interface() {
     let s = shell();
