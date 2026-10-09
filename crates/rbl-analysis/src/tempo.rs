@@ -171,6 +171,10 @@ pub struct TempoOptions {
     pub segment_threshold: f64,
     /// Where each beat is placed when the line is fitted.
     pub placement: Placement,
+    /// Whether the grid follows the music through tempo changes, ramps and
+    /// re-phased returns. Without it the whole track is one constant grid,
+    /// as rekordbox's Normal analysis writes it.
+    pub follow_changes: bool,
 }
 
 /// What a beat is snapped to before the line is fitted through the beats.
@@ -196,6 +200,7 @@ impl Default for TempoOptions {
             segment_window_secs: 16.0,
             segment_threshold: 0.02,
             placement: Placement::Attack,
+            follow_changes: true,
         }
     }
 }
@@ -592,18 +597,38 @@ fn fit(reader: Reader<'_>, bpm: f64, from: usize, to: usize, options: TempoOptio
     best.map(|(fit, _)| whole_bpm(reader, from, to, fit))
 }
 
-/// A steady tempo measured within this of a whole number of BPM is that
+/// A steady tempo measured within this of a whole number of BPM may be that
 /// whole number. Dance music is produced at whole tempos: every one of the
-/// 155 golden tracks is, and our fit lands within 0.04 of the whole number
-/// on all of them, so the tolerance is generous to the fit and still well
-/// short of the next tenth.
+/// 155 golden tracks is, and our fit lands within 0.05 of the whole number
+/// on all of them.
 const WHOLE_BPM_TOLERANCE: f64 = 0.1;
+
+/// The share of the measured line's hits the whole-number line has to sit
+/// on for the whole number to be taken.
+///
+/// A fit a few hundredths from a whole number is either a sequenced track
+/// the fit got slightly wrong, where the whole number sits on as many hits
+/// as the fit, or a track that really runs at 173.97 or 107.95 (a band, a
+/// turntable, a remaster), where the whole number drifts off the hits a
+/// little more every bar. Rekordbox measures those to the hundredth and
+/// does not round them (its Normal analysis searches the tempo in 0.002 BPM
+/// steps around its estimate, `BeatAnalyzer_1_0::UnitBeatAdjust::bpmAdjust`),
+/// and 0.03 BPM is a sixth of a beat of drift over five minutes. Measured
+/// on 145 hard dance and drum & bass and 168 band tracks against
+/// rekordbox's own grids, and on the 155 golden tracks: at 0.85 the golden
+/// grids hold (one is an edit whose half-level second kick pattern pulls
+/// its first tempo's fit 0.04 BPM off, leaving the whole number on 88 % as
+/// many hits), and thirteen drum & bass tracks get rekordbox's 173.97 to
+/// 174.01 instead of 174.00.
+const WHOLE_BPM_SUPPORT: f64 = 0.85;
 
 /// The fit with its period snapped to the whole number of BPM it is
 /// within `WHOLE_BPM_TOLERANCE` of, and its phase refitted through the
 /// same hits at that period, so the line turns about the hits' centre
 /// rather than its first beat. A fit further from a whole number is left
-/// alone: a tempo like 127.7 is rare but real.
+/// alone: a tempo like 127.7 is rare but real. So is one a few hundredths
+/// from a whole number, where the whole number's line sits on clearly
+/// fewer of the hits than the measured one (`WHOLE_BPM_SUPPORT`).
 fn whole_bpm(reader: Reader<'_>, from: usize, to: usize, fit: Fit) -> Fit {
     if fit.period <= 0.0 {
         return fit;
@@ -615,7 +640,34 @@ fn whole_bpm(reader: Reader<'_>, from: usize, to: usize, fit: Fit) -> Fit {
     }
     let period = reader.rate * 60.0 / whole;
     let start = Fit { phase: fit.phase, period };
-    snap_and_fit(reader, from, to, start, Some(period)).map_or(start, |(f, _)| f)
+    let snapped = snap_and_fit(reader, from, to, start, Some(period)).map_or(start, |(f, _)| f);
+    if on_line(reader, from, to, snapped) < on_line(reader, from, to, fit) * WHOLE_BPM_SUPPORT {
+        return fit;
+    }
+    snapped
+}
+
+/// How far from a line a hit may be and still count towards it, in seconds.
+const ON_LINE_SECS: f64 = 0.010;
+
+/// How much of the music a line sits on: the hit nearest each of its beats
+/// in `from..to`, by strength, counted in full on the line and less the
+/// further it is from it, down to nothing at `ON_LINE_SECS`.
+fn on_line(reader: Reader<'_>, from: usize, to: usize, f: Fit) -> f64 {
+    if f.period < 2.0 {
+        return 0.0;
+    }
+    let reach = (f.period * 0.2).max(1.0);
+    let tolerance = ON_LINE_SECS * reader.rate;
+    let first = ((from as f64 - f.phase) / f.period).ceil() as i64;
+    let last = ((to as f64 - 1.0 - f.phase) / f.period).floor() as i64;
+    (first..=last)
+        .filter_map(|k| {
+            let predicted = f.phase + k as f64 * f.period;
+            let (at, height) = reader.snap(predicted, reach)?;
+            Some(height * (1.0 - (at - predicted).abs() / tolerance).max(0.0))
+        })
+        .sum()
 }
 
 /// Comb-filter score of a grid: onset energy summed at every beat of the
@@ -1068,6 +1120,14 @@ fn run_bounds(labels: &[f64]) -> Vec<(usize, usize)> {
 fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&mut Vec<GapDecision>>) -> Vec<Segment> {
     let (values, rate, origin_secs) = (reader.values, reader.rate, reader.origin_secs);
     let n = values.len();
+    if !options.follow_changes {
+        // One line through the whole track, from the start of the file to
+        // its end, whatever the tempo does along the way.
+        return fit(reader, bpm, 0, n, options)
+            .map(|f| Segment { from_secs: 0.0, to_secs: to_secs_of(reader, n as f64), period_secs: f.period / rate, phase_secs: to_secs_of(reader, f.phase) })
+            .into_iter()
+            .collect();
+    }
     let window = ((options.segment_window_secs * rate) as usize).max(64);
     // Local tempo per window, as a ratio to the track's, or None where the
     // window has too little to say.
@@ -1170,6 +1230,11 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&m
         pending = Some(next_fit);
     }
     split_gaps(reader, &segments, options, trace)
+}
+
+/// Seconds into the file of envelope sample `x`.
+fn to_secs_of(reader: Reader<'_>, x: f64) -> f64 {
+    reader.origin_secs + x / reader.rate
 }
 
 /// The tempo of one window as a ratio to `bpm`, or None when the window has

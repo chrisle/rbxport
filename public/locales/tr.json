@@ -940,7 +940,7 @@
   "Analysis mode": "Analiz modu",
   "Rekordbox · Normal": "Kayıt Kutusu · Normal",
   "RBXport (for Electronic Music)": "RBXport (Elektronik Müzik için)",
-  "Normal mode with a 70–180 BPM range, high-precision beat placement and key detection.": "70-180 BPM aralığına, yüksek hassasiyetli vuruş yerleştirmeye ve tuş algılamaya sahip normal mod.",
+  "Normal mode: one constant tempo for the whole track, with high-precision beat placement and key detection.": "Normal mod: Yüksek hassasiyetli vuruş yerleşimi ve ton tespiti ile tüm parça için sabit bir tempo.",
   "Aligns beats to kick drums, uses musical phrase changes to find the first beat of each bar, and detects tempo changes and key.": "Vuruşları davullara göre hizalar, her ölçünün ilk vuruşunu bulmak için müzik cümlesi değişikliklerini kullanır ve tempo değişikliklerini ve tonunu algılar.",
   "Tracks analysed at once": "Parçalar tek seferde analiz edildi",
   "Lower this if analysis affects playback. More tracks at once uses more processing power.": "Analiz oynatmayı etkiliyorsa bunu düşürün. Aynı anda daha fazla parça, daha fazla işlem gücü kullanır.",

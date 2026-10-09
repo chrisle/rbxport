@@ -196,11 +196,27 @@ kick arriving twenty seconds later.
 
 ## 7. A whole number
 
-A steady tempo within 0.1 BPM of a whole number is that whole number: the
-line is fixed at that period and re-phased through the same kicks, so it
-turns about their centre. Dance music is produced at whole tempos, every
-reference track is at one, and the fit lands within 0.04 of it on all of
+A steady tempo within 0.1 BPM of a whole number may be that whole number:
+the line is fixed at that period and re-phased through the same kicks, so
+it turns about their centre. Dance music is produced at whole tempos, every
+reference track is at one, and the fit lands within 0.05 of it on all of
 them. The beats of a walked change keep their measured interval tempo.
+
+The whole number is taken only when its line sits on at least 85 % as much
+of the music as the measured line (`on_line`: each beat's hit by strength,
+counted in full on the line and less the further it is, to nothing at
+10 ms). A track that really runs a few hundredths off a whole number keeps
+its measured tempo, because the whole number's line drifts off its hits
+bar by bar. Rekordbox does not round either: its Normal analysis searches
+the tempo in 0.002 BPM steps around its estimate
+(`BeatAnalyzer_1_0::UnitBeatAdjust::bpmAdjust` in rekordbox 7 for macOS),
+and 13,894 of 35,262 grids in one rekordbox library start at a tempo that
+is not a whole number, drum & bass at 173.97 to 174.01 among them.
+Rounding 173.97 to 174 puts a grid 52 ms early by the end of five minutes.
+The 85 % allows for a fit pulled a few hundredths off by a second,
+half-level kick pattern: the reference edit `Bring Me Back to Life
+[138-150]` fits its 138 section at 137.96, and the 138 line sits on 88 %
+as many of its hits.
 
 ## 8. Gaps
 

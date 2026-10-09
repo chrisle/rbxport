@@ -164,6 +164,24 @@ export interface AudioPreferences {
 
 export type AnalysisMode = "rekordbox" | "rbxport";
 
+/**
+ * Rekordbox's BPM Range choices, in its order, 70–180 the default
+ * (`analyzer::bpmRangeList` in rekordbox 7; the same ten in its Analysis
+ * Setting dialog and Preferences > Analysis > Track Analysis [OBS]). The
+ * tempo search stays inside the chosen range, so 180–200 BPM music needs
+ * one that reaches past 180 or it is counted at half speed.
+ */
+export const BPM_RANGES = [
+  "70-180", "48-95", "58-115", "68-135", "78-155", "88-175", "98-195", "108-215", "118-235", "128-255",
+] as const;
+export type BpmRange = (typeof BPM_RANGES)[number];
+
+/** The lowest and highest tempo a BPM Range choice searches. */
+export function bpmRangeLimits(range: BpmRange): { minBpm: number; maxBpm: number } {
+  const [minBpm = 70, maxBpm = 180] = range.split("-").map(Number);
+  return { minBpm, maxBpm };
+}
+
 export interface AnalysisPreferences {
   mode: AnalysisMode;
   concurrentTracks: number;
@@ -171,6 +189,8 @@ export interface AnalysisPreferences {
   auto: boolean;
   /** Add a memory cue on the first beat; also the Analysis Setting default. */
   firstBeatCue: boolean;
+  /** The tempo range automatic analysis searches; also the Analysis Setting default. */
+  bpmRange: BpmRange;
 }
 
 /**
@@ -294,6 +314,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     concurrentTracks: SLOTS,
     auto: false,
     firstBeatCue: false,
+    bpmRange: "70-180",
   },
   djSystem: {
     waveformColor: "3band",
@@ -462,6 +483,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       concurrentTracks: oneOfNumber(analysis.concurrentTracks, ANALYSIS_SLOTS, SLOTS),
       auto: bool(analysis.auto, d.analysis.auto),
       firstBeatCue: bool(analysis.firstBeatCue, d.analysis.firstBeatCue),
+      bpmRange: oneOf(analysis.bpmRange, BPM_RANGES, d.analysis.bpmRange),
     },
     djSystem: {
       waveformColor: oneOf(dj.waveformColor, WAVEFORM_COLORS, d.djSystem.waveformColor),

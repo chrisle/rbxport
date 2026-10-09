@@ -26,9 +26,15 @@ and measurements live in [Reference evaluation](validation/reference-playlist.md
 - **Drum & bass is counted at the fast tempo** (174, not 87). When two
   octaves are both plausible, the faster one wins if it carries the most
   rhythm at its rate.
-- **Near-integer steady tempos snap to whole BPM.** Under this policy, a fitted line within a tenth of a whole number is snapped
-  to it and re-phased through the same kicks. The beats of a gradual change
-  keep the tempo they were measured at.
+- **Near-integer steady tempos snap to whole BPM when the music agrees.**
+  A fitted line within a tenth of a whole number is snapped to it and
+  re-phased through the same kicks, unless the whole number's line sits on
+  less than 85 % as much of the music as the measured one: a track that
+  really runs at 173.97 keeps 173.97, as rekordbox measures it. The beats of
+  a gradual change keep the tempo they were measured at.
+- **The Normal preset is one constant tempo**, as rekordbox's Normal
+  analysis is. The RBXport preset follows tempo changes, ramps and
+  re-phased returns as described below.
 - **A tempo change is a new segment**, with the beat count carrying on 1–4
   across the join, as rekordbox writes it — whatever the new music does
   on that beat. Beat 1 is decided on the first tempo's own music, and the

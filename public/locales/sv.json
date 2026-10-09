@@ -934,7 +934,7 @@
   "Analysis mode": "Analysläge",
   "Rekordbox · Normal": "Rekordbox · Normal",
   "RBXport (for Electronic Music)": "RBX-port (för elektronisk musik)",
-  "Normal mode with a 70–180 BPM range, high-precision beat placement and key detection.": "Normalt läge med ett intervall på 70–180 BPM, högprecisions slagplacering och tangentdetektering.",
+  "Normal mode: one constant tempo for the whole track, with high-precision beat placement and key detection.": "Normalläge: ett konstant tempo för hela spåret, med högprecisionstaktsplacering och tangentdetektering.",
   "Aligns beats to kick drums, uses musical phrase changes to find the first beat of each bar, and detects tempo changes and key.": "Justerar taktslag för att sparka trummor, använder musikaliska frasändringar för att hitta det första slaget i varje takt, och upptäcker tempoförändringar och tonarter.",
   "Tracks analysed at once": "Spår analyseras på en gång",
   "Lower this if analysis affects playback. More tracks at once uses more processing power.": "Sänk detta om analys påverkar uppspelningen. Fler spår samtidigt använder mer processorkraft.",

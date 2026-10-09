@@ -8,6 +8,11 @@
 //!   what rekordbox recorded for it (BPM, key, the `PQTZ` grid) under
 //!   `target/golden/`.
 //!
+//! `cache genre:<genre>[,<genre>…][:<limit>]` caches the first `limit`
+//!   tracks of each named genre instead of a playlist, to compare a style
+//!   of music against rekordbox's grids without editing the library. Point
+//!   `RB_LITE_GOLDEN` at a separate directory for each set.
+//!
 //! `cargo run --release -p rbl-analysis --example golden -- eval [filter]`
 //!   analyses every cached track and scores three things, each pass/fail per
 //!   track, and prints every failure:
@@ -32,6 +37,15 @@
 //!   with `RB_LITE_BGRID=1` per bar of rekordbox's incoming grid extended
 //!   back over the change; `RB_LITE_PEAKS=kick|flux|attack,from,to[,min]`
 //!   lists one band's raw peaks in a range.
+//!
+//! `cargo run --release -p rbl-analysis --example golden -- align [filter]`
+//!   measures how each grid sits on the music, ours and rekordbox's alike:
+//!   the offset of the onsets from the beats in each fifth of the track,
+//!   and how many grids drift. It needs no grid to be right, so it can
+//!   judge a playlist whose rekordbox grids are not checked by hand.
+//!
+//! `RB_LITE_PRESET=rekordbox|rbxport` picks the app preset under test and
+//! `RB_LITE_RANGE=<min>-<max>` its BPM range.
 //!
 //! `RUST_LOG=rbl_analysis=debug` on any mode prints the tempo stage's
 //! decisions at each change: the settled levels, the kick's runs, the cut.
@@ -84,6 +98,7 @@ fn main() {
         "downbeat" => downbeat_experiment(),
         "kick" => kick_experiment(),
         "transition" => transition_experiment(),
+        "align" => align_experiment(),
         "key" => key_experiment(),
         "bassroot" => bassroot_experiment(),
         other => println!("unknown mode {other:?}; use `cache` or `eval`"),
@@ -106,13 +121,40 @@ fn cache() {
     };
     let share = db.location().share_root.clone();
     let (library, _stats) = rbl_index::load(&db).expect("index");
-    let playlists = library.playlists();
-    let Some(index) = (0..playlists.len()).find(|&i| playlists.name(i) == name) else {
-        println!("no playlist named {name:?}");
-        return;
+    let members = if let Some(selector) = name.strip_prefix("genre:") {
+        // `genre:<name>[,<name>…][:<limit>]`: the first `limit` tracks
+        // (by library row) of each named genre, matched case-insensitively,
+        // whose file is present. For comparing rekordbox's grids on a
+        // style of music without building a playlist in the library.
+        let (names, limit) = match selector.rsplit_once(':') {
+            Some((names, limit)) if limit.parse::<usize>().is_ok() => (names, limit.parse::<usize>().unwrap_or(usize::MAX)),
+            _ => (selector, usize::MAX),
+        };
+        let wanted: Vec<String> = names.split(',').map(|g| g.trim().to_lowercase()).filter(|g| !g.is_empty()).collect();
+        let mut taken = vec![0usize; wanted.len()];
+        let mut rows = Vec::new();
+        for i in 0..library.ids.len() {
+            let row = i as rbl_index::Row;
+            let genre = library.genre_name(row).to_lowercase();
+            let Some(g) = wanted.iter().position(|w| *w == genre) else { continue };
+            if taken[g] >= limit || !Path::new(library.folder_path.get(i)).exists() {
+                continue;
+            }
+            taken[g] += 1;
+            rows.push(row);
+        }
+        println!("genres {wanted:?}: {} tracks", rows.len());
+        rows
+    } else {
+        let playlists = library.playlists();
+        let Some(index) = (0..playlists.len()).find(|&i| playlists.name(i) == name) else {
+            println!("no playlist named {name:?}");
+            return;
+        };
+        let members = playlists.members[index].clone();
+        println!("playlist {name:?}: {} tracks", members.len());
+        members
     };
-    let members = playlists.members[index].clone();
-    println!("playlist {name:?}: {} tracks", members.len());
 
     let started = Instant::now();
     let mut done = 0usize;
@@ -287,6 +329,13 @@ fn options_under_test() -> rbl_analysis::AnalysisOptions {
     };
     if let Some(r) = std::env::var("RB_LITE_ATTACK_REACH").ok().and_then(|v| v.parse::<f64>().ok()) {
         options.attacks.reach_secs = r;
+    }
+    if let Some((min, max)) = std::env::var("RB_LITE_RANGE").ok().and_then(|v| {
+        let (a, b) = v.split_once('-')?;
+        Some((a.parse::<f64>().ok()?, b.parse::<f64>().ok()?))
+    }) {
+        options.tempo.min_bpm = min;
+        options.tempo.max_bpm = max;
     }
     match std::env::var("RB_LITE_PLACEMENT").as_deref() {
         Ok("envelope") => options.tempo.placement = rbl_analysis::tempo::Placement::Envelope,
@@ -484,6 +533,16 @@ fn eval() {
     line("downbeat", count(Score::downbeat_ok));
     line("grid", count(Score::grid_ok));
     line("key", count(Score::key_ok));
+    // A tempo change rekordbox's grid does not have is a grid that is wrong
+    // after it, whatever the bpm column says.
+    let changes = |runs: &str| runs.lines().next().is_some_and(|l| l.contains('|'));
+    let extra: Vec<&str> = scores.iter().filter(|s| changes(&s.our_runs) && !changes(&s.rb_runs)).map(|s| s.title.as_str()).collect();
+    println!("  tempo changes rekordbox's grid does not have: {} / {n}", extra.len());
+    if verbose {
+        for title in extra {
+            println!("    {}", truncate(title, 70));
+        }
+    }
     let mut offsets: Vec<f64> = scores.iter().filter(|s| s.downbeat_ok()).map(|s| s.downbeat_offset_ms).collect();
     offsets.sort_by(|a, b| a.partial_cmp(b).unwrap());
     if !offsets.is_empty() {
@@ -1030,4 +1089,88 @@ fn transition_experiment() {
             if !line.is_empty() { println!("{line}"); }
         }
     }
+}
+
+/// How well each grid sits on the music along the track: per fifth of the
+/// track, the median offset of the strongest onset within a sixth of a beat
+/// of each beat, and the mean onset strength at the beats over the whole
+/// track. A grid whose offsets wander from fifth to fifth has the wrong
+/// tempo, whichever grid it is; the one with the stronger beats is on more
+/// of the music.
+fn align_experiment() {
+    let filter = std::env::args().nth(2).map(|s| s.to_lowercase());
+    let dir = cache_dir();
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "gold")).collect())
+        .unwrap_or_default();
+    paths.sort();
+    // A grid whose offset from the music moves more than this between
+    // fifths of the track has drifted off it somewhere.
+    const DRIFTS_MS: f64 = 40.0;
+    let (mut ours_better, mut rb_better, mut n) = (0usize, 0usize, 0usize);
+    let (mut ours_drift, mut rb_drifts) = (0usize, 0usize);
+    for path in &paths {
+        let Some(track) = read_track(path) else { continue };
+        if filter.as_ref().is_some_and(|f| !track.title.to_lowercase().contains(f.as_str())) {
+            continue;
+        }
+        if track.grid.len() < 16 {
+            continue;
+        }
+        let onsets = rbl_analysis::onset::onset_envelope(&track.samples, track.sample_rate);
+        let analysis = rbl_analysis::analyse_with(&track.samples, track.sample_rate, options_under_test());
+        let describe = |beats: &[Beat]| -> (String, f64, f64) {
+            let secs: Vec<f64> = beats.iter().map(|b| f64::from(b.time_ms) / 1000.0).collect();
+            let end = secs.last().copied().unwrap_or(0.0);
+            let mut parts: Vec<Vec<f64>> = vec![Vec::new(); 5];
+            let mut strength = 0.0;
+            for (i, &t) in secs.iter().enumerate() {
+                let period = secs.get(i + 1).or(secs.get(i.wrapping_sub(1))).map_or(0.5, |&u| (u - t).abs());
+                let x = (t - onsets.origin_secs) * onsets.rate;
+                strength += f64::from(onsets.sample_at(x));
+                let reach = period / 6.0 * onsets.rate;
+                let lo = (x - reach).max(0.0) as usize;
+                let hi = ((x + reach) as usize).min(onsets.len().saturating_sub(1));
+                let Some((at, h)) = (lo..=hi).map(|j| (j, onsets.values[j])).max_by(|a, b| a.1.partial_cmp(&b.1).unwrap()) else { continue };
+                if h < 0.1 {
+                    continue;
+                }
+                let part = ((t / end.max(1e-9)) * 5.0).floor().clamp(0.0, 4.0) as usize;
+                parts[part].push((onsets.time_of(at as f64) - t) * 1000.0);
+            }
+            let medians: Vec<String> = parts
+                .iter_mut()
+                .map(|p| {
+                    p.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    p.get(p.len() / 2).map_or("   -".to_owned(), |m| format!("{m:+4.0}"))
+                })
+                .collect();
+            let values: Vec<f64> = parts.iter().filter_map(|p| p.get(p.len() / 2).copied()).collect();
+            let spread = values.iter().copied().fold(f64::NEG_INFINITY, f64::max) - values.iter().copied().fold(f64::INFINITY, f64::min);
+            (medians.join(" "), strength / secs.len().max(1) as f64, spread)
+        };
+        let (rb_line, rb_strength, rb_spread) = describe(&track.grid);
+        let (our_line, our_strength, our_spread) = describe(&analysis.tempo.beats);
+        n += 1;
+        if rb_spread > DRIFTS_MS {
+            rb_drifts += 1;
+        }
+        if our_spread > DRIFTS_MS {
+            ours_drift += 1;
+        }
+        if our_strength > rb_strength * 1.02 {
+            ours_better += 1;
+        } else if rb_strength > our_strength * 1.02 {
+            rb_better += 1;
+        }
+        println!(
+            "{:<40} rb {:>7.2} [{rb_line}] {rb_strength:.3} | ours {:>7.2} [{our_line}] {our_strength:.3}{}",
+            truncate(&track.title, 40),
+            track.bpm,
+            analysis.tempo.bpm,
+            if our_spread > DRIFTS_MS && rb_spread <= DRIFTS_MS { "  <-- ours drifts" } else { "" },
+        );
+    }
+    println!("{n} tracks: our beats stronger on {ours_better}, rekordbox's on {rb_better}");
+    println!("drifting more than {DRIFTS_MS} ms between fifths: ours {ours_drift}, rekordbox's {rb_drifts}");
 }

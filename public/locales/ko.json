@@ -930,7 +930,7 @@
   "Analysis mode": "분석 모드",
   "Rekordbox · Normal": "Rekordbox · 일반",
   "RBXport (for Electronic Music)": "RBXport(전자 음악용)",
-  "Normal mode with a 70–180 BPM range, high-precision beat placement and key detection.": "70-180 BPM 범위, 고정밀 비트 배치 및 키 감지 기능을 갖춘 일반 모드입니다.",
+  "Normal mode: one constant tempo for the whole track, with high-precision beat placement and key detection.": "일반 모드: 고정밀 비트 배치 및 키 감지를 통해 전체 트랙에 대해 하나의 일정한 템포를 제공합니다.",
   "Aligns beats to kick drums, uses musical phrase changes to find the first beat of each bar, and detects tempo changes and key.": "킥 드럼에 맞춰 비트를 정렬하고, 음악 프레이즈 변경을 사용하여 각 마디의 첫 번째 비트를 찾고, 템포 변화와 키를 감지합니다.",
   "Tracks analysed at once": "트랙을 한번에 분석",
   "Lower this if analysis affects playback. More tracks at once uses more processing power.": "분석이 재생에 영향을 미치는 경우 이 값을 낮추세요. 한 번에 더 많은 트랙이 더 많은 처리 능력을 사용합니다.",

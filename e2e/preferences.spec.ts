@@ -437,10 +437,30 @@ test("Analysis describes the selected mode", async ({ page }) => {
   await dialog.getByRole("tab", { name: "Analysis", exact: true }).click();
   const mode = dialog.getByRole("combobox", { name: "Analysis mode", exact: true });
   await mode.selectOption("rekordbox");
-  await expect(dialog.getByText("Normal mode with a 70–180 BPM range", { exact: false })).toBeVisible();
+  await expect(dialog.getByText("Normal mode: one constant tempo", { exact: false })).toBeVisible();
   await mode.selectOption("rbxport");
   await expect(dialog.getByText("Aligns beats to kick drums", { exact: false })).toBeVisible();
-  await expect(dialog.getByText("Normal mode with a 70–180 BPM range", { exact: false })).toHaveCount(0);
+  await expect(dialog.getByText("Normal mode: one constant tempo", { exact: false })).toHaveCount(0);
+});
+
+test("Analysis BPM Range offers rekordbox's ranges and sets the Analysis Setting default", async ({ page }) => {
+  await open(page, "?writable=1");
+  const dialog = await prefs(page);
+  await dialog.getByRole("tab", { name: "Analysis", exact: true }).click();
+  const range = dialog.getByRole("combobox", { name: "BPM Range", exact: true });
+  await expect(range).toHaveValue("70-180");
+  await expect(range.locator("option")).toHaveText(["70-180", "48-95", "58-115", "68-135", "78-155", "88-175", "98-195", "108-215", "118-235", "128-255"]);
+  await range.selectOption("108-215");
+  await page.keyboard.press("Escape");
+  await page.reload();
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  await rows.nth(2).click();
+  await page.keyboard.press("Shift+Meta+A");
+  const analysis = page.getByRole("dialog", { name: "Analysis Setting" });
+  const batchRange = analysis.getByRole("combobox", { name: "BPM Range" });
+  await expect(batchRange).toHaveValue("108-215");
+  await expect(batchRange.locator("option")).toHaveCount(10);
+  await analysis.getByRole("button", { name: "Cancel", exact: true }).click();
 });
 
 test("Show BPM changes controls waveform annotations and persists", async ({page}) => {

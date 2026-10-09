@@ -2616,6 +2616,7 @@ function AppBody() {
       ) : null}
       {analysisSelection !== null ? (
         <AnalysisDialog count={analysisSelection.length} initialMode={analysisPrefs.mode}
+          initialBpmRange={analysisPrefs.bpmRange}
           initialFirstBeatCue={analysisPrefs.firstBeatCue}
           onCancel={() => setAnalysisSelection(null)}
           onConfirm={settings => {

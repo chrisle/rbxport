@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BPM_RANGES,
+  bpmRangeLimits,
   browseListVars,
   browseScale,
   BROWSE_SCALE_DEFAULT,
@@ -53,6 +55,14 @@ describe("sanitisePreferences", () => {
     expect(DEFAULT_PREFERENCES.analysis.firstBeatCue).toBe(false);
     expect(sanitisePreferences({ analysis: { firstBeatCue: "yes" } }).analysis.firstBeatCue).toBe(false);
     expect(sanitisePreferences({ analysis: { firstBeatCue: true } }).analysis.firstBeatCue).toBe(true);
+  });
+
+  it("offers rekordbox's ten BPM ranges with 70-180 the default", () => {
+    expect(BPM_RANGES).toEqual(["70-180", "48-95", "58-115", "68-135", "78-155", "88-175", "98-195", "108-215", "118-235", "128-255"]);
+    expect(DEFAULT_PREFERENCES.analysis.bpmRange).toBe("70-180");
+    expect(sanitisePreferences({ analysis: { bpmRange: "118-236" } }).analysis.bpmRange).toBe("70-180");
+    expect(sanitisePreferences({ analysis: { bpmRange: "108-215" } }).analysis.bpmRange).toBe("108-215");
+    expect(bpmRangeLimits("128-255")).toEqual({ minBpm: 128, maxBpm: 255 });
   });
 
   it("keeps the browser key-sort choice and preserves the old display-based ordering", () => {

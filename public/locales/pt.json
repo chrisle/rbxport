@@ -949,7 +949,7 @@
   "Analysis mode": "Modo de análise",
   "Rekordbox · Normal": "Rekordbox · Normal",
   "RBXport (for Electronic Music)": "RBXport (para música eletrônica)",
-  "Normal mode with a 70–180 BPM range, high-precision beat placement and key detection.": "Modo normal com faixa de 70–180 BPM, posicionamento de batida de alta precisão e detecção de tom.",
+  "Normal mode: one constant tempo for the whole track, with high-precision beat placement and key detection.": "Modo normal: um andamento constante para toda a faixa, com posicionamento de batida de alta precisão e detecção de tom.",
   "Aligns beats to kick drums, uses musical phrase changes to find the first beat of each bar, and detects tempo changes and key.": "Alinha as batidas com a bateria, usa mudanças de frase musical para encontrar a primeira batida de cada compasso e detecta mudanças de andamento e tom.",
   "Tracks analysed at once": "Faixas analisadas de uma só vez",
   "Lower this if analysis affects playback. More tracks at once uses more processing power.": "Reduza este valor se a análise afetar a reprodução. Mais faixas ao mesmo tempo consomem mais poder de processamento.",

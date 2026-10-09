@@ -945,7 +945,7 @@
   "Analysis mode": "分析模式",
   "Rekordbox · Normal": "Rekordbox · 正常",
   "RBXport (for Electronic Music)": "RBXport（用于电子音乐）",
-  "Normal mode with a 70–180 BPM range, high-precision beat placement and key detection.": "正常模式具有 70-180 BPM 範圍、高精度節拍放置和調檢測。",
+  "Normal mode: one constant tempo for the whole track, with high-precision beat placement and key detection.": "普通模式：整首曲目一個恆定的節奏，具有高精度的節拍定位和調性檢測。",
   "Aligns beats to kick drums, uses musical phrase changes to find the first beat of each bar, and detects tempo changes and key.": "將節拍與底鼓對齊，使用樂句變化來查找每個小節的第一個節拍，並偵測速度變化和調。",
   "Tracks analysed at once": "立即分析曲目",
   "Lower this if analysis affects playback. More tracks at once uses more processing power.": "如果分析影响播放，请降低此值。更多轨道同时使用更多处理能力。",

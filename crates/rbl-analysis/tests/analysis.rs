@@ -371,12 +371,36 @@ fn a_change_on_a_beat_starts_with_it_and_drops_the_old_grid_s_same_hit() {
     assert_eq!(kept[21].time_ms, 10_300);
 }
 
+/// A click track at `bpm` whose every click is moved by up to `jitter_secs`
+/// either way, the same pseudo-random way every run: a sequenced tempo
+/// played with a little looseness, which a fitted line lands near but not
+/// exactly on.
+fn jittered_click_track(bpm: f64, secs: f64, first_secs: f64, jitter_secs: f64) -> Vec<f32> {
+    let total = (secs * f64::from(SR)) as usize;
+    let period = 60.0 / bpm * f64::from(SR);
+    let mut out = vec![0.0_f32; total];
+    let mut seed: u32 = 0x2545_f491;
+    let mut beat = first_secs * f64::from(SR);
+    while (beat as usize) < total {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let unit = f64::from(seed >> 8) / f64::from(1_u32 << 24) * 2.0 - 1.0;
+        let start = (beat + unit * jitter_secs * f64::from(SR)).max(0.0) as usize;
+        for i in 0..(SR as usize / 200) {
+            let Some(slot) = out.get_mut(start + i) else { break };
+            let decay = 1.0 - i as f32 / (SR as f32 / 200.0);
+            *slot += (i as f32 * 0.7).sin() * decay * 0.8;
+        }
+        beat += period;
+    }
+    out
+}
+
 #[test]
 fn a_steady_tempo_near_a_whole_number_is_that_whole_number() {
-    // Dance music is produced at whole tempos; a fit that comes out at
-    // 137.96 is 138. The clicks here really are at 137.96, so the beats
-    // are allowed to lean a few milliseconds either way at the ends.
-    let audio = click_track(137.96, 120.0, 0.2);
+    // Dance music is produced at whole tempos. Clicks at 138 played a few
+    // milliseconds loose put the fitted line a little off 138; the line at
+    // 138 sits on as many of them, so the tempo is 138.
+    let audio = jittered_click_track(138.0, 120.0, 0.2, 0.004);
     let result = analyse(&audio, SR).tempo;
     assert!((result.bpm - 138.0).abs() < 1e-6, "expected exactly 138, got {}", result.bpm);
     assert!(result.beats.iter().all(|b| b.tempo_x100 == 13_800));
@@ -384,6 +408,43 @@ fn a_steady_tempo_near_a_whole_number_is_that_whole_number() {
     let audio = click_track(127.6, 120.0, 0.2);
     let result = analyse(&audio, SR).tempo;
     assert!((result.bpm - 127.6).abs() < 0.05, "expected about 127.6, got {}", result.bpm);
+}
+
+#[test]
+fn a_steady_tempo_a_few_hundredths_off_a_whole_number_keeps_its_measured_tempo() {
+    // Rekordbox measures drum & bass tracks at 173.97 or 174.01 and tracks
+    // from bands and turntables at 107.95, and keeps those tempos: it does
+    // not round to a whole number. Rounding 173.97 to 174 would put the
+    // grid 52 ms early by the end of five minutes, a sixth of a beat.
+    for bpm in [173.97, 107.95] {
+        let audio = click_track(bpm, 300.0, 0.2);
+        let result = analyse(&audio, SR).tempo;
+        assert!((result.bpm - bpm).abs() < 0.005, "expected {bpm}, got {}", result.bpm);
+        assert_eq!(result.segments.len(), 1, "segments: {:?}", result.segments);
+        let period = 60.0 / bpm;
+        let last = result.beats.last().expect("a grid");
+        let last_secs = f64::from(last.time_ms) / 1000.0;
+        let click = 0.2 + ((last_secs - 0.2) / period).round() * period;
+        assert!((last_secs - click).abs() < 0.005, "{bpm}: last beat {last_secs:.3}s, its click at {click:.3}s");
+    }
+}
+
+#[test]
+fn the_normal_preset_is_one_constant_grid_as_rekordbox_writes_it() {
+    use rbl_analysis::{analyse_with, AnalysisPreset};
+    // A DJ edit: 60 seconds at 128, then 60 at 140. RBXport follows the
+    // change; rekordbox's Normal analysis is one tempo for the whole track.
+    let mut audio = click_track(128.0, 60.0, 0.2);
+    audio.extend_from_slice(&click_track(140.0, 60.0, 0.1));
+    let followed = analyse_with(&audio, SR, AnalysisPreset::Rbxport.options()).tempo;
+    assert_eq!(followed.segments.len(), 2, "segments: {:?}", followed.segments);
+    let normal = analyse_with(&audio, SR, AnalysisPreset::Rekordbox.options()).tempo;
+    assert_eq!(normal.segments.len(), 1, "segments: {:?}", normal.segments);
+    let segment = normal.segments[0];
+    assert_eq!(segment.from_secs, 0.0);
+    assert!(segment.to_secs >= 119.9, "the grid runs to the end: {segment:?}");
+    let first = normal.beats.first().map_or(0, |b| b.tempo_x100);
+    assert!(normal.beats.iter().all(|b| b.tempo_x100 == first), "one tempo throughout");
 }
 
 #[test]

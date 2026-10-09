@@ -939,7 +939,7 @@
   "Analysis mode": "Elemzési mód",
   "Rekordbox · Normal": "Rekordbox · Normal",
   "RBXport (for Electronic Music)": "RBXport (elektronikus zenéhez)",
-  "Normal mode with a 70–180 BPM range, high-precision beat placement and key detection.": "Normál mód 70–180 BPM tartománnyal, nagy pontosságú ütéselhelyezéssel és billentyűészleléssel.",
+  "Normal mode: one constant tempo for the whole track, with high-precision beat placement and key detection.": "Normál mód: egy állandó tempó az egész számhoz, nagy pontosságú ütemelhelyezéssel és billentyűészleléssel.",
   "Aligns beats to kick drums, uses musical phrase changes to find the first beat of each bar, and detects tempo changes and key.": "Az ütemeket a dobokhoz igazítja, zenei frázisváltásokat használ az egyes ütemek első ütemének megtalálásához, és érzékeli a tempóváltozásokat és a kulcsot.",
   "Tracks analysed at once": "Egyszerre elemzett számok",
   "Lower this if analysis affects playback. More tracks at once uses more processing power.": "Csökkentse ezt, ha az elemzés befolyásolja a lejátszást. Több zeneszám egyszerre több feldolgozási teljesítményt használ.",
