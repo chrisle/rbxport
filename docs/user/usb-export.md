@@ -39,6 +39,16 @@ edits are refused while rekordbox is running, and greyed while the stick is
 being synced, exported or ejected. Adding tracks from the collection to a
 stick's playlist is an export: use Export Playlist or Sync Manager.
 
+## Music already on the device
+
+As in rekordbox, a track whose file the library already keeps on the
+destination device is not copied. The device databases name the file where it
+is, and export writes only the databases and the track's analysis. A path
+with a component the device cannot carry (a reserved character, or a name
+ending in a dot or a space) is copied under `Contents/` instead, as rekordbox
+does. Export never deletes or replaces such a file, including when the track
+later leaves the selection or music cleanup is enabled.
+
 ## Delete music outside playlists
 
 Off by default. When enabled, export removes RBXport-exported audio outside
