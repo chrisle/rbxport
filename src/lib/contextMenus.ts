@@ -283,7 +283,7 @@ export function treeMenu(
 }
 
 /** What the Devices tree's menus do over a stick's own playlists. */
-export type DeviceTreeAction = "deviceCreatePlaylist" | "deviceCreateFolder" | "deviceRename" | "deviceDelete";
+export type DeviceTreeAction = "deviceCreatePlaylist" | "deviceCreateFolder" | "deviceDelete";
 
 /**
  * Right-clicking under a stick in the Devices tree: its Playlists heading, a
@@ -293,10 +293,11 @@ export type DeviceTreeAction = "deviceCreatePlaylist" | "deviceCreateFolder" | "
  * showTreeViewPopupMenu` @0x1000efa7c, static, rekordbox 7.2.11 macOS].
  *
  * Live are the edits this app makes to a stick: Create New Playlist and
- * Create New Folder, Delete, and the rename. rekordbox renames by editing
- * the name in place; the Rename row beside Delete is this app's, as on the
- * collection's playlists. Import, Delete All, Sort Items, artwork, export to
- * a file and shortcuts are drawn greyed.
+ * Create New Folder, and Delete. There is no Rename row: rekordbox renames
+ * a stick's playlist or folder only by clicking it once selected
+ * (`FolderListTreeViewItem::isEditableItem` @0x1016c7868), and so does the
+ * tree here. Import, Delete All, Sort Items, artwork, export to a file and
+ * shortcuts are drawn greyed.
  */
 export function deviceTreeMenu(kind: "devicePlaylists" | "deviceFolder" | "devicePlaylist"): readonly MenuRow<DeviceTreeAction>[] {
   const create: MenuRow<DeviceTreeAction>[] = [
@@ -322,7 +323,6 @@ export function deviceTreeMenu(kind: "devicePlaylists" | "deviceFolder" | "devic
       SEPARATOR,
       { label: "Import Folder", action: null },
       SEPARATOR,
-      { label: "Rename Folder", action: "deviceRename" },
       { label: "Delete Folder", action: "deviceDelete" },
       SEPARATOR,
       { label: "Sort Items", action: null },
@@ -335,7 +335,6 @@ export function deviceTreeMenu(kind: "devicePlaylists" | "deviceFolder" | "devic
     SEPARATOR,
     { label: "Import Playlist", action: null },
     SEPARATOR,
-    { label: "Rename Playlist", action: "deviceRename" },
     { label: "Delete Playlist", action: "deviceDelete" },
     SEPARATOR,
     { label: "Export a playlist to a file", action: null, submenu: true },
@@ -505,7 +504,6 @@ const WRITES: ReadonlySet<string> = new Set([
   // so these are refused alongside the library's own writes.
   "deviceCreatePlaylist",
   "deviceCreateFolder",
-  "deviceRename",
   "deviceDelete",
 ]);
 

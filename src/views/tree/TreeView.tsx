@@ -641,9 +641,6 @@ export const TreeView = memo(function TreeView({
               case "deviceCreateFolder":
                 onDeviceCreate?.(menu.node, true);
                 break;
-              case "deviceRename":
-                beginRename(menu.node);
-                break;
               case "deviceDelete":
                 onDeviceDelete?.(menu.node);
                 break;

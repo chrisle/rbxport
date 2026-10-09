@@ -371,10 +371,10 @@ describe("a stick's own library", () => {
     ]);
     expect(live(deviceTreeMenu("devicePlaylists"))).toEqual(["Create New Playlist", "Create New Folder"]);
     expect(entriesOf(deviceTreeMenu("devicePlaylist")).map((e) => e.label)).toEqual([
-      "Add Artwork", "Import Playlist", "Rename Playlist", "Delete Playlist", "Export a playlist to a file", "Add To Shortcut",
+      "Add Artwork", "Import Playlist", "Delete Playlist", "Export a playlist to a file", "Add To Shortcut",
     ]);
-    expect(live(deviceTreeMenu("devicePlaylist"))).toEqual(["Rename Playlist", "Delete Playlist"]);
-    expect(live(deviceTreeMenu("deviceFolder"))).toEqual(["Create New Playlist", "Create New Folder", "Rename Folder", "Delete Folder"]);
+    expect(live(deviceTreeMenu("devicePlaylist"))).toEqual(["Delete Playlist"]);
+    expect(live(deviceTreeMenu("deviceFolder"))).toEqual(["Create New Playlist", "Create New Folder", "Delete Folder"]);
   });
 
   it("greys every edit to a stick while rekordbox holds it or the stick is busy", () => {
