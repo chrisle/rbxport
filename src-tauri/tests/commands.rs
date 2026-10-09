@@ -1147,7 +1147,7 @@ fn an_imported_file_goes_into_a_playlist_and_plays_on_a_deck() {
     assert!(s.sink.lock().unwrap().is_none());
     assert!(!s.deck_state().a.loaded);
 
-    run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), id.clone(), 1)).unwrap();
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), id.clone(), 1)).unwrap();
     let loaded = s.pull_until("the deck to load", |t| t.a.loaded);
     assert_eq!(loaded.sample_rate, RATE);
     assert_eq!(loaded.a.total_frames, u64::from(RATE) * 2);
@@ -1157,7 +1157,7 @@ fn an_imported_file_goes_into_a_playlist_and_plays_on_a_deck() {
     assert!(!loaded.b.loaded, "the other deck is untouched");
 
     // Playing moves the clock; pausing stops it where it is.
-    run(commands::deck_play(s.handle(), s.player(), "a".into())).unwrap();
+    run(commands::deck_play(s.handle(), s.player(), s.preview(), "a".into())).unwrap();
     let playing = s.pull_until("the playhead to move", |t| t.a.frames > 4_096);
     assert!(playing.a.playing);
     run(commands::deck_pause(s.player(), "a".into())).unwrap();
@@ -1190,7 +1190,7 @@ fn a_track_whose_file_is_gone_is_refused_at_load_rather_than_failing_later() {
     let s = shell();
     // The fixture's tracks point at files that do not exist. That is caught
     // when the deck is asked for one, not by the engine mid-play.
-    let err = run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), "no-such-track".into(), 1))
+    let err = run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), "no-such-track".into(), 1))
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
     assert!(s.sink.lock().unwrap().is_none(), "the audio output was not opened for it");
@@ -1237,21 +1237,21 @@ fn the_two_decks_play_independently_and_the_master_level_is_the_engine_s() {
     assert_eq!(report.imported, 2);
     let (id_a, id_b) = (report.tracks[0].id.clone(), report.tracks[1].id.clone());
 
-    run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), id_a, 1)).unwrap();
-    run(commands::deck_load(s.handle(), s.state(), s.player(), "b".into(), id_b, 2)).unwrap();
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), id_a, 1)).unwrap();
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "b".into(), id_b, 2)).unwrap();
     s.pull_until("both decks to load", |t| t.a.loaded && t.b.loaded);
 
     run(commands::set_master_level(s.handle(), s.player(), s.preview(), 0.5)).unwrap();
     assert!((s.deck_state().master - 0.5).abs() < 1e-6);
 
-    run(commands::deck_play(s.handle(), s.player(), "b".into())).unwrap();
+    run(commands::deck_play(s.handle(), s.player(), s.preview(), "b".into())).unwrap();
     let tick = s.pull_until("deck B to move", |t| t.b.frames > 4_096);
     assert!(tick.b.playing);
     assert!(!tick.a.playing);
     assert_eq!(tick.a.frames, 0, "deck A stays put while B plays");
 
     // Deck A's one second runs out; deck B is still going.
-    run(commands::deck_play(s.handle(), s.player(), "a".into())).unwrap();
+    run(commands::deck_play(s.handle(), s.player(), s.preview(), "a".into())).unwrap();
     let ended = s.pull_until("deck A to reach its end", |t| !t.a.playing && t.a.frames > 0);
     assert!(ended.b.playing);
     assert!(ended.b.frames > ended.a.frames);
@@ -1275,9 +1275,9 @@ fn a_waveform_click_previews_the_track_without_loading_a_deck() {
     assert!(s.preview_sink.lock().unwrap().is_none());
 
     // Deck A is playing something else.
-    run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), on_deck.clone(), 1)).unwrap();
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), on_deck.clone(), 1)).unwrap();
     s.pull_until("deck A to load", |t| t.a.loaded);
-    run(commands::deck_play(s.handle(), s.player(), "a".into())).unwrap();
+    run(commands::deck_play(s.handle(), s.player(), s.preview(), "a".into())).unwrap();
     s.pull_until("deck A to play", |t| t.a.playing && t.a.frames > 0);
 
     // A click halfway across the second track's waveform.
@@ -1303,6 +1303,55 @@ fn a_waveform_click_previews_the_track_without_loading_a_deck() {
     std::fs::remove_file(&a).unwrap();
     let err = run(commands::preview_play(s.handle(), s.state(), s.player(), s.preview(), on_deck, 0.0)).unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
+}
+
+/// rekordbox outside PERFORMANCE mode stops its preview when a deck plays
+/// (`PreviewComponent::timerCallback`) and when a track is loaded onto a deck
+/// (`ListViewer::loadTrack`). rbxport left the preview playing under the deck,
+/// so the two were heard over each other (#242).
+#[test]
+fn a_deck_that_plays_or_loads_stops_the_preview() {
+    let s = shell();
+    let a = write_wav(&s._dir.path().join("deck.wav"), 3);
+    // Long enough that a preview left playing would not run out by itself
+    // while the test waits for it to stop.
+    let b = write_wav(&s._dir.path().join("preview.wav"), 60);
+    let report = run(commands::import_files(
+        s.handle(),
+        s.state(),
+        vec![a.display().to_string(), b.display().to_string()],
+    ))
+    .unwrap();
+    let (on_deck, previewed) = (report.tracks[0].id.clone(), report.tracks[1].id.clone());
+    let preview = |at: f64| {
+        run(commands::preview_play(s.handle(), s.state(), s.player(), s.preview(), previewed.clone(), at)).unwrap();
+        s.pull_preview_until("the preview to play", |p| p.playing && p.position_ms > at);
+    };
+    // Stopped by the deck, well before the preview's own end.
+    let stopped_by = |what: &str| {
+        let stopped = s.pull_preview_until(what, |p| !p.playing);
+        assert!(stopped.position_ms < 30_000.0, "{what}: the preview ran on to {stopped:?}");
+        stopped
+    };
+
+    // Loading a deck while the preview plays stops it.
+    preview(0.0);
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), on_deck, 1)).unwrap();
+    let stopped = stopped_by("loading deck A to stop the preview");
+    assert_eq!(stopped.track.as_deref(), Some(previewed.as_str()), "stopped, not forgotten");
+    s.pull_until("deck A to load", |t| t.a.loaded);
+
+    // Playing a deck while the preview plays stops it, and the deck plays.
+    preview(1_000.0);
+    run(commands::deck_play(s.handle(), s.player(), s.preview(), "a".into())).unwrap();
+    stopped_by("deck A's Play to stop the preview");
+    s.pull_until("deck A to play", |t| t.a.playing && t.a.frames > 0);
+
+    // A play held for the master's beat is a deck playing too.
+    preview(2_000.0);
+    s.pull_until("the preview to pause deck A", |t| !t.a.playing);
+    run(commands::deck_play_after(s.handle(), s.player(), s.preview(), "a".into(), 50.0)).unwrap();
+    stopped_by("deck A's held Play to stop the preview");
 }
 
 #[test]

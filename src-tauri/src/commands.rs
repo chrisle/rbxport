@@ -1900,10 +1900,15 @@ pub async fn deck_load<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     player: State<'_, Arc<crate::player::Player>>,
+    preview: State<'_, Arc<crate::preview::Preview>>,
     deck: String,
     track: String,
     load_id: u64,
 ) -> AppResult<()> {
+    // rekordbox's `ListViewer::loadTrack` stops the browser's preview before
+    // it loads, whether or not the load then succeeds: a track going onto a
+    // deck is not heard over a preview (#242).
+    preview.stop();
     let library = state.library()?;
     let Some(path) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
         return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
@@ -2031,9 +2036,13 @@ pub async fn deck_unload(
 pub async fn deck_play<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
+    preview: State<'_, Arc<crate::preview::Preview>>,
     deck: String,
 ) -> AppResult<()> {
     let engine = player.engine(&app)?;
+    // A deck that plays stops the browser's preview, as rekordbox's does
+    // outside PERFORMANCE mode; the two are never heard over each other (#242).
+    preview.stop();
     engine.play(crate::player::deck_of(&deck));
     // The tick only runs while something is playing, so play is what starts it.
     crate::player::start_ticker(&app);
@@ -2046,10 +2055,13 @@ pub async fn deck_play<R: tauri::Runtime>(
 pub async fn deck_play_after<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
+    preview: State<'_, Arc<crate::preview::Preview>>,
     deck: String,
     delay_ms: f64,
 ) -> AppResult<()> {
     let engine = player.engine(&app)?;
+    // Held for a beat or not, this is the deck playing: see `deck_play`.
+    preview.stop();
     // Clamped to a positive number first: a delay is at most a beat, and a
     // negative or absurd one is zero rather than a wrapped count.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

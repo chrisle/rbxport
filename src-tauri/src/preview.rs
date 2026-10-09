@@ -20,6 +20,26 @@
 //! - [OBS] `PreviewComponent::cueRegionMouseDown` starts the preview from a
 //!   hot cue's own time when its badge is clicked.
 //!
+//! And what stops it again (rekordbox 7.2.11, macOS arm64), besides its stop
+//! button (`PreviewComponent::buttonClicked`):
+//!
+//! - [OBS] A deck that plays. `PreviewComponent::startPreviewPlayer` runs a
+//!   500 ms timer while the preview plays; `PreviewComponent::timerCallback`
+//!   then calls `stopPreviewPlayer` when `djengine::DjEngineIF::isPlaying` is
+//!   true for any of the four channels, unless the app is in PERFORMANCE mode
+//!   (the same mode flag `startPreviewPlayer` checks before pausing decks).
+//!   rbxport stops it as the deck is told to play, rather than on a timer.
+//! - [OBS] A track loaded onto a deck from the list:
+//!   `ListViewer::loadTrack(ePlayerID, int, RowDataTrack*, bool, bool)` stops
+//!   and unloads the list's `PreviewPlayer` if it is playing, whatever track
+//!   it holds.
+//! - [OBS] Another playlist chosen in the tree:
+//!   `BrowseListViewer::currentBrowseChanged` calls `stopPreviewPlayer` when
+//!   `TreeViewer::isChangeSelectedItem()` is set, which
+//!   `TreeViewer::changedSelectedItem` sets when the newly selected item's
+//!   browse source differs from the old one. That one is the interface's
+//!   (`src/app/App.tsx`).
+//!
 //! [ASSUME] rekordbox can route its preview to a separate output channel
 //! (`OutputChannel_Preview`). rbxport has one output, so the preview plays on
 //! the same device the decks use.
@@ -177,6 +197,10 @@ impl Preview {
 
     /// Stops the preview where it is. The track stays held, so a click on it
     /// again starts at once.
+    ///
+    /// Also what a deck's Play and a deck load call: in rekordbox outside
+    /// PERFORMANCE mode a playing deck stops the preview, and so does loading
+    /// a track onto a deck (see the top of this file).
     pub fn stop(&self) {
         // Anything still waiting for its file gives way too.
         self.request.fetch_add(1, Ordering::SeqCst);

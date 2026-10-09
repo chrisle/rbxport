@@ -1550,6 +1550,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     previewed.positionMs = previewed.durationMs;
     return previewed.positionMs;
   };
+  /** Stops the preview where it is: `previewStop`, and what a deck's load or Play does. */
+  const stopPreviewed = (): void => {
+    previewed.positionMs = previewNow();
+    previewed.playing = false;
+  };
 
   /** The master level, which a browser can hold even with nothing to apply it to. */
   // −1 dB, the knob at 10: what the engine starts at.
@@ -2142,6 +2147,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // readouts — then behaves in a browser exactly as it does in the app, and
     // can be tested. What a browser cannot do is make a noise.
     deckLoad: (deck, trackId, loadId) => {
+      // A deck load stops the preview, as the app's does (#242).
+      stopPreviewed();
       const d = deckOf(deck);
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
@@ -2176,6 +2183,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(undefined);
     },
     deckPlay: (deck) => {
+      // A deck that plays stops the preview, as the app's does (#242).
+      stopPreviewed();
       const d = deckOf(deck);
       if (!d.loaded) return wait(undefined);
       d.playing = true;
@@ -2189,6 +2198,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // browser has no callback to count them in, and the timing is only
     // ever judged by ear against a real device.
     deckPlayAfter: (deck, delayMs) => {
+      stopPreviewed();
       const d = deckOf(deck);
       if (!d.loaded) return wait(undefined);
       d.playing = true;
@@ -2434,8 +2444,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(undefined);
     },
     previewStop: () => {
-      previewed.positionMs = previewNow();
-      previewed.playing = false;
+      stopPreviewed();
       return wait(undefined);
     },
     previewState: () => {

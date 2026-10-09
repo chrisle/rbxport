@@ -40,3 +40,39 @@ test("clicking a row's waveform previews it without loading the deck", async ({ 
   await stop.click();
   await expect(stop).toHaveCount(0);
 });
+
+/** Previews row `row` from halfway across its waveform; returns its stop button. */
+async function preview(page: Page, row: number) {
+  const box = await waveform(page, row).boundingBox();
+  if (!box) throw new Error("the waveform has no box");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height - 2);
+  const stop = page.locator('[role="gridcell"][data-col="preview"]').nth(row).getByRole("button", { name: "Stop" });
+  await expect(stop).toBeVisible();
+  return stop;
+}
+
+// rekordbox stops its preview when a track is loaded onto a deck
+// (`ListViewer::loadTrack`) and when a deck plays (`PreviewComponent::
+// timerCallback`); rbxport left it playing under the deck (#242).
+test("loading a track onto the deck stops the preview", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const stop = await preview(page, 3);
+
+  await page.locator('[role="gridcell"][data-col="title"]').nth(5).dblclick();
+  await expect(player(page).getByRole("button", { name: "Play", exact: true })).toBeEnabled();
+  await expect(stop).toHaveCount(0);
+});
+
+test("playing the deck stops the preview", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(5).dblclick();
+  const play = player(page).getByRole("button", { name: "Play", exact: true });
+  await expect(play).toBeEnabled();
+  const stop = await preview(page, 3);
+
+  await play.click();
+  await expect(player(page).getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expect(stop).toHaveCount(0);
+});
