@@ -12,17 +12,39 @@ pub fn compressed_path(path: &Path) -> PathBuf {
     name.into()
 }
 
+/// First four bytes of an `AppleDouble` file (macOS `._*` companions).
+const APPLE_DOUBLE_MAGIC: [u8; 4] = [0x00, 0x05, 0x16, 0x07];
+
 /// Files a volume's own OS drops into a staging folder: `AppleDouble` `._*`
 /// companions (macOS on exFAT/FAT/network drives), `.DS_Store`, `Thumbs.db`,
 /// `desktop.ini`. They are not backup content and are never compressed, so
 /// `assemble` must skip them rather than fail with "Uncompressed backup entry".
+///
+/// A `._*` name alone is not enough: a source file called `._x` is staged as
+/// `._x.zip`, which is real backup data. Such a name is only skipped when its
+/// content is empty or starts with the `AppleDouble` magic, never a ZIP.
 fn is_os_metadata(path: &Path) -> bool {
-    path.file_name().and_then(|n| n.to_str()).is_some_and(|name| {
-        name.starts_with("._")
-            || name == ".DS_Store"
-            || name.eq_ignore_ascii_case("Thumbs.db")
-            || name.eq_ignore_ascii_case("desktop.ini")
-    })
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name == ".DS_Store" || name.eq_ignore_ascii_case("Thumbs.db") || name.eq_ignore_ascii_case("desktop.ini") {
+        return true;
+    }
+    if !name.starts_with("._") {
+        return false;
+    }
+    let mut head = [0u8; 4];
+    match fs::File::open(path).and_then(|mut f| f.read(&mut head)) {
+        Ok(0) => true,
+        Ok(n) => head[..n] == APPLE_DOUBLE_MAGIC[..n] || name.strip_suffix(".zip").is_none(),
+        Err(_) => false,
+    }
+}
+
+/// Name the staged file in an error, keeping its kind so cancellation
+/// (`Interrupted`) is still recognised.
+fn named(relative: &str, e: impl std::fmt::Display, kind: io::ErrorKind) -> io::Error {
+    io::Error::new(kind, format!("{relative}: {e}"))
 }
 
 pub fn compress_file(
@@ -83,15 +105,15 @@ pub fn assemble(
             if is_os_metadata(&path) {
                 continue;
             }
-            let meta = fs::symlink_metadata(&path)?;
-            if meta.file_type().is_symlink() {
-                return Err(io::Error::other("Unexpected symbolic link"));
-            }
             let relative = path
                 .strip_prefix(root)
                 .map_err(io::Error::other)?
                 .to_string_lossy()
                 .replace('\\', "/");
+            let meta = fs::symlink_metadata(&path).map_err(|e| named(&relative, &e, e.kind()))?;
+            if meta.file_type().is_symlink() {
+                return Err(named(&relative, "Unexpected symbolic link", io::ErrorKind::Other));
+            }
             if meta.is_dir() {
                 zip.add_directory(format!("{relative}/"), SimpleFileOptions::default())?;
                 pending.push(path);
@@ -106,19 +128,23 @@ pub fn assemble(
                     0o644
                 };
                 zip.start_file(
-                    relative,
+                    &relative,
                     SimpleFileOptions::default()
                         .compression_method(zip::CompressionMethod::Deflated)
                         .compression_level(Some(9))
                         .unix_permissions(permissions),
                 )?;
-                zip.write_all(&fs::read(&path)?)?;
+                zip.write_all(&fs::read(&path).map_err(|e| named(&relative, &e, e.kind()))?)?;
             } else {
                 let name = relative
                     .strip_suffix(".zip")
-                    .ok_or_else(|| io::Error::other("Uncompressed backup entry"))?;
-                let mut entry = ZipArchive::new(fs::File::open(&path)?)?;
-                zip.raw_copy_file_rename(entry.by_index(0)?, name)?;
+                    .ok_or_else(|| named(&relative, "Uncompressed backup entry", io::ErrorKind::Other))?;
+                let mut entry = fs::File::open(&path)
+                    .and_then(|f| ZipArchive::new(f).map_err(io::Error::other))
+                    .map_err(|e| named(&relative, &e, e.kind()))?;
+                let file = entry.by_index(0).map_err(|e| named(&relative, &e, io::ErrorKind::Other))?;
+                zip.raw_copy_file_rename(file, name)
+                    .map_err(|e| named(&relative, &e, io::ErrorKind::Other))?;
             }
         }
     }
@@ -182,6 +208,55 @@ mod tests {
         fs::write(stage.join("stray.bin"), b"x").unwrap();
         let err = assemble(&stage, &dir.path().join("b.zip"), &mut || Ok(())).unwrap_err();
         assert!(err.to_string().contains("Uncompressed"));
+        assert!(err.to_string().contains("stray.bin"), "{err}");
+    }
+
+    #[test]
+    fn a_source_file_named_like_appledouble_is_kept_as_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let stage = dir.path().join("stage");
+        fs::create_dir_all(stage.join("analysis")).unwrap();
+        let source = dir.path().join("source");
+        fs::write(&source, b"real").unwrap();
+        compress_file(&source, &stage.join("analysis/._ANLZ.DAT"), &mut |_| Ok(())).unwrap();
+        // Zero-length companions that a FAT/exFAT volume leaves behind.
+        fs::write(stage.join("._empty"), b"").unwrap();
+        fs::write(stage.join("analysis/._empty.zip"), b"").unwrap();
+        let archive = dir.path().join("backup.zip");
+        assemble(&stage, &archive, &mut || Ok(())).unwrap();
+        let zip = ZipArchive::new(fs::File::open(&archive).unwrap()).unwrap();
+        let mut names: Vec<_> = zip.file_names().map(str::to_owned).collect();
+        names.sort();
+        assert_eq!(names, ["analysis/", "analysis/._ANLZ.DAT"]);
+    }
+
+    #[test]
+    fn a_zero_length_or_damaged_staged_zip_names_the_file() {
+        for (bytes, label) in [(&b""[..], "empty"), (&b"PK not really"[..], "damaged")] {
+            let dir = tempfile::tempdir().unwrap();
+            let stage = dir.path().join("stage");
+            fs::create_dir_all(stage.join("analysis")).unwrap();
+            fs::write(stage.join("analysis/ANLZ.DAT.zip"), bytes).unwrap();
+            let err = assemble(&stage, &dir.path().join("b.zip"), &mut || Ok(())).unwrap_err();
+            assert!(err.to_string().contains("analysis/ANLZ.DAT.zip"), "{label}: {err}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_or_vanished_entry_names_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let stage = dir.path().join("stage");
+        fs::create_dir_all(&stage).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("gone"), stage.join("link.zip")).unwrap();
+        let err = assemble(&stage, &dir.path().join("b.zip"), &mut || Ok(())).unwrap_err();
+        assert!(err.to_string().contains("link.zip"), "{err}");
+        // Cancellation keeps its kind.
+        let err = assemble(&stage, &dir.path().join("c.zip"), &mut || {
+            Err(io::Error::new(io::ErrorKind::Interrupted, "stop"))
+        })
+        .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
     }
 
     #[test]
