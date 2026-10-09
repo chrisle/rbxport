@@ -466,8 +466,7 @@ test("a synced deck with Q on stays on the master's beat after jumps and in a lo
  * loaded while the deck plays carries on in phase, and a new track on the
  * master deck hands MASTER to the other one. Q stays off on B throughout, so
  * the Q-on phase lock cannot be what puts B on the beat.
- */
-/**
+ *
  * On the beat, for a deck with Q off. The held start is timed from the
  * master's head as the page last heard it, and without Q there is no lock to
  * take out what that costs: about 15 ms late on the mock, against up to half
@@ -475,7 +474,11 @@ test("a synced deck with Q on stays on the master's beat after jumps and in a lo
  */
 const ON_BEAT = 0.025;
 
-async function syncedPair(page: Page) {
+async function syncedPair(page: Page, { quantize = false, syncType = "beat" } = {}) {
+  if (syncType !== "beat") {
+    await page.addInitScript((type) =>
+      localStorage.setItem("rbl.preferences", JSON.stringify({ advanced: { syncType: type } })), syncType);
+  }
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.getByRole("button", { name: "Layout" }).click();
@@ -498,9 +501,9 @@ async function syncedPair(page: Page) {
   const a = page.getByRole("region", { name: "Preview player", exact: true });
   const b = page.getByRole("region", { name: "Preview player B" });
   await expect(b.getByTestId("player-title")).not.toHaveText("");
-  const quantize = b.getByRole("button", { name: "Quantize" });
-  await quantize.click();
-  await expect(quantize).toHaveAttribute("aria-pressed", "false");
+  const q = b.getByRole("button", { name: "Quantize" });
+  if (!quantize) await q.click();
+  await expect(q).toHaveAttribute("aria-pressed", String(quantize));
   await b.getByRole("button", { name: "Beat sync" }).click();
   await expect(b.getByRole("button", { name: "Beat sync" })).toHaveAttribute("aria-pressed", "true");
 
@@ -515,7 +518,18 @@ async function syncedPair(page: Page) {
     const gap = phase(atA, beatA) - phase(atB, beat);
     return Math.abs(gap - Math.round(gap)) * beat;
   };
-  return { a, b, titles, twin, toB, seconds, offBeat, play: page.getByRole("button", { name: "Play", exact: true }) };
+  return {
+    a, b, titles, bpms, first, twin, toB, seconds, offBeat,
+    play: page.getByRole("button", { name: "Play", exact: true }),
+  };
+}
+
+/** PLAY from a stop, a part of a beat after A: only the sync can line it up. */
+async function startsOnBeat(page: Page, { play, offBeat }: Awaited<ReturnType<typeof syncedPair>>) {
+  await play.first().click();
+  await page.waitForTimeout(700);
+  await play.last().click();
+  await expect.poll(offBeat, { timeout: 3000 }).toBeLessThan(ON_BEAT);
 }
 
 test("PLAY on a synced deck starts on the master's beat with Q off", async ({ page }) => {
@@ -549,11 +563,72 @@ test("a track loaded onto a playing synced deck carries on in phase", async ({ p
   await expect(b.getByRole("button", { name: "Beat sync" })).toHaveAttribute("aria-pressed", "true");
 });
 
+/*
+ * BPM SYNC in Preferences. rekordbox 7's BPM SYNC behaviour starts PLAY with
+ * the same beat-synced trigger, reading no quantize setting [OBS static,
+ * rekordbox 7.2.19 arm64: BpmSyncBehavior::onPlayWithSyncReq @0x102b71080 ->
+ * SlavePlayerFunctions::triggerWithBeatSync @0x102908398], so B starts on A's
+ * beat with Q on and with Q off.
+ */
+test("PLAY on a BPM SYNC deck with Q on starts on the master's beat", async ({ page }) => {
+  const { play, offBeat } = await syncedPair(page, { quantize: true, syncType: "bpm" });
+  await play.first().click();
+  await page.waitForTimeout(700);
+  // Both heads, read every few ms from the press on. The mock moves both by
+  // the same time at each step, so once B runs, a step in which B moves more
+  // or less than A is a jump: the Q lock pulling a deck that started off the
+  // beat onto it. Started on the beat, B is never moved.
+  const heads = page.evaluate(async () => {
+    const read = (window as unknown as {
+      __deckSeconds: () => { a: number; b: number; playingB: boolean };
+    }).__deckSeconds;
+    const out: { a: number; b: number; playing: boolean }[] = [];
+    const end = performance.now() + 1500;
+    while (performance.now() < end) {
+      const { a, b, playingB } = read();
+      out.push({ a, b, playing: playingB });
+      await new Promise((done) => setTimeout(done, 5));
+    }
+    return out;
+  });
+  await play.last().click();
+  const all = await heads;
+  const steps = all.filter(({ a }, n) => n > 0 && a !== all[n - 1]!.a);
+  const running = steps.filter(({ playing, b }, n) => playing && n > 0 && b !== steps[n - 1]!.b);
+  // From B's second step: its first counts from its held start, not A's step.
+  const moves = running.slice(1).map((now, n) => {
+    const before = running[n]!;
+    return Math.abs(now.b - before.b - (now.a - before.a));
+  });
+  expect(moves.length).toBeGreaterThan(5);
+  // A loaded machine can start the held deck a few ms late and the lock then
+  // trims that; a deck started off the beat jumps some 200 ms here.
+  expect(Math.max(...moves)).toBeLessThan(0.05);
+  expect(await offBeat()).toBeLessThan(ON_BEAT);
+});
+
+test("PLAY on a BPM SYNC deck with Q off starts on the master's beat", async ({ page }) => {
+  await startsOnBeat(page, await syncedPair(page, { syncType: "bpm" }));
+});
+
 test("a new track on the master deck hands MASTER to the other deck", async ({ page }) => {
-  const { a, b, titles, twin } = await syncedPair(page);
+  const { a, b, titles, bpms, first, toB } = await syncedPair(page);
+  const bpmA = a.getByTestId("player-bpm");
+  const bpmB = b.getByTestId("player-bpm");
+  const master = Number(bpms[first]);
+  // A track of another tempo on B: it follows A, so it shows A's BPM.
+  const other = bpms.findIndex((bpm) => bpm.trim() !== "" && Number(bpm) !== master);
+  expect(other).toBeGreaterThanOrEqual(0);
+  await toB(other);
+  await expect(b.getByTestId("player-title")).toHaveText((await titles.nth(other).textContent()) ?? "");
+  await expect.poll(async () => Number(await bpmB.innerText())).toBeCloseTo(master, 1);
   await expect(a.getByRole("button", { name: "Sync master" })).toHaveAttribute("aria-pressed", "true");
-  await titles.nth(twin).dblclick();
-  await expect(a.getByTestId("player-title")).toHaveText((await titles.nth(twin).textContent()) ?? "");
+
+  // The same track on A: MASTER moves to B, which keeps the tempo it had.
+  await titles.nth(other).dblclick();
+  await expect(a.getByTestId("player-title")).toHaveText((await titles.nth(other).textContent()) ?? "");
   await expect(b.getByRole("button", { name: "Sync master" })).toHaveAttribute("aria-pressed", "true");
   await expect(a.getByRole("button", { name: "Sync master" })).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(async () => Number(await bpmA.innerText())).toBeCloseTo(Number(bpms[other]), 1);
+  expect(Number(await bpmB.innerText())).toBeCloseTo(master, 1);
 });
