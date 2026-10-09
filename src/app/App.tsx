@@ -2208,6 +2208,9 @@ function AppBody() {
     return {
       playlists: devicePlaylistsOf(treeNodes, selectedDeviceRef.path, selectedDeviceRef.format),
       inPlaylist,
+      // Greyed while the stick is synced, exported or ejected, as the tree's
+      // own edits are, rather than refused on the click.
+      busy: deviceBusy,
       onAdd: (playlist: string, ids: readonly string[]) => {
         const target = devicePlaylistsOf(treeNodes, selectedDeviceRef.path, selectedDeviceRef.format).find((p) => p.id === playlist);
         void editDevice(selectedNode, { kind: "add", playlist, tracks: [...ids] }, `Added to ${target?.name ?? "the playlist"}.`);
@@ -2223,7 +2226,7 @@ function AppBody() {
         })();
       },
     };
-  }, [selectedNode, selectedDeviceRef, treeNodes, editDevice]);
+  }, [selectedNode, selectedDeviceRef, treeNodes, editDevice, deviceBusy]);
   const selectedDevice = useMemo(
     () => devices.find((device) => deviceId(device) === selectedNode?.id) ?? null,
     [devices, selectedNode],

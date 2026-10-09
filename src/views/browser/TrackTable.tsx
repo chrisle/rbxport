@@ -757,6 +757,8 @@ export interface TrackTableProps {
   deviceMenu?: {
     playlists: readonly MenuTarget[];
     inPlaylist: boolean;
+    /** The stick is being synced, exported or ejected: its edits are greyed. */
+    busy: boolean;
     onAdd: (playlist: string, ids: readonly string[]) => void;
     onRemove: (ids: readonly string[]) => void;
   } | undefined;
@@ -1633,7 +1635,7 @@ export const TrackTable = memo(function TrackTable({
           y={trackMenu.y}
           rows={deviceTrackMenu(deviceMenu.playlists, deviceMenu.inPlaylist)}
           label="Track"
-          context={{ inPlaylist: deviceMenu.inPlaylist, hasFile: true, readOnly }}
+          context={{ inPlaylist: deviceMenu.inPlaylist, hasFile: true, readOnly: readOnly || deviceMenu.busy }}
           onChoose={(action) => {
             const ids = [...selection.ids];
             if (action.startsWith("deviceAddToPlaylist:")) deviceMenu.onAdd(action.slice("deviceAddToPlaylist:".length), ids);
