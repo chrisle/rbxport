@@ -513,7 +513,7 @@ async function realBackend(): Promise<Backend> {
         compatibilityFormat: compatibilityFormat ?? null,
       }),
     validateExportFiles: (playlists) => invoke<MissingExportFile[]>("validate_export_files", { playlists }),
-    importUsb: (path, cues, history, settings) => invoke("import_usb", { path, cues, history, settings }),
+    importUsb: (path, cues, history, settings, ratings) => invoke("import_usb", { path, cues, history, settings, ratings }),
     ejectDevice: (path) => invoke<void>("eject_device", { path }),
     formatDevice: (path, layout) => invoke<void>("format_device", { path, layout }),
     deviceSyncState: (path) => invoke<DeviceSyncState>("device_sync_state", { path }),

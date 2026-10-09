@@ -582,7 +582,14 @@ fn check_database_changes(
     for track in &current.tracks {
         let original = baseline.and_then(|b| b.tracks.iter().find(|t| t.id == track.id));
         let next = target.tracks.iter().find(|t| t.id == track.id);
-        if original.is_some_and(|b| b != track) && next != Some(track) {
+        let unchanged = original.is_some_and(|old| {
+            if label == "OneLibrary" && track.rating > 5 && old.rating <= 5 && track.rating == old.rating * 51 {
+                let mut corrected = track.clone();
+                corrected.rating = old.rating;
+                &corrected == old
+            } else { old == track }
+        });
+        if original.is_some() && !unchanged && next != Some(track) {
             return Err(ExportError::Conflict(format!(
                 "{label}: '{}' changed on the USB. Import its changes before syncing.",
                 track.title

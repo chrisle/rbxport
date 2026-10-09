@@ -27,20 +27,15 @@ fn track(dir: &Path, id: u64, rating: u8) -> SourceTrack {
     }
 }
 
-/// A stick holding tracks rated 0 to 5 in one playlist, whose `OneLibrary`
-/// ratings are then rewritten the way rekordbox stores them: the stars
-/// themselves, as `export.pdb` has them [OBS: a rekordbox 7 stick, ratings 1
-/// to 5 in `exportLibrary.db` equal to the same tracks' `export.pdb`
-/// ratings]. The manifest is removed, so the stick is one rbxport has never
-/// synced.
+/// A stick holding tracks rated 0 to 5 in one playlist, with `OneLibrary`
+/// ratings stored as the stars themselves, as `export.pdb` has them [OBS: a
+/// rekordbox 7 stick, ratings 1 to 5 in `exportLibrary.db` equal to the same
+/// tracks' `export.pdb` ratings]. The manifest is removed, so the stick is
+/// one rbxport has never synced.
 fn rekordbox_stick(src: &Path, dest: &Path) {
     let tracks: Vec<SourceTrack> = (0..=5).map(|stars| track(src, u64::from(stars) + 1, stars)).collect();
     let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: (0..tracks.len()).collect(), ..Default::default() }];
     export(dest, &tracks, &playlists).unwrap();
-    let one = rbl_onelibrary::playlists::open_read_write(&dest.join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
-    let rows = one.execute("UPDATE content SET rating = rating / 51", []).unwrap();
-    assert_eq!(rows, tracks.len());
-    drop(one);
     std::fs::remove_file(rbl_export::Manifest::path(dest)).unwrap();
 }
 

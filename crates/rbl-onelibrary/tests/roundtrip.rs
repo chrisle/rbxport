@@ -40,7 +40,7 @@ fn built() -> (tempfile::TempDir, std::path::PathBuf) {
                 file_name: format!("Track {i}.mp3"),
                 file_size: 9_000_000,
                 analysis_path: format!("/PIONEER/USBANLZ/P001/0000000{i}/ANLZ0000.DAT"),
-                rating: 153,
+                rating: 3,
                 comment: "5A - Am - 128".to_owned(),
                 date_added: "2026-09-07".to_owned(),
                 ..Track::default()
@@ -109,7 +109,7 @@ fn tracks_read_back_exactly_as_written() {
     assert_eq!(title, "Track 1");
     assert_eq!(bpm, 12_801);
     assert_eq!(path_text, "/Contents/ARTBAT/Track 1.mp3");
-    assert_eq!(rating, 153, "three stars, as multiples of 51");
+    assert_eq!(rating, 3, "three stars, stored as a star count");
     assert_eq!(comment, "5A - Am - 128");
 
     // The search column is filled from the title, as the reference does.

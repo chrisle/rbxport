@@ -6,6 +6,27 @@ USB export writes player libraries and audio copies to a device. These
 preferences apply to playlist export and Sync Manager; compatibility
 conversion also applies to individual track export.
 
+## Import track ratings
+
+Sync Manager's **Track ratings** checkbox imports ratings edited on a USB
+device since its last RBXport export. **Automatically import track ratings
+when syncing** runs the same import before SYNC; both preferences are on by
+default. Library Protection must be off and rekordbox must be closed. Import
+asks for confirmation; SYNC uses the automatic import preference.
+
+Changes in either OneLibrary or legacy Device Library are imported, including
+clearing a rating to zero. Unchanged device ratings preserve desktop edits.
+When both the device and desktop rating changed, the device wins and the
+result reports how many desktop edits were replaced. Repeated imports of
+already matching ratings make no further changes.
+
+Conflicting edits in the two device databases stop import and SYNC; reconcile
+them in rekordbox first. Devices without a matching RBXport export baseline
+are skipped with a warning. To establish a baseline, or repair an older USB
+with invalid OneLibrary ratings, temporarily turn automatic rating import
+off and sync it. Re-enable the preference afterward. Normal exports write
+0–5 stars to both device formats.
+
 ## What a selection exports
 
 - A playlist exports its tracks. An intelligent playlist exports the tracks

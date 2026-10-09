@@ -46,6 +46,17 @@ export function UsbExportPane() {
     </label>
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
+        <strong id={`${id}-ratings`}>{t("Automatically import track ratings when syncing")}</strong>
+        <span id={`${id}-ratings-help`} className={styles.description}>{t("Import device rating changes before SYNC. Device ratings win when a track was also rated in your library.")}</span>
+        <span className={styles.default}>{t("Default: On")}</span>
+      </span>
+      <input type="checkbox" role="switch" className={controls.toggle}
+        aria-labelledby={`${id}-ratings`} aria-describedby={`${id}-ratings-help`}
+        checked={preferences.usbExport.importRatings}
+        onChange={event => update("usbExport", { importRatings: event.target.checked })} />
+    </label>
+    <label className={`${layout.summary} ${styles.option}`}>
+      <span className={styles.details}>
         <strong id={`${id}-import-cues`}>Import cues and beat grids</strong>
         <span id={`${id}-import-cues-help`} className={styles.description}>Ticked for Import in Sync Manager when the window opens.</span>
         <span className={styles.default}>Default: On</span>
@@ -76,6 +87,17 @@ export function UsbExportPane() {
         aria-labelledby={`${id}-import-settings`} aria-describedby={`${id}-import-settings-help`}
         checked={preferences.usbExport.importButtonSettings}
         onChange={event => update("usbExport", { importButtonSettings: event.target.checked })} />
+    </label>
+    <label className={`${layout.summary} ${styles.option}`}>
+      <span className={styles.details}>
+        <strong id={`${id}-import-ratings`}>{t("Import track ratings")}</strong>
+        <span id={`${id}-import-ratings-help`} className={styles.description}>{t("Ticked for Import in Sync Manager when the window opens.")}</span>
+        <span className={styles.default}>{t("Default: On")}</span>
+      </span>
+      <input type="checkbox" role="switch" className={controls.toggle}
+        aria-labelledby={`${id}-import-ratings`} aria-describedby={`${id}-import-ratings-help`}
+        checked={preferences.usbExport.importButtonRatings}
+        onChange={event => update("usbExport", { importButtonRatings: event.target.checked })} />
     </label>
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
