@@ -85,26 +85,24 @@ export function subscribeNativeFileDrops(listener: (drop: NativeFileDrop) => voi
   };
 }
 
-/** Keep the native Edit menu in sync with the focused editor's history. */
 /**
- * Runs a collection import without replacing anything first. When the file
- * holds folders or playlists that already stand in the library under the
- * same name, the backend writes nothing and names them: ask, as rekordbox
- * does, and import again with `replace` only on OK. Null when declined.
+ * Runs a collection import, which replaces nothing unasked: when the file
+ * holds folders or playlists already standing in the library under the same
+ * name, the backend writes nothing and names them. Ask, as rekordbox does,
+ * and import again with `replace` only on OK. Null when declined.
  */
 export async function importReplacing(
-  command: "import_xml" | "import_itunes" | "import_itunes_selected",
+  command: string,
   args: Record<string, unknown>,
   confirmReplace: ConfirmReplace,
 ): Promise<XmlImportReport | null> {
   const { invoke } = await import("@tauri-apps/api/core");
-  const first = await invoke<XmlImportReport>(command, { ...args, replace: false });
-  const sameNamed = first.sameNamed ?? [];
-  if (sameNamed.length === 0) return first;
-  if (!(await confirmReplace(sameNamed))) return null;
-  return invoke<XmlImportReport>(command, { ...args, replace: true });
+  const first = await invoke<XmlImportReport>(command, args);
+  return !first.sameNamed?.length ? first
+    : await confirmReplace(first.sameNamed) ? invoke<XmlImportReport>(command, { ...args, replace: true }) : null;
 }
 
+/** Keep the native Edit menu in sync with the focused editor's history. */
 export async function setHistoryMenu(undo: string | null, redo: string | null): Promise<void> {
   if (!isTauri) return;
   const { invoke } = await import("@tauri-apps/api/core");

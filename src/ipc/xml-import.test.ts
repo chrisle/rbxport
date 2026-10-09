@@ -18,7 +18,7 @@ it("imports straight away when no list of the same name stands in the library", 
   await expect(importReplacing("import_xml", { path: "/a.xml" }, confirm)).resolves.toMatchObject({ imported: 3 });
   expect(confirm).not.toHaveBeenCalled();
   expect(invoke).toHaveBeenCalledTimes(1);
-  expect(invoke).toHaveBeenCalledWith("import_xml", { path: "/a.xml", replace: false });
+  expect(invoke).toHaveBeenCalledWith("import_xml", { path: "/a.xml" });
 });
 
 it("asks before replacing same-named lists and imports nothing when declined", async () => {
@@ -29,7 +29,7 @@ it("asks before replacing same-named lists and imports nothing when declined", a
   expect(confirm).toHaveBeenCalledWith(["Sets", "Warm up"]);
   // Only the first call, which writes nothing while lists stand in the way.
   expect(invoke).toHaveBeenCalledTimes(1);
-  expect(invoke).toHaveBeenCalledWith("import_itunes", { path: "/L.xml", replace: false });
+  expect(invoke).toHaveBeenCalledWith("import_itunes", { path: "/L.xml" });
 });
 
 it("replaces the same-named lists on OK", async () => {
