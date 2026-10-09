@@ -1817,7 +1817,7 @@ mod all_in_one_tests {
             let shared = Mutex::new(fixture);
             let mut primary = keep_alive(number, ip);
             primary.name = name.into();
-            primary.device_type = DeviceType::Other(7);
+            primary.device_type = DeviceType::AllInOne;
             let mut wire = primary.encode();
             wire[0x25] = 0xa5;
             wire[0x35] = 0x5a;
@@ -1947,7 +1947,7 @@ mod all_in_one_tests {
             let shared = Mutex::new(state);
             let mut primary = keep_alive(9, ip);
             primary.name = "OPUS-QUAD".into();
-            primary.device_type = DeviceType::Other(7);
+            primary.device_type = DeviceType::AllInOne;
             hear_announce(&primary.encode(), SocketAddr::from((ip, 50000)), &config(), &shared, now);
             assert_eq!(shared.lock().peers.len(), 4);
             let mut packet = if removal == 0 {
@@ -2010,14 +2010,14 @@ mod all_in_one_tests {
         for all_in_one in [false, true] {
             let ip = Ipv4Addr::new(192, 168, 50, 10);
             let mut first = keep_alive(if all_in_one { 9 } else { 1 }, ip);
-            if all_in_one { first.device_type = DeviceType::from_u8(7); first.name = "XDJ-RX3".into(); }
+            if all_in_one { first.device_type = DeviceType::AllInOne; first.name = "XDJ-RX3".into(); }
             let shared = acquired(&cfg, &first, now);
             let before = shared.lock().peers.peers().to_vec();
             let greetings = shared.lock().to_greet.clone();
             for number in if all_in_one { 1..=4 } else { 9..=12 } {
                 let mut other = keep_alive(number, Ipv4Addr::new(192, 168, 50, 20));
                 // Even a later different device type must not reclassify the session.
-                if !all_in_one { other.device_type = DeviceType::from_u8(7); other.name = "OPUS-QUAD".into(); }
+                if !all_in_one { other.device_type = DeviceType::AllInOne; other.name = "OPUS-QUAD".into(); }
                 hear_announce(&other.encode(), SocketAddr::from((other.ip, 50000)), &cfg, &shared, now);
                 assert_eq!(shared.lock().peers.peers(), before);
                 assert_eq!(shared.lock().players.len(), before.len());
@@ -2151,7 +2151,7 @@ mod all_in_one_tests {
             rbl_prolink::ConnectionMode::Unknown] {
             let cfg = rejection_config(mode);
             let ip = Ipv4Addr::new(192,168,50,10);
-            let mut first = keep_alive(9,ip); first.device_type = DeviceType::from_u8(7); first.name = "XDJ-RX3".into();
+            let mut first = keep_alive(9,ip); first.device_type = DeviceType::AllInOne; first.name = "XDJ-RX3".into();
             let shared = acquired(&cfg,&first,now);
             // The number gate permits 11/12 even if this later peer's type
             // differs from the original type7; it cannot reclassify LinkUp.
@@ -2193,7 +2193,7 @@ mod all_in_one_tests {
         hear_announce(&first.encode(), SocketAddr::from((ip,50000)), &cfg, &shared, now);
         assert_eq!(*shared.lock().join.as_ref().unwrap().state(), join::State::Waiting);
         assert!(shared.lock().peers.is_empty());
-        first = keep_alive(9, ip); first.device_type = DeviceType::from_u8(7); first.name = "OPUS-QUAD".into();
+        first = keep_alive(9, ip); first.device_type = DeviceType::AllInOne; first.name = "OPUS-QUAD".into();
         hear_announce(&first.encode(), SocketAddr::from((ip,50000)), &cfg, &shared, now);
         for tick in 0..50 { shared.lock().join.as_mut().unwrap().tick(now + join::TICK * tick); }
         assert_eq!(shared.lock().join.as_ref().unwrap().number(),Some(17));
@@ -2210,7 +2210,7 @@ mod all_in_one_tests {
         let cfg = rejection_config(rbl_prolink::ConnectionMode::Wired);
         let ip = Ipv4Addr::new(192,168,50,10);
         let mut primary = keep_alive(9,ip);
-        primary.device_type = DeviceType::from_u8(7); primary.name = "XDJ-RX3".into();
+        primary.device_type = DeviceType::AllInOne; primary.name = "XDJ-RX3".into();
         let mut secondary = primary.clone(); secondary.device_number = 10;
         for removal in ["disconnect", "rediscovery", "paired_disconnect", "paired_expiry"] {
             let shared = acquired(&cfg, &primary, now);
