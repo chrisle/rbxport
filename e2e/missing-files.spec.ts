@@ -130,7 +130,33 @@ test("Relocate over several tracks asks for the first file, then finds the rest 
   for (const at of [1, 3]) await expect(rowOf(page, at).getByRole("img", { name: "File is Missing" })).toHaveCount(0);
 });
 
-test("a missing track does not load: the deck keeps its track and the status bar says why", async ({ page }) => {
+test("the manager's Relocate over every row reaches every missing track past the first page", async ({ page }) => {
+  // 286 missing, three pages of the list. Each relocate saves, and the list
+  // is scanned again without the track, so the run must not page through it
+  // as it goes.
+  await open(page);
+  const manager = await openManager(page);
+  await expect(manager).toContainText("286 Track");
+  await manager.getByRole("button", { name: "Relocate", exact: true }).click();
+  await expect(manager.locator("[aria-live=polite]")).toHaveText("0 Track");
+  const told = await page.evaluate(() => (window as unknown as { __told: string[] }).__told);
+  expect(told).toEqual(["Missing File Manager: RBXport found 285 files."]);
+});
+
+test("the manager's Relocate by hand, track by track, reaches every missing track past the first page", async ({ page }) => {
+  test.setTimeout(60_000);
+  await open(page);
+  const manager = await openManager(page);
+  await expect(manager).toContainText("286 Track");
+  // No to every "find the others?": a chooser for each of the 286.
+  await page.evaluate(() => { (window as unknown as { __confirmAnswer: boolean }).__confirmAnswer = false; });
+  await manager.getByRole("button", { name: "Relocate", exact: true }).click();
+  await expect(manager.locator("[aria-live=polite]")).toHaveText("0 Track");
+  const chosen = await page.evaluate(() => (window as unknown as { __relocateChooser: string[] }).__relocateChooser.length);
+  expect(chosen).toBe(286);
+});
+
+test("a missing track does not load:the deck keeps its track and the status bar says why", async ({ page }) => {
   // Read-only, so a double-click loads rather than edits.
   await open(page, "?missing=7");
   await rowOf(page, 0).locator('[data-col="title"]').dblclick();

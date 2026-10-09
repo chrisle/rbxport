@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { MissingTrack, RelocateSearch } from "@/ipc/types";
-import { missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
+import { listIds, missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
 import { useTranslation } from "@/i18n";
 import styles from "./MissingFileManager.module.css";
 
@@ -140,26 +140,21 @@ export function MissingFileManager({ readOnly, search, onWrote, onFailed, onClos
   const targets = selection.all ? null : [...selection.ids];
 
   /**
-   * The selected rows in the list's order, fetched as Relocate reaches them:
-   * the whole list a page at a time when every row is selected, the clicked
-   * ones otherwise.
+   * The selected rows in the list's order, each checked to be still missing
+   * as Relocate reaches it. With every row selected the whole list's ids are
+   * taken before the first chooser (`listIds`).
    */
-  const selectedTracks = useCallback((): AsyncIterator<MissingTrack> => {
-    if (!selection.all) {
-      const ids = [...selection.ids];
+  const selectedTracks = useCallback(async function* (): AsyncGenerator<MissingTrack> {
+    const backend = await getBackend();
+    let ids: string[];
+    if (selection.all) ids = await listIds(async (offset, limit) => (await backend.missingTracks(offset, limit, false)).tracks, PAGE);
+    else {
+      ids = [...selection.ids];
       const order = new Map<string, number>();
       for (const [page, rows] of pages) rows.forEach((row, at) => order.set(row.id, page * PAGE + at));
       ids.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
-      return missingAmong(ids, async (some) => (await getBackend()).relocationTargets(some));
     }
-    return (async function* everyRow() {
-      const backend = await getBackend();
-      for (let offset = 0; ; offset += PAGE) {
-        const got = await backend.missingTracks(offset, PAGE, false);
-        yield* got.tracks;
-        if (got.tracks.length < PAGE) return;
-      }
-    })();
+    yield* missingAmong(ids, (some) => backend.relocationTargets(some));
   }, [selection, pages]);
 
   const run = (action: () => Promise<string | null>) => {

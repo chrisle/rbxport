@@ -138,6 +138,21 @@ export async function* missingAmong(
   }
 }
 
+/**
+ * The ids of a whole list fetched `page` at a time, in order. Taken in full
+ * before a run starts: each relocate saves, the list is scanned again without
+ * that track and the later rows move up, so paging through it during the run
+ * would skip them.
+ */
+export async function listIds(list: (offset: number, limit: number) => Promise<MissingTrack[]>, page = 100): Promise<string[]> {
+  const ids: string[] = [];
+  for (;;) {
+    const got = await list(ids.length, page);
+    for (const track of got) ids.push(track.id);
+    if (got.length < page) return ids;
+  }
+}
+
 /** `useTranslation()`'s function. */
 type Translate = (text: string, values?: Readonly<Record<string, string | number>>) => string;
 

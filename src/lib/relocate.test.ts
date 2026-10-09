@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { MissingTrack } from "@/ipc/types";
 import {
-  fileNameOf, folderOf, forgetRelocateFolder, missingAmong, movedRoots, relocateTracks, type RelocateSteps,
+  fileNameOf, folderOf, forgetRelocateFolder, listIds, missingAmong, movedRoots, relocateTracks, type RelocateSteps,
 } from "./relocate";
 
 const track = (id: string, path: string): MissingTrack => ({ id, title: `Title ${id}`, artist: "", album: "", path });
@@ -129,5 +129,41 @@ describe("Relocate over several tracks, as rekordbox's relocateSelectedFiles run
     for await (const t of tracks) got.push(t.id);
     expect(got).toEqual(["a", "c"]);
     expect(asked).toEqual([["a", "b"], ["c"]]);
+  });
+
+  it("takes a whole list's ids, a page at a time, before anything changes it", async () => {
+    // 5 rows in pages of 2: three fetches, the last short.
+    const rows = ["a", "b", "c", "d", "e"].map((id) => track(id, `/x/${id}.mp3`));
+    const asked: number[] = [];
+    const ids = await listIds((offset, limit) => {
+      asked.push(offset);
+      return Promise.resolve(rows.slice(offset, offset + limit));
+    }, 2);
+    expect(ids).toEqual(["a", "b", "c", "d", "e"]);
+    expect(asked).toEqual([0, 2, 4]);
+    // A list that is a whole number of pages ends on an empty one.
+    expect(await listIds((offset, limit) => Promise.resolve(rows.slice(0, 4).slice(offset, offset + limit)), 2))
+      .toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("relocates every track of a list that rescans without each relocated one", async () => {
+    // [#201 review] The manager's list loses a row with every relocate. With
+    // the ids taken first, the run reaches all of them; paging the live list
+    // as it went would skip "c".
+    let live = ["a", "b", "c", "d", "e"].map((id) => track(id, `/old/${id}.mp3`));
+    const page = (offset: number, limit: number) => Promise.resolve(live.slice(offset, offset + limit));
+    const ids = await listIds(page, 2);
+    const tracks = missingAmong(ids, (some) => Promise.resolve(live.filter((t) => some.includes(t.id))), 2);
+    const base = scripted({ picks: ["/new/a.mp3", "/new/b.mp3", "/new/c.mp3", "/new/d.mp3", "/new/e.mp3"], findOthers: [false, false, false, false] });
+    const steps: RelocateSteps = {
+      ...base.steps,
+      relocate: (t, path) => {
+        live = live.filter((row) => row.id !== t.id);
+        return base.steps.relocate(t, path);
+      },
+    };
+    const said = base.said;
+    expect(await relocateTracks(tracks, steps)).toBe(5);
+    expect(said.filter((line) => line.startsWith("relocate"))).toHaveLength(5);
   });
 });
