@@ -75,19 +75,67 @@ export function parseRekordboxBrowseWidths(xml: string): { treeWidth?: number; s
   };
 }
 
+/**
+ * What the last startup import took from rekordbox, per context and for the
+ * pane widths, as the JSON it compared.
+ *
+ * rekordbox's file only changes when somebody changes rekordbox. Importing it
+ * on every start put rekordbox's columns back over whatever was chosen in
+ * RBXport since, so a column added, removed, moved or widened here was gone at
+ * the next launch (#207). Comparing against the last import means a layout is
+ * taken from rekordbox when rekordbox's own changed, and RBXport's edits stand
+ * otherwise.
+ */
+const IMPORTED_KEY = "rbl.browse-import.v1";
+
+type Imported = Partial<Record<BrowseContext | "panes", string>>;
+
+function loadImported(): Imported {
+  try {
+    const raw = localStorage.getItem(IMPORTED_KEY);
+    const value: unknown = raw === null ? null : JSON.parse(raw);
+    if (typeof value !== "object" || value === null) return {};
+    const imported: Imported = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (typeof entry === "string") imported[key as keyof Imported] = entry;
+    }
+    return imported;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Applies rekordbox's browse settings, leaving alone every part whose
+ * rekordbox value is the one already imported last time.
+ */
+export function applyRekordboxBrowse(xml: string): void {
+  const imported = loadImported();
+  const next: Imported = { ...imported };
+  for (const [context, layout] of Object.entries(parseRekordboxBrowse(xml)) as [BrowseContext, Layout][]) {
+    const value = JSON.stringify(layout);
+    if (imported[context] === value) continue;
+    localStorage.setItem(`rbl.columns.v2.${context}`, value);
+    next[context] = value;
+  }
+  const widths = parseRekordboxBrowseWidths(xml);
+  if (widths.treeWidth !== undefined || widths.subWidth !== undefined) {
+    const value = JSON.stringify(widths);
+    if (imported.panes !== value) {
+      saveSession({ ...loadSession(), ...widths });
+      next.panes = value;
+    }
+  }
+  localStorage.setItem(IMPORTED_KEY, JSON.stringify(next));
+}
+
 /** Run before the main window mounts, so useColumns reads the imported layout. */
 export async function syncRekordboxBrowseAtStartup(): Promise<void> {
   if (!loadPreferences().rekordbox.syncBrowseSettings) return;
   try {
     const xml = await (await getBackend()).rekordboxBrowseSettings();
     if (!xml) return;
-    for (const [context, layout] of Object.entries(parseRekordboxBrowse(xml))) {
-      localStorage.setItem(`rbl.columns.v2.${context}`, JSON.stringify(layout));
-    }
-    const widths = parseRekordboxBrowseWidths(xml);
-    if (widths.treeWidth !== undefined || widths.subWidth !== undefined) {
-      saveSession({ ...loadSession(), ...widths });
-    }
+    applyRekordboxBrowse(xml);
   } catch {
     // A missing or unreadable rekordbox install leaves local layouts intact.
   }
