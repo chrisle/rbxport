@@ -1484,12 +1484,16 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   // Where each deck is, for an end-to-end test that compares the two.
   if (typeof window !== "undefined") {
     (window as unknown as {
-      __deckSeconds: () => { a: number; b: number; beat: number; looping: boolean };
+      __deckSeconds: () => {
+        a: number; b: number; beat: number; beatA: number; looping: boolean; playingB: boolean;
+      };
     }).__deckSeconds = () => ({
       a: deckA.frames / SAMPLE_RATE,
       b: deckB.frames / SAMPLE_RATE,
       beat: deckBeat.b,
+      beatA: deckBeat.a,
       looping: deckB.looping,
+      playingB: deckB.playing,
     });
   }
   const deckTickListeners = new Set<(tick: Tick) => void>();
@@ -2114,7 +2118,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const d = deckOf(deck);
       if (!d.loaded) return wait(undefined);
       d.playing = true;
-      d.startsAt = 0;
+      // From now, not from the clock's last step: a deck that starts between
+      // two steps has not been playing since the earlier one.
+      d.startsAt = performance.now();
       startClock();
       return wait(undefined);
     },
