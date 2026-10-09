@@ -19,7 +19,7 @@ use std::{
     sync::{OnceLock, RwLock},
 };
 
-use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 type Labels = HashMap<String, String>;
@@ -84,6 +84,42 @@ pub fn set_history_menu<R: Runtime>(
 /// `src/views/settings/AdvancedPane.tsx`), so the item that opens it is too.
 const MISSING_FILE_MANAGER: bool = false;
 
+/// What the About item shows: the product name, its version, the copyright
+/// line and the window icon, all from the bundle's own configuration.
+///
+/// rekordbox's About "displays your installed version" (rekordbox 7 manual,
+/// menu list p.252). On macOS the standard About panel reads all of this from
+/// the app bundle by itself. On Linux and Windows the predefined About item
+/// does nothing at all unless it is given these fields (muda 0.19
+/// `platform_impl/gtk` and `platform_impl/windows` only act on
+/// `About(Some(..))`), which is why About never appeared there.
+pub fn about_metadata<R: Runtime>(app: &AppHandle<R>) -> AboutMetadata<'static> {
+    let package = app.package_info();
+    AboutMetadata {
+        name: Some(package.name.clone()),
+        version: Some(package.version.to_string()),
+        copyright: app.config().bundle.copyright.clone(),
+        icon: app
+            .default_window_icon()
+            .cloned()
+            .map(tauri::image::Image::to_owned),
+        ..AboutMetadata::default()
+    }
+}
+
+/// The About item's metadata for this platform: none on macOS, where the
+/// system panel fills itself in from the bundle (and passing ours would swap
+/// the bundle's full-size icon for the small window one).
+pub fn about_metadata_for_platform<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Option<AboutMetadata<'static>> {
+    if cfg!(target_os = "macos") {
+        None
+    } else {
+        Some(about_metadata(app))
+    }
+}
+
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     build_with_labels(app, &Labels::new())
 }
@@ -125,7 +161,7 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
         .item(&PredefinedMenuItem::about(
             app,
             Some(&label(labels, "About rbxport")),
-            None,
+            about_metadata_for_platform(app),
         )?)
         .item(&updates)
         .separator()
