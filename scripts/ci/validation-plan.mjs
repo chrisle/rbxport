@@ -82,8 +82,16 @@ export function planValidation(paths, { all = false } = {}) {
 
     if (path.startsWith("src-tauri/")) {
       enable(plan, "rust");
-      // Installer hooks and scripts only ever run on Windows.
-      if (path.startsWith("src-tauri/windows/")) enable(plan, "windows_rust");
+      // Installer hooks and scripts only ever run on Windows. The file-drop
+      // bridge has a cfg(windows) WebView2 half and the manifest holds the
+      // cfg(windows) dependencies; the Linux lane compiles neither.
+      if (
+        path.startsWith("src-tauri/windows/") ||
+        path === "src-tauri/src/file_drop.rs" ||
+        path === "src-tauri/Cargo.toml"
+      ) {
+        enable(plan, "windows_rust");
+      }
       continue;
     }
 
