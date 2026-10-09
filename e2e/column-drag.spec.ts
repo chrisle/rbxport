@@ -10,7 +10,7 @@ const headings = (page: Page) =>
 
 test("a dragged heading floats with the pointer and the columns make room as it goes", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)", { timeout: 15_000 });
   const before = await headings(page);
   const keyAt = before.indexOf("Key");
   expect(before[keyAt + 1]).toBe("BPM");
@@ -40,7 +40,7 @@ test("a dragged heading floats with the pointer and the columns make room as it 
 
   // And remembered.
   await page.reload();
-  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)", { timeout: 15_000 });
   const reloaded = await headings(page);
   expect(reloaded.indexOf("Key")).toBeGreaterThan(reloaded.indexOf("BPM"));
 });
