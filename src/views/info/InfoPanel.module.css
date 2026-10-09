@@ -39,6 +39,11 @@
   background: var(--c-info-tab-active);
   color: var(--c-info-tab-active-text);
 }
+/* Summary with several tracks selected: rekordbox greys it and moves to Info. */
+.tab:disabled {
+  background: var(--c-info-tab-disabled);
+  color: var(--c-info-tab-disabled-text);
+}
 
 .reload {
   position: absolute;
@@ -259,6 +264,9 @@
   padding-right: calc(var(--s-info-spinner-right) + 14px);
 }
 .select option { background: var(--c-info-field); color: var(--c-text); }
+/* A box rekordbox greys rather than dims: the Track Title, for several
+   tracks at once. */
+[data-greyed] .box { background: var(--c-info-field-disabled); }
 .input:disabled,
 .select:disabled,
 .comments:disabled,

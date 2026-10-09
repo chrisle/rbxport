@@ -108,7 +108,7 @@ describe("mock edits", () => {
 
   it("clamps a rating to the range the backend accepts", async () => {
     const backend = createMockBackend({ trackCount: 20 });
-    await backend.edits.setTrackRating("100000", 9);
+    await backend.edits.setTrackRating(["100000"], 9);
     const rows = await backend.fetchRows(
       (await backend.openView({ source: { kind: "collection" }, sort: "trackNo", descending: false, query: "" })).viewId,
       0,
@@ -117,9 +117,40 @@ describe("mock edits", () => {
     expect(rows[0]?.rating).toBeLessThanOrEqual(5);
   });
 
+  it("writes one edit to every track of a selection and undoes it in one step", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const ids = ["100000", "100001", "100002"];
+    await backend.edits.setTrackField(ids, "genre", "Techno");
+    await backend.edits.setTrackRating(ids, 4);
+    for (const id of ids) {
+      const d = await backend.trackDetails(id);
+      expect(d.genre).toBe("Techno");
+      expect(d.rating).toBe(4);
+    }
+    await backend.edits.undoEdit();
+    for (const id of ids) expect((await backend.trackDetails(id)).rating).not.toBe(4);
+    expect((await backend.trackDetails("100001")).genre).toBe("Techno");
+  });
+
+  it("refuses a title for several tracks, as rekordbox greys the box", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await expect(backend.edits.setTrackField(["100000", "100001"], "title", "Same")).rejects.toThrow();
+  });
+
+  it("reads a selection as the first track with the differing fields named", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const ids = ["100000", "100001"];
+    await backend.edits.setTrackField(ids, "genre", "Techno");
+    const selection = await backend.selectionDetails(ids);
+    expect(selection.count).toBe(2);
+    expect(selection.first.id).toBe("100000");
+    expect(selection.mixed).toContain("title");
+    expect(selection.mixed).not.toContain("genre");
+  });
+
   it("writes a comment through to the rows the table reads", async () => {
     const backend = createMockBackend({ trackCount: 20 });
-    await backend.edits.setTrackComment("100000", "5A - Am - 128");
+    await backend.edits.setTrackComment(["100000"], "5A - Am - 128");
     const handle = await backend.openView({
       source: { kind: "collection" }, sort: "trackNo", descending: false, query: "",
     });

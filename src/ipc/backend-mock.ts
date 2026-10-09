@@ -15,7 +15,7 @@ import theme from "@/styles/theme";
 import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
   DatabaseDrive, EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
-  SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
+  SelectionDetails, SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
   DeckId, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
@@ -580,6 +580,34 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return announceHistory();
   };
 
+  /**
+   * One edit over several tracks, recorded as one step of history the way
+   * the real backend records a multiple selection's edit.
+   */
+  const recordTrackEdits = (
+    tracks: readonly string[],
+    one: (track: string) => { undo: () => void; redo: () => void },
+  ): Promise<EditHistoryState> => {
+    const steps = tracks.map(one);
+    return recordEdit({
+      label: "Track Edit",
+      undo: () => { for (const step of [...steps].reverse()) step.undo(); },
+      redo: () => { for (const step of steps) step.redo(); },
+    });
+  };
+
+  const setHasArtwork = (track: string, value: boolean) => {
+    const row = all.find((r) => r.id === track);
+    const before = row?.hasArtwork ?? false;
+    const apply = (has: boolean) => {
+      if (row) row.hasArtwork = has;
+      const detail = details.get(track);
+      if (detail) detail.hasArtwork = has;
+    };
+    apply(value);
+    return { undo: () => apply(before), redo: () => apply(value) };
+  };
+
   const findNode = (id: string) => tree.find((n) => n.id === id);
   const treeSnapshot = () => tree.map((node) => ({ ...node }));
   const restoreTree = (snapshot: readonly TreeNode[]) => {
@@ -1036,43 +1064,47 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       membership.set(playlist, [...named, ...current.filter((t) => !named.includes(t))]);
       return bump();
     },
-    setTrackRating: (track, stars) => {
-      const row = all.find((r) => r.id === track);
-      const before = row?.rating ?? 0;
+    setTrackRating: (tracks, stars) => {
       const after = Math.max(0, Math.min(5, stars));
-      const apply = (value: number) => {
-        if (row) row.rating = value;
-        const detail = details.get(track);
-        if (detail) detail.rating = value;
-      };
-      apply(after);
-      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(after) });
+      return recordTrackEdits(tracks, (track) => {
+        const row = all.find((r) => r.id === track);
+        const before = row?.rating ?? 0;
+        const apply = (value: number) => {
+          if (row) row.rating = value;
+          const detail = details.get(track);
+          if (detail) detail.rating = value;
+        };
+        apply(after);
+        return { undo: () => apply(before), redo: () => apply(after) };
+      });
     },
-    setTrackComment: (track, comment) => {
-      const row = all.find((r) => r.id === track);
-      const before = row?.comment ?? "";
-      const apply = (value: string) => {
-        if (row) row.comment = value;
-        const detail = details.get(track);
-        if (detail) detail.comment = value;
-      };
-      apply(comment);
-      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(comment) });
-    },
-    setTrackColor: (track, color) => {
-      const at = all.findIndex((r) => r.id === track);
-      const row = all[at];
-      const before = details.get(track)?.color ?? String(colors[at] ?? 0);
-      const apply = (value: string | null) => {
-        const numeric = value === null ? 0 : Number.parseInt(value, 10);
-        if (row) row.artworkHue = numeric * 40;
-        if (at >= 0) colors[at] = numeric;
-        const detail = details.get(track);
-        if (detail) detail.color = value ?? "0";
-      };
-      apply(color);
-      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(color) });
-    },
+    setTrackComment: (tracks, comment) =>
+      recordTrackEdits(tracks, (track) => {
+        const row = all.find((r) => r.id === track);
+        const before = row?.comment ?? "";
+        const apply = (value: string) => {
+          if (row) row.comment = value;
+          const detail = details.get(track);
+          if (detail) detail.comment = value;
+        };
+        apply(comment);
+        return { undo: () => apply(before), redo: () => apply(comment) };
+      }),
+    setTrackColor: (tracks, color) =>
+      recordTrackEdits(tracks, (track) => {
+        const at = all.findIndex((r) => r.id === track);
+        const row = all[at];
+        const before = details.get(track)?.color ?? String(colors[at] ?? 0);
+        const apply = (value: string | null) => {
+          const numeric = value === null ? 0 : Number.parseInt(value, 10);
+          if (row) row.artworkHue = numeric * 40;
+          if (at >= 0) colors[at] = numeric;
+          const detail = details.get(track);
+          if (detail) detail.color = value ?? "0";
+        };
+        apply(color);
+        return { undo: () => apply(before), redo: () => apply(color) };
+      }),
     setMyTags: (track, tags) => {
       const row = all.find((r) => r.id === track);
       const detail = row ? detailsOf(row) : undefined;
@@ -1082,60 +1114,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(tags) });
     },
     addPlaylistArtwork: () => bump(),
-    addArtwork: (track) => {
-      const row = all.find((r) => r.id === track);
-      const before = row?.hasArtwork ?? false;
-      const apply = (value: boolean) => {
-        if (row) row.hasArtwork = value;
-        const detail = details.get(track);
-        if (detail) detail.hasArtwork = value;
-      };
-      apply(true);
-      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(true) });
-    },
-    clearArtwork: (track) => {
-      const row = all.find((r) => r.id === track);
-      const before = row?.hasArtwork ?? false;
-      const apply = (value: boolean) => {
-        if (row) row.hasArtwork = value;
-        const detail = details.get(track);
-        if (detail) detail.hasArtwork = value;
-      };
-      apply(false);
-      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(false) });
-    },
-    setTrackField: (track, field, value) => {
-      const row = all.find((r) => r.id === track);
-      if (!row) return bump().then(historyState);
-      const d = detailsOf(row);
-      const beforeRow = { ...row };
-      const beforeDetails = { ...d, myTags: [...d.myTags] };
-      const finish = () => {
-        const afterRow = { ...row };
-        const afterDetails = { ...d, myTags: [...d.myTags] };
-        const apply = (rowValue: RowDto, detailValue: TrackDetails) => {
-          Object.assign(row, rowValue);
-          Object.assign(d, detailValue, { myTags: [...detailValue.myTags] });
-        };
-        return recordEdit({
-          label: "Track Edit",
-          undo: () => apply(beforeRow, beforeDetails),
-          redo: () => apply(afterRow, afterDetails),
-        });
-      };
-      // The same refusals the writer makes: a number that is not one, and a
-      // key the library does not hold.
+    addArtwork: (tracks) => recordTrackEdits(tracks, (track) => setHasArtwork(track, true)),
+    clearArtwork: (tracks) => recordTrackEdits(tracks, (track) => setHasArtwork(track, false)),
+    setTrackField: (tracks, field, value) => {
+      // The same refusals the writer makes: a number that is not one, a key
+      // the library does not hold, and a title or BPM for several tracks.
+      if (tracks.length > 1 && (field === "title" || field === "bpm")) {
+        return Promise.reject(new Error(`${field} cannot be edited here.`));
+      }
       const numeric: Partial<Record<TrackField, "year" | "trackNumber" | "discNumber" | "playCount">> = {
         year: "year", trackNumber: "trackNumber", discNumber: "discNumber", playCount: "playCount",
       };
       const which = numeric[field];
-      if (which) {
-        const n = /^\s*\d+\s*$/.test(value) ? Number.parseInt(value, 10) : NaN;
-        if (!Number.isFinite(n)) {
-          return Promise.reject(new Error(`${JSON.stringify(value)} is not a whole number`));
-        }
-        d[which] = n;
-        return finish();
+      const n = /^\s*\d+\s*$/.test(value) ? Number.parseInt(value, 10) : NaN;
+      if (which && !Number.isFinite(n)) {
+        return Promise.reject(new Error(`${JSON.stringify(value)} is not a whole number`));
       }
       if (field === "key" && value !== "" && !KEYS.includes(value)) {
         return Promise.reject(new Error(`${JSON.stringify(value)} is not a key the library knows`));
@@ -1145,22 +1138,42 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         if (!Number.isFinite(bpm) || bpm < 20 || bpm > 400) {
           return Promise.reject(new Error(`${JSON.stringify(value)} is not a BPM between 20 and 400`));
         }
-        row.bpmX100 = Math.round(bpm * 100);
-        d.bpmX100 = row.bpmX100;
+        const row = all.find((r) => r.id === tracks[0]);
+        if (row) {
+          row.bpmX100 = Math.round(bpm * 100);
+          detailsOf(row).bpmX100 = row.bpmX100;
+        }
         return bump().then(historyState);
       }
-      // Narrowed by hand: what is left after the numeric fields is text.
-      const text = field as Exclude<TrackField, "year" | "trackNumber" | "discNumber" | "playCount" | "bpm">;
-      d[text] = value.trim();
-      // The row carries some of the same columns; keep the two in step the
-      // way a reload of the index would.
-      if (field === "title") row.title = d.title;
-      else if (field === "artist") row.artist = d.artist;
-      else if (field === "album") row.album = d.album;
-      else if (field === "genre") row.genre = d.genre;
-      else if (field === "label") row.label = d.label;
-      else if (field === "key") row.key = d.key;
-      return finish();
+      return recordTrackEdits(tracks, (track) => {
+        const row = all.find((r) => r.id === track);
+        if (!row) return { undo: () => {}, redo: () => {} };
+        const d = detailsOf(row);
+        const beforeRow = { ...row };
+        const beforeDetails = { ...d, myTags: [...d.myTags] };
+        if (which) {
+          d[which] = n;
+        } else {
+          // Narrowed by hand: what is left after the numeric fields is text.
+          const text = field as Exclude<TrackField, "year" | "trackNumber" | "discNumber" | "playCount" | "bpm">;
+          d[text] = value.trim();
+          // The row carries some of the same columns; keep the two in step
+          // the way a reload of the index would.
+          if (field === "title") row.title = d.title;
+          else if (field === "artist") row.artist = d.artist;
+          else if (field === "album") row.album = d.album;
+          else if (field === "genre") row.genre = d.genre;
+          else if (field === "label") row.label = d.label;
+          else if (field === "key") row.key = d.key;
+        }
+        const afterRow = { ...row };
+        const afterDetails = { ...d, myTags: [...d.myTags] };
+        const apply = (rowValue: RowDto, detailValue: TrackDetails) => {
+          Object.assign(row, rowValue);
+          Object.assign(d, detailValue, { myTags: [...detailValue.myTags] });
+        };
+        return { undo: () => apply(beforeRow, beforeDetails), redo: () => apply(afterRow, afterDetails) };
+      });
     },
     addCue: (track, kind, positionMs) => {
       if (!all.some((r) => r.id === track)) return refuse(`no track ${track}`);
@@ -2741,6 +2754,23 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (!row) return Promise.reject(new Error("That track is no longer in the library."));
       // A copy: the panel must not be able to edit the backend's own record.
       return wait({ ...detailsOf(row) });
+    },
+    selectionDetails: (trackIds) => {
+      if (!ready) return notReady();
+      const rows = trackIds.flatMap((id) => all.filter((r) => r.id === id));
+      const [head] = rows;
+      if (!head) return Promise.reject(new Error("That track is no longer in the library."));
+      const first = detailsOf(head);
+      const others = rows.slice(1).map(detailsOf);
+      // Every field but the id and the My Tags, as the real backend compares.
+      const compared = (Object.keys(first) as (keyof TrackDetails)[])
+        .filter((key) => key !== "id" && key !== "myTags" && key !== "hasArtwork");
+      const mixed: SelectionDetails["mixed"] = compared.filter((key) =>
+        others.some((other) => other[key] !== first[key]),
+      );
+      // The mock serves a different picture for each track that has one.
+      if (rows.length > 1 && rows.some((r) => r.hasArtwork)) mixed.push("artwork");
+      return wait({ first: { ...first, myTags: [...first.myTags] }, count: rows.length, mixed });
     },
     trackLookups: () =>
       wait({

@@ -13,7 +13,7 @@ import type {
   DatabaseDrive, EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
   LinkStatus, MissingExportFile, MissingTracks, PreviewState, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
   TreeNode, ViewHandle,
-  TrackDetails, TrackLookups,
+  SelectionDetails, TrackDetails, TrackLookups,
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -525,9 +525,9 @@ async function realBackend(): Promise<Backend> {
       removeFromCollection: (tracks) => invoke<number>("remove_from_collection", { tracks }),
       reorderPlaylist: (playlist, tracks) =>
         invoke<number>("reorder_playlist", { playlist, tracks }),
-      setTrackRating: (track, stars) => invoke<EditHistoryState>("set_track_rating", { track, stars }),
-      setTrackComment: (track, comment) => invoke<EditHistoryState>("set_track_comment", { track, comment }),
-      setTrackColor: (track, color) => invoke<EditHistoryState>("set_track_color", { track, color }),
+      setTrackRating: (tracks, stars) => invoke<EditHistoryState>("set_track_rating", { tracks, stars }),
+      setTrackComment: (tracks, comment) => invoke<EditHistoryState>("set_track_comment", { tracks, comment }),
+      setTrackColor: (tracks, color) => invoke<EditHistoryState>("set_track_color", { tracks, color }),
       addCue: (track, kind, positionMs) => invoke<string>("add_cue", { track, kind, positionMs }),
       addLoop: (track, kind, inMs, outMs, beats) =>
         invoke<string>("add_loop", { track, kind, inMs, outMs, beats: beats ?? null }),
@@ -542,15 +542,16 @@ async function realBackend(): Promise<Backend> {
       gridRedo: (track, deck) => invoke<GridState>("grid_redo", { track, deck: deck ?? null }),
       gridLock: (track, on) => invoke<GridState>("grid_lock", { track, on }),
       convertMemoryCuesToHot: (track) => invoke<number>("convert_memory_cues_to_hot", { track }),
-      setTrackField: (track, field, value) =>
-        invoke<EditHistoryState>("set_track_field", { track, field, value }),
-      addArtwork: (track, image) => invoke<EditHistoryState>("add_artwork", { track, image }),
+      setTrackField: (tracks, field, value) =>
+        invoke<EditHistoryState>("set_track_field", { tracks, field, value }),
+      addArtwork: (tracks, image) => invoke<EditHistoryState>("add_artwork", { tracks, image }),
       addPlaylistArtwork: (playlist, image) => invoke<number>("add_playlist_artwork", { playlist, image }),
       setMyTags: (track, tags) => invoke<EditHistoryState>("set_my_tags", { track, tags }),
-      clearArtwork: (track) => invoke<EditHistoryState>("clear_artwork", { track }),
+      clearArtwork: (tracks) => invoke<EditHistoryState>("clear_artwork", { tracks }),
     },
     filterValues: (spec) => invoke<FilterValues>("filter_values", { spec }),
     trackDetails: (trackId) => invoke<TrackDetails>("track_details", { track: trackId }),
+    selectionDetails: (trackIds) => invoke<SelectionDetails>("selection_details", { tracks: trackIds }),
     trackLookups: () => invoke<TrackLookups>("track_lookups"),
   };
 }

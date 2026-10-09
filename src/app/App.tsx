@@ -215,6 +215,10 @@ function AppBody() {
   // The one row the browser has selected, so an empty deck can be clicked to
   // take it. Selecting still loads nothing by itself.
   const [selectedRow, setSelectedRow] = useState<RowDto | null>(null);
+  // The track ids the information panel follows: the selection of whichever
+  // browser list changed last, in the order that list reports it. More than
+  // one is a multiple selection, which the panel edits as a whole.
+  const [infoSelection, setInfoSelection] = useState<readonly string[]>([]);
   // Where each deck's transport is drawn in the two-deck layouts. State rather
   // than a ref, because the players have to re-render once the slots exist.
   const [transportA, setTransportA] = useState<HTMLDivElement | null>(null);
@@ -922,25 +926,28 @@ function AppBody() {
     [refuse],
   );
 
-  const rateTrack = useCallback(
-    (id: string, stars: number) => {
-      if (refuseLoose(id)) return;
-      showPending(id, { rating: stars });
+  /** Rates one track from the list, or the information panel's whole selection. */
+  const rateTracks = useCallback(
+    (ids: readonly string[], stars: number) => {
+      if (ids.some(refuseLoose)) return;
+      for (const id of ids) showPending(id, { rating: stars });
       void runEdit(stars === 0 ? "Rating cleared." : `Rated ${stars} of 5.`, (b) =>
-        b.edits.setTrackRating(id, stars),
+        b.edits.setTrackRating(ids, stars),
       );
     },
     [runEdit, showPending, refuseLoose],
   );
+  const rateTrack = useCallback((id: string, stars: number) => rateTracks([id], stars), [rateTracks]);
 
-  const commentTrack = useCallback(
-    (id: string, comment: string) => {
-      if (refuseLoose(id)) return;
-      showPending(id, { comment });
-      void runEdit("Comment saved.", (b) => b.edits.setTrackComment(id, comment));
+  const commentTracks = useCallback(
+    (ids: readonly string[], comment: string) => {
+      if (ids.some(refuseLoose)) return;
+      for (const id of ids) showPending(id, { comment });
+      void runEdit("Comment saved.", (b) => b.edits.setTrackComment(ids, comment));
     },
     [runEdit, showPending, refuseLoose],
   );
+  const commentTrack = useCallback((id: string, comment: string) => commentTracks([id], comment), [commentTracks]);
 
   const editTrackField = useCallback(
     (id: string, field: TrackField, value: string) => {
@@ -949,7 +956,7 @@ function AppBody() {
       // belong to the information panel and arrive with the re-read.
       if (ROW_FIELDS.has(field)) showPending(id, { [field]: value });
       void runEdit(`${FIELD_LABEL[field]} saved.`, (b) =>
-        b.edits.setTrackField(id, field, value),
+        b.edits.setTrackField([id], field, value),
       );
     },
     [runEdit, showPending, refuseLoose],
@@ -1700,6 +1707,13 @@ function AppBody() {
     setAnalysisSelection(tracks.map(({ id, title }) => ({ id, title })));
   });
   const analyseSelection = useEventCallback(() => analyseTracks(selectedTracks));
+  const reportMainSelection = useCallback((tracks: { id: string; title: string }[]) => {
+    setSelectedTracks(tracks);
+    setInfoSelection(tracks.map((t) => t.id));
+  }, []);
+  const reportSubSelection = useCallback((tracks: { id: string; title: string }[]) => {
+    setInfoSelection(tracks.map((t) => t.id));
+  }, []);
   /** Configure one track: the deck's own, from its menu. */
   const analyseOne = useCallback(
     (id: string, title: string) => {
@@ -2315,7 +2329,8 @@ function AppBody() {
     onRemoveFromTagList: removeFromTagList, onReloadTag: reloadTag, onExportTrack: exportTrackTo,
     playlists: menuPlaylists, devices: menuDevices, onEditField: editTrackField,
     onEditBlocked: readOnly ? explainEditLock : undefined, onFocusedRow: setPlayerTrack,
-    onSelectedRow: setSelectedRow, pendingEdits, readOnly, dragging: draggedTracks !== null,
+    onSelectedRow: setSelectedRow, onSelectedTracks: reportSubSelection, pendingEdits, readOnly,
+    dragging: draggedTracks !== null,
     onDropTracks: addDraggedTo, onRemoveTracksFromPlaylist: removeTracksFromPlaylist,
     onRemoveTracksFromHistory: removeTracksFromHistory, onReorderPlaylist: reorderPlaylist,
     onDropFilesIntoPlaylist: importDroppedFilesTo, onAnalyseTracks: analyseTracks,
@@ -2325,7 +2340,7 @@ function AppBody() {
     addToTagList, removeFromTagList, reloadTag, exportTrackTo, menuPlaylists, menuDevices,
     editTrackField, readOnly, explainEditLock, pendingEdits, draggedTracks, addDraggedTo,
     removeTracksFromPlaylist, removeTracksFromHistory, reorderPlaylist, importDroppedFilesTo,
-    analyseTracks, refuse,
+    analyseTracks, refuse, reportSubSelection,
   ]);
   return (
     <PreferencesProvider value={prefs}>
@@ -2528,7 +2543,7 @@ function AppBody() {
           spec={spec}
           onSortChange={handleSort}
           onSelectionChange={setSelectedCount}
-          onSelectedTracks={setSelectedTracks}
+          onSelectedTracks={reportMainSelection}
           onAnalyse={analyseSelection}
           onShowInformation={showInformation}
           onShowInFinder={revealTrack}
@@ -2605,12 +2620,14 @@ function AppBody() {
         {infoOpen ? (
           <InfoPanel
             // The browser's selection, as rekordbox's Information Window
-            // follows it; the deck's track only when nothing is selected.
-            track={selectedRow ?? playerTrack}
+            // follows it; the deck's track only when nothing is selected —
+            // never for a multiple selection, which the panel shows as one.
+            track={infoSelection.length > 1 ? null : selectedRow ?? playerTrack}
+            selection={infoSelection}
             readOnly={readOnly}
             libraryGeneration={libraryGeneration}
-            onRate={rateTrack}
-            onComment={commentTrack}
+            onRate={rateTracks}
+            onComment={commentTracks}
             onEdit={runEdit}
           />
         ) : null}

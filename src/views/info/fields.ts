@@ -5,8 +5,8 @@
  * tab's rows, the file-type label, and which Info-tab fields the writer will
  * take.
  */
-import type { RowDto, TrackDetails, TrackField } from "@/ipc/types";
-import { formatBitrate, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
+import type { RowDto, SelectionDetails, TrackDetails, TrackField } from "@/ipc/types";
+import { formatBitrate, formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
 
 /** A label and the text beside it. */
 export interface Fact {
@@ -156,3 +156,141 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+
+/**
+ * What the Info tab shows and which tracks its edits go to: one track's
+ * record, or a multiple selection read the way rekordbox reads one.
+ */
+export interface InfoView {
+  /** Every track an edit goes to. */
+  ids: readonly string[];
+  /** Several tracks: the Track Title box is greyed and My Tag is not offered. */
+  multiple: boolean;
+  text: (field: TrackField) => string;
+  rating: number;
+  comment: string;
+  color: string;
+  albumArtist: string;
+  bpm: string;
+  releaseDate: string;
+  mixName: string;
+  message: string;
+  hotCueAutoLoad: boolean;
+  publish: boolean;
+  /** The My Tags on the track; `null` when the toggles are not offered. */
+  myTags: readonly string[] | null;
+}
+
+/** One track: its record, or the row's own fields until the record arrives. */
+export function singleView(row: RowDto, details: TrackDetails | null): InfoView {
+  const record = details ?? fromRow(row);
+  return {
+    ids: [row.id],
+    multiple: false,
+    text: (field) => fieldText(record, field),
+    rating: record.rating,
+    comment: record.comment,
+    color: details?.color ?? "0",
+    albumArtist: details?.albumArtist ?? "",
+    bpm: formatBpm(record.bpmX100),
+    releaseDate: record.releaseDate,
+    mixName: details?.mixName ?? "",
+    message: details?.message ?? "",
+    hotCueAutoLoad: details?.hotCueAutoLoad ?? false,
+    publish: details?.publish ?? false,
+    myTags: details ? details.myTags : null,
+  };
+}
+
+/** The `TrackDetails` field each Info-tab field is read from. */
+const RECORD_FIELD: Record<TrackField, keyof TrackDetails> = {
+  title: "title", artist: "artist", album: "album", year: "year", trackNumber: "trackNumber",
+  discNumber: "discNumber", originalArtist: "originalArtist", composer: "composer",
+  remixer: "remixer", lyricist: "lyricist", playCount: "playCount", genre: "genre",
+  label: "label", key: "key", bpm: "bpmX100",
+};
+
+/**
+ * Several tracks, as rekordbox's Information Window shows them.
+ *
+ * Each field is the tracks' shared value. One they do not share is blank —
+ * text and the Year, Track number, Disc number and DJ Play Count boxes
+ * alike — except the BPM, which reads 0.00, and the rating, which shows no
+ * stars [OBS: rekordbox 7 on Windows 11, three and two tracks selected;
+ * static: 7.2.11 `TrackInfoConcreteMediator::getTrackProp` returns an empty
+ * string for an unshared field, `getBrowseInfoIntValue` 0 for an unshared BPM
+ * or rating]. The two boxes are ticked only when every track has them
+ * ticked (`getBrowseInfoBoolValue`). The colour is the first track's, shared
+ * or not: `getBrowseInfoIntValue` reads it without comparing [static only;
+ * not observed, the captured tracks had no colour].
+ *
+ * Until the record arrives every field is blank.
+ */
+export function selectionView(ids: readonly string[], selection: SelectionDetails | null): InfoView {
+  const mixed = new Set<string>(selection?.mixed ?? []);
+  const first = selection?.first;
+  const shared = <K extends keyof TrackDetails>(key: K): TrackDetails[K] | undefined =>
+    first && !mixed.has(key) ? first[key] : undefined;
+  const sharedText = (key: keyof TrackDetails) => {
+    const value = shared(key);
+    return value === undefined ? "" : String(value);
+  };
+  const bpmX100 = shared("bpmX100");
+  return {
+    ids,
+    multiple: true,
+    text: (field) => (field === "bpm" ? formatBpm(bpmX100 ?? 0) : sharedText(RECORD_FIELD[field])),
+    rating: shared("rating") ?? 0,
+    comment: sharedText("comment"),
+    color: first?.color || "0",
+    albumArtist: sharedText("albumArtist"),
+    bpm: first ? (bpmX100 === undefined ? (0).toFixed(2) : formatBpm(bpmX100)) : "",
+    releaseDate: sharedText("releaseDate"),
+    mixName: sharedText("mixName"),
+    message: sharedText("message"),
+    hotCueAutoLoad: shared("hotCueAutoLoad") ?? false,
+    publish: shared("publish") ?? false,
+    myTags: null,
+  };
+}
+
+/** The record's shape from a row alone, for the moment before it arrives. */
+export function fromRow(row: RowDto): TrackDetails {
+  return {
+    id: row.id,
+    title: row.title,
+    artist: row.artist,
+    album: row.album,
+    albumArtist: "",
+    originalArtist: "",
+    composer: "",
+    remixer: "",
+    lyricist: "",
+    genre: row.genre,
+    label: row.label,
+    key: row.key,
+    comment: row.comment,
+    mixName: "",
+    message: "",
+    color: "0",
+    rating: row.rating,
+    bpmX100: row.bpmX100,
+    durationSec: row.durationSec,
+    year: 0,
+    trackNumber: 0,
+    discNumber: 0,
+    playCount: 0,
+    fileType: 0,
+    fileSize: 0,
+    bitrate: 0,
+    sampleRate: 0,
+    bitDepth: 0,
+    dateCreated: "",
+    releaseDate: row.releaseDate,
+    path: "",
+    hotCueAutoLoad: false,
+    publish: false,
+    hasArtwork: row.hasArtwork,
+    myTags: [],
+  };
+}

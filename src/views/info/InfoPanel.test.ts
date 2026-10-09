@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { acceptable, dateSegments, fieldText, fileTypeLabel, summaryFacts } from "./fields";
-import type { RowDto, TrackDetails } from "@/ipc/types";
+import {
+  acceptable, dateSegments, fieldText, fileTypeLabel, selectionView, singleView, summaryFacts,
+} from "./fields";
+import type { RowDto, SelectionDetails, TrackDetails } from "@/ipc/types";
 
 const row: RowDto = {
   id: "18969",
@@ -151,5 +153,85 @@ describe("the Info tab's fields", () => {
     expect(dateSegments("2023-08-01")).toEqual(["1", "August", "2023"]);
     expect(dateSegments("")).toEqual(["", "", ""]);
     expect(dateSegments("not a date")).toEqual(["", "", ""]);
+  });
+});
+
+describe("the Info tab for several selected tracks", () => {
+  // The two-track selection captured on rekordbox 7 (Windows 11): "I Wish"
+  // and "Dancing In The Street", both 138.00 BPM, keys Eb and C, no artist.
+  const first: TrackDetails = {
+    ...details, id: "1", title: "I Wish (TRIODE Edit)", artist: "", key: "Eb", bpmX100: 13_800,
+    year: 0, trackNumber: 0, discNumber: 0, playCount: 0, rating: 0, hotCueAutoLoad: true,
+  };
+  const pair: SelectionDetails = { first, count: 2, mixed: ["title", "key", "durationSec", "path"] };
+
+  it("shows what the tracks share and blanks what they do not, as rekordbox does", () => {
+    const view = selectionView(["1", "2"], pair);
+    expect(view.multiple).toBe(true);
+    expect(view.ids).toEqual(["1", "2"]);
+    // [OBS] Track Title and Key blank, BPM 138.00, Year/Track/Disc/Play Count 0, auto-load ticked.
+    expect(view.text("title")).toBe("");
+    expect(view.text("key")).toBe("");
+    expect(view.bpm).toBe("138.00");
+    expect(view.text("artist")).toBe("");
+    expect(view.text("year")).toBe("0");
+    expect(view.text("trackNumber")).toBe("0");
+    expect(view.text("discNumber")).toBe("0");
+    expect(view.text("playCount")).toBe("0");
+    expect(view.hotCueAutoLoad).toBe(true);
+    expect(view.myTags).toBeNull();
+  });
+
+  it("reads 0.00 for a BPM the tracks do not share, and no stars for a rating", () => {
+    // [OBS] three tracks at 138, 136 and 128 BPM: the BPM box read 0.00.
+    const three: SelectionDetails = { first: { ...first, rating: 3 }, count: 3, mixed: ["bpmX100", "rating"] };
+    const view = selectionView(["1", "2", "3"], three);
+    expect(view.bpm).toBe("0.00");
+    expect(view.rating).toBe(0);
+  });
+
+  it("blanks a number box the tracks do not share rather than printing the first one's", () => {
+    // [static] getTrackProp returns an empty string for an unshared Year,
+    // Track number, Disc number or DJ Play Count.
+    const view = selectionView(["1", "2"], {
+      first: { ...first, year: 2019, trackNumber: 4, discNumber: 1, playCount: 7 },
+      count: 2,
+      mixed: ["year", "trackNumber", "discNumber", "playCount"],
+    });
+    expect(view.text("year")).toBe("");
+    expect(view.text("trackNumber")).toBe("");
+    expect(view.text("discNumber")).toBe("");
+    expect(view.text("playCount")).toBe("");
+  });
+
+  it("ticks a box only when every track has it ticked, and keeps the first track's colour", () => {
+    const view = selectionView(["1", "2"], {
+      first: { ...first, color: "3", publish: true },
+      count: 2,
+      mixed: ["hotCueAutoLoad", "publish", "color"],
+    });
+    expect(view.hotCueAutoLoad).toBe(false);
+    expect(view.publish).toBe(false);
+    // [static] getBrowseInfoIntValue reads the colour without comparing.
+    expect(view.color).toBe("3");
+  });
+
+  it("is blank until the record arrives", () => {
+    const view = selectionView(["1", "2"], null);
+    expect(view.text("artist")).toBe("");
+    expect(view.text("year")).toBe("");
+    expect(view.bpm).toBe("");
+    expect(view.color).toBe("0");
+  });
+
+  it("leaves one track as it was: its own record, its My Tags, its own id", () => {
+    const view = singleView(row, details);
+    expect(view.multiple).toBe(false);
+    expect(view.ids).toEqual([row.id]);
+    expect(view.text("title")).toBe(row.title);
+    expect(view.text("year")).toBe("0");
+    expect(view.bpm).toBe("138.00");
+    expect(view.myTags).toEqual([]);
+    expect(singleView(row, null).myTags).toBeNull();
   });
 });

@@ -873,6 +873,13 @@ export interface Backend {
    */
   trackDetails(trackId: string): Promise<TrackDetails>;
 
+  /**
+   * Several tracks for the information panel's multiple selection: the
+   * first one's record and which fields differ. `trackIds` in the order the
+   * list reports the selection.
+   */
+  selectionDetails(trackIds: readonly string[]): Promise<SelectionDetails>;
+
   /** What the Info tab's Key and Genre dropdowns offer: what the library holds. */
   trackLookups(): Promise<TrackLookups>;
 }
@@ -1469,23 +1476,30 @@ export interface Edits {
   /** Remove from Collection: the tracks leave the library and every playlist. The files stay. */
   removeFromCollection(tracks: string[]): Promise<number>;
   reorderPlaylist(playlist: string, tracks: string[]): Promise<number>;
-  setTrackRating(track: string, stars: number): Promise<EditHistoryState>;
-  setTrackComment(track: string, comment: string): Promise<EditHistoryState>;
-  setTrackColor(track: string, color: string | null): Promise<EditHistoryState>;
+  /**
+   * The edits below take every track they apply to — one from the list, or
+   * the information panel's whole selection — and record them as one step
+   * of history.
+   */
+  setTrackRating(tracks: readonly string[], stars: number): Promise<EditHistoryState>;
+  setTrackComment(tracks: readonly string[], comment: string): Promise<EditHistoryState>;
+  setTrackColor(tracks: readonly string[], color: string | null): Promise<EditHistoryState>;
   /**
    * One of the Info tab's editable fields, by wire name. The backend keeps
    * the list of what may be written; a name it does not know is refused as
-   * `readOnly` rather than mapped onto a guess.
+   * `readOnly` rather than mapped onto a guess. The title and the BPM are
+   * refused for more than one track: rekordbox greys its Track Title box for
+   * a multiple selection.
    */
-  setTrackField(track: string, field: TrackField, value: string): Promise<EditHistoryState>;
+  setTrackField(tracks: readonly string[], field: TrackField, value: string): Promise<EditHistoryState>;
   /** Sets the My Tags on a track to exactly these ids. */
   setMyTags(track: string, tags: string[]): Promise<EditHistoryState>;
   /** Add Artwork: the image is filed in the share tree and the track points at it. */
-  addArtwork(track: string, image: string): Promise<EditHistoryState>;
+  addArtwork(tracks: readonly string[], image: string): Promise<EditHistoryState>;
   /** Add Artwork on a playlist or folder, from the tree menu. */
   addPlaylistArtwork(playlist: string, image: string): Promise<number>;
   /** Delete Artwork: the track points at no image; the file stays. */
-  clearArtwork(track: string): Promise<EditHistoryState>;
+  clearArtwork(tracks: readonly string[]): Promise<EditHistoryState>;
 
   /**
    * Cues. Unlike the edits above these do not return a generation: a cue
@@ -1638,6 +1652,25 @@ export interface TrackDetails {
   hasArtwork: boolean;
   /** The ids of the My Tags on the track. */
   myTags: string[];
+}
+
+/**
+ * Several selected tracks, as the information panel shows them.
+ *
+ * rekordbox reads each field from the first selected track and leaves a
+ * field the tracks do not all share blank (7.2.11,
+ * `TrackInfoConcreteMediator::getTrackProp`).
+ */
+export interface SelectionDetails {
+  /** The first selected track that is still in the library. */
+  first: TrackDetails;
+  /** How many of the selected tracks are still in the library. */
+  count: number;
+  /**
+   * The `TrackDetails` fields that differ between the tracks, plus
+   * `"artwork"` when they do not all show the same image.
+   */
+  mixed: (keyof TrackDetails | "artwork")[];
 }
 
 export interface TrackLookups {

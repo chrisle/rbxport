@@ -108,10 +108,13 @@
   --c-info-tab-active: #3571E3; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the selected tab's fill, (53,113,227) */
   --c-info-tab-active-text: #000000; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the selected tab's label is black on the blue */
   --c-info-tab-text: #969696; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): an unselected tab's label, (150,150,150); its fill is the raised #323232 */
+  --c-info-tab-disabled: #242424; /* rekordbox 7 on Windows 11, Information Window with three tracks selected (issue #112 parity capture rekordbox-multi3-info.png): the greyed Summary tab's fill, (36,36,36) */
+  --c-info-tab-disabled-text: #464646; /* same capture: the greyed Summary tab's label, (70,70,70) */
   --c-info-label: #878787; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary tab's field labels, (135,135,135) */
   --c-info-value: #FFFFFF; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary tab's values, a flat (255,255,255) */
   --c-info-form-text: #969696; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Info tab's labels, field text and empty stars, all (150,150,150) */
   --c-info-field: #0F0F0F; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Info tab's input boxes and the Summary sleeve's fill, (15,15,15) */
+  --c-info-field-disabled: #191919; /* rekordbox 7 on Windows 11, Information Window with three tracks selected (issue #112 parity capture rekordbox-multi3-info.png): the greyed Track Title box, (25,25,25) against (15,15,15) for the boxes that take an edit */
   --c-info-sleeve-border: #4B4B4B; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the 1px border of the Summary tab's sleeve, (75,75,75) */
   --c-info-spinner: #646464; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the up/down chevrons in the Key, Genre, Color and Release Date boxes, (100,100,100) */
   --c-info-check-off: #282828; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the unticked Publish box, (40,40,40); the ticked one is the active-tab blue with a white tick */

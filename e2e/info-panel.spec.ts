@@ -153,3 +153,83 @@ test("the key is chosen from what the library holds", async ({ page }) => {
   await expect(page.getByRole("contentinfo")).toContainText("Key saved");
   await expect(page.locator('[role="gridcell"][data-col="key"]').nth(3)).toHaveText("Dm");
 });
+
+// ------------------------------------------------- several tracks (#112)
+
+/**
+ * Selects the fourth to sixth rows. rekordbox greys Summary for a multiple
+ * selection and moves the panel to Info [OBS: rekordbox 7, Windows 11].
+ */
+async function selectThree(page: Page) {
+  const titles = page.locator('[role="gridcell"][data-col="title"]');
+  await titles.nth(3).click();
+  await titles.nth(5).click({ modifiers: ["Shift"] });
+}
+
+test("several selected tracks grey Summary and move the panel to Info", async ({ page }) => {
+  // Writable, so the greyed title is the selection's doing, not read-only's.
+  const panel = await openPanel(page, "/?writable");
+  const tabs = panel.getByRole("tablist", { name: "Information" });
+  await expect(tabs.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
+
+  await selectThree(page);
+  await expect(tabs.getByRole("tab", { name: "Summary" })).toBeDisabled();
+  await expect(tabs.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
+  // The Track Title box is greyed and blank: three titles are not one. The
+  // other boxes still take an edit.
+  const title = panel.getByRole("textbox", { name: "Track Title" });
+  await expect(title).toBeDisabled();
+  await expect(title).toHaveValue("");
+  await expect(panel.getByRole("textbox", { name: "Artist", exact: true })).toBeEnabled();
+  await expect(panel.getByRole("textbox", { name: "Composer" })).toBeEnabled();
+
+  // One track again: Summary comes back, and the panel stays on Info.
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+  await expect(tabs.getByRole("tab", { name: "Summary" })).toBeEnabled();
+  await expect(tabs.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
+  await expect(title).toBeEnabled();
+});
+
+test("a multiple selection never shows the loaded track's record", async ({ page }) => {
+  // The report: with a track on the deck, selecting several others showed
+  // the deck's track in the panel.
+  const panel = await openPanel(page);
+  const titles = page.locator('[role="gridcell"][data-col="title"]');
+  await titles.nth(1).dblclick();
+  const loaded = await titles.nth(1).innerText();
+  await selectThree(page);
+  await panel.getByRole("tab", { name: "Info" }).click();
+  await expect(panel.getByRole("textbox", { name: "Track Title" })).toHaveValue("");
+  await expect(panel.getByRole("textbox", { name: "Track Title" })).not.toHaveValue(loaded);
+  // The record shown is the selection's: its first track's file type is not
+  // printed anywhere, because Summary is not shown.
+  await expect(panel.getByRole("tabpanel")).toHaveAttribute("id", "info-panel-info");
+});
+
+test("an edit with several tracks selected goes to every one of them", async ({ page }) => {
+  const panel = await openPanel(page, "/?writable");
+  await selectThree(page);
+  const artist = panel.getByRole("textbox", { name: "Artist", exact: true });
+  await artist.fill("Same Artist For All");
+  await artist.press("Enter");
+  await expect(page.getByRole("contentinfo")).toContainText("Artist saved");
+  const artists = page.locator('[role="gridcell"][data-col="artist"]');
+  for (const n of [3, 4, 5]) await expect(artists.nth(n)).toHaveText("Same Artist For All");
+  await expect(artists.nth(2)).not.toHaveText("Same Artist For All");
+  await expect(artists.nth(6)).not.toHaveText("Same Artist For All");
+  // The shared value now shows in the box.
+  await expect(artist).toHaveValue("Same Artist For All");
+
+  await panel.getByRole("combobox", { name: "Key" }).selectOption("Dm");
+  await expect(page.getByRole("contentinfo")).toContainText("Key saved");
+  const keys = page.locator('[role="gridcell"][data-col="key"]');
+  for (const n of [3, 4, 5]) await expect(keys.nth(n)).toHaveText("Dm");
+
+  // One undo takes the whole edit back from all three.
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    (window as unknown as { __menu: (id: string) => void }).__menu("undo");
+  });
+  for (const n of [3, 4, 5]) await expect(keys.nth(n)).not.toHaveText("Dm");
+  for (const n of [3, 4, 5]) await expect(artists.nth(n)).toHaveText("Same Artist For All");
+});

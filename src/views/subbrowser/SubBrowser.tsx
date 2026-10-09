@@ -56,7 +56,7 @@ export type SubListProps = Pick<
   | "onResetPlayCount" | "onConvertMemoryCues" | "onRemoveFromCollection" | "onImportToCollection"
   | "onAnalysisLock" | "onAddToPlaylist" | "onAddToTagList" | "onRemoveFromTagList" | "onReloadTag"
   | "onExportTrack" | "playlists" | "devices" | "onEditField" | "onEditBlocked" | "onFocusedRow"
-  | "onSelectedRow"
+  | "onSelectedRow" | "onSelectedTracks"
 > & {
   /** Resolves true once removed; false when declined or refused. */
   onRemoveTracksFromPlaylist: (playlistId: string, ids: readonly string[]) => Promise<boolean>;
@@ -186,6 +186,13 @@ export const SubBrowser = memo(function SubBrowser({
   const [searchField, setSearchField] = useState<TrackSearchField>("all");
   const [sort, setSort] = useState<SortState | null>(null);
   const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
+  // Kept here for its own Analyze Track, and told to the shell, whose
+  // information panel follows whichever list was selected in last.
+  const reportSelection = list.onSelectedTracks;
+  const onSelectedTracks = useCallback((tracks: { id: string; title: string }[]) => {
+    setSelectedTracks(tracks);
+    reportSelection?.(tracks);
+  }, [reportSelection]);
   // Its own columns too: a sub-browser is usually kept narrow, and forcing it
   // to share the main table's widths would make it useless.
   const cols = useColumns("subBrowser");
@@ -299,7 +306,7 @@ export const SubBrowser = memo(function SubBrowser({
             ? reorderPlaylist
             : undefined
         }
-        onSelectedTracks={setSelectedTracks}
+        onSelectedTracks={onSelectedTracks}
         onAnalyse={analyseSelection}
       />
     </section>

@@ -26,6 +26,14 @@
  * The reload glyph right of the tabs is drawn and inert: it matches the
  * `brws_refresh` shape, which suggests Reload Tag, but nothing confirms it.
  *
+ * With several tracks selected the panel shows and edits them as one, as
+ * rekordbox does [OBS: rekordbox 7 on Windows 11; static: 7.2.11
+ * `browse::TrackInfoConcreteMediator`]: Summary is greyed and the panel
+ * moves to Info, which shows each value the tracks share and leaves the rest
+ * blank (see `selectionView`); the Track Title box is greyed; every edit is
+ * written to every selected track; and Artwork shows the picture only when
+ * the tracks share it, its buttons acting on all of them.
+ *
  * Every geometry and colour here is a token measured from those captures.
  */
 import { memo, useCallback, useEffect, useRef, useState } from "react";
@@ -35,23 +43,31 @@ import {
   ArtworkDeleteIcon, ArtworkImportIcon, ClearCircleIcon, RecordIcon, ReloadIcon, SpinnerIcon,
 } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
-import type { Backend, RowDto, TrackDetails, TrackField, TrackLookups } from "@/ipc/types";
-import { formatBpm } from "@/lib/format";
+import type { Backend, RowDto, SelectionDetails, TrackDetails, TrackField, TrackLookups } from "@/ipc/types";
 import { RatingStar } from "@/components/RatingStar";
+import { useTranslation } from "@/i18n";
 import styles from "./InfoPanel.module.css";
-import { acceptable, COLORS, dateSegments, fieldText, summaryFacts } from "./fields";
+import {
+  acceptable, COLORS, dateSegments, selectionView, singleView, summaryFacts, type InfoView,
+} from "./fields";
 import { useTooltip } from "@/store/usePreferences";
 
 export type InfoTab = "summary" | "info" | "artwork";
 
 export interface InfoPanelProps {
+  /** The one track shown, when the selection is not several tracks. */
   track: RowDto | null;
+  /**
+   * The browser's selected track ids, in the order its list reports them.
+   * More than one is a multiple selection, shown and edited as a whole.
+   */
+  selection: readonly string[];
   /** The library is open read-only, so the form is greyed and says why. */
   readOnly: boolean;
   /** Bumped after every edit; the record is read again when it changes. */
   libraryGeneration: number;
-  onRate: (id: string, stars: number) => void;
-  onComment: (id: string, comment: string) => void;
+  onRate: (ids: readonly string[], stars: number) => void;
+  onComment: (ids: readonly string[], comment: string) => void;
   /** Runs one write and reports its outcome, refusals included. */
   onEdit: (what: string, edit: (b: Backend) => Promise<unknown>) => Promise<void>;
 }
@@ -72,13 +88,47 @@ const LOCKED: Record<string, string> = {
 const READ_ONLY_REASON = "The library is read-only. Check Library Protection in Preferences, and quit rekordbox to edit";
 
 export function InfoPanel({
-  track, readOnly, libraryGeneration, onRate, onComment, onEdit,
+  track, selection, readOnly, libraryGeneration, onRate, onComment, onEdit,
 }: InfoPanelProps) {
   const [tab, setTab] = useState<InfoTab>("summary");
   const [details, setDetails] = useState<TrackDetails | null>(null);
   const [lookups, setLookups] = useState<TrackLookups | null>(null);
 
-  const trackId = track?.id ?? null;
+  const multiple = selection.length > 1;
+  // rekordbox greys Summary for several tracks and moves to Info, and stays
+  // on Info when the selection is one track again [OBS].
+  if (multiple && tab === "summary") setTab("info");
+  const trackId = multiple ? null : (track?.id ?? null);
+
+  // The selection's record, read again when the selection or the library
+  // changes; one that lands after the selection has moved on is dropped.
+  const [several, setSeveral] = useState<{ ids: readonly string[]; record: SelectionDetails } | null>(null);
+  useEffect(() => {
+    if (!multiple) {
+      setSeveral(null);
+      return;
+    }
+    let live = true;
+    void getBackend()
+      .then((b) => b.selectionDetails(selection))
+      .then((record) => {
+        if (live) setSeveral({ ids: selection, record });
+      })
+      .catch(() => {
+        if (live) setSeveral(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [multiple, selection, libraryGeneration]);
+  const selectionRecord = several && several.ids === selection ? several.record : null;
+  // A new selection is a new form: drafts typed for the last one go.
+  const [selectionKey, setSelectionKey] = useState(0);
+  const [keyedSelection, setKeyedSelection] = useState(selection);
+  if (keyedSelection !== selection) {
+    setKeyedSelection(selection);
+    setSelectionKey((k) => k + 1);
+  }
 
   // The record is fetched per track and again after every edit; a fetch
   // that lands after the selection has moved on is dropped.
@@ -133,6 +183,7 @@ export function InfoPanel({
             aria-selected={tab === id}
             aria-controls={`info-panel-${id}`}
             className={styles.tab}
+            disabled={multiple && id === "summary"}
             onClick={() => setTab(id)}
           >
             {TAB_LABEL[id]}
@@ -149,7 +200,38 @@ export function InfoPanel({
         </button>
       </div>
 
-      {track === null ? (
+      {multiple ? (
+        tab === "artwork" ? (
+          <div role="tabpanel" id="info-panel-artwork" aria-labelledby="info-tab-artwork" className={styles.artwork}>
+            <ArtworkTab
+              ids={selection}
+              shown={selectionRecord && !selectionRecord.mixed.includes("artwork") && selectionRecord.first.hasArtwork
+                ? selectionRecord.first.id
+                : null}
+              hue={0}
+              removable={selectionRecord !== null &&
+                (selectionRecord.first.hasArtwork || selectionRecord.mixed.includes("artwork"))}
+              readOnly={readOnly}
+              onEdit={onEdit}
+            />
+          </div>
+        ) : (
+          <div role="tabpanel" id="info-panel-info" aria-labelledby="info-tab-info" className={styles.info}>
+            {readOnly ? (
+              <p className={styles.banner} role="status">{READ_ONLY_REASON}</p>
+            ) : null}
+            <InfoForm
+              key={`selection-${selectionKey}`}
+              view={selectionView(selection, selectionRecord)}
+              lookups={lookups}
+              readOnly={readOnly}
+              onRate={onRate}
+              onComment={onComment}
+              onEdit={onEdit}
+            />
+          </div>
+        )
+      ) : track === null ? (
         <p className={styles.empty}>Select a track.</p>
       ) : tab === "summary" ? (
         <div role="tabpanel" id="info-panel-summary" aria-labelledby="info-tab-summary" className={styles.summary}>
@@ -162,8 +244,7 @@ export function InfoPanel({
           ) : null}
           <InfoForm
             key={track.id}
-            track={track}
-            details={record}
+            view={singleView(track, record)}
             lookups={lookups}
             readOnly={readOnly}
             onRate={onRate}
@@ -173,7 +254,14 @@ export function InfoPanel({
         </div>
       ) : (
         <div role="tabpanel" id="info-panel-artwork" aria-labelledby="info-tab-artwork" className={styles.artwork}>
-          <ArtworkTab track={track} details={record} readOnly={readOnly} onEdit={onEdit} />
+          <ArtworkTab
+            ids={[track.id]}
+            shown={(record?.hasArtwork ?? track.hasArtwork) ? track.id : null}
+            hue={track.artworkHue}
+            removable={record?.hasArtwork ?? track.hasArtwork}
+            readOnly={readOnly}
+            onEdit={onEdit}
+          />
         </div>
       )}
     </aside>
@@ -234,12 +322,11 @@ const Summary = memo(function Summary({
 // --------------------------------------------------------------------- Info
 
 interface InfoFormProps {
-  track: RowDto;
-  details: TrackDetails | null;
+  view: InfoView;
   lookups: TrackLookups | null;
   readOnly: boolean;
-  onRate: (id: string, stars: number) => void;
-  onComment: (id: string, comment: string) => void;
+  onRate: (ids: readonly string[], stars: number) => void;
+  onComment: (ids: readonly string[], comment: string) => void;
   onEdit: (what: string, edit: (b: Backend) => Promise<unknown>) => Promise<void>;
 }
 
@@ -263,17 +350,14 @@ export const FIELD_LABEL: Record<TrackField, string> = {
   bpm: "BPM",
 };
 
-function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit }: InfoFormProps) {
-  const id = track.id;
-  const rating = details?.rating ?? track.rating;
-  const comment = details?.comment ?? track.comment;
-  const color = details?.color ?? "0";
+function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFormProps) {
+  const { ids, text } = view;
 
   const commit = useCallback(
     (field: TrackField, value: string) => {
-      void onEdit(`${FIELD_LABEL[field]} saved.`, (b) => b.edits.setTrackField(id, field, value));
+      void onEdit(`${FIELD_LABEL[field]} saved.`, (b) => b.edits.setTrackField(ids, field, value));
     },
-    [id, onEdit],
+    [ids, onEdit],
   );
 
   const setColor = useCallback(
@@ -281,13 +365,12 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
       // "0" rather than NULL for none: 38,671 of the reference library's
       // 38,681 tracks carry "0", and two carry NULL.
       void onEdit(value === "0" ? "Color cleared." : "Color saved.", (b) =>
-        b.edits.setTrackColor(id, value),
+        b.edits.setTrackColor(ids, value),
       );
     },
-    [id, onEdit],
+    [ids, onEdit],
   );
 
-  const text = (field: TrackField) => (details ? fieldText(details, field) : fieldText(fromRow(track), field));
   const field = (name: TrackField, extra?: Partial<FieldProps>) => (
     <Field
       key={name}
@@ -303,10 +386,15 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
   const keys = lookups?.keys ?? [];
   const keyValue = text("key");
   const keyOptions = keyValue && !keys.includes(keyValue) ? [keyValue, ...keys] : keys;
+  const myTags = view.myTags;
 
   return (
     <div className={styles.form} data-locked={readOnly ? "" : undefined}>
-      <div className={styles.rowFull}>{field("title")}</div>
+      {/* rekordbox greys the Track Title box for several tracks
+          (`isTrackEditabled`, item 0, refuses more than one) [OBS]. */}
+      <div className={styles.rowFull}>
+        {field("title", view.multiple ? { disabled: true, greyed: true } : undefined)}
+      </div>
       <div className={styles.rowArtist}>
         {field("artist")}
         {field("year", { numeric: true })}
@@ -314,13 +402,13 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
       <div className={styles.rowHalves}>
         {field("album")}
         <Locked label="Release Date" name="releaseDate">
-          <DateBox iso={details?.releaseDate ?? track.releaseDate} />
+          <DateBox iso={view.releaseDate} />
         </Locked>
       </div>
       <div className={styles.rowThirds}>
-        <Locked label="Album Artist" name="albumArtist" value={details?.albumArtist ?? ""} />
+        <Locked label="Album Artist" name="albumArtist" value={view.albumArtist} />
         {field("trackNumber", { numeric: true })}
-        <Locked label="BPM" name="bpm" value={formatBpm(details?.bpmX100 ?? track.bpmX100)} />
+        <Locked label="BPM" name="bpm" value={view.bpm} />
       </div>
       <div className={styles.rowThirds}>
         {field("originalArtist")}
@@ -340,26 +428,26 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
       </div>
       <div className={styles.rowComments}>
         <CommentBox
-          initial={comment}
+          initial={view.comment}
           disabled={readOnly}
-          onCommit={(value) => onComment(id, value)}
+          onCommit={(value) => onComment(ids, value)}
         />
         <div className={styles.side}>
           {field("playCount", { numeric: true })}
           <div className={styles.fieldBlock}>
             <span className={styles.formLabel}>Rating</span>
-            <Stars rating={rating} disabled={readOnly} onRate={(stars) => onRate(id, stars)} />
+            <Stars rating={view.rating} disabled={readOnly} onRate={(stars) => onRate(ids, stars)} />
           </div>
-          <Check label="Allow to auto load HotCue on CDJ/XDJ" name="hotCueAutoLoad" checked={details?.hotCueAutoLoad ?? false} />
-          <Check label="Publish track information" name="publish" checked={details?.publish ?? false} />
+          <Check label="Allow to auto load HotCue on CDJ/XDJ" name="hotCueAutoLoad" checked={view.hotCueAutoLoad} />
+          <Check label="Publish track information" name="publish" checked={view.publish} />
         </div>
       </div>
       <div className={styles.rowFull}>
-        <Locked label="Message" name="message" value={details?.message ?? ""} />
+        <Locked label="Message" name="message" value={view.message} />
       </div>
       <div className={styles.rowRemixer}>
         {field("remixer")}
-        <Locked label="Mix Name" name="mixName" value={details?.mixName ?? ""} />
+        <Locked label="Mix Name" name="mixName" value={view.mixName} />
       </div>
       <div className={styles.rowThirds}>
         {field("label")}
@@ -367,7 +455,7 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
         <Select
           label="Color"
           name="color"
-          value={color === "" ? "0" : color}
+          value={view.color === "" ? "0" : view.color}
           options={["0", ...COLORS.map((c) => c.id)]}
           optionLabel={(v) => COLORS.find((c) => c.id === v)?.name ?? ""}
           disabled={readOnly}
@@ -376,8 +464,10 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
       </div>
       {/* My Tag: the library's categories, each tag a toggle. Not in the
           captures — rekordbox keeps My Tag in a panel of its own — so this
-          is the form's own row, in its own type. */}
-      {lookups && lookups.myTagCategories.length > 0 ? (
+          is the form's own row, in its own type. One track at a time: it is
+          not part of the Information Window rekordbox edits several tracks
+          in, so a multiple selection leaves it out. */}
+      {lookups && lookups.myTagCategories.length > 0 && !view.multiple ? (
         <div className={styles.rowFull}>
           <div className={styles.fieldBlock}>
             <span className={styles.formLabel}>My Tag</span>
@@ -386,7 +476,7 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
                 <div key={category.name} className={styles.tagRow}>
                   <span className={styles.tagCategory}>{category.name}</span>
                   {category.tags.map((tag) => {
-                    const on = details?.myTags.includes(tag.id) ?? false;
+                    const on = myTags?.includes(tag.id) ?? false;
                     return (
                       <button
                         key={tag.id}
@@ -394,10 +484,12 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
                         className={styles.tag}
                         data-on={on || undefined}
                         aria-pressed={on}
-                        disabled={readOnly || !details}
+                        disabled={readOnly || !myTags}
                         onClick={() => {
-                          const current = details?.myTags ?? [];
+                          const current = myTags ?? [];
                           const next = on ? current.filter((t) => t !== tag.id) : [...current, tag.id];
+                          const [id] = ids;
+                          if (id === undefined) return;
                           void onEdit(`My Tag ${on ? "removed" : "added"}.`, (b) => b.edits.setMyTags(id, next));
                         }}
                       >
@@ -415,52 +507,13 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
   );
 }
 
-/** The record's shape from a row alone, for the moment before it arrives. */
-function fromRow(row: RowDto): TrackDetails {
-  return {
-    id: row.id,
-    title: row.title,
-    artist: row.artist,
-    album: row.album,
-    albumArtist: "",
-    originalArtist: "",
-    composer: "",
-    remixer: "",
-    lyricist: "",
-    genre: row.genre,
-    label: row.label,
-    key: row.key,
-    comment: row.comment,
-    mixName: "",
-    message: "",
-    color: "0",
-    rating: row.rating,
-    bpmX100: row.bpmX100,
-    durationSec: row.durationSec,
-    year: 0,
-    trackNumber: 0,
-    discNumber: 0,
-    playCount: 0,
-    fileType: 0,
-    fileSize: 0,
-    bitrate: 0,
-    sampleRate: 0,
-    bitDepth: 0,
-    dateCreated: "",
-    releaseDate: row.releaseDate,
-    path: "",
-    hotCueAutoLoad: false,
-    publish: false,
-    hasArtwork: row.hasArtwork,
-    myTags: [],
-  };
-}
-
 interface FieldProps {
   label: string;
   name: TrackField;
   initial: string;
   disabled: boolean;
+  /** Drawn greyed, as rekordbox draws a box it will not take an edit in. */
+  greyed?: boolean;
   numeric?: boolean;
   /** Suggestions, for a box that is also a dropdown. */
   list?: string[];
@@ -473,7 +526,7 @@ interface FieldProps {
  * escape hatch that makes committing on blur safe. A value the writer would
  * refuse is put back too, so a typo in the year box never reaches it.
  */
-function Field({ label, name, initial, disabled, numeric = false, list, onCommit }: FieldProps) {
+function Field({ label, name, initial, disabled, greyed = false, numeric = false, list, onCommit }: FieldProps) {
   const [draft, setDraft] = useState(initial);
   // A new record for the same track (after an edit) refreshes the box,
   // unless the box is what is being typed in.
@@ -500,7 +553,7 @@ function Field({ label, name, initial, disabled, numeric = false, list, onCommit
   const inputId = `info-field-${name}`;
   const listId = list ? `${inputId}-list` : undefined;
   return (
-    <div className={styles.fieldBlock}>
+    <div className={styles.fieldBlock} data-greyed={greyed ? "" : undefined}>
       <label className={styles.formLabel} htmlFor={inputId}>{label}</label>
       <div className={styles.box} data-list={list ? "" : undefined}>
         <input
@@ -721,35 +774,46 @@ function Check({ label, name, checked }: { label: string; name: string; checked:
 
 // ------------------------------------------------------------------ Artwork
 
-function ArtworkTab({ track, details, readOnly, onEdit }: {
-  track: RowDto;
-  details: TrackDetails | null;
+/**
+ * The Artwork tab, for one track or several. `shown` is the track whose
+ * picture is drawn — several tracks draw one only when they all share it,
+ * as rekordbox's `tracksHaveSameArtwork` decides — and an import or a
+ * delete goes to every track in `ids`, as rekordbox's `addArtwork` files the
+ * image for each selected track in turn.
+ */
+function ArtworkTab({ ids, shown, hue, removable, readOnly, onEdit }: {
+  ids: readonly string[];
+  shown: string | null;
+  hue: number;
+  removable: boolean;
   readOnly: boolean;
   onEdit: (what: string, edit: (b: Backend) => Promise<unknown>) => Promise<void>;
 }) {
-  const hasArtwork = details?.hasArtwork ?? track.hasArtwork;
   const tip = useTooltip();
-  const id = track.id;
+  const t = useTranslation();
   const add = () => {
     void (async () => {
       const backend = await getBackend();
-      const image = await backend.pickImage("Choose the artwork");
+      const image = await backend.pickImage(t("Choose the artwork"));
       if (image === null) return;
-      await onEdit("Artwork added.", (b) => b.edits.addArtwork(id, image));
+      await onEdit("Artwork added.", (b) => b.edits.addArtwork(ids, image));
     })();
   };
   const remove = () => {
     void (async () => {
       const backend = await getBackend();
-      if (!(await backend.confirm("Remove this track's artwork? The image file stays where it is."))) return;
-      await onEdit("Artwork removed.", (b) => b.edits.clearArtwork(id));
+      const question = ids.length > 1
+        ? t("Remove the artwork of the {count} selected tracks? The image files stay where they are.", { count: ids.length })
+        : t("Remove this track's artwork? The image file stays where it is.");
+      if (!(await backend.confirm(question))) return;
+      await onEdit("Artwork removed.", (b) => b.edits.clearArtwork(ids));
     })();
   };
   return (
     <div className={styles.artworkArea}>
-      <div className={styles.picture} style={{ ["--hue" as string]: `${track.artworkHue}deg` }}>
-        {hasArtwork ? (
-          <Artwork trackId={track.id} className={styles.pictureImage} />
+      <div className={styles.picture} style={{ ["--hue" as string]: `${hue}deg` }}>
+        {shown !== null ? (
+          <Artwork trackId={shown} className={styles.pictureImage} />
         ) : (
           // What rekordbox draws here without artwork is not captured; the
           // Summary tab's record stands in.
@@ -772,7 +836,7 @@ function ArtworkTab({ track, details, readOnly, onEdit }: {
           className={styles.artworkButton}
           aria-label="Delete Artwork"
           title={tip(readOnly ? "The library is read-only." : "Delete Artwork")}
-          disabled={readOnly || !hasArtwork}
+          disabled={readOnly || !removable}
           onClick={remove}
         >
           <ArtworkDeleteIcon className={styles.artworkGlyph} />
