@@ -632,8 +632,17 @@ function msAtStepIndex(times: Uint32Array, index: number): number {
  * [OBS static, parity/issue-126]. The grid here is the one the quantize beat
  * value gives (`subdivideGrid`). `null` when the grid has no steps to time
  * against, and the jump is made at once.
+ *
+ * Inside a playing loop the call leaves the loop at once and fires at that
+ * place or at the loop's old out point, whichever comes first, so the head
+ * never wraps back before it gets there. `doHotCueLaunch` calls
+ * `CueBehavior::doExitLoop` @0x102b1b9bc and hands the out point on, and
+ * `moveToCueAndPlayWithWait` takes `min(out, max(step, head))` @0x102b1ab60
+ * [OBS static, parity/issue-126/dis-launch.txt, dis-move.txt].
  */
-export function quantizedLaunchMs(grid: BeatGrid, positionMs: number, cueMs: number): number | null {
+export function quantizedLaunchMs(
+  grid: BeatGrid, positionMs: number, cueMs: number, loopOutMs: number | null = null,
+): number | null {
   const { times } = grid;
   const cue = stepIndexAt(times, cueMs);
   const now = stepIndexAt(times, positionMs);
@@ -642,7 +651,40 @@ export function quantizedLaunchMs(grid: BeatGrid, positionMs: number, cueMs: num
   let at = Math.floor(now - phase) + phase;
   // A hair behind the playhead is the playhead: the step is now.
   if (at < now - 1e-9) at += 1;
-  return Math.max(msAtStepIndex(times, at), positionMs);
+  const step = msAtStepIndex(times, at);
+  return Math.max(loopOutMs === null ? step : Math.min(step, loopOutMs), positionMs);
+}
+
+/**
+ * Where a waiting hot cue call jumps from, in seconds, or `null` to drop it.
+ * The call was timed to reach `at`; `head` is the head read when its timer
+ * fires. A head within `drift` of `at` is a timer a little late, and the jump
+ * is made from `at` (the engine's own head is moved, so the lateness carries
+ * over and the beat runs on).
+ *
+ * `wrap` is the length of a loop the call left at the press, or 0. Then the
+ * reading can be a whole number of loops out: a head read between ticks runs
+ * on past the out point the engine wrapped at (the engine is at `at`), and a
+ * tick taken after an exit that reached the engine one wrap too late shows
+ * the head a loop back (the engine is there). Anything else moved the head
+ * in the meantime and the call is dropped.
+ */
+export function callLeavesFrom(head: number, at: number, wrap: number, drift: number): number | null {
+  const loops = wrap > 0 ? Math.round((head - at) / wrap) : 0;
+  if (Math.abs(head - loops * wrap - at) > drift) return null;
+  return loops < 0 ? at + loops * wrap : at;
+}
+
+/**
+ * Where the head is inside a playing loop, in seconds. The engine wraps at
+ * the out point, but a head read between ticks runs on past it (`extrapolate`
+ * does not know the loop), so a reading at or past the out point is brought
+ * back by whole loops.
+ */
+export function foldIntoLoop(seconds: number, loop: { inSeconds: number; outSeconds: number }): number {
+  const length = loop.outSeconds - loop.inSeconds;
+  if (length <= 0 || seconds < loop.outSeconds) return seconds;
+  return loop.inSeconds + ((seconds - loop.outSeconds) % length);
 }
 
 /** What the deck should do, decided by the CUE button. */

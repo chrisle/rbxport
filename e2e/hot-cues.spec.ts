@@ -260,3 +260,63 @@ test("with Q on, a call on a playing deck waits for the beat and keeps it", asyn
   // And it plays on from the cue.
   await expect(pauseButton(page)).toBeVisible();
 });
+
+test("with Q on, a call inside a one-beat loop leaves the loop and lands on the cue", async ({ page }) => {
+  // rekordbox 7.2.19: doHotCueLaunch leaves a playing loop at the press
+  // (CueBehavior::doExitLoop) and moveToCueAndPlayWithWait fires no later
+  // than the loop's old out point [OBS static, parity/issue-126]. Timed to
+  // the next step alone, the call never came: the deck wrapped first.
+  type Read = () => { a: number; beatA: number; loopingA: boolean };
+  const read = () => page.evaluate(() => (window as unknown as { __deckSeconds: Read }).__deckSeconds());
+  await load(page);
+  // Where A is: called from pause, the deck starts from it. The first new
+  // reading is the cue, give or take a few milliseconds of play.
+  const start = (await read()).a;
+  const moved = page.evaluate(async (from) => {
+    const now = (window as unknown as { __deckSeconds: Read }).__deckSeconds;
+    const end = performance.now() + 2000;
+    while (performance.now() < end) {
+      const { a } = now();
+      if (a !== from) return a;
+      await new Promise((done) => setTimeout(done, 2));
+    }
+    return from;
+  }, start);
+  await pad(page, "A").click();
+  const cueA = await moved;
+  await expect(pauseButton(page)).toBeVisible();
+  await pad(page, "B").click();
+  await page.waitForTimeout(700);
+  const deck = player(page);
+  await deck.getByRole("button", { name: "4 beat loop" }).click();
+  await deck.getByRole("button", { name: "Shorter loop" }).click();
+  await deck.getByRole("button", { name: "Shorter loop" }).click();
+  await expect(deck.getByRole("button", { name: "Exit loop" })).toHaveText("1");
+  await page.waitForTimeout(700);
+  expect((await read()).loopingA).toBe(true);
+
+  const heads = page.evaluate(async () => {
+    const now = (window as unknown as { __deckSeconds: Read }).__deckSeconds;
+    const out: { a: number; looping: boolean }[] = [];
+    const end = performance.now() + 1500;
+    while (performance.now() < end) {
+      const { a, loopingA } = now();
+      out.push({ a, looping: loopingA });
+      await new Promise((done) => setTimeout(done, 4));
+    }
+    return out;
+  });
+  await page.waitForTimeout(100);
+  await pad(page, "A").click();
+  const all = await heads;
+  const beat = (await read()).beatA;
+  // The jump: the one step that moves further than a loop wraps.
+  const jump = all.findIndex((sample, n) => n > 0 && Math.abs(sample.a - all[n - 1]!.a) > beat * 1.5);
+  expect(jump).toBeGreaterThan(0);
+  // It lands on A, not a loop length before it, and the loop is left.
+  expect(Math.abs(all[jump]!.a - cueA)).toBeLessThan(0.1);
+  expect(all.at(-1)!.looping).toBe(false);
+  // And it plays on from the cue, past where the old loop would wrap it.
+  expect(all.at(-1)!.a).toBeGreaterThan(all[jump]!.a + beat);
+  await expect(pauseButton(page)).toBeVisible();
+});

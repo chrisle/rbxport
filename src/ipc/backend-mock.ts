@@ -1488,7 +1488,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   if (typeof window !== "undefined") {
     (window as unknown as {
       __deckSeconds: () => {
-        a: number; b: number; beat: number; beatA: number; looping: boolean; playingB: boolean;
+        a: number; b: number; beat: number; beatA: number; looping: boolean; loopingA: boolean; playingB: boolean;
       };
     }).__deckSeconds = () => ({
       a: deckA.frames / SAMPLE_RATE,
@@ -1496,6 +1496,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       beat: deckBeat.b,
       beatA: deckBeat.a,
       looping: deckB.looping,
+      loopingA: deckA.looping,
       playingB: deckB.playing,
     });
   }
@@ -2185,6 +2186,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     deckLoopActive: (deck, on) => {
       const d = deckOf(deck);
       if (d.loopOutFrames <= d.loopInFrames) return wait(undefined);
+      if (!on && d.looping && d.playing) {
+        // The clock only steps ten times a second, but the deck wraps at the
+        // out point the moment it gets there. Brought up to now first, so an
+        // exit after the out point leaves the head where the deck had
+        // wrapped it to, not past the end of the loop.
+        const now = performance.now();
+        const from = Math.max(clockAt, d.startsAt);
+        if (now > from) {
+          d.frames += Math.round(((now - from) / 1000) * SAMPLE_RATE);
+          if (d.frames >= d.loopOutFrames) {
+            d.frames = d.loopInFrames + ((d.frames - d.loopOutFrames) % (d.loopOutFrames - d.loopInFrames));
+          }
+          d.startsAt = now;
+        }
+      }
       d.looping = on;
       if (on) {
         d.frames = d.loopInFrames;

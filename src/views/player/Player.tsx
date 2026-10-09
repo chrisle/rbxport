@@ -31,6 +31,7 @@ import {
   DETAIL_BARS,
   NO_BEATS,
   nearestBeatMs,
+  callLeavesFrom,
   subdivideGrid,
   ZOOM_STEPS,
   showsEveryBeat,
@@ -1243,20 +1244,23 @@ export const Player = memo(function Player({
    * engine's own head, so a timer that fires a few milliseconds late lands
    * the same few past the cue and the beat runs on unbroken, as rekordbox's
    * warp point pair does (`AudioPlayerCore::doSetWarpPointPair`). Anything
-   * else that moved the head in the meantime called the jump off.
+   * else that moved the head in the meantime called the jump off. A call
+   * that left a loop of `wrap` seconds reads the head modulo the loop: see
+   * `callLeavesFrom`.
    */
-  const jumpAt = useEventCallback((at: number, to: number) => {
+  const jumpAt = useEventCallback((at: number, to: number, from: number, wrap: number) => {
     cancelCall();
     const rate = playback.tempo > 0 ? playback.tempo : 1;
-    const wait = Math.max(0, ((at - playback.positionNow()) * 1000) / rate);
+    const wait = Math.max(0, ((at - from) * 1000) / rate);
     pendingCall.current = globalThis.setTimeout(() => {
       pendingCall.current = undefined;
       if (!playingNow.current) return;
-      const head = playback.positionNow();
-      if (Math.abs(head - at) > CALL_DRIFT) return;
-      playback.moveBy(to - at);
+      const leave = callLeavesFrom(playback.positionNow(), at, wrap, CALL_DRIFT);
+      if (leave !== null) playback.moveBy(to - leave);
     }, wait);
   });
+  const playingLoop = useEventCallback(() => (playback.loop?.active ? playback.loop : null));
+  const leaveLoop = useEventCallback(() => playback.setLoopActive(false));
   // A pause, a new track or an empty deck leaves no beat to wait for.
   useEffect(() => {
     if (!playback.playing) cancelCall();
@@ -1265,7 +1269,7 @@ export const Player = memo(function Player({
   const deckPlaying = useCallback(() => playback.playing, [playback.playing]);
   const hot = useHotCues({
     trackId: playback.idle ? null : track?.id ?? null,
-    cues, positionSeconds, seek, play: playFromCue, playing: deckPlaying, jumpAt,
+    cues, positionSeconds, seek, play: playFromCue, playing: deckPlaying, jumpAt, activeLoop: playingLoop, exitLoop: leaveLoop,
     quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
   });
   // The hooks own editability, so the disabled state and its explanation

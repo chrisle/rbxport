@@ -21,8 +21,10 @@
  * is on the master's beat already, so the jump keeps it there. Export mode
  * never applies PERFORMANCE mode's "Jump before reaching the next beat"
  * preference, so the wait is the only behaviour it has [OBS static,
- * `PlayerWaveView::updateQuantizeSettings` @0x100c8f10c]. From pause the call
- * is at once, as is any call with Q off.
+ * `PlayerWaveView::updateQuantizeSettings` @0x100c8f10c]. A call inside a
+ * playing loop leaves the loop at once and fires at the next step or the
+ * loop's old out point, whichever comes first. From pause the call is at
+ * once, as is any call with Q off.
  *
  * A set pad is never set over. What rekordbox does with the old row when a
  * slot is filled twice — a soft delete and a new row, or an update in place
@@ -33,7 +35,7 @@ import { useCallback } from "react";
 
 import type { Cue } from "@/ipc/types";
 import { hotCue } from "@/lib/cues";
-import { nearestBeatMs, quantizedLaunchMs, type BeatGrid } from "@/lib/player";
+import { foldIntoLoop, nearestBeatMs, quantizedLaunchMs, type BeatGrid } from "@/lib/player";
 import { useCueWriter } from "./useCueWriter";
 
 export interface HotCueDeck {
@@ -53,9 +55,16 @@ export interface HotCueDeck {
   /**
    * Jumps to `toSeconds` when the playhead reaches `atSeconds`, carrying on
    * from there as if the music had not been cut: a quantized hot cue call.
-   * Without it a call is always made at once.
+   * `fromSeconds` is the head the wait was timed from. `wrapSeconds` is the
+   * length of a loop the call has just left, or 0: the engine may still have
+   * wrapped once before the exit reached it. Without it a call is always
+   * made at once.
    */
-  jumpAt?: ((atSeconds: number, toSeconds: number) => void) | undefined;
+  jumpAt?: ((atSeconds: number, toSeconds: number, fromSeconds: number, wrapSeconds: number) => void) | undefined;
+  /** The deck's loop while it plays, or `null` with none or out of it. */
+  activeLoop?: (() => { inSeconds: number; outSeconds: number } | null) | undefined;
+  /** Leaves the playing loop, keeping it for RELOOP. */
+  exitLoop?: (() => void) | undefined;
   /**
    * The grid to snap a new hot cue to, when Q is on, or `null`. The same
    * rule CUE follows: with Q on a cue lands on the nearest beat, which is
@@ -82,7 +91,9 @@ export interface HotCueActions {
 }
 
 export function useHotCues(deck: HotCueDeck): HotCueActions {
-  const { trackId, cues, positionSeconds, seek, play, playing, jumpAt, quantiseTo, readOnly, onError } = deck;
+  const {
+    trackId, cues, positionSeconds, seek, play, playing, jumpAt, activeLoop, exitLoop, quantiseTo, readOnly, onError,
+  } = deck;
   const canEdit = trackId !== null && !readOnly;
   const write = useCueWriter(onError);
 
@@ -97,9 +108,17 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
         // from it. Unlike a memory cue it does not become the cue point, on a
         // CDJ or in rekordbox [REF].
         if (quantiseTo && jumpAt && playing?.()) {
-          const at = quantizedLaunchMs(quantiseTo, positionSeconds() * 1000, cue.positionMs);
+          // In a playing loop the call leaves it now and fires no later than
+          // its out point, where the head would have wrapped: see
+          // `quantizedLaunchMs`.
+          const loop = activeLoop?.() ?? null;
+          const head = loop ? foldIntoLoop(positionSeconds(), loop) : positionSeconds();
+          const at = quantizedLaunchMs(
+            quantiseTo, head * 1000, cue.positionMs, loop ? loop.outSeconds * 1000 : null,
+          );
           if (at !== null) {
-            jumpAt(at / 1000, cue.positionMs / 1000);
+            if (loop) exitLoop?.();
+            jumpAt(at / 1000, cue.positionMs / 1000, head, loop ? loop.outSeconds - loop.inSeconds : 0);
             return;
           }
         }
@@ -112,7 +131,7 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
       const positionMs = Math.round(quantiseTo ? nearestBeatMs(quantiseTo, at) : at);
       write((edits) => edits.addCue(trackId, { hot: letter }, positionMs));
     },
-    [cues, seek, play, playing, jumpAt, canEdit, trackId, positionSeconds, quantiseTo, write],
+    [cues, seek, play, playing, jumpAt, activeLoop, exitLoop, canEdit, trackId, positionSeconds, quantiseTo, write],
   );
 
   const clear = useCallback(

@@ -233,6 +233,41 @@ describe("calling a set pad with Q on", () => {
     expect(transport).toEqual(["seek:0.5", "play"]);
   });
 
+  describe("inside a playing one-beat loop", () => {
+    // rekordbox 7.2.19: doHotCueLaunch leaves the loop at the press
+    // (CueBehavior::doExitLoop @0x102b1b9bc) and WithWait fires no later
+    // than the old out point (min(out, max(step, head)) @0x102b1ab60)
+    // [OBS static, parity/issue-126]. Firing at the step alone never came:
+    // the deck wrapped back to the in point first.
+    const loop = { inSeconds: 1, outSeconds: 1.5 };
+    let log: string[];
+    const deck = (head: number) => ({
+      cues, positionSeconds: () => head, quantiseTo: GRID, playing: () => true,
+      activeLoop: () => loop,
+      exitLoop: () => log.push("exit"),
+      jumpAt: (at: number, to: number, from: number, wrap: number) => log.push(`${at}->${to} from ${from} wrap ${wrap}`),
+    });
+    beforeEach(() => {
+      log = [];
+    });
+
+    it("leaves the loop and jumps at its out point", async () => {
+      mount(deck(1.2));
+      act(() => pads.press("A"));
+      await settle();
+      expect(log).toEqual(["exit", "1.5->0.5 from 1.2 wrap 0.5"]);
+      expect(transport).toEqual([]);
+    });
+
+    it("times the wait from where the engine has wrapped to", async () => {
+      // A head read between ticks runs on past the out point.
+      mount(deck(1.75));
+      act(() => pads.press("A"));
+      await settle();
+      expect(log).toEqual(["exit", "1.5->0.5 from 1.25 wrap 0.5"]);
+    });
+  });
+
   it("jumps at once with Q off", async () => {
     mount({ cues, positionSeconds: () => 1.2, quantiseTo: null, playing: () => true, jumpAt });
     act(() => pads.press("A"));

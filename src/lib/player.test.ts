@@ -42,6 +42,8 @@ import {
   cuesFor,
   nearestBeatMs,
   quantizedLaunchMs,
+  foldIntoLoop,
+  callLeavesFrom,
   needsRedraw,
   NO_BEATS,
   scrollOffset,
@@ -1047,5 +1049,65 @@ describe("quantizedLaunchMs", () => {
   it("has nothing to time against without two beats", () => {
     const one = { times: new Uint32Array([1000]), numbers: new Uint8Array([1]), tempos: new Uint16Array([12_000]) };
     expect(quantizedLaunchMs(one, 1200, 1000)).toBeNull();
+  });
+});
+
+describe("quantizedLaunchMs inside a playing loop", () => {
+  // rekordbox 7.2.19: moveToCueAndPlayWithWait fires at min(out, max(step,
+  // head)) when doHotCueLaunch left a loop [OBS static, parity/issue-126].
+  const grid = {
+    times: new Uint32Array([1000, 1500, 2000, 2500, 3000]),
+    numbers: new Uint8Array([1, 2, 3, 4, 1]),
+    tempos: new Uint16Array([12_000, 12_000, 12_000, 12_000, 12_000]),
+  };
+
+  it("fires at the out point of a one-beat loop, where the head would wrap", () => {
+    expect(quantizedLaunchMs(grid, 1200, 500, 1500)).toBe(1500);
+  });
+
+  it("never fires past the out point for an off-grid cue", () => {
+    // The step at the cue's phase is 1600, past the loop's end at 1500.
+    expect(quantizedLaunchMs(grid, 1200, 2600, 1500)).toBe(1500);
+  });
+
+  it("fires at the next step when that comes before the out point", () => {
+    expect(quantizedLaunchMs(grid, 1200, 500, 3000)).toBe(1500);
+  });
+});
+
+describe("foldIntoLoop", () => {
+  const loop = { inSeconds: 1, outSeconds: 1.5 };
+
+  it("leaves a head inside the loop where it is", () => {
+    expect(foldIntoLoop(1.2, loop)).toBe(1.2);
+  });
+
+  it("brings a head read past the out point back by whole loops", () => {
+    expect(foldIntoLoop(1.6, loop)).toBeCloseTo(1.1);
+    expect(foldIntoLoop(2.1, loop)).toBeCloseTo(1.1);
+  });
+});
+
+describe("callLeavesFrom", () => {
+  it("jumps from the launch point when the timer is a little late", () => {
+    expect(callLeavesFrom(1.52, 1.5, 0, 0.15)).toBe(1.5);
+  });
+
+  it("drops the call when something else moved the head", () => {
+    expect(callLeavesFrom(3, 1.5, 0, 0.15)).toBeNull();
+  });
+
+  it("takes a reading run on past a one-beat loop's out point as the launch point", () => {
+    // Read from a tick before the engine wrapped: a loop or two ahead.
+    expect(callLeavesFrom(1.99, 1.5, 0.5, 0.15)).toBe(1.5);
+    expect(callLeavesFrom(2.51, 1.5, 0.5, 0.15)).toBe(1.5);
+  });
+
+  it("jumps from a loop back when the engine wrapped before the exit reached it", () => {
+    expect(callLeavesFrom(1.01, 1.5, 0.5, 0.15)).toBe(1);
+  });
+
+  it("still drops a call the head moved away from inside a loop", () => {
+    expect(callLeavesFrom(1.75, 1.5, 0.5, 0.15)).toBeNull();
   });
 });
