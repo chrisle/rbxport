@@ -44,6 +44,11 @@ import { setRowDragImage } from "./dragGhost";
 import { detectPlatform, dispatch, isTyping } from "@/lib/shortcuts";
 
 const ROW_H = 25; // --s-row-height
+/**
+ * A removal the list asks for: resolves true once the tracks are gone, false
+ * when the person declined or the write was refused.
+ */
+type RemoveTracks = (ids: readonly string[]) => Promise<boolean>;
 /** One frozen empty list, so a row without cues does not re-render for a new one. */
 const NO_CUES: RowDto["hotCues"] = [];
 /** macOS, where a Control-click is the context menu's press, not a toggle. */
@@ -723,12 +728,12 @@ export interface TrackTableProps {
   /** Right-click actions the table cannot do itself. */
   onShowInformation?: (row: RowDto) => void;
   onShowInFinder?: (row: RowDto) => void;
-  onRemoveFromPlaylist?: (ids: readonly string[]) => void;
-  onRemoveFromHistory?: (ids: readonly string[]) => void;
+  onRemoveFromPlaylist?: RemoveTracks;
+  onRemoveFromHistory?: RemoveTracks;
   onResetPlayCount?: (ids: readonly string[]) => void;
   /** Convert Memory Cues to Hot Cues, on the row under the pointer. */
   onConvertMemoryCues?: (row: RowDto) => void;
-  onRemoveFromCollection?: (ids: readonly string[]) => void;
+  onRemoveFromCollection?: RemoveTracks;
   /** Import To Collection: the Explorer's files, by their `file:` ids. */
   onImportToCollection?: (ids: readonly string[]) => void;
   /** Analysis Lock › Lock and Unlock. */
@@ -736,7 +741,7 @@ export interface TrackTableProps {
   /** Add To Playlist › one of `playlists`. */
   onAddToPlaylist?: (playlist: string, ids: readonly string[]) => void;
   onAddToTagList?: (ids: readonly string[]) => void;
-  onRemoveFromTagList?: (ids: readonly string[]) => void;
+  onRemoveFromTagList?: RemoveTracks;
   /** Reload Tag: the files' tags read again. */
   onReloadTag?: (ids: readonly string[]) => void;
   /** Export Track › one of `devices`. */
@@ -1214,11 +1219,10 @@ export const TrackTable = memo(function TrackTable({
     [],
   );
 
-  // Whether the Delete key speaks to this list: the last press in a list or
-  // a tree landed here. The sub-browser draws a second list, and the tree
-  // beside them takes focus, so a key heard on the window alone would remove
-  // tracks from a list the person was not working in. A press anywhere else
-  // (a deck, a menu, a dialog) leaves it as it was.
+  // Whether the Delete key speaks to this list: rekordbox's list hears it
+  // only while it has the focus. The last press landed in this list, and
+  // nowhere else since — not the tree, the other list, a deck, a waveform or
+  // a button. A menu or a dialog opened from here gives the focus back.
   const rootRef = useRef<HTMLDivElement>(null);
   const engaged = useRef(false);
   useEffect(() => {
@@ -1226,7 +1230,7 @@ export const TrackTable = memo(function TrackTable({
       const target = event.target instanceof Element ? event.target : null;
       if (target === null) return;
       if (rootRef.current?.contains(target)) engaged.current = true;
-      else if (target.closest('[role="grid"], [role="tree"]')) engaged.current = false;
+      else if (!target.closest('[role="menu"], [role="dialog"]')) engaged.current = false;
     };
     window.addEventListener("mousedown", onDown, true);
     return () => {
@@ -1235,37 +1239,52 @@ export const TrackTable = memo(function TrackTable({
   }, []);
 
   // Delete and ⌫ remove the whole selection the way this list's own menu
-  // entry does: from the collection (asked first), a playlist, a history or
-  // the Tag List. rekordbox's list does the same with either key (#136).
+  // entry does, asking first as it does: from the collection, a playlist, a
+  // history or the Tag List. rekordbox's list does the same with either key
+  // (#136). One press is one removal: a held key's repeats, and presses
+  // while one removal is still asking or writing, do nothing.
+  const removing = useRef(false);
   const removeSelection = useEventCallback((event: KeyboardEvent) => {
     if (event.key !== "Delete" && event.key !== "Backspace") return;
     if (event.defaultPrevented || !engaged.current || trackMenu !== null) return;
+    // The key goes where the focus is: the page itself (a click on a row
+    // focuses nothing) or something inside this list, never a control.
     const target = event.target instanceof HTMLElement ? event.target : null;
-    if (isTyping(target) || target?.closest('[role="tree"], [role="dialog"], [role="menu"]')) return;
+    const inList = target !== null && rootRef.current?.contains(target) === true;
+    if (target !== null && !inList && target !== document.body && target !== document.documentElement) return;
+    if (isTyping(target) || target?.closest('[role="tree"], [role="dialog"], [role="menu"], button, [role="slider"], [role="spinbutton"]')) return;
     // A key the person bound to something else in the Keyboard pane is theirs.
     if (dispatch(event, platform, target, preferences.keyboard.overrides) !== null) return;
     const action = deleteKeyAction(spec.source.kind);
     if (action === null || selection.ids.size === 0 || hasLooseId(selection.ids)) return;
     event.preventDefault();
+    if (event.repeat || removing.current) return;
     if (readOnly) {
       onEditBlocked?.();
       return;
     }
+    const remove: RemoveTracks | undefined = {
+      removeFromCollection: onRemoveFromCollection,
+      removeFromPlaylist: onRemoveFromPlaylist,
+      removeFromHistory: onRemoveFromHistory,
+      removeFromTagList: onRemoveFromTagList,
+    }[action];
+    if (remove === undefined) return;
     const ids = [...selection.ids];
-    switch (action) {
-      case "removeFromCollection":
-        onRemoveFromCollection?.(ids);
-        break;
-      case "removeFromPlaylist":
-        onRemoveFromPlaylist?.(ids);
-        break;
-      case "removeFromHistory":
-        onRemoveFromHistory?.(ids);
-        break;
-      case "removeFromTagList":
-        onRemoveFromTagList?.(ids);
-        break;
-    }
+    removing.current = true;
+    void remove(ids)
+      .then((removed) => {
+        // The removed rows are gone; a second press must not name them again.
+        if (!removed) return;
+        const gone = new Set(ids);
+        setSelection((current) => ({
+          ids: new Set([...current.ids].filter((id) => !gone.has(id))),
+          anchorIndex: current.anchorIndex,
+        }));
+      })
+      .finally(() => {
+        removing.current = false;
+      });
   });
   useEffect(() => {
     window.addEventListener("keydown", removeSelection);
@@ -1599,7 +1618,7 @@ export const TrackTable = memo(function TrackTable({
                 onAddToTagList?.(ids);
                 break;
               case "removeFromTagList":
-                onRemoveFromTagList?.(ids);
+                void onRemoveFromTagList?.(ids);
                 break;
               case "reloadTag":
                 onReloadTag?.(ids);
@@ -1614,10 +1633,10 @@ export const TrackTable = memo(function TrackTable({
                 onShowInFinder?.(trackMenu.row);
                 break;
               case "removeFromPlaylist":
-                onRemoveFromPlaylist?.(ids);
+                void onRemoveFromPlaylist?.(ids);
                 break;
               case "removeFromHistory":
-                onRemoveFromHistory?.(ids);
+                void onRemoveFromHistory?.(ids);
                 break;
               case "resetPlayCount":
                 onResetPlayCount?.(ids);
@@ -1626,7 +1645,7 @@ export const TrackTable = memo(function TrackTable({
                 onConvertMemoryCues?.(trackMenu.row);
                 break;
               case "removeFromCollection":
-                onRemoveFromCollection?.(ids);
+                void onRemoveFromCollection?.(ids);
                 break;
               case "loadPlayer1":
                 onLoadTrack?.("a", trackMenu.row);
