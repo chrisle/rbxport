@@ -48,10 +48,20 @@ pub fn detect() -> Result<Option<Detected>, String> {
 
     let output = MidiOutput::new("rbxport RX3 Link Export")
         .map_err(|error| format!("Could not inspect MIDI outputs for an XDJ-RX3: {error}"))?;
+    let mut seen = Vec::new();
     let found = output.ports().into_iter().find_map(|port| {
         let name = output.port_name(&port).ok()?;
-        is_rx3_port_name(&name).then_some((port, name))
+        if is_rx3_port_name(&name) {
+            return Some((port, name));
+        }
+        seen.push(name);
+        None
     });
+    if found.is_none() {
+        // What to compare against when an RX3 is plugged in but not found:
+        // its output is named by the OS driver, not by this application.
+        tracing::debug!(outputs = ?seen, "no XDJ-RX3 MIDI output");
+    }
     Ok(found.map(|(port, name)| Detected { output, port, name }))
 }
 
