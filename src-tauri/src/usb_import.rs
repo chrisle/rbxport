@@ -1,5 +1,5 @@
 //! USB-to-library reads. Never infer track identity from a title or USB row id.
-use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc};
+use std::{collections::{HashMap, HashSet}, path::{Path, PathBuf}, sync::Arc};
 use serde::Serialize;
 use tauri::{State, Manager};
 use crate::{commands::{blocking, reload, write_error}, dto::{DeviceLibraryTreeDto, DevicePlaylistNodeDto}, error::{AppError, AppResult, ErrorKind}, state::AppState};
@@ -102,6 +102,8 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             let (id, value) = entry.map_err(err)?; tracks.insert(id, value);
         }
     }
+    // Checked before the manifest's entries join: theirs are already checked.
+    let gone = retain_live(state, &mut tracks)?;
     // Our manifest also works on legacy-only exports; validate its source path against master.db.
     if let Some(manifest) = rbl_export::Manifest::load(root).filter(|m| m.db_id == 0 || m.db_id == db_id) {
         // The manifest records the path as the index resolved it.
@@ -118,6 +120,7 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
     }
     if cues && tracks.is_empty() { return Err(err("No tracks from this library were found on the device.")); }
     if cues {
+        report.skipped += gone;
         // Open the guarded writer even for an empty device; read-only must not look like success.
         state.write(|_| Ok(())).map_err(write_error)?;
         for (id, analysis) in tracks.values() {
@@ -205,6 +208,33 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         }
     }
     Ok(report)
+}
+
+/// Drops the stick's tracks whose library id names no live `djmdContent`
+/// row, and says how many went.
+///
+/// A stick keeps naming a track by `masterContentId` after the track has
+/// left the library: removed from the collection, or the stick written from
+/// another copy of the same library (the same `masterDbId`). Such a track is
+/// treated as one from another library: its cues are not imported, and a
+/// history that plays it stays on the stick with a warning. Trusting the id
+/// failed the whole import part-way, with "Query returned no rows" for cues
+/// and "USB history contains an unknown track" for history, and so every
+/// sync that imports history first (#138).
+fn retain_live(state: &AppState, tracks: &mut HashMap<u32, (String, String)>) -> AppResult<usize> {
+    if tracks.is_empty() { return Ok(0); }
+    let before = tracks.len();
+    let ids: Vec<String> = tracks.values().map(|(id, _)| id.clone()).collect();
+    let live: HashSet<String> = state.read_db(|db| {
+        let mut q = db.connection().prepare("SELECT 1 FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0")?;
+        let mut live = HashSet::new();
+        for id in ids {
+            if q.exists([&id])? { live.insert(id); }
+        }
+        Ok(live)
+    }).map_err(write_error)?;
+    tracks.retain(|_, (id, _)| live.contains(id));
+    Ok(before - tracks.len())
 }
 
 /// Whether the library's cue rows for `id` are the ones `import_usb_cues`
@@ -443,6 +473,72 @@ mod tests {
         import_then_unchanged("library cue moved");
         assert!(rows(&state).contains(&(1000, None, 0, 0, Some(String::new()))));
         assert_eq!((std::fs::read(&target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap()), files);
+    }
+
+    /// A stick rekordbox wrote to an HFS+ drive (`.PIONEER`, `OneLibrary`
+    /// identity only) still names tracks the library no longer has: one
+    /// whose id is gone, one removed (`rb_local_deleted`). Both used to fail
+    /// the whole import (#138); now they are skipped and the rest comes in.
+    #[test]
+    fn tracks_the_library_no_longer_has_are_skipped_not_fatal() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let db_id = rbl_db::export_info::db_id(db.connection()).unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        drop(db);
+        let live = rbl_db::fixture::track_id(0);
+        let removed = rbl_db::fixture::track_id(1);
+        let relative = state.write(|w| w.analysis_data_path_for(&live)).unwrap();
+        state.write(|w| w.register_analysis(&live, &rbl_db::write::AnalysisRegistration { bpm_x100: 12800, key: None, analysis_data_path: &relative })).unwrap();
+        let target = rbl_anlz::resolve(&location.share_root, &relative);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let mut original = rbl_anlz::write::AnlzBuilder::new();
+        original.path("/original.mp3").beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 250 }]).cue_lists(true);
+        std::fs::write(&target, original.finish()).unwrap();
+        let writable = rbl_db::Library::open(location, rbl_db::OpenMode::ReadWrite).unwrap();
+        assert_eq!(writable.connection().execute("UPDATE djmdContent SET rb_local_deleted=1 WHERE ID=?1", [&removed]).unwrap(), 1);
+        drop(writable);
+
+        let usb = dir.path().join("usb");
+        let one = usb.join(".PIONEER/rekordbox/exportLibrary.db");
+        std::fs::create_dir_all(one.parent().unwrap()).unwrap();
+        let mut builder = rbl_onelibrary::build::Builder::create(&one).unwrap();
+        // Stick id 1 is in the library; 2 never was (or was deleted for
+        // good); 3 is in it but removed.
+        for (content_id, master) in [(1, live.as_str()), (2, "99999"), (3, removed.as_str())] {
+            let analysis = format!("/.PIONEER/USBANLZ/P000/{content_id:08X}/ANLZ0000.DAT");
+            std::fs::create_dir_all(usb.join(analysis.trim_start_matches('/')).parent().unwrap()).unwrap();
+            write_stick(usb.join(analysis.trim_start_matches('/')).parent().unwrap(), &[stick_cue(1, 2000, None, 22, "")]);
+            builder.add_track(&rbl_onelibrary::build::Track {
+                content_id, master_db_id: i64::try_from(db_id).unwrap(), master_content_id: master.parse().unwrap(),
+                title: format!("Track {content_id}"), path: format!("/Contents/{content_id}.mp3"), analysis_path: analysis,
+                ..Default::default()
+            }).unwrap();
+        }
+        builder.add_history(1, "Only ours", 0, 1, false).unwrap();
+        builder.add_history_track(1, 1, 1).unwrap();
+        builder.add_history(2, "With a gone track", 0, 2, false).unwrap();
+        for (seq, content) in [1, 2, 3].into_iter().enumerate() {
+            builder.add_history_track(2, content, i64::try_from(seq + 1).unwrap()).unwrap();
+        }
+        builder.finish("Playlist 1 HFS+", "2026-10-09", 0).unwrap();
+
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let cues = import(&state, &editor, &usb, true, false, false).unwrap();
+        assert_eq!((cues.tracks, cues.skipped), (1, 2), "the live track's cues come in; the other two are skipped");
+        let history = import(&state, &editor, &usb, false, true, false).unwrap();
+        assert_eq!(history.histories, 1, "the session of library tracks comes in");
+        assert_eq!(history.skipped, 2);
+        assert_eq!(history.warnings, vec!["History 'With a gone track' contains tracks that could not be matched to this library; it was left on the USB.".to_owned()]);
+        let imported: Vec<String> = state.read_db(|db| {
+            let mut q = db.connection().prepare("SELECT s.ContentID FROM djmdSongHistory s JOIN djmdHistory h ON h.ID=s.HistoryID WHERE h.Name LIKE 'Only ours (USB %' AND s.rb_local_deleted=0")?;
+            let rows = q.query_map([], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        }).unwrap();
+        assert_eq!(imported, vec![live]);
     }
 
     /// A player's `MYSETTING.DAT`: the 104-byte header, a 40-byte body and
