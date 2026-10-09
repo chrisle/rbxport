@@ -893,10 +893,16 @@ describe("resizedLoopRange", () => {
     // Three beats by hand, with the beat loop length at four.
     expect(resizedLoopRange(grid, 1000, 2500, 4, 0.5)).toEqual({ range: [1000, 1750], beats: 4 });
   });
-  it("keeps the length within a quarter beat and 32 beats", () => {
-    expect(resizedLoopRange(grid, 1000, 1125, 0.25, 0.5)).toEqual({ range: [1000, 1125], beats: 0.25 });
-    expect(resizedLoopRange(grid, 1000, 1100, 4, 0.5)).toEqual({ range: [1000, 1125], beats: 4 });
-    expect(resizedLoopRange(grid, 1000, 13_000, 4, 2)).toEqual({ range: [1000, 17_000], beats: 4 });
+  it("steps a beat loop through rekordbox's 1/64 to 512 beats and stops at the ends", () => {
+    expect(resizedLoopRange(grid, 1000, 1125, 0.25, 0.5)).toEqual({ range: [1000, 1062.5], beats: 0.125 });
+    expect(resizedLoopRange(grid, 1000, 1000 + 500 / 64, 1 / 64, 0.5))
+      .toEqual({ range: [1000, 1000 + 500 / 64], beats: 1 / 64 });
+    expect(resizedLoopRange(grid, 1000, 17_000, 32, 2)).toEqual({ range: [1000, 33_000], beats: 64 });
+    expect(resizedLoopRange(grid, 1000, 257_000, 512, 2)).toEqual({ range: [1000, 257_000], beats: 512 });
+  });
+  it("keeps a manual loop within 1/64 and 512 beats", () => {
+    expect(resizedLoopRange(grid, 1000, 1005, 4, 0.5)).toEqual({ range: [1000, 1000 + 500 / 64], beats: 4 });
+    expect(resizedLoopRange(grid, 1000, 200_000, 4, 2)).toEqual({ range: [1000, 257_000], beats: 4 });
   });
   it("has nothing to count on without a grid", () => {
     expect(resizedLoopRange(NO_BEATS, 1000, 3000, 4, 0.5)).toBeNull();
@@ -921,6 +927,8 @@ describe("loopBeatsLabel", () => {
     expect(loopBeatsLabel(0.5)).toBe("1/2");
     expect(loopBeatsLabel(1)).toBe("1");
     expect(loopBeatsLabel(32)).toBe("32");
+    expect(loopBeatsLabel(1 / 64)).toBe("1/64");
+    expect(loopBeatsLabel(512)).toBe("512");
   });
 });
 

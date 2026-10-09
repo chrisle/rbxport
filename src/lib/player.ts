@@ -977,9 +977,15 @@ export function beatLoopRange(
   return end > start ? [start, end] : null;
 }
 
-/** The shortest and the longest beat loop, in beats. */
-export const LOOP_BEATS_MIN = 0.25;
-export const LOOP_BEATS_MAX = 32;
+/**
+ * The shortest and the longest beat loop, in beats: rekordbox's 1/64 to 512.
+ * The manual gives that range for the Auto Beat Loop (7.2.18, p. 100), and
+ * rekordbox 7.2.11's AutoBeatLoopController builds one length per power of
+ * two from "1/64" to "512", which ‹ and › step through and stop at the ends
+ * (PlayerControllPanel::AutoLoopController::buttonClicked).
+ */
+export const LOOP_BEATS_MIN = 1 / 64;
+export const LOOP_BEATS_MAX = 512;
 
 export function clampLoopBeats(beats: number): number {
   return Math.min(Math.max(beats, LOOP_BEATS_MIN), LOOP_BEATS_MAX);

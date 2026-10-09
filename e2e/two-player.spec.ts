@@ -209,6 +209,35 @@ test("the control row loops the chosen number of beats, and the steps resize it"
   await expect(a.getByTestId("player-overview").locator('[class*="loopBand"][data-active]')).toHaveCount(1);
 });
 
+// rekordbox 7.2.11's AutoBeatLoopController labels, which ‹ and › step
+// through and stop at; the manual gives the same 1/64 to 512 (issue #241).
+const REKORDBOX_LOOP_LENGTHS = [
+  "1/64", "1/32", "1/16", "1/8", "1/4", "1/2", "1", "2", "4", "8", "16", "32", "64", "128", "256", "512",
+];
+
+test("on both decks the loop length steps through rekordbox's 1/64 to 512 beats, the readout following each step", async ({ page }) => {
+  const { a, b } = await twoPlayer(page);
+  for (const deck of [a, b]) {
+    const row = deck.getByTestId("player-controls");
+    const field = row.getByRole("group", { name: "Beat loop length" }).getByRole("button", { name: /beat loop$/ });
+    const shorter = row.getByRole("button", { name: "Shorter loop" });
+    const longer = row.getByRole("button", { name: "Longer loop" });
+    await expect(field).toHaveText("4");
+    // Down from 4 to the shortest, one halving a click.
+    for (const label of REKORDBOX_LOOP_LENGTHS.slice(0, REKORDBOX_LOOP_LENGTHS.indexOf("4")).reverse()) {
+      await shorter.click();
+      await expect(field).toHaveText(label);
+    }
+    await expect(shorter).toBeDisabled();
+    // Then up through every length to the longest.
+    for (const label of REKORDBOX_LOOP_LENGTHS.slice(1)) {
+      await longer.click();
+      await expect(field).toHaveText(label);
+    }
+    await expect(longer).toBeDisabled();
+  }
+});
+
 test("deck B reads the other way up, and its detail meets deck A's at the centre line", async ({ page }) => {
   const { a, b } = await twoPlayer(page);
   const deckA = await box(a);
