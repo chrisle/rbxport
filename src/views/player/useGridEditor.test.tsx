@@ -4,8 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
-import type { Backend, GridState, GridEdit } from "@/ipc/types";
-import { SHIFT_MS, HELD_SHIFT_MS } from "@/lib/gridEdit";
+import type { Backend, GridState, GridEdit, GridEditOptions } from "@/ipc/types";
+import { SHIFT_MS, HELD_SHIFT_MS, MAX_STRETCH_MS } from "@/lib/gridEdit";
 import { useGridEditor, type GridEditorActions } from "./useGridEditor";
 
 declare global {
@@ -148,6 +148,42 @@ describe("recovered grid control behavior", () => {
     ]);
     expect(edits.gridEdit.mock.calls.every(call => (call[2] as { deck?: string }).deck === undefined)).toBe(true);
     expect(grid.nudging).toBe(false);
+  });
+  it("stops saving a held stretch soon after release, however slow the save (#196)", async () => {
+    // A stretch save rewrites both analysis files and the tempo row, then
+    // re-reads the library; on Linux that took longer than a repeat, so each
+    // held repeat queued one more save and the grid went on widening for
+    // seconds after the button was let go.
+    const SAVE_MS = 350;
+    edits.gridEdit.mockImplementation(() => new Promise<GridState>(resolve => { setTimeout(() => resolve(gridState()), SAVE_MS); }));
+    mount(); playhead = 2500;
+    act(() => grid.stretch(1));
+    const repeats = 20;
+    for (let i = 0; i < repeats; i++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      playhead += 100;
+      act(() => grid.stretch(1, true));
+    }
+    const atRelease = edits.gridEdit.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(SAVE_MS * 30); });
+    const sent = edits.gridEdit.mock.calls.map(call => call[1] as Extract<GridEdit, { kind: "stretch" }>);
+    // One save in flight and one batch behind it, at most, at release.
+    expect(sent.length - atRelease).toBeLessThanOrEqual(2);
+    expect(sent.length).toBeLessThan(repeats / 2);
+    // Every press counted, against the beat that was under the playhead.
+    expect(sent.reduce((sum, edit) => sum + edit.byMs, 0)).toBe(-(SHIFT_MS + repeats * HELD_SHIFT_MS));
+    expect(sent[0]).toEqual({ kind: "stretch", byMs: -SHIFT_MS, timeMs: 2500 });
+    // Undo is unchanged: like a held shift, the saves carry no transaction.
+    expect(edits.gridEdit.mock.calls.every(call => (call[2] as GridEditOptions).transaction === undefined)).toBe(true);
+  });
+  it("starts a new stretch batch past the most one save moves a beat", async () => {
+    let finish: (state: GridState) => void = () => {};
+    edits.gridEdit.mockImplementationOnce(() => new Promise<GridState>(resolve => { finish = resolve; }));
+    mount();
+    act(() => grid.stretch(-1)); await settle();
+    act(() => { for (let i = 0; i < 15; i++) grid.stretch(-1, true); });
+    act(() => finish(gridState())); await settle(); await settle(); await settle();
+    expect(edits.gridEdit.mock.calls.map(call => (call[1] as Extract<GridEdit, { kind: "stretch" }>).byMs)).toEqual([SHIFT_MS, MAX_STRETCH_MS, 30]);
   });
   it("saves nothing when the presses cancel out", async () => {
     mount();

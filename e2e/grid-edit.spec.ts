@@ -79,6 +79,23 @@ test("widen and narrow change the target spacing, and the shift keys leave it al
   await expect(bpmField(page)).toHaveValue(`${original.toFixed(2)}`);
 });
 
+test("holding Speed the grid up stops changing the grid soon after release (#196)", async ({ page }) => {
+  await load(page);
+  const original = await bpm(page);
+  const speedUp = button(page, "Speed the grid up");
+  await speedUp.hover();
+  await page.mouse.down();
+  // Past the hold delay, into the repeats.
+  await page.waitForTimeout(1600);
+  await page.mouse.up();
+  await expect.poll(() => bpm(page)).toBeGreaterThan(original);
+  // Nothing is left to drain once the saves behind the release land.
+  await page.waitForTimeout(400);
+  const released = await bpm(page);
+  await page.waitForTimeout(600);
+  expect(await bpm(page)).toBe(released);
+});
+
 test("the lock greys the editing buttons and holds across the panel's redraws", async ({ page }) => {
   await load(page);
   const lock = button(page, "Lock the grid");

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { DeckId, GridEdit, GridEditOptions, GridState } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useTranslation } from "@/i18n";
-import { SHIFT_MS, HELD_SHIFT_MS, tapTempo, tapTimeout, withTap } from "@/lib/gridEdit";
+import { SHIFT_MS, HELD_SHIFT_MS, MAX_STRETCH_MS, tapTempo, tapTimeout, withTap } from "@/lib/gridEdit";
 
 export interface GridEditorDeck {
   trackId: string | null;
@@ -77,6 +77,12 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   const pendingNudge = useRef(0);
   const nudgeQueued = useRef(false);
   const [nudging, setNudging] = useState(false);
+  // The stretch presses not saved yet, the same way: a stretch rewrites the
+  // tempo, so each save is a database write and a library reload too, and a
+  // held widen/narrow saving every repeat ran on for seconds after release
+  // (#196). One batch waits behind the save in flight; its target is the
+  // beat under the playhead at its first press.
+  const pendingStretch = useRef<{ byMs: number; timeMs: number; fromMs: number | null } | null>(null);
   const currentTrack = useRef(trackId);
   currentTrack.current = trackId;
   const cancelTaps = useCallback(() => {
@@ -88,6 +94,7 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   useEffect(() => {
     pendingNudge.current = 0;
     nudgeQueued.current = false;
+    pendingStretch.current = null;
     setNudging(false);
   }, [trackId]);
   useEffect(() => { setFromMs(null); cancelTaps(); return () => { if (tapTimer.current) clearTimeout(tapTimer.current); }; }, [trackId, cancelTaps]);
@@ -109,13 +116,18 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
       finally { done?.(); }
     });
   }, [trackId, setState, onError]);
-  const edit = useCallback((change: GridEdit, boundary = fromMs, transaction?: string, after?: () => void) => {
+  // `take` names the edit when its turn in the queue comes, so presses made
+  // while it waited can still join it; null sends nothing.
+  const send = useCallback((take: () => { change: GridEdit; transaction?: string | undefined } | null, boundary: number | null, after?: () => void) => {
     if (!canEdit || trackId === null) return;
     const options: GridEditOptions = { deck: deckId };
     if (deck.durationMs !== undefined) options.durationMs = deck.durationMs;
     if (boundary !== null) options.fromMs = boundary;
-    if (transaction) options.transaction = transaction;
     run(async edits => {
+      const taken = take();
+      if (taken === null) return null;
+      const { change, transaction } = taken;
+      if (transaction) options.transaction = transaction;
       if ((change.kind === "stretch" || change.kind === "tempo") && isDynamicFrom?.(boundary)) {
         // The backend's dialog, not window.confirm. tauri-plugin-dialog's
         // init script replaces window.confirm with a call to a
@@ -130,7 +142,10 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
       }
       return edits.gridEdit(trackId, change, options);
     }, after);
-  }, [canEdit, trackId, deckId, fromMs, run, isDynamicFrom, confirmDynamic, state, deck.durationMs, t]);
+  }, [canEdit, trackId, deckId, run, isDynamicFrom, confirmDynamic, state, deck.durationMs, t]);
+  const edit = useCallback((change: GridEdit, boundary = fromMs, transaction?: string, after?: () => void) => {
+    send(() => ({ change, transaction }), boundary, after);
+  }, [send, fromMs]);
   const mark = useCallback(() => { if (fromMs === null) edit({ kind: "downbeat", timeMs: playheadMs() }); }, [edit, fromMs, playheadMs]);
   const shift = useCallback((direction: -1 | 1, held = false) => {
     if (fromMs !== null || !canEdit || trackId === null) return;
@@ -152,8 +167,22 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     }, undefined, () => { if (!nudgeQueued.current) setNudging(false); });
   }, [fromMs, canEdit, trackId, onNudge, deck.durationMs, run]);
   const stretch = useCallback((direction: -1 | 1, held = false) => {
-    edit({ kind: "stretch", byMs: -direction * (held ? HELD_SHIFT_MS : SHIFT_MS), timeMs: playheadMs() });
-  }, [edit, playheadMs]);
+    if (!canEdit || trackId === null) return;
+    const byMs = -direction * (held ? HELD_SHIFT_MS : SHIFT_MS);
+    const open = pendingStretch.current;
+    // The backend moves the target beat at most MAX_STRETCH_MS a save, so a
+    // batch that would pass it starts the next one instead.
+    if (open !== null && open.fromMs === fromMs && Math.abs(open.byMs + byMs) <= MAX_STRETCH_MS) {
+      open.byMs += byMs;
+      return;
+    }
+    const batch = { byMs, timeMs: playheadMs(), fromMs };
+    pendingStretch.current = batch;
+    send(() => {
+      if (pendingStretch.current === batch) pendingStretch.current = null;
+      return batch.byMs === 0 ? null : { change: { kind: "stretch", byMs: batch.byMs, timeMs: batch.timeMs } };
+    }, fromMs);
+  }, [canEdit, trackId, fromMs, playheadMs, send]);
   const double = useCallback(() => edit({ kind: "double" }), [edit]);
   const halve = useCallback(() => edit({ kind: "halve" }), [edit]);
   const adjustAll = useCallback(() => { if (canEdit) { cancelTaps(); setFromMs(null); } }, [canEdit, cancelTaps]);

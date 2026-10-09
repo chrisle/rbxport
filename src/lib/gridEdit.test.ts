@@ -19,6 +19,21 @@ describe("Ghidra-derived beat-grid vectors", () => {
     expect(out.find(b => b.timeMs === 1600)?.number).toBe(1);
     expect(times(out)).toEqual([100,600,1100,1600,2100,2600,3100,3600]);
   });
+  it("saves the presses of a held stretch as one stretch with the same grid (#196)", () => {
+    // A grid over the whole track, as analysis leaves it: 120 BPM for 200 s.
+    const track = Array.from({length: 400}, (_, i) => ({timeMs: i * 500, number: i % 4 + 1, tempoX100: 12000}));
+    for (const [fromMs, steps] of [[null, [1, 10, 10, 10, 10, 10]], [null, [-1, -10, -10, -10, -10]], [8000, [1, 10, 10, -10, 10]]] as const) {
+      const oneByOne = steps.reduce((beats, byMs) => applyEditFrom(beats, fromMs, {kind: "stretch", byMs, timeMs: 32_000}, 200_000), track);
+      const batched = applyEditFrom(track, fromMs, {kind: "stretch", byMs: steps.reduce((a: number, b) => a + b, 0), timeMs: 32_000}, 200_000);
+      expect(batched.length).toBe(oneByOne.length);
+      expect(batched.map(b => b.tempoX100)).toEqual(oneByOne.map(b => b.tempoX100));
+      // Every beat the stretch placed lands where the presses one by one put
+      // it; the few beats the narrower grid frees at the end are extended at
+      // the whole-millisecond interval, from a different last beat, so they
+      // may be a millisecond apart.
+      batched.forEach((beat, i) => expect(Math.abs(beat.timeMs - oneByOne[i]!.timeMs)).toBeLessThanOrEqual(i < track.length ? 0 : 1));
+    }
+  });
   it("uses target distance for stretch, including ties-to-even rounding", () => {
     const out = applyEditFrom(grid(), null, {kind: "stretch", byMs: 1, timeMs: 1000}, 4000);
     expect(times(out).slice(0,5)).toEqual([0,500,1001,1502,2002]);

@@ -4,6 +4,8 @@ import type { BeatGrid } from "./player";
 export interface EditableBeat { number: number; tempoX100: number; timeMs: number }
 export const SHIFT_MS = 1;
 export const HELD_SHIFT_MS = 10;
+/** The most one stretch moves its target beat; rbl-anlz clamps to it. */
+export const MAX_STRETCH_MS = 120;
 export const TAP_GAP_MS = 1500;
 export const MIN_BPM_X100 = 4000;
 export const MAX_BPM_X100 = 49900;
@@ -53,7 +55,7 @@ function stretchInterval(beats: readonly EditableBeat[], start: number, time: nu
   let target = nearest(beats, time);
   if (target === start && time >= first.timeMs) target++;
   const beat = beats[target];
-  return target > start && beat ? (beat.timeMs + Math.max(-120, Math.min(120, by)) - first.timeMs) / (target - start) : null;
+  return target > start && beat ? (beat.timeMs + Math.max(-MAX_STRETCH_MS, Math.min(MAX_STRETCH_MS, by)) - first.timeMs) / (target - start) : null;
 }
 export function validateEdit(beats: readonly EditableBeat[], fromMs: number | null, edit: GridEdit): string | null {
   const start = fromMs === null ? 0 : nearest(beats, fromMs);
