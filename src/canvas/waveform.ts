@@ -331,12 +331,11 @@ function monoColumn(data: Uint8Array, at: number): Column {
 /**
  * Reads a `PWV4` column: six bytes, of which the first is the height (0 to
  * 127) and the last three the red, green and blue of the column; the RGB
- * palette. The channels track the mid, high and low bands of `PWV6` in
- * that order (r = +0.79, +0.75, +0.77 against them on the reference
- * library [OBS], `cargo run -p rbl-anlz --example pwv4`), so bass is blue
- * and the mids red, as rekordbox's RGB waveform shows them. Bytes 1 and 2
- * are not read: the second runs against every band and the third with the
- * mids, and neither is needed to draw what the CDJ draws [UNKNOWN].
+ * palette. The channels track the low, mid and high bands in that order:
+ * in rekordbox's own files the red runs with `PWV6`'s low band at r = 0.83
+ * to 0.96 on eleven tracks [OBS 7.2.11, issue #158], as Deep Symmetry's
+ * sine sweep found (bytes 3, 4 and 5 the bottom, middle and top of the
+ * range), so bass is red. Bytes 1 and 2 are not read [UNKNOWN].
  */
 function colourColumn(data: Uint8Array, at: number): Column {
   return {
@@ -346,9 +345,10 @@ function colourColumn(data: Uint8Array, at: number): Column {
 }
 
 /**
- * Reads a `PWV5` column: sixteen bits big-endian, `rrrgggbbhhhhh00` — three
+ * Reads a `PWV5` column: sixteen bits big-endian, `rrrgggbbbhhhhh00` — three
  * bits each of red, green and blue, then five of height [DOC], and the
- * channels track the same bands as `PWV4`'s [OBS].
+ * channels track the low, mid and high bands as `PWV4`'s do [OBS 7.2.11,
+ * issue #158].
  */
 function colourDetailColumn(data: Uint8Array, at: number): Column {
   const word = ((data[at] ?? 0) << 8) | (data[at + 1] ?? 0);

@@ -500,8 +500,8 @@ ignores it is wrong by exactly that much.
 | `PWAV` | DAT | 1 | 400 | `wwwhhhhh` — 3 bits whiteness, 5 bits height |
 | `PWV2` | DAT | 1 | 100 | height alone, 1-15 — **no whiteness bits** |
 | `PWV3` | EXT | 1 | 150/s | same encoding |
-| `PWV4` | EXT | 6 | 1200 | `peak>>1`, 0, 0, `mid>>1`, `high>>1`, `low>>1` |
-| `PWV5` | EXT | 2 | 150/s | be16 `rrrgggbbbhhhhh00` |
+| `PWV4` | EXT | 6 | 1200 | `peak>>1`, 0, 0, then low, mid, high (red, green, blue) |
+| `PWV5` | EXT | 2 | 150/s | be16 `rrrgggbbbhhhhh00`, red/green/blue = low/mid/high |
 | `PWV6` | 2EX | 3 | 1200 | low, mid, high |
 | `PWV7` | 2EX | 3 | 150/s | `band>>1` |
 
@@ -1128,9 +1128,15 @@ Resampling keeps the loudest column per bucket.
 
 #### Generated analysis parity
 
-Generated-analysis comparisons show scale differences in
-  `PWV4` color channels (RBXport ≈1.8×) and `PWV5` green/blue. Copying existing
-  source sections byte-for-byte does not resolve that separate encoder issue.
+The colour channels of `PWV4` and `PWV5` are low, mid and high, in that
+order, in rekordbox's own files. `PWV5`'s colour is normalised (the strongest
+channel at or near 7, green at most 5), and the XDJ-AZ draws its bits without
+normalising, so unnormalised bits draw dim. The XDJ-AZ normalises `PWV4`'s
+colour itself, so only the ratio between its channels matters there. The
+`PWV3`/`PWV5` height is `round(31 × (peak/255)²)` of the 1/150 s sample peak.
+RBXport's encoder follows all of these (issue #158). The colours remain an
+empirical fit, not rekordbox's DSP: about 0.7-0.9 of a step per `PWV5`
+channel and 26-34 of 255 per normalised `PWV4` channel, on average.
 
 #### LINK waveform service
 
