@@ -229,7 +229,9 @@ impl Clone for Vfs {
 /// root's — then twenty zero bytes, the root's being its own id three times
 /// (`docs/pre-release/rekordbox/link-export-internals.md`, "File handles").
 /// Checked on the way back in: the three must agree with the tree, so a
-/// handle from another export, or a made-up one, is refused.
+/// handle from another export, or a made-up one, is refused. The twenty
+/// bytes after them are not read: libFilSiNE's `tkfNtoHFhandle` converts the
+/// three words only, and an XDJ-700 sends its own bytes there (#43).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Handle([u8; HANDLE_LEN]);
 
@@ -630,7 +632,16 @@ impl Vfs {
         Some(Handle(out))
     }
 
-    /// Resolves a handle back to a node, rejecting anything we did not issue.
+    /// Resolves a handle back to a node by its three file-id words, rejecting
+    /// ids we did not issue.
+    ///
+    /// Bytes 12..32 are ignored, as rekordbox ignores them: [OBS, static]
+    /// libFilSiNE's `tkfNtoHFhandle` (`0x2744`) loads only the words at 0, 4
+    /// and 8. [OBS, captures on #43] an XDJ-700 on firmware 1.15 echoes those
+    /// three words but writes its own twenty bytes after them
+    /// (`0301000000001b5800000000110401…`) in every LOOKUP, to rekordbox and
+    /// to us alike; rekordbox answers, so a check of those bytes refuses a
+    /// player rekordbox serves.
     pub fn node_of(&self, handle: &Handle) -> Option<usize> {
         let bytes = handle.as_bytes();
         let word = |at: usize| Some(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
@@ -639,11 +650,6 @@ impl Vfs {
         let nodes = self.read();
         let node = nodes.get(index)?;
         if parent != self.fileid(node.parent) || root != self.fileid(self.root()) {
-            return None;
-        }
-        // The trailing bytes must be the zeroes we issued: a handle that has
-        // been tampered with anywhere is not one of ours.
-        if bytes.get(12..).is_some_and(|rest| rest.iter().any(|b| *b != 0)) {
             return None;
         }
         Some(index)

@@ -522,13 +522,79 @@ fn a_forged_handle_is_stale_not_a_node() {
     let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
     assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::STALE);
 
-    // So is one whose trailing bytes were changed.
-    let mut tampered = *root.as_bytes();
-    tampered[HANDLE_LEN - 1] = 1;
+    // So is one whose root id is not the root's, and one naming file id 0,
+    // which no node has.
+    let mut wrong_root = *root.as_bytes();
+    wrong_root[11] = 2;
+    let mut zero = *root.as_bytes();
+    zero[3] = 0;
+    for forged in [wrong_root, zero] {
+        let mut args = Writer::new();
+        args.opaque_fixed(&forged);
+        let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
+        assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::STALE);
+    }
+}
+
+fn from_hex(hex: &str) -> Vec<u8> {
+    (0..hex.len()).step_by(2).map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap()).collect()
+}
+
+/// [OBS] The mount reply handle RBXport sent an XDJ-700 (firmware 1.15) in
+/// `xdj700_linux_rbxport.pcap` on #43, xid 1266.
+const XDJ700_MOUNT_REPLY: &str = "0000000100000001000000010000000000000000000000000000000000000000";
+
+/// [OBS] The handle the same XDJ-700 then sent in its first LOOKUP: the
+/// three file ids it was given, then twenty bytes of its own. Linux capture
+/// xid 1267 (`mnt`), Windows capture `xdj700_windows_rbxport.pcap` xid 1260
+/// (`Users`).
+const XDJ700_FIRST_LOOKUPS: [&str; 2] = [
+    "0000000100000001000000010301000000001b58000000001104010002a33812",
+    "0000000100000001000000010301000000001b58000000001104010004450197",
+];
+
+/// [OBS] The trailing bytes the XDJ-700 put on every LOOKUP handle when it
+/// loaded a track from rekordbox, which answered each one
+/// (`xdj700_windows_rekordbox.pcap` on #43, xids 1018-1024).
+const XDJ700_TAIL_TO_REKORDBOX: &str = "0301000000001b5800000000110401000cce428f";
+
+/// A handle as the XDJ-700 sends it back: ours, with its own bytes after
+/// the three file ids.
+fn as_xdj700_sends(handle: &Handle) -> Handle {
+    let mut bytes = *handle.as_bytes();
+    bytes[12..].copy_from_slice(&from_hex(XDJ700_TAIL_TO_REKORDBOX));
+    Handle::from_slice(&bytes).unwrap()
+}
+
+#[test]
+fn the_xdj700s_first_lookup_resolves_under_the_mount_handle() {
+    // #43/#123: the XDJ-700 got STALE for this exact LOOKUP and showed
+    // E-8302 (C658). rekordbox reads only the three file ids
+    // (libFilSiNE `tkfNtoHFhandle`), so the bytes after them do not matter.
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    assert_eq!(root.as_bytes().as_slice(), from_hex(XDJ700_MOUNT_REPLY));
+    for sent in XDJ700_FIRST_LOOKUPS {
+        let handle = Handle::from_slice(&from_hex(sent)).unwrap();
+        assert!(lookup(&server, &handle, "Contents").is_ok(), "{sent}");
+        let pioneer = lookup(&server, &handle, "PIONEER").unwrap();
+        assert_eq!(pioneer, lookup(&server, &root, "PIONEER").unwrap(), "the same node, the clean handle");
+    }
+}
+
+#[test]
+fn the_xdj700_walks_to_a_track_and_reads_it_with_its_own_trailing_bytes() {
+    let (_dir, server) = fixture();
+    let mut at = mount_root(&server);
+    for part in ["Contents", "ARTBAT", "The Abyss.mp3"] {
+        at = lookup(&server, &as_xdj700_sends(&at), part).unwrap();
+    }
+    let sent = as_xdj700_sends(&at);
     let mut args = Writer::new();
-    args.opaque_fixed(Handle::from_slice(&tampered).unwrap().as_bytes());
+    args.opaque_fixed(sent.as_bytes());
     let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
-    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::STALE);
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::OK);
+    assert_eq!(read_whole(&server, &sent), vec![7_u8; 40_000]);
 }
 
 #[test]
