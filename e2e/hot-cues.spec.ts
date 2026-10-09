@@ -320,3 +320,12 @@ test("with Q on, a call inside a one-beat loop leaves the loop and lands on the 
   expect(all.at(-1)!.a).toBeGreaterThan(all[jump]!.a + beat);
   await expect(pauseButton(page)).toBeVisible();
 });
+
+test("right-clicking a set pad opens the cue colour menu and recolours it (#272)", async ({ page }) => {
+  await load(page);
+  await pad(page, "A").click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Hot cue color" });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("button", { name: "Color 6" }).click();
+  await expect(menu).toBeHidden();
+});
