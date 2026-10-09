@@ -200,6 +200,8 @@ fn loose_row(position: usize, name: &str, id: &str, tags: Option<&rbl_index::fol
         artwork_hue: 0,
         has_artwork: false,
         file_name: name.to_owned(),
+        // Listed because it was just read off the disk.
+        missing: false,
         extra: None,
     }
 }

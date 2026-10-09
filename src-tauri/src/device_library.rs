@@ -304,6 +304,9 @@ fn row_dto(row: &DeviceRow) -> RowDto {
         has_artwork: false,
         file_name: row.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         extra: None,
+        // A stick's own row: its file is on the stick, not a collection
+        // file that rekordbox could mark missing.
+        missing: false,
     }
 }
 

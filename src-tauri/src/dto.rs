@@ -40,6 +40,10 @@ pub struct RowDto {
     pub has_artwork: bool,
     /// The file's own name, for the Explorer's File Name column.
     pub file_name: String,
+    /// The file is not where the library says: rekordbox's `[!]` in the
+    /// Attribute column. Left out when false, which is nearly every row.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub missing: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra: Option<serde_json::Map<String, serde_json::Value>>,
 }
@@ -203,6 +207,7 @@ pub struct MissingTrackDto {
     pub id: String,
     pub title: String,
     pub artist: String,
+    pub album: String,
     /// Where the library still expects it.
     pub path: String,
 }
@@ -210,7 +215,7 @@ pub struct MissingTrackDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MissingTracksDto {
-    /// Every missing track, not just the ones listed.
+    /// Every missing track, not just the ones in this page.
     pub total: u32,
     pub tracks: Vec<MissingTrackDto>,
 }

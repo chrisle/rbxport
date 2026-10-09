@@ -998,6 +998,12 @@ fn relocating_leaves_the_analysis_and_memberships_alone() {
     let mut f = fixture();
     let list = f.writer.create_playlist("Set", ROOT).unwrap();
     f.writer.add_tracks(&list, &[track_id(0), track_id(1)]).unwrap();
+    // rekordbox's Relocate keeps a track's cues, beat grid and the rest
+    // [OBS issue #201, the Help Center's Relocate article]: the cues are
+    // `djmdCue` rows and the grid lives in the files `AnalysisDataPath` names.
+    let cue = f.writer.add_cue(&track_id(0), 1, 12_345).unwrap();
+    let analysis: Option<String> =
+        f.one("SELECT AnalysisDataPath FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
 
     f.writer.relocate(&track_id(0), &moved).unwrap();
 
@@ -1005,6 +1011,15 @@ fn relocating_leaves_the_analysis_and_memberships_alone() {
     let deleted: i64 =
         f.one("SELECT rb_local_deleted FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
     assert_eq!(deleted, 0);
+    let (owner, at, gone): (String, i64, i64) = f.conn().query_row(
+        "SELECT ContentID, InMsec, rb_local_deleted FROM djmdCue WHERE ID = ?1",
+        params![cue],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).unwrap();
+    assert_eq!((owner.as_str(), at, gone), (track_id(0).as_str(), 12_345, 0));
+    let after: Option<String> =
+        f.one("SELECT AnalysisDataPath FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    assert_eq!(after, analysis, "the grid's files stay the track's");
 }
 
 // ------------------------------------------------------------------- cues

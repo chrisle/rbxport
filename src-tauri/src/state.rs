@@ -36,6 +36,9 @@ pub struct AppState {
     /// rather than reopened per selection. A `Mutex`, not `RwLock`, because a
     /// `rusqlite::Connection` is `Send` and not `Sync`.
     reader: parking_lot::Mutex<Option<rbl_db::Library>>,
+    /// The Missing File Manager's last scan, paged out to it a screenful at a
+    /// time. See [`crate::relocate::MissingScan`].
+    pub(crate) missing_scan: parking_lot::Mutex<Option<crate::relocate::MissingScan>>,
 }
 
 /// One reversible library operation. Grid edits keep their own history because
@@ -165,6 +168,7 @@ impl AppState {
             backup_dir,
             backup_destination: RwLock::new(backup_destination),
             reader: parking_lot::Mutex::new(None),
+            missing_scan: parking_lot::Mutex::new(None),
         }
     }
 
@@ -758,6 +762,7 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
                 )
                 .unwrap_or(0),
                 file_name: library.file_name.get(index).to_owned(),
+                missing: crate::relocate::is_missing(library.folder_path.get(index)),
                 extra: None,
             }
         })
