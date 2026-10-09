@@ -36,8 +36,13 @@ describe("menu", () => {
     expect(menuCommand("updates")?.writes).toBe(false);
   });
 
+  it("opens the Missing File Manager on a read-only library", () => {
+    // Its list only reads; Auto Relocate, Relocate and Delete are greyed.
+    expect(resolveMenu("missing", true)).toEqual({ action: "missing" });
+  });
+
   it("says why rather than doing nothing", () => {
-    const outcome = resolveMenu("missing", true);
+    const outcome = resolveMenu("import", true);
     expect(outcome).not.toBeNull();
     expect(outcome).toHaveProperty("refused");
   });

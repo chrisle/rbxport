@@ -308,6 +308,16 @@
   clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 .cue { font-size: var(--f-size-xs); color: var(--c-text-dim); }
+/* rekordbox's [!] for a track whose file is missing, drawn rather than typed
+   so it matches at any font. Measured from rekordbox 7.2.14 at 175% (Winrig
+   chris-win11 2026-10-08, issue #201): a 3.5px-wide (FF,96,00) stroke, 14px
+   tall, a 3.5px gap and a 3.5px dot, centred on the row; 2 x 8, 2 and 2 CSS px. */
+.missing {
+  flex: none;
+  width: 2px;
+  height: 12px;
+  background: linear-gradient(var(--c-missing) 0 8px, transparent 8px 10px, var(--c-missing) 10px 12px);
+}
 
 .artwork { padding: 0; position: relative; overflow: hidden; background: var(--c-simple-well); }
 /* The record a cell without artwork shows: `design/icons/ui/record.svg`,

@@ -21,12 +21,17 @@ export interface ContextMenuProps<A extends string> {
   context: MenuContext;
   /** Named for the screen reader, since a menu with no name is "menu". */
   label: string;
+  /**
+   * A heading drawn over the entries, above a rule: rekordbox's "File is
+   * Missing" over a missing track's menu. Most menus have none.
+   */
+  title?: string | undefined;
   onChoose: (action: A) => void;
   onClose: () => void;
 }
 
 export function ContextMenu<A extends string>({
-  x, y, rows, context, label, onChoose, onClose,
+  x, y, rows, context, label, title, onChoose, onClose,
 }: ContextMenuProps<A>) {
   const box = useRef<HTMLDivElement>(null);
   const submenu = useRef<HTMLDivElement>(null);
@@ -90,6 +95,12 @@ export function ContextMenu<A extends string>({
       role="menu"
       aria-label={label}
     >
+      {title !== undefined ? (
+        <>
+          <div className={styles.title} role="presentation">{title}</div>
+          <div className={styles.separator} role="separator" />
+        </>
+      ) : null}
       {rows.map((row, index) =>
         row === SEPARATOR ? (
           // Its position is the only thing a separator has to be keyed by, and

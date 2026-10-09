@@ -95,6 +95,21 @@
 }
 .submenu > .item { flex-shrink: 0; }
 
+/* The heading over a menu that has one: rekordbox's "File is Missing" over
+   a missing track's menu. Measured from rekordbox 7.2.14 at 175% (Winrig
+   chris-win11 2026-10-08, issue #201): the text starts 25px inside the
+   hairline (14pt) where the entries start 46px (26pt), and its rule sits 78px
+   (45pt) below the panel's top. The size is read from the heading's width,
+   166px against 137px for 'Auto Relocate' [ASSUME: Arial at 16pt]. */
+.title {
+  display: flex;
+  align-items: center;
+  height: 39px;
+  padding: 0 var(--s-context-menu-arrow-inset) 0 calc(var(--s-context-menu-text-inset) - 11px);
+  font-size: 16px;
+  white-space: nowrap;
+}
+
 .separator {
   height: 1px;
   margin: var(--s-context-menu-sep-gap) var(--s-context-menu-sep-inset-r)

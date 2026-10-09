@@ -69,6 +69,7 @@ import type { PreferencePane } from "@/lib/preferences";
 import { answer, deckNumber, setPlaying, whenLoaded, withSetting, type ScriptHandler } from "@/lib/scripting";
 import { useAnalysis } from "@/store/useAnalysis";
 import { AnalysisDialog } from "@/views/analysis/AnalysisDialog";
+import { MissingFileManager } from "@/views/library/MissingFileManager";
 import { NewLibraryDialog, type LibraryQuestion } from "@/views/library/NewLibraryDialog";
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
@@ -184,6 +185,8 @@ function AppBody() {
   // What to ask when there is no library to load: none anywhere, or one
   // configured on a drive that is not connected.
   const [missingLibrary, setMissingLibrary] = useState<LibraryQuestion | null>(null);
+  /** File › Display All Missing Files: the Missing File Manager is open. */
+  const [missingFilesOpen, setMissingFilesOpen] = useState(false);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
   // Do not write the empty bootstrap selection over the session while the
   // backend is still restoring the node that was open at exit. WebKit gets
@@ -1490,6 +1493,32 @@ function AppBody() {
     [writeNow],
   );
 
+  // A missing track's menu [OBS rekordbox 7.2.14, issue #201]. Auto
+  // Relocate searches Preferences' Auto Relocate Search Folders for each
+  // selected track's file name; Relocate asks for the one file.
+  const relocateFolders = advancedPrefs.relocateFolders;
+  const autoRelocate = useCallback(
+    (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      write(async (b) => {
+        const done = await b.autoRelocate([...relocateFolders], [...ids]);
+        return done.unresolved > 0
+          ? t("{relocated} relocated, {unresolved} not found in the search folders.", { ...done })
+          : t("{relocated} relocated.", { ...done });
+      });
+    },
+    [write, relocateFolders, t],
+  );
+  const relocate = useCallback(
+    (row: RowDto) => {
+      write(async (b) => {
+        const path = await b.relocateTrack(row.id);
+        return path === null ? "" : t("Relocated {title}.", { title: row.title });
+      });
+    },
+    [write, t],
+  );
+
   // Import To Collection, over the Explorer's files: their ids are their
   // paths behind `file:`.
   const importToCollection = useCallback(
@@ -1890,8 +1919,11 @@ function AppBody() {
       setLayout(asLayout(outcome.action.slice("layout-".length)));
       return;
     }
-    // The missing-file manager is a pane of Preferences.
-    openPreferences(outcome.action === "missing" ? "advanced" : "view");
+    if (outcome.action === "missing") {
+      setMissingFilesOpen(true);
+      return;
+    }
+    openPreferences("view");
   }, [
     readOnly, advancedPrefs.protectLibrary, importFromMenu, importFolderFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
     openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider, openReport,
@@ -2444,6 +2476,7 @@ function AppBody() {
     onShowInformation: showInformation, onShowInFinder: revealTrack, onRate: rateTrack,
     onComment: commentTrack, onResetPlayCount: resetPlayCount, onConvertMemoryCues: convertMemoryCues,
     onRemoveFromCollection: removeFromCollection, onImportToCollection: importToCollection,
+    onAutoRelocate: autoRelocate, onRelocate: relocate,
     onAnalysisLock: analysisLock, onAddToPlaylist: addToPlaylist, onAddToTagList: addToTagList,
     onRemoveFromTagList: removeFromTagList, onReloadTag: reloadTag, onExportTrack: exportTrackTo,
     playlists: menuPlaylists, devices: menuDevices, onEditField: editTrackField,
@@ -2455,7 +2488,7 @@ function AppBody() {
     onDropFilesIntoPlaylist: importDroppedFilesTo, onAnalyseTracks: analyseTracks,
   }), [
     layout, loadTrack, showInformation, revealTrack, rateTrack, commentTrack, resetPlayCount,
-    convertMemoryCues, removeFromCollection, importToCollection, analysisLock, addToPlaylist,
+    convertMemoryCues, removeFromCollection, importToCollection, autoRelocate, relocate, analysisLock, addToPlaylist,
     addToTagList, removeFromTagList, reloadTag, exportTrackTo, menuPlaylists, menuDevices,
     editTrackField, readOnly, explainEditLock, pendingEdits, draggedTracks, addDraggedTo,
     removeTracksFromPlaylist, removeTracksFromHistory, reorderPlaylist, importDroppedFilesTo,
@@ -2674,6 +2707,8 @@ function AppBody() {
           onResetPlayCount={resetPlayCount}
           onConvertMemoryCues={convertMemoryCues}
           onRemoveFromCollection={removeFromCollection}
+          onAutoRelocate={autoRelocate}
+          onRelocate={relocate}
           onImportToCollection={importToCollection}
           onAnalysisLock={analysisLock}
           onAddToPlaylist={addToPlaylist}
@@ -2784,6 +2819,15 @@ function AppBody() {
           onUseDefault={async () => (await getBackend()).useDefaultLibrary()}
           onConfirm={async (message, labels) => (await getBackend()).confirm(message, labels)}
           onQuit={() => { void getBackend().then(backend => backend.closeWindow()); }} />
+      ) : null}
+      {missingFilesOpen ? (
+        <MissingFileManager
+          readOnly={readOnly}
+          folders={relocateFolders}
+          onWrote={(said) => { void afterWrite(said); }}
+          onFailed={refuse}
+          onClose={() => setMissingFilesOpen(false)}
+        />
       ) : null}
       {analysisSelection !== null ? (
         <AnalysisDialog count={analysisSelection.length} initialMode={analysisPrefs.mode}

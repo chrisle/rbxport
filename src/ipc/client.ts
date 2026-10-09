@@ -404,7 +404,8 @@ async function realBackend(): Promise<Backend> {
     nudgeLinkMaster: (deltaBpm) => invoke<LinkStatus>("link_nudge_master", { deltaBpm }),
     takeLinkMasterTempo: () => invoke<LinkStatus>("link_take_master_tempo"),
     onLinkStatus: (listener) => subscribe<LinkStatus>("link:status", listener),
-    missingTracks: (limit) => invoke<MissingTracks>("missing_tracks", { limit }),
+    missingTracks: (offset, limit, rescan) => invoke<MissingTracks>("missing_tracks", { offset, limit, rescan }),
+    removeMissingTracks: (tracks) => invoke<number>("remove_missing_tracks", { tracks }),
     findDuplicates: (limit) => invoke<Duplicates>("find_duplicates", { limit }),
     relocateTrack: async (trackId) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -424,7 +425,7 @@ async function realBackend(): Promise<Backend> {
       await invoke<number>("relocate_track", { track: trackId, path: picked });
       return picked;
     },
-    autoRelocate: (folders) => invoke<RelocateReport>("auto_relocate", { folders }),
+    autoRelocate: (folders, tracks) => invoke<RelocateReport>("auto_relocate", { folders, tracks }),
     pickImage: async (title) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({

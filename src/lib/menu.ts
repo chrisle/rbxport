@@ -39,7 +39,9 @@ const COMMANDS: Record<string, MenuCommand> = {
   "import-xml": { action: "import-xml", writes: true },
   "import-itunes": { action: "import-itunes", writes: true },
   "export-xml": { action: "export-xml", writes: false },
-  missing: { action: "missing", writes: true },
+  // Listing missing files reads; the manager's own buttons are what write,
+  // and they are greyed while the library is read-only.
+  missing: { action: "missing", writes: false },
   info: { action: "info", writes: false },
   sub: { action: "sub", writes: false },
   // ⌘7/8/9/0, which is where rekordbox's Export key map puts them.

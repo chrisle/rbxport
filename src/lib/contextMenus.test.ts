@@ -1,11 +1,30 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  deckMenu, deleteKeyAction, deviceTrackMenu, deviceTreeMenu, enabled, entriesOf, SEPARATOR, shortcutMenu, TRACK_MENU, trackMenuFor, treeMenu,
-  type MenuContext, type MenuRow,
+  deckMenu, deleteKeyAction, deviceTrackMenu, deviceTreeMenu, enabled, entriesOf, MISSING_TRACK_MENU, MISSING_TRACK_TITLE,
+  SEPARATOR, shortcutMenu, TRACK_MENU, trackMenuFor, treeMenu, type MenuContext, type MenuRow,
 } from "./contextMenus";
 
 const OPEN: MenuContext = { inPlaylist: true, hasFile: true, readOnly: false };
+
+describe("MISSING_TRACK_MENU", () => {
+  it("is rekordbox's menu over a missing track, under its heading", () => {
+    // [OBS rekordbox 7.2.14, Winrig chris-win11 2026-10-08, issue #201]
+    expect(MISSING_TRACK_TITLE).toBe("File is Missing");
+    expect(MISSING_TRACK_MENU.map((row) => (row === SEPARATOR ? row : row.label))).toEqual([
+      "Auto Relocate",
+      "Relocate",
+      "Remove from Collection",
+    ]);
+  });
+
+  it("writes, so a read-only library greys all three", () => {
+    for (const entry of entriesOf(MISSING_TRACK_MENU)) {
+      expect(enabled(entry, OPEN), entry.label).toBe(true);
+      expect(enabled(entry, { ...OPEN, readOnly: true }), entry.label).toBe(false);
+    }
+  });
+});
 
 describe("TRACK_MENU", () => {
   it("is rekordbox's own list, in its own order, less the cloud", () => {

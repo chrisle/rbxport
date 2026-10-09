@@ -377,6 +377,12 @@ export interface MockOptions {
    * turns it on for the tests that exercise an edit.
    */
   writable?: boolean;
+  /**
+   * Every how-manyth track's file is gone, from `?missing=N`, starting with
+   * the second: the Collection's `[!]` and the Missing File Manager need some.
+   * Unset, nothing is missing, as the rest of the suite expects.
+   */
+  missingEvery?: number;
 }
 
 export function createMockBackend(options: MockOptions = {}): Backend {
@@ -384,6 +390,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const latency = options.latencyMs ?? readLatencyFromUrl() ?? 0;
   const playlistFixture = options.playlistFixture ?? readPlaylistFixtureFromUrl();
   const all = makeRows(trackCount);
+  const missingEvery = options.missingEvery ?? readMissingFromUrl();
+  if (missingEvery !== null) {
+    for (let i = 1; i < all.length; i += missingEvery) {
+      const row = all[i];
+      if (row) row.missing = true;
+    }
+  }
   const colors = makeColors(trackCount);
   const rowPositions = new Map(all.map((row, index) => [row.id, index]));
   // What the row DTO does not carry, made up per track and edited in place.
@@ -2608,9 +2621,32 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     exportPlaylistFile: () => wait(null),
     exportXml: () => wait(null),
 
-    // Nothing in the mock has a file behind it, so nothing can be missing and
-    // there is no picker to choose one with.
-    missingTracks: () => wait({ total: 0, tracks: [] }),
+    // The tracks `?missing=N` took the files of, in collection order.
+    missingTracks: (offset, limit) => {
+      const gone = all.filter((row) => row.missing === true);
+      return wait({
+        total: gone.length,
+        tracks: gone.slice(offset, offset + limit).map((row) => ({
+          id: row.id,
+          title: row.title,
+          artist: row.artist,
+          album: row.album,
+          path: String(row.extra?.location ?? ""),
+        })),
+      });
+    },
+    removeMissingTracks: async (tracks) => {
+      const gone = all.filter((row) => row.missing === true && (tracks === null || tracks.includes(row.id)));
+      const ids = gone.map((row) => row.id);
+      for (const [playlist, members] of membership) {
+        membership.set(playlist, members.filter((t) => !ids.includes(t)));
+      }
+      // The mock's collection is fixed, so a deleted track stays listed but
+      // stops being missing; the manager's list is what shows the change.
+      for (const row of gone) delete row.missing;
+      if (ids.length > 0) await bump(false);
+      return ids.length;
+    },
     // The mock's titles are drawn from a short list, so the same title under
     // the same artist comes up as it does in a real library.
     findDuplicates: (limit) => {
@@ -2630,9 +2666,25 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         })),
       });
     },
-    relocateTrack: () => wait(null),
-    // No files behind the rows, so nothing is missing and nothing moves.
-    autoRelocate: () => wait({ relocated: 0, unresolved: 0 }),
+    // No picker in a browser: a missing track is pointed at a fixed folder,
+    // so the flow can be driven end to end; any other track is a cancel.
+    relocateTrack: async (trackId) => {
+      const row = all.find((r) => r.id === trackId);
+      if (row?.missing !== true) return null;
+      delete row.missing;
+      await bump();
+      return `/Users/mock/Music/Moved/${row.fileName ?? row.title}`;
+    },
+    // The search folders hold every other missing file, in list order, so a
+    // run both relocates and leaves some unresolved; with no folders nothing
+    // is found.
+    autoRelocate: async (folders, tracks) => {
+      const gone = all.filter((row) => row.missing === true && (tracks === null || tracks.includes(row.id)));
+      const found = folders.length === 0 ? [] : gone.filter((_, at) => at % 2 === 0);
+      for (const row of found) delete row.missing;
+      if (found.length > 0) await bump();
+      return { relocated: found.length, unresolved: gone.length - found.length };
+    },
     // No dialogs in a browser: the folder is a fixed one, so the search
     // folders list can be driven end to end.
     pickFolder: () => wait("/Users/mock/Music/Moved"),
@@ -2858,6 +2910,13 @@ function readLinkFromUrl(): "detected" | "on" | "blocked" | null {
 }
 
 /** `?tracks=40000` lets the perf spec load a full-size library into the mock. */
+function readMissingFromUrl(): number | null {
+  if (typeof location === "undefined") return null;
+  const raw = new URLSearchParams(location.search).get("missing");
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function readCountFromUrl(): number | null {
   if (typeof location === "undefined") return null;
   const raw = new URLSearchParams(location.search).get("tracks");

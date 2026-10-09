@@ -1,0 +1,82 @@
+/* rekordbox 7.2.14's Missing File Manager, measured at 175% on chris-win11
+   (Winrig 2026-10-08, issue #201): a 1064x934px window, so 608x534pt; four
+   columns of 210px (120pt) and the location filling the rest; rows on a
+   44px (25pt) pitch, black and (25,25,25) by turns, selected rows in the
+   browser's selection blue; "N Track" right-aligned over the buttons; Auto
+   Relocate, Relocate and Delete on the left at 190x50px (109x29pt) and OK on
+   the right. */
+.dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  width: 608px;
+  height: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  padding: 0 14px 14px;
+  border: 1px solid var(--c-context-menu-border);
+  background: var(--c-missing-manager);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--f-size-ui);
+}
+.dialog::backdrop { background: var(--c-modal-scrim); }
+.title {
+  margin: 0;
+  padding: 8px 0;
+  font-size: var(--f-size-ui);
+  font-weight: 400;
+  color: var(--c-text-dim);
+}
+.table {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--c-raised);
+}
+.header,
+.row {
+  display: grid;
+  grid-template-columns: 120px 120px 120px minmax(0, 1fr);
+  height: var(--s-menu-row-h);
+  line-height: var(--s-menu-row-h);
+}
+.header { background: var(--c-missing-manager); color: var(--c-text-dim); border-bottom: 1px solid var(--c-raised); }
+.cell {
+  overflow: hidden;
+  padding: 0 5px;
+  white-space: nowrap;
+  border-right: 1px solid var(--c-raised);
+}
+.list { position: relative; flex: 1; min-height: 0; overflow: auto; background: var(--c-black); }
+.rows { position: relative; }
+.row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--c-black);
+  cursor: default;
+}
+.row[data-even] { background: var(--c-missing-manager); }
+.row[data-selected] { background: var(--c-select); }
+.count { padding: 10px 2px 6px; text-align: right; color: var(--c-text-dim); }
+.note { margin: 0 2px 6px; color: var(--c-text-dim); }
+.buttons { display: flex; gap: 14px; }
+.spacer { flex: 1; }
+.buttons button {
+  white-space: nowrap;
+  width: 109px;
+  height: 29px;
+  border: 1px solid var(--c-pref-button-border);
+  border-radius: 2px;
+  background: linear-gradient(var(--c-pref-button-top), var(--c-pref-button-bottom));
+  color: inherit;
+  font: inherit;
+}
+.buttons button:disabled { opacity: .4; }
+.buttons button:hover:not(:disabled) { border-color: var(--c-accent); }
+.dialog :focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }

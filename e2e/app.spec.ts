@@ -1412,20 +1412,6 @@ test("with the library held by rekordbox the cells are not editable at all", asy
   await expect(warning).toHaveText("Editing is locked while rekordbox is running. Quit rekordbox to enable editing.");
 });
 
-// The missing-file manager is hidden for now (MISSING_FILES_ENABLED).
-test.skip("settings can check for missing files", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("dialog", { name: "Preferences" }).getByRole("tab", { name: "Advanced" }).click();
-
-  const section = page.getByRole("region", { name: "Missing files" });
-  await expect(section.getByRole("button", { name: /check for missing files/i })).toBeVisible();
-
-  await section.getByRole("button", { name: /check for missing files/i }).click();
-  // The mock has no files behind its rows, so nothing can be missing.
-  await expect(section).toContainText("where the library expects it");
-});
-
 test("the player marks a track's cues on its waveforms", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

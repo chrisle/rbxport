@@ -14,6 +14,8 @@
   --c-text-dim: #9A9A9A;
   --c-icon-off: #A0A0A0; /* skins/*_off.svg fill rgb(160,160,160) */
   --c-icon-on: #F0F0F0; /* skins/*_on.svg fill rgb(240,240,240) */
+  --c-missing: #FF9600; /* measured: the orange [!] rekordbox 7.2.14 draws in the Attribute column for a track whose file is missing (Winrig chris-win11 2026-10-08, issue #201) */
+  --c-missing-manager: #191919; /* measured: rekordbox 7.2.14's Missing File Manager window and every other row of its list, (25,25,25), the rows between them black (Winrig chris-win11 2026-10-08, issue #201) */
   --c-wave-low: #0055E1; /* rekordbox's 3Band waveform, the low band standing alone; sampled from rekordbox in mixxxdj/mixxx#12326 and the same value our own capture measured */
   --c-wave-mid: #FFA600; /* rekordbox's 3Band waveform, the mid band standing alone (mixxxdj/mixxx#12326); our overview capture measured #FF8C00 where the mid stood mostly alone */
   --c-wave-high: #FFFFFF; /* rekordbox's 3Band waveform, the high band standing alone (mixxxdj/mixxx#12326) */

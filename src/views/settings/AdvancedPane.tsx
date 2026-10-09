@@ -3,9 +3,10 @@
  * to 9.49.51 PM.
  *
  * Database holds the library's own facts, rekordbox's Database management
- * (the one place rekordbox chooses which library it works on), and the
- * missing-file manager, with rekordbox's Auto Relocate Search Folders
- * feeding it. Browse holds
+ * (the one place rekordbox chooses which library it works on), and
+ * rekordbox's Auto Relocate Search Folders, which the Missing File Manager
+ * (File › Display All Missing Files) and a missing track's Auto Relocate
+ * search. Browse holds
  * Library Protection and Edit Library. Others holds BEAT/BPM SYNC, the
  * quantize beat value and play history.
  *
@@ -18,20 +19,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { DatabaseDrive, Duplicates, LibrarySummary, MissingTracks, RelocateReport } from "@/ipc/types";
+import type { DatabaseDrive, Duplicates, LibrarySummary } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
 import { QUANTIZE_BEATS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import { Button, Note, Radios, Section, Select, Sub, Toggle } from "./controls";
-
-/**
- * Whether Database shows the missing-file manager and Auto Relocate Search
- * Folders. Hidden from users for now; the code stays so it can be turned
- * back on. The File menu's Missing File Manager item is gated to match in
- * `src-tauri/src/menu.rs`.
- */
-export const MISSING_FILES_ENABLED = false;
 
 export type AdvancedTab = "database" | "browse" | "others";
 
@@ -40,9 +33,6 @@ export const ADVANCED_TABS: readonly { id: AdvancedTab; label: string }[] = [
   { id: "browse", label: "Browse" },
   { id: "others", label: "Others" },
 ];
-
-/** How many missing tracks to list. The count above it is exact. */
-const MISSING_SHOWN = 20;
 
 export function AdvancedPane({ tab, summary }: {
   tab: AdvancedTab;
@@ -188,13 +178,10 @@ export function AdvancedPane({ tab, summary }: {
           </dd>
         </dl>
       </Section>
-      {MISSING_FILES_ENABLED ? (
-        <RelocateSection
-          folders={advanced.relocateFolders}
-          onFolders={(relocateFolders) => set({ relocateFolders })}
-          readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary}
-        />
-      ) : null}
+      <RelocateSection
+        folders={advanced.relocateFolders}
+        onFolders={(relocateFolders) => set({ relocateFolders })}
+      />
       <DuplicatesSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
       {/* Last, as in rekordbox, under the external-drive settings. */}
       <DatabaseManagementSection readOnly={summary?.readOnly ?? false} />
@@ -367,141 +354,52 @@ function DuplicatesSection({ readOnly }: { readOnly: boolean }) {
   );
 }
 
-function RelocateSection({ folders, onFolders, readOnly }: {
+/**
+ * rekordbox's Auto Relocate Search Folders, Specified user folders part
+ * [OBS rekordbox 7.2.14 Preferences › Advanced › Database, issue #201]. Its
+ * Music, Video and Desktop boxes are not drawn: which folders they stand
+ * for has not been established [UNKNOWN].
+ */
+function RelocateSection({ folders, onFolders }: {
   folders: readonly string[];
   onFolders: (folders: string[]) => void;
-  readOnly: boolean;
 }) {
-  const [missing, setMissing] = useState<MissingTracks | null>(null);
-  const [scanning, setScanning] = useState(false);
   const [picked, setPicked] = useState<string>(folders[0] ?? "");
-  const [report, setReport] = useState<RelocateReport | null>(null);
   const current = folders.includes(picked) ? picked : (folders[0] ?? "");
 
-  const rescan = async () => {
-    const backend = await getBackend();
-    setMissing(await backend.missingTracks(MISSING_SHOWN));
-  };
-
   return (
-    <>
-      <Section title="Auto Relocate Search Folders">
-        <Sub>Specified user folders</Sub>
-        <div className={styles.actions}>
-          <select
-            className={styles.select}
-            data-plain
-            aria-label="Search folders"
-            value={current}
-            onChange={(e) => setPicked(e.target.value)}
-          >
-            {folders.length === 0 ? <option value="">No folders</option> : null}
-            {folders.map((folder) => (
-              <option key={folder} value={folder}>{folder}</option>
-            ))}
-          </select>
-          <Button
-            onClick={() => {
-              void (async () => {
-                const backend = await getBackend();
-                const folder = await backend.pickFolder("Choose a folder to search for moved files");
-                if (folder === null || folders.includes(folder)) return;
-                onFolders([...folders, folder]);
-                setPicked(folder);
-              })();
-            }}
-          >
-            Add
-          </Button>
-          <Button disabled={current === ""} onClick={() => onFolders(folders.filter((f) => f !== current))}>
-            Del
-          </Button>
-        </div>
-      </Section>
-
-      <Section title="Missing files">
-        {missing === null ? (
-          <>
-            <div className={styles.actions}>
-              <Button
-                disabled={scanning}
-                onClick={() => {
-                  setScanning(true);
-                  void rescan().finally(() => setScanning(false));
-                }}
-              >
-                {scanning ? "Checking…" : "Check for missing files"}
-              </Button>
-            </div>
-          </>
-        ) : missing.total === 0 ? (
-          <Note>Every track&rsquo;s file is where the library expects it.</Note>
-        ) : (
-          <>
-            <Note>
-              {missing.total.toLocaleString()} track{missing.total === 1 ? "" : "s"} cannot be found.
-            </Note>
-            <div className={styles.actions}>
-              <Button
-                disabled={readOnly || folders.length === 0 || scanning}
-                onClick={() => {
-                  setScanning(true);
-                  void (async () => {
-                    try {
-                      const backend = await getBackend();
-                      setReport(await backend.autoRelocate([...folders]));
-                      await rescan();
-                    } finally {
-                      setScanning(false);
-                    }
-                  })();
-                }}
-              >
-                {scanning ? "Searching…" : "Auto Relocate"}
-              </Button>
-            </div>
-            {report ? (
-              <Note>
-                {report.relocated} relocated
-                {report.unresolved > 0 ? `, ${report.unresolved} not found in the search folders.` : "."}
-              </Note>
-            ) : folders.length === 0 ? (
-              <Note>Add a search folder above to relocate them automatically.</Note>
-            ) : null}
-            <ul className={styles.list}>
-              {missing.tracks.map((track) => (
-                <li key={track.id}>
-                  <span className={styles.listTitle}>
-                    {track.title}
-                    {track.artist ? ` — ${track.artist}` : ""}
-                  </span>
-                  <span className={styles.listPath}>{track.path}</span>
-                  <button
-                    type="button"
-                    className={styles.listAction}
-                    disabled={readOnly}
-                    onClick={() => {
-                      void (async () => {
-                        const backend = await getBackend();
-                        const chosen = await backend.relocateTrack(track.id);
-                        // Cancelling leaves the list alone; a successful
-                        // relocate means the track is no longer missing.
-                        if (chosen === null) return;
-                        await rescan();
-                      })();
-                    }}
-                  >
-                    Locate&hellip;
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {missing.total > missing.tracks.length ? (
-              <Note>Showing the first {missing.tracks.length}.</Note>
-            ) : null}
-          </>
-        )}
-      </Section>
-    </>
+    <Section title="Auto Relocate Search Folders">
+      <Sub>Specified user folders</Sub>
+      <div className={styles.actions}>
+        <select
+          className={styles.select}
+          data-plain
+          aria-label="Search folders"
+          value={current}
+          onChange={(e) => setPicked(e.target.value)}
+        >
+          {folders.length === 0 ? <option value="">No folders</option> : null}
+          {folders.map((folder) => (
+            <option key={folder} value={folder}>{folder}</option>
+          ))}
+        </select>
+        <Button
+          onClick={() => {
+            void (async () => {
+              const backend = await getBackend();
+              const folder = await backend.pickFolder("Choose a folder to search for moved files");
+              if (folder === null || folders.includes(folder)) return;
+              onFolders([...folders, folder]);
+              setPicked(folder);
+            })();
+          }}
+        >
+          Add
+        </Button>
+        <Button disabled={current === ""} onClick={() => onFolders(folders.filter((f) => f !== current))}>
+          Del
+        </Button>
+      </div>
+    </Section>
   );
 }

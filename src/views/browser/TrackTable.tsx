@@ -24,7 +24,9 @@ import {
   type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
-import { deleteKeyAction, deviceTrackMenu, trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
+import {
+  deleteKeyAction, deviceTrackMenu, MISSING_TRACK_MENU, MISSING_TRACK_TITLE, trackMenuFor, type MenuTarget,
+} from "@/lib/contextMenus";
 import { hasLooseId } from "@/lib/explorer";
 import { previewFromClick, WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
@@ -523,7 +525,14 @@ const TrackRow = memo(function TrackRow({
               {row.analysed ? (
                 <span className={styles.analysed} title={tooltips ? "Analyzed" : undefined} />
               ) : null}
-              <span className={styles.cue}>{row.hotCues.length > 0 ? "CUE" : ""}</span>
+              {row.missing === true ? (
+                // rekordbox's orange [!], where CUE would be: no missing row
+                // in either capture shows CUE beside it [OBS issue #201].
+                <span className={styles.missing} role="img" aria-label="File is Missing"
+                  title={tooltips ? "File is Missing" : undefined} />
+              ) : (
+                <span className={styles.cue}>{row.hotCues.length > 0 ? "CUE" : ""}</span>
+              )}
             </div>
           );
         }
@@ -735,6 +744,10 @@ export interface TrackTableProps {
   /** Convert Memory Cues to Hot Cues, on the row under the pointer. */
   onConvertMemoryCues?: (row: RowDto) => void;
   onRemoveFromCollection?: RemoveTracks;
+  /** Auto Relocate, from a missing track's menu: the selected tracks. */
+  onAutoRelocate?: (ids: readonly string[]) => void;
+  /** Relocate, from a missing track's menu: the row under the pointer. */
+  onRelocate?: (row: RowDto) => void;
   /** Import To Collection: the Explorer's files, by their `file:` ids. */
   onImportToCollection?: (ids: readonly string[]) => void;
   /** Analysis Lock › Lock and Unlock. */
@@ -814,7 +827,7 @@ export const TrackTable = memo(function TrackTable({
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
-  onRemoveFromCollection, onConvertMemoryCues, readOnly = false,
+  onRemoveFromCollection, onAutoRelocate, onRelocate, onConvertMemoryCues, readOnly = false,
   onImportToCollection, onAnalysisLock, onAddToPlaylist, onAddToTagList, onRemoveFromTagList, onExportTrack, onReloadTag,
   playlists = [], devices = [], deviceMenu,
   players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
@@ -1647,10 +1660,11 @@ export const TrackTable = memo(function TrackTable({
         <ContextMenu
           x={trackMenu.x}
           y={trackMenu.y}
-          rows={trackMenuFor(players, playlists, devices, {
+          rows={trackMenu.row.missing === true ? MISSING_TRACK_MENU : trackMenuFor(players, playlists, devices, {
             tagList: spec.source.kind === "tagList",
             explorer: spec.source.kind === "folder",
           })}
+          title={trackMenu.row.missing === true ? MISSING_TRACK_TITLE : undefined}
           label="Track"
           context={{
             inPlaylist: spec.source.kind === "playlist",
@@ -1711,6 +1725,12 @@ export const TrackTable = memo(function TrackTable({
                 break;
               case "removeFromCollection":
                 void onRemoveFromCollection?.(ids);
+                break;
+              case "autoRelocate":
+                onAutoRelocate?.(ids);
+                break;
+              case "relocate":
+                onRelocate?.(trackMenu.row);
                 break;
               case "loadPlayer1":
                 onLoadTrack?.("a", trackMenu.row);

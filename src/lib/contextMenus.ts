@@ -33,6 +33,8 @@ export type TrackAction =
   | "showInFinder"
   | "loadPlayer1"
   | "loadPlayer2"
+  | "autoRelocate"
+  | "relocate"
   /** A device track into one of its own library's playlists. */
   | `deviceAddToPlaylist:${string}`;
 
@@ -183,6 +185,23 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
       { label: "Do not publish", action: null },
     ],
   },
+];
+
+/** The heading over `MISSING_TRACK_MENU`. */
+export const MISSING_TRACK_TITLE = "File is Missing";
+
+/**
+ * Right-clicking a track whose file is missing: rekordbox's own short menu
+ * in place of `TRACK_MENU`, under the heading "File is Missing" [OBS
+ * rekordbox 7.2.14, Winrig chris-win11 2026-10-08, issue #201, and the
+ * reporter's rekordbox on macOS]. A cloud-shared track whose file is on
+ * another computer is not this: rekordbox marks it `?` and keeps the full
+ * menu, with Load greyed [OBS same session].
+ */
+export const MISSING_TRACK_MENU: readonly MenuRow<TrackAction>[] = [
+  { label: "Auto Relocate", action: "autoRelocate" },
+  { label: "Relocate", action: "relocate" },
+  { label: "Remove from Collection", action: "removeFromCollection" },
 ];
 
 /**
@@ -496,6 +515,8 @@ const WRITES: ReadonlySet<string> = new Set([
   "reloadTag",
   "removeFromHistory",
   "removeFromCollection",
+  "autoRelocate",
+  "relocate",
   "createPlaylist",
   "createFolder",
   "rename",

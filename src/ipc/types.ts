@@ -44,6 +44,11 @@ export interface RowDto {
    * the backend always sends it.
    */
   fileName?: string;
+  /**
+   * The file is not where the library says: rekordbox's `[!]` in the
+   * Attribute column. Sent only when true.
+   */
+  missing?: boolean;
   /** Extra database fields requested for visible browser columns. */
   extra?: Record<string, string | number | boolean>;
 }
@@ -734,7 +739,18 @@ export interface Backend {
   /** Shows a track's file in the Finder. */
   revealTrack(trackId: string): Promise<void>;
 
-  missingTracks(limit: number): Promise<MissingTracks>;
+  /**
+   * A page of the Missing File Manager's list, `limit` tracks from `offset`.
+   * `rescan` checks every track's file again; otherwise the page comes from
+   * the last check.
+   */
+  missingTracks(offset: number, limit: number, rescan: boolean): Promise<MissingTracks>;
+  /**
+   * The Missing File Manager's Delete: the missing tracks named, or every
+   * missing track when `tracks` is null, leave the collection and every
+   * playlist. Resolves to how many went.
+   */
+  removeMissingTracks(tracks: string[] | null): Promise<number>;
   /** Tracks that share a title and an artist, the first `limit` groups listed. */
   findDuplicates(limit: number): Promise<Duplicates>;
 
@@ -747,11 +763,12 @@ export interface Backend {
   relocateTrack(trackId: string): Promise<string | null>;
 
   /**
-   * Points every missing track at a file of the same name found under one
-   * of `folders`, searched in order. A track whose name is found nowhere
-   * is left missing.
+   * Points missing tracks at a file of the same name found under one of
+   * `folders`, searched in order: the tracks named, or every missing track
+   * when `tracks` is null. A track whose name is found nowhere is left
+   * missing.
    */
-  autoRelocate(folders: string[]): Promise<RelocateReport>;
+  autoRelocate(folders: string[], tracks: string[] | null): Promise<RelocateReport>;
 
   /** Opens a folder picker; null when it is cancelled. */
   pickFolder(title: string): Promise<string | null>;
@@ -1447,6 +1464,7 @@ export interface MissingTrack {
   id: string;
   title: string;
   artist: string;
+  album: string;
   /** Where the library still expects it. */
   path: string;
 }
@@ -1474,7 +1492,7 @@ export interface Duplicates {
 }
 
 export interface MissingTracks {
-  /** Every missing track, not just the ones listed. */
+  /** Every missing track, not just the ones in this page. */
   total: number;
   tracks: MissingTrack[];
 }
