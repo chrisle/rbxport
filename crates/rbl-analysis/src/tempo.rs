@@ -146,6 +146,40 @@ impl TempoResult {
     pub fn empty() -> Self {
         Self { bpm: 0.0, confidence: 0.0, first_beat_secs: 0.0, segments: Vec::new(), beats: Vec::new() }
     }
+
+    /// Carries the last tempo on to `end_secs`: the grid of a file analysed
+    /// only up to a point, for the part after it.
+    ///
+    /// The beats already there are kept as they are, numbering included; the
+    /// new ones continue the last segment's grid and the bar count. A grid
+    /// that already reaches `end_secs` is left alone.
+    pub fn extend_to(&mut self, end_secs: f64) {
+        let Some(segment) = self.segments.last_mut() else { return };
+        if !end_secs.is_finite() || end_secs <= segment.to_secs || segment.period_secs <= 0.0 {
+            return;
+        }
+        segment.to_secs = end_secs;
+        let segment = *segment;
+        let Some(last) = self.beats.last().copied() else { return };
+        // The last beat's place on its segment's grid, so the new beats
+        // carry on from it rather than from a rounded millisecond.
+        let k = ((f64::from(last.time_ms) / 1000.0 - segment.phase_secs) / segment.period_secs).round();
+        let mut number = last.beat_number;
+        let mut next = k + 1.0;
+        loop {
+            let time = segment.phase_secs + next * segment.period_secs;
+            if time >= end_secs || self.beats.len() >= 1_000_000 {
+                break;
+            }
+            number = number % 4 + 1;
+            self.beats.push(Beat {
+                beat_number: number,
+                tempo_x100: last.tempo_x100,
+                time_ms: u32::try_from((time * 1000.0).round() as i64).unwrap_or(u32::MAX),
+            });
+            next += 1.0;
+        }
+    }
 }
 
 /// What the candidate stage is tuned by.
@@ -2104,6 +2138,31 @@ mod tests {
     use super::*;
 
     const RATE: f64 = 44_100.0 / 256.0;
+
+    #[test]
+    fn a_grid_carries_its_last_tempo_on_to_the_end_of_the_file() {
+        let segment = Segment { from_secs: 0.0, to_secs: 10.0, period_secs: 0.5, phase_secs: 0.25 };
+        let beats = beats_of(&[segment], 1);
+        let mut result = TempoResult { bpm: 120.0, confidence: 1.0, first_beat_secs: 0.25, segments: vec![segment], beats: beats.clone() };
+        result.extend_to(20.0);
+        assert_eq!(&result.beats[..beats.len()], &beats[..], "the beats there are kept");
+        assert_eq!(result.beats.len(), 40, "0.25 s to 19.75 s every half second");
+        let last = result.beats.last().unwrap();
+        assert_eq!((last.time_ms, last.tempo_x100), (19_750, 12_000));
+        // The bar count runs on: every beat is one more than the last, mod 4.
+        for pair in result.beats.windows(2) {
+            assert_eq!(pair[1].beat_number, pair[0].beat_number % 4 + 1);
+            assert_eq!(pair[1].time_ms - pair[0].time_ms, 500);
+        }
+        assert!((result.segments[0].to_secs - 20.0).abs() < f64::EPSILON);
+        // Already long enough, or nothing to carry on: unchanged.
+        let before = result.beats.clone();
+        result.extend_to(15.0);
+        assert_eq!(result.beats, before);
+        let mut empty = TempoResult::empty();
+        empty.extend_to(20.0);
+        assert_eq!(empty.beats, []);
+    }
 
     #[test]
     fn transition_transients_have_a_short_rate_independent_release() {

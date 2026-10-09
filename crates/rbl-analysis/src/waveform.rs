@@ -215,9 +215,15 @@ fn overview(samples: &[f32], rate: u32) -> Vec<[u8; 3]> {
             energy = 0.0;
         }
     }
+    finish_overview(raw, &counts, level, frames)
+}
+
+/// The overview's normalization, once the samples are summed into buckets:
+/// shared by the in-memory pass and the [`Builder`].
+fn finish_overview(mut raw: Vec<[f64; 3]>, counts: &[usize], level: f64, frames: usize) -> Vec<[u8; 3]> {
     let target = level / frames.max(1) as f64 * 92.0;
     let mut means = [0.0; 3];
-    for (values, &count) in raw.iter_mut().zip(&counts) {
+    for (values, &count) in raw.iter_mut().zip(counts) {
         let n = count.max(1) as f64;
         values[0] = (values[0] / n).powf(0.45);
         values[1] /= n;
@@ -270,6 +276,136 @@ pub fn compute(samples: &[f32], sample_rate: u32) -> Waveform {
     Waveform { columns, columns_per_sec: COLUMNS_PER_SEC, overview: overview(samples, sample_rate) }
 }
 
+/// The waveform of audio that arrives in pieces, so a long file never has
+/// to be held whole.
+///
+/// The detail columns are exactly what [`compute`] gives for the same
+/// samples: the band filters run on across the pieces, and a column spans
+/// them. The overview cannot be bucketed sample by sample, since its 1,200
+/// buckets divide a length that is only known at the end; it is summed per
+/// detail column instead and the columns bucketed at the end, which moves a
+/// bucket's edge by under 1/150 s. Only used where that is nothing: past the
+/// half hour [`compute`] is given, where a bucket is several seconds wide.
+pub struct Builder {
+    per_column: usize,
+    bands: Bands,
+    /// The column being filled: samples in it, and its four maxima.
+    fill: usize,
+    open: [f32; 4],
+    columns: Vec<WaveformColumn>,
+    // The overview's filters, as in `overview`, and its sums per column.
+    mid_filters: [OverviewFilter; 2],
+    high_hp: OverviewFilter,
+    low_coeff: f64,
+    low: f64,
+    sums: [f64; 3],
+    energy: f64,
+    hops: Vec<[f64; 3]>,
+    level: f64,
+    samples: usize,
+    peak: f32,
+}
+
+impl Builder {
+    pub fn new(sample_rate: u32) -> Self {
+        let rate = sample_rate.max(1);
+        Self {
+            per_column: (f64::from(rate) / COLUMNS_PER_SEC).max(1.0) as usize,
+            bands: Bands::new(rate as f32),
+            fill: 0,
+            open: [0.0; 4],
+            columns: Vec::new(),
+            mid_filters: [OverviewFilter::new(rate, 200.0, true), OverviewFilter::new(rate, 2000.0, false)],
+            high_hp: OverviewFilter::new(rate, 2000.0, true),
+            low_coeff: (-2.0 * std::f64::consts::PI * 200.0 / f64::from(rate)).exp(),
+            low: 0.0,
+            sums: [0.0; 3],
+            energy: 0.0,
+            hops: Vec::new(),
+            level: 0.0,
+            samples: 0,
+            peak: 0.0,
+        }
+    }
+
+    /// Folds in the next samples, in order.
+    pub fn push(&mut self, samples: &[f32]) {
+        for &sample in samples {
+            let (l, m, h) = self.bands.split(sample);
+            self.open[0] = self.open[0].max(l.abs());
+            self.open[1] = self.open[1].max(m.abs());
+            self.open[2] = self.open[2].max(h.abs());
+            self.open[3] = self.open[3].max(sample.abs());
+
+            let x = f64::from(sample);
+            self.low = x * (1.0 - self.low_coeff) + self.low * self.low_coeff;
+            let mid = self.mid_filters[0].process(x);
+            let mid = self.mid_filters[1].process(mid);
+            let high = self.high_hp.process(x);
+            self.sums[0] += self.low * self.low;
+            self.sums[1] += mid.abs();
+            self.sums[2] += high.abs();
+            self.energy += x * x;
+
+            self.fill += 1;
+            if self.fill == self.per_column {
+                self.close_column();
+            }
+        }
+        self.samples += samples.len();
+        self.peak = samples.iter().fold(self.peak, |p, s| p.max(s.abs()));
+    }
+
+    fn close_column(&mut self) {
+        let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0) as u8;
+        let [low, mid, high, peak] = self.open;
+        self.columns.push(WaveformColumn { low: to_u8(low), mid: to_u8(mid), high: to_u8(high), peak: to_u8(peak) });
+        self.hops.push(self.sums);
+        self.level += (self.energy / self.fill as f64).sqrt();
+        self.open = [0.0; 4];
+        self.sums = [0.0; 3];
+        self.energy = 0.0;
+        self.fill = 0;
+    }
+
+    /// Samples folded in so far.
+    pub fn samples(&self) -> usize {
+        self.samples
+    }
+
+    /// The loudest sample folded in so far.
+    pub fn peak(&self) -> f32 {
+        self.peak
+    }
+
+    /// The waveform of everything pushed.
+    pub fn finish(mut self) -> Waveform {
+        if self.samples == 0 {
+            return compute(&[], 1);
+        }
+        // The last, short column, as `compute`'s last chunk is.
+        let last = self.fill;
+        if last > 0 {
+            self.close_column();
+        }
+        let mut raw = vec![[0.0_f64; 3]; COLOUR_PREVIEW_COLUMNS];
+        let mut counts = vec![0_usize; COLOUR_PREVIEW_COLUMNS];
+        let total = self.samples;
+        for (index, sums) in self.hops.iter().enumerate() {
+            let first = index * self.per_column;
+            let count = if index + 1 == self.hops.len() && last > 0 { last } else { self.per_column };
+            // The bucket of the column's middle sample.
+            let middle = first + count / 2;
+            let bucket = (((middle + 1) * COLOUR_PREVIEW_COLUMNS - 1) / total).min(COLOUR_PREVIEW_COLUMNS - 1);
+            for band in 0..3 { raw[bucket][band] += sums[band]; }
+            counts[bucket] += count;
+        }
+        let frames = self.hops.len();
+        let overview = finish_overview(raw, &counts, self.level, frames);
+        Waveform { columns: self.columns, columns_per_sec: COLUMNS_PER_SEC, overview }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod pack_tests {
@@ -308,6 +444,30 @@ mod pack_tests {
             .map(|(&a, &b)| usize::from(a.abs_diff(b))).sum();
         assert!(error < 360, "an isolated peak must not lift the whole overview: {error}");
         assert!(with_peak.columns.iter().any(|c| c.peak == 255), "detail keeps the peak");
+    }
+
+    #[test]
+    fn the_builder_draws_what_compute_draws_however_the_audio_arrives() {
+        let rate = 44_100;
+        // Twenty seconds with a loud second half, so the overview has a shape.
+        let samples: Vec<f32> = (0..rate * 20).map(|i| {
+            let t = i as f32 / rate as f32;
+            let gain = if t < 10.0 { 0.1 } else { 0.6 };
+            gain * ((2.0 * std::f32::consts::PI * 90.0 * t).sin() + 0.3 * (2.0 * std::f32::consts::PI * 5000.0 * t).sin())
+        }).collect();
+        let whole = compute(&samples, rate as u32);
+        let mut builder = Builder::new(rate as u32);
+        // Packet-sized pieces that do not line up with the columns.
+        for piece in samples.chunks(1_152) { builder.push(piece); }
+        assert_eq!(builder.samples(), samples.len());
+        assert!((builder.peak() - samples.iter().fold(0.0_f32, |p, s| p.max(s.abs()))).abs() < f32::EPSILON);
+        let streamed = builder.finish();
+        assert_eq!(streamed.columns, whole.columns, "detail columns are exact");
+        assert_eq!(streamed.overview.len(), COLOUR_PREVIEW_COLUMNS);
+        let off: usize = streamed.overview.iter().flatten().zip(whole.overview.iter().flatten())
+            .map(|(&a, &b)| usize::from(a.abs_diff(b))).sum();
+        assert!(off <= 3 * COLOUR_PREVIEW_COLUMNS / 50, "the overview stays within rounding of compute's: {off}");
+        assert_eq!(Builder::new(rate as u32).finish().columns, []);
     }
 
     #[test]
