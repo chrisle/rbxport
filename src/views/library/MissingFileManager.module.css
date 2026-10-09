@@ -70,6 +70,7 @@
 .buttons button {
   white-space: nowrap;
   width: 109px;
+  padding: 0;
   height: 29px;
   border: 1px solid var(--c-pref-button-border);
   border-radius: 2px;
