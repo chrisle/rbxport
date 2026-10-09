@@ -20,13 +20,15 @@ use crate::commands::{blocking, write_error};
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::AppState;
 
-/// How much of a file is decoded, in seconds.
+/// How much of a file is held in memory for analysis, in seconds.
 ///
-/// Tempo and key are global properties and three minutes settle them, but
-/// the grid and the waveforms have to reach the end of the track — a CDJ
-/// draws nothing past where they stop. Thirty minutes covers every track
-/// and stops a two-hour mix from becoming a gigabyte of samples; a mix
-/// longer than that is analysed up to the cap and drawn that far.
+/// Tempo and key are global properties and three minutes settle them, so
+/// thirty minutes is plenty for both and stops a two-hour mix from becoming
+/// a gigabyte of samples. The grid and the waveforms still have to reach
+/// the end of the track, as rekordbox's do — a CDJ draws nothing past where
+/// they stop — so the rest of a longer file is decoded too, but streamed:
+/// folded into the waveform as it goes, with the grid carried on at the
+/// last tempo (see [`analyse_file`]).
 const DECODE_CAP_SECS: f64 = 1800.0;
 
 /// How near an existing memory cue has to be to the first beat to count as
@@ -171,14 +173,11 @@ fn analyse_and_save(
     }
 
     let started = std::time::Instant::now();
-    let audio = rbl_audio::decode_mono(std::path::Path::new(path), Some(DECODE_CAP_SECS)).map_err(|e| {
-        AppError::new(ErrorKind::Malformed, "That file could not be decoded.")
-            .with_detail(e.to_string())
-    })?;
     if !settings.bpm_grid {
+        let audio = rbl_audio::decode_mono(std::path::Path::new(path), Some(DECODE_CAP_SECS)).map_err(|e| decode_error(&e))?;
         return analyse_key_only(state, library, row, track_id, &audio, editor, started);
     }
-    let analysis = rbl_analysis::analyse_with(&audio.samples, audio.sample_rate, options);
+    let (analysis, duration_secs) = analyse_file(std::path::Path::new(path), &options, DECODE_CAP_SECS)?;
 
     let _edit_guard = state.edit_gate.lock();
     ensure_analysis_unlocked(state, editor, track_id)?;
@@ -227,10 +226,9 @@ fn analyse_and_save(
     let bpm_x100 = to_u32(analysis.tempo.bpm * 100.0);
     let detected_key = settings.key.then(|| analysis.key.map(|k| k.name)).flatten();
     let key = detected_key.clone().unwrap_or_else(|| library.keys.name(library.key.get(row).copied().unwrap_or(0)).to_owned());
-    let duration_sec = to_u32(audio.duration_secs());
-    // The length is kept only when the whole file was decoded: a capped
-    // decode's length would be the cap, not the track's.
-    let length_sec = (audio.duration_secs() < DECODE_CAP_SECS - 1.0).then_some(duration_sec);
+    let duration_sec = to_u32(duration_secs);
+    // The whole file was decoded, however long, so this is its length.
+    let length_sec = Some(duration_sec);
 
     save_analysis_files(state, &location, track_id, &dat, files, bpm_x100, detected_key.as_deref(), &relative, length_sec, editor)?;
     let added_first_beat_cue = match beats.first() {
@@ -250,6 +248,63 @@ fn analyse_and_save(
         analysis_path: relative,
         added_first_beat_cue,
     })
+}
+
+fn decode_error(e: &rbl_audio::AudioError) -> AppError {
+    AppError::new(ErrorKind::Malformed, "That file could not be decoded.").with_detail(e.to_string())
+}
+
+/// Decodes and analyses a whole file, holding at most `head_secs` of it.
+///
+/// The tempo, key and level come from the first `head_secs`. A file longer
+/// than that is decoded on to its end without being kept: its waveform is
+/// built from every sample, start to finish, and the grid is carried on at
+/// the head's last tempo, so both reach the end of the track the way
+/// rekordbox's do [OBS: a 40.8-minute rekordbox export has `PWV5`/`PWV7`
+/// for all 2,447.9 s and its last beat at 2,447.5 s]. Before this the
+/// waveform and grid stopped at the half hour (#156).
+///
+/// Resolves to the analysis and the file's length in seconds.
+fn analyse_file(
+    path: &std::path::Path,
+    options: &rbl_analysis::AnalysisOptions,
+    head_secs: f64,
+) -> AppResult<(rbl_analysis::Analysis, f64)> {
+    let mut stream = rbl_audio::MonoStream::open(path).map_err(|e| decode_error(&e))?;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a positive number of seconds at an audio rate")]
+    let cap = (head_secs.max(0.0) * f64::from(stream.sample_rate())) as usize;
+    let mut head: Vec<f32> = Vec::with_capacity(cap.min(1 << 24));
+    // Past the head, the whole file's waveform, which begins with the head.
+    let mut rest: Option<rbl_analysis::waveform::Builder> = None;
+    while let Some(chunk) = stream.next_chunk() {
+        if let Some(builder) = rest.as_mut() {
+            builder.push(chunk);
+            continue;
+        }
+        head.extend_from_slice(chunk);
+        if head.len() > cap {
+            let mut builder = rbl_analysis::waveform::Builder::new(stream.sample_rate());
+            builder.push(&head);
+            head.truncate(cap);
+            head.shrink_to_fit();
+            rest = Some(builder);
+        }
+    }
+    if head.is_empty() {
+        return Err(decode_error(&rbl_audio::AudioError::Unsupported("decoded no samples".into())));
+    }
+    let rate = stream.sample_rate();
+    let audio = rbl_audio::Audio { samples: head, sample_rate: rate, source_channels: stream.source_channels() };
+    let mut analysis = rbl_analysis::analyse_with(&audio.samples, rate, *options);
+    let Some(builder) = rest else {
+        return Ok((analysis, audio.duration_secs()));
+    };
+    #[allow(clippy::cast_precision_loss, reason = "a sample count well inside f64's exact range")]
+    let duration_secs = builder.samples() as f64 / f64::from(rate.max(1));
+    analysis.peak = analysis.peak.max(builder.peak());
+    analysis.tempo.extend_to(duration_secs);
+    analysis.waveform = builder.finish();
+    Ok((analysis, duration_secs))
 }
 
 /// Adds a memory cue at `first_beat_ms` unless a memory cue is already
@@ -651,6 +706,44 @@ mod tests {
         editor.set_locked(&track_id(0), true).unwrap();
         assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).is_err());
         assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_only, &editor).is_err());
+    }
+
+    /// #156: a file longer than what is held for the tempo still gets a
+    /// waveform and a grid to its end, the same waveform it gets when it
+    /// is held whole.
+    #[test]
+    fn a_file_longer_than_the_held_head_is_drawn_and_gridded_to_its_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let audio = dir.path().join("long.wav");
+        write_click_wav(&audio, 24, 0.5);
+        let options = AnalysisSettings::default().options(rbl_analysis::AnalysisPreset::Rbxport).unwrap();
+
+        let (whole, whole_secs) = analyse_file(&audio, &options, 60.0).unwrap();
+        let (headed, headed_secs) = analyse_file(&audio, &options, 8.0).unwrap();
+        assert!((whole_secs - 24.0).abs() < 0.01 && (headed_secs - 24.0).abs() < 0.01, "{whole_secs} {headed_secs}");
+
+        // Every 1/150 s column of all 24 seconds, identical to the whole decode's.
+        assert_eq!(headed.waveform.columns.len(), 24 * 150);
+        assert_eq!(headed.waveform.columns, whole.waveform.columns);
+        let loud_after_head = headed.waveform.columns[20 * 150..].iter().filter(|c| c.peak > 100).count();
+        assert!(loud_after_head >= 8, "the clicks past the head are drawn: {loud_after_head}");
+        // The overview spans the whole file too: its last buckets have clicks.
+        assert!(headed.waveform.overview[1_100..].iter().any(|b| b.iter().any(|&v| v > 0)));
+        let off: usize = headed.waveform.overview.iter().flatten().zip(whole.waveform.overview.iter().flatten())
+            .map(|(&a, &b)| usize::from(a.abs_diff(b))).sum();
+        assert!(off <= 3 * 1_200 / 20, "{off}");
+
+        // The grid reaches the end, on the clicks, at the same tempo.
+        let last = headed.tempo.beats.last().unwrap().time_ms;
+        assert!(last > 23_000, "the grid stops at {last} ms");
+        // Beat for beat where the whole decode's grid has them; a beat that
+        // lands on the file's last millisecond may be in only one of the two.
+        assert!(headed.tempo.beats.len().abs_diff(whole.tempo.beats.len()) <= 1);
+        for (a, b) in headed.tempo.beats.iter().zip(&whole.tempo.beats) {
+            assert!(a.time_ms.abs_diff(b.time_ms) <= 20, "{} vs {}", a.time_ms, b.time_ms);
+        }
+        assert!(headed.tempo.beats.windows(2).all(|p| p[1].beat_number == p[0].beat_number % 4 + 1));
+        assert!((headed.peak - whole.peak).abs() < f32::EPSILON);
     }
 
     #[test]
