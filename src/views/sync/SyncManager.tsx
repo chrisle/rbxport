@@ -21,6 +21,7 @@ import { getBackend } from "@/ipc/client";
 import type { Device, DeviceSyncState, ExportReport, ItunesLibrary, TreeNode } from "@/ipc/types";
 import { formatSpace } from "@/lib/devices";
 import { errorMessage } from "@/lib/errorMessage";
+import { askToReplaceLists } from "@/lib/xmlImport";
 import { nodesForSource, subtreeIds, toggle, visibleNodes } from "@/lib/tree";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { usePreferences } from "@/store/usePreferences";
@@ -451,7 +452,13 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
           setStatus([t("Quit rekordbox to import from iTunes.")]);
           return;
         }
-        const report = await backend.importItunesSelected(itunes.path, ids);
+        // rekordbox asks before replacing same-named lists (#152); Cancel
+        // imports nothing.
+        const report = await backend.importItunesSelected(itunes.path, ids, () => askToReplaceLists(backend, t));
+        if (report === null) {
+          setStatus([]);
+          return;
+        }
         // Show the imported playlists in the rekordbox column at once.
         setTree(await backend.playlistTree());
         setItunesTicked(new Set());

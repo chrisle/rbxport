@@ -2620,8 +2620,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     importFolder: () => wait(null),
     importPaths: (paths) => wait({ imported: 0, skipped: paths.map((p) => `${p}: the mock library takes no files`), tracks: [], existing: [] }),
     // Emits progress, then holds until `window.__finishImport()` so a test
-    // can watch the status line while an import is still running.
-    importXml: async () => {
+    // can watch the status line while an import is still running. A test
+    // sets `window.__xmlSameNamed` to the lists the file would replace: the
+    // mock then asks first, as the real backend's caller does, and
+    // `window.__xmlImportStarted` says whether anything was imported.
+    importXml: async (confirmReplace) => {
+      const page = window as unknown as { __xmlSameNamed?: string[]; __xmlImportStarted?: boolean };
+      const sameNamed = page.__xmlSameNamed ?? [];
+      if (sameNamed.length > 0 && !(await confirmReplace(sameNamed))) return null;
+      page.__xmlImportStarted = true;
       const emit = (done: number) => importListeners.forEach((listener) =>
         listener({ path: "", state: "copying", done, total: 3, title: "" }));
       emit(0);

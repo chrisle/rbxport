@@ -32,6 +32,7 @@ import { transposeKey } from "@/lib/camelot";
 import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
+import { askToReplaceLists } from "@/lib/xmlImport";
 import { deviceId, devicePath, renamedDevice } from "@/lib/devices";
 import { DEVICE_ASKS, deviceNodeId, deviceParentFor, devicePlaylistsOf, isDeviceLibraryKind, parseDeviceNodeId } from "@/lib/deviceLibrary";
 import { useDeviceLibraries } from "@/store/useDeviceLibraries";
@@ -1892,7 +1893,12 @@ function AppBody() {
           busy: true,
         });
       });
-      const imported = source === "itunes" ? await backend.importItunes() : await backend.importXml();
+      // rekordbox asks before replacing same-named lists (#152); Cancel
+      // imports nothing.
+      const confirmReplace = () => askToReplaceLists(backend, t);
+      const imported = source === "itunes"
+        ? await backend.importItunes(confirmReplace)
+        : await backend.importXml(confirmReplace);
       if (imported === null) {
         setNote(null);
         return;

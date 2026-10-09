@@ -6,7 +6,7 @@
  */
 import { detectPlatform } from "@/lib/shortcuts";
 import type {
-  AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceLibrary,
+  AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, ConfirmReplace, Cue, DeckEvent, Device, DeviceLibrary,
   DevicePlaylistEditResult, DeviceSettings, DeviceSyncState,
   Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
   UpdateProgress, UpdateReady, XmlImportReport,
@@ -86,6 +86,25 @@ export function subscribeNativeFileDrops(listener: (drop: NativeFileDrop) => voi
 }
 
 /** Keep the native Edit menu in sync with the focused editor's history. */
+/**
+ * Runs a collection import without replacing anything first. When the file
+ * holds folders or playlists that already stand in the library under the
+ * same name, the backend writes nothing and names them: ask, as rekordbox
+ * does, and import again with `replace` only on OK. Null when declined.
+ */
+export async function importReplacing(
+  command: "import_xml" | "import_itunes" | "import_itunes_selected",
+  args: Record<string, unknown>,
+  confirmReplace: ConfirmReplace,
+): Promise<XmlImportReport | null> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const first = await invoke<XmlImportReport>(command, { ...args, replace: false });
+  const sameNamed = first.sameNamed ?? [];
+  if (sameNamed.length === 0) return first;
+  if (!(await confirmReplace(sameNamed))) return null;
+  return invoke<XmlImportReport>(command, { ...args, replace: true });
+}
+
 export async function setHistoryMenu(undo: string | null, redo: string | null): Promise<void> {
   if (!isTauri) return;
   const { invoke } = await import("@tauri-apps/api/core");
@@ -219,7 +238,7 @@ async function realBackend(): Promise<Backend> {
       if (typeof picked !== "string") return null;
       return invoke<number>("export_playlist_file", { playlist: playlistId, path: picked, format });
     },
-    importXml: async () => {
+    importXml: async (confirmReplace) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({
         multiple: false,
@@ -228,9 +247,9 @@ async function realBackend(): Promise<Backend> {
         filters: [{ name: "rekordbox XML", extensions: ["xml"] }],
       });
       if (typeof picked !== "string") return null;
-      return invoke<XmlImportReport>("import_xml", { path: picked });
+      return importReplacing("import_xml", { path: picked }, confirmReplace);
     },
-    importItunes: async () => {
+    importItunes: async (confirmReplace) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({
         multiple: false,
@@ -239,7 +258,7 @@ async function realBackend(): Promise<Backend> {
         filters: [{ name: "iTunes Library XML", extensions: ["xml"] }],
       });
       if (typeof picked !== "string") return null;
-      return invoke<XmlImportReport>("import_itunes", { path: picked });
+      return importReplacing("import_itunes", { path: picked }, confirmReplace);
     },
     itunesDefaultLibrary: () => invoke<ItunesLibrary | null>("itunes_default_library"),
     chooseItunesLibrary: async () => {
@@ -253,7 +272,8 @@ async function realBackend(): Promise<Backend> {
       if (typeof picked !== "string") return null;
       return invoke<ItunesLibrary>("itunes_library_at", { path: picked });
     },
-    importItunesSelected: (path, ids) => invoke<XmlImportReport>("import_itunes_selected", { path, ids: [...ids] }),
+    importItunesSelected: (path, ids, confirmReplace) =>
+      importReplacing("import_itunes_selected", { path, ids: [...ids] }, confirmReplace),
     exportXml: async () => {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const picked = await save({

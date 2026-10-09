@@ -10,7 +10,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { __setBackend } from "@/ipc/client";
+import { __setBackend, getBackend } from "@/ipc/client";
 import type { Backend, Device, DeviceSyncState, ItunesLibrary, SyncDeviceReport, SyncProgress, TreeNode, ExportProgress } from "@/ipc/types";
 import { SyncManager } from "./SyncManager";
 import { PreferencesProvider } from "@/store/usePreferences";
@@ -454,8 +454,36 @@ describe("SyncManager", () => {
 
     click(itunesSync);
     await settle();
-    expect(importItunesSelected).toHaveBeenCalledWith("/Users/dj/Music/Music/Library.xml", ["itunes:1"]);
+    expect(importItunesSelected).toHaveBeenCalledWith("/Users/dj/Music/Music/Library.xml", ["itunes:1"], expect.any(Function));
     expect(status()).toContain("Imported 1 playlists from iTunes");
+  });
+
+  it("asks rekordbox's question before replacing same-named lists and imports nothing on Cancel", async () => {
+    act(() => root.unmount());
+    itunesLibrary = {
+      path: "/Users/dj/Music/Music/Library.xml",
+      tree: [{ id: "itunes:0", name: "Police Set", kind: "playlist", depth: 1 }],
+    };
+    // The backend found "Police Set" already in the library: the import
+    // writes nothing unless the question is answered OK.
+    importItunesSelected = vi.fn(async (_path: string, _ids: string[], confirmReplace: (names: string[]) => Promise<boolean>) =>
+      (await confirmReplace(["Police Set"])) ? { imported: 0, existing: 2, skipped: [], playlists: 0, cues: 0, tracks: [] } : null);
+    __setBackend({ ...(await getBackend()), importItunesSelected });
+    confirmExport.mockImplementation(() => Promise.resolve(false));
+    root = createRoot(host);
+    act(() => root.render(<SyncManager onClose={onClose} />));
+    await settle();
+
+    click(box("Police Set"));
+    await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="Import selected iTunes playlists"]'));
+    await settle();
+    await settle();
+    expect(confirmExport).toHaveBeenCalledWith(
+      "One or several lists with the same name already exist.\nDo you want to replace them with the one you're importing?",
+      { yes: "OK", no: "Cancel", title: "Import" },
+    );
+    expect(status()).not.toContain("Imported");
   });
 
   it("offers a file picker when no iTunes library is detected", () => {

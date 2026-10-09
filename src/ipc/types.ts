@@ -434,10 +434,18 @@ export interface Backend {
    * Imports a rekordbox XML collection chosen in the platform's file
    * dialog: its files into the library, its playlists, and the cues of each
    * track that landed. Null when the dialog is cancelled.
+   *
+   * When folders or playlists the file holds already stand in the library
+   * under the same parent with the same name, `confirmReplace` is asked
+   * first, as rekordbox asks: true replaces them with the file's, false
+   * imports nothing at all and resolves to null.
    */
-  importXml(): Promise<XmlImportReport | null>;
-  /** Asks for Music.app's Library.xml and imports its tracks and playlists. */
-  importItunes(): Promise<XmlImportReport | null>;
+  importXml(confirmReplace: ConfirmReplace): Promise<XmlImportReport | null>;
+  /**
+   * Asks for Music.app's Library.xml and imports its tracks and playlists,
+   * asking `confirmReplace` as {@link importXml} does.
+   */
+  importItunes(confirmReplace: ConfirmReplace): Promise<XmlImportReport | null>;
   /**
    * The iTunes / Music library at its usual place, for the Sync Manager's
    * iTunes column. Null when no shared `Library.xml` is found, so the column
@@ -453,7 +461,7 @@ export interface Backend {
    * Imports the ticked iTunes playlists — `itunes:<index>` ids from an
    * {@link ItunesLibrary} tree — into the library, folders above them kept.
    */
-  importItunesSelected(path: string, ids: readonly string[]): Promise<XmlImportReport>;
+  importItunesSelected(path: string, ids: readonly string[], confirmReplace: ConfirmReplace): Promise<XmlImportReport | null>;
   /**
    * Writes the collection as rekordbox's XML where the platform's save
    * dialog says; resolves to how many tracks, or null when cancelled.
@@ -1512,7 +1520,19 @@ export interface XmlImportReport {
   playlists: number;
   cues: number;
   tracks: { id: string; title: string }[];
+  /**
+   * Folders and playlists already in the library under the same parent with
+   * the same name, which the import would replace. When not empty nothing
+   * was imported: the backend waits to be asked again with `replace`.
+   */
+  sameNamed?: string[];
 }
+
+/**
+ * Asked before an import replaces folders or playlists already in the
+ * library (their names given); true to replace them.
+ */
+export type ConfirmReplace = (names: readonly string[]) => Promise<boolean>;
 
 /**
  * Preferences › Advanced › Database › Auto Relocate Search Folders: the
