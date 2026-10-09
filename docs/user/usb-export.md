@@ -18,6 +18,24 @@ conversion also applies to individual track export.
   updates when the library changes while the window is open; ticks on
   deleted playlists are removed.
 
+## Playlists on a stick
+
+Open a stick under **Devices** to see the libraries it holds, **Device
+Library** and **OneLibrary**, each with **All Tracks** and its **Playlists**,
+as rekordbox lists them. Select a playlist to see its tracks.
+
+Right-click the Playlists heading or a folder to create a playlist or folder
+on the stick; right-click a playlist or folder to rename or delete it. Over
+the stick's tracks, **Add To Playlist** lists that library's playlists, and
+inside a playlist **Remove from Playlist** takes tracks out. A new playlist
+goes at the top, as in rekordbox.
+
+Each change is written to the library it was made in and not the other, as
+rekordbox does. Deleting a playlist leaves its tracks on the stick. These
+edits are refused while rekordbox is running, and while the stick is being
+synced or ejected. Adding tracks from the collection to a stick's playlist
+is an export: use Export Playlist or Sync Manager.
+
 ## Delete music outside playlists
 
 Off by default. When enabled, export removes RBXport-exported audio outside

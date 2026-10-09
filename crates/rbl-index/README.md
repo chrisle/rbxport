@@ -22,6 +22,7 @@ The [manifest](Cargo.toml) lists dependencies and feature flags.
 | [`smart.rs`](src/smart.rs) | Smart playlist rules. |
 | [`cache.rs`](src/cache.rs) | Snapshot caching. |
 | [`related.rs`](src/related.rs) | Related-track selection. |
+| [`device.rs`](src/device.rs) | A stick library's tracks as a view, ordered and searched. |
 | [`xml_export.rs`](src/xml_export.rs) | XML export. |
 
 ## Contracts and safety

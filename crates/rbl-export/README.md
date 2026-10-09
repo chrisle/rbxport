@@ -22,6 +22,7 @@ The [manifest](Cargo.toml) lists dependencies and feature flags.
 | [`reconcile.rs`](src/reconcile.rs) | Sync reconciliation. |
 | [`verification.rs`](src/verification.rs) | Export verification. |
 | [`ext_pdb.rs`](src/ext_pdb.rs) | Extended database support. |
+| [`device_library.rs`](src/device_library.rs) | A stick's own playlists, read and edited in one library at a time. |
 
 ## Contracts and safety
 

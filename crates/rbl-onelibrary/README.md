@@ -18,6 +18,7 @@ The [manifest](Cargo.toml) lists dependencies and feature flags.
 | [`lib.rs`](src/lib.rs) | Opening, cipher setup, and schema inspection. |
 | [`build.rs`](src/build.rs) | Export database construction. |
 | [`settings.rs`](src/settings.rs) | Export settings. |
+| [`playlists.rs`](src/playlists.rs) | Playlist and playlist content rows of an existing stick, read and edited in place. |
 | [`key.rs`](src/key.rs) | Passphrase derivation implementation. |
 
 ## Contracts and safety

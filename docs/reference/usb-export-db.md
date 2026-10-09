@@ -979,6 +979,40 @@ plus eight bytes. Skip tracks that failed to export when assigning playlist
 entry positions, retaining a dense one-based sequence. Refuse history dates
 that are not exactly ten ASCII bytes in `YYYY-MM-DD` form.
 
+#### Device playlist edits
+
+rekordbox's Devices tree lists each library on a stick on its own, Device
+Library and OneLibrary, each with All Tracks, Playlists and Hot Cue Bank
+Lists, and an edit there changes only the library it is made in
+[OBS rekordbox 7.2.14 for Windows, Winrig 2026-10-08, on a fixture stick;
+DOC rekordbox FAQ "Device Library Plus"]. What it wrote for each edit, read
+back from both files [OBS, same session]:
+
+| Edit | Rows written |
+| --- | --- |
+| Create New Playlist / Folder | id = largest id + 1; sequence 0 in its parent; every sibling's sequence + 1, gaps kept; named `Untitled Playlist` / `Untitled Folder`, then renamed in place |
+| Rename | the name only |
+| Delete | the node (and what is under it) and its entries; the parent's remaining children renumbered from 0 |
+| Add To Playlist | an entry appended at n + 1; a track already in the playlist asks Add or Skip |
+| Remove from Playlist | the entries removed; the rest renumbered from 1 |
+
+The playlist's tracks stay on the stick unless the Delete Tracks preference
+is on (off by default [static: `_kDeviceDeletePlaylistTracksDefaultValue`
+is 0]); rekordbox asks about it after a removal or delete.
+
+`rbl_export::device_library` makes the same edits. For `export.pdb` it
+rewrites only the `playlist_tree` and `playlist_entries` tables with
+`rbl_pdb::build::replace_table`: the table keeps its index page and reuses
+its data pages, takes its empty candidate and then fresh pages from the
+unused end, and every other table's pages stay byte for byte. Kept rows are
+written back as the file held them; a renamed or renumbered row keeps its
+first five words. rekordbox's own engine instead deletes and re-inserts the
+changed rows in place (presence bits cleared, page flags `0x34`); both read
+back as the same rows. For `exportLibrary.db` the edit is SQL on the
+`playlist` and `playlist_content` rows of a staged copy. Either file is
+read back before it is published through the export journal, and an edit
+is refused when the file changed while it was staged.
+
 ### Analysis and cue export
 
 #### Analysis path collisions

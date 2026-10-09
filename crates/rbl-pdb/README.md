@@ -16,7 +16,7 @@ The [manifest](Cargo.toml) lists dependencies and feature flags.
 | File in `src/` | Responsibility |
 | --- | --- |
 | [`lib.rs`](src/lib.rs) | Page chains, presence maps, row lookup, and decoding. |
-| [`build.rs`](src/build.rs) | Page/table construction. |
+| [`build.rs`](src/build.rs) | Page/table construction, and replacing one table of an existing file in place. |
 | [`rows.rs`](src/rows.rs) | Row encoders. |
 | [`reference.rs`](src/reference.rs) | Reference-format helpers. |
 
