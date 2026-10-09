@@ -1575,13 +1575,18 @@ struct PdbTables<'a> {
 /// one `property` row: device name, track count, the export's date and the
 /// Device Library background colour [OBS 7.2.14]. A player looks the table
 /// list up by type, so the empty ones have to be there.
+///
+/// Rows that open with a subtype word carry their slot on the page, as
+/// rekordbox's do; see [`rbl_pdb::rows::set_index_shift`].
 fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
     use rbl_pdb::reference;
+    use rbl_pdb::rows::set_index_shift;
+    let numbered = |row: &mut Vec<u8>, slot: u16| set_index_shift(row, slot);
     let mut file = FileBuilder::new(PAGE_SIZE);
-    file.add_table(0, tables.tracks);
+    file.add_table_numbered(0, tables.tracks, numbered);
     file.add_table(1, tables.genres);
-    file.add_table(2, tables.artists);
-    file.add_table(3, tables.albums);
+    file.add_table_numbered(2, tables.artists, numbered);
+    file.add_table_numbered(3, tables.albums, numbered);
     file.add_table(4, tables.labels);
     file.add_table(5, tables.keys);
     file.add_table(
@@ -1628,7 +1633,7 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
         background_color: tables.background,
         ..rbl_pdb::rows::PdbProperty::default()
     };
-    file.add_table(19, &rbl_pdb::rows::property_row(&property).map_or_else(Vec::new, |row| vec![row]));
+    file.add_table_numbered(19, &rbl_pdb::rows::property_row(&property).map_or_else(Vec::new, |row| vec![row]), numbered);
     file.finish()
 }
 

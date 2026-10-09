@@ -74,6 +74,21 @@ fn put_u4(row: &mut [u8], at: usize, v: u32) {
     }
 }
 
+/// Writes a row's slot on its page into bytes 2 and 3, as the slot times 32.
+///
+/// Rows that open with a u16 subtype carry this "index shift": tracks
+/// (`0x24`), artists (`0x60`), albums (`0x80`), `property` (`0x0280`) and
+/// `exportExt.pdb`'s tags (`0x0680`). rekordbox numbers every one of them
+/// from 0 on each page [OBS: all 222 live track, artist, album and property
+/// rows on the 17 data pages of a stick rekordbox 7 wrote]. The `DeviceSQL`
+/// engine of NXS-era players reads the slot back from here: `rbp` 2.21 on
+/// the XDJ-RX takes `*(u16 *)(row + 2) >> 5` as the row's slot in
+/// `FUN_0032ceb0` and `FUN_0032db38` and keeps it as the cursor position.
+/// Encoders write 0; the page builder numbers the row when it places it.
+pub fn set_index_shift(row: &mut [u8], slot: u16) {
+    put_u2(row, 2, slot.saturating_mul(32));
+}
+
 /// Encodes a track row.
 ///
 /// The string block holds offsets relative to the start of the row, and the
@@ -109,7 +124,7 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     // its string columns misread. Pinned against rekordbox's MP3 export and
     // CDJ-3000 firmware browse/load tests (../rbxport-private/docs/audits/usb-track-records.md).
     put_u2(&mut row, 0x00, 0x24); // track record with 16-bit string offsets
-    put_u2(&mut row, 0x02, 0); // index_shift
+    put_u2(&mut row, 0x02, 0); // index_shift: the row's slot, see `set_index_shift`
     put_u4(&mut row, 0x04, 0); // bitmask
     put_u4(&mut row, 0x08, input.sample_rate);
     put_u4(&mut row, 0x0c, 0); // composer_id
