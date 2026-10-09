@@ -208,8 +208,18 @@ export const UPDATE_FREQUENCIES = ["start", "daily", "weekly"] as const;
 export type UpdateFrequency = (typeof UPDATE_FREQUENCIES)[number];
 
 export interface AdvancedPreferences {
-  /** Auto Relocate Search Folders › Specified user folders. */
+  /** Auto Relocate Search Folders › Specified user folders: the list. */
   relocateFolders: string[];
+  /**
+   * Auto Relocate Search Folders' boxes [OBS rekordbox 7.2.19 static,
+   * `DetailAutoRelocate` and `SettingIF::isSelectedAutoRelocate*Folder`]:
+   * Music, Video and Desktop are searched by default; the Specified user
+   * folders only once that box is ticked.
+   */
+  relocateMusic: boolean;
+  relocateVideo: boolean;
+  relocateDesktop: boolean;
+  relocateUserFolders: boolean;
   /** Library Protection: refuse every edit, whatever rekordbox is doing. */
   protectLibrary: boolean;
   /** Edit Library › Double-click to edit; off is a click on a selected row. */
@@ -311,6 +321,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   usbExport: { importSettings: false, importHistory: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false },
   advanced: {
     relocateFolders: [],
+    relocateMusic: true,
+    relocateVideo: true,
+    relocateDesktop: true,
+    relocateUserFolders: false,
     protectLibrary: true,
     doubleClickToEdit: false,
     syncType: "beat",
@@ -480,6 +494,14 @@ export function sanitisePreferences(value: unknown): Preferences {
     },
     advanced: {
       relocateFolders: strings(advanced.relocateFolders),
+      relocateMusic: bool(advanced.relocateMusic, d.advanced.relocateMusic),
+      relocateVideo: bool(advanced.relocateVideo, d.advanced.relocateVideo),
+      relocateDesktop: bool(advanced.relocateDesktop, d.advanced.relocateDesktop),
+      // Folders saved before the box existed were being searched: keep them so.
+      relocateUserFolders: bool(
+        advanced.relocateUserFolders,
+        strings(advanced.relocateFolders).length > 0 || d.advanced.relocateUserFolders,
+      ),
       recordHistory: bool(advanced.recordHistory, d.advanced.recordHistory),
       // A stored object predates this switch when the key is absent. Preserve
       // that user's writable library; only a truly empty store gets defaults.

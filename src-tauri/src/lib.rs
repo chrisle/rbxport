@@ -574,6 +574,8 @@ pub fn run() {
             commands::import_files,
             commands::relocate_track,
             relocate::auto_relocate,
+            relocate::relocation_targets,
+            relocate::relocate_by_location,
             preferences::open_preferences,
             sync_window::open_sync_window,
             report::open_report_window,

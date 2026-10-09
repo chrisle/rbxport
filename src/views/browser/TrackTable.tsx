@@ -739,8 +739,11 @@ export interface TrackTableProps {
   onRemoveFromCollection?: RemoveTracks;
   /** Auto Relocate, from a missing track's menu: the selected tracks. */
   onAutoRelocate?: (ids: readonly string[]) => void;
-  /** Relocate, from a missing track's menu: the row under the pointer. */
-  onRelocate?: (row: RowDto) => void;
+  /**
+   * Relocate, from a missing track's menu: every selected track, in list
+   * order, as rekordbox's `popupEventRelocateTrack` takes them.
+   */
+  onRelocate?: (ids: readonly string[]) => void;
   /** Import To Collection: the Explorer's files, by their `file:` ids. */
   onImportToCollection?: (ids: readonly string[]) => void;
   /** Analysis Lock › Lock and Unlock. */
@@ -1768,9 +1771,13 @@ export const TrackTable = memo(function TrackTable({
               case "autoRelocate":
                 onAutoRelocate?.(ids);
                 break;
-              case "relocate":
-                onRelocate?.(trackMenu.row);
+              case "relocate": {
+                const chosen = selection.ids;
+                void view.idsInRange(0, view.count)
+                  .then((listed) => onRelocate?.(inListOrder(chosen, listed)))
+                  .catch(() => onRelocate?.(ids));
                 break;
+              }
               case "loadPlayer1":
                 onLoadTrack?.("a", trackMenu.row);
                 break;

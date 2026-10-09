@@ -12,10 +12,11 @@
  * screenful at a time and fetched a page at a time from the backend's last
  * scan. Opening the manager, and every change made from it, scans again.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { MissingTrack } from "@/ipc/types";
+import type { MissingTrack, RelocateSearch } from "@/ipc/types";
+import { missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
 import { useTranslation } from "@/i18n";
 import styles from "./MissingFileManager.module.css";
 
@@ -31,11 +32,11 @@ type Selection = { all: true } | { all: false; ids: ReadonlySet<string>; anchor:
 
 const EVERY: Selection = { all: true };
 
-export function MissingFileManager({ readOnly, folders, onWrote, onFailed, onClose }: {
+export function MissingFileManager({ readOnly, search, onWrote, onFailed, onClose }: {
   /** rekordbox holds the library, or Library Protection is on: nothing is written. */
   readOnly: boolean;
   /** Preferences › Advanced › Database › Auto Relocate Search Folders. */
-  folders: readonly string[];
+  search: RelocateSearch;
   /** A change was saved: the status line says so and the tree is re-read. */
   onWrote: (said: string) => void;
   onFailed: (said: string) => void;
@@ -138,15 +139,28 @@ export function MissingFileManager({ readOnly, folders, onWrote, onFailed, onClo
   /** What the backend is asked to act on: null is every missing track. */
   const targets = selection.all ? null : [...selection.ids];
 
-  /** The first selected row in the list's order, for Relocate. */
-  const firstChosen = useMemo((): MissingTrack | undefined => {
-    if (selection.all) return rowAt(0);
-    for (const page of [...pages.keys()].sort((a, b) => a - b)) {
-      const found = pages.get(page)?.find((row) => selection.ids.has(row.id));
-      if (found) return found;
+  /**
+   * The selected rows in the list's order, fetched as Relocate reaches them:
+   * the whole list a page at a time when every row is selected, the clicked
+   * ones otherwise.
+   */
+  const selectedTracks = useCallback((): AsyncIterator<MissingTrack> => {
+    if (!selection.all) {
+      const ids = [...selection.ids];
+      const order = new Map<string, number>();
+      for (const [page, rows] of pages) rows.forEach((row, at) => order.set(row.id, page * PAGE + at));
+      ids.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+      return missingAmong(ids, async (some) => (await getBackend()).relocationTargets(some));
     }
-    return undefined;
-  }, [selection, pages, rowAt]);
+    return (async function* everyRow() {
+      const backend = await getBackend();
+      for (let offset = 0; ; offset += PAGE) {
+        const got = await backend.missingTracks(offset, PAGE, false);
+        yield* got.tracks;
+        if (got.tracks.length < PAGE) return;
+      }
+    })();
+  }, [selection, pages]);
 
   const run = (action: () => Promise<string | null>) => {
     setBusy(true);
@@ -168,7 +182,7 @@ export function MissingFileManager({ readOnly, folders, onWrote, onFailed, onClo
 
   const autoRelocate = () => run(async () => {
     const backend = await getBackend();
-    const report = await backend.autoRelocate([...folders], targets);
+    const report = await backend.autoRelocate(search, targets);
     const said = report.unresolved > 0
       ? t("{relocated} relocated, {unresolved} not found in the search folders.", { ...report })
       : t("{relocated} relocated.", { ...report });
@@ -176,18 +190,25 @@ export function MissingFileManager({ readOnly, folders, onWrote, onFailed, onClo
     return report.relocated > 0 ? said : null;
   });
 
+  // Relocate over the selected rows, rekordbox's way (src/lib/relocate.ts).
   const relocate = () => run(async () => {
-    if (!firstChosen) return null;
     const backend = await getBackend();
-    const path = await backend.relocateTrack(firstChosen.id);
-    return path === null ? null : t("Relocated {title}.", { title: firstChosen.title });
+    const moved = await relocateTracks(selectedTracks(), relocateSteps(backend, t));
+    return moved > 0 ? "" : null;
   });
 
+  // [OBS rekordbox 7.2.19 static] Delete, the button
+  // (`MissingFileComponent::buttonClicked` → `deleteSelectedFiles(true)`
+  // @0x1012a5e74) and the Delete key (`MissingFileTable::deleteKeyPressed`
+  // @0x1012a5bb4), asks OK/Cancel under the title "Remove": "Are you sure you
+  // want to remove the selected tracks?". The key's Command + Delete, which
+  // skips the question, and the line saying so are not here, as they are
+  // not in the track list (#136).
   const remove = () => run(async () => {
     const backend = await getBackend();
-    const count = `${chosen} track${chosen === 1 ? "" : "s"}`;
     const sure = await backend.confirm(
-      t("Remove {count} from the collection? This can’t be undone. The files stay where they are.", { count }),
+      t("Are you sure you want to remove the selected tracks?"),
+      { yes: t("OK"), no: t("Cancel"), title: t("Remove") },
     );
     if (!sure) return null;
     const removed = await backend.removeMissingTracks(targets);
@@ -230,7 +251,21 @@ export function MissingFileManager({ readOnly, folders, onWrote, onFailed, onClo
       onKeyDown={(event) => event.stopPropagation()}
     >
       <h2 id="missing-file-manager-title" className={styles.title}>Missing File Manager</h2>
-      <div className={styles.table} role="grid" aria-label="Missing files" aria-rowcount={total ?? 0}>
+      <div
+        className={styles.table}
+        role="grid"
+        aria-label="Missing files"
+        aria-rowcount={total ?? 0}
+        tabIndex={0}
+        onKeyDown={(event) => {
+          // rekordbox's list takes Delete and Backspace alike
+          // (`CustomListBox::keyPressed` → `MissingFileTable::deleteKeyPressed`).
+          if (event.key !== "Delete" && event.key !== "Backspace") return;
+          event.preventDefault();
+          if (event.repeat || readOnly || busy || chosen === 0) return;
+          remove();
+        }}
+      >
         <div className={styles.header} role="row">
           <span className={styles.cell} role="columnheader">Track Title</span>
           <span className={styles.cell} role="columnheader">artist</span>
@@ -252,7 +287,7 @@ export function MissingFileManager({ readOnly, folders, onWrote, onFailed, onClo
       {note !== null ? <p className={styles.note}>{note}</p> : null}
       <div className={styles.buttons}>
         <button type="button" disabled={readOnly || busy || chosen === 0} onClick={autoRelocate}>Auto Relocate</button>
-        <button type="button" disabled={readOnly || busy || firstChosen === undefined} onClick={relocate}>Relocate</button>
+        <button type="button" disabled={readOnly || busy || chosen === 0} onClick={relocate}>Relocate</button>
         <button type="button" disabled={readOnly || busy || chosen === 0} onClick={remove}>Delete</button>
         <span className={styles.spacer} />
         <button type="button" onClick={onClose}>OK</button>

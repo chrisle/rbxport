@@ -522,8 +522,13 @@ export interface Backend {
   /** Called per track while an XML collection is being imported (done of total). */
   onImportProgress(listener: (progress: ExportProgress) => void): () => void;
   cancelExport(path: string): Promise<void>;
-  /** A yes-or-no question in the platform's own dialog; false when dismissed. */
-  confirm(message: string, labels?: { yes: string; no: string }): Promise<boolean>;
+  /**
+   * A yes-or-no question in the platform's own dialog; false when dismissed.
+   * `title` heads the dialog where rekordbox gives its own a title.
+   */
+  confirm(message: string, labels?: { yes: string; no: string; title?: string }): Promise<boolean>;
+  /** A message in the platform's own dialog, with one OK button. */
+  tell(message: string, title: string): Promise<void>;
   /** The volumes an export could be written to, and what is on each. */
   listDevices(): Promise<Device[]>;
   /**
@@ -761,20 +766,35 @@ export interface Backend {
   findDuplicates(limit: number): Promise<Duplicates>;
 
   /**
-   * Asks the user for a file and points a track at it.
-   *
-   * Resolves to the chosen path, or `null` if they cancelled. Outside Tauri
-   * there is no picker, so it resolves to `null` immediately.
+   * Relocate's file chooser for one track, under `title`, showing only
+   * files of `fileName`'s extension, opened in `folder` when given.
+   * Resolves to the chosen path, or `null` if they cancelled.
    */
-  relocateTrack(trackId: string): Promise<string | null>;
+  chooseRelocateFile(title: string, fileName: string, folder: string | null): Promise<string | null>;
+  /**
+   * Points a track at `path`. Resolves to false, writing nothing, when the
+   * collection already holds that file.
+   */
+  relocateTrack(trackId: string, path: string): Promise<boolean>;
+  /**
+   * The named tracks whose file is missing, in the order named; at most 128
+   * are looked at per call.
+   */
+  relocationTargets(tracks: string[]): Promise<MissingTrack[]>;
+  /**
+   * Relocate's "find other missing file using the location of this track":
+   * each named missing track found where it would be had it moved from
+   * `from` to `to` is pointed there. Resolves to how many were found.
+   */
+  relocateByLocation(tracks: string[], from: string, to: string): Promise<number>;
 
   /**
-   * Points missing tracks at a file of the same name found under one of
-   * `folders`, searched in order: the tracks named, or every missing track
+   * Points missing tracks at a file of the same name found under the search
+   * folders, in rekordbox's order: the tracks named, or every missing track
    * when `tracks` is null. A track whose name is found nowhere is left
    * missing.
    */
-  autoRelocate(folders: string[], tracks: string[] | null): Promise<RelocateReport>;
+  autoRelocate(search: RelocateSearch, tracks: string[] | null): Promise<RelocateReport>;
 
   /** Opens a folder picker; null when it is cancelled. */
   pickFolder(title: string): Promise<string | null>;
@@ -1461,6 +1481,18 @@ export interface XmlImportReport {
   playlists: number;
   cues: number;
   tracks: { id: string; title: string }[];
+}
+
+/**
+ * Preferences › Advanced › Database › Auto Relocate Search Folders: the
+ * user's folders (empty unless Specified user folders is ticked), then the
+ * Music, Movies/Videos and Desktop folders where ticked.
+ */
+export interface RelocateSearch {
+  folders: string[];
+  music: boolean;
+  video: boolean;
+  desktop: boolean;
 }
 
 /** What an automatic relocate did. */

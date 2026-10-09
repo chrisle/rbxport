@@ -16,13 +16,30 @@
 //! Nothing else about the file is checked — a same-named file that is a
 //! different recording is the user's to notice, and Relocate is there to fix
 //! it.
+//!
+//! [OBS rekordbox 7.2.19 macOS arm64, static] The folders are the ones
+//! Preferences › Advanced › Database › Auto Relocate Search Folders ticks,
+//! in this order (`MissingFileTable::relocateSelectedFiles` `$_0` @0x1012a9d20
+//! .. 0x1012aa100): the Specified user folders that exist, when that box is
+//! ticked (`isSelectedAutoRelocateUserFolder`, default off), then the user's
+//! Music folder (`getSpecialLocation(userMusicDirectory)`, default on), the
+//! Movies/Videos folder (`userMoviesDirectory`, default on) and the Desktop
+//! (`userDesktopDirectory`, default on); the defaults are the bytes at
+//! 0x1037bbacc..acf read by `SettingIF::isSelectedAutoRelocate*Folder`.
+//! [ASSUME] the extra places rekordbox tries first — the macOS file id of
+//! the old path (`common::getFilePathFromIDEx`) and the folder of the track
+//! it found last — are not modelled.
+//!
+//! Relocate over several tracks is rekordbox's too
+//! ([`relocate_by_location`]): once one file has been chosen, the rest can
+//! be looked for "using the location of this track".
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde::Serialize;
-use tauri::State;
+use serde::{Deserialize, Serialize};
+use tauri::{Manager, State};
 
 use rbl_index::Library;
 
@@ -40,6 +57,17 @@ pub fn is_missing(path: &str) -> bool {
     // browser does; whole-library scans run under `blocking`.
     !path.is_empty() && !Path::new(path).exists()
 }
+
+/// Whether a file the library points at is gone.
+pub fn is_missing_path(path: &Path) -> bool {
+    // perf-ok: one `stat`, as rekordbox's own load does before it opens.
+    !path.as_os_str().is_empty() && !path.exists()
+}
+
+/// rekordbox's `kPlayerOperateErrorLoadMissingFile` (global 0x1056c6b00,
+/// set @0x1004d4004 in 7.2.19): the status bar's word when a deck is asked to
+/// load a track whose file is gone.
+pub const LOAD_MISSING_FILE: &str = "Load error. The file could not be found.";
 
 /// The rows of every missing track, in the index's order.
 fn scan(library: &Library) -> Vec<u32> {
@@ -198,15 +226,54 @@ fn file_name(path: &str) -> Option<String> {
     Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned())
 }
 
-/// Points missing tracks at same-named files under the folders: the tracks
-/// named, or every missing track when none are.
+/// Preferences › Advanced › Database › Auto Relocate Search Folders.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocateSearch {
+    /// Specified user folders: empty unless that box is ticked.
+    pub folders: Vec<String>,
+    pub music: bool,
+    pub video: bool,
+    pub desktop: bool,
+}
+
+/// The folders Auto Relocate walks, in rekordbox's order: the user's own
+/// that exist, then Music, Movies/Videos and the Desktop where ticked.
+fn search_roots(
+    search: &RelocateSearch,
+    music: Option<PathBuf>,
+    video: Option<PathBuf>,
+    desktop: Option<PathBuf>,
+) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = search
+        .folders
+        .iter()
+        .map(PathBuf::from)
+        // perf-ok: one `stat` per configured folder, under `blocking`.
+        .filter(|folder| folder.exists())
+        .collect();
+    let system = [(search.music, music), (search.video, video), (search.desktop, desktop)];
+    for (ticked, folder) in system {
+        if let Some(folder) = folder.filter(|_| ticked) {
+            if !roots.contains(&folder) {
+                roots.push(folder);
+            }
+        }
+    }
+    roots
+}
+
+/// Points missing tracks at same-named files under the search folders: the
+/// tracks named, or every missing track when none are.
 #[tauri::command]
 pub async fn auto_relocate<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
-    folders: Vec<String>,
+    search: RelocateSearch,
     tracks: Option<Vec<String>>,
 ) -> AppResult<RelocateReportDto> {
+    let paths = app.path();
+    let (music, video, desktop) = (paths.audio_dir().ok(), paths.video_dir().ok(), paths.desktop_dir().ok());
     let library = state.library()?;
     let state_for_reload = Arc::clone(&state);
     let writing = Arc::clone(&state);
@@ -220,7 +287,7 @@ pub async fn auto_relocate<R: tauri::Runtime>(
             return Ok(RelocateReportDto { relocated: 0, unresolved: 0 });
         }
 
-        let roots: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
+        let roots = search_roots(&search, music, video, desktop);
         let found = index_folders(&roots);
 
         writing
@@ -279,6 +346,152 @@ pub async fn remove_missing_tracks<R: tauri::Runtime>(
     })
     .await?;
     Ok(count)
+}
+
+/// The tracks a Relocate over a selection asks about, in the order given:
+/// the ones named whose file is missing. Paged by the caller, so a page
+/// stays inside one response.
+///
+/// [OBS rekordbox 7.2.19 static] `MissingFileTable::relocateSelectedFiles`
+/// @0x1012a6964..0x1012a69b0 passes over a selected track whose file is
+/// there (`File::existsAsFile` on its working path).
+#[tauri::command]
+pub async fn relocation_targets(state: State<'_, Arc<AppState>>, tracks: Vec<String>) -> AppResult<Vec<MissingTrackDto>> {
+    let library = state.library()?;
+    blocking("relocation_targets", move || {
+        Ok(tracks
+            .iter()
+            .take(MAX_ROWS as usize)
+            .filter_map(|id| library.row_of(id))
+            .filter(|&row| is_missing(library.folder_path.get(row as usize)))
+            .map(|row| missing_dto(&library, row))
+            .collect())
+    })
+    .await
+}
+
+/// Whether two strings are equal ignoring case, char by char, as
+/// `juce::String::equalsIgnoreCase` compares them.
+fn same_char(a: char, b: char) -> bool {
+    a == b || a.to_lowercase().eq(b.to_lowercase())
+}
+
+fn starts_with_ignoring_case(text: &[char], prefix: &[char]) -> bool {
+    text.len() >= prefix.len() && text.iter().zip(prefix).all(|(&a, &b)| same_char(a, b))
+}
+
+/// `text` with every occurrence of `from` replaced by `to`, ignoring case:
+/// `juce::String::replace(from, to, true)`.
+fn replace_ignoring_case(text: &str, from: &str, to: &str) -> String {
+    let text: Vec<char> = text.chars().collect();
+    let from: Vec<char> = from.chars().collect();
+    if from.is_empty() {
+        return text.into_iter().collect();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while at < text.len() {
+        if starts_with_ignoring_case(&text[at..], &from) {
+            out.push_str(to);
+            at += from.len();
+        } else {
+            out.push(text[at]);
+            at += 1;
+        }
+    }
+    out
+}
+
+/// Where a missing track's file would be if it moved the way the one just
+/// relocated did, or `None`.
+///
+/// [OBS rekordbox 7.2.19 static, `relocateSelectedFiles` `$_2` @0x1012aa9d8]
+/// First `to` + the track's file name (`File::getChildFile(FileNameL)`);
+/// failing that, when `from` and `to` differ and the track's path (with `\`
+/// as `/`) starts with `from`, the path with `from` replaced by `to`. `from`
+/// and `to` are the old and new folders with the trailing folder names they
+/// share taken off. Only a file that is there counts.
+fn moved_like(path: &str, file_name: &str, from: &str, to: &str, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    let child = Path::new(to).join(file_name);
+    if exists(&child) {
+        return Some(child);
+    }
+    let same = from.chars().count() == to.chars().count() && from.chars().zip(to.chars()).all(|(a, b)| same_char(a, b));
+    if same {
+        return None;
+    }
+    let path = path.replace('\\', "/");
+    let chars: Vec<char> = path.chars().collect();
+    let prefix: Vec<char> = from.chars().collect();
+    if !starts_with_ignoring_case(&chars, &prefix) {
+        return None;
+    }
+    let moved = PathBuf::from(replace_ignoring_case(&path, from, to));
+    exists(&moved).then_some(moved)
+}
+
+/// A path built with `/` in Windows' own separators, as `juce::File` keeps
+/// it, so the library stores what rekordbox would.
+fn native(path: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(path.to_string_lossy().replace('/', "\\"))
+    } else {
+        path
+    }
+}
+
+/// Relocate's "find other missing file using the location of this track":
+/// each named track still missing whose file turns up where
+/// [`moved_like`] looks, and is not already another track in the
+/// collection, is pointed at it. Returns how many were.
+///
+/// [OBS rekordbox 7.2.19 static] `$_2` skips a found file the collection
+/// already holds (`DatabaseIF::isCollectionSong`) and relocates the rest
+/// (`DatabaseIF::relocateTrack`); the count is what "rekordbox found N
+/// files." reports.
+#[tauri::command]
+pub async fn relocate_by_location<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+    from: String,
+    to: String,
+) -> AppResult<u32> {
+    let library = state.library()?;
+    let writing = Arc::clone(&state);
+    let state_for_reload = Arc::clone(&state);
+    let found = blocking("relocate_by_location", move || {
+        let moves: Vec<(String, PathBuf)> = tracks
+            .iter()
+            .filter_map(|id| library.row_of(id).map(|row| (id, row)))
+            .filter_map(|(id, row)| {
+                let path = library.folder_path.get(row as usize);
+                if !is_missing(path) {
+                    return None;
+                }
+                let name = file_name(path)?;
+                // perf-ok: a `stat` or two per track, under `blocking`.
+                let moved = native(moved_like(path, &name, &from, &to, Path::is_file)?);
+                library.row_for_path(&moved).is_none().then(|| (id.clone(), moved))
+            })
+            .collect();
+        if moves.is_empty() {
+            return Ok(0);
+        }
+        writing
+            .write(|writer| {
+                for (id, path) in &moves {
+                    writer.relocate(id, path)?;
+                }
+                Ok(u32::try_from(moves.len()).unwrap_or(u32::MAX))
+            })
+            .map_err(write_error)
+    })
+    .await?;
+    if found > 0 {
+        reload(app, state_for_reload).await?;
+    }
+    Ok(found)
 }
 
 #[cfg(test)]
@@ -353,5 +566,59 @@ mod tests {
     fn a_file_name_is_the_last_segment_of_a_row_path() {
         assert_eq!(file_name("/Users/x/Music/Track.aiff").as_deref(), Some("Track.aiff"));
         assert_eq!(file_name(""), None);
+    }
+    #[test]
+    fn the_search_folders_come_in_rekordboxs_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = dir.path().join("mine");
+        std::fs::create_dir_all(&mine).unwrap();
+        let gone = dir.path().join("gone");
+        let music = Some(PathBuf::from("/m/Music"));
+        let video = Some(PathBuf::from("/m/Movies"));
+        let desktop = Some(PathBuf::from("/m/Desktop"));
+        let every = RelocateSearch {
+            folders: vec![gone.to_string_lossy().into_owned(), mine.to_string_lossy().into_owned()],
+            music: true,
+            video: true,
+            desktop: true,
+        };
+        assert_eq!(
+            search_roots(&every, music.clone(), video.clone(), desktop.clone()),
+            [mine.clone(), PathBuf::from("/m/Music"), PathBuf::from("/m/Movies"), PathBuf::from("/m/Desktop")]
+        );
+        let only_desktop = RelocateSearch { desktop: true, ..RelocateSearch::default() };
+        assert_eq!(search_roots(&only_desktop, music, video, desktop), [PathBuf::from("/m/Desktop")]);
+        assert_eq!(search_roots(&RelocateSearch::default(), None, None, None), Vec::<PathBuf>::new());
+    }
+
+    #[test]
+    fn a_track_moved_like_the_relocated_one_is_found() {
+        let there = |paths: &'static [&'static str]| move |p: &Path| paths.iter().any(|q| Path::new(q) == p);
+        // The same file name in the new folder comes first.
+        assert_eq!(
+            moved_like("/old/A/x.mp3", "x.mp3", "/old", "/new", there(&["/new/x.mp3", "/new/A/x.mp3"])),
+            Some(PathBuf::from("/new/x.mp3"))
+        );
+        // Then the old folder swapped for the new, ignoring case.
+        assert_eq!(
+            moved_like("/OLD/A/x.mp3", "x.mp3", "/old", "/new", there(&["/new/A/x.mp3"])),
+            Some(PathBuf::from("/new/A/x.mp3"))
+        );
+        // A Windows path is compared with its separators as `/`.
+        assert_eq!(
+            moved_like("C:\\Music\\A\\x.mp3", "x.mp3", "C:/Music", "D:/Music", there(&["D:/Music/A/x.mp3"])),
+            Some(PathBuf::from("D:/Music/A/x.mp3"))
+        );
+        // Nothing there, or a path outside the old folder: not found.
+        assert_eq!(moved_like("/old/A/x.mp3", "x.mp3", "/old", "/new", there(&[])), None);
+        assert_eq!(moved_like("/else/A/x.mp3", "x.mp3", "/old", "/new", there(&["/new/A/x.mp3"])), None);
+        // The same folder both ways is only the child-file look.
+        assert_eq!(moved_like("/old/A/x.mp3", "x.mp3", "/old", "/OLD", there(&["/OLD/A/x.mp3"])), None);
+    }
+
+    #[test]
+    fn replacing_ignores_case_and_takes_every_occurrence() {
+        assert_eq!(replace_ignoring_case("/Old/a/old/b", "/old", "/new"), "/new/a/new/b");
+        assert_eq!(replace_ignoring_case("abc", "", "x"), "abc");
     }
 }

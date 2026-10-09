@@ -58,25 +58,104 @@ test("Relocate from the menu clears the track's [!]", async ({ page }) => {
   await expect(row.getByRole("img", { name: "File is Missing" })).toHaveCount(0);
 });
 
+/** Opens Preferences › Advanced › Database's Auto Relocate Search Folders. */
+async function searchFolders(page: Page) {
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const preferences = page.getByRole("dialog", { name: "Preferences" });
+  await preferences.getByRole("tab", { name: "Advanced" }).click();
+  return preferences.getByRole("region", { name: "Auto Relocate Search Folders" });
+}
+
+/** File › Display All Missing Files. */
+async function openManager(page: Page) {
+  await page.waitForFunction(() => "__menu" in window);
+  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("missing"));
+  const manager = page.getByRole("dialog", { name: "Missing File Manager" });
+  await expect(manager).toBeVisible();
+  return manager;
+}
+
+test("Auto Relocate Search Folders has rekordbox's boxes, Music, Video and Desktop ticked", async ({ page }) => {
+  await open(page);
+  const folders = await searchFolders(page);
+  // [OBS rekordbox 7.2.19 static, DetailAutoRelocate] Music, Movies/Video,
+  // Desktop, then Specified user folders; only the last starts unticked and
+  // greys the list, Add and Del.
+  const boxes = folders.getByRole("checkbox");
+  await expect(boxes).toHaveCount(4);
+  await expect(folders.getByRole("checkbox", { name: "Music" })).toBeChecked();
+  await expect(folders.getByRole("checkbox", { name: /^(Movies|Video)$/ })).toBeChecked();
+  await expect(folders.getByRole("checkbox", { name: "Desktop" })).toBeChecked();
+  const own = folders.getByRole("checkbox", { name: "Specified user folders" });
+  await expect(own).not.toBeChecked();
+  await expect(folders.getByRole("button", { name: "Add" })).toBeDisabled();
+  await expect(folders.getByRole("combobox", { name: "Search folders" })).toBeDisabled();
+  await own.check();
+  await folders.getByRole("button", { name: "Add" }).click();
+  await expect(folders.getByRole("combobox", { name: "Search folders" })).toHaveValue("/Users/mock/Music/Moved");
+  await folders.getByRole("checkbox", { name: "Desktop" }).uncheck();
+  await page.keyboard.press("Escape");
+
+  // Auto Relocate searches what is ticked, the user's folders first.
+  const manager = await openManager(page);
+  await manager.getByRole("button", { name: "Auto Relocate" }).click();
+  await expect(manager).toContainText("143 Track");
+  const searched = await page.evaluate(() => (window as unknown as { __relocateSearch: unknown[] }).__relocateSearch);
+  expect(searched).toEqual([{ folders: ["/Users/mock/Music/Moved"], music: true, video: true, desktop: false }]);
+});
+
+test("Relocate over several tracks asks for the first file, then finds the rest from its location", async ({ page }) => {
+  await open(page, "?missing=2&writable=1");
+  await showAttribute(page);
+  // Rows 1 and 3 are missing; select rows 0 to 3.
+  await rowOf(page, 0).locator('[data-col="title"]').click();
+  await rowOf(page, 3).locator('[data-col="title"]').click({ modifiers: ["Shift"] });
+  await rowOf(page, 1).locator('[data-col="title"]').click({ button: "right" });
+  await page.getByRole("menu", { name: "Track" }).getByRole("menuitem", { name: "Relocate", exact: true }).click();
+  // One chooser, for the first missing track, titled with its file name.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __told?: string[] }).__told ?? [])).toHaveLength(1);
+  const asked = await page.evaluate(() => {
+    const w = window as unknown as { __relocateChooser: string[]; __confirmed: string[]; __confirmTitles: (string | null)[]; __confirmLabels: (string | null)[]; __told: string[]; __relocatedBy: string[] };
+    return { chooser: w.__relocateChooser, confirmed: w.__confirmed, titles: w.__confirmTitles, labels: w.__confirmLabels, told: w.__told, by: w.__relocatedBy };
+  });
+  expect(asked.chooser).toHaveLength(1);
+  expect(asked.chooser[0]).toMatch(/^Choose a new fullpath for : \d+\.mp3 \| $/);
+  expect(asked.confirmed).toHaveLength(1);
+  expect(asked.confirmed[0]).toMatch(/^Would you like RBXport to find other missing file using the location of this track \?\n./);
+  expect(asked.titles).toEqual(["Missing File Manager"]);
+  expect(asked.labels).toEqual(["Yes/No"]);
+  expect(asked.told).toEqual(["Missing File Manager: RBXport found 1 files."]);
+  expect(asked.by).toHaveLength(1);
+  // Both [!] are gone.
+  for (const at of [1, 3]) await expect(rowOf(page, at).getByRole("img", { name: "File is Missing" })).toHaveCount(0);
+});
+
+test("a missing track does not load: the deck keeps its track and the status bar says why", async ({ page }) => {
+  // Read-only, so a double-click loads rather than edits.
+  await open(page, "?missing=7");
+  await rowOf(page, 0).locator('[data-col="title"]').dblclick();
+  const title = page.getByTestId("player-title").first();
+  const loaded = await rowOf(page, 0).locator('[data-col="title"]').innerText();
+  await expect(title).toHaveText(loaded);
+  await rowOf(page, 1).locator('[data-col="title"]').dblclick();
+  await expect(page.getByRole("alert")).toHaveText("Load error. The file could not be found.");
+  await expect(title).toHaveText(loaded);
+});
+
 test("the Missing File Manager lists every missing track and relocates them", async ({ page }) => {
   // Preferences, then the manager, then three rescans: longer than one view.
   test.setTimeout(60_000);
   await open(page);
   // A search folder first, from Preferences, where rekordbox keeps them.
-  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
-  const preferences = page.getByRole("dialog", { name: "Preferences" });
-  await preferences.getByRole("tab", { name: "Advanced" }).click();
-  const folders = preferences.getByRole("region", { name: "Auto Relocate Search Folders" });
+  const folders = await searchFolders(page);
+  await folders.getByRole("checkbox", { name: "Specified user folders" }).check();
   await folders.getByRole("button", { name: "Add" }).click();
   await expect(folders.getByRole("combobox", { name: "Search folders" })).toHaveValue("/Users/mock/Music/Moved");
   await page.keyboard.press("Escape");
-  await expect(preferences).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Preferences" })).toHaveCount(0);
 
-  await page.waitForFunction(() => "__menu" in window);
-  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("missing"));
+  const manager = await openManager(page);
 
-  const manager = page.getByRole("dialog", { name: "Missing File Manager" });
-  await expect(manager).toBeVisible();
   // 2000 mock tracks, every seventh from the second: 286.
   await expect(manager).toContainText("286 Track");
   const grid = manager.getByRole("grid", { name: "Missing files" });
@@ -90,10 +169,24 @@ test("the Missing File Manager lists every missing track and relocates them", as
   await manager.getByRole("button", { name: "Auto Relocate" }).click();
   await expect(manager).toContainText("143 Track");
   await expect(manager).toContainText("143 relocated, 143 not found in the search folders.");
+  expect(await page.evaluate(() => (window as unknown as { __relocateSearch: unknown[] }).__relocateSearch))
+    .toEqual([{ folders: ["/Users/mock/Music/Moved"], music: true, video: true, desktop: true }]);
 
-  // One row, then Delete: only that one goes.
+  // One row, then Delete: rekordbox's question, then only that one goes.
   await grid.getByRole("row").nth(1).click();
   await manager.getByRole("button", { name: "Delete" }).click();
+  await expect(manager).toContainText("142 Track");
+  const asked = await page.evaluate(() => {
+    const w = window as unknown as { __confirmed: string[]; __confirmTitles: (string | null)[]; __confirmLabels: (string | null)[] };
+    return { message: w.__confirmed.at(-1), title: w.__confirmTitles.at(-1), labels: w.__confirmLabels.at(-1) };
+  });
+  expect(asked).toEqual({ message: "Are you sure you want to remove the selected tracks?", title: "Remove", labels: "OK/Cancel" });
+
+  // The Delete key asks the same; Cancel keeps the row.
+  await page.evaluate(() => { (window as unknown as { __confirmAnswer: boolean }).__confirmAnswer = false; });
+  await grid.getByRole("row").nth(1).click();
+  await page.keyboard.press("Delete");
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __confirmed: string[] }).__confirmed.length)).toBe(2);
   await expect(manager).toContainText("142 Track");
 
   await manager.getByRole("button", { name: "OK" }).click();

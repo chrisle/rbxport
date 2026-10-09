@@ -1914,6 +1914,14 @@ pub async fn deck_load<R: tauri::Runtime>(
         return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
             .with_detail(format!("track {track}")));
     };
+    // [OBS rekordbox 7.2.19 static] `UiPlayer::handleMessageDragAndDrop`
+    // @0x101abadc4 opens a track only when its file is there; otherwise the
+    // status bar says `kPlayerOperateErrorLoadMissingFile` (@0x101abb0f4)
+    // and the deck is left as it was.
+    if crate::relocate::is_missing_path(&path) {
+        return Err(AppError::new(ErrorKind::NotFound, crate::relocate::LOAD_MISSING_FILE)
+            .with_detail(format!("track {track}: {}", path.display())));
+    }
     let engine = player.engine(&app)?;
     let which = crate::player::deck_of(&deck);
     // The engine's own thread does the opening; this only hands it the path.
@@ -2832,17 +2840,30 @@ pub async fn import_files<R: tauri::Runtime>(
     Ok(report)
 }
 
+/// Relocate: points a track at the file chosen for it.
+///
+/// [OBS rekordbox 7.2.19 static, `MissingFileTable::showFileChooser`
+/// @0x1012a8408] A file the collection already holds is refused with "This
+/// file is already in the collection." and nothing is written; the answer
+/// is then `false`.
 #[tauri::command]
 pub async fn relocate_track<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
     path: String,
-) -> AppResult<u32> {
+) -> AppResult<bool> {
+    let library = state.library()?;
+    let chosen = std::path::PathBuf::from(&path);
+    let held = blocking("relocate_track_check", move || Ok(library.row_for_path(&chosen).is_some())).await?;
+    if held {
+        return Ok(false);
+    }
     edit(app, state, "relocate_track", Touched::Tracks, move |w| {
         w.relocate(&track, std::path::Path::new(&path)).map(|_| ())
     })
-    .await
+    .await?;
+    Ok(true)
 }
 
 #[tauri::command]

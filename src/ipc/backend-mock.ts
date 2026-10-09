@@ -16,7 +16,7 @@ import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
   DatabaseDrive, EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SelectionDetails, SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
-  PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
+  PreferencesRequest, RelocateSearch, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
   DeckId, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
@@ -2135,10 +2135,27 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // A browser cannot ask; the answer is yes, so the flow can be driven. A
     // test sets `window.__confirmAnswer = false` to answer Cancel instead, and
     // reads what was asked from `window.__confirmed`.
-    confirm: (message) => {
-      const page = window as unknown as { __confirmAnswer?: boolean; __confirmed?: string[] };
+    // `window.__confirmTitles` keeps each question's title, and
+    // `window.__confirmAnswers`, when set, answers question by question.
+    confirm: (message, labels) => {
+      const page = window as unknown as {
+        __confirmAnswer?: boolean;
+        __confirmAnswers?: boolean[];
+        __confirmed?: string[];
+        __confirmTitles?: (string | null)[];
+        __confirmLabels?: (string | null)[];
+      };
       (page.__confirmed ??= []).push(message);
-      return Promise.resolve(page.__confirmAnswer ?? true);
+      (page.__confirmTitles ??= []).push(labels?.title ?? null);
+      (page.__confirmLabels ??= []).push(labels ? `${labels.yes}/${labels.no}` : null);
+      const queued = page.__confirmAnswers?.shift();
+      return Promise.resolve(queued ?? page.__confirmAnswer ?? true);
+    },
+    // A message box: what it said, in `window.__told`, as "title: text".
+    tell: (message, title) => {
+      const page = window as unknown as { __told?: string[] };
+      (page.__told ??= []).push(`${title}: ${message}`);
+      return wait(undefined);
     },
 
     // A deck that keeps time but makes no sound. The audio engine is Rust and
@@ -2152,6 +2169,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const d = deckOf(deck);
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
+      // A missing file is refused before the deck changes, as the app's is.
+      if (row?.missing === true) return notFound("Load error. The file could not be found.");
       d.frames = 0;
       d.totalFrames = row ? row.durationSec * SAMPLE_RATE : 0;
       deckBeat[deck] = row && row.bpmX100 > 0 ? 6000 / row.bpmX100 : 0;
@@ -2687,21 +2706,60 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         })),
       });
     },
-    // No picker in a browser: a missing track is pointed at a fixed folder,
-    // so the flow can be driven end to end; any other track is a cancel.
-    relocateTrack: async (trackId) => {
+    // No picker in a browser: the chooser answers with the track's own file
+    // name under a fixed folder, or with `window.__relocatePicks` in turn
+    // (null is a cancel). What it was asked is kept in
+    // `window.__relocateChooser` as "title | folder".
+    chooseRelocateFile: (title, fileName, folder) => {
+      const page = window as unknown as { __relocatePicks?: (string | null)[]; __relocateChooser?: string[] };
+      (page.__relocateChooser ??= []).push(`${title} | ${folder ?? ""}`);
+      const queued = page.__relocatePicks?.shift();
+      return wait(queued !== undefined ? queued : `/Users/mock/Music/Moved/${fileName}`);
+    },
+    // A file another row of the collection already has is refused, as
+    // rekordbox refuses it; anything else stops the track being missing.
+    relocateTrack: async (trackId, path) => {
       const row = all.find((r) => r.id === trackId);
-      if (row?.missing !== true) return null;
-      delete row.missing;
-      await bump();
-      return `/Users/mock/Music/Moved/${row.fileName ?? row.title}`;
+      const taken = all.some((r) => r.id !== trackId && r.missing !== true && String(r.extra?.location ?? "") === path);
+      if (taken) return false;
+      if (row?.missing === true) {
+        delete row.missing;
+        await bump();
+      }
+      return true;
+    },
+    relocationTargets: (tracks) => {
+      const wanted = tracks.slice(0, 128);
+      return wait(wanted
+        .map((id) => all.find((row) => row.id === id))
+        .filter((row): row is RowDto => row?.missing === true)
+        .map((row) => ({
+          id: row.id,
+          title: row.title,
+          artist: row.artist,
+          album: row.album,
+          path: String(row.extra?.location ?? ""),
+        })));
+    },
+    // The new folder holds every missing file named: each is found.
+    // `window.__relocatedBy` keeps "from -> to".
+    relocateByLocation: async (tracks, from, to) => {
+      const page = window as unknown as { __relocatedBy?: string[] };
+      (page.__relocatedBy ??= []).push(`${from} -> ${to}`);
+      const found = all.filter((row) => row.missing === true && tracks.includes(row.id));
+      for (const row of found) delete row.missing;
+      if (found.length > 0) await bump();
+      return found.length;
     },
     // The search folders hold every other missing file, in list order, so a
-    // run both relocates and leaves some unresolved; with no folders nothing
-    // is found.
-    autoRelocate: async (folders, tracks) => {
+    // run both relocates and leaves some unresolved; with no folder ticked
+    // nothing is found. `window.__relocateSearch` keeps what was searched.
+    autoRelocate: async (search, tracks) => {
+      const page = window as unknown as { __relocateSearch?: RelocateSearch[] };
+      (page.__relocateSearch ??= []).push(search);
+      const searched = search.folders.length > 0 || search.music || search.video || search.desktop;
       const gone = all.filter((row) => row.missing === true && (tracks === null || tracks.includes(row.id)));
-      const found = folders.length === 0 ? [] : gone.filter((_, at) => at % 2 === 0);
+      const found = searched ? gone.filter((_, at) => at % 2 === 0) : [];
       for (const row of found) delete row.missing;
       if (found.length > 0) await bump();
       return { relocated: found.length, unresolved: gone.length - found.length };

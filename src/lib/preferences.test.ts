@@ -109,6 +109,20 @@ describe("sanitisePreferences", () => {
     expect(out.advanced.protectLibrary).toBe(true);
   });
 
+  it("searches Music, Video and Desktop by default, as rekordbox does", () => {
+    // [OBS rekordbox 7.2.19 static] defaults 1, 1, 1 and 0 at 0x1037bbacc.
+    const fresh = sanitisePreferences({ advanced: {} }).advanced;
+    expect([fresh.relocateMusic, fresh.relocateVideo, fresh.relocateDesktop, fresh.relocateUserFolders])
+      .toEqual([true, true, true, false]);
+    const kept = sanitisePreferences({
+      advanced: { relocateMusic: false, relocateVideo: false, relocateDesktop: false, relocateUserFolders: true },
+    }).advanced;
+    expect([kept.relocateMusic, kept.relocateVideo, kept.relocateDesktop, kept.relocateUserFolders])
+      .toEqual([false, false, false, true]);
+    // Folders saved before the box existed stay searched.
+    expect(sanitisePreferences({ advanced: { relocateFolders: ["/a"] } }).advanced.relocateUserFolders).toBe(true);
+  });
+
   it("checks for updates unless the store plainly says not to", () => {
     // A store written before the switch existed has no such key.
     expect(sanitisePreferences({ advanced: {} }).advanced.checkUpdates).toBe(true);

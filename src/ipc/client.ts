@@ -12,7 +12,7 @@ import type {
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   DatabaseDrive, EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
-  LinkStatus, MissingExportFile, MissingTracks, PreviewState, UnanalysedTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
+  LinkStatus, MissingExportFile, MissingTrack, MissingTracks, PreviewState, UnanalysedTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
   TreeNode, ViewHandle,
   SelectionDetails, TrackDetails, TrackLookups,
 } from "./types";
@@ -291,7 +291,15 @@ async function realBackend(): Promise<Backend> {
     deleteBackup: (path) => invoke<void>("delete_backup", { path }),
     confirm: async (message, labels) => {
       const { ask } = await import("@tauri-apps/plugin-dialog");
-      return ask(message, { kind: "warning", ...(labels ? { okLabel: labels.yes, cancelLabel: labels.no } : {}) });
+      return ask(message, {
+        kind: "warning",
+        ...(labels ? { okLabel: labels.yes, cancelLabel: labels.no } : {}),
+        ...(labels?.title ? { title: labels.title } : {}),
+      });
+    },
+    tell: async (text, title) => {
+      const { message } = await import("@tauri-apps/plugin-dialog");
+      await message(text, { title, kind: "info" });
     },
     deckLoad: (deck, trackId, loadId) => invoke<void>("deck_load", { deck, track: trackId, loadId }),
     deckUnload: (deck) => invoke<void>("deck_unload", { deck }),
@@ -408,25 +416,28 @@ async function realBackend(): Promise<Backend> {
     removeMissingTracks: (tracks) => invoke<number>("remove_missing_tracks", { tracks }),
     unanalysedTracks: (from, limit) => invoke<UnanalysedTracks>("unanalysed_tracks", { from, limit }),
     findDuplicates: (limit) => invoke<Duplicates>("find_duplicates", { limit }),
-    relocateTrack: async (trackId) => {
+    // rekordbox's chooser [OBS 7.2.19 static, `MissingFileTable::showFileChooser`
+    // @0x1012a82c0]: "Choose a new fullpath for : <file name>", only files of
+    // the track's own extension ("*" + `getFileExtension()`), opened where the
+    // last Relocate found its file.
+    chooseRelocateFile: async (title, fileName, folder) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
+      const dot = fileName.lastIndexOf(".");
+      const extension = dot > 0 ? fileName.slice(dot + 1) : "";
       const picked = await open({
         multiple: false,
         directory: false,
-        title: "Choose the file for this track",
-        filters: [
-          {
-            name: "Audio",
-            extensions: ["mp3", "m4a", "aiff", "aif", "wav", "flac", "aac", "ogg"],
-          },
-        ],
+        title,
+        ...(extension !== "" ? { filters: [{ name: `*.${extension}`, extensions: [extension] }] } : {}),
+        ...(folder !== null ? { defaultPath: folder } : {}),
       });
       // Cancelling is a normal outcome, not an error.
-      if (typeof picked !== "string") return null;
-      await invoke<number>("relocate_track", { track: trackId, path: picked });
-      return picked;
+      return typeof picked === "string" ? picked : null;
     },
-    autoRelocate: (folders, tracks) => invoke<RelocateReport>("auto_relocate", { folders, tracks }),
+    relocateTrack: (trackId, path) => invoke<boolean>("relocate_track", { track: trackId, path }),
+    relocationTargets: (tracks) => invoke<MissingTrack[]>("relocation_targets", { tracks }),
+    relocateByLocation: (tracks, from, to) => invoke<number>("relocate_by_location", { tracks, from, to }),
+    autoRelocate: (search, tracks) => invoke<RelocateReport>("auto_relocate", { search, tracks }),
     pickImage: async (title) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({

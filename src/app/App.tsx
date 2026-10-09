@@ -75,7 +75,8 @@ import { NewLibraryDialog, type LibraryQuestion } from "@/views/library/NewLibra
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { AnalysisResult, DevicePlaylistEdit, FilterValues, LinkPeerSeen, LinkStatus, SmartRule, TrackLookups, UnanalysedTracks } from "@/ipc/types";
+import type { AnalysisResult, DevicePlaylistEdit, FilterValues, LinkPeerSeen, LinkStatus, RelocateSearch, SmartRule, TrackLookups, UnanalysedTracks } from "@/ipc/types";
+import { missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
 import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
 import { nativeMenuLabels } from "@/lib/nativeMenu";
@@ -1093,6 +1094,25 @@ function AppBody() {
   );
 
   /**
+   * What loading a track onto a deck goes through: a track whose file is
+   * missing is not loaded, the deck keeps what it had, and the status bar
+   * says so in rekordbox's words [OBS rekordbox 7.2.19 static:
+   * `UiPlayer::handleMessageDragAndDrop` @0x101abadc4 opens only a file that
+   * is there, else shows `kPlayerOperateErrorLoadMissingFile`, "Load error.
+   * The file could not be found.", @0x101abb0f4 and returns].
+   */
+  const deckLoaders = useMemo(() => {
+    const guard = (set: (row: RowDto | null) => void) => (row: RowDto | null) => {
+      if (row?.missing === true) {
+        refuse(t("Load error. The file could not be found."));
+        return;
+      }
+      set(row);
+    };
+    return { a: guard(setPlayerTrack), b: guard(setPlayerTrackB) };
+  }, [refuse, t]);
+
+  /**
    * Loading a dragged track into a deck.
    *
    * A pair of stable callbacks rather than one taking a deck id: `Player` is
@@ -1107,8 +1127,8 @@ function AppBody() {
       // library, so this is the one drop that cannot be refused.
       if (row) put(row);
     };
-    return { a: into(setPlayerTrack), b: into(setPlayerTrackB) };
-  }, [draggedTracks]);
+    return { a: into(deckLoaders.a), b: into(deckLoaders.b) };
+  }, [draggedTracks, deckLoaders]);
 
   // Dropping a track onto a CDJ row in the LINK strip tells that player to
   // load it from us over Pro DJ Link.
@@ -1130,10 +1150,7 @@ function AppBody() {
   );
 
   /** The same three decks, loaded from the track menu or from a click. */
-  const loadInto = useMemo(
-    () => ({ a: setPlayerTrack, b: setPlayerTrackB }),
-    [],
-  );
+  const loadInto = deckLoaders;
   const loadTrack = useCallback(
     (deck: DeckId, row: RowDto) => loadInto[deck === "b" ? "b" : "a"](row),
     [loadInto],
@@ -1141,10 +1158,10 @@ function AppBody() {
   const loadSelectedInto = useMemo(() => {
     if (!selectedRow) return { a: undefined, b: undefined };
     return {
-      a: () => setPlayerTrack(selectedRow),
-      b: () => setPlayerTrackB(selectedRow),
+      a: () => deckLoaders.a(selectedRow),
+      b: () => deckLoaders.b(selectedRow),
     };
-  }, [selectedRow]);
+  }, [selectedRow, deckLoaders]);
 
   /**
    * The tree's context menu, and the track's.
@@ -1507,25 +1524,35 @@ function AppBody() {
 
   // A missing track's menu [OBS rekordbox 7.2.14, issue #201]. Auto
   // Relocate searches Preferences' Auto Relocate Search Folders for each
-  // selected track's file name; Relocate asks for the one file.
-  const relocateFolders = advancedPrefs.relocateFolders;
+  // selected track's file name; Relocate asks for each selected track's file
+  // in turn, as rekordbox's `relocateSelectedFiles` does (src/lib/relocate.ts).
+  const relocateSearch = useMemo((): RelocateSearch => ({
+    folders: advancedPrefs.relocateUserFolders ? [...advancedPrefs.relocateFolders] : [],
+    music: advancedPrefs.relocateMusic,
+    video: advancedPrefs.relocateVideo,
+    desktop: advancedPrefs.relocateDesktop,
+  }), [
+    advancedPrefs.relocateUserFolders, advancedPrefs.relocateFolders, advancedPrefs.relocateMusic,
+    advancedPrefs.relocateVideo, advancedPrefs.relocateDesktop,
+  ]);
   const autoRelocate = useCallback(
     (ids: readonly string[]) => {
       if (ids.length === 0) return;
       write(async (b) => {
-        const done = await b.autoRelocate([...relocateFolders], [...ids]);
+        const done = await b.autoRelocate(relocateSearch, [...ids]);
         return done.unresolved > 0
           ? t("{relocated} relocated, {unresolved} not found in the search folders.", { ...done })
           : t("{relocated} relocated.", { ...done });
       });
     },
-    [write, relocateFolders, t],
+    [write, relocateSearch, t],
   );
   const relocate = useCallback(
-    (row: RowDto) => {
+    (ids: readonly string[]) => {
+      if (ids.length === 0) return;
       write(async (b) => {
-        const path = await b.relocateTrack(row.id);
-        return path === null ? "" : t("Relocated {title}.", { title: row.title });
+        await relocateTracks(missingAmong(ids, (page) => b.relocationTargets(page)), relocateSteps(b, t));
+        return "";
       });
     },
     [write, t],
@@ -2522,14 +2549,14 @@ function AppBody() {
     onAnalysisLock: analysisLock, onAddToPlaylist: addToPlaylist, onAddToTagList: addToTagList,
     onRemoveFromTagList: removeFromTagList, onReloadTag: reloadTag, onExportTrack: exportTrackTo,
     playlists: menuPlaylists, devices: menuDevices, onEditField: editTrackField,
-    onEditBlocked: readOnly ? explainEditLock : undefined, onFocusedRow: setPlayerTrack,
+    onEditBlocked: readOnly ? explainEditLock : undefined, onFocusedRow: deckLoaders.a,
     onSelectedRow: setSelectedRow, onSelectedTracks: reportSubSelection, pendingEdits, readOnly,
     dragging: draggedTracks !== null,
     onDropTracks: addDraggedTo, onRemoveTracksFromPlaylist: removeTracksFromPlaylist,
     onRemoveTracksFromHistory: removeTracksFromHistory, onReorderPlaylist: reorderPlaylist,
     onDropFilesIntoPlaylist: importDroppedFilesTo, onAnalyseTracks: analyseTracks,
   }), [
-    layout, loadTrack, showInformation, revealTrack, rateTrack, commentTrack, resetPlayCount,
+    layout, loadTrack, deckLoaders, showInformation, revealTrack, rateTrack, commentTrack, resetPlayCount,
     convertMemoryCues, removeFromCollection, importToCollection, autoRelocate, relocate, analysisLock, addToPlaylist,
     addToTagList, removeFromTagList, reloadTag, exportTrackTo, menuPlaylists, menuDevices,
     editTrackField, readOnly, explainEditLock, pendingEdits, draggedTracks, addDraggedTo,
@@ -2765,7 +2792,7 @@ function AppBody() {
           trafficLight={activeTrafficLight}
           onTrafficLight={setTrafficLight}
           trafficKey={trafficKey}
-          onFocusedRow={setPlayerTrack}
+          onFocusedRow={deckLoaders.a}
           onSelectedRow={setSelectedRow}
           onDragTracks={setDraggedTracks}
           dragging={draggedTracks !== null}
@@ -2865,7 +2892,7 @@ function AppBody() {
       {missingFilesOpen ? (
         <MissingFileManager
           readOnly={readOnly}
-          folders={relocateFolders}
+          search={relocateSearch}
           onWrote={(said) => { void afterWrite(said); }}
           onFailed={refuse}
           onClose={() => setMissingFilesOpen(false)}

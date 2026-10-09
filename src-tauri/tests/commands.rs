@@ -1196,6 +1196,41 @@ fn a_track_whose_file_is_gone_is_refused_at_load_rather_than_failing_later() {
     assert!(s.sink.lock().unwrap().is_none(), "the audio output was not opened for it");
 }
 
+/// rekordbox opens a track only when its file is there, and otherwise says
+/// "Load error. The file could not be found." in the status bar and leaves
+/// the deck alone [OBS static, rekordbox 7.2.19
+/// `UiPlayer::handleMessageDragAndDrop` @0x101abadc4/0x101abb0f4].
+#[test]
+fn a_library_track_whose_file_is_gone_is_refused_in_rekordboxs_words() {
+    let s = shell();
+    let err = run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), track_id(0), 1))
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::NotFound);
+    assert_eq!(err.message, "Load error. The file could not be found.");
+    assert!(s.sink.lock().unwrap().is_none(), "the audio output was not opened for it");
+    assert!(!s.deck_state().a.loaded);
+}
+
+/// Relocate refuses a file the collection already holds, writing nothing,
+/// as rekordbox's `MissingFileTable::showFileChooser` does ("This file is
+/// already in the collection.") [OBS static @0x1012a8408].
+#[test]
+fn relocate_refuses_a_file_the_collection_already_holds() {
+    let s = shell();
+    let held = write_wav(&s._dir.path().join("held.wav"), 1).display().to_string();
+    let report = run(commands::import_files(s.handle(), s.state(), vec![held.clone()])).unwrap();
+    assert_eq!(report.imported, 1);
+    let before = s.state().library().unwrap().audio_path_of(&track_id(1)).map(str::to_owned);
+
+    let taken = run(commands::relocate_track(s.handle(), s.state(), track_id(1), held)).unwrap();
+    assert!(!taken, "refused");
+    assert_eq!(s.state().library().unwrap().audio_path_of(&track_id(1)).map(str::to_owned), before, "nothing written");
+
+    let free = write_wav(&s._dir.path().join("free.wav"), 1).display().to_string();
+    assert!(run(commands::relocate_track(s.handle(), s.state(), track_id(1), free.clone())).unwrap());
+    assert_eq!(s.state().library().unwrap().audio_path_of(&track_id(1)), Some(free.as_str()));
+}
+
 #[test]
 fn auto_analysis_is_offered_the_unanalysed_tracks_whose_files_are_there_a_page_at_a_time() {
     let s = shell();

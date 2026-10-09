@@ -21,10 +21,11 @@ import { useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { DatabaseDrive, Duplicates, LibrarySummary } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
-import { QUANTIZE_BEATS } from "@/lib/preferences";
+import { QUANTIZE_BEATS, type AdvancedPreferences } from "@/lib/preferences";
+import { detectPlatform } from "@/lib/shortcuts";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
-import { Button, Note, Radios, Section, Select, Sub, Toggle } from "./controls";
+import { Button, Checkbox, Note, Radios, Section, Select, Sub, Toggle } from "./controls";
 
 export type AdvancedTab = "database" | "browse" | "others";
 
@@ -178,10 +179,7 @@ export function AdvancedPane({ tab, summary }: {
           </dd>
         </dl>
       </Section>
-      <RelocateSection
-        folders={advanced.relocateFolders}
-        onFolders={(relocateFolders) => set({ relocateFolders })}
-      />
+      <RelocateSection advanced={advanced} set={set} />
       <DuplicatesSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
       {/* Last, as in rekordbox, under the external-drive settings. */}
       <DatabaseManagementSection readOnly={summary?.readOnly ?? false} />
@@ -355,48 +353,73 @@ function DuplicatesSection({ readOnly }: { readOnly: boolean }) {
 }
 
 /**
- * rekordbox's Auto Relocate Search Folders, Specified user folders part
- * [OBS rekordbox 7.2.14 Preferences › Advanced › Database, issue #201]. Its
- * Music, Video and Desktop boxes are not drawn: which folders they stand
- * for has not been established [UNKNOWN].
+ * rekordbox's Auto Relocate Search Folders [OBS rekordbox 7.2.19 static,
+ * `DetailAutoRelocate::DetailAutoRelocate` @0x1006b4894]: the Music,
+ * Movies (Video) and Desktop boxes stacked under the heading, then Specified user folders,
+ * then the folder list with Add and Del, which are greyed until that box is
+ * ticked. Music, Video and Desktop start ticked; Specified user folders
+ * does not (`SettingIF::isSelectedAutoRelocate*Folder`). Auto Relocate
+ * searches the ticked ones in that order, the user's folders first.
  */
-function RelocateSection({ folders, onFolders }: {
-  folders: readonly string[];
-  onFolders: (folders: string[]) => void;
+/**
+ * The second box's word. rekordbox's constructor makes it "Video" and its
+ * `lookAndFeelChanged` @0x1006b557c, which puts every label through
+ * `translate`, renames it "Movies" in the macOS build [OBS static], the
+ * name of the folder it searches there. [ASSUME] Windows keeps "Video".
+ */
+const VIDEO_LABEL = detectPlatform().mac ? "Movies" : "Video";
+
+function RelocateSection({ advanced, set }: {
+  advanced: AdvancedPreferences;
+  set: (patch: Partial<AdvancedPreferences>) => void;
 }) {
+  const folders = advanced.relocateFolders;
+  const own = advanced.relocateUserFolders;
   const [picked, setPicked] = useState<string>(folders[0] ?? "");
   const current = folders.includes(picked) ? picked : (folders[0] ?? "");
 
   return (
     <Section title="Auto Relocate Search Folders">
-      <Sub>Specified user folders</Sub>
+      <Checkbox label="Music" checked={advanced.relocateMusic} onChange={(relocateMusic) => set({ relocateMusic })} />
+      <Checkbox label={VIDEO_LABEL} checked={advanced.relocateVideo} onChange={(relocateVideo) => set({ relocateVideo })} />
+      <Checkbox label="Desktop" checked={advanced.relocateDesktop} onChange={(relocateDesktop) => set({ relocateDesktop })} />
+      <Checkbox
+        label="Specified user folders"
+        checked={own}
+        onChange={(relocateUserFolders) => set({ relocateUserFolders })}
+      />
       <div className={styles.actions}>
         <select
           className={styles.select}
           data-plain
           aria-label="Search folders"
           value={current}
+          disabled={!own}
           onChange={(e) => setPicked(e.target.value)}
         >
-          {folders.length === 0 ? <option value="">No folders</option> : null}
+          {folders.length === 0 ? <option value="">(no choices)</option> : null}
           {folders.map((folder) => (
             <option key={folder} value={folder}>{folder}</option>
           ))}
         </select>
         <Button
+          disabled={!own}
           onClick={() => {
             void (async () => {
               const backend = await getBackend();
               const folder = await backend.pickFolder("Choose a folder to search for moved files");
               if (folder === null || folders.includes(folder)) return;
-              onFolders([...folders, folder]);
+              set({ relocateFolders: [...folders, folder] });
               setPicked(folder);
             })();
           }}
         >
           Add
         </Button>
-        <Button disabled={current === ""} onClick={() => onFolders(folders.filter((f) => f !== current))}>
+        <Button
+          disabled={!own || current === ""}
+          onClick={() => set({ relocateFolders: folders.filter((f) => f !== current) })}
+        >
           Del
         </Button>
       </div>
