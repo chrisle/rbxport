@@ -892,6 +892,30 @@ fn the_information_panel_reads_and_writes_a_multiple_selection() {
     assert_eq!(err.kind, ErrorKind::ReadOnly);
 }
 
+/// The list keeps a selection's ids after the tracks behind them leave the
+/// collection. An edit over that selection writes the tracks still there,
+/// as one step that one Undo takes back, rather than failing on the gone
+/// one after writing the tracks before it.
+#[test]
+fn an_edit_over_a_selection_with_a_removed_track_writes_the_rest_as_one_step() {
+    let s = shell();
+    let tracks = vec![track_id(2), track_id(3), track_id(4)];
+    run(commands::remove_from_collection(s.handle(), s.state(), vec![track_id(3)])).unwrap();
+
+    run(details::set_track_field(s.handle(), s.state(), tracks.clone(), "genre".into(), "Techno".into()))
+        .unwrap();
+    for track in [track_id(2), track_id(4)] {
+        let record = run(details::track_details(s.state(), track.clone())).unwrap();
+        assert_eq!(record.genre, "Techno", "{track}");
+    }
+
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    for track in [track_id(2), track_id(4)] {
+        let record = run(details::track_details(s.state(), track.clone())).unwrap();
+        assert_eq!(record.genre, "", "{track} undone");
+    }
+}
+
 #[test]
 fn a_cue_added_through_the_command_is_read_back_and_announced() {
     let s = shell();

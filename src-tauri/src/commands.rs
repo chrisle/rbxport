@@ -3584,6 +3584,13 @@ pub async fn reorder_playlist<R: tauri::Runtime>(
 /// rekordbox's information panel writes a multiple selection the same way:
 /// `TrackInfoConcreteMediator::updateDB` takes the whole selected array and
 /// sets the one value on each (7.2.11, static analysis).
+///
+/// Each track is its own transaction, so a failure partway through would
+/// leave the tracks before it changed with nothing in the history to take
+/// them back. The steps already written are undone, last first, before the
+/// error is returned: the edit lands on every track or on none. Ids that
+/// are no longer in the library are passed over first; the list keeps a
+/// selection's ids after the tracks behind them are removed.
 pub(crate) fn each_track<F>(
     w: &mut rbl_db::write::Writer,
     tracks: &[String],
@@ -3594,12 +3601,46 @@ where
 {
     let mut edits = Vec::with_capacity(tracks.len());
     for track in tracks {
-        let (_, edit) = edit(w, track)?;
-        if !edit.is_empty() {
-            edits.push(edit);
+        let step = match w.has_track(track) {
+            Ok(false) => continue,
+            Ok(true) => edit(w, track),
+            Err(error) => Err(error),
+        };
+        match step {
+            Ok((_, edit)) => {
+                if !edit.is_empty() {
+                    edits.push(edit);
+                }
+            }
+            Err(error) => return Err(roll_back(w, &edits, error)),
         }
     }
     Ok(LibraryEdit::Track(edits))
+}
+
+/// Undoes `applied`, last first, after `error` stopped [`each_track`].
+/// Returns the error to report: `error` itself, or one that also says how
+/// many tracks could not be put back.
+fn roll_back(
+    w: &mut rbl_db::write::Writer,
+    applied: &[rbl_db::write::TrackEdit],
+    error: rbl_db::DbError,
+) -> rbl_db::DbError {
+    let mut stranded = 0usize;
+    for step in applied.iter().rev() {
+        if let Err(undo) = w.undo_track_edit(step) {
+            tracing::error!(error = %undo, "could not undo a track edit after a failed multi-track edit");
+            stranded += 1;
+        }
+    }
+    if stranded == 0 {
+        return error;
+    }
+    // `Io` displays the message as it is, with no prefix of its own.
+    rbl_db::DbError::Io(std::io::Error::other(format!(
+        "{error}; {stranded} of {} already-edited tracks could not be changed back",
+        applied.len()
+    )))
 }
 
 /// Rates every track in `tracks`: one track from the list, or the whole
@@ -3720,6 +3761,47 @@ mod tests {
         state.write_then(|w| super::apply_history(w, &edit, true), |_, ()| Ok(())).unwrap();
         for track in &tracks {
             assert_eq!(genre(&state, track), "", "undone on {track}");
+        }
+    }
+
+    /// A step that fails partway through a multiple selection takes back the
+    /// tracks already written, so the edit lands on all of them or on none:
+    /// each track is its own transaction, and a failed edit records nothing
+    /// an Undo could reach.
+    #[test]
+    fn a_failure_partway_through_several_tracks_puts_the_earlier_ones_back() {
+        use crate::state::AppState;
+        use rbl_db::write::TrackField;
+
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        crate::backups::create(&state).unwrap();
+        let tracks: Vec<String> = (1..=4).map(rbl_db::fixture::track_id).collect();
+        let failing = tracks[2].clone();
+        let genre = |state: &AppState, id: &str| {
+            state.read_db(|db| db.track_details(id)).unwrap().unwrap().genre
+        };
+
+        let result = state.write_then(
+            |w| {
+                super::each_track(w, &tracks, |w, track| {
+                    if track == failing {
+                        return Err(rbl_db::DbError::WriteRefused("disk full".to_owned()));
+                    }
+                    w.set_field_with_undo(track, TrackField::Genre, "Techno")
+                })
+            },
+            |_, edit| Ok(edit),
+        );
+
+        let error = result.err().expect("the failing step is reported");
+        assert!(error.to_string().contains("disk full"), "{error}");
+        for track in &tracks {
+            assert_eq!(genre(&state, track), "", "{track} is as it was");
         }
     }
 

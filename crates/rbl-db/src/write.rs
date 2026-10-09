@@ -1677,6 +1677,12 @@ impl Writer {
         self.track_edit(content, column, |writer| writer.set_field(content, field, value))
     }
 
+    /// Whether `content` is a track in the library: a row that is there and
+    /// not soft-deleted.
+    pub fn has_track(&self, content: &str) -> Result<bool> {
+        content_exists(self.library.connection(), content)
+    }
+
     pub fn undo_track_edit(&mut self, edit: &TrackEdit) -> Result<Changed> {
         self.touch_content(&edit.content, edit.column, &edit.before)
     }
