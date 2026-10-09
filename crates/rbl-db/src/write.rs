@@ -969,6 +969,84 @@ impl Writer {
         Ok(outcome)
     }
 
+    /// Makes a playlist hold exactly `contents`, in that order, the first of a
+    /// repeated track counting: the current members are soft-deleted and the
+    /// new ones written with `TrackNo` 1..N, all in one transaction, so a
+    /// refusal or error partway leaves the old members and order as they were.
+    /// Writes nothing when the playlist already holds exactly these. Refuses an
+    /// intelligent playlist, a folder, and a track not in the library.
+    /// `rows` is the membership rows written for the new members.
+    pub fn set_tracks(&mut self, playlist: &str, contents: &[String]) -> Result<Changed> {
+        let mut seen = std::collections::HashSet::new();
+        let wanted: Vec<&String> = contents.iter().filter(|c| seen.insert(c.as_str())).collect();
+        self.prepare()?;
+        let stamp = time::now();
+        let mut ids: Vec<(String, String)> = Vec::with_capacity(wanted.len());
+        for _ in &wanted {
+            ids.push((self.rng.uuid4(), self.rng.uuid4()));
+        }
+
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let attribute: Option<i64> = tx
+            .query_row(
+                "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![playlist],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match attribute {
+            None => return Err(DbError::WriteRefused(format!("no playlist {playlist}"))),
+            Some(ATTRIBUTE_FOLDER) => {
+                return Err(DbError::WriteRefused(format!("{playlist} is a folder, not a playlist")))
+            }
+            Some(_) => refuse_if_smart(&tx, playlist)?,
+        }
+        let current: Vec<(String, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT ID, ContentID FROM djmdSongPlaylist
+                 WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID",
+            )?;
+            let rows = stmt.query_map(params![playlist], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        if current.len() == wanted.len()
+            && current.iter().zip(&wanted).all(|((_, have), want)| have == *want)
+        {
+            return Ok(Changed { rows: 0, usn: 0 });
+        }
+
+        let mut usn = 0;
+        for (row_id, _) in &current {
+            usn = next_usn(&tx)?;
+            tx.execute(
+                "UPDATE djmdSongPlaylist SET rb_local_deleted = 1, rb_local_usn = ?1,
+                    updated_at = ?2 WHERE ID = ?3",
+                params![usn, stamp, row_id],
+            )?;
+        }
+        let mut rows = 0;
+        for ((track_no, content), (row_id, uuid)) in (1_i64..).zip(&wanted).zip(ids) {
+            // Checked here, after the old rows are gone, so a refusal is the
+            // transaction rolling back, never a half-replaced playlist.
+            if !content_exists(&tx, content)? {
+                return Err(DbError::WriteRefused(format!("no track {content}")));
+            }
+            usn = next_usn(&tx)?;
+            rows += tx.execute(
+                "INSERT INTO djmdSongPlaylist
+                    (ID, PlaylistID, ContentID, TrackNo, UUID,
+                     rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                     usn, rb_local_usn, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+                params![row_id, playlist, content, track_no, uuid, usn, stamp],
+            )?;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
     /// Removes tracks from a playlist and closes the gaps in `TrackNo`.
     pub fn remove_tracks(&mut self, playlist: &str, contents: &[String]) -> Result<Changed> {
         self.prepare()?;

@@ -401,6 +401,64 @@ fn adding_a_track_already_present_does_nothing() {
 }
 
 #[test]
+fn setting_a_playlists_tracks_replaces_them_in_the_order_given() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0), track_id(1), track_id(2)]).unwrap();
+
+    let wanted = vec![track_id(3), track_id(1), track_id(3)];
+    let changed = f.writer.set_tracks(&list, &wanted).unwrap();
+
+    assert_eq!(changed.rows, 2, "a repeated track is written once");
+    assert_eq!(f.order(&list), vec![track_id(3), track_id(1)]);
+    assert_eq!(f.track_numbers(&list), vec![1, 2]);
+    assert_eq!(f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'"), changed.usn);
+    // The old rows are soft-deleted, as remove_tracks leaves them.
+    assert_eq!(
+        f.one::<i64>("SELECT COUNT(*) FROM djmdSongPlaylist WHERE PlaylistID = ?1 AND rb_local_deleted = 1", &[&list]),
+        3
+    );
+
+    let usn = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+    let again = f.writer.set_tracks(&list, &[track_id(3), track_id(1)]).unwrap();
+    assert_eq!(again.rows, 0, "already holding exactly these writes nothing");
+    assert_eq!(f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'"), usn);
+}
+
+#[test]
+fn a_set_of_a_playlists_tracks_that_fails_partway_leaves_the_old_ones() {
+    // The old members are soft-deleted before the bad track is reached; the
+    // refusal must roll that back, not leave the playlist empty.
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    let old = vec![track_id(2), track_id(0), track_id(1)];
+    f.writer.add_tracks(&list, &old).unwrap();
+    let usn = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+    let rows = f.count("SELECT COUNT(*) FROM djmdSongPlaylist");
+
+    let err = f.writer.set_tracks(&list, &[track_id(3), "no-such-track".to_owned()]).unwrap_err();
+
+    assert!(matches!(err, DbError::WriteRefused(_)), "{err:?}");
+    assert_eq!(f.order(&list), old);
+    assert_eq!(f.track_numbers(&list), vec![1, 2, 3]);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongPlaylist"), rows);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 1"), 0);
+    assert_eq!(f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'"), usn);
+}
+
+#[test]
+fn an_intelligent_playlist_or_folder_has_no_tracks_to_set() {
+    let mut f = fixture();
+    let smart = f.writer.create_smart_playlist("Smart", ROOT, |_| "<NODE/>".to_owned()).unwrap();
+    let folder = f.writer.create_folder("Crate", ROOT).unwrap();
+    for node in [&smart, &folder] {
+        let err = f.writer.set_tracks(node, &[track_id(0)]).unwrap_err();
+        assert!(matches!(err, DbError::WriteRefused(_)), "{err:?}");
+        assert_eq!(f.one::<i64>("SELECT COUNT(*) FROM djmdSongPlaylist WHERE PlaylistID = ?1", &[node]), 0);
+    }
+}
+
+#[test]
 fn removing_a_track_closes_the_gap_it_leaves() {
     // TrackNo is contiguous from 1 in every one of the 683 reference
     // playlists; a hole makes rekordbox render the playlist with a gap.

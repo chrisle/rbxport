@@ -368,7 +368,8 @@ pub fn import(writer: &mut Writer, library: &XmlLibrary, progress: &mut dyn FnMu
         let id = if let Some(id) = existing_node(writer.library(), &parent, &node.name, attribute, &claimed)? {
             report.playlists_replaced += 1;
             if !node.folder {
-                report.playlist_tracks += replace_tracks(writer, &id, &members)?;
+                // One transaction: a failure leaves the old members as they were.
+                report.playlist_tracks += writer.set_tracks(&id, &members)?.rows;
             }
             id
         } else {
@@ -415,30 +416,6 @@ pub fn same_named_lists(library: &Library, document: &XmlLibrary) -> Result<Vec<
         parents.push(existing);
     }
     Ok(found)
-}
-
-/// Makes a playlist hold exactly `members`, in that order. Writes nothing when
-/// it already does. Returns the membership rows written.
-fn replace_tracks(writer: &mut Writer, playlist: &str, members: &[String]) -> Result<usize> {
-    let current: Vec<String> = {
-        let connection = writer.library().connection();
-        let mut stmt = connection.prepare(
-            "SELECT ContentID FROM djmdSongPlaylist
-             WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID",
-        )?;
-        let rows = stmt.query_map(params![playlist], |r| r.get::<_, String>(0))?;
-        rows.collect::<rusqlite::Result<_>>()?
-    };
-    if current == members {
-        return Ok(0);
-    }
-    if !current.is_empty() {
-        writer.remove_tracks(playlist, &current)?;
-    }
-    if members.is_empty() {
-        return Ok(0);
-    }
-    Ok(writer.add_tracks(playlist, members)?.rows)
 }
 
 /// The cues of a document track onto a library track. `Num` -1 is a memory
