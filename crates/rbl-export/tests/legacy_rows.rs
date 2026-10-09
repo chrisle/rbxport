@@ -1,5 +1,6 @@
 //! The parts of `export.pdb` that NXS-era players read and the CDJ-3000 does
-//! not: each row's slot on its page (#182). The bytes are read straight off the pages, the way the
+//! not: each row's slot on its page, and where each playlist sits in its
+//! folder (#182). The bytes are read straight off the pages, the way the
 //! players' DeviceSQL engine reads them, not through `rbl_pdb`'s reader.
 //!
 //! Every stick here is written into a temporary directory.
@@ -99,4 +100,60 @@ fn rows_carry_their_slot_on_the_page_as_rekordboxs_do() {
     let property = rows(&file, 19);
     assert_eq!(property.len(), 1);
     assert_eq!(u2(property[0].2, 2), 0);
+}
+
+/// rekordbox numbers the playlists and folders in each folder, and at the
+/// root, from 0 with no gaps [OBS: a stick rekordbox 7 wrote has its three
+/// root playlists at 0, 1 and 2; rekordbox 7.2.14 renumbers a folder's
+/// children from 0 after a delete, `parity/issue-186`]. rbxport numbered
+/// every playlist in one run from 1, so a folder's first child could be 2
+/// and the root's last a number higher than the root has playlists.
+#[test]
+fn playlists_are_numbered_from_0_within_their_folder_in_both_databases() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let tracks: Vec<SourceTrack> = (1..=2).map(|n| track(src.path(), n)).collect();
+    let playlist = |id: u64, parent_id: u64, name: &str, folder: bool| SourcePlaylist {
+        id,
+        parent_id,
+        name: name.into(),
+        folder,
+        track_indices: if folder { Vec::new() } else { vec![0, 1] },
+        ..Default::default()
+    };
+    let playlists = [
+        playlist(10, 0, "Folder A", true),
+        playlist(11, 10, "Inside A", false),
+        playlist(12, 0, "Top List", false),
+        playlist(13, 0, "Folder B", true),
+        playlist(14, 13, "B One", false),
+        playlist(15, 13, "B Two", false),
+    ];
+    export(dest.path(), &tracks, &playlists).unwrap();
+
+    let expected = [
+        ("Folder A", 0),
+        ("Inside A", 0),
+        ("Top List", 1),
+        ("Folder B", 2),
+        ("B One", 0),
+        ("B Two", 1),
+    ];
+    let file = pdb(dest.path());
+    let tree: Vec<(String, u32)> = rows(&file, 7)
+        .iter()
+        .map(|(_, _, row)| {
+            // Short ASCII: the length byte is (len + 1) * 2 + 1.
+            let len = (row[20] as usize - 1) / 2 - 1;
+            (String::from_utf8(row[21..21 + len].to_vec()).unwrap(), u4(row, 8))
+        })
+        .collect();
+    assert_eq!(tree, expected.map(|(name, at)| (name.to_owned(), at)));
+
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(&dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    let (one, _) = rbl_onelibrary::playlists::read(db.connection()).unwrap();
+    let mut one: Vec<(String, i64)> = one.into_iter().map(|row| (row.name, row.sequence)).collect();
+    let mut want: Vec<(String, i64)> = expected.iter().map(|(name, at)| ((*name).to_owned(), i64::from(*at))).collect();
+    one.sort();
+    want.sort();
+    assert_eq!(one, want);
 }
