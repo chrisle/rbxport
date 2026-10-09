@@ -32,7 +32,6 @@ import { transposeKey } from "@/lib/camelot";
 import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
-import { askToReplaceLists } from "@/lib/xmlImport";
 import { deviceId, devicePath, renamedDevice } from "@/lib/devices";
 import { DEVICE_ASKS, deviceNodeId, deviceParentFor, devicePlaylistsOf, isDeviceLibraryKind, parseDeviceNodeId } from "@/lib/deviceLibrary";
 import { useDeviceLibraries } from "@/store/useDeviceLibraries";
@@ -1877,49 +1876,15 @@ function AppBody() {
     [runImport],
   );
 
+  // File > Import rekordbox xml / iTunes Library, loaded on demand to keep
+  // the first paint small.
   const importXmlFromMenu = useCallback(async (source: "rekordbox" | "itunes" = "rekordbox") => {
-    report(source === "itunes" ? "Choosing the iTunes Library.xml…" : "Choosing a rekordbox XML file…");
-    let stopProgress = () => {};
-    let finished = false;
-    try {
-      const backend = await getBackend();
-      stopProgress = backend.onImportProgress((p) => {
-        if (finished) return;
-        setNote({
-          text: p.total > 0
-            ? t("Importing {done} of {total} tracks…", { done: p.done.toLocaleString(), total: p.total.toLocaleString() })
-            : t("Importing…"),
-          failed: false,
-          busy: true,
-        });
-      });
-      // rekordbox asks before replacing same-named lists (#152); Cancel
-      // imports nothing.
-      const confirmReplace = () => askToReplaceLists(backend, t);
-      const imported = source === "itunes"
-        ? await backend.importItunes(confirmReplace)
-        : await backend.importXml(confirmReplace);
-      if (imported === null) {
-        setNote(null);
-        return;
-      }
-      const parts = [
-        `${imported.imported} track${imported.imported === 1 ? "" : "s"} imported`,
-        imported.existing > 0 ? `${imported.existing} already here` : "",
-        imported.skipped.length > 0 ? `${imported.skipped.length} skipped` : "",
-        `${imported.playlists} playlist${imported.playlists === 1 ? "" : "s"}`,
-        imported.cues > 0 ? `${imported.cues} cue${imported.cues === 1 ? "" : "s"}` : "",
-      ].filter((part) => part !== "");
-      report(`${parts.join(", ")}.`);
+    const { importCollection } = await import("@/lib/xmlImport");
+    await importCollection(source, t, setNote, async (backend, imported) => {
       setTree(await backend.playlistTree());
       if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
-    } catch (e) {
-      refuse(e instanceof Error ? e.message : "That XML could not be imported.");
-    } finally {
-      finished = true;
-      stopProgress();
-    }
-  }, [t, report, refuse, analysisPrefs.auto, analysis]);
+    });
+  }, [t, analysisPrefs.auto, analysis]);
 
   const exportXmlFromMenu = useCallback(async () => {
     report("Choosing where to write the XML…");
