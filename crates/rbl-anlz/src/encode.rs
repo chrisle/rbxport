@@ -8,9 +8,10 @@
 //! - `PWAV`, `PWV2`, `PWV3`: one byte a column, five bits of height and
 //!   three of "whiteness" — how much of the column is treble.
 //! - `PWV4`: six bytes a column, the first the raw peak out of 127 and the
-//!   last three the red, green and blue, which track the mid, high and low
+//!   last three the red, green and blue, which track the low, mid and high
 //!   bands [OBS]. Bytes 1 and 2 are `[UNKNOWN]` and written as zero.
-//! - `PWV5`: a big-endian `u16` a column, `rrrgggbbbhhhhh00`.
+//! - `PWV5`: a big-endian `u16` a column, `rrrgggbbbhhhhh00`, red, green
+//!   and blue again the low, mid and high bands [OBS].
 //! - `PWV6`, `PWV7`: three bytes a column, low, mid and high out of 127.
 //!
 //! `PWAV` is 400 columns and `PWV2` 100; `PWV4` and `PWV6` are 1,200; the
@@ -18,13 +19,14 @@
 //! peak preview uses the loudest column of each bucket. `PWV6` uses an
 //! independent energy envelope when supplied to [`author_with_overview`].
 //!
-//! Every height drawn comes from the three bands, never from the column's
-//! raw sample peak — that is `PWV4`'s first byte and nothing else. The
-//! bands are not all written at one scale: `PWV6` takes [`band`],
-//! while `PWV7` keeps the full seven-bit detail range;
-//! `PWV4`'s colour channels the plain seven-bit narrowing, `PWV5`'s the
-//! top three bits. Each of those is what rekordbox's own files hold; see
-//! the functions for the measurements.
+//! The preview heights (`PWAV`, `PWV2`) come from the three bands; the
+//! scrolling details' (`PWV3`, `PWV5`) from the column's sample peak, on
+//! rekordbox's squared curve — see [`detail_height`]. The bands are not all
+//! written at one scale: `PWV6` takes [`band`], while `PWV7` keeps the full
+//! seven-bit detail range; `PWV4`'s colour channels a weighted seven-bit
+//! narrowing, `PWV5`'s a colour normalised to its strongest band. Each of
+//! those is what rekordbox's own files hold; see the functions for the
+//! measurements.
 
 use rbl_core::FourCc;
 
@@ -109,25 +111,43 @@ const PWAV_CEILING: u32 = 25;
 const PWV2_CEILING: u32 = 15;
 const DETAIL_CEILING: u32 = 31;
 
-/// A column's drawn height, up to `ceiling`.
+/// A preview column's drawn height, up to `ceiling`.
 ///
-/// The loudest of the three bands, not the column's raw sample peak. They
-/// are not the same thing and rekordbox draws the first: on a loud master
-/// its raw peak, the byte it writes as `PWV4`'s height and the one ours
-/// already matches, is pinned at full scale for most of the track, while
-/// the heights it draws keep their dynamics - `PWAV` sits at 10-21 of its
-/// 25 and `PWV3` at 5-19 of its 31 [OBS 7.2.11]. Taking the peak put every
-/// column at the top: a solid block.
+/// The loudest of the three bands, not the column's raw sample peak taken
+/// linearly: on a loud master the peak over a whole preview bucket, the
+/// byte rekordbox writes as `PWV4`'s height and the one ours already
+/// matches, is pinned at full scale for most of the track, while the
+/// `PWAV` heights it draws keep their dynamics, sitting at 10-21 of its 25
+/// [OBS 7.2.11]. Taking that peak put every column at the top: a solid
+/// block. The scrolling details, whose 1/150 s columns are short enough to
+/// keep the peak's dynamics, use [`detail_height`] instead.
 fn band_height(column: BandColumn, ceiling: u32) -> u32 {
     let loudest = u32::from(band(column.low).max(band(column.mid)).max(band(column.high)));
     (loudest * ceiling / BAND_FULL_SCALE).min(ceiling)
 }
 
-/// The one-byte encoding: height in the low five bits, whiteness above.
-fn mono_byte(column: BandColumn, ceiling: u32) -> u8 {
+/// A scrolling detail column's height, 0..=31: the column's sample peak
+/// squared, rounded into the five bits.
+///
+/// rekordbox's `PWV3` height is `round(31 * (peak / 255)^2)` of the same
+/// 1/150 s sample peak this analysis takes: against it over eleven
+/// rekordbox-analysed tracks (three of them not used to find the curve)
+/// the mean error is 0.14 to 0.42 of a step, where the band-derived
+/// height it replaces was 2.6 to 4.8 out, its 95th percentile 16-28 of 31
+/// where rekordbox's is 21-31 [OBS 7.2.11, issue #158].
+/// rekordbox's `PWV5` height is the same as its `PWV3` on 63-93% of
+/// columns, differing either way on the rest, so the one curve serves both.
+fn detail_height(column: BandColumn) -> u32 {
+    const FULL: u32 = 255 * 255;
+    let peak = u32::from(column.peak);
+    ((DETAIL_CEILING * peak * peak + FULL / 2) / FULL).min(DETAIL_CEILING)
+}
+
+/// The one-byte encoding: `height` in the low five bits, whiteness above.
+fn mono_byte(column: BandColumn, height: u32) -> u8 {
     let total = u32::from(column.low) + u32::from(column.mid) + u32::from(column.high);
     let whiteness = (u32::from(column.high) * 7 + total / 2).checked_div(total).unwrap_or(0);
-    u8::try_from((whiteness.min(7) << 5) | band_height(column, ceiling)).unwrap_or(0)
+    u8::try_from((whiteness.min(7) << 5) | height.min(DETAIL_CEILING)).unwrap_or(0)
 }
 
 /// The lowest height rekordbox writes in each preview tag. A silent column
@@ -145,7 +165,7 @@ const PWV2_FLOOR: u8 = 1;
 /// `PWAV`: 400 columns, one byte each, the height at least [`PWAV_FLOOR`].
 #[must_use]
 pub fn pwav(columns: &[BandColumn]) -> Vec<u8> {
-    resample(columns, PREVIEW_COLUMNS).into_iter().map(|c| device_preview_byte(mono_byte(c, PWAV_CEILING))).collect()
+    resample(columns, PREVIEW_COLUMNS).into_iter().map(|c| device_preview_byte(mono_byte(c, band_height(c, PWAV_CEILING)))).collect()
 }
 
 /// `PWV2`: 100 columns, one byte each: the height alone, 1..=15.
@@ -205,15 +225,31 @@ pub fn with_device_preview(section: &Section) -> Section {
     Section { tag: section.tag, header: section.header.clone(), payload: section.payload.iter().map(|&b| repair(b)).collect() }
 }
 
-/// `PWV3`: every column, one byte each.
+/// `PWV3`: every column, one byte each, at [`detail_height`].
 #[must_use]
 pub fn pwv3(columns: &[BandColumn]) -> Vec<u8> {
-    columns.iter().copied().map(|c| mono_byte(c, DETAIL_CEILING)).collect()
+    columns.iter().copied().map(|c| mono_byte(c, detail_height(c))).collect()
 }
+
+/// `PWV4`'s mid and high channels as fractions of the plain seven-bit
+/// narrowing: `PWV4_MID_GAIN.0 / PWV4_MID_GAIN.1` and likewise for high;
+/// low keeps the plain narrowing.
+///
+/// The XDJ-AZ scales a column's three channels so the strongest is full
+/// before it draws them (firmware 1.30, the `PWV4` reader `FUN_017a8e1c`),
+/// so the colour drawn depends only on their ratios, which these gains
+/// set. Compared that way, scaled to 255, with rekordbox's own `PWV4` for
+/// the same audio, these gains leave a mean error of 26 to 34 a channel on
+/// eleven rekordbox-analysed tracks (three not used to choose them), where
+/// the unweighted channels were 20 to 68 out and the mid, high and low
+/// order this used to write 61 to 121 [OBS 7.2.11, issue #158].
+const PWV4_MID_GAIN: (u32, u32) = (4, 5);
+const PWV4_HIGH_GAIN: (u32, u32) = (13, 20);
 
 /// `PWV4`: 1,200 columns of six bytes.
 #[must_use]
 pub fn pwv4(columns: &[BandColumn]) -> Vec<u8> {
+    let weigh = |value: u8, (num, den): (u32, u32)| u8::try_from(u32::from(value >> 1) * num / den).unwrap_or(127);
     let mut out = Vec::with_capacity(OVERVIEW_COLUMNS * 6);
     for column in resample(columns, OVERVIEW_COLUMNS) {
         // The three colour channels are seven-bit like the height beside
@@ -224,39 +260,70 @@ pub fn pwv4(columns: &[BandColumn]) -> Vec<u8> {
         // straight from the 0..=255 band these ran to 255, which put half
         // of them outside the field.
         //
-        // Ours still sit about 1.8x rekordbox's at the median here, where
-        // `PWV6` now matches it: the two sections disagree about how hot a
-        // band should be and only `PWV6`'s scale has been pinned down.
+        // The channels are low, mid and high in that order: rekordbox's
+        // byte 3 runs with its own `PWV6` low band at r = 0.83 to 0.96 on
+        // every one of eleven tracks, and with ours at 0.93 to 0.99, where
+        // the mid this used to write there managed 0.43 to 0.84 [OBS 7.2.11,
+        // issue #158].
         out.extend_from_slice(&[
             column.peak >> 1,
             0,
             0,
-            column.mid >> 1,
-            column.high >> 1,
             column.low >> 1,
+            weigh(column.mid, PWV4_MID_GAIN),
+            weigh(column.high, PWV4_HIGH_GAIN),
         ]);
     }
     out
 }
 
-/// `PWV5`: every column as a big-endian word, `rrrgggbbbhhhhh00`.
+/// `PWV5`'s three colour channels for a column, `(red, green, blue)`: the
+/// low, mid and high bands as shares of the strongest of them, so the
+/// colour says which bands the column holds and the height alone how loud
+/// it is.
 ///
-/// The three-bit colour channels keep the band's own top bits rather than
-/// the scaled `band` the six-byte sections take: three bits is coarse
-/// enough that rekordbox uses most of the range here, its green and blue
-/// sitting at 5 and 6 of 7 where ours sit at 2 [OBS] - scaling them down
-/// would widen that, not close it. (That gap is a colour-mapping
-/// difference, not a scale one, and is left alone.) The height is the
-/// band-derived one into the whole five bits, as `PWV3`'s is: rekordbox's
-/// reaches 31 on every reference track, where its `PWAV` stops at 25.
+/// What rekordbox writes, over eight rekordbox-analysed tracks [OBS 7.2.11,
+/// issue #158]:
+///
+/// - red runs with the column's low band, green with its mid and blue with
+///   its high (r = 0.76 to 0.86, 0.46 to 0.80 and 0.59 to 0.82 against each band's share
+///   of the column). This used to write mid, high and low.
+/// - The colour is normalised: the strongest channel is 7 in 80% of columns
+///   and 5 or 6 in nearly all the rest. Green tops out at 5 — 51% of columns
+///   have it there, 2.6% at 6 and 0.2% at 7. The plain top three bits written here
+///   before left all three channels at 1 or 2 on most columns.
+/// - High weighs 1.5 times the other two in choosing the strongest; that
+///   weight and green's ceiling of 5 give the least error of the
+///   combinations tried, 0.66 to 0.91 of a step a channel on all eleven
+///   tracks (three not used to choose them), where this was 3.0 to 3.3.
+///
+/// The XDJ-AZ draws these bits as they are, each shifted up into a byte,
+/// without normalising (firmware 1.30,
+/// `DetailedWaveformDataProvider<DetailedWaveform_RGB>` slot 7 at
+/// `0x01b94d90`), so the plain bits drew dim, washed-out columns.
+fn pwv5_colour(column: BandColumn) -> (u16, u16, u16) {
+    let low = 2 * u32::from(column.low);
+    let mid = 2 * u32::from(column.mid);
+    let high = 3 * u32::from(column.high);
+    let strongest = low.max(mid).max(high);
+    if strongest == 0 {
+        return (0, 0, 0);
+    }
+    let share = |value: u32, full: u32| u16::try_from((2 * full * value + strongest) / (2 * strongest)).unwrap_or(0);
+    (share(low, 7), share(mid, 5), share(high, 7))
+}
+
+/// `PWV5`: every column as a big-endian word, `rrrgggbbbhhhhh00` — the
+/// colour from [`pwv5_colour`], the height from [`detail_height`].
 #[must_use]
 pub fn pwv5(columns: &[BandColumn]) -> Vec<u8> {
     let mut out = Vec::with_capacity(columns.len() * 2);
-    for column in columns {
-        let word = (u16::from(column.mid >> 5) << 13)
-            | (u16::from(column.high >> 5) << 10)
-            | (u16::from(column.low >> 5) << 7)
-            | (u16::try_from(band_height(*column, DETAIL_CEILING)).unwrap_or(0) << 2);
+    for &column in columns {
+        let (red, green, blue) = pwv5_colour(column);
+        let word = (red << 13)
+            | (green << 10)
+            | (blue << 7)
+            | (u16::try_from(detail_height(column)).unwrap_or(0) << 2);
         out.extend_from_slice(&word.to_be_bytes());
     }
     out
@@ -481,9 +548,10 @@ mod tests {
         // short of the top of it: the headroom rekordbox leaves, without
         // which a loud track draws as a block with its top cut off.
         assert!(pwv4(&columns).chunks(6).all(|c| c[0] <= 127));
-        // `PWV4`'s colours use the whole seven bits; `PWV6`'s stop at `band`.
+        // `PWV4`'s colours use the whole seven bits, mid and high weighted
+        // down; `PWV6`'s stop at `band`.
         assert!(pwv4(&columns).chunks(6).all(|c| c[3] <= 127 && c[4] <= 127 && c[5] <= 127));
-        assert_eq!(pwv4(&[BandColumn { low: 255, mid: 255, high: 255, peak: 255 }])[3..6], [127, 127, 127]);
+        assert_eq!(pwv4(&[BandColumn { low: 255, mid: 255, high: 255, peak: 255 }])[3..6], [127, 101, 82]);
         assert!(pwv6(&columns).iter().all(|&b| b <= 44));
         assert!(pwv7(&columns).iter().all(|&b| b <= 127));
         assert_eq!(pwv7(&[BandColumn { low: 255, mid: 128, high: 64, peak: 255 }]), [127, 64, 32]);
@@ -501,11 +569,90 @@ mod tests {
         // A treble-only column is white; a bass-only one is not.
         assert_eq!(mono_byte(BandColumn { low: 0, mid: 0, high: 255, peak: 255 }, PWAV_CEILING) >> 5, 7);
         assert_eq!(mono_byte(BandColumn { low: 255, mid: 0, high: 0, peak: 255 }, PWAV_CEILING) >> 5, 0);
-        // `PWV5` keeps the raw band's top three bits per channel; only its
-        // height is scaled.
+        // A full column: high, weighted 1.5x, is the strongest band, so blue
+        // is full and red and green take their shares; the height fills the
+        // five bits.
         let word = u16::from_be_bytes(pwv5(&[full])[..2].try_into().unwrap());
-        assert_eq!(word >> 7, 0b1_1111_1111, "three bits each of red, green and blue");
-        assert_eq!((word >> 2) & 0x1f, 31, "the band-derived height, into all five bits");
+        assert_eq!(word >> 7, 0b101_011_111, "red 5, green 3, blue 7");
+        assert_eq!((word >> 2) & 0x1f, 31, "the peak-derived height, into all five bits");
+    }
+
+    fn pwv5_word(column: BandColumn) -> u16 {
+        u16::from_be_bytes(pwv5(&[column])[..2].try_into().unwrap())
+    }
+
+    /// `(red, green, blue, height)` of a `PWV5` word.
+    fn pwv5_fields(word: u16) -> [u16; 4] {
+        [word >> 13, (word >> 10) & 7, (word >> 7) & 7, (word >> 2) & 0x1f]
+    }
+
+    #[test]
+    fn colour_channels_are_low_mid_and_high() {
+        // rekordbox's red is the low band, green the mid and blue the high,
+        // in `PWV5` and in `PWV4`'s last three bytes alike (issue #158).
+        let bass = BandColumn { low: 200, mid: 0, high: 0, peak: 200 };
+        let body = BandColumn { low: 0, mid: 200, high: 0, peak: 200 };
+        let hats = BandColumn { low: 0, mid: 0, high: 200, peak: 200 };
+        assert_eq!(pwv5_fields(pwv5_word(bass))[..3], [7, 0, 0], "a kick is red");
+        assert_eq!(pwv5_fields(pwv5_word(body))[..3], [0, 5, 0], "the mids are green, at most 5");
+        assert_eq!(pwv5_fields(pwv5_word(hats))[..3], [0, 0, 7], "the hats are blue");
+        assert_eq!(pwv4(&[bass])[3..6], [100, 0, 0]);
+        assert_eq!(pwv4(&[body])[3..6], [0, 80, 0]);
+        assert_eq!(pwv4(&[hats])[3..6], [0, 0, 65]);
+    }
+
+    #[test]
+    fn pwv5_colour_is_normalised_so_a_quiet_column_is_as_saturated_as_a_loud_one() {
+        // The XDJ-AZ draws the three bits as they are, so the strongest band
+        // must reach the top of its field however quiet the column is; only
+        // the height says how loud it is.
+        let loud = pwv5_fields(pwv5_word(BandColumn { low: 240, mid: 120, high: 40, peak: 250 }));
+        let quiet = pwv5_fields(pwv5_word(BandColumn { low: 60, mid: 30, high: 10, peak: 80 }));
+        assert_eq!(loud[0], 7);
+        assert_eq!(loud[..3], quiet[..3]);
+        assert!(quiet[3] < loud[3]);
+        assert_eq!(pwv5_word(BandColumn::default()), 0, "silence is black and flat");
+    }
+
+    #[test]
+    fn detail_height_is_rekordboxs_squared_peak() {
+        // rekordbox's median `PWV3`/`PWV5` height for a sample peak, read off
+        // eight rekordbox-analysed tracks (issue #158): 56 -> 1, 104 -> 5,
+        // 136 -> 9, 168 -> 13, 200 -> 19, 232 -> 26, 255 -> 31.
+        for (peak, height) in [(0, 0), (56, 1), (104, 5), (136, 9), (168, 13), (200, 19), (232, 26), (255, 31)] {
+            let column = BandColumn { low: peak / 2, mid: peak / 2, high: peak / 4, peak };
+            assert_eq!(u16::from(pwv3(&[column])[0] & 0x1f), height, "PWV3 at peak {peak}");
+            assert_eq!(pwv5_fields(pwv5_word(column))[3], height, "PWV5 at peak {peak}");
+        }
+    }
+
+    #[test]
+    fn pwv5_matches_rekordboxs_own_words_for_these_columns() {
+        // Columns of two tracks rekordbox 7.2.11 analysed and this crate's
+        // analysis did not see while its colour and height were chosen
+        // ("Language (Sam WOLFE Remix)" and "YES BITCH (Sam WOLFE Remix)"):
+        // the bands this analysis measures for the column, then the `PWV5`
+        // word and `PWV3` height in rekordbox's own `.EXT` for it. These are
+        // columns where the two agree exactly, picked to cover the colours;
+        // across all columns the mean error is 0.7-0.8 of a step a channel,
+        // not zero (issue #158).
+        let rekordbox = [
+            ((44, 102, 109, 186), 0x4fc0_u16, 16_u8),
+            ((217, 94, 55, 198), 0xe9cc, 19),
+            ((189, 45, 35, 222), 0xe55c, 23),
+            ((179, 112, 106, 252), 0xef78, 30),
+            ((233, 76, 21, 253), 0xe8fc, 31),
+            ((176, 173, 127, 239), 0xd7ec, 27),
+            ((162, 90, 57, 190), 0xee44, 17),
+            ((41, 68, 149, 182), 0x2bc0, 16),
+            ((173, 97, 41, 236), 0xed6c, 27),
+            ((133, 216, 145, 253), 0x97fc, 31),
+        ];
+        for ((low, mid, high, peak), word, height) in rekordbox {
+            let column = BandColumn { low, mid, high, peak };
+            assert_eq!(pwv5_word(column), word, "PWV5 for {column:?}");
+            assert_eq!(pwv3(&[column])[0] & 0x1f, height, "PWV3 height for {column:?}");
+        }
     }
 
     #[test]
