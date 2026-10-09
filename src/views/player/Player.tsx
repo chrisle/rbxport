@@ -1139,11 +1139,11 @@ export const Player = memo(function Player({
   /** BEAT SYNC lit and Q on: the deck must stay on the master's beat. */
   const phaseLocked = synced && quantize;
   /**
-   * BEAT SYNC lit, matching beats rather than only the BPM: the deck starts
-   * on the master's beat — on PLAY, after a CUE, and when a track is loaded
-   * while PLAY is engaged — whether Q is on or not. rekordbox 7 does so in
-   * all three cases [OBS chris-win11, parity/issue-128]. Q adds the lock
-   * that keeps it there through jumps, cues and loops: see `phaseLocked`.
+   * BEAT SYNC lit, matching beats rather than only the BPM: a track loaded
+   * while PLAY is engaged goes onto the master's beat, Q on or off, as in
+   * rekordbox 7 [OBS chris-win11, parity/issue-128]. Q adds the lock that
+   * keeps it there through jumps, cues and loops: see `phaseLocked`. PLAY
+   * starts on the beat in either sync type: see `togglePlay`.
    */
   const beatSynced = synced && advancedPrefs.syncType !== "bpm";
   /**
@@ -1183,10 +1183,13 @@ export const Player = memo(function Player({
    * then takes the deck over and drops it.
    */
   const alignAfterLoad = useRef<string | null>(null);
+  /** The move a ready load still has to make: see `alignToMaster`. */
+  const alignTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const holdCue = useCallback(() => {
     if (playback.idle) return;
     alignAfterLoad.current = null;
+    globalThis.clearTimeout(alignTimer.current);
     const action = pressCue(
       playback.positionRef.current,
       cuePoint,
@@ -1424,8 +1427,13 @@ export const Player = memo(function Player({
   /** The phase lock waits until this time: see `checkPhase`. */
   const lockHold = useRef(0);
   /**
-   * PLAY. With BEAT SYNC lit, a stopped deck starts on the beat, Q on or
-   * off, as rekordbox does (see `beatSynced`): it is put on its own nearest beat and
+   * PLAY. With sync lit, a stopped deck starts on the beat, Q on or off and
+   * in BPM SYNC as in BEAT SYNC. rekordbox 7 does so with BEAT SYNC
+   * [OBS chris-win11, parity/issue-128], and its BPM SYNC behaviour starts
+   * PLAY with a beat-synced trigger that reads no quantize setting
+   * [OBS static, rekordbox 7.2.19 arm64: BpmSyncBehavior::onPlayWithSyncReq
+   * @0x102b71080 -> SlavePlayerFunctions::triggerWithBeatSync @0x102908398].
+   * The deck is put on its own nearest beat and
    * held until the master's next one lands, so the two are on the beat
    * together from the first sound. The wait is the engine's, counted in
    * output frames. A master that is not running has no next beat to wait
@@ -1441,11 +1449,12 @@ export const Player = memo(function Player({
     // [OBS chris-win11, parity/issue-202].
     // PLAY lines the deck up itself, so a load still waiting to be is done.
     alignAfterLoad.current = null;
+    globalThis.clearTimeout(alignTimer.current);
     if (previewing.current) {
       previewing.current = false;
       if (playback.playing) return;
     }
-    if (!playback.playing && beatSynced) {
+    if (!playback.playing && synced) {
       const leader = peerSync?.();
       const follower = syncState.current();
       if (leader && follower) {
@@ -1464,7 +1473,7 @@ export const Player = memo(function Player({
       }
     }
     playback.toggle();
-  }, [playback, beatSynced, peerSync, grid]);
+  }, [playback, synced, peerSync, grid]);
 
   /*
    * A track loaded while PLAY is engaged starts as soon as it is ready (see
@@ -1497,7 +1506,6 @@ export const Player = memo(function Player({
     playback.moveBy(nudge);
     lockHold.current = performance.now() + PHASE_SETTLE_MS;
   });
-  const alignTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     if (!loadReady || !playback.playing || alignAfterLoad.current !== loadedId) return;
     alignAfterLoad.current = null;
