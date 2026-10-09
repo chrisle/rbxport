@@ -94,6 +94,12 @@ pub struct ManifestTrack {
     pub conversion: String,
     #[serde(default)]
     pub conversion_source_hash: u64,
+    /// The audio was already on the stick, where the library keeps it, and
+    /// the export only pointed the databases at it. It is the library's file,
+    /// not a copy of ours, so a later sync never deletes or replaces it.
+    /// Absent in older records, which only ever name copies.
+    #[serde(default)]
+    pub in_place: bool,
 }
 
 impl ManifestTrack {
@@ -211,6 +217,7 @@ mod tests {
                 artwork: String::new(),
                 conversion: String::new(),
                 conversion_source_hash: 0,
+                in_place: false,
             }],
             playlists: vec![ManifestPlaylist { device_only: false, export_id: 1, folder: false, library_id: 9, name: "Set".to_owned() }],
             loose: vec![42],

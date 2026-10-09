@@ -195,6 +195,10 @@ pub struct ExportReport {
     pub reused: usize,
     /// What not copying them saved.
     pub bytes_reused: u64,
+    /// Of `reused`, tracks whose library file already lives on the stick
+    /// itself: the databases point at it where it is and nothing is copied,
+    /// as rekordbox does.
+    pub in_place: usize,
     /// Tracks taken off the stick because the selection no longer holds them.
     pub removed: usize,
     /// Playlists newly present in this generation (folders excluded).
@@ -390,10 +394,61 @@ pub(crate) fn path_key(path: &str) -> String {
     path.nfc().collect::<String>().to_lowercase()
 }
 
-fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Manifest>) -> Vec<Layout> {
-    let mut used = BTreeSet::new();
-    tracks.iter().zip(ids).map(|(track, id)| {
+/// Where a track's audio already sits on the stick, when the library keeps the
+/// file there: the stick-relative path the databases can name as it is.
+///
+/// rekordbox does not copy such a file. `DatabaseMediator::
+/// get_device_file_path_candidate` (7.2.19 arm64 @0x1009ba39c) keeps the
+/// on-device path when the track's path starts with the device root and
+/// `hasSpecialCharInFilePath` (@0x1009baeb8) finds no component a stick cannot
+/// carry; `export_track_data` (@0x1009b8ca4) then copies the file onto itself,
+/// which `juce::File::copyFileTo` treats as done [OBS static]. A path with
+/// such a component is copied under `Contents/` like any other, as there.
+fn on_stick(destination: &Path, source: &Path) -> Option<String> {
+    use unicode_normalization::UnicodeNormalization;
+    let root = destination.canonicalize().ok()?;
+    let file = source.canonicalize().ok().filter(|f| f.is_file())?;
+    let relative = file.strip_prefix(&root).ok()?;
+    let mut parts = Vec::new();
+    for component in relative.components() {
+        let std::path::Component::Normal(name) = component else { return None };
+        let name = name.to_str()?;
+        // `fat_safe` changes nothing but the characters a stick cannot carry
+        // (and the normal form, which a lookup on the stick ignores).
+        if fat_safe(name) != name.nfc().collect::<String>() { return None; }
+        parts.push(name);
+    }
+    // Never adopt our own staging area or the rekordbox folders as music.
+    let first = parts.first()?;
+    if ["PIONEER", ".PIONEER", PUBLICATION].iter().any(|r| first.eq_ignore_ascii_case(r)) { return None; }
+    Some(format!("/{}", parts.join("/")))
+}
+
+/// [`on_stick`] for each track the selection names; `None` for a track that
+/// is copied. Only one track can own a file: a second library entry for the
+/// same file is copied beside it rather than sharing its analysis.
+fn in_place_paths(destination: &Path, tracks: &[SourceTrack]) -> Vec<Option<String>> {
+    let mut claimed = BTreeSet::new();
+    tracks.iter().map(|track| {
+        if track.device.as_ref().is_some_and(|d| d.preserve) { return None; }
+        on_stick(destination, &track.source_path).filter(|path| claimed.insert(path_key(path)))
+    }).collect()
+}
+
+fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Manifest>, in_place: &[Option<String>]) -> Vec<Layout> {
+    // Library files on the stick keep their names, and nothing copied may land
+    // on one: not this run's, nor one an earlier run pointed at and left.
+    let mut used: BTreeSet<String> = in_place.iter().flatten().map(|path| path_key(path))
+        .chain(previous.into_iter().flat_map(|m| &m.tracks).filter(|t| t.in_place).map(|t| path_key(&t.audio)))
+        .collect();
+    tracks.iter().zip(ids).zip(in_place).map(|((track, id), in_place)| {
         let mut place = layout(track, *id);
+        if let Some(audio) = in_place {
+            place.audio.clone_from(audio);
+            place.file_name = audio.rsplit('/').next().unwrap_or_default().to_owned();
+            place.anlz_dir = place.anlz_dir.replacen("/PIONEER/", &format!("/{root}/"), 1);
+            return place;
+        }
         if let Some(device) = track.device.as_ref().filter(|d| d.preserve) {
             place.audio.clone_from(&device.audio);
             place.file_name = Path::new(&place.audio).file_name().unwrap_or_default().to_string_lossy().into_owned();
@@ -730,7 +785,8 @@ pub fn export_cancellable(
         keys: &mut keys,
     };
 
-    let layouts = layouts(tracks, &ids, root_name, previous.as_ref());
+    let in_place_paths = in_place_paths(destination, tracks);
+    let layouts = layouts(tracks, &ids, root_name, previous.as_ref(), &in_place_paths);
     // Losing access to a selected source must never delete its good USB copy.
     for track in tracks {
         if !track.source_path.is_file() && previous.as_ref().is_some_and(|m| m.tracks.iter().any(|t| t.key() == track_key(track.id, &track.source_path.to_string_lossy()))) {
@@ -800,13 +856,16 @@ pub fn export_cancellable(
         if !written_audio_paths.insert(path_key(&place.audio)) {
             return Err(ExportError::Conflict(format!("Conversion would create duplicate audio path: {}", place.audio)));
         }
+        // Still the library's own file on the stick, not renamed for a
+        // conversion or an analysis collision: point at it, copy nothing.
+        let in_place = in_place_paths.get(index).and_then(Option::as_deref) == Some(place.audio.as_str());
         let profile = conversion.map_or("", rbl_audio::compatibility::Format::profile);
         let source_hash = if conversion.is_some() { file_hash(&track.source_path)? } else { 0 };
         let carried = stale.remove(&key);
         let audio_dest = under(destination, &place.audio);
         // Unchanged means: same source bytes by size and time, same place on
         // the stick, and still actually there.
-        let unchanged_metadata = carried.is_some_and(|c| {
+        let unchanged_metadata = !in_place && carried.is_some_and(|c| {
             c.audio == place.audio && c.size == size && c.modified == modified && c.conversion == profile
         });
         // The previous export recorded the bytes it actually placed on the
@@ -837,7 +896,12 @@ pub fn export_cancellable(
         } else { false };
 
         let output_size;
-        if unchanged {
+        if in_place {
+            output_size = size;
+            report.reused += 1;
+            report.in_place += 1;
+            report.bytes_reused += size;
+        } else if unchanged {
             output_size = std::fs::metadata(&audio_dest)?.len();
             report.reused += 1;
             report.bytes_reused += output_size;
@@ -865,7 +929,8 @@ pub fn export_cancellable(
         // Renaming an artist moves the file; the copy under the old name would
         // otherwise sit on the stick forever, unreferenced.
         if let Some(c) = carried {
-            if c.audio != place.audio && !same_file(&under(destination, &c.audio), &audio_dest) {
+            // A file that was the library's own is never ours to delete.
+            if c.audio != place.audio && !c.in_place && !same_file(&under(destination, &c.audio), &audio_dest) {
                 obsolete.push((c.audio.clone(), false));
             }
             if c.anlz_dir != place.anlz_dir {
@@ -950,7 +1015,11 @@ pub fn export_cancellable(
             None => 0,
         };
 
-        let audio_hash = if unchanged {
+        // An adopted file is not read: on a stick of music that would be
+        // every byte of it, every sync, to protect nothing we wrote.
+        let audio_hash = if in_place {
+            0
+        } else if unchanged {
             existing_audio_hash.map_or_else(|| file_hash(&audio_dest), Ok)?
         } else {
             file_hash(&under(publication.stage(), &place.audio))?
@@ -974,6 +1043,7 @@ pub fn export_cancellable(
             conversion: profile.to_owned(),
             conversion_source_hash: source_hash,
             audio_hash,
+            in_place,
         });
 
         // The same facts the pdb row carries, kept for exportLibrary.db.
@@ -1054,7 +1124,7 @@ pub fn export_cancellable(
 
     // Whatever the previous export left that this one does not name.
     for entry in stale.values() {
-        obsolete.push((entry.audio.clone(), false));
+        if !entry.in_place { obsolete.push((entry.audio.clone(), false)); }
         obsolete.push((entry.anlz_dir.clone(), true));
         report.removed += 1;
     }
