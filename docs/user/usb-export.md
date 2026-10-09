@@ -25,16 +25,19 @@ Library** and **OneLibrary**, each with **All Tracks** and its **Playlists**,
 as rekordbox lists them. Select a playlist to see its tracks.
 
 Right-click the Playlists heading or a folder to create a playlist or folder
-on the stick; right-click a playlist or folder to rename or delete it. Over
-the stick's tracks, **Add To Playlist** lists that library's playlists, and
-inside a playlist **Remove from Playlist** takes tracks out. A new playlist
-goes at the top, as in rekordbox.
+on the stick; right-click a playlist or folder to delete it. To rename one,
+click it again once it is selected, as in rekordbox. Over the stick's
+tracks, **Add To Playlist** lists that library's playlists, and inside a
+playlist **Remove from Playlist** takes tracks out. A new playlist goes at
+the top, as in rekordbox. When a playlist lists a track twice, selecting
+either copy selects both, and Remove from Playlist takes both out (rekordbox
+selects and removes each row on its own).
 
 Each change is written to the library it was made in and not the other, as
 rekordbox does. Deleting a playlist leaves its tracks on the stick. These
-edits are refused while rekordbox is running, and while the stick is being
-synced or ejected. Adding tracks from the collection to a stick's playlist
-is an export: use Export Playlist or Sync Manager.
+edits are refused while rekordbox is running, and greyed while the stick is
+being synced, exported or ejected. Adding tracks from the collection to a
+stick's playlist is an export: use Export Playlist or Sync Manager.
 
 ## Delete music outside playlists
 
