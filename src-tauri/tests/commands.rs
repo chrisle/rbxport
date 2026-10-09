@@ -1837,7 +1837,7 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
     let path = folder.display().to_string();
 
     let report =
-        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None)).unwrap();
+        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None)).unwrap();
     assert!(report.folder);
     assert_eq!(report.name, "Warm Up");
     assert_eq!(report.imported, 3);
@@ -1851,7 +1851,7 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
 
     // The same folder again: nothing written until the replacement is agreed.
     let asked =
-        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None)).unwrap();
+        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None)).unwrap();
     assert_eq!(asked.conflict.as_deref(), Some(playlist.as_str()));
     assert_eq!(asked.playlist, None);
     let replaced = run(commands::import_folder_playlist(
@@ -1860,6 +1860,7 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
         path,
         "root".into(),
         Some(playlist.clone()),
+        asked.at,
     ))
     .unwrap();
     assert_eq!(replaced.existing, 3, "the files are reused, not imported twice");
@@ -1873,6 +1874,7 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
         s.state(),
         folder.join("a.wav").display().to_string(),
         "root".into(),
+        None,
         None,
     ))
     .unwrap();

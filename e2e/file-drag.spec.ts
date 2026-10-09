@@ -176,3 +176,18 @@ test("a folder dropped on a playlist folder lands inside it; loose files are ign
     "Drop folders onto Playlists or a playlist folder to make playlists of them.",
   );
 });
+
+test("folders dropped together all take the drop's place, so the last lands first", async ({ page }) => {
+  await page.goto("/?writable=1");
+  const folder = page.locator('[role="treeitem"][data-kind="folder"]').first();
+  const drop = await folderDrop(page, ["/Music/Drop A", "/Music/Drop B"]);
+  await folder.dispatchEvent("drop", { dataTransfer: drop });
+  await expect(page.getByRole("contentinfo")).toContainText("Made playlists: Drop A, Drop B.");
+  // rekordbox moves each new list to the drop's one insert index
+  // (rekordboxDBController::createNewList), so B ends up before A.
+  const names = await page.getByRole("treeitem").allTextContents();
+  const a = names.findIndex((name) => name.includes("Drop A"));
+  const b = names.findIndex((name) => name.includes("Drop B"));
+  expect(a).toBeGreaterThan(-1);
+  expect(b).toBe(a - 1);
+});

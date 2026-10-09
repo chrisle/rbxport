@@ -414,9 +414,11 @@ export interface Backend {
    * holding every audio file under it with subfolders flattened, as
    * rekordbox does. A same-named sibling stops it with nothing written and
    * comes back as `conflict`; call again with `replace` set to that id once
-   * the user agrees to replace it.
+   * the user agrees to replace it. `at` is the drop's insert index under
+   * `parent` (omitted: the end); rekordbox puts every folder of one drop at
+   * the same index, so pass each folder the `at` the previous one returned.
    */
-  importFolderPlaylist(path: string, parent: string, replace?: string): Promise<FolderPlaylistReport>;
+  importFolderPlaylist(path: string, parent: string, replace?: string, at?: number | null): Promise<FolderPlaylistReport>;
   /**
    * Export Loop As WAV: asks where, then writes the loop's stretch of the
    * track as a WAV. Resolves to the frames written, or null when cancelled.
@@ -1487,6 +1489,8 @@ export interface FolderPlaylistReport {
   tracks: { id: string; title: string }[];
   /** How many of the folder's files the library already held. */
   existing: number;
+  /** The drop's insert index under the target, for its next folder. */
+  at: number | null;
 }
 
 /** What importing a rekordbox XML collection did. */

@@ -2616,7 +2616,7 @@ fn a_dropped_folder_becomes_one_flat_playlist_named_after_it() {
 
     let mut budget = rbl_db::import::WalkBudget::new(16, 1000);
     let files = rbl_db::import::audio_files_in(&folder, &mut budget);
-    let outcome = f.writer.import_folder_as_playlist("Friday Set", ROOT, &files, None).unwrap();
+    let outcome = f.writer.import_folder_as_playlist("Friday Set", ROOT, &files, None, None).unwrap();
 
     let playlist = outcome.playlist.clone().expect("a playlist is made");
     assert_eq!(outcome.conflict, None);
@@ -2647,7 +2647,7 @@ fn a_folder_dropped_on_a_playlist_folder_lands_inside_it() {
     let mut f = fixture();
     let crate_folder = f.writer.create_folder("Crates", ROOT).unwrap();
     let files = vec![audio.path().join("t.wav")];
-    let outcome = f.writer.import_folder_as_playlist("Techno", &crate_folder, &files, None).unwrap();
+    let outcome = f.writer.import_folder_as_playlist("Techno", &crate_folder, &files, None, None).unwrap();
     let playlist = outcome.playlist.unwrap();
     assert_eq!(f.children(&crate_folder), [playlist]);
 }
@@ -2656,7 +2656,7 @@ fn a_folder_dropped_on_a_playlist_folder_lands_inside_it() {
 fn a_folder_without_audio_makes_nothing() {
     let mut f = fixture();
     let before = f.children(ROOT);
-    let outcome = f.writer.import_folder_as_playlist("Artwork", ROOT, &[], None).unwrap();
+    let outcome = f.writer.import_folder_as_playlist("Artwork", ROOT, &[], None, None).unwrap();
     assert_eq!(outcome, rbl_db::write::FolderPlaylist::default());
     assert_eq!(f.children(ROOT), before);
 }
@@ -2674,13 +2674,13 @@ fn a_name_clash_writes_nothing_until_the_replacement_is_agreed() {
     let before = f.children(ROOT);
     let tracks_before = f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0");
 
-    let asked = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, None).unwrap();
+    let asked = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, None, None).unwrap();
     assert_eq!(asked.conflict, Some(clash.clone()));
     assert_eq!(asked.playlist, None);
     assert_eq!(f.children(ROOT), before);
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"), tracks_before);
 
-    let replaced = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, Some(&clash)).unwrap();
+    let replaced = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, Some(&clash), None).unwrap();
     let playlist = replaced.playlist.unwrap();
     assert_eq!(replaced.conflict, None);
     assert_eq!(
@@ -2690,4 +2690,44 @@ fn a_name_clash_writes_nothing_until_the_replacement_is_agreed() {
     );
     assert_eq!(f.writer.child_named(ROOT, "Playlist 0").unwrap(), Some(playlist.clone()));
     assert_eq!(member_files(&f, &playlist), ["t.wav"]);
+}
+
+/// Several folders in one drop all go to the drop's one insert index, so a
+/// later folder lands before an earlier one, and replacing a clash that sat
+/// before that index lowers it for the rest of the drop. rekordbox 7.2.19
+/// [OBS, static]: `treeMessageImportExternalFoldersToList` (0x1015677ec) reads
+/// the index once; `rekordboxDBController::createNewList` (0x1017e6808)
+/// appends each list and `movePlaylist`s it to that index;
+/// `checkSameNameList` (0x10155d5a8) takes one off it after deleting a list
+/// that was before it (0x10155d748..0x10155d75c).
+#[test]
+fn folders_dropped_together_share_the_drop_index_like_rekordbox() {
+    let audio = tempfile::tempdir().unwrap();
+    write_wav(&audio.path().join("t.wav"), 1);
+    let files = vec![audio.path().join("t.wav")];
+    let mut f = fixture();
+    let crate_folder = f.writer.create_folder("Crates", ROOT).unwrap();
+    let old_1 = f.writer.create_playlist("Old 1", &crate_folder).unwrap();
+    let old_2 = f.writer.create_playlist("Old 2", &crate_folder).unwrap();
+    let name = |f: &Fixture, id: &String| f.one::<String>("SELECT Name FROM djmdPlaylist WHERE ID = ?1", &[id]);
+    let names = |f: &Fixture| f.children(&crate_folder).iter().map(|id| name(f, id)).collect::<Vec<_>>();
+
+    // A drop of `A` then `B` onto the middle of the `Crates` row.
+    let a = f.writer.import_folder_as_playlist("A", &crate_folder, &files, None, None).unwrap();
+    assert_eq!(a.at, Some(2), "the end of the target when the drop was made");
+    let b = f.writer.import_folder_as_playlist("B", &crate_folder, &files, None, a.at).unwrap();
+    assert_eq!(b.at, Some(2));
+    assert_eq!(names(&f), ["Old 1", "Old 2", "B", "A"]);
+
+    // A drop of `Old 1` (replaced) then `C`: the index starts at 4, drops to 3
+    // when `Old 1` at 0 is deleted, and `C` goes in before the new `Old 1`.
+    let asked = f.writer.import_folder_as_playlist("Old 1", &crate_folder, &files, None, None).unwrap();
+    assert_eq!((asked.conflict.as_ref(), asked.at), (Some(&old_1), Some(4)));
+    let replaced =
+        f.writer.import_folder_as_playlist("Old 1", &crate_folder, &files, Some(&old_1), asked.at).unwrap();
+    assert_eq!(replaced.at, Some(3));
+    let c = f.writer.import_folder_as_playlist("C", &crate_folder, &files, None, replaced.at).unwrap();
+    assert_eq!(c.at, Some(3));
+    assert_eq!(names(&f), ["Old 2", "B", "A", "C", "Old 1"]);
+    assert_eq!(f.children(&crate_folder)[0], old_2);
 }

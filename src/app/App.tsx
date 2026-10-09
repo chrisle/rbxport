@@ -1093,8 +1093,13 @@ function AppBody() {
           let folders = 0;
           let skipped = 0;
           let kept = 0;
+          // rekordbox puts every folder of one drop at the same insert index
+          // (TreeViewer::treeMessageImportExternalFoldersToList), so each call
+          // gets the index the previous one settled on.
+          let at: number | null = null;
           for (const path of paths) {
-            let result = await backend.importFolderPlaylist(path, parent);
+            let result = await backend.importFolderPlaylist(path, parent, undefined, at);
+            at = result.at ?? at;
             if (result.folder) folders += 1;
             if (result.conflict) {
               const replace = await backend.confirm(
@@ -1104,7 +1109,8 @@ function AppBody() {
                 kept += 1;
                 continue;
               }
-              result = await backend.importFolderPlaylist(path, parent, result.conflict);
+              result = await backend.importFolderPlaylist(path, parent, result.conflict, at);
+              at = result.at ?? at;
             }
             if (result.playlist) made.push(result.name);
             tracks.push(...result.tracks);

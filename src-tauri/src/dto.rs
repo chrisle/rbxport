@@ -340,6 +340,9 @@ pub struct FolderPlaylistDto {
     pub tracks: Vec<ImportedTrackDto>,
     /// How many of the folder's files the library already held.
     pub existing: u32,
+    /// The drop's insert index under the target, to pass to the next folder
+    /// of the same drop; `None` until one was worked out.
+    pub at: Option<u32>,
 }
 
 /// One track an import added.

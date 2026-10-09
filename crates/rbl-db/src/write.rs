@@ -301,6 +301,11 @@ pub struct FolderPlaylist {
     pub existing: Vec<String>,
     /// Files that could not be imported, each with the reason.
     pub skipped: Vec<String>,
+    /// The place under the target the playlist was put, or would have been:
+    /// the insert index rekordbox keeps for every folder of one drop. Pass it
+    /// back as `at` for the drop's next folder. `None` when the folder held
+    /// no audio, so nothing was looked at.
+    pub at: Option<usize>,
 }
 
 /// One playlist or folder move, with both positions counted among the
@@ -616,6 +621,17 @@ impl Writer {
         self.move_to(&edit.id, &edit.after_parent, Some(edit.after_index))
     }
 
+    /// The live children of `parent`, in tree order.
+    fn child_ids(&self, parent: &str) -> Result<Vec<String>> {
+        let mut statement = self.library.connection().prepare(
+            "SELECT ID FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+        )?;
+        let ids = statement
+            .query_map(params![parent], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(ids)
+    }
+
     fn playlist_position(&self, id: &str) -> Result<(String, usize)> {
         let conn = self.library.connection();
         let parent = conn.query_row(
@@ -880,25 +896,54 @@ impl Writer {
     /// `TreeViewer::showReplaceListAlert`). Nothing is written until it is
     /// answered: the clash comes back in [`FolderPlaylist::conflict`], and the
     /// caller calls again with `replace` set to that id to replace it.
+    ///
+    /// `at` is where the playlist goes among `parent`'s children; `None`
+    /// means the end, as for a drop onto the middle of a folder row. Every
+    /// folder of one drop goes to the same index, so pass each call the
+    /// [`FolderPlaylist::at`] the previous one returned. rekordbox does the
+    /// same [OBS rekordbox 7.2.19 static]: `treeMessageImportExternalFoldersToList`
+    /// (0x1015677ec) reads the drop's insert index once and passes it to
+    /// `createTargetList` for every folder; `rekordboxDBController::createNewList`
+    /// (0x1017e6808) appends with `insertPlaylist` (seq one past
+    /// `getPlaylistFolderSeqMax`) and then `movePlaylist`s the new list to that
+    /// index whenever its seq is not below it. So a later folder lands before an earlier one: two
+    /// folders `A`, `B` end up `B`, `A`. Replacing a clash that sat before the
+    /// index takes one off it (`checkSameNameList` 0x10155d5a8, @0x10155d748..0x10155d75c),
+    /// and that lower index holds for the rest of the drop.
     pub fn import_folder_as_playlist(
         &mut self,
         name: &str,
         parent: &str,
         files: &[PathBuf],
         replace: Option<&str>,
+        at: Option<usize>,
     ) -> Result<FolderPlaylist> {
         let mut outcome = FolderPlaylist::default();
         if files.is_empty() {
+            outcome.at = at;
             return Ok(outcome);
         }
+        let mut at = match at {
+            Some(at) => at,
+            None => self.child_ids(parent)?.len(),
+        };
         if let Some(clash) = self.child_named(parent, name)? {
             if replace != Some(clash.as_str()) {
                 outcome.conflict = Some(clash);
+                outcome.at = Some(at);
                 return Ok(outcome);
             }
+            let (_, place) = self.playlist_position(&clash)?;
             self.delete_playlist(&clash)?;
+            if place < at {
+                at -= 1;
+            }
         }
+        outcome.at = Some(at);
         let playlist = self.create_playlist(name, parent)?;
+        if self.child_ids(parent)?.iter().position(|id| *id == playlist) != Some(at) {
+            self.move_to(&playlist, parent, Some(at))?;
+        }
         let mut members = Vec::with_capacity(files.len());
         for file in files {
             if let Some(id) = self.track_id_at(file)? {
