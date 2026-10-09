@@ -27,6 +27,7 @@ mod file_journal;
 mod new_library;
 mod diagnostics;
 mod explorer;
+mod device_library;
 mod link;
 mod rx3_link;
 mod network_labels;
@@ -639,6 +640,8 @@ pub fn run() {
             device_settings::ensure_device_library,
             explorer::explorer_roots,
             explorer::explorer_children,
+            device_library::device_libraries,
+            device_library::device_playlist_edit,
             // The information panel: one track's full record, the lookup
             // lists its dropdowns offer, and the fields it may write.
             details::track_details,

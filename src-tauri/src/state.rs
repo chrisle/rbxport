@@ -119,6 +119,8 @@ struct Inner {
     views: HashMap<u32, OpenView>,
     /// The Explorer's views, under the same ids and the same eviction.
     folders: HashMap<u32, Arc<FolderView>>,
+    /// The Devices tree's views of a stick's own library, likewise.
+    devices: HashMap<u32, Arc<rbl_index::device::DeviceView>>,
     /// Insertion order, for eviction.
     view_order: Vec<u32>,
     next_view_id: u32,
@@ -503,6 +505,19 @@ impl AppState {
         (id, len, inner.generation)
     }
 
+    /// Opens a view of a library on a stick; the same handle shape.
+    pub fn open_device_view(&self, view: rbl_index::device::DeviceView) -> (u32, u32, u32) {
+        let len = u32::try_from(view.len()).unwrap_or(u32::MAX);
+        let mut inner = self.inner.write();
+        let id = inner.register(Registered::Device(Arc::new(view)));
+        (id, len, inner.generation)
+    }
+
+    /// The device view behind an id, or `None` for any other kind of id.
+    pub fn device_view(&self, view_id: u32) -> Option<Arc<rbl_index::device::DeviceView>> {
+        self.inner.read().devices.get(&view_id).cloned()
+    }
+
     /// The folder view behind an id, or `None` when the id is a library view
     /// or nothing at all.
     pub fn folder_view(&self, view_id: u32) -> Option<Arc<FolderView>> {
@@ -527,6 +542,7 @@ fn default_backup_dir() -> std::path::PathBuf {
 enum Registered {
     Library(OpenView),
     Folder(Arc<FolderView>),
+    Device(Arc<rbl_index::device::DeviceView>),
 }
 
 impl Inner {
@@ -542,12 +558,16 @@ impl Inner {
             Registered::Folder(view) => {
                 self.folders.insert(id, view);
             }
+            Registered::Device(view) => {
+                self.devices.insert(id, view);
+            }
         }
         self.view_order.push(id);
         while self.view_order.len() > MAX_VIEWS {
             let oldest = self.view_order.remove(0);
             self.views.remove(&oldest);
             self.folders.remove(&oldest);
+            self.devices.remove(&oldest);
         }
         id
     }
@@ -603,7 +623,7 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
         // A folder never reaches the index: `open_view` opens one through
         // `explorer::open_folder` before translating. The collection is what
         // the sort and query here would apply to if it ever did.
-        TrackSourceDto::Collection | TrackSourceDto::Folder { .. } => TrackSource::Collection,
+        TrackSourceDto::Collection | TrackSourceDto::Folder { .. } | TrackSourceDto::Device { .. } => TrackSource::Collection,
         TrackSourceDto::History { id } => id
             .parse::<u64>()
             .ok()

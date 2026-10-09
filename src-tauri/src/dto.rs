@@ -174,6 +174,11 @@ pub enum TrackSourceDto {
     /// The Tag List.
     #[serde(rename = "tagList")]
     TagList,
+    /// A library on a USB stick, as the Devices tree opens it: one of its
+    /// playlists, or every track for playlist `"0"`. `format` is
+    /// `deviceLibrary` or `oneLibrary`.
+    #[serde(rename = "device")]
+    Device { path: String, format: String, playlist: String },
 }
 
 #[derive(Debug, Clone, Deserialize)]

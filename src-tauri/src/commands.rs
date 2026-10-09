@@ -276,6 +276,10 @@ fn push_lists(
 
 #[tauri::command]
 pub async fn open_view(state: State<'_, Arc<AppState>>, spec: ViewSpecDto) -> AppResult<ViewHandleDto> {
+    // A stick's own library is read from the stick, not from the index.
+    if let crate::dto::TrackSourceDto::Device { path, format, playlist } = &spec.source {
+        return crate::device_library::open_view(&state, path.clone(), format.clone(), playlist.clone(), &spec).await;
+    }
     let library = state.library()?;
     // A folder is read from disk, not from the index, so it takes its own
     // path before the source is translated.
@@ -306,6 +310,9 @@ pub async fn fetch_rows(
             AppError::new(ErrorKind::Malformed, "Too many rows requested at once.")
                 .with_detail(format!("len {len} exceeds the {MAX_ROWS}-row cap")),
         );
+    }
+    if let Some(device) = state.device_view(view_id) {
+        return crate::device_library::fetch_rows(&device, offset, len);
     }
     let library = state.library()?;
     let extra_columns = extra_columns.unwrap_or_default();
@@ -401,6 +408,9 @@ pub async fn view_ids_in_range(
     from: u32,
     to: u32,
 ) -> AppResult<Vec<String>> {
+    if let Some(device) = state.device_view(view_id) {
+        return Ok(crate::device_library::ids_in_range(&device, from, to));
+    }
     let library = state.library()?;
     if let Some(folder) = state.folder_view(view_id) {
         return crate::explorer::ids_in_range(library, folder, from, to).await;

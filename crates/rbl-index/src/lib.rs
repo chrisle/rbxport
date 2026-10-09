@@ -14,6 +14,7 @@
 
 pub mod cache;
 mod category;
+pub mod device;
 mod filter;
 pub mod folder;
 pub mod key;
