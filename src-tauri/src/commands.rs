@@ -15,7 +15,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::link::LinkStatusDto;
 use crate::dto::{
     cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
-    EditHistoryDto, ImportReportDto, LibrarySummaryDto, LimiterDto, PhraseDto, RowDto,
+    EditHistoryDto, ImportReportDto, LibrarySummaryDto, LimiterDto, PhraseDto, RowDto, UnanalysedTrackDto, UnanalysedTracksDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
     ExportProgressDto, FilterValuesDto, ItunesLibraryDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
@@ -2645,6 +2645,51 @@ pub async fn track_vocals(
     })
     .await
     .map(tauri::ipc::Response::new)
+}
+
+/// A page of the Collection tracks Auto Analysis would analyse: never
+/// analysed, with their file where the library says.
+///
+/// rekordbox offers these at launch when Auto Analysis is on ("Auto Analysis
+/// is starting.", OK/Cancel) [OBS: rekordbox 7.2.14 on chris-win11]. There can
+/// be thousands, so they come a page at a time from row `from`; `next` is the
+/// row to ask from for the next page, or `None` when the scan reached the end.
+/// The pages are rows rather than offsets into the result so each file is
+/// checked once however many pages are asked for.
+#[tauri::command]
+pub async fn unanalysed_tracks(
+    state: State<'_, Arc<AppState>>,
+    from: u32,
+    limit: u32,
+) -> AppResult<UnanalysedTracksDto> {
+    if limit == 0 || limit > MAX_ROWS {
+        return Err(
+            AppError::new(ErrorKind::Malformed, "That page size is not valid.")
+                .with_detail(format!("limit {limit} is outside 1..={MAX_ROWS}")),
+        );
+    }
+    let library = state.library()?;
+    blocking("unanalysed_tracks", move || {
+        let wanted = limit as usize;
+        let mut tracks = Vec::with_capacity(wanted);
+        let mut next = None;
+        for row in library.unanalysed_rows().into_iter().filter(|&row| row >= from) {
+            if tracks.len() == wanted {
+                next = Some(row);
+                break;
+            }
+            let index = row as usize;
+            if !std::path::Path::new(library.folder_path.get(index)).exists() {
+                continue;
+            }
+            tracks.push(UnanalysedTrackDto {
+                id: library.ids.get(index).copied().unwrap_or(0).to_string(),
+                title: library.title.get(index).to_owned(),
+            });
+        }
+        Ok(UnanalysedTracksDto { tracks, next })
+    })
+    .await
 }
 
 /// How deep a chosen folder is walked. A music library is a handful of levels

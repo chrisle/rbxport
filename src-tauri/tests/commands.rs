@@ -1197,6 +1197,33 @@ fn a_track_whose_file_is_gone_is_refused_at_load_rather_than_failing_later() {
 }
 
 #[test]
+fn auto_analysis_is_offered_the_unanalysed_tracks_whose_files_are_there_a_page_at_a_time() {
+    let s = shell();
+    // The fixture's own tracks are analysed and their files are elsewhere;
+    // freshly imported files are not analysed yet.
+    let files: Vec<String> = ["a.wav", "b.wav", "c.wav"]
+        .iter()
+        .map(|name| write_wav(&s._dir.path().join(name), 1).display().to_string())
+        .collect();
+    let report = run(commands::import_files(s.handle(), s.state(), files)).unwrap();
+    assert_eq!(report.imported, 3);
+    let imported: Vec<String> = report.tracks.iter().map(|t| t.id.clone()).collect();
+    // One of them loses its file: there is nothing to analyse there.
+    std::fs::remove_file(s._dir.path().join("b.wav")).unwrap();
+
+    let first = run(commands::unanalysed_tracks(s.state(), 0, 1)).unwrap();
+    assert_eq!(first.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), [imported[0].as_str()]);
+    assert_eq!(first.tracks[0].title, "a");
+    let from = first.next.expect("more to come");
+    let second = run(commands::unanalysed_tracks(s.state(), from, 1)).unwrap();
+    assert_eq!(second.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), [imported[2].as_str()]);
+    assert_eq!(second.next, None, "the scan reached the end");
+
+    let err = run(commands::unanalysed_tracks(s.state(), 0, commands::MAX_ROWS + 1)).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::Malformed);
+}
+
+#[test]
 fn the_two_decks_play_independently_and_the_master_level_is_the_engine_s() {
     let s = shell();
     let a = write_wav(&s._dir.path().join("a.wav"), 1);

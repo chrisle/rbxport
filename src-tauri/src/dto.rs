@@ -220,6 +220,23 @@ pub struct MissingTracksDto {
     pub tracks: Vec<MissingTrackDto>,
 }
 
+/// A track Auto Analysis would analyse.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnanalysedTrackDto {
+    pub id: String,
+    pub title: String,
+}
+
+/// One page of [`UnanalysedTrackDto`]s.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnanalysedTracksDto {
+    pub tracks: Vec<UnanalysedTrackDto>,
+    /// The row the next page starts from; `None` once the library is done.
+    pub next: Option<u32>,
+}
+
 /// One copy in a group of duplicates.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

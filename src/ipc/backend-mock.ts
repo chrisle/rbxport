@@ -2647,6 +2647,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (ids.length > 0) await bump(false);
       return ids.length;
     },
+    // The unanalysed rows whose file is there; `?missing=N` takes files away.
+    unanalysedTracks: (from, limit) => {
+      const tracks: { id: string; title: string }[] = [];
+      for (let index = from; index < all.length; index += 1) {
+        const row = all[index];
+        if (!row || row.analysed !== 0 || row.missing === true) continue;
+        if (tracks.length === limit) return wait({ tracks, next: index });
+        tracks.push({ id: row.id, title: row.title });
+      }
+      return wait({ tracks, next: null });
+    },
     // The mock's titles are drawn from a short list, so the same title under
     // the same artist comes up as it does in a real library.
     findDuplicates: (limit) => {

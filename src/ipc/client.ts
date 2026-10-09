@@ -12,7 +12,7 @@ import type {
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   DatabaseDrive, EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
-  LinkStatus, MissingExportFile, MissingTracks, PreviewState, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
+  LinkStatus, MissingExportFile, MissingTracks, PreviewState, UnanalysedTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
   TreeNode, ViewHandle,
   SelectionDetails, TrackDetails, TrackLookups,
 } from "./types";
@@ -406,6 +406,7 @@ async function realBackend(): Promise<Backend> {
     onLinkStatus: (listener) => subscribe<LinkStatus>("link:status", listener),
     missingTracks: (offset, limit, rescan) => invoke<MissingTracks>("missing_tracks", { offset, limit, rescan }),
     removeMissingTracks: (tracks) => invoke<number>("remove_missing_tracks", { tracks }),
+    unanalysedTracks: (from, limit) => invoke<UnanalysedTracks>("unanalysed_tracks", { from, limit }),
     findDuplicates: (limit) => invoke<Duplicates>("find_duplicates", { limit }),
     relocateTrack: async (trackId) => {
       const { open } = await import("@tauri-apps/plugin-dialog");

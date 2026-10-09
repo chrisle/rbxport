@@ -751,6 +751,12 @@ export interface Backend {
    * playlist. Resolves to how many went.
    */
   removeMissingTracks(tracks: string[] | null): Promise<number>;
+  /**
+   * Collection tracks that have never been analysed and whose file is there,
+   * a page of at most `limit` (1 to 128) scanned from row `from`. Ask again
+   * from `next` until it is null.
+   */
+  unanalysedTracks(from: number, limit: number): Promise<UnanalysedTracks>;
   /** Tracks that share a title and an artist, the first `limit` groups listed. */
   findDuplicates(limit: number): Promise<Duplicates>;
 
@@ -1489,6 +1495,13 @@ export interface Duplicates {
   /** Copies beyond the first, over every group. */
   extra: number;
   shown: DuplicateGroup[];
+}
+
+/** One page of the tracks Auto Analysis would analyse. */
+export interface UnanalysedTracks {
+  tracks: { id: string; title: string }[];
+  /** The row the next page starts from; null once the library is done. */
+  next: number | null;
 }
 
 export interface MissingTracks {
