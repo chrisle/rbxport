@@ -328,6 +328,146 @@ impl crate::Library {
     }
 }
 
+/// What the information panel shows for several selected tracks at once.
+///
+/// rekordbox 7.2.11 builds its panel the same way
+/// (`browse::TrackInfoConcreteMediator::getTrackProp` and
+/// `tracksHaveSameInfo`, static analysis): each field is read from the first
+/// selected track, and a field whose value is not identical on every
+/// selected track is shown blank. Text compares exactly, case included
+/// (`juce::String::compare`), and numbers by value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionDetails {
+    /// The first of the tracks that are still in the library, in the order
+    /// given.
+    pub first: TrackDetails,
+    /// How many of the tracks are still in the library.
+    pub count: usize,
+    /// The wire names (`TrackDetails` in camelCase, as the panel spells
+    /// them) of the fields that differ between the tracks, in
+    /// [`COMPARED_FIELDS`] order. Empty for one track.
+    pub mixed: Vec<&'static str>,
+}
+
+type FieldsDiffer = fn(&TrackDetails, &TrackDetails) -> bool;
+
+/// Every field the panel shows, with how two tracks are compared on it.
+///
+/// My Tags are not compared: rekordbox keeps them in a panel of its own, and
+/// the Info tab does not edit them for a multiple selection.
+pub const COMPARED_FIELDS: &[(&str, FieldsDiffer)] = &[
+    ("title", |a, b| a.title != b.title),
+    ("artist", |a, b| a.artist != b.artist),
+    ("album", |a, b| a.album != b.album),
+    ("albumArtist", |a, b| a.album_artist != b.album_artist),
+    ("originalArtist", |a, b| a.original_artist != b.original_artist),
+    ("composer", |a, b| a.composer != b.composer),
+    ("remixer", |a, b| a.remixer != b.remixer),
+    ("lyricist", |a, b| a.lyricist != b.lyricist),
+    ("genre", |a, b| a.genre != b.genre),
+    ("label", |a, b| a.label != b.label),
+    ("key", |a, b| a.key != b.key),
+    ("comment", |a, b| a.comment != b.comment),
+    ("mixName", |a, b| a.mix_name != b.mix_name),
+    ("message", |a, b| a.message != b.message),
+    // "0" and NULL are both no colour.
+    ("color", |a, b| colour_id(&a.color) != colour_id(&b.color)),
+    ("rating", |a, b| a.rating != b.rating),
+    ("bpmX100", |a, b| a.bpm_x100 != b.bpm_x100),
+    ("durationSec", |a, b| a.duration_sec != b.duration_sec),
+    ("year", |a, b| a.year != b.year),
+    ("trackNumber", |a, b| a.track_number != b.track_number),
+    ("discNumber", |a, b| a.disc_number != b.disc_number),
+    ("playCount", |a, b| a.play_count != b.play_count),
+    ("fileType", |a, b| a.file_type != b.file_type),
+    ("fileSize", |a, b| a.file_size != b.file_size),
+    ("bitrate", |a, b| a.bitrate != b.bitrate),
+    ("sampleRate", |a, b| a.sample_rate != b.sample_rate),
+    ("bitDepth", |a, b| a.bit_depth != b.bit_depth),
+    ("dateCreated", |a, b| a.date_created != b.date_created),
+    ("releaseDate", |a, b| a.release_date != b.release_date),
+    ("path", |a, b| a.path != b.path),
+    ("hotCueAutoLoad", |a, b| a.hot_cue_auto_load != b.hot_cue_auto_load),
+    ("publish", |a, b| a.publish != b.publish),
+];
+
+fn colour_id(stored: &str) -> &str {
+    if stored.is_empty() { "0" } else { stored }
+}
+
+/// Reads the tracks `ids` as the information panel shows a multiple
+/// selection: see [`SelectionDetails`]. `None` when none of them is in the
+/// library.
+///
+/// A point read per track, stopping early once every field is known to
+/// differ, so a select-all over a mixed library costs a handful of reads
+/// rather than one per track.
+pub fn selection_details(conn: &Connection, ids: &[String]) -> Result<Option<SelectionDetails>> {
+    let mut first: Option<TrackDetails> = None;
+    let mut count = 0;
+    let mut differs = vec![false; COMPARED_FIELDS.len()];
+    let mut remaining = COMPARED_FIELDS.len();
+    let mut known = 0;
+    for (index, id) in ids.iter().enumerate() {
+        if remaining == 0 {
+            // Every field already differs: the rest only need counting.
+            known = index;
+            break;
+        }
+        known = index + 1;
+        let Some(track) = track_row(conn, id)? else { continue };
+        count += 1;
+        let Some(head) = first.as_ref() else {
+            first = Some(track);
+            continue;
+        };
+        for (slot, (_, differ)) in differs.iter_mut().zip(COMPARED_FIELDS) {
+            if !*slot && differ(head, &track) {
+                *slot = true;
+                remaining -= 1;
+            }
+        }
+    }
+    let Some(mut first) = first else { return Ok(None) };
+    if known < ids.len() {
+        count += live_count(conn, &ids[known..])?;
+    }
+    first.my_tags = my_tags_of(conn, &first.id);
+    let mixed = COMPARED_FIELDS
+        .iter()
+        .zip(&differs)
+        .filter_map(|((name, _), differs)| differs.then_some(*name))
+        .collect();
+    Ok(Some(SelectionDetails { first, count, mixed }))
+}
+
+/// How many of `ids` are live tracks.
+fn live_count(conn: &Connection, ids: &[String]) -> Result<usize> {
+    let mut statement =
+        conn.prepare_cached("SELECT 1 FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0")?;
+    let mut count = 0;
+    for id in ids {
+        if statement.exists(params![id])? {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+impl crate::Library {
+    /// [`selection_details`] with the first track's path as
+    /// [`crate::Library::track_details`] gives it.
+    pub fn selection_details(&self, ids: &[String]) -> Result<Option<SelectionDetails>> {
+        let Some(mut selection) = selection_details(self.connection(), ids)? else {
+            return Ok(None);
+        };
+        if let Some(stored) = self.stored_path(&selection.first.id)? {
+            selection.first.path = self.track_paths().location(&stored);
+        }
+        Ok(Some(selection))
+    }
+}
+
 /// Browser page enrichment omits the separate My Tag id query. Its names are
 /// read only when that column is visible.
 pub fn browser_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
@@ -397,8 +537,9 @@ pub fn my_tag_names(conn: &Connection, id: &str) -> Vec<String> {
 fn track_row(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
     // One statement with the lookups joined, rather than a query per
     // reference: seven round trips for one row is seven times the work for
-    // no reason, and the joins are on primary keys.
-    conn.query_row(
+    // no reason, and the joins are on primary keys. Cached, since a multiple
+    // selection reads it once per track.
+    let mut statement = conn.prepare_cached(
         "SELECT c.ID, c.Title, c.ArtistID, artist.Name, c.AlbumID, album.Name,
                 album_artist.Name, c.OrgArtistID, org.Name, composer.Name,
                 c.RemixerID, remixer.Name, c.Lyricist, c.GenreID, genre.Name,
@@ -418,6 +559,8 @@ fn track_row(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
          LEFT JOIN djmdLabel label ON label.ID = c.LabelID
          LEFT JOIN djmdKey key ON key.ID = c.KeyID
          WHERE c.ID = ?1 AND c.rb_local_deleted = 0",
+    )?;
+    statement.query_row(
         params![id],
         |r| {
             Ok(TrackDetails {
@@ -758,5 +901,153 @@ mod tests {
             d.play_count, 0,
             "unparseable text reads as zero rather than failing the row"
         );
+    }
+
+    fn lookup(conn: &Connection, table: &str, rows: &[(&str, &str)]) {
+        let stamp = rbl_core::time::now();
+        for (id, name) in rows {
+            conn.execute(
+                &format!("INSERT INTO {table} (ID, Name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)"),
+                params![id, name, stamp],
+            )
+            .expect("lookup row");
+        }
+    }
+
+    /// The fixture's tracks differ in title, path and BPM and agree on the
+    /// rest; three of them are given the same genre, comment and year so the
+    /// shared values have something to show.
+    fn selection_fixture() -> (tempfile::TempDir, Library, Vec<String>) {
+        let (dir, library) = open();
+        let ids: Vec<String> = (1..=3).map(track_id).collect();
+        let conn = library.connection();
+        lookup(conn, "djmdGenre", &[("5001", "Techno")]);
+        for id in &ids {
+            conn.execute(
+                "UPDATE djmdContent SET GenreID = '5001', Commnt = 'peak', ReleaseYear = 2024,
+                     ColorID = '0' WHERE ID = ?1",
+                params![id],
+            )
+            .expect("shared values");
+        }
+        (dir, library, ids)
+    }
+
+    #[test]
+    fn a_selection_blanks_only_the_fields_its_tracks_disagree_on() {
+        let (_dir, library, ids) = selection_fixture();
+        let selection = selection_details(library.connection(), &ids).expect("read").expect("some");
+        assert_eq!(selection.count, 3);
+        assert_eq!(selection.first.id, ids[0], "the first track given is the one read");
+        assert_eq!(selection.first.genre, "Techno");
+        assert_eq!(selection.first.comment, "peak");
+        assert_eq!(selection.first.year, 2024);
+        assert_eq!(selection.mixed, vec!["title", "bpmX100", "path"]);
+    }
+
+    #[test]
+    fn a_selection_compares_text_exactly_case_included() {
+        let (_dir, library, ids) = selection_fixture();
+        let conn = library.connection();
+        // juce::String::compare is case-sensitive, so "peak" and "Peak" differ.
+        conn.execute("UPDATE djmdContent SET Commnt = 'Peak' WHERE ID = ?1", params![ids[2]])
+            .expect("comment");
+        let selection = selection_details(conn, &ids).expect("read").expect("some");
+        assert!(selection.mixed.contains(&"comment"));
+        assert!(!selection.mixed.contains(&"genre"));
+    }
+
+    #[test]
+    fn no_colour_stored_as_null_or_zero_is_the_same_colour() {
+        let (_dir, library, ids) = selection_fixture();
+        let conn = library.connection();
+        conn.execute("UPDATE djmdContent SET ColorID = NULL WHERE ID = ?1", params![ids[1]])
+            .expect("colour");
+        let selection = selection_details(conn, &ids).expect("read").expect("some");
+        assert!(!selection.mixed.contains(&"color"));
+        conn.execute("UPDATE djmdContent SET ColorID = '3' WHERE ID = ?1", params![ids[1]])
+            .expect("colour");
+        let selection = selection_details(conn, &ids).expect("read").expect("some");
+        assert!(selection.mixed.contains(&"color"));
+    }
+
+    #[test]
+    fn one_track_is_its_own_record_with_nothing_mixed() {
+        let (_dir, library, ids) = selection_fixture();
+        let selection =
+            selection_details(library.connection(), &ids[..1]).expect("read").expect("some");
+        assert_eq!(selection.count, 1);
+        assert_eq!(selection.mixed, [] as [&str; 0]);
+        assert_eq!(
+            selection.first,
+            track_details(library.connection(), &ids[0]).expect("read").expect("row")
+        );
+    }
+
+    #[test]
+    fn tracks_no_longer_in_the_library_are_left_out() {
+        let (_dir, library, ids) = selection_fixture();
+        let conn = library.connection();
+        conn.execute("UPDATE djmdContent SET rb_local_deleted = 1 WHERE ID = ?1", params![ids[0]])
+            .expect("soft delete");
+        let mut given = vec!["no-such-id".to_owned()];
+        given.extend(ids.iter().cloned());
+        let selection = selection_details(conn, &given).expect("read").expect("some");
+        assert_eq!(selection.count, 2);
+        assert_eq!(selection.first.id, ids[1]);
+        assert_eq!(selection_details(conn, &["gone".to_owned()]).expect("read"), None);
+        assert_eq!(selection_details(conn, &[]).expect("read"), None);
+    }
+
+    #[test]
+    fn once_every_field_differs_the_rest_are_only_counted() {
+        let (_dir, library) = open();
+        let conn = library.connection();
+        let ids: Vec<String> = (0..40).map(track_id).collect();
+        // Make the first two tracks differ on every compared field, then
+        // delete one later track: it must still be left out of the count.
+        lookup(conn, "djmdArtist", &[("6001", "A"), ("6002", "B")]);
+        lookup(conn, "djmdGenre", &[("5001", "G1"), ("5002", "G2")]);
+        lookup(conn, "djmdLabel", &[("8001", "L1"), ("8002", "L2")]);
+        let stamp = rbl_core::time::now();
+        for (id, name, artist) in [("7001", "X", "6001"), ("7002", "Y", "6002")] {
+            conn.execute(
+                "INSERT INTO djmdAlbum (ID, Name, AlbumArtistID, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![id, name, artist, stamp],
+            )
+            .expect("album");
+        }
+        for (id, name) in [("9001", "Am"), ("9002", "Bm")] {
+            conn.execute(
+                "INSERT INTO djmdKey (ID, ScaleName, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+                params![id, name, stamp],
+            )
+            .expect("key");
+        }
+        conn.execute_batch(&format!(
+            "UPDATE djmdContent SET ArtistID = '6001', AlbumID = '7001', OrgArtistID = '6001',
+                 ComposerID = '6001', RemixerID = '6001', Lyricist = 'l1', GenreID = '5001',
+                 LabelID = '8001', KeyID = '9001', Commnt = 'c1', Subtitle = 's1',
+                 DeliveryComment = 'm1', ColorID = '1', Rating = 1, Length = 1, ReleaseYear = 1,
+                 TrackNo = 1, DiscNo = 1, DJPlayCount = 1, FileType = 1, FileSize = 1, BitRate = 1,
+                 SampleRate = 1, BitDepth = 1, DateCreated = 'd1', ReleaseDate = 'r1',
+                 HotCueAutoLoad = 'on', DeliveryControl = 'on' WHERE ID = '{a}';
+             UPDATE djmdContent SET ArtistID = '6002', AlbumID = '7002', OrgArtistID = '6002',
+                 ComposerID = '6002', RemixerID = '6002', Lyricist = 'l2', GenreID = '5002',
+                 LabelID = '8002', KeyID = '9002', Commnt = 'c2', Subtitle = 's2',
+                 DeliveryComment = 'm2', ColorID = '2', Rating = 2, Length = 2, ReleaseYear = 2,
+                 TrackNo = 2, DiscNo = 2, DJPlayCount = 2, FileType = 2, FileSize = 2, BitRate = 2,
+                 SampleRate = 2, BitDepth = 2, DateCreated = 'd2', ReleaseDate = 'r2',
+                 HotCueAutoLoad = '', DeliveryControl = '' WHERE ID = '{b}';
+             UPDATE djmdContent SET rb_local_deleted = 1 WHERE ID = '{gone}';",
+            a = ids[0],
+            b = ids[1],
+            gone = ids[30],
+        ))
+        .expect("differing tracks");
+        let selection = selection_details(conn, &ids).expect("read").expect("some");
+        assert_eq!(selection.mixed.len(), COMPARED_FIELDS.len(), "{:?}", selection.mixed);
+        assert_eq!(selection.count, 39);
     }
 }
