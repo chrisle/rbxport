@@ -40,12 +40,67 @@ export async function droppedFilePaths(files: File[]): Promise<string[]> {
   const paths = files.map((file) => (file as File & { path?: string }).path);
   if (paths.every((path): path is string => Boolean(path))) return paths;
   if (!isTauri) throw new Error("Drop files in the desktop app to import them.");
+  const webview2 = (window as { chrome?: { webview?: WebView2Bridge } }).chrome?.webview;
+  if (webview2?.postMessageWithAdditionalObjects) return webview2FilePaths(webview2, files);
   const { invoke } = await import("@tauri-apps/api/core");
   try {
     return await invoke<string[]>("dropped_file_paths", { names: files.map((file) => file.name) });
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error));
   }
+}
+
+/** The part of WebView2's `window.chrome.webview` used for dropped files. */
+interface WebView2Bridge {
+  postMessageWithAdditionalObjects?: (message: unknown, objects: File[]) => void;
+  addEventListener: (type: "message", listener: (event: { data: unknown }) => void) => void;
+  removeEventListener: (type: "message", listener: (event: { data: unknown }) => void) => void;
+}
+
+/** Must match `REQUEST_KEY` in `src-tauri/src/file_drop.rs`. */
+const WEBVIEW2_DROP_KEY = "rbxportDroppedFiles";
+const WEBVIEW2_DROP_TIMEOUT_MS = 10_000;
+
+/**
+ * Windows: WebView2 gives a dropped `File` no path, but hands the host one
+ * for each `File` posted with `postMessageWithAdditionalObjects`. The host
+ * answers with the paths in the same order, tagged with this request's id.
+ */
+function webview2FilePaths(webview: WebView2Bridge, files: File[]): Promise<string[]> {
+  const id = crypto.randomUUID();
+  const unavailable = "This platform did not provide the dropped files' locations.";
+  return new Promise<string[]>((resolve, reject) => {
+    const finish = () => {
+      clearTimeout(timer);
+      webview.removeEventListener("message", onMessage);
+    };
+    const onMessage = (event: { data: unknown }) => {
+      const reply = event.data as { [WEBVIEW2_DROP_KEY]?: unknown; paths?: unknown; error?: unknown } | null;
+      if (typeof reply !== "object" || reply === null || reply[WEBVIEW2_DROP_KEY] !== id) return;
+      finish();
+      const paths = reply.paths;
+      if (
+        Array.isArray(paths)
+        && paths.length === files.length
+        && paths.every((path) => typeof path === "string" && path.length > 0)
+      ) {
+        resolve(paths as string[]);
+      } else {
+        reject(new Error(typeof reply.error === "string" ? reply.error : unavailable));
+      }
+    };
+    const timer = setTimeout(() => {
+      finish();
+      reject(new Error(unavailable));
+    }, WEBVIEW2_DROP_TIMEOUT_MS);
+    webview.addEventListener("message", onMessage);
+    try {
+      webview.postMessageWithAdditionalObjects?.({ [WEBVIEW2_DROP_KEY]: id }, files);
+    } catch {
+      finish();
+      reject(new Error(unavailable));
+    }
+  });
 }
 
 export interface NativeFileDrop {

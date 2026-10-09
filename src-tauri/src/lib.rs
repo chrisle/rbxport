@@ -441,6 +441,11 @@ pub fn run() {
                 app.manage(mounts);
             }
             app.set_menu(crate::menu::build(app.handle())?)?;
+            // Windows: paths of files dropped from Explorer onto a playlist.
+            #[cfg(windows)]
+            if let Some(main) = app.get_webview_window("main") {
+                crate::file_drop::install_webview2_bridge(&main);
+            }
             Ok(())
         })
         .on_menu_event(|app, event| crate::menu::on_event(app, event.id().as_ref()))

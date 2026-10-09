@@ -100,3 +100,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 [target.'cfg(windows)'.dependencies]
 midir = "0.11"
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_Foundation"] }
+# The paths of files dropped from Explorer (`file_drop.rs`): WebView2 hands
+# them to the host for `File`s the page posts. The versions Tauri's wry uses.
+webview2-com = "0.38"
+windows-core = "0.61"

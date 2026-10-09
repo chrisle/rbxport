@@ -1,5 +1,17 @@
-//! `WKWebView` exposes dropped files but withholds their filesystem paths.
-//! Read `AppKit`'s drag pasteboard while leaving HTML5 drag handling enabled.
+//! The webview exposes files dropped from the desktop but withholds their
+//! filesystem paths, while HTML5 drag handling stays enabled for the app's own
+//! drags. On macOS, read `AppKit`'s drag pasteboard (`dropped_file_paths`). On
+//! Windows, the page posts the dropped `File`s to the host through `WebView2`,
+//! which gives the host each file's path (`install_webview2_bridge`).
+
+/// The key of a page message asking for the paths of the `File`s posted with
+/// it, and of the host's answer. Must match `WEBVIEW2_DROP_KEY` in
+/// `src/ipc/client.ts`.
+#[cfg(any(windows, test))]
+const REQUEST_KEY: &str = "rbxportDroppedFiles";
+
+#[cfg(any(windows, test))]
+const UNAVAILABLE: &str = "This platform did not provide the dropped files' locations.";
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, reason = "a Tauri command argument is deserialized, so it must be owned")]
@@ -66,9 +78,154 @@ fn validate_paths(names: &[String], paths: Vec<String>) -> Result<Vec<String>, S
     Ok(paths)
 }
 
+/// The id of a page message asking for dropped files' paths, or `None` for
+/// any other message (Tauri's own IPC, for one).
+#[cfg(any(windows, test))]
+fn request_id(message_json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(message_json).ok()?;
+    value.get(REQUEST_KEY)?.as_str().map(str::to_owned)
+}
+
+/// The host's answer to request `id`: every path, in the order the page
+/// posted the files, or why there are none.
+#[cfg(any(windows, test))]
+fn reply(id: &str, paths: Result<Vec<String>, String>) -> String {
+    let answer = match paths {
+        Ok(paths) if !paths.is_empty() && paths.iter().all(|path| !path.is_empty()) => {
+            serde_json::json!({ REQUEST_KEY: id, "paths": paths })
+        }
+        Ok(_) => serde_json::json!({ REQUEST_KEY: id, "error": UNAVAILABLE }),
+        Err(error) => serde_json::json!({ REQUEST_KEY: id, "error": error }),
+    };
+    answer.to_string()
+}
+
+/// Answer the page's requests for dropped files' paths on Windows.
+///
+/// The request is a JSON object, not a string, so wry's own handler (which
+/// reads only string messages) skips it and Tauri never sees it.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn install_webview2_bridge(window: &tauri::WebviewWindow) {
+    let installed = window.with_webview(|webview| {
+        // SAFETY: `with_webview` runs this on the thread that owns the
+        // WebView2 controller.
+        if let Err(error) = unsafe { webview2::listen(&webview.controller()) } {
+            tracing::warn!(%error, "dropped files' paths unavailable: WebView2 refused the message handler");
+        }
+    });
+    if let Err(error) = installed {
+        tracing::warn!(%error, "dropped files' paths unavailable: no WebView2 to listen on");
+    }
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod webview2 {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2Controller, ICoreWebView2File, ICoreWebView2WebMessageReceivedEventArgs,
+        ICoreWebView2WebMessageReceivedEventArgs2,
+    };
+    use webview2_com::{take_pwstr, WebMessageReceivedEventHandler};
+    use windows_core::{Interface, HSTRING, PWSTR};
+
+    use super::{reply, request_id, UNAVAILABLE};
+
+    /// # Safety
+    /// Must run on the thread that owns `controller`.
+    pub(super) unsafe fn listen(controller: &ICoreWebView2Controller) -> windows_core::Result<()> {
+        // SAFETY: the caller is on the controller's thread.
+        let core = unsafe { controller.CoreWebView2()? };
+        let handler = WebMessageReceivedEventHandler::create(Box::new(|sender, args| {
+            let (Some(sender), Some(args)) = (sender, args) else {
+                return Ok(());
+            };
+            let mut json = PWSTR::null();
+            // SAFETY: WebView2 calls this handler on the controller's thread
+            // with live arguments; `take_pwstr` frees the returned string.
+            unsafe { args.WebMessageAsJson(&raw mut json)? };
+            let Some(id) = request_id(&take_pwstr(json)) else {
+                return Ok(());
+            };
+            // SAFETY: as above.
+            let answer = reply(&id, unsafe { dropped_paths(&args) });
+            // SAFETY: as above.
+            unsafe { sender.PostWebMessageAsJson(&HSTRING::from(answer)) }
+        }));
+        let mut token = 0_i64;
+        // SAFETY: the caller is on the controller's thread; the handler lives
+        // as long as the webview, which holds a reference to it.
+        unsafe { core.add_WebMessageReceived(&handler, &raw mut token) }
+    }
+
+    /// The path of every `File` posted with the message, in posted order.
+    ///
+    /// # Safety
+    /// Must run inside the `WebMessageReceived` handler that received `args`.
+    unsafe fn dropped_paths(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Result<Vec<String>, String> {
+        let read = || -> windows_core::Result<Vec<String>> {
+            // Needs a WebView2 Runtime that supports `AdditionalObjects`.
+            let args = args.cast::<ICoreWebView2WebMessageReceivedEventArgs2>()?;
+            // SAFETY: the caller is inside the handler; every string WebView2
+            // returns is freed by `take_pwstr`.
+            unsafe {
+                let objects = args.AdditionalObjects()?;
+                let mut count = 0_u32;
+                objects.Count(&raw mut count)?;
+                (0..count)
+                    .map(|index| {
+                        let file = objects.GetValueAtIndex(index)?.cast::<ICoreWebView2File>()?;
+                        let mut path = PWSTR::null();
+                        file.Path(&raw mut path)?;
+                        Ok(take_pwstr(path))
+                    })
+                    .collect()
+            }
+        };
+        read().map_err(|error| {
+            tracing::warn!(%error, "WebView2 did not give the dropped files' paths");
+            UNAVAILABLE.to_owned()
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::validate_paths;
+    use super::{reply, request_id, validate_paths, REQUEST_KEY, UNAVAILABLE};
+
+    #[test]
+    fn answers_only_requests_for_dropped_files() {
+        assert_eq!(request_id(r#"{"rbxportDroppedFiles":"7f"}"#), Some("7f".into()));
+        // Tauri's own IPC and anything else the page posts are not ours.
+        assert_eq!(request_id(r#""{\"cmd\":\"x\"}""#), None);
+        assert_eq!(request_id(r#"{"cmd":"dropped_file_paths"}"#), None);
+        assert_eq!(request_id(r#"{"rbxportDroppedFiles":7}"#), None);
+        assert_eq!(request_id("not json"), None);
+    }
+
+    #[test]
+    fn replies_with_every_path_in_posted_order() {
+        let answer: serde_json::Value = serde_json::from_str(&reply(
+            "7f",
+            Ok(vec![r"C:\Users\dj\Music\b.mp3".into(), r"C:\Users\dj\Music\é #.mp3".into()]),
+        ))
+        .unwrap_or_default();
+        assert_eq!(
+            answer,
+            serde_json::json!({
+                REQUEST_KEY: "7f",
+                "paths": [r"C:\Users\dj\Music\b.mp3", r"C:\Users\dj\Music\é #.mp3"],
+            })
+        );
+    }
+
+    #[test]
+    fn replies_with_an_error_when_any_path_is_missing() {
+        for paths in [Ok(vec![]), Ok(vec![String::new()]), Err(UNAVAILABLE.to_owned())] {
+            let answer: serde_json::Value = serde_json::from_str(&reply("7f", paths)).unwrap_or_default();
+            assert_eq!(answer, serde_json::json!({ REQUEST_KEY: "7f", "error": UNAVAILABLE }));
+        }
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
