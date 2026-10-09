@@ -1515,5 +1515,6 @@
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "Vill du ta bort {count} från samlingen? Detta kan inte ångras. Filerna stannar där de är.",
   "location": "placering",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} flyttad, {unresolved} hittades inte i sökmapparna.",
-  "{relocated} relocated.": "{relocated} flyttade."
+  "{relocated} relocated.": "{relocated} flyttade.",
+  "Auto Analysis is starting.": "Automatisk analys startar."
 }

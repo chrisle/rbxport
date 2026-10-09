@@ -88,3 +88,44 @@ test("a macOS Control-click menu analyses the whole selection (#135)", async ({ 
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(rows.and(page.locator("[data-selected]"))).toHaveCount(3);
 });
+
+// rekordbox 7.2.14, Auto Analysis on, unanalysed tracks in Collection: at
+// launch it shows Analysis Setting with "Auto Analysis is starting." and
+// OK/Cancel, BPM / Grid ticked and greyed, and no selection count (#207).
+test("Auto Analysis asks at launch before analysing never-analysed tracks", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({ analysis: { auto: true } })));
+  await page.goto("/?writable=1");
+  const dialog = page.getByRole("dialog", { name: "Analysis Setting" });
+  await expect(dialog).toContainText("Auto Analysis is starting.");
+  await expect(dialog).not.toContainText("selected");
+  await expect(dialog).not.toContainText("will be overwritten");
+  const bpmGrid = dialog.getByRole("checkbox", { name: "BPM / Grid", exact: true });
+  await expect(bpmGrid).toBeChecked();
+  await expect(bpmGrid).toBeDisabled();
+  await expect(dialog.getByRole("checkbox", { name: "KEY", exact: true })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("contentinfo")).not.toContainText("Analyzing ");
+
+  // Asked again at the next launch, and OK starts the run.
+  await page.reload();
+  await expect(dialog).toContainText("Auto Analysis is starting.");
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("contentinfo")).toContainText("Analyzing ");
+});
+
+test("Auto Analysis does not ask when it is off or the library is read-only", async ({ page }) => {
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  const dialog = page.getByRole("dialog", { name: "Analysis Setting" });
+  await page.goto("/?writable=1");
+  await expect(rows.first()).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(dialog).toHaveCount(0);
+
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({ analysis: { auto: true } })));
+  await page.goto("/");
+  await expect(rows.first()).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(dialog).toHaveCount(0);
+});

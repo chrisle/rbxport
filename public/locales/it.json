@@ -1519,5 +1519,6 @@
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "Rimuovere {count} dalla raccolta? Questa operazione non può essere annullata. I file rimangono dove sono.",
   "location": "posizione",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} trasferito, {unresolved} non trovato nelle cartelle di ricerca.",
-  "{relocated} relocated.": "{relocated} trasferito."
+  "{relocated} relocated.": "{relocated} trasferito.",
+  "Auto Analysis is starting.": "Si sta avviando la verifica automatica."
 }

@@ -1515,5 +1515,6 @@
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "{count} uit de collectie verwijderen? Dit kan niet ongedaan worden gemaakt. De bestanden blijven waar ze zijn.",
   "location": "plaats",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} verplaatst, {unresolved} niet gevonden in de zoekmappen.",
-  "{relocated} relocated.": "{relocated} verhuisd."
+  "{relocated} relocated.": "{relocated} verhuisd.",
+  "Auto Analysis is starting.": "Automatisch analyseren begint."
 }

@@ -1513,5 +1513,6 @@
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "Vil du fjerne {count} fra samlingen? Dette kan ikke fortrydes. Filerne bliver, hvor de er.",
   "location": "sted",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} flyttet, {unresolved} ikke fundet i søgemapperne.",
-  "{relocated} relocated.": "{relocated} flyttet."
+  "{relocated} relocated.": "{relocated} flyttet.",
+  "Auto Analysis is starting.": "Automatisk analyse starter."
 }

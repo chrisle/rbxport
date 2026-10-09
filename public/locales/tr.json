@@ -1518,5 +1518,6 @@
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "{count} koleksiyondan kaldırılsın mı? Bu geri alınamaz. Dosyalar oldukları yerde kalır.",
   "location": "konum",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} yeri değiştirildi, {unresolved} arama klasörlerinde bulunamadı.",
-  "{relocated} relocated.": "{relocated} yeri değiştirildi."
+  "{relocated} relocated.": "{relocated} yeri değiştirildi.",
+  "Auto Analysis is starting.": "Oto Analiz başlatılıyor."
 }

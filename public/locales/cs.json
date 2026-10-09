@@ -1518,5 +1518,6 @@
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "Odebrat {count} ze sbírky? Tuto akci nelze vrátit zpět. Soubory zůstanou tam, kde jsou.",
   "location": "umístění",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} přemístěno, {unresolved} nenalezeno ve složkách hledání.",
-  "{relocated} relocated.": "{relocated} přemístěno."
+  "{relocated} relocated.": "{relocated} přemístěno.",
+  "Auto Analysis is starting.": "Spouští se automatická analýza."
 }

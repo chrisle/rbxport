@@ -68,13 +68,14 @@ import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences
 import type { PreferencePane } from "@/lib/preferences";
 import { answer, deckNumber, setPlaying, whenLoaded, withSetting, type ScriptHandler } from "@/lib/scripting";
 import { useAnalysis } from "@/store/useAnalysis";
-import { AnalysisDialog } from "@/views/analysis/AnalysisDialog";
+import { AnalysisDialog, type AnalysisChoice } from "@/views/analysis/AnalysisDialog";
+import { autoAnalysisOffer, takeRemainingPages } from "@/lib/autoAnalysis";
 import { MissingFileManager } from "@/views/library/MissingFileManager";
 import { NewLibraryDialog, type LibraryQuestion } from "@/views/library/NewLibraryDialog";
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { AnalysisResult, DevicePlaylistEdit, FilterValues, LinkPeerSeen, LinkStatus, SmartRule, TrackLookups } from "@/ipc/types";
+import type { AnalysisResult, DevicePlaylistEdit, FilterValues, LinkPeerSeen, LinkStatus, SmartRule, TrackLookups, UnanalysedTracks } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
 import { nativeMenuLabels } from "@/lib/nativeMenu";
@@ -1758,6 +1759,36 @@ function AppBody() {
     },
     [readOnly, refuse],
   );
+  // Once, at launch, with Auto Analysis on: rekordbox asks "Auto Analysis is
+  // starting." before it analyses the Collection tracks it never analysed.
+  const [autoAnalysis, setAutoAnalysis] = useState<UnanalysedTracks | null>(null);
+  const autoAnalysisAsked = useRef(false);
+  useEffect(() => {
+    if (autoAnalysisAsked.current || !sessionReady || summary === null) return;
+    autoAnalysisAsked.current = true;
+    void getBackend()
+      .then(backend => autoAnalysisOffer(backend, { auto: analysisPrefs.auto, readOnly }))
+      .then(setAutoAnalysis)
+      .catch(() => {
+        // No prompt is the quiet outcome; analysis is still there on demand.
+      });
+  }, [sessionReady, summary, analysisPrefs.auto, readOnly]);
+  const startAutoAnalysis = useEventCallback(async (offer: UnanalysedTracks, settings: AnalysisChoice) => {
+    setAutoAnalysis(null);
+    if (readOnly) {
+      refuse(ANALYSIS_REFUSED);
+      return;
+    }
+    // Gathered before queueing, so stopping the run cannot be undone by a
+    // page arriving after it.
+    const tracks = [...offer.tracks];
+    try {
+      await takeRemainingPages(await getBackend(), offer.next, page => tracks.push(...page));
+    } catch {
+      // Analyse what was found; the rest is offered again at the next launch.
+    }
+    analysis.add(tracks, settings);
+  });
 
   // Import from a picker: files (Import) or whole folders (Import Folder). Both
   // land the same way — pick, import, refresh the tree, queue Auto Analysis —
@@ -2838,6 +2869,12 @@ function AppBody() {
             analysis.add(analysisSelection, settings);
             setAnalysisSelection(null);
           }} />
+      ) : null}
+      {autoAnalysis !== null ? (
+        <AnalysisDialog auto count={autoAnalysis.tracks.length} initialMode={analysisPrefs.mode}
+          initialFirstBeatCue={analysisPrefs.firstBeatCue}
+          onCancel={() => setAutoAnalysis(null)}
+          onConfirm={settings => void startAutoAnalysis(autoAnalysis, settings)} />
       ) : null}
       {settingsOpen !== null ? (
         <ConnectedPreferences

@@ -27,6 +27,8 @@
 .options { padding: 4px 20px; }
 .check { display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .check input { margin: 0; width: 15px; height: 15px; accent-color: var(--c-filter-accent); }
+/* Greyed as in rekordbox's launch prompt, where BPM / Grid is always on. */
+.check:has(> input:disabled) { color: var(--c-text-dim); }
 .gridOptions { margin: 4px 0 10px 24px; padding: 0; border: 0; min-width: 0; }
 .gridOptions:disabled { opacity: .45; }
 .field { display: grid; grid-template-columns: 108px minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 8px; }

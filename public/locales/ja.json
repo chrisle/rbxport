@@ -1526,5 +1526,6 @@
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "コレクションから {count} を削除しますか?これを元に戻すことはできません。ファイルはそのまま残ります。",
   "location": "場所",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} は再配置されましたが、{unresolved} は検索フォルダーに見つかりませんでした。",
-  "{relocated} relocated.": "{relocated}移転しました。"
+  "{relocated} relocated.": "{relocated}移転しました。",
+  "Auto Analysis is starting.": "自動解析を開始します。"
 }

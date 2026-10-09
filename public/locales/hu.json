@@ -1517,5 +1517,6 @@
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "Eltávolítja a gyűjteményből a következőt: {count}? Ez nem vonható vissza. A fájlok ott maradnak, ahol vannak.",
   "location": "hely",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} áthelyezve, {unresolved} nem található a keresési mappákban.",
-  "{relocated} relocated.": "{relocated} költözött."
+  "{relocated} relocated.": "{relocated} költözött.",
+  "Auto Analysis is starting.": "Az Automatikus elemzés elindul."
 }
