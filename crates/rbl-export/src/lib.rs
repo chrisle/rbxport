@@ -445,7 +445,7 @@ fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Ma
         let mut place = layout(track, *id);
         if let Some(audio) = in_place {
             place.audio.clone_from(audio);
-            place.file_name = audio.rsplit('/').next().unwrap_or_default().to_owned();
+            audio.rsplit('/').next().unwrap_or_default().clone_into(&mut place.file_name);
             place.anlz_dir = place.anlz_dir.replacen("/PIONEER/", &format!("/{root}/"), 1);
             return place;
         }
