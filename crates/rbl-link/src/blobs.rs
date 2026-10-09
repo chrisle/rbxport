@@ -3,6 +3,7 @@
 //! (measured against a CDJ-3000 where captured fixtures are available).
 //! The VBR compatibility placeholder is retained behavior, not a vendor oracle.
 
+use rbl_anlz::cues::export_colour;
 use rbl_anlz::{Anlz, Beat, Section};
 use rbl_index::Cue;
 
@@ -88,10 +89,6 @@ pub fn waveform_detail_blob(pwv3: &[u8]) -> Vec<u8> {
 const EXTENDED_CUE_UNKNOWN: u8 = 0x56;
 /// The word after a comment, constant, meaning unknown.
 const EXTENDED_CUE_AFTER_COMMENT: [u8; 4] = [0x2c, 0x00, 0x00, 0x00];
-/// The colour rekordbox gave every hot cue in the capture: code `15`, then
-/// the LED colour green. `[ASSUME]` the same for every hot cue until the
-/// colour table is read.
-const HOT_CUE_COLOUR: [u8; 4] = [0x15, 0x00, 0xff, 0x00];
 
 /// One cue as the extended list carries it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -102,6 +99,8 @@ pub struct ExtendedCue {
     /// 1–8 for hot cues A–H, 0 for a memory cue.
     pub hot_slot: u8,
     pub comment: String,
+    /// `djmdCue.ColorTableIndex`; 0 for none.
+    pub colour: u8,
 }
 
 impl From<&Cue> for ExtendedCue {
@@ -116,6 +115,7 @@ impl From<&Cue> for ExtendedCue {
                 0
             },
             comment: String::new(),
+            colour: cue.colour,
         }
     }
 }
@@ -164,6 +164,13 @@ pub fn vbr_compatibility_blob() -> Vec<u8> {
 /// One entry: a fixed head to `0x48`, the comment's UTF-16LE byte length,
 /// the comment with its NUL, a constant word, the colour (hot cues only),
 /// and zero padding to the length rekordbox writes.
+///
+/// The colour is the code then the device RGB, the four bytes `PCO2` puts
+/// after its comment, from the same palette as the USB export. [OBS] The
+/// capture's hot cues carry `15 00 ff 00` here, code 21 and palette entry
+/// 21's RGB, and its memory cues zeros; its source colours were not kept.
+/// [ASSUME] A hot cue without a colour gets code 0 and its slot's default
+/// RGB, as on USB.
 fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16>) -> Vec<u8> {
     let comment: Vec<u8> = if cue.comment.is_empty() {
         Vec::new()
@@ -202,7 +209,8 @@ fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16
     e[at..at + 4].copy_from_slice(&EXTENDED_CUE_AFTER_COMMENT);
     at += 4;
     if cue.hot_slot != 0 {
-        e[at..at + 4].copy_from_slice(&HOT_CUE_COLOUR);
+        e[at] = cue.colour;
+        e[at + 1..at + 4].copy_from_slice(&export_colour(cue.colour, u32::from(cue.hot_slot)));
     }
     e
 }

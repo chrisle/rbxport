@@ -96,12 +96,14 @@ fn the_vbr_compatibility_placeholder_keeps_its_existing_bytes() {
 #[test]
 fn the_extended_cue_list_matches_the_capture() {
     // The track's cues as `djmdCue` holds them: hot cues A–D and four
-    // memory cues at the same places (rekordbox's auto cues).
+    // memory cues at the same places (rekordbox's auto cues). The capture's
+    // hot cues are all colour 21, green.
     let cue = |slot: u8, ms: u32| ExtendedCue {
         position_ms: ms,
         out_ms: 0,
         hot_slot: slot,
         comment: "CUE(Auto)".into(),
+        colour: if slot == 0 { 0 } else { 21 },
     };
     // Memory cues in rekordbox's table order, which the reply keeps.
     let cues = vec![
@@ -153,4 +155,51 @@ fn the_waveform_preview_sends_pwv2_as_height_alone() {
     let blob = blobs::waveform_preview_blob(&[0xa3, 0x20], &[0x48, 0xef, 0x00, 0x0f]);
     assert_eq!(&blob[..4], &[0x03, 0x05, 0x02, 0x01]);
     assert_eq!(&blob[4..8], &[8, 15, 1, 15]);
+}
+
+/// The four colour bytes of the only entry in a reply: code, then RGB,
+/// after the comment and the word that follows it.
+fn colour_of(blob: &[u8]) -> &[u8] {
+    let comment = usize::from(u16::from_le_bytes([blob[0x48], blob[0x49]]));
+    &blob[0x4e + comment..0x52 + comment]
+}
+
+#[test]
+fn a_hot_cue_carries_its_own_colour() {
+    // Issue 275: every hot cue was sent as green whatever its colour.
+    let hot = |kind: u8, colour: u8| {
+        ExtendedCue::from(&Cue {
+            id: 1,
+            position_ms: 100,
+            out_ms: 0,
+            kind,
+            colour,
+        })
+    };
+    for (kind, colour, expected) in [
+        (1, 42, [42, 0xff, 0x00, 0x00]),
+        (2, 9, [9, 0x00, 0xe0, 0xff]),
+        (3, 30, [30, 0xe6, 0xff, 0x00]),
+        (5, 56, [56, 0xb3, 0x00, 0xff]),
+    ] {
+        let (blob, _) = blobs::extended_cues_blob(&[hot(kind, colour)]);
+        assert_eq!(colour_of(&blob), expected, "kind {kind}, colour {colour}");
+    }
+    // Without a colour, the code is 0 and the RGB the slot's default, as
+    // the USB export writes it: A is palette entry 43.
+    let (blob, _) = blobs::extended_cues_blob(&[hot(1, 0)]);
+    assert_eq!(colour_of(&blob), [0, 0xff, 0x00, 0x17]);
+}
+
+#[test]
+fn a_memory_cue_carries_no_colour() {
+    let memory = ExtendedCue::from(&Cue {
+        id: 2,
+        position_ms: 200,
+        out_ms: 0,
+        kind: 0,
+        colour: 42,
+    });
+    let (blob, _) = blobs::extended_cues_blob(&[memory]);
+    assert_eq!(colour_of(&blob), [0; 4]);
 }
