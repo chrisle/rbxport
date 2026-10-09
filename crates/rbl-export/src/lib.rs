@@ -424,37 +424,69 @@ fn on_stick(destination: &Path, source: &Path) -> Option<String> {
     Some(format!("/{}", parts.join("/")))
 }
 
+/// Whether a previous export's entry names the library's own file, where the
+/// library keeps it on the stick, rather than a copy the export made. Such a
+/// file is never the export's to delete, replace, or rename.
+///
+/// The `in_place` flag says so for entries this version wrote. An entry from
+/// an older version has no flag, yet its library file may sit exactly where
+/// the export would have copied it (`Contents/<Artist>/<Album>/<file>`), and
+/// that export then copied it onto itself: a library track whose source is the
+/// very file its audio path names is the library's too.
+fn owns_library_file(destination: &Path, entry: &ManifestTrack) -> bool {
+    entry.in_place
+        || (entry.library_id != 0 && same_file(Path::new(&entry.source), &under(destination, &entry.audio)))
+}
+
+/// The audio paths, by [`path_key`], of every library file a previous export
+/// left in place (see [`owns_library_file`]).
+fn previous_in_place(destination: &Path, previous: Option<&Manifest>) -> BTreeSet<String> {
+    previous.into_iter().flat_map(|m| &m.tracks)
+        .filter(|t| owns_library_file(destination, t))
+        .map(|t| path_key(&t.audio))
+        .collect()
+}
+
 /// [`on_stick`] for each track the selection names; `None` for a track that
 /// is copied. Only one track can own a file: a second library entry for the
 /// same file is copied beside it rather than sharing its analysis.
-fn in_place_paths(destination: &Path, tracks: &[SourceTrack]) -> Vec<Option<String>> {
+///
+/// A device track kept only because the stick still lists it (its history or
+/// a playlist made on the player) stays in place too when it is a library
+/// file an earlier export left there: it keeps its path, nothing copies over
+/// it, and the record keeps saying the file is not the export's.
+fn in_place_paths(destination: &Path, tracks: &[SourceTrack], previous: &BTreeSet<String>) -> Vec<Option<String>> {
     let mut claimed = BTreeSet::new();
     tracks.iter().map(|track| {
-        if track.device.as_ref().is_some_and(|d| d.preserve) { return None; }
+        if let Some(device) = track.device.as_ref().filter(|d| d.preserve) {
+            return (previous.contains(&path_key(&device.audio))
+                && same_file(&track.source_path, &under(destination, &device.audio))
+                && claimed.insert(path_key(&device.audio)))
+                .then(|| device.audio.clone());
+        }
         on_stick(destination, &track.source_path).filter(|path| claimed.insert(path_key(path)))
     }).collect()
 }
 
-fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Manifest>, in_place: &[Option<String>]) -> Vec<Layout> {
+fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Manifest>, in_place: &[Option<String>], previous_in_place: &BTreeSet<String>) -> Vec<Layout> {
     // Library files on the stick keep their names, and nothing copied may land
     // on one: not this run's, nor one an earlier run pointed at and left.
     let mut used: BTreeSet<String> = in_place.iter().flatten().map(|path| path_key(path))
-        .chain(previous.into_iter().flat_map(|m| &m.tracks).filter(|t| t.in_place).map(|t| path_key(&t.audio)))
+        .chain(previous_in_place.iter().cloned())
         .collect();
     tracks.iter().zip(ids).zip(in_place).map(|((track, id), in_place)| {
         let mut place = layout(track, *id);
-        if let Some(audio) = in_place {
-            place.audio.clone_from(audio);
-            audio.rsplit('/').next().unwrap_or_default().clone_into(&mut place.file_name);
-            place.anlz_dir = place.anlz_dir.replacen("/PIONEER/", &format!("/{root}/"), 1);
-            return place;
-        }
         if let Some(device) = track.device.as_ref().filter(|d| d.preserve) {
             place.audio.clone_from(&device.audio);
             place.file_name = Path::new(&place.audio).file_name().unwrap_or_default().to_string_lossy().into_owned();
             place.anlz_dir.clone_from(&device.analysis_dir);
+        } else if let Some(audio) = in_place {
+            place.audio.clone_from(audio);
+            audio.rsplit('/').next().unwrap_or_default().clone_into(&mut place.file_name);
         }
         place.anlz_dir = place.anlz_dir.replacen("/PIONEER/", &format!("/{root}/"), 1);
+        // A file left in place is where the library keeps it: never renamed.
+        if in_place.is_some() { return place; }
         // Keep a previous collision suffix when another colliding track goes away.
         if let Some(old) = previous.and_then(|m| m.tracks.iter().find(|t| t.key() == track_key(track.id, &track.source_path.to_string_lossy()))) {
             if old.conversion.is_empty() && Path::new(&old.audio).parent() == Path::new(&place.audio).parent() && old.source == track.source_path.to_string_lossy() {
@@ -785,8 +817,9 @@ pub fn export_cancellable(
         keys: &mut keys,
     };
 
-    let in_place_paths = in_place_paths(destination, tracks);
-    let layouts = layouts(tracks, &ids, root_name, previous.as_ref(), &in_place_paths);
+    let previous_in_place = previous_in_place(destination, previous.as_ref());
+    let in_place_paths = in_place_paths(destination, tracks, &previous_in_place);
+    let layouts = layouts(tracks, &ids, root_name, previous.as_ref(), &in_place_paths, &previous_in_place);
     // Losing access to a selected source must never delete its good USB copy.
     for track in tracks {
         if !track.source_path.is_file() && previous.as_ref().is_some_and(|m| m.tracks.iter().any(|t| t.key() == track_key(track.id, &track.source_path.to_string_lossy()))) {
@@ -930,7 +963,7 @@ pub fn export_cancellable(
         // otherwise sit on the stick forever, unreferenced.
         if let Some(c) = carried {
             // A file that was the library's own is never ours to delete.
-            if c.audio != place.audio && !c.in_place && !same_file(&under(destination, &c.audio), &audio_dest) {
+            if c.audio != place.audio && !owns_library_file(destination, c) && !same_file(&under(destination, &c.audio), &audio_dest) {
                 obsolete.push((c.audio.clone(), false));
             }
             if c.anlz_dir != place.anlz_dir {
@@ -1124,7 +1157,8 @@ pub fn export_cancellable(
 
     // Whatever the previous export left that this one does not name.
     for entry in stale.values() {
-        if !entry.in_place { obsolete.push((entry.audio.clone(), false)); }
+        // A file that was the library's own is never ours to delete.
+        if !owns_library_file(destination, entry) { obsolete.push((entry.audio.clone(), false)); }
         obsolete.push((entry.anlz_dir.clone(), true));
         report.removed += 1;
     }
