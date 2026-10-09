@@ -12,7 +12,7 @@ import { reportStartupPaint } from "@/lib/startup";
 import { useEventCallback } from "@/store/useEventCallback";
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { DeckId, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/types";
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
@@ -34,7 +34,7 @@ import { FilterIcon, SortDownIcon, SortUpIcon } from "@/components/icons";
 import { Artwork } from "@/components/Artwork";
 import { RatingStar } from "@/components/RatingStar";
 import { RecordIcon } from "@/components/icons";
-import { EXTRA_COLUMNS, type ColumnKey, type ColumnSpec } from "@/lib/columns";
+import { EXTRA_COLUMNS, reorderTarget, type ColumnKey, type ColumnSpec } from "@/lib/columns";
 import { COLOR_NAMES } from "@/lib/trackFilter";
 import { browseListVars, browseScale, formatKey } from "@/lib/preferences";
 import { trafficLightLit, type TrafficLightReach } from "@/lib/camelot";
@@ -89,16 +89,9 @@ function totalWidthOf(columns: readonly ColumnSpec[]): number {
   return columns.reduce((a, c) => a + c.width, 0);
 }
 
-/** Which heading sits under an x position, by hit-testing the header row. */
-function columnAt(head: HTMLElement | null, x: number): number | null {
-  if (!head) return null;
-  const cells = [...head.children];
-  for (const [at, cell] of cells.entries()) {
-    const box = cell.getBoundingClientRect();
-    if (x >= box.left && x <= box.right) return at;
-  }
-  // Past the last heading: the far right.
-  return cells.length > 0 ? cells.length - 1 : null;
+/** The header row's headings, leaving out the floating copy of a dragged one. */
+function headingsOf(head: HTMLElement): Element[] {
+  return [...head.children].filter((cell) => cell.getAttribute("role") === "columnheader");
 }
 
 export function cellText(row: RowDto, key: Column["key"]): string {
@@ -891,11 +884,20 @@ export const TrackTable = memo(function TrackTable({
   // Live during a header-edge drag. A ref, not state: this updates per
   // mousemove and re-rendering the table on each would be a frame's work.
   const resizing = useRef<{ key: ColumnKey; x: number; width: number } | null>(null);
-  // A heading drag in progress, and whether it passed the threshold.
-  const reorder = useRef<{ key: ColumnKey; from: number; x: number; moved: boolean } | null>(null);
+  // A heading drag in progress, and whether it passed the threshold. `grab`
+  // is where in the heading it was taken, so the floating copy stays under
+  // the pointer at the same place.
+  const reorder = useRef<{ key: ColumnKey; x: number; grab: number; moved: boolean } | null>(null);
   // Set when a drag finishes, so the click that follows does not also sort.
   const draggedRef = useRef(false);
   const headRef = useRef<HTMLDivElement>(null);
+  // The floating copy of the heading being dragged. Moved by its own style
+  // on every mousemove rather than through state, so following the pointer
+  // costs no render.
+  const ghostRef = useRef<HTMLDivElement>(null);
+  const ghostLeft = useRef(0);
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -905,21 +907,39 @@ export const TrackTable = memo(function TrackTable({
         return;
       }
       const move = reorder.current;
-      if (!move) return;
+      const head = headRef.current;
+      if (!move || !head) return;
       // A few pixels of slop, so a slightly imprecise click still sorts.
       if (!move.moved && Math.abs(e.clientX - move.x) < 5) return;
-      move.moved = true;
-      setDragKey(move.key);
+      if (!move.moved) {
+        move.moved = true;
+        setDragKey(move.key);
+      }
+      // rekordbox's drag: the heading floats with the pointer and the columns
+      // make room for it as it goes, so where it will land is always on show.
+      const current = columnsRef.current;
+      const at = current.findIndex((col) => col.key === move.key);
+      if (at === -1) return;
+      const origin = head.getBoundingClientRect().left;
+      const left = e.clientX - move.grab;
+      const width = current[at]?.width ?? 0;
+      ghostLeft.current = Math.round(left - origin);
+      if (ghostRef.current) ghostRef.current.style.transform = `translateX(${ghostLeft.current}px)`;
+      const spans = headingsOf(head).map((cell) => {
+        const box = cell.getBoundingClientRect();
+        return { left: box.left, right: box.right };
+      });
+      const first = current.filter((col) => col.fixed).length;
+      const to = reorderTarget(spans, at, left, left + width, first);
+      if (to !== at) onColumnMove(move.key, to);
     };
-    const onUp = (e: MouseEvent) => {
+    const onUp = () => {
       resizing.current = null;
       const move = reorder.current;
       reorder.current = null;
       setDragKey(null);
-      if (!move?.moved) return;
-      draggedRef.current = true;
-      const to = columnAt(headRef.current, e.clientX);
-      if (to !== null && to !== move.from) onColumnMove(move.key, to);
+      // Already where it belongs: the columns moved while it was held.
+      if (move?.moved) draggedRef.current = true;
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -1391,9 +1411,16 @@ export const TrackTable = memo(function TrackTable({
     [spec.sort, spec.descending],
   );
 
+  const dragged = dragKey === null ? undefined : columns.find((col) => col.key === dragKey);
+  // The copy mounts on the move that starts the drag; put it under the
+  // pointer before it paints rather than at the row's left edge.
+  useLayoutEffect(() => {
+    if (dragKey !== null && ghostRef.current) ghostRef.current.style.transform = `translateX(${ghostLeft.current}px)`;
+  }, [dragKey]);
+
   const header = useMemo(
     () =>
-      columns.map((col, at) => (
+      columns.map((col) => (
         <div
           key={col.key}
           className={col.align === "right" ? `${styles.headCell} ${styles.right}` : styles.headCell}
@@ -1404,8 +1431,9 @@ export const TrackTable = memo(function TrackTable({
             // drag-and-drop: marking the heading `draggable` makes the browser
             // treat a plain click as the start of a drag and swallow it, which
             // stopped the heading sorting at all.
-            if (e.button !== 0) return;
-            reorder.current = { key: col.key, from: at, x: e.clientX, moved: false };
+            if (e.button !== 0 || col.fixed) return;
+            const box = e.currentTarget.getBoundingClientRect();
+            reorder.current = { key: col.key, x: e.clientX, grab: e.clientX - box.left, moved: false };
           }}
           onClick={
             col.sortable
@@ -1595,6 +1623,17 @@ export const TrackTable = memo(function TrackTable({
         */}
         <div className={styles.colHead} role="row" ref={headRef}>
           {header}
+          {dragged ? (
+            <div
+              ref={ghostRef}
+              className={dragged.align === "right" ? `${styles.headCell} ${styles.right} ${styles.headGhost}` : `${styles.headCell} ${styles.headGhost}`}
+              style={{ width: `${dragged.width}px` }}
+              data-testid="column-drag-ghost"
+              aria-hidden
+            >
+              {dragged.label}
+            </div>
+          ) : null}
         </div>
 
         <div

@@ -159,7 +159,23 @@
   cursor: default;
 }
 .headCell[data-sorted] { color: var(--c-accent); }
-.headCell[data-dragging] { opacity: .45; }
+/* A heading being dragged, as rekordbox draws it ([OBS] rekordbox 7.2.14,
+   #207): its place in the row is left blank while a copy of it follows the
+   pointer, and the columns move aside as it passes them. The copy's label
+   measured (198..210) over the header's ground (30) where a resting label is
+   (230): the same heading at about 85% opacity, without its divider. */
+.headCell[data-dragging] { color: transparent; }
+.headCell[data-dragging] > * { visibility: hidden; }
+.headGhost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: var(--c-panel);
+  border-right: 0;
+  opacity: .85;
+  pointer-events: none;
+  will-change: transform;
+}
 .headCell { display: flex; align-items: center; }
 
 /* The resize grip: a few pixels at the right edge of every heading, wider than

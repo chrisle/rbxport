@@ -296,3 +296,47 @@ export function sanitise(value: unknown, fallback: () => Layout = defaultLayout)
   }
   return { order: withTitle(order), widths };
 }
+
+/** A rendered heading's horizontal extent, in any one coordinate space. */
+export interface HeadingSpan {
+  left: number;
+  right: number;
+}
+
+/**
+ * Where a heading being dragged belongs now, as rekordbox moves it.
+ *
+ * rekordbox reorders the columns while the heading is still held, rather than
+ * on release: the dragged heading floats with the pointer and swaps with a
+ * neighbour once its floating copy passes that neighbour's middle
+ * ([OBS] rekordbox 7.2.14 on Windows, #207; the same rule as JUCE's
+ * `TableHeaderComponent::mouseDrag`, which rekordbox's header is built on).
+ * Testing the copy's edges against the neighbours' middles rather than the
+ * pointer against their boxes keeps a narrow column dragged over a wide one
+ * from swapping back and forth on every move.
+ *
+ * `spans` are the headings as drawn, `at` the dragged one's index among them,
+ * `left`/`right` its floating copy's edges, and `first` the lowest index it
+ * may take (fixed columns lead and do not move).
+ */
+export function reorderTarget(
+  spans: readonly HeadingSpan[],
+  at: number,
+  left: number,
+  right: number,
+  first: number,
+): number {
+  let to = at;
+  while (to - 1 >= first) {
+    const neighbour = spans[to - 1];
+    if (!neighbour || left >= (neighbour.left + neighbour.right) / 2) break;
+    to -= 1;
+  }
+  if (to !== at) return to;
+  while (to + 1 < spans.length) {
+    const neighbour = spans[to + 1];
+    if (!neighbour || right <= (neighbour.left + neighbour.right) / 2) break;
+    to += 1;
+  }
+  return to;
+}
