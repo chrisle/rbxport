@@ -143,7 +143,7 @@ mod webview2 {
             let mut json = PWSTR::null();
             // SAFETY: WebView2 calls this handler on the controller's thread
             // with live arguments; `take_pwstr` frees the returned string.
-            unsafe { args.WebMessageAsJson(&mut json)? };
+            unsafe { args.WebMessageAsJson(&raw mut json)? };
             let Some(id) = request_id(&take_pwstr(json)) else {
                 return Ok(());
             };
@@ -155,7 +155,7 @@ mod webview2 {
         let mut token = 0_i64;
         // SAFETY: the caller is on the controller's thread; the handler lives
         // as long as the webview, which holds a reference to it.
-        unsafe { core.add_WebMessageReceived(&handler, &mut token) }
+        unsafe { core.add_WebMessageReceived(&handler, &raw mut token) }
     }
 
     /// The path of every `File` posted with the message, in posted order.
@@ -171,12 +171,12 @@ mod webview2 {
             unsafe {
                 let objects = args.AdditionalObjects()?;
                 let mut count = 0_u32;
-                objects.Count(&mut count)?;
+                objects.Count(&raw mut count)?;
                 (0..count)
                     .map(|index| {
                         let file = objects.GetValueAtIndex(index)?.cast::<ICoreWebView2File>()?;
                         let mut path = PWSTR::null();
-                        file.Path(&mut path)?;
+                        file.Path(&raw mut path)?;
                         Ok(take_pwstr(path))
                     })
                     .collect()
