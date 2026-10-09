@@ -809,8 +809,9 @@ impl Date {
     }
 
     /// The inclusive start of a relative-date window. A case-insensitive
-    /// singular `month` steps the calendar; every other spelling counts days,
-    /// with today as the first day.
+    /// singular `month` starts on the last day of the month that many months
+    /// back (so today's month never counts as one); every other spelling
+    /// counts days, with today as the first day.
     #[must_use]
     pub fn minus(self, count: i64, unit: &str) -> Self {
         if unit.eq_ignore_ascii_case("month") {
@@ -824,30 +825,25 @@ impl Date {
         Self::from_days(self.days() - count)
     }
 
+    /// The last day of the month `count` months before this one (a count
+    /// below one acts as one), which is the first day of the window.
+    /// [OBS: static, rekordbox 7.2.19 arm64 `db::pastMonthToDay` takes
+    /// `max(count - 1, 0)`, subtracts it from the current month, sets the
+    /// day of month to 0 and passes the result through `mktime`, which
+    /// normalises it to the last day of the month before; the five cutoffs
+    /// in issue #255 fit]. `db::pastMonthToDay` then divides the `mktime`
+    /// result by 86400 with no local-offset correction, so its day can be
+    /// off by one around midnight [UNKNOWN: not reproduced here].
     fn months_back(self, count: i64) -> Self {
-        let total = self.year * 12 + (self.month - 1) - count;
+        let total = self.year * 12 + (self.month - 1) - count.max(1) + 1;
         let year = total.div_euclid(12);
         let month = total.rem_euclid(12) + 1;
-        Self { year, month, day: self.day.min(days_in_month(year, month)) }
+        Self::from_days(days_from_civil(year, month, 1) - 1)
     }
 
     fn from_days(days: i64) -> Self {
         let (year, month, day) = civil_from_days(days);
         Self { year, month, day }
-    }
-}
-
-fn days_in_month(year: i64, month: i64) -> i64 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        _ => {
-            if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
-                29
-            } else {
-                28
-            }
-        }
     }
 }
 
@@ -980,6 +976,34 @@ mod tests {
         let xml = rule.to_xml(4_290_236_987);
         assert!(xml.starts_with("<NODE Id=\"4290236987\" LogicalOperator=\"2\" AutomaticUpdate=\"1\"><CONDITION PropertyName=\"genre\" Operator=\"8\""));
         assert_eq!(SmartRule::parse(&xml).unwrap(), rule);
+    }
+
+    /// [OBS: issue #255, rekordbox on 2026-10-09] The first included day of
+    /// "in the last N months" is the last day of the month N months back.
+    #[test]
+    fn months_window_starts_on_the_last_day_of_the_month_n_months_back() {
+        let day = |y, m, d| Date { year: y, month: m, day: d };
+        let today = day(2026, 10, 9);
+        assert_eq!(today.minus(4, "month"), day(2026, 6, 30));
+        assert_eq!(today.minus(6, "month"), day(2026, 4, 30));
+        assert_eq!(today.minus(9, "month"), day(2026, 1, 31));
+        assert_eq!(today.minus(12, "month"), day(2025, 10, 31));
+        assert_eq!(today.minus(36, "month"), day(2023, 10, 31));
+        // The day of the month never matters, only the month.
+        assert_eq!(day(2026, 10, 1).minus(4, "month"), day(2026, 6, 30));
+        assert_eq!(day(2026, 10, 31).minus(4, "month"), day(2026, 6, 30));
+        // Month ends: from 31 January and 31 March, and a leap February.
+        assert_eq!(day(2026, 1, 31).minus(1, "month"), day(2025, 12, 31));
+        assert_eq!(day(2026, 3, 31).minus(1, "month"), day(2026, 2, 28));
+        assert_eq!(day(2024, 3, 31).minus(1, "month"), day(2024, 2, 29));
+        assert_eq!(day(2024, 5, 15).minus(3, "month"), day(2024, 2, 29));
+        assert_eq!(day(2024, 3, 1).minus(12, "month"), day(2023, 3, 31));
+        // Year rollover.
+        assert_eq!(day(2026, 2, 14).minus(2, "month"), day(2025, 12, 31));
+        assert_eq!(day(2026, 1, 5).minus(13, "month"), day(2024, 12, 31));
+        // A count below one acts as one [OBS: `max(count - 1, 0)`].
+        assert_eq!(today.minus(0, "month"), day(2026, 9, 30));
+        assert_eq!(today.minus(-3, "month"), day(2026, 9, 30));
     }
 
     #[test]
