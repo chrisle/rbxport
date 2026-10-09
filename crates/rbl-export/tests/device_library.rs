@@ -279,3 +279,49 @@ fn the_rigs_rekordbox_edits_leave_the_same_rows_here() {
     device_library::apply(d, one, &Edit::Delete { id: 4 }).unwrap();
     assert_eq!(rows(d, one), vec![row(1, 0, 0, "Folder A", &[]), row(2, 1, 1, "Inside A", &[1, 2]), row(3, 0, 1, "Top List", &[3, 4, 1])]);
 }
+
+/// An edit that starts while another write holds the stick (an export, or
+/// a second edit) waits for it, then plans against the file that write
+/// left, not the one it would have read before.
+#[test]
+fn an_edit_waits_for_a_write_in_progress_and_plans_against_its_result() {
+    for format in [Format::DeviceLibrary, Format::OneLibrary] {
+        let src = tempfile::tempdir().unwrap();
+        let (dest, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        stick(src.path(), dest.path());
+        stick(src.path(), elsewhere.path());
+        // What the other write is about to publish: the same stick with a
+        // playlist more, made on a copy.
+        let newer = device_library::apply(elsewhere.path(), format, &Edit::Create { parent: 0, name: "Newer".into(), folder: false }).unwrap();
+        let newer_bytes = db(elsewhere.path(), format);
+        let before = device_library::read(dest.path(), format).unwrap();
+        assert!(before.nodes.iter().all(|n| n.name != "Newer"));
+
+        let holding = rbl_core::durable::Publication::new(dest.path(), ".rbxport-publication").unwrap();
+        let (done, finished) = std::sync::mpsc::channel();
+        let root = dest.path().to_path_buf();
+        let editing = std::thread::spawn(move || {
+            let result = device_library::apply(&root, format, &Edit::Create { parent: 0, name: "Mine".into(), folder: false });
+            done.send(result).unwrap();
+        });
+        assert!(
+            finished.recv_timeout(std::time::Duration::from_millis(400)).is_err(),
+            "{format:?}: the edit went ahead while another write held the stick"
+        );
+        let relative = Path::new("PIONEER/rekordbox");
+        std::fs::create_dir_all(holding.stage().join(relative)).unwrap();
+        std::fs::write(holding.stage().join(relative).join(format.file_name()), &newer_bytes).unwrap();
+        let wal = |suffix: &str| relative.join(format!("{}{suffix}", format.file_name()));
+        holding.commit(&[relative.join(format.file_name()), wal("-wal"), wal("-shm")]).unwrap();
+        drop(holding);
+
+        let applied = finished.recv_timeout(std::time::Duration::from_secs(30)).unwrap().unwrap();
+        editing.join().unwrap();
+        assert_eq!(applied, Applied { id: newer.id + 1, changed: 1 }, "{format:?}: planned against the newer file");
+        let after = device_library::read(dest.path(), format).unwrap();
+        // Both new playlists, the later one on top; the rest move down.
+        let top: Vec<&str> = after.nodes.iter().filter(|n| n.parent == 0).map(|n| n.name.as_str()).collect();
+        assert_eq!(top, ["Mine", "Newer", "Sets", "Warm Up"], "{format:?}");
+        assert_eq!(after.nodes.iter().filter(|n| n.parent == 0).take(2).map(|n| n.sequence).collect::<Vec<_>>(), [0, 1], "{format:?}");
+    }
+}

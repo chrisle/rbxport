@@ -151,10 +151,26 @@ fn library_dto(library: &device::Library) -> DeviceLibraryDto {
 /// Applies one edit to one library on the stick at `path`.
 #[tauri::command]
 pub async fn device_playlist_edit(path: String, format: String, edit: DeviceEditDto) -> AppResult<DeviceEditResultDto> {
-    blocking("device_playlist_edit", move || apply_edit(&path, &format, edit)).await
+    blocking("device_playlist_edit", move || apply_edit(&path, &format, edit, rbl_db::is_rekordbox_running())).await
 }
 
-fn apply_edit(path: &str, format: &str, edit: DeviceEditDto) -> AppResult<DeviceEditResultDto> {
+/// Why an edit to a stick must be refused, if it must.
+///
+/// rekordbox holds a connected stick's databases open and writes them on its
+/// own (a Devices tree edit, a sync, an export), so this refuses whenever it
+/// runs, as the USB export does. The interface greys the edits too, but from
+/// a snapshot that can be out of date, and the unsafe-writes override that
+/// lets the user's own library be written clears it; neither may decide for
+/// a stick. Kept apart from [`apply_edit`] so the rule is tested without a
+/// running rekordbox.
+pub fn edit_refusal(rekordbox_running: bool) -> Option<AppError> {
+    rekordbox_running.then(|| AppError::new(ErrorKind::ReadOnly, "Quit rekordbox before changing this USB's playlists so only one application writes its libraries."))
+}
+
+fn apply_edit(path: &str, format: &str, edit: DeviceEditDto, rekordbox_running: bool) -> AppResult<DeviceEditResultDto> {
+    if let Some(refused) = edit_refusal(rekordbox_running) {
+        return Err(refused);
+    }
     let mount = connected(path)?;
     let format = format_from(format)?;
     let edit = match edit {
@@ -347,7 +363,7 @@ mod tests {
     fn an_edit_from_the_interface_changes_the_library_it_names() {
         let (_src, dest) = stick();
         let path = dest.path().to_str().unwrap();
-        let made = apply_edit(path, "deviceLibrary", DeviceEditDto::Create { parent: "0".into(), name: "Opening".into(), folder: false }).unwrap();
+        let made = apply_edit(path, "deviceLibrary", DeviceEditDto::Create { parent: "0".into(), name: "Opening".into(), folder: false }, false).unwrap();
         assert_eq!(made.changed, 1);
         let rows: Vec<String> = device::read(dest.path(), Format::DeviceLibrary)
             .unwrap()
@@ -355,14 +371,35 @@ mod tests {
             .iter()
             .map(|t| rbl_index::folder::loose_id(&audio_path(dest.path(), &t.path)))
             .collect();
-        apply_edit(path, "deviceLibrary", DeviceEditDto::Add { playlist: made.id.clone(), tracks: rows }).unwrap();
+        apply_edit(path, "deviceLibrary", DeviceEditDto::Add { playlist: made.id.clone(), tracks: rows }, false).unwrap();
         let found = libraries(dest.path());
         let opening = found[0].nodes.iter().find(|n| n.name == "Opening").unwrap();
         assert_eq!(opening.count, 3);
         assert!(!found[1].nodes.iter().any(|n| n.name == "Opening"), "OneLibrary is left as it was");
-        let refused = apply_edit(path, "deviceLibrary", DeviceEditDto::Rename { id: made.id, name: "   ".into() }).unwrap_err();
+        let refused = apply_edit(path, "deviceLibrary", DeviceEditDto::Rename { id: made.id, name: "   ".into() }, false).unwrap_err();
         assert!(matches!(refused.kind, ErrorKind::Malformed));
-        assert!(apply_edit(path, "elsewhere", DeviceEditDto::Delete { id: "1".into() }).is_err());
+        assert!(apply_edit(path, "elsewhere", DeviceEditDto::Delete { id: "1".into() }, false).is_err());
+    }
+
+    #[test]
+    fn an_edit_is_refused_while_rekordbox_runs_and_leaves_the_stick_alone() {
+        assert!(edit_refusal(false).is_none());
+        // The export's own refusal, in the same words but for the edit.
+        let refusal = edit_refusal(true).unwrap();
+        assert!(matches!(refusal.kind, ErrorKind::ReadOnly));
+        assert_eq!(refusal.message, "Quit rekordbox before changing this USB's playlists so only one application writes its libraries.");
+        let (_src, dest) = stick();
+        let path = dest.path().to_str().unwrap();
+        let db = dest.path().join("PIONEER/rekordbox");
+        let files = || ["export.pdb", "exportLibrary.db"].map(|f| std::fs::read(db.join(f)).unwrap());
+        let before = files();
+        for format in ["deviceLibrary", "oneLibrary"] {
+            let refused = apply_edit(path, format, DeviceEditDto::Create { parent: "0".into(), name: "Opening".into(), folder: false }, true).unwrap_err();
+            assert!(matches!(refused.kind, ErrorKind::ReadOnly));
+            assert_eq!(refused.message, refusal.message);
+        }
+        assert!(files() == before, "a refused edit writes nothing");
+        assert!(!dest.path().join(".rbxport-publication").exists());
     }
 
     #[test]
