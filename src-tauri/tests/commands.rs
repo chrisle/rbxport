@@ -44,6 +44,8 @@ struct Shell {
     changes: Arc<Mutex<Vec<u32>>>,
     /// How many `tag-list:changed` the interface would have seen.
     tag_list_changes: Arc<Mutex<usize>>,
+    /// The fixture library, to read rows back the way rekordbox would.
+    location: rbl_db::LibraryLocation,
 }
 
 /// A mock app over a fresh fixture, loaded the way `spawn_library_load`
@@ -59,7 +61,7 @@ fn shell_with_shape(shape: Shape) -> Shell {
     let state = AppState::with_backups(dir.path().join("backups"));
     let db = Db::open(location.clone(), OpenMode::ReadOnly).expect("open the fixture");
     let (library, _) = rbl_index::load(&db).expect("index the fixture");
-    state.set_library(library, false, db.schema().db_version, 0, location);
+    state.set_library(library, false, db.schema().db_version, 0, location.clone());
 
     let sink: Arc<Mutex<Option<Arc<NullSink>>>> = Arc::new(Mutex::new(None));
     let slot = Arc::clone(&sink);
@@ -94,7 +96,7 @@ fn shell_with_shape(shape: Shape) -> Shell {
     let tagged = Arc::clone(&tag_list_changes);
     app.listen("tag-list:changed", move |_| *tagged.lock().unwrap() += 1);
 
-    Shell { _dir: dir, app, sink, preview_sink, changes, tag_list_changes }
+    Shell { _dir: dir, app, sink, preview_sink, changes, tag_list_changes, location }
 }
 
 /// Runs a command the way the invoke handler does: to completion, on the
@@ -706,6 +708,87 @@ fn a_write_the_library_refuses_is_read_only_to_the_interface_and_changes_nothing
 
     let err = run(commands::set_track_rating(s.handle(), s.state(), vec![track_id(0)], 9)).unwrap_err();
     assert_eq!(err.kind, ErrorKind::ReadOnly);
+}
+
+/// Every playlist and membership row, and the USN counter: what an import
+/// that writes nothing must leave exactly as it was.
+fn playlist_snapshot(s: &Shell) -> (Vec<String>, Vec<String>, i64) {
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let conn = db.connection();
+    let rows = |sql: &str| -> Vec<String> {
+        let mut stmt = conn.prepare(sql).unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0)).unwrap().map(Result::unwrap).collect()
+    };
+    let lists = rows(
+        "SELECT ID || '|' || ParentID || '|' || Name || '|' || Seq || '|' || rb_local_deleted || '|' || rb_local_usn
+         FROM djmdPlaylist ORDER BY ID",
+    );
+    let members = rows(
+        "SELECT ID || '|' || PlaylistID || '|' || ContentID || '|' || TrackNo || '|' || rb_local_deleted || '|' || rb_local_usn
+         FROM djmdSongPlaylist ORDER BY ID",
+    );
+    let usn = conn
+        .query_row("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", [], |r| r.get(0))
+        .unwrap();
+    (lists, members, usn)
+}
+
+/// Issue #152: rekordbox asks "One or several lists with the same name
+/// already exist." before an import that would replace lists, and Cancel
+/// imports nothing. The command keeps that promise itself: without
+/// `replace` it names the lists and writes, reloads and announces nothing;
+/// with `replace` it replaces them.
+#[test]
+fn an_xml_import_that_would_replace_lists_writes_nothing_until_told_to() {
+    let s = shell();
+    let audio: Vec<PathBuf> =
+        ["One", "Two"].iter().map(|n| write_wav(&s._dir.path().join(format!("{n}.wav")), 1)).collect();
+    let location = |p: &Path| format!("file://localhost{}", p.to_string_lossy().replace(' ', "%20"));
+    let doc = |keys: &[u8]| {
+        let members: String = keys.iter().map(|k| format!(r#"<TRACK Key="{k}"/>"#)).collect();
+        format!(
+            r#"<?xml version="1.0"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="2">
+            <TRACK TrackID="1" Name="One" Location="{}"/>
+            <TRACK TrackID="2" Name="Two" Location="{}"/>
+            </COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="1">
+            <NODE Name="Issue 152" Type="1" KeyType="0" Entries="{}">{members}</NODE>
+            </NODE></PLAYLISTS></DJ_PLAYLISTS>"#,
+            location(&audio[0]),
+            location(&audio[1]),
+            keys.len(),
+        )
+    };
+    let file = s._dir.path().join("collection.xml");
+    std::fs::write(&file, doc(&[1, 2])).unwrap();
+    let path = file.display().to_string();
+
+    let first = run(commands::import_xml(s.handle(), s.state(), path.clone(), None)).unwrap();
+    assert!(first.same_named.is_empty());
+    assert_eq!((first.imported, first.playlists), (2, 1));
+    let list = s.node("Issue 152").id;
+    let titles = |s: &Shell| -> Vec<String> { s.playlist_rows(&list).iter().map(|r| r.title.clone()).collect() };
+    assert_eq!(titles(&s), vec!["One", "Two"]);
+
+    // The next export dropped "One".
+    std::fs::write(&file, doc(&[2])).unwrap();
+    let before = playlist_snapshot(&s);
+    let generation = s.state().summary().3;
+    let changes = s.changes.lock().unwrap().len();
+
+    let asked = run(commands::import_xml(s.handle(), s.state(), path.clone(), None)).unwrap();
+    assert_eq!(asked.same_named, vec!["Issue 152"]);
+    assert_eq!((asked.imported, asked.playlists), (0, 0));
+    assert_eq!(playlist_snapshot(&s), before, "no row and no USN changed");
+    assert_eq!(s.state().summary().3, generation, "nothing was reloaded");
+    assert_eq!(s.changes.lock().unwrap().len(), changes, "nothing was announced");
+    assert_eq!(titles(&s), vec!["One", "Two"]);
+
+    let replaced = run(commands::import_xml(s.handle(), s.state(), path, Some(true))).unwrap();
+    assert!(replaced.same_named.is_empty());
+    assert!(s.state().summary().3 > generation, "the replacement reloads the library");
+    assert_eq!(s.node("Issue 152").id, list, "replaced where it stands, not doubled");
+    assert_eq!(titles(&s), vec!["Two"]);
+    assert_ne!(playlist_snapshot(&s).2, before.2);
 }
 
 // ----------------------------------------------------------- the Tag List
