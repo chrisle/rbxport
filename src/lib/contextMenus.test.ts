@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deckMenu, enabled, entriesOf, SEPARATOR, shortcutMenu, TRACK_MENU, trackMenuFor, treeMenu, type MenuContext } from "./contextMenus";
+import { deckMenu, deleteKeyAction, enabled, entriesOf, SEPARATOR, shortcutMenu, TRACK_MENU, trackMenuFor, treeMenu, type MenuContext } from "./contextMenus";
 
 const OPEN: MenuContext = { inPlaylist: true, hasFile: true, readOnly: false };
 
@@ -340,5 +340,20 @@ describe("deckMenu", () => {
   it("offers Analyze Track for the loaded track", () => {
     const entry = entriesOf(deckMenu(state)).find((e) => e.label === "Analyze Track");
     expect(entry?.action).toBe("analyse");
+  });
+});
+
+describe("deleteKeyAction", () => {
+  it("is the removal the list's own menu offers, as rekordbox's Delete key is (#136)", () => {
+    expect(deleteKeyAction("collection")).toBe("removeFromCollection");
+    expect(deleteKeyAction("playlist")).toBe("removeFromPlaylist");
+    expect(deleteKeyAction("history")).toBe("removeFromHistory");
+    expect(deleteKeyAction("tagList")).toBe("removeFromTagList");
+  });
+
+  it("does nothing where there is nothing to remove from", () => {
+    for (const source of ["folder", "playlistFolder", "related"]) {
+      expect(deleteKeyAction(source)).toBeNull();
+    }
   });
 });

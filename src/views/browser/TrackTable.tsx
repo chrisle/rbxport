@@ -23,7 +23,7 @@ import {
   applyClick, clickSettles, emptySelection, pressModifier, pressSelects, selectAll, selectedTracks, type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
-import { trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
+import { deleteKeyAction, trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
 import { hasLooseId } from "@/lib/explorer";
 import { previewFromClick, WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
@@ -41,7 +41,7 @@ import { usePreferences, useTooltip } from "@/store/usePreferences";
 import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
 import { setRowDragImage } from "./dragGhost";
-import { detectPlatform, dispatch } from "@/lib/shortcuts";
+import { detectPlatform, dispatch, isTyping } from "@/lib/shortcuts";
 
 const ROW_H = 25; // --s-row-height
 /** One frozen empty list, so a row without cues does not re-render for a new one. */
@@ -1214,6 +1214,66 @@ export const TrackTable = memo(function TrackTable({
     [],
   );
 
+  // Whether the Delete key speaks to this list: the last press in a list or
+  // a tree landed here. The sub-browser draws a second list, and the tree
+  // beside them takes focus, so a key heard on the window alone would remove
+  // tracks from a list the person was not working in. A press anywhere else
+  // (a deck, a menu, a dialog) leaves it as it was.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const engaged = useRef(false);
+  useEffect(() => {
+    const onDown = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target === null) return;
+      if (rootRef.current?.contains(target)) engaged.current = true;
+      else if (target.closest('[role="grid"], [role="tree"]')) engaged.current = false;
+    };
+    window.addEventListener("mousedown", onDown, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown, true);
+    };
+  }, []);
+
+  // Delete and ⌫ remove the whole selection the way this list's own menu
+  // entry does: from the collection (asked first), a playlist, a history or
+  // the Tag List. rekordbox's list does the same with either key (#136).
+  const removeSelection = useEventCallback((event: KeyboardEvent) => {
+    if (event.key !== "Delete" && event.key !== "Backspace") return;
+    if (event.defaultPrevented || !engaged.current || trackMenu !== null) return;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (isTyping(target) || target?.closest('[role="tree"], [role="dialog"], [role="menu"]')) return;
+    // A key the person bound to something else in the Keyboard pane is theirs.
+    if (dispatch(event, platform, target, preferences.keyboard.overrides) !== null) return;
+    const action = deleteKeyAction(spec.source.kind);
+    if (action === null || selection.ids.size === 0 || hasLooseId(selection.ids)) return;
+    event.preventDefault();
+    if (readOnly) {
+      onEditBlocked?.();
+      return;
+    }
+    const ids = [...selection.ids];
+    switch (action) {
+      case "removeFromCollection":
+        onRemoveFromCollection?.(ids);
+        break;
+      case "removeFromPlaylist":
+        onRemoveFromPlaylist?.(ids);
+        break;
+      case "removeFromHistory":
+        onRemoveFromHistory?.(ids);
+        break;
+      case "removeFromTagList":
+        onRemoveFromTagList?.(ids);
+        break;
+    }
+  });
+  useEffect(() => {
+    window.addEventListener("keydown", removeSelection);
+    return () => {
+      window.removeEventListener("keydown", removeSelection);
+    };
+  }, [removeSelection]);
+
   const reportedSelection = useRef("");
   useEffect(() => {
     if (!onSelectedTracks) return;
@@ -1307,6 +1367,7 @@ export const TrackTable = memo(function TrackTable({
 
   return (
     <div
+      ref={rootRef}
       className={styles.browser}
       style={{
         ["--cols" as string]: gridOf(columns),

@@ -493,6 +493,44 @@ export function trackMenuFor(
   });
 }
 
+/** The removals the Delete key can stand for. */
+export type DeleteKeyAction =
+  | "removeFromCollection"
+  | "removeFromPlaylist"
+  | "removeFromHistory"
+  | "removeFromTagList";
+
+/**
+ * What the Delete key (or ⌫, Backspace) does to the selected tracks of a
+ * list showing `source`: the same removal as the menu entry for that list,
+ * over the whole selection, or `null` where it does nothing.
+ *
+ * rekordbox's track list sends both keys to `ListViewer::deleteKeyPressed`
+ * [OBS static, rekordbox 7.2.19 arm64: `CustomListBox::keyPressed`
+ * @0x100e7c6ac compares the key with `KeyPress::deleteKey` and
+ * `KeyPress::backspaceKey`]. That removes the selected rows from the Tag
+ * List, from a playlist or a history, and in the Collection asks first and
+ * passes every selected track to `DatabaseIF::removeFromCollection`
+ * (@0x1004069b8) [OBS static]. The manual says the same of the Collection
+ * (p.20, "Press the [Delete] key... Click [OK]") and of a playlist (p.39)
+ * [OBS rekordbox 7.2.18 manual]. Elsewhere — the Explorer, Related Tracks,
+ * a folder — this app has nothing to remove [ASSUME].
+ */
+export function deleteKeyAction(source: string): DeleteKeyAction | null {
+  switch (source) {
+    case "collection":
+      return "removeFromCollection";
+    case "playlist":
+      return "removeFromPlaylist";
+    case "history":
+      return "removeFromHistory";
+    case "tagList":
+      return "removeFromTagList";
+    default:
+      return null;
+  }
+}
+
 /** The entries of a menu, without its separators. */
 export function entriesOf<A>(rows: readonly MenuRow<A>[]): MenuEntry<A>[] {
   return rows.filter((row): row is MenuEntry<A> => row !== SEPARATOR);
