@@ -794,7 +794,7 @@ function ArtworkTab({ ids, shown, hue, removable, readOnly, onEdit }: {
   const add = () => {
     void (async () => {
       const backend = await getBackend();
-      const image = await backend.pickImage(t("Choose the artwork"));
+      const image = await backend.pickImage(t("Select an artwork"));
       if (image === null) return;
       await onEdit("Artwork added.", (b) => b.edits.addArtwork(ids, image));
     })();

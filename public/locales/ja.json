@@ -1492,5 +1492,7 @@
   "{device}: updated {count} track": "{device}: updated {count} track",
   "Are you sure you want to remove the selected tracks?": "選択した曲を削除してよろしいですか？",
   "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.": "選択した楽曲をプレイリストから削除してもよろしいですか？\n同期しているすべてのデバイスのプレイリストから削除されます。",
-  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "選択した楽曲をタグリストから削除してもよろしいですか？\n同期しているすべてのデバイスのタグリストから削除されます。"
+  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "選択した楽曲をタグリストから削除してもよろしいですか？\n同期しているすべてのデバイスのタグリストから削除されます。",
+  "Remove the artwork of the {count} selected tracks? The image files stay where they are.": "選択した{count}トラックのアートワークを削除しますか?画像ファイルはそのまま残ります。",
+  "Select an artwork": "アートワークの選択"
 }

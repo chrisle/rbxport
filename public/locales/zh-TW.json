@@ -1490,5 +1490,7 @@
   "{device}: updated {count} track": "{device}: updated {count} track",
   "Are you sure you want to remove the selected tracks?": "您確定要移除所選擇的音軌嗎？",
   "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.": "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.",
-  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices."
+  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.",
+  "Remove the artwork of the {count} selected tracks? The image files stay where they are.": "刪除所選 {count} 首曲目的藝術作品？圖像檔案保留在原來的位置。",
+  "Select an artwork": "選擇圖檔"
 }

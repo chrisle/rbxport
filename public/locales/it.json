@@ -1487,5 +1487,7 @@
   "{device}: updated {count} track": "{device}: updated {count} track",
   "Are you sure you want to remove the selected tracks?": "Siete certi di voler rimuovere  brani scelti?",
   "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.": "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.",
-  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices."
+  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.",
+  "Remove the artwork of the {count} selected tracks? The image files stay where they are.": "Rimuovere l'artwork delle {count} tracce selezionate? I file immagine rimangono dove sono.",
+  "Select an artwork": "Selezionare un'illustrazione."
 }

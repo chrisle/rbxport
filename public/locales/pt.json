@@ -1489,5 +1489,7 @@
   "{device}: updated {count} track": "{device}: updated {count} track",
   "Are you sure you want to remove the selected tracks?": "Tem certeza que deseja remover as faixas seleccionadas?",
   "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.": "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.",
-  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices."
+  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.",
+  "Remove the artwork of the {count} selected tracks? The image files stay where they are.": "Remover a arte das {count} faixas selecionadas? Os arquivos de imagem permanecem onde estão.",
+  "Select an artwork": "Seleccione uma ilustração"
 }

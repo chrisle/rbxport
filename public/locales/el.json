@@ -1487,5 +1487,7 @@
   "{device}: updated {count} track": "{device}: updated {count} track",
   "Are you sure you want to remove the selected tracks?": "Θέλετε σίγουρα να καταργήσετε τα επιλεγμένα κομμάτια;",
   "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.": "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.",
-  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices."
+  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.",
+  "Remove the artwork of the {count} selected tracks? The image files stay where they are.": "Να καταργηθεί το καλλιτεχνικό έργο των {count} επιλεγμένων κομματιών; Τα αρχεία εικόνας παραμένουν εκεί που είναι.",
+  "Select an artwork": "Επιλέξτε γραφικά"
 }
