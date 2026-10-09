@@ -100,3 +100,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 [target.'cfg(windows)'.dependencies]
 midir = "0.11"
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_Foundation"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# ALSA sequencer backend: the XDJ-RX3's USB-MIDI output, for its Link Export
+# activation lease (`rx3_link.rs`).
+midir = "0.11"
