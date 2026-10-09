@@ -90,6 +90,10 @@ pub struct Preview {
     /// The newest request. An older one still waiting for its file to open
     /// gives way rather than starting a track nobody is asking for now.
     request: AtomicU64,
+    /// Held by a start from its last look at `request` to the play, and by a
+    /// stop while it pauses, so a stop cannot land between the two and be
+    /// followed by a play that nobody can see to stop (#242).
+    starting: Mutex<()>,
 }
 
 impl Default for Preview {
@@ -105,7 +109,12 @@ impl Preview {
     }
 
     fn from_player(player: Player) -> Self {
-        Self { player: player.quiet(), track: Mutex::new(None), request: AtomicU64::new(0) }
+        Self {
+            player: player.quiet(),
+            track: Mutex::new(None),
+            request: AtomicU64::new(0),
+            starting: Mutex::new(()),
+        }
     }
 
     /// Plays `track`, from the file at `path`, from `position_ms`.
@@ -174,6 +183,7 @@ impl Preview {
                 std::thread::sleep(Duration::from_millis(2));
             }
         }
+        let _starting = self.starting.lock();
         if self.request.load(Ordering::SeqCst) != request {
             return Ok(());
         }
@@ -202,6 +212,7 @@ impl Preview {
     /// PERFORMANCE mode a playing deck stops the preview, and so does loading
     /// a track onto a deck (see the top of this file).
     pub fn stop(&self) {
+        let _starting = self.starting.lock();
         // Anything still waiting for its file gives way too.
         self.request.fetch_add(1, Ordering::SeqCst);
         if let Some(engine) = self.player.opened() {
