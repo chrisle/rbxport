@@ -123,7 +123,7 @@ describe("AboutPane › Updates", () => {
   it("the button checks here and reports an update found", async () => {
     downloadUpdate.mockReturnValue(new Promise(() => {}));
     checkForUpdate.mockResolvedValue({
-      currentVersion: "0.4.0", version: "0.5.0", date: null, changes: [], ready: null,
+      currentVersion: "0.4.0", version: "0.5.0", date: null, changes: [], ready: null, storeInstall: false,
     });
     mount();
     act(() => checkButton().click());
@@ -144,13 +144,25 @@ describe("AboutPane › Updates", () => {
 
   it("the button reports being up to date", async () => {
     checkForUpdate.mockResolvedValue({
-      currentVersion: "0.4.0", version: null, date: null, changes: [], ready: null,
+      currentVersion: "0.4.0", version: null, date: null, changes: [], ready: null, storeInstall: false,
     });
     mount();
     act(() => checkButton().click());
     await settle();
     expect(downloadUpdate).not.toHaveBeenCalled();
     expect(section().textContent).toContain("rbxport v0.4.0 is up to date.");
+  });
+
+  it("the button in a Microsoft Store install points to the Store and downloads nothing", async () => {
+    checkForUpdate.mockResolvedValue({
+      currentVersion: "1.2.0", version: null, date: null, changes: [], ready: null, storeInstall: true,
+    });
+    mount();
+    act(() => checkButton().click());
+    await settle();
+    expect(downloadUpdate).not.toHaveBeenCalled();
+    expect(section().textContent).toContain("This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.");
+    expect(section().textContent).not.toContain("is up to date");
   });
 
   it("a check that cannot reach the server shows an error, not a crash", async () => {

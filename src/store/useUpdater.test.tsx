@@ -32,9 +32,12 @@ const AVAILABLE: UpdateCheck = {
   date: "2026-09-11T00:00:00Z",
   changes: [{ version: "0.5.0", date: "2026-09-11", body: "## [0.5.0]\n\n- A thing." }],
   ready: null,
+  storeInstall: false,
 };
 
-const UP_TO_DATE: UpdateCheck = { currentVersion: "0.4.0", version: null, date: null, changes: [], ready: null };
+const UP_TO_DATE: UpdateCheck = { currentVersion: "0.4.0", version: null, date: null, changes: [], ready: null, storeInstall: false };
+
+const STORE: UpdateCheck = { ...UP_TO_DATE, version: null, storeInstall: true };
 
 const INSTALLED: UpdateReady = { version: "0.5.0", installed: true };
 
@@ -141,6 +144,25 @@ describe("useUpdater", () => {
     expect(updater.state.phase).toBe("checking");
     await settle();
     expect(updater.state).toEqual({ phase: "upToDate", currentVersion: "0.4.0" });
+  });
+
+  it("a Microsoft Store install downloads nothing, on its own or when asked (#189)", async () => {
+    check = () => Promise.resolve(STORE);
+    const fetched = vi.fn(() => Promise.resolve(INSTALLED));
+    download = fetched;
+    await mount(true);
+    act(() => {
+      vi.advanceTimersByTime(15_000);
+    });
+    await settle();
+    expect(updater.state).toEqual({ phase: "store", currentVersion: "0.4.0" });
+    expect(updater.open).toBe(false);
+
+    act(() => updater.check(true));
+    await settle();
+    expect(updater.state).toEqual({ phase: "store", currentVersion: "0.4.0" });
+    expect(updater.open).toBe(true);
+    expect(fetched).not.toHaveBeenCalled();
   });
 
   it("a download reports its progress and turns into an install at the end", async () => {

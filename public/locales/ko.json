@@ -1518,5 +1518,6 @@
   "location": "위치",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated}이(가) 재배치되었으며 {unresolved}이(가) 검색 폴더에 없습니다.",
   "{relocated} relocated.": "{relocated} 이전되었습니다.",
-  "Auto Analysis is starting.": "자동 분석이 시작됩니다."
+  "Auto Analysis is starting.": "자동 분석이 시작됩니다.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "이 rbxport는 Microsoft Store에서 설치되었습니다. 업데이트는 Microsoft Store에서 받으세요."
 }

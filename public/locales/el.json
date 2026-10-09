@@ -1520,5 +1520,6 @@
   "location": "τοποθεσια",
   "{relocated} relocated, {unresolved} not found in the search folders.": "Το {relocated} μετεγκαταστάθηκε, το {unresolved} δεν βρέθηκε στους φακέλους αναζήτησης.",
   "{relocated} relocated.": "{relocated} μετεγκαταστάθηκε.",
-  "Auto Analysis is starting.": "Η Αυτόματη Ανάλυση ξεκινά."
+  "Auto Analysis is starting.": "Η Αυτόματη Ανάλυση ξεκινά.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "Αυτό το αντίγραφο του rbxport προέρχεται από το Microsoft Store. Λάβετε ενημερώσεις από το Microsoft Store."
 }

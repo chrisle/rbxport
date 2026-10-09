@@ -1527,5 +1527,6 @@
   "location": "場所",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} は再配置されましたが、{unresolved} は検索フォルダーに見つかりませんでした。",
   "{relocated} relocated.": "{relocated}移転しました。",
-  "Auto Analysis is starting.": "自動解析を開始します。"
+  "Auto Analysis is starting.": "自動解析を開始します。",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "この rbxport は Microsoft Store からインストールされました。アップデートは Microsoft Store から入手してください。"
 }

@@ -1,8 +1,10 @@
 /**
  * Software updates, as the Update Manager window sees them.
  *
- * One state machine: idle → checking → up to date | downloading →
- * installing → ready, with failed reachable from any of the working states.
+ * One state machine: idle → checking → up to date | store |
+ * downloading → installing → ready, with failed reachable from any of the
+ * working states. A Microsoft Store install is updated by the Store, so its
+ * check ends there and nothing is downloaded.
  * The backend does the checking, downloading and installing; this holds
  * where it has got to and whether the window is showing.
  *
@@ -27,6 +29,8 @@ export type UpdaterState =
   | { phase: "idle" }
   | { phase: "checking" }
   | { phase: "upToDate"; currentVersion: string }
+  /** A Microsoft Store install: the Store installs its updates, not the app. */
+  | { phase: "store"; currentVersion: string }
   /** The update was found; the following effect starts its automatic download. */
   | { phase: "available"; check: UpdateCheck }
   | { phase: "downloading"; check: UpdateCheck; progress: UpdateProgress | null }
@@ -141,7 +145,9 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
         const backend = await getBackend();
         const found = await backend.checkForUpdate();
         if (mine !== sequence.current) return;
-        if (found.version === null) {
+        if (found.storeInstall) {
+          setState({ phase: "store", currentVersion: found.currentVersion });
+        } else if (found.version === null) {
           setState({ phase: "upToDate", currentVersion: found.currentVersion });
         } else if (found.ready) {
           setState({ phase: "ready", check: found, ready: found.ready });

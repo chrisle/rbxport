@@ -38,6 +38,7 @@ const CHECK: UpdateCheck = {
     { version: "0.5.0", date: "2026-09-11", body: "## [0.5.0] — 2026-09-11\n\n### Fixed\n- A crash." },
   ],
   ready: null,
+  storeInstall: false,
 };
 
 function mount(state: UpdaterState) {
@@ -96,6 +97,15 @@ describe("UpdateManager", () => {
     expect(text()).toContain("rbxport 0.4.0 is the latest version.");
     expect(buttons()).toEqual(["OK"]);
     expect(host.querySelector('[aria-label="Close"]')).not.toBeNull();
+  });
+
+  it("a Microsoft Store install points to the Store, with only a way out", () => {
+    mount({ phase: "store", currentVersion: "1.2.0" });
+    expect(text()).toContain("This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.");
+    expect(text()).not.toContain("latest version");
+    expect(buttons()).toEqual(["OK"]);
+    click("OK");
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("shows a download with both versions and what changed in between, and can be closed over it", () => {

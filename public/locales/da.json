@@ -1514,5 +1514,6 @@
   "location": "sted",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} flyttet, {unresolved} ikke fundet i søgemapperne.",
   "{relocated} relocated.": "{relocated} flyttet.",
-  "Auto Analysis is starting.": "Automatisk analyse starter."
+  "Auto Analysis is starting.": "Automatisk analyse starter.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "Denne kopi af rbxport er fra Microsoft Store. Hent opdateringer fra Microsoft Store."
 }

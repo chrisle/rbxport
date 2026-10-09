@@ -995,6 +995,11 @@ export interface UpdateCheck {
   changes: UpdateChange[];
   /** Set when the version on offer is already downloaded this run. */
   ready: UpdateReady | null;
+  /**
+   * This copy was installed by the Microsoft Store, which installs its
+   * updates. The check did not ask the download server; `version` is null.
+   */
+  storeInstall: boolean;
 }
 
 /** A downloaded update, and whether it is already in the app's place. */

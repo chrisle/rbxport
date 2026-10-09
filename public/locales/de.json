@@ -1517,5 +1517,6 @@
   "location": "Speicherort",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} neu zugeordnet, {unresolved} nicht in den Suchordnern gefunden.",
   "{relocated} relocated.": "{relocated} neu zugeordnet.",
-  "Auto Analysis is starting.": "Die Auto-Analyse startet."
+  "Auto Analysis is starting.": "Die Auto-Analyse startet.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "Diese Kopie von rbxport stammt aus dem Microsoft Store. Updates erhalten Sie über den Microsoft Store."
 }

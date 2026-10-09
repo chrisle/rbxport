@@ -1523,5 +1523,6 @@
   "location": "где",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} перемещен, {unresolved} не найден в папках поиска.",
   "{relocated} relocated.": "{relocated} переехал.",
-  "Auto Analysis is starting.": "Автоматический анализ запускается."
+  "Auto Analysis is starting.": "Автоматический анализ запускается.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "Эта копия rbxport установлена из Microsoft Store. Получайте обновления в Microsoft Store."
 }

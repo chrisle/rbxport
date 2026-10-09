@@ -1519,5 +1519,6 @@
   "location": "umístění",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} přemístěno, {unresolved} nenalezeno ve složkách hledání.",
   "{relocated} relocated.": "{relocated} přemístěno.",
-  "Auto Analysis is starting.": "Spouští se automatická analýza."
+  "Auto Analysis is starting.": "Spouští se automatická analýza.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "Tato kopie rbxport pochází z Microsoft Store. Aktualizace získáte v Microsoft Store."
 }

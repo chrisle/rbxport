@@ -150,6 +150,10 @@ export function UpdateManager({ state, onCheck, onRetry, onRestart, onClose }: U
         <div className={styles.body}>
           {state.phase === "checking" ? (
             <p className={styles.status}>Checking for updates…</p>
+          ) : state.phase === "store" ? (
+            // The Store installs this copy's updates; the app's own installer
+            // would put a second copy beside it (#189).
+            <p className={styles.status}>{t("This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.")}</p>
           ) : state.phase === "upToDate" ? (
             <p className={styles.status}>
               rbxport {state.currentVersion} is the latest version.

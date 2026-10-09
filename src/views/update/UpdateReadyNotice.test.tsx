@@ -33,7 +33,7 @@ describe("UpdateReadyNotice", () => {
       <UpdateReadyNotice
         state={{
           phase: "ready",
-          check: { currentVersion: "1.2.2", version: "1.2.3", date: null, changes: [], ready: null },
+          check: { currentVersion: "1.2.2", version: "1.2.3", date: null, changes: [], ready: null, storeInstall: false },
           ready: { version: "1.2.3", installed: true },
         }}
         onRestart={onRestart}
@@ -56,7 +56,7 @@ describe("UpdateReadyNotice", () => {
     const onDismiss = vi.fn();
     act(() => root.render(
       <UpdateReadyNotice
-        state={{ phase: "ready", check: { currentVersion: "1.2.2", version: "1.2.3", date: null, changes: [], ready: null }, ready: { version: "1.2.3", installed: true } }}
+        state={{ phase: "ready", check: { currentVersion: "1.2.2", version: "1.2.3", date: null, changes: [], ready: null, storeInstall: false }, ready: { version: "1.2.3", installed: true } }}
         onRestart={vi.fn()}
         onWhatsNew={vi.fn()}
         onDismiss={onDismiss}

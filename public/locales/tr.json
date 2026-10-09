@@ -1519,5 +1519,6 @@
   "location": "konum",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} yeri değiştirildi, {unresolved} arama klasörlerinde bulunamadı.",
   "{relocated} relocated.": "{relocated} yeri değiştirildi.",
-  "Auto Analysis is starting.": "Oto Analiz başlatılıyor."
+  "Auto Analysis is starting.": "Oto Analiz başlatılıyor.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "Bu rbxport kopyası Microsoft Store'dan yüklendi. Güncellemeleri Microsoft Store'dan alın."
 }

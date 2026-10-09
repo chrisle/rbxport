@@ -2307,6 +2307,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     checkForUpdate: () =>
       wait<UpdateCheck>({
         ready: updateReady,
+        storeInstall: false,
         currentVersion: "0.4.0",
         version: "0.6.0",
         date: "2026-09-12T18:00:00Z",

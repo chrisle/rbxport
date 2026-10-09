@@ -1516,5 +1516,6 @@
   "location": "plaats",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} verplaatst, {unresolved} niet gevonden in de zoekmappen.",
   "{relocated} relocated.": "{relocated} verhuisd.",
-  "Auto Analysis is starting.": "Automatisch analyseren begint."
+  "Auto Analysis is starting.": "Automatisch analyseren begint.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "Deze kopie van rbxport komt uit de Microsoft Store. Haal updates op via de Microsoft Store."
 }

@@ -1520,5 +1520,6 @@
   "location": "emplacement",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} déplacé, {unresolved} introuvable dans les dossiers de recherche.",
   "{relocated} relocated.": "{relocated} a déménagé.",
-  "Auto Analysis is starting.": "L’analyse automatique démarre."
+  "Auto Analysis is starting.": "L’analyse automatique démarre.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "Cette copie de rbxport provient du Microsoft Store. Obtenez les mises à jour depuis le Microsoft Store."
 }

@@ -24,6 +24,7 @@ type UpdateStatus =
   | { kind: "idle" }
   | { kind: "checking" }
   | { kind: "upToDate"; version: string }
+  | { kind: "store" }
   | { kind: "available"; version: string }
   | { kind: "ready"; version: string };
 
@@ -122,7 +123,9 @@ export function AboutPane() {
       try {
         const backend = await getBackend();
         const found = await backend.checkForUpdate();
-        if (found.version === null) {
+        if (found.storeInstall) {
+          setUpdateStatus({ kind: "store" });
+        } else if (found.version === null) {
           setUpdateStatus({ kind: "upToDate", version: found.currentVersion });
         } else if (found.ready) {
           setUpdateStatus({ kind: "ready", version: found.version });
@@ -143,6 +146,8 @@ export function AboutPane() {
 
   const statusText = updateStatus.kind === "checking"
     ? t("Checking for updates…")
+    : updateStatus.kind === "store"
+    ? t("This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.")
     : updateStatus.kind === "upToDate"
     ? t("rbxport v{version} is up to date.", { version: updateStatus.version })
     : updateStatus.kind === "available"

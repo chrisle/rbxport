@@ -1523,5 +1523,6 @@
   "location": "位置",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated}已重新定位，在搜尋資料夾中未找到{unresolved}。",
   "{relocated} relocated.": "{relocated}已搬遷。",
-  "Auto Analysis is starting.": "開始自動分析。"
+  "Auto Analysis is starting.": "開始自動分析。",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "此 rbxport 副本來自 Microsoft Store。請從 Microsoft Store 取得更新。"
 }

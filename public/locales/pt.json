@@ -1522,5 +1522,6 @@
   "location": "em",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} realocado, {unresolved} não encontrado nas pastas de pesquisa.",
   "{relocated} relocated.": "{relocated} realocado.",
-  "Auto Analysis is starting.": "A Análise Automática começa."
+  "Auto Analysis is starting.": "A Análise Automática começa.",
+  "This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.": "Esta cópia do rbxport é da Microsoft Store. Obtenha atualizações na Microsoft Store."
 }
