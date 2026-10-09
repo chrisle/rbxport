@@ -31,7 +31,9 @@ rbxport applies the following rules for electronic dance music:
 - **Four beats per bar.** Every analysed track is in 4/4. A bar has four
   beats, numbered 1–4, and beat 1 is the downbeat.
 - **Whole-number steady tempos.** A fitted steady tempo within 0.1 BPM of a
-  whole number is set to that number; gradual changes retain their measured
+  whole number is set to that number when the whole number's grid sits on
+  the music nearly as well as the measured one; a track that really runs at 173.97
+  keeps 173.97. Gradual changes retain their measured
   tempo from beat to beat.
 - **Fast drum & bass.** Drum & bass is counted at the fast tempo, such as
   174 BPM rather than 87, when the faster octave carries the rhythm.
@@ -153,7 +155,8 @@ flowchart LR
 > of points furthest from the first fit are removed. No point more than one
 > tenth of a beat from the line survives the refit. rbxport also fits the
 > alternate half-beat phase and keeps the one that collects more kick energy.
-> If a steady result is within 0.1 BPM of a whole number, it snaps to that
+> If a steady result is within 0.1 BPM of a whole number, and the whole
+> number's line sits on at least 85 % as much of the music, it snaps to that
 > number and is re-phased through the same kicks.
 
 ## 3. Deal with tempo changes, breakdowns, and re-phasing
