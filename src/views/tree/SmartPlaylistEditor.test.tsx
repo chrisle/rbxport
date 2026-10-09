@@ -432,6 +432,37 @@ describe("saving", () => {
   });
 });
 
+describe("focus", () => {
+  it("lands on the name, selected, when the dialog opens", () => {
+    open();
+    expect(document.activeElement).toBe(nameField());
+    expect(nameField().selectionStart).toBe(0);
+    expect(nameField().selectionEnd).toBe(nameField().value.length);
+  });
+
+  it("stays on a dropdown when the parent renders again with a new onCancel", () => {
+    // #131, #215: App passes `onCancel` as a fresh arrow and renders on its
+    // own (the window regaining focus refreshes devices and LINK status).
+    // Each new `onCancel` used to focus the name again, which shut the
+    // Property dropdown the moment it opened.
+    open();
+    const property = sel(1, "Property")!;
+    act(() => property.focus());
+    expect(document.activeElement).toBe(property);
+
+    const later = vi.fn();
+    open({ onCancel: later });
+    expect(document.activeElement).toBe(property);
+
+    // Escape still reaches the newest handler, and only that one.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(later).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+});
+
 describe("closing without saving", () => {
   it("closes on Escape, on Cancel, and on a click outside — but not on one inside", () => {
     open();

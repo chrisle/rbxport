@@ -119,16 +119,28 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
     initialRule.conditions.length === 0 ? [emptyCondition()] : initialRule.conditions.map((c) => ({ ...c })),
   );
   const nameField = useRef<HTMLInputElement>(null);
+  const cancel = useRef(onCancel);
+  useEffect(() => {
+    cancel.current = onCancel;
+  }, [onCancel]);
 
+  // The name is focused and selected once, when the editor opens. The parent
+  // hands down a new `onCancel` each time it renders, and it renders on its
+  // own (the window regaining focus refreshes the devices and LINK status),
+  // so focusing on every new `onCancel` pulled focus back to the name and
+  // shut a dropdown the moment it opened (#131, #215).
   useEffect(() => {
     nameField.current?.focus();
     nameField.current?.select();
+  }, []);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape") cancel.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  }, []);
 
   const update = (at: number, patch: Partial<SmartCondition>) =>
     setConditions((current) => current.map((c, i) => (i === at ? { ...c, ...patch } : c)));
