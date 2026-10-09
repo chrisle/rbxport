@@ -61,68 +61,14 @@ impl Audio {
 ///
 /// `max_secs` bounds the work: tempo and key are stable well before a whole
 /// long mix is decoded, and an unbounded decode is how a 2-hour file becomes a
-/// memory problem.
+/// memory problem. A caller that needs the rest of the file as well, without
+/// holding it, reads it from a [`MonoStream`] instead.
 pub fn decode_mono(path: &Path, max_secs: Option<f64>) -> Result<Audio> {
-    let file = std::fs::File::open(path)?;
-    let stream = MediaSourceStream::new(Box::new(file), symphonia::core::io::MediaSourceStreamOptions::default());
-
-    let mut hint = Hint::new();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
-
-    let probed = symphonia::default::get_probe()
-        .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
-        .map_err(|e| AudioError::Unsupported(e.to_string()))?;
-    let mut format = probed.format;
-
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
-        .ok_or(AudioError::NoTrack)?;
-    let track_id = track.id;
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| AudioError::Unsupported(e.to_string()))?;
-
-    let mut sample_rate = track.codec_params.sample_rate.unwrap_or(44_100);
-    let mut source_channels = track
-        .codec_params
-        .channels
-        .map_or(2, |c| u16::try_from(c.count()).unwrap_or(2));
-
-    let cap = max_secs.map(|s| (s * f64::from(sample_rate)) as usize);
+    let mut stream = MonoStream::open(path)?;
+    let cap = max_secs.map(|s| (s * f64::from(stream.sample_rate())) as usize);
     let mut samples: Vec<f32> = Vec::with_capacity(cap.unwrap_or(0).min(1 << 24));
-    let mut buffer: Option<SampleBuffer<f32>> = None;
-
-    // `next_packet` reports end of stream as an error, so this reads until it
-    // fails rather than testing a separate condition.
-    while let Ok(packet) = format.next_packet() {
-        if packet.track_id() != track_id {
-            continue;
-        }
-        let frames = match decoder.decode(&packet) {
-            Ok(d) => d,
-            // A damaged packet mid-file should not discard what we already have.
-            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
-            Err(_) => break,
-        };
-
-        let spec = *frames.spec();
-        sample_rate = spec.rate;
-        source_channels = u16::try_from(spec.channels.count()).unwrap_or(2);
-
-        let interleaved =
-            buffer.get_or_insert_with(|| SampleBuffer::new(frames.capacity() as u64, spec));
-        interleaved.copy_interleaved_ref(frames);
-
-        let channels = spec.channels.count().max(1);
-        for frame in interleaved.samples().chunks(channels) {
-            let sum: f32 = frame.iter().sum();
-            samples.push(sum / channels as f32);
-        }
-
+    while let Some(chunk) = stream.next_chunk() {
+        samples.extend_from_slice(chunk);
         if let Some(cap) = cap {
             if samples.len() >= cap {
                 samples.truncate(cap);
@@ -135,7 +81,102 @@ pub fn decode_mono(path: &Path, max_secs: Option<f64>) -> Result<Audio> {
         return Err(AudioError::Unsupported("decoded no samples".into()));
     }
 
-    Ok(Audio { samples, sample_rate, source_channels })
+    Ok(Audio { samples, sample_rate: stream.sample_rate(), source_channels: stream.source_channels() })
+}
+
+/// A file decoded to mono `f32` one packet at a time.
+///
+/// What [`decode_mono`] collects into one buffer, for a caller that wants
+/// to keep only part of it: the analysis keeps the first half hour for the
+/// tempo and key and only folds the rest into the waveform, so a two-hour
+/// mix is drawn to its end without its samples all being held at once.
+pub struct MonoStream {
+    format: Box<dyn symphonia::core::formats::FormatReader>,
+    decoder: Box<dyn symphonia::core::codecs::Decoder>,
+    track_id: u32,
+    sample_rate: u32,
+    source_channels: u16,
+    buffer: Option<SampleBuffer<f32>>,
+    mono: Vec<f32>,
+}
+
+impl MonoStream {
+    /// Opens a file and its first audio track.
+    pub fn open(path: &Path) -> Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let stream = MediaSourceStream::new(Box::new(file), symphonia::core::io::MediaSourceStreamOptions::default());
+
+        let mut hint = Hint::new();
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            hint.with_extension(ext);
+        }
+
+        let probed = symphonia::default::get_probe()
+            .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
+            .map_err(|e| AudioError::Unsupported(e.to_string()))?;
+        let format = probed.format;
+
+        let track = format
+            .tracks()
+            .iter()
+            .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+            .ok_or(AudioError::NoTrack)?;
+        let track_id = track.id;
+        let decoder = symphonia::default::get_codecs()
+            .make(&track.codec_params, &DecoderOptions::default())
+            .map_err(|e| AudioError::Unsupported(e.to_string()))?;
+        let sample_rate = track.codec_params.sample_rate.unwrap_or(44_100);
+        let source_channels = track
+            .codec_params
+            .channels
+            .map_or(2, |c| u16::try_from(c.count()).unwrap_or(2));
+        Ok(Self { format, decoder, track_id, sample_rate, source_channels, buffer: None, mono: Vec::new() })
+    }
+
+    /// The rate of the samples handed out so far, or the one the container
+    /// declares before the first packet.
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    /// Channels in the source, before the downmix.
+    pub fn source_channels(&self) -> u16 {
+        self.source_channels
+    }
+
+    /// The next packet's samples, downmixed; `None` at the end of the file.
+    ///
+    /// `next_packet` reports the end of the stream as an error, so any error
+    /// there ends it. A damaged packet mid-file is skipped rather than
+    /// discarding what came before it.
+    pub fn next_chunk(&mut self) -> Option<&[f32]> {
+        loop {
+            let packet = self.format.next_packet().ok()?;
+            if packet.track_id() != self.track_id {
+                continue;
+            }
+            let frames = match self.decoder.decode(&packet) {
+                Ok(d) => d,
+                Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+                Err(_) => return None,
+            };
+
+            let spec = *frames.spec();
+            self.sample_rate = spec.rate;
+            self.source_channels = u16::try_from(spec.channels.count()).unwrap_or(2);
+
+            let interleaved =
+                self.buffer.get_or_insert_with(|| SampleBuffer::new(frames.capacity() as u64, spec));
+            interleaved.copy_interleaved_ref(frames);
+
+            let channels = spec.channels.count().max(1);
+            self.mono.clear();
+            self.mono.extend(interleaved.samples().chunks(channels).map(|frame| frame.iter().sum::<f32>() / channels as f32));
+            if !self.mono.is_empty() {
+                return Some(&self.mono);
+            }
+        }
+    }
 }
 
 /// Writes the stretch of a file between `from_secs` and `to_secs` as a
