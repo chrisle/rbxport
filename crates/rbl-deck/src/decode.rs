@@ -174,6 +174,15 @@ impl Streamer {
         self.position
     }
 
+    /// The frame the next `fill` starts at, in device-rate frames.
+    ///
+    /// Not `position` straight after a seek: that is the packet boundary the
+    /// demuxer landed on, and the overshoot to the frame asked for is only
+    /// thrown away by the next `fill`.
+    pub fn next_frame(&self) -> u64 {
+        self.position + self.skip
+    }
+
     /// Nothing left: the file is finished and the buffers are empty.
     pub fn finished(&self) -> bool {
         self.finished

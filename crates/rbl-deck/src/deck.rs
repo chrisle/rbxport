@@ -8,6 +8,7 @@
 //! change except a command, so the thread blocks on the channel rather than
 //! polling. That is what keeps an idle app at no measurable CPU.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
@@ -20,7 +21,7 @@ use crate::clock::DeckClock;
 use crate::decode::Streamer;
 use crate::scrub::{PcmWindow, Scrubber, WINDOW_REACH};
 use crate::stretch::{Stretcher, Varispeed, Wsola};
-use crate::{Deck, DeckEvent, EventSink};
+use crate::{Deck, DeckError, DeckEvent, EventSink};
 
 /// What the control side asks a deck to do.
 pub enum Command {
@@ -66,6 +67,17 @@ const TOP_UP_WAIT: Duration = Duration::from_millis(2);
 /// the opposite — every block already queued is a block of the pointer's past.
 const SCRUB_BLOCKS: usize = 3;
 
+/// The longest loop whose audio is decoded once and kept, in device-rate
+/// frames: about six seconds at 44.1 kHz and three at 96 kHz, 2 MiB.
+///
+/// A loop goes round by going back to its in point, and for the streamer that
+/// is a demuxer seek and a decode from the packet before it. Once a pass that
+/// is cheap enough. A 1/64-beat loop goes round every few milliseconds, more
+/// often than a block, and an accurate MP3 seek can scan the file from its
+/// start; so a short loop is read from memory instead. A longer one is sought
+/// once a pass, as before.
+const LOOP_AUDIO_FRAMES: u64 = 1 << 18;
+
 pub struct DeckHandle {
     commands: Sender<Command>,
     clock: Arc<DeckClock>,
@@ -104,26 +116,7 @@ pub fn spawn(
     std::thread::Builder::new()
         .name(format!("rbl-deck-{}", deck.name()))
         .spawn(move || {
-            let mut worker = Worker {
-                deck,
-                clock: worker_clock,
-                producer,
-                device_rate,
-                events,
-                streamer: None,
-                generation: 0,
-                scrubber: None,
-                last_report: None,
-                window: PcmWindow::empty(),
-                keylock: key_lock(device_rate),
-                varispeed: Varispeed::new(device_rate),
-                tempo: 1.0,
-                master_tempo: false,
-                key_shift: 0,
-                head: 0.0,
-                feed: vec![0.0; BLOCK_FRAMES * 2],
-                fed: 0,
-            };
+            let mut worker = Worker::new(deck, worker_clock, producer, device_rate, events);
             worker.run(&rx);
         })?;
     Ok(DeckHandle { commands: tx, clock })
@@ -174,9 +167,61 @@ struct Worker {
     feed: Vec<f32>,
     /// How much of `feed` has been handed over.
     fed: usize,
+    /// The audio of a loop no longer than [`LOOP_AUDIO_FRAMES`], interleaved,
+    /// decoded the first time the loop went round. Shorter than the loop when
+    /// the track ends inside it.
+    loop_audio: Vec<f32>,
+    /// The loop `loop_audio` holds, as `(in, out)`.
+    loop_audio_range: Option<(u64, u64)>,
+    /// Where in `loop_audio` the next frame of input comes from, in frames;
+    /// `None` while it comes from the streamer. While it is `Some`, the
+    /// streamer waits where `loop_audio` ends, which is where the track goes
+    /// on from after EXIT.
+    from_loop_audio: Option<usize>,
+    /// Passes of a loop the stretcher has been fed that the head has not
+    /// reached yet, oldest first, as the `(in, out)` each went round at.
+    ///
+    /// The input goes round the moment it reaches the out point, a
+    /// stretcher's buffer ahead of the sound, and nothing is reset there: the
+    /// stretcher hears the loop as one continuous signal. The head goes round
+    /// when the output reaches the same point, and this is what tells it to.
+    wraps: VecDeque<(u64, u64)>,
 }
 
 impl Worker {
+    fn new(
+        deck: Deck,
+        clock: Arc<DeckClock>,
+        producer: Producer<Block>,
+        device_rate: u32,
+        events: EventSink,
+    ) -> Self {
+        Self {
+            deck,
+            clock,
+            producer,
+            device_rate,
+            events,
+            streamer: None,
+            generation: 0,
+            scrubber: None,
+            last_report: None,
+            window: PcmWindow::empty(),
+            keylock: key_lock(device_rate),
+            varispeed: Varispeed::new(device_rate),
+            tempo: 1.0,
+            master_tempo: false,
+            key_shift: 0,
+            head: 0.0,
+            feed: vec![0.0; BLOCK_FRAMES * 2],
+            fed: 0,
+            loop_audio: Vec::new(),
+            loop_audio_range: None,
+            from_loop_audio: None,
+            wraps: VecDeque::with_capacity(64),
+        }
+    }
+
     fn run(&mut self, commands: &Receiver<Command>) {
         loop {
             // A ring's worth at most, then look at the channel again.
@@ -265,6 +310,7 @@ impl Worker {
         self.clock.set_loop(None);
         self.clock.set_playing(false);
         self.streamer = None;
+        self.forget_loop_audio();
         self.clock.set_loaded(false);
         self.clock.set_end_of_stream(false);
 
@@ -317,12 +363,16 @@ impl Worker {
         if self.clock.looping() { self.clock.loop_range() } else { None }
     }
 
-    /// Back to the loop's in point, quietly: no generation change, so the
-    /// callback plays straight on from the block before the jump to the
-    /// block after it with nothing faded, which is what makes a loop seam
-    /// inaudible. The blocks already in the ring were trimmed to the out
-    /// point by `produce`, so nothing past it is queued.
+    /// Back to the loop's in point with the stretcher emptied, quietly: no
+    /// generation change, so the callback plays straight on with nothing
+    /// faded.
+    ///
+    /// Only for a stretched head that reached the out point without the input
+    /// going round first, which is a loop set behind what the stretcher had
+    /// already been fed. Every other pass goes round in the input, where
+    /// nothing is reset; see `wrap_input`.
     fn loop_jump(&mut self, frame: u64) {
+        self.forget_input();
         let Some(streamer) = self.streamer.as_mut() else { return };
         match streamer.seek(frame) {
             Ok(landed) => {
@@ -330,17 +380,163 @@ impl Worker {
                 self.head = landed as f64;
                 self.restart_stretch();
             }
+            Err(e) => self.report(&e),
+        }
+    }
+
+    /// Tells the interface that the file could not be read.
+    fn report(&self, e: &DeckError) {
+        (self.events)(DeckEvent::Error {
+            deck: self.deck,
+            load_id: self.clock.load_id(),
+            message: e.to_string(),
+        });
+    }
+
+    /// The input is about to come from the streamer at wherever it is sent
+    /// next, and no pass of a loop is waiting for the head.
+    fn forget_input(&mut self) {
+        self.from_loop_audio = None;
+        self.wraps.clear();
+    }
+
+    /// A different file, or none: the loop audio held is not this one's.
+    fn forget_loop_audio(&mut self) {
+        self.forget_input();
+        self.loop_audio.clear();
+        self.loop_audio_range = None;
+    }
+
+    /// Where the next frame of input sits in the track.
+    fn input_at(&self) -> u64 {
+        if let (Some(at), Some((from, _))) = (self.from_loop_audio, self.loop_audio_range) {
+            return from + at as u64;
+        }
+        self.streamer.as_ref().map_or(0, Streamer::next_frame)
+    }
+
+    /// At most `wanted` frames, and none past the loop's out point.
+    ///
+    /// Input already past the out point is not held to it: it was read before
+    /// the loop was set, and the head deals with that when it gets there.
+    fn input_room(&self, wanted: usize) -> usize {
+        let Some((_, to)) = self.active_loop() else { return wanted };
+        let at = self.input_at();
+        if at >= to {
+            return wanted;
+        }
+        usize::try_from(to - at).map_or(wanted, |left| left.min(wanted))
+    }
+
+    /// Takes the input back to the in point when it is at the out point.
+    ///
+    /// Unstretched the input is the head, and anywhere at or past the out
+    /// point goes round. Stretched, only input that stopped on the out point
+    /// does: input past it was fed to the stretcher before the loop was set,
+    /// and the head going round has to empty the stretcher (`wrap_head`).
+    /// False when the file could not be read.
+    fn wrap_input(&mut self, stretching: bool) -> bool {
+        let Some((from, to)) = self.active_loop() else { return true };
+        let at = self.input_at();
+        if at < to || (stretching && at > to) {
+            return true;
+        }
+        if to - from <= LOOP_AUDIO_FRAMES {
+            if self.loop_audio_range != Some((from, to)) && !self.decode_loop_audio(from, to) {
+                return false;
+            }
+            self.from_loop_audio = (!self.loop_audio.is_empty()).then_some(0);
+        } else {
+            self.from_loop_audio = None;
+            let Some(streamer) = self.streamer.as_mut() else { return false };
+            if let Err(e) = streamer.seek(from) {
+                self.clock.set_end_of_stream(true);
+                self.report(&e);
+                return false;
+            }
+        }
+        if stretching {
+            self.wraps.push_back((from, to));
+        }
+        self.clock.set_end_of_stream(false);
+        true
+    }
+
+    /// Decodes `from..to` into `loop_audio`, leaving the streamer at `to`, or
+    /// at the end of the track if that comes first.
+    fn decode_loop_audio(&mut self, from: u64, to: u64) -> bool {
+        self.from_loop_audio = None;
+        self.loop_audio_range = None;
+        let Some(streamer) = self.streamer.as_mut() else { return false };
+        let length = usize::try_from(to - from).unwrap_or(0);
+        self.loop_audio.clear();
+        self.loop_audio.resize(length * 2, 0.0);
+        let mut filled = 0;
+        let mut failed = streamer.seek(from).err();
+        while failed.is_none() && filled < length {
+            let Some(rest) = self.loop_audio.get_mut(filled * 2..) else { break };
+            match streamer.fill(rest) {
+                Ok(0) => break,
+                Ok(frames) => filled += frames,
+                Err(e) => failed = Some(e),
+            }
+        }
+        if let Some(e) = failed {
+            self.loop_audio.clear();
+            self.clock.set_end_of_stream(true);
+            self.report(&e);
+            return false;
+        }
+        self.loop_audio.truncate(filled * 2);
+        self.loop_audio_range = Some((from, to));
+        true
+    }
+
+    /// Reads input into `out`, from the loop audio or the streamer, stopping
+    /// at the out point. Returns where the first frame sits in the track and
+    /// how many were read; `None` when the file could not be read.
+    fn read_input(&mut self, out: &mut [f32]) -> Option<(u64, usize)> {
+        let room = self.input_room(out.len() / 2);
+        if let (Some(at), Some((from, _))) = (self.from_loop_audio, self.loop_audio_range) {
+            let held = self.loop_audio.len() / 2;
+            let frames = room.min(held.saturating_sub(at));
+            if let (Some(src), Some(dst)) =
+                (self.loop_audio.get(at * 2..(at + frames) * 2), out.get_mut(..frames * 2))
+            {
+                dst.copy_from_slice(src);
+            }
+            // Past the end of what is held, the streamer is already there.
+            self.from_loop_audio = (at + frames < held).then_some(at + frames);
+            return Some((from + at as u64, frames));
+        }
+        let streamer = self.streamer.as_mut()?;
+        let target = out.get_mut(..room * 2)?;
+        match streamer.fill(target) {
+            // Stamped after the fill, not before: the first fill after a seek
+            // starts by discarding what the demuxer overshot by, so the
+            // position beforehand is the packet boundary it landed on, not the
+            // frame the block's audio begins at. Stamping that put the
+            // playhead a few hundred frames early for one block after every
+            // seek.
+            Ok(frames) => Some((streamer.position() - frames as u64, frames)),
             Err(e) => {
-                (self.events)(DeckEvent::Error {
-                    deck: self.deck,
-                    load_id: self.clock.load_id(),
-                    message: e.to_string(),
-                });
+                // A decode that fails mid-track stops the deck rather than
+                // playing whatever was left in the buffer.
+                self.clock.set_end_of_stream(true);
+                self.report(&e);
+                None
             }
         }
     }
 
+    /// Whether the input has nothing more to give: it is the streamer's, and
+    /// the streamer is finished.
+    fn input_finished(&self) -> bool {
+        self.from_loop_audio.is_none() && self.streamer.as_ref().is_some_and(Streamer::finished)
+    }
+
     fn seek(&mut self, frame: u64) {
+        self.forget_input();
         let Some(streamer) = self.streamer.as_mut() else { return };
         match streamer.seek(frame) {
             Ok(landed) => {
@@ -357,13 +553,7 @@ impl Worker {
                 // would start a second changeover for one seek.
                 self.generation = self.clock.generation();
             }
-            Err(e) => {
-                (self.events)(DeckEvent::Error {
-                    deck: self.deck,
-                    load_id: self.clock.load_id(),
-                    message: e.to_string(),
-                });
-            }
+            Err(e) => self.report(&e),
         }
     }
 
@@ -417,6 +607,7 @@ impl Worker {
         self.clock.set_loop(None);
         self.clock.set_playing(false);
         self.streamer = None;
+        self.forget_loop_audio();
         self.generation = self.clock.bump_generation();
         self.clock.set_loaded(false);
         self.clock.set_load_id(0);
@@ -439,6 +630,9 @@ impl Worker {
         // The blocks already in flight belong to normal playback and are at the
         // wrong place and the wrong speed; a new generation drops them.
         self.generation = self.clock.bump_generation();
+        // The window is read from wherever the streamer is sent, and the end
+        // of the drag seeks from there.
+        self.forget_input();
         self.fill_window(at);
         self.clock.set_scrubbing(true);
     }
@@ -552,19 +746,29 @@ impl Worker {
             return false;
         }
         let generation = self.generation;
-        // At or past the out point: round again before another frame is
-        // decoded. A loop set behind the head, or a seek past its end while
-        // it is on, comes back here too.
-        let active = self.active_loop();
-        if let Some((from, to)) = active {
-            let at = if self.stretching() { self.head as u64 } else { self.streamer.as_ref().map_or(0, Streamer::position) };
-            if at >= to {
-                self.loop_jump(from);
+        let stretching = self.stretching();
+        if stretching {
+            // A head at or past the out point with no pass of the loop fed
+            // for it: a loop set behind the head, or a seek past its end
+            // while it is on. Round again before another frame is decoded.
+            if self.wraps.is_empty() {
+                if let Some((from, to)) = self.active_loop() {
+                    if self.head >= to as f64 {
+                        self.loop_jump(from);
+                    }
+                }
+            }
+        } else {
+            // Unstretched the head is the input, so nothing waits for it.
+            self.wraps.clear();
+            if !self.wrap_input(false) {
+                return false;
             }
         }
-        let stretching = self.stretching();
-        let Some(streamer) = self.streamer.as_mut() else { return false };
-        if streamer.finished() {
+        if self.streamer.is_none() {
+            return false;
+        }
+        if self.input_finished() {
             self.clock.set_end_of_stream(true);
             return false;
         }
@@ -575,49 +779,20 @@ impl Worker {
             return self.produce_stretched(generation);
         }
         let mut block = Block::empty(generation, 0);
-        // Only up to the out point, so the jump lands on the frame: a block
-        // that ran past it would play the audio beyond the loop first.
-        let room = active.map_or(BLOCK_FRAMES, |(_, to)| {
-            usize::try_from(to.saturating_sub(streamer.position())).unwrap_or(BLOCK_FRAMES).clamp(1, BLOCK_FRAMES)
-        });
-        let Some(target) = block.samples.get_mut(..room * 2) else { return false };
-        let frames = match streamer.fill(target) {
-            Ok(frames) => frames,
-            Err(e) => {
-                // A decode that fails mid-track stops the deck rather than
-                // playing whatever was left in the buffer.
-                self.clock.set_end_of_stream(true);
-                (self.events)(DeckEvent::Error {
-                    deck: self.deck,
-                    load_id: self.clock.load_id(),
-                    message: e.to_string(),
-                });
-                return false;
-            }
-        };
+        // Only up to the out point, so the next block is the in point: a
+        // block that ran past it would play the audio beyond the loop first,
+        // and a loop shorter than a block would play a block long.
+        let Some((start, frames)) = self.read_input(&mut block.samples) else { return false };
         if frames == 0 {
-            if streamer.finished() {
+            if self.input_finished() {
                 self.clock.set_end_of_stream(true);
             }
             return false;
         }
-        // Stamped after the fill, not before: the first fill after a seek
-        // starts by discarding what the demuxer overshot by, so the position
-        // beforehand is the packet boundary it landed on, not the frame the
-        // block's audio begins at. Stamping that put the playhead a few
-        // hundred frames early for one block after every seek.
-        block.position = streamer.position() - frames as u64;
-        self.head = streamer.position() as f64;
+        block.position = start;
+        self.head = (start + frames as u64) as f64;
         block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
-        let pushed = self.producer.push(block).is_ok();
-        // Reached the out point with this block: round now, so the next block
-        // decoded is the in point rather than a bufferful past the out.
-        if let Some((from, to)) = active {
-            if self.streamer.as_ref().is_some_and(|s| s.position() >= to) {
-                self.loop_jump(from);
-            }
-        }
-        pushed
+        self.producer.push(block).is_ok()
     }
 
     /// Whether the audio goes through a stretcher rather than straight: the
@@ -637,6 +812,7 @@ impl Worker {
         let tempo = f64::from(self.tempo);
         let mut block = Block::empty(generation, self.head as u64);
         let mut frames = 0;
+        let limit = self.block_limit(tempo);
 
         // Feed, take what came of it, feed again — until the block is full or
         // there is nothing left to feed it with. One pass is not enough for
@@ -644,11 +820,11 @@ impl Worker {
         // what that block made, and wants nothing more until it has been
         // drained, so a single feed-then-pull filled exactly half of every
         // block. WSOLA fills one in a pass and leaves this loop after it.
-        while frames < BLOCK_FRAMES {
+        while frames < limit {
             if !self.top_up_stretcher() {
                 break;
             }
-            let Some(rest) = block.samples.get_mut(frames * 2..) else { break };
+            let Some(rest) = block.samples.get_mut(frames * 2..limit * 2) else { break };
             let got = self.stretcher().pull(rest);
             if got == 0 {
                 break;
@@ -662,16 +838,46 @@ impl Worker {
         self.head += frames as f64 * tempo;
         block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
         let pushed = self.producer.push(block).is_ok();
-        // Stretched, the head is counted rather than read, so the loop
-        // rounds at a block's granularity — a few milliseconds at most —
-        // rather than on the frame [ASSUME: close enough for a beat loop;
-        // sample-exact would mean trimming the stretcher's output].
+        self.wrap_head();
+        pushed
+    }
+
+    /// Output frames this block may hold before the head reaches the next out
+    /// point, so that no block runs across a seam and the playhead never reads
+    /// past the out point. The head is counted in input frames, so the block
+    /// ends on the first output frame that takes it to or over the out point:
+    /// over by less than one frame's worth of tempo, which `wrap_head` carries
+    /// into the next pass rather than dropping.
+    fn block_limit(&self, tempo: f64) -> usize {
+        let out = self.wraps.front().map(|&(_, to)| to).or_else(|| self.active_loop().map(|(_, to)| to));
+        let Some(to) = out else { return BLOCK_FRAMES };
+        let left = to as f64 - self.head;
+        if left <= 0.0 || tempo <= 0.0 {
+            return BLOCK_FRAMES;
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "positive, and clamped to a block")]
+        let frames = (left / tempo).ceil().min(BLOCK_FRAMES as f64) as usize;
+        frames.clamp(1, BLOCK_FRAMES)
+    }
+
+    /// Takes the head round when it reaches the out point of the oldest pass
+    /// the input has already gone round, keeping what it went over by.
+    ///
+    /// With no such pass and the loop on, the stretcher was fed past the out
+    /// point before the loop was set, and has to be emptied: the old jump.
+    fn wrap_head(&mut self) {
+        if let Some(&(from, to)) = self.wraps.front() {
+            if self.head >= to as f64 {
+                self.head = from as f64 + (self.head - to as f64);
+                self.wraps.pop_front();
+            }
+            return;
+        }
         if let Some((from, to)) = self.active_loop() {
-            if self.head as u64 >= to {
+            if self.head >= to as f64 {
                 self.loop_jump(from);
             }
         }
-        pushed
     }
 
     /// Gives the stretcher everything it asks for that there is input for.
@@ -685,21 +891,19 @@ impl Worker {
                 break;
             }
             if self.fed == 0 {
-                let Some(streamer) = self.streamer.as_mut() else { return false };
-                let frames = match streamer.fill(&mut self.feed) {
-                    Ok(frames) => frames,
-                    Err(e) => {
-                        self.clock.set_end_of_stream(true);
-                        (self.events)(DeckEvent::Error {
-                            deck: self.deck,
-                            load_id: self.clock.load_id(),
-                            message: e.to_string(),
-                        });
-                        return false;
-                    }
-                };
+                // The input stops on the out point and goes round from there,
+                // so the stretcher is fed the loop over and over as one
+                // continuous signal and never anything past it.
+                if !self.wrap_input(true) {
+                    return false;
+                }
+                // Lent out and put back, so reading into it allocates nothing.
+                let mut feed = std::mem::take(&mut self.feed);
+                let read = self.read_input(&mut feed);
+                self.feed = feed;
+                let Some((_, frames)) = read else { return false };
                 if frames == 0 {
-                    if streamer.finished() {
+                    if self.input_finished() {
                         self.clock.set_end_of_stream(true);
                     }
                     break;
@@ -735,4 +939,273 @@ fn key_lock(device_rate: u32) -> Box<dyn Stretcher> {
         return Box::new(stretcher);
     }
     Box::new(Wsola::new(device_rate))
+}
+
+/// The loop path, rendered offline: a worker driven by hand, its ring drained
+/// as it fills, with no device, no callback and no clock time. What comes out
+/// is exactly what the decode thread would queue, whatever the machine's load.
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+mod tests {
+    use super::*;
+
+    const RATE: u32 = 44_100;
+
+    /// Frames in the fixture: one 16-bit step per frame, so every sample says
+    /// exactly which frame of the file it is.
+    const TOTAL: u64 = 32_768;
+
+    /// What one step of the fixture wraps at.
+    const STEPS: u64 = 65_536;
+
+    /// One beat at 128 BPM is 20,671.875 frames at 44.1 kHz, so 1/64 of a beat
+    /// is 323 frames and 1/32 is 646: both shorter than two blocks, and 1/64
+    /// shorter than one.
+    const BEAT_64: u64 = 323;
+    const BEAT_32: u64 = 646;
+
+    const FROM: u64 = 10_000;
+
+    /// A 16-bit stereo WAV of `total` frames whose sample at frame `n` is
+    /// `n - 32768`, wrapping every 65,536 frames.
+    fn staircase(path: &std::path::Path, total: u64) {
+        let data_len = u32::try_from(total * 4).unwrap();
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data_len).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16_u32.to_le_bytes());
+        out.extend_from_slice(&1_u16.to_le_bytes());
+        out.extend_from_slice(&2_u16.to_le_bytes());
+        out.extend_from_slice(&RATE.to_le_bytes());
+        out.extend_from_slice(&(RATE * 4).to_le_bytes());
+        out.extend_from_slice(&4_u16.to_le_bytes());
+        out.extend_from_slice(&16_u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&data_len.to_le_bytes());
+        for frame in 0..total {
+            let sample = ((frame % STEPS) as i32 - 32_768) as i16;
+            out.extend_from_slice(&sample.to_le_bytes());
+            out.extend_from_slice(&sample.to_le_bytes());
+        }
+        std::fs::write(path, out).unwrap();
+    }
+
+    /// Which frame of the fixture an output sample came from, fractional
+    /// where the stretcher interpolated between two.
+    fn source(sample: f32) -> f64 {
+        f64::from(sample) * 32_768.0 + 32_768.0
+    }
+
+    struct Render {
+        /// The left channel, as frames of the fixture.
+        frames: Vec<f64>,
+        /// Each block's position and length, in the order queued.
+        blocks: Vec<(u64, usize)>,
+    }
+
+    struct Rig {
+        worker: Worker,
+        clock: Arc<DeckClock>,
+        ring: rtrb::Consumer<Block>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl Rig {
+        fn new(tempo: f32, master_tempo: bool) -> Self {
+            Self::with_length(tempo, master_tempo, TOTAL)
+        }
+
+        fn with_length(tempo: f32, master_tempo: bool, total: u64) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("staircase.wav");
+            staircase(&path, total);
+            let clock = Arc::new(DeckClock::default());
+            let (producer, ring) = rtrb::RingBuffer::<Block>::new(RING_BLOCKS);
+            let events: EventSink = Arc::new(|event| {
+                assert!(!matches!(event, DeckEvent::Error { .. }), "the deck reported {event:?}");
+            });
+            let mut worker = Worker::new(Deck::A, Arc::clone(&clock), producer, RATE, events);
+            clock.request_load(1);
+            worker.load(1, &path);
+            assert!(clock.loaded(), "the fixture did not load");
+            worker.handle(Command::SetTempo(tempo));
+            worker.handle(Command::SetMasterTempo(master_tempo));
+            Self { worker, clock, ring, _dir: dir }
+        }
+
+        /// Sets a loop and sends the head to its in point, as the engine does.
+        fn set_loop(&mut self, from: u64, to: u64) {
+            self.clock.set_loop(Some((from, to)));
+            self.clock.set_looping(true);
+            self.clock.bump_generation();
+            self.worker.handle(Command::Seek(from));
+        }
+
+        /// Everything the decode thread queues, until at least `frames`.
+        fn render(&mut self, frames: usize) -> Render {
+            let mut out = Render { frames: Vec::new(), blocks: Vec::new() };
+            let mut idle = 0;
+            while out.frames.len() < frames {
+                let produced = self.worker.produce();
+                let mut popped = false;
+                while let Ok(block) = self.ring.pop() {
+                    popped = true;
+                    out.blocks.push((block.position, usize::from(block.frames)));
+                    out.frames.extend(block.filled().chunks_exact(2).map(|frame| source(frame[0])));
+                }
+                idle = if produced || popped { 0 } else { idle + 1 };
+                assert!(idle < 4, "the deck stopped producing after {} frames", out.frames.len());
+            }
+            out
+        }
+    }
+
+    /// Output frames between successive returns to the in point.
+    ///
+    /// Inside a pass the source frame only rises. A return is where it starts
+    /// to fall, which can take two frames when the stretcher interpolates
+    /// between the out point and the in point.
+    fn periods(frames: &[f64]) -> Vec<usize> {
+        let seams: Vec<usize> = frames
+            .windows(3)
+            .enumerate()
+            .filter(|(_, three)| three[1] >= three[0] && three[2] < three[1])
+            .map(|(at, _)| at + 2)
+            .collect();
+        seams.windows(2).map(|pair| pair[1] - pair[0]).collect()
+    }
+
+    /// At the file's own speed a loop of any length plays exactly its own
+    /// frames, in order, over and over: `from..to` and nothing else.
+    #[test]
+    fn a_loop_shorter_than_a_block_repeats_on_its_own_frames_at_unity() {
+        for length in [BEAT_64, BEAT_32] {
+            let mut rig = Rig::new(1.0, false);
+            rig.set_loop(FROM, FROM + length);
+            let render = rig.render(40 * BLOCK_FRAMES);
+            let expected: Vec<f64> =
+                (0..render.frames.len() as u64).map(|i| (FROM + i % length) as f64).collect();
+            assert_eq!(render.frames, expected, "a {length}-frame loop did not play its own frames");
+            assert!(
+                render.blocks.iter().all(|&(at, frames)| at >= FROM && at + frames as u64 <= FROM + length),
+                "a block ran past the out point: {:?}",
+                render.blocks
+            );
+        }
+    }
+
+    /// Off the file's own speed the loop goes round every `length / tempo`
+    /// output frames — 316.67 for 1/64 of a beat at +2 % and 633.33 for 1/32 —
+    /// so each period is one of the two whole numbers either side. Before the
+    /// input stopped on the out point these came out at 512 and 1,024.
+    #[test]
+    fn a_loop_shorter_than_a_block_repeats_every_length_over_tempo_when_stretched() {
+        for tempo in [1.02_f32, 0.94] {
+            for length in [BEAT_64, BEAT_32] {
+                let mut rig = Rig::new(tempo, false);
+                rig.set_loop(FROM, FROM + length);
+                let render = rig.render(200 * BLOCK_FRAMES);
+                // Past the tempo control's smoothing, which starts the
+                // stretcher at the file's own speed and eases it over.
+                let settled = render.frames.get(16 * BLOCK_FRAMES..).unwrap();
+                let periods = periods(settled);
+                let ideal = length as f64 / f64::from(tempo);
+                assert!(periods.len() > 100, "too few passes to judge: {periods:?}");
+                assert!(
+                    periods.iter().all(|&p| (p as f64 - ideal).abs() < 1.0),
+                    "a {length}-frame loop at {tempo} went round at {periods:?}, not every {ideal:.2}"
+                );
+                let mean = periods.iter().sum::<usize>() as f64 / periods.len() as f64;
+                assert!((mean - ideal).abs() < 0.05, "a {length}-frame loop at {tempo} averaged {mean:.3}, not {ideal:.3}");
+                // And nothing from outside the loop reaches the stretcher.
+                let (lo, hi) = settled.iter().fold((f64::MAX, f64::MIN), |(lo, hi), &f| (lo.min(f), hi.max(f)));
+                assert!(
+                    lo >= FROM as f64 - 0.5 && hi <= (FROM + length) as f64,
+                    "a {length}-frame loop at {tempo} played frames {lo}..{hi}"
+                );
+            }
+        }
+    }
+
+    /// The playhead goes round with the audio, a block at a time: no block
+    /// runs across the out point, and over many passes the head reports one
+    /// pass per `length / tempo` output frames, as the audio makes.
+    #[test]
+    fn a_stretched_head_goes_round_with_its_loop() {
+        for master_tempo in [false, true] {
+            let tempo = 1.02_f32;
+            let length = BEAT_64;
+            let mut rig = Rig::new(tempo, master_tempo);
+            rig.set_loop(FROM, FROM + length);
+            let render = rig.render(400 * BLOCK_FRAMES);
+            let mut passes = 0;
+            let mut last = FROM as f64;
+            for &(at, frames) in &render.blocks {
+                assert!(at >= FROM && at < FROM + length, "a block started at {at}, outside the loop");
+                let reach = at as f64 + frames as f64 * f64::from(tempo);
+                assert!(reach < (FROM + length) as f64 + f64::from(tempo), "a block ran to {reach}, past the out point");
+                // Started behind where the last one reached: gone round.
+                if (at as f64) < last - 1.0 {
+                    passes += 1;
+                }
+                last = reach;
+            }
+            let ideal = render.frames.len() as f64 * f64::from(tempo) / length as f64;
+            assert!(
+                (f64::from(passes) - ideal).abs() <= 2.0,
+                "master tempo {master_tempo}: the head went round {passes} times in {} frames, not {ideal:.1}",
+                render.frames.len()
+            );
+        }
+    }
+
+    /// A loop too long to keep in memory goes round by seeking the streamer,
+    /// and lands on its in point just the same: the frame after the out
+    /// point's is the in point's.
+    #[test]
+    fn a_loop_too_long_to_keep_goes_round_on_the_frame() {
+        let length = LOOP_AUDIO_FRAMES + 1_000;
+        let mut rig = Rig::with_length(1.0, false, length + 2 * FROM);
+        rig.set_loop(FROM, FROM + length);
+        let render = rig.render(length as usize + 20 * BLOCK_FRAMES);
+        let expected: Vec<f64> =
+            (0..render.frames.len() as u64).map(|i| ((FROM + i % length) % STEPS) as f64).collect();
+        assert!(render.frames == expected, "a {length}-frame loop did not go round on its in point");
+    }
+
+    /// EXIT with passes of the loop already in the stretcher: those still
+    /// play, the head goes round for each, and then both carry on past the out
+    /// point together rather than the playhead running a loop ahead.
+    #[test]
+    fn exit_lets_the_queued_passes_play_and_keeps_the_head_with_the_audio() {
+        for tempo in [1.0_f32, 1.02] {
+            let length = BEAT_64;
+            let mut rig = Rig::new(tempo, false);
+            rig.set_loop(FROM, FROM + length);
+            rig.render(40 * BLOCK_FRAMES);
+            rig.clock.set_looping(false);
+            let render = rig.render(40 * BLOCK_FRAMES);
+            let &(at, frames) = render.blocks.last().unwrap();
+            assert!(at > FROM + length, "at {tempo} the head stayed in the loop after EXIT: {at}");
+            // The last block's audio is where its position says it is, to
+            // within the tempo smoothing's head start and one interpolation.
+            let heard = render.frames[render.frames.len() - frames];
+            assert!(
+                (heard - at as f64).abs() < 16.0,
+                "at {tempo} the head said {at} while the audio was at {heard}"
+            );
+            // And the audio ran on from the out point without a gap or a jump.
+            let after: Vec<f64> = render.frames.iter().copied().skip_while(|&f| f < (FROM + length) as f64 - 1.0).collect();
+            assert!(after.windows(2).all(|pair| pair[1] > pair[0] && pair[1] - pair[0] < 2.0), "at {tempo} the audio jumped after EXIT");
+        }
+    }
 }
