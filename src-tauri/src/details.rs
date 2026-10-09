@@ -153,7 +153,7 @@ fn details_dto(d: rbl_db::details::TrackDetails, has_artwork: bool) -> TrackDeta
         publish: d.publish,
         has_artwork,
         my_tags: d.my_tags,
-}
+    }
 }
 
 /// Several tracks as the information panel shows them: the first one's
@@ -314,8 +314,11 @@ pub async fn clear_artwork<R: tauri::Runtime>(
 /// rekordbox writes field by field to every selected track. Its Track Title
 /// box is the one it greys out for more than one track
 /// (`TrackInfoConcreteMediator::isTrackEditabled`, item 0, 7.2.11 static
-/// analysis), so a title is refused for more than one here too. The BPM,
-/// which retimes a beat grid, is written one track at a time.
+/// analysis), so a title is refused for more than one here too. A BPM is
+/// refused for more than one as well, which is this app's rule rather than
+/// rekordbox's: writing it retimes the track's beat grid, which the grid
+/// editor does one track at a time. The panel never sends one; its BPM box
+/// is locked.
 #[tauri::command]
 pub async fn set_track_field<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

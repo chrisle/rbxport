@@ -399,9 +399,10 @@ fn colour_id(stored: &str) -> &str {
 /// selection: see [`SelectionDetails`]. `None` when none of them is in the
 /// library.
 ///
-/// A point read per track, stopping early once every field is known to
-/// differ, so a select-all over a mixed library costs a handful of reads
-/// rather than one per track.
+/// A point read per track. The reads stop early once every compared field
+/// is known to differ, but a real library seldom gets there: fields such as
+/// the lyricist, message and disc number are usually the same on every
+/// track, so a large selection is read in full, and again after each edit.
 pub fn selection_details(conn: &Connection, ids: &[String]) -> Result<Option<SelectionDetails>> {
     let mut first: Option<TrackDetails> = None;
     let mut count = 0;

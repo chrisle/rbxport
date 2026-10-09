@@ -1487,9 +1487,12 @@ export interface Edits {
   /**
    * One of the Info tab's editable fields, by wire name. The backend keeps
    * the list of what may be written; a name it does not know is refused as
-   * `readOnly` rather than mapped onto a guess. The title and the BPM are
-   * refused for more than one track: rekordbox greys its Track Title box for
-   * a multiple selection.
+   * `readOnly` rather than mapped onto a guess. The title is refused for
+   * more than one track because rekordbox greys its Track Title box for a
+   * multiple selection. The BPM is refused for more than one track as well,
+   * but not on rekordbox evidence: a BPM write retimes one track's beat grid,
+   * and the panel's BPM box is locked anyway, so the refusal only guards
+   * other callers.
    */
   setTrackField(tracks: readonly string[], field: TrackField, value: string): Promise<EditHistoryState>;
   /** Sets the My Tags on a track to exactly these ids. */
