@@ -419,9 +419,12 @@ async function realBackend(): Promise<Backend> {
     // rekordbox's chooser [OBS 7.2.19 static, `MissingFileTable::showFileChooser`
     // @0x1012a82c0]: "Choose a new fullpath for : <file name>", only files of
     // the track's own extension ("*" + `getFileExtension()`), opened where the
-    // last Relocate found its file.
+    // last Relocate found its file, and the first time in the Music folder
+    // (`getSpecialLocation(userMusicDirectory)` @0x1012a6a14).
     chooseRelocateFile: async (title, fileName, folder) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
+      const { audioDir } = await import("@tauri-apps/api/path");
+      const defaultPath = folder ?? (await audioDir().catch(() => null));
       const dot = fileName.lastIndexOf(".");
       const extension = dot > 0 ? fileName.slice(dot + 1) : "";
       const picked = await open({
@@ -429,7 +432,7 @@ async function realBackend(): Promise<Backend> {
         directory: false,
         title,
         ...(extension !== "" ? { filters: [{ name: `*.${extension}`, extensions: [extension] }] } : {}),
-        ...(folder !== null ? { defaultPath: folder } : {}),
+        ...(defaultPath !== null ? { defaultPath } : {}),
       });
       // Cancelling is a normal outcome, not an error.
       return typeof picked === "string" ? picked : null;

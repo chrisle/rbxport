@@ -75,16 +75,16 @@ async function openManager(page: Page) {
   return manager;
 }
 
-test("Auto Relocate Search Folders has rekordbox's boxes, Music, Video and Desktop ticked", async ({ page }) => {
+test("Auto Relocate Search Folders has rekordbox's boxes, Music, Movies and Desktop ticked", async ({ page }) => {
   await open(page);
   const folders = await searchFolders(page);
-  // [OBS rekordbox 7.2.19 static, DetailAutoRelocate] Music, Movies/Video,
+  // [OBS rekordbox 7.2.19 static, DetailAutoRelocate] Music, Movies,
   // Desktop, then Specified user folders; only the last starts unticked and
   // greys the list, Add and Del.
   const boxes = folders.getByRole("checkbox");
   await expect(boxes).toHaveCount(4);
   await expect(folders.getByRole("checkbox", { name: "Music" })).toBeChecked();
-  await expect(folders.getByRole("checkbox", { name: /^(Movies|Video)$/ })).toBeChecked();
+  await expect(folders.getByRole("checkbox", { name: "Movies" })).toBeChecked();
   await expect(folders.getByRole("checkbox", { name: "Desktop" })).toBeChecked();
   const own = folders.getByRole("checkbox", { name: "Specified user folders" });
   await expect(own).not.toBeChecked();

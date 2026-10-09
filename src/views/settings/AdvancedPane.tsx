@@ -22,7 +22,6 @@ import { getBackend } from "@/ipc/client";
 import type { DatabaseDrive, Duplicates, LibrarySummary } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
 import { QUANTIZE_BEATS, type AdvancedPreferences } from "@/lib/preferences";
-import { detectPlatform } from "@/lib/shortcuts";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import { Button, Checkbox, Note, Radios, Section, Select, Sub, Toggle } from "./controls";
@@ -355,24 +354,23 @@ function DuplicatesSection({ readOnly }: { readOnly: boolean }) {
 /**
  * rekordbox's Auto Relocate Search Folders [OBS rekordbox 7.2.19 static,
  * `DetailAutoRelocate::DetailAutoRelocate` @0x1006b4894]: the Music,
- * Movies (Video) and Desktop boxes stacked under the heading, then Specified user folders,
- * then the folder list with Add and Del, which are greyed until that box is
- * ticked. Music, Video and Desktop start ticked; Specified user folders
- * does not (`SettingIF::isSelectedAutoRelocate*Folder`). Auto Relocate
- * searches the ticked ones in that order, the user's folders first.
+ * Movies and Desktop boxes stacked under the heading, then Specified user
+ * folders, then the folder list with Add and Del, which are greyed until that
+ * box is ticked. Music, Movies and Desktop start ticked; Specified user
+ * folders does not (`SettingIF::isSelectedAutoRelocate*Folder`). Auto
+ * Relocate searches the ticked ones in that order, the user's folders first.
+ *
+ * The second box is "Movies": the constructor names it "Video", and
+ * `lookAndFeelChanged` @0x1006b5584 renames it "Movies" with no platform
+ * check, and rekordbox's shared .lang files carry "Music", "Movies" and
+ * "Desktop" together. [ASSUME] Windows shows "Movies" too (not yet seen on a
+ * Windows rekordbox).
  */
-/**
- * The second box's word. rekordbox's constructor makes it "Video" and its
- * `lookAndFeelChanged` @0x1006b557c, which puts every label through
- * `translate`, renames it "Movies" in the macOS build [OBS static], the
- * name of the folder it searches there. [ASSUME] Windows keeps "Video".
- */
-const VIDEO_LABEL = detectPlatform().mac ? "Movies" : "Video";
-
 function RelocateSection({ advanced, set }: {
   advanced: AdvancedPreferences;
   set: (patch: Partial<AdvancedPreferences>) => void;
 }) {
+  const t = useTranslation();
   const folders = advanced.relocateFolders;
   const own = advanced.relocateUserFolders;
   const [picked, setPicked] = useState<string>(folders[0] ?? "");
@@ -381,7 +379,7 @@ function RelocateSection({ advanced, set }: {
   return (
     <Section title="Auto Relocate Search Folders">
       <Checkbox label="Music" checked={advanced.relocateMusic} onChange={(relocateMusic) => set({ relocateMusic })} />
-      <Checkbox label={VIDEO_LABEL} checked={advanced.relocateVideo} onChange={(relocateVideo) => set({ relocateVideo })} />
+      <Checkbox label="Movies" checked={advanced.relocateVideo} onChange={(relocateVideo) => set({ relocateVideo })} />
       <Checkbox label="Desktop" checked={advanced.relocateDesktop} onChange={(relocateDesktop) => set({ relocateDesktop })} />
       <Checkbox
         label="Specified user folders"
@@ -407,7 +405,9 @@ function RelocateSection({ advanced, set }: {
           onClick={() => {
             void (async () => {
               const backend = await getBackend();
-              const folder = await backend.pickFolder("Choose a folder to search for moved files");
+              // [OBS static] rekordbox's Add (`DetailAutoRelocate::buttonClicked`
+              // @0x1006b5a4c) browses for a folder under this title.
+              const folder = await backend.pickFolder(t("Choose a new fullpath for"));
               if (folder === null || folders.includes(folder)) return;
               set({ relocateFolders: [...folders, folder] });
               setPicked(folder);
