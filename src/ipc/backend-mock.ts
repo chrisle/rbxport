@@ -504,7 +504,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         }
       }
     } else if (spec.source.kind === "history") {
-      candidates = seededMembers(spec.source.id);
+      candidates = membersOf(spec.source.id).map((id) => indexOfId.get(id)).filter((i): i is number => i !== undefined);
     } else if (spec.source.kind === "tagList") {
       candidates = tagList.map((id) => indexOfId.get(id)).filter((i): i is number => i !== undefined);
     } else if (spec.source.kind === "related") {
@@ -1012,7 +1012,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     // The mock keeps no history sessions of its own to add to or take from.
     recordPlay: () => wait(generation),
-    removeFromHistory: () => bump(),
+    removeFromHistory: (history, tracks) => {
+      membership.set(history, membersOf(history).filter((t) => !tracks.includes(t)));
+      return bump();
+    },
     // The mock's rows are addressed by index, so a removal only takes the
     // tracks out of every playlist; the collection keeps its count.
     removeFromCollection: async (tracks) => {
@@ -2068,8 +2071,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (!backups.delete(path)) return notFound("Backup not found.");
       return wait(undefined);
     },
-    // A browser cannot ask; the answer is yes, so the flow can be driven.
-    confirm: () => Promise.resolve(true),
+    // A browser cannot ask; the answer is yes, so the flow can be driven. A
+    // test sets `window.__confirmAnswer = false` to answer Cancel instead, and
+    // reads what was asked from `window.__confirmed`.
+    confirm: (message) => {
+      const page = window as unknown as { __confirmAnswer?: boolean; __confirmed?: string[] };
+      (page.__confirmed ??= []).push(message);
+      return Promise.resolve(page.__confirmAnswer ?? true);
+    },
 
     // A deck that keeps time but makes no sound. The audio engine is Rust and
     // is not here, so this counts frames and emits the same ticks the engine

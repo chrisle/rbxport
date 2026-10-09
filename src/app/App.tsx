@@ -1121,20 +1121,39 @@ function AppBody() {
     [report],
   );
 
-  const write = useCallback(
-    (run: (backend: Backend) => Promise<string>) => {
-      void (async () => {
-        const backend = await getBackend();
-        try {
-          const said = await run(backend);
-          await afterWrite(said);
-        } catch (e) {
-          refuse(e instanceof Error ? e.message : "That could not be saved.");
-        }
-      })();
+  // A write, awaited: true once it is saved and reported, false if refused.
+  const writeNow = useCallback(
+    async (run: (backend: Backend) => Promise<string>): Promise<boolean> => {
+      const backend = await getBackend();
+      try {
+        const said = await run(backend);
+        await afterWrite(said);
+        return true;
+      } catch (e) {
+        refuse(e instanceof Error ? e.message : "That could not be saved.");
+        return false;
+      }
     },
     [afterWrite, refuse],
   );
+  const write = useCallback(
+    (run: (backend: Backend) => Promise<string>) => {
+      void writeNow(run);
+    },
+    [writeNow],
+  );
+
+  // rekordbox asks OK/Cancel ("Remove") before a track leaves a playlist, a
+  // history or the Tag List, from the track menu and from the Delete key
+  // [OBS static, rekordbox 7.2.19 arm64: `ListViewer::showPopupMenu`
+  // @0x100407278/0x1004073a8/0x10040748c and `ListViewer::deleteKeyPressed`
+  // @0x100405eb8 call `BrowseAlertWindow::showOkCancelBox` before
+  // `deleteFromTagList` / `removeTrackOrderFromList`]. The message is passed
+  // already translated.
+  const confirmRemoval = useCallback(async (message: string): Promise<boolean> => {
+    const backend = await getBackend();
+    return backend.confirm(message, { yes: t("OK"), no: t("Cancel") });
+  }, [t]);
 
   const createPlaylistIn = useCallback(
     (node: TreeNode) => {
@@ -1371,19 +1390,22 @@ function AppBody() {
     query === "" &&
     spec.filter === undefined;
 
+  // Asked first, as rekordbox asks (its history wording); there is no undo.
   const removeTracksFromHistory = useCallback(
-    (history: string, ids: readonly string[]) => {
-      if (ids.length === 0) return;
-      write(async (backend) => {
+    async (history: string, ids: readonly string[]): Promise<boolean> => {
+      if (ids.length === 0) return false;
+      if (!(await confirmRemoval(t("Are you sure you want to remove the selected tracks?")))) return false;
+      return writeNow(async (backend) => {
         await backend.edits.removeFromHistory(history, [...ids]);
         return `Removed ${ids.length} play${ids.length === 1 ? "" : "s"} from the history.`;
       });
     },
-    [write],
+    [confirmRemoval, t, writeNow],
   );
   const removeFromHistory = useCallback(
-    (ids: readonly string[]) => {
-      if (spec.source.kind === "history") removeTracksFromHistory(spec.source.id, ids);
+    (ids: readonly string[]): Promise<boolean> => {
+      if (spec.source.kind !== "history") return Promise.resolve(false);
+      return removeTracksFromHistory(spec.source.id, ids);
     },
     [removeTracksFromHistory, spec.source],
   );
@@ -1421,22 +1443,20 @@ function AppBody() {
   // Asked first, as rekordbox asks: the tracks leave every playlist as well
   // as the collection, and there is no undo in the window.
   const removeFromCollection = useCallback(
-    (ids: readonly string[]) => {
-      if (ids.length === 0) return;
-      void (async () => {
-        const backend = await getBackend();
-        const count = `${ids.length} track${ids.length === 1 ? "" : "s"}`;
-        const sure = await backend.confirm(
-          `Remove ${count} from the collection? This can’t be undone. The files stay where they are.`,
-        );
-        if (!sure) return;
-        write(async (b) => {
-          await b.edits.removeFromCollection([...ids]);
-          return `Removed ${count} from the collection.`;
-        });
-      })();
+    async (ids: readonly string[]): Promise<boolean> => {
+      if (ids.length === 0) return false;
+      const backend = await getBackend();
+      const count = `${ids.length} track${ids.length === 1 ? "" : "s"}`;
+      const sure = await backend.confirm(
+        `Remove ${count} from the collection? This can’t be undone. The files stay where they are.`,
+      );
+      if (!sure) return false;
+      return writeNow(async (b) => {
+        await b.edits.removeFromCollection([...ids]);
+        return `Removed ${count} from the collection.`;
+      });
     },
-    [write],
+    [writeNow],
   );
 
   // Import To Collection, over the Explorer's files: their ids are their
@@ -1527,15 +1547,20 @@ function AppBody() {
     [write],
   );
 
+  // Asked first, as rekordbox asks; there is no undo.
   const removeFromTagList = useCallback(
-    (ids: readonly string[]) => {
-      if (ids.length === 0) return;
-      write(async (backend) => {
+    async (ids: readonly string[]): Promise<boolean> => {
+      if (ids.length === 0) return false;
+      const sure = await confirmRemoval(t(
+        "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.",
+      ));
+      if (!sure) return false;
+      return writeNow(async (backend) => {
         await backend.edits.removeFromTagList([...ids]);
         return `Removed ${ids.length} track${ids.length === 1 ? "" : "s"} from the Tag List.`;
       });
     },
-    [write],
+    [confirmRemoval, t, writeNow],
   );
 
   // Export Track: onto a connected stick, in no playlist.
@@ -1598,19 +1623,25 @@ function AppBody() {
   }, [tree]);
   const menuDevices = useMemo(() => devices.map((d) => ({ id: d.path, name: d.name })), [devices]);
 
+  // Asked first, as rekordbox asks, though Edit › Undo can bring them back.
   const removeTracksFromPlaylist = useCallback(
-    (playlist: string, ids: readonly string[]) => {
-      if (ids.length === 0) return;
-      write(async (backend) => {
+    async (playlist: string, ids: readonly string[]): Promise<boolean> => {
+      if (ids.length === 0) return false;
+      const sure = await confirmRemoval(t(
+        "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.",
+      ));
+      if (!sure) return false;
+      return writeNow(async (backend) => {
         await backend.edits.removeTracksFromPlaylist(playlist, [...ids]);
         return `Removed ${ids.length} track${ids.length === 1 ? "" : "s"}.`;
       });
     },
-    [write],
+    [confirmRemoval, t, writeNow],
   );
   const removeFromPlaylist = useCallback(
-    (ids: readonly string[]) => {
-      if (spec.source.kind === "playlist") removeTracksFromPlaylist(spec.source.id, ids);
+    (ids: readonly string[]): Promise<boolean> => {
+      if (spec.source.kind !== "playlist") return Promise.resolve(false);
+      return removeTracksFromPlaylist(spec.source.id, ids);
     },
     [removeTracksFromPlaylist, spec.source],
   );

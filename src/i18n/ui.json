@@ -1418,5 +1418,8 @@
   "This operation may require long time.",
   "Failed to switch Master Database.",
   "Database management",
-  "Select a drive"
+  "Select a drive",
+  "Are you sure you want to remove the selected tracks?",
+  "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.",
+  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices."
 ]

@@ -58,8 +58,9 @@ export type SubListProps = Pick<
   | "onExportTrack" | "playlists" | "devices" | "onEditField" | "onEditBlocked" | "onFocusedRow"
   | "onSelectedRow"
 > & {
-  onRemoveTracksFromPlaylist: (playlistId: string, ids: readonly string[]) => void;
-  onRemoveTracksFromHistory: (historyId: string, ids: readonly string[]) => void;
+  /** Resolves true once removed; false when declined or refused. */
+  onRemoveTracksFromPlaylist: (playlistId: string, ids: readonly string[]) => Promise<boolean>;
+  onRemoveTracksFromHistory: (historyId: string, ids: readonly string[]) => Promise<boolean>;
   onReorderPlaylist: (playlistId: string, order: readonly string[]) => void;
   onDropFilesIntoPlaylist: (playlistId: string, files: File[]) => void;
   onAnalyseTracks: (tracks: readonly { id: string; title: string }[]) => void;
@@ -199,15 +200,13 @@ export const SubBrowser = memo(function SubBrowser({
     setSort((current) => nextSort(current ?? DEFAULT_SORT, column));
   }, []);
   const removeFromPlaylist = useCallback(
-    (ids: readonly string[]) => {
-      if (spec.source.kind === "playlist") list.onRemoveTracksFromPlaylist(spec.source.id, ids);
-    },
+    (ids: readonly string[]): Promise<boolean> =>
+      spec.source.kind === "playlist" ? list.onRemoveTracksFromPlaylist(spec.source.id, ids) : Promise.resolve(false),
     [list, spec.source],
   );
   const removeFromHistory = useCallback(
-    (ids: readonly string[]) => {
-      if (spec.source.kind === "history") list.onRemoveTracksFromHistory(spec.source.id, ids);
-    },
+    (ids: readonly string[]): Promise<boolean> =>
+      spec.source.kind === "history" ? list.onRemoveTracksFromHistory(spec.source.id, ids) : Promise.resolve(false),
     [list, spec.source],
   );
   const reorderPlaylist = useCallback(

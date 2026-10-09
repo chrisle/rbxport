@@ -1489,5 +1489,8 @@
   "{device}: imported {count} play-history entry.": "{device}: imported {count} play-history entry.",
   "{device}: no CDJ/mixer settings files found.": "{device}: no CDJ/mixer settings files found.",
   "{device}: no new play-history entries.": "{device}: no new play-history entries.",
-  "{device}: updated {count} track": "{device}: updated {count} track"
+  "{device}: updated {count} track": "{device}: updated {count} track",
+  "Are you sure you want to remove the selected tracks?": "選択した曲を削除してよろしいですか？",
+  "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.": "選択した楽曲をプレイリストから削除してもよろしいですか？\n同期しているすべてのデバイスのプレイリストから削除されます。",
+  "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.": "選択した楽曲をタグリストから削除してもよろしいですか？\n同期しているすべてのデバイスのタグリストから削除されます。"
 }
