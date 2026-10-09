@@ -27,7 +27,10 @@ let result = rbl_analysis::analyse_with(&mono_samples, sample_rate, options);
 
 The snippet assumes an existing mono sample buffer and its sample rate.
 `analyse` uses `AnalysisOptions::default()`; `analyse_with` accepts explicit
-options. Both app presets currently produce the same 70–180 BPM options.
+options. Both app presets use the 70–180 BPM range; the Normal
+(`Rekordbox`) preset fits one constant tempo to the whole track, as
+rekordbox's Normal analysis does, and the `Rbxport` preset follows tempo
+changes.
 The app can override the range and placement after selecting a preset.
 
 `Analysis` returns `TempoResult`, an optional `MusicalKey`, a `Waveform`, and

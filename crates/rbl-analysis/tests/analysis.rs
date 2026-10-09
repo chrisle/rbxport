@@ -430,6 +430,24 @@ fn a_steady_tempo_a_few_hundredths_off_a_whole_number_keeps_its_measured_tempo()
 }
 
 #[test]
+fn the_normal_preset_is_one_constant_grid_as_rekordbox_writes_it() {
+    use rbl_analysis::{analyse_with, AnalysisPreset};
+    // A DJ edit: 60 seconds at 128, then 60 at 140. RBXport follows the
+    // change; rekordbox's Normal analysis is one tempo for the whole track.
+    let mut audio = click_track(128.0, 60.0, 0.2);
+    audio.extend_from_slice(&click_track(140.0, 60.0, 0.1));
+    let followed = analyse_with(&audio, SR, AnalysisPreset::Rbxport.options()).tempo;
+    assert_eq!(followed.segments.len(), 2, "segments: {:?}", followed.segments);
+    let normal = analyse_with(&audio, SR, AnalysisPreset::Rekordbox.options()).tempo;
+    assert_eq!(normal.segments.len(), 1, "segments: {:?}", normal.segments);
+    let segment = normal.segments[0];
+    assert_eq!(segment.from_secs, 0.0);
+    assert!(segment.to_secs >= 119.9, "the grid runs to the end: {segment:?}");
+    let first = normal.beats.first().map_or(0, |b| b.tempo_x100);
+    assert!(normal.beats.iter().all(|b| b.tempo_x100 == first), "one tempo throughout");
+}
+
+#[test]
 fn the_envelope_is_timestamped_at_the_frame_centre() {
     let audio = click_track(120.0, 5.0, 0.0);
     let envelope = onset_envelope(&audio, SR);

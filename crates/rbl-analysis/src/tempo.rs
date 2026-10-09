@@ -205,6 +205,10 @@ pub struct TempoOptions {
     pub segment_threshold: f64,
     /// Where each beat is placed when the line is fitted.
     pub placement: Placement,
+    /// Whether the grid follows the music through tempo changes, ramps and
+    /// re-phased returns. Without it the whole track is one constant grid,
+    /// as rekordbox's Normal analysis writes it.
+    pub follow_changes: bool,
 }
 
 /// What a beat is snapped to before the line is fitted through the beats.
@@ -230,6 +234,7 @@ impl Default for TempoOptions {
             segment_window_secs: 16.0,
             segment_threshold: 0.02,
             placement: Placement::Attack,
+            follow_changes: true,
         }
     }
 }
@@ -1149,6 +1154,14 @@ fn run_bounds(labels: &[f64]) -> Vec<(usize, usize)> {
 fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&mut Vec<GapDecision>>) -> Vec<Segment> {
     let (values, rate, origin_secs) = (reader.values, reader.rate, reader.origin_secs);
     let n = values.len();
+    if !options.follow_changes {
+        // One line through the whole track, from the start of the file to
+        // its end, whatever the tempo does along the way.
+        return fit(reader, bpm, 0, n, options)
+            .map(|f| Segment { from_secs: 0.0, to_secs: to_secs_of(reader, n as f64), period_secs: f.period / rate, phase_secs: to_secs_of(reader, f.phase) })
+            .into_iter()
+            .collect();
+    }
     let window = ((options.segment_window_secs * rate) as usize).max(64);
     // Local tempo per window, as a ratio to the track's, or None where the
     // window has too little to say.
@@ -1251,6 +1264,11 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&m
         pending = Some(next_fit);
     }
     split_gaps(reader, &segments, options, trace)
+}
+
+/// Seconds into the file of envelope sample `x`.
+fn to_secs_of(reader: Reader<'_>, x: f64) -> f64 {
+    reader.origin_secs + x / reader.rate
 }
 
 /// The tempo of one window as a ratio to `bpm`, or None when the window has

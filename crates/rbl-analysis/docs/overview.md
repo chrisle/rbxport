@@ -161,6 +161,10 @@ flowchart LR
 
 ## 3. Deal with tempo changes, breakdowns, and re-phasing
 
+The Normal analysis mode skips this step: like rekordbox's Normal analysis,
+it keeps one constant grid, fitted over the whole track. The RBXport mode
+does the following.
+
 A grid is not assumed to be correct forever just because it works at the
 start. rbxport checks 16-second slices throughout the song. A new tempo must
 show up consistently in at least three slices, differ by more than 2%, and

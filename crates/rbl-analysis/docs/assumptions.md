@@ -32,6 +32,9 @@ and measurements live in [Reference evaluation](validation/reference-playlist.md
   less than 85 % as much of the music as the measured one: a track that
   really runs at 173.97 keeps 173.97, as rekordbox measures it. The beats of
   a gradual change keep the tempo they were measured at.
+- **The Normal preset is one constant tempo**, as rekordbox's Normal
+  analysis is. The RBXport preset follows tempo changes, ramps and
+  re-phased returns as described below.
 - **A tempo change is a new segment**, with the beat count carrying on 1–4
   across the join, as rekordbox writes it — whatever the new music does
   on that beat. Beat 1 is decided on the first tempo's own music, and the

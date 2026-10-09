@@ -13,7 +13,7 @@ Changing the browser selection while the dialog is open does not change it.
 | --- | --- |
 | BPM / Grid | Replaces tempo/grid analysis and regenerates waveforms. Disabling it also disables the timing controls. |
 | High precision analysis | Uses attack detection for beat placement; otherwise uses the onset envelope. Enabled by default. |
-| Analysis Mode | Normal (`rekordbox`) and RBXport (`rbxport`) currently select the same underlying RBXport options. A separate Normal implementation is not present. Initially follows Preferences. |
+| Analysis Mode | Normal (`rekordbox`) fits one constant tempo to the whole track, as rekordbox's Normal analysis does; use it for music played by a band or with a drifting tempo. RBXport (`rbxport`) follows tempo changes, ramps, and re-phased returns, for DJ edits and electronic music. Rekordbox's Dynamic and Auto modes are not available. Initially follows Preferences. |
 | BPM Range | Limits tempo search to 70–180 (default), 98–195, 118–236, or 58–115. |
 | Add memory cue at first beat | Adds a memory cue on the first beat of the new grid. Skipped when a memory cue or memory loop already starts within 5 ms of that beat, so re-analysis does not stack duplicates. Requires BPM / Grid. Initially follows Preferences; off by default. |
 | KEY | Updates detected key; disabling it preserves the existing key. |

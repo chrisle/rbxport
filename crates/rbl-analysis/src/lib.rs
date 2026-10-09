@@ -68,7 +68,15 @@ pub struct AnalysisOptions {
 /// Named application presets. Both use the requested 70–180 BPM range.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AnalysisPreset {
+    /// Rekordbox's Normal analysis: one constant tempo for the whole track.
+    /// Rekordbox builds it with its constant-tempo analyser
+    /// (`BeatAnalyzer_1_0::BA_CreateConst44k`) and its Dynamic mode with
+    /// another (`BA_CreateVaried44k`). Of 35,262 grids in one rekordbox
+    /// library, 32 have a tempo change, and 30 of those are hand-gridded DJ
+    /// edits or grids rbxport's own test rig wrote.
     Rekordbox,
+    /// Follows tempo changes, ramps and re-phased returns, for DJ edits
+    /// and electronic music.
     #[default]
     Rbxport,
 }
@@ -78,6 +86,7 @@ impl AnalysisPreset {
         let mut options = AnalysisOptions::default();
         options.tempo.min_bpm = 70.0;
         options.tempo.max_bpm = 180.0;
+        options.tempo.follow_changes = self == Self::Rbxport;
         options
     }
 }
