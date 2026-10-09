@@ -67,15 +67,32 @@ test("a playlist made, filled and deleted on the stick changes only its own libr
   await inLibrary(page, 0, "Untitled Playlist").click();
   await expect(rows(page)).toHaveCount(1);
 
-  // Remove from Playlist inside it.
-  await rows(page).first().click();
-  await rows(page).first().click({ button: "right" });
-  await page.getByRole("menu", { name: "Track" }).getByRole("menuitem", { name: "Remove from Playlist" }).click();
+  // Remove from Playlist inside it, asked first in rekordbox's words:
+  // Cancel keeps the track, OK takes it out.
+  type Asked = { __confirmAnswer?: boolean; __confirmed?: string[] };
+  const removeOne = async () => {
+    await rows(page).first().click();
+    await rows(page).first().click({ button: "right" });
+    await page.getByRole("menu", { name: "Track" }).getByRole("menuitem", { name: "Remove from Playlist" }).click();
+  };
+  await page.evaluate(() => { (window as unknown as Asked).__confirmAnswer = false; });
+  await removeOne();
+  await expect.poll(() => page.evaluate(() => (window as unknown as Asked).__confirmed ?? [])).toContain(
+    "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.",
+  );
+  await expect(rows(page)).toHaveCount(1);
+  await page.evaluate(() => { (window as unknown as Asked).__confirmAnswer = true; });
+  await removeOne();
   await expect(rows(page)).toHaveCount(0);
+  // The note counts the entries that went.
+  await expect(page.getByRole("contentinfo")).toContainText("Removed 1 track.");
 
-  // And Delete Playlist from its own menu.
+  // And Delete Playlist from its own menu, which has no Rename row: as in
+  // rekordbox, a stick's playlist renames by clicking it once selected.
   await inLibrary(page, 0, "Untitled Playlist").click({ button: "right" });
-  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Delete Playlist" }).click();
+  const playlistMenu = page.getByRole("menu", { name: "Playlist" });
+  await expect(playlistMenu.getByRole("menuitem", { name: /^Rename/ })).toHaveCount(0);
+  await playlistMenu.getByRole("menuitem", { name: "Delete Playlist" }).click();
   await expect(page.getByRole("contentinfo")).toContainText("Deleted Untitled Playlist.");
   await expect(lists.filter({ hasText: "Untitled Playlist" })).toHaveCount(0);
   await expect(lists).toHaveCount(6);

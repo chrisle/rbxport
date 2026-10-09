@@ -167,7 +167,7 @@ fn db_dir(root: &Path) -> Result<PathBuf> {
 }
 
 fn missing(format: Format) -> ExportError {
-    ExportError::Conflict(format!("This device has no {}.", format.file_name()))
+    ExportError::Conflict(format!("This device has no {file}.", file = format.file_name()))
 }
 
 /// Reads one library from the stick at `root`.
@@ -326,7 +326,9 @@ pub enum Edit {
     /// Tracks of this library appended to a playlist; one already in it is
     /// not added twice.
     Add { playlist: u32, tracks: Vec<u32> },
-    /// Every entry of these tracks taken out of a playlist.
+    /// Every entry of these tracks taken out of a playlist. The interface
+    /// names a stick's rows by their file, so two entries of one track are
+    /// one row id there and are selected, and taken out, together.
     Remove { playlist: u32, tracks: Vec<u32> },
 }
 
@@ -379,7 +381,7 @@ fn plan(nodes: &[Node], tracks: &BTreeSet<u32>, edit: &Edit) -> Result<(Vec<Node
                 return Err(refused("That folder is no longer on the device."));
             }
             let name = checked_name(name)?;
-            let id = nodes.iter().map(|n| n.id).max().unwrap_or(0).checked_add(1).ok_or_else(|| refused("The device has no room for another playlist."))?;
+            let id = nodes.iter().map(|n| n.id).max().unwrap_or(0).checked_add(1).ok_or_else(|| ExportError::Conflict("The device has no room for another playlist.".to_owned()))?;
             for sibling in after.iter_mut().filter(|n| n.parent == *parent) {
                 sibling.sequence = sibling.sequence.saturating_add(1);
             }
@@ -577,7 +579,7 @@ fn rewrite_pdb(bytes: &[u8], before: &[Node], after: &[Node]) -> Result<Vec<u8>>
     let pdb = rbl_pdb::Pdb::parse(bytes).map_err(unreadable)?;
     let old: BTreeMap<u32, &Node> = before.iter().map(|n| (n.id, n)).collect();
     let new: BTreeMap<u32, &Node> = after.iter().map(|n| (n.id, n)).collect();
-    let cannot = || refused("This device's library could not be changed in place. Nothing was changed.");
+    let cannot = || ExportError::Conflict("This device's library could not be changed in place. Nothing was changed.".to_owned());
 
     let mut next = bytes.to_vec();
     let same_row = |was: &Node, now: &Node| was.name == now.name && was.sequence == now.sequence;

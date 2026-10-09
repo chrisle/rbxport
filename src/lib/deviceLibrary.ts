@@ -56,6 +56,20 @@ export function isDeviceLibraryKind(kind: TreeNode["kind"]): boolean {
     kind === "deviceFolder" || kind === "devicePlaylist";
 }
 
+/**
+ * rekordbox's own questions before a stick's playlist, folder or entries go,
+ * word for word [OBS 7.2.14, Winrig 2026-10-08: `rekordbox-19` for a
+ * playlist, `rekordbox-13` for Remove from Playlist; the folder's is its
+ * sibling in rekordbox's catalog, `[ASSUME]` shown the same way]. Kept as
+ * they are so each language gets rekordbox's own translation from its
+ * `.lang` catalog (`pnpm locales`).
+ */
+export const DEVICE_ASKS = {
+  deletePlaylist: "Are you sure you want to delete this playlist?\nPlaylist will be deleted from all synced devices.",
+  deleteFolder: "Are you sure you want to delete this folder?\nFolder will be deleted from all synced devices.",
+  removeTracks: "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.",
+} as const;
+
 /** A library's name in the tree, as rekordbox spells it. */
 export const LIBRARY_NAMES: Record<DeviceFormat, string> = {
   deviceLibrary: "Device Library",

@@ -33,7 +33,7 @@ import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, devicePath, renamedDevice } from "@/lib/devices";
-import { deviceNodeId, deviceParentFor, devicePlaylistsOf, isDeviceLibraryKind, parseDeviceNodeId } from "@/lib/deviceLibrary";
+import { DEVICE_ASKS, deviceNodeId, deviceParentFor, devicePlaylistsOf, isDeviceLibraryKind, parseDeviceNodeId } from "@/lib/deviceLibrary";
 import { useDeviceLibraries } from "@/store/useDeviceLibraries";
 import { refusal, resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
@@ -2124,63 +2124,62 @@ function AppBody() {
   // A stick's own playlists, edited one library at a time as rekordbox's
   // Devices tree does. Nothing here touches the collection.
   const deviceBusy = syncing || exportRunning || ejectingDeviceId !== null;
+  // `said` is the note once it is done, from how many entries changed.
   const editDevice = useCallback(
-    async (node: TreeNode, edit: DevicePlaylistEdit, said: string) => {
+    async (node: TreeNode, edit: DevicePlaylistEdit, said: (changed: number) => string) => {
       const ref = parseDeviceNodeId(node.id);
       if (!ref) return;
       if (deviceBusy) {
-        refuse("Wait for the device to finish before changing its playlists.");
+        refuse(t("Wait for the device to finish before changing its playlists."));
         return;
       }
       try {
         const result = await deviceLibraries.edit(ref.path, ref.format, edit);
-        if (result.changed > 0) report(said);
+        if (result.changed > 0) report(said(result.changed));
       } catch (e) {
-        refuse(e instanceof Error ? e.message : "The device library could not be changed.");
+        refuse(e instanceof Error ? e.message : t("The device library could not be changed."));
       }
     },
-    [deviceLibraries, deviceBusy, report, refuse],
+    [deviceLibraries, deviceBusy, report, refuse, t],
   );
   const createOnDevice = useCallback(
     (parent: TreeNode, folder: boolean) => {
       const at = deviceParentFor(parent);
       if (at === null) return;
-      // rekordbox's own names for a new one [OBS 7.2.14, Winrig 2026-10-08].
-      const name = folder ? "Untitled Folder" : "Untitled Playlist";
-      void editDevice(parent, { kind: "create", parent: at, name, folder }, `Created ${name}.`);
+      // rekordbox's own names for a new one [OBS 7.2.14, Winrig 2026-10-08],
+      // in the interface's language as rekordbox's are.
+      const name = folder ? t("Untitled Folder") : t("Untitled Playlist");
+      void editDevice(parent, { kind: "create", parent: at, name, folder }, () => t("Created {name}.", { name }));
     },
-    [editDevice],
+    [editDevice, t],
   );
   const renameOnDevice = useCallback(
     (node: TreeNode, name: string) => {
       const ref = parseDeviceNodeId(node.id);
-      if (ref) void editDevice(node, { kind: "rename", id: ref.id, name }, `Renamed to ${name}.`);
+      if (ref) void editDevice(node, { kind: "rename", id: ref.id, name }, () => t("Renamed to {name}.", { name }));
     },
-    [editDevice],
+    [editDevice, t],
   );
-  // Asked first, as rekordbox asks [OBS 7.2.14]: a stick's playlists have
-  // no undo here. The tracks stay on the stick.
+  // Asked first, in rekordbox's own words [OBS 7.2.14, `rekordbox-19`]: a
+  // stick's playlists have no undo here. The tracks stay on the stick.
   const deleteOnDevice = useCallback(
     (node: TreeNode) => {
       const ref = parseDeviceNodeId(node.id);
       if (!ref) return;
       void (async () => {
-        const backend = await getBackend();
-        const what = node.kind === "deviceFolder" ? "folder" : "playlist";
-        const sure = await backend.confirm(
-          `Delete the ${what} ${node.name} from the device? This can’t be undone. Its tracks stay on the device.`,
-        );
-        if (!sure) return;
+        const ask = node.kind === "deviceFolder" ? DEVICE_ASKS.deleteFolder : DEVICE_ASKS.deletePlaylist;
+        // OK and Cancel, as rekordbox's own box has.
+        if (!(await confirmRemoval(`${t(ask)}\n\n'${node.name}'`))) return;
         // The selection stays in the Devices tree, on the library's
         // Playlists heading, rather than leaving the section.
         if (selectedNode?.id === node.id) {
           const heading = deviceNodeId({ ...ref, role: "playlists", id: "0" });
           setSelectedNode(treeNodes.find((n) => n.id === heading) ?? null);
         }
-        await editDevice(node, { kind: "delete", id: ref.id }, `Deleted ${node.name}.`);
+        await editDevice(node, { kind: "delete", id: ref.id }, () => t("Deleted {name}.", { name: node.name }));
       })();
     },
-    [editDevice, selectedNode, treeNodes],
+    [editDevice, selectedNode, treeNodes, t, confirmRemoval],
   );
   // Tracks of the selected stick library, into one of its playlists or out
   // of the one open.
@@ -2213,20 +2212,23 @@ function AppBody() {
       busy: deviceBusy,
       onAdd: (playlist: string, ids: readonly string[]) => {
         const target = devicePlaylistsOf(treeNodes, selectedDeviceRef.path, selectedDeviceRef.format).find((p) => p.id === playlist);
-        void editDevice(selectedNode, { kind: "add", playlist, tracks: [...ids] }, `Added to ${target?.name ?? "the playlist"}.`);
+        const name = target?.name ?? "";
+        void editDevice(selectedNode, { kind: "add", playlist, tracks: [...ids] }, () => t("Added to {name}.", { name }));
       },
+      // rekordbox's question names no count [OBS 7.2.14, `rekordbox-13`];
+      // the note after it counts the entries that went. A track listed
+      // twice is one row id here, so both copies are selected and go
+      // together, as in the collection's playlists.
       onRemove: (ids: readonly string[]) => {
         if (!inPlaylist || ids.length === 0) return;
         void (async () => {
-          const backend = await getBackend();
-          const count = `${ids.length} track${ids.length === 1 ? "" : "s"}`;
-          const sure = await backend.confirm(`Remove ${count} from ${selectedNode.name} on the device? This can’t be undone.`);
-          if (!sure) return;
-          await editDevice(selectedNode, { kind: "remove", playlist: selectedDeviceRef.id, tracks: [...ids] }, `Removed ${count}.`);
+          if (!(await confirmRemoval(t(DEVICE_ASKS.removeTracks)))) return;
+          await editDevice(selectedNode, { kind: "remove", playlist: selectedDeviceRef.id, tracks: [...ids] }, (changed) =>
+            changed === 1 ? t("Removed {count} track.", { count: changed }) : t("Removed {count} tracks.", { count: changed }));
         })();
       },
     };
-  }, [selectedNode, selectedDeviceRef, treeNodes, editDevice, deviceBusy]);
+  }, [selectedNode, selectedDeviceRef, treeNodes, editDevice, deviceBusy, t, confirmRemoval]);
   const selectedDevice = useMemo(
     () => devices.find((device) => deviceId(device) === selectedNode?.id) ?? null,
     [devices, selectedNode],
