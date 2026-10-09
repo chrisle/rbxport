@@ -569,6 +569,12 @@ const PHASE_CHECK_MS = 100;
 const PHASE_TOLERANCE = 0.01;
 /** How long the lock waits after its own move, before it checks again. */
 const PHASE_SETTLE_MS = 250;
+/**
+ * How far from its beat a waiting hot cue call may find the head and still
+ * jump, in seconds: a timer late under load. Further than this, a jump, a
+ * drag or a cue moved the head first, and the call is dropped.
+ */
+const CALL_DRIFT = 0.15;
 
 /**
  * What GRID puts in the pad row, read off `docs/screenshots`.
@@ -1221,9 +1227,45 @@ export const Player = memo(function Player({
   const playFromCue = useEventCallback(() => {
     if (!playback.playing) togglePlay();
   });
+  /**
+   * A hot cue called with Q on, waiting for its beat: see `useHotCues`. One
+   * at a time; a second call takes the place of the first.
+   */
+  const pendingCall = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const playingNow = useRef(playback.playing);
+  playingNow.current = playback.playing;
+  const cancelCall = useCallback(() => {
+    globalThis.clearTimeout(pendingCall.current);
+    pendingCall.current = undefined;
+  }, []);
+  /**
+   * Plays on to `at` and jumps to `to` there. The jump is a move from the
+   * engine's own head, so a timer that fires a few milliseconds late lands
+   * the same few past the cue and the beat runs on unbroken, as rekordbox's
+   * warp point pair does (`AudioPlayerCore::doSetWarpPointPair`). Anything
+   * else that moved the head in the meantime called the jump off.
+   */
+  const jumpAt = useEventCallback((at: number, to: number) => {
+    cancelCall();
+    const rate = playback.tempo > 0 ? playback.tempo : 1;
+    const wait = Math.max(0, ((at - playback.positionNow()) * 1000) / rate);
+    pendingCall.current = globalThis.setTimeout(() => {
+      pendingCall.current = undefined;
+      if (!playingNow.current) return;
+      const head = playback.positionNow();
+      if (Math.abs(head - at) > CALL_DRIFT) return;
+      playback.moveBy(to - at);
+    }, wait);
+  });
+  // A pause, a new track or an empty deck leaves no beat to wait for.
+  useEffect(() => {
+    if (!playback.playing) cancelCall();
+  }, [playback.playing, cancelCall]);
+  useEffect(() => cancelCall, [track?.id, cancelCall]);
+  const deckPlaying = useCallback(() => playback.playing, [playback.playing]);
   const hot = useHotCues({
     trackId: playback.idle ? null : track?.id ?? null,
-    cues, positionSeconds, seek, play: playFromCue,
+    cues, positionSeconds, seek, play: playFromCue, playing: deckPlaying, jumpAt,
     quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
   });
   // The hooks own editability, so the disabled state and its explanation

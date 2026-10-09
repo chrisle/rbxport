@@ -206,6 +206,42 @@ describe("pressing a pad that is already set", () => {
   });
 });
 
+describe("calling a set pad with Q on", () => {
+  // rekordbox 7.2.19, EXPORT mode: QuantizedCueBehavior::doHotCueLaunch takes
+  // moveToCueAndPlayWithWait, the deck plays on to the next quantize step and
+  // jumps to the cue there [OBS static, parity/issue-126].
+  const cues = [hot("cue-a", "A", 500)];
+  let jumps: string[];
+  const jumpAt = (at: number, to: number) => jumps.push(`${at}->${to}`);
+  beforeEach(() => {
+    jumps = [];
+  });
+
+  it("waits for the next beat on a playing deck, then jumps to the cue", async () => {
+    mount({ cues, positionSeconds: () => 1.2, quantiseTo: GRID, playing: () => true, jumpAt });
+    act(() => pads.press("A"));
+    await settle();
+    expect(jumps).toEqual(["1.5->0.5"]);
+    expect(transport).toEqual([]);
+  });
+
+  it("jumps at once from pause, and plays", async () => {
+    mount({ cues, positionSeconds: () => 1.2, quantiseTo: GRID, playing: () => false, jumpAt });
+    act(() => pads.press("A"));
+    await settle();
+    expect(jumps).toEqual([]);
+    expect(transport).toEqual(["seek:0.5", "play"]);
+  });
+
+  it("jumps at once with Q off", async () => {
+    mount({ cues, positionSeconds: () => 1.2, quantiseTo: null, playing: () => true, jumpAt });
+    act(() => pads.press("A"));
+    await settle();
+    expect(jumps).toEqual([]);
+    expect(transport).toEqual(["seek:0.5", "play"]);
+  });
+});
+
 describe("at", () => {
   it("gives the cue in a slot and null for an empty one", () => {
     mount({ cues: [hot("cue-a", "A", 30_000)] });

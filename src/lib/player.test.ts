@@ -41,6 +41,7 @@ import {
   memoryTime,
   cuesFor,
   nearestBeatMs,
+  quantizedLaunchMs,
   needsRedraw,
   NO_BEATS,
   scrollOffset,
@@ -1006,5 +1007,45 @@ describe("createWheelZoomGate", () => {
     expect(gate(-60, 1010)).toBe(0);
     // The old direction's travel was discarded, not netted against.
     expect(gate(-60, 1020)).toBe(-1);
+  });
+});
+
+describe("quantizedLaunchMs", () => {
+  // 120 BPM: a beat every 500 ms from 1000 ms.
+  const grid = {
+    times: new Uint32Array([1000, 1500, 2000, 2500, 3000]),
+    numbers: new Uint8Array([1, 2, 3, 4, 1]),
+    tempos: new Uint16Array([12_000, 12_000, 12_000, 12_000, 12_000]),
+  };
+
+  it("fires a cue on the grid at the next beat", () => {
+    expect(quantizedLaunchMs(grid, 1700, 1000)).toBe(2000);
+    expect(quantizedLaunchMs(grid, 1501, 2500)).toBe(2000);
+  });
+
+  it("fires at once when the playhead is on a beat", () => {
+    expect(quantizedLaunchMs(grid, 2000, 1000)).toBe(2000);
+  });
+
+  it("keeps an off-grid cue's place within the beat", () => {
+    // The cue sits 100 ms past a beat, so the jump waits for the next point
+    // 100 ms past a beat: the bar runs on unbroken.
+    expect(quantizedLaunchMs(grid, 1700, 2600)).toBe(2100);
+    expect(quantizedLaunchMs(grid, 1550, 2600)).toBe(1600);
+  });
+
+  it("follows the quantize beat value through a finer grid", () => {
+    const halves = subdivideGrid(grid, 2);
+    expect(quantizedLaunchMs(halves, 1600, 1000)).toBe(1750);
+  });
+
+  it("carries the edge spacing past the ends of the grid", () => {
+    expect(quantizedLaunchMs(grid, 3100, 1000)).toBe(3500);
+    expect(quantizedLaunchMs(grid, 200, 1000)).toBe(500);
+  });
+
+  it("has nothing to time against without two beats", () => {
+    const one = { times: new Uint32Array([1000]), numbers: new Uint8Array([1]), tempos: new Uint16Array([12_000]) };
+    expect(quantizedLaunchMs(one, 1200, 1000)).toBeNull();
   });
 });

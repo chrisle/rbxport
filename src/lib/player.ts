@@ -588,6 +588,63 @@ export function nearestBeatMs(grid: BeatGrid, ms: number): number {
   return Math.abs(ms - before) <= Math.abs(after - ms) ? before : after;
 }
 
+/**
+ * A place as a count of grid steps from the first one: 2.25 is a quarter of
+ * the way from the third step to the fourth. Before the first step and past
+ * the last the edge spacing carries on, so a cue in an intro the grid does not
+ * reach still has a phase. `null` for a grid of fewer than two steps.
+ */
+function stepIndexAt(times: Uint32Array, ms: number): number | null {
+  const last = times.length - 1;
+  if (last < 1) return null;
+  const first = times[0] ?? 0;
+  const end = times[last] ?? 0;
+  if (ms < first) return (ms - first) / Math.max((times[1] ?? first) - first, 1);
+  if (ms >= end) return last + (ms - end) / Math.max(end - (times[last - 1] ?? end), 1);
+  const after = lowerBound(times, ms);
+  const at = (times[after] ?? end) === ms ? after : after - 1;
+  const from = times[at] ?? first;
+  const to = times[at + 1] ?? from;
+  return at + (ms - from) / Math.max(to - from, 1);
+}
+
+/** The inverse of `stepIndexAt`. */
+function msAtStepIndex(times: Uint32Array, index: number): number {
+  const last = times.length - 1;
+  const first = times[0] ?? 0;
+  const end = times[last] ?? 0;
+  if (index < 0) return first + index * ((times[1] ?? first) - first);
+  if (index >= last) return end + (index - last) * (end - (times[last - 1] ?? end));
+  const at = Math.floor(index);
+  const from = times[at] ?? first;
+  const to = times[at + 1] ?? from;
+  return from + (index - at) * (to - from);
+}
+
+/**
+ * Where a hot cue called with Q on fires: the first place at or after the
+ * playhead that sits at the same point of a quantize step as the cue does.
+ * For a cue on the grid that is simply the next step.
+ *
+ * rekordbox 7.2.19 in EXPORT mode (`QuantizedCueBehavior::doHotCueLaunch`
+ * @0x102b1b60c -> `moveToCueAndPlayWithWait` @0x102b1a860) plays on to that
+ * place and jumps to the cue there, so the rhythm runs on without a break
+ * [OBS static, parity/issue-126]. The grid here is the one the quantize beat
+ * value gives (`subdivideGrid`). `null` when the grid has no steps to time
+ * against, and the jump is made at once.
+ */
+export function quantizedLaunchMs(grid: BeatGrid, positionMs: number, cueMs: number): number | null {
+  const { times } = grid;
+  const cue = stepIndexAt(times, cueMs);
+  const now = stepIndexAt(times, positionMs);
+  if (cue === null || now === null) return null;
+  const phase = cue - Math.floor(cue);
+  let at = Math.floor(now - phase) + phase;
+  // A hair behind the playhead is the playhead: the step is now.
+  if (at < now - 1e-9) at += 1;
+  return Math.max(msAtStepIndex(times, at), positionMs);
+}
+
 /** What the deck should do, decided by the CUE button. */
 export interface CueAction {
   /** Where to move the playhead, or `null` to leave it. */

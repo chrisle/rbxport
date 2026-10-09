@@ -217,3 +217,46 @@ test("setting an empty pad from pause leaves the deck stopped", async ({ page })
   await page.waitForTimeout(300);
   await expect(playButton(page)).toBeVisible();
 });
+
+test("with Q on, a call on a playing deck waits for the beat and keeps it", async ({ page }) => {
+  // rekordbox 7.2.19, EXPORT mode: QuantizedCueBehavior::doHotCueLaunch ->
+  // moveToCueAndPlayWithWait. The deck plays on to the next quantize step and
+  // jumps to the cue there, so the beat runs on through the jump
+  // [OBS static, parity/issue-126]. Q is on by default.
+  await load(page);
+  await expect(player(page).getByRole("button", { name: "Quantize" })).toHaveAttribute("aria-pressed", "true");
+  await pad(page, "B").click();
+  await expect(pauseButton(page)).toBeVisible();
+  await page.waitForTimeout(600);
+
+  // The head, read every few ms from just before the press of A.
+  const heads = page.evaluate(async () => {
+    const read = (window as unknown as { __deckSeconds: () => { a: number; beatA: number } }).__deckSeconds;
+    const out: { a: number; beat: number; at: number }[] = [];
+    const end = performance.now() + 1800;
+    while (performance.now() < end) {
+      const { a, beatA } = read();
+      out.push({ a, beat: beatA, at: performance.now() });
+      await new Promise((done) => setTimeout(done, 4));
+    }
+    return out;
+  });
+  await page.waitForTimeout(100);
+  await pad(page, "A").click();
+  const all = await heads;
+  const beat = all[0]!.beat;
+  expect(beat).toBeGreaterThan(0.2);
+  // The jump: the one step that moves far, from B's region to A's cue.
+  const jump = all.findIndex((sample, n) => n > 0 && Math.abs(sample.a - all[n - 1]!.a) > 0.3);
+  expect(jump).toBeGreaterThan(0);
+  const before = all[jump - 1]!.a;
+  const after = all[jump]!.a;
+  // Where it left and where it landed are the same place in a beat: the
+  // jump waited for the step instead of cutting the beat short. On the mock
+  // this comes to under a millisecond; a jump at the press is off by
+  // wherever in the beat the press fell.
+  const phase = (((before - after) % beat) + beat) % beat;
+  expect(Math.min(phase, beat - phase)).toBeLessThan(0.02);
+  // And it plays on from the cue.
+  await expect(pauseButton(page)).toBeVisible();
+});
