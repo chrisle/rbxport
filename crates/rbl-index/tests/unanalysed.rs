@@ -17,5 +17,8 @@ fn only_unanalysed_tracks_with_a_file_are_offered() {
         *locked = 1;
     }
 
-    assert_eq!(library.unanalysed_rows(), vec![1, 4]);
+    assert_eq!(library.unanalysed_rows(0).collect::<Vec<_>>(), vec![1, 4]);
+    // A later page starts at its row and skips the ones before it.
+    assert_eq!(library.unanalysed_rows(2).collect::<Vec<_>>(), vec![4]);
+    assert_eq!(library.unanalysed_rows(5).count(), 0);
 }

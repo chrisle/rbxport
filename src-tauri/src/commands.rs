@@ -2673,7 +2673,7 @@ pub async fn unanalysed_tracks(
         let wanted = limit as usize;
         let mut tracks = Vec::with_capacity(wanted);
         let mut next = None;
-        for row in library.unanalysed_rows().into_iter().filter(|&row| row >= from) {
+        for row in library.unanalysed_rows(from) {
             if tracks.len() == wanted {
                 next = Some(row);
                 break;

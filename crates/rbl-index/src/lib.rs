@@ -677,20 +677,19 @@ impl Library {
         self.count == 0
     }
 
-    /// Collection rows rekordbox has not analysed, in library order: what
-    /// Auto Analysis offers to analyse at launch.
+    /// Collection rows rekordbox has not analysed, in library order from row
+    /// `from`: what Auto Analysis offers to analyse at launch.
     ///
     /// `djmdContent.Analysed` is 0 for these. A track with the analysis lock
     /// has bit 0x80 set there, so it never counts as unanalysed, and a row
-    /// with no file path has nothing to analyse.
-    #[must_use]
-    pub fn unanalysed_rows(&self) -> Vec<Row> {
-        (0..self.count)
+    /// with no file path has nothing to analyse. The rows are yielded lazily
+    /// so a caller paging through them reads each row once.
+    pub fn unanalysed_rows(&self, from: Row) -> impl Iterator<Item = Row> + '_ {
+        (from as usize..self.count)
             .filter(|&index| {
                 self.analysed.get(index).copied() == Some(0) && !self.folder_path.get(index).is_empty()
             })
             .filter_map(|index| Row::try_from(index).ok())
-            .collect()
     }
 
     #[inline]
