@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { deckMenu, deleteKeyAction, enabled, entriesOf, SEPARATOR, shortcutMenu, TRACK_MENU, trackMenuFor, treeMenu, type MenuContext } from "./contextMenus";
+import {
+  deckMenu, deleteKeyAction, deviceTrackMenu, deviceTreeMenu, enabled, entriesOf, SEPARATOR, shortcutMenu, TRACK_MENU, trackMenuFor, treeMenu,
+  type MenuContext, type MenuRow,
+} from "./contextMenus";
 
 const OPEN: MenuContext = { inPlaylist: true, hasFile: true, readOnly: false };
 
@@ -355,5 +358,42 @@ describe("deleteKeyAction", () => {
     for (const source of ["folder", "playlistFolder", "related"]) {
       expect(deleteKeyAction(source)).toBeNull();
     }
+  });
+});
+
+describe("a stick's own library", () => {
+  const live = <A extends string>(rows: readonly MenuRow<A>[], context: MenuContext = { inPlaylist: false, hasFile: false, readOnly: false }) =>
+    entriesOf(rows).filter((e) => enabled(e, context)).map((e) => e.label);
+
+  it("draws rekordbox 7.2.14's tree menus [OBS Winrig 2026-10-08], with the edits this app makes live", () => {
+    expect(entriesOf(deviceTreeMenu("devicePlaylists")).map((e) => e.label)).toEqual([
+      "Create New Playlist", "Create New Folder", "Import Folder", "Delete All", "Sort Items", "Add To Shortcut",
+    ]);
+    expect(live(deviceTreeMenu("devicePlaylists"))).toEqual(["Create New Playlist", "Create New Folder"]);
+    expect(entriesOf(deviceTreeMenu("devicePlaylist")).map((e) => e.label)).toEqual([
+      "Add Artwork", "Import Playlist", "Rename Playlist", "Delete Playlist", "Export a playlist to a file", "Add To Shortcut",
+    ]);
+    expect(live(deviceTreeMenu("devicePlaylist"))).toEqual(["Rename Playlist", "Delete Playlist"]);
+    expect(live(deviceTreeMenu("deviceFolder"))).toEqual(["Create New Playlist", "Create New Folder", "Rename Folder", "Delete Folder"]);
+  });
+
+  it("greys every edit to a stick while rekordbox holds it or the stick is busy", () => {
+    const busy = { inPlaylist: false, hasFile: false, readOnly: true };
+    for (const kind of ["devicePlaylists", "deviceFolder", "devicePlaylist"] as const) {
+      expect(live(deviceTreeMenu(kind), busy)).toEqual([]);
+    }
+    expect(live(deviceTrackMenu([{ id: "3", name: "Top List" }], true), { inPlaylist: true, hasFile: true, readOnly: true })).toEqual([]);
+  });
+
+  it("offers a library's playlists to its tracks, and Remove from Playlist only inside one", () => {
+    const inAll = deviceTrackMenu([{ id: "3", name: "Top List" }], false);
+    expect(entriesOf(inAll).map((e) => e.label)).toEqual([
+      "Add To Playlist", "Delete Track", "Retrieve the waveform from collection", "Update Collection", "Show information",
+    ]);
+    const add = entriesOf(inAll)[0];
+    expect(add?.items && entriesOf(add.items).map((e) => [e.label, e.action])).toEqual([["Top List", "deviceAddToPlaylist:3"]]);
+    const open = { inPlaylist: true, hasFile: true, readOnly: false };
+    expect(entriesOf(deviceTrackMenu([], true)).filter((e) => enabled(e, open)).map((e) => e.label)).toEqual(["Remove from Playlist"]);
+    expect(entriesOf(deviceTrackMenu([], false)).some((e) => e.label === "Remove from Playlist")).toBe(false);
   });
 });

@@ -24,7 +24,7 @@ import {
   type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
-import { deleteKeyAction, trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
+import { deleteKeyAction, deviceTrackMenu, trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
 import { hasLooseId } from "@/lib/explorer";
 import { previewFromClick, WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
@@ -749,6 +749,17 @@ export interface TrackTableProps {
   onExportTrack?: (device: string, ids: readonly string[]) => void;
   /** What Add To Playlist and Export Track offer. */
   playlists?: readonly MenuTarget[];
+  /**
+   * The menu over a stick's own tracks, when the view is one of its
+   * libraries: Add To Playlist naming that library's playlists, and in one
+   * of them Remove from Playlist.
+   */
+  deviceMenu?: {
+    playlists: readonly MenuTarget[];
+    inPlaylist: boolean;
+    onAdd: (playlist: string, ids: readonly string[]) => void;
+    onRemove: (ids: readonly string[]) => void;
+  } | undefined;
   devices?: readonly MenuTarget[];
   /** rekordbox is running, so every write is refused rather than raced. */
   readOnly?: boolean;
@@ -803,7 +814,7 @@ export const TrackTable = memo(function TrackTable({
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
   onRemoveFromCollection, onConvertMemoryCues, readOnly = false,
   onImportToCollection, onAnalysisLock, onAddToPlaylist, onAddToTagList, onRemoveFromTagList, onExportTrack, onReloadTag,
-  playlists = [], devices = [],
+  playlists = [], devices = [], deviceMenu,
   players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
   trafficLight, onTrafficLight, trafficKey = null,
 }: TrackTableProps) {
@@ -1616,7 +1627,21 @@ export const TrackTable = memo(function TrackTable({
         </div>
       </div>
 
-      {trackMenu ? (
+      {trackMenu && deviceMenu && spec.source.kind === "device" ? (
+        <ContextMenu
+          x={trackMenu.x}
+          y={trackMenu.y}
+          rows={deviceTrackMenu(deviceMenu.playlists, deviceMenu.inPlaylist)}
+          label="Track"
+          context={{ inPlaylist: deviceMenu.inPlaylist, hasFile: true, readOnly }}
+          onChoose={(action) => {
+            const ids = [...selection.ids];
+            if (action.startsWith("deviceAddToPlaylist:")) deviceMenu.onAdd(action.slice("deviceAddToPlaylist:".length), ids);
+            else if (action === "removeFromPlaylist") deviceMenu.onRemove(ids);
+          }}
+          onClose={() => setTrackMenu(null)}
+        />
+      ) : trackMenu ? (
         <ContextMenu
           x={trackMenu.x}
           y={trackMenu.y}

@@ -13,7 +13,7 @@ import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
 import { DeviceIcon, EjectIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon, SmartListIcon } from "@/components/icons";
 import { ContextMenu } from "@/components/ContextMenu";
-import { treeMenu, type MenuTarget } from "@/lib/contextMenus";
+import { deviceTreeMenu, treeMenu, type MenuTarget } from "@/lib/contextMenus";
 import {
   branchIds, childrenOf, containerOf, emptySources, newlyClosed, nodesForSource, sourceOf,
   subtreeIds, toggle, visibleNodes, searchTree, type TreeSearchScope, type Source,
@@ -117,13 +117,14 @@ const Row = memo(function Row({
   // which the backend says by sending it an open/closed state.
   const historyFolder = node.kind === "history" && (branch || node.expanded !== undefined);
   const Icon =
-    node.kind === "folder" || node.kind === "directory" || historyFolder
+    node.kind === "folder" || node.kind === "directory" || historyFolder ||
+    node.kind === "devicePlaylists" || node.kind === "deviceFolder"
       ? FolderIcon
       : node.kind === "history"
         ? HistoryIcon
-        : node.kind === "allTracks"
+        : node.kind === "allTracks" || node.kind === "deviceAllTracks"
           ? NoteIcon
-          : node.kind === "device"
+          : node.kind === "device" || node.kind === "deviceLibrary"
             ? DeviceIcon
             : node.kind === "smartPlaylist"
               ? SmartListIcon
@@ -223,9 +224,9 @@ const Row = memo(function Row({
       }}
       data-move={moveEdge ?? undefined}
       onContextMenu={(e) => {
-        // Only the kinds that have a menu: the fixed roots and the device
-        // nodes are not playlists and have nothing to offer.
-        if ((node.kind !== "collection" && node.kind !== "playlist" && node.kind !== "smartPlaylist" && node.kind !== "folder") || !onMenu) return;
+        // Only the kinds that have a menu: the fixed roots and a stick's
+        // own row and headings, which have nothing to offer here.
+        if (!MENU_KINDS.has(node.kind) || !onMenu) return;
         e.preventDefault();
         onMenu(node, { x: e.clientX, y: e.clientY });
       }}
@@ -303,6 +304,16 @@ const Row = memo(function Row({
   );
 });
 
+/** The tree kinds a right-click opens a menu over. */
+const MENU_KINDS: ReadonlySet<TreeNode["kind"]> = new Set([
+  "collection", "playlist", "smartPlaylist", "folder", "devicePlaylists", "deviceFolder", "devicePlaylist",
+]);
+
+/** A stick's own playlists and folders, which its menus and renames act on. */
+function isDeviceMenuKind(kind: TreeNode["kind"]): kind is "devicePlaylists" | "deviceFolder" | "devicePlaylist" {
+  return kind === "devicePlaylists" || kind === "deviceFolder" || kind === "devicePlaylist";
+}
+
 /** The measured row pitch, `--s-row-height`. */
 const TREE_ROW_H = 25;
 
@@ -364,6 +375,13 @@ export interface TreeViewProps {
   onDeleteShortcut?: (id: string) => void;
   /** Safely eject a connected volume from its row in the Devices tree. */
   onEjectDevice?: (node: TreeNode) => void;
+  /**
+   * A stick's own playlists: create under its Playlists heading or a folder,
+   * rename and delete. Each acts on the library the node belongs to.
+   */
+  onDeviceCreate?: (parent: TreeNode, folder: boolean) => void;
+  onDeviceRename?: (node: TreeNode, name: string) => void;
+  onDeviceDelete?: (node: TreeNode) => void;
   ejectingDeviceId?: string | null;
   deviceBusy?: boolean;
 }
@@ -376,6 +394,7 @@ export const TreeView = memo(function TreeView({
   onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems,
   railShortcuts, onOpenShortcut, onDeleteShortcut,
   onEjectDevice, ejectingDeviceId, deviceBusy = false,
+  onDeviceCreate, onDeviceRename, onDeviceDelete,
 }: TreeViewProps) {
   const { advanced: { doubleClickToEdit }, view } = usePreferences();
   // Browse › FontSize and Line Space apply to the tree as they do the list.
@@ -392,7 +411,17 @@ export const TreeView = memo(function TreeView({
         (node.kind === "playlist" || node.kind === "smartPlaylist" || node.kind === "folder")) {
       setRenamingId(node.id);
     }
-  }, [readOnly, onRenameNode]);
+    // A stick's playlist or folder renames in place, as rekordbox's does
+    // [OBS 7.2.14: a click on the selected row]; not while it is busy.
+    if (!readOnly && !deviceBusy && onDeviceRename && (node.kind === "devicePlaylist" || node.kind === "deviceFolder")) {
+      setRenamingId(node.id);
+    }
+  }, [readOnly, onRenameNode, deviceBusy, onDeviceRename]);
+  const renameNode = useCallback((node: TreeNode, name: string) => {
+    if (node.kind === "devicePlaylist" || node.kind === "deviceFolder") onDeviceRename?.(node, name);
+    else onRenameNode?.(node, name);
+  }, [onRenameNode, onDeviceRename]);
+  const canRename = Boolean(onRenameNode) || Boolean(onDeviceRename);
   useEffect(() => {
     if (readOnly) endRename();
   }, [readOnly, endRename]);
@@ -570,11 +599,11 @@ export const TreeView = memo(function TreeView({
             onDropTracks={onDropTracks}
             onDropFiles={onDropFiles}
             onMenu={(node, at) => setMenu({ ...at, node })}
-            count={showCounts && node.kind === "playlist" ? node.childCount : undefined}
+            count={showCounts && (node.kind === "playlist" || node.kind === "devicePlaylist") ? node.childCount : undefined}
             renaming={!readOnly && node.id === renamingId}
-            onRename={readOnly ? undefined : onRenameNode}
+            onRename={readOnly ? undefined : renameNode}
             onRenameEnd={endRename}
-            onRenameStart={readOnly || !onRenameNode ? undefined : beginRename}
+            onRenameStart={readOnly || !canRename ? undefined : beginRename}
             doubleClickToEdit={doubleClickToEdit}
             movable={
               Boolean(onMoveNode) &&
@@ -597,7 +626,32 @@ export const TreeView = memo(function TreeView({
 
       </div>
 
-      {menu ? (
+      {menu && isDeviceMenuKind(menu.node.kind) ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          rows={deviceTreeMenu(menu.node.kind)}
+          label={menu.node.kind === "deviceFolder" ? "Folder" : menu.node.kind === "devicePlaylists" ? "Playlists" : "Playlist"}
+          context={{ inPlaylist: false, hasFile: false, readOnly: readOnly || deviceBusy }}
+          onChoose={(action) => {
+            switch (action) {
+              case "deviceCreatePlaylist":
+                onDeviceCreate?.(menu.node, false);
+                break;
+              case "deviceCreateFolder":
+                onDeviceCreate?.(menu.node, true);
+                break;
+              case "deviceRename":
+                beginRename(menu.node);
+                break;
+              case "deviceDelete":
+                onDeviceDelete?.(menu.node);
+                break;
+            }
+          }}
+          onClose={() => setMenu(null)}
+        />
+      ) : menu ? (
         <ContextMenu
           x={menu.x}
           y={menu.y}

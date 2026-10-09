@@ -8,6 +8,7 @@
  * the depth comes back up.
  */
 import { TREE_ROOT, type RelatedCriterion, type TreeNode } from "@/ipc/types";
+import { isDeviceLibraryKind } from "./deviceLibrary";
 
 /**
  * Where a new playlist made from `node`'s menu goes: the folder itself, or
@@ -247,7 +248,8 @@ export function nodesForSource(nodes: readonly TreeNode[], source: Source): Tree
       // The section's own heading first, so jumping there lands on it.
       return nodes.filter((n) => n.kind === "histories" || n.kind === "history");
     case "devices":
-      return nodes.filter((n) => n.kind === "device");
+      // Each stick, and what its own libraries hold under it.
+      return nodes.filter((n) => n.kind === "device" || isDeviceLibraryKind(n.kind));
     case "related":
       return nodes.filter((n) => n.kind === "related" || n.kind === "relatedCriterion");
     case "tagList":
@@ -294,6 +296,11 @@ export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null):
     case "histories":
       return "histories";
     case "device":
+    case "deviceLibrary":
+    case "deviceAllTracks":
+    case "devicePlaylists":
+    case "deviceFolder":
+    case "devicePlaylist":
       return "devices";
     case "explorer":
     case "directory":

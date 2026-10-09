@@ -32,7 +32,9 @@ export type TrackAction =
   | "showInformation"
   | "showInFinder"
   | "loadPlayer1"
-  | "loadPlayer2";
+  | "loadPlayer2"
+  /** A device track into one of its own library's playlists. */
+  | `deviceAddToPlaylist:${string}`;
 
 export type TreeAction =
   | `exportTo:${string}`
@@ -280,6 +282,95 @@ export function treeMenu(
   ];
 }
 
+/** What the Devices tree's menus do over a stick's own playlists. */
+export type DeviceTreeAction = "deviceCreatePlaylist" | "deviceCreateFolder" | "deviceRename" | "deviceDelete";
+
+/**
+ * Right-clicking under a stick in the Devices tree: its Playlists heading, a
+ * folder, or a playlist of one of its libraries, top to bottom as rekordbox
+ * 7.2.14 draws them [OBS Winrig 2026-10-08, `parity/issue-186/rekordbox-02`,
+ * `-07` and `-18`; the folder's from `BrowsePopupMenuManager::
+ * showTreeViewPopupMenu` @0x1000efa7c, static, rekordbox 7.2.11 macOS].
+ *
+ * Live are the edits this app makes to a stick: Create New Playlist and
+ * Create New Folder, Delete, and the rename. rekordbox renames by editing
+ * the name in place; the Rename row beside Delete is this app's, as on the
+ * collection's playlists. Import, Delete All, Sort Items, artwork, export to
+ * a file and shortcuts are drawn greyed.
+ */
+export function deviceTreeMenu(kind: "devicePlaylists" | "deviceFolder" | "devicePlaylist"): readonly MenuRow<DeviceTreeAction>[] {
+  const create: MenuRow<DeviceTreeAction>[] = [
+    { label: "Create New Playlist", action: "deviceCreatePlaylist" },
+    { label: "Create New Folder", action: "deviceCreateFolder" },
+  ];
+  if (kind === "devicePlaylists") {
+    return [
+      ...create,
+      SEPARATOR,
+      { label: "Import Folder", action: null },
+      SEPARATOR,
+      { label: "Delete All", action: null },
+      SEPARATOR,
+      { label: "Sort Items", action: null },
+      SEPARATOR,
+      { label: "Add To Shortcut", action: null },
+    ];
+  }
+  if (kind === "deviceFolder") {
+    return [
+      ...create,
+      SEPARATOR,
+      { label: "Import Folder", action: null },
+      SEPARATOR,
+      { label: "Rename Folder", action: "deviceRename" },
+      { label: "Delete Folder", action: "deviceDelete" },
+      SEPARATOR,
+      { label: "Sort Items", action: null },
+      SEPARATOR,
+      { label: "Add To Shortcut", action: null },
+    ];
+  }
+  return [
+    { label: "Add Artwork", action: null },
+    SEPARATOR,
+    { label: "Import Playlist", action: null },
+    SEPARATOR,
+    { label: "Rename Playlist", action: "deviceRename" },
+    { label: "Delete Playlist", action: "deviceDelete" },
+    SEPARATOR,
+    { label: "Export a playlist to a file", action: null, submenu: true },
+    SEPARATOR,
+    { label: "Add To Shortcut", action: null },
+  ];
+}
+
+/**
+ * Right-clicking tracks of a stick's own library, as rekordbox 7.2.14 draws
+ * it [OBS Winrig 2026-10-08, `parity/issue-186/rekordbox-09` under All
+ * Tracks and `-12` in a playlist]: Add To Playlist lists that library's
+ * playlists, and inside a playlist Remove from Playlist takes the tracks
+ * out. Delete Track, which takes the file off the stick, the waveform and
+ * collection rows and Show information are drawn greyed.
+ *
+ * rekordbox's submenu nests the library's folders; this one lists the
+ * playlists flat, as the collection's Add To Playlist here does.
+ */
+export function deviceTrackMenu(playlists: readonly MenuTarget[], inPlaylist: boolean): readonly MenuRow<TrackAction>[] {
+  const add: MenuEntry<TrackAction> = playlists.length > 0
+    ? { label: "Add To Playlist", action: null, submenu: true, items: playlists.map((p) => ({ label: p.name, action: `deviceAddToPlaylist:${p.id}` as const })) }
+    : { label: "Add To Playlist", action: null, submenu: true };
+  return [
+    add,
+    inPlaylist
+      ? { label: "Remove from Playlist", action: "removeFromPlaylist", needs: "playlist" }
+      : { label: "Delete Track", action: null },
+    { label: "Retrieve the waveform from collection", action: null },
+    { label: "Update Collection", action: null },
+    SEPARATOR,
+    { label: "Show information", action: null },
+  ];
+}
+
 export type ShortcutAction = "deleteShortcut";
 
 /**
@@ -410,6 +501,12 @@ const WRITES: ReadonlySet<string> = new Set([
   "createFolder",
   "rename",
   "delete",
+  // A stick's own library: rekordbox holds a mounted stick's database open,
+  // so these are refused alongside the library's own writes.
+  "deviceCreatePlaylist",
+  "deviceCreateFolder",
+  "deviceRename",
+  "deviceDelete",
 ]);
 
 /** Whether an entry can be clicked. Everything else is drawn and greyed. */
@@ -421,7 +518,7 @@ export function enabled<A extends string>(
   // having something under it that is.
   if (entry.items) return entriesOf(entry.items).some((row) => enabled(row, context));
   if (entry.action === null) return false;
-  if (context.readOnly && (WRITES.has(entry.action) || entry.action.startsWith("addToPlaylist:"))) return false;
+  if (context.readOnly && (WRITES.has(entry.action) || entry.action.startsWith("addToPlaylist:") || entry.action.startsWith("deviceAddToPlaylist:"))) return false;
   if (context.loose === true && entry.needs !== "loose" && entry.needs !== "file" && entry.importsLoose !== true) {
     return entry.action.startsWith("loadPlayer");
   }

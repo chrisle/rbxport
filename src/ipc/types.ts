@@ -58,7 +58,14 @@ export type TrackSource =
   /** Related Tracks: what goes with `track` under a criterion. An empty track lists nothing. */
   | { kind: "related"; track: string; criterion: RelatedCriterion }
   /** The Tag List, in its own order. */
-  | { kind: "tagList" };
+  | { kind: "tagList" }
+  /**
+   * A library on a USB stick, as the Devices tree opens it: one of its
+   * playlists, or all its tracks for playlist `"0"`. The rows come from the
+   * stick's own database. `revision` changes after an edit to the stick so
+   * the view is opened again; the backend does not read it.
+   */
+  | { kind: "device"; path: string; format: DeviceFormat; playlist: string; revision?: number };
 
 /** The Related Tracks section's criteria: rekordbox's own three. */
 export type RelatedCriterion = "bpmKey" | "genreRecent" | "artist" | "suggestion";
@@ -120,7 +127,14 @@ export interface TreeNode {
     /** rekordbox's Tag List: its one temporary list, kept in the library. */
     | "tagList"
     /** A line of information in the tree, not a place: nothing opens when it is clicked. */
-    | "note";
+    | "note"
+    /**
+     * A USB stick's own library under its device row, as rekordbox's
+     * Devices tree has it: the library's heading (Device Library or
+     * OneLibrary), its All Tracks and Playlists headings, and its folders
+     * and playlists.
+     */
+    | "deviceLibrary" | "deviceAllTracks" | "devicePlaylists" | "deviceFolder" | "devicePlaylist";
   depth: number;
   /** Undefined for leaves. */
   expanded?: boolean;
@@ -865,6 +879,18 @@ export interface Backend {
   explorerChildren(path: string): Promise<ExplorerChildren>;
 
   /**
+   * The libraries on a stick, Device Library first, each with its playlist
+   * tree. A stick with neither answers with none.
+   */
+  deviceLibraries(path: string): Promise<DeviceLibrary[]>;
+  /**
+   * Changes one library's playlists on a stick, as rekordbox's Devices tree
+   * does: that library only, never the other. Resolves to the playlist or
+   * folder the edit was about (the new one for a create).
+   */
+  devicePlaylistEdit(path: string, format: DeviceFormat, edit: DevicePlaylistEdit): Promise<DevicePlaylistEditResult>;
+
+  /**
    * One track's full record: what the information panel's Summary and Info
    * tabs show and the row DTO does not carry.
    *
@@ -1101,6 +1127,47 @@ export interface Device {
   volumeId: string;
   /** What is already on it, null when it holds no export. */
   export: DeviceExport | null;
+}
+
+/** One of the two libraries a stick can hold: `export.pdb` or `exportLibrary.db`. */
+export type DeviceFormat = "deviceLibrary" | "oneLibrary";
+
+/** A library on a stick, for the Devices tree. */
+export interface DeviceLibrary {
+  format: DeviceFormat;
+  /** Tracks in the library, for All Tracks. */
+  tracks: number;
+  /** Playlists and folders in tree order. */
+  nodes: DeviceLibraryNode[];
+}
+
+export interface DeviceLibraryNode {
+  id: string;
+  /** `"0"` for the top level. */
+  parentId: string;
+  name: string;
+  folder: boolean;
+  /** Under the Playlists heading: 0 for the top level. */
+  depth: number;
+  /** Tracks in a playlist; children of a folder. */
+  count: number;
+}
+
+/**
+ * An edit to a stick's playlists. `parent` `"0"` is the Playlists heading.
+ * Tracks are the rows' own ids, as a device view lists them.
+ */
+export type DevicePlaylistEdit =
+  | { kind: "create"; parent: string; name: string; folder: boolean }
+  | { kind: "rename"; id: string; name: string }
+  | { kind: "delete"; id: string }
+  | { kind: "add"; playlist: string; tracks: string[] }
+  | { kind: "remove"; playlist: string; tracks: string[] };
+
+export interface DevicePlaylistEditResult {
+  id: string;
+  /** What changed; 0 when there was nothing to do. */
+  changed: number;
 }
 
 /** What a device already holds. */

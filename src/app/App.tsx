@@ -32,7 +32,9 @@ import { transposeKey } from "@/lib/camelot";
 import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
-import { deviceId, deviceNodes, devicePath, renamedDevice } from "@/lib/devices";
+import { deviceId, devicePath, renamedDevice } from "@/lib/devices";
+import { deviceNodeId, deviceParentFor, devicePlaylistsOf, isDeviceLibraryKind, parseDeviceNodeId } from "@/lib/deviceLibrary";
+import { useDeviceLibraries } from "@/store/useDeviceLibraries";
 import { refusal, resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import {
@@ -71,7 +73,7 @@ import { NewLibraryDialog, type LibraryQuestion } from "@/views/library/NewLibra
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus, SmartRule, TrackLookups } from "@/ipc/types";
+import type { AnalysisResult, DevicePlaylistEdit, FilterValues, LinkPeerSeen, LinkStatus, SmartRule, TrackLookups } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
 import { nativeMenuLabels } from "@/lib/nativeMenu";
@@ -156,6 +158,8 @@ function AppBody() {
   // Connected volumes. Asked for, never polled: a 1 Hz scan of every mount
   // point is exactly the kind of idle work the budgets forbid.
   const [devices, setDevices] = useState<readonly Device[]>([]);
+  // What each stick's own libraries hold, read when a stick is opened.
+  const deviceLibraries = useDeviceLibraries(devices);
   const [syncing, setSyncing] = useState(false);
   const [ejectingDeviceId, setEjectingDeviceId] = useState<string | null>(null);
   const ejectingDeviceRef = useRef(false);
@@ -379,7 +383,7 @@ function AppBody() {
   // The table's layout follows the kind of thing being browsed, as
   // browseSetting.xml does, rather than each individual playlist.
   const columnContext: ColumnContext =
-    selectedNode?.kind === "playlist" || selectedNode?.kind === "smartPlaylist"
+    selectedNode?.kind === "playlist" || selectedNode?.kind === "smartPlaylist" || selectedNode?.kind === "devicePlaylist"
       ? "playlist"
       : selectedNode?.kind === "history"
         ? "history"
@@ -787,12 +791,12 @@ function AppBody() {
   // Related Tracks relate to the track on Player 1, as rekordbox's do.
   const relatedTo = playerTrack?.id ?? null;
   const spec: ViewSpec = useMemo(() => {
-    const base = { ...specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo), searchField };
+    const base = { ...specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo, deviceLibraries.revision), searchField };
     // Only while the bar is showing: hiding it puts the whole list back,
     // so a closed bar can never be silently narrowing the library.
     const filter = filterOpen ? toSpecFilter(filterState, masterBpmX100) : undefined;
     return filter ? { ...base, filter } : base;
-  }, [selectedNode, sortState, query, searchField, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo]);
+  }, [selectedNode, sortState, query, searchField, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo, deviceLibraries.revision]);
 
   // What the bar's lists offer, from Rust, for the source and query alone.
   // Re-asked when either changes or the library does, and only while the bar
@@ -2105,11 +2109,121 @@ function AppBody() {
   const treeNodes = useMemo(
     () => [
       ...(viewPrefs.allTracks ? tree : tree.filter((node) => node.kind !== "allTracks")),
-      ...deviceNodes(devices),
+      ...deviceLibraries.nodes,
       ...(viewPrefs.explorer ? explorer.nodes : []),
     ],
-    [tree, devices, explorer.nodes, viewPrefs.allTracks, viewPrefs.explorer],
+    [tree, deviceLibraries.nodes, explorer.nodes, viewPrefs.allTracks, viewPrefs.explorer],
   );
+  // A lazy row was opened: a stick reads its libraries, a folder on disk
+  // its subfolders.
+  const expandNode = useCallback(
+    (node: TreeNode) => (node.kind === "device" ? deviceLibraries.expand(node) : explorer.expand(node)),
+    [deviceLibraries, explorer],
+  );
+
+  // A stick's own playlists, edited one library at a time as rekordbox's
+  // Devices tree does. Nothing here touches the collection.
+  const deviceBusy = syncing || exportRunning || ejectingDeviceId !== null;
+  const editDevice = useCallback(
+    async (node: TreeNode, edit: DevicePlaylistEdit, said: string) => {
+      const ref = parseDeviceNodeId(node.id);
+      if (!ref) return;
+      if (deviceBusy) {
+        refuse("Wait for the device to finish before changing its playlists.");
+        return;
+      }
+      try {
+        const result = await deviceLibraries.edit(ref.path, ref.format, edit);
+        if (result.changed > 0) report(said);
+      } catch (e) {
+        refuse(e instanceof Error ? e.message : "The device library could not be changed.");
+      }
+    },
+    [deviceLibraries, deviceBusy, report, refuse],
+  );
+  const createOnDevice = useCallback(
+    (parent: TreeNode, folder: boolean) => {
+      const at = deviceParentFor(parent);
+      if (at === null) return;
+      // rekordbox's own names for a new one [OBS 7.2.14, Winrig 2026-10-08].
+      const name = folder ? "Untitled Folder" : "Untitled Playlist";
+      void editDevice(parent, { kind: "create", parent: at, name, folder }, `Created ${name}.`);
+    },
+    [editDevice],
+  );
+  const renameOnDevice = useCallback(
+    (node: TreeNode, name: string) => {
+      const ref = parseDeviceNodeId(node.id);
+      if (ref) void editDevice(node, { kind: "rename", id: ref.id, name }, `Renamed to ${name}.`);
+    },
+    [editDevice],
+  );
+  // Asked first, as rekordbox asks [OBS 7.2.14]: a stick's playlists have
+  // no undo here. The tracks stay on the stick.
+  const deleteOnDevice = useCallback(
+    (node: TreeNode) => {
+      const ref = parseDeviceNodeId(node.id);
+      if (!ref) return;
+      void (async () => {
+        const backend = await getBackend();
+        const what = node.kind === "deviceFolder" ? "folder" : "playlist";
+        const sure = await backend.confirm(
+          `Delete the ${what} ${node.name} from the device? This can’t be undone. Its tracks stay on the device.`,
+        );
+        if (!sure) return;
+        // The selection stays in the Devices tree, on the library's
+        // Playlists heading, rather than leaving the section.
+        if (selectedNode?.id === node.id) {
+          const heading = deviceNodeId({ ...ref, role: "playlists", id: "0" });
+          setSelectedNode(treeNodes.find((n) => n.id === heading) ?? null);
+        }
+        await editDevice(node, { kind: "delete", id: ref.id }, `Deleted ${node.name}.`);
+      })();
+    },
+    [editDevice, selectedNode, treeNodes],
+  );
+  // Tracks of the selected stick library, into one of its playlists or out
+  // of the one open.
+  const selectedDeviceRef = useMemo(
+    () => (selectedNode && isDeviceLibraryKind(selectedNode.kind) ? parseDeviceNodeId(selectedNode.id) : null),
+    [selectedNode],
+  );
+  // A stick's library open in the browser goes with the stick when it is
+  // unplugged or ejected; the tree falls back as it does for the stick's row.
+  // Only a stick this session has listed can be said to have gone: at
+  // startup the list is still empty.
+  const listedSticks = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    const before = listedSticks.current;
+    listedSticks.current = new Set(devices.map((device) => device.path));
+    if (selectedDeviceRef && before.has(selectedDeviceRef.path) && !listedSticks.current.has(selectedDeviceRef.path)) {
+      setSelectedNode(tree.find((item) => item.kind === "allTracks") ?? tree[0] ?? null);
+    }
+    // Only the device list going is a reason; the selection is what changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devices]);
+  const deviceMenu = useMemo(() => {
+    if (!selectedNode || !selectedDeviceRef) return undefined;
+    const inPlaylist = selectedNode.kind === "devicePlaylist";
+    return {
+      playlists: devicePlaylistsOf(treeNodes, selectedDeviceRef.path, selectedDeviceRef.format),
+      inPlaylist,
+      onAdd: (playlist: string, ids: readonly string[]) => {
+        const target = devicePlaylistsOf(treeNodes, selectedDeviceRef.path, selectedDeviceRef.format).find((p) => p.id === playlist);
+        void editDevice(selectedNode, { kind: "add", playlist, tracks: [...ids] }, `Added to ${target?.name ?? "the playlist"}.`);
+      },
+      onRemove: (ids: readonly string[]) => {
+        if (!inPlaylist || ids.length === 0) return;
+        void (async () => {
+          const backend = await getBackend();
+          const count = `${ids.length} track${ids.length === 1 ? "" : "s"}`;
+          const sure = await backend.confirm(`Remove ${count} from ${selectedNode.name} on the device? This can’t be undone.`);
+          if (!sure) return;
+          await editDevice(selectedNode, { kind: "remove", playlist: selectedDeviceRef.id, tracks: [...ids] }, `Removed ${count}.`);
+        })();
+      },
+    };
+  }, [selectedNode, selectedDeviceRef, treeNodes, editDevice]);
   const selectedDevice = useMemo(
     () => devices.find((device) => deviceId(device) === selectedNode?.id) ?? null,
     [devices, selectedNode],
@@ -2307,7 +2421,7 @@ function AppBody() {
     onDropFiles: readOnly ? undefined : importDroppedFilesTo,
     onExport: exportPlaylist, exportDevices: menuDevices, onExportFile: exportPlaylistFile, onCreatePlaylist: createPlaylistIn,
     onCreateFolder: createFolderIn, onDeleteNode: deleteNode, onRenameNode: renameNode,
-    onMoveNode: readOnly ? undefined : moveNode, onExpand: explorer.expand,
+    onMoveNode: readOnly ? undefined : moveNode, onExpand: expandNode,
     showCounts: viewPrefs.playlistCounts, onOpenSync: openSyncManager,
     onCreateSmartPlaylist: createSmartPlaylistIn, onEditSmartPlaylist: editSmartPlaylist,
     onAddArtwork: addPlaylistArtwork, onAddToShortcut: addToShortcut, onSortItems: sortItems,
@@ -2315,7 +2429,7 @@ function AppBody() {
     ejectingDeviceId, deviceBusy: syncing || exportRunning || ejectingDeviceId !== null, readOnly,
   }), [
     draggedTracks, addDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, menuDevices, exportPlaylistFile,
-    createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, explorer.expand,
+    createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, expandNode,
     viewPrefs.playlistCounts, openSyncManager, createSmartPlaylistIn, editSmartPlaylist,
     addPlaylistArtwork, addToShortcut, sortItems, ejectDeviceFromTree, ejectingDeviceId, syncing,
     exportRunning,
@@ -2498,7 +2612,7 @@ function AppBody() {
           onRenameNode={renameNode}
           onMoveNode={readOnly ? undefined : moveNode}
           readOnly={readOnly}
-          onExpand={explorer.expand}
+          onExpand={expandNode}
           initialExpansion={restored.treeExpansion}
           onExpansionChange={setTreeExpansion}
           showCounts={viewPrefs.playlistCounts}
@@ -2513,7 +2627,10 @@ function AppBody() {
           onDeleteShortcut={deleteShortcut}
           onEjectDevice={(node) => { void ejectDeviceFromTree(node); }}
           ejectingDeviceId={ejectingDeviceId}
-          deviceBusy={syncing || exportRunning || ejectingDeviceId !== null}
+          deviceBusy={deviceBusy}
+          onDeviceCreate={createOnDevice}
+          onDeviceRename={renameOnDevice}
+          onDeviceDelete={deleteOnDevice}
         />
         <div
           className={styles.splitter}
@@ -2561,6 +2678,7 @@ function AppBody() {
           onExportTrack={exportTrackTo}
           playlists={menuPlaylists}
           devices={menuDevices}
+          deviceMenu={deviceMenu}
           readOnly={readOnly}
           trafficLight={activeTrafficLight}
           onTrafficLight={setTrafficLight}

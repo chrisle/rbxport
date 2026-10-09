@@ -24,6 +24,7 @@ import { applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBea
 import { toCamelot } from "@/lib/camelot";
 import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
 import { referenceDeviceSettings } from "./mock-device-settings";
+import { createMockDeviceLibraries } from "./mock-device-library";
 
 const ARTISTS = [
   "MORTEN", "ARTBAT", "Meduza", "Vintage Culture", "Tujamo", "UMEK", "Kryder", "Joel Corry",
@@ -742,6 +743,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       export: { tracks: 77, playlists: 3, ours: false, written: "" },
     },
   ];
+
+  // What each stick's own libraries hold, for the Devices tree.
+  const stickLibraries = createMockDeviceLibraries();
 
   // What each stick's tabs hold. DJ STICK starts empty and gains a library
   // when something is exported to it; TEST carries the rows read off the
@@ -1699,6 +1703,27 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // answer before the library is up. A mock that served rows while the
       // summary was still failing would not be standing in for anything.
       if (!ready) return notReady();
+      if (spec.source.kind === "device") {
+        const q = fold(spec.query.trim());
+        let rows: RowDto[];
+        try {
+          rows = stickLibraries.rows(spec.source.path, spec.source.format, spec.source.playlist)
+            .filter((row) => q === "" || matchesSearch(row, q, spec.searchField ?? "all"));
+        } catch (error) {
+          return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+        }
+        if (spec.sort !== "trackNo") {
+          rows.sort((x, y) => {
+            const c = compare(x, y, spec.sort);
+            return spec.descending ? -c : c;
+          });
+        } else if (spec.descending) {
+          rows.reverse();
+        }
+        const viewId = nextViewId++;
+        folderViews.set(viewId, rows);
+        return wait<ViewHandle>({ viewId, len: rows.length, gen: 1 });
+      }
       if (spec.source.kind === "folder") {
         const folder = spec.source.path;
         const q = fold(spec.query.trim());
@@ -2735,6 +2760,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return () => analysisListeners.delete(listener);
     },
     // The fake disk above. Copies, as with the tree: the map is the mock's.
+    deviceLibraries: (path) => wait(stickLibraries.libraries(path)),
+    devicePlaylistEdit: (path, format, edit) => {
+      try {
+        return wait(stickLibraries.edit(path, format, edit));
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    },
     explorerRoots: () => wait(EXPLORER_ROOTS.map((root) => ({ ...root }))),
     explorerChildren: (path) => {
       const names = [...(EXPLORER_CHILDREN.get(path) ?? [])];

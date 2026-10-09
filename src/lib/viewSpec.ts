@@ -6,6 +6,7 @@
  * drift the moment a source kind was added.
  */
 import type { KeyDisplay, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
+import { deviceSource } from "./deviceLibrary";
 import { explorerPath } from "./explorer";
 import { relatedCriterionOf } from "./tree";
 
@@ -42,17 +43,21 @@ export function specForNode(
    * loaded.
    */
   relatedTo: string | null = null,
+  /** Bumped after an edit to a stick, so a view of its library opens again. */
+  deviceRevision = 0,
 ): ViewSpec {
   const order = sort ?? DEFAULT_SORT;
+  // A stick's own library is read from the stick.
+  const device = node ? deviceSource(node, deviceRevision) : null;
   return {
     // A playlist, its parent folder, or a history session narrows the view.
-    // History folders still have no members of their own; a device is not a
-    // track source here.
+    // History folders still have no members of their own; a device row is
+    // its settings panel, and what is under it opens through `deviceSource`.
     // The Explorer's folders open as themselves, and its heading as an empty
     // folder: rekordbox shows an Explorer with nothing in it there.
     // An intelligent playlist is asked for as a playlist: the backend knows
     // which of its playlists are rules and answers with what the rule admits.
-    source:
+    source: device ?? (
       node?.kind === "playlist" || node?.kind === "smartPlaylist"
         ? { kind: "playlist", id: node.id }
         : node?.kind === "folder"
@@ -67,7 +72,7 @@ export function specForNode(
                 ? { kind: "related", track: relatedTo ?? "", criterion: relatedCriterionOf(node.id) ?? "bpmKey" }
                 : node?.kind === "tagList"
                   ? { kind: "tagList" }
-                  : { kind: "collection" },
+                  : { kind: "collection" }),
     sort: order.column === "key" && keySort === "musical" ? "keyCamelot" : order.column,
     descending: order.descending,
     query,
