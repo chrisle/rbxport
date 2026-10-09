@@ -642,6 +642,7 @@ pub fn run() {
             // The information panel: one track's full record, the lookup
             // lists its dropdowns offer, and the fields it may write.
             details::track_details,
+            details::selection_details,
             details::track_lookups,
             details::set_track_field,
             details::add_artwork,

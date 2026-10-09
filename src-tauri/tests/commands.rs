@@ -574,7 +574,7 @@ fn library_history_names_and_reverses_each_supported_edit() {
     assert_eq!(ids(&s.playlist_rows(&playlist.id)), [tracks[0].as_str(), tracks[2].as_str()]);
 
     let track = track_id(7);
-    let edited = run(commands::set_track_rating(s.handle(), s.state(), track.clone(), 4)).unwrap();
+    let edited = run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 4)).unwrap();
     assert_eq!(edited.undo_label.as_deref(), Some("Track Edit"));
     run(commands::undo_edit(s.handle(), s.state())).unwrap();
     assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().rating, 0);
@@ -582,7 +582,7 @@ fn library_history_names_and_reverses_each_supported_edit() {
     assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().rating, 4);
 
     let field = run(details::set_track_field(
-        s.handle(), s.state(), track.clone(), "title".into(), "Seven".into(),
+        s.handle(), s.state(), vec![track.clone()], "title".into(), "Seven".into(),
     )).unwrap();
     assert_eq!(field.undo_label.as_deref(), Some("Track Edit"));
     run(commands::undo_edit(s.handle(), s.state())).unwrap();
@@ -595,7 +595,7 @@ fn library_history_names_and_reverses_each_supported_edit() {
 fn removing_from_collection_is_permanent_and_clears_history() {
     let s = shell();
     let track = track_id(5);
-    run(commands::set_track_rating(s.handle(), s.state(), track.clone(), 3)).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 3)).unwrap();
     run(commands::remove_from_collection(s.handle(), s.state(), vec![track])).unwrap();
     let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
     assert_eq!(error.kind, ErrorKind::NotFound);
@@ -642,7 +642,7 @@ fn every_edit_bumps_the_generation_and_tells_the_interface() {
     let (_, _, _, start) = s.state().summary();
 
     let first = run(commands::create_playlist(s.handle(), s.state(), "One".into(), ROOT.into())).unwrap();
-    let second = run(commands::set_track_rating(s.handle(), s.state(), track_id(0), 3)).unwrap();
+    let second = run(commands::set_track_rating(s.handle(), s.state(), vec![track_id(0)], 3)).unwrap();
     assert!(first > start);
     assert!(second.generation > first);
     assert_eq!(s.state().summary().3, second.generation, "the state reports the latest");
@@ -662,19 +662,19 @@ fn library_backups_are_manual_only() {
     let backups = s._dir.path().join("backups");
     assert!(!backups.exists());
 
-    run(commands::set_track_rating(s.handle(), s.state(), track_id(0), 3)).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track_id(0)], 3)).unwrap();
     assert!(!backups.exists(), "the first edit must not back up");
 
     // Every kind of edit opens its own writer; none should copy the database.
-    run(commands::set_track_comment(s.handle(), s.state(), track_id(0), "x".into())).unwrap();
+    run(commands::set_track_comment(s.handle(), s.state(), vec![track_id(0)], "x".into())).unwrap();
     run(commands::create_playlist(s.handle(), s.state(), "Later".into(), ROOT.into())).unwrap();
     run(cues::add_cue(s.handle(), s.state(), track_id(0), CueKind::Memory, 1_000)).unwrap();
-    run(details::set_track_field(s.handle(), s.state(), track_id(0), "title".into(), "T".into())).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![track_id(0)], "title".into(), "T".into())).unwrap();
     assert!(!backups.exists(), "edits must not back up automatically");
 
     let path = run(commands::back_up_library(s.state())).unwrap();
     assert!(Path::new(&path).is_file(), "manual backups remain available");
-    run(commands::set_track_rating(s.handle(), s.state(), track_id(0), 4)).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track_id(0)], 4)).unwrap();
     assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1);
 }
 
@@ -704,7 +704,7 @@ fn a_write_the_library_refuses_is_read_only_to_the_interface_and_changes_nothing
     assert_eq!(s.state().summary().3, generation, "nothing was reloaded");
     assert!(s.changes.lock().unwrap().is_empty());
 
-    let err = run(commands::set_track_rating(s.handle(), s.state(), track_id(0), 9)).unwrap_err();
+    let err = run(commands::set_track_rating(s.handle(), s.state(), vec![track_id(0)], 9)).unwrap_err();
     assert_eq!(err.kind, ErrorKind::ReadOnly);
 }
 
@@ -792,10 +792,10 @@ fn a_rating_a_comment_and_a_colour_show_in_the_rows_after_the_edit() {
     let s = shell();
     let track = track_id(7);
 
-    run(commands::set_track_rating(s.handle(), s.state(), track.clone(), 4)).unwrap();
-    run(commands::set_track_comment(s.handle(), s.state(), track.clone(), "opener — long intro".into()))
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 4)).unwrap();
+    run(commands::set_track_comment(s.handle(), s.state(), vec![track.clone()], "opener — long intro".into()))
         .unwrap();
-    run(commands::set_track_color(s.handle(), s.state(), track.clone(), Some("pink".into()))).unwrap();
+    run(commands::set_track_color(s.handle(), s.state(), vec![track.clone()], Some("pink".into()))).unwrap();
 
     let (view, _) = s.open(collection_spec());
     let rows = s.rows(view);
@@ -807,8 +807,8 @@ fn a_rating_a_comment_and_a_colour_show_in_the_rows_after_the_edit() {
     let (view, _) = s.open(ViewSpecDto { sort: "rating".into(), descending: true, ..collection_spec() });
     assert_eq!(s.rows(view)[0].id, track);
 
-    run(commands::set_track_rating(s.handle(), s.state(), track.clone(), 0)).unwrap();
-    run(commands::set_track_color(s.handle(), s.state(), track.clone(), None)).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 0)).unwrap();
+    run(commands::set_track_color(s.handle(), s.state(), vec![track.clone()], None)).unwrap();
     let (view, _) = s.open(collection_spec());
     assert_eq!(s.rows(view).iter().find(|r| r.id == track).unwrap().rating, 0);
 }
@@ -824,11 +824,11 @@ fn the_information_panel_reads_the_record_and_writes_a_field_the_rows_follow() {
     assert_eq!(record.rating, 0);
     assert_eq!(record.duration_sec, 300);
 
-    run(details::set_track_field(s.handle(), s.state(), track.clone(), "title".into(), "Nine".into())).unwrap();
-    run(details::set_track_field(s.handle(), s.state(), track.clone(), "artist".into(), "Somebody".into()))
+    run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "title".into(), "Nine".into())).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "artist".into(), "Somebody".into()))
         .unwrap();
-    run(details::set_track_field(s.handle(), s.state(), track.clone(), "year".into(), "2019".into())).unwrap();
-    run(commands::set_track_rating(s.handle(), s.state(), track.clone(), 2)).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "year".into(), "2019".into())).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 2)).unwrap();
 
     let record = run(details::track_details(s.state(), track.clone())).unwrap();
     assert_eq!((record.title.as_str(), record.artist.as_str(), record.year, record.rating), ("Nine", "Somebody", 2019, 2));
@@ -842,10 +842,53 @@ fn the_information_panel_reads_the_record_and_writes_a_field_the_rows_follow() {
     assert_eq!(s.rows(view)[0].id, track, "the one track with an artist sorts first");
 
     // A field the writer does not take is refused before anything is opened.
-    let err = run(details::set_track_field(s.handle(), s.state(), track.clone(), "bitrate".into(), "320".into()))
+    let err = run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "bitrate".into(), "320".into()))
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::ReadOnly);
-    let err = run(details::set_track_field(s.handle(), s.state(), track, "year".into(), "soon".into())).unwrap_err();
+    let err = run(details::set_track_field(s.handle(), s.state(), vec![track], "year".into(), "soon".into())).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::ReadOnly);
+}
+
+/// Issue #112: several tracks selected in the browser are one record in the
+/// information panel — the first track's, with the fields they do not share
+/// named — and an edit goes to every one of them as one step of history.
+#[test]
+fn the_information_panel_reads_and_writes_a_multiple_selection() {
+    let s = shell();
+    let tracks = vec![track_id(2), track_id(3), track_id(4)];
+
+    let selection = run(details::selection_details(s.state(), tracks.clone())).unwrap();
+    assert_eq!(selection.count, 3);
+    assert_eq!(selection.first.id, tracks[0]);
+    assert!(selection.mixed.iter().any(|f| f == "title"), "{:?}", selection.mixed);
+    assert!(!selection.mixed.iter().any(|f| f == "genre"), "{:?}", selection.mixed);
+    assert!(!selection.mixed.iter().any(|f| f == "artwork"), "none has artwork");
+
+    let edit = run(details::set_track_field(s.handle(), s.state(), tracks.clone(), "genre".into(), "Techno".into()))
+        .unwrap();
+    assert_eq!(edit.undo_label.as_deref(), Some("Track Edit"));
+    run(commands::set_track_rating(s.handle(), s.state(), tracks.clone(), 5)).unwrap();
+    for track in &tracks {
+        let record = run(details::track_details(s.state(), track.clone())).unwrap();
+        assert_eq!((record.genre.as_str(), record.rating), ("Techno", 5), "{track}");
+    }
+    let untouched = run(details::track_details(s.state(), track_id(5))).unwrap();
+    assert_eq!((untouched.genre.as_str(), untouched.rating), ("", 0));
+    let selection = run(details::selection_details(s.state(), tracks.clone())).unwrap();
+    assert_eq!(selection.first.genre, "Techno");
+    assert!(!selection.mixed.iter().any(|f| f == "genre" || f == "rating"));
+
+    // One undo takes the rating back from all three, and leaves the genre.
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    for track in &tracks {
+        let record = run(details::track_details(s.state(), track.clone())).unwrap();
+        assert_eq!((record.genre.as_str(), record.rating), ("Techno", 0), "{track}");
+    }
+
+    // rekordbox greys the Track Title box for several tracks; the command
+    // refuses a title for more than one.
+    let err = run(details::set_track_field(s.handle(), s.state(), tracks, "title".into(), "Same".into()))
+        .unwrap_err();
     assert_eq!(err.kind, ErrorKind::ReadOnly);
 }
 

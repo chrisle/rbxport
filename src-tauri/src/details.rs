@@ -11,7 +11,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{Manager, State};
 
-use crate::commands::{blocking, edit, recorded_edit, write_error, Touched};
+use crate::commands::{blocking, each_track, edit, recorded_edit, write_error, Touched};
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{AppState, LibraryEdit};
 
@@ -111,42 +111,96 @@ pub async fn track_details(
             return Err(AppError::new(ErrorKind::NotFound, "That track is no longer in the library.")
                 .with_detail(format!("track {track}")));
         };
-        Ok(TrackDetailsDto {
-            id: d.id,
-            title: d.title,
-            artist: d.artist,
-            album: d.album,
-            album_artist: d.album_artist,
-            original_artist: d.original_artist,
-            composer: d.composer,
-            remixer: d.remixer,
-            lyricist: d.lyricist,
-            genre: d.genre,
-            label: d.label,
-            key: d.key,
-            comment: d.comment,
-            mix_name: d.mix_name,
-            message: d.message,
-            color: d.color,
-            rating: d.rating,
-            bpm_x100: d.bpm_x100,
-            duration_sec: d.duration_sec,
-            year: d.year,
-            track_number: d.track_number,
-            disc_number: d.disc_number,
-            play_count: d.play_count,
-            file_type: d.file_type,
-            file_size: d.file_size,
-            bitrate: d.bitrate,
-            sample_rate: d.sample_rate,
-            bit_depth: d.bit_depth,
-            date_created: d.date_created,
-            release_date: d.release_date,
-            path: d.path,
-            hot_cue_auto_load: d.hot_cue_auto_load,
-            publish: d.publish,
-            has_artwork,
-            my_tags: d.my_tags,
+        Ok(details_dto(d, has_artwork))
+    })
+    .await
+}
+
+fn details_dto(d: rbl_db::details::TrackDetails, has_artwork: bool) -> TrackDetailsDto {
+    TrackDetailsDto {
+        id: d.id,
+        title: d.title,
+        artist: d.artist,
+        album: d.album,
+        album_artist: d.album_artist,
+        original_artist: d.original_artist,
+        composer: d.composer,
+        remixer: d.remixer,
+        lyricist: d.lyricist,
+        genre: d.genre,
+        label: d.label,
+        key: d.key,
+        comment: d.comment,
+        mix_name: d.mix_name,
+        message: d.message,
+        color: d.color,
+        rating: d.rating,
+        bpm_x100: d.bpm_x100,
+        duration_sec: d.duration_sec,
+        year: d.year,
+        track_number: d.track_number,
+        disc_number: d.disc_number,
+        play_count: d.play_count,
+        file_type: d.file_type,
+        file_size: d.file_size,
+        bitrate: d.bitrate,
+        sample_rate: d.sample_rate,
+        bit_depth: d.bit_depth,
+        date_created: d.date_created,
+        release_date: d.release_date,
+        path: d.path,
+        hot_cue_auto_load: d.hot_cue_auto_load,
+        publish: d.publish,
+        has_artwork,
+        my_tags: d.my_tags,
+}
+}
+
+/// Several tracks as the information panel shows them: the first one's
+/// record, how many there are, and which fields differ between them.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionDetailsDto {
+    pub first: TrackDetailsDto,
+    pub count: u32,
+    /// `TrackDetailsDto` field names, plus `artwork` when the tracks do not
+    /// all show the same image.
+    pub mixed: Vec<String>,
+}
+
+/// The information panel's record for a multiple selection.
+///
+/// rekordbox fills its panel from the first selected track and blanks each
+/// field the selected tracks do not share (`TrackInfoConcreteMediator::
+/// getTrackProp`, `tracksHaveSameInfo`), and shows artwork only when every
+/// track has the same image (`tracksHaveSameArtwork`); 7.2.11, static
+/// analysis. `tracks` comes in the order the list shows them, so "first" is
+/// the topmost.
+#[tauri::command]
+pub async fn selection_details(
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+) -> AppResult<SelectionDetailsDto> {
+    let state = Arc::clone(&state);
+    blocking("selection_details", move || {
+        let library = state.library()?;
+        let selection = state
+            .read_db(|db| db.selection_details(&tracks))
+            .map_err(write_error)?;
+        let Some(selection) = selection else {
+            return Err(AppError::new(ErrorKind::NotFound, "That track is no longer in the library.")
+                .with_detail(format!("{} tracks", tracks.len())));
+        };
+        let artwork_of = |id: &str| library.artwork_path_of(id).filter(|p| !p.is_empty());
+        let first_artwork = artwork_of(&selection.first.id);
+        let mut mixed: Vec<String> = selection.mixed.iter().map(|&name| name.to_owned()).collect();
+        if tracks.iter().any(|id| artwork_of(id) != first_artwork) {
+            mixed.push("artwork".to_owned());
+        }
+        Ok(SelectionDetailsDto {
+            first: details_dto(selection.first, first_artwork.is_some()),
+            count: u32::try_from(selection.count).unwrap_or(u32::MAX),
+            mixed,
         })
     })
     .await
@@ -201,18 +255,23 @@ pub async fn set_my_tags<R: tauri::Runtime>(
     }).await
 }
 
-/// Add Artwork: the image at `image` is filed in the share tree and the
-/// track points at it.
+/// Add Artwork: the image at `image` is filed in the share tree and each of
+/// `tracks` points at it.
+///
+/// Track by track, as rekordbox's `TrackInfoConcreteMediator::addArtwork`
+/// calls `DatabaseIF::modifyTrackArtwork` once per selected track (7.2.11,
+/// static analysis).
 #[tauri::command]
 pub async fn add_artwork<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
-    track: String,
+    tracks: Vec<String>,
     image: String,
 ) -> AppResult<crate::dto::EditHistoryDto> {
     recorded_edit(app, state, "add_artwork", Touched::Tracks, "Track Edit", move |w| {
-        w.set_artwork_with_undo(&track, Some(std::path::Path::new(&image)))
-            .map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+        each_track(w, &tracks, |w, track| {
+            w.set_artwork_with_undo(track, Some(std::path::Path::new(&image)))
+        })
     }).await
 }
 
@@ -230,35 +289,48 @@ pub async fn add_playlist_artwork<R: tauri::Runtime>(
     .await
 }
 
-/// Delete Artwork: the track points at no image; the file stays.
+/// Delete Artwork: each of `tracks` points at no image; the files stay.
 #[tauri::command]
 pub async fn clear_artwork<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
-    track: String,
+    tracks: Vec<String>,
 ) -> AppResult<crate::dto::EditHistoryDto> {
     recorded_edit(app, state, "clear_artwork", Touched::Tracks, "Track Edit", move |w| {
-        w.set_artwork_with_undo(&track, None).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+        each_track(w, &tracks, |w, track| w.set_artwork_with_undo(track, None))
     }).await
 }
 
-/// Writes one of the Info tab's editable fields.
+/// Writes one of the Info tab's editable fields on each of `tracks`.
 ///
 /// `field` is the wire name — `title`, `artist`, `year`, … — and the set of
 /// names the writer accepts is the whole list of what is safe to write; a
 /// name it does not know is refused here rather than mapped to a guess.
+///
+/// Several tracks are the information panel's multiple selection, which
+/// rekordbox writes field by field to every selected track. Its Track Title
+/// box is the one it greys out for more than one track
+/// (`TrackInfoConcreteMediator::isTrackEditabled`, item 0, 7.2.11 static
+/// analysis), so a title is refused for more than one here too. The BPM,
+/// which retimes a beat grid, is written one track at a time.
 #[tauri::command]
 pub async fn set_track_field<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
-    track: String,
+    tracks: Vec<String>,
     field: String,
     value: String,
 ) -> AppResult<crate::dto::EditHistoryDto> {
     let Some(which) = rbl_db::write::TrackField::parse(&field) else {
         return Err(AppError::new(ErrorKind::ReadOnly, format!("{field} cannot be edited here.")));
     };
+    if tracks.len() > 1 && matches!(field.as_str(), "title" | "bpm") {
+        return Err(AppError::new(ErrorKind::ReadOnly, format!("{field} cannot be edited here.")));
+    }
     if field == "bpm" {
+        let Some(track) = tracks.into_iter().next() else {
+            return Err(AppError::new(ErrorKind::Malformed, "No track was given."));
+        };
         let state = Arc::clone(&state);
         let writing = Arc::clone(&state);
         let reported = track.clone();
@@ -284,7 +356,7 @@ pub async fn set_track_field<R: tauri::Runtime>(
         return Ok(dto);
     }
     recorded_edit(app, state, "set_track_field", Touched::Tracks, "Track Edit", move |w| {
-        w.set_field_with_undo(&track, which, &value).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+        each_track(w, &tracks, |w, track| w.set_field_with_undo(track, which, &value))
     })
     .await
 }

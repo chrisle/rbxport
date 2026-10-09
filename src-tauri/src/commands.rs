@@ -3578,15 +3578,41 @@ pub async fn reorder_playlist<R: tauri::Runtime>(
     edit(app, state, "reorder_playlist", Touched::Playlists, move |w| w.reorder(&playlist, &tracks).map(|_| ())).await
 }
 
+/// Runs one track edit on each of `tracks` and keeps them as one step of
+/// history, so an edit made with several tracks selected undoes in one go.
+///
+/// rekordbox's information panel writes a multiple selection the same way:
+/// `TrackInfoConcreteMediator::updateDB` takes the whole selected array and
+/// sets the one value on each (7.2.11, static analysis).
+pub(crate) fn each_track<F>(
+    w: &mut rbl_db::write::Writer,
+    tracks: &[String],
+    mut edit: F,
+) -> Result<LibraryEdit, rbl_db::DbError>
+where
+    F: FnMut(&mut rbl_db::write::Writer, &str) -> Result<(rbl_db::write::Changed, rbl_db::write::TrackEdit), rbl_db::DbError>,
+{
+    let mut edits = Vec::with_capacity(tracks.len());
+    for track in tracks {
+        let (_, edit) = edit(w, track)?;
+        if !edit.is_empty() {
+            edits.push(edit);
+        }
+    }
+    Ok(LibraryEdit::Track(edits))
+}
+
+/// Rates every track in `tracks`: one track from the list, or the whole
+/// selection from the information panel.
 #[tauri::command]
 pub async fn set_track_rating<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
-    track: String,
+    tracks: Vec<String>,
     stars: u8,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "set_track_rating", Touched::Metadata(vec![track.clone()]), "Track Edit", move |w| {
-        w.set_rating_with_undo(&track, stars).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+    recorded_edit(app, state, "set_track_rating", Touched::Metadata(tracks.clone()), "Track Edit", move |w| {
+        each_track(w, &tracks, |w, track| w.set_rating_with_undo(track, stars))
     }).await
 }
 
@@ -3594,11 +3620,11 @@ pub async fn set_track_rating<R: tauri::Runtime>(
 pub async fn set_track_comment<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
-    track: String,
+    tracks: Vec<String>,
     comment: String,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "set_track_comment", Touched::Metadata(vec![track.clone()]), "Track Edit", move |w| {
-        w.set_comment_with_undo(&track, &comment).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+    recorded_edit(app, state, "set_track_comment", Touched::Metadata(tracks.clone()), "Track Edit", move |w| {
+        each_track(w, &tracks, |w, track| w.set_comment_with_undo(track, &comment))
     }).await
 }
 
@@ -3606,11 +3632,11 @@ pub async fn set_track_comment<R: tauri::Runtime>(
 pub async fn set_track_color<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
-    track: String,
+    tracks: Vec<String>,
     color: Option<String>,
 ) -> AppResult<EditHistoryDto> {
-    recorded_edit(app, state, "set_track_color", Touched::Metadata(vec![track.clone()]), "Track Edit", move |w| {
-        w.set_color_with_undo(&track, color.as_deref()).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+    recorded_edit(app, state, "set_track_color", Touched::Metadata(tracks.clone()), "Track Edit", move |w| {
+        each_track(w, &tracks, |w, track| w.set_color_with_undo(track, color.as_deref()))
     }).await
 }
 
@@ -3653,6 +3679,49 @@ pub async fn filter_values(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::expand_import_paths;
+
+    /// An edit made with three tracks selected writes all three, and one
+    /// undo takes all three back: it is one step of history, as it is one
+    /// action in rekordbox's information panel.
+    #[test]
+    fn an_edit_over_several_tracks_is_written_to_each_and_undone_as_one() {
+        use crate::state::{AppState, LibraryEdit};
+        use rbl_db::write::TrackField;
+
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        crate::backups::create(&state).unwrap();
+        let tracks: Vec<String> = (1..=3).map(rbl_db::fixture::track_id).collect();
+        let untouched = rbl_db::fixture::track_id(4);
+        let genre = |state: &AppState, id: &str| {
+            state.read_db(|db| db.track_details(id)).unwrap().unwrap().genre
+        };
+
+        let edit = state
+            .write_then(
+                |w| super::each_track(w, &tracks, |w, track| w.set_field_with_undo(track, TrackField::Genre, "Techno")),
+                |_, edit| Ok(edit),
+            )
+            .unwrap();
+        let steps = match &edit {
+            LibraryEdit::Track(steps) => steps.len(),
+            _ => 0,
+        };
+        assert_eq!(steps, 3, "one track edit with a step per track");
+        for track in &tracks {
+            assert_eq!(genre(&state, track), "Techno");
+        }
+        assert_eq!(genre(&state, &untouched), "");
+
+        state.write_then(|w| super::apply_history(w, &edit, true), |_, ()| Ok(())).unwrap();
+        for track in &tracks {
+            assert_eq!(genre(&state, track), "", "undone on {track}");
+        }
+    }
 
     /// Sorted file names, so a filesystem-dependent walk order does not make
     /// the assertions flaky.

@@ -567,15 +567,15 @@ fn edit_track(id: u64, edit: TrackEdit) {
         let state = app.state::<Arc<AppState>>();
         let track = id.to_string();
         match edit {
-            TrackEdit::Rating(stars) => done(crate::commands::set_track_rating(app.clone(), state, track, stars).await),
+            TrackEdit::Rating(stars) => done(crate::commands::set_track_rating(app.clone(), state, vec![track], stars).await),
             TrackEdit::Comment(comment) => {
-                done(crate::commands::set_track_comment(app.clone(), state, track, comment).await)
+                done(crate::commands::set_track_comment(app.clone(), state, vec![track], comment).await)
             }
             TrackEdit::Color(color) => {
-                done(crate::commands::set_track_color(app.clone(), state, track, Some(color)).await)
+                done(crate::commands::set_track_color(app.clone(), state, vec![track], Some(color)).await)
             }
             TrackEdit::Field(field, value) => {
-                done(crate::details::set_track_field(app.clone(), state, track, field.to_owned(), value).await)
+                done(crate::details::set_track_field(app.clone(), state, vec![track], field.to_owned(), value).await)
             }
         }
     });
