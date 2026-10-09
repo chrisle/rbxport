@@ -175,7 +175,10 @@ pub struct SelectionDetailsDto {
 /// getTrackProp`, `tracksHaveSameInfo`), and shows artwork only when every
 /// track has the same image (`tracksHaveSameArtwork`); 7.2.11, static
 /// analysis. `tracks` comes in the order the list shows them, so "first" is
-/// the topmost.
+/// the topmost row: the track table reports its selection in list order, as
+/// rekordbox builds its selected array by walking the list's `SparseSet` of
+/// selected rows from the lowest index up (`BrowseBasicView::
+/// changedSelectedRows`, 7.2.11, static analysis), not in click order.
 #[tauri::command]
 pub async fn selection_details(
     state: State<'_, Arc<AppState>>,

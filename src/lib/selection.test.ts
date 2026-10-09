@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyClick, clickSettles, contextPress, emptySelection, modifierFor, pressModifier, pressSelects, selectAll, selectedTracks,
+  applyClick, clickSettles, contextPress, emptySelection, inListOrder, modifierFor, pressModifier, pressSelects, selectAll,
+  selectedTracks,
 } from "./selection";
 
 describe("selection", () => {
@@ -105,5 +106,20 @@ describe("selection", () => {
     expect(tracks).toHaveLength(30_000);
     expect(tracks[0]).toEqual({ id: "100000", title: "Title 100000" });
     expect(tracks[29_999]).toEqual({ id: "129999", title: "129999" });
+  });
+
+  it("orders a ⌘-click selection top to bottom, as rekordbox's selected array is", () => {
+    // Clicked c, then a with ⌘: the set holds them in click order.
+    let state = applyClick(emptySelection, { id: "c", index: 2 }, "none");
+    state = applyClick(state, { id: "a", index: 0 }, "toggle");
+    expect([...state.ids]).toEqual(["c", "a"]);
+    expect(inListOrder(state.ids, ["a", "b", "c", "d"])).toEqual(["a", "c"]);
+  });
+
+  it("puts a selected id the list no longer shows last", () => {
+    const ids = new Set(["gone", "d", "b"]);
+    expect(inListOrder(ids, ["a", "b", "c", "d"])).toEqual(["b", "d", "gone"]);
+    // A track listed twice (a playlist may hold one twice) is reported once.
+    expect(inListOrder(new Set(["b"]), ["b", "a", "b"])).toEqual(["b"]);
   });
 });

@@ -20,7 +20,8 @@ import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBitrate, formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
 import {
-  applyClick, clickSettles, emptySelection, pressModifier, pressSelects, selectAll, selectedTracks, type SelectionState,
+  applyClick, clickSettles, emptySelection, inListOrder, pressModifier, pressSelects, selectAll, selectedTracks,
+  type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import { deleteKeyAction, trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
@@ -1294,23 +1295,60 @@ export const TrackTable = memo(function TrackTable({
   }, [removeSelection]);
 
   const reportedSelection = useRef("");
+  // The list order of a selection the row cache could not order, asked of
+  // the backend once per selection and view; `order` is null while asked.
+  const listOrder = useRef<{ ids: ReadonlySet<string>; token: string; order: string[] | null } | null>(null);
   useEffect(() => {
     if (!onSelectedTracks) return;
     // Titles come from whatever pages are cached; the ids are the whole
-    // selection, cached or not.
+    // selection, cached or not. The scan runs top to bottom, so the titles
+    // map holds the cached selected rows in list order.
     const titles = new Map<string, string>();
     for (let i = 0; i < view.count && titles.size < selection.ids.size; i++) {
       const row = view.rowAt(i);
       if (row && selection.ids.has(row.id)) titles.set(row.id, row.title);
     }
-    const tracks = selectedTracks(selection.ids, titles);
-    // Only when it has actually changed. This hands a new array upwards, and
-    // the app holds it in state: sending an equal one re-renders the window,
-    // which renders this table, which runs this effect again.
-    const stamp = tracks.map((t) => t.id).join(",");
-    if (stamp === reportedSelection.current) return;
-    reportedSelection.current = stamp;
-    onSelectedTracks(tracks);
+    const report = (ids: Iterable<string>) => {
+      const tracks = selectedTracks(ids, titles);
+      // Only when it has actually changed. This hands a new array upwards, and
+      // the app holds it in state: sending an equal one re-renders the window,
+      // which renders this table, which runs this effect again.
+      const stamp = tracks.map((t) => t.id).join(",");
+      if (stamp === reportedSelection.current) return;
+      reportedSelection.current = stamp;
+      onSelectedTracks(tracks);
+    };
+    // An answer still on its way for another selection or view is dropped.
+    const known = listOrder.current;
+    if (known && (known.ids !== selection.ids || known.token !== view.token)) listOrder.current = null;
+    // Reported in list order, as rekordbox orders its selection (see
+    // `inListOrder`). With every selected row cached the scan above has the
+    // order already.
+    if (titles.size === selection.ids.size) {
+      report(titles.keys());
+      return;
+    }
+    // Some rows are not cached. Report the selection as it stands, so a
+    // command run straight after acts on all of it, then again in list order
+    // once the backend has sent the view's ids. A range or select-all is in
+    // list order already, which makes the second report a no-op. Pages
+    // arriving re-run this effect; they must not ask again.
+    if (listOrder.current) {
+      report(listOrder.current.order ?? selection.ids);
+      return;
+    }
+    report(selection.ids);
+    if (selection.ids.size < 2) return;
+    const asked = { ids: selection.ids, token: view.token, order: null as string[] | null };
+    listOrder.current = asked;
+    void view.idsInRange(0, view.count).then((listed) => {
+      if (listOrder.current !== asked) return;
+      asked.order = inListOrder(asked.ids, listed);
+      report(asked.order);
+    }).catch(() => {
+      // The order only decides which track's colour the information panel
+      // shows; the selection already reported stands.
+    });
   }, [selection.ids, view, onSelectedTracks]);
 
   // An arrow drawn to rekordbox's geometry rather than the text arrows that

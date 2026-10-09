@@ -134,10 +134,36 @@ export function isSelected(state: SelectionState, id: string): boolean {
  * cache no longer holds is labelled by the id.
  */
 export function selectedTracks(
-  ids: ReadonlySet<string>,
+  ids: Iterable<string>,
   titles: ReadonlyMap<string, string>,
 ): { id: string; title: string }[] {
   const tracks: { id: string; title: string }[] = [];
   for (const id of ids) tracks.push({ id, title: titles.get(id) ?? id });
   return tracks;
+}
+
+/**
+ * The selected ids in the order the list shows them, given the list's ids
+ * top to bottom. An id the list does not show (its track has gone) goes
+ * last, in selection order.
+ *
+ * A selection is a set in the order its rows were picked, so after a
+ * ⌘-click it is click order. rekordbox hands its information panel the
+ * selected tracks top to bottom: `BrowseBasicView::changedSelectedRows`
+ * walks the list's `juce::SparseSet` of selected row indices, which JUCE
+ * keeps sorted, from the lowest up (7.2.11, static analysis). The panel
+ * shows the first track's colour, so the order decides which one it shows.
+ */
+export function inListOrder(ids: ReadonlySet<string>, listed: Iterable<string>): string[] {
+  const ordered: string[] = [];
+  const placed = new Set<string>();
+  for (const id of listed) {
+    if (ids.has(id) && !placed.has(id)) {
+      placed.add(id);
+      ordered.push(id);
+      if (placed.size === ids.size) return ordered;
+    }
+  }
+  for (const id of ids) if (!placed.has(id)) ordered.push(id);
+  return ordered;
 }
