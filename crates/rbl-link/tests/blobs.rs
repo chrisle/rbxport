@@ -189,6 +189,9 @@ fn a_hot_cue_carries_its_own_colour() {
     // the USB export writes it: A is palette entry 43.
     let (blob, _) = blobs::extended_cues_blob(&[hot(1, 0)]);
     assert_eq!(colour_of(&blob), [0, 0xff, 0x00, 0x17]);
+    // A code past the 65-entry palette is sent the same way.
+    let (blob, _) = blobs::extended_cues_blob(&[hot(1, 65)]);
+    assert_eq!(colour_of(&blob), [0, 0xff, 0x00, 0x17]);
 }
 
 #[test]

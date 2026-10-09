@@ -161,6 +161,9 @@ pub fn vbr_compatibility_blob() -> Vec<u8> {
     vec![0_u8; VBR_BLOB_LEN]
 }
 
+/// The last code in the device palette (65 entries).
+const LAST_COLOUR_CODE: u8 = 64;
+
 /// One entry: a fixed head to `0x48`, the comment's UTF-16LE byte length,
 /// the comment with its NUL, a constant word, the colour (hot cues only),
 /// and zero padding to the length rekordbox writes.
@@ -170,7 +173,7 @@ pub fn vbr_compatibility_blob() -> Vec<u8> {
 /// capture's hot cues carry `15 00 ff 00` here, code 21 and palette entry
 /// 21's RGB, and its memory cues zeros; its source colours were not kept.
 /// [ASSUME] A hot cue without a colour gets code 0 and its slot's default
-/// RGB, as on USB.
+/// RGB, as on USB, and so does a code past the palette.
 fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16>) -> Vec<u8> {
     let comment: Vec<u8> = if cue.comment.is_empty() {
         Vec::new()
@@ -209,8 +212,14 @@ fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16
     e[at..at + 4].copy_from_slice(&EXTENDED_CUE_AFTER_COMMENT);
     at += 4;
     if cue.hot_slot != 0 {
-        e[at] = cue.colour;
-        e[at + 1..at + 4].copy_from_slice(&export_colour(cue.colour, u32::from(cue.hot_slot)));
+        // A code past the palette has no RGB; send it as no colour.
+        let code = if cue.colour > LAST_COLOUR_CODE {
+            0
+        } else {
+            cue.colour
+        };
+        e[at] = code;
+        e[at + 1..at + 4].copy_from_slice(&export_colour(code, u32::from(cue.hot_slot)));
     }
     e
 }
