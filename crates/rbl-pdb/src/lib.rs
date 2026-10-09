@@ -263,6 +263,16 @@ impl<'a> Pdb<'a> {
         }
     }
 
+    /// A `playlist_tree` row exactly as the file holds it: the five words and
+    /// the name, unknown bytes and all, so a row that is kept can be written
+    /// back without being re-encoded. `None` when the name is not a string
+    /// the reader knows.
+    pub fn playlist_row_bytes(&self, row: RowRef) -> Option<Vec<u8>> {
+        let name_at = row.offset + rows::PLAYLIST_NAME_AT;
+        let end = name_at + self.string_len_at(name_at)?;
+        self.bytes.get(row.offset..end).map(<[u8]>::to_vec)
+    }
+
     /// A string located by a two-byte offset stored in the row.
     ///
     /// The offset is relative to the start of the **row**, not the page — the
