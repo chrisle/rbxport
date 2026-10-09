@@ -1155,6 +1155,7 @@ impl Writer {
         let album = intern(&tx, "djmdAlbum", "Name", &tags.album, &mut self.rng, &stamp)?;
         let genre = intern(&tx, "djmdGenre", "Name", &tags.genre, &mut self.rng, &stamp)?;
         let label = intern(&tx, "djmdLabel", "Name", &tags.label, &mut self.rng, &stamp)?;
+        let key = tag_key_id(&tx, &tags.key, &mut self.rng, &stamp)?;
 
         let usn = next_usn(&tx)?;
         // Every column rekordbox 7 fills on a file it imports itself, as on
@@ -1165,7 +1166,7 @@ impl Writer {
         // `*Updated` counters, which rekordbox sets as it goes.
         tx.execute(
             "INSERT INTO djmdContent
-                (ID, FolderPath, FileNameL, FileNameS, Title, Subtitle, ArtistID, AlbumID, GenreID, LabelID,
+                (ID, FolderPath, FileNameL, FileNameS, Title, Subtitle, ArtistID, AlbumID, GenreID, LabelID, KeyID,
                  Length, BitRate, BitDepth, SampleRate, FileSize, FileType, ReleaseYear, TrackNo, DiscNo,
                  Commnt, Rating, ColorID, DJPlayCount, Analysed, UUID,
                  StockDate, DateCreated, MasterDBID, MasterSongID, DeviceID, HotCueAutoLoad,
@@ -1173,7 +1174,7 @@ impl Writer {
                  SamplerTrackInfo, SamplerPlayOffset, SamplerGain, VideoAssociate, LyricStatus, ServiceID,
                  rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
                  usn, rb_local_usn, created_at, updated_at)
-             VALUES (?1, ?2, ?3, '', ?4, '', ?5, ?6, ?7, ?8,
+             VALUES (?1, ?2, ?3, '', ?4, '', ?5, ?6, ?7, ?8, ?24,
                      ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0,
                      ?17, 0, 0, 0, NULL, ?18,
                      ?19, ?19, ?20, ?1, ?21, 'on',
@@ -1204,7 +1205,8 @@ impl Writer {
                 master_db,
                 device,
                 usn,
-                stamp
+                stamp,
+                key
             ],
         )?;
         set_counter(&tx, usn)?;
@@ -2122,10 +2124,15 @@ impl Writer {
     }
 
     /// Reload Tag: reads the file's tags again and writes what they say
-    /// over the row — title, artist, album, genre, label, comment, year and
-    /// track number [ASSUME: which fields rekordbox's Reload Tag takes has
-    /// not been captured; these are the ones its import reads]. Fields the
-    /// file leaves empty are left as they are. Returns how many changed.
+    /// over the row — title, artist, album, genre, label, comment, key, year
+    /// and track number, each from the tag rekordbox reads it from (see
+    /// [`crate::import::read_tags`]). rekordbox's Reload Tag
+    /// (`DatabaseMediator::readTag` @0x100c459ec, 7.2.19 macOS arm64) and its
+    /// import share `convertTagData` @0x100c463e0, which takes the key only
+    /// when the tag has one and never reads the BPM [OBS static]. Fields the
+    /// file leaves empty are left as they are [ASSUME: `convertTagData`
+    /// copies the text fields even when empty; what rekordbox then shows for
+    /// one has not been observed]. Returns how many changed.
     pub fn reload_tags(&mut self, content: &str) -> Result<usize> {
         self.prepare()?;
         let Some(stored) = self.library.stored_path(content)? else {
@@ -2148,6 +2155,9 @@ impl Writer {
                 let id = intern(&tx, table, "Name", value.trim(), &mut self.rng, &stamp)?;
                 fields.push((column, id.map_or(Value::Null, Value::Text)));
             }
+        }
+        if let Some(key) = tag_key_id(&tx, &tags.key, &mut self.rng, &stamp)? {
+            fields.push(("KeyID", Value::Text(key)));
         }
         if tags.year != 0 { fields.push(("ReleaseYear", Value::Integer(i64::from(tags.year)))); }
         if tags.track_no != 0 { fields.push(("TrackNo", Value::Integer(i64::from(tags.track_no)))); }
@@ -2679,6 +2689,36 @@ fn normalized(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+/// The `djmdKey` row for a key a file's tag names, made when the library has
+/// none of that name; `None` for no key.
+///
+/// rekordbox does make one for a tag's key: on the reference library a `2A`
+/// row was created 4 ms before the imported track that points at it [OBS].
+/// Its `Seq` rule is unknown, so the row is made the way
+/// [`Writer::ensure_detected_key`] makes one for an analysed key, without a
+/// `Seq`. An existing name resolves as an analysis does, by [`key_id_for`].
+/// The name is matched as the tag wrote it [UNKNOWN: whether rekordbox
+/// normalises it, say trims spaces, when it looks the row up].
+fn tag_key_id(conn: &Connection, name: &str, rng: &mut Rng, stamp: &str) -> Result<Option<String>> {
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT k.ID FROM djmdKey k
+             LEFT JOIN djmdContent c ON c.KeyID = k.ID AND c.rb_local_deleted = 0
+             WHERE k.ScaleName = ?1 AND k.rb_local_deleted = 0
+             GROUP BY k.ID ORDER BY COUNT(c.ID) DESC, k.ID LIMIT 1",
+            params![name],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match existing {
+        Some(id) => Ok(Some(id)),
+        None => intern(conn, "djmdKey", "ScaleName", name, rng, stamp),
+    }
 }
 
 /// The `djmdKey` row for a key name: where two rows share a name, the one

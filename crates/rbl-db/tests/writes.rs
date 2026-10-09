@@ -2219,6 +2219,127 @@ fn reload_tag_reads_the_file_again_over_the_row() {
     assert!(matches!(f.writer.reload_tags("no-such-track"), Err(DbError::WriteRefused(_))));
 }
 
+/// Forty silent MPEG-1 Layer III frames, tagged with an `ID3v2` carrying
+/// `items`: rekordbox reads a key from an MP3's `ID3v2` but not from a WAV's
+/// `id3 ` chunk.
+fn tagged_mp3(path: &std::path::Path, items: &[(lofty::prelude::ItemKey, &str)]) {
+    use lofty::config::WriteOptions;
+    use lofty::prelude::TagExt;
+    use lofty::tag::{Tag, TagType};
+
+    let mut out = Vec::new();
+    for _ in 0..40 {
+        let start = out.len();
+        out.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]);
+        out.resize(start + 417, 0);
+    }
+    std::fs::write(path, out).unwrap();
+    if items.is_empty() {
+        return;
+    }
+    let mut tag = Tag::new(TagType::Id3v2);
+    for (key, value) in items {
+        tag.insert_text(key.clone(), (*value).to_owned());
+    }
+    tag.save_to_path(path, WriteOptions::default()).unwrap();
+}
+
+fn key_of(f: &Fixture, id: &str) -> Option<String> {
+    f.one("SELECT k.ScaleName FROM djmdContent c LEFT JOIN djmdKey k ON k.ID = c.KeyID WHERE c.ID = ?1", &[&id])
+}
+
+#[test]
+fn an_imported_files_key_tag_points_the_track_at_a_key_row() {
+    use lofty::prelude::ItemKey;
+
+    let audio = tempfile::tempdir().unwrap();
+    let mut f = fixture();
+    let keys_before = f.count("SELECT COUNT(*) FROM djmdKey");
+
+    // A key the library has not seen gets its row, as rekordbox's "2A" did.
+    let first = audio.path().join("first.mp3");
+    tagged_mp3(&first, &[(ItemKey::TrackTitle, "Keyed"), (ItemKey::InitialKey, "2A")]);
+    let a = f.writer.import_file(&first).unwrap();
+    assert_eq!(key_of(&f, &a).as_deref(), Some("2A"));
+
+    // A second file with that key shares the row rather than adding one.
+    let second = audio.path().join("second.mp3");
+    tagged_mp3(&second, &[(ItemKey::TrackTitle, "Keyed"), (ItemKey::InitialKey, "2A")]);
+    let b = f.writer.import_file(&second).unwrap();
+    assert_eq!(key_of(&f, &b).as_deref(), Some("2A"));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey WHERE ScaleName = '2A'"), 1);
+
+    // No key tag, no key: nothing is invented, and no row is made.
+    let plain = audio.path().join("plain.mp3");
+    tagged_mp3(&plain, &[]);
+    let c = f.writer.import_file(&plain).unwrap();
+    assert_eq!(key_of(&f, &c), None);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey"), keys_before + 1);
+
+    // Reload Tag takes a key the file gained after the import...
+    tagged_mp3(&plain, &[(ItemKey::TrackTitle, "Plain"), (ItemKey::InitialKey, "Fm")]);
+    f.writer.reload_tags(&c).unwrap();
+    assert_eq!(key_of(&f, &c).as_deref(), Some("Fm"));
+    // ...and keeps the key it has when the file names none:
+    // convertTagData copies the tag's key only when it is not empty.
+    tagged_mp3(&plain, &[(ItemKey::TrackTitle, "Plain")]);
+    f.writer.reload_tags(&c).unwrap();
+    assert_eq!(key_of(&f, &c).as_deref(), Some("Fm"));
+}
+
+#[test]
+fn a_wavs_id3_chunk_gives_an_imported_track_no_key() {
+    use lofty::config::WriteOptions;
+    use lofty::prelude::{ItemKey, TagExt};
+    use lofty::tag::{Tag, TagType};
+
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("chunk.wav");
+    write_wav(&path, 1);
+    let mut tag = Tag::new(TagType::Id3v2);
+    tag.insert_text(ItemKey::InitialKey, "2A".to_owned());
+    tag.save_to_path(&path, WriteOptions::default()).unwrap();
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+    assert_eq!(key_of(&f, &id), None);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey WHERE ScaleName = '2A'"), 0);
+}
+
+#[test]
+fn a_bpm_tag_is_not_read_on_import_or_reload() {
+    use lofty::prelude::ItemKey;
+
+    // rekordbox's convertTagData never reads the tag's BPM: it comes from
+    // analysis, so an unanalysed import has none.
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("bpm.mp3");
+    tagged_mp3(&path, &[(ItemKey::TrackTitle, "Tempo"), (ItemKey::Bpm, "128")]);
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+    let bpm = |f: &Fixture| f.one::<Option<i64>>("SELECT BPM FROM djmdContent WHERE ID = ?1", &[&id]).unwrap_or(0);
+    assert_eq!(bpm(&f), 0);
+    f.writer.reload_tags(&id).unwrap();
+    assert_eq!(bpm(&f), 0);
+}
+
+#[test]
+fn importing_a_file_already_in_the_library_leaves_its_row_alone() {
+    use lofty::prelude::ItemKey;
+
+    // rekordbox's addTrack stops at isCollectionSong before reading any tag.
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("again.mp3");
+    tagged_mp3(&path, &[(ItemKey::TrackTitle, "First"), (ItemKey::InitialKey, "2A")]);
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+
+    tagged_mp3(&path, &[(ItemKey::TrackTitle, "Second"), (ItemKey::InitialKey, "9B")]);
+    assert!(matches!(f.writer.import_file(&path), Err(DbError::WriteRefused(_))));
+    assert_eq!(f.one::<String>("SELECT Title FROM djmdContent WHERE ID = ?1", &[&id]), "First");
+    assert_eq!(key_of(&f, &id).as_deref(), Some("2A"));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey WHERE ScaleName = '9B'"), 0);
+}
+
 #[test]
 fn embedded_cover_is_registered_with_thumbnails_and_never_replaces_custom_art() {
     use lofty::config::WriteOptions;
