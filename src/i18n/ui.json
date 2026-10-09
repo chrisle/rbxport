@@ -1471,6 +1471,5 @@
   "No playlist was made.",
   "No playlist was made: the folders hold no audio files.",
   "One or several lists with the same name already exist.",
-  "[data-file-drop-folder]",
   "{count} files skipped."
 ]

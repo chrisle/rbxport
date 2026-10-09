@@ -1537,6 +1537,5 @@
   "No playlist was made.": "No playlist was made.",
   "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
   "One or several lists with the same name already exist.": "相同名稱的播放清單或文件夾已經存在",
-  "[data-file-drop-folder]": "[data-file-drop-folder]",
   "{count} files skipped.": "{count} files skipped."
 }

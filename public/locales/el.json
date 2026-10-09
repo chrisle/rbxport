@@ -1536,6 +1536,5 @@
   "No playlist was made.": "No playlist was made.",
   "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
   "One or several lists with the same name already exist.": "Υπάρχουν ήδη μία ή περισσότερες λίστες με το ίδιο όνομα.",
-  "[data-file-drop-folder]": "[data-file-drop-folder]",
   "{count} files skipped.": "{count} files skipped."
 }

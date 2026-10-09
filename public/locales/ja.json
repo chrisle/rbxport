@@ -1541,6 +1541,5 @@
   "No playlist was made.": "No playlist was made.",
   "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
   "One or several lists with the same name already exist.": "同じ名前のリストまたはフォルダが既に存在します。",
-  "[data-file-drop-folder]": "[data-file-drop-folder]",
   "{count} files skipped.": "{count} files skipped."
 }

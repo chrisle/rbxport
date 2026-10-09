@@ -133,15 +133,21 @@ const folderDrop = (page: import("@playwright/test").Page, paths: string[]) =>
       transfer.items.add(new File([], name));
     }
     // `dataTransfer.files` hands back the File objects added; give each the
-    // path a desktop host would carry.
-    Array.from(transfer.files).forEach((file, i) => Object.defineProperty(file, "path", { value: paths[i] }));
+    // path a desktop host would carry. Hold on to them: WebKit may drop an
+    // unreferenced File wrapper, and the `path` with it.
+    const files = Array.from(transfer.files);
+    files.forEach((file, i) => Object.defineProperty(file, "path", { value: paths[i] }));
+    (window as unknown as { __droppedFolders?: File[][] }).__droppedFolders = [
+      ...((window as unknown as { __droppedFolders?: File[][] }).__droppedFolders ?? []),
+      files,
+    ];
     return transfer;
   }, paths);
 
 test("a folder dropped on the Playlists root becomes a playlist named after it", async ({ page }) => {
   await page.goto("/?writable=1");
   const root = page.getByRole("treeitem").filter({ hasText: /^Playlists/ }).first();
-  await expect(root).toHaveAttribute("data-file-drop-folder", "root");
+  await expect(root).toHaveAttribute("data-file-drop-playlist", "playlists");
   const drop = await folderDrop(page, ["/Music/Friday Set"]);
   await root.dispatchEvent("dragover", { dataTransfer: drop });
   await root.dispatchEvent("drop", { dataTransfer: drop });
@@ -160,7 +166,7 @@ test("a folder dropped on the Playlists root becomes a playlist named after it",
 test("a folder dropped on a playlist folder lands inside it; loose files are ignored", async ({ page }) => {
   await page.goto("/?writable=1");
   const folder = page.locator('[role="treeitem"][data-kind="folder"]').first();
-  const id = await folder.getAttribute("data-file-drop-folder");
+  const id = await folder.getAttribute("data-file-drop-playlist");
   expect(id).toBeTruthy();
   const drop = await folderDrop(page, ["/Music/Warm Up"]);
   await folder.dispatchEvent("drop", { dataTransfer: drop });
