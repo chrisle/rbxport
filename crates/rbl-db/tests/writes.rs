@@ -1866,9 +1866,11 @@ fn importing_the_same_rekordbox_xml_twice_doubles_nothing() {
         (3, 6, 5),
     );
 
+    let names = xml::same_named_lists(f.writer.library(), &parsed).unwrap();
+    assert_eq!(names, vec!["Sets", "Warm up", "Inner", "Deep", "Same", "Same"]);
     let second = xml::import(&mut f.writer, &parsed, &mut |_, _| {}).unwrap();
     assert_eq!((second.imported, second.existing, second.playlists, second.cues), (0, 3, 0, 0));
-    assert_eq!(second.playlists_existing, 6);
+    assert_eq!(second.playlists_replaced, 6);
     assert_eq!(second.playlist_tracks, 0);
     assert_eq!(snapshot(&f), after_first, "a second import of the same file adds no row");
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Sets'"), 1);
@@ -1895,10 +1897,11 @@ fn importing_the_same_rekordbox_xml_twice_doubles_nothing() {
     assert_eq!(members(&f, &same[1]), vec![two.to_string_lossy().into_owned()]);
 
     // A newer export of the same collection with a track added to a playlist
-    // lands that one track in the playlist already there, and nothing else.
+    // replaces that playlist with the document's three tracks, and nothing
+    // else.
     let grown = XmlLibrary::parse(&doc(r#"<TRACK Key="3"/>"#));
     let third = xml::import(&mut f.writer, &grown, &mut |_, _| {}).unwrap();
-    assert_eq!((third.imported, third.playlists, third.playlists_existing, third.playlist_tracks), (0, 0, 6, 1));
+    assert_eq!((third.imported, third.playlists, third.playlists_replaced, third.playlist_tracks), (0, 0, 6, 3));
     let warm_up: String = f.one("SELECT ID FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Warm up'", &[]);
     assert_eq!(
         members(&f, &warm_up),
@@ -1909,6 +1912,90 @@ fn importing_the_same_rekordbox_xml_twice_doubles_nothing() {
         ],
     );
     assert_eq!(f.track_numbers(&warm_up), vec![1, 2, 3]);
+}
+
+/// Issue #152: re-importing an xml whose playlist lost a track and had the
+/// rest reordered replaces the playlist with the document's, as rekordbox's
+/// "Do you want to replace them with the one you're importing?" does: the
+/// removed track leaves, the order is the document's, and no list is doubled.
+/// Lists the document does not name, and intelligent playlists, are left
+/// alone.
+#[test]
+fn reimporting_an_xml_replaces_the_same_named_playlist_with_the_documents() {
+    use rbl_db::xml::{self, XmlLibrary};
+    let audio = tempfile::tempdir().unwrap();
+    let paths: Vec<std::path::PathBuf> = ["One", "Two", "Three"].iter().map(|n| audio.path().join(format!("{n}.wav"))).collect();
+    for path in &paths {
+        write_wav(path, 2);
+    }
+    let location = |p: &std::path::Path| format!("file://localhost{}", p.to_string_lossy().replace(' ', "%20"));
+    let doc = |keys: &[u8]| {
+        let members: String = keys.iter().map(|k| format!(r#"<TRACK Key="{k}"/>"#)).collect();
+        format!(
+            r#"<?xml version="1.0"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="3">
+            <TRACK TrackID="1" Name="One" Location="{}"/>
+            <TRACK TrackID="2" Name="Two" Location="{}"/>
+            <TRACK TrackID="3" Name="Three" Location="{}"/>
+            </COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="2">
+            <NODE Name="Sets" Type="0" Count="1">
+              <NODE Name="Warm up" Type="1" KeyType="0" Entries="{}">{members}</NODE>
+            </NODE>
+            <NODE Name="Smart" Type="1" KeyType="0" Entries="1"><TRACK Key="1"/></NODE>
+            </NODE></PLAYLISTS></DJ_PLAYLISTS>"#,
+            location(&paths[0]),
+            location(&paths[1]),
+            location(&paths[2]),
+            keys.len(),
+        )
+    };
+
+    let mut f = fixture();
+    // An intelligent playlist named like a document playlist is never taken
+    // for it.
+    let smart = f.writer.create_smart_playlist("Smart", ROOT, |_| "<NODE/>".to_owned()).unwrap();
+    let first = xml::import(&mut f.writer, &XmlLibrary::parse(&doc(&[1, 2, 3])), &mut |_, _| {}).unwrap();
+    assert_eq!((first.playlists, first.playlists_replaced), (3, 0));
+    let sets: String = f.one("SELECT ID FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Sets'", &[]);
+    let warm_up: String = f.one("SELECT ID FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Warm up'", &[]);
+    // A playlist the DJ made by hand in the imported folder.
+    let own = f.writer.create_playlist("Mine", &sets).unwrap();
+    f.writer.add_tracks(&own, &[f.one::<String>("SELECT ContentID FROM djmdSongPlaylist WHERE PlaylistID = ?1 AND TrackNo = 1 AND rb_local_deleted = 0", &[&warm_up])]).unwrap();
+
+    // The next export dropped "Two" and put "Three" first.
+    let newer = XmlLibrary::parse(&doc(&[3, 1]));
+    assert_eq!(xml::same_named_lists(f.writer.library(), &newer).unwrap(), vec!["Sets", "Warm up", "Smart"]);
+    let nodes = f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0");
+    let second = xml::import(&mut f.writer, &newer, &mut |_, _| {}).unwrap();
+    // "Smart" is the plain playlist the first import made beside the
+    // intelligent one, replaced now; the intelligent one is never matched.
+    assert_eq!((second.imported, second.existing, second.playlists, second.playlists_replaced), (0, 3, 0, 3));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0"), nodes);
+
+    let members = |f: &Fixture, playlist: &str| -> Vec<String> {
+        let mut stmt = f
+            .conn()
+            .prepare(
+                "SELECT c.Title FROM djmdSongPlaylist s JOIN djmdContent c ON c.ID = s.ContentID
+                 WHERE s.PlaylistID = ?1 AND s.rb_local_deleted = 0 ORDER BY s.TrackNo",
+            )
+            .unwrap();
+        stmt.query_map([playlist], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    };
+    let current: String = f.one("SELECT ID FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Warm up'", &[]);
+    assert_eq!(current, warm_up, "the playlist is replaced where it stands, not doubled");
+    let titles = members(&f, &warm_up);
+    let title_of = |p: &std::path::Path| f.one::<String>("SELECT Title FROM djmdContent WHERE FolderPath = ?1 AND rb_local_deleted = 0", &[&p.to_string_lossy().into_owned()]);
+    assert_eq!(titles, vec![title_of(&paths[2]), title_of(&paths[0])]);
+    assert_eq!(f.track_numbers(&warm_up), vec![1, 2]);
+    assert_eq!(members(&f, &own).len(), 1, "a list the document does not name is left alone");
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Attribute = 4 AND Name = 'Smart'"), 1);
+    assert!(f.writer.library().connection().query_row("SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0", [&smart], |_| Ok(())).is_ok());
+
+    // The same document once more writes nothing.
+    let usn: i64 = f.one("SELECT MAX(rb_local_usn) FROM djmdSongPlaylist", &[]);
+    let third = xml::import(&mut f.writer, &newer, &mut |_, _| {}).unwrap();
+    assert_eq!((third.playlists, third.playlist_tracks), (0, 0));
+    assert_eq!(f.one::<i64>("SELECT MAX(rb_local_usn) FROM djmdSongPlaylist", &[]), usn);
 }
 
 /// A file named in the document by a path that is not in its plain form
