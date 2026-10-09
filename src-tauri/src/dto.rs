@@ -474,6 +474,11 @@ pub struct XmlImportReportDto {
     pub cues: u32,
     /// The tracks that landed, so they can be queued for analysis.
     pub tracks: Vec<ImportedTrackDto>,
+    /// Folders and playlists already in the library under the same parent
+    /// with the same name, which the import would replace. When not empty,
+    /// nothing was imported: ask, as rekordbox does, then import again with
+    /// `replace`.
+    pub same_named: Vec<String>,
 }
 
 /// An iTunes / Music library read for the Sync Manager's iTunes column: where

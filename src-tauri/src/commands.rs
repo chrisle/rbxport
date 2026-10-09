@@ -3271,8 +3271,9 @@ pub async fn import_xml<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     path: String,
+    replace: Option<bool>,
 ) -> AppResult<XmlImportReportDto> {
-    import_collection(app, state, path, "import_xml", |text| {
+    import_collection(app, state, path, "import_xml", replace.unwrap_or(false), |text| {
         let document = rbl_db::xml::XmlLibrary::parse(text);
         if document.tracks.is_empty() && document.nodes.is_empty() {
             return Err(AppError::new(ErrorKind::Malformed, "That is not a rekordbox XML collection."));
@@ -3290,8 +3291,9 @@ pub async fn import_itunes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     path: String,
+    replace: Option<bool>,
 ) -> AppResult<XmlImportReportDto> {
-    import_collection(app, state, path, "import_itunes", |text| {
+    import_collection(app, state, path, "import_itunes", replace.unwrap_or(false), |text| {
         rbl_db::itunes::parse(text)
             .ok_or_else(|| AppError::new(ErrorKind::Malformed, "That is not an iTunes or Music library file."))
     })
@@ -3365,13 +3367,14 @@ pub async fn import_itunes_selected<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     path: String,
     ids: Vec<String>,
+    replace: Option<bool>,
 ) -> AppResult<XmlImportReportDto> {
     let keep: std::collections::BTreeSet<usize> =
         ids.iter().filter_map(|id| id.strip_prefix("itunes:").and_then(|n| n.parse().ok())).collect();
     if keep.is_empty() {
         return Err(AppError::new(ErrorKind::Malformed, "Select at least one iTunes playlist to import."));
     }
-    import_collection(app, state, path, "import_itunes_selected", move |text| {
+    import_collection(app, state, path, "import_itunes_selected", replace.unwrap_or(false), move |text| {
         let full = rbl_db::itunes::parse(text)
             .ok_or_else(|| AppError::new(ErrorKind::Malformed, "That is not an iTunes or Music library file."))?;
         Ok(rbl_db::xml::subset(&full, &keep))
@@ -3380,17 +3383,24 @@ pub async fn import_itunes_selected<R: tauri::Runtime>(
 }
 
 /// Reads a collection file with `parse` and imports what it holds.
+///
+/// A folder or playlist the file holds that already stands in the library
+/// under the same parent with the same name is replaced, as rekordbox does
+/// (issue #152) — but only with `replace`. Without it, and when there is one,
+/// nothing is written and the report's `same_named` lists them, so the caller
+/// can ask rekordbox's question and import again with `replace` on OK.
 async fn import_collection<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     path: String,
     name: &'static str,
+    replace: bool,
     parse: impl FnOnce(&str) -> AppResult<rbl_db::xml::XmlLibrary> + Send + 'static,
 ) -> AppResult<XmlImportReportDto> {
     let state_for_reload = Arc::clone(&state);
     let writing = Arc::clone(&state);
     let progress_app = app.clone();
-    let (report, added_to_playlists) = blocking(name, move || {
+    let (report, changed_playlists) = blocking(name, move || {
         let text = std::fs::read_to_string(&path).map_err(|e| {
             AppError::new(ErrorKind::NotFound, "That file could not be read.").with_detail(e.to_string())
         })?;
@@ -3408,13 +3418,37 @@ async fn import_collection<R: tauri::Runtime>(
                 },
             );
         };
-        on_progress(0, document.tracks.len());
-        let report = writing
-            .write(|writer| rbl_db::xml::import(writer, &document, &mut on_progress))
+        // Looked for under the same edit gate as the import, so nothing can
+        // make a same-named list between the question and the write.
+        let outcome = writing
+            .write(|writer| {
+                if !replace {
+                    let same_named = rbl_db::xml::same_named_lists(writer.library(), &document)?;
+                    if !same_named.is_empty() {
+                        return Ok(Err(same_named));
+                    }
+                }
+                on_progress(0, document.tracks.len());
+                rbl_db::xml::import(writer, &document, &mut on_progress).map(Ok)
+            })
             .map_err(write_error)?;
-        // A re-import reuses the playlists already there (#152), and may
-        // still have added tracks to them: that, too, needs a reload.
-        let added_to_playlists = report.playlist_tracks > 0;
+        let report = match outcome {
+            Ok(report) => report,
+            Err(same_named) => {
+                return Ok((XmlImportReportDto {
+                    imported: 0,
+                    existing: 0,
+                    skipped: Vec::new(),
+                    playlists: 0,
+                    cues: 0,
+                    tracks: Vec::new(),
+                    same_named,
+                }, false));
+            }
+        };
+        // A replaced playlist may have changed without a list or track being
+        // made: that, too, needs a reload.
+        let changed_playlists = report.playlist_tracks > 0 || report.playlists_replaced > 0;
         Ok((XmlImportReportDto {
             imported: u32::try_from(report.imported).unwrap_or(u32::MAX),
             existing: u32::try_from(report.existing).unwrap_or(u32::MAX),
@@ -3422,10 +3456,11 @@ async fn import_collection<R: tauri::Runtime>(
             playlists: u32::try_from(report.playlists).unwrap_or(u32::MAX),
             cues: u32::try_from(report.cues).unwrap_or(u32::MAX),
             tracks: report.tracks.into_iter().map(|(id, title)| crate::dto::ImportedTrackDto { id, title }).collect(),
-        }, added_to_playlists))
+            same_named: Vec::new(),
+        }, changed_playlists))
     })
     .await?;
-    if report.imported > 0 || report.playlists > 0 || added_to_playlists {
+    if report.imported > 0 || report.playlists > 0 || changed_playlists {
         reload(app, state_for_reload).await?;
     }
     Ok(report)
