@@ -18,7 +18,7 @@ import type { DeckId, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/typ
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
-import { formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
+import { formatBitrate, formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
 import {
   applyClick, clickSettles, emptySelection, pressModifier, pressSelects, selectAll, selectedTracks, type SelectionState,
 } from "@/lib/selection";
@@ -122,7 +122,7 @@ export function cellText(row: RowDto, key: Column["key"]): string {
     case "publishTrackInfo": return value === true ? "On" : value === false ? "Off" : "";
     case "cloud": return value === true ? "Cloud" : "";
     case "sampleRate": return typeof value === "number" && value > 0 ? `${value / 1000} kHz` : "";
-    case "bitrate": return typeof value === "number" && value > 0 ? `${value} kbps` : "";
+    case "bitrate": return typeof value === "number" ? formatBitrate(value) : "";
     case "bitDepth": return typeof value === "number" && value > 0 ? `${value} bit` : "";
     case "year": case "discNo": case "djPlayCount": case "trackNumber":
       return typeof value === "number" && value > 0 ? String(value) : "";

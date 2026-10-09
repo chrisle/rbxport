@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBpm, formatBytes, formatDuration, formatSelectionSummary, formatShortDate, formatTotalTime } from "./format";
+import { formatBitrate, formatBpm, formatBytes, formatDuration, formatSelectionSummary, formatShortDate, formatTotalTime } from "./format";
 
 describe("formatDuration", () => {
   it("pads to two digits like rekordbox", () => {
@@ -22,6 +22,21 @@ describe("formatBpm", () => {
   });
   it("treats unanalysed (0) as blank, not 0.00", () => {
     expect(formatBpm(0)).toBe("");
+  });
+});
+
+describe("formatBitrate", () => {
+  it("prints kbps for a stored bitrate", () => {
+    expect(formatBitrate(320)).toBe("320 kbps");
+    expect(formatBitrate(1411)).toBe("1411 kbps");
+  });
+  it("prints VBR for the zero rekordbox stores on FLAC, VBR MP3 and some M4A rows", () => {
+    // [OBS] rekordbox 7.2.14: BitRate 0 shows "VBR" in the column and Summary tab.
+    expect(formatBitrate(0)).toBe("VBR");
+  });
+  it("is blank for nonsense", () => {
+    expect(formatBitrate(Number.NaN)).toBe("");
+    expect(formatBitrate(-1)).toBe("");
   });
 });
 

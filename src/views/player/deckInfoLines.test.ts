@@ -106,7 +106,9 @@ describe("the deck's INFO tab", () => {
 
   it("leaves a fact blank when the library does not hold it", () => {
     const bare = { ...details, fileType: 6, fileSize: 0, sampleRate: 0, bitrate: 0 };
-    expect(deckInfo(row, bare).file).toEqual(["", "", "", ""]);
+    // A zero bitrate prints "VBR", as the Summary tab does [ASSUME: the deck
+    // INFO tab was not observed in rekordbox; it reuses the Summary facts].
+    expect(deckInfo(row, bare).file).toEqual(["", "", "", "VBR"]);
   });
 
   it("names the eight colours and nothing else", () => {

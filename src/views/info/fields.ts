@@ -6,7 +6,7 @@
  * take.
  */
 import type { RowDto, TrackDetails, TrackField } from "@/ipc/types";
-import { formatBytes, formatDuration, formatShortDate } from "@/lib/format";
+import { formatBitrate, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
 
 /** A label and the text beside it. */
 export interface Fact {
@@ -45,14 +45,15 @@ export interface FileFacts {
 /**
  * The file's facts as the Summary tab prints them — "WAV File", "45.1 MB",
  * "44100 Hz", "1411 kbps" in the capture — and as the deck's INFO tab
- * reuses them. A value the library does not hold is blank.
+ * reuses them. A value the library does not hold is blank, except a zero
+ * bitrate, which rekordbox prints as "VBR".
  */
 export function fileFacts(d: TrackDetails): FileFacts {
   return {
     type: fileTypeLabel(d.fileType),
     size: d.fileSize > 0 ? formatBytes(d.fileSize) : "",
     sampleRate: d.sampleRate > 0 ? `${d.sampleRate} Hz` : "",
-    bitrate: d.bitrate > 0 ? `${d.bitrate} kbps` : "",
+    bitrate: formatBitrate(d.bitrate),
   };
 }
 

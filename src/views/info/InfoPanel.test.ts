@@ -96,12 +96,19 @@ describe("the Summary tab's table", () => {
     expect(summaryFacts(row, stale).find((f) => f.label === "Size")?.value).toBe("");
   });
 
-  it("says nothing for a size, rate or bitrate the library left at zero", () => {
-    const bare = { ...details, fileSize: 0, sampleRate: 0, bitrate: 0 };
+  it("says nothing for a size or rate the library left at zero", () => {
+    const bare = { ...details, fileSize: 0, sampleRate: 0 };
     const byLabel = Object.fromEntries(summaryFacts(row, bare).map((f) => [f.label, f.value]));
     expect(byLabel["Size"]).toBe("");
     expect(byLabel["Sample Rate"]).toBe("");
-    expect(byLabel["Bitrate"]).toBe("");
+  });
+
+  it("prints VBR for a bitrate the library left at zero, as rekordbox does", () => {
+    // [OBS] rekordbox 7.2.14 Summary tab: FLAC, VBR MP3 and M4A rows stored
+    // at BitRate 0 all read "VBR".
+    const flac = { ...details, fileType: 5, bitrate: 0 };
+    const byLabel = Object.fromEntries(summaryFacts(row, flac).map((f) => [f.label, f.value]));
+    expect(byLabel["Bitrate"]).toBe("VBR");
   });
 });
 

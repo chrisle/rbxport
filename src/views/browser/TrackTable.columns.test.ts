@@ -28,4 +28,11 @@ describe("browser detail columns", () => {
     }
     expect(cellText(row, "hotCue")).toBe("A");
   });
+
+  it("prints VBR for a bitrate the library holds at zero, and nothing for one it did not send", () => {
+    const row = { extra: { bitrate: 0 } } as unknown as RowDto;
+    expect(cellText(row, "bitrate")).toBe("VBR");
+    expect(cellText({ ...row, extra: { bitrate: 256 } }, "bitrate")).toBe("256 kbps");
+    expect(cellText({ ...row, extra: {} }, "bitrate")).toBe("");
+  });
 });

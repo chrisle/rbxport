@@ -15,6 +15,19 @@ export function formatBpm(bpmX100: number): string {
   return (bpmX100 / 100).toFixed(2);
 }
 
+/**
+ * `320 kbps`, or `VBR` for a track the library holds at zero.
+ *
+ * rekordbox stores `BitRate` 0 for every FLAC, for VBR MP3s and for some M4A
+ * files it imports, and its Bitrate column and Summary tab print `VBR` for
+ * all of them [OBS: rekordbox 7.2.14 on Windows 11]. It leaves `VBR`
+ * untranslated: no rekordbox 7 `.lang` file has an entry for it.
+ */
+export function formatBitrate(kbps: number): string {
+  if (!Number.isFinite(kbps) || kbps < 0) return "";
+  return kbps === 0 ? "VBR" : `${kbps} kbps`;
+}
+
 /** `9/6/26` — US short date, no leading zeros, two-digit year. */
 export function formatShortDate(iso: string | null | undefined): string {
   if (!iso) return "";
