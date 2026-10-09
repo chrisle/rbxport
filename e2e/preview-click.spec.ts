@@ -24,6 +24,9 @@ test("clicking a row's waveform previews it without loading the deck", async ({ 
   const cell = page.locator('[role="gridcell"][data-col="preview"]').nth(3);
   const stop = cell.getByRole("button", { name: "Stop" });
   await expect(stop).toBeVisible();
+  // On the left of the waveform, as rekordbox's is (#207).
+  const stopBox = await stop.boundingBox();
+  expect((stopBox?.x ?? 0) - box.x).toBeLessThan(box.width / 4);
   // The deck was not given the track.
   await expect(player(page).getByRole("button", { name: "Play", exact: true })).toBeDisabled();
 

@@ -393,17 +393,33 @@
   background: var(--c-text);
   pointer-events: none;
 }
+/* rekordbox's preview stop: a grey ring round a small grey square, on the
+   left of the waveform and centred on it ("Click the stop button on the left
+   side of the waveform", rekordbox 7.2.18 manual p. 90; the ring and square
+   sampled grey there). It was a bare white square in the bottom-right corner,
+   easy to miss (#207). */
 .previewStop {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 9px;
-  height: 9px;
+  left: 2px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
   padding: 0;
-  border: 0;
-  border-radius: 1px;
-  background: var(--c-text);
+  transform: translateY(-50%);
+  border: 1px solid var(--c-icon-off);
+  border-radius: 50%;
+  background: var(--c-black);
   cursor: pointer;
+}
+.previewStop::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  transform: translate(-50%, -50%);
+  background: var(--c-icon-off);
 }
 
 /* Stands in for a cell's text while its page loads: a dim bar on the row's
