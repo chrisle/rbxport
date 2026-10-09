@@ -191,8 +191,9 @@ export function MissingFileManager({ readOnly, folders, onWrote, onFailed, onClo
     );
     if (!sure) return null;
     const removed = await backend.removeMissingTracks(targets);
-    const gone = `${removed} track${removed === 1 ? "" : "s"}`;
-    return t("Removed {count} from the collection.", { count: gone });
+    return removed === 1
+      ? t("Removed {count} track.", { count: removed })
+      : t("Removed {count} tracks.", { count: removed });
   });
 
   const isSelected = (track: MissingTrack | undefined) =>

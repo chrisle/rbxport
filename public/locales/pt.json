@@ -1518,7 +1518,6 @@
   "File is Missing": "Está a faltar o ficheiro",
   "Relocate": "Deslocar",
   "Relocated {title}.": "{title} realocado.",
-  "Removed {count} from the collection.": "{count} removido da coleção.",
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "Remover {count} da coleção? Isso não pode ser desfeito. Os arquivos permanecem onde estão.",
   "location": "em",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} realocado, {unresolved} não encontrado nas pastas de pesquisa.",

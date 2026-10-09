@@ -1516,7 +1516,6 @@
   "File is Missing": "Λείπει το αρχείο",
   "Relocate": "Νέος εντοπισμός",
   "Relocated {title}.": "Μεταφέρθηκε {title}.",
-  "Removed {count} from the collection.": "Καταργήθηκε το {count} από τη συλλογή.",
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "Κατάργηση του {count} από τη συλλογή; Αυτό δεν μπορεί να αναιρεθεί. Τα αρχεία παραμένουν εκεί που είναι.",
   "location": "τοποθεσια",
   "{relocated} relocated, {unresolved} not found in the search folders.": "Το {relocated} μετεγκαταστάθηκε, το {unresolved} δεν βρέθηκε στους φακέλους αναζήτησης.",

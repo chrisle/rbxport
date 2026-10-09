@@ -1519,7 +1519,6 @@
   "File is Missing": "Файл отсутствует",
   "Relocate": "Переместить",
   "Relocated {title}.": "{title} перемещен.",
-  "Removed {count} from the collection.": "Удален {count} из коллекции.",
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "Удалить {count} из коллекции? Это невозможно отменить. Файлы остаются там, где они есть.",
   "location": "где",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} перемещен, {unresolved} не найден в папках поиска.",

@@ -1515,7 +1515,6 @@
   "File is Missing": "Soubor chybí",
   "Relocate": "Přemístit",
   "Relocated {title}.": "Přemístěno {title}.",
-  "Removed {count} from the collection.": "Odebráno {count} ze sbírky.",
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "Odebrat {count} ze sbírky? Tuto akci nelze vrátit zpět. Soubory zůstanou tam, kde jsou.",
   "location": "umístění",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} přemístěno, {unresolved} nenalezeno ve složkách hledání.",

@@ -1514,7 +1514,6 @@
   "File is Missing": "파일이 없습니다",
   "Relocate": "재배치",
   "Relocated {title}.": "{title}을(를) 이전했습니다.",
-  "Removed {count} from the collection.": "컬렉션에서 {count}개를 제거했습니다.",
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "컬렉션에서 {count}개를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다. 파일은 현재 위치에 유지됩니다.",
   "location": "위치",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated}이(가) 재배치되었으며 {unresolved}이(가) 검색 폴더에 없습니다.",

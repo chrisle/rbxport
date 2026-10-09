@@ -1517,7 +1517,6 @@
   "File is Missing": "Falta archivo",
   "Relocate": "Relocalizar",
   "Relocated {title}.": "Reubicado {title}.",
-  "Removed {count} from the collection.": "Se eliminó {count} de la colección.",
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "¿Eliminar {count} de la colección? Esto no se puede deshacer. Los archivos permanecen donde están.",
   "location": "ubicación",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} reubicado, {unresolved} no encontrado en las carpetas de búsqueda.",

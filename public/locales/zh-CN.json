@@ -1519,7 +1519,6 @@
   "File is Missing": "文件不存在",
   "Relocate": "重新定位",
   "Relocated {title}.": "搬迁了{title}。",
-  "Removed {count} from the collection.": "已从集合中删除 {count}。",
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "从集合中删除 {count} 吗？此操作无法撤消。文件保留在原处。",
   "location": "位置",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated}已重新定位，在搜索文件夹中未找到{unresolved}。",

@@ -1523,7 +1523,6 @@
   "File is Missing": "ファイルが見つかりません",
   "Relocate": "再配置",
   "Relocated {title}.": "{title} を移転しました。",
-  "Removed {count} from the collection.": "コレクションから {count} を削除しました。",
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "コレクションから {count} を削除しますか?これを元に戻すことはできません。ファイルはそのまま残ります。",
   "location": "場所",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} は再配置されましたが、{unresolved} は検索フォルダーに見つかりませんでした。",

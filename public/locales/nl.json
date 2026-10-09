@@ -1512,7 +1512,6 @@
   "File is Missing": "Bestand ontbreekt",
   "Relocate": "Toewijzen",
   "Relocated {title}.": "Verplaatst {title}.",
-  "Removed {count} from the collection.": "{count} uit de collectie verwijderd.",
   "Remove {count} from the collection? This can’t be undone. The files stay where they are.": "{count} uit de collectie verwijderen? Dit kan niet ongedaan worden gemaakt. De bestanden blijven waar ze zijn.",
   "location": "plaats",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} verplaatst, {unresolved} niet gevonden in de zoekmappen.",
