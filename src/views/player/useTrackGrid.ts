@@ -23,16 +23,24 @@ export interface TrackGrid {
   state: GridState | null;
   /** Replaces the state from a command's own answer, ahead of the refetch. */
   setState: (state: GridState) => void;
+  /**
+   * The track `grid` was read for. After a switch the previous track's grid
+   * stays until the new one arrives, so a reader that must not act on the
+   * wrong track's beats checks this first.
+   */
+  gridTrackId: string | null;
 }
 
 export function useTrackGrid(track: RowDto | null): TrackGrid {
   const [grid, setGrid] = useState<BeatGrid>(NO_BEATS);
   const [state, setState] = useState<GridState | null>(null);
+  const [gridTrackId, setGridTrackId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!track || !track.analysed) {
       setGrid(NO_BEATS);
       setState(null);
+      setGridTrackId(track?.id ?? null);
       return;
     }
     const id = track.id;
@@ -55,6 +63,7 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
       if (!live || current !== request) return;
       setGrid(parseBeatGrid(bytes));
       setState(found);
+      setGridTrackId(id);
     };
 
     void (async () => {
@@ -82,5 +91,5 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
     };
   }, [track]);
 
-  return { grid, state, setState };
+  return { grid, state, setState, gridTrackId };
 }

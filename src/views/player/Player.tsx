@@ -785,7 +785,7 @@ export const Player = memo(function Player({
   const barsLabel = useRef<HTMLSpanElement>(null);
   // The grid and the GRID panel's state, kept current by the backend: an
   // edit from any deck refetches both — see `useTrackGrid`.
-  const { grid: savedGrid, state: gridState, setState: setGridState } = useTrackGrid(track);
+  const { grid: savedGrid, state: gridState, setState: setGridState, gridTrackId } = useTrackGrid(track);
   // A grid shift plays before its save ends: the shifted grid stands in for
   // the saved one until the save comes back. Kept with its track, so a
   // track change drops it.
@@ -1139,6 +1139,14 @@ export const Player = memo(function Player({
   /** BEAT SYNC lit and Q on: the deck must stay on the master's beat. */
   const phaseLocked = synced && quantize;
   /**
+   * BEAT SYNC lit, matching beats rather than only the BPM: the deck starts
+   * on the master's beat — on PLAY, after a CUE, and when a track is loaded
+   * while PLAY is engaged — whether Q is on or not. rekordbox 7 does so in
+   * all three cases [OBS chris-win11, parity/issue-128]. Q adds the lock
+   * that keeps it there through jumps, cues and loops: see `phaseLocked`.
+   */
+  const beatSynced = synced && advancedPrefs.syncType !== "bpm";
+  /**
    * Where a move on a locked, playing deck lands: on the master's beat, by
    * `inPhaseAt`. A master that is stopped has no beat to keep, so the move
    * stays as it is.
@@ -1169,9 +1177,16 @@ export const Player = memo(function Player({
    * which; this only carries it out and remembers whether a preview is running.
    */
   const previewing = useRef(false);
+  /**
+   * A track loaded while playing, still to be put on the master's beat once
+   * it is ready: see the effect after `togglePlay`. A CUE or a PLAY before
+   * then takes the deck over and drops it.
+   */
+  const alignAfterLoad = useRef<string | null>(null);
 
   const holdCue = useCallback(() => {
     if (playback.idle) return;
+    alignAfterLoad.current = null;
     const action = pressCue(
       playback.positionRef.current,
       cuePoint,
@@ -1409,8 +1424,8 @@ export const Player = memo(function Player({
   /** The phase lock waits until this time: see `checkPhase`. */
   const lockHold = useRef(0);
   /**
-   * PLAY. With BEAT SYNC lit and Q on, a stopped deck starts on the beat, as
-   * a CDJ with SYNC and QUANTIZE does: it is put on its own nearest beat and
+   * PLAY. With BEAT SYNC lit, a stopped deck starts on the beat, Q on or
+   * off, as rekordbox does (see `beatSynced`): it is put on its own nearest beat and
    * held until the master's next one lands, so the two are on the beat
    * together from the first sound. The wait is the engine's, counted in
    * output frames. A master that is not running has no next beat to wait
@@ -1424,11 +1439,13 @@ export const Player = memo(function Player({
     // preview ran out at the end of the track is started, as any stopped deck
     // is, and stays where it is when CUE comes up. rekordbox 7 does both
     // [OBS chris-win11, parity/issue-202].
+    // PLAY lines the deck up itself, so a load still waiting to be is done.
+    alignAfterLoad.current = null;
     if (previewing.current) {
       previewing.current = false;
       if (playback.playing) return;
     }
-    if (!playback.playing && synced && quantize) {
+    if (!playback.playing && beatSynced) {
       const leader = peerSync?.();
       const follower = syncState.current();
       if (leader && follower) {
@@ -1447,7 +1464,49 @@ export const Player = memo(function Player({
       }
     }
     playback.toggle();
-  }, [playback, synced, quantize, peerSync, grid]);
+  }, [playback, beatSynced, peerSync, grid]);
+
+  /*
+   * A track loaded while PLAY is engaged starts as soon as it is ready (see
+   * `usePlayback`). On a synced deck it then goes onto the master's nearest
+   * beat, once: the load is the deck's own and the grid the new track's, not
+   * the last one's still on screen. A load on a stopped deck needs nothing
+   * here; PLAY lines it up. The tempo needs nothing either: the follow effect
+   * below matches the new file's BPM to the master's.
+   */
+  const loadedId = playback.idle ? null : track?.id ?? null;
+  // Read in the render the load happens in, where PLAY still says what it
+  // was: engaged, the new track will start by itself.
+  const playingAtLoad = playback.playing;
+  useEffect(() => {
+    alignAfterLoad.current = playingAtLoad ? loadedId : null;
+    // Only a new load arms it; PLAY changing on the same track does not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedId]);
+  const loadReady = loadedId !== null && gridTrackId === loadedId && playback.duration > 0;
+  // Read when it runs, not when it was set: the master moves on meanwhile.
+  const alignToMaster = useEventCallback(() => {
+    if (!beatSynced || !playback.playing) return;
+    const leader = peerSync?.();
+    const follower = syncState.current();
+    if (!leader?.playing || !follower) return;
+    const nudge = beatNudgeFor(leader, follower);
+    if (Math.abs(nudge) <= PHASE_TOLERANCE) return;
+    // From the engine's own head, as the lock moves it, so the time the
+    // command takes does not put it off again.
+    playback.moveBy(nudge);
+    lockHold.current = performance.now() + PHASE_SETTLE_MS;
+  });
+  const alignTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    if (!loadReady || !playback.playing || alignAfterLoad.current !== loadedId) return;
+    alignAfterLoad.current = null;
+    // After the engine has said where the new track is: until its first
+    // tick, the head here is a guess from when PLAY was sent.
+    alignTimer.current = globalThis.setTimeout(alignToMaster, PHASE_SETTLE_MS);
+  }, [loadReady, loadedId, playback.playing, alignToMaster]);
+  // Another load, or the deck going away, drops one still waiting.
+  useEffect(() => () => globalThis.clearTimeout(alignTimer.current), [loadedId]);
 
   /*
    * The phase lock. A locked deck that plays is checked ten times a second,

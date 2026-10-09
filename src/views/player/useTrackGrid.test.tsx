@@ -14,8 +14,8 @@ const stop = vi.fn();
 const trackBeats = vi.fn<Backend["trackBeats"]>();
 const gridState = vi.fn<Backend["gridState"]>();
 const track = { id: "loaded", analysed: true } as unknown as RowDto;
-function Probe() {
-  latest = useTrackGrid(track);
+function Probe({ row = track }: { row?: RowDto }) {
+  latest = useTrackGrid(row);
   return null;
 }
 function bytes(time: number, bpm = 12800) {
@@ -71,4 +71,20 @@ it("does not let a pre-analysis read overwrite the refreshed grid", async () => 
   resolveOld(bytes(467));
   await settle();
   expect(Array.from(latest.grid.times)).toEqual([0]);
+});
+it("names the track its grid was read for, so a switch is not taken for the new grid", async () => {
+  let resolveNext!: (value: Uint8Array) => void;
+  act(() => root.render(<Probe />));
+  await settle();
+  expect(latest.gridTrackId).toBe("loaded");
+  const next = { id: "next", analysed: true } as unknown as RowDto;
+  trackBeats.mockReturnValueOnce(new Promise((resolve) => { resolveNext = resolve; }));
+  act(() => root.render(<Probe row={next} />));
+  await settle();
+  // The old grid is still on show while the new one is read.
+  expect(Array.from(latest.grid.times)).toEqual([467]);
+  expect(latest.gridTrackId).toBe("loaded");
+  resolveNext(bytes(0));
+  await settle();
+  expect(latest.gridTrackId).toBe("next");
 });

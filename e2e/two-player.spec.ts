@@ -458,3 +458,93 @@ test("a synced deck with Q on stays on the master's beat after jumps and in a lo
     await expect.poll(offBeat, { timeout: 1000 }).toBeLessThan(0.012);
   }
 });
+
+/**
+ * BEAT SYNC across a load and a restart, as rekordbox 7 does it
+ * [OBS chris-win11, parity/issue-128/values-sync-on-load.txt]: PLAY on a
+ * synced deck starts on the master's beat with Q off as well as on, a track
+ * loaded while the deck plays carries on in phase, and a new track on the
+ * master deck hands MASTER to the other one. Q stays off on B throughout, so
+ * the Q-on phase lock cannot be what puts B on the beat.
+ */
+/**
+ * On the beat, for a deck with Q off. The held start is timed from the
+ * master's head as the page last heard it, and without Q there is no lock to
+ * take out what that costs: about 15 ms late on the mock, against up to half
+ * a beat (some 240 ms here) off without the sync.
+ */
+const ON_BEAT = 0.025;
+
+async function syncedPair(page: Page) {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  const titles = page.locator('[role="gridcell"][data-col="title"]');
+  // Two rows with the same BPM: the mock deck counts frames at the file's
+  // own speed, so two tracks stay in phase only when their BPMs agree.
+  const bpms = await page.locator('[role="gridcell"][data-col="bpm"]').allTextContents();
+  const first = bpms.findIndex((bpm, n) => bpm.trim() !== "" && bpms.indexOf(bpm, n + 1) > n);
+  expect(first).toBeGreaterThanOrEqual(0);
+  const twin = bpms.indexOf(bpms[first] ?? "", first + 1);
+  await titles.nth(first).dblclick();
+  const toB = async (row: number) => {
+    await titles.nth(row).click({ button: "right" });
+    const menu = page.getByRole("menu", { name: "Track" });
+    await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
+    await menu.getByRole("menuitem", { name: "Load track to player 2" }).click();
+  };
+  await toB(first);
+  const a = page.getByRole("region", { name: "Preview player", exact: true });
+  const b = page.getByRole("region", { name: "Preview player B" });
+  await expect(b.getByTestId("player-title")).not.toHaveText("");
+  const quantize = b.getByRole("button", { name: "Quantize" });
+  await quantize.click();
+  await expect(quantize).toHaveAttribute("aria-pressed", "false");
+  await b.getByRole("button", { name: "Beat sync" }).click();
+  await expect(b.getByRole("button", { name: "Beat sync" })).toHaveAttribute("aria-pressed", "true");
+
+  const seconds = () =>
+    page.evaluate(() => (window as unknown as {
+      __deckSeconds: () => { a: number; b: number; beat: number; beatA: number; playingB: boolean };
+    }).__deckSeconds());
+  /** How far B is from A's beat, in seconds of B's track: 0 is on it. */
+  const offBeat = async () => {
+    const { a: atA, b: atB, beat, beatA } = await seconds();
+    const phase = (at: number, length: number) => (((at / length) % 1) + 1) % 1;
+    const gap = phase(atA, beatA) - phase(atB, beat);
+    return Math.abs(gap - Math.round(gap)) * beat;
+  };
+  return { a, b, titles, twin, toB, seconds, offBeat, play: page.getByRole("button", { name: "Play", exact: true }) };
+}
+
+test("PLAY on a synced deck starts on the master's beat with Q off", async ({ page }) => {
+  const { play, offBeat } = await syncedPair(page);
+  await play.first().click();
+  // Started a part of a beat after A, so only the sync can line it up.
+  await page.waitForTimeout(700);
+  await play.last().click();
+  await expect.poll(offBeat, { timeout: 3000 }).toBeLessThan(ON_BEAT);
+  // Restarted from the cue point: CUE stops and rewinds, PLAY starts again.
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "Cue", exact: true }).last().click();
+  await page.waitForTimeout(450);
+  await play.last().click();
+  await expect.poll(offBeat, { timeout: 3000 }).toBeLessThan(ON_BEAT);
+});
+
+test("a track loaded onto a playing synced deck carries on in phase", async ({ page }) => {
+  const { b, play, toB, twin, titles, seconds, offBeat } = await syncedPair(page);
+  await play.first().click();
+  await page.waitForTimeout(700);
+  await play.last().click();
+  await expect.poll(offBeat, { timeout: 3000 }).toBeLessThan(ON_BEAT);
+  await page.waitForTimeout(450);
+  const title = (await titles.nth(twin).textContent()) ?? "";
+  await toB(twin);
+  await expect(b.getByTestId("player-title")).toHaveText(title);
+  // Still playing, the new track from its start, and on A's beat.
+  await expect.poll(async () => (await seconds()).playingB, { timeout: 3000 }).toBe(true);
+  await expect.poll(offBeat, { timeout: 3000 }).toBeLessThan(ON_BEAT);
+  await expect(b.getByRole("button", { name: "Beat sync" })).toHaveAttribute("aria-pressed", "true");
+});
