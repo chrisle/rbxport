@@ -76,3 +76,20 @@ test("playing the deck stops the preview", async ({ page }) => {
   await expect(player(page).getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   await expect(stop).toHaveCount(0);
 });
+
+// rekordbox's `BrowseListViewer::currentBrowseChanged` stops the preview when
+// another item is chosen in the tree. The row and its stop button go with the
+// old list, so a preview left playing could no longer be stopped (#242).
+test("choosing another playlist stops the preview", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("treeitem", { name: /All Tracks/ }).click();
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const stop = await preview(page, 3);
+
+  await page.getByRole("treeitem", { name: /Hardstyle/ }).click();
+  await expect(page.getByText(/^Hardstyle \(\d+ Tracks\)/)).toBeVisible();
+  // Back to the list it was started from: the row is there again, stopped.
+  await page.getByRole("treeitem", { name: /All Tracks/ }).click();
+  await expect(waveform(page, 3)).toBeVisible();
+  await expect(stop).toHaveCount(0);
+});

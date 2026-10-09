@@ -44,7 +44,7 @@ import {
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { AppCost } from "@/views/topbar/AppCost";
 import { useLimiter } from "@/store/useLimiter";
-import { onPreviewError } from "@/store/usePreview";
+import { onPreviewError, stopPreview } from "@/store/usePreview";
 import { useUpdater } from "@/store/useUpdater";
 import { UpdateReadyNotice } from "@/views/update/UpdateReadyNotice";
 import { MasterOutputProvider, MasterOutputConnection, useMasterControls, useMasterDisplay } from "@/store/MasterOutput";
@@ -596,6 +596,17 @@ function AppBody() {
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
   // A waveform click whose track could not be previewed says why.
   useEffect(() => onPreviewError(refuse), [refuse]);
+  // Choosing another playlist in the tree stops the preview, as rekordbox's
+  // `BrowseListViewer::currentBrowseChanged` does when the tree's selected
+  // item changed. The row with its stop button is gone with the old list,
+  // and a preview left playing had nothing left to stop it (#242).
+  const previewedNode = useRef(selectedNode?.id ?? null);
+  useEffect(() => {
+    const id = selectedNode?.id ?? null;
+    if (id === previewedNode.current) return;
+    previewedNode.current = id;
+    void stopPreview();
+  }, [selectedNode?.id]);
   const openLog = useCallback(() => {
     void getBackend()
       .then((backend) => backend.openLog())
