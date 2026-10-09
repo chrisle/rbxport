@@ -43,11 +43,12 @@ export interface SyncManagerProps {
 type Tick = "on" | "off" | "some";
 
 /** What Import can bring back from a stick, in the order it does them. */
-type ImportKind = "cues" | "history" | "settings";
+type ImportKind = "cues" | "history" | "settings" | "ratings";
 const IMPORT_KINDS: readonly { kind: ImportKind; label: string; noun: string }[] = [
   { kind: "cues", label: "Cues and beat grids", noun: "cues and beat grids" },
   { kind: "history", label: "Play history", noun: "play history" },
   { kind: "settings", label: "CDJ/mixer settings", noun: "CDJ/mixer settings" },
+  { kind: "ratings", label: "Track ratings", noun: "track ratings" },
 ];
 
 /**
@@ -151,7 +152,8 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   // gets, as it is on every export from the shell.
   const preferences = usePreferences();
   const stickDefaults = preferences.djSystem;
-  const { importHistory, importSettings } = preferences.usbExport;
+  const { importHistory, importSettings, importRatings } = preferences.usbExport;
+  const protectLibrary = preferences.advanced.protectLibrary;
   // Import's ticks start at the defaults in Preferences, and follow them
   // until they are changed here.
   const [importTicks, setImportTicks] = useState<Partial<Record<ImportKind, boolean>>>({});
@@ -159,6 +161,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
     cues: preferences.usbExport.importButtonCues,
     history: preferences.usbExport.importButtonHistory,
     settings: preferences.usbExport.importButtonSettings,
+    ratings: preferences.usbExport.importButtonRatings,
   };
   const importTicked = (kind: ImportKind) => importTicks[kind] ?? importDefaults[kind];
   /** Why a kind cannot be imported right now, or null when it can. */
@@ -166,6 +169,8 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
     kind === "cues" && preferences.advanced.protectLibrary ? t("Turn off Library Protection to import cues and grids.")
     : kind === "history" && preferences.advanced.protectLibrary ? t("Turn off Library Protection to import play history.")
     : kind === "history" && rekordboxOpen !== false ? t("Quit rekordbox to import play history.")
+    : kind === "ratings" && preferences.advanced.protectLibrary ? t("Turn off Library Protection to import track ratings.")
+    : kind === "ratings" && rekordboxOpen !== false ? t("Quit rekordbox to import track ratings.")
     : null;
   const importKinds = IMPORT_KINDS.map(({ kind }) => kind).filter(kind => importTicked(kind) && !importBlocked(kind));
   const deleteUnlistedMusic = preferences.usbExport.deleteUnlistedMusic;
@@ -522,6 +527,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
           setStatus([t("Quit rekordbox to enable synchronization.")]);
           return;
         }
+        if (importRatings && protectLibrary) throw new Error(t("Turn off Library Protection to import track ratings."));
         const missing = await backend.validateExportFiles(playlists);
         if (missing.length > 0) {
           const shown = missing.slice(0, 10).map((file) => `• ${file.title}\n  ${file.path}`).join("\n");
@@ -534,13 +540,16 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
           }
         }
         // Import only after SYNC is clicked and preflight is accepted, before
-        // exporting can replace the selected devices' history/settings.
+        // exporting can replace the selected devices' history/settings/ratings.
         const importNotes: string[] = [];
-        if (importHistory || importSettings) {
+        if (importHistory || importSettings || importRatings) {
           for (const path of destinations) {
-            setStatus([`${nameOf(path)}: Importing USB history/settings…`]);
+            setStatus([t("{device}: importing from USB…", { device: nameOf(path) })]);
             try {
-              const imported = await backend.importUsb(path, false, importHistory, importSettings);
+              const imported = await backend.importUsb(path, false, importHistory, importSettings, importRatings);
+              if (imported.ratings) importNotes.push(imported.ratings === 1
+                ? t("{device}: imported {count} track rating.", { device: nameOf(path), count: imported.ratings })
+                : t("{device}: imported {count} track ratings.", { device: nameOf(path), count: imported.ratings }));
               if (imported.histories) importNotes.push(`${nameOf(path)}: imported ${imported.histories} play-history entries.`);
               if (imported.settings) importNotes.push(`${nameOf(path)}: imported ${imported.settings} CDJ/mixer settings files.`);
               importNotes.push(...(imported.warnings ?? []).map(warning => `${nameOf(path)}: ${warning}`));
@@ -571,7 +580,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
         setOperation(null);
       }
     })();
-  }, [canSync, nodes, ticked, tickedDevices, importHistory, importSettings, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
+  }, [canSync, nodes, ticked, tickedDevices, importHistory, importSettings, importRatings, protectLibrary, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
 
   /** One line for a cue import: what changed, and what already matched. */
   const cuesResult = (device: string, result: { tracks: number; skipped: number; unchanged?: number }) => {
@@ -598,20 +607,27 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
       try {
         const backend = await getBackend();
         if (kinds.includes("cues") && !await backend.confirm("Import cue and beat-grid changes from the selected USB devices? This replaces cues and grids for matching tracks in your library.")) return;
+        if (kinds.includes("ratings") && !await backend.confirm(t("Import changed track ratings from the selected USB devices? Device ratings replace library ratings, including ratings edited in both places."))) return;
+        if (kinds.includes("ratings") && (await backend.librarySummary()).readOnly) throw new Error(t("Quit rekordbox to import track ratings."));
         const results: string[] = [];
         for (const device of devices.filter(d => tickedDevices.has(d.path))) {
           // One kind at a time, so each is reported on its own and one that
           // fails does not keep the others from being brought in.
           for (const { kind, noun } of IMPORT_KINDS.filter(({ kind }) => kinds.includes(kind))) {
-            setStatus([t("Waiting for USB activity to finish, then importing {kind} from {device}…", { kind: noun, device: device.name })]);
+            setStatus([t("Waiting for USB activity to finish, then importing {kind} from {device}…", { kind: t(noun), device: device.name })]);
             try {
-              const result = await backend.importUsb(device.path, kind === "cues", kind === "history", kind === "settings");
+              const result = await backend.importUsb(device.path, kind === "cues", kind === "history", kind === "settings", kind === "ratings");
               if (kind === "cues") results.push(cuesResult(device.name, result));
               else if (kind === "history") results.push(result.histories === 1
                 ? t("{device}: imported {count} play-history entry.", { device: device.name, count: result.histories })
                 : result.histories
                   ? t("{device}: imported {count} play-history entries.", { device: device.name, count: result.histories })
                   : t("{device}: no new play-history entries.", { device: device.name }));
+              else if (kind === "ratings") results.push(result.ratings === 1
+                ? t("{device}: imported {count} track rating.", { device: device.name, count: result.ratings })
+                : result.ratings
+                  ? t("{device}: imported {count} track ratings.", { device: device.name, count: result.ratings })
+                  : t("{device}: no new track ratings.", { device: device.name }));
               // Kept as RBXport's My Settings: a stick synced later that has
               // none of its own is given them, as rekordbox's imported My
               // Settings go to the sticks it writes. Nothing in the library

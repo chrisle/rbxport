@@ -4156,6 +4156,7 @@ dependencies = [
  "rbl-onelibrary",
  "rbl-pdb",
  "rbl-prolink",
+ "rusqlite",
  "semver",
  "sentry",
  "serde",

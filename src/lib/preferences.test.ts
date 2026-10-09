@@ -11,6 +11,11 @@ import {
 } from "./preferences";
 
 describe("sanitisePreferences", () => {
+  it("enables rating imports for older settings and remembers explicit off choices", () => {
+    expect(DEFAULT_PREFERENCES.usbExport).toMatchObject({ importRatings: true, importButtonRatings: true });
+    expect(sanitisePreferences({ usbExport: {} }).usbExport).toMatchObject({ importRatings: true, importButtonRatings: true });
+    expect(sanitisePreferences({ usbExport: { importRatings: false, importButtonRatings: false } }).usbExport).toMatchObject({ importRatings: false, importButtonRatings: false });
+  });
   it("enables rekordbox browse sync by default and remembers an explicit off choice", () => {
     expect(DEFAULT_PREFERENCES.rekordbox.syncBrowseSettings).toBe(true);
     expect(sanitisePreferences({ view: {} }).rekordbox.syncBrowseSettings).toBe(true);
@@ -158,9 +163,9 @@ describe("the sliders and the quantize value", () => {
   });
 });
 
- it("defaults USB imports to history only and preserves saved choices", () => {
-  expect(sanitisePreferences({}).usbExport).toEqual({ importSettings: false, importHistory: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false });
-  expect(sanitisePreferences({ usbExport: { importSettings: true, importHistory: false } }).usbExport).toEqual({ importSettings: true, importHistory: false, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false });
+ it("defaults USB imports to history and ratings and preserves saved choices", () => {
+  expect(sanitisePreferences({}).usbExport).toEqual({ importSettings: false, importHistory: true, importRatings: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
+  expect(sanitisePreferences({ usbExport: { importSettings: true, importHistory: false } }).usbExport).toEqual({ importSettings: true, importHistory: false, importRatings: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
   expect(sanitisePreferences({ usbExport: { importButtonCues: false, importButtonSettings: true } }).usbExport).toMatchObject({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
 });
 
@@ -178,7 +183,7 @@ it("defaults compatibility conversion to off and WAV, and preserves AIFF and MP3
   expect(sanitisePreferences({ usbExport: { maximumCompatibility: true, conversionFormat: "aiff" } }).usbExport)
     .toMatchObject({ maximumCompatibility: true, conversionFormat: "aiff" });
   expect(sanitisePreferences({ usbExport: { maximumCompatibility: "yes", conversionFormat: "flac" } }).usbExport)
-    .toMatchObject({ maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false });
+    .toMatchObject({ maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
 });
 
 describe("browseListVars", () => {

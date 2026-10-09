@@ -4,6 +4,8 @@ use serde::Serialize;
 use tauri::{State, Manager};
 use crate::{commands::{blocking, reload, write_error}, dto::{DeviceLibraryTreeDto, DevicePlaylistNodeDto}, error::{AppError, AppResult, ErrorKind}, state::AppState};
 
+mod ratings;
+
 fn err(e: impl std::fmt::Display) -> AppError {
     let detail = format!("USB import: {e}");
     AppError::new(ErrorKind::Internal, detail.clone()).with_detail(detail)
@@ -48,7 +50,7 @@ pub(crate) fn settings_stash(state_dir: &Path) -> PathBuf {
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct ImportReport {
-    tracks: usize, histories: usize, settings: usize, skipped: usize,
+    tracks: usize, histories: usize, settings: usize, ratings: usize, skipped: usize,
     /// Tracks whose cues and grid on the stick already match the library.
     unchanged: usize,
     warnings: Vec<String>,
@@ -57,16 +59,18 @@ pub struct ImportReport {
 
 /// Explicit imports and Sync Manager imports share identity checks.
 #[tauri::command]
-pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: State<'_, Arc<AppState>>, path: String, cues: bool, history: bool, settings: bool) -> AppResult<ImportReport> {
+#[allow(clippy::too_many_arguments, reason = "Tauri injects the app and state alongside the independent import choices")]
+#[allow(clippy::fn_params_excessive_bools, reason = "independent import choices preserve the existing flat IPC contract")]
+pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: State<'_, Arc<AppState>>, path: String, cues: bool, history: bool, settings: bool, ratings: bool) -> AppResult<ImportReport> {
     let state = Arc::clone(&state);
     let worker = Arc::clone(&state);
     if !rbl_devices::list().iter().any(|d| d.mount_point == Path::new(&path)) { return Err(err("Device is no longer connected")); }
     let editor = Arc::clone(&app.state::<Arc<crate::grid::GridEditor>>());
     let log_path = path.clone();
-    let result = blocking("import_usb", move || import(&worker, &editor, Path::new(&path), cues, history, settings)).await;
+    let result = blocking("import_usb", move || import(&worker, &editor, Path::new(&path), cues, history, settings, ratings)).await;
     match result {
         Ok(result) => {
-            if result.tracks > 0 || result.histories > 0 { reload(app.clone(), state).await?; }
+            if result.tracks > 0 || result.histories > 0 || result.ratings > 0 { reload(app.clone(), state).await?; }
             for id in &result.changed {
                 let _ = tauri::Emitter::emit(&app, "grid:changed", id);
                 let _ = tauri::Emitter::emit(&app, "cues:changed", id);
@@ -74,14 +78,15 @@ pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Stat
             Ok(result)
         }
         Err(e) => {
-            tracing::error!(path = %log_path, cues, history, settings, error = %e, "USB import failed");
+            tracing::error!(path = %log_path, cues, history, settings, ratings, error = %e, "USB import failed");
             let _ = reload(app, state).await;
             Err(e)
         }
     }
 }
 
-fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues: bool, history: bool, settings: bool) -> AppResult<ImportReport> {
+#[allow(clippy::fn_params_excessive_bools, reason = "the same independent choices as import_usb")]
+fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues: bool, history: bool, settings: bool, ratings: bool) -> AppResult<ImportReport> {
     let _gate = state.edit_gate.lock();
     let _files = state.analysis_write.lock();
     rbl_devices::settings::recover(root)
@@ -103,19 +108,24 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         }
     }
     // Our manifest also works on legacy-only exports; validate its source path against master.db.
-    if let Some(manifest) = rbl_export::Manifest::load(root).filter(|m| m.db_id == 0 || m.db_id == db_id) {
+    let manifest = rbl_export::Manifest::load(root).filter(|m| m.db_id == 0 || m.db_id == db_id);
+    let mut rating_tracks = HashMap::new();
+    if let Some(manifest) = &manifest {
         // The manifest records the path as the index resolved it.
         let drive = state.read_db(|db| Ok(db.drive_mapping())).map_err(write_error)?;
-        for t in manifest.tracks {
+        for t in &manifest.tracks {
             let id = t.library_id.to_string();
             let stored = state.read_db(|db| Ok(db.connection().query_row("SELECT FolderPath FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [&id], |r| r.get::<_,String>(0)).ok())).map_err(write_error)?;
             let matched = stored.is_some_and(|p| drive.as_ref().map_or(std::borrow::Cow::Borrowed(p.as_str()), |d| d.apply(&p)) == t.source.as_str());
             if matched {
+                rating_tracks.insert(t.export_id, id.clone());
                 let analysis = if t.anlz_dir.is_empty() { String::new() } else { format!("{}/ANLZ0000.DAT", t.anlz_dir) };
                 tracks.entry(t.export_id).or_insert((id, analysis));
             }
         }
     }
+    // Resolve all rating conflicts before any requested imports write to the library.
+    if ratings { ratings::import(state, root, manifest.as_ref(), &rating_tracks, db_id, &mut report)?; }
     if cues && tracks.is_empty() { return Err(err("No tracks from this library were found on the device.")); }
     if cues {
         // Open the guarded writer even for an empty device; read-only must not look like success.
@@ -277,7 +287,7 @@ mod tests {
             export_id: 1, library_id: id.parse().unwrap(), source: source_path, audio: "audio.mp3".into(), anlz_dir: anlz.into(), size: 0, modified: 0, analysis: 0, artwork: String::new(), conversion: String::new(), conversion_source_hash: 0,
         }] }.save(&usb).unwrap();
         let editor = crate::grid::GridEditor::at(state.backup_dir());
-        let report = import(&state, &editor, &usb, true, false, false).unwrap();
+        let report = import(&state, &editor, &usb, true, false, false, false).unwrap();
         assert_eq!(report.tracks, 1);
         let result = rbl_anlz::Anlz::read(&target).unwrap();
         assert_eq!(result.path().as_deref(), Some("/original.mp3"));
@@ -291,18 +301,18 @@ mod tests {
             "SELECT AnalysisUpdated, rb_local_usn FROM djmdContent WHERE ID=?1", [&id],
             |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<i64>>(1)?)))?)).unwrap();
         let before = (stamp(&state), std::fs::read(&target).unwrap());
-        let again = import(&state, &editor, &usb, true, false, false).unwrap();
+        let again = import(&state, &editor, &usb, true, false, false, false).unwrap();
         assert_eq!((again.tracks, again.unchanged, again.skipped), (0, 1, 0));
         assert_eq!(again.changed, Vec::<String>::new());
         assert_eq!((stamp(&state), std::fs::read(&target).unwrap()), before);
         editor.set_locked(&id, true).unwrap();
-        assert_eq!(import(&state, &editor, &usb, true, false, false).unwrap().skipped, 1);
+        assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().skipped, 1);
         editor.set_locked(&id, false).unwrap();
         let mut manifest = rbl_export::Manifest::load(&usb).unwrap();
         manifest.tracks[0].anlz_dir.clear();
         manifest.save(&usb).unwrap();
         // Identity remains available for history even without cue analysis.
-        assert_eq!(import(&state, &editor, &usb, true, false, false).unwrap().skipped, 1);
+        assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().skipped, 1);
     }
 
     /// A cue as the master database holds it (`Kind` 0 memory, 1-3 A-C,
@@ -382,7 +392,7 @@ mod tests {
             std::fs::read(target.with_extension("EXT")).unwrap(),
             rows(state),
         );
-        let import_cues = || import(&state, &editor, &usb, true, false, false).unwrap();
+        let import_cues = || import(&state, &editor, &usb, true, false, false, false).unwrap();
         // Imports once, then asserts the same stick is a no-op that touches
         // no file, row or counter.
         let import_then_unchanged = |why: &str| {
@@ -477,7 +487,7 @@ mod tests {
         let file = my_setting(7);
         std::fs::write(usb.join("PIONEER/MYSETTING.DAT"), &file).unwrap();
         let editor = crate::grid::GridEditor::at(state.backup_dir());
-        let report = import(&state, &editor, &usb, false, false, true).unwrap();
+        let report = import(&state, &editor, &usb, false, false, true, false).unwrap();
         assert_eq!(report.settings, 1);
         // The folder the export reads from, for the same state directory.
         assert_eq!(settings_stash(state.backup_dir()), dir.path().join("state/usb-settings"));
@@ -521,7 +531,7 @@ mod tests {
         let state = AppState::with_backups(dir.path().join("backups"));
         let editor = crate::grid::GridEditor::at(state.backup_dir());
 
-        let error = import(&state, &editor, &usb, false, true, false).unwrap_err();
+        let error = import(&state, &editor, &usb, false, true, false, false).unwrap_err();
         assert!(error.message.contains("Could not recover an interrupted export"));
         assert!(error.message.contains("missing-track.wav"));
     }

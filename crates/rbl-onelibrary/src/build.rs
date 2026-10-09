@@ -187,7 +187,7 @@ pub struct Track {
     pub file_size: i64,
     /// Stick-relative path of the analysis file.
     pub analysis_path: String,
-    /// 0 to 255, in the multiples of 51 rekordbox uses for stars.
+    /// Star count, 0 to 5.
     pub rating: i64,
     pub comment: String,
     pub date_added: String,

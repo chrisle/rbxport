@@ -407,6 +407,13 @@ rows. Several tables are required to exist while empty. `dbVersion` is
   `analysisDataFilePath`, `path`, `bpmx100`, `bitrate`, `samplingRate`,
   track/disc numbers, bit depth, play count, analysis flags, hot-cue
   auto-load, creation date and ISRC.
+  `content.rating` stores the **0–5 star count**, as DeviceSQL does, without
+  rekordbox XML's multiplier of 51. This is documented in the
+  [pyrekordbox format reference](https://pyrekordbox.readthedocs.io/en/latest/formats/devicelib_plus.html#content).
+  A physical XDJ-AZ check found no visible rating when five stars were exported
+  as 255; corrected-export physical confirmation remains required. Raw SQL
+  regression coverage verifies all six values independently of snapshot decoding,
+  and checks OneLibrary-only conversion preserves those ratings.
 - `artist`, `album`, `genre`, `label`, `key`, `color` — interned and deduped;
   an empty name is id 0, which is how the reference spells "none".
 - `image` — `(image_id, path)`, the id being **the same one `export.pdb`'s

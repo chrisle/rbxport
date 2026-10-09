@@ -240,9 +240,9 @@ export interface Preferences {
   advanced: AdvancedPreferences;
   keyboard: KeyboardPreferences;
   usbExport: {
-    importSettings: boolean; importHistory: boolean; deleteUnlistedMusic: boolean; maximumCompatibility: boolean; conversionFormat: "wav" | "aiff" | "mp3";
+    importSettings: boolean; importHistory: boolean; importRatings: boolean; deleteUnlistedMusic: boolean; maximumCompatibility: boolean; conversionFormat: "wav" | "aiff" | "mp3";
     /** What Sync Manager's Import button has ticked when the window opens. */
-    importButtonCues: boolean; importButtonHistory: boolean; importButtonSettings: boolean;
+    importButtonCues: boolean; importButtonHistory: boolean; importButtonSettings: boolean; importButtonRatings: boolean;
   };
 }
 
@@ -308,7 +308,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     autoJoinLink: false,
     linkKeySort: "musical",
   },
-  usbExport: { importSettings: false, importHistory: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false },
+  usbExport: { importSettings: false, importHistory: true, importRatings: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true },
   advanced: {
     relocateFolders: [],
     protectLibrary: true,
@@ -420,7 +420,7 @@ export function sanitisePreferences(value: unknown): Preferences {
   const d = DEFAULT_PREFERENCES;
   return {
     rekordbox: { syncBrowseSettings: bool(rekordbox.syncBrowseSettings, true) },
-    usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true), deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: oneOf(usb.conversionFormat, ["wav", "aiff", "mp3"] as const, "wav"), importButtonCues: bool(usb.importButtonCues, true), importButtonHistory: bool(usb.importButtonHistory, true), importButtonSettings: bool(usb.importButtonSettings, false) },
+    usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true), importRatings: bool(usb.importRatings, true), deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: oneOf(usb.conversionFormat, ["wav", "aiff", "mp3"] as const, "wav"), importButtonCues: bool(usb.importButtonCues, true), importButtonHistory: bool(usb.importButtonHistory, true), importButtonSettings: bool(usb.importButtonSettings, false), importButtonRatings: bool(usb.importButtonRatings, true) },
     view: {
       locale: oneOf(view.locale, LOCALES, d.view.locale),
       showBpmChanges: bool(view.showBpmChanges, d.view.showBpmChanges),

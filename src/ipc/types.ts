@@ -804,11 +804,11 @@ export interface Backend {
   /** What a stick was last synced with, and what it holds now. */
   deviceSyncState(path: string): Promise<DeviceSyncState>;
   /**
-   * Brings cues and grids, play history and CDJ/mixer settings back from a
-   * stick. `unchanged` counts tracks whose cues and grid on the stick already
+   * Brings cues and grids, play history, CDJ/mixer settings and changed ratings
+   * back from a stick. `unchanged` counts tracks whose cues and grid already
    * match the library; they are not rewritten.
    */
-  importUsb(path: string, cues: boolean, history: boolean, settings: boolean): Promise<{ tracks: number; histories: number; settings: number; skipped: number; unchanged?: number; warnings?: string[] }>;
+  importUsb(path: string, cues: boolean, history: boolean, settings: boolean, ratings: boolean): Promise<{ tracks: number; histories: number; settings: number; ratings: number; skipped: number; unchanged?: number; warnings?: string[] }>;
 
   /**
    * An intelligent playlist's rule, for the editor; an empty "all" for a
