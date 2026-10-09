@@ -29,6 +29,12 @@ interface MockTrack {
   bpmX100: number;
   key: string;
   durationSec: number;
+  /**
+   * The mock collection's id for the track this one was exported from, as
+   * a stick's `masterContentId` names it; null for a track the collection
+   * does not have.
+   */
+  masterContentId: string | null;
 }
 
 /**
@@ -36,12 +42,12 @@ interface MockTrack {
  * stick's [OBS: read-only copy, 2026-10-08]; the tracks are made up.
  */
 const TRACKS: readonly MockTrack[] = [
-  { id: 1, title: "B2ME (feat. JordinLaine) (Original Mix)", artist: "atDusk", bpmX100: 12_800, key: "Bbm", durationSec: 390 },
-  { id: 2, title: "Spectrum (Extended Mix)", artist: "Arty", bpmX100: 13_200, key: "Fm", durationSec: 402 },
-  { id: 3, title: "Lost Without You", artist: "Ferry Corsten", bpmX100: 13_800, key: "Am", durationSec: 365 },
-  { id: 4, title: "Gravity", artist: "Gareth Emery", bpmX100: 13_000, key: "Gm", durationSec: 344 },
-  { id: 5, title: "Mirage", artist: "Tinlicker", bpmX100: 12_300, key: "Dm", durationSec: 421 },
-  { id: 6, title: "Cold Blooded", artist: "Ilan Bluestone", bpmX100: 12_600, key: "Ebm", durationSec: 377 },
+  { id: 1, title: "B2ME (feat. JordinLaine) (Original Mix)", artist: "atDusk", bpmX100: 12_800, key: "Bbm", durationSec: 390, masterContentId: "100000" },
+  { id: 2, title: "Spectrum (Extended Mix)", artist: "Arty", bpmX100: 13_200, key: "Fm", durationSec: 402, masterContentId: "100001" },
+  { id: 3, title: "Lost Without You", artist: "Ferry Corsten", bpmX100: 13_800, key: "Am", durationSec: 365, masterContentId: "100002" },
+  { id: 4, title: "Gravity", artist: "Gareth Emery", bpmX100: 13_000, key: "Gm", durationSec: 344, masterContentId: "100003" },
+  { id: 5, title: "Mirage", artist: "Tinlicker", bpmX100: 12_300, key: "Dm", durationSec: 421, masterContentId: null },
+  { id: 6, title: "Cold Blooded", artist: "Ilan Bluestone", bpmX100: 12_600, key: "Ebm", durationSec: 377, masterContentId: "100005" },
 ];
 
 function testLibrary(format: DeviceFormat): MockLibrary {
@@ -60,6 +66,12 @@ export interface MockDeviceLibraries {
   edit(path: string, format: DeviceFormat, edit: DevicePlaylistEdit): DevicePlaylistEditResult;
   /** A playlist's rows in its order, or every track for `"0"`. */
   rows(path: string, format: DeviceFormat, playlist: string): RowDto[];
+  /**
+   * A playlist's name and, for each entry in order, the collection track it
+   * was exported from (null when the collection does not have it), for
+   * Import Playlist.
+   */
+  playlist(path: string, format: DeviceFormat, playlist: string): { name: string; masters: (string | null)[] };
 }
 
 /** Depth first from the top level, siblings by sequence then id. */
@@ -141,6 +153,14 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
         const track = TRACKS.find((t) => t.id === id);
         return track ? [trackRow(path, track, at + 1)] : [];
       });
+    },
+    playlist: (path, format, playlist) => {
+      const node = libraryOf(path, format).nodes.find((n) => String(n.id) === playlist && !n.folder);
+      if (!node) throw new Error("That playlist is no longer on the device.");
+      return {
+        name: node.name,
+        masters: node.tracks.map((id) => TRACKS.find((t) => t.id === id)?.masterContentId ?? null),
+      };
     },
     edit: (path, format, edit) => {
       const library = libraryOf(path, format);

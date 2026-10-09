@@ -1518,5 +1518,12 @@
   "location": "hely",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} áthelyezve, {unresolved} nem található a keresési mappákban.",
   "{relocated} relocated.": "{relocated} költözött.",
-  "Auto Analysis is starting.": "Az Automatikus elemzés elindul."
+  "Auto Analysis is starting.": "Az Automatikus elemzés elindul.",
+  "Cannot import the playlist:": "A lejátszási lista nem importálható:",
+  "All songs in the list do not exist in Collection or the list is empty.": "A gyűjtemény nem tartalmazza a lista összes zeneszámát, vagy a lista üres.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "A lejátszási sorrend módosult, mert a gyűjteményben már létezik ilyen nevű lejátszás sorrend.",
+  "Imported {name}.": "Importálva: {name}.",
+  "{count} track is not in the collection and was left out.": "{count} szám nincs a gyűjteményben, ezért kimaradt.",
+  "{count} tracks are not in the collection and were left out.": "{count} szám nincs a gyűjteményben, ezért kimaradt.",
+  "The playlist could not be imported.": "A lejátszási lista nem importálható."
 }

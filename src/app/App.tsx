@@ -2244,6 +2244,45 @@ function AppBody() {
     },
     [editDevice, selectedNode, treeNodes, t, confirmRemoval],
   );
+  // Import Playlist over a stick's playlist: a playlist at the end of the
+  // collection's top level with the entries whose track the collection
+  // has, as rekordbox's Devices tree imports one. The stick is only read.
+  // The notes are rekordbox's own where it has one: its report when the
+  // name was taken [static, rekordbox 7.2.11 macOS,
+  // `importFromDeviceReportWindow` @0x10018b1ec] and its older device
+  // import's refusal when no track is in the collection
+  // (`importDevicePlaylistLegacy` @0x1016689bc). rekordbox copies a track
+  // the collection lacks to the computer; this leaves it out and says so.
+  const importFromDevice = useCallback(
+    (node: TreeNode) => {
+      const ref = parseDeviceNodeId(node.id);
+      if (!ref) return;
+      void (async () => {
+        const backend = await getBackend();
+        try {
+          const result = await backend.devicePlaylistImport(ref.path, ref.format, ref.id);
+          if (result.id === null) {
+            refuse(`${t("Cannot import the playlist:")} ${result.name} ${t("All songs in the list do not exist in Collection or the list is empty.")}`);
+            return;
+          }
+          const said = [
+            result.renamed
+              ? `${t("Playlist name was changed because there was a playlist with the same name in your collection.")} "${result.name}"`
+              : t("Imported {name}.", { name: result.name }),
+          ];
+          if (result.missing > 0) {
+            said.push(result.missing === 1
+              ? t("{count} track is not in the collection and was left out.", { count: result.missing })
+              : t("{count} tracks are not in the collection and were left out.", { count: result.missing }));
+          }
+          await afterWrite(said.join(" "));
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : t("The playlist could not be imported."));
+        }
+      })();
+    },
+    [afterWrite, refuse, t],
+  );
   // Tracks of the selected stick library, into one of its playlists or out
   // of the one open.
   const selectedDeviceRef = useMemo(
@@ -2700,6 +2739,7 @@ function AppBody() {
           onDeviceCreate={createOnDevice}
           onDeviceRename={renameOnDevice}
           onDeviceDelete={deleteOnDevice}
+          onDeviceImport={importFromDevice}
         />
         <div
           className={styles.splitter}

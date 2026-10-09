@@ -1516,5 +1516,12 @@
   "location": "plaats",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} verplaatst, {unresolved} niet gevonden in de zoekmappen.",
   "{relocated} relocated.": "{relocated} verhuisd.",
-  "Auto Analysis is starting.": "Automatisch analyseren begint."
+  "Auto Analysis is starting.": "Automatisch analyseren begint.",
+  "Cannot import the playlist:": "Kan de afspeellijst niet importeren:",
+  "All songs in the list do not exist in Collection or the list is empty.": "De muziekstukken in de lijst komen niet voor in uw verzameling of de lijst is leeg.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "De naam van de afspeellijst werd gewijzigd, want er bevond zich al een afspeellijst met dezelfde naam in uw verzameling.",
+  "Imported {name}.": "{name} geïmporteerd.",
+  "{count} track is not in the collection and was left out.": "{count} nummer staat niet in de verzameling en is weggelaten.",
+  "{count} tracks are not in the collection and were left out.": "{count} nummers staan niet in de verzameling en zijn weggelaten.",
+  "The playlist could not be imported.": "De afspeellijst kan niet worden geïmporteerd."
 }

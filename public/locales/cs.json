@@ -1519,5 +1519,12 @@
   "location": "umístění",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} přemístěno, {unresolved} nenalezeno ve složkách hledání.",
   "{relocated} relocated.": "{relocated} přemístěno.",
-  "Auto Analysis is starting.": "Spouští se automatická analýza."
+  "Auto Analysis is starting.": "Spouští se automatická analýza.",
+  "Cannot import the playlist:": "Nelze importovat seznam skladeb:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Ne všechny písničky uvedené v seznamu existují ve sbírce nebo je seznam prázdný.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "Název seznamu skladeb byl změněn, protože ve vaší sbírce existoval seznam skladeb se stejným názvem.",
+  "Imported {name}.": "Importováno {name}.",
+  "{count} track is not in the collection and was left out.": "{count} skladba není ve sbírce a byla vynechána.",
+  "{count} tracks are not in the collection and were left out.": "Počet vynechaných skladeb, které nejsou ve sbírce: {count}.",
+  "The playlist could not be imported.": "Seznam skladeb nelze importovat."
 }

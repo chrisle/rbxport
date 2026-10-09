@@ -39,6 +39,23 @@ edits are refused while rekordbox is running, and greyed while the stick is
 being synced, exported or ejected. Adding tracks from the collection to a
 stick's playlist is an export: use Export Playlist or Sync Manager.
 
+### Import a stick's playlist into the collection
+
+Right-click a playlist on the stick and choose **Import Playlist** to copy it
+into your collection, as rekordbox does. This is how a playlist made on a
+player gets back to your library, such as a TAG LIST an XDJ-AZ saved as a
+playlist. The new playlist goes at the end of the top level of your
+playlists, with the stick's name and track order. If a playlist or folder
+there already has that name, the new one is numbered (`Name (1)`,
+`Name (2)`, ...) and a note says so. A track listed twice is imported twice.
+
+Only the tracks already in your collection are imported. A stick track is
+matched to the collection track at the same file, or to the collection track
+it was exported from. rekordbox offers to copy a track your collection lacks
+to the computer; RBXport leaves it out and the note counts what was left
+out. If none of the playlist's tracks are in the collection, nothing is
+imported. The stick is only read.
+
 ## Music already on the device
 
 As in rekordbox, a track whose file the library already keeps on the

@@ -275,6 +275,39 @@ pub struct Changed {
     pub usn: i64,
 }
 
+/// A playlist [`Writer::import_device_playlist`] made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedPlaylist {
+    pub id: String,
+    /// The name it was given, which differs from the device's when the top
+    /// level already had a playlist or folder by that name.
+    pub name: String,
+    /// Entries added, a track listed twice counted twice.
+    pub tracks: usize,
+}
+
+/// The name rekordbox gives a playlist it imports from a device, among the
+/// `siblings` already in the folder it goes to: the device's name, or the
+/// first of `"<name> (1)"`, `"<name> (2)"`, … that none of them has.
+///
+/// [static, rekordbox 7.2.11 macOS: `DatabaseMediator::importDevicePlaylist`
+/// @0x10166939c compares the name with every child of the destination
+/// (`getPlaylistItem`), case-sensitively (`juce::String::compare`), and on a
+/// match tries the device's name with the next number, formatted with
+/// `L" (%d)"` @0x102e2f2f4, until nothing matches.]
+#[must_use]
+pub fn device_import_name(name: &str, siblings: &[String]) -> String {
+    let mut candidate = name.to_owned();
+    let mut n = 0_usize;
+    // Each pass rules out a name a sibling has, so this ends within
+    // `siblings.len()` passes.
+    while siblings.contains(&candidate) {
+        n += 1;
+        candidate = format!("{name} ({n})");
+    }
+    candidate
+}
+
 /// The exact tombstones made by one playlist deletion.
 ///
 /// Keeping row ids, rather than only the deleted root, matters for undo: a
@@ -830,6 +863,90 @@ impl Writer {
         }
         tx.commit()?;
         Ok(Changed { rows, usn })
+    }
+
+    // --------------------------------------------------------- device import
+
+    /// Adds a playlist imported from a device's own library (a stick's
+    /// playlist, such as a Tag List a player saved as one) as rekordbox's
+    /// Import Playlist does, in one transaction: a new playlist at the end
+    /// of the top level, named as on the device unless a playlist or folder
+    /// there already has that name (see [`device_import_name`]), holding
+    /// `contents` in the device's order. A track the device lists twice is
+    /// added twice, as rekordbox adds it.
+    ///
+    /// `contents` are the collection's ids for the device's tracks; working
+    /// out which collection track a device track is belongs to the caller.
+    /// Every one must be a live track, or nothing is written.
+    ///
+    /// [static, rekordbox 7.2.11 macOS: the Import Playlist menu row
+    /// (`FolderListTreeViewItem::clickEventWithRigthButton` @0x1016c7ab4,
+    /// item -107) sends position -1, so `rekordboxDBController::createNewList`
+    /// @0x101496cac appends: `Seq` is `getPlaylistFolderSeqMax` + 1, or 1 in
+    /// an empty folder (`AppSyncDBController::insertPlaylist` @0x10090041c
+    /// turns 0 into 1); `addTrackToPlaylistNotSupportedAllowed` @0x10149d280
+    /// numbers the tracks from the playlist's count + 1 through
+    /// `addMultiTracksToPlaylist` @0x1008df574, which inserts every id it
+    /// is given.]
+    pub fn import_device_playlist(&mut self, name: &str, contents: &[String]) -> Result<ImportedPlaylist> {
+        self.prepare()?;
+        let id = self.unused_id("djmdPlaylist")?;
+        let uuid = self.rng.uuid4();
+        let stamp = time::now();
+        let mut rows: Vec<(String, String)> = Vec::with_capacity(contents.len());
+        for _ in contents {
+            rows.push((self.rng.uuid4(), self.rng.uuid4()));
+        }
+
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for content in contents {
+            let live: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![content],
+                |r| r.get(0),
+            )?;
+            if live == 0 {
+                return Err(DbError::WriteRefused(format!("track {content} is not in the collection")));
+            }
+        }
+        let siblings: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT COALESCE(Name, '') FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0",
+            )?;
+            let names = stmt.query_map(params![ROOT], |r| r.get::<_, String>(0))?;
+            names.collect::<std::result::Result<_, _>>()?
+        };
+        let name = device_import_name(name, &siblings);
+        let seq: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(Seq), 0) + 1 FROM djmdPlaylist
+             WHERE ParentID = ?1 AND rb_local_deleted = 0",
+            params![ROOT],
+            |r| r.get(0),
+        )?;
+        let mut usn = next_usn(&tx)?;
+        tx.execute(
+            "INSERT INTO djmdPlaylist
+                (ID, Seq, Name, ImagePath, Attribute, ParentID, SmartList, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5, NULL, ?6, 0, 0, 0, 0, NULL, ?7, ?8, ?8)",
+            params![id, seq, name, ATTRIBUTE_PLAYLIST, ROOT, uuid, usn, stamp],
+        )?;
+        for (track_no, (content, (row_id, row_uuid))) in (1_i64..).zip(contents.iter().zip(rows)) {
+            usn = next_usn(&tx)?;
+            tx.execute(
+                "INSERT INTO djmdSongPlaylist
+                    (ID, PlaylistID, ContentID, TrackNo, UUID,
+                     rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                     usn, rb_local_usn, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+                params![row_id, id, content, track_no, row_uuid, usn, stamp],
+            )?;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(ImportedPlaylist { id, name, tracks: contents.len() })
     }
 
     /// Removes tracks from a playlist and closes the gaps in `TrackNo`.

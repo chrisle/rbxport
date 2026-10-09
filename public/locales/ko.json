@@ -1518,5 +1518,12 @@
   "location": "위치",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated}이(가) 재배치되었으며 {unresolved}이(가) 검색 폴더에 없습니다.",
   "{relocated} relocated.": "{relocated} 이전되었습니다.",
-  "Auto Analysis is starting.": "자동 분석이 시작됩니다."
+  "Auto Analysis is starting.": "자동 분석이 시작됩니다.",
+  "Cannot import the playlist:": "플레이리스트를 들여오기 할 수 없습니다:",
+  "All songs in the list do not exist in Collection or the list is empty.": "리스트에 있는 모든 노래가 컬렉션에 존재하지 않거나, 리스트가 비어있습니다.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "컬렉션에 같은 이름의 플레이리스트가 있었기 때문에 플레이리스트 이름이 변경되었습니다.",
+  "Imported {name}.": "{name}을(를) 가져왔습니다.",
+  "{count} track is not in the collection and was left out.": "{count}개의 트랙이 컬렉션에 없어 제외되었습니다.",
+  "{count} tracks are not in the collection and were left out.": "{count}개의 트랙이 컬렉션에 없어 제외되었습니다.",
+  "The playlist could not be imported.": "플레이리스트를 가져올 수 없습니다."
 }

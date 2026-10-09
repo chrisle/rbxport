@@ -1520,5 +1520,12 @@
   "location": "posizione",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} trasferito, {unresolved} non trovato nelle cartelle di ricerca.",
   "{relocated} relocated.": "{relocated} trasferito.",
-  "Auto Analysis is starting.": "Si sta avviando la verifica automatica."
+  "Auto Analysis is starting.": "Si sta avviando la verifica automatica.",
+  "Cannot import the playlist:": "Non è possibile importare la playlist:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Nessun brano della lista esiste nella Collezione o la lista è vuota.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "Il nome della playlist è cambiato in quanto nella collezione era presente una playlist con lo stesso nome.",
+  "Imported {name}.": "Importato {name}.",
+  "{count} track is not in the collection and was left out.": "{count} traccia non è nella collezione ed è stata esclusa.",
+  "{count} tracks are not in the collection and were left out.": "{count} tracce non sono nella collezione e sono state escluse.",
+  "The playlist could not be imported.": "Impossibile importare la playlist."
 }

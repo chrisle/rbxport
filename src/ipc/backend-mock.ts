@@ -2847,6 +2847,31 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         return Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }
     },
+    // Import Playlist, as the real backend does it: the entries whose
+    // track the collection has, in the stick's order, into a new playlist
+    // at the end of the top level, numbered " (1)", " (2)"… when the name
+    // is taken there. None at all writes nothing.
+    devicePlaylistImport: (path, format, id) => {
+      if (!ready) return notReady();
+      let source: { name: string; masters: (string | null)[] };
+      try {
+        source = stickLibraries.playlist(path, format, id);
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+      const contents = source.masters.filter((m): m is string => m !== null && all.some((r) => r.id === m));
+      const missing = source.masters.length - contents.length;
+      if (contents.length === 0 && source.masters.length > 0) {
+        return wait({ id: null, name: source.name, renamed: false, tracks: 0, missing });
+      }
+      const taken = new Set(childrenOf(TREE_ROOT).map((n) => n.name));
+      let name = source.name;
+      for (let n = 1; taken.has(name); n += 1) name = `${source.name} (${n})`;
+      const made = `made-${nextId++}`;
+      membership.set(made, contents);
+      insertUnder(TREE_ROOT, { id: made, name, kind: "playlist", depth: 1, childCount: contents.length });
+      return bump().then(() => ({ id: made, name, renamed: name !== source.name, tracks: contents.length, missing }));
+    },
     explorerRoots: () => wait(EXPLORER_ROOTS.map((root) => ({ ...root }))),
     explorerChildren: (path) => {
       const names = [...(EXPLORER_CHILDREN.get(path) ?? [])];

@@ -912,6 +912,15 @@ export interface Backend {
    * folder the edit was about (the new one for a create).
    */
   devicePlaylistEdit(path: string, format: DeviceFormat, edit: DevicePlaylistEdit): Promise<DevicePlaylistEditResult>;
+  /**
+   * Import Playlist over one of a stick's playlists, as rekordbox's Devices
+   * tree does: a playlist at the end of the collection's top level with the
+   * tracks of the stick's one that the collection has, in the stick's
+   * order. Writes the user's library; the stick is only read. Resolves
+   * with no id, having written nothing, when none of its tracks is in the
+   * collection.
+   */
+  devicePlaylistImport(path: string, format: DeviceFormat, id: string): Promise<DevicePlaylistImportResult>;
 
   /**
    * One track's full record: what the information panel's Summary and Info
@@ -1191,6 +1200,20 @@ export interface DevicePlaylistEditResult {
   id: string;
   /** What changed; 0 when there was nothing to do. */
   changed: number;
+}
+
+/** What Import Playlist did with a stick's playlist. */
+export interface DevicePlaylistImportResult {
+  /** The collection playlist made, or null when nothing was imported. */
+  id: string | null;
+  /** The name it was given (the stick's name when nothing was made). */
+  name: string;
+  /** The collection's top level already had that name, so it was numbered. */
+  renamed: boolean;
+  /** Entries added; a track listed twice counts twice. */
+  tracks: number;
+  /** Entries left out because their track is not in the collection. */
+  missing: number;
 }
 
 /** What a device already holds. */

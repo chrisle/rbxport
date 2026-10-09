@@ -1520,5 +1520,12 @@
   "location": "τοποθεσια",
   "{relocated} relocated, {unresolved} not found in the search folders.": "Το {relocated} μετεγκαταστάθηκε, το {unresolved} δεν βρέθηκε στους φακέλους αναζήτησης.",
   "{relocated} relocated.": "{relocated} μετεγκαταστάθηκε.",
-  "Auto Analysis is starting.": "Η Αυτόματη Ανάλυση ξεκινά."
+  "Auto Analysis is starting.": "Η Αυτόματη Ανάλυση ξεκινά.",
+  "Cannot import the playlist:": "Δεν είναι δυνατή η εισαγωγή της λίστας αναπαραγωγής:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Όλα τα τραγούδια της λίστας δεν υπάρχουν στη Συλλογή ή η λίστα είναι κενή.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "Το όνομα της λίστας αναπαραγωγής μεταβλήθηκε επειδή υπήρχε λίστα αναπαραγωγής με το ίδιο όνομα στη συλλογή σας.",
+  "Imported {name}.": "Έγινε εισαγωγή του {name}.",
+  "{count} track is not in the collection and was left out.": "{count} κομμάτι δεν υπάρχει στη συλλογή και παραλείφθηκε.",
+  "{count} tracks are not in the collection and were left out.": "{count} κομμάτια δεν υπάρχουν στη συλλογή και παραλείφθηκαν.",
+  "The playlist could not be imported.": "Δεν ήταν δυνατή η εισαγωγή της λίστας αναπαραγωγής."
 }

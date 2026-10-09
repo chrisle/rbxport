@@ -1519,5 +1519,12 @@
   "location": "konum",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} yeri değiştirildi, {unresolved} arama klasörlerinde bulunamadı.",
   "{relocated} relocated.": "{relocated} yeri değiştirildi.",
-  "Auto Analysis is starting.": "Oto Analiz başlatılıyor."
+  "Auto Analysis is starting.": "Oto Analiz başlatılıyor.",
+  "Cannot import the playlist:": "Çalma listesi alınamadı:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Listedeki tüm şarkılar Koleksiyonda yok ya da liste boş.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "Koleksiyonunuzda aynı ada sahip bir çalma listesi olduğundan çalma listesi adı değişti.",
+  "Imported {name}.": "{name} içe aktarıldı.",
+  "{count} track is not in the collection and was left out.": "{count} parça koleksiyonda olmadığı için dışarıda bırakıldı.",
+  "{count} tracks are not in the collection and were left out.": "{count} parça koleksiyonda olmadığı için dışarıda bırakıldı.",
+  "The playlist could not be imported.": "Çalma listesi içe aktarılamadı."
 }

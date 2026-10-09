@@ -1521,5 +1521,12 @@
   "location": "ubicación",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} reubicado, {unresolved} no encontrado en las carpetas de búsqueda.",
   "{relocated} relocated.": "{relocated} reubicado.",
-  "Auto Analysis is starting.": "El autoanálisis comienza."
+  "Auto Analysis is starting.": "El autoanálisis comienza.",
+  "Cannot import the playlist:": "No se puede importar la lista de reproducción:",
+  "All songs in the list do not exist in Collection or the list is empty.": "En la colección no existen todas las canciones de la lista o la lista está vacía.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "El nombre de la lista de reproducción ha cambiado porque había una lista de reproducción con el mismo nombre en tu colección.",
+  "Imported {name}.": "Importado {name}.",
+  "{count} track is not in the collection and was left out.": "{count} pista no está en la colección y se omitió.",
+  "{count} tracks are not in the collection and were left out.": "{count} pistas no están en la colección y se omitieron.",
+  "The playlist could not be imported.": "No se pudo importar la lista de reproducción."
 }

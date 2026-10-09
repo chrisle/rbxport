@@ -80,7 +80,15 @@ fn both_libraries_of_an_export_read_as_the_same_tree() {
     assert_eq!(legacy.tracks.len(), 4);
     let first = legacy.track(legacy.nodes[1].tracks[0]).unwrap();
     assert_eq!((first.title.as_str(), first.artist.as_str(), first.bpm_x100, first.rating), ("Track 1", "TRIODE", 12_800, 4));
-    assert_eq!(legacy.tracks, one.tracks.iter().map(|t| device_library::Track { ..t.clone() }).collect::<Vec<_>>());
+    // Only OneLibrary names the desktop track each one was exported from.
+    assert!(legacy.tracks.iter().all(|t| (t.master_db_id, t.master_content_id) == (0, 0)));
+    let mut masters: Vec<u64> = one.tracks.iter().map(|t| t.master_content_id).collect();
+    masters.sort_unstable();
+    assert_eq!(masters, [1, 2, 3, 4], "masterContentId is the source track's id");
+    assert_eq!(
+        legacy.tracks,
+        one.tracks.iter().map(|t| device_library::Track { master_db_id: 0, master_content_id: 0, ..t.clone() }).collect::<Vec<_>>()
+    );
 }
 
 #[test]

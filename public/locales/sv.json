@@ -1516,5 +1516,12 @@
   "location": "placering",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} flyttad, {unresolved} hittades inte i sökmapparna.",
   "{relocated} relocated.": "{relocated} flyttade.",
-  "Auto Analysis is starting.": "Automatisk analys startar."
+  "Auto Analysis is starting.": "Automatisk analys startar.",
+  "Cannot import the playlist:": "Spellistan kan inte importeras:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Alla låtar på listan finns inte med i aktuell samling eller också är listan tom.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "Spellistans namn ändrades eftersom det fanns en spellista med samma namn i din samling.",
+  "Imported {name}.": "Importerade {name}.",
+  "{count} track is not in the collection and was left out.": "{count} spår finns inte i samlingen och utelämnades.",
+  "{count} tracks are not in the collection and were left out.": "{count} spår finns inte i samlingen och utelämnades.",
+  "The playlist could not be imported.": "Spellistan kunde inte importeras."
 }

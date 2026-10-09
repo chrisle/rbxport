@@ -1517,5 +1517,12 @@
   "location": "Speicherort",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} neu zugeordnet, {unresolved} nicht in den Suchordnern gefunden.",
   "{relocated} relocated.": "{relocated} neu zugeordnet.",
-  "Auto Analysis is starting.": "Die Auto-Analyse startet."
+  "Auto Analysis is starting.": "Die Auto-Analyse startet.",
+  "Cannot import the playlist:": "Kann nicht die Wiedergabeliste importieren:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Alle Songs in der Liste existieren nicht in der Sammlung, oder die Liste ist leer.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "Der Wiedergabelistenname wurde geändert, da in Ihrer Sammlung eine Wiedergabeliste mit dem gleichen Namen vorliegt.",
+  "Imported {name}.": "{name} importiert.",
+  "{count} track is not in the collection and was left out.": "{count} Titel ist nicht in der Sammlung und wurde ausgelassen.",
+  "{count} tracks are not in the collection and were left out.": "{count} Titel sind nicht in der Sammlung und wurden ausgelassen.",
+  "The playlist could not be imported.": "Die Wiedergabeliste konnte nicht importiert werden."
 }

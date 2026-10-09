@@ -644,6 +644,7 @@ pub fn run() {
             explorer::explorer_children,
             device_library::device_libraries,
             device_library::device_playlist_edit,
+            device_library::device_playlist_import,
             // The information panel: one track's full record, the lookup
             // lists its dropdowns offer, and the fields it may write.
             details::track_details,

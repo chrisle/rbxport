@@ -302,7 +302,7 @@ export function treeMenu(
 }
 
 /** What the Devices tree's menus do over a stick's own playlists. */
-export type DeviceTreeAction = "deviceCreatePlaylist" | "deviceCreateFolder" | "deviceDelete";
+export type DeviceTreeAction = "deviceCreatePlaylist" | "deviceCreateFolder" | "deviceDelete" | "deviceImportPlaylist";
 
 /**
  * Right-clicking under a stick in the Devices tree: its Playlists heading, a
@@ -315,8 +315,11 @@ export type DeviceTreeAction = "deviceCreatePlaylist" | "deviceCreateFolder" | "
  * Create New Folder, and Delete. There is no Rename row: rekordbox renames
  * a stick's playlist or folder only by clicking it once selected
  * (`FolderListTreeViewItem::isEditableItem` @0x1016c7868), and so does the
- * tree here. Import, Delete All, Sort Items, artwork, export to a file and
- * shortcuts are drawn greyed.
+ * tree here. Import Playlist copies a stick's playlist into the collection
+ * (`FolderListTreeViewItem::clickEventWithRigthButton` @0x1016c7ab4, item
+ * -107, sends it to `DatabaseIF::importDevicePlaylist`). Import Folder,
+ * Delete All, Sort Items, artwork, export to a file and shortcuts are drawn
+ * greyed.
  */
 export function deviceTreeMenu(kind: "devicePlaylists" | "deviceFolder" | "devicePlaylist"): readonly MenuRow<DeviceTreeAction>[] {
   const create: MenuRow<DeviceTreeAction>[] = [
@@ -352,7 +355,7 @@ export function deviceTreeMenu(kind: "devicePlaylists" | "deviceFolder" | "devic
   return [
     { label: "Add Artwork", action: null },
     SEPARATOR,
-    { label: "Import Playlist", action: null },
+    { label: "Import Playlist", action: "deviceImportPlaylist" },
     SEPARATOR,
     { label: "Delete Playlist", action: "deviceDelete" },
     SEPARATOR,
@@ -526,6 +529,8 @@ const WRITES: ReadonlySet<string> = new Set([
   "deviceCreatePlaylist",
   "deviceCreateFolder",
   "deviceDelete",
+  // Writes the collection, not the stick.
+  "deviceImportPlaylist",
 ]);
 
 /** Whether an entry can be clicked. Everything else is drawn and greyed. */

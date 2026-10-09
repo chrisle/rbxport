@@ -1514,5 +1514,12 @@
   "location": "sted",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} flyttet, {unresolved} ikke fundet i søgemapperne.",
   "{relocated} relocated.": "{relocated} flyttet.",
-  "Auto Analysis is starting.": "Automatisk analyse starter."
+  "Auto Analysis is starting.": "Automatisk analyse starter.",
+  "Cannot import the playlist:": "Kan ikke importere afspilningslisten:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Alle melodier på listen eksisterer ikke i samlingen eller listen er tom.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "Afspilningslistens navn blev ændret, fordi der var en afspilningsliste med samme navn i din samling.",
+  "Imported {name}.": "Importerede {name}.",
+  "{count} track is not in the collection and was left out.": "{count} nummer er ikke i samlingen og blev udeladt.",
+  "{count} tracks are not in the collection and were left out.": "{count} numre er ikke i samlingen og blev udeladt.",
+  "The playlist could not be imported.": "Afspilningslisten kunne ikke importeres."
 }

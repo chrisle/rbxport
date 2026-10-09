@@ -185,6 +185,169 @@ fn apply_edit(path: &str, format: &str, edit: DeviceEditDto, rekordbox_running: 
     Ok(DeviceEditResultDto { id: applied.id.to_string(), changed: u32::try_from(applied.changed).unwrap_or(u32::MAX) })
 }
 
+/// What Import Playlist did with one of a stick's playlists.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceImportResultDto {
+    /// The collection playlist made; `None` when nothing was imported
+    /// because none of the playlist's tracks is in the collection.
+    pub id: Option<String>,
+    /// The name it was given, or the device's name when nothing was made.
+    pub name: String,
+    /// The name differs from the device's because the top level already
+    /// had one by that name.
+    pub renamed: bool,
+    /// Entries added, a track listed twice counted twice.
+    pub tracks: u32,
+    /// Entries left out because their track is not in the collection.
+    pub missing: u32,
+}
+
+/// Import Playlist over a stick's playlist: a playlist at the end of the
+/// collection's top level holding the stick playlist's tracks, as
+/// rekordbox's Devices tree does (see
+/// [`rbl_db::write::Writer::import_device_playlist`]). Only the user's
+/// library is written; the stick is read.
+///
+/// rekordbox copies a track that is not in the collection to the computer
+/// and imports it [static, rekordbox 7.2.11 macOS:
+/// `importFromDeviceManager::start` @0x100191868 and
+/// `import_from_d_ask_file_copy` @0x100191d44 ask, then
+/// `importFromDeviceThread::import_from_d_file_copy` @0x10018fdc0 copies to
+/// `PioneerDJ/Imported from Device`]. This does not copy files: such a
+/// track is left out and counted in `missing`, as rekordbox's older device
+/// import (`importDevicePlaylistLegacy` @0x1016689bc) leaves it out, and
+/// when that is every track nothing is made.
+#[tauri::command]
+pub async fn device_playlist_import<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    format: String,
+    id: String,
+) -> AppResult<DeviceImportResultDto> {
+    let reading = Arc::clone(&state);
+    let plan = blocking("device_playlist_import", move || {
+        let mount = connected(&path)?;
+        let (format, id) = (format_from(&format)?, id_from(&id)?);
+        let stick = StickTracks::read(&mount, format)?;
+        let Some(node) = stick.library.node(id).filter(|n| !n.folder) else {
+            return Err(AppError::new(ErrorKind::NotFound, "That playlist is no longer on the device."));
+        };
+        reading.read_db(|db| plan_import(db, &stick, node)).map_err(crate::commands::write_error)
+    })
+    .await?;
+    let missing = u32::try_from(plan.missing).unwrap_or(u32::MAX);
+    if plan.contents.is_empty() && plan.listed > 0 {
+        return Ok(DeviceImportResultDto { id: None, name: plan.name, renamed: false, tracks: 0, missing });
+    }
+    let made: Arc<parking_lot::Mutex<Option<rbl_db::write::ImportedPlaylist>>> = Arc::default();
+    let slot = Arc::clone(&made);
+    let (name, contents) = (plan.name.clone(), plan.contents);
+    crate::commands::edit(app, state, "device_playlist_import", crate::commands::Touched::Playlists, move |w| {
+        *slot.lock() = Some(w.import_device_playlist(&name, &contents)?);
+        Ok(())
+    })
+    .await?;
+    let made = made.lock().take().ok_or_else(|| AppError::new(ErrorKind::Internal, "The playlist could not be imported."))?;
+    tracing::info!(tracks = made.tracks, missing = plan.missing, "imported a device playlist");
+    Ok(DeviceImportResultDto {
+        id: Some(made.id),
+        renamed: made.name != plan.name,
+        name: made.name,
+        tracks: u32::try_from(made.tracks).unwrap_or(u32::MAX),
+        missing,
+    })
+}
+
+/// One library of a stick, with what tells its tracks apart from the
+/// collection's.
+struct StickTracks {
+    mount: PathBuf,
+    library: device::Library,
+    /// For the Device Library, whose rows do not say which desktop track
+    /// they are: the stick's `exportLibrary.db` rows by file, which do.
+    masters_by_path: std::collections::HashMap<String, (u64, u64)>,
+}
+
+impl StickTracks {
+    fn read(mount: &Path, format: Format) -> AppResult<Self> {
+        let library = device::read(mount, format).map_err(|e| device_error(&e))?;
+        let mut masters_by_path = std::collections::HashMap::new();
+        if format == Format::DeviceLibrary && device::formats(mount).contains(&Format::OneLibrary) {
+            let one = device::read(mount, Format::OneLibrary).map_err(|e| device_error(&e))?;
+            masters_by_path = one.tracks.iter().map(|t| (t.path.clone(), (t.master_db_id, t.master_content_id))).collect();
+        }
+        Ok(Self { mount: mount.to_path_buf(), library, masters_by_path })
+    }
+}
+
+/// What Import Playlist will write for one of a stick's playlists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ImportPlan {
+    /// The playlist's name on the stick.
+    name: String,
+    /// The collection's ids for its entries, in the stick's order, without
+    /// the ones the collection does not have.
+    contents: Vec<String>,
+    /// Entries the stick lists.
+    listed: usize,
+    /// Entries left out.
+    missing: usize,
+}
+
+/// Works out which collection track each entry of `node` is, in
+/// rekordbox's order [static, rekordbox 7.2.11 macOS,
+/// `importFromDeviceManager::start` @0x100191868]: first a collection track
+/// at the same file (`rekordboxDBController::isCollectionSong`, the file on
+/// the stick), then the track the entry was exported from, when the stick
+/// names this library (`getMainTrackByDeviceTrack` @0x100464c00: the
+/// row's `masterDbId` equal to this library's `DBID`, then its
+/// `masterContentId`). Read-only.
+///
+/// The Device Library's rows carry no such ids, and how rekordbox tells
+/// them apart is [UNKNOWN]; this takes the ids of the stick's `OneLibrary`
+/// row for the same file [ASSUME: both libraries of one stick describe the
+/// same files].
+fn plan_import(db: &rbl_db::Library, stick: &StickTracks, node: &device::Node) -> Result<ImportPlan, rbl_db::DbError> {
+    let conn = db.connection();
+    let db_id = rbl_db::export_info::db_id(conn)?;
+    let live = |content: &str| -> Result<bool, rbl_db::DbError> {
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+            [content],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    };
+    let mut contents = Vec::with_capacity(node.tracks.len());
+    for entry in &node.tracks {
+        let Some(track) = stick.library.track(*entry) else { continue };
+        let file = audio_path(&stick.mount, &track.path);
+        let at_file: Option<String> = conn
+            .prepare("SELECT ID FROM djmdContent WHERE FolderPath = ?1 AND rb_local_deleted = 0 ORDER BY ID LIMIT 1")?
+            .query_map([file.to_string_lossy().as_ref()], |r| r.get(0))?
+            .next()
+            .transpose()?;
+        if let Some(found) = at_file {
+            contents.push(found);
+            continue;
+        }
+        let (master_db, master_content) = match (track.master_db_id, track.master_content_id) {
+            (0, 0) => stick.masters_by_path.get(&track.path).copied().unwrap_or((0, 0)),
+            ids => ids,
+        };
+        if db_id != 0 && master_db == db_id && master_content != 0 {
+            let content = master_content.to_string();
+            if live(&content)? {
+                contents.push(content);
+            }
+        }
+    }
+    let listed = node.tracks.len();
+    Ok(ImportPlan { name: node.name.clone(), missing: listed - contents.len(), contents, listed })
+}
+
 /// Where a track of the stick plays from: its mount point and the library's
 /// volume-relative path. The row id and the edit both come from here, so
 /// the two always agree.
@@ -403,6 +566,132 @@ mod tests {
         }
         assert!(files() == before, "a refused edit writes nothing");
         assert!(!dest.path().join(".rbxport-publication").exists());
+    }
+
+    /// A collection, and a stick exported from it whose `OneLibrary` names it
+    /// as rekordbox's export does (`masterDbId` its `DBID`,
+    /// `masterContentId` the track's id). The stick's tracks 1-4 are the
+    /// collection's first four. Then, as an XDJ-AZ saves a TAG LIST, a
+    /// playlist the player wrote: `TAG LIST` with the fourth, the second and
+    /// the fourth track again.
+    struct Rig {
+        dir: tempfile::TempDir,
+        _src: tempfile::TempDir,
+        stick: tempfile::TempDir,
+        location: rbl_db::LibraryLocation,
+    }
+
+    const TAG_LIST: i64 = 9001;
+
+    fn rig() -> Rig {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let (src, stick) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let tracks: Vec<rbl_export::SourceTrack> = (0..4_usize)
+            .map(|i| {
+                let path = src.path().join(format!("t{i}.mp3"));
+                std::fs::write(&path, vec![u8::try_from(i).unwrap(); 512]).unwrap();
+                rbl_export::SourceTrack {
+                    id: rbl_db::fixture::track_id(i).parse().unwrap(),
+                    source_path: path,
+                    title: format!("Track {i}"),
+                    artist: "TRIODE".into(),
+                    ..Default::default()
+                }
+            })
+            .collect();
+        let playlists = vec![rbl_export::SourcePlaylist { id: 11, name: "Friday".into(), track_indices: vec![0, 1], ..Default::default() }];
+        rbl_export::export(stick.path(), &tracks, &playlists).unwrap();
+        let one = stick.path().join("PIONEER/rekordbox/exportLibrary.db");
+        let conn = rbl_onelibrary::playlists::open_read_write(&one).unwrap();
+        conn.execute("UPDATE content SET masterDbId = 1000000001", []).unwrap();
+        drop(conn);
+        let library = device::read(stick.path(), Format::OneLibrary).unwrap();
+        let stick_id = |i: usize| -> i64 {
+            let master: u64 = rbl_db::fixture::track_id(i).parse().unwrap();
+            i64::from(library.tracks.iter().find(|t| t.master_content_id == master).unwrap().id)
+        };
+        let change = rbl_onelibrary::playlists::Change {
+            create: vec![rbl_onelibrary::playlists::PlaylistRow { id: TAG_LIST, parent: 0, name: "TAG LIST".into(), attribute: 0, sequence: 5 }],
+            contents: vec![(TAG_LIST, vec![stick_id(3), stick_id(1), stick_id(3)])],
+            ..Default::default()
+        };
+        rbl_onelibrary::playlists::apply(&one, &change).unwrap();
+        Rig { dir, _src: src, stick, location }
+    }
+
+    impl Rig {
+        fn plan(&self, format: Format, name: &str) -> ImportPlan {
+            let stick = StickTracks::read(self.stick.path(), format).unwrap();
+            let node = stick.library.nodes.iter().find(|n| n.name == name).unwrap().clone();
+            let db = rbl_db::Library::open(self.location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+            plan_import(&db, &stick, &node).unwrap()
+        }
+
+        fn writer(&self) -> rbl_db::write::Writer {
+            rbl_db::write::Writer::open(self.location.clone(), self.dir.path().join("backups")).unwrap()
+        }
+    }
+
+    fn ids(indices: &[usize]) -> Vec<String> {
+        indices.iter().map(|&i| rbl_db::fixture::track_id(i)).collect()
+    }
+
+    #[test]
+    fn a_tag_list_the_player_saved_finds_its_tracks_in_the_collection() {
+        let rig = rig();
+        let plan = rig.plan(Format::OneLibrary, "TAG LIST");
+        assert_eq!(plan, ImportPlan { name: "TAG LIST".into(), contents: ids(&[3, 1, 3]), listed: 3, missing: 0 });
+        // And it lands as rekordbox's Import Playlist leaves it: at the end
+        // of the top level (the fixture has Playlist 0-2 at Seq 0-2), in
+        // the player's order, the repeated track twice.
+        let made = rig.writer().import_device_playlist(&plan.name, &plan.contents).unwrap();
+        let db = rbl_db::Library::open(rig.location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (seq, parent): (i64, String) = db
+            .connection()
+            .query_row("SELECT Seq, ParentID FROM djmdPlaylist WHERE ID = ?1", [&made.id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!((made.name.as_str(), seq, parent.as_str()), ("TAG LIST", 3, "root"));
+        let entries: Vec<String> = db
+            .connection()
+            .prepare("SELECT ContentID FROM djmdSongPlaylist WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo")
+            .unwrap()
+            .query_map([&made.id], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(entries, ids(&[3, 1, 3]));
+    }
+
+    #[test]
+    fn the_device_library_finds_its_tracks_through_the_sticks_onelibrary() {
+        let rig = rig();
+        assert_eq!(rig.plan(Format::DeviceLibrary, "Friday").contents, ids(&[0, 1]));
+    }
+
+    #[test]
+    fn a_track_from_another_library_or_gone_from_this_one_is_left_out() {
+        let rig = rig();
+        let one = rig.stick.path().join("PIONEER/rekordbox/exportLibrary.db");
+        let conn = rbl_onelibrary::playlists::open_read_write(&one).unwrap();
+        conn.execute("UPDATE content SET masterDbId = 42 WHERE masterContentId = ?1", [rbl_db::fixture::track_id(1)]).unwrap();
+        drop(conn);
+        assert_eq!(rig.plan(Format::OneLibrary, "TAG LIST"), ImportPlan { name: "TAG LIST".into(), contents: ids(&[3, 3]), listed: 3, missing: 1 });
+        rig.writer().delete_track(&rbl_db::fixture::track_id(3)).unwrap();
+        let plan = rig.plan(Format::OneLibrary, "TAG LIST");
+        assert_eq!((plan.contents.len(), plan.listed, plan.missing), (0, 3, 3), "nothing to import");
+    }
+
+    #[test]
+    fn a_collection_track_at_the_sticks_own_file_comes_first() {
+        // rekordbox looks for the file before the exported-from id.
+        let rig = rig();
+        let library = device::read(rig.stick.path(), Format::OneLibrary).unwrap();
+        let master: u64 = rbl_db::fixture::track_id(1).parse().unwrap();
+        let on_stick = library.tracks.iter().find(|t| t.master_content_id == master).unwrap();
+        let file = audio_path(rig.stick.path(), &on_stick.path);
+        rbl_db::fixture::point_at_audio(&rig.location, 20, &file.to_string_lossy(), 300).unwrap();
+        assert_eq!(rig.plan(Format::OneLibrary, "TAG LIST").contents, ids(&[3, 20, 3]));
     }
 
     #[test]

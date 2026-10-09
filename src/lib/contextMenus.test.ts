@@ -392,7 +392,8 @@ describe("a stick's own library", () => {
     expect(entriesOf(deviceTreeMenu("devicePlaylist")).map((e) => e.label)).toEqual([
       "Add Artwork", "Import Playlist", "Delete Playlist", "Export a playlist to a file", "Add To Shortcut",
     ]);
-    expect(live(deviceTreeMenu("devicePlaylist"))).toEqual(["Delete Playlist"]);
+    expect(live(deviceTreeMenu("devicePlaylist"))).toEqual(["Import Playlist", "Delete Playlist"]);
+    expect(entriesOf(deviceTreeMenu("devicePlaylist")).find((e) => e.label === "Import Playlist")?.action).toBe("deviceImportPlaylist");
     expect(live(deviceTreeMenu("deviceFolder"))).toEqual(["Create New Playlist", "Create New Folder", "Delete Folder"]);
   });
 

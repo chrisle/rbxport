@@ -7,7 +7,7 @@
 import { detectPlatform } from "@/lib/shortcuts";
 import type {
   AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceLibrary,
-  DevicePlaylistEditResult, DeviceSettings, DeviceSyncState,
+  DevicePlaylistEditResult, DevicePlaylistImportResult, DeviceSettings, DeviceSyncState,
   Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
@@ -490,6 +490,8 @@ async function realBackend(): Promise<Backend> {
     deviceLibraries: (path) => invoke<DeviceLibrary[]>("device_libraries", { path }),
     devicePlaylistEdit: (path, format, edit) =>
       invoke<DevicePlaylistEditResult>("device_playlist_edit", { path, format, edit }),
+    devicePlaylistImport: (path, format, id) =>
+      invoke<DevicePlaylistImportResult>("device_playlist_import", { path, format, id }),
     onLibraryChanged: (listener) => {
       // Tauri's listen resolves asynchronously; unsubscribing before it does
       // has to still work, so the flag is checked when it lands.

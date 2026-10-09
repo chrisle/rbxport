@@ -1523,5 +1523,12 @@
   "location": "где",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} перемещен, {unresolved} не найден в папках поиска.",
   "{relocated} relocated.": "{relocated} переехал.",
-  "Auto Analysis is starting.": "Автоматический анализ запускается."
+  "Auto Analysis is starting.": "Автоматический анализ запускается.",
+  "Cannot import the playlist:": "Невозможно импортировать список воспроизведения:",
+  "All songs in the list do not exist in Collection or the list is empty.": "Все песни в списке не существуют в Сборнике или список пустой.",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "Имя списка воспроизведения было изменено, так как в вашем сборнике уже есть список воспроизведения с таким именем.",
+  "Imported {name}.": "Импортировано {name}.",
+  "{count} track is not in the collection and was left out.": "Пропущен трек, которого нет в сборнике: {count}.",
+  "{count} tracks are not in the collection and were left out.": "Пропущено треков, которых нет в сборнике: {count}.",
+  "The playlist could not be imported.": "Не удалось импортировать список воспроизведения."
 }

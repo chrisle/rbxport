@@ -96,6 +96,12 @@ pub struct Track {
     pub color: u8,
     /// Volume-relative, with a leading slash.
     pub path: String,
+    /// The desktop library the track was exported from (its `DBID`), and
+    /// the track's id there: the `exportLibrary.db` columns `masterDbId` and
+    /// `masterContentId`. 0 when the library does not say, which is always
+    /// so for the Device Library.
+    pub master_db_id: u64,
+    pub master_content_id: u64,
 }
 
 /// One library on the stick.
@@ -245,6 +251,8 @@ fn read_pdb(bytes: &[u8]) -> Result<(Vec<Node>, Vec<Track>)> {
             rating: t.rating.min(5),
             color: t.color_id,
             path: t.file_path,
+            master_db_id: 0,
+            master_content_id: 0,
         })
         .collect();
     Ok((nodes, tracks))
@@ -279,7 +287,8 @@ fn read_one(path: &Path) -> Result<(Vec<Node>, Vec<Track>)> {
             "SELECT c.content_id, COALESCE(c.title,''), COALESCE(a.name,''), COALESCE(al.name,''),
                     COALESCE(g.name,''), COALESCE(l.name,''), COALESCE(k.name,''), COALESCE(c.djComment,''),
                     COALESCE(c.dateAdded,''), COALESCE(c.bpmx100,0), COALESCE(c.length,0), COALESCE(c.rating,0),
-                    COALESCE(c.color_id,0), COALESCE(c.path,'')
+                    COALESCE(c.color_id,0), COALESCE(c.path,''),
+                    COALESCE(c.masterDbId,0), COALESCE(c.masterContentId,0)
              FROM content c
              LEFT JOIN artist a ON a.artist_id = c.artist_id_artist
              LEFT JOIN album al ON al.album_id = c.album_id
@@ -306,6 +315,8 @@ fn read_one(path: &Path) -> Result<(Vec<Node>, Vec<Track>)> {
                 rating: u8::try_from(r.get::<_, u32>(11)? / 51).unwrap_or(5).min(5),
                 color: r.get(12)?,
                 path: r.get(13)?,
+                master_db_id: u64::try_from(r.get::<_, i64>(14)?).unwrap_or(0),
+                master_content_id: u64::try_from(r.get::<_, i64>(15)?).unwrap_or(0),
             })
         })
         .map_err(one_error)?

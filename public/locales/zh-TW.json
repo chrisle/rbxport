@@ -1523,5 +1523,12 @@
   "location": "位置",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated}已重新定位，在搜尋資料夾中未找到{unresolved}。",
   "{relocated} relocated.": "{relocated}已搬遷。",
-  "Auto Analysis is starting.": "開始自動分析。"
+  "Auto Analysis is starting.": "開始自動分析。",
+  "Cannot import the playlist:": "無法匯入播放清單:",
+  "All songs in the list do not exist in Collection or the list is empty.": "集合中不存在清單中的所有歌曲，或清單是空的。",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "由於您的收集中有相同名稱的播放清單，因此播放清單名稱已經變更。",
+  "Imported {name}.": "已匯入{name}。",
+  "{count} track is not in the collection and was left out.": "{count} 首曲目不在集合中，已略過。",
+  "{count} tracks are not in the collection and were left out.": "{count} 首曲目不在集合中，已略過。",
+  "The playlist could not be imported.": "無法匯入播放清單。"
 }

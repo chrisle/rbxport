@@ -1527,5 +1527,12 @@
   "location": "場所",
   "{relocated} relocated, {unresolved} not found in the search folders.": "{relocated} は再配置されましたが、{unresolved} は検索フォルダーに見つかりませんでした。",
   "{relocated} relocated.": "{relocated}移転しました。",
-  "Auto Analysis is starting.": "自動解析を開始します。"
+  "Auto Analysis is starting.": "自動解析を開始します。",
+  "Cannot import the playlist:": "このプレイリストをインポートできません：",
+  "All songs in the list do not exist in Collection or the list is empty.": "リスト内のすべての曲がコレクションにないかリストが空です。",
+  "Playlist name was changed because there was a playlist with the same name in your collection.": "同じ名前のプレイリストがコレクションに存在したため、名前を変更してインポートしました。",
+  "Imported {name}.": "{name}をインポートしました。",
+  "{count} track is not in the collection and was left out.": "{count} 個のトラックはコレクションにないため除外しました。",
+  "{count} tracks are not in the collection and were left out.": "{count} 個のトラックはコレクションにないため除外しました。",
+  "The playlist could not be imported.": "プレイリストをインポートできませんでした。"
 }
