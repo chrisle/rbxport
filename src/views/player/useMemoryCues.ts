@@ -2,7 +2,7 @@
  * The MEMORY cluster: store, call previous, call next, delete.
  *
  * rekordbox's own arrangement, from `german.lang` and the Export key map:
- * `Set Memory Cue` (`M`) stores the cue point the transport's CUE has set,
+ * `Set Memory Cue` (`M`) stores the cue point the transport's CUE or IN set,
  * `Call Previous Memory Cue` (`B`) and `Call Next Memory Cue` (`N`) move the
  * playhead to the memory cue either side of it, and `Delete Memory Cue` (`X`)
  * removes the one the playhead is standing on. The list beside the deck has
@@ -20,6 +20,9 @@ import { memoryCueAt, memoryCueNumber, nextMemoryCue, previousMemoryCue } from "
 import { useCueWriter } from "./useCueWriter";
 
 export { READ_ONLY_REASON } from "./useCueWriter";
+
+/** Memory cues and loops a track can hold: rekordbox's MEMORY list is ten. */
+export const MEMORY_CUE_LIMIT = 10;
 
 export interface MemoryCueDeck {
   /** The loaded track's id, or `null` when the deck is empty. */
@@ -60,14 +63,23 @@ export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
   const canEdit = trackId !== null && !readOnly;
   const write = useCueWriter(onError);
 
+  /**
+   * MEMORY stores the cue point, never the playhead, playing or paused.
+   * [OBS] rekordbox 7.2.19 `UiPlayer::eventMemoryCue` @0x101b9d91c reads
+   * `DjEngineIF::getCueTime(channel, 0)` (the deck's current cue, the one CUE
+   * and IN set) and writes that with `setCueTime`; it does not read the play
+   * position or pause the deck. A DJ who wants the playhead stored presses
+   * IN there first, which makes it the cue point (see `markLoopIn`).
+   */
   const store = useCallback(() => {
     if (!canEdit || trackId === null) return;
     const positionMs = Math.round(Math.max(cuePoint, 0) * 1000);
-    // One memory cue per point. [ASSUME] Whether rekordbox stacks a second
-    // cue on the same millisecond is not recorded; a second row at the same
-    // point is nothing the list or the waveform could show, so it is not
-    // written.
-    if (memoryCueAt(cues, positionMs)) return;
+    // [OBS] The same handler does nothing when a memory cue already sits on
+    // the cue point, or when the track already has ten (memory cues and
+    // memory loops together, @0x101b9dde8). rekordbox compares the exact
+    // point; within the list's tolerance is the nearest the rows here can
+    // tell apart.
+    if (memoryCueAt(cues, positionMs) || cues.filter((c) => c.memory).length >= MEMORY_CUE_LIMIT) return;
     write((edits) => edits.addCue(trackId, "memory", positionMs));
   }, [canEdit, trackId, cuePoint, cues, write]);
 

@@ -236,6 +236,29 @@ describe("storing a memory cue", () => {
     expect(sent).toEqual(["add:track-1:memory:45000"]);
   });
 
+  it("stores the cue point whether or not the deck is playing", async () => {
+    // [OBS] rekordbox 7.2.19 eventMemoryCue reads the current cue, never the
+    // play position: the head being elsewhere changes nothing.
+    mount({ cues: [], cuePoint: 12.5, positionSeconds: () => 200 });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual(["add:track-1:memory:12500"]);
+  });
+
+  it("refuses an eleventh, counting memory loops, as rekordbox's MEMORY does", async () => {
+    const nine = Array.from({ length: 9 }, (_, i) => cue(`m${i}`, (i + 1) * 10_000));
+    mount({ cues: [...nine, loopCue("l", 100_000, 104_000)], cuePoint: 150 });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual([]);
+
+    // Nine plus a hot cue is still room for a tenth.
+    mount({ cues: [...nine, hot("h", "A", 100_000)], cuePoint: 150 });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual(["add:track-1:memory:150000"]);
+  });
+
   it("refuses a second cue on a point that already has one", async () => {
     mount({ cuePoint: 30 });
     act(() => memory.store());
