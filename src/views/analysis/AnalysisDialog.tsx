@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AnalysisSettings } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
-import type { AnalysisMode } from "@/lib/preferences";
+import { BPM_RANGES, bpmRangeLimits, type AnalysisMode, type BpmRange } from "@/lib/preferences";
 import { lastAnalysisChoice, rememberAnalysisChoice } from "@/lib/analysisChoice";
 import styles from "./AnalysisDialog.module.css";
 
@@ -16,11 +16,13 @@ export type AnalysisChoice = AnalysisSettings & { mode: AnalysisMode };
  * BPM / Grid ticked and greyed, since every track it covers has never been
  * analysed [OBS: rekordbox 7.2.14, chris-win11].
  */
-export function AnalysisDialog({ count, auto = false, initialMode, initialFirstBeatCue, onConfirm, onCancel }: {
+export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRange, initialFirstBeatCue, onConfirm, onCancel }: {
   count: number;
   /** The launch prompt for never-analysed Collection tracks. */
   auto?: boolean;
   initialMode: AnalysisMode;
+  /** The Preferences BPM Range; changing it here applies to this batch only. */
+  initialBpmRange: BpmRange;
   /** The Preferences switch, which this window has no box for. */
   initialFirstBeatCue: boolean;
   onConfirm: (settings: AnalysisChoice) => void;
@@ -30,8 +32,9 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialFirstB
   // from what it was last confirmed with. The first-beat cue is always the
   // Preferences switch as it stands now (#343).
   const [settings, setSettings] = useState<AnalysisChoice>(() => ({
-    mode: initialMode, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180,
+    mode: initialMode, bpmGrid: true, key: true, highPrecision: true,
     ...(auto ? {} : lastAnalysisChoice()),
+    ...bpmRangeLimits(initialBpmRange),
     firstBeatCue: initialFirstBeatCue,
   }));
   const dialog = useRef<HTMLDialogElement>(null);
@@ -77,13 +80,9 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialFirstB
             </label>
             <label className={styles.field}>
               <span>{t("BPM Range")}</span>
-              <select value={`${settings.minBpm}-${settings.maxBpm}`} onChange={event => {
-                const [minBpm = 70, maxBpm = 180] = event.target.value.split("-").map(Number);
-                update({ minBpm, maxBpm });
-              }}>
-                {[[70, 180], [98, 195], [118, 236], [58, 115]].map(([min, max]) => (
-                  <option key={min} value={`${min}-${max}`}>{min}–{max}</option>
-                ))}
+              <select value={`${settings.minBpm}-${settings.maxBpm}`}
+                onChange={event => update(bpmRangeLimits(event.target.value as BpmRange))}>
+                {BPM_RANGES.map(range => <option key={range} value={range}>{range}</option>)}
               </select>
             </label>
           </fieldset>

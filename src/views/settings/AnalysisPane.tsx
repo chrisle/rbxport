@@ -1,4 +1,5 @@
 /** Analysis presets retain high-precision beat placement and key detection. */
+import { BPM_RANGES } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import { Section, Select, Toggle } from "./controls";
@@ -21,8 +22,13 @@ export function AnalysisPane(_: { tab: AnalysisTab }) {
             { value: "rbxport", label: "RBXport (for Electronic Music)" }]}
           onChange={mode => update("analysis", { mode })} />
         <p aria-live="polite">{preferences.analysis.mode === "rekordbox"
-          ? "Normal mode with a 70–180 BPM range, high-precision beat placement and key detection."
+          ? "Normal mode: one constant tempo for the whole track, with high-precision beat placement and key detection."
           : "Aligns beats to kick drums, uses musical phrase changes to find the first beat of each bar, and detects tempo changes and key."}</p>
+      </div>
+      <div className={styles.analysisField}>
+        <Select label="BPM Range" caption="BPM Range" plain preserveChoiceLabels value={preferences.analysis.bpmRange}
+          choices={BPM_RANGES.map(range => ({ value: range, label: range }))}
+          onChange={bpmRange => update("analysis", { bpmRange })} />
       </div>
       <div className={styles.analysisField}>
         <Select label="Tracks analysed at once" caption="Tracks analysed at once" plain value={String(preferences.analysis.concurrentTracks)}

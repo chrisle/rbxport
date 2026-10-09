@@ -27,7 +27,7 @@ afterEach(() => {
 async function pressOk(props: { auto?: boolean; initialFirstBeatCue: boolean }): Promise<AnalysisChoice | undefined> {
   let chosen: AnalysisChoice | undefined;
   await act(async () => {
-    root.render(<AnalysisDialog count={1} initialMode="rbxport" {...props}
+    root.render(<AnalysisDialog count={1} initialMode="rbxport" initialBpmRange="70-180" {...props}
       onConfirm={settings => { chosen = settings; }} onCancel={() => {}} />);
     await Promise.resolve();
   });

@@ -14,7 +14,7 @@ Changing the browser selection while the dialog is open does not change it.
 | BPM / Grid | Replaces tempo/grid analysis and regenerates waveforms. Disabling it also disables the timing controls. |
 | High precision analysis | Uses attack detection for beat placement; otherwise uses the onset envelope. Enabled by default. |
 | Analysis Mode | Normal (`rekordbox`) fits one constant tempo to the whole track, as rekordbox's Normal analysis does; use it for music played by a band or with a drifting tempo. RBXport (`rbxport`) follows tempo changes, ramps, and re-phased returns, for DJ edits and electronic music. Rekordbox's Dynamic and Auto modes are not available. Initially follows Preferences. |
-| BPM Range | Limits tempo search to 70–180 (default), 98–195, 118–236, or 58–115. |
+| BPM Range | Limits the tempo search to one of rekordbox's ten ranges: 70-180, 48-95, 58-115, 68-135, 78-155, 88-175, 98-195, 108-215, 118-235, or 128-255. Music faster than the top of the range is counted at half speed, so 180–200 BPM music needs 98-195, 108-215, or 118-235. Initially follows Preferences (70-180 by default). |
 | Add memory cue at first beat | Adds a memory cue on the first beat of the new grid. Skipped when a memory cue or memory loop already starts within 5 ms of that beat, so re-analysis does not stack duplicates. Requires BPM / Grid. Initially follows Preferences; off by default. |
 | KEY | Updates detected key; disabling it preserves the existing key. |
 
@@ -44,7 +44,7 @@ other batches cannot alter pending work. Manual choices apply to that batch
 and do not overwrite global preferences.
 
 Automatic imports queue directly with the preferred preset, BPM/grid and key
-enabled, high precision enabled, the 70–180 range, and the Preferences
+enabled, high precision enabled, the Preferences BPM Range, and the Preferences
 first-beat memory cue choice. Eligible tempo
 transitions use the automatic transient fallback with either preset; see
 [Beat grid](../../crates/rbl-analysis/docs/algorithms/beat.md#6-grid-the-change).
