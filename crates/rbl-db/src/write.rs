@@ -2128,20 +2128,12 @@ impl Writer {
     /// file leaves empty are left as they are. Returns how many changed.
     pub fn reload_tags(&mut self, content: &str) -> Result<usize> {
         self.prepare()?;
-        let folder: Option<String> = self
-            .library
-            .connection()
-            .query_row(
-                "SELECT FolderPath FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
-                params![content],
-                |r| r.get(0),
-            )
-            .optional()?
-            .flatten();
-        let Some(folder) = folder else {
+        let Some(stored) = self.library.stored_path(content)? else {
             return Err(DbError::WriteRefused(format!("no track {content}")));
         };
-        let path = crate::resolve_folder_path(&self.real_path(&folder), None);
+        // The file rekordbox opens: a cloud-synced track's local copy, as
+        // playback resolves it, not the raw stored path.
+        let path = self.library.track_paths().resolve(&stored);
         let tags = crate::import::read_tags(Path::new(&path))
             .map_err(|e| DbError::WriteRefused(e.to_string()))?;
         let stamp = time::now();

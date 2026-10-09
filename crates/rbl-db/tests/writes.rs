@@ -2423,3 +2423,36 @@ fn grid_lock_preserves_other_flags_and_grid_revision_uses_reference_character() 
     assert_eq!(f.one::<String>("SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1", &[&id]),":");
     assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&id]),12800);
 }
+
+#[test]
+fn reload_tag_reads_a_cloud_tracks_local_copy() {
+    use lofty::config::WriteOptions;
+    use lofty::prelude::{ItemKey, TagExt};
+    use lofty::tag::{Tag, TagType};
+
+    let audio = tempfile::tempdir().unwrap();
+    let local = audio.path().join("Local.wav");
+    write_wav(&local, 1);
+    let mut tag = Tag::new(TagType::RiffInfo);
+    tag.insert_text(ItemKey::TrackTitle, "From The Local Copy".to_owned());
+    tag.save_to_path(&local, WriteOptions::default()).unwrap();
+
+    let mut f = fixture();
+    let id = rbl_db::fixture::track_id(0);
+    // Uploaded from this machine through Cloud Library Sync: FolderPath is
+    // a cloud path no file answers to, OrgFolderPath is the real file.
+    f.conn()
+        .execute(
+            "UPDATE djmdContent SET FolderPath = '/contents_1739239895/a/missing.wav', OrgFolderPath = ?1, \
+             ContentLink = ?2, ServiceID = ?3, DeviceID = 'own' WHERE ID = ?4",
+            rusqlite::params![local.to_string_lossy(), rbl_db::track_path::CLOUD_SHARED, rbl_db::track_path::SERVICE_GOOGLE_DRIVE, id],
+        )
+        .unwrap();
+    f.conn().execute("UPDATE djmdProperty SET DeviceID = 'own'", []).unwrap();
+    f.writer.library().set_dropbox_folder(None);
+
+    let changed = f.writer.reload_tags(&id).unwrap();
+    assert!(changed >= 1, "{changed}");
+    let title: String = f.one("SELECT Title FROM djmdContent WHERE ID = ?1", &[&id]);
+    assert_eq!(title, "From The Local Copy");
+}
