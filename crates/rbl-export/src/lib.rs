@@ -11,6 +11,7 @@
 //! Nothing here touches the user's library: it reads from an already-loaded
 //! index and writes only under the destination directory.
 
+pub mod device_library;
 pub mod ext_pdb;
 pub mod manifest;
 pub mod sync_record;

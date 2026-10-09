@@ -8,6 +8,7 @@
 
 pub mod build;
 pub mod key;
+pub mod playlists;
 pub mod settings;
 
 use std::path::Path;
