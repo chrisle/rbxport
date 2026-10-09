@@ -1129,7 +1129,6 @@
   "Delete music not in any playlist": "A lejátszási listákon nem szereplő zenék törlése",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Szabadítson fel helyet az USB-meghajtón, ha eltávolítja a lejátszási listákon nem szereplő dalokat.",
   "Maximum CDJ compatibility": "Maximális CDJ kompatibilitás",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "A régebbi CDJ modellekhez mentse az olyan formátumokat, mint a FLAC és M4A WAV, AIFF vagy MP3 formátumban az USB-meghajtóra. Az eredetiek érintetlenek maradnak.",
   "Convert to": "Konvertálás erre",
   "WAV — larger files": "WAV – nagyobb fájlok",
   "AIFF — larger files": "AIFF – nagyobb fájlok",
@@ -1524,5 +1523,6 @@
   "This file is already in the collection.": "A fájl már a gyűjteményben van.",
   "Would you like RBXport to find other missing file using the location of this track ?": "Szeretné, hogy a RBXport megkeresse a többi hiányzó fájlt e szám helye alapján?",
   "RBXport found {count} files.": "A RBXport {count} fájlt talált.",
-  "Load error. The file could not be found.": "Betöltési hiba. A fájl hiányzik. "
+  "Load error. The file could not be found.": "Betöltési hiba. A fájl hiányzik. ",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "A régebbi CDJ modellekhez mentse az olyan formátumokat, mint a FLAC és M4A WAV, AIFF vagy MP3 formátumban az USB-meghajtóra. Átalakítja az alacsony mintavételezési frekvenciájú MP3-fájlokat (16, 22,05 vagy 24 kHz) is, amelyeket egyes lejátszók túl gyorsan játszanak le. Az eredetiek érintetlenek maradnak."
 }

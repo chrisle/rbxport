@@ -1128,7 +1128,6 @@
   "Delete music not in any playlist": "Smažte hudbu, která není v žádném seznamu skladeb",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Uvolněte místo na USB klíči odstraněním skladeb, které nejsou v žádném seznamu skladeb.",
   "Maximum CDJ compatibility": "Maximální CDJ kompatibilita",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "U starších modelů CDJ uložte formáty jako FLAC a M4A jako WAV, AIFF nebo MP3 na USB flash disk. Originály zůstávají nedotčeny.",
   "Convert to": "Převést na",
   "WAV — larger files": "WAV — větší soubory",
   "AIFF — larger files": "AIFF — větší soubory",
@@ -1525,5 +1524,6 @@
   "This file is already in the collection.": "Tento soubor již ve sbírce existuje.",
   "Would you like RBXport to find other missing file using the location of this track ?": "Chcete, aby aplikace RBXport pomocí umístění této stopy našla jiný chybějící soubor?",
   "RBXport found {count} files.": "Aplikace RBXport našla {count} souborů.",
-  "Load error. The file could not be found.": "Chyba při načítání. Soubor chybí. "
+  "Load error. The file could not be found.": "Chyba při načítání. Soubor chybí. ",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "U starších modelů CDJ uložte formáty jako FLAC a M4A jako WAV, AIFF nebo MP3 na USB flash disk. Převede i MP3 s nízkým vzorkovacím kmitočtem (16, 22,05 nebo 24 kHz), které některé přehrávače hrají příliš rychle. Originály zůstávají nedotčeny."
 }

@@ -1132,7 +1132,6 @@
   "Delete music not in any playlist": "Διαγραφή μουσικής όχι σε καμία λίστα αναπαραγωγής",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Ελευθερώστε χώρο στο USB stick αφαιρώντας τραγούδια που δεν υπάρχουν σε καμία λίστα αναπαραγωγής.",
   "Maximum CDJ compatibility": "Μέγιστη συμβατότητα CDJ",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Αποθηκεύστε μορφές όπως FLAC και M4A ως WAV, AIFF ή MP3 στο USB stick για παλαιότερα μοντέλα CDJ. Τα πρωτότυπα μένουν ανέγγιχτα.",
   "Convert to": "Μετατροπή σε",
   "WAV — larger files": "WAV — μεγαλύτερα αρχεία",
   "AIFF — larger files": "AIFF — μεγαλύτερα αρχεία",
@@ -1526,5 +1525,6 @@
   "This file is already in the collection.": "Αυτό το αρχείο υπάρχει ήδη στη συλλογή.",
   "Would you like RBXport to find other missing file using the location of this track ?": "Θέλετε το RBXport να βρει άλλο αρχείο που λείπει χρησιμοποιώντας τη θέση αυτού του κομματιού;",
   "RBXport found {count} files.": "Το RBXport βρήκε {count} ρχεία.",
-  "Load error. The file could not be found.": "Σφάλμα φόρτωσης. Λείπει το αρχείο. "
+  "Load error. The file could not be found.": "Σφάλμα φόρτωσης. Λείπει το αρχείο. ",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "Αποθηκεύστε μορφές όπως FLAC και M4A ως WAV, AIFF ή MP3 στο USB stick για παλαιότερα μοντέλα CDJ. Μετατρέπει επίσης MP3 χαμηλού ρυθμού δειγματοληψίας (16, 22,05 ή 24 kHz) που ορισμένα players παίζουν πολύ γρήγορα. Τα πρωτότυπα μένουν ανέγγιχτα."
 }

@@ -1135,7 +1135,6 @@
   "Delete music not in any playlist": "Удалить музыку, которой нет ни в одном плейлисте",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Освободите место на USB-накопителе, удалив песни, которых нет ни в одном плейлисте.",
   "Maximum CDJ compatibility": "Максимальная совместимость с CDJ",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Сохраняйте такие форматы, как FLAC и M4A, как WAV, AIFF или MP3 на USB-накопителе для старых моделей CDJ. Оригиналы остаются нетронутыми.",
   "Convert to": "Преобразовать в",
   "WAV — larger files": "WAV — файлы большего размера",
   "AIFF — larger files": "AIFF — файлы большего размера",
@@ -1527,5 +1526,6 @@
   "This file is already in the collection.": "Этот файл уже находится в коллекции.",
   "Would you like RBXport to find other missing file using the location of this track ?": "Нужно-ли запустить поиск на RBXport других недостающих файлов, \nиспользуя месторасположение данной дорожки?",
   "RBXport found {count} files.": "RBXport обнаружил {count} файлов.",
-  "Load error. The file could not be found.": "Ошибка загрузки. Не найден исходный."
+  "Load error. The file could not be found.": "Ошибка загрузки. Не найден исходный.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "Сохраняйте такие форматы, как FLAC и M4A, как WAV, AIFF или MP3 на USB-накопителе для старых моделей CDJ. Также конвертирует MP3 с низкой частотой дискретизации (16, 22,05 или 24 кГц), которые некоторые плееры воспроизводят слишком быстро. Оригиналы остаются нетронутыми."
 }

@@ -1141,7 +1141,6 @@
   "Delete music not in any playlist": "どのプレイリストにもない音楽を削除する",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "どのプレイリストにも含まれていない曲を削除して、USB スティックのスペースを解放します。",
   "Maximum CDJ compatibility": "最大限の CDJ 互換性",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "古い CDJ モデルの場合は、FLAC や M4A などの形式を WAV、AIFF または MP3 として USB スティックに保存します。オリジナルはそのまま残ります。",
   "Convert to": "に変換する",
   "WAV — larger files": "WAV — 大きなファイル",
   "AIFF — larger files": "AIFF — 大きなファイル",
@@ -1531,5 +1530,6 @@
   "This file is already in the collection.": "このファイルは既にコレクションに存在します。",
   "Would you like RBXport to find other missing file using the location of this track ?": "この曲の場所を使って他のファイルを検索しますか ?",
   "RBXport found {count} files.": "ファイルを {count} 個見つけました。",
-  "Load error. The file could not be found.": "ロードエラー。 ファイルが見つかりません。"
+  "Load error. The file could not be found.": "ロードエラー。 ファイルが見つかりません。",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "古い CDJ モデルの場合は、FLAC や M4A などの形式を WAV、AIFF または MP3 として USB スティックに保存します。一部のプレーヤーで速く再生されてしまう、サンプルレートの低い MP3 (16、22.05、24 kHz) も変換します。オリジナルはそのまま残ります。"
 }

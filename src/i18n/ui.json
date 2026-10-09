@@ -889,7 +889,7 @@
   "SYNC",
   "Same Key",
   "Sample Rate",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.",
   "Save your library in a compressed ZIP. Music files are not backed up.",
   "Saved backups",
   "Saving backup folder…",

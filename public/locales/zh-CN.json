@@ -1139,7 +1139,6 @@
   "Delete music not in any playlist": "删除不在任何播放列表中的音乐",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "通过删除不在任何播放列表中的歌曲来释放 USB 记忆棒上的空间。",
   "Maximum CDJ compatibility": "最大的 CDJ 兼容性",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "对于旧版 CDJ 型号，可将 FLAC 和 M4A 等格式另存为 WAV、AIFF 或 MP3 到 U 盘上。原件保持不变。",
   "Convert to": "转换为",
   "WAV — larger files": "WAV — 较大的文件",
   "AIFF — larger files": "AIFF — 较大的文件",
@@ -1527,5 +1526,6 @@
   "This file is already in the collection.": "已经在收集该文件。",
   "Would you like RBXport to find other missing file using the location of this track ?": "其他曲目也按照这个位置进行搜索吗？",
   "RBXport found {count} files.": "找到 {count} 个文件。",
-  "Load error. The file could not be found.": "加载错误。文件不存在。"
+  "Load error. The file could not be found.": "加载错误。文件不存在。",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "对于旧版 CDJ 型号，可将 FLAC 和 M4A 等格式另存为 WAV、AIFF 或 MP3 到 U 盘上。还会转换部分播放器播放过快的低采样率 MP3(16、22.05 或 24 kHz)。原件保持不变。"
 }

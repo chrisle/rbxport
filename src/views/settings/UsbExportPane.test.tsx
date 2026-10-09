@@ -95,3 +95,15 @@ it("offers AIFF as a compatibility conversion target", () => {
   });
   expect(update).toHaveBeenCalledWith("usbExport", { conversionFormat: "aiff" });
 });
+
+it("says Maximum CDJ compatibility also converts low-sample-rate MP3s", () => {
+  act(() => root.render(
+    <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update: vi.fn(), reset: vi.fn() }}>
+      <UsbExportPane />
+    </PreferencesProvider>,
+  ));
+
+  const help = host.querySelector('[id$="-compatibility-help"]');
+  expect(help?.textContent).toContain("FLAC and M4A");
+  expect(help?.textContent).toContain("low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast");
+});

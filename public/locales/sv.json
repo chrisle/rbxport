@@ -1124,7 +1124,6 @@
   "Delete music not in any playlist": "Ta bort musik som inte finns i någon spellista",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Frigör utrymme på ditt USB-minne genom att ta bort låtar som inte finns i någon spellista.",
   "Maximum CDJ compatibility": "Maximal CDJ-kompatibilitet",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Spara format som FLAC och M4A som WAV, AIFF eller MP3 på ditt USB-minne för äldre CDJ-modeller. Originalen förblir orörda.",
   "Convert to": "Konvertera till",
   "WAV — larger files": "WAV — större filer",
   "AIFF — larger files": "AIFF — större filer",
@@ -1522,5 +1521,6 @@
   "This file is already in the collection.": "Denna fil finns redan i samlingen.",
   "Would you like RBXport to find other missing file using the location of this track ?": "Vill du att RBXport söker efter andra saknade filer med hjälp av detta spårs plats?",
   "RBXport found {count} files.": "RBXport hittade {count} filer.",
-  "Load error. The file could not be found.": "Laddningsfel. Fil saknas."
+  "Load error. The file could not be found.": "Laddningsfel. Fil saknas.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "Spara format som FLAC och M4A som WAV, AIFF eller MP3 på ditt USB-minne för äldre CDJ-modeller. Konverterar även MP3-filer med låg samplingsfrekvens (16, 22,05 eller 24 kHz) som vissa spelare spelar upp för snabbt. Originalen förblir orörda."
 }

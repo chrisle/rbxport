@@ -1130,7 +1130,6 @@
   "Delete music not in any playlist": "Herhangi bir çalma listesinde olmayan müziği silin",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Hiçbir çalma listesinde olmayan şarkıları kaldırarak USB belleğinizde yer açın.",
   "Maximum CDJ compatibility": "Maksimum CDJ uyumluluğu",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Eski CDJ modelleri için FLAC ve M4A gibi formatları USB belleğinize WAV, AIFF veya MP3 olarak kaydedin. Orijinallere dokunulmaz.",
   "Convert to": "Şuna dönüştür:",
   "WAV — larger files": "WAV — daha büyük dosyalar",
   "AIFF — larger files": "AIFF — daha büyük dosyalar",
@@ -1525,5 +1524,6 @@
   "This file is already in the collection.": "Bu dosya koleksiyonda zaten var.",
   "Would you like RBXport to find other missing file using the location of this track ?": "Bu parçanın konumunu kullanarak RBXport'ın diğer eksik dosyayı bulmasını ister misiniz?",
   "RBXport found {count} files.": "RBXport {count} adet dosya buldu.",
-  "Load error. The file could not be found.": "Yükleme hatası. Dosya eksik. "
+  "Load error. The file could not be found.": "Yükleme hatası. Dosya eksik. ",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "Eski CDJ modelleri için FLAC ve M4A gibi formatları USB belleğinize WAV, AIFF veya MP3 olarak kaydedin. Bazı oynatıcıların çok hızlı çaldığı düşük örnekleme hızlı MP3'leri (16, 22,05 veya 24 kHz) de dönüştürür. Orijinallere dokunulmaz."
 }

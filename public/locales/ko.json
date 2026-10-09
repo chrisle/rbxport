@@ -1119,7 +1119,6 @@
   "Delete music not in any playlist": "재생목록에 없는 음악 삭제",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "재생 목록에 없는 노래를 제거하여 USB 스틱에 여유 공간을 확보하세요.",
   "Maximum CDJ compatibility": "최대 CDJ 호환성",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "구형 CDJ 모델의 경우 FLAC 및 M4A와 같은 형식을 USB 스틱에 WAV, AIFF 또는 MP3로 저장하세요. 원본은 그대로 유지됩니다.",
   "Convert to": "다음으로 변환",
   "WAV — larger files": "WAV — 더 큰 파일",
   "AIFF — larger files": "AIFF — 더 큰 파일",
@@ -1522,5 +1521,6 @@
   "This file is already in the collection.": "This file is already in the collection.",
   "Would you like RBXport to find other missing file using the location of this track ?": "본 트랙의 위치를 사용하여 RBXport로 하여금 그밖의 분실된 파일을 찾도록 하시겠습니까?",
   "RBXport found {count} files.": "RBXport가 {count} 개의 파일을 찾아냈습니다.",
-  "Load error. The file could not be found.": "로드 오류. 파일이 없습니다."
+  "Load error. The file could not be found.": "로드 오류. 파일이 없습니다.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "구형 CDJ 모델의 경우 FLAC 및 M4A와 같은 형식을 USB 스틱에 WAV, AIFF 또는 MP3로 저장하세요. 일부 플레이어에서 너무 빠르게 재생되는 낮은 샘플링 레이트의 MP3(16, 22.05, 24 kHz)도 변환합니다.원본은 그대로 유지됩니다."
 }

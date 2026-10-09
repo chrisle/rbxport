@@ -92,7 +92,7 @@ export function UsbExportPane() {
       <label className={styles.conversionToggle}>
         <span className={styles.details}>
           <strong id={`${id}-compatibility`}>{t("Maximum CDJ compatibility")}</strong>
-          <span id={`${id}-compatibility-help`} className={styles.description}>{t("Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.")}</span>
+          <span id={`${id}-compatibility-help`} className={styles.description}>{t("Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.")}</span>
         </span>
         <input type="checkbox" role="switch" className={controls.toggle}
           aria-labelledby={`${id}-compatibility`} aria-describedby={`${id}-compatibility-help`}

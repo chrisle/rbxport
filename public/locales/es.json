@@ -1134,7 +1134,6 @@
   "Delete music not in any playlist": "Eliminar música que no esté en ninguna lista de reproducción",
   "Free space on your USB stick by removing songs that aren't in any playlist.": "Libera espacio en tu memoria USB eliminando canciones que no están en ninguna lista de reproducción.",
   "Maximum CDJ compatibility": "Máxima compatibilidad con CDJ",
-  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Originals stay untouched.": "Guarde formatos como FLAC y M4A como WAV, AIFF o MP3 en su memoria USB para modelos de CDJ más antiguos. Los originales permanecen intactos.",
   "Convert to": "Convertir a",
   "WAV — larger files": "WAV: archivos más grandes",
   "AIFF — larger files": "AIFF: archivos más grandes",
@@ -1525,5 +1524,6 @@
   "This file is already in the collection.": "El archivo ya forma parte de la colección.",
   "Would you like RBXport to find other missing file using the location of this track ?": "¿Desea que RBXport use la ubicación de esta pista \npara buscar otros archivos que faltan?",
   "RBXport found {count} files.": "RBXport ha encontrado {count} archivos.",
-  "Load error. The file could not be found.": "Error de carga. No se encontra el archivo."
+  "Load error. The file could not be found.": "Error de carga. No se encontra el archivo.",
+  "Save formats like FLAC and M4A as WAV, AIFF or MP3 on your USB stick for older CDJ models. Also converts low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast. Originals stay untouched.": "Guarde formatos como FLAC y M4A como WAV, AIFF o MP3 en su memoria USB para modelos de CDJ más antiguos. También convierte los MP3 de baja frecuencia de muestreo (16, 22,05 o 24 kHz) que algunos reproductores reproducen demasiado rápido. Los originales permanecen intactos."
 }
