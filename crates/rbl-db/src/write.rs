@@ -302,6 +302,46 @@ pub struct Changed {
     pub usn: i64,
 }
 
+/// A cue a player saved or deleted over the link, with its colour already
+/// settled. See [`Writer::save_player_cue`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlayerCue {
+    /// `djmdCue.Kind`: 0 a memory cue or loop, 4 an active memory loop,
+    /// 1-3 and 5-17 hot cues.
+    pub kind: u8,
+    pub in_ms: u32,
+    /// A loop's end; `None` on a cue point.
+    pub out_ms: Option<u32>,
+    /// A memory cue's `Color`, 0-7, or `None`.
+    pub colour: Option<u8>,
+    /// A hot cue's `ColorTableIndex`, 1-64.
+    pub color_table_index: u8,
+    pub comment: String,
+    /// The loop's length in beats, numerator and denominator.
+    pub beat_loop: Option<(u16, u16)>,
+}
+
+impl PlayerCue {
+    /// Kind 0, and 4 for an active loop, are memory cues; rekordbox gives
+    /// them no slot.
+    pub const fn is_memory(&self) -> bool {
+        matches!(self.kind, 0 | 4)
+    }
+
+    fn check(&self) -> Result<()> {
+        if self.kind > 17 || (self.kind == 4 && self.out_ms.is_none()) {
+            return Err(DbError::WriteRefused(format!("{} is not a cue kind rekordbox uses", self.kind)));
+        }
+        if self.out_ms.is_some_and(|out| out <= self.in_ms) {
+            return Err(DbError::WriteRefused("a loop has to end after it starts".to_owned()));
+        }
+        if self.colour.is_some_and(|colour| colour > 7) || (!self.is_memory() && !(1..=64).contains(&self.color_table_index)) {
+            return Err(DbError::WriteRefused("cue colour is outside rekordbox's palette".to_owned()));
+        }
+        Ok(())
+    }
+}
+
 /// The exact tombstones made by one playlist deletion.
 ///
 /// Keeping row ids, rather than only the deleted root, matters for undo: a
@@ -1905,6 +1945,124 @@ impl Writer {
             "UPDATE djmdCue SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
              WHERE ID = ?3 AND rb_local_deleted = 0",
             params![usn, stamp, cue],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// Saves a cue a player made over the link, as rekordbox 7.2.19 does in
+    /// `UiProDJLink::ReceiveSetCueEvent` (@`0x1015fc31c`) [OBS static]: a
+    /// hot cue first takes whatever is in its slot off the track (the
+    /// method calls `ReceiveDeleteCueEvent`, vtable `+0x158`, before
+    /// `DatabaseIF::setCue`), a memory cue or loop is simply added. Returns
+    /// the new cue's id.
+    ///
+    /// Columns follow [`Writer::add_cue`]'s reference-library values: a
+    /// memory cue's `Color` is its colour or 255 and its `ColorTableIndex`
+    /// 0; a hot cue's `Color` is -1 and its `ColorTableIndex` the colour.
+    /// A cue point's `OutMsec` is -1, which rekordbox writes [OBS rig
+    /// library, board 2026-10-10]. `BeatLoopSize` is
+    /// `(numerator << 16) | denominator` when the player sent both.
+    pub fn save_player_cue(&mut self, content: &str, cue: &PlayerCue) -> Result<String> {
+        cue.check()?;
+        self.prepare()?;
+        let id = self.unused_id_below("djmdCue", MAX_CUE_ID)?;
+        let uuid = self.rng.uuid4();
+        let stamp = time::now();
+        let memory = cue.is_memory();
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let content_uuid: String = tx
+            .query_row("SELECT UUID FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0", params![content], |r| r.get(0))
+            .optional()?
+            .ok_or_else(|| DbError::WriteRefused(format!("no track {content}")))?;
+        let usn = next_usn(&tx)?;
+        if !memory {
+            tx.execute(
+                "UPDATE djmdCue SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
+                 WHERE ContentID = ?3 AND Kind = ?4 AND rb_local_deleted = 0",
+                params![usn, stamp, content, i64::from(cue.kind)],
+            )?;
+        }
+        let size = cue.beat_loop.map(|(numerator, denominator)| (i64::from(numerator) << 16) | i64::from(denominator));
+        tx.execute(
+            "INSERT INTO djmdCue
+                (ID, ContentID, InMsec, InFrame, InMpegFrame, InMpegAbs,
+                 OutMsec, OutFrame, OutMpegFrame, OutMpegAbs,
+                 Kind, Color, ColorTableIndex, ActiveLoop, Comment, BeatLoopSize,
+                 CueMicrosec, ContentUUID, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, 0, 0, ?4, NULL, NULL, NULL,
+                     ?5, ?6, ?7, 0, ?8, ?9,
+                     NULL, ?10, ?11, 0, 0, 0, 0, NULL, ?12, ?13, ?13)",
+            params![
+                id,
+                content,
+                i64::from(cue.in_ms),
+                cue.out_ms.map_or(-1, i64::from),
+                i64::from(cue.kind),
+                if memory { cue.colour.map_or(255, i64::from) } else { -1 },
+                if memory { 0 } else { i64::from(cue.color_table_index) },
+                cue.comment,
+                size,
+                content_uuid,
+                uuid,
+                usn,
+                stamp
+            ],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Deletes a cue a player deleted over the link, as rekordbox 7.2.19's
+    /// `UiProDJLink::ReceiveDeleteCueEvent` (@`0x1015fc4f4`) finds it
+    /// [OBS static]: a hot cue by its slot alone, a memory cue by its kind,
+    /// `InMsec` and `OutMsec` (both without an out, or the same out). Only
+    /// the first match goes. A memory loop that matches nothing as `Kind` 0
+    /// is looked for again as an active loop, `Kind` 4, as
+    /// `PSvDBMain::SavUsbCueExt` retries it. Nothing matching is not an
+    /// error: rekordbox answers the player with the track's cues either way.
+    pub fn delete_player_cue(&mut self, content: &str, cue: &PlayerCue) -> Result<Changed> {
+        if cue.kind > 17 {
+            return Err(DbError::WriteRefused(format!("{} is not a cue kind rekordbox uses", cue.kind)));
+        }
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let find = |kind: u8| -> Result<Option<String>> {
+            let found = if cue.is_memory() {
+                tx.query_row(
+                    "SELECT ID FROM djmdCue WHERE ContentID = ?1 AND Kind = ?2 AND rb_local_deleted = 0
+                       AND InMsec = ?3
+                       AND (CASE WHEN COALESCE(OutMsec, -1) <= 0 THEN -1 ELSE OutMsec END) = ?4
+                     ORDER BY CAST(ID AS INTEGER) LIMIT 1",
+                    params![content, i64::from(kind), i64::from(cue.in_ms), cue.out_ms.map_or(-1, i64::from)],
+                    |r| r.get(0),
+                )
+            } else {
+                tx.query_row(
+                    "SELECT ID FROM djmdCue WHERE ContentID = ?1 AND Kind = ?2 AND rb_local_deleted = 0
+                     ORDER BY CAST(ID AS INTEGER) LIMIT 1",
+                    params![content, i64::from(kind)],
+                    |r| r.get(0),
+                )
+            };
+            Ok(found.optional()?)
+        };
+        let mut target = find(cue.kind)?;
+        if target.is_none() && cue.kind == 0 && cue.out_ms.is_some() {
+            target = find(4)?;
+        }
+        let Some(target) = target else {
+            return Ok(Changed { rows: 0, usn: 0 });
+        };
+        let usn = next_usn(&tx)?;
+        let rows = tx.execute(
+            "UPDATE djmdCue SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2 WHERE ID = ?3",
+            params![usn, stamp, target],
         )?;
         set_counter(&tx, usn)?;
         tx.commit()?;

@@ -3135,3 +3135,119 @@ fn removing_tracks_in_a_batch_leaves_what_removing_them_one_at_a_time_does() {
     );
     assert_eq!(counter, *usns.last().unwrap());
 }
+
+// ------------------------------------------------- cues a player saves (LINK)
+
+fn player_cue(kind: u8, in_ms: u32, out_ms: Option<u32>) -> rbl_db::write::PlayerCue {
+    rbl_db::write::PlayerCue { kind, in_ms, out_ms, colour: None, color_table_index: 21, comment: String::new(), beat_loop: None }
+}
+
+/// Kind, InMsec, OutMsec (-1 for none), Color, ColorTableIndex, Comment,
+/// BeatLoopSize of a track's live cues.
+type CueRow = (i64, i64, i64, i64, i64, String, Option<i64>);
+
+fn live_cues(f: &Fixture, track: &str) -> Vec<CueRow> {
+    let mut stmt = f
+        .conn()
+        .prepare(
+            "SELECT Kind, InMsec, COALESCE(OutMsec, -1), Color, ColorTableIndex, Comment, BeatLoopSize FROM djmdCue
+             WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY Kind, InMsec",
+        )
+        .unwrap();
+    stmt.query_map([track], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+
+#[test]
+fn a_players_memory_cue_and_loop_are_added_with_their_colour_name_and_length() {
+    // rekordbox's ReceiveSetCueEvent adds a memory cue without looking for
+    // one already there; a second at the same place is a second row.
+    let mut f = fixture();
+    let track = track_id(0);
+    let mut named = player_cue(0, 61_234, None);
+    named.colour = Some(2);
+    named.comment = "drop".into();
+    f.writer.save_player_cue(&track, &named).unwrap();
+    f.writer.save_player_cue(&track, &named).unwrap();
+    let mut looped = player_cue(0, 1_000, Some(3_000));
+    looped.beat_loop = Some((4, 1));
+    f.writer.save_player_cue(&track, &looped).unwrap();
+    assert_eq!(
+        live_cues(&f, &track),
+        vec![
+            (0, 1_000, 3_000, 255, 0, String::new(), Some(262_145)),
+            (0, 61_234, -1, 2, 0, "drop".into(), None),
+            (0, 61_234, -1, 2, 0, "drop".into(), None),
+        ]
+    );
+}
+
+#[test]
+fn a_players_hot_cue_replaces_the_one_in_its_slot_only() {
+    // ReceiveSetCueEvent calls ReceiveDeleteCueEvent (vtable +0x158) on a
+    // hot cue first: the slot's old cue goes, the other slots stay.
+    let mut f = fixture();
+    let track = track_id(0);
+    let old = f.writer.add_cue(&track, 5, 9_000).unwrap();
+    f.writer.add_cue(&track, 1, 1_000).unwrap();
+    f.writer.add_cue(&track_id(1), 5, 9_000).unwrap();
+    let mut d = player_cue(5, 4_000, None);
+    d.color_table_index = 5;
+    f.writer.save_player_cue(&track, &d).unwrap();
+    assert_eq!(
+        live_cues(&f, &track),
+        vec![(1, 1_000, -1, -1, 21, String::new(), None), (5, 4_000, -1, -1, 5, String::new(), None)]
+    );
+    let deleted: i64 = f.one("SELECT rb_local_deleted FROM djmdCue WHERE ID = ?1", &[&old]);
+    assert_eq!(deleted, 1, "soft-deleted, as rekordbox's own deletes are");
+    assert_eq!(live_cues(&f, &track_id(1)).len(), 1, "another track's slot D is untouched");
+}
+
+#[test]
+fn a_players_delete_takes_a_hot_cue_by_slot_and_a_memory_cue_by_its_times() {
+    let mut f = fixture();
+    let track = track_id(0);
+    f.writer.add_cue(&track, 2, 1_000).unwrap();
+    f.writer.add_cue(&track, 0, 5_000).unwrap();
+    f.writer.add_loop(&track, 0, 5_000, 6_000, 0).unwrap();
+    // A hot cue goes by its slot, wherever it is.
+    assert_eq!(f.writer.delete_player_cue(&track, &player_cue(2, 77, None)).unwrap().rows, 1);
+    // A memory cue needs its in and out to match: the loop at 5 s is not
+    // the cue point at 5 s.
+    assert_eq!(f.writer.delete_player_cue(&track, &player_cue(0, 5_000, Some(6_500))).unwrap().rows, 0);
+    assert_eq!(f.writer.delete_player_cue(&track, &player_cue(0, 5_000, None)).unwrap().rows, 1);
+    assert_eq!(live_cues(&f, &track), vec![(0, 5_000, 6_000, 255, 0, String::new(), Some(0))]);
+    // Nothing left to match is not an error.
+    assert_eq!(f.writer.delete_player_cue(&track, &player_cue(3, 0, None)).unwrap().rows, 0);
+}
+
+#[test]
+fn a_players_active_memory_loop_is_kind_4_and_deleted_as_one() {
+    // SavUsbCueExt stores an active memory loop as Kind 4, and a delete of
+    // a memory loop that finds no Kind 0 looks for Kind 4.
+    let mut f = fixture();
+    let track = track_id(0);
+    f.writer.save_player_cue(&track, &player_cue(4, 2_000, Some(2_500))).unwrap();
+    assert_eq!(live_cues(&f, &track), vec![(4, 2_000, 2_500, 255, 0, String::new(), None)]);
+    assert_eq!(f.writer.delete_player_cue(&track, &player_cue(0, 2_000, Some(2_500))).unwrap().rows, 1);
+    assert!(live_cues(&f, &track).is_empty());
+}
+
+#[test]
+fn a_players_cue_rekordbox_would_not_store_is_refused() {
+    let mut f = fixture();
+    let track = track_id(0);
+    for cue in [
+        player_cue(18, 0, None),
+        player_cue(4, 0, None),
+        player_cue(0, 5_000, Some(5_000)),
+        rbl_db::write::PlayerCue { colour: Some(8), ..player_cue(0, 0, None) },
+        rbl_db::write::PlayerCue { color_table_index: 0, ..player_cue(1, 0, None) },
+    ] {
+        assert!(matches!(f.writer.save_player_cue(&track, &cue), Err(DbError::WriteRefused(_))), "{cue:?}");
+    }
+    assert!(matches!(f.writer.save_player_cue("no-such-track", &player_cue(0, 0, None)), Err(DbError::WriteRefused(_))));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue"), 0);
+}
