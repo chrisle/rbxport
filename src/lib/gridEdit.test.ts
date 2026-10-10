@@ -69,4 +69,25 @@ describe("TapButton",()=>{
   expect(withTap([0],100)).toEqual([]);
   expect(withTap([0,500],1010)).toEqual([0,500,1010]);
  });
+ // The tempo rekordbox 7.2.19 hands BeatGridAdjustment::tapTap after each
+ // tap (TapButton::clicked @0x1010b6378 / calcBpm @0x1010b64d4, arm64), and
+ // the timeout it restarts; 0 / null where it sends no tempo (#137).
+ it.each([
+  ["steady", [0,500,1000,1500,2000], [0,120,120,120,120], [1500,750,750,750,750]],
+  ["uneven", [0,469,937,1406,1875,2343], [0,127.931770,128.068303,128.022760,128,128.040973], [1500,703,702,703,703,702]],
+  ["drift inside the ±16% gate", [0,500,1020,1500,2010], [0,120,117.647059,120,119.402985], [1500,750,765,750,753]],
+  ["outlier resets", [0,500,1100,1600,2100], [0,120,0,0,120], [1500,750,null,1500,750]],
+  ["second tap too fast", [0,100,600,1100], [0,0,0,120], [1500,null,1500,750]],
+  ["gap starts a new run", [0,500,1300,1800,2300], [0,120,0,120,120], [1500,750,1500,750,750]],
+  ["slowest", [0,1490,2980,4470], [0,40.268456,40.268456,40.268456], [1500,1500,1500,1500]],
+  ["mean at 120 ms sends none", [0,130,240,370], [0,461.538462,0,486.486486], [1500,195,180,185]],
+ ])("matches rekordbox's TapButton: %s", (_name, times, bpms, timeouts) => {
+  let taps: number[] = [];
+  times.forEach((now, i) => {
+   taps = withTap(taps, now);
+   const bpm = tapTempo(taps) === null ? 0 : 60_000 * (taps.length - 1) / (taps.at(-1)! - taps[0]!);
+   expect(bpm).toBeCloseTo(bpms[i]!, 5);
+   expect(taps.length ? tapTimeout(taps) : null).toBe(timeouts[i]);
+  });
+ });
 });
