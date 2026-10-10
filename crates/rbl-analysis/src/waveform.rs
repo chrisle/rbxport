@@ -145,9 +145,11 @@ fn blue_byte(c: WaveformColumn) -> u8 {
     ((c.high >> 5) << 5) | five_bits(c.peak)
 }
 
-/// A column's colour the way rekordbox's RGB waveform reads: bass blue,
-/// mids amber, highs white. The bands are the ones in the column; the
-/// mapping to channels is ours [UNKNOWN: rekordbox's own weights].
+/// A column's colour for the `pack_colour_*` diagnostics only: bass blue,
+/// mids amber, highs white. This is not what rekordbox writes: its `PWV4`
+/// and `PWV5` channels are low, mid and high as red, green and blue
+/// [OBS, issues #158 and #288], and the files rbxport writes take their
+/// colour from `rbl_anlz::encode` instead.
 fn rgb_of(c: WaveformColumn) -> (u8, u8, u8) {
     let amber_green = u8::try_from(u16::from(c.mid) * 3 / 5).unwrap_or(u8::MAX);
     (c.mid.max(c.high), amber_green.max(c.high), c.low.max(c.high))
