@@ -49,6 +49,8 @@
   cursor: pointer;
 }
 
+.twistyWrapper[data-leaf]{ cursor: unset; }
+
 .twisty {
   width: 0;
   height: 0;
@@ -57,13 +59,18 @@
   border: 5px solid transparent;
   border-left-color: var(--c-text);
 }
-.twisty[data-open] {
+
+.twistyWrapper[data-leaf] .twisty{
+  border-left-color: transparent;
+  width: 10px;
+}
+
+.twistyWrapper[data-open] .twisty {
   border-left-color: transparent;
   border-top-color: var(--c-text);
   border-bottom: 0;
   margin-top: 3px;
 }
-.twisty[data-leaf] { border-left-color: transparent; width: 10px; }
 
 .icon { width: 14px; height: 12px; flex: none; color: var(--c-text); }
 /* The Explorer's folders are drawn in the dimmer icon grey [OBS], measured

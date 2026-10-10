@@ -245,6 +245,11 @@ const Row = memo(function Row({
     >
       <div
         className={styles.twistyWrapper}
+        data-open={(branch && open) || undefined}
+        data-leaf={!branch || undefined}
+        role={branch ? "button" : undefined}
+        // Stops the row's own mousedown from also selecting: opening a folder
+        // and moving to it are different intentions.
         onMouseDown={(e) => {
           if (!branch) return;
           e.stopPropagation();
@@ -254,12 +259,6 @@ const Row = memo(function Row({
       >
         <span
           className={styles.twisty}
-          data-open={(branch && open) || undefined}
-          data-leaf={!branch || undefined}
-          // Stops the row's own mousedown from also selecting: opening a folder
-          // and moving to it are different intentions.
-          
-          role={branch ? "button" : undefined}
           aria-label={branch ? `${open ? "Collapse" : "Expand"} ${node.name}` : undefined}
         />
       </div>
