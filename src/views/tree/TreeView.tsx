@@ -243,21 +243,26 @@ const Row = memo(function Row({
       aria-expanded={branch ? open : undefined}
       tabIndex={selected ? 0 : -1}
     >
-      <span
-        className={styles.twisty}
-        data-open={(branch && open) || undefined}
-        data-leaf={!branch || undefined}
-        // Stops the row's own mousedown from also selecting: opening a folder
-        // and moving to it are different intentions.
+      <div
+        className={styles.twistyWrapper}
         onMouseDown={(e) => {
           if (!branch) return;
           e.stopPropagation();
           e.preventDefault();
           onToggle(node);
         }}
-        role={branch ? "button" : undefined}
-        aria-label={branch ? `${open ? "Collapse" : "Expand"} ${node.name}` : undefined}
-      />
+      >
+        <span
+          className={styles.twisty}
+          data-open={(branch && open) || undefined}
+          data-leaf={!branch || undefined}
+          // Stops the row's own mousedown from also selecting: opening a folder
+          // and moving to it are different intentions.
+          
+          role={branch ? "button" : undefined}
+          aria-label={branch ? `${open ? "Collapse" : "Expand"} ${node.name}` : undefined}
+        />
+      </div>
       {node.kind === "collection" || node.kind === "histories" || node.kind === "explorer" ||
       node.kind === "note" ? null : (
         <Icon className={styles.icon} />
