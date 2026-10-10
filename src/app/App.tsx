@@ -577,9 +577,16 @@ function AppBody() {
       live = false;
     };
   }, []);
+  // Long library operations wait their turn here, shown in the status bar.
+  const jobError = useRef<(job: JobView, error: unknown) => void>(() => undefined);
+  const [jobs] = useState(() => new JobQueue((job, error) => jobError.current(job, error)));
+  const jobList = useSyncExternalStore(jobs.subscribe, jobs.getSnapshot);
   // An analysed track's BPM, key and waveform change: its row is drawn from
   // the answer at once, and the library is re-read once the run is over so
-  // every view holds what was written.
+  // every view holds what was written. A running job that moves files (Auto
+  // Relocate) holds the run: the status bar says it is queued, and no track
+  // is read from where its file used to be (#286).
+  const analysisHeld = jobList.some((job) => job.holdsAnalysis && job.state !== "queued");
   const analysis = useAnalysis(
     useCallback((id: string, result: AnalysisResult) => {
       setPendingEdits((edits) =>
@@ -595,6 +602,7 @@ function AppBody() {
       void getBackend().then((backend) => backend.reloadLibrary());
     }, []),
     analysisPrefs,
+    analysisHeld,
   );
   // What is in flight out of the browser: a playlist takes the ids, a deck
   // takes the one row under the hand.
@@ -610,10 +618,6 @@ function AppBody() {
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
-  // Long library operations wait their turn here, shown in the status bar.
-  const jobError = useRef<(job: JobView, error: unknown) => void>(() => undefined);
-  const [jobs] = useState(() => new JobQueue((job, error) => jobError.current(job, error)));
-  const jobList = useSyncExternalStore(jobs.subscribe, jobs.getSnapshot);
   const stopJob = useCallback((id: number) => jobs.stop(id), [jobs]);
   jobError.current = (job, error) => refuse(error instanceof Error ? error.message : `${job.label} failed.`);
   // A waveform click whose track could not be previewed says why.
@@ -1650,17 +1654,28 @@ function AppBody() {
     advancedPrefs.relocateUserFolders, advancedPrefs.relocateFolders, advancedPrefs.relocateMusic,
     advancedPrefs.relocateVideo, advancedPrefs.relocateDesktop,
   ]);
+  // [OBS rekordbox 7.2.19 static] rekordbox runs the search under a
+  // "Searching..." progress window (`UpdateMissingFiles`, a
+  // `ThreadWithProgressWindow` built @0x1012a760c, run from
+  // `relocateSelectedFiles` @0x1012a6bd0). Here it is a status-bar job of
+  // that name, so a long search is seen to be running (#286). It is one
+  // backend call, so it has no Stop.
+  const searching = useCallback(
+    <T,>(work: () => Promise<T>): Promise<T> =>
+      jobs.perform({ label: t("Searching..."), holdsAnalysis: true }, () => work()),
+    [jobs, t],
+  );
   const autoRelocate = useCallback(
     (ids: readonly string[]) => {
       if (ids.length === 0) return;
       write(async (b) => {
-        const done = await b.autoRelocate(relocateSearch, [...ids]);
+        const done = await searching(() => b.autoRelocate(relocateSearch, [...ids]));
         return done.unresolved > 0
           ? t("{relocated} relocated, {unresolved} not found in the search folders.", { ...done })
           : t("{relocated} relocated.", { ...done });
       });
     },
-    [write, relocateSearch, t],
+    [write, searching, relocateSearch, t],
   );
   const relocate = useCallback(
     (ids: readonly string[]) => {
@@ -2991,6 +3006,7 @@ function AppBody() {
         <MissingFileManager
           readOnly={readOnly}
           search={relocateSearch}
+          searching={searching}
           onWrote={(said) => { void afterWrite(said); }}
           onFailed={refuse}
           onClose={() => setMissingFilesOpen(false)}
@@ -3083,6 +3099,7 @@ function AppBody() {
         analysisProgress={analysis.running ? {
           completed: analysis.state.done + analysis.state.failed.length,
           total: analysis.total,
+          waiting: analysis.waiting,
         } : undefined}
         activity={
           note !== null && !note.failed

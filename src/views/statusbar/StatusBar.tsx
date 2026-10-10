@@ -16,7 +16,8 @@ export interface StatusBarProps {
   version?: string | null;
   /** General status text; empty when idle. */
   activity?: string;
-  analysisProgress?: { completed: number; total: number } | undefined;
+  /** `waiting`: nothing is being analysed yet, a library job holds the run. */
+  analysisProgress?: { completed: number; total: number; waiting?: boolean } | undefined;
   backupActivity?: string;
   backupProgress?: { phase: string; copiedBytes: number; totalBytes: number } | undefined;
   /**
@@ -123,7 +124,7 @@ export function StatusBar({
         const percent = job.total > 0 ? Math.min(100, Math.floor(job.done / job.total * 100)) : 0;
         return (
           <span key={job.id} className={styles.jobMeter} data-state={job.state}>
-            {onStopJob ? (
+            {onStopJob && job.stoppable ? (
               <button type="button" className={styles.stop} onClick={() => onStopJob(job.id)}
                 disabled={job.state === "stopping"} aria-label={`${t("Stop")}: ${job.label}`}>
                 {job.state === "stopping" ? t("Stopping…") : t("Stop")}
@@ -162,9 +163,11 @@ export function StatusBar({
         : backupActivity ? <span className={styles.backupActivity} role="status">{backupActivity}</span> : null}
       {analysisProgress ? <span className={styles.analysisMeter}>
         <span>Analyzing {analysisProgress.total} {analysisProgress.total === 1 ? "track" : "tracks"}</span>
-        <progress className={styles.backupProgress} aria-label="Analysis progress"
-          max={100} value={analysisPercent} />
-        <span className={styles.backupPercent}>({analysisPercent}%)</span>
+        {analysisProgress.waiting === true ? <span className={styles.jobQueued}>{t("Queued")}</span> : <>
+          <progress className={styles.backupProgress} aria-label="Analysis progress"
+            max={100} value={analysisPercent} />
+          <span className={styles.backupPercent}>({analysisPercent}%)</span>
+        </>}
       </span> : <span className={styles.activity}>{activity}</span>}
       {analysisFailures > 0 ? (
         <span

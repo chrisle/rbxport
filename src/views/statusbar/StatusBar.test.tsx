@@ -61,8 +61,8 @@ it("offers the support action when it is available", () => {
 it("lists the running job and then those waiting, each with its own Stop", () => {
   const onStopJob = vi.fn();
   act(() => root.render(<StatusBar onStopJob={onStopJob} jobs={[
-    { id: 1, label: "Adding 495 to Set", done: 99, total: 495, state: "running", target: "p", pendingRows: 396 },
-    { id: 2, label: "Removing 10 from the collection", done: 0, total: 10, state: "queued", target: null, pendingRows: 0 },
+    { id: 1, label: "Adding 495 to Set", done: 99, total: 495, state: "running", target: "p", pendingRows: 396, stoppable: true, holdsAnalysis: false },
+    { id: 2, label: "Removing 10 from the collection", done: 0, total: 10, state: "queued", target: null, pendingRows: 0, stoppable: true, holdsAnalysis: false },
   ]} />));
   const meters = [...host.querySelectorAll("[data-state]")];
   expect(meters.map((m) => m.getAttribute("data-state"))).toEqual(["running", "queued"]);
@@ -72,4 +72,20 @@ it("lists the running job and then those waiting, each with its own Stop", () =>
   expect(stops).toHaveLength(2);
   act(() => stops[1]?.click());
   expect(onStopJob).toHaveBeenCalledWith(2);
+});
+
+it("shows a search that cannot be stopped without Stop, and analysis waiting behind it as Queued (#286)", () => {
+  const onStopJob = vi.fn();
+  act(() => root.render(<StatusBar onStopJob={onStopJob} jobs={[
+    { id: 3, label: "Searching...", done: 0, total: 0, state: "running", target: null, pendingRows: 0, stoppable: false, holdsAnalysis: true },
+  ]} analysisProgress={{ completed: 0, total: 1, waiting: true }} onCancelAnalysis={() => undefined} />));
+  const search = host.querySelector("[data-state='running']");
+  expect(search?.textContent).toBe("Searching...");
+  expect(host.querySelector("button[aria-label^='Stop']")).toBeNull();
+  expect(host.textContent).toContain("Analyzing 1 trackQueued");
+  expect(host.querySelector("progress[aria-label='Analysis progress']")).toBeNull();
+
+  act(() => root.render(<StatusBar analysisProgress={{ completed: 0, total: 1 }} />));
+  expect(host.querySelector("progress[aria-label='Analysis progress']")).not.toBeNull();
+  expect(host.textContent).not.toContain("Queued");
 });

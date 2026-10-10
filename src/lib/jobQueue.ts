@@ -19,6 +19,13 @@ export interface JobView {
   target: string | null;
   /** Rows still to arrive in `target`. */
   pendingRows: number;
+  /** Whether Stop can end it; false for one backend call that cannot be cut short. */
+  stoppable: boolean;
+  /**
+   * Whether analysis waits for it: a job that moves tracks' files, so a track
+   * analysed meanwhile would be read from where it no longer is.
+   */
+  holdsAnalysis: boolean;
 }
 
 export interface JobUpdate {
@@ -38,6 +45,10 @@ export interface JobSpec {
   total?: number;
   target?: string;
   pendingRows?: number;
+  /** Defaults to true. */
+  stoppable?: boolean;
+  /** Defaults to false. */
+  holdsAnalysis?: boolean;
   run: (context: JobContext) => Promise<void>;
 }
 
@@ -70,6 +81,7 @@ export class JobQueue {
       view: {
         id, label: spec.label, done: 0, total: spec.total ?? 0, state: "queued",
         target: spec.target ?? null, pendingRows: spec.pendingRows ?? 0,
+        stoppable: spec.stoppable ?? true, holdsAnalysis: spec.holdsAnalysis ?? false,
       },
       run: spec.run,
       abort: new AbortController(),
@@ -79,10 +91,34 @@ export class JobQueue {
     return id;
   }
 
-  /** Stops a running job after its current slice, or drops a waiting one. */
+  /**
+   * Waits its turn in the queue, then runs `work` as a job that cannot be
+   * stopped, and settles as `work` does: for one backend call the caller
+   * needs the answer of. An error goes to the caller, not to `onError`.
+   */
+  perform<T>(spec: Omit<JobSpec, "run" | "stoppable">, work: (context: JobContext) => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.add({
+        ...spec,
+        stoppable: false,
+        run: async (context) => {
+          try {
+            resolve(await work(context));
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        },
+      });
+    });
+  }
+
+  /**
+   * Stops a running job after its current slice, or drops a waiting one. A
+   * job that cannot be stopped is left alone, waiting or running.
+   */
   stop(id: number): void {
     const entry = this.entries.find((e) => e.view.id === id);
-    if (!entry) return;
+    if (!entry || !entry.view.stoppable) return;
     if (entry.view.state === "queued") {
       this.entries = this.entries.filter((e) => e !== entry);
     } else {

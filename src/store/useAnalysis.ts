@@ -17,6 +17,7 @@ import {
   enqueue,
   fail,
   isRunning,
+  isWaiting,
   reset,
   start,
   succeed,
@@ -28,6 +29,8 @@ import {
 export interface Analysis {
   state: QueueState;
   running: boolean;
+  /** Tracks are waiting and none is being analysed: a library job holds the run. */
+  waiting: boolean;
   total: number;
   add: (items: readonly QueueItem[], settings?: QueueItem["analysis"]) => void;
   cancel: () => void;
@@ -39,6 +42,11 @@ export function useAnalysis(
   /** Called once when a run ends, whether it finished, failed or was stopped. */
   onDrained?: () => void,
   preferences?: AnalysisPreferences,
+  /**
+   * A library job that moves files (Auto Relocate) is running: no track
+   * starts until it ends, so none is read from where its file used to be.
+   */
+  held = false,
 ): Analysis {
   const storedPreferences = usePreferences().analysis;
   const { mode, concurrentTracks, firstBeatCue } = preferences ?? storedPreferences;
@@ -61,7 +69,7 @@ export function useAnalysis(
   useEffect(() => {
     // Fill the free slots first, if the run has not been cancelled; the
     // effect runs again on the new state and sends the requests.
-    const next = start(state, concurrentTracks);
+    const next = start(state, concurrentTracks, held);
     if (next !== state) {
       setState(next);
       return;
@@ -82,7 +90,7 @@ export function useAnalysis(
         }
       })();
     }
-  }, [state, onAnalysed, mode, concurrentTracks]);
+  }, [state, onAnalysed, mode, concurrentTracks, held]);
 
   const add = useCallback((items: readonly QueueItem[], settings?: QueueItem["analysis"]) => {
     // Capture settings at enqueue time, including automatic imports. Later
@@ -94,8 +102,9 @@ export function useAnalysis(
   const clear = useCallback(() => setState(reset), []);
 
   // Memoised as a whole: see the note in `useColumns`.
+  const waiting = isWaiting(state, held);
   return useMemo(
-    () => ({ state, running, total: total(state), add, cancel, clear }),
-    [state, running, add, cancel, clear],
+    () => ({ state, running, waiting, total: total(state), add, cancel, clear }),
+    [state, running, waiting, add, cancel, clear],
   );
 }

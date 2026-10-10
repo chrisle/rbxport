@@ -53,6 +53,14 @@ export function total(state: QueueState): number {
   return state.done + state.failed.length + state.pending.length + state.running.length;
 }
 
+/**
+ * Whether the run is only waiting: tracks are left but none is being
+ * analysed, because a library job holds it.
+ */
+export function isWaiting(state: QueueState, held: boolean): boolean {
+  return held && state.running.length === 0 && state.pending.length > 0;
+}
+
 /** Whether anything is left to do. */
 export function isRunning(state: QueueState): boolean {
   return state.running.length > 0 || state.pending.length > 0;
@@ -77,12 +85,15 @@ export function enqueue(state: QueueState, items: readonly QueueItem[]): QueueSt
 
 /**
  * Fills the free slots from the waiting tracks, in order, or parks if there
- * is nothing waiting, the slots are full, or the run is cancelling.
+ * is nothing waiting, the slots are full, the run is cancelling, or it is
+ * `held` behind a library job that moves files (Auto Relocate): the tracks
+ * already started finish, and the rest wait for it.
  */
-export function start(state: QueueState, slots = SLOTS): QueueState {
+export function start(state: QueueState, slots = SLOTS, held = false): QueueState {
   if (state.cancelling) {
     return state.pending.length > 0 ? { ...state, pending: [] } : state;
   }
+  if (held) return state;
   const limit = Number.isInteger(slots) ? Math.max(1, Math.min(4, slots)) : SLOTS;
   const free = limit - state.running.length;
   if (free <= 0 || state.pending.length === 0) return state;

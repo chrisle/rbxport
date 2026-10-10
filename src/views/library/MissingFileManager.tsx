@@ -32,11 +32,20 @@ type Selection = { all: true } | { all: false; ids: ReadonlySet<string>; anchor:
 
 const EVERY: Selection = { all: true };
 
-export function MissingFileManager({ readOnly, search, onWrote, onFailed, onClose }: {
+/** Runs the work straight away, for when no job queue is given. */
+const now = <T,>(work: () => Promise<T>): Promise<T> => work();
+
+export function MissingFileManager({ readOnly, search, searching = now, onWrote, onFailed, onClose }: {
   /** rekordbox holds the library, or Library Protection is on: nothing is written. */
   readOnly: boolean;
   /** Preferences › Advanced › Database › Auto Relocate Search Folders. */
   search: RelocateSearch;
+  /**
+   * Runs Auto Relocate's search as the app's "Searching..." job, so the
+   * status bar shows it and analysis waits for it, as it does from the
+   * track menu.
+   */
+  searching?: <T>(work: () => Promise<T>) => Promise<T>;
   /** A change was saved: the status line says so and the tree is re-read. */
   onWrote: (said: string) => void;
   onFailed: (said: string) => void;
@@ -168,6 +177,7 @@ export function MissingFileManager({ readOnly, search, onWrote, onFailed, onClos
           await rescan();
         }
       } catch (e) {
+        setNote(null);
         onFailed(e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
@@ -175,9 +185,13 @@ export function MissingFileManager({ readOnly, search, onWrote, onFailed, onClos
     })();
   };
 
+  // [OBS rekordbox 7.2.19 static] rekordbox searches under a "Searching..."
+  // progress window (`UpdateMissingFiles` @0x1012a760c); this says so here
+  // until the answer comes.
   const autoRelocate = () => run(async () => {
     const backend = await getBackend();
-    const report = await backend.autoRelocate(search, targets);
+    setNote(t("Searching..."));
+    const report = await searching(() => backend.autoRelocate(search, targets));
     const said = report.unresolved > 0
       ? t("{relocated} relocated, {unresolved} not found in the search folders.", { ...report })
       : t("{relocated} relocated.", { ...report });

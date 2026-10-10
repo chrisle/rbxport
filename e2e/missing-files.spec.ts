@@ -58,6 +58,32 @@ test("Relocate from the menu clears the track's [!]", async ({ page }) => {
   await expect(row.getByRole("img", { name: "File is Missing" })).toHaveCount(0);
 });
 
+test("Auto Relocate shows Searching... and analysis asked for meanwhile waits for it (#286)", async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => { (window as unknown as { __relocateHeld: boolean }).__relocateHeld = true; });
+  const status = page.getByRole("contentinfo");
+  await rowOf(page, 1).locator('[data-col="title"]').click({ button: "right" });
+  await page.getByRole("menu", { name: "Track" }).getByRole("menuitem", { name: "Auto Relocate" }).click();
+  // [OBS rekordbox 7.2.19 static] rekordbox's own word for the search.
+  const search = status.locator("[data-state='running']");
+  await expect(search).toHaveText("Searching...");
+  // One backend call: there is nothing for Stop to cut short.
+  await expect(search.getByRole("button")).toHaveCount(0);
+
+  await rowOf(page, 0).locator('[data-col="title"]').click();
+  await page.keyboard.press("Shift+Meta+A");
+  const dialog = page.getByRole("dialog", { name: "Analysis Setting" });
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
+  await expect(status).toContainText("Analyzing 1 trackQueued");
+  await expect(status.getByRole("progressbar", { name: "Analysis progress" })).toHaveCount(0);
+
+  await page.evaluate(() => { (window as unknown as { __releaseRelocate: () => void }).__releaseRelocate(); });
+  await expect(search).toHaveCount(0);
+  await expect(status).toContainText(/relocated/);
+  await expect(status).not.toContainText("Queued");
+  await expect(status.getByRole("button", { name: "Stop" })).toHaveCount(0, { timeout: 15_000 });
+});
+
 /** Opens Preferences › Advanced › Database's Auto Relocate Search Folders. */
 async function searchFolders(page: Page) {
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();

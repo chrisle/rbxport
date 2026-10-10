@@ -2842,10 +2842,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     // The search folders hold every other missing file, in list order, so a
     // run both relocates and leaves some unresolved; with no folder ticked
-    // nothing is found. `window.__relocateSearch` keeps what was searched.
+    // nothing is found. `window.__relocateSearch` keeps what was searched;
+    // a test that sets `window.__relocateHeld` keeps the search going until
+    // it calls `window.__releaseRelocate()`, as a long walk of the folders
+    // would.
     autoRelocate: async (search, tracks) => {
-      const page = window as unknown as { __relocateSearch?: RelocateSearch[] };
+      const page = window as unknown as {
+        __relocateSearch?: RelocateSearch[]; __relocateHeld?: boolean; __releaseRelocate?: () => void;
+      };
       (page.__relocateSearch ??= []).push(search);
+      if (page.__relocateHeld === true) {
+        await new Promise<void>((resolve) => { page.__releaseRelocate = resolve; });
+      }
       const searched = search.folders.length > 0 || search.music || search.video || search.desktop;
       const gone = all.filter((row) => row.missing === true && (tracks === null || tracks.includes(row.id)));
       const found = searched ? gone.filter((_, at) => at % 2 === 0) : [];

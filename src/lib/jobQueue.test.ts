@@ -65,6 +65,41 @@ describe("JobQueue", () => {
   });
 });
 
+describe("JobQueue.perform", () => {
+  it("waits its turn, answers with the work's result, and cannot be stopped (#286)", async () => {
+    const queue = new JobQueue();
+    let release: () => void = () => undefined;
+    queue.add({ label: "a", run: () => new Promise<void>((r) => { release = r; }) });
+    let calls = 0;
+    let answer: number | undefined;
+    void queue.perform({ label: "Searching...", holdsAnalysis: true }, () => { calls += 1; return Promise.resolve(42); })
+      .then((value) => { answer = value; });
+    await settle();
+    expect(queue.getSnapshot().map((j) => [j.label, j.state, j.stoppable, j.holdsAnalysis]))
+      .toEqual([["a", "running", true, false], ["Searching...", "queued", false, true]]);
+    const searching = queue.getSnapshot()[1]!.id;
+    queue.stop(searching);
+    expect(queue.getSnapshot()).toHaveLength(2);
+    expect(calls).toBe(0);
+    release();
+    await settle();
+    await settle();
+    expect(calls).toBe(1);
+    expect(answer).toBe(42);
+    expect(queue.getSnapshot()).toEqual([]);
+  });
+
+  it("hands an error to the caller rather than to onError", async () => {
+    const errors: string[] = [];
+    const queue = new JobQueue((job) => errors.push(job.label));
+    const failed = queue.perform({ label: "Searching..." }, () => Promise.reject(new Error("no folder")));
+    await expect(failed).rejects.toThrow("no folder");
+    await settle();
+    expect(errors).toEqual([]);
+    expect(queue.getSnapshot()).toEqual([]);
+  });
+});
+
 describe("slices", () => {
   it("cuts a list into runs of at most the size", () => {
     expect(slices([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);

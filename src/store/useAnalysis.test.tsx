@@ -11,8 +11,8 @@ vi.mock("@/ipc/client", () => ({ getBackend: () => Promise.resolve(held) }));
 let host: HTMLDivElement;
 let root: Root;
 let analysis: Analysis;
-function Harness({ preferences }: { preferences: AnalysisPreferences }) {
-  analysis = useAnalysis(undefined, undefined, preferences);
+function Harness({ preferences, held = false }: { preferences: AnalysisPreferences; held?: boolean }) {
+  analysis = useAnalysis(undefined, undefined, preferences, held);
   return null;
 }
 beforeEach(() => {
@@ -70,4 +70,16 @@ it("queues automatic batches with the first-beat cue preference captured", async
   expect(held.analyseTrack).toHaveBeenCalledWith("a", "rbxport", expect.objectContaining({ firstBeatCue: true }));
   await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true, firstBeatCue: false }} />); await Promise.resolve(); });
   expect(analysis.state.pending[0]?.analysis?.firstBeatCue).toBe(true);
+});
+
+it("re-analysis asked for during Auto Relocate waits, says so, and runs once the relocate ends (#286)", async () => {
+  const preferences: AnalysisPreferences = { mode: "rbxport", concurrentTracks: 3, auto: false, firstBeatCue: false };
+  await act(async () => { root.render(<Harness preferences={preferences} held />); await Promise.resolve(); });
+  await act(async () => { analysis.add([{ id: "moved", title: "Moved" }]); await Promise.resolve(); });
+  expect(held.analyseTrack).not.toHaveBeenCalled();
+  expect(analysis.running).toBe(true);
+  expect(analysis.waiting).toBe(true);
+  await act(async () => { root.render(<Harness preferences={preferences} />); await Promise.resolve(); });
+  expect(held.analyseTrack.mock.calls.map(call => String(call[0]))).toEqual(["moved"]);
+  expect(analysis.waiting).toBe(false);
 });

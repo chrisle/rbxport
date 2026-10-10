@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  cancel, emptyQueue, enqueue, fail, isRunning, reset, SLOTS, start, succeed, total,
+  cancel, emptyQueue, enqueue, fail, isRunning, isWaiting, reset, SLOTS, start, succeed, total,
   type QueueItem,
 } from "./queue";
 
@@ -68,6 +68,24 @@ describe("start", () => {
 
   it("does nothing on an empty queue", () => {
     expect(start(emptyQueue)).toBe(emptyQueue);
+  });
+
+  it("starts nothing while held behind a relocate, then fills the slots once it ends (#286)", () => {
+    const q = start(enqueue(emptyQueue, items("a", "b")), 2, true);
+    expect(running(q)).toEqual([]);
+    expect(isWaiting(q, true)).toBe(true);
+    expect(isRunning(q)).toBe(true);
+    const freed = start(q, 2, false);
+    expect(running(freed)).toEqual(["a", "b"]);
+    expect(isWaiting(freed, false)).toBe(false);
+  });
+
+  it("lets the tracks already started finish while held, and is not waiting meanwhile", () => {
+    const going = start(enqueue(emptyQueue, items("a", "b")), 1);
+    const held = start(going, 2, true);
+    expect(held).toBe(going);
+    expect(isWaiting(held, true)).toBe(false);
+    expect(isWaiting(succeed(held, "a"), true)).toBe(true);
   });
 
   it("drops what is waiting when the run is cancelling", () => {
