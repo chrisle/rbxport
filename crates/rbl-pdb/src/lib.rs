@@ -127,6 +127,33 @@ pub(crate) fn u4(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([u1(b, at), u1(b, at + 1), u1(b, at + 2), u1(b, at + 3)])
 }
 
+/// How many entries a data page's row index holds, deleted rows included.
+///
+/// rekordbox packs the index length into the low 13 bits of the three
+/// bytes at `0x18` and the present-row count into the top 11 [OBS: a
+/// rekordbox 7 stick, playlist-entry pages of 284 rows read `1c 81 23`;
+/// track pages with deletions read 9 entries, 8 rows]. Neither `0x20` nor
+/// `0x22` is a row count: on those 284-row pages they hold 1 and 283.
+/// Reading `0x22` as the count dropped each full page's last row, so the
+/// stick's two databases looked as if they disagreed (#284).
+///
+/// rbxport's own writer ([`build`]) holds `0x18` at `0xff` on a page of
+/// more than 255 rows and puts the true count at `0x22`; that count, larger
+/// than the packed one, is kept for such pages. On rekordbox's pages `0x22`
+/// is a row's index, so it is never above the packed length.
+fn row_index_len(page: &[u8]) -> u32 {
+    let packed = u32::from(u1(page, 0x18))
+        | u32::from(u1(page, 0x19)) << 8
+        | u32::from(u1(page, 0x1a)) << 16;
+    let offsets = packed & 0x1fff;
+    let legacy = u32::from(u2(page, 0x22));
+    if offsets == 0xff && legacy > offsets && legacy != 0x1fff {
+        legacy
+    } else {
+        offsets
+    }
+}
+
 impl<'a> Pdb<'a> {
     pub fn parse(bytes: &'a [u8]) -> Result<Self> {
         if bytes.len() < 28 {
@@ -181,13 +208,7 @@ impl<'a> Pdb<'a> {
 
             let page_flags = u1(p, 0x1b);
             let is_data_page = page_flags & 0x40 == 0;
-            let num_rows_small = u32::from(u1(p, 0x18));
-            let num_rows_large = u32::from(u2(p, 0x22));
-            let num_rows = if num_rows_large > num_rows_small && num_rows_large != 0x1fff {
-                num_rows_large
-            } else {
-                num_rows_small
-            };
+            let num_rows = row_index_len(p);
 
             if is_data_page && num_rows > 0 {
                 let groups = (num_rows - 1) / 16 + 1;
