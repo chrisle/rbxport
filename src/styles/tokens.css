@@ -85,14 +85,14 @@
   --c-filter-strip: #282828; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the MASTER PLAYER strip behind the arrows, x 920..1634 */
   --c-filter-chip: #040404; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a My Tag chip's ground */
   --c-filter-chip-text: #4F4F4F; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a My Tag chip's text */
-  --c-comment-pink: #E778F1; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the colour comment dots, sampled at each dot's centre */
-  --c-comment-red: #E33122; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
-  --c-comment-orange: #EBA44A; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
-  --c-comment-yellow: #F4E458; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
-  --c-comment-green: #66DD42; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
-  --c-comment-aqua: #56BDF3; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
-  --c-comment-blue: #204FEF; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
-  --c-comment-purple: #8B1EEF; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
+  --c-comment-pink: #F870F8; /* rekordbox::cPink (248,112,248), rekordbox 7.2.19 ColorTheme static init; BrowseHelper::findBallColour gives it to the track list's Color column, the filter's colour list and the deck's info tab. The old value was a macOS capture colour-managed into Display P3 */
+  --c-comment-red: #F80000; /* rekordbox::cRed (248,0,0), rekordbox 7.2.19 ColorTheme static init; BrowseHelper::findBallColour gives it to the track list's Color column, the filter's colour list and the deck's info tab. The old value was a macOS capture colour-managed into Display P3 [OBS Winrig chris-win11 rekordbox 7, issue #312: the Color column's ball reads exactly this] */
+  --c-comment-orange: #F8A030; /* rekordbox::cOrange (248,160,48), rekordbox 7.2.19 ColorTheme static init; BrowseHelper::findBallColour gives it to the track list's Color column, the filter's colour list and the deck's info tab. The old value was a macOS capture colour-managed into Display P3 */
+  --c-comment-yellow: #F8E330; /* rekordbox::cYellow (248,227,48), rekordbox 7.2.19 ColorTheme static init; BrowseHelper::findBallColour gives it to the track list's Color column, the filter's colour list and the deck's info tab. The old value was a macOS capture colour-managed into Display P3 */
+  --c-comment-green: #00E000; /* rekordbox::cGreen (0,224,0), rekordbox 7.2.19 ColorTheme static init; BrowseHelper::findBallColour gives it to the track list's Color column, the filter's colour list and the deck's info tab. The old value was a macOS capture colour-managed into Display P3 [OBS Winrig chris-win11 rekordbox 7, issue #312: the Color column's ball reads exactly this] */
+  --c-comment-aqua: #00C0F8; /* rekordbox::cAqua (0,192,248), rekordbox 7.2.19 ColorTheme static init; BrowseHelper::findBallColour gives it to the track list's Color column, the filter's colour list and the deck's info tab. The old value was a macOS capture colour-managed into Display P3 */
+  --c-comment-blue: #0050F8; /* rekordbox::cBlue (0,80,248), rekordbox 7.2.19 ColorTheme static init; BrowseHelper::findBallColour gives it to the track list's Color column, the filter's colour list and the deck's info tab. The old value was a macOS capture colour-managed into Display P3 */
+  --c-comment-purple: #9808F8; /* rekordbox::cPurple (152,8,248), rekordbox 7.2.19 ColorTheme static init; BrowseHelper::findBallColour gives it to the track list's Color column, the filter's colour list and the deck's info tab. The old value was a macOS capture colour-managed into Display P3 */
   --c-device-tab-on: #3571E3; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the selected tab of the six on a device, which is not the browser's accent blue */
   --c-device-label: #969696; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the field captions (Device Name, Waveform color, Inactive Categories) and the space table's left column */
   --c-device-disabled: #808080; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): a greyed radio label (Half Waveform / Full Waveform) */
@@ -317,6 +317,8 @@
   --s-filter-strip-label-w: 77px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): MASTER PLAYER between the arrow lines, x 1200..1354 */
   --s-filter-rst-w: 34px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the RST button x 3580..3648 */
   --s-filter-rst-h: 20px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the RST button y 820..860 */
+  --s-color-col-ball-x: 5px; /* rekordbox 7.2.19 browse::ListViewer::paintColourColumn @0x1003f13cc: drawColorBall(g, 5, (h - 8) / 2, 8) */
+  --s-color-col-text-x: 16px; /* same function: the colour's name in Rectangle(16, ., width - 21, .), centredLeft */
   --s-filter-dot: 8px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a colour dot, 16px across at 2x */
   --s-filter-toggle: 18px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the header's filter button x 3122..3158, y 760..796 */
   --s-filter-toggle-glyph: 11px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the glyph inside it, x 3129..3151 */

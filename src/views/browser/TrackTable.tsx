@@ -614,6 +614,17 @@ const TrackRow = memo(function TrackRow({
             </div>
           );
         }
+        if (col.key === "color") {
+          // rekordbox's ListViewer::paintColourColumn: the colour's ball, then
+          // its name; a track with no colour leaves the cell empty.
+          const name = cellText(row, col.key);
+          return (
+            <div key={col.key} className={`${styles.cell} ${styles.colorCell}`} data-col={col.key} role="gridcell">
+              {name ? <span className={styles.colorBall} data-color={name} aria-hidden /> : null}
+              {name}
+            </div>
+          );
+        }
         if (col.key === "key") {
           // The Traffic Light: a key that goes with the loaded track's is lit.
           const lit = trafficKey !== null && trafficLightLit(row.key, trafficKey, trafficReach);

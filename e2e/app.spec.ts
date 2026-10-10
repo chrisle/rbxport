@@ -479,6 +479,16 @@ test("Color sorts in rekordbox's palette order, not by name", async ({ page }) =
     const visible = (await values.allInnerTexts()).map((value) => palette.indexOf(value));
     return visible.every((value, index) => value >= 0 && (index === 0 || (visible[index - 1] ?? 0) >= value));
   }).toBe(true);
+
+  // rekordbox paints the colour's ball before its name (ListViewer::
+  // paintColourColumn): an 8px circle at x 5 in rekordbox::cPurple.
+  const ball = values.first().locator("[data-color]");
+  await expect(ball).toHaveAttribute("data-color", "Purple");
+  await expect(ball).toHaveCSS("background-color", "rgb(152, 8, 248)");
+  await expect(ball).toHaveCSS("width", "8px");
+  await expect(ball).toHaveCSS("border-radius", "50%");
+  const [cellBox, ballBox] = [await values.first().boundingBox(), await ball.boundingBox()];
+  expect((ballBox?.x ?? 0) - (cellBox?.x ?? 0)).toBe(5);
 });
 
 test("Track number sorts by the tag's number, apart from the # column", async ({ page }) => {

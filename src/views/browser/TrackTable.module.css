@@ -316,6 +316,31 @@
 
 .right { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* The Color column, as rekordbox 7.2.19 paints it
+   (browse::ListViewer::paintColourColumn @0x1003f13cc): an 8px ball at x 5,
+   centred on the row (BrowseHelper::drawColorBall, a filled ellipse), then the
+   colour's name in the row's text colour from x 16. */
+.colorCell {
+  position: relative;
+  padding-left: var(--s-color-col-text-x);
+}
+.colorBall {
+  position: absolute;
+  left: var(--s-color-col-ball-x);
+  top: calc((100% - var(--s-filter-dot)) / 2);
+  width: var(--s-filter-dot);
+  height: var(--s-filter-dot);
+  border-radius: 50%;
+}
+.colorBall[data-color="Pink"] { background: var(--c-comment-pink); }
+.colorBall[data-color="Red"] { background: var(--c-comment-red); }
+.colorBall[data-color="Orange"] { background: var(--c-comment-orange); }
+.colorBall[data-color="Yellow"] { background: var(--c-comment-yellow); }
+.colorBall[data-color="Green"] { background: var(--c-comment-green); }
+.colorBall[data-color="Aqua"] { background: var(--c-comment-aqua); }
+.colorBall[data-color="Blue"] { background: var(--c-comment-blue); }
+.colorBall[data-color="Purple"] { background: var(--c-comment-purple); }
+
 .attr { display: flex; align-items: center; gap: 8px; }
 .analysed {
   width: 10px;
