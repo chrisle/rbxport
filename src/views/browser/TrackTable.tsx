@@ -6,7 +6,7 @@
  * tokens. Rows are virtualized and keyed by row id so a re-sort moves DOM nodes
  * instead of rewriting every cell.
  */
-import { dragTracksToDesktop, nativeTrackDragging } from "@/ipc/client";
+import { dragTracksToDesktop, getBackend, nativeTrackDragging } from "@/ipc/client";
 import { SearchField } from "@/components/SearchField";
 import { reportStartupPaint } from "@/lib/startup";
 import { useEventCallback } from "@/store/useEventCallback";
@@ -143,10 +143,10 @@ export function cellText(row: RowDto, key: Column["key"]): string {
  * The title edits on a second single click; its double click still loads
  * the track into the deck.
  *
- * `key` is left out too — it is checked against the keys the library already
- * holds, so a free-typed one would be refused after the fact, and the
- * information panel offers the list instead. The dates are formatted on the
- * way out and would have to be parsed back on the way in. `bpm` is typed
+ * `key` is edited from a list of the keys the library already holds, not a
+ * text box, because a free-typed one would be refused after the fact. The
+ * dates are formatted on the way out and would have to be parsed back on the
+ * way in. `bpm` is typed
  * over as a number, which the backend reads back and retimes the beat grid
  * to, so the CDJ and the column agree.
  */
@@ -156,6 +156,7 @@ const EDITABLE_FIELDS: Partial<Record<ColumnKey, TrackField>> = {
   album: "album",
   genre: "genre",
   label: "label",
+  key: "key",
   bpm: "bpm",
 };
 
@@ -209,10 +210,23 @@ const Stars = memo(function Stars({
  * safe.
  */
 const EditableCell = memo(function EditableCell({
-  value, label, col, onCommit, onClick, tip, doubleClickLoads = false, onEditBlocked,
+  value, label, col, onCommit, onClick, tip, doubleClickLoads = false, onEditBlocked, choices, choiceLabel, display, lit, onOpen,
 }: {
   value: string;
+  /** What the cell shows when it is not being edited; the value itself when absent. */
+  display?: string;
   label: string;
+  /**
+   * The values the field accepts. Present, the cell opens a list rather than
+   * a text box; null while the list is still being fetched.
+   */
+  choices?: readonly string[] | null;
+  /** How a choice reads in the list, e.g. `Ebm` or `2A`. */
+  choiceLabel?: (choice: string) => string;
+  /** The Traffic Light lit this cell. */
+  lit?: boolean;
+  /** Called each time the editor opens. */
+  onOpen?: () => void;
   /** The column this cell belongs to, which its width and alignment key off. */
   col: string;
   onCommit: (next: string) => void;
@@ -245,6 +259,9 @@ const EditableCell = memo(function EditableCell({
   }, []);
   // A pending edit must not follow a changed selection, lock, or recycled row.
   useEffect(() => cancelPendingEdit, [cancelPendingEdit, onClick, onEditBlocked, value]);
+  useEffect(() => {
+    if (editing) onOpen?.();
+  }, [editing, onOpen]);
 
   if (!editing) {
     const begin = () => {
@@ -276,6 +293,7 @@ const EditableCell = memo(function EditableCell({
       <div
         className={styles.cell}
         data-col={col}
+        data-lit={lit || undefined}
         role="gridcell"
         onMouseDown={(e) => {
           pressedOnSelected.current = onClick && e.button === 0 && !e.shiftKey && !e.metaKey && !e.ctrlKey;
@@ -298,7 +316,42 @@ const EditableCell = memo(function EditableCell({
         }}
         title={tip}
       >
-        {value}
+        {display ?? value}
+      </div>
+    );
+  }
+  if (choices !== undefined) {
+    // The current value stays on the list when the library no longer holds it.
+    const options = choices === null ? [] : value && !choices.includes(value) ? [value, ...choices] : choices;
+    return (
+      <div
+        className={styles.cell}
+        data-col={col}
+        role="gridcell"
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <select
+          className={styles.editor}
+          value={value}
+          aria-label={label}
+          autoFocus
+          onMouseDown={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            setEditing(false);
+            if (e.target.value !== value) {
+              if (onEditBlocked) onEditBlocked();
+              else onCommit(e.target.value);
+            }
+          }}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setEditing(false);
+            e.stopPropagation();
+          }}
+        >
+          {options.includes("") ? null : <option value="" />}
+          {options.map((option) => <option key={option} value={option}>{choiceLabel ? choiceLabel(option) : option}</option>)}
+        </select>
       </div>
     );
   }
@@ -349,7 +402,7 @@ const EditableCell = memo(function EditableCell({
 
 const TrackRow = memo(function TrackRow({
   row, top, selected, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
-  onComment, onEditField, onEditBlocked, onMenu, keyDisplay, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
+  onComment, onEditField, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
   reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache,
 }: {
   row: RowDto | undefined;
@@ -359,6 +412,10 @@ const TrackRow = memo(function TrackRow({
   columns: readonly ColumnSpec[];
   /** Preferences: `Ebm` or `2A`. */
   keyDisplay: KeyDisplay;
+  /** The keys the Key cell offers; null until fetched. */
+  keyChoices: readonly string[] | null;
+  /** The Key cell opened: fetch the list. */
+  onOpenKeys: () => void;
   /** Preferences: the hot cue badges over the row's waveform. */
   previewCues: boolean;
   /** Preferences: a comment opens on a click rather than a double click. */
@@ -582,10 +639,18 @@ const TrackRow = memo(function TrackRow({
                 onClick={(clickToEdit || col.key === "title") && selected}
                 doubleClickLoads={col.key === "title"}
                 tip={
+            const isKey = col.key === "key";
                   tooltips
                     ? `${col.label} — ${clickToEdit || col.key === "title" ? "click" : "double-click"} to edit`
                     : undefined
                 }
+                {...(isKey ? {
+                  choices: keyChoices,
+                  choiceLabel: (k: string) => formatKey(k, keyDisplay),
+                  display: formatKey(row.key, keyDisplay),
+                  lit: trafficKey !== null && trafficLightLit(row.key, trafficKey, trafficReach),
+                  onOpen: onOpenKeys,
+                } : {})}
               />
             );
           }
@@ -861,6 +926,15 @@ export const TrackTable = memo(function TrackTable({
     const onDown = (event: MouseEvent) => {
       if (!trafficBox.current?.contains(event.target as Node)) setTrafficMenu(false);
     };
+  // The Key cell's list, fetched the first time one opens so the table does
+  // not ask for it at startup.
+  const [keyChoices, setKeyChoices] = useState<readonly string[] | null>(null);
+  const loadKeyChoices = useCallback(() => {
+    void getBackend()
+      .then((b) => b.trackLookups())
+      .then((lookups) => setKeyChoices(lookups.keys))
+      .catch(() => {});
+  }, []);
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setTrafficMenu(false);
     };
@@ -1688,6 +1762,8 @@ export const TrackTable = memo(function TrackTable({
                 onOpen={handleOpen}
                 onMenu={openTrackMenu}
                 reorderable={Boolean(onReorder)}
+                keyChoices={keyChoices}
+                onOpenKeys={loadKeyChoices}
                 isLocalDrag={() => carrying.current !== null}
                 dropEdge={
                   dropAt?.index === item.index ? (dropAt.below ? "below" : "above") : null

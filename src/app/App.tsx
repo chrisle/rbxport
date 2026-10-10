@@ -89,7 +89,7 @@ import { nativeMenuLabels } from "@/lib/nativeMenu";
  * panel's record, which is re-read anyway.
  */
 const ROW_FIELDS: ReadonlySet<TrackField> = new Set<TrackField>([
-  "title", "artist", "album", "genre", "label",
+  "title", "artist", "album", "genre", "label", "key",
 ]);
 
 const DuplicateTracksDialog = lazy(() => import("@/components/DuplicateTracksDialog").then(m => ({ default: m.DuplicateTracksDialog })));
