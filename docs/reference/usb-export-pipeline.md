@@ -333,9 +333,9 @@ wrappers that fill in defaults.
 | 3 | Create `Contents/`, `<root>/USBANLZ/`, `<root>/rekordbox/` directly on the stick. | `rbl_core::durable::create_dir_all` | Directories only. Done even for an empty export. |
 | 4 | Finish an interrupted publication. | `rbl_export::recover` | Nothing may read the stick while a previous run's journal is pending. See [recovery](#recovery-of-an-interrupted-publication). |
 | 5 | Open the publication: take the exclusive lock, replay any journal, delete leftover stages, create `.rbxport-staging-*`. | `Publication::new` | All new files go into the stage. The lock (`.rbxport-write.lock`, `fs2` exclusive lock) is held until the end of the run. |
-| 6 | Load the previous manifest. Read a `Snapshot` of both databases and an `analysis_stamp` of every analysis file they name. | `Manifest::load`, `snapshot::Snapshot::read`, `snapshot::analysis_stamp` | The "before" picture, used for reconciling now and for detecting other writers just before commit. |
+| 6 | Load the previous manifest. Read a `Snapshot` of both databases. | `Manifest::load`, `snapshot::Snapshot::read` | The "before" picture, used for reconciling now and for detecting other writers just before commit. |
 | 7 | Upgrade an old manifest that has no `db_id`, if rekordbox's sync record names the same `DBID`. | inline | Old manifests lack the field. |
-| 8 | Baseline checks. | `Snapshot::check_baseline` | Refuses a stick whose two libraries already disagree (first sync only), whose track identities rekordbox changed, or whose manifest belongs to another library (`db_id`). |
+| 8 | Baseline checks, then an `analysis_stamp` of every analysis file the databases name. | `reconcile::rewritten`, `Snapshot::check_baseline_except`, `snapshot::analysis_stamp` | Refuses a stick whose two libraries already describe a track or playlist differently (first sync only), naming it, unless the selection rewrites that row from the library; one whose track identities rekordbox changed; or one whose manifest belongs to another library (`db_id`). The stamp reads every analysis file, so it comes after the checks: a refused sync says so at once. |
 | 9 | Reconcile the selection with the stick. | `reconcile::prepare` | Links selected tracks to their existing device rows (`identify_tracks`) and playlists to their device ids (`identify_playlists`). Keeps what the selection does not name but the stick still needs (`retain_device_only`). |
 | 10 | Merge the stick's My Tags into the library's. | inline | Tags that exist only on the stick are kept. |
 | 11 | Assign ids: playlists first, then tracks. Check that ids are unique and playlist membership is valid. | `playlist_ids`, `assign_ids` | Ids are pinned to the previous manifest, so they stay the same between syncs ([why](usb-export-db.md#incremental-sync)). |
@@ -631,7 +631,7 @@ stays as it was:
 | Message starts with | Raised by |
 | --- | --- |
 | "Both PIONEER and .PIONEER contain libraries" | `export_root_name_with` |
-| "The two existing device libraries disagree" | `Snapshot::check_baseline` (first sync) |
+| "The USB's two libraries, export.pdb and exportLibrary.db, differ on …" | `Snapshot::check_baseline_except` (first sync); names the track and fields, or the playlist |
 | "rekordbox changed the device track identities" | `Snapshot::check_baseline` |
 | "This USB belongs to a different or older unverified master library" | `Snapshot::check_baseline` |
 | "Device playlist/history references missing track" | `reconcile::retain_device_only` |

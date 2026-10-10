@@ -39,6 +39,43 @@ pub fn prepare(
     Ok((tracks, playlists))
 }
 
+/// The stick's rows [`prepare`] will tie to the selection, and so write afresh
+/// from the library: the device tracks `identify_tracks` names by their
+/// master ids, and the device playlists `identify_playlists` names. Worked
+/// out from the snapshot alone, before any analysis file is read.
+pub fn rewritten(
+    root: &Path,
+    before: &Snapshot,
+    previous: Option<&Manifest>,
+    tracks: &[SourceTrack],
+    playlists: &[SourcePlaylist],
+    db_id: u64,
+) -> crate::snapshot::Rewritten {
+    let selected: BTreeSet<u64> = tracks.iter().filter(|t| t.id != 0).map(|t| t.id).collect();
+    let mut out = crate::snapshot::Rewritten::default();
+    // The first device row per library track, as `identify_tracks` takes it.
+    let mut taken = BTreeSet::new();
+    for (device, (db, content)) in &before.identity {
+        if *db == db_id && selected.contains(content) && taken.insert(*content) {
+            out.tracks.insert(*device);
+        }
+    }
+    // A selected track with no such row, that an earlier export recorded.
+    if let Some(m) = previous.filter(|m| m.db_id == db_id) {
+        let recorded: BTreeMap<String, u32> = m.tracks.iter().map(|t| (t.key(), t.export_id)).collect();
+        for track in tracks.iter().filter(|t| t.id == 0 || !taken.contains(&t.id)) {
+            if let Some(id) = recorded.get(&crate::track_key(track.id, &track.source_path.to_string_lossy())) {
+                out.tracks.insert(*id);
+            }
+        }
+    }
+    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
+    let mut playlists = playlists.to_vec();
+    identify_playlists(&mut playlists, previous, record.as_ref());
+    out.playlists = playlists.iter().map(|p| p.device_id).filter(|id| *id != 0).collect();
+    out
+}
+
 /// Puts the playlists the previous export listed back in the order it listed
 /// them, with the ones new to the stick after them in the selection's order:
 /// an export that adds to a stick does not move what it already holds.

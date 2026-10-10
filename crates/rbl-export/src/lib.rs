@@ -861,7 +861,6 @@ pub fn export_cancellable(
     let publication = rbl_core::durable::Publication::new(destination, PUBLICATION)?;
     let mut previous = Manifest::load(destination);
     let before = snapshot::Snapshot::read(destination)?;
-    let analysis_before = snapshot::analysis_stamp(destination, &before)?;
     let db_id = sync.map_or(0, |s| s.db_id);
     if let Some(old) = previous.as_mut().filter(|m| m.db_id == 0 && db_id != 0) {
         if sync_record::read(destination).is_some_and(|r| r.db_id == db_id) {
@@ -870,7 +869,12 @@ pub fn export_cancellable(
             old.db_id = db_id;
         }
     }
-    before.check_baseline(previous.as_ref(), db_id)?;
+    let rewritten = reconcile::rewritten(destination, &before, previous.as_ref(), tracks, playlists, db_id);
+    before.check_baseline_except(previous.as_ref(), db_id, &rewritten)?;
+    // Read every analysis file the stick names only once the sync is going
+    // ahead: on a large stick that is most of what preparing takes, and a
+    // refused sync should say so at once (#331).
+    let analysis_before = snapshot::analysis_stamp(destination, &before)?;
     let (tracks, playlists) = reconcile::prepare(destination, &before, previous.as_ref(), tracks, playlists, db_id, keep_unlisted)?;
     let tracks = tracks.as_slice();
     let mut merged_tags = my_tags.to_vec();

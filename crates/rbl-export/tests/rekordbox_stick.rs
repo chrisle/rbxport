@@ -181,3 +181,42 @@ fn another_librarys_copies_are_not_taken_for_this_ones() {
     let estimate = rbl_export::estimate::estimate(dest.path(), DB_ID + 1, &tracks, false, None);
     assert_eq!((estimate.tracks_new, estimate.tracks_kept), (2, 0));
 }
+
+/// Gives a track a different comment in `exportLibrary.db` than in
+/// `export.pdb`.
+fn disagree_on_comment(dest: &Path, device_id: u32) {
+    let one = rbl_onelibrary::playlists::open_read_write(&dest.join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    assert_eq!(one.execute("UPDATE content SET djComment = 'edited' WHERE content_id = ?1", [device_id]).unwrap(), 1);
+}
+
+fn device_id(dest: &Path, library_id: u64) -> u32 {
+    let snapshot = Snapshot::read(dest).unwrap();
+    *snapshot.identity.iter().find(|(_, (_, content))| *content == library_id).unwrap().0
+}
+
+#[test]
+fn a_disagreement_on_a_track_the_sync_rewrites_does_not_stop_it() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (tracks, playlists) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
+    disagree_on_comment(dest.path(), device_id(dest.path(), 2));
+    let report = sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
+    assert_eq!(report.tracks, 3);
+    let snapshot = Snapshot::read(dest.path()).unwrap();
+    assert_eq!(snapshot.legacy, snapshot.one, "both databases carry the library's version again");
+}
+
+#[test]
+fn a_disagreement_the_sync_would_carry_names_what_differs() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (tracks, _) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
+    disagree_on_comment(dest.path(), device_id(dest.path(), 3));
+    // Track 3 is not selected: the stick keeps it as it has it.
+    let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
+    let error = sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap_err().to_string();
+    assert_eq!(
+        error,
+        "USB sync conflict: The USB's two libraries, export.pdb and exportLibrary.db, differ on the comment of track 'Track 3', \
+         so this first sync stopped before changing anything. Include that track in this sync if it is in your library, \
+         or delete it from the USB in rekordbox, then sync again."
+    );
+}

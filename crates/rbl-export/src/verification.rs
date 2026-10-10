@@ -147,21 +147,7 @@ fn disagreement(legacy: &Library, one: &Library) -> String {
         let Some(other) = one.tracks.iter().find(|t| t.id == track.id) else {
             return format!("{PREFIX}: track '{}' is only in export.pdb", track.title);
         };
-        let fields = [
-            ("title", track.title != other.title),
-            ("artist", track.artist != other.artist),
-            ("album", track.album != other.album),
-            ("genre", track.genre != other.genre),
-            ("label", track.label != other.label),
-            ("key", track.key != other.key),
-            ("comment", track.comment != other.comment),
-            ("file path", track.path != other.path),
-            ("analysis path", track.analysis != other.analysis),
-            ("BPM", track.bpm != other.bpm),
-            ("rating", track.rating != other.rating),
-            ("colour", track.color != other.color),
-        ];
-        let differ: Vec<&str> = fields.iter().filter(|(_, differs)| *differs).map(|(name, _)| *name).collect();
+        let differ = crate::snapshot::track_differences(track, other);
         if !differ.is_empty() {
             return format!("{PREFIX} on the {} of track '{}'", differ.join(", "), track.title);
         }

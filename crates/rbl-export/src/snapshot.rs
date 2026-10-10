@@ -2,7 +2,10 @@
 //! Settings and encryption/page counters deliberately do not participate.
 use crate::{ExportError, Manifest, Result};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Track {
@@ -136,22 +139,26 @@ impl Snapshot {
     }
 
     pub fn check_baseline(&self, previous: Option<&Manifest>, db_id: u64) -> Result<()> {
+        self.check_baseline_except(previous, db_id, &Rewritten::default())
+    }
+
+    /// [`Self::check_baseline`], leaving out the stick's rows this sync
+    /// writes afresh from the library.
+    ///
+    /// On a stick never synced from here there is no record of which of its
+    /// two databases is right, so a track or playlist they describe
+    /// differently stops the sync: carrying one version would silently drop
+    /// the other. A row the selection rewrites is the exception. It ends up
+    /// in both databases as the library has it, whatever either said before,
+    /// as rekordbox's export overwrites a device track it already holds
+    /// (`DatabaseMediator::overwrite_export`, #331).
+    pub fn check_baseline_except(&self, previous: Option<&Manifest>, db_id: u64, rewritten: &Rewritten) -> Result<()> {
         if previous.and_then(|m| m.baseline.as_ref()).is_none() {
             if let (Some(a), Some(b)) = (&self.legacy, &self.one) {
-                if a.tracks
-                    .iter()
-                    .any(|t| b.tracks.iter().any(|other| other.id == t.id && other != t))
-                    || a.playlists.iter().any(|p| {
-                        b.playlists.iter().any(|other| {
-                            other.id == p.id
-                                && (other.name != p.name
-                                    || other.parent != p.parent
-                                    || other.folder != p.folder
-                                    || other.tracks != p.tracks)
-                        })
-                    })
-                {
-                    return Err(ExportError::Conflict("The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.".into()));
+                match first_difference(a, b, rewritten) {
+                    Some(Difference::Track(detail)) => return Err(ExportError::Conflict(format!("The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again."))),
+                    Some(Difference::Playlist(detail)) => return Err(ExportError::Conflict(format!("The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again."))),
+                    None => {}
                 }
             }
         }
@@ -247,6 +254,68 @@ impl Snapshot {
         Ok(())
     }
 }
+/// The stick's rows a sync writes afresh from the library: the device ids of
+/// the tracks and playlists its selection names.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rewritten {
+    pub tracks: BTreeSet<u32>,
+    pub playlists: BTreeSet<u32>,
+}
+
+/// The fields two readings of one track differ on, by name.
+pub(crate) fn track_differences(a: &Track, b: &Track) -> Vec<&'static str> {
+    [
+        ("title", a.title != b.title),
+        ("artist", a.artist != b.artist),
+        ("album", a.album != b.album),
+        ("genre", a.genre != b.genre),
+        ("label", a.label != b.label),
+        ("key", a.key != b.key),
+        ("comment", a.comment != b.comment),
+        ("file path", a.path != b.path),
+        ("analysis path", a.analysis != b.analysis),
+        ("BPM", a.bpm != b.bpm),
+        ("rating", a.rating != b.rating),
+        ("colour", a.color != b.color),
+    ]
+    .into_iter()
+    .filter_map(|(name, differs)| differs.then_some(name))
+    .collect()
+}
+
+/// What [`first_difference`] found, described for a message.
+#[derive(Debug, PartialEq, Eq)]
+enum Difference {
+    /// "the artist of track 'X'"
+    Track(String),
+    /// "playlist 'Y'"
+    Playlist(String),
+}
+
+/// The first track or playlist both databases hold but describe differently,
+/// leaving out what `rewritten` names.
+fn first_difference(legacy: &Library, one: &Library, rewritten: &Rewritten) -> Option<Difference> {
+    let tracks: BTreeMap<u32, &Track> = one.tracks.iter().map(|t| (t.id, t)).collect();
+    for track in legacy.tracks.iter().filter(|t| !rewritten.tracks.contains(&t.id)) {
+        let Some(other) = tracks.get(&track.id) else { continue };
+        let differ = track_differences(track, other);
+        if !differ.is_empty() {
+            return Some(Difference::Track(format!("the {} of track '{}'", differ.join(", "), track.title)));
+        }
+    }
+    let playlists: BTreeMap<u32, &Playlist> = one.playlists.iter().map(|p| (p.id, p)).collect();
+    legacy
+        .playlists
+        .iter()
+        .filter(|p| !rewritten.playlists.contains(&p.id))
+        .find(|p| {
+            playlists.get(&p.id).is_some_and(|other| {
+                other.name != p.name || other.parent != p.parent || other.folder != p.folder || other.tracks != p.tracks
+            })
+        })
+        .map(|p| Difference::Playlist(format!("playlist '{}'", p.name)))
+}
+
 /// The legacy `export.pdb` side of [`Snapshot::read_at`].
 fn read_legacy_into(out: &mut Snapshot, pdb: &Path) -> Result<()> {
     use rbl_pdb::PageType;
