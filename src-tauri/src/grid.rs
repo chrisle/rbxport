@@ -99,7 +99,14 @@ pub struct GridOptions {
 /// rekordbox stores its analysis lock in bit 7 of Analysed.
 pub(crate) fn database_locked(location: &rbl_db::LibraryLocation, track: &str) -> AppResult<bool> {
     let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).map_err(write_error)?;
-    db.connection().query_row("SELECT (COALESCE(Analysed, 0) & 128) != 0 FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [track], |r| r.get(0)).map_err(|e| AppError::internal(e.to_string()))
+    locked_in(&db, track).map_err(|e| AppError::internal(e.to_string()))
+}
+
+/// [`database_locked`] over a handle the caller already has, for a
+/// loop over many tracks: opening the library derives its key again each
+/// time, which is the cost of the whole check (#284).
+pub(crate) fn locked_in(db: &rbl_db::Library, track: &str) -> Result<bool, rbl_db::DbError> {
+    Ok(db.connection().query_row("SELECT (COALESCE(Analysed, 0) & 128) != 0 FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [track], |r| r.get(0))?)
 }
 
 /// What an action did.

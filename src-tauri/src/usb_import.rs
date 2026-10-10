@@ -82,11 +82,15 @@ pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Stat
 }
 
 fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues: bool, history: bool, settings: bool) -> AppResult<ImportReport> {
-    let _gate = state.edit_gate.lock();
-    let _files = state.analysis_write.lock();
+    // The stick first, the library after: an import waiting here for an
+    // export to finish writing the stick must not hold the library's edit
+    // gate, or every analysis and the next sync's preparation wait behind
+    // it (#284). An export never asks for the gate while it holds the stick.
     rbl_devices::settings::recover(root)
         .map_err(|e| err(format!("Could not recover an interrupted export before importing: {e}")))?;
     let _device_read = rbl_core::durable::read_lock(root).map_err(err)?;
+    let _gate = state.edit_gate.lock();
+    let _files = state.analysis_write.lock();
     let mut report = ImportReport::default();
     let location = state.location()?;
     crate::file_journal::recover(state.backup_dir(), &location)?;
@@ -124,7 +128,12 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         // Open the guarded writer even for an empty device; read-only must not look like success.
         state.write(|_| Ok(())).map_err(write_error)?;
         for (id, analysis) in tracks.values() {
-            if editor.is_locked(id) || crate::grid::database_locked(&state.location()?, id)? { report.skipped += 1; continue; }
+            // Read on the open handle. Opening the library, for the lock
+            // bit here and the analysis path below, derives its key again:
+            // about 155 ms each, two per track, so a stick of 20,000 tracks
+            // held the library, and every analysis and sync, for well over
+            // an hour (#284).
+            if editor.is_locked(id) || state.read_db(|db| crate::grid::locked_in(db, id)).map_err(write_error)? { report.skipped += 1; continue; }
             if analysis.is_empty() { report.skipped += 1; continue; }
             let source = within(root, analysis)?;
             let source_dat = rbl_anlz::Anlz::read(&source).map_err(err)?;
@@ -138,7 +147,7 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             let previous_bpm = state.read_db(|db| Ok(db.connection().query_row("SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [id], |r| r.get::<_,u32>(0))?)).map_err(write_error)?;
             let bpm = beats.first().map_or(previous_bpm, |b| u32::from(b.tempo_x100));
             let bpm_changed = bpm != previous_bpm;
-            let relative = state.write(|w| w.analysis_data_path_for(id)).map_err(write_error)?;
+            let relative = state.read_db(|db| rbl_db::write::analysis_data_path(db.connection(), id)).map_err(write_error)?;
             let target = rbl_anlz::resolve(&location.share_root, &relative);
             let mut files = Vec::new();
             // A stick that carries the cues and grid the library already has
@@ -539,6 +548,102 @@ mod tests {
             Ok(rows)
         }).unwrap();
         assert_eq!(imported, vec![live]);
+    }
+
+    /// A library and a stick rekordbox wrote from it: every fixture track on
+    /// the stick, with cues, under `OneLibrary` identity.
+    fn library_and_stick(dir: &Path) -> (AppState, rbl_db::LibraryLocation, std::path::PathBuf, usize) {
+        let location = rbl_db::fixture::build(dir, rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let db_id = rbl_db::export_info::db_id(db.connection()).unwrap();
+        let tracks = library.len();
+        let state = AppState::with_backups(dir.join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        drop(db);
+        let usb = dir.join("usb");
+        let one = usb.join("PIONEER/rekordbox/exportLibrary.db");
+        std::fs::create_dir_all(one.parent().unwrap()).unwrap();
+        let mut builder = rbl_onelibrary::build::Builder::create(&one).unwrap();
+        for index in 0..tracks {
+            let content_id = i64::try_from(index + 1).unwrap();
+            let analysis = format!("/PIONEER/USBANLZ/P000/{content_id:08X}/ANLZ0000.DAT");
+            let folder = usb.join(analysis.trim_start_matches('/')).parent().unwrap().to_path_buf();
+            std::fs::create_dir_all(&folder).unwrap();
+            write_stick(&folder, &[stick_cue(1, 2000, None, 22, "")]);
+            builder.add_track(&rbl_onelibrary::build::Track {
+                content_id, master_db_id: i64::try_from(db_id).unwrap(),
+                master_content_id: rbl_db::fixture::track_id(index).parse().unwrap(),
+                title: format!("Track {content_id}"), path: format!("/Contents/{content_id}.mp3"), analysis_path: analysis,
+                ..Default::default()
+            }).unwrap();
+        }
+        builder.finish("Playlist 1 HFS+", "2026-10-09", 0).unwrap();
+        (state, location, usb, tracks)
+    }
+
+    /// Importing cues reads two things from the library for each track on
+    /// the stick, its analysis lock and its analysis path. Each used to open
+    /// the library again, deriving its key every time (about 155 ms), so a
+    /// stick of 20,000 tracks held the library's edit gate, and with it
+    /// every analysis and every sync's preparation, for well over an hour
+    /// (#284). Measured against one open on this machine, the whole import
+    /// of the stick must cost a fraction of an open per track.
+    #[test]
+    fn importing_cues_does_not_reopen_the_library_for_every_track() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, usb, tracks) = library_and_stick(dir.path());
+        assert!(tracks >= 40);
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        // Warm the shared handle and the writer, as an app that has loaded
+        // the library has.
+        import(&state, &editor, &usb, true, false, false).unwrap();
+        let started = std::time::Instant::now();
+        for _ in 0..3 {
+            drop(rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap());
+        }
+        let one_open = started.elapsed() / 3;
+        let started = std::time::Instant::now();
+        let report = import(&state, &editor, &usb, true, false, false).unwrap();
+        let elapsed = started.elapsed();
+        // No local analysis files: each track is looked up, then skipped.
+        assert_eq!((report.tracks, report.skipped), (0, tracks));
+        assert!(
+            elapsed < one_open * u32::try_from(tracks / 4).unwrap(),
+            "{tracks} tracks took {elapsed:?}; one open of the library takes {one_open:?}",
+        );
+    }
+
+    /// An import that has to wait for the stick, while an export holds it,
+    /// waits without the library's edit gate or analysis lock, so analysis
+    /// and the next sync's preparation go on (#284).
+    #[test]
+    fn an_import_waiting_for_the_stick_holds_no_library_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, _location, usb, _tracks) = library_and_stick(dir.path());
+        let state = std::sync::Arc::new(state);
+        let editor = std::sync::Arc::new(crate::grid::GridEditor::at(state.backup_dir()));
+        // What an export holds for its whole run: the stick's write lock.
+        let export = rbl_core::durable::Publication::new(&usb, ".rbxport-publication-284").unwrap();
+        let (sent, finished) = std::sync::mpsc::channel();
+        let worker = {
+            let (state, editor, usb) = (std::sync::Arc::clone(&state), std::sync::Arc::clone(&editor), usb.clone());
+            std::thread::spawn(move || {
+                let result = import(&state, &editor, &usb, false, true, false);
+                sent.send(()).unwrap();
+                result
+            })
+        };
+        // Long enough for the import to have reached the stick's lock.
+        assert!(finished.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the import waits for the export");
+        let other = {
+            let state = std::sync::Arc::clone(&state);
+            std::thread::spawn(move || state.edit_gate.try_lock().is_some() && state.analysis_write.try_lock().is_some())
+        };
+        assert!(other.join().unwrap(), "an analysis can take the library's locks while the import waits");
+        drop(export);
+        finished.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+        worker.join().unwrap().unwrap();
     }
 
     /// A player's `MYSETTING.DAT`: the 104-byte header, a 40-byte body and

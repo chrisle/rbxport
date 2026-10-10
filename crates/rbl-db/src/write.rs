@@ -251,6 +251,33 @@ pub struct AnalysisRegistration<'a> {
     pub analysis_data_path: &'a str,
 }
 
+/// [`Writer::analysis_data_path_for`] over any connection to the library,
+/// so a caller that only needs the path reads it without opening the
+/// library for writing: each such open derives the key again (about 155 ms
+/// on an M2), which a stick of 20,000 tracks paid once per track (#284).
+pub fn analysis_data_path(conn: &Connection, content: &str) -> Result<String> {
+    let (existing, uuid): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT AnalysisDataPath, UUID FROM djmdContent
+             WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![content],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| DbError::WriteRefused(format!("{content} is not a live track")))?;
+    if let Some(path) = existing.filter(|p| !p.is_empty()) {
+        return Ok(path);
+    }
+    let uuid = uuid.unwrap_or_default();
+    match (uuid.get(..3), uuid.get(3..)) {
+        (Some(head), Some(tail)) if !tail.is_empty() => {
+            Ok(format!("/PIONEER/USBANLZ/{head}/{tail}/ANLZ0000.DAT"))
+        }
+        _ => Err(DbError::WriteRefused(format!(
+            "{content} has no UUID to derive an analysis path from"
+        ))),
+    }
+}
+
 /// A guarded write session.
 ///
 /// Holds the library open read-write. Every action is one immediate
@@ -1524,28 +1551,7 @@ impl Writer {
     /// re-analysis. A row that already has a path keeps it, so files are
     /// replaced in place rather than left behind.
     pub fn analysis_data_path_for(&self, content: &str) -> Result<String> {
-        let (existing, uuid): (Option<String>, Option<String>) = self
-            .library
-            .connection()
-            .query_row(
-                "SELECT AnalysisDataPath, UUID FROM djmdContent
-                 WHERE ID = ?1 AND rb_local_deleted = 0",
-                params![content],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .map_err(|_| DbError::WriteRefused(format!("{content} is not a live track")))?;
-        if let Some(path) = existing.filter(|p| !p.is_empty()) {
-            return Ok(path);
-        }
-        let uuid = uuid.unwrap_or_default();
-        match (uuid.get(..3), uuid.get(3..)) {
-            (Some(head), Some(tail)) if !tail.is_empty() => {
-                Ok(format!("/PIONEER/USBANLZ/{head}/{tail}/ANLZ0000.DAT"))
-            }
-            _ => Err(DbError::WriteRefused(format!(
-                "{content} has no UUID to derive an analysis path from"
-            ))),
-        }
+        analysis_data_path(self.library.connection(), content)
     }
 
     /// Registers an analysis on a track: BPM, key, the analysis path, and the
