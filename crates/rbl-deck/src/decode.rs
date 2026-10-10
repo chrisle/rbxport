@@ -67,8 +67,17 @@ pub struct Streamer {
     ready: Vec<f32>,
     /// How much of `ready` has been handed out, in samples.
     taken: usize,
-    /// Where the next frame handed out sits in the track, at the device rate.
+    /// Where the next decoded frame sits in the file, at the device rate:
+    /// symphonia's timeline, which `lead` turns into the track's.
     position: u64,
+    /// Device-rate frames rekordbox's timeline for this file runs ahead of the
+    /// decoder's: the track's frame `t` is the decoded frame `t - lead`. See
+    /// [`rbl_core::mpeg`]. Zero for anything but an MP3 whose first frames
+    /// rekordbox maps differently.
+    lead: i64,
+    /// Frames of silence still to hand out before the first decoded one: what
+    /// is left of a positive `lead` when playing from inside it.
+    silence: u64,
     /// Frames to throw away before handing anything out, so a seek lands on
     /// the frame it was asked for rather than on a packet boundary.
     skip: u64,
@@ -129,6 +138,17 @@ impl Streamer {
             .make(&track.codec_params, &DecoderOptions::default())
             .map_err(|e| DeckError::Decode(e.to_string()))?;
 
+        // Cues, beats and waveforms are times on rekordbox's timeline, so the
+        // deck plays on it: an MP3 whose tag frame rekordbox plays as silence
+        // starts that much later here too.
+        let lead = if track.codec_params.codec == CODEC_TYPE_MP3 {
+            let frames = std::fs::File::open(path).map_or(0, |mut file| rbl_core::mpeg::rekordbox_lead_frames(&mut file));
+            let scaled = i64::try_from(scale_frames(frames.unsigned_abs(), source_rate, device_rate)).unwrap_or(0);
+            if frames < 0 { -scaled } else { scaled }
+        } else {
+            0
+        };
+
         let resampler = if source_rate == device_rate {
             None
         } else {
@@ -157,7 +177,10 @@ impl Streamer {
             ready: Vec::new(),
             taken: 0,
             position: 0,
-            skip: 0,
+            lead,
+            // A negative lead is decoded audio before the track's first frame.
+            silence: lead.max(0).unsigned_abs(),
+            skip: lead.min(0).unsigned_abs(),
             total_frames,
             drained: false,
             finished: false,
@@ -165,13 +188,24 @@ impl Streamer {
         })
     }
 
+    /// The track's length in device-rate frames, or zero when the file does
+    /// not say.
     pub fn total_frames(&self) -> u64 {
-        self.total_frames
+        if self.total_frames == 0 {
+            return 0;
+        }
+        self.on_track(self.total_frames)
     }
 
     /// Where the next frame handed out sits, in device-rate frames.
     pub fn position(&self) -> u64 {
-        self.position
+        self.on_track(self.position).saturating_sub(self.silence)
+    }
+
+    /// A decoded frame's place on the track's timeline.
+    fn on_track(&self, decoded: u64) -> u64 {
+        let decoded = i64::try_from(decoded).unwrap_or(i64::MAX);
+        u64::try_from(decoded.saturating_add(self.lead)).unwrap_or(0)
     }
 
     /// The frame the next `fill` starts at, in device-rate frames.
@@ -180,7 +214,7 @@ impl Streamer {
     /// demuxer landed on, and the overshoot to the frame asked for is only
     /// thrown away by the next `fill`.
     pub fn next_frame(&self) -> u64 {
-        self.position + self.skip
+        self.on_track(self.position + self.skip).saturating_sub(self.silence)
     }
 
     /// Nothing left: the file is finished and the buffers are empty.
@@ -194,7 +228,11 @@ impl Streamer {
     /// to 576 frames early, a compressed format further — so whatever it
     /// overshoots by is decoded and thrown away. A cue point that is 7 ms out
     /// is a cue point in the wrong place.
-    pub fn seek(&mut self, frame: u64) -> Result<u64> {
+    pub fn seek(&mut self, track_frame: u64) -> Result<u64> {
+        // Inside a positive lead the decoder starts at its first frame, after
+        // the silence still to come; otherwise the decoder's own frame.
+        let silence = u64::try_from(self.lead).unwrap_or(0).saturating_sub(track_frame);
+        let frame = u64::try_from(i64::try_from(track_frame).unwrap_or(i64::MAX).saturating_sub(self.lead)).unwrap_or(0);
         let seconds = frame as f64 / f64::from(self.device_rate.max(1));
         // MPEG needs an accurate packet timestamp. Coarse seeking can put
         // audio a packet ahead while reporting the requested timestamp: the
@@ -234,9 +272,10 @@ impl Streamer {
         }
         self.position = scale_frames(landed.actual_ts, self.source_rate, self.device_rate);
         self.skip = frame.saturating_sub(self.position);
+        self.silence = silence;
         // The position it reports is where it will actually resume, which is
         // where it was asked to go once the overshoot has been discarded.
-        Ok(frame.max(self.position))
+        Ok(track_frame.max(self.position()))
     }
 
     /// One demuxer seek, in seconds.
@@ -263,6 +302,17 @@ impl Streamer {
     /// means there is nothing more at all.
     pub fn fill(&mut self, out: &mut [f32]) -> Result<usize> {
         self.discard_skipped()?;
+        // The lead's silence first. It is part of the track, so it is handed
+        // out even past a length the file declares wrongly short.
+        let quiet = usize::try_from(self.silence).unwrap_or(usize::MAX).min(out.len() / 2);
+        if quiet > 0 {
+            if let Some(into) = out.get_mut(..quiet * 2) {
+                into.fill(0.0);
+            }
+            self.silence -= quiet as u64;
+            let rest = out.get_mut(quiet * 2..).unwrap_or(&mut []);
+            return Ok(quiet + if rest.is_empty() { 0 } else { self.fill(rest)? });
+        }
         let mut wanted = out.len() / 2;
         // Never past the length the file declares. The resampler's tail is
         // zero-padded to a full chunk, so without this a resampled track ends
@@ -371,8 +421,21 @@ impl Streamer {
             }
             let decoded = match self.decoder.decode(&packet) {
                 Ok(decoded) => decoded,
-                // One damaged packet should not end the track.
-                Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+                // One damaged packet should not end the track, nor move what
+                // comes after it: it is played as the silence it lasts, as
+                // rekordbox's decoder does. Dropped, every cue after the first
+                // frames of a file that opens on a broken bit reservoir played
+                // a frame early for each one.
+                Err(symphonia::core::errors::Error::DecodeError(_)) => {
+                    let frames = usize::try_from(packet.dur).unwrap_or(0);
+                    for channel in &mut self.pending {
+                        channel.resize(channel.len() + frames, 0.0);
+                    }
+                    if frames == 0 {
+                        continue;
+                    }
+                    return Ok(true);
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "the decoder stopped early");
                     return Ok(false);
@@ -629,6 +692,121 @@ mod tests {
                 .fold(0.0_f32, f32::max);
             assert!(error < 1e-5, "seek to {at}: PCM shifted, max error {error}");
         }
+    }
+
+    /// A LAME MP3 of a second of tone whose Info frame is in the audio's own
+    /// channel mode: rekordbox's timeline starts a frame before symphonia's.
+    fn lame_mp3(dir: &Path) -> std::path::PathBuf {
+        let wav = dir.join("tone.wav");
+        tone(&wav, 44_100, 1.0);
+        let mp3 = dir.join("tone.mp3");
+        rbl_audio::compatibility::convert(&wav, &mp3, rbl_audio::compatibility::Format::Mp3).unwrap();
+        mp3
+    }
+
+    /// The file as symphonia decodes it, interleaved stereo, nothing moved.
+    fn symphonia_stereo(path: &Path) -> Vec<f32> {
+        let file = std::fs::File::open(path).unwrap();
+        let stream = MediaSourceStream::new(Box::new(file), symphonia::core::io::MediaSourceStreamOptions::default());
+        let mut format = symphonia::default::get_probe()
+            .format(&Hint::new(), stream, &FormatOptions::default(), &MetadataOptions::default())
+            .unwrap()
+            .format;
+        let track = format.default_track().unwrap().clone();
+        let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).unwrap();
+        let mut out = Vec::new();
+        while let Ok(packet) = format.next_packet() {
+            let Ok(audio) = decoder.decode(&packet) else { continue };
+            let mut buffer = SampleBuffer::<f32>::new(audio.capacity() as u64, *audio.spec());
+            buffer.copy_interleaved_ref(audio);
+            out.extend_from_slice(buffer.samples());
+        }
+        out
+    }
+
+    fn drain(streamer: &mut Streamer) -> Vec<f32> {
+        let mut all = Vec::new();
+        let mut out = vec![0.0_f32; 1000];
+        while !streamer.finished() {
+            let frames = streamer.fill(&mut out).unwrap();
+            all.extend_from_slice(&out[..frames * 2]);
+        }
+        all
+    }
+
+    #[test]
+    fn an_mp3_plays_on_rekordbox_s_timeline() {
+        // #277: a cue rekordbox put on a kick is 1,152 samples after the
+        // kick in symphonia's decode of a LAME file, because rekordbox plays
+        // the Info frame as a frame of silence.
+        let dir = tempfile::tempdir().unwrap();
+        let mp3 = lame_mp3(dir.path());
+        let raw = symphonia_stereo(&mp3);
+        let mut streamer = Streamer::open(&mp3, 44_100).unwrap();
+        let declared = streamer.total_frames();
+        let played = drain(&mut streamer);
+        assert_eq!(played.len(), raw.len() + 1152 * 2);
+        assert!(played[..1152 * 2].iter().all(|&s| s == 0.0));
+        assert_eq!(&played[1152 * 2..], &raw[..]);
+        assert_eq!(streamer.position() as usize, played.len() / 2);
+        assert_eq!(declared as usize, played.len() / 2);
+    }
+
+    #[test]
+    fn a_seek_into_an_mp3_lands_on_rekordbox_s_timeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let mp3 = lame_mp3(dir.path());
+        let raw = symphonia_stereo(&mp3);
+        let mut streamer = Streamer::open(&mp3, 44_100).unwrap();
+        // Inside the frame rekordbox plays as silence, then well past it.
+        for at in [500_usize, 10_000, 0, 1152] {
+            assert_eq!(streamer.seek(at as u64).unwrap(), at as u64);
+            assert_eq!(streamer.next_frame(), at as u64);
+            let mut out = vec![0.0_f32; 16_384];
+            assert_eq!(streamer.fill(&mut out).unwrap(), 8192);
+            let quiet = 1152_usize.saturating_sub(at);
+            assert!(out[..quiet * 2].iter().all(|&s| s == 0.0), "seek to {at}");
+            // Past the decoder's warm-up after a seek, as the sequential
+            // timeline test does: the PCM, not just the reported position.
+            let from = (at + quiet - 1152) * 2;
+            let warm = if from == 0 { 0 } else { 4096 };
+            let error = out[quiet * 2 + warm..]
+                .iter()
+                .zip(&raw[from + warm..])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f32, f32::max);
+            assert!(error < 1e-5, "seek to {at}: PCM shifted, max error {error}");
+            assert_eq!(streamer.position(), at as u64 + 8192);
+        }
+    }
+
+    #[test]
+    fn an_mp3_rekordbox_maps_as_symphonia_does_is_not_moved() {
+        // ffmpeg's Info frame says stereo over joint-stereo audio, so
+        // rekordbox's map starts at the audio, where symphonia's does.
+        let mut fixture = std::io::Cursor::new(include_bytes!("../tests/fixtures/seek-noise.mp3").to_vec());
+        assert_eq!(rbl_core::mpeg::rekordbox_lead_frames(&mut fixture), 0);
+    }
+
+    #[test]
+    fn a_damaged_mp3_packet_is_played_as_silence_in_its_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let mp3 = lame_mp3(dir.path());
+        let whole = drain(&mut Streamer::open(&mp3, 44_100).unwrap());
+        // The fourth frame claims more big values than a granule holds.
+        let mut bytes = std::fs::read(&mp3).unwrap();
+        let mut at = bytes.windows(2).position(|w| w == [0xFF, 0xFB]).unwrap();
+        for _ in 0..3 {
+            at += 1044 + usize::from((bytes[at + 2] >> 1) & 1);
+        }
+        bytes[at + 8] = 0xFF;
+        bytes[at + 9] |= 0x80;
+        let damaged = dir.path().join("damaged.mp3");
+        std::fs::write(&damaged, bytes).unwrap();
+        let played = drain(&mut Streamer::open(&damaged, 44_100).unwrap());
+        assert_eq!(played.len(), whole.len(), "a dropped packet moves everything after it");
+        let tail = whole.len() - 22_050;
+        assert_eq!(&played[tail..], &whole[tail..]);
     }
 
     #[test]

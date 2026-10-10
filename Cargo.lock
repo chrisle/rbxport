@@ -3886,6 +3886,7 @@ name = "rbl-audio"
 version = "1.5.0"
 dependencies = [
  "mp3lame-encoder",
+ "rbl-core",
  "rubato",
  "symphonia",
  "tempfile",
@@ -3964,6 +3965,8 @@ version = "1.5.0"
 dependencies = [
  "cc",
  "cpal",
+ "rbl-audio",
+ "rbl-core",
  "rbl-db",
  "rbl-index",
  "rtrb",
