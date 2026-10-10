@@ -2,9 +2,18 @@
   "app": {
     "windows": [
       {
+        "title": "rbxport",
+        "width": 1800,
+        "height": 1130,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true,
+        "center": true,
         "titleBarStyle": "Visible",
         "hiddenTitle": false,
         "decorations": true,
+        "acceptFirstMouse": true,
+        "visible": false,
         "dragDropEnabled": true
       }
     ]
