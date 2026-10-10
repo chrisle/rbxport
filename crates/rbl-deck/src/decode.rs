@@ -781,6 +781,52 @@ mod tests {
     }
 
     #[test]
+    fn an_mp3_whose_map_restarts_after_audio_drops_that_audio() {
+        // The first audio frame differs in channel mode from the Info frame
+        // before it and the audio after it, so rekordbox's map starts again
+        // at the second audio frame: the frame symphonia plays first is not
+        // on rekordbox's timeline at all (a lead of -1,152).
+        let dir = tempfile::tempdir().unwrap();
+        let mut bytes = std::fs::read(lame_mp3(dir.path())).unwrap();
+        let info = bytes.windows(2).position(|w| w == [0xFF, 0xFB]).unwrap();
+        let first = info + 1044 + usize::from((bytes[info + 2] >> 1) & 1);
+        assert_eq!(bytes[first..first + 2], [0xFF, 0xFB]);
+        // Stereo and joint stereo share their side information's layout, so
+        // the frame still decodes.
+        bytes[first + 3] ^= 0x40;
+        let moved = dir.path().join("restart.mp3");
+        std::fs::write(&moved, &bytes).unwrap();
+        assert_eq!(rbl_core::mpeg::rekordbox_lead_frames(&mut std::io::Cursor::new(&bytes)), -1152);
+
+        let raw = symphonia_stereo(&moved);
+        let mut streamer = Streamer::open(&moved, 44_100).unwrap();
+        let declared = streamer.total_frames();
+        let played = drain(&mut streamer);
+        assert_eq!(played.len(), raw.len() - 1152 * 2);
+        assert_eq!(&played[..], &raw[1152 * 2..]);
+        assert_eq!(streamer.position() as usize, played.len() / 2);
+        assert_eq!(declared as usize, played.len() / 2);
+
+        for at in [0_usize, 10_000] {
+            assert_eq!(streamer.seek(at as u64).unwrap(), at as u64);
+            assert_eq!(streamer.next_frame(), at as u64);
+            let mut out = vec![0.0_f32; 16_384];
+            assert_eq!(streamer.fill(&mut out).unwrap(), 8192);
+            // Even track frame 0 is a seek into the stream here, so the
+            // decoder warms up after it as after any other seek.
+            let warm = 4096;
+            let from = (at + 1152) * 2;
+            let error = out[warm..]
+                .iter()
+                .zip(&raw[from + warm..])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f32, f32::max);
+            assert!(error < 1e-5, "seek to {at}: PCM shifted, max error {error}");
+            assert_eq!(streamer.position(), at as u64 + 8192);
+        }
+    }
+
+    #[test]
     fn an_mp3_rekordbox_maps_as_symphonia_does_is_not_moved() {
         // ffmpeg's Info frame says stereo over joint-stereo audio, so
         // rekordbox's map starts at the audio, where symphonia's does.
