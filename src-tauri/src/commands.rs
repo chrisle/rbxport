@@ -1636,8 +1636,14 @@ fn source_track(
     extra: &rbl_db::export_info::TrackExtras,
 ) -> AppResult<rbl_export::SourceTrack> {
     let i = row as usize;
+    // What analysis wrote, from the row as it is now: an analysis run
+    // re-reads the index only once it is over, and a sync made during one
+    // must not take the tracks it has analysed as unanalysed (#309).
+    let analysed = extra.analysis.as_ref();
+    let analysis_path = analysed.map_or_else(|| library.analysis_path.get(i), |a| a.analysis_path.as_str());
+    let artwork_path = analysed.map_or_else(|| library.artwork_path.get(i), |a| a.artwork_path.as_str());
     // The library's own image, share-relative like the analysis.
-    let artwork = Some(library.artwork_path.get(i))
+    let artwork = Some(artwork_path)
         .filter(|p| !p.is_empty())
         .map(|p| share.join(p.trim_start_matches(['/', '\\'])));
     Ok(rbl_export::SourceTrack {
@@ -1655,19 +1661,19 @@ fn source_track(
         album: library.album_name(row).to_owned(),
         genre: library.genre_name(row).to_owned(),
         label: library.label_name(row).to_owned(),
-        key: library.key_name(row).to_owned(),
+        key: analysed.map_or_else(|| library.key_name(row).to_owned(), |a| a.key.clone()),
         comment: library.comment.get(i).to_owned(),
         date_added: library.date_added.get(i).to_owned(),
         release_date: library.release_date.get(i).to_owned(),
-        bpm_x100: library.bpm_x100.get(i).copied().unwrap_or(0),
-        duration_sec: u16::try_from(library.length_sec.get(i).copied().unwrap_or(0)).unwrap_or(u16::MAX),
+        bpm_x100: analysed.map_or_else(|| library.bpm_x100.get(i).copied().unwrap_or(0), |a| a.bpm_x100),
+        duration_sec: u16::try_from(analysed.map_or_else(|| library.length_sec.get(i).copied().unwrap_or(0), |a| a.length_sec)).unwrap_or(u16::MAX),
         rating: library.rating.get(i).copied().unwrap_or(0),
         color_id: library.color.get(i).copied().unwrap_or(0),
         bitrate: library.bitrate.get(i).copied().unwrap_or(0),
         sample_rate: library.sample_rate.get(i).copied().unwrap_or(0),
         file_size: library.file_size.get(i).copied().unwrap_or(0),
         year: library.year.get(i).copied().unwrap_or(0),
-        analysis: read_analysis(share, library.analysis_path.get(i))?,
+        analysis: read_analysis(share, analysis_path)?,
     })
 }
 
@@ -4207,6 +4213,45 @@ mod tests {
         assert_eq!(on_stick(&stick), [leaf(&a), leaf(&b)], "the first playlist stays on the stick");
         export_playlist_to(&state, &location, &stick, &a);
         assert_eq!(on_stick(&stick), [leaf(&a), leaf(&b)], "a playlist exported again keeps its place");
+    }
+
+    /// A track analysed after the index was read goes on the stick analysed:
+    /// its BPM, key, length and analysis files, as the row now has them. An
+    /// analysis run writes each track's row and files and re-reads the index
+    /// only when the run is over; a sync made before then exported those
+    /// tracks with no waveform, grid, BPM or key (#309).
+    #[test]
+    fn a_track_analysed_since_the_index_was_read_is_exported_analysed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, stick) = export_rig(dir.path(), |_| {});
+        let track = rbl_db::fixture::track_id(0);
+        let relative = "/PIONEER/USBANLZ/P309/00000309/ANLZ0000.DAT";
+        let dat = location.share_root.join(relative.trim_start_matches('/'));
+        std::fs::create_dir_all(dat.parent().unwrap()).unwrap();
+        std::fs::write(&dat, rbl_anlz::AnlzBuilder::new().path("/x.mp3").finish()).unwrap();
+        // What `analyse_track` writes, without the reload the analysis
+        // queue makes once it has drained.
+        state
+            .write(|w| {
+                w.ensure_detected_key("F#m")?;
+                w.set_analysis(&track, &rbl_db::write::AnalysisWrite { bpm_x100: 12_650, key: Some("F#m"), analysis_path: relative, length_sec: Some(241) })
+            })
+            .unwrap();
+        let library = state.library().unwrap();
+        let row = library.row_of(&track).unwrap() as usize;
+        assert!(library.analysis_path.get(row).is_empty(), "the index still has the track unanalysed");
+
+        export_playlist_to(&state, &location, &stick, &rbl_db::fixture::playlist_id(0));
+
+        let snapshot = rbl_export::snapshot::Snapshot::read(&stick).unwrap();
+        let one = snapshot.one.as_ref().unwrap();
+        let id = snapshot.identity.iter().find(|(_, (_, content))| content.to_string() == track).map(|(id, _)| *id).unwrap();
+        let exported = one.tracks.iter().find(|t| t.id == id).unwrap();
+        assert_eq!((exported.bpm, exported.key.as_str()), (12_650, "F#m"));
+        assert!(!exported.analysis.is_empty(), "the stick names the track's analysis");
+        assert!(stick.join(exported.analysis.trim_start_matches('/')).is_file(), "and the file is there");
+        let legacy = snapshot.legacy.as_ref().unwrap().tracks.iter().find(|t| t.id == id).unwrap();
+        assert_eq!((legacy.bpm, legacy.analysis.as_str()), (12_650, exported.analysis.as_str()), "export.pdb says the same");
     }
 
     /// A playlist deleted from the library stays on the stick through Export

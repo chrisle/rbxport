@@ -10,6 +10,9 @@ conversion also applies to individual track export.
 
 - A playlist exports its tracks. An intelligent playlist exports the tracks
   its rule admits at the time of export.
+- Each track goes on the stick with the BPM, key, length and analysis files
+  your library holds for it when the export starts, including a track
+  analysed while an analysis run is still going.
 - **Export Folder** exports every playlist and intelligent playlist under the
   folder, at any depth. The device gets the folder, its subfolders (including
   empty ones), and the folders above it, with each playlist inside its folder.

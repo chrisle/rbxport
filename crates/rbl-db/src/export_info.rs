@@ -83,6 +83,48 @@ pub struct TrackExtras {
     pub alternate_paths: Vec<String>,
     /// The ids of the My Tags on the track.
     pub my_tags: Vec<String>,
+    /// What analysis last wrote to the track's row, read from the database
+    /// as it is now; `None` when the row was not found.
+    pub analysis: Option<AnalysisFacts>,
+}
+
+/// The columns an analysis writes to a track's row (`AnalysisDataPath`,
+/// `BPM`, `Length`, the key, and the artwork it imports).
+///
+/// The export reads them from the database rather than from the index: an
+/// analysis run writes them one track at a time and the index is re-read
+/// only when the whole run is over, so a sync made while a run was going
+/// took the tracks it had already analysed as unanalysed, with no BPM, key,
+/// waveform or grid on the stick (#309).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AnalysisFacts {
+    /// Share-relative, `/PIONEER/USBANLZ/…/ANLZ0000.DAT`; empty when none.
+    pub analysis_path: String,
+    pub bpm_x100: u32,
+    pub length_sec: u32,
+    /// The key's `ScaleName`; empty when the track has none.
+    pub key: String,
+    /// Share-relative artwork; empty when none.
+    pub artwork_path: String,
+}
+
+/// A whole number from a column that may hold an integer, a real or text,
+/// as rekordbox's columns sometimes do; 0 when it holds none.
+fn whole(value: rusqlite::types::ValueRef<'_>) -> i64 {
+    use rusqlite::types::ValueRef;
+    match value {
+        ValueRef::Integer(v) => v,
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "a column value, clamped by the caller"
+        )]
+        ValueRef::Real(v) => v as i64,
+        ValueRef::Text(t) => std::str::from_utf8(t)
+            .ok()
+            .and_then(|t| t.trim().parse().ok())
+            .unwrap_or(0),
+        ValueRef::Null | ValueRef::Blob(_) => 0,
+    }
 }
 
 /// The extras for a set of tracks, keyed by `djmdContent.ID`.
@@ -124,6 +166,39 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
                     extras.alternate_paths.push(path);
                 }
             }
+        }
+        let keyed = has_table(conn, "djmdKey");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT c.ID, c.AnalysisDataPath, c.BPM, c.Length, {key}, c.ImagePath
+             FROM djmdContent c {join} WHERE c.ID IN ({marks})",
+            key = if keyed { "k.ScaleName" } else { "NULL" },
+            join = if keyed {
+                "LEFT JOIN djmdKey k ON k.ID = c.KeyID"
+            } else {
+                ""
+            },
+        ))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
+            let count = |idx| {
+                Ok::<_, rusqlite::Error>(
+                    u32::try_from(whole(r.get_ref(idx)?).clamp(0, i64::from(u32::MAX)))
+                        .unwrap_or(0),
+                )
+            };
+            Ok((
+                r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                AnalysisFacts {
+                    analysis_path: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    bpm_x100: count(2)?,
+                    length_sec: count(3)?,
+                    key: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                    artwork_path: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                },
+            ))
+        })?;
+        for row in rows {
+            let (id, facts) = row?;
+            out.entry(id).or_default().analysis = Some(facts);
         }
         if has_table(conn, "djmdCue") {
             let mut stmt = conn.prepare(&format!(
@@ -218,7 +293,62 @@ fn loop_end(start_ms: u32, stored_end: i64, beat_loop_size: u32, bpm_x100: u32) 
 mod tests {
     use rusqlite::Connection;
 
-    use super::track_extras;
+    use super::{track_extras, AnalysisFacts};
+
+    /// The export takes what analysis wrote from the row as it is now, not
+    /// from an index read before the analysis (#309).
+    #[test]
+    fn the_extras_carry_what_analysis_wrote_to_the_row() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE djmdContent (
+                ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
+                TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM,
+                AnalysisDataPath TEXT, Length INTEGER, KeyID TEXT, ImagePath TEXT
+             );
+             CREATE TABLE djmdKey (ID TEXT PRIMARY KEY, ScaleName TEXT);
+             INSERT INTO djmdKey VALUES ('7', 'F#m');
+             INSERT INTO djmdContent (ID, BPM, AnalysisDataPath, Length, KeyID, ImagePath, Analysed)
+                VALUES ('1', 12800, '/PIONEER/USBANLZ/P001/0001/ANLZ0000.DAT', 301, '7', '/PIONEER/Artwork/a.jpg', 105),
+                       ('2', NULL, NULL, NULL, NULL, NULL, 0),
+                       ('3', '12450', '', 200, 'gone', '', 0);",
+        )
+        .unwrap();
+
+        let extras = track_extras(
+            &conn,
+            &[
+                "1".to_owned(),
+                "2".to_owned(),
+                "3".to_owned(),
+                "4".to_owned(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            extras["1"].analysis,
+            Some(AnalysisFacts {
+                analysis_path: "/PIONEER/USBANLZ/P001/0001/ANLZ0000.DAT".into(),
+                bpm_x100: 12_800,
+                length_sec: 301,
+                key: "F#m".into(),
+                artwork_path: "/PIONEER/Artwork/a.jpg".into(),
+            })
+        );
+        assert_eq!(
+            extras["2"].analysis,
+            Some(AnalysisFacts::default()),
+            "a row never analysed reads as such"
+        );
+        let text_bpm = extras["3"].analysis.as_ref().unwrap();
+        assert_eq!(
+            (text_bpm.bpm_x100, text_bpm.key.as_str()),
+            (12_450, ""),
+            "a BPM stored as text, a key row that is gone"
+        );
+        assert!(!extras.contains_key("4"), "no row, no facts");
+    }
 
     #[test]
     fn an_active_beat_loop_without_an_out_point_is_exported_as_a_loop() {
@@ -227,7 +357,8 @@ mod tests {
             "CREATE TABLE djmdContent (
                 ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
                 TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
-                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM INTEGER
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM INTEGER,
+                AnalysisDataPath TEXT, Length INTEGER, KeyID TEXT, ImagePath TEXT
              );
              CREATE TABLE djmdCue (
                 ContentID TEXT, Kind INTEGER, InMsec INTEGER, OutMsec INTEGER,
