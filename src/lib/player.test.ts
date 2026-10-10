@@ -45,6 +45,7 @@ import {
   quantizedLaunchMs,
   foldIntoLoop,
   callLeavesFrom,
+  lateCall,
   needsRedraw,
   NO_BEATS,
   scrollOffset,
@@ -1108,6 +1109,21 @@ describe("foldIntoLoop", () => {
   it("brings a head read past the out point back by whole loops", () => {
     expect(foldIntoLoop(1.6, loop)).toBeCloseTo(1.1);
     expect(foldIntoLoop(2.1, loop)).toBeCloseTo(1.1);
+  });
+});
+
+describe("lateCall", () => {
+  it("is how far past the launch point a late timer read the head", () => {
+    expect(lateCall(1.52, 1.5, 0, 0.15)).toBeCloseTo(0.02, 9);
+  });
+
+  it("is never early and never more than the drift", () => {
+    expect(lateCall(1.49, 1.5, 0, 0.15)).toBe(0);
+    expect(lateCall(1.9, 1.5, 0, 0.15)).toBe(0.15);
+  });
+
+  it("takes whole loops off a head read past a one-beat loop's out point", () => {
+    expect(lateCall(2.03, 1.5, 0.5, 0.15)).toBeCloseTo(0.03, 9);
   });
 });
 

@@ -281,6 +281,57 @@ describe("calling a set pad with Q on", () => {
   });
 });
 
+describe("calling a hot cue saved as a loop", () => {
+  // The issue's cue: pad B, `djmdCue` Kind 2, InMsec 22312, OutMsec 22997.
+  // rekordbox 7.2.19 CueBehavior::doHotCueLaunch @0x102b075b0: a cue with an
+  // out point moves to its in point, sets the out-to-in warp pair (the loop)
+  // and starts the deck [OBS static]. Before this, the pad only seeked.
+  const loopB: Cue = { id: "cue-b", positionMs: 22_312, outMs: 22_997, letter: "B", memory: false, colour: null };
+  const setLoop = (inSeconds: number, outSeconds: number) => transport.push(`loop:${inSeconds}-${outSeconds}`);
+
+  it("starts the loop at its in point and plays", async () => {
+    mount({ cues: [loopB], positionSeconds: () => 1, setLoop });
+    act(() => pads.press("B"));
+    await settle();
+    expect(transport).toEqual(["loop:22.312-22.997", "seek:22.312", "play"]);
+  });
+
+  it("does the same on a playing deck with Q off", async () => {
+    mount({ cues: [loopB], positionSeconds: () => 1, setLoop, playing: () => true, quantiseTo: null });
+    act(() => pads.press("B"));
+    await settle();
+    expect(transport).toEqual(["loop:22.312-22.997", "seek:22.312", "play"]);
+  });
+
+  it("carries the loop through a quantized wait", async () => {
+    const jumps: string[] = [];
+    mount({
+      cues: [{ ...loopB, positionMs: 500, outMs: 1000 }], positionSeconds: () => 1.2, setLoop,
+      quantiseTo: GRID, playing: () => true,
+      jumpAt: (at, to, _from, _wrap, loop) => jumps.push(`${at}->${to} loop ${loop ? `${loop.inSeconds}-${loop.outSeconds}` : "none"}`),
+    });
+    act(() => pads.press("B"));
+    await settle();
+    expect(jumps).toEqual(["1.5->0.5 loop 0.5-1"]);
+    expect(transport).toEqual([]);
+  });
+
+  it("leaves a plain hot cue a jump", async () => {
+    mount({ cues: [hot("cue-a", "A", 30_000)], positionSeconds: () => 1, setLoop });
+    act(() => pads.press("A"));
+    await settle();
+    expect(transport).toEqual(["seek:30", "play"]);
+  });
+
+  it("reads OutMsec -1 (stored as 0) as no loop", async () => {
+    // rekordbox writes OutMsec -1 on a plain cue; the loader clamps it to 0.
+    mount({ cues: [{ ...loopB, outMs: 0 }], positionSeconds: () => 1, setLoop });
+    act(() => pads.press("B"));
+    await settle();
+    expect(transport).toEqual(["seek:22.312", "play"]);
+  });
+});
+
 describe("at", () => {
   it("gives the cue in a slot and null for an empty one", () => {
     mount({ cues: [hot("cue-a", "A", 30_000)] });

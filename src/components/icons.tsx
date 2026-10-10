@@ -32,6 +32,17 @@ export const CollectionIcon = (props: IconProps) => (
   </svg>
 );
 
+/**
+ * A saved loop on a cue row: rekordbox 7's `skins/cueLoopIcon.svg` (10x6, its
+ * own fill `rgb(255, 130, 5)`), the orange mark the HOT CUE and MEMORY panels
+ * put on a row that holds a loop.
+ */
+export const CueLoopIcon = (props: IconProps) => (
+  <svg viewBox="0 0 10 6" aria-hidden focusable="false" {...props}>
+    <path fillRule="evenodd" fill="currentColor" d="M8.057 0L4.216 0L5.032 1.404L8.057 1.404C8.367 1.404 8.629 1.672 8.629 1.99L8.629 4.002C8.629 4.32 8.367 4.588 8.057 4.588L3.651 4.588C3.341 4.588 3.079 4.32 3.079 4.002L3.079 3.875L4.734 3.875L2.367 0.065L0 3.875L1.709 3.875L1.709 4.002C1.709 5.097 2.583 5.992 3.651 5.992L8.057 5.992C9.126 5.992 10 5.097 10 4.002L10 1.99C10 0.895 9.126 0 8.057 0Z"/>
+  </svg>
+);
+
 export const CommentIcon = (props: IconProps) => (
   <svg viewBox="0 0 12 10" aria-hidden focusable="false" {...props}>
     <path fill="currentColor" d="M2.2 0h7.6A2.2 2.2 0 0 1 12 2.2v2.6A2.2 2.2 0 0 1 9.8 7H6.1L2 10V7A2.2 2.2 0 0 1 0 4.8V2.2A2.2 2.2 0 0 1 2.2 0Z"/>
