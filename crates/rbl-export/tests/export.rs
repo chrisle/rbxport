@@ -547,6 +547,30 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     let path: String = lib.connection().query_row("SELECT path FROM image WHERE image_id = 1", [], |r| r.get(0)).unwrap();
     assert_eq!(path, "/PIONEER/Artwork/00001/a1.jpg");
 
+    // exportExt.pdb lists the tags and, in its type-4 table, the same
+    // memberships against the tracks' export.pdb ids, which is what a
+    // player's Track Filter reads (#316).
+    let id_of = |title: &str| -> u32 {
+        pdb.track_rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap()).into_iter().find(|t| t.title == title).unwrap().id
+    };
+    let ext_bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/exportExt.pdb")).unwrap();
+    let ext = rbl_pdb::Pdb::parse(&ext_bytes).unwrap();
+    assert_eq!(ext.rows(ext.table(rbl_pdb::PageType::Albums).unwrap()).len(), 3, "type 3: every tag");
+    let mut memberships: Vec<(u32, u32)> = ext
+        .rows(ext.table(rbl_pdb::PageType::Labels).unwrap())
+        .iter()
+        .map(|&r| (ext.u4_at(r, 0x0c), ext.u4_at(r, 0x08)))
+        .collect();
+    memberships.sort_unstable();
+    let mut expected = vec![(11, id_of("All U Need")), (12, id_of("All U Need")), (12, id_of("The Abyss"))];
+    expected.sort_unstable();
+    assert_eq!(memberships, expected);
+    let lib_memberships: i64 = lib
+        .connection()
+        .query_row("SELECT COUNT(*) FROM myTag_content", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(usize::try_from(lib_memberships).unwrap(), memberships.len(), "both databases agree");
+
     // A second export finds the artwork in place and writes none again.
     let again = export_full(dest.path(), &tracks, &playlists, &my_tags, None, None, &mut |_| {}).unwrap();
     assert_eq!(again.artwork_files, 0);

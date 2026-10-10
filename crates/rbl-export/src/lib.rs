@@ -1354,9 +1354,10 @@ pub fn export_cancellable(
     let staged_db = publication.stage().join(root_name).join("rekordbox");
     std::fs::create_dir_all(&staged_db).map_err(context("Could not write export.pdb".to_owned()))?;
     std::fs::write(staged_db.join("export.pdb"), &pdb).map_err(context("Could not write export.pdb".to_owned()))?;
-    // The tags, for the player's My Tag browsing.
+    // The tags and the tracks carrying them, for the player's Track Filter.
     let master_db_id = my_tag_master_db_id(sync);
-    std::fs::write(staged_db.join("exportExt.pdb"), ext_pdb::build(my_tags, master_db_id)).map_err(context("Could not write exportExt.pdb".to_owned()))?;
+    let tagged: Vec<(u32, &[u64])> = one_library_tracks.iter().map(|t| (t.export_id, t.my_tags.as_slice())).collect();
+    std::fs::write(staged_db.join("exportExt.pdb"), ext_pdb::build(my_tags, &tagged, master_db_id)).map_err(context("Could not write exportExt.pdb".to_owned()))?;
 
     write_one_library(&staged_db, &one_library_tracks, playlists, &playlist_ids, &export_ids, &artwork_paths, my_tags, settings.as_ref().or(defaults), master_db_id, &before, Some(&existing_database))?;
     report.one_library = true;
@@ -1589,7 +1590,7 @@ pub fn create_library_with_root(
     // The library's tags go on even a stick with no tracks [OBS 7.2.11:
     // the blank stick's `exportExt.pdb` held all 99].
     let master_db_id = my_tag_master_db_id(sync);
-    rbl_core::durable::write(&db_dir.join("exportExt.pdb"), &ext_pdb::build(my_tags, master_db_id))?;
+    rbl_core::durable::write(&db_dir.join("exportExt.pdb"), &ext_pdb::build(my_tags, &[], master_db_id))?;
     write_one_library(&db_dir, &[], &[], &[], &[], &[], my_tags, defaults, master_db_id, &snapshot::Snapshot::default(), None)?;
     let files = staged_files(publication.stage(), &[])?;
     publication.commit(&files)?;

@@ -1,13 +1,45 @@
 //! `PIONEER/rekordbox/exportExt.pdb`: the second `DeviceSQL` database on a
-//! stick, which carries the library's My Tags for a player's tag browsing.
+//! stick, which carries the library's My Tags and which tracks carry them,
+//! for a player's Track Filter.
 //!
-//! Decoded from the 2026-09-17 parity reference (rekordbox 7.2.11, 99
-//! tags, no track carrying one) [OBS]. Nine tables, types 0 to 8, laid out
-//! like `export.pdb`'s: an index page each, a data page or an empty
-//! candidate. Two hold rows:
+//! The tables are rekordbox's `DJDBEX*` tables, numbered in the order
+//! rekordbox creates them [OBS static, rekordbox 7.2.19 arm64
+//! `_edb_MAS_MODULE1_table_inits` @0x100a1a38c]:
 //!
-//! - type 3, the tags: one row per `djmdMyTag` row, each category followed
-//!   by the tags under it, in `Seq` order —
+//! | type | table | here |
+//! |---|---|---|
+//! | 0 | `DJDBEXRECOMMENDLIKE` | empty |
+//! | 1 | `DJDBEXHISTORY` | empty |
+//! | 2 | `DJDBEXSONGHISTORY` | empty |
+//! | 3 | `DJDBEXMYTAG`, the tags | one row per tag |
+//! | 4 | `DJDBEXSONGMYTAG`, a track's tags | one row per tag on a track |
+//! | 5 | `DJDBEXCUEOPTION` | empty |
+//! | 6 | `DJDBEXCONTENTOPTION` | empty |
+//! | 7 | `DJDBEXDBPROPERTYOPTION` | one row, the master id |
+//! | 8 | `DJDBEXGENERALOPTION` | empty |
+//!
+//! Type 0 (the "recommend like" pairs of tracks) is not a My Tag table and
+//! stays empty.
+//!
+//! Rows are laid out by rekordbox's `DeviceSQL` engine from each table's
+//! columns (`__epl_DJDBEX*_create`), not by hand [OBS static, 7.2.19:
+//! `_TE_ComputeRealPositions` @0x102f747b0, `_TE_RowFormSmgr` @0x102f7572c]:
+//! a u32 header holding the row's index on its page `<< 21` and the table's
+//! number `(49 + type) << 5`; then the fixed columns, 8-byte ones first,
+//! then 4-, 2- and 1-byte ones, each group in reverse column order; then the
+//! first string column at the next multiple of four; then, if there are
+//! more string columns, one offset byte each, and their strings. The row
+//! takes the space that sums to, rounded up to four. That rule reproduces
+//! 79 of the 80 type-3 rows and the type-7 row of a rekordbox 7 stick
+//! (2026-10-03) byte for byte, lengths included; the eightieth has one
+//! stray byte past its last string [OBS]. No captured stick has a type-4
+//! row, so the one below follows from the rule and its columns [ASSUME:
+//! unverified on hardware].
+//!
+//! - type 3, `DJDBEXMYTAG` (`ID`, `SEQ`, `ATTRIBUTE`, `RESERVED1` u8,
+//!   `RESERVED2` u16, `PARENTID`, `RESERVED3`, `RESERVED4`, then the strings
+//!   `RESERVED5`, `NAME`, `RESERVED6`): one row per `djmdMyTag` row, each
+//!   category followed by the tags under it, in `Seq` order —
 //!
 //!   ```text
 //!   00  u16  0x0680
@@ -29,15 +61,36 @@
 //!   `32 + name bytes + 8` rounded up to four — counted from 0x20 even
 //!   when the ASCII name starts at 0x1f.
 //!
+//! - type 4, `DJDBEXSONGMYTAG` (`MYTAGID` u32, `CONTENTID` i32,
+//!   `RESERVED1` u32, `RESERVED2` string): one row per tag on a track,
+//!   which the player reads by tag to list the tags that have tracks and by
+//!   track to filter [OBS static, XDJ-RX3 1.20 `djeplGetMyTagItem`
+//!   @0x0015f4e4 and `Dsql_SetRegistMyTagIDs` @0x0015f888] —
+//!
+//!   ```text
+//!   00  u16  0x06a0
+//!   02  u16  the row's index on its page × 32
+//!   04  u32  0
+//!   08  u32  the track's id in export.pdb
+//!   0c  u32  the tag's id
+//!   10  u8   an empty short string (0x03)
+//!   ```
+//!
+//!   20 bytes with the padding. rekordbox inserts the rows a tag at a time
+//!   (`db::extPutMyTagOnTrack` @0x1019b7b74: the tag id, the track, 0 and
+//!   an empty string); the order on a stick is [ASSUME] not significant,
+//!   as the player looks rows up through its hash indexes on both ids.
+//!
 //! - type 7, one row: `00 07 00 00`, twenty zero bytes, the u32
 //!   `exportLibrary.db` calls `myTagMasterDBID`, then an empty string, five
 //!   offsets and the five empty strings they point at: 39 bytes, which the
 //!   page counts as 60 used, so the row is padded to that.
 //!
-//! Types 0–2, 4–6 and 8 were empty in the reference. Type 5 is where a
-//! track's tags would go by `export.pdb`'s pattern of a members table two
-//! after its names table [UNKNOWN: no captured export has a tagged
-//! track]; nothing is written there.
+//! The XDJ-RX3 lists a tag under Track Filter only when a type-4 row ties it
+//! to a track that exists [OBS static, `djeplGetMyTagItem`]; without those
+//! rows a stick's tags never reach the player.
+
+use std::collections::BTreeSet;
 
 use rbl_pdb::build::{long_utf16le, short_ascii, FileBuilder};
 
@@ -46,11 +99,14 @@ use crate::SourceMyTag;
 /// The page size, `export.pdb`'s.
 const PAGE_SIZE: usize = 4096;
 
-/// The file, for these tags. `master_db_id` is the value the reference
-/// wrote into both this file and `exportLibrary.db`'s `property` row; what
-/// it is derived from is not known, so it is passed in.
+/// The file, for these tags and the tracks that carry them: each entry of
+/// `tagged` is a track's id in `export.pdb` and the library's ids of its
+/// tags. Ids of tags not in `my_tags` are left out, as `exportLibrary.db`
+/// leaves them out. `master_db_id` is the value the reference wrote into
+/// both this file and `exportLibrary.db`'s `property` row; what it is
+/// derived from is not known, so it is passed in.
 #[must_use]
-pub fn build(my_tags: &[SourceMyTag], master_db_id: u32) -> Vec<u8> {
+pub fn build(my_tags: &[SourceMyTag], tagged: &[(u32, &[u64])], master_db_id: u32) -> Vec<u8> {
     let mut file = FileBuilder::new(PAGE_SIZE);
     // rekordbox writes the master row first, then the tags [OBS: the
     // candidate for type 7 comes before type 3's second page].
@@ -62,7 +118,9 @@ pub fn build(my_tags: &[SourceMyTag], master_db_id: u32) -> Vec<u8> {
     file.add_table_numbered(3, &tag_rows(my_tags), |row, index| {
         row[2..4].copy_from_slice(&(index.wrapping_mul(32)).to_le_bytes());
     });
-    file.add_table(4, &empty);
+    file.add_table_numbered(4, &song_tag_rows(my_tags, tagged), |row, index| {
+        row[2..4].copy_from_slice(&(index.wrapping_mul(32)).to_le_bytes());
+    });
     file.add_table(5, &empty);
     file.add_table(6, &empty);
     file.add_table(7, &[master_row(master_db_id)]);
@@ -70,16 +128,16 @@ pub fn build(my_tags: &[SourceMyTag], master_db_id: u32) -> Vec<u8> {
     file.finish()
 }
 
-/// The tag rows in rekordbox's order: each category (by `Seq`) and then
-/// the tags under it (by `Seq`). A tag whose category is not in the list
-/// is put after the last category.
-fn tag_rows(my_tags: &[SourceMyTag]) -> Vec<Vec<u8>> {
+/// The tags in rekordbox's order: each category (by `Seq`) and then the
+/// tags under it (by `Seq`). A tag whose category is not in the list is put
+/// after the last category.
+fn listed_order(my_tags: &[SourceMyTag]) -> Vec<&SourceMyTag> {
     let mut categories: Vec<&SourceMyTag> = my_tags.iter().filter(|t| t.attribute == 1).collect();
     categories.sort_by_key(|c| (c.seq, c.id));
-    let mut rows = Vec::with_capacity(my_tags.len());
+    let mut order = Vec::with_capacity(my_tags.len());
     let mut placed = vec![false; my_tags.len()];
     for category in &categories {
-        rows.push(tag_row(category));
+        order.push(*category);
         let mut under: Vec<(usize, &SourceMyTag)> = my_tags
             .iter()
             .enumerate()
@@ -88,14 +146,51 @@ fn tag_rows(my_tags: &[SourceMyTag]) -> Vec<Vec<u8>> {
         under.sort_by_key(|(_, t)| (t.seq, t.id));
         for (index, tag) in under {
             placed[index] = true;
-            rows.push(tag_row(tag));
+            order.push(tag);
         }
     }
     let mut orphans: Vec<&SourceMyTag> =
         my_tags.iter().enumerate().filter(|(i, t)| t.attribute != 1 && !placed[*i]).map(|(_, t)| t).collect();
     orphans.sort_by_key(|t| (t.seq, t.id));
-    rows.extend(orphans.iter().map(|tag| tag_row(tag)));
+    order.extend(orphans);
+    order
+}
+
+/// The type-3 rows, one per tag in [`listed_order`].
+fn tag_rows(my_tags: &[SourceMyTag]) -> Vec<Vec<u8>> {
+    listed_order(my_tags).into_iter().map(tag_row).collect()
+}
+
+/// The table number rekordbox's engine gives `DJDBEXSONGMYTAG` (`49 +
+/// type`, one after `DJDBEXMYTAG`'s 52), in a row header's bits 5 to 20.
+const SONG_MY_TAG_HEADER: u16 = 53 << 5;
+
+/// One type-4 row per tag on a track: the tags in the order type 3 lists
+/// them, and under each the tracks in the order given.
+fn song_tag_rows(my_tags: &[SourceMyTag], tagged: &[(u32, &[u64])]) -> Vec<Vec<u8>> {
+    let mut rows = Vec::new();
+    let mut written: BTreeSet<(u32, u32)> = BTreeSet::new();
+    for tag in listed_order(my_tags) {
+        let Ok(tag_id) = u32::try_from(tag.id) else { continue };
+        if tag_id == 0 {
+            continue;
+        }
+        for &(track, tags) in tagged {
+            if track != 0 && tags.contains(&tag.id) && written.insert((tag_id, track)) {
+                rows.push(song_tag_row(tag_id, track));
+            }
+        }
+    }
     rows
+}
+
+fn song_tag_row(tag_id: u32, track: u32) -> Vec<u8> {
+    let mut row = vec![0_u8; 20];
+    row[0..2].copy_from_slice(&SONG_MY_TAG_HEADER.to_le_bytes());
+    row[0x08..0x0c].copy_from_slice(&track.to_le_bytes());
+    row[0x0c..0x10].copy_from_slice(&tag_id.to_le_bytes());
+    row[0x10] = 0x03;
+    row
 }
 
 fn tag_row(tag: &SourceMyTag) -> Vec<u8> {
@@ -200,7 +295,7 @@ mod tests {
             tag(101, 1, "a ▶ x", 0, 5),
             tag(102, 1, "c", 0, 11),
         ];
-        let bytes = build(&tags, 7);
+        let bytes = build(&tags, &[], 7);
         let pdb = rbl_pdb::Pdb::parse(&bytes).expect("parses");
         let census = pdb.census();
         assert_eq!(census.len(), 9);
@@ -214,5 +309,93 @@ mod tests {
         let master = pdb.rows(pdb.table(rbl_pdb::PageType::PlaylistTree).expect("type 7"));
         assert_eq!(master.len(), 1);
         assert_eq!(pdb.u4_at(master[0], 0x18), 7);
+    }
+
+    #[test]
+    fn a_track_tag_row_is_rekordboxs_layout_for_its_columns() {
+        // DJDBEXSONGMYTAG is (MYTAGID u32, CONTENTID i32, RESERVED1 u32,
+        // RESERVED2 string): the u32s in reverse column order after the
+        // header, then the one string, empty, at 0x10, padded to four.
+        let row = song_tag_row(4_271_045_719, 0x0102_0304);
+        let expected: Vec<u8> = "a0 06 00 00 00 00 00 00 04 03 02 01 57 fc 92 fe 03 00 00 00"
+            .split(' ')
+            .map(|h| u8::from_str_radix(h, 16).unwrap())
+            .collect();
+        assert_eq!(row, expected);
+    }
+
+    #[test]
+    fn the_header_numbers_follow_the_tables_rekordbox_wrote() {
+        // The reference's type-3 rows start 0x0680 and its type-7 row 0x0700:
+        // (49 + type) << 5, so type 4 is 0x06a0.
+        let category = tag_row(&tag(5, 1, "x", 1, 0));
+        assert_eq!(u16::from_le_bytes([category[0], category[1]]), 0x0680);
+        let master = master_row(1);
+        assert_eq!(u16::from_le_bytes([master[0], master[1]]), 0x0700);
+        assert_eq!(SONG_MY_TAG_HEADER, (49 + 4) << 5);
+    }
+
+    #[test]
+    fn tracks_tags_go_to_type_4_by_tag_once_each_and_only_for_known_tags() {
+        let tags = vec![
+            tag(1, 1, "Genre", 1, 0),
+            tag(12, 2, "Warm-up", 0, 1),
+            tag(11, 1, "Peak", 0, 1),
+        ];
+        let first: Vec<u64> = vec![12, 11, 12];
+        let second: Vec<u64> = vec![12, 99];
+        let none: Vec<u64> = Vec::new();
+        let tagged: Vec<(u32, &[u64])> = vec![(7, &first), (9, &second), (10, &none)];
+        let bytes = build(&tags, &tagged, 3);
+        let pdb = rbl_pdb::Pdb::parse(&bytes).expect("parses");
+        let rows = pdb.rows(pdb.table(rbl_pdb::PageType::Labels).expect("type 4"));
+        let pairs: Vec<(u32, u32)> = rows.iter().map(|&r| (pdb.u4_at(r, 0x0c), pdb.u4_at(r, 0x08))).collect();
+        // Peak (Seq 1) before Warm-up (Seq 2); 99 is not a tag; no repeats.
+        assert_eq!(pairs, vec![(11, 7), (12, 7), (12, 9)]);
+        let headers: Vec<u16> = rows.iter().map(|&r| pdb.u2_at(r, 0)).collect();
+        assert_eq!(headers, vec![0x06a0; 3]);
+        let indexes: Vec<u16> = rows.iter().map(|&r| pdb.u2_at(r, 2)).collect();
+        assert_eq!(indexes, vec![0, 32, 64]);
+        assert!(rows.iter().all(|&r| pdb.u4_at(r, 4) == 0 && pdb.u1_at(r, 0x10) == 0x03));
+    }
+
+    #[test]
+    fn many_track_tags_fill_pages_with_the_index_starting_again() {
+        let tags = vec![tag(1, 1, "Genre", 1, 0), tag(11, 1, "Peak", 0, 1)];
+        let one: Vec<u64> = vec![11];
+        let tagged: Vec<(u32, &[u64])> = (1..=600).map(|id| (id, one.as_slice())).collect();
+        let bytes = build(&tags, &tagged, 3);
+        let pdb = rbl_pdb::Pdb::parse(&bytes).expect("parses");
+        let rows = pdb.rows(pdb.table(rbl_pdb::PageType::Labels).expect("type 4"));
+        assert_eq!(rows.len(), 600);
+        let tracks: Vec<u32> = rows.iter().map(|&r| pdb.u4_at(r, 0x08)).collect();
+        assert_eq!(tracks, (1..=600).collect::<Vec<u32>>());
+        // Every page's first row is index 0 again.
+        let firsts = rows.iter().filter(|&&r| pdb.u2_at(r, 2) == 0).count();
+        assert!(firsts > 1, "600 rows take more than one page");
+        assert!(rows.iter().all(|&r| r.offset - r.page_offset - 0x28 + 20 <= 4096));
+    }
+
+    #[test]
+    fn the_tag_and_master_tables_are_the_same_with_or_without_tracks() {
+        let tags = vec![tag(5, 1, "Lexicon Tags", 1, 0), tag(6, 1, "Components ▶ Synth", 0, 5)];
+        let carrying: Vec<u64> = vec![6];
+        let with = build(&tags, &[(1, carrying.as_slice())], 9);
+        let without = build(&tags, &[], 9);
+        // Each data page's rows and row index: everything but the page's
+        // own number, link and sequence, which move with the new table.
+        let pages_of = |bytes: &[u8], kind: rbl_pdb::PageType| -> Vec<Vec<u8>> {
+            let pdb = rbl_pdb::Pdb::parse(bytes).expect("parses");
+            let mut pages: Vec<usize> = pdb.rows(pdb.table(kind).expect("table")).iter().map(|r| r.page_offset).collect();
+            pages.dedup();
+            pages.iter().map(|&at| bytes[at + 0x18..at + 4096].to_vec()).collect()
+        };
+        for kind in [rbl_pdb::PageType::Albums, rbl_pdb::PageType::PlaylistTree] {
+            let before = pages_of(&without, kind);
+            assert_eq!(before.len(), 1, "one page of {kind:?}");
+            assert_eq!(pages_of(&with, kind), before, "{kind:?}");
+        }
+        let pdb = rbl_pdb::Pdb::parse(&without).expect("parses");
+        assert!(pdb.rows(pdb.table(rbl_pdb::PageType::Labels).expect("type 4")).is_empty());
     }
 }

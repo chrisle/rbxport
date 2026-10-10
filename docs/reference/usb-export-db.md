@@ -87,7 +87,7 @@ rekordbox synchronization and the DJ's settings.
 | `PIONEER/rekordbox/export.pdb` | player (library) | yes |
 | `PIONEER/USBANLZ/P###/########/ANLZ0000.DAT` | player (grid, cues, preview waveform) | per track, for anything but a bare file list |
 | `PIONEER/USBANLZ/.../ANLZ0000.EXT`, `.2EX` | player (detail and colour waveforms) | needed for their corresponding detailed and colour waveform views |
-| `PIONEER/rekordbox/exportExt.pdb` | player (My Tags browsing) | no |
+| `PIONEER/rekordbox/exportExt.pdb` | player (My Tags in Track Filter) | no |
 | `PIONEER/rekordbox/exportLibrary.db` | rekordbox 7 device panel | separate from the tested DeviceSQL playback path; contains device-panel metadata |
 | `PIONEER/Artwork/#####/…jpg` | player (artwork) | no |
 | `PIONEER/DEVSETTING.DAT` | player (display prefs) | no |
@@ -385,9 +385,36 @@ truncated** and the length fixed up to match.
 u32 `myTagMasterDBID` at `0x18`, then `0x03` and five offsets to empty
 strings. 39 bytes, padded to 60 because the page reports 60 used.
 
-Type 5 is a candidate for track-to-tag associations by analogy with
-`export.pdb`; that interpretation and its record layout are unverified. The master id's
-derivation is also unknown: rekordbox's reference wrote `1744129535`.
+**Type 4, one row per tag on a track** (`DJDBEXSONGMYTAG`): grouped by tag
+in type-3 order, each tag's tracks in export order. A player lists a tag
+under Track Filter only when a row here ties it to a track on the stick
+(XDJ-RX3 1.20 `djeplGetMyTagItem`, static).
+
+```text
+0x00 u16 0x06a0
+0x02 u16 row index on page * 32   (restarts per page)
+0x04 u32 0
+0x08 u32 the track's export.pdb id
+0x0c u32 the tag's id
+0x10     0x03 (empty short string), padded to 20 bytes
+```
+
+The table types are rekordbox's `DJDBEX*` tables in creation order
+(rekordbox 7.2.19 `_edb_MAS_MODULE1_table_inits`, static): 0
+`RECOMMENDLIKE`, 1 `HISTORY`, 2 `SONGHISTORY`, 3 `MYTAG`, 4 `SONGMYTAG`, 5
+`CUEOPTION`, 6 `CONTENTOPTION`, 7 `DBPROPERTYOPTION`, 8 `GENERALOPTION`.
+Rows are laid out by rekordbox's DeviceSQL engine from the table's columns
+(`_TE_ComputeRealPositions`, `_TE_RowFormSmgr`): a u32 header of the row's
+page index `<< 21` and `(49 + type) << 5`; the fixed columns grouped by size
+(8, 4, 2, 1 bytes), each group in reverse column order; the first string
+column at the next multiple of four; one offset byte for each further
+string column, then those strings. That rule reproduces 79 of the 80 type-3
+rows and the type-7 row of a rekordbox 7 stick byte for byte (the
+eightieth differs in one byte past its last string). No captured stick has
+a type-4 row, so its bytes come from the rule and the column list
+(`MYTAGID`, `CONTENTID`, `RESERVED1`, `RESERVED2`) [static, unverified on
+hardware]. The master id's
+derivation is still unknown: rekordbox's reference wrote `1744129535`.
 The same master ID must appear in the extended database and
 OneLibrary property row.
 
@@ -819,8 +846,9 @@ the pad recalls the saved cue.
 
 ## 13. Still unknown
 
-- `exportExt.pdb` type 5, where a track's tag links would go, and the
-  derivation of `myTagMasterDBID` (rekordbox wrote `1744129535`).
+- The derivation of `myTagMasterDBID` (rekordbox wrote `1744129535`), and a
+  hardware check of `exportExt.pdb`'s type-4 rows, which were derived
+  statically.
 - `PWV4` header bytes 1–2, the third header word of `PWV3`/`PWV5`, and the
   `PQT2` payload derivation.
 - Remaining reader/UI cue display-color measurements; the export palette
