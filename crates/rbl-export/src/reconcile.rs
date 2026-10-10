@@ -256,7 +256,7 @@ fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack
                     release_date: r.get(9)?,
                     bpm_x100: r.get(10)?,
                     duration_sec: r.get(11)?,
-                    rating: r.get::<_, u8>(12)? / 51,
+                    rating: crate::snapshot::onelibrary_stars(r.get(12)?),
                     color_id: r.get(13)?,
                     year: r.get(14)?,
                     bitrate: r.get(15)?,

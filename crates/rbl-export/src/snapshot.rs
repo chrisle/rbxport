@@ -69,6 +69,20 @@ pub struct Snapshot {
 fn sql(e: impl std::fmt::Display) -> ExportError {
     ExportError::OneLibrary(e.to_string())
 }
+
+/// Stars, 0 to 5, from a `OneLibrary` `content.rating`.
+///
+/// rekordbox writes the stars themselves [OBS: a rekordbox 7 stick, ratings
+/// 1 to 5 in `exportLibrary.db` equal to the same tracks' `export.pdb`
+/// ratings]. rbxport has written them as multiples of 51, the scale of the
+/// collection XML. No rekordbox value is above 5 and no rbxport value is a
+/// non-zero one at or below it, so both read back to the same stars. Read
+/// on rbxport's scale alone, every rekordbox rating was 0, the stick's two
+/// databases disagreed, and its first sync from here was refused (#284).
+pub(crate) fn onelibrary_stars(raw: i64) -> u8 {
+    let stars = if raw > 5 { raw / 51 } else { raw };
+    u8::try_from(stars.clamp(0, 5)).unwrap_or(0)
+}
 impl Snapshot {
     pub fn read(root: &Path) -> Result<Self> {
         Self::read_at(root, crate::export_root_name(root)?)
@@ -366,7 +380,7 @@ fn read_one_library(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> R
                     path: r.get(2)?,
                     analysis: r.get(3)?,
                     bpm: r.get(4)?,
-                    rating: r.get::<_, u32>(5)? / 51,
+                    rating: u32::from(onelibrary_stars(r.get(5)?)),
                     color: r.get(6)?,
                     comment: r.get(7)?,
                 },

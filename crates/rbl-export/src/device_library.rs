@@ -302,8 +302,7 @@ fn read_one(path: &Path) -> Result<(Vec<Node>, Vec<Track>)> {
                 date_added: r.get(8)?,
                 bpm_x100: r.get(9)?,
                 duration_sec: r.get(10)?,
-                // The library stores rekordbox's 0-255 scale; 51 a star.
-                rating: u8::try_from(r.get::<_, u32>(11)? / 51).unwrap_or(5).min(5),
+                rating: crate::snapshot::onelibrary_stars(r.get(11)?),
                 color: r.get(12)?,
                 path: r.get(13)?,
             })
