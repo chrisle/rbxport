@@ -588,14 +588,19 @@ function AppBody() {
   const analysisHeld = jobList.some((job) => job.holdsAnalysis && job.state !== "queued");
   const analysis = useAnalysis(
     useCallback((id: string, result: AnalysisResult) => {
-      setPendingEdits((edits) =>
-        new Map(edits).set(id, {
-          analysed: result.analysed ?? 1,
-          bpmX100: result.bpmX100,
-          key: result.key,
-          durationSec: result.durationSec,
-        }),
-      );
+      const analysed = {
+        analysed: result.analysed ?? 1,
+        bpmX100: result.bpmX100,
+        key: result.key,
+        durationSec: result.durationSec,
+      };
+      setPendingEdits((edits) => new Map(edits).set(id, analysed));
+      // A deck holds the row it was loaded with, and draws its waveform and
+      // grid only for an analysed one: a track loaded before its analysis
+      // finished stayed black until it was loaded again (#330).
+      const update = (row: RowDto | null) => (row?.id === id ? { ...row, ...analysed } : row);
+      setPlayerTrack(update);
+      setPlayerTrackB(update);
     }, []),
     useCallback(() => {
       void getBackend().then((backend) => backend.reloadLibrary());
