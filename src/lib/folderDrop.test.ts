@@ -40,6 +40,30 @@ describe("importFolderDrop", () => {
     ]);
   });
 
+  it("stops between folders: the folders before are playlists, the rest are not touched", async () => {
+    const stop = new AbortController();
+    const importFolderPlaylist = vi.fn((path: string) =>
+      Promise.resolve(report(path, { playlist: `id-${path}`, tracks: [{ id: path, title: path }] })));
+    const seen: number[] = [];
+    const done = await importFolderDrop({ importFolderPlaylist, confirm: vi.fn() }, "root", ["A", "B", "C"], t,
+      stop.signal, (n) => { seen.push(n); if (n === 2) stop.abort(); });
+    expect(importFolderPlaylist.mock.calls.map((call) => call[0])).toEqual(["A", "B"]);
+    expect(seen).toEqual([1, 2]);
+    expect(done).toEqual({
+      message: "Made playlists: A, B.", refused: false,
+      tracks: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+    });
+  });
+
+  it("counts a folder kept on a name clash as done", async () => {
+    const seen: number[] = [];
+    await importFolderDrop({
+      importFolderPlaylist: (path) => Promise.resolve(report(path, { conflict: "x", at: 0 })),
+      confirm: () => Promise.resolve(false),
+    }, "root", ["Old", "Older"], t, undefined, (n) => seen.push(n));
+    expect(seen).toEqual([1, 2]);
+  });
+
   it("keeps the old list when the answer is no, and refuses a drop with no folder", async () => {
     const kept = await importFolderDrop({
       importFolderPlaylist: (path) => Promise.resolve(report(path, { conflict: "x", at: 0 })),

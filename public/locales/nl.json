@@ -1601,5 +1601,7 @@
   "skip": "skip",
   "Could not be written": "Could not be written",
   "Missing or unreadable": "Missing or unreadable",
-  "The written library did not read back correctly.": "The written library did not read back correctly."
+  "The written library did not read back correctly.": "The written library did not read back correctly.",
+  "Adding track data to the Collection": "Muziekstukgegevens toevoegen aan de Verzameling",
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
 }

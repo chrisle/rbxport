@@ -1608,5 +1608,7 @@
   "skip": "skip",
   "Could not be written": "Could not be written",
   "Missing or unreadable": "Missing or unreadable",
-  "The written library did not read back correctly.": "The written library did not read back correctly."
+  "The written library did not read back correctly.": "The written library did not read back correctly.",
+  "Adding track data to the Collection": "新增音軌資料至「收集」",
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
 }

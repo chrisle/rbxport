@@ -1,6 +1,7 @@
 import { ConfirmHost } from "@/components/ConfirmDialog";
 import type { DuplicateAnswer } from "@/components/DuplicateTracksDialog";
 import { JobQueue, slices, type JobView } from "@/lib/jobQueue";
+import { importInSlices, removeInSlices } from "@/lib/bulkJobs";
 import { useBackupProgress } from "@/store/useBackupProgress";
 import { useExportProgress } from "@/store/useExportProgress";
 import { reportStartupPaint } from "@/lib/startup";
@@ -110,8 +111,6 @@ const SHOW_MAIN_SUPPORT = true;
  * in and the longest a Stop waits.
  */
 const ADD_SLICE = 100;
-const IMPORT_SLICE = 100;
-const REMOVE_SLICE = 100;
 
 function ConnectedPreferences(props: Omit<React.ComponentProps<typeof Preferences>, "reduction" | "vu" | "peakLeft" | "peakRight">) {
   const master = useMasterDisplay();
@@ -1029,15 +1028,14 @@ function AppBody() {
     [advancedPrefs.duplicateTracks, prefs],
   );
 
-  const addDraggedTo = useCallback(
-    (playlistId: string) => {
-      const ids = draggedTracks?.ids;
-      setDraggedTracks(null);
-      if (!ids || ids.length === 0) return;
-      if (advancedPrefs.protectLibrary) {
-        refuse(refusal(true));
-        return;
-      }
+  /**
+   * Tracks (or Explorer files, imported on the way in) added to a playlist
+   * as a status-bar job, a slice at a time, so a few hundred show how far
+   * along they are and can be stopped between slices. Both a drag onto a
+   * playlist and the Add To Playlist menu come here (#291).
+   */
+  const addTracksTo = useCallback(
+    (playlistId: string, ids: readonly string[]) => {
       const name = tree.find((n) => n.id === playlistId)?.name ?? t("the playlist");
       jobs.add({
         label: t("Adding {count} to {name}", { count: ids.length, name }),
@@ -1046,8 +1044,9 @@ function AppBody() {
         pendingRows: ids.length,
         run: async ({ signal, update }) => {
           const backend = await getBackend();
-          // Rows dragged out of the Explorer that the library does not hold
-          // are imported on the way in, as Add To Playlist does with them.
+          // Rows out of the Explorer that the library does not hold are
+          // imported on the way in, as rekordbox's Add To Playlist does with
+          // them [OBS 7, Winrig 2026-10-08].
           const { ids: trackIds, report: imported } = await importLoose(ids, (paths) => backend.importPaths(paths));
           if (imported && analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
           const skipped = imported?.skipped.length ?? 0;
@@ -1061,22 +1060,46 @@ function AppBody() {
             report(`Nothing added to ${name}${tail}.`);
             return;
           }
+          // Tracks the playlist already holds and keeps once, so the note
+          // counts only the ones that were added.
+          const held = allowDuplicates ? 0 : (await backend.edits.playlistDuplicates(playlistId, trackIds)).length;
           update({ total: trackIds.length, pendingRows: trackIds.length });
           let added = 0;
-          for (const slice of slices(trackIds, ADD_SLICE)) {
-            if (signal.aborted) break;
-            await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates);
-            added += slice.length;
-            update({ done: added, pendingRows: trackIds.length - added });
+          try {
+            for (const slice of slices(trackIds, ADD_SLICE)) {
+              if (signal.aborted) break;
+              await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates);
+              added += slice.length;
+              update({ done: added, pendingRows: trackIds.length - added });
+            }
+          } finally {
+            if (added > 0) setTree(withSources(await backend.playlistTree()));
           }
           const noun = (n: number) => `${n} track${n === 1 ? "" : "s"}`;
+          const count = added - held;
           report(added < trackIds.length
             ? `Stopped: added ${added} of ${noun(trackIds.length)} to ${name}${tail}.`
-            : `Added ${noun(added)} to ${name}${tail}.`);
+            : count <= 0
+              ? `Already in ${name}${tail}.`
+              : `Added ${noun(count)} to ${name}${tail}.`);
         },
       });
     },
-    [draggedTracks, tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates],
+    [tree, report, refuse, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates],
+  );
+
+  const addDraggedTo = useCallback(
+    (playlistId: string) => {
+      const ids = draggedTracks?.ids;
+      setDraggedTracks(null);
+      if (!ids || ids.length === 0) return;
+      if (advancedPrefs.protectLibrary) {
+        refuse(refusal(true));
+        return;
+      }
+      addTracksTo(playlistId, ids);
+    },
+    [draggedTracks, refuse, advancedPrefs.protectLibrary, addTracksTo],
   );
 
   /**
@@ -1093,8 +1116,18 @@ function AppBody() {
       }
       const target = tree.find((n) => n.id === playlistId);
       if (playlistId === "playlists" || target?.kind === "folder") {
-        void import("@/lib/folderDrop").then(({ dropFolders }) =>
-          dropFolders(playlistId, paths, t, report, refuse, setTree, analysisPrefs.auto ? analysis.add : undefined));
+        // Queued and shown in the status bar like any long import; each
+        // folder is one transaction, so Stop lands between folders (#291).
+        jobs.add({
+          label: paths.length === 1 ? t("Importing 1 folder…") : t("Importing {count} folders…", { count: paths.length }),
+          total: paths.length,
+          stoppable: paths.length > 1,
+          run: async ({ signal, update }) => {
+            const { dropFolders } = await import("@/lib/folderDrop");
+            await dropFolders(playlistId, paths, t, report, refuse, setTree, analysisPrefs.auto ? analysis.add : undefined,
+              signal, (done) => update({ done }));
+          },
+        });
         return;
       }
       const name = target?.name ?? t("the playlist");
@@ -1115,26 +1148,21 @@ function AppBody() {
           const noun = (n: number) => `${n} track${n === 1 ? "" : "s"}`;
           // Importing is the first half of the bar and adding the second.
           update({ total: total * 2, done: 0, pendingRows: total, label: t("Importing {count} into {name}", { count: total, name }) });
-          const toAdd: string[] = [];
-          const fresh: ImportReport["tracks"] = [];
-          let skipped = 0;
-          let existing = 0;
-          let imported = 0;
-          let reached = 0;
-          for (const slice of slices(files, IMPORT_SLICE)) {
-            if (signal.aborted) break;
-            const result = await backend.importPathsSlice(slice);
-            reached += slice.length;
-            imported += result.imported;
-            skipped += result.skipped.length;
-            existing += result.existing.length;
-            fresh.push(...result.tracks);
-            // Files the library already held still belong in the playlist.
-            for (const track of [...result.tracks, ...result.existing]) toAdd.push(track.id);
-            update({ done: reached });
+          // One re-read of the library for the whole import, not one a
+          // slice, and one even when a slice fails, so the slices that
+          // landed are shown.
+          let landed = 0;
+          let sliced;
+          try {
+            sliced = await importInSlices(files, (slice) => backend.importPathsSlice(slice), signal, (reached, sofar) => {
+              landed = sofar.imported;
+              update({ done: reached });
+            });
+          } finally {
+            if (landed > 0) await backend.reloadLibrary();
           }
-          // One re-read of the library for the whole import, not one a slice.
-          if (imported > 0) await backend.reloadLibrary();
+          // Files the library already held still belong in the playlist.
+          const { ids: toAdd, tracks: fresh, skipped, existing } = sliced;
           update({ label: t("Adding {count} to {name}", { count: total, name }) });
           const allowDuplicates = signal.aborted ? false : await resolveDuplicates(playlistId, toAdd, name);
           let added = 0;
@@ -1621,14 +1649,14 @@ function AppBody() {
         label: t("Removing {count} from the collection", { count: ids.length }),
         total: ids.length,
         run: async ({ signal, update }) => {
+          // Each slice is one transaction: a Stop, or a slice that fails,
+          // leaves the slices before it removed whole and the rest untouched.
           let removed = 0;
           try {
-            for (const slice of slices(ids, REMOVE_SLICE)) {
-              if (signal.aborted) break;
-              await backend.edits.removeFromCollection([...slice]);
-              removed += slice.length;
-              update({ done: removed });
-            }
+            await removeInSlices(ids, (slice) => backend.edits.removeFromCollection(slice), signal, (count) => {
+              removed = count;
+              update({ done: count });
+            });
           } finally {
             if (removed > 0) setTree(withSources(await backend.playlistTree()));
           }
@@ -1694,24 +1722,44 @@ function AppBody() {
     (ids: readonly string[]) => {
       const paths = ids.filter(isLooseId).map((id) => id.slice("file:".length));
       if (paths.length === 0) return;
-      void (async () => {
-        const backend = await getBackend();
-        try {
-          const imported = await backend.importPaths(paths);
-          const total = imported.imported + imported.skipped.length;
-          const already = imported.existing.length > 0 ? `; ${imported.existing.length} already in the library` : "";
-          await afterWrite(
-            imported.skipped.length === 0
-              ? `Imported ${imported.imported} of ${total} files${already}.`
-              : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped${already}.`,
-          );
+      // [OBS rekordbox 7.2.19 static] rekordbox adds files to the
+      // collection under a progress window titled "Adding track data to the
+      // Collection" (english.lang). Here it is a status-bar job of that name,
+      // in slices of one transaction each, so a few hundred files show how
+      // far along they are and Stop keeps the slices already imported (#291).
+      jobs.add({
+        label: t("Adding track data to the Collection"),
+        total: paths.length,
+        run: async ({ signal, update }) => {
+          const backend = await getBackend();
+          let landed = 0;
+          let imported;
+          try {
+            imported = await importInSlices(paths, (slice) => backend.importPathsSlice(slice), signal, (reached, sofar) => {
+              landed = sofar.imported;
+              update({ done: reached });
+            });
+          } finally {
+            // One re-read for the whole import, and one after a failed slice
+            // too, so the slices that landed are shown.
+            if (landed > 0) await backend.reloadLibrary();
+          }
           if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
-        } catch (e) {
-          refuse(e instanceof Error ? e.message : "Those files could not be imported.");
-        }
-      })();
+          const values = {
+            imported: imported.imported, total: imported.imported + imported.skipped,
+            skipped: imported.skipped, existing: imported.existing, count: paths.length,
+          };
+          const said = signal.aborted
+            ? t("Stopped: imported {imported} of {count} files.", values)
+            : imported.skipped === 0
+              ? `Imported ${values.imported} of ${values.total} files`
+              : `Imported ${values.imported} of ${values.total} files; ${values.skipped} skipped`;
+          const already = imported.existing > 0 ? `; ${imported.existing} already in the library` : "";
+          await afterWrite(signal.aborted ? said : `${said}${already}.`);
+        },
+      });
     },
-    [afterWrite, refuse, analysisPrefs.auto, analysis],
+    [afterWrite, analysisPrefs.auto, analysis, jobs, t],
   );
 
   // Analysis Lock: the GRID panel's lock, set from the list on every
@@ -1738,24 +1786,9 @@ function AppBody() {
   const addToPlaylist = useCallback(
     (playlist: string, ids: readonly string[]) => {
       if (ids.length === 0) return;
-      const name = tree.find((n) => n.id === playlist)?.name ?? "the playlist";
-      write(async (backend) => {
-        const { ids: trackIds, report: imported } = await importLoose(ids, (paths) => backend.importPaths(paths));
-        if (imported && analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
-        const skipped = imported?.skipped.length ?? 0;
-        const tail = skipped > 0 ? `; ${skipped} skipped` : "";
-        if (trackIds.length === 0) return `Nothing added to ${name}${tail}.`;
-        const allowDuplicates = await resolveDuplicates(playlist, trackIds, name);
-        if (allowDuplicates === null) return `Nothing added to ${name}${tail}.`;
-        const held = allowDuplicates ? [] : await backend.edits.playlistDuplicates(playlist, trackIds);
-        await backend.edits.addTracksToPlaylist(playlist, trackIds, allowDuplicates);
-        const count = trackIds.length - held.length;
-        return count === 0
-          ? `Already in ${name}${tail}.`
-          : `Added ${count} track${count === 1 ? "" : "s"} to ${name}${tail}.`;
-      });
+      addTracksTo(playlist, ids);
     },
-    [write, tree, analysisPrefs.auto, analysis, resolveDuplicates],
+    [addTracksTo],
   );
 
   const addToTagList = useCallback(

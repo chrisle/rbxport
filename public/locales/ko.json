@@ -1603,5 +1603,7 @@
   "skip": "skip",
   "Could not be written": "Could not be written",
   "Missing or unreadable": "Missing or unreadable",
-  "The written library did not read back correctly.": "The written library did not read back correctly."
+  "The written library did not read back correctly.": "The written library did not read back correctly.",
+  "Adding track data to the Collection": "컬렉션에 트랙 데이터 추가하는 중",
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
 }

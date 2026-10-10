@@ -1614,5 +1614,7 @@
   "skip": "skip",
   "Could not be written": "Could not be written",
   "Missing or unreadable": "Missing or unreadable",
-  "The written library did not read back correctly.": "The written library did not read back correctly."
+  "The written library did not read back correctly.": "The written library did not read back correctly.",
+  "Adding track data to the Collection": "トラックデータをコレクションに追加しています",
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
 }
