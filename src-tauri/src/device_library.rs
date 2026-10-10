@@ -120,10 +120,14 @@ impl DeviceAssets {
         if relative.is_empty() {
             return None;
         }
-        crate::protocol::resolve_under(mount, relative).or_else(|| {
+        // `resolve_under` only joins (#271), so whether the file is there is
+        // asked here: a miss is what sends the lookup to the listings.
+        // perf-ok: one `stat`, as the canonicalising join it replaces did.
+        let there = |relative: &str| crate::protocol::resolve_under(mount, relative).filter(|path| path.exists());
+        there(relative).or_else(|| {
             let found = device::StickFiles::new(mount).locate(relative);
             let within = found.strip_prefix(mount).ok()?.to_str()?.to_owned();
-            crate::protocol::resolve_under(mount, &within)
+            there(&within)
         })
     }
 }
@@ -587,7 +591,7 @@ mod tests {
             assert_eq!((bare.analysed, bare.has_artwork), (0, false), "{format:?}");
 
             let dat = state.device_assets(&full.id).unwrap().analysis_dat().unwrap();
-            assert!(dat.starts_with(mount.canonicalize().unwrap()), "{format:?}: {}", dat.display());
+            assert!(dat.starts_with(mount) && dat.is_file(), "{format:?}: {}", dat.display());
             assert_eq!(crate::commands::waveform_of(&dat, "preview", None, None), preview, "{format:?}");
             assert_eq!(state.device_assets(&bare.id).unwrap().analysis_dat(), None, "{format:?}: a stick track without analysis draws nothing");
             assert_eq!(state.device_assets("12345"), None, "{format:?}: a library id falls through to the library");
@@ -666,6 +670,23 @@ mod tests {
         let assets = DeviceAssets { mount: stick.path().join("PIONEER"), audio: String::new(), analysis: "/../outside.DAT".into(), artwork: "../x.jpg".into() };
         std::fs::write(stick.path().join("outside.DAT"), b"x").unwrap();
         assert_eq!((assets.analysis_dat(), assets.artwork_file()), (None, None));
+    }
+
+    #[test]
+    fn a_stick_file_that_is_not_there_is_not_named() {
+        // The join no longer asks the file system (#271), so a missing file
+        // must still come back as nothing rather than as a path to open.
+        let stick = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(stick.path().join("PIONEER/Artwork/00001")).unwrap();
+        std::fs::write(stick.path().join("PIONEER/Artwork/00001/a1.jpg"), b"jpeg").unwrap();
+        let assets = DeviceAssets {
+            mount: stick.path().to_path_buf(),
+            audio: "/Contents/missing.mp3".into(),
+            analysis: "/PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT".into(),
+            artwork: "/PIONEER/Artwork/00001/a1.jpg".into(),
+        };
+        assert_eq!((assets.audio_file(), assets.analysis_dat()), (None, None));
+        assert_eq!(assets.artwork_file(), Some(stick.path().join("PIONEER/Artwork/00001/a1.jpg")));
     }
 
     #[test]
