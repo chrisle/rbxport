@@ -363,7 +363,9 @@ the track is handled), `copying` (only when a track is actually written),
   writer put on the stick. Their metadata is read back from
   `exportLibrary.db` (`sources_from_one`) or `export.pdb`
   (`sources_from_legacy`). Their audio and analysis stay exactly as they are,
-  and conversion is skipped.
+  and conversion is skipped. The manifest marks them `preserved`, so a later
+  sync still treats them as the stick's rather than as tracks it exported
+  and can take off (#317).
 - If neither database exists, reconcile does nothing (`merged_library` returns
   `None`).
 
@@ -375,7 +377,11 @@ In loop order:
    changed (Unix only; a no-op on Windows). Then progress `checking`, then a
    cancellation check.
 2. `metadata(source)`: if the file is not found, the track is added to
-   `report.skipped` and the loop moves on. `ENXIO`, `ENODEV`, or `EIO`
+   `report.skipped` and the loop moves on. A preserved device track whose
+   audio is already missing from the stick is not skipped: its rows keep
+   naming the path, nothing is copied, and verification does not count that
+   file as missing (#317). rekordbox's export only visits the tracks it is
+   given, so it leaves such a row as well. `ENXIO`, `ENODEV`, or `EIO`
    becomes `DeviceGone`.
 3. **Conversion.** `compatibility` is set and
    `rbl_audio::compatibility::needs_conversion` returns true. The file is
