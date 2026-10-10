@@ -1,0 +1,68 @@
+name: Nix AppImage smoke test
+description: >-
+  Build the Nix `bin` package (optionally against a locally built AppImage) and
+  require the AppImage it packages to open a window under Xvfb. This checks the
+  release artifact; `bin`'s own launcher wraps the app in appimage-run's sandbox
+  and is NixOS-specific, so it is not run here.
+
+inputs:
+  appimage:
+    description: "Absolute path to a locally built AppImage; empty uses packaging/nix/pin.json"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install X11 and GL libraries
+      shell: bash
+      run: |
+        sudo apt-get update
+        # The AppImage bundles GTK/WebKit but expects the host's EGL/GL base
+        # libraries, which a minimal runner does not ship.
+        sudo apt-get install -y xvfb x11-utils \
+          libegl1 libegl-mesa0 libgl1 libgles2 libglx-mesa0 libgl1-mesa-dri \
+          libgbm1 libdrm2 libfribidi0
+        sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2 || true
+
+    - name: Build bin
+      id: build
+      shell: bash
+      env:
+        RBXPORT_APPIMAGE: ${{ inputs.appimage }}
+      run: |
+        set -euo pipefail
+        out="$(nix build --no-link --print-out-paths --impure -f packaging/nix/ci.nix)"
+        echo "out=$out" >> "$GITHUB_OUTPUT"
+
+    - name: Require the packaged AppImage to open a window
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Launch the AppImage the package ships, not $out/bin/rbxport. That
+        # launcher goes through appimage-run's bubblewrap sandbox, which a
+        # hosted runner cannot start: unprivileged user namespaces are blocked
+        # and there is no /run/opengl-driver for the sandbox to find a driver.
+        # The AppImage is the release artifact every Linux user downloads, so
+        # it is what this job checks; the launcher is NixOS-specific and is
+        # covered by building it and by running on NixOS.
+        appimage="${{ steps.build.outputs.out }}/share/rbxport/rbxport.AppImage"
+        export APPIMAGE_EXTRACT_AND_RUN=1
+        export XDG_CONFIG_HOME="$RUNNER_TEMP/xdg-config"
+        export XDG_DATA_HOME="$RUNNER_TEMP/xdg-data"
+        log="$RUNNER_TEMP/rbxport-nix-window.log"
+        # shellcheck disable=SC2016 # $1/$2 expand in the child shell below.
+        xvfb-run -a bash -c '
+          set -euo pipefail
+          "$1" >"$2" 2>&1 &
+          pid=$!
+          trap "kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true" EXIT
+          for _ in $(seq 1 120); do
+            if xwininfo -root -tree | grep -Fq "rbxport"; then exit 0; fi
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          cat "$2"
+          echo "::error::rbxport did not create a Linux window"
+          exit 1
+        ' _ "$appimage" "$log"
