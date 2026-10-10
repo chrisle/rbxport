@@ -315,9 +315,28 @@ Other rows worth the detail:
 
 ### Ordering
 
-Playlist `sort_order` is the 1-based enumeration index. Playlist entry
-positions in the reference are dense and 1-based. Browse sort order comes from
-the fixed `columns` table, not from the data.
+Playlist `sort_order` is the position among the playlists and folders that
+share the parent, from 0 with no gaps, and `exportLibrary.db`'s
+`sequenceNo` is the same number [OBS: a stick rekordbox 7 wrote has its
+three root playlists at 0, 1 and 2; the 7.2.11 reference's one playlist is
+at 0; rekordbox 7.2.14 renumbers a folder's children from 0 after a
+delete]. Until #182 rbxport numbered every playlist on the stick in one run
+from 1. Playlist entry positions in the reference are dense and 1-based.
+Browse sort order comes from the fixed `columns` table, not from the data.
+
+### Row slots
+
+Rows that open with a u16 subtype (tracks `0x24`, artists `0x60`, albums
+`0x80`, `property` `0x0280`, and `exportExt.pdb`'s tags `0x0680`) carry
+their slot on the page in the next u16, as the slot times 32, counted from
+0 on every page [OBS: all 222 live rows of those tables on a stick rekordbox
+7 wrote]. NXS-era players read it: the DeviceSQL engine in the XDJ-RX's
+`rbp` 2.21 takes `*(u16 *)(row + 2) >> 5` as the row's slot when it
+positions a cursor (`FUN_0032ceb0`, `FUN_0032db38`). The CDJ-3000 reads
+`export.pdb` with its own parser and ignores it. Until #182 rbxport wrote 0
+in every row, so every row of a page claimed slot 0; a CDJ-900NXS locked up
+browsing such a stick [UNKNOWN whether this or the playlist numbering above
+was the cause; both now match rekordbox].
 
 ### Tables copied verbatim
 
@@ -804,6 +823,9 @@ the pad recalls the saved cue.
   `"ON"` when hot-cue auto-load is enabled.
 - Album rows carry the id at `0x0c`, not where a reader might expect it.
 - Playlist tree rows are five words, with a zero word after the parent.
+  `sort_order` counts from 0 within each folder, not across the stick.
+- Track, artist, album and `property` rows carry their slot on the page,
+  times 32, at byte 2. The CDJ-3000 ignores it; NXS-era players do not.
 - ANLZ `len_header` varies per tag; the `PWV6` header is 20 bytes.
 - The `PQTZ` header carries a signed millisecond grid offset.
 - The five-bit waveform tags have different ceilings: 25, 15, 31.

@@ -568,6 +568,30 @@ fn playlist_ids(playlists: &[SourcePlaylist], previous: Option<&Manifest>) -> Re
     Ok(result)
 }
 
+/// The position of each playlist and folder among those that share its
+/// parent on the stick, from 0 and in the order given, which is the order
+/// both databases carry as `sort_order` and `sequenceNo`.
+///
+/// rekordbox numbers the children of each folder, and the root, from 0 with
+/// no gaps [OBS: a stick rekordbox 7 wrote has its three root playlists at
+/// 0, 1 and 2; the one playlist of the 7.2.11 reference export is at 0;
+/// rekordbox 7.2.14 renumbers a folder's remaining children from 0 after a
+/// delete, `parity/issue-186`]. rbxport used to number every playlist on
+/// the stick in one run from 1 (#182).
+fn sibling_positions(playlists: &[SourcePlaylist]) -> Vec<u32> {
+    let mut next: BTreeMap<Option<usize>, u32> = BTreeMap::new();
+    playlists
+        .iter()
+        .map(|playlist| {
+            let parent = playlists.iter().position(|p| p.id != 0 && p.id == playlist.parent_id);
+            let slot = next.entry(parent).or_default();
+            let position = *slot;
+            *slot = slot.saturating_add(1);
+            position
+        })
+        .collect()
+}
+
 /// Gives every track the id it had on this stick last time, and a fresh one
 /// otherwise.
 ///
@@ -1262,12 +1286,13 @@ pub fn export_cancellable(
     // Playlists reference export ids, so they are built after the tracks.
     let mut playlist_rows = Vec::with_capacity(playlists.len());
     let mut entry_rows = Vec::new();
+    let positions = sibling_positions(playlists);
     for (i, playlist) in playlists.iter().enumerate() {
         let playlist_id = playlist_ids[i];
         playlist_rows.push(playlist_row(
             playlist_id,
             playlists.iter().position(|p| p.id != 0 && p.id == playlist.parent_id).map_or(0, |p| playlist_ids[p]),
-            u32::try_from(i).unwrap_or(0) + 1,
+            positions[i],
             playlist.folder,
             &playlist.name,
         ));
@@ -1466,13 +1491,18 @@ struct PdbTables<'a> {
 /// one `property` row: device name, track count, the export's date and the
 /// Device Library background colour [OBS 7.2.14]. A player looks the table
 /// list up by type, so the empty ones have to be there.
+///
+/// Rows that open with a subtype word carry their slot on the page, as
+/// rekordbox's do; see [`rbl_pdb::rows::set_index_shift`].
 fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
     use rbl_pdb::reference;
+    use rbl_pdb::rows::set_index_shift;
+    let numbered = |row: &mut Vec<u8>, slot: u16| set_index_shift(row, slot);
     let mut file = FileBuilder::new(PAGE_SIZE);
-    file.add_table(0, tables.tracks);
+    file.add_table_numbered(0, tables.tracks, numbered);
     file.add_table(1, tables.genres);
-    file.add_table(2, tables.artists);
-    file.add_table(3, tables.albums);
+    file.add_table_numbered(2, tables.artists, numbered);
+    file.add_table_numbered(3, tables.albums, numbered);
     file.add_table(4, tables.labels);
     file.add_table(5, tables.keys);
     file.add_table(
@@ -1519,7 +1549,7 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
         background_color: tables.background,
         ..rbl_pdb::rows::PdbProperty::default()
     };
-    file.add_table(19, &rbl_pdb::rows::property_row(&property).map_or_else(Vec::new, |row| vec![row]));
+    file.add_table_numbered(19, &rbl_pdb::rows::property_row(&property).map_or_else(Vec::new, |row| vec![row]), numbered);
     file.finish()
 }
 
@@ -1758,11 +1788,12 @@ fn write_one_library(
 
     add_tracks(&mut builder, tracks, &known_tags)?;
 
+    let positions = sibling_positions(playlists);
     for (i, playlist) in playlists.iter().enumerate() {
         let playlist_id = i64::from(playlist_ids[i]);
         let parent = playlists.iter().position(|p| p.id != 0 && p.id == playlist.parent_id).map_or(0, |p| i64::from(playlist_ids[p]));
         builder
-            .add_playlist_node(playlist_id, &playlist.name, parent, i64::try_from(i).unwrap_or(0), playlist.folder)
+            .add_playlist_node(playlist_id, &playlist.name, parent, i64::from(positions[i]), playlist.folder)
             .map_err(|e| one_library_error(&e))?;
         let mut position: i64 = 0;
         for &track_index in &playlist.track_indices {

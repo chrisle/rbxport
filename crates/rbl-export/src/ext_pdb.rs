@@ -59,9 +59,7 @@ pub fn build(my_tags: &[SourceMyTag], master_db_id: u32) -> Vec<u8> {
     file.add_table(0, &empty);
     file.add_table(1, &empty);
     file.add_table(2, &empty);
-    file.add_table_numbered(3, &tag_rows(my_tags), |row, index| {
-        row[2..4].copy_from_slice(&(index.wrapping_mul(32)).to_le_bytes());
-    });
+    file.add_table_numbered(3, &tag_rows(my_tags), |row, index| rbl_pdb::rows::set_index_shift(row, index));
     file.add_table(4, &empty);
     file.add_table(5, &empty);
     file.add_table(6, &empty);

@@ -225,6 +225,19 @@ fn rig_stick(src: &Path, dest: &Path) {
         SourcePlaylist { id: 12, name: "Top List".into(), track_indices: vec![2, 3, 0], ..Default::default() },
     ];
     export(dest, &tracks, &playlists).unwrap();
+    // The rig's stick came from an rbxport that numbered every playlist in
+    // one run, from 1 in export.pdb and from 0 in exportLibrary.db; put
+    // those numbers back so rekordbox's edits start from the same rows.
+    let pdb_path = dest.join("PIONEER/rekordbox/export.pdb");
+    let tree = [
+        rbl_pdb::rows::playlist_row(1, 0, 1, true, "Folder A"),
+        rbl_pdb::rows::playlist_row(2, 1, 2, false, "Inside A"),
+        rbl_pdb::rows::playlist_row(3, 0, 3, false, "Top List"),
+    ];
+    let pdb = rbl_pdb::build::replace_table(&std::fs::read(&pdb_path).unwrap(), 7, &tree).unwrap();
+    std::fs::write(&pdb_path, pdb).unwrap();
+    let change = rbl_onelibrary::playlists::Change { sequence: vec![(1, 0), (2, 1), (3, 2)], ..Default::default() };
+    rbl_onelibrary::playlists::apply(&dest.join("PIONEER/rekordbox/exportLibrary.db"), &change).unwrap();
 }
 
 /// `(id, parent, sequence, name, tracks)` of every node, by id.
