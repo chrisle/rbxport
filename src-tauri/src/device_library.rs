@@ -71,6 +71,40 @@ pub struct DeviceEditResultDto {
     pub changed: u32,
 }
 
+/// What a stick's library names beside one of its tracks' audio, kept so the
+/// track's waveforms, beat grid and artwork are read from the stick, as
+/// rekordbox's Devices tree shows them (#319).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeviceAssets {
+    /// The stick's mount point; both paths below are relative to it.
+    pub mount: PathBuf,
+    /// The `.DAT` the library names, volume-relative; empty for none.
+    pub analysis: String,
+    /// The artwork image the library names, volume-relative; empty for none.
+    pub artwork: String,
+}
+
+impl DeviceAssets {
+    /// The track's `.DAT` on the stick, or `None` when the library names
+    /// none or the file is not there. The path comes from the stick's
+    /// database, so it must stay under the stick's root.
+    pub fn analysis_dat(&self) -> Option<PathBuf> {
+        Self::on_stick(&self.mount, &self.analysis)
+    }
+
+    /// The track's artwork on the stick, under the same rule.
+    pub fn artwork_file(&self) -> Option<PathBuf> {
+        Self::on_stick(&self.mount, &self.artwork)
+    }
+
+    fn on_stick(mount: &Path, relative: &str) -> Option<PathBuf> {
+        if relative.is_empty() {
+            return None;
+        }
+        crate::protocol::resolve_under(mount, relative)
+    }
+}
+
 const fn format_name(format: Format) -> &'static str {
     match format {
         Format::DeviceLibrary => "deviceLibrary",
@@ -232,11 +266,12 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
         } else {
             library.node(playlist).map(|n| n.tracks.clone()).unwrap_or_default()
         };
-        let rows = ids
+        let rows: Vec<DeviceRow> = ids
             .iter()
             .enumerate()
             .filter_map(|(at, id)| library.track(*id).map(|t| device_row(&mount, t, at)))
             .collect();
+        handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, t)));
         let view = DeviceView::open(rows, &parsed, field);
         let (view_id, len, generation) = handle.open_device_view(view);
         Ok(ViewHandleDto { view_id, len, gen: generation })
@@ -261,7 +296,17 @@ fn device_row(mount: &Path, track: &device::Track, at: usize) -> DeviceRow {
         duration_sec: track.duration_sec,
         rating: track.rating,
         color: track.color,
+        analysed: !track.analysis_path.is_empty(),
+        has_artwork: !track.artwork_path.is_empty(),
     }
+}
+
+/// A stick track's row id with what its library names beside the audio.
+fn assets_of(mount: &Path, track: &device::Track) -> (String, DeviceAssets) {
+    (
+        rbl_index::folder::loose_id(&audio_path(mount, &track.path)),
+        DeviceAssets { mount: mount.to_path_buf(), analysis: track.analysis_path.clone(), artwork: track.artwork_path.clone() },
+    )
 }
 
 /// A window of a device view's rows. Each is a track the deck can play from
@@ -295,13 +340,13 @@ fn row_dto(row: &DeviceRow) -> RowDto {
         key: row.key.clone(),
         duration_sec: row.duration_sec,
         rating: row.rating,
-        analysed: 0,
+        analysed: u8::from(row.analysed),
         date_added: row.date_added.clone(),
         release_date: String::new(),
         hot_cues: Vec::new(),
         memory_cues: Vec::new(),
         artwork_hue: 0,
-        has_artwork: false,
+        has_artwork: row.has_artwork,
         file_name: row.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         extra: None,
         // A stick's own row: its file is on the stick, not a collection
@@ -403,6 +448,85 @@ mod tests {
         }
         assert!(files() == before, "a refused edit writes nothing");
         assert!(!dest.path().join(".rbxport-publication").exists());
+    }
+
+    #[test]
+    fn a_sticks_tracks_draw_their_waveform_and_artwork_from_the_stick() {
+        // #319: a Devices list showed no preview, no artwork and an empty
+        // deck, because its rows said "not analysed, no artwork" and nothing
+        // read the stick's own ANLZ files or artwork.
+        let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let image = src.path().join("cover.jpg");
+        let jpeg = b"\xff\xd8sleeve\xff\xd9".to_vec();
+        std::fs::write(&image, &jpeg).unwrap();
+        let preview: Vec<u8> = (0..400_u16).map(|i| u8::try_from(i % 30 + 2).unwrap()).collect();
+        let mut tracks: Vec<rbl_export::SourceTrack> = (1..=2_u8)
+            .map(|i| {
+                let path = src.path().join(format!("t{i}.mp3"));
+                std::fs::write(&path, vec![i; 512]).unwrap();
+                rbl_export::SourceTrack { id: u64::from(i), source_path: path, title: format!("Track {i}"), ..Default::default() }
+            })
+            .collect();
+        tracks[0].analysis = vec![("DAT".into(), rbl_anlz::AnlzBuilder::new().path("/t1.mp3").waveform_preview(b"PWAV", &preview).finish())];
+        tracks[0].artwork = Some(image);
+        rbl_export::export(dest.path(), &tracks, &[]).unwrap();
+        let mount = dest.path();
+        // As the page's `encodeURIComponent` sends a `file:` id.
+        let encoded = |id: &str| -> String { id.bytes().map(|b| if b.is_ascii_alphanumeric() { char::from(b).to_string() } else { format!("%{b:02X}") }).collect() };
+        let artwork = |state: &Arc<AppState>, id: &str| {
+            let request = tauri::http::Request::builder().uri(format!("rbl://localhost/artwork/{}", encoded(id))).body(Vec::new()).unwrap();
+            crate::protocol::handle(state, &request)
+        };
+
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let library = device::read(mount, format).unwrap();
+            let state = Arc::new(AppState::new());
+            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, t)));
+            let rows: Vec<RowDto> = library.tracks.iter().enumerate().map(|(at, t)| row_dto(&device_row(mount, t, at))).collect();
+            let (full, bare) = (rows.iter().find(|r| r.title == "Track 1").unwrap(), rows.iter().find(|r| r.title == "Track 2").unwrap());
+            assert_eq!((full.analysed, full.has_artwork), (1, true), "{format:?}");
+            assert_eq!((bare.analysed, bare.has_artwork), (0, false), "{format:?}");
+
+            let dat = state.device_assets(&full.id).unwrap().analysis_dat().unwrap();
+            assert!(dat.starts_with(mount.canonicalize().unwrap()), "{format:?}: {}", dat.display());
+            assert_eq!(crate::commands::waveform_of(&dat, "preview", None, None), preview, "{format:?}");
+            assert_eq!(state.device_assets(&bare.id).unwrap().analysis_dat(), None, "{format:?}: a stick track without analysis draws nothing");
+            assert_eq!(state.device_assets("12345"), None, "{format:?}: a library id falls through to the library");
+
+            // The artwork, through the `rbl://` handler, with no library open.
+            let response = artwork(&state, &full.id);
+            assert_eq!(response.status(), tauri::http::StatusCode::OK, "{format:?}");
+            assert_eq!(response.body(), &jpeg, "{format:?}");
+            assert_eq!(artwork(&state, &bare.id).status(), tauri::http::StatusCode::NOT_FOUND, "{format:?}");
+        }
+    }
+
+    #[test]
+    fn a_stick_path_that_climbs_out_is_not_read() {
+        let stick = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(stick.path().join("PIONEER")).unwrap();
+        let assets = DeviceAssets { mount: stick.path().join("PIONEER"), analysis: "/../outside.DAT".into(), artwork: "../x.jpg".into() };
+        std::fs::write(stick.path().join("outside.DAT"), b"x").unwrap();
+        assert_eq!((assets.analysis_dat(), assets.artwork_file()), (None, None));
+    }
+
+    #[test]
+    fn a_reread_or_ejected_stick_forgets_its_earlier_tracks() {
+        let (first, other) = (Path::new("/Volumes/STICK"), Path::new("/Volumes/OTHER"));
+        let at = |mount: &Path, analysis: &str| DeviceAssets { mount: mount.to_path_buf(), analysis: analysis.into(), artwork: String::new() };
+        let state = AppState::new();
+        state.remember_device_assets(first, [("file:/Volumes/STICK/a.mp3".to_string(), at(first, "/a.DAT"))]);
+        state.remember_device_assets(other, [("file:/Volumes/OTHER/o.mp3".to_string(), at(other, "/o.DAT"))]);
+
+        // A different stick read at the same mount replaces the first one's tracks.
+        state.remember_device_assets(first, [("file:/Volumes/STICK/b.mp3".to_string(), at(first, "/b.DAT"))]);
+        assert_eq!(state.device_assets("file:/Volumes/STICK/a.mp3"), None);
+        assert_eq!(state.device_assets("file:/Volumes/STICK/b.mp3"), Some(at(first, "/b.DAT")));
+        assert_eq!(state.device_assets("file:/Volumes/OTHER/o.mp3"), Some(at(other, "/o.DAT")), "another mount is untouched");
+
+        state.forget_device_assets(first);
+        assert_eq!(state.device_assets("file:/Volumes/STICK/b.mp3"), None);
+        assert_eq!(state.device_assets("file:/Volumes/OTHER/o.mp3"), Some(at(other, "/o.DAT")));
     }
 
     #[test]
