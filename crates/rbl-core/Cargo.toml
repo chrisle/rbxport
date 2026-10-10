@@ -24,3 +24,8 @@ fs2 = "0.4"
 # Name forms: macOS FAT/exFAT drivers list NFD names but rename and delete
 # only under the form a name was stored in.
 unicode-normalization = "0.1"
+
+# Plain fsync where F_FULLFSYNC is not implemented (exFAT on macOS); see
+# `durable::flush`. Already in the lock through tempfile.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+rustix = { version = "1", features = ["fs"] }

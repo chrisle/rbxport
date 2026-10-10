@@ -1794,7 +1794,7 @@ fn write_one_library(
     }
     let created = rbl_core::time::local_date();
     builder.finish(&settings.device_name, &created, master_db_id).map_err(|e| one_library_error(&e))?;
-    rbl_core::durable::replace(&staged, &path).map_err(|e| ExportError::OneLibrary(e.to_string()))?;
+    rbl_core::durable::replace(&staged, &path).map_err(|e| ExportError::OneLibrary(format!("could not stage it: {e}")))?;
     Ok(())
 }
 
@@ -1891,7 +1891,7 @@ fn copy_data_with_durability(from: &Path, to: &Path, durable: bool) -> std::io::
             target.write_all(&chunk)?;
             total += chunk.len() as u64;
         }
-        if durable { target.sync_all()?; }
+        if durable { rbl_core::durable::flush(&target)?; }
         Ok(total)
     });
     let read_result = (|| -> std::io::Result<()> {
