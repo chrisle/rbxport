@@ -1431,6 +1431,33 @@ fn folder_contents(playlists: &rbl_index::Playlists, folder: usize) -> (Vec<usiz
     (leaves, folders)
 }
 
+/// Each playlist and folder id's place in the tree read top to bottom: a
+/// folder, then what is inside it, each level in `Seq` order (a tie by row).
+fn tree_rank(playlists: &rbl_index::Playlists) -> std::collections::HashMap<u64, usize> {
+    let mut children: std::collections::HashMap<u32, Vec<usize>> = std::collections::HashMap::new();
+    for index in 0..playlists.len() {
+        let parent = playlists.parent.get(index).copied().unwrap_or(rbl_index::NO_ID);
+        children.entry(parent).or_default().push(index);
+    }
+    for siblings in children.values_mut() {
+        siblings.sort_by_key(|&i| (playlists.seq.get(i).copied().unwrap_or(0), i));
+    }
+    let mut rank = std::collections::HashMap::new();
+    let mut visited = vec![false; playlists.len()];
+    let mut stack: Vec<usize> = children.get(&rbl_index::NO_ID).map(|c| c.iter().rev().copied().collect()).unwrap_or_default();
+    while let Some(index) = stack.pop() {
+        match visited.get_mut(index) {
+            Some(seen) if !*seen => *seen = true,
+            _ => continue,
+        }
+        rank.insert(playlists.ids.get(index).copied().unwrap_or(0), rank.len());
+        if let Some(under) = u32::try_from(index).ok().and_then(|i| children.get(&i)) {
+            stack.extend(under.iter().rev());
+        }
+    }
+    rank
+}
+
 impl ExportSelection {
     /// The union of these playlists, each track read once however many of
     /// them hold it. Ids are the tree's numeric playlist ids. An intelligent
@@ -1565,7 +1592,7 @@ impl ExportSelection {
         }
         // Include ancestors as actual folder rows in both USB databases.
         let tree_view = library.playlists();
-        let mut ancestors = std::collections::BTreeSet::new();
+        let mut ancestors = std::collections::HashSet::new();
         for p in &mut source_playlists {
             p.parent_id = sync.tree.iter().find(|n| n.id == p.id).map_or(0, |n| n.parent);
             let mut parent = p.parent_id;
@@ -1586,6 +1613,11 @@ impl ExportSelection {
         }
         folders.append(&mut source_playlists);
         source_playlists = folders;
+        // The library tree's own order, folders and playlists as the tree
+        // lists them: the exporter numbers siblings in the order given, and
+        // the ancestors were gathered in id order (#315).
+        let rank = tree_rank(&tree_view);
+        source_playlists.sort_by_key(|p| rank.get(&p.id).copied().unwrap_or(usize::MAX));
         Ok(Self { tracks, playlists: source_playlists, my_tags, sync, keep_unlisted: false })
     }
 
@@ -4284,6 +4316,46 @@ mod tests {
 
         export_track_to(&state, &location, &stick, &rbl_db::fixture::track_id(39));
         assert_eq!(on_stick(&stick), [leaf(&a), leaf(&b), leaf(&c)], "Export Track keeps it too");
+        assert!(rbl_export::verify(&stick).unwrap().is_ok());
+    }
+
+    /// Folders and playlists reach the stick, and both of its databases, in
+    /// the library tree's order, not the order of their ids (#315): a folder
+    /// made last but dragged to the top is the stick's first.
+    #[test]
+    fn folders_and_playlists_reach_the_stick_in_tree_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ids = Vec::new();
+        let (state, location, stick) = export_rig(dir.path(), |w| {
+            let first = w.create_folder("First", rbl_db::write::ROOT).unwrap();
+            let second = w.create_folder("Second", rbl_db::write::ROOT).unwrap();
+            let in_first = w.create_playlist("In first", &first).unwrap();
+            let in_second = w.create_playlist("In second", &second).unwrap();
+            w.add_tracks(&in_first, &[rbl_db::fixture::track_id(30)]).unwrap();
+            w.add_tracks(&in_second, &[rbl_db::fixture::track_id(31)]).unwrap();
+            // Second, made later and so with the larger id, goes to the top.
+            w.move_to(&second, rbl_db::write::ROOT, Some(0)).unwrap();
+            ids = vec![first, second, in_first, in_second];
+        });
+        let [first, second, in_first, in_second]: [String; 4] = ids.try_into().unwrap();
+        let library = state.library().unwrap();
+        let everything: Vec<String> = [&first, &second, &in_first, &in_second].iter().map(|s| (*s).clone()).collect();
+        let selection = super::ExportSelection::from_playlists(&state, &library, &location.share_root, &everything, false).unwrap();
+        super::write_export_with_phase(&stick, &selection, None, None, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+
+        let order: Vec<String> = on_stick(&stick).into_iter().map(|(id, _)| id).collect();
+        let expected = [second.clone(), in_second.clone(), first.clone(), in_first.clone()];
+        assert_eq!(order, expected, "the manifest follows the tree");
+        // Both databases agree: siblings are numbered in the same order.
+        let snapshot = rbl_export::snapshot::Snapshot::read(&stick).unwrap();
+        let roots = |library: &rbl_export::snapshot::Library| {
+            let mut roots: Vec<_> = library.playlists.iter().filter(|p| p.parent == 0).collect();
+            roots.sort_by_key(|p| (p.sequence, p.id));
+            roots.into_iter().map(|p| p.name.clone()).collect::<Vec<_>>()
+        };
+        let want = ["Second", "First"];
+        assert_eq!(roots(snapshot.legacy.as_ref().unwrap()), want, "export.pdb");
+        assert_eq!(roots(snapshot.one.as_ref().unwrap()), want, "exportLibrary.db");
         assert!(rbl_export::verify(&stick).unwrap().is_ok());
     }
 
