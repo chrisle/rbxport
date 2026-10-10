@@ -210,7 +210,10 @@ const DEVICE_PALETTE: [[u8; 3]; 65] = [
     [255, 255, 255],
 ];
 
-fn export_colour(code: u8, slot: u32) -> [u8; 3] {
+/// The device RGB a player is sent for a hot cue's `ColorTableIndex`, as
+/// `PCO2` carries it after the colour code. `slot` is 1 for A; a code of 0
+/// gets the slot's default colour.
+pub fn export_colour(code: u8, slot: u32) -> [u8; 3] {
     // Default colors read from rekordbox exports for A-D and I-L.
     let default = match slot {
         1 | 9 => 43,
