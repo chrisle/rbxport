@@ -167,3 +167,30 @@ fn an_interrupted_export_left_by_the_earlier_version_is_recovered() {
         assert!(leftovers(&root).is_empty(), "{file_system}: {:?}", leftovers(&root));
     }
 }
+
+/// #283: a stick synced once takes a second sync that adds a playlist of
+/// tracks it does not hold yet, at the volume's root as the Sync Manager
+/// writes it.
+#[test]
+fn a_fat32_or_exfat_stick_takes_another_playlist_on_a_later_sync() {
+    for (file_system, volume) in volumes() {
+        let root = &volume.mount;
+        let src = tempfile::tempdir().unwrap();
+        let tracks = tracks(src.path());
+        let first = SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() };
+        let added = SourcePlaylist { id: 11, name: "Warm-up".into(), track_indices: vec![2], ..Default::default() };
+        let node = |id| SyncNode { id, parent: 0, attribute: 0 };
+        let once = SyncSource { db_id: 123, tree: vec![node(10)], automatic: false };
+        export_full(root, &tracks[..2], std::slice::from_ref(&first), &[], None, Some(&once), &mut |_| {})
+            .unwrap_or_else(|e| panic!("{file_system}: {e}"));
+        let twice = SyncSource { db_id: 123, tree: vec![node(10), node(11)], automatic: false };
+        let report = export_full(root, &tracks, &[first, added], &[], None, Some(&twice), &mut |_| {})
+            .unwrap_or_else(|e| panic!("{file_system}: {e}"));
+        assert_eq!((report.tracks, report.reused), (3, 2), "{file_system}");
+
+        let check = verify(root).unwrap();
+        assert!(check.is_ok(), "{file_system}: {:?}", check.errors);
+        assert_eq!(check.tracks, 3, "{file_system}");
+        assert!(leftovers(root).is_empty(), "{file_system}: {:?}", leftovers(root));
+    }
+}
