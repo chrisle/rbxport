@@ -692,7 +692,20 @@ function gridButton(
     case "mark":
       return once(editor.mark, withCut("Make the beat nearest the playhead beat 1"));
     case "tap":
-      return once(editor.tap, withCut("Tap the tempo; updates begin with the second tap"));
+      // A tap counts when the button goes down, not when it comes up:
+      // rekordbox's TapButton is set triggered-on-mouse-down (GridViewPanel
+      // constructor, rekordbox 7.2.19). Timed on release, each tap's moment
+      // moved with how long it was held, so the tempo wandered and beat 1
+      // landed late (#137). A click with no pointer behind it (detail 0,
+      // as assistive tech sends) still taps; a pointer's click does not
+      // tap a second time.
+      return {
+        ...once(editor.tap, withCut("Tap the tempo; updates begin with the second tap")),
+        handlers: {
+          onPointerDown: event => { if (event.button === 0) editor.tap(); },
+          onClick: event => { if (event.detail === 0) editor.tap(); },
+        },
+      };
     case "shift-back":
       return held((repeat) => editor.shift(-1, repeat), withCut("Shift the grid 1 ms earlier"));
     case "shift-forward":
