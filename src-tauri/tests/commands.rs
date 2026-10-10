@@ -1271,6 +1271,80 @@ fn an_imported_file_goes_into_a_playlist_and_plays_on_a_deck() {
     assert_eq!(empty.a.frames, 0);
 }
 
+/// A WAV with a click every half second, so the analysis finds a tempo and
+/// draws a waveform with something in it.
+fn write_click_wav(path: &Path, seconds: u32) {
+    let frames = RATE * seconds;
+    let period = RATE / 2;
+    let mut data = Vec::with_capacity(frames as usize * 2);
+    for i in 0..frames {
+        let since = i % period;
+        let sample: i16 = if since < 400 { (20_000.0 * (1.0 - since as f32 / 400.0)) as i16 } else { 0 };
+        data.extend_from_slice(&sample.to_le_bytes());
+    }
+    let data_len = u32::try_from(data.len()).unwrap();
+    let mut out = Vec::with_capacity(44 + data.len());
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16_u32.to_le_bytes());
+    out.extend_from_slice(&1_u16.to_le_bytes()); // PCM
+    out.extend_from_slice(&1_u16.to_le_bytes()); // mono
+    out.extend_from_slice(&RATE.to_le_bytes());
+    out.extend_from_slice(&(RATE * 2).to_le_bytes());
+    out.extend_from_slice(&2_u16.to_le_bytes());
+    out.extend_from_slice(&16_u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    out.extend_from_slice(&data);
+    std::fs::write(path, out).unwrap();
+}
+
+/// What Auto Analysis does after File > Import: the imported track's id goes
+/// to `analyse_track`, and once the queue drains the library is re-read. The
+/// track must then have a waveform and a grid to edit (#132).
+#[test]
+fn an_imported_file_analyses_into_a_waveform_and_a_grid() {
+    let s = shell();
+    s.app.manage(Arc::new(rbxport_lib::grid::GridEditor::at(&s._dir.path().join("editor"))));
+    let audio = s._dir.path().join("Click Track.wav");
+    write_click_wav(&audio, 20);
+
+    let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
+    assert_eq!(report.imported, 1);
+    let id = report.tracks[0].id.clone();
+    let row = |s: &Shell| {
+        let (view, _) = s.open(ViewSpecDto { query: "click track".into(), ..collection_spec() });
+        let rows = s.rows(view);
+        assert_eq!(ids(&rows), [id.as_str()]);
+        rows[0].clone()
+    };
+    assert_eq!(row(&s).analysed, 0, "an import alone is not analysed, as in rekordbox with Auto Analysis off");
+
+    let result = run(rbxport_lib::analysis::analyse_track(
+        s.handle(),
+        s.state(),
+        s.app.state::<Arc<rbxport_lib::grid::GridEditor>>(),
+        id.clone(),
+        None,
+        None,
+    ))
+    .expect("the imported track analyses");
+    assert_eq!(result.track_id, id);
+    assert!(result.bpm_x100 > 0, "a click track has a tempo");
+    assert!(result.beats > 0, "and a grid");
+    assert!(!result.analysis_path.is_empty());
+
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
+    assert_ne!(row(&s).analysed, 0, "the row says it is analysed, so the deck draws its waveform");
+    let dat = rbl_anlz::resolve(&s.state().share_root(), &result.analysis_path);
+    let anlz = rbl_anlz::Anlz::read(&dat).expect("the DAT is there");
+    assert_eq!(anlz.waveform(b"PWAV").unwrap().1.len(), 400, "the preview waveform");
+    assert_eq!(anlz.beat_grid().unwrap().len() as u32, result.beats, "the grid the GRID panel edits");
+    let ext = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "EXT")).expect("the EXT is there");
+    assert!(ext.waveform(b"PWV5").is_some(), "the colour detail waveform");
+}
+
 #[test]
 fn a_track_whose_file_is_gone_is_refused_at_load_rather_than_failing_later() {
     let s = shell();
