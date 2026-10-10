@@ -447,8 +447,12 @@ const TrackRow = memo(function TrackRow({
   onReorderDrop: () => void;
   startupCache: boolean;
 }) {
-  const nativePress = useRef<{ x: number; y: number } | null>(null);
+  // Stops watching a press that might become a native drag. The pointer is
+  // followed on the window: a quick flick leaves a row before the row sees
+  // the 5px of travel, and the drag then never started.
+  const stopNativePress = useRef<(() => void) | null>(null);
   const suppressClick = useRef(false);
+  useEffect(() => () => stopNativePress.current?.(), []);
 
   if (!row) {
     // A skeleton, not a blank: while the page is in flight a dim bar stands in
@@ -495,22 +499,29 @@ const TrackRow = memo(function TrackRow({
       }}
       onPointerDown={(e) => {
         suppressClick.current = false;
-        if (nativeTrackDragging() && e.button === 0 &&
+        stopNativePress.current?.();
+        if (nativeTrackDragging() && e.button === 0 && row &&
             !(e.target as HTMLElement).closest("input, button, [contenteditable=true]")) {
-          nativePress.current = { x: e.clientX, y: e.clientY };
+          const start = { x: e.clientX, y: e.clientY };
+          const stop = () => {
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", stop);
+            window.removeEventListener("pointercancel", stop);
+            stopNativePress.current = null;
+          };
+          const move = (ev: PointerEvent) => {
+            if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 5) return;
+            stop();
+            suppressClick.current = true;
+            ev.preventDefault();
+            onDragStart(row);
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", stop);
+          window.addEventListener("pointercancel", stop);
+          stopNativePress.current = stop;
         }
       }}
-      onPointerMove={(e) => {
-        const press = nativePress.current;
-        if (!press) return;
-        if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < 5) return;
-        nativePress.current = null;
-        suppressClick.current = true;
-        e.preventDefault();
-        onDragStart(row);
-      }}
-      onPointerUp={() => { nativePress.current = null; }}
-      onPointerCancel={() => { nativePress.current = null; }}
       // The plain click a press on a selected row held back, now that the
       // release has shown it was not a drag.
       onClick={(e) => {
@@ -628,22 +639,11 @@ const TrackRow = memo(function TrackRow({
         if (onEditField) {
           const field = EDITABLE_FIELDS[col.key];
           if (field) {
+            const isKey = col.key === "key";
             return (
               <EditableCell
                 key={col.key}
                 value={cellText(row, col.key)}
-                onEditBlocked={onEditBlocked}
-                label={col.label}
-                col={col.key}
-                onCommit={(next) => onEditField(row.id, field, next)}
-                onClick={(clickToEdit || col.key === "title") && selected}
-                doubleClickLoads={col.key === "title"}
-                tip={
-            const isKey = col.key === "key";
-                  tooltips
-                    ? `${col.label} — ${clickToEdit || col.key === "title" ? "click" : "double-click"} to edit`
-                    : undefined
-                }
                 {...(isKey ? {
                   choices: keyChoices,
                   choiceLabel: (k: string) => formatKey(k, keyDisplay),
@@ -651,6 +651,17 @@ const TrackRow = memo(function TrackRow({
                   lit: trafficKey !== null && trafficLightLit(row.key, trafficKey, trafficReach),
                   onOpen: onOpenKeys,
                 } : {})}
+                onEditBlocked={onEditBlocked}
+                label={col.label}
+                col={col.key}
+                onCommit={(next) => onEditField(row.id, field, next)}
+                onClick={(clickToEdit || col.key === "title") && selected}
+                doubleClickLoads={col.key === "title"}
+                tip={
+                  tooltips
+                    ? `${col.label} — ${clickToEdit || col.key === "title" ? "click" : "double-click"} to edit`
+                    : undefined
+                }
               />
             );
           }
@@ -915,6 +926,15 @@ export const TrackTable = memo(function TrackTable({
   const preferences = usePreferences();
   const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;
   const tip = useTooltip();
+  // The Key cell's list, fetched the first time one opens so the table does
+  // not ask for it at startup.
+  const [keyChoices, setKeyChoices] = useState<readonly string[] | null>(null);
+  const loadKeyChoices = useCallback(() => {
+    void getBackend()
+      .then((b) => b.trackLookups())
+      .then((lookups) => setKeyChoices(lookups.keys))
+      .catch(() => {});
+  }, []);
   // The MASTER menu, open or not. Closed by anything outside it, as every
   // other menu here is.
   const [trafficMenu, setTrafficMenu] = useState(false);
@@ -926,15 +946,6 @@ export const TrackTable = memo(function TrackTable({
     const onDown = (event: MouseEvent) => {
       if (!trafficBox.current?.contains(event.target as Node)) setTrafficMenu(false);
     };
-  // The Key cell's list, fetched the first time one opens so the table does
-  // not ask for it at startup.
-  const [keyChoices, setKeyChoices] = useState<readonly string[] | null>(null);
-  const loadKeyChoices = useCallback(() => {
-    void getBackend()
-      .then((b) => b.trackLookups())
-      .then((lookups) => setKeyChoices(lookups.keys))
-      .catch(() => {});
-  }, []);
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setTrafficMenu(false);
     };
@@ -1751,6 +1762,8 @@ export const TrackTable = memo(function TrackTable({
                 onEditField={onEditField}
                 onEditBlocked={onEditBlocked}
                 keyDisplay={keyDisplay}
+                keyChoices={keyChoices}
+                onOpenKeys={loadKeyChoices}
                 previewCues={previewCueMarkers}
                 clickToEdit={clickToEdit}
                 tooltips={tooltips}
@@ -1762,8 +1775,6 @@ export const TrackTable = memo(function TrackTable({
                 onOpen={handleOpen}
                 onMenu={openTrackMenu}
                 reorderable={Boolean(onReorder)}
-                keyChoices={keyChoices}
-                onOpenKeys={loadKeyChoices}
                 isLocalDrag={() => carrying.current !== null}
                 dropEdge={
                   dropAt?.index === item.index ? (dropAt.below ? "below" : "above") : null
