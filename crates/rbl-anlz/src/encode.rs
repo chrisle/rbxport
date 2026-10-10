@@ -380,23 +380,56 @@ pub struct Existing<'a> {
 const AUTHORED: [&[u8; 4]; 11] =
     [b"PPTH", b"PVBR", b"PQTZ", b"PWAV", b"PWV2", b"PWV3", b"PWV4", b"PWV5", b"PWV6", b"PWV7", b"PQT2"];
 
+/// The cue-list tags, which the authored shape places itself (see
+/// [`author_with_overview`]).
+const CUE_LISTS: [&[u8; 4]; 2] = [b"PCOB", b"PCO2"];
+
+/// What `PPTH` holds in a desktop library's share tree: `?/` and the audio
+/// file's name, not its path.
+///
+/// [OBS] 26 of 26 `.DAT`s sampled from a rekordbox 7.2.14 library's share
+/// tree (issue #323), all 32 rekordbox 7.2.19 wrote for its demo tracks, and
+/// 300 of 300 in the reference library (`crates/rbl-analysis/docs/validation/
+/// multitempo.md`). [static, rekordbox 7.2.19 macOS arm64]
+/// `CMusicAnalyzeFile::get_new_format_ppth` (`0x100656bac`) builds it for a
+/// local file as `s_new_ppth_prefix + "/" + File(path).getFileName()`, and
+/// `CAnalyzerIF::getMusicAnalyzeFileHandleFromAnalyzePath` (`0x101625fc8`)
+/// closes a file whose `PPTH` is not the one it derives for the track
+/// (`is_same_new_format_ppth`, `0x100656ec0`). A USB export is different:
+/// its `PPTH` is the full `/Contents/…` path, rewritten by the export.
+#[must_use]
+pub fn share_tree_ppth(audio_path: &str) -> String {
+    let name = audio_path.rsplit(['/', '\\']).next().unwrap_or(audio_path);
+    format!("?/{name}")
+}
+
 /// Authors the three analysis files for a track.
 ///
-/// `audio_path` is what `PPTH` names: the file's own path, as
-/// `djmdContent.FolderPath` holds it. The grid and the waveforms are written
-/// from the analysis; everything else in an existing file — the cue lists,
-/// `PSSI`, `PVDI`, tags nobody has named — is carried through in its own
-/// order, because rekordbox authored it and this cannot. `PQT2` is the one
-/// exception: it is an extended copy of the grid, and a stale one beside a
-/// new grid is worse than none, so it is dropped (nothing here can write
-/// one; see [`Anlz::has_extended_grid`]).
+/// `ppth` is what `PPTH` names: for a desktop library's share tree,
+/// [`share_tree_ppth`] of the audio file. The grid and the waveforms are
+/// written from the analysis; everything else in an existing file —
+/// `PSSI`, `PVDI`, `PWVC`, tags nobody has named, and any cue list with
+/// cues in it — is carried through in its own order, because rekordbox
+/// authored it and this cannot. `PQT2` is the one exception: it is an
+/// extended copy of the grid, and a stale one beside a new grid is worse
+/// than none, so it is dropped (nothing here can write one; see
+/// [`Anlz::has_extended_grid`]).
 ///
-/// A file with nothing to carry gets the empty cue lists the share tree
-/// holds: cues live in `djmdCue`, and every share-tree cue list in the
-/// reference library is empty [OBS].
+/// The sections are laid out as rekordbox 7.2.19 lays out its own share-tree
+/// files [OBS: its demo-track analysis, and 7.2.14's on the rig]:
+///
+/// - `.DAT`: `PPTH`, `PVBR`, `PQTZ`, `PWAV`, `PWV2`, `PCOB` (hot cues),
+///   `PCOB` (memory cues);
+/// - `.EXT`: `PPTH`, `PWV3`, `PCOB` ×2, `PCO2` ×2, `PWV5`, `PWV4`, then
+///   anything carried (`PSSI`);
+/// - `.2EX`: `PPTH`, `PWV7`, `PWV6`, then anything carried (`PWVC`, `PVDI`).
+///
+/// Empty cue lists get rekordbox's own empty headers: cues live in
+/// `djmdCue`, and every share-tree cue list in the reference library is
+/// empty [OBS].
 #[must_use]
-pub fn author(audio_path: &str, beats: &[Beat], columns: &[BandColumn], existing: Existing<'_>) -> AnalysisFiles {
-    author_with_overview(audio_path, beats, columns, None, existing)
+pub fn author(ppth: &str, beats: &[Beat], columns: &[BandColumn], existing: Existing<'_>) -> AnalysisFiles {
+    author_with_overview(ppth, beats, columns, None, existing)
 }
 
 /// Authors analysis with an independently measured PWV6 energy envelope.
@@ -404,12 +437,13 @@ pub fn author(audio_path: &str, beats: &[Beat], columns: &[BandColumn], existing
 /// Callers with only detail columns can pass `None` for the legacy approximation.
 #[must_use]
 pub fn author_with_overview(
-    audio_path: &str, beats: &[Beat], columns: &[BandColumn],
+    ppth: &str, beats: &[Beat], columns: &[BandColumn],
     overview: Option<&[[u8; 3]; OVERVIEW_COLUMNS]>, existing: Existing<'_>,
 ) -> AnalysisFiles {
     let dat = {
         let mut builder = AnlzBuilder::new();
-        builder.path(audio_path);
+        header_of(&mut builder, existing.dat);
+        builder.path(ppth);
         // `PVBR` sits between the path and the grid in every rekordbox `.DAT`
         // (1,558 of 1,558 reference files [OBS]); rekordbox 6/7 reject a `.DAT`
         // that lacks it. A real VBR seek table cannot be re-derived from the
@@ -423,52 +457,76 @@ pub fn author_with_overview(
         builder.beat_grid(beats);
         builder.waveform_preview(b"PWAV", &pwav(columns));
         builder.waveform_preview(b"PWV2", &pwv2(columns));
-        carry_or(&mut builder, existing.dat, |b| {
-            b.empty_cue_list_of(false, 0);
-            b.empty_cue_list_of(false, 1);
-        });
+        cue_lists_of(&mut builder, existing.dat, false);
+        carry(&mut builder, existing.dat);
         builder.finish()
     };
     let ext = {
         let mut builder = AnlzBuilder::new();
-        builder.path(audio_path);
+        header_of(&mut builder, existing.ext);
+        builder.path(ppth);
         builder.waveform_scroll(b"PWV3", 1, &pwv3(columns));
-        builder.waveform_scroll(b"PWV4", 6, &pwv4(columns));
+        cue_lists_of(&mut builder, existing.ext, true);
         builder.waveform_scroll(b"PWV5", 2, &pwv5(columns));
-        carry_or(&mut builder, existing.ext, |b| {
-            b.empty_cue_list_of(true, 0);
-            b.empty_cue_list_of(true, 1);
-        });
+        builder.waveform_scroll(b"PWV4", 6, &pwv4(columns));
+        carry(&mut builder, existing.ext);
         builder.finish()
     };
     let two_ex = {
         let mut builder = AnlzBuilder::new();
-        builder.path(audio_path);
+        header_of(&mut builder, existing.two_ex);
+        builder.path(ppth);
         let preview = overview.map_or_else(|| pwv6(columns), |bands| bands.iter().flatten().map(|v| (*v).min(127)).collect());
-        builder.waveform_scroll(b"PWV6", 3, &preview);
         builder.waveform_scroll(b"PWV7", 3, &pwv7(columns));
-        carry_or(&mut builder, existing.two_ex, |_| {});
+        builder.waveform_scroll(b"PWV6", 3, &preview);
+        carry(&mut builder, existing.two_ex);
         builder.finish()
     };
     AnalysisFiles { dat, ext, two_ex }
 }
 
-/// Copies an existing file's other sections, or writes the defaults for a
-/// file that has none.
-fn carry_or(builder: &mut AnlzBuilder, existing: Option<&Anlz>, defaults: impl FnOnce(&mut AnlzBuilder)) {
-    match existing {
-        Some(file) => {
-            builder.header_extra(&file.header_extra);
-            for section in file.sections.iter().filter(|s| !is_authored(s)) {
-                builder.copy_section(section);
-            }
+/// An existing file's header bytes, kept as they were.
+fn header_of(builder: &mut AnlzBuilder, existing: Option<&Anlz>) {
+    if let Some(file) = existing {
+        builder.header_extra(&file.header_extra);
+    }
+}
+
+/// The cue lists: an existing file's own when any of them holds a cue, as
+/// they were; otherwise rekordbox's empty pair (and, in an `.EXT`, the
+/// extended pair too) with its own headers — see [`AnlzBuilder::cue_lists`].
+/// Releases before issue #323 wrote empty lists in another shape (memory
+/// first, a zero last word, `PCO2` with a twelve-byte header and no `PCOB`
+/// in the `.EXT`); a re-analysis replaces those.
+fn cue_lists_of(builder: &mut AnlzBuilder, existing: Option<&Anlz>, extended: bool) {
+    let carried: Vec<&Section> = existing
+        .map(|file| file.sections.iter().filter(|s| is_cue_list(s)).collect())
+        .unwrap_or_default();
+    if carried.iter().any(|s| !s.payload.is_empty()) {
+        for section in carried {
+            builder.copy_section(section);
         }
-        None => defaults(builder),
+    } else {
+        builder.cue_lists(extended);
+    }
+}
+
+/// Copies an existing file's sections this analysis neither writes nor
+/// places, in their own order.
+fn carry(builder: &mut AnlzBuilder, existing: Option<&Anlz>) {
+    if let Some(file) = existing {
+        for section in file.sections.iter().filter(|s| !is_authored(s) && !is_cue_list(s)) {
+            builder.copy_section(section);
+        }
     }
 }
 
 fn is_authored(section: &Section) -> bool {
     AUTHORED.iter().any(|tag| section.tag == FourCc::new(tag))
+}
+
+fn is_cue_list(section: &Section) -> bool {
+    CUE_LISTS.iter().any(|tag| section.tag == FourCc::new(tag))
 }
 
 /// The grid as `Beat`s from the analyser's own beat list, which shares the
@@ -790,5 +848,94 @@ mod tests {
         assert!(!reread.has_extended_grid());
         assert_eq!(reread.header_extra, vec![9; 16]);
         assert_eq!(reread.sections.iter().filter(|s| s.tag == FourCc::new(b"PWV3")).count(), 1);
+    }
+
+    /// The tags of a file, in order.
+    fn tags(bytes: &[u8]) -> Vec<String> {
+        crate::parse(bytes).unwrap().sections.iter().map(|s| s.tag.to_string()).collect()
+    }
+
+    /// A section's header bytes after its 12-byte frame, as hex.
+    fn header_hex(bytes: &[u8], tag: [u8; 4], nth: usize) -> String {
+        use std::fmt::Write as _;
+        let file = crate::parse(bytes).unwrap();
+        let section = file.sections.iter().filter(|s| s.tag == FourCc::new(&tag)).nth(nth).unwrap();
+        section.header.iter().fold(String::new(), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
+    }
+
+    #[test]
+    fn the_share_tree_path_is_the_file_name_after_a_question_mark() {
+        // rekordbox's own share-tree `PPTH` (issue #323): 26 of 26 sampled
+        // on a rekordbox 7.2.14 library, e.g. `?/99 funkytown.mp3`.
+        assert_eq!(share_tree_ppth("/Users/dj/Music/99 funkytown.mp3"), "?/99 funkytown.mp3");
+        assert_eq!(share_tree_ppth("C:/Users/dj/Music/Breaks1.wav"), "?/Breaks1.wav");
+        assert_eq!(share_tree_ppth("C:\\Users\\dj\\Music\\House3.wav"), "?/House3.wav");
+        assert_eq!(share_tree_ppth("track.flac"), "?/track.flac");
+    }
+
+    #[test]
+    fn fresh_files_have_rekordboxs_share_tree_layout_and_headers() {
+        // Section order and headers of the files rekordbox 7.2.19 wrote for
+        // its demo track "MergeFX Sample Sound 209.wav" (issue #323):
+        //   .DAT  PPTH PVBR PQTZ PWAV PWV2 PCOB PCOB
+        //   .EXT  PPTH PWV3 PCOB PCOB PCO2 PCO2 PWV5 PWV4
+        //   .2EX  PPTH PWV7 PWV6 PWVC
+        // with each PCOB `0000000{1,0} 0000 0000 ffffffff` (hot cues first)
+        // and each PCO2 `0000000{1,0} 0000 0000`. The `PWVC` is not
+        // authored here: its values are [UNKNOWN].
+        let beats = beat_grid_of([(1, 12_800, 0), (2, 12_800, 469)]);
+        let fresh = author("?/track.wav", &beats, &ramp(600), Existing::default());
+        assert_eq!(tags(&fresh.dat), ["PPTH", "PVBR", "PQTZ", "PWAV", "PWV2", "PCOB", "PCOB"]);
+        assert_eq!(tags(&fresh.ext), ["PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PWV5", "PWV4"]);
+        assert_eq!(tags(&fresh.two_ex), ["PPTH", "PWV7", "PWV6"]);
+        for file in [&fresh.dat, &fresh.ext] {
+            assert_eq!(header_hex(file, *b"PCOB", 0), "0000000100000000ffffffff");
+            assert_eq!(header_hex(file, *b"PCOB", 1), "0000000000000000ffffffff");
+        }
+        assert_eq!(header_hex(&fresh.ext, *b"PCO2", 0), "0000000100000000");
+        assert_eq!(header_hex(&fresh.ext, *b"PCO2", 1), "0000000000000000");
+        assert_eq!(crate::parse(&fresh.ext).unwrap().path().as_deref(), Some("?/track.wav"));
+    }
+
+    #[test]
+    fn re_analysis_repairs_the_old_shape_and_keeps_rekordboxs_sections() {
+        let beats = beat_grid_of([(1, 12_800, 0)]);
+        let columns = ramp(600);
+        // What releases before issue #323 wrote: the full path, memory list
+        // first with a zero last word, and only twelve-byte-header `PCO2`s
+        // after the waveforms in the `.EXT`.
+        let mut old_ext = AnlzBuilder::new();
+        old_ext.path("/Music/track.wav").waveform_scroll(b"PWV3", 1, &[0; 4]).waveform_scroll(b"PWV4", 6, &[0; 6])
+            .waveform_scroll(b"PWV5", 2, &[0; 2]).empty_cue_list_of(true, 0).empty_cue_list_of(true, 1);
+        let old_ext = crate::parse(&old_ext.finish()).unwrap();
+        let mut old_dat = AnlzBuilder::new();
+        old_dat.path("/Music/track.wav").vbr_table_zero().beat_grid(&beats).empty_cue_list_of(false, 0).empty_cue_list_of(false, 1);
+        let old_dat = crate::parse(&old_dat.finish()).unwrap();
+        let again = author("?/track.wav", &beats, &columns, Existing { dat: Some(&old_dat), ext: Some(&old_ext), two_ex: None });
+        assert_eq!(again, author("?/track.wav", &beats, &columns, Existing::default()), "the same files as a fresh analysis");
+
+        // A rekordbox-analysed track keeps its phrases, vocals and `PWVC`,
+        // after the authored sections as rekordbox orders them.
+        let mut rb_ext = crate::parse(&again.ext).unwrap();
+        rb_ext.sections.push(Section::new(b"PSSI", vec![0; 20], vec![1, 2, 3]));
+        let mut rb_two = crate::parse(&again.two_ex).unwrap();
+        rb_two.sections.push(Section::new(b"PWVC", vec![0; 2], vec![0, 0x50, 0, 0xd7, 1, 0xf4]));
+        rb_two.sections.push(Section::new(b"PVDI", vec![0; 12], vec![7]));
+        let kept = author("?/track.wav", &beats, &columns, Existing { ext: Some(&rb_ext), two_ex: Some(&rb_two), ..Existing::default() });
+        assert_eq!(tags(&kept.ext), ["PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PWV5", "PWV4", "PSSI"]);
+        assert_eq!(tags(&kept.two_ex), ["PPTH", "PWV7", "PWV6", "PWVC", "PVDI"]);
+
+        // A cue list with cues in it is rekordbox's data and is carried as it is.
+        let mut cued = crate::parse(&again.dat).unwrap();
+        let hot = cued.sections.iter_mut().find(|s| s.tag == FourCc::new(b"PCOB")).unwrap();
+        hot.payload = vec![b'P', b'C', b'P', b'T', 0, 0, 0, 0x1c];
+        let carried = author("?/track.wav", &beats, &columns, Existing { dat: Some(&cued), ..Existing::default() });
+        let reread = crate::parse(&carried.dat).unwrap();
+        let lists: Vec<&Section> = reread.sections.iter().filter(|s| s.tag == FourCc::new(b"PCOB")).collect();
+        assert_eq!(lists.len(), 2);
+        assert_eq!(lists[0].payload, vec![b'P', b'C', b'P', b'T', 0, 0, 0, 0x1c]);
     }
 }
