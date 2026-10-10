@@ -18,7 +18,7 @@ import { useEventCallback } from "@/store/useEventCallback";
  */
 import type { TrackSearchField } from "@/lib/search";
 
-import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { droppedFilePaths, getBackend, subscribeNativeFileDrops } from "@/ipc/client";
 import type {
   Backend, DeckId, Device, ImportReport, LibraryProblem, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
@@ -391,10 +391,6 @@ function AppBody() {
       }
     : {};
   const [query, setQuery] = useState("");
-  // The view follows the search box a beat behind: the keystroke is drawn
-  // first and the view reopened after, and a burst of typing reopens it once
-  // at the end rather than once per letter.
-  const deferredQuery = useDeferredValue(query);
   const [searchField, setSearchField] = useState<TrackSearchField>("all");
   // The tree's width, dragged by the splitter. Held here because the grid that
   // sizes both panes lives here.
@@ -835,12 +831,12 @@ function AppBody() {
   // Related Tracks relate to the track on Player 1, as rekordbox's do.
   const relatedTo = playerTrack?.id ?? null;
   const spec: ViewSpec = useMemo(() => {
-    const base = { ...specForNode(selectedNode, deferredQuery, sortState, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo, deviceLibraries.revision), searchField };
+    const base = { ...specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo, deviceLibraries.revision), searchField };
     // Only while the bar is showing: hiding it puts the whole list back,
     // so a closed bar can never be silently narrowing the library.
     const filter = filterOpen ? toSpecFilter(filterState, masterBpmX100) : undefined;
     return filter ? { ...base, filter } : base;
-  }, [selectedNode, sortState, deferredQuery, searchField, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo, deviceLibraries.revision]);
+  }, [selectedNode, sortState, query, searchField, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo, deviceLibraries.revision]);
 
   // What the bar's lists offer, from Rust, for the source and query alone.
   // Re-asked when either changes or the library does, and only while the bar
@@ -852,7 +848,7 @@ function AppBody() {
     void (async () => {
       const backend = await getBackend();
       try {
-        const values = await backend.filterValues({ ...specForNode(selectedNode, deferredQuery, null, "classic", "alphabetical", relatedTo), searchField });
+        const values = await backend.filterValues({ ...specForNode(selectedNode, query, null, "classic", "alphabetical", relatedTo), searchField });
         if (live) setFilterValues(values);
       } catch {
         // The library is not up yet; the ready event re-runs this through
@@ -862,7 +858,7 @@ function AppBody() {
     return () => {
       live = false;
     };
-  }, [filterOpen, selectedNode, deferredQuery, searchField, libraryGeneration, relatedTo, tagListKey]);
+  }, [filterOpen, selectedNode, query, searchField, libraryGeneration, relatedTo, tagListKey]);
 
   const handleSort = useCallback((column: SortColumn) => {
     setSortState((s) => nextSort(s, column));
