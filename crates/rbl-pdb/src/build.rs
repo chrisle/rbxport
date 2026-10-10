@@ -74,6 +74,26 @@ pub fn device_sql_string(text: &str) -> Vec<u8> {
     }
 }
 
+/// How a table's data pages are filled and what their header says at
+/// `0x20` and `0x22`. Every other header field is the same either way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PageStyle {
+    /// `0x20` the row count, `0x22` 0 (the count again past 255 rows),
+    /// and a new page once less than the next row plus eight bytes is
+    /// free: rbxport's `export.pdb` pages and `exportExt.pdb`'s tag and
+    /// master pages, whose bytes this style keeps as they always were.
+    #[default]
+    Counted,
+    /// `0x20` 1 and `0x22` the last row's index, each row group's last
+    /// word 0 except the last group's, which holds only the last row's
+    /// bit, and rows added for as long as they and their row index fit
+    /// the page to the last byte: rekordbox's `exportExt.pdb` type-4 pages
+    /// [OBS: a rekordbox 7 export, #316: 222 sixteen-byte rows a page, 4
+    /// bytes free, `01 00 dd 00`, the last group `ff 3f 00 20`; its last
+    /// page of 128 rows `01 00 7f 00`, `ff ff 00 80`].
+    LastRowIndex,
+}
+
 /// Builds one page of rows.
 pub struct PageBuilder {
     page_size: usize,
@@ -82,6 +102,7 @@ pub struct PageBuilder {
     next_page: u32,
     heap: Vec<u8>,
     row_offsets: Vec<u16>,
+    style: PageStyle,
 }
 
 impl PageBuilder {
@@ -93,6 +114,25 @@ impl PageBuilder {
             next_page,
             heap: Vec::new(),
             row_offsets: Vec::new(),
+            style: PageStyle::Counted,
+        }
+    }
+
+    /// The page with its header and fill in `style`.
+    #[must_use]
+    pub fn with_style(mut self, style: PageStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Whether a row of `len` bytes still goes on this page in its style.
+    pub fn fits(&self, len: usize) -> bool {
+        match self.style {
+            PageStyle::Counted => self.free_space() >= len + 8,
+            PageStyle::LastRowIndex => {
+                let heap = self.heap.len().div_ceil(4) * 4 + len;
+                PAGE_HEADER_LEN + heap + groups_for(self.row_offsets.len() + 1) * ROW_GROUP_LEN <= self.page_size
+            }
         }
     }
 
@@ -164,9 +204,17 @@ impl PageBuilder {
             .saturating_sub(2 * num_rows + 4 * groups_for(num_rows));
         page[0x1c..0x1e].copy_from_slice(&u16::try_from(free).unwrap_or(0).to_le_bytes());
         page[0x1e..0x20].copy_from_slice(&u16::try_from(used).unwrap_or(u16::MAX).to_le_bytes());
-        page[0x20..0x22].copy_from_slice(&rows_u16.to_le_bytes());
-        if num_rows > 0xff {
-            page[0x22..0x24].copy_from_slice(&rows_u16.to_le_bytes());
+        match self.style {
+            PageStyle::Counted => {
+                page[0x20..0x22].copy_from_slice(&rows_u16.to_le_bytes());
+                if num_rows > 0xff {
+                    page[0x22..0x24].copy_from_slice(&rows_u16.to_le_bytes());
+                }
+            }
+            PageStyle::LastRowIndex => {
+                page[0x20..0x22].copy_from_slice(&1_u16.to_le_bytes());
+                page[0x22..0x24].copy_from_slice(&rows_u16.saturating_sub(1).to_le_bytes());
+            }
         }
 
         // Heap.
@@ -187,10 +235,17 @@ impl PageBuilder {
                     page[at..at + 2].copy_from_slice(&offset.to_le_bytes());
                 }
             }
-            // The mask twice: rekordbox writes it in both trailing words.
-            for at in [base - 4, base - 2] {
+            // The mask, then the mask again, or in the last-row-index
+            // style only the last row's bit in the last group and 0 in
+            // the others.
+            let second = match self.style {
+                PageStyle::Counted => present,
+                PageStyle::LastRowIndex if group == groups - 1 => 1 << (in_group - 1),
+                PageStyle::LastRowIndex => 0,
+            };
+            for (at, word) in [(base - 4, present), (base - 2, second)] {
                 if at + 2 <= page.len() {
-                    page[at..at + 2].copy_from_slice(&present.to_le_bytes());
+                    page[at..at + 2].copy_from_slice(&word.to_le_bytes());
                 }
             }
         }
@@ -277,17 +332,20 @@ impl FileBuilder {
     /// index, times 32, in their third and fourth bytes, and it starts
     /// again on every page.
     pub fn add_table_numbered(&mut self, page_type: u32, rows: &[Vec<u8>], number: impl Fn(&mut Vec<u8>, u16)) {
+        self.add_table_styled(page_type, rows, number, PageStyle::Counted);
+    }
+
+    /// [`add_table_numbered`](Self::add_table_numbered), with the data
+    /// pages filled and headed in `style`.
+    pub fn add_table_styled(&mut self, page_type: u32, rows: &[Vec<u8>], number: impl Fn(&mut Vec<u8>, u16), style: PageStyle) {
         // Page indices are assigned in `finish`, so use a placeholder for now
         // and patch the links afterwards.
         let mut pages: Vec<Vec<u8>> = Vec::new();
-        let mut builder = PageBuilder::new(self.page_size, 0, page_type, 0);
+        let fresh = || PageBuilder::new(self.page_size, 0, page_type, 0).with_style(style);
+        let mut builder = fresh();
         for row in rows {
-            if builder.free_space() < row.len() + 8 {
-                pages.push(std::mem::replace(
-                    &mut builder,
-                    PageBuilder::new(self.page_size, 0, page_type, 0),
-                )
-                .finish());
+            if !builder.fits(row.len()) {
+                pages.push(std::mem::replace(&mut builder, fresh()).finish());
             }
             let mut row = row.clone();
             number(&mut row, u16::try_from(builder.row_count()).unwrap_or(u16::MAX));

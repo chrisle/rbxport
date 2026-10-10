@@ -1,7 +1,7 @@
 //! Round-trips: what the builder writes, the reader must read back exactly.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use rbl_pdb::build::{device_sql_string, long_utf16le, short_ascii, FileBuilder, PageBuilder};
+use rbl_pdb::build::{device_sql_string, long_utf16le, short_ascii, FileBuilder, PageBuilder, PageStyle};
 use rbl_pdb::{PageType, Pdb};
 
 const PAGE: usize = 4096;
@@ -422,3 +422,44 @@ fn a_long_ascii_string_reads_and_writes_as_rekordbox_does() {
     assert_eq!(rows[0].name, path);
 }
 
+
+/// rekordbox's `exportExt.pdb` type-4 pages [OBS, a rekordbox 7 export
+/// posted on #316]: full to the byte, `0x20` 1 and `0x22` the last row's
+/// index, and the row groups' second word marking only the last row. The
+/// reader takes every row of them, and the counted style is unchanged.
+#[test]
+fn last_row_index_pages_fill_up_and_read_back_whole() {
+    let rows: Vec<Vec<u8>> = (0..500_u32).map(|i| [i.to_le_bytes(), [0; 4], [0; 4], [3, 0, 0, 0]].concat()).collect();
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table_styled(4, &rows, |_, _| {}, PageStyle::LastRowIndex);
+    let bytes = file.finish();
+    let pdb = Pdb::parse(&bytes).unwrap();
+    let read = pdb.rows(pdb.table(PageType::Labels).unwrap());
+    assert_eq!(read.len(), 500);
+    let ids: Vec<u32> = read.iter().map(|&r| pdb.u4_at(r, 0)).collect();
+    assert_eq!(ids, (0..500).collect::<Vec<u32>>());
+    let mut pages: Vec<usize> = read.iter().map(|r| r.page_offset).collect();
+    pages.dedup();
+    let counts: Vec<usize> = pages.iter().map(|&p| read.iter().filter(|r| r.page_offset == p).count()).collect();
+    assert_eq!(counts, vec![222, 222, 56]);
+    assert_eq!(&bytes[pages[0] + 0x1c..pages[0] + 0x24], &[0x04, 0x00, 0xe0, 0x0d, 0x01, 0x00, 0xdd, 0x00]);
+    assert_eq!(&bytes[pages[2] + 0x20..pages[2] + 0x24], &[0x01, 0x00, 0x37, 0x00]);
+    // 56 rows: four groups, the last of eight rows.
+    let last_group = pages[2] + PAGE - 3 * 0x24;
+    assert_eq!(&bytes[last_group - 4..last_group], &[0xff, 0x00, 0x80, 0x00]);
+    assert_eq!(&bytes[pages[2] + PAGE - 4..pages[2] + PAGE], &[0xff, 0xff, 0x00, 0x00]);
+
+    // The same rows counted: the row count at 0x20, the mask twice, and
+    // a new page before the last bytes run out.
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table(4, &rows);
+    let bytes = file.finish();
+    let pdb = Pdb::parse(&bytes).unwrap();
+    let read = pdb.rows(pdb.table(PageType::Labels).unwrap());
+    assert_eq!(read.len(), 500);
+    let first = read[0].page_offset;
+    let on_first = read.iter().filter(|r| r.page_offset == first).count();
+    assert_eq!(on_first, 221);
+    assert_eq!(&bytes[first + 0x20..first + 0x24], &[221, 0, 0, 0]);
+    assert_eq!(&bytes[first + PAGE - 4..first + PAGE], &[0xff, 0xff, 0xff, 0xff]);
+}
