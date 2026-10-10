@@ -703,6 +703,17 @@ export function callLeavesFrom(head: number, at: number, wrap: number, drift: nu
 }
 
 /**
+ * How late a waiting hot cue call fired, in seconds: how far past `at` the
+ * head is, read the way `callLeavesFrom` reads it (whole loops of `wrap`
+ * taken off), and kept between 0 and `drift`. A hot loop lands this far into
+ * its loop, so the beat runs on as a plain call's move keeps it.
+ */
+export function lateCall(head: number, at: number, wrap: number, drift: number): number {
+  const loops = wrap > 0 ? Math.round((head - at) / wrap) : 0;
+  return Math.min(Math.max(head - loops * wrap - at, 0), drift);
+}
+
+/**
  * Where the head is inside a playing loop, in seconds. The engine wraps at
  * the out point, but a head read between ticks runs on past it (`extrapolate`
  * does not know the loop), so a reading at or past the out point is brought
