@@ -4,6 +4,7 @@
 
 pub mod durable;
 pub mod ids;
+pub mod mpeg;
 pub mod musickey;
 pub mod time;
 pub mod xml;
