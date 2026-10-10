@@ -197,6 +197,45 @@ test("tapping shows the taps' tempo and writes it during the tapping run", async
   await expect(button(page, "Undo the last grid edit")).toBeEnabled();
 });
 
+test("a tap counts when TAP goes down, however long it is held (#137)", async ({ page }) => {
+  // rekordbox's TapButton is triggered on mouse down. Four presses 600 ms
+  // apart (100 BPM), held for different lengths: timed on release, the
+  // second interval (350 ms against 850 ms) fails the outlier gate.
+  await load(page);
+  const now = new Date("2026-09-21T12:00:00Z");
+  await page.clock.install({time: now});
+  await page.clock.pauseAt(now);
+  await button(page, "Tap the tempo").hover();
+  const holds = [50, 300, 50, 300];
+  for (const [i, hold] of holds.entries()) {
+    await page.mouse.down();
+    await page.clock.runFor(hold);
+    await page.mouse.up();
+    if (i < holds.length - 1) await page.clock.runFor(600 - hold);
+  }
+  await expect(bpmField(page)).toHaveAttribute("data-tapping", "true");
+  const shown = await bpm(page);
+  expect(shown).toBeGreaterThan(95);
+  expect(shown).toBeLessThan(105);
+});
+
+test("a click with no pointer behind it still taps once", async ({ page }) => {
+  // Assistive tech activates a button with a bare click (detail 0); the
+  // pointer path above must not be the only way to tap, nor tap twice.
+  await load(page);
+  const now = new Date("2026-09-21T12:00:00Z");
+  await page.clock.install({time: now});
+  await page.clock.pauseAt(now);
+  const tap = button(page, "Tap the tempo");
+  await tap.dispatchEvent("click");
+  await page.clock.runFor(500);
+  await tap.dispatchEvent("click");
+  await expect(bpmField(page)).toHaveAttribute("data-tapping", "true");
+  const shown = await bpm(page);
+  expect(shown).toBeGreaterThan(110);
+  expect(shown).toBeLessThan(130);
+});
+
 test("a read-only library greys edits and the lock but permits the metronome", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({ view: { tooltips: true } })));
   await load(page, "");
