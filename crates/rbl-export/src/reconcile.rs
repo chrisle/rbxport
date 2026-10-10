@@ -202,7 +202,7 @@ fn retain_device_only(
         if positions.contains_key(&id) {
             continue;
         }
-        let track = existing_sources
+        let mut track = existing_sources
             .get(&id)
             .ok_or_else(|| {
                 ExportError::Conflict(format!(
@@ -210,6 +210,12 @@ fn retain_device_only(
                 ))
             })?
             .clone();
+        // A track an earlier export put there that a device playlist or the
+        // history still names: carried for now, but still ours to take off
+        // once nothing names it.
+        if let Some(device) = track.device.as_mut() {
+            device.exported = previously_owned.contains(&id);
+        }
         positions.insert(id, tracks.len());
         tracks.push(track);
     }
@@ -437,6 +443,7 @@ fn fill_source_details(
             audio: t.path.clone(),
             analysis_dir,
             preserve: true,
+            exported: false,
         });
     }
     Ok(())

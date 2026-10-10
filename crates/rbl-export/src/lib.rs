@@ -139,6 +139,11 @@ pub struct DeviceTrack {
     pub audio: String,
     pub analysis_dir: String,
     pub preserve: bool,
+    /// Carried (`preserve`) only because a device playlist or the play
+    /// history still names it, though an earlier export put it there itself.
+    /// It stays the export's: once nothing names it, a later sync takes it
+    /// off like any track no longer selected.
+    pub exported: bool,
 }
 
 /// One My Tag of the library, to be listed on the stick: a category
@@ -452,14 +457,22 @@ fn owns_library_file(destination: &Path, entry: &ManifestTrack) -> bool {
 /// the stick had it, rather than one it exported (#317). Such a track is the
 /// stick's: a later sync keeps carrying it and never deletes its files.
 ///
-/// The `preserved` flag says so for entries this version wrote. An older
-/// version recorded a carried track as if it had exported it, but always with
-/// no library id and with the stick's own file at its audio path as the
-/// source, which an exported copy never has (a library file left in place
-/// keeps its library id). The path is also compared as written, for a
-/// carried track whose audio is already gone.
+/// The `preserved` flag says so for entries this version wrote, `false`
+/// included. An older version did not record it: it listed a carried track as
+/// if it had exported it, always with no library id and with the stick's own
+/// file at its audio path as the source. The path is also compared as
+/// written, for a carried track whose audio is already gone.
+///
+/// Known limit of that inference: an older version wrote exactly the same
+/// entry for a track it had exported itself and carried only because a device
+/// playlist or history still named it after it was deselected. Nothing left
+/// on the stick tells the two apart (the device row's master ids match the
+/// library's either way when rekordbox exported from the same collection), so
+/// such a track reads as carried and stays on the stick. That errs towards
+/// keeping a file rather than deleting another writer's; the record says
+/// which it is from then on.
 pub(crate) fn carried_entry(destination: &Path, entry: &ManifestTrack) -> bool {
-    if entry.preserved { return true; }
+    if let Some(preserved) = entry.preserved { return preserved; }
     if entry.library_id != 0 || entry.audio.is_empty() { return false; }
     let on_stick = under(destination, &entry.audio);
     Path::new(&entry.source) == on_stick || same_file(Path::new(&entry.source), &on_stick)
@@ -1212,7 +1225,7 @@ pub fn export_cancellable(
             conversion_source_hash: source_hash,
             audio_hash,
             in_place: in_place && !absent,
-            preserved,
+            preserved: Some(preserved && !track.device.as_ref().is_some_and(|d| d.exported)),
             copy_stamp: recorded_stamp,
         });
 

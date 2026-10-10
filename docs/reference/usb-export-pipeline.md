@@ -363,13 +363,19 @@ the track is handled), `copying` (only when a track is actually written),
   writer put on the stick. Their metadata is read back from
   `exportLibrary.db` (`sources_from_one`) or `export.pdb`
   (`sources_from_legacy`). Their audio and analysis stay exactly as they are,
-  and conversion is skipped. The manifest marks them `preserved`, so a later
-  sync still treats them as the stick's rather than as tracks it exported
-  and can take off (#317). A manifest from an older build has no such flag
-  and listed carried tracks as exported; `carried_entry` reads an entry with
-  no library id whose source is the stick's own file at its audio path as
-  preserved too. A preserved entry left over at the end of a sync is never
-  deleted.
+  and conversion is skipped. The manifest records `preserved` for every
+  track. It is `true` for a track another writer put there, so a later sync
+  still treats it as the stick's rather than as a track it exported and can
+  take off (#317). It is `false` for a track an earlier export put there
+  that a device playlist or history still names (`DeviceTrack::exported`):
+  that track stays the export's and is removed, like any track no longer
+  selected, once nothing names it. A manifest from an older build has no
+  such field and listed carried tracks as exported; `carried_entry` reads an
+  entry with no library id whose source is the stick's own file at its
+  audio path as preserved too. Known limit: an older build wrote the same
+  entry for its own deselected track kept by a device playlist or history,
+  so that track reads as preserved and stays on the stick. A preserved entry
+  left over at the end of a sync is never deleted.
 - If neither database exists, reconcile does nothing (`merged_library` returns
   `None`).
 

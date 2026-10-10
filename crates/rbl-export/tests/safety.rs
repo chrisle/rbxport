@@ -535,7 +535,7 @@ fn a_device_track_in_no_playlist_is_kept_by_every_later_sync() {
         let after = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
         assert!(track_on_stick(after.one.as_ref().unwrap(), "Track 1").is_some(), "{attempt} sync dropped it");
         assert!(usb.path().join(audio.trim_start_matches('/')).is_file(), "{attempt} sync deleted its audio");
-        assert!(Manifest::load(usb.path()).unwrap().tracks.iter().any(|t| t.preserved && t.audio == audio));
+        assert!(Manifest::load(usb.path()).unwrap().tracks.iter().any(|t| t.preserved == Some(true) && t.audio == audio));
         assert!(verify(usb.path()).unwrap().is_ok());
     }
 }
@@ -560,11 +560,11 @@ fn a_track_an_older_build_carried_is_kept_by_the_next_sync() {
         let mut record: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         let mut carried = 0;
         for entry in record["tracks"].as_array_mut().unwrap() {
-            carried += usize::from(entry.as_object_mut().unwrap().remove("preserved").is_some());
+            carried += usize::from(entry.as_object_mut().unwrap().remove("preserved") == Some(serde_json::Value::Bool(true)));
         }
         assert_eq!(carried, 1, "{attempt} sync: the carried track was recorded as carried");
         std::fs::write(&path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
-        assert!(Manifest::load(usb.path()).unwrap().tracks.iter().all(|t| !t.preserved));
+        assert!(Manifest::load(usb.path()).unwrap().tracks.iter().all(|t| t.preserved.is_none()));
 
         let report = sync(usb.path(), std::slice::from_ref(&chosen), &[playlist(20, &[0])])
             .unwrap_or_else(|e| panic!("{attempt} sync: {e}"));
@@ -575,7 +575,41 @@ fn a_track_an_older_build_carried_is_kept_by_the_next_sync() {
         }
         assert!(usb.path().join(audio.trim_start_matches('/')).is_file(), "{attempt} sync deleted its audio");
         assert!(usb.path().join(analysis.trim_start_matches('/')).is_file(), "{attempt} sync deleted its analysis");
-        assert!(Manifest::load(usb.path()).unwrap().tracks.iter().any(|t| t.preserved && t.audio == audio));
+        assert!(Manifest::load(usb.path()).unwrap().tracks.iter().any(|t| t.preserved == Some(true) && t.audio == audio));
         assert!(verify(usb.path()).unwrap().is_ok());
     }
+}
+
+/// A track this app exported, then deselected while a device playlist still
+/// named it, is carried for that one sync because the playlist needs it. It
+/// stays ours: once nothing on the stick names it, the next sync takes it
+/// off, audio and all, like any track no longer selected. Recording it as
+/// carried kept it on the stick forever (#317 review).
+#[test]
+fn a_track_we_exported_and_a_device_playlist_kept_is_removed_once_unnamed() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = tempfile::tempdir().unwrap();
+    let tracks = [track(src.path(), 1), track(src.path(), 2)];
+    sync(usb.path(), &tracks, &[playlist(10, &[0, 1])]).unwrap();
+    let audio = Manifest::load(usb.path()).unwrap().tracks.iter().find(|t| t.library_id == 1).unwrap().audio.clone();
+    edit(usb.path(), "INSERT INTO playlist VALUES(99,1,'On the deck',NULL,0,0); INSERT INTO playlist_content VALUES(99,1,1)");
+    std::fs::remove_file(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let chosen = std::slice::from_ref(&tracks[1]);
+    sync(usb.path(), chosen, &[playlist(20, &[0])]).unwrap();
+    let after = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+    assert!(track_on_stick(after.one.as_ref().unwrap(), "Track 1").is_some(), "the device playlist still names it");
+    let manifest = Manifest::load(usb.path()).unwrap();
+    assert!(manifest.tracks.iter().any(|t| t.audio == audio && t.preserved == Some(false)), "still recorded as ours");
+
+    edit(usb.path(), "DELETE FROM playlist_content WHERE playlist_id=99; DELETE FROM playlist WHERE playlist_id=99");
+    std::fs::remove_file(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let report = sync(usb.path(), chosen, &[playlist(20, &[0])]).unwrap();
+    assert_eq!(report.removed, 1, "{report:?}");
+    let after = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+    for (format, library) in [("OneLibrary", &after.one), ("Device Library", &after.legacy)] {
+        assert!(track_on_stick(library.as_ref().unwrap(), "Track 1").is_none(), "Track 1 stayed in the {format}");
+        assert!(track_on_stick(library.as_ref().unwrap(), "Track 2").is_some(), "{format}");
+    }
+    assert!(!usb.path().join(audio.trim_start_matches('/')).exists(), "its audio stayed");
+    assert!(verify(usb.path()).unwrap().is_ok());
 }
