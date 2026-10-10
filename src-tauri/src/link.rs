@@ -59,10 +59,11 @@ pub struct PeerDto {
     pub address: String,
 }
 
-/// How a device type reads for the window.
+/// How a device type reads for the window. An all-in-one (XDJ-RX3) is a
+/// player, so LINK auto-join starts for it as it does for a CDJ.
 fn kind_name(kind: rbl_link::DeviceType) -> &'static str {
     match kind {
-        rbl_link::DeviceType::Cdj => "player",
+        rbl_link::DeviceType::Cdj | rbl_link::DeviceType::AllInOne => "player",
         rbl_link::DeviceType::Mixer => "mixer",
         rbl_link::DeviceType::Rekordbox => "rekordbox",
         rbl_link::DeviceType::Other(_) => "device",
@@ -657,12 +658,20 @@ fn is_link_local(address: std::net::Ipv4Addr) -> bool {
 
 #[cfg(test)]
 mod rx3_interface_tests {
-    use super::{is_link_local, players};
+    use super::{is_link_local, kind_name, players};
     use rbl_link::beacon::{MasterState, Player};
     use rbl_link::{Interface, LinkState, Snapshot};
     use rbl_prolink::DeviceType;
     use std::net::Ipv4Addr;
     use std::time::Instant;
+
+    #[test]
+    fn an_xdj_rx3_is_a_player_so_auto_join_starts_for_it() {
+        assert_eq!(DeviceType::from_u8(0x07), DeviceType::AllInOne);
+        assert_eq!(kind_name(DeviceType::AllInOne), "player");
+        assert_eq!(kind_name(DeviceType::Cdj), "player");
+        assert_eq!(kind_name(DeviceType::Other(0x0a)), "device");
+    }
 
     #[test]
     fn auto_prefers_ethernet_even_when_wifi_peer_is_seen_first() {

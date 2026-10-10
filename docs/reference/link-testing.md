@@ -27,10 +27,24 @@ AtEmu proves the response, transport, and firmware behavior that its device mode
 | Device | User manual | Firmware reference | AtEmu status | Important compatibility detail |
 | --- | --- | --- | --- | --- |
 | XDJ-AZ | XDJ-AZ instruction manual | Firmware 1.30 | **Passing emulated USB gate:** generated FAT32 export browses, loads on deck 1, and passes tone/cue audio tests. | One appliance exposes two ordinary Pro DJ Link deck identities; four-deck status can use USB slot `07`. Physical XDJ-AZ behavior is not established by this gate. |
-| XDJ-RX3 | XDJ-RX3 instruction manual | Firmware 1.20; activation capture on 1.19 | **Unavailable:** no bootable emulator model. | Uses legacy request variants for several browse/load operations. Rear USB Link Export does not start until the audio gadget reports its connection event. |
+| XDJ-RX3 | XDJ-RX3 instruction manual | Firmware 1.20; activation capture on 1.19 | **Unavailable:** no bootable emulator model. | Uses legacy request variants for several browse/load operations. Rear USB Link Export does not start until the audio gadget reports its connection event. Physical check on Linux, firmware 1.20: source, browse, load, play and auto-join pass. |
 | CDJ-3000 | CDJ-3000 instruction manual | Firmware 3.20 | **Available:** vendor firmware boots and supports automated panel interaction. | Uses live keyboard search `1500`; after a Link Export load it waits for user-info `3006` before requesting delivery info `2602`. |
 
 The XDJ-AZ and XDJ-RX3 manual actions are in **Track selection**; the CDJ-3000 equivalents are in **Track selection** and **Browsing tracks**. Packet expectations are based on firmware analysis and protocol captures, with evidence markers distinguishing observations from assumptions.
+
+### XDJ-RX3 on Linux
+
+The rear-USB activation lease (`0x50` over USB-MIDI) also runs on Linux, through ALSA (`midir`). The port shows as `XDJ-RX3:XDJ-RX3 MIDI 1 <client>:0`.
+
+The RX3's USB NIC (`2b73:0007`, `cdc_ether`) uses IPv4 link-local (169.254/16). Windows and macOS self-assign it when DHCP gets no answer. NetworkManager's default wired profile is DHCP only, so the interface gets no IPv4 and RBX reports "no 169.254.x.x address". Bind a profile to the NIC:
+
+```sh
+nmcli con add type ethernet con-name rx3-link ifname '*' \
+  802-3-ethernet.mac-address <RX3 NIC MAC> \
+  ipv4.method link-local ipv6.method link-local connection.autoconnect yes
+```
+
+On NetworkManager 1.52 or later, `ipv4.link-local fallback` (DHCP first, then link-local) also works.
 
 ## Test layers
 

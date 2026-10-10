@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use rbl_prolink::{
     number_in_use_reply_with_counter, rekordbox_assign_request, rekordbox_claim_stage1, rekordbox_claim_stage2,
-    ConnectionMode, KeepAlive, NumberBlock, NumberProbe, NumberReply, NUMBER_REPLY_IN_USE, PROBE_SUBTYPE_ASSIGN,
+    ConnectionMode, DeviceType, KeepAlive, NumberBlock, NumberProbe, NumberReply, NUMBER_REPLY_IN_USE, PROBE_SUBTYPE_ASSIGN,
     PROBE_SUBTYPE_PROBE, REKORDBOX_CLAIM_NUMBERS, REKORDBOX_NAME,
 };
 
@@ -218,7 +218,7 @@ impl Join {
                 "first player or mixer heard; joining the link"
             );
             self.state = State::Discovery { sent: 0 };
-            self.all_in_one_session = Some(keep_alive.device_type.to_u8() == 7);
+            self.all_in_one_session = Some(keep_alive.device_type == DeviceType::AllInOne);
             self.next_at = now;
         }
     }

@@ -239,6 +239,7 @@ fn device_types_round_trip() {
         DeviceType::Cdj,
         DeviceType::Mixer,
         DeviceType::Rekordbox,
+        DeviceType::AllInOne,
         DeviceType::Other(9),
     ] {
         assert_eq!(DeviceType::from_u8(kind.to_u8()), kind);

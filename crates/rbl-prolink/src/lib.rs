@@ -102,6 +102,10 @@ pub enum DeviceType {
     Mixer,
     /// rekordbox acting as a media source (measured: byte `0x34` = `04`).
     Rekordbox,
+    /// Peer type `07`. [OBS] An XDJ-RX3 on firmware 1.20 announces it (seen
+    /// on the wire from Linux). [UNKNOWN] Which other products announce it;
+    /// "all-in-one" is a working name, not an established category.
+    AllInOne,
     Other(u8),
 }
 
@@ -111,6 +115,7 @@ impl DeviceType {
             Self::Cdj => 0x01,
             Self::Mixer => 0x02,
             Self::Rekordbox => 0x04,
+            Self::AllInOne => 0x07,
             Self::Other(v) => v,
         }
     }
@@ -123,6 +128,7 @@ impl DeviceType {
             // Both are mixers, so both decode as one — `to_u8` still says `02`.
             0x02 | 0x03 => Self::Mixer,
             0x04 => Self::Rekordbox,
+            0x07 => Self::AllInOne,
             other => Self::Other(other),
         }
     }

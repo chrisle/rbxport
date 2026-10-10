@@ -9,30 +9,30 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 use std::time::Duration;
 
 /// Pioneer command `0x50`, captured from a working RX3 Link Export session.
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 const ACTIVATE: [u8; 12] = [
     0xf0, 0x00, 0x40, 0x05, 0x00, 0x00, 0x03, 0x0d, 0x00, 0x50, 0x01, 0xf7,
 ];
 /// Safely inside the firmware's one-second certification expiry.
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 const REFRESH_EVERY: Duration = Duration::from_millis(200);
 
 /// An RX3 MIDI output found before the network services are bound.
 ///
 /// Detection and activation are separate so the caller can select and bind
 /// the USB network interface before the first activation command is sent.
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 pub struct Detected {
     output: midir::MidiOutput,
     port: midir::MidiOutputPort,
     name: String,
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 pub struct Detected;
 
 /// The refresh worker, owned by the running LINK session.
@@ -42,20 +42,30 @@ pub struct Activation {
 }
 
 /// Finds the RX3's output endpoint without sending anything.
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 pub fn detect() -> Result<Option<Detected>, String> {
     use midir::MidiOutput;
 
     let output = MidiOutput::new("rbxport RX3 Link Export")
         .map_err(|error| format!("Could not inspect MIDI outputs for an XDJ-RX3: {error}"))?;
+    let mut seen = Vec::new();
     let found = output.ports().into_iter().find_map(|port| {
         let name = output.port_name(&port).ok()?;
-        is_rx3_port_name(&name).then_some((port, name))
+        if is_rx3_port_name(&name) {
+            return Some((port, name));
+        }
+        seen.push(name);
+        None
     });
+    if found.is_none() {
+        // What to compare against when an RX3 is plugged in but not found:
+        // its output is named by the OS driver, not by this application.
+        tracing::debug!(outputs = ?seen, "no XDJ-RX3 MIDI output");
+    }
     Ok(found.map(|(port, name)| Detected { output, port, name }))
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 #[allow(clippy::unnecessary_wraps)]
 pub fn detect() -> Result<Option<Detected>, String> {
     Ok(None)
@@ -63,7 +73,7 @@ pub fn detect() -> Result<Option<Detected>, String> {
 
 impl Detected {
     /// Opens the captured USB-MIDI output and starts refreshing its lease.
-    #[cfg(any(target_os = "macos", windows))]
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     pub fn activate(self) -> Result<Activation, String> {
         let name = self.name;
         let mut connection = self
@@ -92,7 +102,7 @@ impl Detected {
         })
     }
 
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     pub fn activate(self) -> Result<Activation, String> {
         let _ = self;
         unreachable!("RX3 detection is unavailable on this platform")
@@ -108,7 +118,7 @@ impl Drop for Activation {
     }
 }
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 fn is_rx3_port_name(name: &str) -> bool {
     let compact: String = name
         .chars()
@@ -118,7 +128,7 @@ fn is_rx3_port_name(name: &str) -> bool {
     compact.contains("XDJRX3")
 }
 
-#[cfg(all(test, any(target_os = "macos", windows)))]
+#[cfg(all(test, any(target_os = "macos", windows, target_os = "linux")))]
 mod tests {
     use super::*;
 
@@ -136,6 +146,11 @@ mod tests {
         assert!(is_rx3_port_name("XDJ-RX3"));
         assert!(is_rx3_port_name("PIONEER DJ XDJ RX3 MIDI"));
         assert!(is_rx3_port_name("XDJRX3 Port 1"));
+        // midir's ALSA names are "client:port client-id:port-id".
+        assert!(is_rx3_port_name("XDJ-RX3:XDJ-RX3 MIDI 1 24:0"));
+        assert!(is_rx3_port_name("Pioneer DJ XDJ-RX3:XDJ-RX3 MIDI 1 20:0"));
+        assert!(!is_rx3_port_name("Midi Through:Midi Through Port-0 14:0"));
+        assert!(!is_rx3_port_name("XDJ-RX2:XDJ-RX2 MIDI 1 24:0"));
         assert!(!is_rx3_port_name("XDJ-RX2"));
         assert!(!is_rx3_port_name("XDJ-XZ"));
         assert!(!is_rx3_port_name("XDJ-AZ"));
