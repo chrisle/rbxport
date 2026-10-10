@@ -365,7 +365,11 @@ the track is handled), `copying` (only when a track is actually written),
   (`sources_from_legacy`). Their audio and analysis stay exactly as they are,
   and conversion is skipped. The manifest marks them `preserved`, so a later
   sync still treats them as the stick's rather than as tracks it exported
-  and can take off (#317).
+  and can take off (#317). A manifest from an older build has no such flag
+  and listed carried tracks as exported; `carried_entry` reads an entry with
+  no library id whose source is the stick's own file at its audio path as
+  preserved too. A preserved entry left over at the end of a sync is never
+  deleted.
 - If neither database exists, reconcile does nothing (`merged_library` returns
   `None`).
 

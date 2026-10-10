@@ -448,6 +448,23 @@ fn owns_library_file(destination: &Path, entry: &ManifestTrack) -> bool {
         || (entry.library_id != 0 && same_file(Path::new(&entry.source), &under(destination, &entry.audio)))
 }
 
+/// Whether a previous export's entry is a device track it only carried, as
+/// the stick had it, rather than one it exported (#317). Such a track is the
+/// stick's: a later sync keeps carrying it and never deletes its files.
+///
+/// The `preserved` flag says so for entries this version wrote. An older
+/// version recorded a carried track as if it had exported it, but always with
+/// no library id and with the stick's own file at its audio path as the
+/// source, which an exported copy never has (a library file left in place
+/// keeps its library id). The path is also compared as written, for a
+/// carried track whose audio is already gone.
+pub(crate) fn carried_entry(destination: &Path, entry: &ManifestTrack) -> bool {
+    if entry.preserved { return true; }
+    if entry.library_id != 0 || entry.audio.is_empty() { return false; }
+    let on_stick = under(destination, &entry.audio);
+    Path::new(&entry.source) == on_stick || same_file(Path::new(&entry.source), &on_stick)
+}
+
 /// The audio paths, by [`path_key`], of every library file a previous export
 /// left in place (see [`owns_library_file`]).
 fn previous_in_place(destination: &Path, previous: Option<&Manifest>) -> BTreeSet<String> {
@@ -989,7 +1006,8 @@ pub fn export_cancellable(
             }
         } else { 0 };
         let carried = stale.remove(&key);
-        if carried.is_none() { report.tracks_added += 1; }
+        // A track kept without its audio writes nothing, so adds nothing.
+        if carried.is_none() && !absent { report.tracks_added += 1; }
         // Otherwise the copy was written since this export recorded it, or
         // the record predates `copy_stamp`. Hash the USB copy once against
         // the recorded hash and the source: a same-size rewrite on the stick
@@ -1276,6 +1294,8 @@ pub fn export_cancellable(
 
     // Whatever the previous export left that this one does not name.
     for entry in stale.values() {
+        // A track the export only carried is the stick's, files and all.
+        if carried_entry(destination, entry) { continue; }
         // A file that was the library's own is never ours to delete.
         if !owns_library_file(destination, entry) { obsolete.push((entry.audio.clone(), false)); }
         obsolete.push((entry.anlz_dir.clone(), true));

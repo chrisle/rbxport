@@ -32,7 +32,7 @@ pub fn prepare(
     identify_tracks(&mut tracks, before, previous, db_id, &existing_sources);
     let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
     identify_playlists(&mut playlists, previous, record.as_ref());
-    retain_device_only(&current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref(), keep_unlisted)?;
+    retain_device_only(root, &current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref(), keep_unlisted)?;
     if keep_unlisted {
         keep_stick_order(&mut playlists, previous);
     }
@@ -127,6 +127,7 @@ fn identify_playlists(
 /// recorded as the library's, under the library id it was exported from.
 #[allow(clippy::too_many_arguments, reason = "everything reconciliation already gathered, passed through")]
 fn retain_device_only(
+    root: &Path,
     current: &Library,
     tracks: &mut Vec<SourceTrack>,
     playlists: &mut Vec<SourcePlaylist>,
@@ -176,9 +177,10 @@ fn retain_device_only(
         .collect();
     // What an earlier export put there itself. A track it only carried
     // (`preserved`) is still another writer's: counting it as ours would keep
-    // it for one sync and drop it, unannounced, at the next (#317).
+    // it for one sync and drop it, unannounced, at the next (#317). An older
+    // record has no such flag; `carried_entry` infers it.
     let previously_owned: BTreeSet<u32> = previous
-        .map(|m| m.tracks.iter().filter(|t| !t.preserved).map(|t| t.export_id).collect())
+        .map(|m| m.tracks.iter().filter(|t| !crate::carried_entry(root, t)).map(|t| t.export_id).collect())
         .unwrap_or_default();
     // Tracks that arrived through another writer belong to the USB, not to our
     // previous selection. Retain them even when no playlist references them,
