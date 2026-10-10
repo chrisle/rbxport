@@ -5,7 +5,7 @@
 //! the same layout, and the layout itself was validated against a real
 //! rekordbox-authored export.
 
-use crate::build::device_sql_string;
+use crate::build::{device_sql_string, push_device_sql_string};
 
 /// Fixed portion of a track row, before the 21 string offsets.
 const TRACK_FIXED_LEN: usize = 0x5e;
@@ -141,14 +141,14 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     put_u2(&mut row, 0x5a, audio_file_type(&input.filename));
     put_u2(&mut row, 0x5c, 3);
 
-    // Append each string, recording where it landed.
+    // Append each string, recording where it landed. Long strings start
+    // on a four-byte boundary of the row, as rekordbox writes them.
     let mut offsets = [0_u16; TRACK_STRINGS];
     for (slot, text) in strings.iter().enumerate() {
-        let at = u16::try_from(row.len()).unwrap_or(0);
+        let at = u16::try_from(push_device_sql_string(&mut row, text)).unwrap_or(0);
         if let Some(entry) = offsets.get_mut(slot) {
             *entry = at;
         }
-        row.extend_from_slice(&device_sql_string(text));
     }
     for (slot, offset) in offsets.iter().enumerate() {
         put_u2(&mut row, TRACK_FIXED_LEN + slot * 2, *offset);
@@ -278,6 +278,8 @@ pub fn property_row(property: &PdbProperty) -> Option<Vec<u8>> {
     row.extend_from_slice(&crate::build::short_ascii(date));
     row.extend_from_slice(&PROPERTY_GAP);
     row.extend_from_slice(&crate::build::short_ascii(&property.db_version));
+    // Where rekordbox puts a long or UTF-16 device name here is not
+    // observed [UNKNOWN]; the readers parse this row in sequence.
     row.extend_from_slice(&device_sql_string(&property.device_name));
     row.extend_from_slice(&[0; 8]);
     while !row.len().is_multiple_of(4) {
@@ -287,13 +289,18 @@ pub fn property_row(property: &PdbProperty) -> Option<Vec<u8>> {
 }
 
 /// `artists`: the name is located by a one-byte offset from the row start.
+///
+/// A short name follows at `0x0a`; a long or UTF-16 name starts at `0x0c`
+/// after two zero bytes [OBS: rekordbox's `60 00 e0 03 76 00 00 00 03 0c 00 00`
+/// before `90 0e 00 00 "LÜRUM"`, and `0x0a` for all 666 short names on the
+/// same stick].
 pub fn artist_row(id: u32, name: &str) -> Vec<u8> {
     let mut row = vec![0_u8; 10];
     put_u2(&mut row, 0x00, 0x60); // subtype: near offset
     put_u4(&mut row, 0x04, id);
     row[0x08] = 0x03; // constant rekordbox writes
-    row[0x09] = 0x0a; // the name follows immediately
-    row.extend_from_slice(&device_sql_string(name));
+    let at = push_device_sql_string(&mut row, name);
+    row[0x09] = u8::try_from(at).unwrap_or(0x0a);
     row
 }
 
@@ -310,14 +317,18 @@ pub fn artist_row(id: u32, name: &str) -> Vec<u8> {
 /// The id is the fourth word and the artist the third; an earlier version
 /// of this writer had them the other way round, which a player reads as
 /// every album having id 0.
+///
+/// A long or UTF-16 name starts at `0x18` after two zero bytes instead
+/// [OBS: rekordbox's `03 18 00 00` before `90 3a 00 00 "Café Del Mar
+/// (Extended Mix)"`].
 pub fn album_row(id: u32, artist_id: u32, name: &str) -> Vec<u8> {
     let mut row = vec![0_u8; ALBUM_NAME_AT];
     put_u2(&mut row, 0x00, 0x80);
     put_u4(&mut row, 0x08, artist_id);
     put_u4(&mut row, 0x0c, id);
     row[0x14] = 0x03; // constant rekordbox writes
-    row[0x15] = u8::try_from(ALBUM_NAME_AT).unwrap_or(0x16); // the name follows immediately
-    row.extend_from_slice(&device_sql_string(name));
+    let at = push_device_sql_string(&mut row, name);
+    row[0x15] = u8::try_from(at).unwrap_or(0x16);
     row
 }
 

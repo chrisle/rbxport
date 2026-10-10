@@ -260,7 +260,9 @@ impl<'a> Pdb<'a> {
             }
             0x90 => {
                 let len = u2(b, offset + 1) as usize;
-                // Length counts the header and two trailing NULs.
+                // Length counts the header and the text. rekordbox writes no
+                // terminator; files from older rbxport builds end in a NUL
+                // pair the length also counts, which the NUL check drops.
                 let start = offset + 4;
                 let take = len.saturating_sub(4);
                 let raw = b.get(start..start + take).unwrap_or(&[]);

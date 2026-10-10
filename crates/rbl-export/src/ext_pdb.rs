@@ -207,13 +207,7 @@ fn tag_row(tag: &SourceMyTag) -> Vec<u8> {
     let name: Vec<u8> = if tag.name.is_ascii() && tag.name.len() < 0x7e {
         short_ascii(&tag.name)
     } else {
-        let mut long = long_utf16le(&tag.name);
-        // `export.pdb`'s strings end in a NUL pair; these do not, and the
-        // length counts what is there.
-        long.truncate(long.len() - 2);
-        let len = u16::try_from(long.len()).unwrap_or(u16::MAX);
-        long[1..3].copy_from_slice(&len.to_le_bytes());
-        long
+        long_utf16le(&tag.name)
     };
     // A short string sits right after the offsets; a long one starts on
     // the even byte after.

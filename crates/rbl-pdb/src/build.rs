@@ -48,11 +48,20 @@ pub fn long_ascii(text: &str) -> Vec<u8> {
     out
 }
 
-/// Encodes a string in the long UTF-16LE form, for text ASCII cannot carry.
+/// Encodes a string in the long UTF-16LE form, for text ASCII cannot carry:
+/// `0x90`, a `u16` length that counts these four header bytes and the
+/// text, a pad byte, then the UTF-16LE text with no terminator.
+///
+/// rekordbox writes no trailing NUL in either `export.pdb` or
+/// `exportExt.pdb` [OBS: every one of the 252 UTF-16 strings in a
+/// rekordbox-written `export.pdb`, e.g. artist `LÜRUM` as
+/// `90 0e 00 00 4c 00 dc 00 52 00 55 00 4d 00` and title `¡Viva La Gloria!`
+/// with length `0x24` followed directly by the next string]. An earlier
+/// writer appended `00 00` and counted it, which is the shape a
+/// CDJ-2000NXS was reported to freeze on (#321).
 pub fn long_utf16le(text: &str) -> Vec<u8> {
     let units: Vec<u16> = text.encode_utf16().collect();
-    // The length counts the 4-byte header and the two trailing NUL bytes.
-    let len = 4 + units.len() * 2 + 2;
+    let len = 4 + units.len() * 2;
     let mut out = Vec::with_capacity(len);
     out.push(0x90);
     out.extend_from_slice(&u16::try_from(len).unwrap_or(u16::MAX).to_le_bytes());
@@ -60,7 +69,6 @@ pub fn long_utf16le(text: &str) -> Vec<u8> {
     for unit in units {
         out.extend_from_slice(&unit.to_le_bytes());
     }
-    out.extend_from_slice(&[0, 0]);
     out
 }
 
@@ -72,6 +80,30 @@ pub fn device_sql_string(text: &str) -> Vec<u8> {
     } else {
         long_utf16le(text)
     }
+}
+
+/// Appends `text` to a row the way rekordbox lays strings out, and returns
+/// the row offset the string starts at.
+///
+/// A short ASCII string goes straight after what is already there. A long
+/// one, ASCII (`0x40`) or UTF-16 (`0x90`), starts on a four-byte boundary
+/// of the row, with zero bytes filling the gap [OBS: in a rekordbox-written
+/// `export.pdb`, all 346 long strings in track rows sit at a row offset
+/// that is a multiple of four, artists with a long name have it at `0x0c`
+/// behind `03 0c 00 00` where short names sit at `0x0a`, and albums at
+/// `0x18` where short names sit at `0x16`]. Rows themselves start on a
+/// four-byte boundary of the page, so the text of a UTF-16 string is
+/// always aligned for a 16-bit read.
+pub fn push_device_sql_string(row: &mut Vec<u8>, text: &str) -> usize {
+    let encoded = device_sql_string(text);
+    if encoded.first().is_some_and(|&flag| flag == 0x40 || flag == 0x90) {
+        while !row.len().is_multiple_of(4) {
+            row.push(0);
+        }
+    }
+    let at = row.len();
+    row.extend_from_slice(&encoded);
+    at
 }
 
 /// How a table's data pages are filled and what their header says at

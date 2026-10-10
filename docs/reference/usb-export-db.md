@@ -256,10 +256,19 @@ Three forms:
 |---|---|
 | Short ASCII | one length byte = `(len+1)*2+1`, then text, no terminator |
 | Long ASCII | `0x40`, u16 length **counting the 4 header bytes**, pad `0x00`, text |
-| UTF-16LE | `0x90`, u16 length counting header and the two trailing NULs, pad, UTF-16LE, `00 00` |
+| UTF-16LE | `0x90`, u16 length counting the 4 header bytes and the text, pad `0x00`, UTF-16LE, no terminator |
 
 Selection: ASCII shorter than `0x7e` → short; longer ASCII → long; anything
 non-ASCII → UTF-16.
+
+Placement: a short string follows whatever precedes it, but a long ASCII or
+UTF-16 string starts on a **four-byte boundary of its row**, zero bytes
+filling the gap. Artists then point at `0x0c` instead of `0x0a`, albums at
+`0x18` instead of `0x16`. [OBS: every one of 252 UTF-16 strings in a
+rekordbox-written `export.pdb` has no terminator, and all 346 long strings
+in its track rows start at a multiple of four.] Before #321 rbxport wrote a
+counted `00 00` terminator and packed long strings at any offset; a
+CDJ-2000NXS was reported to freeze (E-8709) on such a stick.
 
 ### Row layouts
 
@@ -378,8 +387,7 @@ order each followed by their own tags, orphans last.
 0x1e     offset of the trailing empty string
 ```
 
-Unlike `export.pdb`, a UTF-16 name here has its **trailing NUL pair
-truncated** and the length fixed up to match.
+A UTF-16 name here has no terminator, as in `export.pdb`.
 
 **Type 7, one master row**: `00 07 00 00`, 20 zeros,
 u32 `myTagMasterDBID` at `0x18`, then `0x03` and five offsets to empty
