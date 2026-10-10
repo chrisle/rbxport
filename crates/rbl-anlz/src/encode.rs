@@ -300,7 +300,11 @@ pub fn pwv4(columns: &[BandColumn]) -> Vec<u8> {
 /// The XDJ-AZ draws these bits as they are, each shifted up into a byte,
 /// without normalising (firmware 1.30,
 /// `DetailedWaveformDataProvider<DetailedWaveform_RGB>` slot 7 at
-/// `0x01b94d90`), so the plain bits drew dim, washed-out columns.
+/// `0x01b94d90`), so the plain bits drew dim, washed-out columns. The
+/// CDJ-3000 does the same (firmware 3.20, the same provider's slot 7 at
+/// `0x14a38d8`, `(c & 7) << 5` per channel) [static, issue #288]: on twelve
+/// tracks of a rekordbox USB export, rekordbox's brightest channel averages
+/// 6.6-6.9 of 7 and the plain bits 3.0-3.6 [OBS].
 fn pwv5_colour(column: BandColumn) -> (u16, u16, u16) {
     let low = 2 * u32::from(column.low);
     let mid = 2 * u32::from(column.mid);
@@ -652,6 +656,38 @@ mod tests {
             let column = BandColumn { low, mid, high, peak };
             assert_eq!(pwv5_word(column), word, "PWV5 for {column:?}");
             assert_eq!(pwv3(&[column])[0] & 0x1f, height, "PWV3 height for {column:?}");
+        }
+    }
+
+    #[test]
+    fn pwv5_matches_a_rekordbox_usb_exports_words_for_these_columns() {
+        // A second, independent sample (issue #288, CDJ-3000): columns of
+        // four tracks on a rekordbox USB export ("esrr", "cotton eye joe",
+        // "castles 138-160", "Flight 643 (TRIODE Remix)"), none of them used
+        // to choose the colour or height model. The bands this analysis
+        // measures for the column, then the `PWV5` word and `PWV3` height
+        // in the stick's own `.EXT`. Columns where the two agree exactly,
+        // picked to cover the colours; across all columns of those tracks
+        // the mean error is 0.7-0.9 of a step a channel.
+        let rekordbox = [
+            ((205, 230, 93, 255), 0xd67c_u16, 31_u8),
+            ((115, 55, 77, 170), 0xebb8, 14),
+            ((90, 36, 45, 145), 0xeaa8, 10),
+            ((77, 111, 152, 231), 0x4be4, 25),
+            ((97, 173, 125, 245), 0x97f4, 29),
+            ((36, 72, 140, 190), 0x2bc4, 17),
+            ((95, 74, 120, 243), 0x8bf0, 28),
+            ((88, 81, 30, 139), 0xf624, 9),
+            ((112, 79, 111, 227), 0xabe4, 25),
+        ];
+        for ((low, mid, high, peak), word, height) in rekordbox {
+            let column = BandColumn { low, mid, high, peak };
+            assert_eq!(pwv5_word(column), word, "PWV5 for {column:?}");
+            assert_eq!(pwv3(&[column])[0] & 0x1f, height, "PWV3 height for {column:?}");
+            // What a CDJ-3000 or XDJ-AZ draws: the bits shifted up, so a
+            // column is only as bright as its strongest channel.
+            let strongest = (word >> 13 & 7).max(word >> 10 & 7).max(word >> 7 & 7);
+            assert!(strongest >= 5, "rekordbox's {word:#06x} is drawn bright");
         }
     }
 
