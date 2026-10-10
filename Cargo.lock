@@ -3920,6 +3920,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "fs2",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

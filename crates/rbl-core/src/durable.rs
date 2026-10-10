@@ -6,7 +6,7 @@ use std::time::Duration;
 
 pub fn sync_dir(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
-    if let Err(error) = std::fs::File::open(path)?.sync_all() {
+    if let Err(error) = flush(&std::fs::File::open(path)?) {
         // Some removable filesystems mounted by macOS, notably exFAT, allow
         // the file and rename flushes above but reject fsync on a directory
         // with ENOTSUP (os error 45). The directory flush is an extra
@@ -19,6 +19,31 @@ pub fn sync_dir(path: &Path) -> std::io::Result<()> {
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
+}
+
+/// Flushes a file's data and metadata to the device, as
+/// [`std::fs::File::sync_all`] does, on any filesystem a DJ stick uses.
+///
+/// On macOS `sync_all` is `fcntl(F_FULLFSYNC)` and nothing else, and Apple
+/// documents `F_FULLFSYNC` as implemented on HFS, MS-DOS (FAT), UDF and APFS
+/// only [OBS `man 2 fcntl`, macOS 26.6.2]: exFAT is not among them, and
+/// where the call is not implemented it fails with ENOTSUP (os error 45).
+/// SQLite falls back to `fsync` there [OBS `unixSync`/`full_fsync` in the
+/// bundled `sqlite3.c`: "failure indicates that FULLFSYNC isn't supported
+/// for this file system"], and so does this. The data still reaches the
+/// device; only the drive-cache barrier is lost. Every other error stays.
+pub fn flush(file: &std::fs::File) -> std::io::Result<()> {
+    flush_with(file, std::fs::File::sync_all)
+}
+
+/// [`flush`] with the full flush supplied, so a test can stand in for a
+/// filesystem that lacks it.
+fn flush_with(file: &std::fs::File, full: impl FnOnce(&std::fs::File) -> std::io::Result<()>) -> std::io::Result<()> {
+    match full(file) {
+        #[cfg(target_vendor = "apple")]
+        Err(error) if unsupported(&error) => rustix::fs::fsync(file).map_err(std::io::Error::from),
+        other => other,
+    }
 }
 
 /// Whether the filesystem rejected an operation it does not implement
@@ -200,7 +225,7 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .unwrap_or_else(|| Path::new("."));
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     temp.write_all(bytes)?;
-    temp.as_file().sync_all()?;
+    flush(temp.as_file())?;
     temp.persist(path).map_err(|e| e.error)?;
     sync_dir(parent)
 }
@@ -208,10 +233,7 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// Flush a complete staged file before atomically replacing the destination.
 /// Both paths must be on the same filesystem, and database handles closed.
 pub fn replace(staged: &Path, target: &Path) -> std::io::Result<()> {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(staged)?
-        .sync_all()?;
+    flush(&std::fs::OpenOptions::new().write(true).open(staged)?)?;
     std::fs::rename(staged, target)?;
     sync_dir(
         target
@@ -229,7 +251,7 @@ pub fn copy(source: &Path, target: &Path) -> std::io::Result<u64> {
         .unwrap_or(Path::new("."));
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     let bytes = std::io::copy(&mut std::fs::File::open(source)?, &mut temp)?;
-    temp.as_file().sync_all()?;
+    flush(temp.as_file())?;
     temp.persist(target).map_err(|e| e.error)?;
     sync_dir(parent)?;
     Ok(bytes)
@@ -362,7 +384,7 @@ impl Publication {
                 std::fs::OpenOptions::new()
                     .write(true)
                     .open(&image)
-                    .and_then(|file| file.sync_all())
+                    .and_then(|file| flush(&file))
                     .map_err(at("flush", &image))?;
             }
             let target = self.root.join(path);
@@ -877,6 +899,33 @@ mod tests {
             std::io::ErrorKind::PermissionDenied,
             "permission denied",
         )));
+    }
+
+    /// A filesystem without `F_FULLFSYNC` (exFAT on macOS) answers ENOTSUP;
+    /// the file is flushed with `fsync` instead of failing the write (#283).
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn a_file_flush_the_filesystem_lacks_falls_back_to_fsync() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = std::fs::File::create(dir.path().join("exportLibrary.db")).unwrap();
+        let mut asked = false;
+        flush_with(&file, |_| {
+            asked = true;
+            Err(std::io::Error::from_raw_os_error(45))
+        })
+        .unwrap();
+        assert!(asked);
+        flush_with(&file, |_| Err(std::io::Error::from_raw_os_error(102))).unwrap();
+    }
+
+    #[test]
+    fn a_file_flush_that_fails_otherwise_still_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = std::fs::File::create(dir.path().join("exportLibrary.db")).unwrap();
+        // EIO: the device failed the write; that is never papered over.
+        let error = flush_with(&file, |_| Err(std::io::Error::from_raw_os_error(5))).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(5));
+        flush(&file).unwrap();
     }
 
     #[cfg(target_os = "macos")]
