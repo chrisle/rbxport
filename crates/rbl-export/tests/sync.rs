@@ -244,7 +244,9 @@ fn a_stick_with_no_manifest_of_ours_is_written_in_full() {
     let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &[]).unwrap();
 
-    // As if rekordbox itself had written the stick: our record is not there.
+    // Our record is not there, and the stick's rows name no library (an
+    // export that is not a sync writes master DB id 0). A stick rekordbox
+    // exported from this library keeps its copies: see rekordbox_stick.rs.
     std::fs::remove_file(Manifest::path(dest.path())).unwrap();
 
     let second = export(dest.path(), &tracks, &[]).unwrap();

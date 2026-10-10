@@ -52,7 +52,23 @@ manifest that the previous run left at `PIONEER/rbxport/manifest.json`. Audio
 that has not changed is reused, files that changed are copied again, and files
 that are no longer selected are removed. Player-facing ids stay the same
 between syncs. If the manifest is missing, unreadable, or from a different
-`MANIFEST_VERSION`, the export writes everything again.
+`MANIFEST_VERSION`, the export writes everything again, except the tracks
+the stick's own database already holds for this library (below).
+
+**A stick another writer exported.** On a stick rekordbox exported, the
+first sync from here has no manifest, but `exportLibrary.db` names each
+track's library row by `masterDbId`/`masterContentId`. A selected track the
+stick holds for this library (`db_id` not 0), whose file at that row's path
+has the source's size, is kept where it is and not copied again
+(`adopted_paths`). The manifest then records it as this export's, with the
+source's hash and the copy's stamp, so later syncs treat it as one they
+wrote. rekordbox's export does the same: `DatabaseMediator::execExport` asks
+`rekordboxDBController::isCollectionSongForDuplicateSongId` (master ids,
+then `RowDataTrack::isSameTrackForDuplicateId`) and on a match calls
+`DatabaseMediator::overwrite_export`, which updates the row and copies no
+audio [OBS: rekordbox 7.2.19 arm64, 0x1009b7598..0x1009b7690]. The Sync
+Manager's estimate (`rbl_export::estimate`) counts such tracks as already on
+the stick (#331).
 
 **Inputs.** The in-memory library index (`rbl_index::Library`) and a few
 values read from `master.db` through `rbl_db::export_info`: cues, extra
@@ -445,7 +461,7 @@ In loop order:
 
 | Thing | Fresh stick | Later sync |
 | --- | --- | --- |
-| Audio of a selected track | Copied or converted into the stage | Reused if unchanged; copied again if changed or missing; left alone if in place |
+| Audio of a selected track | Copied or converted into the stage, unless the stick's database already holds it for this library at the source's size | Reused if unchanged; copied again if changed or missing; left alone if in place |
 | Audio of a track that left the selection | — | Removed after commit, unless it is the library's own file on the stick or still needed by device playlists or history |
 | Audio of device-only and history tracks | — | Kept as is |
 | Analysis | Re-emitted for every track that has it | Rewritten only if changed; missing companions repaired |

@@ -508,6 +508,34 @@ fn in_place_paths(destination: &Path, tracks: &[SourceTrack], previous: &BTreeSe
     }).collect()
 }
 
+/// For each selected track, the stick's own copy of it that the sync keeps
+/// rather than copies again; `None` for a track that is copied.
+///
+/// That is a track the stick's database already holds for this library
+/// track (reconciliation tied it to the device row by its master ids), whose
+/// file is at that row's path with the source's size, and that no earlier
+/// export from here recorded: typically a stick rekordbox exported, synced
+/// from here for the first time. rekordbox's export looks such a track up by
+/// the same ids (`rekordboxDBController::isCollectionSongForDuplicateSongId`)
+/// and updates its row in place without copying the audio again
+/// (`DatabaseMediator::overwrite_export`, #331). Copying it would need the
+/// stick's free space for every track it already holds.
+///
+/// A sync that names no library (`db_id` 0) adopts nothing: rows whose
+/// master DB id is 0 do not say which library they came from.
+fn adopted_paths(destination: &Path, tracks: &[SourceTrack], previous: Option<&Manifest>, in_place: &[Option<String>], db_id: u64) -> Vec<Option<String>> {
+    if db_id == 0 { return vec![None; tracks.len()]; }
+    let recorded: BTreeSet<String> = previous.into_iter().flat_map(|m| &m.tracks).map(ManifestTrack::key).collect();
+    let mut claimed: BTreeSet<String> = in_place.iter().flatten().map(|path| path_key(path)).collect();
+    tracks.iter().zip(in_place).map(|(track, in_place)| {
+        let device = track.device.as_ref().filter(|d| !d.preserve && !d.audio.is_empty())?;
+        if in_place.is_some() || recorded.contains(&track_key(track.id, &track.source_path.to_string_lossy())) { return None; }
+        let source = std::fs::metadata(&track.source_path).ok()?;
+        let copy = std::fs::metadata(under(destination, &device.audio)).ok()?;
+        (copy.is_file() && copy.len() == source.len() && claimed.insert(path_key(&device.audio))).then(|| device.audio.clone())
+    }).collect()
+}
+
 fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Manifest>, in_place: &[Option<String>], previous_in_place: &BTreeSet<String>) -> Vec<Layout> {
     // Library files on the stick keep their names, and nothing copied may land
     // on one: not this run's, nor one an earlier run pointed at and left.
@@ -890,7 +918,11 @@ pub fn export_cancellable(
 
     let previous_in_place = previous_in_place(destination, previous.as_ref());
     let in_place_paths = in_place_paths(destination, tracks, &previous_in_place);
-    let layouts = layouts(tracks, &ids, root_name, previous.as_ref(), &in_place_paths, &previous_in_place);
+    let adopted_paths = adopted_paths(destination, tracks, previous.as_ref(), &in_place_paths, db_id);
+    // An adopted copy keeps its place as a library file on the stick does:
+    // never renamed, and nothing else copied over it.
+    let kept_paths: Vec<Option<String>> = in_place_paths.iter().zip(&adopted_paths).map(|(a, b)| a.clone().or_else(|| b.clone())).collect();
+    let layouts = layouts(tracks, &ids, root_name, previous.as_ref(), &kept_paths, &previous_in_place);
     // Losing access to a selected source must never delete its good USB copy.
     // A track only carried from the stick has no other source; its missing
     // audio is the stick's own state, kept below as it is.
@@ -989,6 +1021,9 @@ pub fn export_cancellable(
         // conversion or an analysis collision: point at it, copy nothing.
         let in_place = absent || in_place_paths.get(index).and_then(Option::as_deref) == Some(place.audio.as_str());
         if absent { absent_audio.insert(path_key(&place.audio)); }
+        // The stick's own copy, still where its row says and not renamed for
+        // a conversion or an analysis collision: kept, nothing copied.
+        let adopted = !in_place && adopted_paths.get(index).and_then(Option::as_deref) == Some(place.audio.as_str());
         let profile = conversion.map_or("", rbl_audio::compatibility::Format::profile);
         let audio_dest = under(destination, &place.audio);
         // Looked at, not yet claimed: a track that fails below must leave
@@ -1019,8 +1054,9 @@ pub fn export_cancellable(
             }
         } else { 0 };
         let carried = stale.remove(&key);
-        // A track kept without its audio writes nothing, so adds nothing.
-        if carried.is_none() && !absent { report.tracks_added += 1; }
+        // A track kept without its audio writes nothing, so adds nothing;
+        // nor does one whose copy the stick already holds.
+        if carried.is_none() && !absent && !adopted { report.tracks_added += 1; }
         // Otherwise the copy was written since this export recorded it, or
         // the record predates `copy_stamp`. Hash the USB copy once against
         // the recorded hash and the source: a same-size rewrite on the stick
@@ -1058,6 +1094,10 @@ pub fn export_cancellable(
             output_size = size;
             report.reused += 1;
             report.in_place += 1;
+            report.bytes_reused += size;
+        } else if adopted {
+            output_size = size;
+            report.reused += 1;
             report.bytes_reused += size;
         } else if unchanged {
             output_size = std::fs::metadata(&audio_dest)?.len();
@@ -1191,6 +1231,12 @@ pub fn export_cancellable(
         // every byte of it, every sync, to protect nothing we wrote.
         let audio_hash = if in_place {
             0
+        } else if adopted {
+            // Recorded as the source's bytes, which the stick's copy is
+            // taken to hold by its identity and size, as rekordbox takes it
+            // without reading it back. The copy's stamp below then lets the
+            // next sync trust it as one this export wrote.
+            file_hash(&track.source_path)?
         } else if unchanged {
             existing_audio_hash.map_or_else(|| file_hash(&audio_dest), Ok)?
         } else {
@@ -1200,6 +1246,8 @@ pub fn export_cancellable(
         // size and time, so the staged file's stamp is the published one's.
         let recorded_stamp = if in_place {
             None
+        } else if adopted {
+            copy_stamp(&audio_dest)?
         } else if unchanged {
             copy_now
         } else {
