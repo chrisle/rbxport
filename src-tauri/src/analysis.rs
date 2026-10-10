@@ -213,8 +213,11 @@ fn analyse_and_save(
         .iter()
         .map(|c| rbl_anlz::BandColumn { low: c.low, mid: c.mid, high: c.high, peak: c.peak })
         .collect();
+    // `PPTH` as rekordbox writes it in the share tree: `?/<file name>`. The
+    // full path this wrote before is not what rekordbox derives for the
+    // track (issue #323).
     let files = rbl_anlz::author_with_overview(
-        path,
+        &rbl_anlz::share_tree_ppth(path),
         &beats,
         &columns,
         analysis.waveform.overview.as_slice().try_into().ok(),
@@ -608,12 +611,20 @@ mod tests {
         // The three files, parseable, with the grid and every waveform.
         let dat_path = rbl_anlz::resolve(&share, &result.analysis_path);
         let dat = rbl_anlz::Anlz::read(&dat_path).expect("the DAT is there");
-        assert_eq!(dat.path().unwrap(), audio.to_str().unwrap());
+        // `PPTH` and the section layout are rekordbox's own share-tree shape
+        // (issue #323): `?/<file name>`, not the full path.
+        assert_eq!(dat.path().unwrap(), "?/click.wav");
+        let tags = |file: &rbl_anlz::Anlz| file.sections.iter().map(|s| s.tag.to_string()).collect::<Vec<_>>();
+        assert_eq!(tags(&dat), ["PPTH", "PVBR", "PQTZ", "PWAV", "PWV2", "PCOB", "PCOB"]);
         assert_eq!(dat.beat_grid().unwrap().len() as u32, result.beats);
         assert_eq!(dat.waveform(b"PWAV").unwrap().1.len(), 400);
         let ext = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat_path, "EXT")).expect("the EXT is there");
         assert_eq!(ext.waveform(b"PWV5").unwrap().0, 2);
+        assert_eq!(tags(&ext), ["PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PWV5", "PWV4"]);
         let two = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat_path, "2EX")).expect("the 2EX is there");
+        assert_eq!(tags(&two), ["PPTH", "PWV7", "PWV6"]);
+        assert_eq!(ext.path().unwrap(), "?/click.wav");
+        assert_eq!(two.path().unwrap(), "?/click.wav");
         assert_eq!(two.waveform(b"PWV6").unwrap().1.len(), 3600);
 
         // And the row says so.
