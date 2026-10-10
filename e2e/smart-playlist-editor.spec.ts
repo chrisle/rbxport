@@ -16,7 +16,7 @@ async function openEditor(page: Page) {
   // The mock stands in for a library rekordbox holds unless told otherwise.
   await page.goto("/?writable=1");
   await page.getByRole("treeitem").filter({ hasText: "Fresh 128s" }).click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Edit Intelligent Playlist" }).click();
+  await page.getByRole("menuitem", { name: "Edit the Intelligent Playlist" }).click();
   const dialog = page.getByRole("dialog", { name: "Edit the Intelligent Playlist" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel("List name")).toBeFocused();

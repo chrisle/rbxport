@@ -108,6 +108,7 @@ describe("treeMenu", () => {
   it("offers root creation actions on the Playlists collection", () => {
     expect(entriesOf(treeMenu("collection")).map((e) => e.label)).toEqual([
       "Create New Playlist",
+      "Create New Intelligent Playlist",
       "Create New Folder",
     ]);
   });
@@ -121,6 +122,7 @@ describe("treeMenu", () => {
     expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toEqual([
       "Export Playlist",
       "Create New Playlist",
+      "Create New Intelligent Playlist",
       "Create New Folder",
       "Playlist display setting",
       "Add Artwork",
@@ -146,8 +148,14 @@ describe("treeMenu", () => {
   });
 
   it("offers the rule editor on an intelligent playlist, and a shortcut's removal only on the shortcut", () => {
-    expect(entriesOf(treeMenu("smartPlaylist")).map((e) => e.label)).toContain("Edit Intelligent Playlist");
-    expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).not.toContain("Edit Intelligent Playlist");
+    // rekordbox 7.2.19 opens an intelligent playlist's menu with the editor
+    // and a separator, ahead of Export Playlist (showTreeViewPopupMenu
+    // @0x10011af90); the rest is a playlist's menu.
+    const smart = treeMenu("smartPlaylist");
+    expect(smart[0]).toEqual({ label: "Edit the Intelligent Playlist", action: "editSmartPlaylist" });
+    expect(smart[1]).toBe(SEPARATOR);
+    expect(smart.slice(2)).toEqual(treeMenu("playlist"));
+    expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).not.toContain("Edit the Intelligent Playlist");
     // rekordbox 7.2.11 keeps "Add To Shortcut" on a playlist that is one
     // already; the shortcut's own menu is the one row that deletes it.
     expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).not.toContain("Remove from Shortcut");
@@ -201,6 +209,7 @@ describe("treeMenu", () => {
     expect(entriesOf(treeMenu("folder")).map((e) => e.label)).toEqual([
       "Export Folder",
       "Create New Playlist",
+      "Create New Intelligent Playlist",
       "Create New Folder",
       "Playlist display setting",
       "Rename Folder",
@@ -221,6 +230,23 @@ describe("treeMenu", () => {
     // Drawn but not done: the two KUVO rows and the two Auto Load rows.
     const lock = entriesOf(TRACK_MENU).find((e) => e.label === "Track information");
     expect(enabled(lock ?? { label: "", action: null }, OPEN)).toBe(false);
+  });
+
+  it("offers Create New Intelligent Playlist between the other two create rows, as rekordbox does", () => {
+    // #151: the row was missing. rekordbox 7.2.19 draws it on the Playlists
+    // heading, a folder, a playlist and an intelligent playlist, always
+    // between Create New Playlist and Create New Folder
+    // (showTreeViewPopupMenu @0x100119568 and @0x10011b0b8).
+    for (const kind of ["collection", "folder", "playlist", "smartPlaylist"] as const) {
+      const rows = entriesOf(treeMenu(kind));
+      const at = rows.findIndex((e) => e.label === "Create New Intelligent Playlist");
+      expect(rows[at - 1]?.label, kind).toBe("Create New Playlist");
+      expect(rows[at]?.action, kind).toBe("createSmartPlaylist");
+      expect(rows[at + 1]?.label, kind).toBe("Create New Folder");
+      // It writes the library, so it is greyed while rekordbox holds it.
+      expect(enabled(rows[at]!, OPEN), kind).toBe(true);
+      expect(enabled(rows[at]!, { ...OPEN, readOnly: true }), kind).toBe(false);
+    }
   });
 
   it("takes the node's own word for what is being deleted", () => {

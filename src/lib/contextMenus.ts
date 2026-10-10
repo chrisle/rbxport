@@ -213,9 +213,18 @@ export const MISSING_TRACK_MENU: readonly MenuRow<TrackAction>[] = [
  * too; the folder's menu is its own list [OBS 7.2.11, 2026-09-18].
  *
  * `Playlist display setting` stays greyed, as rekordbox 7.2.11 greys it
- * over a playlist and a folder of the collection [OBS 2026-09-18]. `Edit Intelligent Playlist` is not in the capture, which
- * was taken over a plain playlist; rekordbox opens the rule editor from
- * the intelligent playlist's own menu, and so does this [ASSUME the label].
+ * over a playlist and a folder of the collection [OBS 2026-09-18].
+ *
+ * `Create New Intelligent Playlist` sits between Create New Playlist and
+ * Create New Folder on every one of these menus: the Playlists heading, a
+ * folder, a playlist and an intelligent playlist. An intelligent playlist's
+ * menu opens with `Edit the Intelligent Playlist` and a separator, ahead of
+ * Export Playlist [OBS static, rekordbox 7.2.19 arm64
+ * `BrowsePopupMenuManager::showTreeViewPopupMenu` @0x100118eec: the three
+ * create rows at @0x100119530..0x1001195c8 (folder and root, attribute 1)
+ * and @0x10011b07c..0x10011b118 (playlists), the edit row at @0x10011af90
+ * when the attribute is 4; the labels are the Strings at 0x1056cb2d0 and
+ * 0x1056cb500, set from those literals @0x101b96768 and its neighbours].
  * `Add To Shortcut` stays `Add To Shortcut` on a playlist that is one
  * already [OBS 7.2.11, 2026-09-18: rekordbox even takes it twice]; a
  * shortcut goes away from its own menu, `shortcutMenu` below.
@@ -242,6 +251,7 @@ export function treeMenu(
   if (kind === "collection") {
     return [
       { label: "Create New Playlist", action: "createPlaylist" },
+      { label: "Create New Intelligent Playlist", action: "createSmartPlaylist" },
       { label: "Create New Folder", action: "createFolder" },
     ];
   }
@@ -256,6 +266,7 @@ export function treeMenu(
       exportRow("Export Folder"),
       SEPARATOR,
       { label: "Create New Playlist", action: "createPlaylist" },
+      { label: "Create New Intelligent Playlist", action: "createSmartPlaylist" },
       { label: "Create New Folder", action: "createFolder" },
       SEPARATOR,
       { label: "Playlist display setting", action: null },
@@ -271,10 +282,11 @@ export function treeMenu(
   // An intelligent playlist is exported, renamed and deleted like any other;
   // what it cannot do is take tracks by hand, which its rows never offer.
   return [
+    ...(smart ? [{ label: "Edit the Intelligent Playlist", action: "editSmartPlaylist" as const }, SEPARATOR] : []),
     exportRow("Export Playlist"),
     SEPARATOR,
     { label: "Create New Playlist", action: "createPlaylist" },
-    ...(smart ? [{ label: "Edit Intelligent Playlist", action: "editSmartPlaylist" as const }] : []),
+    { label: "Create New Intelligent Playlist", action: "createSmartPlaylist" },
     { label: "Create New Folder", action: "createFolder" },
     SEPARATOR,
     { label: "Playlist display setting", action: null },

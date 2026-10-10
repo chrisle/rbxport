@@ -621,11 +621,9 @@ test("the source rail switches which part of the library the tree shows", async 
   await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
 });
 
-test("unfinished sources and playlist creation are hidden", async ({ page }) => {
+test("unfinished sources are hidden", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("tab", { name: "Related Tracks" })).toHaveCount(0);
-  await page.getByRole("treeitem").filter({ hasText: "CURRENT" }).click({ button: "right" });
-  await expect(page.getByRole("menuitem", { name: "Create New Intelligent Playlist" })).toHaveCount(0);
 });
 
 test("the Histories section opens on the sessions rekordbox recorded", async ({ page }) => {
