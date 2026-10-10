@@ -100,6 +100,14 @@ pub struct ManifestTrack {
     /// Absent in older records, which only ever name copies.
     #[serde(default)]
     pub in_place: bool,
+    /// Size and modification time of the copy on the stick, as this export
+    /// left it. While the copy still reads the same, a sync trusts
+    /// `audio_hash` rather than reading every byte back off the stick.
+    /// Anything that rewrites the copy (rekordbox exporting over it, a
+    /// file manager) moves its time, and the copy is hashed again. Absent
+    /// in older records and for files the export did not write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy_stamp: Option<(u64, i64)>,
 }
 
 impl ManifestTrack {
@@ -218,6 +226,7 @@ mod tests {
                 conversion: String::new(),
                 conversion_source_hash: 0,
                 in_place: false,
+                copy_stamp: Some((1234, 1_789_000_000_000_000_000)),
             }],
             playlists: vec![ManifestPlaylist { device_only: false, export_id: 1, folder: false, library_id: 9, name: "Set".to_owned() }],
             loose: vec![42],
@@ -229,6 +238,7 @@ mod tests {
         assert_eq!(read.tracks[0].key(), "#42");
         assert_eq!(read.playlists[0].library_id, 9);
         assert_eq!(read.loose, vec![42]);
+        assert_eq!(read.tracks[0].copy_stamp, Some((1234, 1_789_000_000_000_000_000)));
         // The temporary must not survive the rename.
         assert!(!Manifest::path(dir.path()).with_extension("json.part").exists());
     }

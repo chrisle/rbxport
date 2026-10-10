@@ -622,6 +622,30 @@ fn source_stamp(meta: &std::fs::Metadata) -> (u64, i64) {
     (meta.len(), modified)
 }
 
+/// The size and modification time of a file on the stick, or `None` when
+/// there is no file there.
+fn copy_stamp(path: &Path) -> Result<Option<(u64, i64)>> {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_file() => Ok(Some(source_stamp(&meta))),
+        Ok(_) => Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) if is_device_gone(&e) => Err(ExportError::DeviceGone),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Whether the copy on the stick is the one the manifest recorded: the same
+/// size and the same modification time, to the resolution the file system
+/// reports. A copy rewritten in place, by rekordbox exporting over it or by
+/// anything else, gets the time of that write. A file system that reports a
+/// finer time straight after a write than after a remount, or a stick moved
+/// to a computer in another time zone (FAT keeps local time), reads as
+/// changed: that costs one hashing pass, after which the new time is
+/// recorded, and never a wrong reuse.
+fn same_copy(recorded: Option<(u64, i64)>, now: Option<(u64, i64)>) -> bool {
+    matches!((recorded, now), (Some(recorded), Some(now)) if recorded == now && recorded.1 != 0)
+}
+
 /// Whether two paths name the same file on disk.
 ///
 /// A stick is FAT32 and a Mac's disk is case-insensitive by default, so
@@ -910,7 +934,25 @@ pub fn export_cancellable(
         // conversion or an analysis collision: point at it, copy nothing.
         let in_place = in_place_paths.get(index).and_then(Option::as_deref) == Some(place.audio.as_str());
         let profile = conversion.map_or("", rbl_audio::compatibility::Format::profile);
-        let source_hash = if conversion.is_some() {
+        let audio_dest = under(destination, &place.audio);
+        // Looked at, not yet claimed: a track that fails below must leave
+        // its entry in `stale`.
+        let previous_entry = stale.get(&key).copied();
+        // Unchanged means: same source bytes by size and time, same place on
+        // the stick, and still actually there.
+        let unchanged_metadata = !in_place && previous_entry.is_some_and(|c| {
+            c.audio == place.audio && c.size == size && c.modified == modified && c.conversion == profile
+        });
+        // The stick's copy as it is now, by size and time only.
+        let copy_now = if unchanged_metadata { copy_stamp(&audio_dest)? } else { None };
+        // The copy is still the one this export recorded: nothing has
+        // written to it since, so the bytes `audio_hash` names are the bytes
+        // there. Trusting that, as rekordbox trusts its device database for
+        // a track already exported, saves reading the whole stick back.
+        let copy_unchanged = previous_entry.is_some_and(|c| c.audio_hash != 0 && same_copy(c.copy_stamp, copy_now));
+        let source_hash = if let Some(c) = previous_entry.filter(|_| conversion.is_some() && copy_unchanged) {
+            c.conversion_source_hash
+        } else if conversion.is_some() {
             match file_hash(&track.source_path) {
                 Ok(hash) => hash,
                 Err(e) if is_device_gone(&e) => return Err(ExportError::DeviceGone),
@@ -922,18 +964,14 @@ pub fn export_cancellable(
         } else { 0 };
         let carried = stale.remove(&key);
         if carried.is_none() { report.tracks_added += 1; }
-        let audio_dest = under(destination, &place.audio);
-        // Unchanged means: same source bytes by size and time, same place on
-        // the stick, and still actually there.
-        let unchanged_metadata = !in_place && carried.is_some_and(|c| {
-            c.audio == place.audio && c.size == size && c.modified == modified && c.conversion == profile
-        });
-        // The previous export recorded the bytes it actually placed on the
-        // device. Hash the USB copy once against that record and the source:
-        // the old path compared source/USB and then hashed the USB again.
-        // Reading both sides remains deliberate—a same-size source rewrite or
-        // direct USB edit must still be detected even if timestamps lie.
-        let existing_audio_hash = if unchanged_metadata {
+        // Otherwise the copy was written since this export recorded it, or
+        // the record predates `copy_stamp`. Hash the USB copy once against
+        // the recorded hash and the source: a same-size rewrite on the stick
+        // is caught here, and the copy's new stamp is recorded so the next
+        // sync can trust it again.
+        let existing_audio_hash = if copy_unchanged {
+            carried.map(|c| c.audio_hash)
+        } else if unchanged_metadata {
             match carried.filter(|c| c.audio_hash != 0) {
                 Some(_) => match file_hash(&audio_dest) {
                     Ok(hash) => Some(hash),
@@ -943,11 +981,12 @@ pub fn export_cancellable(
                 None => None,
             }
         } else { None };
-        let current_source_hash = if unchanged_metadata && conversion.is_none() {
+        let current_source_hash = if unchanged_metadata && !copy_unchanged && conversion.is_none() {
             Some(file_hash(&track.source_path)?)
         } else { None };
         let unchanged = unchanged_metadata && if let Some(c) = carried {
-            if conversion.is_some() && c.conversion_source_hash != source_hash { false }
+            if copy_unchanged { true }
+            else if conversion.is_some() && c.conversion_source_hash != source_hash { false }
             else if c.audio_hash != 0 {
                 existing_audio_hash == Some(c.audio_hash)
                     && (conversion.is_some() || current_source_hash == existing_audio_hash)
@@ -1098,6 +1137,15 @@ pub fn export_cancellable(
         } else {
             file_hash(&under(publication.stage(), &place.audio))?
         };
+        // Publication renames the staged copy into place, which keeps its
+        // size and time, so the staged file's stamp is the published one's.
+        let recorded_stamp = if in_place {
+            None
+        } else if unchanged {
+            copy_now
+        } else {
+            copy_stamp(&under(publication.stage(), &place.audio))?
+        };
         recorded.push(ManifestTrack {
             analysis_hashes: analysis.iter().map(|(e, b)| (e.clone(), manifest::hash(b))).collect(),
             analysis_extensions: analysis.iter().map(|(e, _)| e.clone()).collect(),
@@ -1118,6 +1166,7 @@ pub fn export_cancellable(
             conversion_source_hash: source_hash,
             audio_hash,
             in_place,
+            copy_stamp: recorded_stamp,
         });
 
         // The same facts the pdb row carries, kept for exportLibrary.db.
