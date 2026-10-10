@@ -34,6 +34,15 @@ let ready: boolean;
 let readyListeners: Set<() => void>;
 let opens: number;
 let tagListListeners: Set<() => void>;
+/** What the rows say past their number, so a fetched-again row can be told from the one before. */
+let stamp: string;
+/** Ratings the library holds, as a reload would carry them. */
+let ratings: Record<string, number>;
+/** Pages answered by hand, in whichever order the test chooses. */
+let holdFetches: boolean;
+let heldFetches: Array<() => void>;
+/** The library generation the app passes down. */
+let generation: number;
 
 const SPEC: ViewSpec = {
   source: { kind: "collection" },
@@ -46,7 +55,7 @@ function row(i: number): RowDto {
   return {
     id: String(i),
     trackNo: i + 1,
-    title: `Track ${i}`,
+    title: `Track ${i}${stamp}`,
     artist: "",
     album: "",
     genre: "",
@@ -55,7 +64,7 @@ function row(i: number): RowDto {
     bpmX100: 0,
     key: "",
     durationSec: 0,
-    rating: 0,
+    rating: ratings[String(i)] ?? 0,
     analysed: 0,
     dateAdded: "",
     releaseDate: "",
@@ -70,14 +79,21 @@ function makeBackend(): Backend {
   return {
     openView: (_spec: ViewSpec) => {
       opens += 1;
+      // Every open is a new view with a new generation, as the backend
+      // answers one after an edit.
       return ready
-        ? Promise.resolve({ viewId: 1, len: 500, gen: 1 })
+        ? Promise.resolve({ viewId: opens, len: 500, gen: opens })
         : Promise.reject(new Error("The library has not finished loading yet."));
     },
-    fetchRows: (_viewId: number, offset: number, len: number) =>
-      ready
-        ? Promise.resolve(Array.from({ length: len }, (_, i) => row(offset + i)))
-        : Promise.reject(new Error("The library has not finished loading yet.")),
+    fetchRows: (_viewId: number, offset: number, len: number) => {
+      if (!ready) return Promise.reject(new Error("The library has not finished loading yet."));
+      const rows = () => Array.from({ length: len }, (_, i) => row(offset + i));
+      if (!holdFetches) return Promise.resolve(rows());
+      // Answered when the test says, with the rows as they read then.
+      return new Promise<RowDto[]>((resolve) => {
+        heldFetches.push(() => resolve(rows()));
+      });
+    },
     onLibraryReady: (listener: () => void) => {
       readyListeners.add(listener);
       return () => readyListeners.delete(listener);
@@ -104,7 +120,13 @@ const settle = async () => {
   });
 };
 
-let latest: { count: number; error: string | null; rowAt: (i: number) => RowDto | undefined };
+let latest: {
+  count: number;
+  error: string | null;
+  loading: boolean;
+  rowAt: (i: number) => RowDto | undefined;
+  fresh: (i: number) => boolean;
+};
 
 /** The scroll position the stand-in table is showing. */
 let window_: { start: number; end: number } = { start: 0, end: 32 };
@@ -114,8 +136,10 @@ let edits: ReadonlyMap<string, Partial<RowDto>> | undefined;
 
 let spec: ViewSpec = SPEC;
 
+let extraColumns: string[] = [];
+
 function Probe() {
-  const view = useTrackView(spec, 0, edits, seed);
+  const view = useTrackView(spec, generation, edits, seed, extraColumns);
   latest = view;
   // A table asks for the window it is showing; this stands in for that.
   view.ensureRange(window_.start, window_.end);
@@ -133,6 +157,12 @@ beforeEach(async () => {
   window_ = { start: 0, end: 32 };
   seed = undefined;
   edits = undefined;
+  stamp = "";
+  ratings = {};
+  holdFetches = false;
+  heldFetches = [];
+  generation = 0;
+  extraColumns = [];
   ({ __setBackend: setBackend } = await import("@/ipc/client"));
   setBackend(makeBackend());
   ({ useTrackView } = await import("./useTrackView"));
@@ -238,6 +268,147 @@ describe("useTrackView, against a library that is not up yet", () => {
     for (const listener of readyListeners) listener();
     await settle();
     expect(opens).toBe(before);
+  });
+});
+
+describe("useTrackView, when the library changes under an open view", () => {
+  /** An opened view with its first page on screen. */
+  const opened = async () => {
+    ready = true;
+    act(() => root.render(<Probe />));
+    await settle();
+    await settle();
+    expect(latest.rowAt(0)?.title).toBe("Track 0");
+    expect(latest.fresh(0)).toBe(true);
+  };
+
+  it("keeps drawing the rows it has until the fetched-again page lands", async () => {
+    await opened();
+    const before = opens;
+
+    // An edit: the backend reloaded and announced a new generation. The
+    // rows it had are the picture until the new page arrives — not a
+    // screen of skeletons, and not a view that reads as loading.
+    stamp = " (edited)";
+    generation = 1;
+    act(() => root.render(<Probe />));
+    expect(latest.rowAt(0)?.title).toBe("Track 0");
+    expect(latest.fresh(0)).toBe(false);
+    expect(latest.loading).toBe(false);
+    expect(latest.count).toBe(500);
+
+    await settle();
+    await settle();
+    expect(opens).toBe(before + 1);
+    expect(latest.rowAt(0)?.title).toBe("Track 0 (edited)");
+    expect(latest.fresh(0)).toBe(true);
+  });
+
+  it("keeps the overlay on a stale row until its fresh page lands", async () => {
+    await opened();
+    // The star is lit from the overlay the moment it is clicked.
+    edits = new Map([["0", { rating: 5 }]]);
+    act(() => root.render(<Probe />));
+    expect(latest.rowAt(0)?.rating).toBe(5);
+
+    // The reload lands: the app drops the overlay and bumps the generation
+    // in the same breath. The star must not go out while the page is
+    // fetched again.
+    ratings = { "0": 5 };
+    edits = undefined;
+    generation = 1;
+    act(() => root.render(<Probe />));
+    expect(latest.rowAt(0)?.rating).toBe(5);
+    expect(latest.fresh(0)).toBe(false);
+
+    await settle();
+    await settle();
+    expect(latest.fresh(0)).toBe(true);
+    expect(latest.rowAt(0)?.rating).toBe(5);
+  });
+
+  it("forgets a held edit once a fresh row arrives without it", async () => {
+    await opened();
+    edits = new Map([["0", { rating: 5 }]]);
+    act(() => root.render(<Probe />));
+    expect(latest.rowAt(0)?.rating).toBe(5);
+
+    // Refused: the overlay goes, nothing reloads, the row shows what the
+    // library holds.
+    edits = undefined;
+    act(() => root.render(<Probe />));
+    expect(latest.rowAt(0)?.rating).toBe(0);
+
+    // A later, unrelated reload must not resurrect the refused star for the
+    // length of its fetch.
+    generation = 1;
+    act(() => root.render(<Probe />));
+    expect(latest.rowAt(0)?.rating).toBe(0);
+    await settle();
+    await settle();
+    expect(latest.rowAt(0)?.rating).toBe(0);
+  });
+
+  it("fetches the pages again when an extra column is shown", async () => {
+    await opened();
+    const before = opens;
+    // The spec the backend sees is the same; the rows it answers with are
+    // not, since the column's field is only fetched when it is on show. The
+    // pages kept from before have no such field, so they must be replaced —
+    // which rests on every open answering with a view of its own.
+    stamp = " (with size)";
+    extraColumns = ["size"];
+    act(() => root.render(<Probe />));
+    expect(latest.rowAt(0)?.title).toBe("Track 0");
+    await settle();
+    await settle();
+    expect(opens).toBe(before + 1);
+    expect(latest.rowAt(0)?.title).toBe("Track 0 (with size)");
+  });
+
+  it("empties the rows when the source changes", async () => {
+    await opened();
+    spec = { ...SPEC, source: { kind: "tagList" } };
+    act(() => root.render(<Probe />));
+    // One playlist's rows are no picture of another's.
+    expect(latest.rowAt(0)).toBeUndefined();
+    expect(latest.loading).toBe(true);
+    await settle();
+    await settle();
+    expect(latest.loading).toBe(false);
+    expect(latest.rowAt(0)?.title).toBe("Track 0");
+  });
+
+  it("drops a page answered for the view before, whichever order the answers come in", async () => {
+    ready = true;
+    holdFetches = true;
+    act(() => root.render(<Probe />));
+    await settle();
+    await settle();
+    // The first view's page 0 is in flight.
+    expect(heldFetches.length).toBe(1);
+    const stale = heldFetches[0]!;
+
+    generation = 1;
+    act(() => root.render(<Probe />));
+    await settle();
+    await settle();
+    // So is the reopened view's.
+    expect(heldFetches.length).toBe(2);
+    const fresh = heldFetches[1]!;
+
+    stamp = " (fresh)";
+    act(() => fresh());
+    await settle();
+    expect(latest.rowAt(0)?.title).toBe("Track 0 (fresh)");
+
+    // The old answer lands last. It belongs to a view that is gone, and
+    // writing it would put the stale rows over the fresh ones.
+    stamp = " (stale)";
+    act(() => stale());
+    await settle();
+    expect(latest.rowAt(0)?.title).toBe("Track 0 (fresh)");
+    expect(latest.fresh(0)).toBe(true);
   });
 });
 

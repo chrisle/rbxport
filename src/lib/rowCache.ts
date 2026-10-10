@@ -45,6 +45,24 @@ export class RowCache<T> {
     return entry.rows[index % this.pageSize];
   }
 
+  /**
+   * The row at an index under whatever token its page was fetched with.
+   *
+   * A stale picture, for a view that is being fetched again after an edit
+   * or a re-sort: the page it had is drawn until the replacement lands,
+   * rather than every row going blank in between. `missingPages` still
+   * counts such a page as missing, so it is fetched again as soon as it is
+   * on screen, and `get` is the read for a caller that must not see it.
+   */
+  peek(index: number): T | undefined {
+    const page = Math.floor(index / this.pageSize);
+    const entry = this.#pages.get(page);
+    if (!entry) return undefined;
+    this.#pages.delete(page);
+    this.#pages.set(page, entry);
+    return entry.rows[index % this.pageSize];
+  }
+
   setPage(page: number, token: CacheToken, rows: readonly T[]): void {
     this.#pages.delete(page);
     this.#pages.set(page, { token, rows });

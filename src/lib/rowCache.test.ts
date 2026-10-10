@@ -21,6 +21,20 @@ describe("RowCache", () => {
     expect(c.get(1, "v2:1")).toBeUndefined();
   });
 
+  it("peeks at a page from the view before, until its replacement lands", () => {
+    const c = new RowCache<string>(4, 10);
+    c.setPage(0, "v1:1", page(0));
+    // An edit reopened the view: the page is no longer current, but it is
+    // still the best picture of those rows there is.
+    expect(c.get(1, "v2:2")).toBeUndefined();
+    expect(c.peek(1)).toBe("r1");
+    expect(c.missingPages(0, 4, "v2:2")).toEqual([0]);
+    c.setPage(0, "v2:2", ["s0", "s1", "s2", "s3"]);
+    expect(c.get(1, "v2:2")).toBe("s1");
+    expect(c.peek(1)).toBe("s1");
+    expect(c.peek(9)).toBeUndefined();
+  });
+
   it("reports exactly the pages a range needs", () => {
     const c = new RowCache<string>(4, 10);
     c.setPage(1, "v1:1", page(1));

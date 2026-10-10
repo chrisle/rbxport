@@ -923,6 +923,7 @@ export const TrackTable = memo(function TrackTable({
 }: TrackTableProps) {
   const extraColumns = useMemo(() => EXTRA_COLUMNS.filter((key) => columns.some((column) => column.key === key)), [columns]);
   const view = useTrackView(spec, libraryGeneration, pendingEdits, seed, extraColumns);
+  const sourceKey = useMemo(() => JSON.stringify(spec.source), [spec.source]);
   const preferences = usePreferences();
   const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;
   const tip = useTooltip();
@@ -965,7 +966,10 @@ export const TrackTable = memo(function TrackTable({
   // screen. Only the first page, and only when it is filled.
   const reported = useRef("");
   useEffect(() => {
-    if (!onFirstRows || view.loading || view.count === 0) return;
+    // Fresh rows only: while an edit is being fetched back the top of the
+    // list is the picture from before it, and the next start would open on
+    // the rating as it was.
+    if (!onFirstRows || view.loading || view.count === 0 || !view.fresh(0)) return;
     const first = view.rowAt(0);
     if (!first) return;
     reportStartupPaint("first-rows-painted");
@@ -1740,8 +1744,16 @@ export const TrackTable = memo(function TrackTable({
           ) : null}
         </div>
 
+        {/*
+          Keyed on the source, so switching to another playlist builds the
+          list afresh — WebKit has kept a shorter list's retired row layers
+          otherwise — while an edit, a sort or a search keeps the rows that
+          are there and lets React move or rewrite them in place. Keyed on
+          the view token, as it was, every rating tore down and rebuilt
+          every visible row three times.
+        */}
         <div
-          key={view.token}
+          key={sourceKey}
           className={styles.inner}
           ref={rowsRef}
           style={{ height: `${virtualizer.getTotalSize()}px` }}

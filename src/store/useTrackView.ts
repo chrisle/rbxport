@@ -18,8 +18,16 @@ export interface TrackView {
   token: CacheToken;
   loading: boolean;
   error: string | null;
-  /** Row at an absolute index, or undefined while its page is in flight. */
+  /**
+   * Row at an absolute index, or undefined while its page is in flight.
+   *
+   * While the view is being fetched again for the same source — after an
+   * edit, a re-sort or a search keystroke — this is the row the index had
+   * before, until the fresh page lands; `fresh` tells the two apart.
+   */
   rowAt: (index: number) => RowDto | undefined;
+  /** Whether the row at an index was fetched for the view as it now is. */
+  fresh: (index: number) => boolean;
   /** Ask for the pages covering [start, end); safe to call every frame. */
   ensureRange: (start: number, end: number) => void;
   /** Ids between two row indices inclusive, resolved by the backend. */
@@ -64,6 +72,7 @@ export function useTrackView(
     count: 0,
     gen: 0,
     specKey: "",
+    sourceKey: "",
     error: null as string | null,
   });
   const cache = useRef(new RowCache<RowDto>(PAGE_SIZE));
@@ -90,14 +99,31 @@ export function useTrackView(
     [spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter, libraryGeneration, tagListKey, extraKey],
   );
 
+  // Where the rows come from, apart from how they are sorted, searched or
+  // filtered. Only a change of source empties the cache: one playlist's rows
+  // are no picture of another's. Any other change keeps them — they are stale
+  // by that one change, and drawing them until their replacements land beats
+  // a screen of skeletons that is then rebuilt row by row, which is what every
+  // rating used to cost: three DOM rebuilds of each visible row.
+  const sourceKey = useMemo(() => JSON.stringify(spec.source), [spec.source]);
   // View identity for the cache: a new view id, or a library change, invalidates pages.
   const token: CacheToken = `${state.viewId}:${state.gen}`;
+  // The open is in flight: `state` still describes the spec before this one.
+  const swapping = state.specKey !== specKey;
+  // Read when a page lands, so one answered for the view before is dropped
+  // rather than written over the page the current view has already fetched.
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+  const cachedSource = useRef("");
 
   useEffect(() => {
     let cancelled = false;
     let opened = false;
     let stopReady: (() => void) | undefined;
-    cache.current.clear();
+    if (cachedSource.current !== sourceKey) {
+      cache.current.clear();
+      cachedSource.current = sourceKey;
+    }
     inFlight.current.clear();
     setState((s) => ({ ...s, error: null }));
 
@@ -114,13 +140,14 @@ export function useTrackView(
           count: handle.len,
           gen: handle.gen,
           specKey,
+          sourceKey,
           error: null,
         });
       } catch (e) {
         if (cancelled) return;
         // Mark the failure as belonging to this spec, or it reads as still
         // loading and retries forever.
-        setState((s) => ({ ...s, specKey, error: e instanceof Error ? e.message : String(e) }));
+        setState((s) => ({ ...s, specKey, sourceKey, error: e instanceof Error ? e.message : String(e) }));
       }
     };
 
@@ -149,7 +176,8 @@ export function useTrackView(
       cancelled = true;
       stopReady?.();
     };
-    // specKey captures every field that changes the view.
+    // specKey captures every field that changes the view, the source among
+    // them, so sourceKey cannot change without it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [specKey]);
 
@@ -209,10 +237,9 @@ export function useTrackView(
   const ensureRange = useCallback(
     (start: number, end: number) => {
       const { viewId, count } = state;
-      const loading = state.specKey !== specKey;
       // Fetching while a view swap is in flight would fill the cache from the
       // outgoing view under the incoming token.
-      if (!viewId || count === 0 || loading) return;
+      if (!viewId || count === 0 || swapping) return;
       const missing = cache.current.missingPages(start, Math.min(end, count), token);
       const toFetch = planFetches(missing, inFlight.current);
       if (toFetch.length === 0) return;
@@ -223,8 +250,10 @@ export function useTrackView(
           try {
             const backend = await getBackend();
             const rows = await backend.fetchRows(viewId, page * PAGE_SIZE, PAGE_SIZE, extraColumns);
-            // A view swap between request and response makes this page stale.
-            if (cache.current.hasPage(page, token)) return;
+            // A view swap between request and response makes this page
+            // stale, and it must not land on top of the one the new view
+            // has fetched: the two answers can arrive in either order.
+            if (tokenRef.current !== token || cache.current.hasPage(page, token)) return;
             cache.current.setPage(page, token, rows);
             setPagesLoaded((n) => n + 1);
           } catch {
@@ -235,24 +264,45 @@ export function useTrackView(
         })();
       }
     },
-    // `specKey` matters as much as `state`: between a spec change and its
-    // fetch resolving, only `specKey` has moved, and a stale one here reads as
-    // "not loading" and fills the cache from the outgoing view.
+    // `swapping` matters as much as `state`: between a spec change and its
+    // fetch resolving, only `specKey` has moved, and reading `state` alone
+    // here would fill the cache from the outgoing view.
     // extraKey changes only with visible extra columns, not on width drags.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state, token, specKey, extraKey],
+    [state, token, swapping, extraKey],
   );
+
+  /*
+   * Edits kept past the app's overlay, for the rows that are stale.
+   *
+   * The app drops its overlay the moment the backend announces the reload
+   * that carries the edit, and that same announcement is what makes the rows
+   * here stale until they are fetched again. Without this a star went out
+   * for the length of the fetch and lit again. An entry is dropped once a
+   * fresh row has been served with no overlay for it — which is also how a
+   * refused edit's entry goes, so it is never drawn on a later refresh.
+   */
+  const held = useRef(new Map<string, Partial<RowDto>>());
+  useEffect(() => {
+    if (!pending) return;
+    for (const [id, edit] of pending) held.current.set(id, { ...held.current.get(id), ...edit });
+  }, [pending]);
 
   const rowAt = useCallback(
     (index: number) => {
-      const row = cache.current.get(index, token);
-      if (!row || !pending) return row;
+      const current = swapping ? undefined : cache.current.get(index, token);
+      const row = current ?? cache.current.peek(index);
+      if (!row) return undefined;
       // The cached row is what the backend last said; the overlay is what the
       // user just did. Merging rather than mutating keeps the cache honest.
-      const edit = pending.get(row.id);
+      let edit = pending?.get(row.id);
+      if (!edit) {
+        if (current) held.current.delete(row.id);
+        else edit = held.current.get(row.id);
+      }
       if (!edit) return row;
-      const held = overlays.current.get(row);
-      if (held?.edit === edit) return held.row;
+      const kept = overlays.current.get(row);
+      if (kept?.edit === edit) return kept.row;
       const merged = { ...row, ...edit };
       overlays.current.set(row, { edit, row: merged });
       return merged;
@@ -260,7 +310,14 @@ export function useTrackView(
     // `pagesLoaded` is not read here on purpose: the cache is a ref, so this
     // counter is the only signal that a page arrived and callers must redraw.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [token, pagesLoaded, pending],
+    [token, pagesLoaded, pending, swapping],
+  );
+
+  const fresh = useCallback(
+    (index: number) => !swapping && cache.current.hasPage(RowCache.pageOf(index), token),
+    // `pagesLoaded`, as for `rowAt`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, pagesLoaded, swapping],
   );
 
   const idsInRange = useCallback(
@@ -288,13 +345,17 @@ export function useTrackView(
     () => ({
       count: rows ? seedCount : state.count,
       token,
-      loading: state.specKey !== specKey,
+      // Loading is a change of source, where there is nothing to draw until
+      // the open answers. The same source fetched again — an edit, a sort,
+      // a keystroke — keeps its rows and count on screen meanwhile.
+      loading: state.sourceKey !== sourceKey,
       error: state.error,
       rowAt: rows ? (index: number) => rows[index] : rowAt,
+      fresh: rows ? () => false : fresh,
       ensureRange,
       idsInRange,
     }),
-    [rows, seedCount, state.count, state.specKey, state.error, token, specKey, rowAt, ensureRange, idsInRange],
+    [rows, seedCount, state.count, state.sourceKey, state.error, token, sourceKey, rowAt, fresh, ensureRange, idsInRange],
   );
 }
 
