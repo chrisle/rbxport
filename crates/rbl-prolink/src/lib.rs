@@ -102,8 +102,9 @@ pub enum DeviceType {
     Mixer,
     /// rekordbox acting as a media source (measured: byte `0x34` = `04`).
     Rekordbox,
-    /// An all-in-one unit, two decks and a mixer in one (XDJ-RX3, OPUS-QUAD):
-    /// `07`, measured on the wire from an XDJ-RX3 on firmware 1.20.
+    /// Peer type `07`. [OBS] An XDJ-RX3 on firmware 1.20 announces it (seen
+    /// on the wire from Linux). [UNKNOWN] Which other products announce it;
+    /// "all-in-one" is a working name, not an established category.
     AllInOne,
     Other(u8),
 }
