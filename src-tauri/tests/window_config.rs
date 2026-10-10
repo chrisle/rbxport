@@ -10,7 +10,12 @@
 //! These checks run on every platform, so the Linux merge is tested on any
 //! machine that runs the Rust suite.
 
-#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 
 use serde_json::{json, Value};
 
@@ -19,7 +24,12 @@ const LINUX: &str = include_str!("../tauri.linux.conf.json");
 
 /// The window fields a platform file is allowed to change. Anything else the
 /// base file sets must survive the merge unchanged.
-const PLATFORM_OVERRIDES: [&str; 4] = ["titleBarStyle", "hiddenTitle", "decorations", "dragDropEnabled"];
+const PLATFORM_OVERRIDES: [&str; 4] = [
+    "titleBarStyle",
+    "hiddenTitle",
+    "decorations",
+    "dragDropEnabled",
+];
 
 /// RFC 7396: objects merge key by key, `null` removes a key, and anything
 /// else (including arrays) replaces the target.
@@ -73,7 +83,11 @@ fn every_platform_window_keeps_the_title_and_the_base_fields() {
         assert_eq!(merged_windows.len(), 1, "{name}: one main window");
         let window = merged_windows[0].as_object().unwrap();
 
-        assert_eq!(window.get("title"), Some(&json!("rbxport")), "{name}: window title");
+        assert_eq!(
+            window.get("title"),
+            Some(&json!("rbxport")),
+            "{name}: window title"
+        );
         for (key, value) in base_fields {
             if PLATFORM_OVERRIDES.contains(&key.as_str()) {
                 continue;
