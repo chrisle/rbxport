@@ -13,8 +13,20 @@
 //! library, and the resulting path is checked to still sit under the share
 //! root — belt and braces, because `ImagePath` comes from the database rather
 //! than from us.
+//!
+//! # Where rekordbox reads it from
+//!
+//! rekordbox opens the file at `masterDbDirectory + "/share"` joined with
+//! `ImagePath` as it is (`getCloudSharedPath`,
+//! `rekordboxDBController::getArtworkInfo`, `ArtworkCache::getFromURI`
+//! loading `juce::File(path)`) [OBS static, rekordbox 7.2.11 macOS]. It does
+//! not resolve links first, so a share whose `Artwork` folder is a link to
+//! another disk, or a volume the system cannot give a final path for, still
+//! shows its artwork there. The check here is on the stored path's own
+//! components for the same reason (issue #271).
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tauri::http::{Request, Response, StatusCode};
@@ -65,12 +77,20 @@ pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec
     };
 
     match std::fs::metadata(&path) {
+        Ok(meta) if !meta.is_file() => return status(StatusCode::NOT_FOUND),
         Ok(meta) if meta.len() > MAX_BYTES => return status(StatusCode::PAYLOAD_TOO_LARGE),
         Ok(_) => {}
-        Err(_) => return status(StatusCode::NOT_FOUND),
+        Err(error) => {
+            note_unreadable(&path, &error);
+            return status(StatusCode::NOT_FOUND);
+        }
     }
-    let Ok(bytes) = std::fs::read(&path) else {
-        return status(StatusCode::NOT_FOUND);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            note_unreadable(&path, &error);
+            return status(StatusCode::NOT_FOUND);
+        }
     };
 
     Response::builder()
@@ -105,24 +125,48 @@ fn image_response(bytes: Vec<u8>) -> Response<Vec<u8>> {
         .body(bytes).unwrap_or_else(|_| status(StatusCode::INTERNAL_SERVER_ERROR))
 }
 
+/// The first artwork file that could not be read, logged once a session.
+///
+/// A row asks for its sleeve every time it scrolls into view, so logging each
+/// failure would bury the log; one line is enough to say where the app looked
+/// and why it got nothing, which is what a report needs.
+static LOGGED_UNREADABLE: AtomicBool = AtomicBool::new(false);
+
+fn note_unreadable(path: &Path, error: &std::io::Error) {
+    if !LOGGED_UNREADABLE.swap(true, Ordering::Relaxed) {
+        tracing::warn!(path = %path.display(), %error, "artwork file could not be read; later failures are not logged");
+    }
+}
+
 /// Joins a share-relative path onto the root, refusing anything that climbs out.
 ///
 /// `ImagePath` comes from the database, so it is not ours to trust: a value
-/// with `..` in it would otherwise read outside the library.
+/// with `..` in it, or a part that names a drive or a root of its own, would
+/// otherwise read outside the library. Each part has to be one plain name.
+///
+/// The check is on the stored path, not on where the file finally lives.
+/// rekordbox opens the joined path as it is, and an earlier version here that
+/// canonicalised both sides refused every sleeve when the share's `Artwork`
+/// folder was a link to another disk, or when the volume had no final path
+/// the system would give (some RAM, network and virtual drives on Windows) —
+/// while the waveforms and the LINK server, which join the same way rekordbox
+/// does, still worked (#271).
 pub(crate) fn resolve_under(root: &Path, relative: &str) -> Option<PathBuf> {
     let mut out = root.to_path_buf();
     for part in relative.split(['/', '\\']) {
         match part {
             "" | "." => {}
             ".." => return None,
-            _ => out.push(part),
+            _ => {
+                let mut components = Path::new(part).components();
+                match (components.next(), components.next()) {
+                    (Some(Component::Normal(_)), None) => out.push(part),
+                    _ => return None,
+                }
+            }
         }
     }
-    // Resolving symlinks too: a link inside the share tree could still point
-    // out of it.
-    let canonical = out.canonicalize().ok()?;
-    let root = root.canonicalize().ok()?;
-    canonical.starts_with(&root).then_some(canonical)
+    Some(out)
 }
 
 fn content_type(path: &Path) -> &'static str {
@@ -264,6 +308,50 @@ mod tests {
             "..\\..\\Windows\\System32",
         ] {
             assert!(resolve_under(&dir.path().join("share"), attempt).is_none(), "{attempt}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_artwork_folder_linked_to_another_disk_is_still_read() {
+        // A share whose `Artwork` folder was moved to a bigger disk and left
+        // behind as a link: rekordbox opens the joined path as it is and
+        // shows the sleeve, so this must too (#271).
+        let dir = tempfile::tempdir().unwrap();
+        let share = dir.path().join("share");
+        let elsewhere = dir.path().join("other-disk/Artwork");
+        std::fs::create_dir_all(share.join("PIONEER")).unwrap();
+        std::fs::create_dir_all(elsewhere.join("abc/uuid")).unwrap();
+        std::fs::write(elsewhere.join("abc/uuid/artwork.jpg"), b"jpeg").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, share.join("PIONEER/Artwork")).unwrap();
+
+        let got = resolve_under(&share, "/PIONEER/Artwork/abc/uuid/artwork.jpg").unwrap();
+        assert_eq!(got, share.join("PIONEER/Artwork/abc/uuid/artwork.jpg"));
+        assert_eq!(std::fs::read(got).unwrap(), b"jpeg");
+    }
+
+    #[test]
+    fn the_path_is_joined_without_asking_the_volume_for_its_final_path() {
+        // Some volumes cannot say where a file finally lives (Windows RAM,
+        // network and virtual drives), and asking refused every sleeve on
+        // them. The stored path is checked on its own parts instead.
+        let root = Path::new("/no/such/volume/share");
+        assert_eq!(
+            resolve_under(root, "/PIONEER/Artwork/00a/uuid/artwork.jpg"),
+            Some(root.join("PIONEER").join("Artwork").join("00a").join("uuid").join("artwork.jpg")),
+        );
+        assert_eq!(
+            resolve_under(root, "\\PIONEER\\Artwork\\00a\\uuid\\artwork.jpg"),
+            Some(root.join("PIONEER").join("Artwork").join("00a").join("uuid").join("artwork.jpg")),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_part_that_names_a_drive_is_refused() {
+        let root = Path::new("C:\\share");
+        for attempt in ["/PIONEER/C:/Windows/win.ini", "D:\\secret.jpg", "/PIONEER/D:"] {
+            assert!(resolve_under(root, attempt).is_none(), "{attempt}");
         }
     }
 
