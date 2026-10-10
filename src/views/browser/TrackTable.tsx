@@ -923,7 +923,6 @@ export const TrackTable = memo(function TrackTable({
 }: TrackTableProps) {
   const extraColumns = useMemo(() => EXTRA_COLUMNS.filter((key) => columns.some((column) => column.key === key)), [columns]);
   const view = useTrackView(spec, libraryGeneration, pendingEdits, seed, extraColumns);
-  const sourceKey = useMemo(() => JSON.stringify(spec.source), [spec.source]);
   const preferences = usePreferences();
   const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;
   const tip = useTooltip();
@@ -1753,7 +1752,7 @@ export const TrackTable = memo(function TrackTable({
           every visible row three times.
         */}
         <div
-          key={sourceKey}
+          key={view.sourceKey}
           className={styles.inner}
           ref={rowsRef}
           style={{ height: `${virtualizer.getTotalSize()}px` }}

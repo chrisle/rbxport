@@ -17,6 +17,8 @@ export interface TrackView {
   /** Identity of the current view's data; changes whenever rows must be refetched. */
   token: CacheToken;
   loading: boolean;
+  /** Identity of the source (not its sort or query); a new one is a different list. */
+  sourceKey: string;
   error: string | null;
   /**
    * Row at an absolute index, or undefined while its page is in flight.
@@ -349,6 +351,7 @@ export function useTrackView(
       // the open answers. The same source fetched again — an edit, a sort,
       // a keystroke — keeps its rows and count on screen meanwhile.
       loading: state.sourceKey !== sourceKey,
+      sourceKey,
       error: state.error,
       rowAt: rows ? (index: number) => rows[index] : rowAt,
       fresh: rows ? () => false : fresh,
