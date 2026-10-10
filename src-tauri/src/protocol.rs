@@ -37,11 +37,24 @@ pub(crate) const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Answers one `rbl://` request.
 pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
-    let Some(track_id) = artwork_id(request.uri().path()) else {
+    let Some(encoded) = artwork_id(request.uri().path()) else {
         return status(StatusCode::NOT_FOUND);
     };
+    // A library id is digits, but a stick's own track in the Devices tree is
+    // `file:` and its path, which the page percent-encodes.
+    let Some(decoded) = percent_decoded(encoded) else {
+        return status(StatusCode::BAD_REQUEST);
+    };
+    let track_id = decoded.as_str();
     if track_id.is_empty() {
         return status(StatusCode::BAD_REQUEST);
+    }
+
+    // A stick's track: its artwork is the one the stick's library names, on
+    // the stick (#319). Only an id the Devices tree has listed resolves, so
+    // the page still cannot name a file of its own choosing.
+    if let Some(assets) = state.device_assets(track_id) {
+        return assets.artwork_file().map_or_else(|| status(StatusCode::NOT_FOUND), |path| file_response(&path));
     }
 
     let Ok(library) = state.library() else {
@@ -63,19 +76,23 @@ pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec
         tracing::warn!(%relative, "artwork path escapes the share root; refused");
         return status(StatusCode::FORBIDDEN);
     };
+    file_response(&path)
+}
 
-    match std::fs::metadata(&path) {
+/// The image at `path`, already checked to sit where it may be read from.
+fn file_response(path: &Path) -> Response<Vec<u8>> {
+    match std::fs::metadata(path) {
         Ok(meta) if meta.len() > MAX_BYTES => return status(StatusCode::PAYLOAD_TOO_LARGE),
         Ok(_) => {}
         Err(_) => return status(StatusCode::NOT_FOUND),
     }
-    let Ok(bytes) = std::fs::read(&path) else {
+    let Ok(bytes) = std::fs::read(path) else {
         return status(StatusCode::NOT_FOUND);
     };
 
     Response::builder()
         .status(StatusCode::OK)
-        .header("Content-Type", content_type(&path))
+        .header("Content-Type", content_type(path))
         .header("Access-Control-Allow-Origin", "*")
         // Artwork for a given track never changes without the library
         // reloading, and the frontend re-requests with a new generation then.
@@ -89,6 +106,25 @@ pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec
 fn artwork_id(path: &str) -> Option<&str> {
     let mut parts = path.trim_start_matches('/').split('/');
     (parts.next() == Some(ARTWORK)).then(|| parts.next().unwrap_or(""))
+}
+
+/// `%XX` escapes decoded, as `encodeURIComponent` made them; `None` for a
+/// malformed escape or bytes that are not UTF-8.
+fn percent_decoded(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        if byte == b'%' {
+            let hex = std::str::from_utf8(bytes.get(at + 1..at + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            at += 3;
+        } else {
+            out.push(byte);
+            at += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 fn image_response(bytes: Vec<u8>) -> Response<Vec<u8>> {
@@ -216,6 +252,19 @@ mod tests {
         serve(&state, &request, |response| out.push(response));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn an_encoded_id_is_decoded_and_a_malformed_one_refused() {
+        assert_eq!(percent_decoded("file%3AG%3A%5CContents%5Ca%20b.mp3").as_deref(), Some("file:G:\\Contents\\a b.mp3"));
+        assert_eq!(percent_decoded("12345").as_deref(), Some("12345"));
+        assert_eq!(percent_decoded("caf%C3%A9").as_deref(), Some("café"));
+        for bad in ["%", "%4", "%zz", "%FF"] {
+            assert_eq!(percent_decoded(bad), None, "{bad}");
+        }
+        let state = Arc::new(AppState::new());
+        let request = Request::builder().uri("rbl://localhost/artwork/file%3A%zz").body(Vec::new()).unwrap();
+        assert_eq!(handle(&state, &request).status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]

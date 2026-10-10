@@ -35,6 +35,10 @@ pub struct DeviceRow {
     /// Stars, 0 to 5.
     pub rating: u8,
     pub color: u8,
+    /// Whether the stick's library names an analysis file for the track.
+    pub analysed: bool,
+    /// Whether the stick's library names artwork for the track.
+    pub has_artwork: bool,
 }
 
 /// The rows a view shows, ordered and searched.

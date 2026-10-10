@@ -448,6 +448,14 @@ pub async fn track_waveform(
     from: Option<u32>,
     len: Option<u32>,
 ) -> AppResult<tauri::ipc::Response> {
+    // A stick's own track, from the Devices tree: its analysis is on the
+    // stick, not in the library (#319).
+    if let Some(assets) = state.device_assets(&track_id) {
+        let dat = assets.analysis_dat();
+        return blocking("track_waveform", move || Ok(dat.map(|dat| waveform_of(&dat, &kind, from, len)).unwrap_or_default()))
+            .await
+            .map(tauri::ipc::Response::new);
+    }
     let library = match state.library() {
         Ok(library) => library,
         Err(error) => return crate::screen_cache::cached_waveform(&track_id, &kind)
@@ -484,30 +492,50 @@ pub(crate) fn waveform_bytes(
         return Ok(Vec::new());
     }
 
-        // The stored path names the .DAT; the colour waveforms live in the
-        // .EXT sibling and the three-band ones in .2EX.
-    let dat = rbl_anlz::resolve(share, analysis_path);
-        // rekordbox 7 draws the three-band waveforms, and every one of the
-        // first 300 tracks checked in the reference library has them. `PWV6`
-        // is the 1,200-column overview and `PWV7` the full-resolution detail,
-        // both three bytes per column: low, mid, high.
+    Ok(waveform_of(&rbl_anlz::resolve(share, analysis_path), kind, from, len))
+}
+
+/// One kind of waveform from the analysis files beside `dat`, windowed.
+/// Empty when the file or the tag is not there.
+pub(crate) fn waveform_of(dat: &std::path::Path, kind: &str, from: Option<u32>, len: Option<u32>) -> Vec<u8> {
+    // The stored path names the .DAT; the colour waveforms live in the
+    // .EXT sibling and the three-band ones in .2EX.
+    // rekordbox 7 draws the three-band waveforms, and every one of the
+    // first 300 tracks checked in the reference library has them. `PWV6`
+    // is the 1,200-column overview and `PWV7` the full-resolution detail,
+    // both three bytes per column: low, mid, high.
     let (file, tag, stride): (std::path::PathBuf, [u8; 4], usize) = match kind {
-            "bands" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV6", 3),
-            "bandsDetail" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV7", 3),
-            // The RGB palette's pair, six and two bytes a column.
-            "colourDetail" | "detail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV5", 2),
-            "colour" | "color" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV4", 6),
-            // The BLUE palette's pair, one byte a column.
-            "monoDetail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV3", 1),
-            _ => (dat, *b"PWAV", 1),
+        "bands" => (rbl_anlz::sibling(dat, "2EX"), *b"PWV6", 3),
+        "bandsDetail" => (rbl_anlz::sibling(dat, "2EX"), *b"PWV7", 3),
+        // The RGB palette's pair, six and two bytes a column.
+        "colourDetail" | "detail" => (rbl_anlz::sibling(dat, "EXT"), *b"PWV5", 2),
+        "colour" | "color" => (rbl_anlz::sibling(dat, "EXT"), *b"PWV4", 6),
+        // The BLUE palette's pair, one byte a column.
+        "monoDetail" => (rbl_anlz::sibling(dat, "EXT"), *b"PWV3", 1),
+        _ => (dat.to_path_buf(), *b"PWAV", 1),
     };
 
     let Ok(anlz) = rbl_anlz::Anlz::read(&file) else {
         // Analysis missing on disk: draw nothing rather than fail the view.
-        return Ok(Vec::new());
+        return Vec::new();
     };
     let whole = anlz.waveform(&tag).map(|(_, data)| data).unwrap_or_default();
-    Ok(window_of(whole, stride, from, len))
+    window_of(whole, stride, from, len)
+}
+
+/// Where a track's analysis `.DAT` is, or `None` when it has none: on the
+/// stick for a stick's own track in the Devices tree (#319), otherwise the
+/// library's under its share root. Only the path; nothing is read here.
+fn analysis_dat(state: &AppState, track: &str) -> AppResult<Option<std::path::PathBuf>> {
+    if let Some(assets) = state.device_assets(track) {
+        return Ok(assets.analysis_dat());
+    }
+    let library = state.library()?;
+    let Some(row) = library.row_of(track) else { return Ok(None) };
+    let relative = library.analysis_path.get(row as usize);
+    // Either slash: `read_beat_grid` took a leading backslash too, and on
+    // Windows a path that keeps one would replace the share root.
+    Ok((!relative.is_empty()).then(|| state.share_root().join(relative.trim_start_matches(['/', '\\']))))
 }
 
 /// A short, true stereo PCM waveform window. The response is decimated to
@@ -2070,15 +2098,10 @@ pub async fn track_beats(
     state: State<'_, Arc<AppState>>,
     track: String,
 ) -> AppResult<tauri::ipc::Response> {
-    let library = state.library()?;
-    let share = state.share_root();
+    let dat = analysis_dat(&state, &track)?;
     blocking("track_beats", move || {
-        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
-        let relative = library.analysis_path.get(row as usize);
-        if relative.is_empty() {
-            return Ok(Vec::new());
-        }
-        let beats = read_beat_grid(&share, relative);
+        let Some(dat) = dat else { return Ok(Vec::new()) };
+        let beats = read_beat_grid(&dat);
         let mut out: Vec<u8> = Vec::with_capacity(beats.len() * BEAT_BYTES);
         for (time_ms, number, tempo_x100) in beats {
             out.extend_from_slice(&time_ms.to_le_bytes());
@@ -2094,9 +2117,8 @@ pub async fn track_beats(
 /// A track's beat grid from its `.DAT`: milliseconds, the beat's number in
 /// the bar (1 is the downbeat) and the tempo there x100, at most `MAX_BEATS`
 /// of them. Empty for a track without one.
-pub(crate) fn read_beat_grid(share: &std::path::Path, relative: &str) -> Vec<(u32, u8, u16)> {
-    let path = share.join(relative.trim_start_matches(['/', '\\']));
-    let Ok(bytes) = std::fs::read(&path) else { return Vec::new() };
+fn read_beat_grid(path: &std::path::Path) -> Vec<(u32, u8, u16)> {
+    let Ok(bytes) = std::fs::read(path) else { return Vec::new() };
     let Ok(file) = rbl_anlz::parse(&bytes) else { return Vec::new() };
     file.sections
         .iter()
@@ -2156,14 +2178,8 @@ pub async fn deck_load<R: tauri::Runtime>(
     player.loaded_tracks.lock().insert(which, track.clone());
     // And the grid, for the metronome. Read off the async thread: it is a
     // file, and the deck is loading on its own thread anyway.
-    let share = state.share_root();
-    let relative = library.row_of(&track).map(|row| library.analysis_path.get(row as usize).to_owned());
-    let grid = blocking("deck_load_grid", move || {
-        Ok(relative
-            .filter(|rel| !rel.is_empty())
-            .map(|rel| read_beat_grid(&share, &rel))
-            .unwrap_or_default())
-    })
+    let dat = analysis_dat(&state, &track)?;
+    let grid = blocking("deck_load_grid", move || Ok(dat.map(|dat| read_beat_grid(&dat)).unwrap_or_default()))
     .await?;
     // A newer track may have been selected while its predecessor's analysis
     // file was being read. Never put the older grid on the newer audio.
@@ -2825,15 +2841,9 @@ pub async fn track_phrases(
     state: State<'_, Arc<AppState>>,
     track: String,
 ) -> AppResult<Vec<PhraseDto>> {
-    let library = state.library()?;
-    let share = state.share_root();
+    let dat = analysis_dat(&state, &track)?;
     blocking("track_phrases", move || {
-        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
-        let relative = library.analysis_path.get(row as usize);
-        if relative.is_empty() {
-            return Ok(Vec::new());
-        }
-        let dat = rbl_anlz::resolve(&share, relative);
+        let Some(dat) = dat else { return Ok(Vec::new()) };
 
         let Ok(ext) = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "EXT")) else {
             // Not analysed for phrases, or the file is gone: draw no strip
@@ -2876,15 +2886,9 @@ pub async fn track_vocals(
     from: Option<u32>,
     len: Option<u32>,
 ) -> AppResult<tauri::ipc::Response> {
-    let library = state.library()?;
-    let share = state.share_root();
+    let dat = analysis_dat(&state, &track)?;
     blocking("track_vocals", move || {
-        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
-        let relative = library.analysis_path.get(row as usize);
-        if relative.is_empty() {
-            return Ok(Vec::new());
-        }
-        let dat = rbl_anlz::resolve(&share, relative);
+        let Some(dat) = dat else { return Ok(Vec::new()) };
         let Ok(two) = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "2EX")) else {
             return Ok(Vec::new());
         };

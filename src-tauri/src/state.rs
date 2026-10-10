@@ -39,6 +39,12 @@ pub struct AppState {
     /// The Missing File Manager's last scan, paged out to it a screenful at a
     /// time. See [`crate::relocate::MissingScan`].
     pub(crate) missing_scan: parking_lot::Mutex<Option<crate::relocate::MissingScan>>,
+    /// What a stick's own tracks have beside their audio: the analysis and
+    /// artwork its library names, by the rows' `file:` ids. Filled as the
+    /// Devices tree opens a stick's list, and kept when the list closes, so
+    /// a track loaded onto a deck still finds its waveform after the tree
+    /// moves on. See [`crate::device_library::DeviceAssets`].
+    device_assets: RwLock<HashMap<String, crate::device_library::DeviceAssets>>,
 }
 
 /// One reversible library operation. Grid edits keep their own history because
@@ -169,6 +175,7 @@ impl AppState {
             backup_destination: RwLock::new(backup_destination),
             reader: parking_lot::Mutex::new(None),
             missing_scan: parking_lot::Mutex::new(None),
+            device_assets: RwLock::new(HashMap::new()),
         }
     }
 
@@ -515,6 +522,18 @@ impl AppState {
         let mut inner = self.inner.write();
         let id = inner.register(Registered::Device(Arc::new(view)));
         (id, len, inner.generation)
+    }
+
+    /// Records the analysis and artwork of a stick's tracks, by row id. A
+    /// later read of the same stick replaces what an earlier one said.
+    pub(crate) fn remember_device_assets(&self, assets: impl IntoIterator<Item = (String, crate::device_library::DeviceAssets)>) {
+        self.device_assets.write().extend(assets);
+    }
+
+    /// The analysis and artwork a stick's library names for one of its rows,
+    /// or `None` for an id that is not a stick's track.
+    pub(crate) fn device_assets(&self, row_id: &str) -> Option<crate::device_library::DeviceAssets> {
+        self.device_assets.read().get(row_id).cloned()
     }
 
     /// The device view behind an id, or `None` for any other kind of id.
