@@ -2610,6 +2610,11 @@ export const Player = memo(function Player({
                       : tip(hotCueEditReason ?? `Set Hot Cue ${letter}${key ? ` (${key})` : ""}`)}
                     disabled={!cue && !hot.canEdit}
                     onClick={() => hot.press(letter)}
+                    onContextMenu={cue ? (event) => {
+                      // Rekordbox: right-click a set hot cue button to pick its colour.
+                      event.preventDefault(); event.stopPropagation();
+                      setCueColorMenu({x: event.clientX, y: event.clientY, cue});
+                    } : undefined}
                   >
                     <span className={styles.padInner}>{letter}</span>
                   </button>
