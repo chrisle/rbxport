@@ -144,6 +144,77 @@ mod tests {
         assert_eq!(root("/Users/me/Music/"), None);
     }
 
+    /// #282 / #40: a CDJ-3000X got E-8306 for every track. [OBS] In the
+    /// capture on #43 the database server sent
+    /// `/Volumes/SD/Music/PioneerDJ/…` and `/Volumes/Transcend/Music/…`,
+    /// and the player's LOOKUPs went `Volumes` ok, `SD` ok, then `Music`
+    /// NOENT and `Transcend` NOENT. A track directly on the card
+    /// (`/Volumes/SD/<file>`) registered `Volumes` and `SD` as complete
+    /// directories holding only the way to that file, which hid every
+    /// allowed folder beside it. rekordbox stats every name on the host
+    /// ([OBS, static] libFilSiNE LOOKUP), so a track's path resolves whatever
+    /// other tracks share its folders.
+    #[test]
+    fn a_shallow_track_does_not_hide_the_library_folders_beside_it() {
+        let sd = "/Volumes/SD/Music/PioneerDJ/Moved/one.mp3";
+        let transcend = "/Volumes/Transcend/Music/Ron/two.mp3";
+        let loose = "/Volumes/SD/loose.mp3";
+        let track = |id, path: &'static str| TestTrack {
+            id,
+            title: "t",
+            path,
+            ..TestTrack::default()
+        };
+        for order in [
+            [loose, sd, transcend],
+            [sd, loose, transcend],
+            [sd, transcend, loose],
+        ] {
+            let library = library_from(&[
+                track(1, order[0]),
+                track(2, order[1]),
+                track(3, order[2]),
+            ]);
+            let exports = exports(&library);
+            let root = exports.get("/").unwrap();
+            // The allowed folders resolve, and are the host's.
+            for (folder, host) in [
+                ("Volumes/SD/Music", "/Volumes/SD/Music"),
+                ("Volumes/Transcend/Music", "/Volumes/Transcend/Music"),
+            ] {
+                let node = root.resolve(folder);
+                assert!(node.is_some(), "{folder} with {order:?}");
+                assert_eq!(
+                    root.source(node.unwrap()).unwrap().to_str(),
+                    Some(host),
+                    "{folder}"
+                );
+            }
+            assert_eq!(
+                root.source(root.resolve("Volumes/SD/loose.mp3").unwrap())
+                    .unwrap()
+                    .to_str(),
+                Some(loose)
+            );
+            // Listings on the way show every way through, once.
+            let names = |path: &str| -> Vec<String> {
+                let at = root.resolve(path).unwrap();
+                let mut names: Vec<String> = root
+                    .children(at)
+                    .iter()
+                    .map(|&i| root.name(i).unwrap())
+                    .collect();
+                names.sort();
+                names
+            };
+            assert_eq!(names("Volumes"), ["SD", "Transcend"]);
+            assert_eq!(names("Volumes/SD"), ["Music", "loose.mp3"]);
+            // Still nothing outside the library.
+            assert_eq!(root.resolve("Volumes/Other"), None);
+            assert_eq!(root.resolve("Volumes/SD/Other"), None);
+        }
+    }
+
     #[test]
     fn the_tree_reaches_the_library_folders_and_shallow_tracks_only() {
         let dir = tempfile::tempdir().unwrap();

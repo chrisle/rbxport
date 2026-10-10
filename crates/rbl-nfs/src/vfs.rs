@@ -57,8 +57,12 @@ struct Node {
     /// folder, the host directory its names are asked of. A directory of the
     /// registered tree, or one on the way to an allowed folder, has none.
     source: Option<PathBuf>,
-    /// Whether every child is in the tree: always for a registered
-    /// directory; for one on the host, once a listing has read it.
+    /// Whether every child is in the tree: for a directory on the host,
+    /// once a listing has read it; for one of the tree, once a listing has
+    /// added the allowed folders that pass through it. A registered
+    /// directory starts unlisted, because an allowed folder may run through
+    /// it too: a track at `/Volumes/SD/a.mp3` registers `Volumes/SD`, and
+    /// `Volumes/SD/Music` and `Volumes/Transcend` must still resolve (#282).
     listed: bool,
     /// Attributes of synthetic nodes. Host-backed nodes are stat'ed on
     /// every request, as libFilSiNE obtains the current host attributes.
@@ -385,7 +389,7 @@ impl Vfs {
             None => (&"", parts.as_slice()),
         };
         for part in directories {
-            at = Self::insert(nodes, at, part, NodeKind::Directory, None, Some(dir_stat), true);
+            at = Self::insert(nodes, at, part, NodeKind::Directory, None, Some(dir_stat), false);
         }
         match file {
             Some((source, stat)) => Self::insert(nodes, at, last, NodeKind::File, Some(source), stat, true),

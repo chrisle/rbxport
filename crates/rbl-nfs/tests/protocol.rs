@@ -684,6 +684,41 @@ fn a_file_reads_back_byte_for_byte() {
     assert_eq!(read_whole(&server, &small), b"hello");
 }
 
+/// #282: a file registered in a folder an allowed folder also runs through
+/// (a track at `/Volumes/SD/a.mp3` beside `/Volumes/SD/Music/…`) must not
+/// hide the allowed folder. [OBS] A CDJ-3000X walked `Volumes`, `SD`, then
+/// got NOENT for `Music` and `Transcend` and showed E-8306 (capture on #43).
+#[test]
+fn a_registered_file_does_not_hide_an_allowed_folder_beside_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let music = dir.path().join("Music");
+    fs::create_dir_all(music.join("PioneerDJ")).unwrap();
+    fs::write(music.join("PioneerDJ/one.mp3"), vec![3_u8; 70_000]).unwrap();
+    let transcend = dir.path().join("Transcend");
+    fs::create_dir_all(transcend.join("Ron")).unwrap();
+    fs::write(transcend.join("Ron/two.mp3"), b"two").unwrap();
+    fs::write(dir.path().join("loose.mp3"), b"loose").unwrap();
+
+    let mut vfs = Vfs::new("/");
+    vfs.add_file_unsized("Volumes/SD/loose.mp3", dir.path().join("loose.mp3"));
+    vfs.allow_folder("Volumes/SD/Music", &music);
+    vfs.allow_folder("Volumes/Transcend/Music", &transcend);
+    let mut exports = Exports::new();
+    exports.insert(vfs);
+    let server = Server::new(exports, NFS_PORT, MOUNT_PORT);
+
+    let root = mount_root(&server);
+    let one = lookup_path(&server, &root, "Volumes/SD/Music/PioneerDJ/one.mp3").unwrap();
+    assert_eq!(read_whole(&server, &one), vec![3_u8; 70_000]);
+    let two = lookup_path(&server, &root, "Volumes/Transcend/Music/Ron/two.mp3").unwrap();
+    assert_eq!(read_whole(&server, &two), b"two");
+    let loose = lookup_path(&server, &root, "Volumes/SD/loose.mp3").unwrap();
+    assert_eq!(read_whole(&server, &loose), b"loose");
+    // Beside them, still nothing.
+    assert_eq!(lookup_path(&server, &root, "Volumes/SD/Other").unwrap_err(), nfs_status::NOENT);
+    assert_eq!(lookup_path(&server, &root, "Volumes/Other").unwrap_err(), nfs_status::NOENT);
+}
+
 #[test]
 fn each_new_read_reopens_the_file_and_reports_its_current_attributes() {
     let (dir, server) = fixture();
