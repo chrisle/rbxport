@@ -416,3 +416,53 @@ fn device_only_tags_and_cue_rows_are_preserved() {
     assert_eq!(after.my_tags, before.my_tags);
     assert_eq!(after.tag_memberships, before.tag_memberships);
 }
+/// An export that adds to a stick (Export Playlist, Export Track) leaves
+/// what earlier exports put there: playlists it does not name, even one the
+/// library no longer has, and empty folders, each in its place and under
+/// its device id, still recorded as the library's so a later SYNC can take
+/// them off. Playlists made on a player stay too (#304).
+#[test]
+fn keep_unlisted_adds_to_the_stick_without_taking_anything_off() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = tempfile::tempdir().unwrap();
+    let tracks = [track(src.path(), 1), track(src.path(), 2), track(src.path(), 3)];
+    let folder = |id: u64, parent_id: u64| SourcePlaylist { id, name: format!("Folder {id}"), folder: true, parent_id, ..Default::default() };
+    let mut a = playlist(10, &[0]);
+    a.parent_id = 90;
+    sync(usb.path(), &tracks[..2], &[folder(90, 0), folder(91, 90), a, playlist(20, &[1])]).unwrap();
+    edit(usb.path(), "INSERT INTO playlist VALUES(99,1,'On the deck',NULL,0,0); INSERT INTO playlist_content VALUES(99,1,1)");
+    let before = Manifest::load(usb.path()).unwrap();
+
+    let add = SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 30, parent: 0, attribute: 0 }], automatic: false };
+    rbl_export::export_cancellable(
+        usb.path(), &tracks[2..], &[playlist(30, &[0])], &[],
+        &rbl_export::ExportOptions { sync: Some(&add), keep_unlisted: true, ..Default::default() },
+        &mut |_| {}, &|| false,
+    )
+    .unwrap();
+
+    let after = Manifest::load(usb.path()).unwrap();
+    let listed: Vec<(u64, u32, bool)> = after.playlists.iter().filter(|p| !p.device_only).map(|p| (p.library_id, p.export_id, p.folder)).collect();
+    let mut expected: Vec<(u64, u32, bool)> = before.playlists.iter().filter(|p| !p.device_only).map(|p| (p.library_id, p.export_id, p.folder)).collect();
+    assert_eq!(listed[..expected.len()], expected[..], "what the stick held keeps its place, id and owner");
+    expected.push((30, listed[expected.len()].1, false));
+    assert_eq!(listed, expected, "the new playlist goes after them");
+    let s = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+    let names: Vec<&str> = s.one.as_ref().unwrap().playlists.iter().map(|p| p.name.as_str()).collect();
+    for name in ["Folder 90", "Folder 91", "Playlist 10", "Playlist 20", "Playlist 30", "On the deck"] {
+        assert!(names.contains(&name), "{name} is on the stick: {names:?}");
+    }
+    let one = s.one.as_ref().unwrap();
+    let held = |name: &str| one.playlists.iter().find(|p| p.name == name).unwrap().tracks.len();
+    assert_eq!((held("Playlist 10"), held("Playlist 20"), held("Playlist 30")), (1, 1, 1));
+    assert!(verify(usb.path()).unwrap().is_ok());
+
+    // Still the library's: a SYNC of only the new playlist takes them off,
+    // and keeps the one made on the player.
+    sync(usb.path(), &tracks[2..], &[playlist(30, &[0])]).unwrap();
+    let s = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+    let mut names: Vec<&str> = s.one.as_ref().unwrap().playlists.iter().map(|p| p.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["On the deck", "Playlist 30"]);
+    assert!(verify(usb.path()).unwrap().is_ok());
+}

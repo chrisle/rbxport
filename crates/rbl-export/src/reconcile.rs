@@ -21,6 +21,7 @@ pub fn prepare(
     tracks: &[SourceTrack],
     playlists: &[SourcePlaylist],
     db_id: u64,
+    keep_unlisted: bool,
 ) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>)> {
     let mut tracks = tracks.to_vec();
     let mut playlists = playlists.to_vec();
@@ -31,8 +32,27 @@ pub fn prepare(
     identify_tracks(&mut tracks, before, previous, db_id, &existing_sources);
     let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
     identify_playlists(&mut playlists, previous, record.as_ref());
-    retain_device_only(&current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref())?;
+    retain_device_only(&current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref(), keep_unlisted)?;
+    if keep_unlisted {
+        keep_stick_order(&mut playlists, previous);
+    }
     Ok((tracks, playlists))
+}
+
+/// Puts the playlists the previous export listed back in the order it listed
+/// them, with the ones new to the stick after them in the selection's order:
+/// an export that adds to a stick does not move what it already holds.
+fn keep_stick_order(playlists: &mut [SourcePlaylist], previous: Option<&Manifest>) {
+    let Some(previous) = previous else { return };
+    let place: BTreeMap<u32, usize> = previous
+        .playlists
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, old)| old.export_id != 0)
+        .map(|(i, old)| (old.export_id, i))
+        .collect();
+    playlists.sort_by_key(|p| place.get(&p.device_id).copied().unwrap_or(usize::MAX));
 }
 
 /// Ties a track already in the selection to the device row it came from, so
@@ -101,6 +121,10 @@ fn identify_playlists(
 /// Keeps whatever the device holds that this sync's selection does not name:
 /// playlists nobody chose (and their ancestor folders), and the tracks those
 /// playlists or the play history still reference.
+///
+/// A playlist an earlier export put there (`owned`) is taken off unless
+/// `keep_unlisted`, in which case it stays as the stick has it and is still
+/// recorded as the library's, under the library id it was exported from.
 #[allow(clippy::too_many_arguments, reason = "everything reconciliation already gathered, passed through")]
 fn retain_device_only(
     current: &Library,
@@ -110,23 +134,40 @@ fn retain_device_only(
     previous: Option<&Manifest>,
     existing_sources: &BTreeMap<u32, SourceTrack>,
     record: Option<&SyncRecord>,
+    keep_unlisted: bool,
 ) -> Result<()> {
-    let owned: BTreeSet<u32> = previous.map_or_else(
-        || record.map(|r| r.device_ids.values().copied().collect()).unwrap_or_default(),
+    // Device playlist id -> the library id it was exported from.
+    let owned: BTreeMap<u32, u64> = previous.map_or_else(
+        || {
+            record
+                .map(|r| r.device_ids.iter().map(|(library, device)| (*device, *library)).collect())
+                .unwrap_or_default()
+        },
         |m| {
             m.playlists
                 .iter()
-                .filter(|p| !p.device_only)
-                .map(|p| p.export_id)
-                .filter(|id| *id != 0)
+                .filter(|p| !p.device_only && p.export_id != 0)
+                .map(|p| (p.export_id, p.library_id))
                 .collect()
         },
     );
+    // Kept as the library's: owned, with a library id the selection does not
+    // already use for another playlist.
+    let kept_owned: BTreeMap<u32, u64> = if keep_unlisted {
+        owned
+            .iter()
+            .filter(|(_, library)| **library != 0 && !playlists.iter().any(|n| n.id == **library))
+            .map(|(device, library)| (*device, *library))
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
     let retained: Vec<_> = current
         .playlists
         .iter()
-        .filter(|p| !owned.contains(&p.id) && !playlists.iter().any(|n| n.device_id == p.id))
+        .filter(|p| (!owned.contains_key(&p.id) || kept_owned.contains_key(&p.id)) && !playlists.iter().any(|n| n.device_id == p.id))
         .collect();
+    let retained_id = |device: u32| kept_owned.get(&device).copied().unwrap_or(DEVICE_PLAYLIST_ID_BASE + u64::from(device));
     let mut needed: BTreeSet<u32> = retained
         .iter()
         .flat_map(|p| &p.tracks)
@@ -191,12 +232,12 @@ fn retain_device_only(
             playlists
                 .iter()
                 .find(|n| n.device_id == p.parent)
-                .map_or(DEVICE_PLAYLIST_ID_BASE + u64::from(p.parent), |n| n.id)
+                .map_or_else(|| retained_id(p.parent), |n| n.id)
         };
         playlists.push(SourcePlaylist {
-            id: DEVICE_PLAYLIST_ID_BASE + u64::from(p.id),
+            id: retained_id(p.id),
             device_id: p.id,
-            device_only: true,
+            device_only: !kept_owned.contains_key(&p.id),
             name: p.name.clone(),
             parent_id,
             folder: p.folder,

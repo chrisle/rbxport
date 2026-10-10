@@ -729,7 +729,7 @@ pub fn export_full(
     sync: Option<&SyncSource>,
     progress: &mut dyn FnMut(&ExportProgress),
 ) -> Result<ExportReport> {
-    export_with_options(destination, tracks, playlists, my_tags, &ExportOptions { defaults, sync, compatibility: None, root: None }, progress)
+    export_with_options(destination, tracks, playlists, my_tags, &ExportOptions { defaults, sync, ..Default::default() }, progress)
 }
 
 #[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize)]
@@ -751,6 +751,12 @@ pub struct ExportOptions<'a> {
     pub sync: Option<&'a SyncSource>,
     pub compatibility: Option<CompatibilityFormat>,
     pub root: Option<ExportRoot>,
+    /// Add the selection to what the stick holds rather than make the stick
+    /// hold exactly it: playlists and folders an earlier export put there
+    /// that the selection does not name stay as the stick has them, and in
+    /// their place, instead of being taken off. Export Playlist and Export
+    /// Track add to a device as rekordbox's do; a SYNC leaves this off.
+    pub keep_unlisted: bool,
 }
 
 /// Export with optional conversion of audio outside the common CDJ formats.
@@ -780,7 +786,7 @@ pub fn export_cancellable(
     cancelled: &dyn Fn() -> bool,
 ) -> Result<ExportReport> {
     if cancelled() { return Err(ExportError::Cancelled); }
-    let &ExportOptions { defaults, sync, compatibility, root } = options;
+    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted } = options;
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
     }
@@ -807,7 +813,7 @@ pub fn export_cancellable(
         }
     }
     before.check_baseline(previous.as_ref(), db_id)?;
-    let (tracks, playlists) = reconcile::prepare(destination, &before, previous.as_ref(), tracks, playlists, db_id)?;
+    let (tracks, playlists) = reconcile::prepare(destination, &before, previous.as_ref(), tracks, playlists, db_id, keep_unlisted)?;
     let tracks = tracks.as_slice();
     let mut merged_tags = my_tags.to_vec();
     for tag in &before.my_tags {

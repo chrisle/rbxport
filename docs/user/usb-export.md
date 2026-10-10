@@ -15,11 +15,15 @@ conversion also applies to individual track export.
   empty ones), and the folders above it, with each playlist inside its folder.
 - **Export Playlist** and **Export Folder** (right-click a playlist or folder,
   then choose a connected stick) add to what the stick already holds, as
-  rekordbox's do: playlists exported earlier, by either menu or Sync Manager,
-  stay on the stick, and the stick's own playlists are kept. Exporting a
-  playlist the stick already holds updates it in place.
+  rekordbox's do, and so does **Export Track**: playlists and folders exported
+  earlier, by either menu or Sync Manager, stay on the stick in their place,
+  including empty folders and playlists since deleted from your library, and
+  the stick's own playlists are kept. A playlist still in your library is
+  updated to what it holds now; one deleted from your library stays as the
+  stick has it.
 - Sync Manager makes each ticked stick hold exactly the ticked playlists: a
-  playlist from your library that is no longer ticked is taken off the stick.
+  playlist from your library that is no longer ticked, or that was deleted
+  from your library, is taken off the stick.
 - Sync Manager lists playlists, intelligent playlists, and folders. Ticking a
   folder ticks every playlist and intelligent playlist under it. The list
   updates when the library changes while the window is open; ticks on
