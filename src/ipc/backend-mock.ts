@@ -2030,7 +2030,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           reused: 0, removed: 0, tracksAdded: tracks, tracksUpdated: 0, playlistsAdded: 1, playlistsRemoved: 0, skipped: [], failed: [], verified: true,
         });
       }
-      return mockExport(destination, () => writeTo(device, [playlistId], defaults, deleteUnlistedMusic));
+      // Added beside what the stick holds, as rekordbox's Export Playlist
+      // adds one (#304); only the Sync Manager's SYNC replaces the selection.
+      const held = (syncSelections.get(destination) ?? []).map(p => p.libraryId);
+      return mockExport(destination, () => writeTo(device, held.includes(playlistId) ? held : [...held, playlistId], defaults, deleteUnlistedMusic));
     },
     exportTracksToDevice: (tracks, destination, defaults) => {
       const device = devices.find((d) => d.path === destination);

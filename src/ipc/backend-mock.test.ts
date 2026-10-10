@@ -226,8 +226,10 @@ describe("USB music cleanup", () => {
     const cleaned = await backend.syncDevices([a, b], [destination!], undefined, false, false, true);
     expect(cleaned[0]?.report).toMatchObject({ tracks: 2, removed: 1 });
     await backend.exportTracksToDevice(["100002"], destination!);
+    // Export Playlist adds to what the stick holds (#304): B stays, and only
+    // the loose track outside every playlist is cleaned up.
     const exported = await backend.exportPlaylist(a, destination!, undefined, true);
-    expect(exported).toMatchObject({ tracks: 1, removed: 2 });
+    expect(exported).toMatchObject({ tracks: 2, removed: 1, playlists: 2 });
   });
 });
 

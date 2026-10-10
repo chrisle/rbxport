@@ -950,11 +950,16 @@ pub async fn link_take_master_tempo(state: State<'_, Arc<AppState>>) -> AppResul
     Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
 }
 
-/// Writes a playlist to a stick.
+/// Writes a playlist to a stick: the tree's Export Playlist / Export Folder.
 ///
 /// Copies the audio, re-emits the analysis, and writes `export.pdb` and
 /// `exportLibrary.db`. Never re-analyses: an export moves what the library
 /// already knows.
+///
+/// The playlist is added beside what the stick already holds, as rekordbox's
+/// Export Playlist adds one ("Export the selected playlist to the device",
+/// rekordbox 7.2.18 manual p. 256); only the Sync Manager's SYNC makes a
+/// stick hold exactly a selection (#304).
 #[tauri::command]
 pub async fn export_playlist<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -972,15 +977,62 @@ pub async fn export_playlist<R: tauri::Runtime>(
     let state = Arc::clone(&state);
     let progress_app = app.clone();
     let report = blocking("export_playlist", move || {
-        let selection = ExportSelection::from_playlists(&state, &library, &share, std::slice::from_ref(&playlist), false)?;
         let destination = std::path::Path::new(&destination);
-        let selection = selection.for_stick(&state, &library, &share, destination, delete_unlisted_music.unwrap_or(false))?;
+        let selection = playlist_export_selection(&state, &library, &share, destination, &playlist, delete_unlisted_music.unwrap_or(false))?;
         write_export_with_progress(&progress_app, destination, &selection, defaults.as_ref(), compatibility_format)
     })
     .await?;
 
     let _ = tauri::Emitter::emit(&app, "export:done", &report);
     Ok(report)
+}
+
+/// The library playlists a stick holds from this library, in the order its
+/// manifest lists them, and whether its record asks for automatic sync.
+///
+/// Only a manifest written from this library counts: another library's ids
+/// name other playlists. Playlists since deleted from the library, and the
+/// stick's own playlists (made on a player or by rekordbox), are left out;
+/// the export keeps the latter itself as device-only playlists.
+fn held_on_stick(state: &AppState, library: &rbl_index::Library, stick: &std::path::Path) -> (Vec<String>, bool) {
+    let Some(manifest) = rbl_export::Manifest::load(stick) else { return (Vec::new(), false) };
+    let db_id = state.read_db(|db| rbl_db::export_info::db_id(db.connection())).unwrap_or(0);
+    if manifest.db_id != db_id {
+        return (Vec::new(), false);
+    }
+    let playlists = library.playlists();
+    let held = manifest
+        .playlists
+        .iter()
+        .filter(|p| !p.folder && !p.device_only && p.library_id != 0 && playlists.index_of(p.library_id).is_some())
+        .map(|p| p.library_id.to_string())
+        .collect();
+    (held, rbl_export::sync_record::read(stick).is_some_and(|r| r.automatic))
+}
+
+/// What Export Playlist / Export Folder writes to `stick`: what it already
+/// holds from this library, then `chosen` (a playlist or a folder) after it.
+fn playlist_export_selection(
+    state: &AppState,
+    library: &rbl_index::Library,
+    share: &std::path::Path,
+    stick: &std::path::Path,
+    chosen: &str,
+    delete_unlisted_music: bool,
+) -> AppResult<ExportSelection> {
+    if !stick.is_dir() {
+        return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
+    }
+    let (mut playlists, automatic) = held_on_stick(state, library, stick);
+    if !playlists.iter().any(|id| id == chosen) {
+        playlists.push(chosen.to_owned());
+    }
+    let selection = ExportSelection::from_playlists(state, library, share, &playlists, automatic)?;
+    let kept = selection.for_stick(state, library, share, stick, delete_unlisted_music)?;
+    Ok(match kept {
+        std::borrow::Cow::Owned(kept) => kept,
+        std::borrow::Cow::Borrowed(_) => selection,
+    })
 }
 
 /// Writes the same playlists to every destination, and says how each fared.
@@ -1201,14 +1253,8 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
         if !stick.is_dir() {
             return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
         }
-        let record = rbl_export::Manifest::load(stick);
-        let (playlists, mut loose, automatic) = match record {
-            Some(m) => {
-                let ids: Vec<String> = m.playlists.iter().filter(|p| !p.folder).map(|p| p.library_id.to_string()).collect();
-                (ids, m.loose, rbl_export::sync_record::read(stick).is_some_and(|r| r.automatic))
-            }
-            None => (Vec::new(), Vec::new(), false),
-        };
+        let (playlists, automatic) = held_on_stick(&state, &library, stick);
+        let mut loose = rbl_export::Manifest::load(stick).map(|m| m.loose).unwrap_or_default();
         for id in tracks.iter().filter_map(|t| t.parse::<u64>().ok()) {
             if !loose.contains(&id) {
                 loose.push(id);
@@ -4063,6 +4109,42 @@ mod tests {
     fn a_missing_analysis_file_does_not_fail_the_export() {
         let share = tempfile::tempdir().unwrap();
         assert_eq!(read_analysis(share.path(), "/PIONEER/USBANLZ/ca6/gone/ANLZ0000.DAT").unwrap(), []);
+    }
+
+    /// Export Playlist from the tree adds the playlist to what the stick
+    /// already holds, as rekordbox's does, rather than replacing the stick's
+    /// playlists with the one chosen (#304). Exporting one it holds already
+    /// keeps its place.
+    #[test]
+    fn export_playlist_adds_to_what_the_stick_holds() {
+        use crate::state::AppState;
+
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let share = location.share_root.clone();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        drop(db);
+        let state = AppState::with_backups(dir.path().join("backups"));
+        state.set_library(library, false, None, 0, location);
+        let library = state.library().unwrap();
+        let stick = dir.path().join("usb");
+        std::fs::create_dir_all(&stick).unwrap();
+        let on_stick = || -> Vec<String> {
+            rbl_export::Manifest::load(&stick).unwrap().playlists.iter().filter(|p| !p.folder).map(|p| p.library_id.to_string()).collect()
+        };
+        let export = |playlist: &str| {
+            let selection = super::playlist_export_selection(&state, &library, &share, &stick, playlist, false).unwrap();
+            super::write_export_with_phase(&stick, &selection, None, None, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        };
+        let (a, b) = (rbl_db::fixture::playlist_id(0), rbl_db::fixture::playlist_id(1));
+
+        export(&a);
+        assert_eq!(on_stick(), std::slice::from_ref(&a));
+        export(&b);
+        assert_eq!(on_stick(), [a.clone(), b.clone()], "the first playlist stays on the stick");
+        export(&a);
+        assert_eq!(on_stick(), [a, b], "a playlist exported again keeps its place");
     }
 
     /// An edit made with three tracks selected writes all three, and one
