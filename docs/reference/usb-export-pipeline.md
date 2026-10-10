@@ -391,9 +391,14 @@ In loop order:
      (`on_stick`). The databases point at it, nothing is copied, and it is
      not hashed.
    - *Unchanged*: same path, same source size and nanosecond mtime, and same
-     conversion profile. The stick's copy then matches the recorded
-     `audio_hash`, and for unconverted files the source hash matches too.
-     Manifests without `audio_hash` fall back to `files_equal`. See
+     conversion profile. The manifest also records the stick copy's size
+     and modification time (`copy_stamp`). While the source is unchanged
+     and the copy still has exactly that size and time, neither file is
+     read and the recorded `audio_hash` is trusted. Otherwise (the copy
+     was written since, is missing, or the manifest predates `copy_stamp`)
+     the copy is hashed against `audio_hash` and the source, and its new
+     stamp is recorded. Manifests without `audio_hash` fall back to
+     `files_equal`. See
      [Incremental sync](usb-export-db.md#incremental-sync).
    - *Otherwise*: `copy_staged`, or `compatibility::convert`, into the
      stage. `copying` is reported.

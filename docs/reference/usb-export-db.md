@@ -1219,10 +1219,21 @@ must not shift between syncs, because a deck caches artwork and waveforms
 against them.
 
 Reusing an existing audio file requires the same path, the same source size
-*and* nanosecond mtime, the same conversion profile, **and** a full byte
-comparison of source against destination — removable media may have been
-edited by something else. Converted files
-compare hashes instead. Analysis is rewritten only when the hash or directory
+*and* nanosecond mtime, the same conversion profile, **and** an unchanged
+stick copy. The manifest records each copy's size and modification time
+(`copy_stamp`, absent for in-place library files and in older manifests).
+When the source is unchanged and the copy still has exactly the recorded
+size and a non-zero, equal mtime, neither file is read and the recorded
+`audio_hash` is trusted. Anything else falls back to hashing the copy
+against `audio_hash` (and the source for unconverted files; converted files
+compare the recorded source hash), replaces it if it differs, and records
+the new stamp. A wrong stamp therefore costs one hashing pass and never
+causes a wrong reuse. [OBS] rekordbox does no file check here:
+`execExport` calls `DatabaseMediator::overwrite_export`, which compares
+database rows only. [ASSUME] Accepted trade-off: a source rewritten with
+the same size and the same nanosecond mtime (for example MP3Gain with
+"preserve file date/time") is no longer detected, and on FAT an edit to the
+stick copy that keeps its size within the same 2 s timestamp is not either. Analysis is rewritten only when the hash or directory
 changed, or the bytes on disk differ. The manifest also records expected
 analysis extensions and individual companion hashes. A deleted EXT can
 therefore be detected and repaired without treating it as a player cue edit.
