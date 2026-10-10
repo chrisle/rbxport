@@ -13,6 +13,7 @@ workspace = true
 thiserror = { workspace = true }
 tracing = { workspace = true }
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "alac", "isomp4", "flac", "wav", "aiff", "pcm", "adpcm"] }
+rbl-core = { path = "../rbl-core" }
 mp3lame-encoder = "0.2.5"
 rubato = "0.16"
 

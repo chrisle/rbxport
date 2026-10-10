@@ -32,9 +32,12 @@ cpal = "0.18"
 rtrb = "0.4"
 rubato = "0.16"
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "alac", "isomp4", "flac", "wav", "aiff", "pcm", "adpcm"] }
+rbl-core = { path = "../rbl-core" }
 
 [dev-dependencies]
 tempfile = "3"
 # The load probe walks the installed library; the engine itself needs neither.
 rbl-db = { path = "../rbl-db" }
 rbl-index = { path = "../rbl-index" }
+# Encodes the LAME MP3 the timeline tests play.
+rbl-audio = { path = "../rbl-audio" }
