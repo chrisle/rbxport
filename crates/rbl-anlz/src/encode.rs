@@ -130,16 +130,79 @@ fn mono_byte(column: BandColumn, ceiling: u32) -> u8 {
     u8::try_from((whiteness.min(7) << 5) | band_height(column, ceiling)).unwrap_or(0)
 }
 
-/// `PWAV`: 400 columns, one byte each.
+/// The lowest height rekordbox writes in each preview tag. A silent column
+/// is not 0: over 1,558 rekordbox 7 `.DAT` files of a USB export, the
+/// smallest `PWAV` height is 2 in 1,552 of them and never lower, and the
+/// smallest `PWV2` byte is 1 in 1,143 and never 0 [OBS, issue #278].
+///
+/// Players read 0 as "not analysed yet": the Nexus firmware's preview check
+/// (`TotalWaveWacher_CheckWaveDataComplete`, below) reports a preview with a
+/// zero column as incomplete, and the player then builds its own from the
+/// audio and saves it over the stick's [static].
+const PWAV_FLOOR: u8 = 2;
+const PWV2_FLOOR: u8 = 1;
+
+/// `PWAV`: 400 columns, one byte each, the height at least [`PWAV_FLOOR`].
 #[must_use]
 pub fn pwav(columns: &[BandColumn]) -> Vec<u8> {
-    resample(columns, PREVIEW_COLUMNS).into_iter().map(|c| mono_byte(c, PWAV_CEILING)).collect()
+    resample(columns, PREVIEW_COLUMNS).into_iter().map(|c| device_preview_byte(mono_byte(c, PWAV_CEILING))).collect()
 }
 
-/// `PWV2`: 100 columns, one byte each.
+/// `PWV2`: 100 columns, one byte each: the height alone, 1..=15.
+///
+/// Unlike `PWAV`, rekordbox puts no whiteness above the height here: no
+/// `PWV2` byte in 1,590 rekordbox-written `.DAT` files (a rekordbox 7 USB
+/// export and a rekordbox 7 share tree) is above 15 [OBS, issue #278]. Players
+/// depend on that. The Nexus player firmware checks the 900-byte preview it
+/// loads and throws all of it away, `PWAV` with it, when any `PWV2` byte is
+/// above 15 (`TotalWaveWacher_CheckWaveDataComplete` at `0x000d7c18`, XDJ-RX2
+/// 1.43, which shares the XDJ-1000MK2's code base) [static]. See
+/// [`with_device_preview`] for files already written with whiteness.
 #[must_use]
 pub fn pwv2(columns: &[BandColumn]) -> Vec<u8> {
-    resample(columns, TINY_COLUMNS).into_iter().map(|c| mono_byte(c, PWV2_CEILING)).collect()
+    resample(columns, TINY_COLUMNS).into_iter().map(tiny_preview_byte).collect()
+}
+
+/// One `PWV2` column: its height and nothing else.
+fn tiny_preview_byte(column: BandColumn) -> u8 {
+    device_tiny_preview_byte(u8::try_from(band_height(column, PWV2_CEILING)).unwrap_or(0))
+}
+
+/// The tallest byte a player accepts in `PWV2`: see [`pwv2`].
+pub const PWV2_MAX_BYTE: u8 = 15;
+
+/// One `PWAV` byte as rekordbox writes it: the whiteness kept, the height
+/// at least [`PWAV_FLOOR`]. A byte rekordbox wrote comes back unchanged.
+#[must_use]
+pub fn device_preview_byte(byte: u8) -> u8 {
+    (byte & 0xe0) | (byte & 0x1f).max(PWAV_FLOOR)
+}
+
+/// One `PWV2` byte as rekordbox writes it and players accept it: the
+/// five-bit height without the whiteness bits earlier versions of this
+/// encoder put above it, within [`PWV2_FLOOR`]..=[`PWV2_MAX_BYTE`]. A byte
+/// rekordbox wrote comes back unchanged.
+#[must_use]
+pub fn device_tiny_preview_byte(byte: u8) -> u8 {
+    (byte & 0x1f).clamp(PWV2_FLOOR, PWV2_MAX_BYTE)
+}
+
+/// A section with its `PWAV` or `PWV2` bytes brought to what rekordbox
+/// writes and players accept; every other section unchanged. Analysis
+/// written before issue #278 carried whiteness in `PWV2`, which makes a
+/// Nexus player (XDJ-1000MK2, XDJ-RX2) reject the track's whole preview, and
+/// zero-height columns, which it reads as unfinished; an export repairs both
+/// rather than asking for every track to be analysed again.
+#[must_use]
+pub fn with_device_preview(section: &Section) -> Section {
+    let repair: fn(u8) -> u8 = if section.tag == FourCc::new(b"PWAV") {
+        device_preview_byte
+    } else if section.tag == FourCc::new(b"PWV2") {
+        device_tiny_preview_byte
+    } else {
+        return section.clone();
+    };
+    Section { tag: section.tag, header: section.header.clone(), payload: section.payload.iter().map(|&b| repair(b)).collect() }
 }
 
 /// `PWV3`: every column, one byte each.
@@ -432,9 +495,9 @@ mod tests {
         assert_eq!(band_height(full, PWAV_CEILING), 25);
         assert_eq!(band_height(full, DETAIL_CEILING), 31);
         assert_eq!(pwav(&columns).iter().map(|b| b & 0x1f).max(), Some(25));
-        assert_eq!(pwv2(&columns).iter().map(|b| b & 0x1f).max(), Some(15));
+        assert_eq!(pwv2(&columns).iter().max(), Some(&15), "PWV2 is height alone, no whiteness");
         assert_eq!(pwv3(&columns).iter().map(|b| b & 0x1f).max(), Some(31));
-        assert_eq!(pwav(&[BandColumn::default()])[0] & 0x1f, 0);
+        assert_eq!(pwav(&[BandColumn::default()])[0] & 0x1f, 2, "a silent column at rekordbox's floor, not 0");
         // A treble-only column is white; a bass-only one is not.
         assert_eq!(mono_byte(BandColumn { low: 0, mid: 0, high: 255, peak: 255 }, PWAV_CEILING) >> 5, 7);
         assert_eq!(mono_byte(BandColumn { low: 255, mid: 0, high: 0, peak: 255 }, PWAV_CEILING) >> 5, 0);
@@ -443,6 +506,43 @@ mod tests {
         let word = u16::from_be_bytes(pwv5(&[full])[..2].try_into().unwrap());
         assert_eq!(word >> 7, 0b1_1111_1111, "three bits each of red, green and blue");
         assert_eq!((word >> 2) & 0x1f, 31, "the band-derived height, into all five bits");
+    }
+
+    #[test]
+    fn pwv2_carries_the_height_alone_as_rekordbox_does() {
+        // No PWV2 byte rekordbox writes is above 15 (1,590 of 1,590 files,
+        // issue #278), and a Nexus player drops the whole preview when one
+        // is. A treble-only column, which takes whiteness 7 in PWAV, is
+        // still just its height here.
+        let treble = BandColumn { low: 0, mid: 0, high: 255, peak: 255 };
+        assert_eq!(pwv2(&[treble]), vec![15; TINY_COLUMNS]);
+        assert_eq!(pwav(&[treble])[0], 0b111_11001, "PWAV keeps whiteness 7 over its height of 25");
+        let columns = ramp(3000);
+        assert!(pwv2(&columns).iter().all(|&b| b <= PWV2_MAX_BYTE));
+        assert_eq!(pwv2(&columns).iter().max(), Some(&15));
+        assert_eq!(pwv2(&[BandColumn::default()]), vec![1; TINY_COLUMNS], "a silent column at rekordbox's floor, not 0");
+    }
+
+    #[test]
+    fn an_export_repairs_old_previews_and_leaves_rekordboxs_alone() {
+        // Bytes this encoder wrote before issue #278: whiteness 2 over a
+        // height of 8, whiteness 7 over 15, a silent column, whiteness 1 over 15.
+        let ours = Section::new(b"PWV2", vec![0; 8], vec![0x48, 0xef, 0x00, 0x2f]);
+        assert_eq!(with_device_preview(&ours).payload, [8, 15, 1, 15]);
+        assert_eq!(with_device_preview(&ours).header, ours.header);
+        // PWAV keeps its whiteness; only a height under rekordbox's floor moves.
+        let pwav = Section::new(b"PWAV", vec![0; 8], vec![0xa0, 0x00, 0xe5, 0x21]);
+        assert_eq!(with_device_preview(&pwav).payload, [0xa2, 0x02, 0xe5, 0x22]);
+        // rekordbox's own previews (bytes from a rekordbox 7 USB export) are
+        // in range already and come back byte for byte.
+        let rekordbox_pwv2 = Section::new(b"PWV2", vec![0; 8], vec![0x08, 0x0a, 0x0a, 0x04, 0x0c, 0x0d, 0x0e, 0x01]);
+        assert_eq!(with_device_preview(&rekordbox_pwv2), rekordbox_pwv2);
+        let rekordbox_pwav = Section::new(b"PWAV", vec![0; 8], vec![0xa2, 0xa2, 0xa5, 0xa4, 0xa7]);
+        assert_eq!(with_device_preview(&rekordbox_pwav), rekordbox_pwav);
+        // Other sections are not touched.
+        let pwv3 = Section::new(b"PWV3", vec![0; 12], vec![0x00, 0xe0]);
+        assert_eq!(with_device_preview(&pwv3), pwv3);
+        assert_eq!(device_tiny_preview_byte(0xff), 15);
     }
 
     #[test]
