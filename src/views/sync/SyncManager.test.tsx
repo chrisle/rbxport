@@ -76,6 +76,7 @@ let onClose: ReturnType<typeof vi.fn>;
 let rekordboxOpen: boolean;
 let itunesLibrary: ItunesLibrary | null;
 let importItunesSelected: ReturnType<typeof vi.fn>;
+let itunesDefault: ReturnType<typeof vi.fn>;
 
 const settle = () =>
   act(async () => {
@@ -121,6 +122,7 @@ beforeEach(async () => {
   validateExportFiles = vi.fn(() => Promise.resolve([]));
   confirmExport = vi.fn(() => Promise.resolve(true));
   itunesLibrary = null;
+  itunesDefault = vi.fn(() => Promise.resolve(itunesLibrary));
   importItunesSelected = vi.fn(() => Promise.resolve({ imported: 5, existing: 0, skipped: [], playlists: 1, cues: 0, tracks: [] }));
   __setBackend({
     librarySummary: () => Promise.resolve({ trackCount: 3, playlistCount: 3, readOnly: rekordboxOpen, dbVersion: 6000 }),
@@ -129,7 +131,7 @@ beforeEach(async () => {
       libraryChanged = listener;
       return () => { libraryChanged = undefined; };
     },
-    itunesDefaultLibrary: () => Promise.resolve(itunesLibrary),
+    itunesDefaultLibrary: itunesDefault,
     chooseItunesLibrary: () => Promise.resolve(null),
     importItunesSelected,
     listDevices,
@@ -540,6 +542,28 @@ describe("SyncManager", () => {
     await settle();
     expect(host.querySelector('[aria-label="Playlists"] [role="alert"]')).toBeNull();
     expect(names()).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "Closing", "Fresh Playlist"]);
+  });
+
+  it("shows the iTunes column and its SYNC off Linux, and looks for the library", () => {
+    expect(host.querySelector('section[aria-label="iTunes"]')).not.toBeNull();
+    expect(host.querySelector('button[aria-label="Import selected iTunes playlists"]')).not.toBeNull();
+    expect(itunesDefault).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll("section")).toHaveLength(3);
+  });
+
+  it("is two columns on Linux, with no iTunes column, SYNC or library lookup", async () => {
+    act(() => root.unmount());
+    itunesDefault.mockClear();
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Linux x86_64" });
+    root = createRoot(host);
+    act(() => root.render(<SyncManager onClose={onClose} />));
+    await settle();
+
+    expect(host.querySelector('section[aria-label="iTunes"]')).toBeNull();
+    expect(host.querySelector('button[aria-label="Import selected iTunes playlists"]')).toBeNull();
+    expect(host.textContent).not.toContain("iTunes");
+    expect(itunesDefault).not.toHaveBeenCalled();
+    expect([...host.querySelectorAll("section")].map((c) => c.getAttribute("aria-label"))).toEqual(["rbxport", "Device"]);
   });
 
   it("imports only the ticked iTunes playlists and refreshes the library column", async () => {

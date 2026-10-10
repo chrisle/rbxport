@@ -150,7 +150,10 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   const [itunes, setItunes] = useState<ItunesLibrary | null>(null);
   const [itunesTicked, setItunesTicked] = useState<ReadonlySet<string>>(new Set());
   const [itunesCollapsed, setItunesCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const [itunesLoading, setItunesLoading] = useState(true);
+  // iTunes and Music.app do not exist on Linux, so there the manager is two
+  // columns (rbxport, Device) and never looks for an iTunes library.
+  const showItunes = useMemo(() => !detectPlatform().linux, []);
+  const [itunesLoading, setItunesLoading] = useState(showItunes);
   const [itunesError, setItunesError] = useState("");
   const [ejectingPath, setEjectingPath] = useState<string | null>(null);
   const [missingPrompt, setMissingPrompt] = useState<{ files: MissingExportFile[]; resolve: (proceed: boolean) => void } | null>(null);
@@ -445,6 +448,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   // Music.app writes the XML only when sharing is on — and leaves the column
   // offering a file picker rather than showing an error.
   useEffect(() => {
+    if (!showItunes) return;
     let live = true;
     setItunesLoading(true);
     void getBackend()
@@ -457,7 +461,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
       .catch(() => { if (live) setItunesError("Couldn’t read the iTunes library."); })
       .finally(() => { if (live) setItunesLoading(false); });
     return () => { live = false; };
-  }, []);
+  }, [showItunes]);
 
   const chooseItunes = useCallback(() => {
     if (busy) return;
@@ -763,6 +767,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
         Sync Manager
       </header>
       <div className={styles.body}>
+        {showItunes ? <>
         <section className={styles.column} aria-label="iTunes">
           <div className={styles.headingRow}>
             <div>
@@ -826,6 +831,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
             {operation === "itunes" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> Importing…</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
           </button>
         </div>
+        </> : null}
 
         <section className={styles.column} aria-label="rbxport">
           <div className={styles.headingRow}>
