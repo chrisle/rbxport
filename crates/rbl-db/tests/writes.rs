@@ -3136,6 +3136,110 @@ fn removing_tracks_in_a_batch_leaves_what_removing_them_one_at_a_time_does() {
     assert_eq!(counter, *usns.last().unwrap());
 }
 
+/// The library a long job leaves, checked whole: no live playlist entry
+/// points at a removed track, every playlist numbers its tracks 1..n, and
+/// the update counter is at the highest USN any row carries.
+fn assert_consistent(f: &Fixture) {
+    assert_eq!(
+        f.count(
+            "SELECT COUNT(*) FROM djmdSongPlaylist s JOIN djmdContent c ON c.ID = s.ContentID
+             WHERE s.rb_local_deleted = 0 AND c.rb_local_deleted = 1",
+        ),
+        0,
+        "no live playlist entry points at a removed track",
+    );
+    let playlists: Vec<String> = {
+        let mut stmt = f.conn().prepare("SELECT ID FROM djmdPlaylist WHERE rb_local_deleted = 0").unwrap();
+        stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
+    };
+    for playlist in &playlists {
+        let numbers = f.track_numbers(playlist);
+        assert_eq!(numbers, (1..=numbers.len() as i64).collect::<Vec<_>>(), "playlist {playlist} numbered 1..n");
+    }
+    let highest: i64 = f.one(
+        "SELECT MAX(u) FROM (SELECT MAX(rb_local_usn) AS u FROM djmdContent
+                             UNION ALL SELECT MAX(rb_local_usn) FROM djmdSongPlaylist)",
+        &[],
+    );
+    let counter: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    assert!(counter >= highest, "counter {counter} below a row's USN {highest}");
+}
+
+/// #291: Remove from Collection runs as a status-bar job, one
+/// `delete_tracks` call (one transaction) per slice of 100, and Stop lands
+/// between slices. A stop after two slices of 495 tracks leaves those 200
+/// removed from the collection and from every playlist, the other 295 as
+/// they were, and nothing half-done; removing the rest later finishes it.
+#[test]
+fn a_removal_stopped_between_slices_leaves_a_consistent_library() {
+    let mut f = fixture_with(Shape { tracks: 495, ..Shape::default() });
+    let all: Vec<String> = (0..495).map(track_id).collect();
+    let big = f.writer.create_playlist("Big", ROOT).unwrap();
+    f.writer.add_tracks(&big, &all).unwrap();
+    let small = f.writer.create_playlist("Small", ROOT).unwrap();
+    let mixed: Vec<String> = [150, 250, 50, 494].into_iter().map(track_id).collect();
+    f.writer.add_tracks(&small, &mixed).unwrap();
+
+    let slices: Vec<&[String]> = all.chunks(100).collect();
+    for slice in &slices[..2] {
+        f.writer.delete_tracks(slice).unwrap();
+    }
+
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 1"), 200);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"), 295);
+    assert_eq!(f.order(&big), all[200..].to_vec());
+    assert_eq!(f.order(&small), vec![track_id(250), track_id(494)]);
+    assert_consistent(&f);
+
+    for slice in &slices[2..] {
+        f.writer.delete_tracks(slice).unwrap();
+    }
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"), 0);
+    assert!(f.order(&big).is_empty());
+    assert_consistent(&f);
+}
+
+/// #291: Import runs as a status-bar job, one `import_files` call (one
+/// transaction) per slice of 100 files. A stop after three slices of 495
+/// leaves exactly those 300 files as whole track rows and none of the rest;
+/// importing all 495 again takes the 300 as already held and adds the 195,
+/// ending where one uninterrupted import ends.
+#[test]
+fn an_import_stopped_between_slices_leaves_whole_rows_and_can_be_finished() {
+    use rbl_db::write::ImportOutcome;
+
+    let root = tempfile::tempdir().unwrap();
+    let audio = root.path().join("imports");
+    std::fs::create_dir(&audio).unwrap();
+    let files: Vec<std::path::PathBuf> = (0..495)
+        .map(|i| {
+            let path = audio.join(format!("t{i:03}.mp3"));
+            tagged_mp3(&path, &[]);
+            path
+        })
+        .collect();
+
+    let mut stopped = fixture();
+    let before = stopped.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0");
+    for slice in files.chunks(100).take(3) {
+        let outcomes = stopped.writer.import_files(slice).unwrap();
+        assert!(outcomes.iter().all(|o| matches!(o, ImportOutcome::Added(_))));
+    }
+    assert_eq!(stopped.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"), before + 300);
+    assert_eq!(described(&stopped).len(), 300);
+    assert_consistent(&stopped);
+
+    let again = stopped.writer.import_files(&files).unwrap();
+    let held = again.iter().filter(|o| matches!(o, ImportOutcome::Existing(_))).count();
+    let added = again.iter().filter(|o| matches!(o, ImportOutcome::Added(_))).count();
+    assert_eq!((held, added), (300, 195));
+    assert_consistent(&stopped);
+
+    let mut whole = fixture();
+    whole.writer.import_files(&files).unwrap();
+    assert_eq!(described(&stopped), described(&whole));
+}
+
 // ------------------------------------------------- cues a player saves (LINK)
 
 fn player_cue(kind: u8, in_ms: u32, out_ms: Option<u32>) -> rbl_db::write::PlayerCue {
