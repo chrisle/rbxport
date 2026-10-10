@@ -22,7 +22,7 @@ import { getBackend } from "@/ipc/client";
 import { useElementSize } from "@/store/useElementSize";
 import { Artwork } from "@/components/Artwork";
 import {
-  EjectIcon, GridAlignAllIcon, GridAlignHereIcon, GridCutIcon, GridDoubleIcon, GridHalveIcon,
+  CueLoopIcon, EjectIcon, GridAlignAllIcon, GridAlignHereIcon, GridCutIcon, GridDoubleIcon, GridHalveIcon,
   GridLockIcon, GridLockOpenIcon, GridMarkIcon, GridMetronomeIcon, GridNarrowIcon, GridRedoIcon,
   GridShiftBackIcon, GridShiftForwardIcon, GridUndoIcon, GridWidenIcon, RecordIcon,
 } from "@/components/icons";
@@ -32,6 +32,7 @@ import {
   NO_BEATS,
   nearestBeatMs,
   callLeavesFrom,
+  lateCall,
   subdivideGrid,
   ZOOM_STEPS,
   showsEveryBeat,
@@ -100,7 +101,7 @@ import { useHoldRepeat } from "./useHoldRepeat";
 import { DeckInfo } from "./DeckInfo";
 import { DualControls, DualHead } from "./DualDeck";
 import { READ_ONLY_REASON, useMemoryCues } from "./useMemoryCues";
-import { useHotCues } from "./useHotCues";
+import { type DeckLoopRange, useHotCues } from "./useHotCues";
 import { useCueWriter } from "./useCueWriter";
 import { CueColorMenu } from "./CueColorMenu";
 import styles from "./Player.module.css";
@@ -333,13 +334,15 @@ export const CueMarkers = memo(function CueMarkers({
   const deckLoop = loop ? bandStyle(loop.inSeconds * 1000, loop.outSeconds * 1000) : null;
   return (
     <>
-      {/* Memory loops as bands under their heads, and the deck's loop over
-          them, lit while it plays — the stored ones read as places to go,
-          the live one as where the deck is going round. */}
+      {/* Stored loops, memory and hot, as bands from their in point to their
+          out point, and the deck's loop over them, lit while it plays — the
+          stored ones read as places to go, the live one as where the deck is
+          going round. */}
       {cues.map((cue) => {
-        if (!cue.memory || cue.outMs <= cue.positionMs) return null;
+        if (cue.outMs <= cue.positionMs) return null;
         const style = bandStyle(cue.positionMs, cue.outMs);
-        return style ? <span key={`loop-${cue.id || cue.positionMs}`} className={styles.loopBand} style={style} aria-hidden /> : null;
+        const key = `loop-${cue.id || (cue.memory ? cue.positionMs : `${cue.letter}-${cue.positionMs}`)}`;
+        return style ? <span key={key} className={styles.loopBand} data-cue-loop={cue.memory ? "memory" : cue.letter} style={style} aria-hidden /> : null;
       })}
       {deckLoop ? (
         <span className={styles.loopBand} data-active={loop?.active || undefined} style={deckLoop} aria-hidden />
@@ -1293,15 +1296,27 @@ export const Player = memo(function Player({
    * that left a loop of `wrap` seconds reads the head modulo the loop: see
    * `callLeavesFrom`.
    */
-  const jumpAt = useEventCallback((at: number, to: number, from: number, wrap: number) => {
+  const jumpAt = useEventCallback((at: number, to: number, from: number, wrap: number, loop?: DeckLoopRange | null) => {
     cancelCall();
     const rate = playback.tempo > 0 ? playback.tempo : 1;
     const wait = Math.max(0, ((at - from) * 1000) / rate);
     pendingCall.current = globalThis.setTimeout(() => {
       pendingCall.current = undefined;
       if (!playingNow.current) return;
-      const leave = callLeavesFrom(playback.positionNow(), at, wrap, CALL_DRIFT);
-      if (leave !== null) playback.moveBy(to - leave);
+      const head = playback.positionNow();
+      const leave = callLeavesFrom(head, at, wrap, CALL_DRIFT);
+      if (leave === null) return;
+      if (!loop) {
+        playback.moveBy(to - leave);
+        return;
+      }
+      // A hot loop lands as its loop. The loop and the move go to the engine
+      // as two commands that can arrive in either order, so the move is a
+      // seek inside the loop rather than a step from wherever the head is:
+      // either way round, the deck ends inside the loop, as late into it as
+      // the timer was.
+      playback.setLoop(loop.inSeconds, loop.outSeconds);
+      playback.seek(to + lateCall(head, at, wrap, CALL_DRIFT));
     }, wait);
   });
   const playingLoop = useEventCallback(() => (playback.loop?.active ? playback.loop : null));
@@ -1317,7 +1332,8 @@ export const Player = memo(function Player({
   const [dropSlot, setDropSlot] = useState<string | null>(null);
   const hot = useHotCues({
     trackId: playback.idle ? null : track?.id ?? null,
-    cues, positionSeconds, seek, play: playFromCue, playing: deckPlaying, jumpAt, activeLoop: playingLoop, exitLoop: leaveLoop,
+    cues, positionSeconds, seek, play: playFromCue, playing: deckPlaying, jumpAt, setLoop: playback.setLoop,
+    activeLoop: playingLoop, exitLoop: leaveLoop,
     quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
   });
   // The hooks own editability, so the disabled state and its explanation
@@ -2896,6 +2912,11 @@ export const Player = memo(function Player({
                       <span className={styles.cueTime}>{splitTime(cue.positionMs / 1000).main}</span>
                       <CueName cue={cue} renaming={renamingCue} setRenaming={setRenamingCue}
                         canEdit={hot.canEdit} onSave={(text) => writeCue((edits) => edits.setCueComment(cue.id, text))} />
+                      {/* rekordbox's HOT CUE panel marks a saved loop with its
+                          orange loop icon (manual p.73, item 4). */}
+                      {cue.outMs > cue.positionMs ? (
+                        <CueLoopIcon className={styles.cueLoopIcon} data-testid="hot-cue-loop" />
+                      ) : null}
                       <button
                         type="button"
                         className={styles.cueDelete}

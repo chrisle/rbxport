@@ -26,6 +26,19 @@
  * loop's old out point, whichever comes first. From pause the call is at
  * once, as is any call with Q off.
  *
+ * A hot cue saved as a loop (a `djmdCue` row with an `OutMsec`, drawn orange
+ * in the HOT CUE panel) is called as the loop: the deck goes to its in point,
+ * plays, and goes round until EXIT, as a memory loop called from the list
+ * does. rekordbox 7.2.19's `CueBehavior::doHotCueLaunch` @0x102b075b0 reads
+ * the cue's out point and, when it has one, moves to the in point and sets
+ * the out-to-in warp pair that is a loop (`doSetWarpPointPair` @0x102b07928)
+ * before it starts the deck; `QuantizedCueBehavior::doHotCueLaunch` carries
+ * the same loop through its wait [OBS static]. The manual's PERFORMANCE
+ * hint, "During the Hot Cue playback, you can cancel the loop play and
+ * adjust the length of the loop" (p.165), and the XDJ-RX3's
+ * `playengine::Loop::playHotLoop` (in, out, play, `startLooping`) agree
+ * [OBS manual, OBS firmware].
+ *
  * A set pad is never set over. What rekordbox does with the old row when a
  * slot is filled twice — a soft delete and a new row, or an update in place
  * — has not been recorded [UNKNOWN], so the pad calls rather than replaces,
@@ -37,6 +50,12 @@ import type { Cue } from "@/ipc/types";
 import { hotCue } from "@/lib/cues";
 import { foldIntoLoop, nearestBeatMs, quantizedLaunchMs, type BeatGrid } from "@/lib/player";
 import { useCueWriter } from "./useCueWriter";
+
+/** A loop's range, in seconds. */
+export interface DeckLoopRange {
+  inSeconds: number;
+  outSeconds: number;
+}
 
 export interface HotCueDeck {
   /** The loaded track's id, or `null` when the deck is empty. */
@@ -60,9 +79,17 @@ export interface HotCueDeck {
    * wrapped once before the exit reached it. Without it a call is always
    * made at once.
    */
-  jumpAt?: ((atSeconds: number, toSeconds: number, fromSeconds: number, wrapSeconds: number) => void) | undefined;
+  jumpAt?: ((
+    atSeconds: number, toSeconds: number, fromSeconds: number, wrapSeconds: number, loop?: DeckLoopRange | null,
+  ) => void) | undefined;
+  /**
+   * Sets the deck's loop and starts it, for a hot cue saved as a loop. A head
+   * outside the range goes to the in point; one inside it stays. Without it a
+   * hot loop is called as a plain hot cue.
+   */
+  setLoop?: ((inSeconds: number, outSeconds: number) => void) | undefined;
   /** The deck's loop while it plays, or `null` with none or out of it. */
-  activeLoop?: (() => { inSeconds: number; outSeconds: number } | null) | undefined;
+  activeLoop?: (() => DeckLoopRange | null) | undefined;
   /** Leaves the playing loop, keeping it for RELOOP. */
   exitLoop?: (() => void) | undefined;
   /**
@@ -97,7 +124,7 @@ export interface HotCueActions {
 
 export function useHotCues(deck: HotCueDeck): HotCueActions {
   const {
-    trackId, cues, positionSeconds, seek, play, playing, jumpAt, activeLoop, exitLoop, quantiseTo, readOnly, onError,
+    trackId, cues, positionSeconds, seek, play, playing, jumpAt, setLoop, activeLoop, exitLoop, quantiseTo, readOnly, onError,
   } = deck;
   const canEdit = trackId !== null && !readOnly;
   const write = useCueWriter(onError);
@@ -108,6 +135,10 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
     (letter: string) => {
       const cue = hotCue(cues, letter);
       if (cue) {
+        // A hot loop is called as its loop; anything else as a point.
+        const hotLoop = setLoop && cue.outMs > cue.positionMs
+          ? { inSeconds: cue.positionMs / 1000, outSeconds: cue.outMs / 1000 }
+          : null;
         // Calling a hot cue is a jump that plays: from pause rekordbox starts
         // playback at the cue (manual p.102), and a playing deck carries on
         // from it. Unlike a memory cue it does not become the cue point, on a
@@ -123,10 +154,13 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
           );
           if (at !== null) {
             if (loop) exitLoop?.();
-            jumpAt(at / 1000, cue.positionMs / 1000, head, loop ? loop.outSeconds - loop.inSeconds : 0);
+            jumpAt(at / 1000, cue.positionMs / 1000, head, loop ? loop.outSeconds - loop.inSeconds : 0, hotLoop);
             return;
           }
         }
+        // The loop first and then the in point: either order the two reach
+        // the engine in, the head ends at the in point inside the loop.
+        if (hotLoop) setLoop?.(hotLoop.inSeconds, hotLoop.outSeconds);
         seek(cue.positionMs / 1000);
         play();
         return;
@@ -136,7 +170,7 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
       const positionMs = Math.round(quantiseTo ? nearestBeatMs(quantiseTo, at) : at);
       write((edits) => edits.addCue(trackId, { hot: letter }, positionMs));
     },
-    [cues, seek, play, playing, jumpAt, activeLoop, exitLoop, canEdit, trackId, positionSeconds, quantiseTo, write],
+    [cues, seek, play, playing, jumpAt, setLoop, activeLoop, exitLoop, canEdit, trackId, positionSeconds, quantiseTo, write],
   );
 
   const clear = useCallback(

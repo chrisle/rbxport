@@ -124,6 +124,7 @@
   --c-info-button: #7D7D7D; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Artwork tab's import and delete buttons, (125,125,125) with a black glyph */
   --c-cue-row: #0F0F0F; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: each row's box reads (15,15,15) on the (30,30,30) panel; ten boxes whether or not a cue fills them */
   --c-cue-delete: #969696; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: the ✕ on a row that holds a cue, (150,150,150) at its brightest */
+  --c-cue-loop-icon: #FF8205; /* rekordbox 7 skins/cueLoopIcon.svg fill rgb(255,130,5): the loop mark on a HOT CUE or MEMORY row that holds a saved loop (manual p.72-73, item 4) */
   --c-cue-delete-empty: #454545; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: the ✕ on an empty row, (69,69,69) at its brightest */
   --c-titlebar-text: #B2B3B4; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the title bar's 'rekordbox', (178,179,180) across its stems */
   --c-rail-lit: #3571E3; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the open Information box's fill in the right-hand icon column, (53,113,227) solid across x 3664..3709; the open sub-browser's in 9.09.26 PM is the same */

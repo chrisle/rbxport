@@ -1144,6 +1144,9 @@ button.pageNumber:disabled { color: var(--c-icon-off); }
   border: 1px solid var(--c-text);
   padding: 0 2px;
 }
+/* A row holding a saved loop carries rekordbox's orange loop mark before
+   the ✕, at the skin's own 10x6. */
+.cueLoopIcon { width: 10px; height: 6px; flex: none; color: var(--c-cue-loop-icon); }
 .cueDelete { color: var(--c-cue-delete); flex: none; }
 /* The memory list's ✕ is a button of its own; the hot-cue list's is still a
    glyph. Same glyph, same place, and disabled it dims like the pad row's. */
