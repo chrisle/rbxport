@@ -36,7 +36,7 @@ use rbl_index::Library;
 
 pub use beacon::{LinkState, Player};
 pub use catalog::{IndexCatalog, KeyNotation, KeyOrder, Played, Source};
-pub use rbl_dbserver::catalog::{ArtistRole, Edit, RootCategory, Sort, TrackColumn};
+pub use rbl_dbserver::catalog::{ArtistRole, Edit, HotCueColour, PlayerCue, RootCategory, Sort, TrackColumn};
 pub use rbl_prolink::DeviceType;
 pub use watch::Watcher;
 

@@ -1514,7 +1514,9 @@ fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() 
                 Edit::HotCueBankCue { .. } => return false,
                 Edit::HistoryAdd { .. }
                 | Edit::HistoryRemove { .. }
-                | Edit::HistoryDelete { .. } => return false,
+                | Edit::HistoryDelete { .. }
+                | Edit::SaveCue { .. }
+                | Edit::DeleteCue { .. } => return false,
             }
             true
         }
@@ -2069,10 +2071,14 @@ fn analysis_write_early_refusals_preserve_menus_without_storage_calls() {
                 }
             }
         }
+        // A `2705` shorter than 0x38 is refused with 0x32. One of 0x38
+        // whose hot cue slot (0xaaaa) is past H writes nothing and answers
+        // with the track's cue list, which this catalog cannot read: the
+        // same 0x32 envelope, after one read.
         for length in [0, 1, 55, 56] {
             let mut request = numbers(0x2705, 0x8134, &[CTX, TRACK, 0, length]);
             request.arguments.push(Argument::Blob(vec![0xaa; length as usize]));
-            cases.push((request, length < 56));
+            cases.push((request, true));
         }
         // OnWriteCmd and these early guards have no foreign-context gate.
         for context in [CTX, SECOND, 0x0208_0302] {
@@ -2094,7 +2100,9 @@ fn analysis_write_early_refusals_preserve_menus_without_storage_calls() {
             }
         }
         // RBX malformed-shape safety policy, not vendor refusal parity:
-        // wrong-typed fields and missing blobs remain unsupported (4003).
+        // wrong-typed fields and missing blobs remain unsupported (4003),
+        // except on a cue save, where a 4003 sends a CDJ-3000 into an
+        // endless resend: that is refused with the 0x32 cue envelope.
         for command in [0x2705, 0x2805, 0x2905] {
             let valid = if command == 0x2705 {
                 let mut request = numbers(command, 0x8134, &[CTX, TRACK, 0, 55]);
@@ -2108,15 +2116,21 @@ fn analysis_write_early_refusals_preserve_menus_without_storage_calls() {
                 malformed.push(arguments);
             }
             for arguments in malformed {
+                let expected = if command == 0x2705 {
+                    hex("11872349ae1100008134104e020f05140000000506060603061100002705110000003211000000001100000000")
+                } else {
+                    hex(&format!("11872349ae11000081341040030f01140000000106110000{command:04x}"))
+                };
                 assert_eq!(exchange_wire(&mut s, &Message::new(0x8134, command, arguments).encode()),
-                    vec![hex(&format!("11872349ae11000081341040030f01140000000106110000{command:04x}"))]);
+                    vec![expected]);
                 for (render, expected) in renders.iter().zip(&before) {
                     assert_eq!(exchange_wire(&mut s, &render.encode()), *expected);
                 }
             }
         }
         assert_eq!(catalog.edits.load(Ordering::Relaxed), 0);
-        assert_eq!(catalog.reads.load(Ordering::Relaxed), 0);
+        // The three 0x38-byte `2705` requests read the cue list; nothing else.
+        assert_eq!(catalog.reads.load(Ordering::Relaxed), 3);
     }
 }
 

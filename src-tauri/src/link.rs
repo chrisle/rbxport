@@ -156,11 +156,15 @@ pub fn interfaces() -> Vec<InterfaceDto> {
     rbl_link::interfaces().iter().map(InterfaceDto::from).collect()
 }
 
+/// Tells the window the library changed: an event name and its payload,
+/// the generation for `library:changed`, the track's id for `cues:changed`.
+pub type LibraryEvents = Arc<dyn Fn(&'static str, serde_json::Value) + Send + Sync>;
+
 /// The app's library, as the link reads it. Weak so the state does not own
 /// a session that owns the state.
 struct StateSource(
     Weak<AppState>,
-    Arc<dyn Fn(&'static str, u32) + Send + Sync>,
+    LibraryEvents,
     rbl_prolink::DeviceSettings,
     rbl_link::KeyOrder,
 );
@@ -199,6 +203,13 @@ impl Source for StateSource {
 
     fn edit(&self, edit: &rbl_link::Edit) -> bool {
         let Some(state) = self.0.upgrade() else { return false; };
+        if let rbl_link::Edit::SaveCue { track, cue } | rbl_link::Edit::DeleteCue { track, cue } = edit {
+            let save = matches!(edit, rbl_link::Edit::SaveCue { .. });
+            return match player_cue_edit(&state, &track.to_string(), &player_cue(cue), save) {
+                Ok(()) => { (self.1)("cues:changed", track.to_string().into()); true }
+                Err(error) => { tracing::warn!(%error, ?edit, "player cue edit refused"); false }
+            };
+        }
         if let rbl_link::Edit::GridOffset { track, offset_ms } = edit {
             return match save_grid_offset(&state, &track.to_string(), *offset_ms) {
                 Ok(()) => true,
@@ -212,7 +223,7 @@ impl Source for StateSource {
             rbl_link::Edit::HotCueBankCue { .. } => crate::commands::Touched::Metadata(Vec::new()),
             // The catalog keeps the link session's history and writes it
             // through the methods below.
-            rbl_link::Edit::HistoryAdd { .. } | rbl_link::Edit::HistoryRemove { .. } | rbl_link::Edit::HistoryDelete { .. } => return false,
+            rbl_link::Edit::HistoryAdd { .. } | rbl_link::Edit::HistoryRemove { .. } | rbl_link::Edit::HistoryDelete { .. } | rbl_link::Edit::SaveCue { .. } | rbl_link::Edit::DeleteCue { .. } => return false,
         };
         let event = touched.event();
         let result = state.write_then(|writer| match edit {
@@ -234,10 +245,12 @@ impl Source for StateSource {
             rbl_link::Edit::GridOffset { .. }
             | rbl_link::Edit::HistoryAdd { .. }
             | rbl_link::Edit::HistoryRemove { .. }
-            | rbl_link::Edit::HistoryDelete { .. } => unreachable!("handled above"),
+            | rbl_link::Edit::HistoryDelete { .. }
+            | rbl_link::Edit::SaveCue { .. }
+            | rbl_link::Edit::DeleteCue { .. } => unreachable!("handled above"),
         }, |db, _| crate::commands::refresh_after_edit(&state, db, touched));
         match result {
-            Ok(generation) => { (self.1)(event, generation); true }
+            Ok(generation) => { (self.1)(event, generation.into()); true }
             Err(error) => { tracing::warn!(%error, ?edit, "player library edit or refresh failed"); false }
         }
     }
@@ -310,6 +323,41 @@ impl Source for StateSource {
     }
 }
 
+/// A player's cue as the library stores it. A hot cue whose colour came
+/// only as LED red, green and blue takes the device pad palette's index for
+/// exactly that colour, or 1 when there is none, as rekordbox's
+/// `PSvDBMain::GetColorTableIndex` and the clamp after it in
+/// `SavUsbCueExt` make it [OBS static].
+fn player_cue(cue: &rbl_link::PlayerCue) -> rbl_db::write::PlayerCue {
+    let color_table_index = match cue.hot_colour {
+        rbl_link::HotCueColour::Index(index) => index,
+        rbl_link::HotCueColour::Rgb(rgb) => rbl_anlz::MEASURED_CUE_COLOURS
+            .iter()
+            .find(|(index, colour)| (1..=64).contains(index) && *colour == rgb)
+            .map_or(1, |(index, _)| *index),
+    };
+    rbl_db::write::PlayerCue {
+        kind: cue.kind,
+        in_ms: cue.in_ms,
+        out_ms: cue.out_ms,
+        colour: cue.colour,
+        color_table_index,
+        comment: cue.comment.clone(),
+        beat_loop: cue.beat_loop,
+    }
+}
+
+/// Saves or deletes a player's cue and reads that track's cues again, as a
+/// cue edit in the window does (`cues.rs`), so the next request for the
+/// track's cues, from a player or the window, has it.
+fn player_cue_edit(state: &AppState, track: &str, cue: &rbl_db::write::PlayerCue, save: bool) -> Result<(), rbl_db::DbError> {
+    let library = state.library().map_err(|error| rbl_db::DbError::Open(error.message))?;
+    state.write_then(
+        |writer| if save { writer.save_player_cue(track, cue).map(|_| ()) } else { writer.delete_player_cue(track, cue).map(|_| ()) },
+        |db, ()| Ok(rbl_index::reload_cues_of(db, &library, track)?),
+    )
+}
+
 impl StateSource {
     /// A write to the history tree for a player, then the histories read
     /// again — with the play counts of `tracks` — and the window told.
@@ -322,7 +370,7 @@ impl StateSource {
         });
         match result {
             Ok((value, generation)) => {
-                (self.1)(event, generation);
+                (self.1)(event, generation.into());
                 Some(value)
             }
             Err(error) => {
@@ -381,7 +429,7 @@ impl Session {
         device_settings: rbl_prolink::DeviceSettings,
         key_order: rbl_link::KeyOrder,
         report: F,
-        library_changed: Arc<dyn Fn(&'static str, u32) + Send + Sync>,
+        library_changed: LibraryEvents,
     ) -> Result<Self, String>
     where
         F: Fn(LinkStatusDto) + Send + 'static,
@@ -768,8 +816,8 @@ mod grid_offset_tests {
         let received = notifications.clone();
         let source = StateSource(
             Arc::downgrade(&state),
-            Arc::new(move |event, generation| {
-                received.lock().unwrap().push((event, generation));
+            Arc::new(move |event, payload: serde_json::Value| {
+                received.lock().unwrap().push((event, payload));
             }),
             rbl_prolink::DeviceSettings::default(),
             rbl_link::KeyOrder::Musical,
@@ -798,7 +846,7 @@ mod grid_offset_tests {
             assert_eq!(state.summary().3, generation);
             assert!(state.view(collection).is_ok());
             assert!(state.view(tag_list).is_err());
-            assert_eq!(notifications.lock().unwrap().last(), Some(&("tag-list:changed", generation)));
+            assert_eq!(notifications.lock().unwrap().last(), Some(&("tag-list:changed", generation.into())));
         }
         assert_eq!(notifications.lock().unwrap().len(), 5);
         let old_rating = original.rating[row as usize];
@@ -812,7 +860,7 @@ mod grid_offset_tests {
         let (persisted, _) = rbl_index::load(&db).unwrap();
         assert_eq!(persisted.rating, updated.rating);
         assert_eq!(notifications.lock().unwrap().len(), 6);
-        assert_eq!(notifications.lock().unwrap().last(), Some(&("library:changed", state.summary().3)));
+        assert_eq!(notifications.lock().unwrap().last(), Some(&("library:changed", state.summary().3.into())));
     }
 
     #[test]
@@ -829,8 +877,8 @@ mod grid_offset_tests {
         let received = notifications.clone();
         let source = StateSource(
             Arc::downgrade(&state),
-            Arc::new(move |event, generation| {
-                received.lock().unwrap().push((event, generation));
+            Arc::new(move |event, payload: serde_json::Value| {
+                received.lock().unwrap().push((event, payload));
             }),
             rbl_prolink::DeviceSettings::default(),
             rbl_link::KeyOrder::Musical,
@@ -851,7 +899,7 @@ mod grid_offset_tests {
         let tracks = catalog.list(&Query::Tracks { scope: TrackScope::History(*session), sort: Sort::Default });
         assert_eq!(tracks, vec![Row::Track { id: track, position: 1 }]);
         assert_eq!(state.library().unwrap().play_count[row], before + 1);
-        assert_eq!(notifications.lock().unwrap().last(), Some(&("library:changed", state.summary().3)));
+        assert_eq!(notifications.lock().unwrap().last(), Some(&("library:changed", state.summary().3.into())));
 
         // Persisted: a fresh read of the database has the session and the play.
         let reopened = state.open_read_only().unwrap();
@@ -861,6 +909,88 @@ mod grid_offset_tests {
 
         assert!(catalog.edit(&rbl_link::Edit::HistoryRemove { track }));
         assert_eq!(catalog.list(&Query::Tracks { scope: TrackScope::History(*session), sort: Sort::Default }), [] as [rbl_dbserver::catalog::Row; 0]);
+    }
+
+    /// Issue 281: a cue a CDJ-3000 saves on a track it loaded over the link
+    /// reaches the library, the next cue read has it, and the window is told.
+    #[test]
+    fn a_cue_saved_on_a_player_over_the_link_is_written_to_the_library() {
+        use rbl_dbserver::net::Handler;
+        use rbl_dbserver::{kind, Argument, Message};
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        crate::backups::create(&state).unwrap();
+        let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received = notifications.clone();
+        let source = StateSource(
+            Arc::downgrade(&state),
+            Arc::new(move |event, payload: serde_json::Value| {
+                received.lock().unwrap().push((event, payload));
+            }),
+            rbl_prolink::DeviceSettings::default(),
+            rbl_link::KeyOrder::Musical,
+        );
+        let catalog = Arc::new(rbl_link::IndexCatalog::new(Arc::new(source), rbl_link::Played::default()));
+        let mut session = rbl_dbserver::session::CatalogHandler::new(catalog).open();
+        session.handle(&rbl_dbserver::setup_request(1));
+        let id = rbl_db::fixture::track_id(1);
+        let track: u32 = id.parse().unwrap();
+        let row = state.library().unwrap().row_of(&id).unwrap();
+        assert_eq!(state.library().unwrap().cues_of(row), [] as [rbl_index::Cue; 0]);
+
+        // Hot cue B at 12.345 s as a CDJ-3000 3.20 sends it: the record's
+        // length, a 0x46-byte head, then a length word and [0, r, g, b].
+        let mut record = vec![0_u8; 0x54];
+        record[0..4].copy_from_slice(&0x54_u32.to_le_bytes());
+        record[4..6].copy_from_slice(&2_u16.to_le_bytes());
+        record[6] = 1;
+        record[0xa..0xc].copy_from_slice(&1000_u16.to_le_bytes());
+        record[0xc..0x10].copy_from_slice(&12_345_u32.to_le_bytes());
+        record[0x10..0x14].copy_from_slice(&u32::MAX.to_le_bytes());
+        record[0x34..0x38].copy_from_slice(&(0x12_u32 + 8).to_le_bytes());
+        record[0x4a..0x4e].copy_from_slice(&4_u32.to_le_bytes());
+        // Pad colour 5 of the device palette, as LED bytes only.
+        record[0x4e..0x52].copy_from_slice(&[0, 0x00, 0x70, 0xff]);
+        let save = |op: u32, record: Vec<u8>| Message::new(7, kind::SAVE_EXTENDED_CUE, vec![
+            Argument::Number(0x0101_0301), Argument::Number(track), Argument::Number(op),
+            Argument::Number(u32::try_from(record.len()).unwrap()), Argument::Blob(record),
+        ]);
+        let reply = session.handle(&save(1, record.clone()));
+        assert_eq!(reply.len(), 1);
+        assert_eq!(reply[0].kind, kind::EXTENDED_CUES_REPLY);
+        assert_eq!(reply[0].arguments[..2], [Argument::Number(0x2705), Argument::Number(0)]);
+        assert_eq!(reply[0].arguments[4], Argument::Number(1), "the answer already lists the new cue");
+
+        let cues = state.library().unwrap().cues_of(row);
+        assert_eq!(cues.len(), 1);
+        assert_eq!((cues[0].kind, cues[0].position_ms, cues[0].colour), (2, 12_345, 5));
+        assert_eq!(notifications.lock().unwrap().last(), Some(&("cues:changed", serde_json::Value::from(id.clone()))));
+        let reopened = state.open_read_only().unwrap();
+        let stored: (i64, i64, i64) = reopened.connection().query_row(
+            "SELECT Kind, InMsec, ColorTableIndex FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0",
+            [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).unwrap();
+        assert_eq!(stored, (2, 12_345, 5));
+
+        // Deleted on the player: gone from the library, and the answer is
+        // the empty list with rekordbox's status 1, not a failure.
+        let reply = session.handle(&save(0, record));
+        assert_eq!(reply[0].arguments[..2], [Argument::Number(0x2705), Argument::Number(1)]);
+        assert_eq!(state.library().unwrap().cues_of(row), [] as [rbl_index::Cue; 0]);
+    }
+
+    #[test]
+    fn an_led_colour_takes_the_pad_palette_index_or_1() {
+        let cue = |rgb| player_cue(&rbl_link::PlayerCue { kind: 1, hot_colour: rbl_link::HotCueColour::Rgb(rgb), ..Default::default() }).color_table_index;
+        // Values from rekordbox 7.2.19's GetColorTableIndex branches
+        // (@0x1018ca9a8): (0, 0x70, 0xff) is 5, white is 64.
+        assert_eq!(cue([0x00, 0x70, 0xff]), 5);
+        assert_eq!(cue([0xff, 0xff, 0xff]), 64);
+        assert_eq!(cue([0x01, 0x02, 0x03]), 1);
     }
 
     #[test]

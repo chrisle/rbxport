@@ -356,6 +356,55 @@ pub struct HotCueBankCue {
     pub cue_microsec: u32,
 }
 
+/// A cue point or loop a player saved or deleted over the link, as
+/// rekordbox 7.2.19 turns the request into its `PSvDBServerCallback::Cue`
+/// (`PSvDBMain::SavUsbCueExt` @`0x1018ca050` for `0x2705`,
+/// `PSvDBMain::SavUsbCue` @`0x1018c67d8` for `0x2105`) [OBS static].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlayerCue {
+    /// `djmdCue.Kind`: 0 a memory cue or loop, 4 a memory loop the player
+    /// marked active, 1-3 and 5-9 hot cues A-H.
+    pub kind: u8,
+    pub in_ms: u32,
+    /// Where a loop ends; `None` for a cue point.
+    pub out_ms: Option<u32>,
+    /// A memory cue's colour, 0-7 (`djmdCue.Color`); `None` for none.
+    pub colour: Option<u8>,
+    /// A hot cue's colour as the player sent it.
+    pub hot_colour: HotCueColour,
+    /// The cue's name, without its terminating NUL.
+    pub comment: String,
+    /// The loop's length in beats as a fraction, numerator and denominator,
+    /// when the player sent both.
+    pub beat_loop: Option<(u16, u16)>,
+}
+
+/// A hot cue's colour from a player's `0x2705` record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HotCueColour {
+    /// The `djmdCue.ColorTableIndex` to store, already settled: the code
+    /// the player sent, clamped to 1-64, or rekordbox's default of 21 for a
+    /// cue point and 36 for a loop (`hotCueDefaultColorIndex(bool)`
+    /// @`0x1012516cc`). Meaningless on a memory cue.
+    Index(u8),
+    /// Only the LED colour was sent: rekordbox looks it up with
+    /// `PSvDBMain::GetColorTableIndex(r, g, b)` @`0x1018ca9a8`, an exact
+    /// match against the device pad palette, and stores 1 when nothing
+    /// matches.
+    Rgb([u8; 3]),
+}
+
+impl Default for HotCueColour {
+    fn default() -> Self {
+        Self::Index(HOT_CUE_DEFAULT)
+    }
+}
+
+/// rekordbox's default hot cue colour, `ColorTableIndex` 21.
+pub const HOT_CUE_DEFAULT: u8 = 0x15;
+/// rekordbox's default hot loop colour, `ColorTableIndex` 36.
+pub const HOT_LOOP_DEFAULT: u8 = 0x24;
+
 /// One ordinary USB cue in the legacy `4702` reply.  The RX3 asks for this
 /// list after applying a Hot Cue Bank edit, so the bank write is followed by
 /// the edited track's own cues rather than by another bank-cue reply.
@@ -536,5 +585,18 @@ pub enum Edit {
     /// The player deleted a history: `u32::MAX` names the link session's own.
     HistoryDelete {
         history: u32,
+    },
+    /// A player saved a cue point or loop on a track (`0x2705` or `0x2105`
+    /// with a non-zero operation). A hot cue replaces the one in its slot.
+    SaveCue {
+        track: u32,
+        cue: PlayerCue,
+    },
+    /// A player deleted a cue point or loop (`0x2705` or `0x2105` with
+    /// operation 0): a hot cue by its slot, a memory cue by its kind and
+    /// times.
+    DeleteCue {
+        track: u32,
+        cue: PlayerCue,
     },
 }

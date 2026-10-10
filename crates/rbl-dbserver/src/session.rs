@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::catalog::{
-    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, Query, Row, Sort, TrackColumn,
-    TrackDetails, TrackScope, UsbCue,
+    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, HotCueColour, PlayerCue, Query, Row,
+    Sort, TrackColumn, TrackDetails, TrackScope, UsbCue, HOT_CUE_DEFAULT, HOT_LOOP_DEFAULT,
 };
 use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
@@ -411,6 +411,106 @@ impl LinkSession {
         Self::blob(message, reply, self.catalog.analysis(track, what), tail)
     }
 
+    /// A track's extended cue list (`4e02`), echoing the request kind: the
+    /// reply to `2b04`, and to a `2705` once the cue is saved or deleted.
+    ///
+    /// [OBS static] rekordbox 7.2.19 `PSvDBMain::GetUsbCueExtSharedContent`
+    /// sends status `count < 1` (@`0x1018c9e74`): 1 and no entries for a
+    /// track without cues, which a player reads as success. A track the
+    /// catalog cannot read keeps RBX's `0x32` refusal.
+    fn extended_cue_list(&self, message: &Message, track: u32) -> Vec<Message> {
+        match self.catalog.analysis(track, &Analysis::ExtendedCueList) {
+            Some(blob) if blob.is_empty() => vec![Message::new(
+                message.transaction,
+                kind::EXTENDED_CUES_REPLY,
+                vec![
+                    Argument::Number(u32::from(message.kind)),
+                    Argument::Number(1),
+                    Argument::Number(0),
+                    Argument::Blob(Vec::new()),
+                    Argument::Number(0),
+                ],
+            )],
+            blob => {
+                // The trailing number is the cue count; the catalog's blob
+                // carries it in its header, which the reply repeats.
+                let count = blob.as_ref().map_or(0, |b| extended_cue_count(b));
+                Self::blob(message, kind::EXTENDED_CUES_REPLY, blob, Some(count))
+            }
+        }
+    }
+
+    /// A player saving or deleting a cue in the extended record (`2705`).
+    ///
+    /// [OBS static] rekordbox 7.2.19 `PSvDBMain::SavUsbCueExt`
+    /// (@`0x1018ca050`): a record shorter than `0x38` is refused with
+    /// status `0x32`; a hot cue past H, a shape other than cue (1) or loop
+    /// (2), or a time base other than 75, 150 or 1000 changes nothing and
+    /// answers with the current list; otherwise the cue is saved (operation
+    /// non-zero) or deleted (0) and the track's list is the answer. A
+    /// failed write is `0x32`.
+    ///
+    /// Every answer is a `4e02`. A CDJ-3000 that gets a `4003` here resends
+    /// the cue as a `2105`, and on another `4003` sends it again, forever
+    /// (`MemoryHot_CueRegisterTicket` in the CDJ-3000 3.20 firmware): the
+    /// player's database client stalls until it is restarted. So a request
+    /// RBX cannot read is refused with `0x32` too, never with `4003`.
+    fn save_extended_cue(&self, message: &Message) -> Vec<Message> {
+        let refuse = || Self::blob(message, kind::EXTENDED_CUES_REPLY, None, Some(0));
+        let (track, save, record) = match message.arguments.as_slice() {
+            [Argument::Number(_), Argument::Number(track), Argument::Number(op), Argument::Number(length), Argument::Blob(bytes), ..] => {
+                let length = usize::try_from(*length).unwrap_or(usize::MAX).min(bytes.len());
+                (*track, *op != 0, &bytes[..length])
+            }
+            _ => return refuse(),
+        };
+        if record.len() < 0x38 {
+            return refuse();
+        }
+        let Some(cue) = parse_extended_cue(record) else {
+            return self.extended_cue_list(message, track);
+        };
+        let edit = if save { Edit::SaveCue { track, cue } } else { Edit::DeleteCue { track, cue } };
+        if self.catalog.edit(&edit) {
+            self.extended_cue_list(message, track)
+        } else {
+            refuse()
+        }
+    }
+
+    /// A player saving or deleting a cue in the legacy 36-byte record
+    /// (`2105`), answered with the track's legacy cue list (`4702`).
+    ///
+    /// [OBS static] rekordbox 7.2.19 `PSvDBMain::SavUsbCue` (@`0x1018c67d8`).
+    /// rekordbox raises an internal error and sends nothing for a record
+    /// shorter than `0x24` or a slot past C; RBX answers those, and a write
+    /// that fails, with the `4702` failure envelope instead, so a waiting
+    /// player is never left without an answer [ASSUME: RBX policy].
+    fn save_cue(&self, message: &Message) -> Vec<Message> {
+        let args = message.arguments.as_slice();
+        let (track, save, record) = match args {
+            [Argument::Number(_), Argument::Number(track), Argument::Number(op), Argument::Number(length), Argument::Blob(record), ..]
+                if *length >= 0x24 && record.len() >= 0x24 => (*track, *op != 0, record.as_slice()),
+            _ => return Self::hot_cue_bank_unavailable(message),
+        };
+        let sidecar = match args.get(5..7) {
+            Some([Argument::Number(length), Argument::Blob(bytes)]) => {
+                let length = usize::try_from(*length).unwrap_or(usize::MAX).min(8).min(bytes.len());
+                bytes.get(..length).unwrap_or_default()
+            }
+            _ => &[],
+        };
+        let Some(cue) = parse_legacy_cue(record, sidecar) else {
+            return Self::hot_cue_bank_unavailable(message);
+        };
+        let edit = if save { Edit::SaveCue { track, cue } } else { Edit::DeleteCue { track, cue } };
+        if self.catalog.edit(&edit) {
+            Self::usb_cue_reply(message, self.catalog.usb_cues(track))
+        } else {
+            Self::hot_cue_bank_unavailable(message)
+        }
+    }
+
     /// Source-proven early write refusals only. Passing these guards is not
     /// write acceptance: storage/authorization callbacks remain unsupported.
     /// Wrong decoded types retain RBX's safe unsupported-command response.
@@ -420,12 +520,6 @@ impl LinkSession {
             bytes[3] == 0 && bytes[..3].eq_ignore_ascii_case(expected)
         };
         match (message.kind, message.arguments.as_slice()) {
-            (0x2705, [Argument::Number(_), Argument::Number(_), Argument::Number(_),
-                Argument::Number(length), Argument::Blob(_), ..]) if *length < 56 => {
-                // V4 SavUsbCueExt -> V6 RetNewCueToClient. Native pointer
-                // alignment is deliberately not a Rust wire-level guard.
-                Some(Self::blob(message, kind::EXTENDED_CUES_REPLY, None, Some(0)))
-            }
             (0x2805, [Argument::Number(_), Argument::Number(_), Argument::Number(atom),
                 Argument::Number(extension), Argument::Number(reserved),
                 Argument::Number(length), Argument::Blob(_), ..]) => {
@@ -1070,14 +1164,7 @@ impl LinkSession {
                     None,
                 )
             }
-            kind::EXTENDED_CUES => {
-                let track = Self::number(message, 1);
-                // The trailing number is the cue count; the catalog's blob
-                // carries it in its header, which the reply repeats.
-                let blob = self.catalog.analysis(track, &Analysis::ExtendedCueList);
-                let count = blob.as_ref().map_or(0, |b| extended_cue_count(b));
-                Self::blob(message, kind::EXTENDED_CUES_REPLY, blob, Some(count))
-            }
+            kind::EXTENDED_CUES => self.extended_cue_list(message, Self::number(message, 1)),
             kind::ANLZ_TAG | kind::ANLZ_TAG_2EX => {
                 let track = Self::number(message, 1);
                 let fourcc = Self::number(message, 2).to_le_bytes();
@@ -1147,7 +1234,9 @@ impl Session for LinkSession {
             // `dbcl_SetOnAir` must not replace an unrelated pending menu with
             // a spurious generic `0x4000` response.
             kind::TEARDOWN | kind::SET_ON_AIR | 0x3203 | 0x3503 => Vec::new(),
-            0x2705 | 0x2805 | 0x2905 => Self::analysis_write_refusal(message)
+            kind::SAVE_EXTENDED_CUE => self.save_extended_cue(message),
+            kind::SAVE_CUE => self.save_cue(message),
+            0x2805 | 0x2905 => Self::analysis_write_refusal(message)
                 .unwrap_or_else(|| self.handle_menu(message)),
             // V4 OnPrepareCmd / OnOtherCmd: scalar responses, no menu/cache
             // replacement. Internal notices above do not imply wire replies.
@@ -1399,6 +1488,169 @@ fn extended_cue_count(blob: &[u8]) -> u32 {
         count += 1;
     }
     count
+}
+
+/// A little-endian field of a player's cue record; 0 past its end.
+fn le16(bytes: &[u8], at: usize) -> u16 {
+    bytes.get(at..at + 2).map_or(0, |b| u16::from_le_bytes([b[0], b[1]]))
+}
+
+fn le32(bytes: &[u8], at: usize) -> u32 {
+    bytes.get(at..at + 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+/// rekordbox's `CmnFunc_Frm150ToMsec_InOoutConv` (@`0x1008fcdc8`): a
+/// 1/150 s frame count times the double `0x401aaaaaaaaaaaab` (20/3, rounded
+/// up), then rounded up to a whole millisecond.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a u32 frame count times 20/3 fits in a u32 millisecond count up to 6.4e8 frames; past that rekordbox's fcvtpu saturates too, as `as` does"
+)]
+fn frames_to_ms(frames: u32) -> u32 {
+    (f64::from(frames) * f64::from_bits(0x401a_aaaa_aaaa_aaab)).ceil() as u32
+}
+
+/// `djmdCue.Kind` for a hot cue slot 1-8 (A-H): A-C are 1-3, D on 5-9,
+/// as `SavUsbCueExt` makes it (`hot + (hot > 3)`).
+fn hot_kind(slot: u16) -> u8 {
+    u8::try_from(slot + u16::from(slot > 3)).unwrap_or(0)
+}
+
+/// Decodes a `2705` record the way rekordbox 7.2.19's
+/// `PSvDBMain::SavUsbCueExt` (@`0x1018ca050`) does [OBS static], or `None`
+/// for one it answers without a write: a hot cue past H (`u16` at 4), a
+/// shape other than 1 (cue) or 2 (loop) at 6, or a time base (`u16` at
+/// `0xa`) other than 1000 (ms), 150 or 75 (frames).
+///
+/// The fields rekordbox reads: in at `0xc` and, for a loop, out at `0x10`;
+/// the active-loop bit 4 of the `u16` at `0x18`, which makes a memory loop
+/// `Kind` 4; then, when the `u32` at `0x34` is non-zero and the record
+/// holds that many bytes past `0x38`: the memory cue colour + 1 at `0x3a`,
+/// the loop's beats as `u16` numerator and denominator at `0x42` and
+/// `0x44`, the comment's UTF-16 byte length at `0x48` and the comment at
+/// `0x4a`, and, when at least 8 bytes follow the comment, a length word and
+/// the hot cue's colour code and LED red, green and blue after it.
+///
+/// [ASSUME] A frame-based (150 or 75) cue point is stored without an out
+/// point. rekordbox's conversion leaves its out at 0 rather than -1 there,
+/// which its `ReceiveSetCueEvent` then reads as a loop; players send 1000.
+/// [UNKNOWN] The record's MPEG frame words (`0x24`-`0x33`) and sub-ms
+/// remainders (`0x3c`, `0x3e`) rekordbox also passes on are not kept.
+fn parse_extended_cue(record: &[u8]) -> Option<PlayerCue> {
+    let slot = le16(record, 4);
+    let shape = record.get(6).copied().unwrap_or(0);
+    let timebase = le16(record, 0xa);
+    if slot > 8 || !matches!(shape, 1 | 2) || !matches!(timebase, 75 | 150 | 1000) {
+        return None;
+    }
+    let looped = shape == 2;
+    let (in_ms, out_ms) = if timebase == 1000 {
+        (le32(record, 0xc), looped.then(|| le32(record, 0x10)))
+    } else {
+        let scale = if timebase == 75 { 2 } else { 1 };
+        let frames_in = le32(record, 0xc).wrapping_mul(scale);
+        let frames_out = le32(record, 0x10).wrapping_mul(scale);
+        (frames_to_ms(frames_in), looped.then(|| frames_to_ms(frames_out.wrapping_add(1))))
+    };
+    let kind = if slot != 0 {
+        hot_kind(slot)
+    } else if looped {
+        u8::try_from(le16(record, 0x18) & 4).unwrap_or(0)
+    } else {
+        0
+    };
+    let default = if looped { HOT_LOOP_DEFAULT } else { HOT_CUE_DEFAULT };
+    let mut cue = PlayerCue {
+        kind,
+        in_ms,
+        out_ms,
+        colour: None,
+        hot_colour: HotCueColour::Index(default),
+        comment: String::new(),
+        beat_loop: None,
+    };
+    let options = usize::try_from(le32(record, 0x34)).unwrap_or(usize::MAX);
+    if options == 0 || record.len() < options.saturating_add(0x38) {
+        return Some(cue);
+    }
+    cue.colour = record.get(0x3a).and_then(|c| c.checked_sub(1)).filter(|c| *c <= 7);
+    let (numerator, denominator) = (le16(record, 0x42), le16(record, 0x44));
+    if numerator != 0 && denominator != 0 {
+        cue.beat_loop = Some((numerator, denominator));
+    }
+    let comment_len = usize::from(le16(record, 0x48));
+    if comment_len != 0 {
+        if let Some(bytes) = record.get(0x4a..0x4a + comment_len) {
+            // juce::String(CharPointer_UTF16, max(n, 1) - 1): the last unit
+            // is the NUL, and the string stops at any earlier one.
+            let units: Vec<u16> = bytes
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .take((comment_len / 2).max(1) - 1)
+                .take_while(|unit| *unit != 0)
+                .collect();
+            cue.comment = String::from_utf16_lossy(&units);
+        }
+    }
+    if slot != 0 {
+        let tail = 0x4a + comment_len;
+        let (code, rgb) = if record.len() >= tail + 8 {
+            let wanted = usize::try_from(le32(record, tail)).unwrap_or(usize::MAX).min(0x2c);
+            let byte = |i: usize| if i < wanted { record.get(tail + 4 + i).copied().unwrap_or(0) } else { 0 };
+            (byte(0), [byte(1), byte(2), byte(3)])
+        } else {
+            (0, [0; 3])
+        };
+        cue.hot_colour = if code != 0 {
+            HotCueColour::Index(code.min(64))
+        } else if rgb == [0; 3] {
+            HotCueColour::Index(default)
+        } else {
+            HotCueColour::Rgb(rgb)
+        };
+    }
+    Some(cue)
+}
+
+/// Decodes a `2105` legacy record and its optional millisecond sidecar the
+/// way rekordbox 7.2.19's `PSvDBMain::SavUsbCue` (@`0x1018c67d8`) does
+/// [OBS static], or `None` for a slot past C, which it refuses.
+///
+/// The first word is `slot << 16`, bit 0 for a loop and `0x200` for an
+/// active one, which is a memory loop of `Kind` 4. The sidecar's in and out
+/// milliseconds are used when its in is non-zero; otherwise the record's
+/// 1/150 s frames at `0xc` and `0x10`. A cue point has no out; a hot cue
+/// takes rekordbox's default colour.
+///
+/// [ASSUME] A frame-based loop's out is converted as a loop's. rekordbox
+/// converts it only when the whole flags word is 1, and stores 0 otherwise.
+fn parse_legacy_cue(record: &[u8], sidecar: &[u8]) -> Option<PlayerCue> {
+    let flags = le32(record, 0);
+    if flags >= 0x4_0000 {
+        return None;
+    }
+    let looped = flags & 1 != 0;
+    let active = looped && flags & 0x200 != 0;
+    let slot = u16::try_from(flags >> 16).unwrap_or(0);
+    let kind = if active { 4 } else { u8::try_from(slot).unwrap_or(0) };
+    let mut side = [0_u8; 8];
+    side[..sidecar.len().min(8)].copy_from_slice(&sidecar[..sidecar.len().min(8)]);
+    let (in_ms, out_ms) = if le32(&side, 0) != 0 {
+        (le32(&side, 0), le32(&side, 4))
+    } else {
+        (frames_to_ms(le32(record, 0xc)), frames_to_ms(le32(record, 0x10).wrapping_add(1)))
+    };
+    let default = if looped { HOT_LOOP_DEFAULT } else { HOT_CUE_DEFAULT };
+    Some(PlayerCue {
+        kind,
+        in_ms,
+        out_ms: looped.then_some(out_ms),
+        colour: None,
+        hot_colour: HotCueColour::Index(default),
+        comment: String::new(),
+        beat_loop: None,
+    })
 }
 
 /// The sixteen metadata rows in the order negotiated for the player family.

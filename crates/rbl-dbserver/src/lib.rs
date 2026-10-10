@@ -471,6 +471,17 @@ pub mod kind {
     /// The beat grid.
     pub const BEAT_GRID: u16 = 0x2204;
     pub const SAVE_GRID_OFFSET: u16 = 0x2605;
+    /// A player saving or deleting one cue in the legacy 36-byte record
+    /// (`CMD_SAV_USB_CUE`): `[r:m:s:t, track, op, 0x24, record, 8,
+    /// milliseconds]`, op 1 to save and 0 to delete. Answered with the
+    /// track's legacy cue list in [`HOT_CUE_BANK_REPLY`].
+    pub const SAVE_CUE: u16 = 0x2105;
+    /// A player saving or deleting one cue in the extended record
+    /// (`CMD_SAV_USB_CUE2`): `[r:m:s:t, track, op, length, record]`, op 1 to
+    /// save and 0 to delete. Answered with the track's extended cue list in
+    /// [`EXTENDED_CUES_REPLY`]. A CDJ-3000 sends this first and falls back
+    /// to [`SAVE_CUE`] only on a `4003`.
+    pub const SAVE_EXTENDED_CUE: u16 = 0x2705;
     pub const GRID_OFFSET: u16 = 0x2804;
     /// The track a player delivers to KUVO, as the firmware names it
     /// (`CMD_GET_DELIVERY_INFO`): a 13-row menu much like [`METADATA`],
@@ -628,6 +639,8 @@ pub mod kind {
             TRACK_INFO => "track info".to_owned(),
             BEAT_GRID => "beat grid".to_owned(),
             SAVE_GRID_OFFSET => "save grid offset".to_owned(),
+            SAVE_CUE => "save cue".to_owned(),
+            SAVE_EXTENDED_CUE => "save extended cue".to_owned(),
             GRID_OFFSET => "grid offset".to_owned(),
             VBR => "VBR".to_owned(),
             WAVEFORM_DETAIL => "waveform detail".to_owned(),
