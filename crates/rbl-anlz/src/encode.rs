@@ -302,7 +302,7 @@ pub fn pwv4(columns: &[BandColumn]) -> Vec<u8> {
 /// `DetailedWaveformDataProvider<DetailedWaveform_RGB>` slot 7 at
 /// `0x01b94d90`), so the plain bits drew dim, washed-out columns. The
 /// CDJ-3000 does the same (firmware 3.20, the same provider's slot 7 at
-/// `0x14a38d8`, `(c & 7) << 5` per channel) [static, issue #288]: on twelve
+/// `0x14a38d8`, `(c & 7) << 5` per channel) [static, issue #288]: on eight
 /// tracks of a rekordbox USB export, rekordbox's brightest channel averages
 /// 6.6-6.9 of 7 and the plain bits 3.0-3.6 [OBS].
 fn pwv5_colour(column: BandColumn) -> (u16, u16, u16) {
