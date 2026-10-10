@@ -84,6 +84,30 @@ fn both_libraries_of_an_export_read_as_the_same_tree() {
 }
 
 #[test]
+fn both_libraries_name_each_tracks_analysis_and_artwork_on_the_stick() {
+    // The Devices tree draws a stick track's waveforms and artwork from the
+    // stick itself (#319), so both readers must carry the paths the
+    // library names, and those paths must be files on the stick.
+    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let image = src.path().join("cover.jpg");
+    std::fs::write(&image, b"\xff\xd8cover\xff\xd9").unwrap();
+    let mut tracks: Vec<SourceTrack> = (1..=2).map(|i| track(src.path(), i, &format!("Track {i}"))).collect();
+    tracks[0].artwork = Some(image);
+    tracks[1].analysis.clear();
+    export(dest.path(), &tracks, &[SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }]).unwrap();
+    for format in [Format::DeviceLibrary, Format::OneLibrary] {
+        let library = device_library::read(dest.path(), format).unwrap();
+        let by_title = |title: &str| library.tracks.iter().find(|t| t.title == title).unwrap().clone();
+        let (art, bare) = (by_title("Track 1"), by_title("Track 2"));
+        assert!(art.analysis_path.starts_with("/PIONEER/USBANLZ/") && art.analysis_path.ends_with("ANLZ0000.DAT"), "{format:?}: {}", art.analysis_path);
+        assert!(dest.path().join(art.analysis_path.trim_start_matches('/')).is_file(), "{format:?}");
+        assert_eq!(art.artwork_path, "/PIONEER/Artwork/00001/a1.jpg", "{format:?}");
+        assert!(dest.path().join(art.artwork_path.trim_start_matches('/')).is_file(), "{format:?}");
+        assert_eq!((bare.analysis_path.as_str(), bare.artwork_path.as_str()), ("", ""), "{format:?}: an unanalysed track without artwork names neither");
+    }
+}
+
+#[test]
 fn an_edit_changes_its_own_library_and_leaves_the_other_byte_for_byte() {
     for format in [Format::DeviceLibrary, Format::OneLibrary] {
         let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());

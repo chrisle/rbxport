@@ -96,6 +96,11 @@ pub struct Track {
     pub color: u8,
     /// Volume-relative, with a leading slash.
     pub path: String,
+    /// The analysis `.DAT` the library names, volume-relative; empty when
+    /// the track was exported without one. Its `.EXT` and `.2EX` sit beside it.
+    pub analysis_path: String,
+    /// The artwork image the library names, volume-relative; empty for none.
+    pub artwork_path: String,
 }
 
 /// One library on the stick.
@@ -222,8 +227,14 @@ fn read_pdb(bytes: &[u8]) -> Result<(Vec<Node>, Vec<Track>)> {
     let names = |kind| -> BTreeMap<u32, String> {
         pdb.table(kind).map(|t| pdb.named_rows(t).into_iter().map(|n| (n.id, n.name)).collect()).unwrap_or_default()
     };
-    let (artists, albums, genres, labels, keys) =
-        (names(PageType::Artists), names(PageType::Albums), names(PageType::Genres), names(PageType::Labels), names(PageType::Keys));
+    let (artists, albums, genres, labels, keys, artwork) = (
+        names(PageType::Artists),
+        names(PageType::Albums),
+        names(PageType::Genres),
+        names(PageType::Labels),
+        names(PageType::Keys),
+        names(PageType::Artwork),
+    );
     let name = |map: &BTreeMap<u32, String>, id: u32| map.get(&id).cloned().unwrap_or_default();
     let tracks = pdb
         .table(PageType::Tracks)
@@ -245,6 +256,8 @@ fn read_pdb(bytes: &[u8]) -> Result<(Vec<Node>, Vec<Track>)> {
             rating: t.rating.min(5),
             color: t.color_id,
             path: t.file_path,
+            analysis_path: t.analyze_path,
+            artwork_path: name(&artwork, t.artwork_id),
         })
         .collect();
     Ok((nodes, tracks))
@@ -279,13 +292,14 @@ fn read_one(path: &Path) -> Result<(Vec<Node>, Vec<Track>)> {
             "SELECT c.content_id, COALESCE(c.title,''), COALESCE(a.name,''), COALESCE(al.name,''),
                     COALESCE(g.name,''), COALESCE(l.name,''), COALESCE(k.name,''), COALESCE(c.djComment,''),
                     COALESCE(c.dateAdded,''), COALESCE(c.bpmx100,0), COALESCE(c.length,0), COALESCE(c.rating,0),
-                    COALESCE(c.color_id,0), COALESCE(c.path,'')
+                    COALESCE(c.color_id,0), COALESCE(c.path,''), COALESCE(c.analysisDataFilePath,''), COALESCE(i.path,'')
              FROM content c
              LEFT JOIN artist a ON a.artist_id = c.artist_id_artist
              LEFT JOIN album al ON al.album_id = c.album_id
              LEFT JOIN genre g ON g.genre_id = c.genre_id
              LEFT JOIN label l ON l.label_id = c.label_id
-             LEFT JOIN key k ON k.key_id = c.key_id",
+             LEFT JOIN key k ON k.key_id = c.key_id
+             LEFT JOIN image i ON i.image_id = c.image_id",
         )
         .map_err(one_error)?;
     let tracks = statement
@@ -305,6 +319,8 @@ fn read_one(path: &Path) -> Result<(Vec<Node>, Vec<Track>)> {
                 rating: crate::snapshot::onelibrary_stars(r.get(11)?),
                 color: r.get(12)?,
                 path: r.get(13)?,
+                analysis_path: r.get(14)?,
+                artwork_path: r.get(15)?,
             })
         })
         .map_err(one_error)?
