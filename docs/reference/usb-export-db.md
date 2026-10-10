@@ -361,7 +361,7 @@ Yellow and Blue were observed; the other values are [ASSUME] from that order.
 ## 5. `exportExt.pdb` — My Tags
 
 Same page format, same builder, `PAGE_SIZE` 4096, nine tables (types 0–8),
-write order `[7, 3]`.
+write order `[7, 3]` (type 4 follows in table order).
 
 **Type 3, one row per tag**: categories in `Seq`
 order each followed by their own tags, orphans last.
@@ -385,19 +385,32 @@ truncated** and the length fixed up to match.
 u32 `myTagMasterDBID` at `0x18`, then `0x03` and five offsets to empty
 strings. 39 bytes, padded to 60 because the page reports 60 used.
 
-**Type 4, one row per tag on a track** (`DJDBEXSONGMYTAG`): grouped by tag
-in type-3 order, each tag's tracks in export order. A player lists a tag
-under Track Filter only when a row here ties it to a track on the stick
-(XDJ-RX3 1.20 `djeplGetMyTagItem`, static).
+**Type 4, one row per tag on a track** (`DJDBEXSONGMYTAG`): 16 bytes with
+no row header and no page index. The rows go by track, export.pdb ids
+ascending, and each track's tags in type-3 order, each pair once. A player
+lists a tag under Track Filter only when a row here ties it to a track on the
+stick (XDJ-RX3 1.20 `djeplGetMyTagItem`, static).
 
 ```text
-0x00 u16 0x06a0
-0x02 u16 row index on page * 32   (restarts per page)
-0x04 u32 0
-0x08 u32 the track's export.pdb id
-0x0c u32 the tag's id
-0x10     0x03 (empty short string), padded to 20 bytes
+0x00 u32 0
+0x04 u32 the track's export.pdb id
+0x08 u32 the tag's id
+0x0c     0x03 (empty short string), then 3 zero bytes
 ```
+
+Its pages differ from type 3's: `0x20` holds 1 and `0x22` the last row's
+index (as on `export.pdb`'s large pages), each row group's second trailing
+word is 0 except in the last group, where it holds only the last row's bit,
+and a page takes rows until it is full to the byte: 222 rows, 4 bytes free.
+The builder writes these pages with `PageStyle::LastRowIndex`; every other
+table keeps `PageStyle::Counted`.
+
+[OBS] All of this is from a rekordbox 7 export's `exportExt.pdb` (2026-10-04,
+sha1 `bc6c8351…`) that the reporter of #316 posted: 572 type-4 rows (572
+distinct pairs, 48 tracks, 50 tags) on pages of 222, 222 and 128 rows.
+Rebuilt from that file's own tags and memberships, rbxport's type-4 data pages
+match it byte for byte from `0x18` to the end. The same file has 14 type-0
+(`RECOMMENDLIKE`) rows, each a pair of track ids; rbxport leaves type 0 empty.
 
 The table types are rekordbox's `DJDBEX*` tables in creation order
 (rekordbox 7.2.19 `_edb_MAS_MODULE1_table_inits`, static): 0
@@ -410,10 +423,8 @@ page index `<< 21` and `(49 + type) << 5`; the fixed columns grouped by size
 column at the next multiple of four; one offset byte for each further
 string column, then those strings. That rule reproduces 79 of the 80 type-3
 rows and the type-7 row of a rekordbox 7 stick byte for byte (the
-eightieth differs in one byte past its last string). No captured stick has
-a type-4 row, so its bytes come from the rule and the column list
-(`MYTAGID`, `CONTENTID`, `RESERVED1`, `RESERVED2`) [static, unverified on
-hardware]. The master id's
+eightieth differs in one byte past its last string). It does not apply to
+type 4, whose rows have no header (above). The master id's
 derivation is still unknown: rekordbox's reference wrote `1744129535`.
 The same master ID must appear in the extended database and
 OneLibrary property row.
@@ -847,8 +858,8 @@ the pad recalls the saved cue.
 ## 13. Still unknown
 
 - The derivation of `myTagMasterDBID` (rekordbox wrote `1744129535`), and a
-  hardware check of `exportExt.pdb`'s type-4 rows, which were derived
-  statically.
+  hardware check that a player lists My Tags from rbxport's `exportExt.pdb`
+  type-4 rows (which match a rekordbox 7 export's byte for byte).
 - `PWV4` header bytes 1–2, the third header word of `PWV3`/`PWV5`, and the
   `PQT2` payload derivation.
 - Remaining reader/UI cue display-color measurements; the export palette

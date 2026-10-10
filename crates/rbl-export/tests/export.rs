@@ -556,11 +556,14 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     let ext_bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/exportExt.pdb")).unwrap();
     let ext = rbl_pdb::Pdb::parse(&ext_bytes).unwrap();
     assert_eq!(ext.rows(ext.table(rbl_pdb::PageType::Albums).unwrap()).len(), 3, "type 3: every tag");
-    let mut memberships: Vec<(u32, u32)> = ext
+    // A row is 0, the track, the tag, an empty string; by track.
+    let rows: Vec<(u32, u32)> = ext
         .rows(ext.table(rbl_pdb::PageType::Labels).unwrap())
         .iter()
-        .map(|&r| (ext.u4_at(r, 0x0c), ext.u4_at(r, 0x08)))
+        .map(|&r| (ext.u4_at(r, 0x04), ext.u4_at(r, 0x08)))
         .collect();
+    assert!(rows.windows(2).all(|w| w[0].0 <= w[1].0), "rows go by track: {rows:?}");
+    let mut memberships: Vec<(u32, u32)> = rows.iter().map(|&(track, tag)| (tag, track)).collect();
     memberships.sort_unstable();
     let mut expected = vec![(11, id_of("All U Need")), (12, id_of("All U Need")), (12, id_of("The Abyss"))];
     expected.sort_unstable();

@@ -19,7 +19,8 @@
 //! | 8 | `DJDBEXGENERALOPTION` | empty |
 //!
 //! Type 0 (the "recommend like" pairs of tracks) is not a My Tag table and
-//! stays empty.
+//! stays empty [OBS: the reporter's file has 14 type-0 rows, each a pair
+//! of track ids; what makes rekordbox write them is [UNKNOWN]].
 //!
 //! Rows are laid out by rekordbox's `DeviceSQL` engine from each table's
 //! columns (`__epl_DJDBEX*_create`), not by hand [OBS static, 7.2.19:
@@ -32,9 +33,9 @@
 //! takes the space that sums to, rounded up to four. That rule reproduces
 //! 79 of the 80 type-3 rows and the type-7 row of a rekordbox 7 stick
 //! (2026-10-03) byte for byte, lengths included; the eightieth has one
-//! stray byte past its last string [OBS]. No captured stick has a type-4
-//! row, so the one below follows from the rule and its columns [ASSUME:
-//! unverified on hardware].
+//! stray byte past its last string [OBS]. It does not hold for type 4,
+//! whose rows rekordbox writes with no header at all [OBS: the reporter's
+//! rekordbox 7 `exportExt.pdb`, #316, below].
 //!
 //! - type 3, `DJDBEXMYTAG` (`ID`, `SEQ`, `ATTRIBUTE`, `RESERVED1` u8,
 //!   `RESERVED2` u16, `PARENTID`, `RESERVED3`, `RESERVED4`, then the strings
@@ -61,25 +62,27 @@
 //!   `32 + name bytes + 8` rounded up to four — counted from 0x20 even
 //!   when the ASCII name starts at 0x1f.
 //!
-//! - type 4, `DJDBEXSONGMYTAG` (`MYTAGID` u32, `CONTENTID` i32,
-//!   `RESERVED1` u32, `RESERVED2` string): one row per tag on a track,
-//!   which the player reads by tag to list the tags that have tracks and by
-//!   track to filter [OBS static, XDJ-RX3 1.20 `djeplGetMyTagItem`
-//!   @0x0015f4e4 and `Dsql_SetRegistMyTagIDs` @0x0015f888] —
+//! - type 4, `DJDBEXSONGMYTAG`: one row per tag on a track, which the
+//!   player reads by tag to list the tags that have tracks and by track to
+//!   filter [OBS static, XDJ-RX3 1.20 `djeplGetMyTagItem` @0x0015f4e4 and
+//!   `Dsql_SetRegistMyTagIDs` @0x0015f888]. 16 bytes, no row header and no
+//!   page index [OBS: a rekordbox 7 export's `exportExt.pdb` (2026-10-04,
+//!   sha1 `bc6c8351…`, posted on #316 by its reporter): all 572 rows, 48
+//!   tracks and 50 tags] —
 //!
 //!   ```text
-//!   00  u16  0x06a0
-//!   02  u16  the row's index on its page × 32
-//!   04  u32  0
-//!   08  u32  the track's id in export.pdb
-//!   0c  u32  the tag's id
-//!   10  u8   an empty short string (0x03)
+//!   00  u32  0
+//!   04  u32  the track's id in export.pdb
+//!   08  u32  the tag's id
+//!   0c  u8   an empty short string (0x03), then three zero bytes
 //!   ```
 //!
-//!   20 bytes with the padding. rekordbox inserts the rows a tag at a time
-//!   (`db::extPutMyTagOnTrack` @0x1019b7b74: the tag id, the track, 0 and
-//!   an empty string); the order on a stick is [ASSUME] not significant,
-//!   as the player looks rows up through its hash indexes on both ids.
+//!   The rows go by track, track ids ascending, and each track's tags in
+//!   the order type 3 lists them, each pair once [OBS, same file]. Its
+//!   pages differ from type 3's: `0x20` holds 1 and `0x22` the last row's
+//!   index, as on `export.pdb`'s large pages, and a page takes rows until
+//!   it is full to the byte, 222 of them with 4 bytes free [OBS, same
+//!   file; [`PageStyle::LastRowIndex`]].
 //!
 //! - type 7, one row: `00 07 00 00`, twenty zero bytes, the u32
 //!   `exportLibrary.db` calls `myTagMasterDBID`, then an empty string, five
@@ -90,9 +93,9 @@
 //! to a track that exists [OBS static, `djeplGetMyTagItem`]; without those
 //! rows a stick's tags never reach the player.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use rbl_pdb::build::{long_utf16le, short_ascii, FileBuilder};
+use rbl_pdb::build::{long_utf16le, short_ascii, FileBuilder, PageStyle};
 
 use crate::SourceMyTag;
 
@@ -102,7 +105,12 @@ const PAGE_SIZE: usize = 4096;
 /// The file, for these tags and the tracks that carry them: each entry of
 /// `tagged` is a track's id in `export.pdb` and the library's ids of its
 /// tags. Ids of tags not in `my_tags` are left out, as `exportLibrary.db`
-/// leaves them out. `master_db_id` is the value the reference wrote into
+/// leaves them out. A tag listed twice on one track gets one row here, as
+/// in rekordbox's file (one row per pair), and because the XDJ-RX3 copies
+/// a track's type-4 tags into a fixed buffer with no bound
+/// (`Dsql_SetRegistMyTagIDs`); `exportLibrary.db` keeps such a repeat as
+/// the library has it, which this change leaves alone.
+/// `master_db_id` is the value the reference wrote into
 /// both this file and `exportLibrary.db`'s `property` row; what it is
 /// derived from is not known, so it is passed in.
 #[must_use]
@@ -118,9 +126,7 @@ pub fn build(my_tags: &[SourceMyTag], tagged: &[(u32, &[u64])], master_db_id: u3
     file.add_table_numbered(3, &tag_rows(my_tags), |row, index| {
         row[2..4].copy_from_slice(&(index.wrapping_mul(32)).to_le_bytes());
     });
-    file.add_table_numbered(4, &song_tag_rows(my_tags, tagged), |row, index| {
-        row[2..4].copy_from_slice(&(index.wrapping_mul(32)).to_le_bytes());
-    });
+    file.add_table_styled(4, &song_tag_rows(my_tags, tagged), |_, _| {}, PageStyle::LastRowIndex);
     file.add_table(5, &empty);
     file.add_table(6, &empty);
     file.add_table(7, &[master_row(master_db_id)]);
@@ -161,35 +167,38 @@ fn tag_rows(my_tags: &[SourceMyTag]) -> Vec<Vec<u8>> {
     listed_order(my_tags).into_iter().map(tag_row).collect()
 }
 
-/// The table number rekordbox's engine gives `DJDBEXSONGMYTAG` (`49 +
-/// type`, one after `DJDBEXMYTAG`'s 52), in a row header's bits 5 to 20.
-const SONG_MY_TAG_HEADER: u16 = 53 << 5;
-
-/// One type-4 row per tag on a track: the tags in the order type 3 lists
-/// them, and under each the tracks in the order given.
+/// One type-4 row per tag on a track, in rekordbox's order: the tracks by
+/// id, and each track's tags in the order type 3 lists them. A tag on a
+/// track twice gets one row; ids that are not tags, or do not fit a u32,
+/// get none.
 fn song_tag_rows(my_tags: &[SourceMyTag], tagged: &[(u32, &[u64])]) -> Vec<Vec<u8>> {
-    let mut rows = Vec::new();
-    let mut written: BTreeSet<(u32, u32)> = BTreeSet::new();
-    for tag in listed_order(my_tags) {
-        let Ok(tag_id) = u32::try_from(tag.id) else { continue };
-        if tag_id == 0 {
+    // Each tag's place in type 3, by the library's id.
+    let listed: HashMap<u64, (usize, u32)> = listed_order(my_tags)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(at, tag)| u32::try_from(tag.id).ok().filter(|&id| id != 0).map(|id| (tag.id, (at, id))))
+        .collect();
+    let mut by_track: BTreeMap<u32, BTreeSet<(usize, u32)>> = BTreeMap::new();
+    for &(track, tags) in tagged {
+        if track == 0 {
             continue;
         }
-        for &(track, tags) in tagged {
-            if track != 0 && tags.contains(&tag.id) && written.insert((tag_id, track)) {
-                rows.push(song_tag_row(tag_id, track));
-            }
+        let known: Vec<(usize, u32)> = tags.iter().filter_map(|id| listed.get(id).copied()).collect();
+        if !known.is_empty() {
+            by_track.entry(track).or_default().extend(known);
         }
     }
-    rows
+    by_track
+        .into_iter()
+        .flat_map(|(track, tags)| tags.into_iter().map(move |(_, tag_id)| song_tag_row(track, tag_id)))
+        .collect()
 }
 
-fn song_tag_row(tag_id: u32, track: u32) -> Vec<u8> {
-    let mut row = vec![0_u8; 20];
-    row[0..2].copy_from_slice(&SONG_MY_TAG_HEADER.to_le_bytes());
-    row[0x08..0x0c].copy_from_slice(&track.to_le_bytes());
-    row[0x0c..0x10].copy_from_slice(&tag_id.to_le_bytes());
-    row[0x10] = 0x03;
+fn song_tag_row(track: u32, tag_id: u32) -> Vec<u8> {
+    let mut row = vec![0_u8; 16];
+    row[0x04..0x08].copy_from_slice(&track.to_le_bytes());
+    row[0x08..0x0c].copy_from_slice(&tag_id.to_le_bytes());
+    row[0x0c] = 0x03;
     row
 }
 
@@ -311,69 +320,75 @@ mod tests {
         assert_eq!(pdb.u4_at(master[0], 0x18), 7);
     }
 
-    #[test]
-    fn a_track_tag_row_is_rekordboxs_layout_for_its_columns() {
-        // DJDBEXSONGMYTAG is (MYTAGID u32, CONTENTID i32, RESERVED1 u32,
-        // RESERVED2 string): the u32s in reverse column order after the
-        // header, then the one string, empty, at 0x10, padded to four.
-        let row = song_tag_row(4_271_045_719, 0x0102_0304);
-        let expected: Vec<u8> = "a0 06 00 00 00 00 00 00 04 03 02 01 57 fc 92 fe 03 00 00 00"
-            .split(' ')
-            .map(|h| u8::from_str_radix(h, 16).unwrap())
-            .collect();
-        assert_eq!(row, expected);
+    fn hex(text: &str) -> Vec<u8> {
+        text.split_whitespace().map(|h| u8::from_str_radix(h, 16).unwrap()).collect()
     }
 
     #[test]
-    fn the_header_numbers_follow_the_tables_rekordbox_wrote() {
-        // The reference's type-3 rows start 0x0680 and its type-7 row 0x0700:
-        // (49 + type) << 5, so type 4 is 0x06a0.
-        let category = tag_row(&tag(5, 1, "x", 1, 0));
-        assert_eq!(u16::from_le_bytes([category[0], category[1]]), 0x0680);
-        let master = master_row(1);
-        assert_eq!(u16::from_le_bytes([master[0], master[1]]), 0x0700);
-        assert_eq!(SONG_MY_TAG_HEADER, (49 + 4) << 5);
+    fn track_tag_rows_are_the_reference_byte_for_byte() {
+        // Rows of a rekordbox 7 export's exportExt.pdb (2026-10-04, sha1
+        // bc6c8351..., posted on #316 by its reporter): type 4, the first
+        // data page's rows 0 and 17 (tracks 2 and 3) and the last page's
+        // row 127.
+        assert_eq!(song_tag_row(2, 0x07ae_781a), hex("00 00 00 00 02 00 00 00 1a 78 ae 07 03 00 00 00"));
+        assert_eq!(song_tag_row(3, 0x07ae_781a), hex("00 00 00 00 03 00 00 00 1a 78 ae 07 03 00 00 00"));
+        assert_eq!(song_tag_row(0x31, 0x0e72_3f7d), hex("00 00 00 00 31 00 00 00 7d 3f 72 0e 03 00 00 00"));
     }
 
     #[test]
-    fn tracks_tags_go_to_type_4_by_tag_once_each_and_only_for_known_tags() {
+    fn tracks_tags_go_to_type_4_by_track_in_type_3_order_once_each_and_only_for_known_tags() {
         let tags = vec![
+            tag(2, 2, "Mood", 1, 0),
             tag(1, 1, "Genre", 1, 0),
+            tag(21, 1, "Dark", 0, 2),
             tag(12, 2, "Warm-up", 0, 1),
             tag(11, 1, "Peak", 0, 1),
         ];
-        let first: Vec<u64> = vec![12, 11, 12];
+        // Type 3 lists Genre, Peak, Warm-up, Mood, Dark.
+        let first: Vec<u64> = vec![21, 12, 11, 12];
         let second: Vec<u64> = vec![12, 99];
         let none: Vec<u64> = Vec::new();
-        let tagged: Vec<(u32, &[u64])> = vec![(7, &first), (9, &second), (10, &none)];
+        let tagged: Vec<(u32, &[u64])> = vec![(9, &second), (7, &first), (10, &none)];
         let bytes = build(&tags, &tagged, 3);
         let pdb = rbl_pdb::Pdb::parse(&bytes).expect("parses");
         let rows = pdb.rows(pdb.table(rbl_pdb::PageType::Labels).expect("type 4"));
-        let pairs: Vec<(u32, u32)> = rows.iter().map(|&r| (pdb.u4_at(r, 0x0c), pdb.u4_at(r, 0x08))).collect();
-        // Peak (Seq 1) before Warm-up (Seq 2); 99 is not a tag; no repeats.
-        assert_eq!(pairs, vec![(11, 7), (12, 7), (12, 9)]);
-        let headers: Vec<u16> = rows.iter().map(|&r| pdb.u2_at(r, 0)).collect();
-        assert_eq!(headers, vec![0x06a0; 3]);
-        let indexes: Vec<u16> = rows.iter().map(|&r| pdb.u2_at(r, 2)).collect();
-        assert_eq!(indexes, vec![0, 32, 64]);
-        assert!(rows.iter().all(|&r| pdb.u4_at(r, 4) == 0 && pdb.u1_at(r, 0x10) == 0x03));
+        let pairs: Vec<(u32, u32)> = rows.iter().map(|&r| (pdb.u4_at(r, 0x04), pdb.u4_at(r, 0x08))).collect();
+        // Track 7 before 9; Peak, Warm-up, Dark; 99 is not a tag; no repeats.
+        assert_eq!(pairs, vec![(7, 11), (7, 12), (7, 21), (9, 12)]);
+        assert!(rows.iter().all(|&r| pdb.u4_at(r, 0) == 0 && pdb.u4_at(r, 0x0c) == 0x03));
+        let offsets: Vec<usize> = rows.iter().map(|&r| r.offset - r.page_offset - 0x28).collect();
+        assert_eq!(offsets, vec![0, 16, 32, 48]);
     }
 
     #[test]
-    fn many_track_tags_fill_pages_with_the_index_starting_again() {
-        let tags = vec![tag(1, 1, "Genre", 1, 0), tag(11, 1, "Peak", 0, 1)];
-        let one: Vec<u64> = vec![11];
-        let tagged: Vec<(u32, &[u64])> = (1..=600).map(|id| (id, one.as_slice())).collect();
+    fn track_tag_pages_are_headed_and_filled_as_rekordboxs() {
+        // The reference's 572 type-4 rows took pages of 222, 222 and 128
+        // rows with these bytes at 0x18..0x24 [OBS, the #316 reporter's
+        // rekordbox 7 exportExt.pdb, its pages 10, 21 and 23].
+        let mut tags = vec![tag(1, 1, "Genre", 1, 0)];
+        tags.extend((0..11_u32).map(|i| tag(100 + u64::from(i), i + 1, "t", 0, 1)));
+        let all: Vec<u64> = (100..111).collect();
+        let tagged: Vec<(u32, &[u64])> = (1..=52).map(|id| (id, all.as_slice())).collect();
         let bytes = build(&tags, &tagged, 3);
         let pdb = rbl_pdb::Pdb::parse(&bytes).expect("parses");
         let rows = pdb.rows(pdb.table(rbl_pdb::PageType::Labels).expect("type 4"));
-        assert_eq!(rows.len(), 600);
-        let tracks: Vec<u32> = rows.iter().map(|&r| pdb.u4_at(r, 0x08)).collect();
-        assert_eq!(tracks, (1..=600).collect::<Vec<u32>>());
-        // Every page's first row is index 0 again.
-        let firsts = rows.iter().filter(|&&r| pdb.u2_at(r, 2) == 0).count();
-        assert!(firsts > 1, "600 rows take more than one page");
-        assert!(rows.iter().all(|&r| r.offset - r.page_offset - 0x28 + 20 <= 4096));
+        assert_eq!(rows.len(), 572, "the reader takes every row of each full page");
+        let mut pages: Vec<usize> = rows.iter().map(|r| r.page_offset).collect();
+        pages.dedup();
+        let per_page: Vec<usize> = pages.iter().map(|&p| rows.iter().filter(|r| r.page_offset == p).count()).collect();
+        assert_eq!(per_page, vec![222, 222, 128]);
+        let header = |at: usize| bytes[at + 0x18..at + 0x24].to_vec();
+        assert_eq!(header(pages[0]), hex("de c0 1b 24 04 00 e0 0d 01 00 dd 00"));
+        assert_eq!(header(pages[1]), hex("de c0 1b 24 04 00 e0 0d 01 00 dd 00"));
+        assert_eq!(header(pages[2]), hex("80 00 10 24 b8 06 00 08 01 00 7f 00"));
+        // Each row group's two last words: the present mask, then 0 but
+        // in the last group, which marks only the last row.
+        let words = |at: usize, group: usize| bytes[at + 4096 - group * 0x24 - 4..at + 4096 - group * 0x24].to_vec();
+        assert_eq!(words(pages[0], 0), hex("ff ff 00 00"));
+        assert_eq!(words(pages[0], 13), hex("ff 3f 00 20"));
+        assert_eq!(words(pages[2], 7), hex("ff ff 00 80"));
+        let tracks: Vec<u32> = rows.iter().map(|&r| pdb.u4_at(r, 0x04)).collect();
+        assert!(tracks.windows(2).all(|w| w[0] <= w[1]));
     }
 
     #[test]
