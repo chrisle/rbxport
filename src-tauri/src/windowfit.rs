@@ -106,6 +106,17 @@ mod tests {
     }
 
     #[test]
+    fn the_configured_size_centred_on_a_13_inch_retina_screen_fills_its_work_area() {
+        // The geometry logged in #247 on macOS 11.7: 1800x1131 points centred
+        // on a 1280x800-point Retina screen, all in physical pixels at 2x. The
+        // work area is the screen less a 25-point menu bar. Both sides are
+        // physical, so the result is the whole work area, 1280x775 points.
+        let screen = Rect::new(0, 50, 2560, 1550);
+        let fitted = fit_within(Rect::new(-520, -306, 3600, 2262), screen);
+        assert_eq!(fitted, screen);
+    }
+
+    #[test]
     fn the_result_always_fits(){
         // Whatever it is handed, including sizes and positions that make no
         // sense, what comes back is inside the area.

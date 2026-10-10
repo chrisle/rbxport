@@ -222,9 +222,10 @@ const MAIN_WINDOW: &str = "main";
 
 /// What the window-state plugin saves and puts back: everything but whether
 /// the window is showing. Every window is created hidden and shows itself
-/// once its page has rendered (`startup::show_window`); a restore that
-/// included visibility called `show()` the moment the window was built, and
-/// the window came up as an empty frame until React drew into it.
+/// once its page has rendered (`startup::show_window`), or is shown without
+/// it when the page never gets that far (`startup::reveal_if_page_stalls`); a
+/// restore that included visibility called `show()` the moment the window was
+/// built, and the window came up as an empty frame until React drew into it.
 const WINDOW_STATE: tauri_plugin_window_state::StateFlags =
     tauri_plugin_window_state::StateFlags::all().difference(tauri_plugin_window_state::StateFlags::VISIBLE);
 
@@ -246,6 +247,9 @@ fn window_geometry() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 
     tauri::plugin::Builder::<tauri::Wry>::new("windowfit")
         .on_window_ready(|window| {
+            // Every window, not only the main one: each is built hidden and waits
+            // for its page to show it.
+            startup::reveal_if_page_stalls(&window);
             if window.label() != MAIN_WINDOW {
                 return;
             }
@@ -410,6 +414,15 @@ pub fn run() {
         .manage(Arc::new(crate::update::Updates::default()))
         .manage(crate::test_port::TestPort::default())
         .setup(|app| {
+            // The system webview runs the whole interface, and on macOS its
+            // version follows the Safari installed rather than the OS: Big Sur
+            // stopped shipping Safari with its updates after 11.6. A page that
+            // will not run in it leaves nothing on screen to report from, so
+            // the log is where the version has to be.
+            match tauri::webview_version() {
+                Ok(version) => tracing::info!(%version, "webview"),
+                Err(e) => tracing::warn!(error = %e, "could not read the webview's version"),
+            }
             screen_cache::initialize(app.handle());
             // Listens only in a debug build asked to (`RBXPORT_TEST_PORT`).
             crate::test_port::start(app.handle());
