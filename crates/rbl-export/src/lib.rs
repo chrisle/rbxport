@@ -1024,6 +1024,13 @@ pub fn export_cancellable(
                     parsed.sections.insert(1, rbl_anlz::write::vbr_table_zero_section());
                 }
                 parsed.sections = parsed.sections.iter().map(rbl_anlz::Section::with_export_phrase_mask).collect();
+                // Analysis written before issue #278 put whiteness bits in
+                // `PWV2` and zero-height preview columns, neither of which
+                // rekordbox writes; a Nexus player (XDJ-1000MK2) then rejects
+                // the track's whole preview, and with it the detail waveform
+                // and hot-cue markers on load. rekordbox-written `PWAV` and
+                // `PWV2` pass through unchanged.
+                parsed.sections = parsed.sections.iter().map(rbl_anlz::encode::with_device_preview).collect();
                 if let Some(cues) = &track.cues {
                     if extension == "DAT" || extension == "EXT" {
                         parsed.sections.retain(|s| !s.is_cue_list());

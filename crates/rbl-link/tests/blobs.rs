@@ -143,3 +143,14 @@ fn an_index_cue_becomes_an_extended_cue_by_its_hot_letter() {
     assert_eq!(blob[6], 2);
     assert_eq!(&blob[16..20], &900_u32.to_le_bytes());
 }
+
+#[test]
+fn the_waveform_preview_sends_pwv2_as_height_alone() {
+    // PWV2 written by this app before issue #278 carried whiteness and
+    // zero columns; a Nexus player discards the whole preview reply when a
+    // PWV2 byte is above 15 and reads a zero column as unfinished. The PWAV
+    // columns keep their whiteness byte; a zero height rises to rekordbox's 2.
+    let blob = blobs::waveform_preview_blob(&[0xa3, 0x20], &[0x48, 0xef, 0x00, 0x0f]);
+    assert_eq!(&blob[..4], &[0x03, 0x05, 0x02, 0x01]);
+    assert_eq!(&blob[4..8], &[8, 15, 1, 15]);
+}

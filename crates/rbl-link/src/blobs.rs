@@ -50,14 +50,21 @@ const PREVIEW_TAIL: [u8; 4] = [0x9e, 0xeb, 0x78, 0x10];
 
 /// The waveform preview reply (`4402`): each of the 400 `PWAV` columns as
 /// two bytes — height (the low five bits) then whiteness (the high three) —
-/// then the 100 `PWV2` columns as they are, then a fixed tail.
+/// then the 100 `PWV2` columns, then a fixed tail.
+///
+/// The columns go out as rekordbox's are: `PWV2` the height alone (1..=15)
+/// and no height 0. A Nexus player checks this reply and discards the whole
+/// preview when a `PWV2` byte is above 15, and treats a zero column as
+/// unfinished (issue #278); analysis written by earlier versions of this app
+/// has both. A rekordbox-written column is unchanged.
 pub fn waveform_preview_blob(pwav: &[u8], pwv2: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(pwav.len() * 2 + pwv2.len() + 4);
     for &column in pwav {
+        let column = rbl_anlz::encode::device_preview_byte(column);
         out.push(column & 0x1f);
         out.push(column >> 5);
     }
-    out.extend_from_slice(pwv2);
+    out.extend(pwv2.iter().map(|&b| rbl_anlz::encode::device_tiny_preview_byte(b)));
     out.extend_from_slice(&PREVIEW_TAIL);
     out
 }

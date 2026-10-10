@@ -754,6 +754,29 @@ fn exports_cues_metadata_and_all_companions_and_repairs_a_missing_ext() {
 }
 
 #[test]
+fn an_export_brings_an_old_pwv2_into_the_range_players_accept() {
+    // Analysis this app wrote before issue #278 carried whiteness in PWV2
+    // and zero-height columns, neither of which rekordbox writes; an
+    // XDJ-1000MK2 drops the whole preview. The export repairs both; PWAV
+    // keeps its whiteness.
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let mut t = track(src.path(), 1, "Old Analysis", "Artist");
+    let dat = rbl_anlz::AnlzBuilder::new().path("?/library.mp3")
+        .beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 0 }])
+        .waveform_preview(b"PWAV", &[0xa2, 0xe5, 0x03, 0x20])
+        .waveform_preview(b"PWV2", &[0x48, 0xef, 0x00, 0x0f])
+        .finish();
+    t.analysis = vec![("DAT".into(), dat)];
+    export(dest.path(), &[t], &[]).unwrap();
+    let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+    let saved = dest.path().join(manifest.tracks[0].anlz_dir.trim_start_matches('/')).join("ANLZ0000.DAT");
+    let parsed = rbl_anlz::Anlz::read(&saved).unwrap();
+    assert_eq!(parsed.waveform(b"PWV2").unwrap().1, &[8, 15, 1, 15]);
+    assert_eq!(parsed.waveform(b"PWAV").unwrap().1, &[0xa2, 0xe5, 0x03, 0x22]);
+}
+
+#[test]
 fn a_firmware_path_hash_collision_keeps_both_analysis_bundles() {
     let src = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();

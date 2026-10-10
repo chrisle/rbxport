@@ -498,7 +498,7 @@ ignores it is wrong by exactly that much.
 | Tag | File | Stride | Columns | Payload |
 |---|---|---|---|---|
 | `PWAV` | DAT | 1 | 400 | `wwwhhhhh` — 3 bits whiteness, 5 bits height |
-| `PWV2` | DAT | 1 | 100 | same encoding |
+| `PWV2` | DAT | 1 | 100 | height alone, 1-15 — **no whiteness bits** |
 | `PWV3` | EXT | 1 | 150/s | same encoding |
 | `PWV4` | EXT | 6 | 1200 | `peak>>1`, 0, 0, `mid>>1`, `high>>1`, `low>>1` |
 | `PWV5` | EXT | 2 | 150/s | be16 `rrrgggbbbhhhhh00` |
@@ -510,6 +510,23 @@ ignores it is wrong by exactly that much.
 assumes full scale draws every loud track as a flat block. The three-band
 bytes are likewise an already-scaled drawing height, not a magnitude: on
 loud material they still sit near a quarter of the byte.
+
+**`PWV2` carries no whiteness.** No `PWV2` byte in 1,590 rekordbox-written
+`.DAT` files (a rekordbox 7 USB export and a rekordbox 7 share tree) is above
+15 [OBS, issue #278]. Players rely on it: the Nexus firmware (XDJ-RX2 1.43,
+`TotalWaveWacher_CheckWaveDataComplete` at `0x000d7c18`; the XDJ-1000MK2
+shares the code base [ASSUME]) rejects the whole 900-byte preview, `PWAV`
+included, when any `PWV2` byte is above 15. With the preview rejected the
+deck's waveform cache entry is never created, so the detail waveform and the
+cue markers fetched on load have nowhere to go and are not shown until
+playback builds a preview from the audio.
+
+**No preview column is 0.** rekordbox's smallest `PWAV` height is 2 (1,552 of
+1,558 files, never lower) and its smallest `PWV2` byte 1 (never 0) [OBS]. The
+same firmware check reads a zero column as an unfinished preview, after which
+the player builds its own from the audio and saves it over the stick's. The
+export and the LINK server repair both in analysis written by older versions
+of this app; rekordbox's own bytes pass through unchanged.
 
 `PWV6`'s section header is **20 bytes, not the 24** the other scroll tags
 use — a real shape trap.
