@@ -1799,7 +1799,8 @@ pub fn export_progress() -> Vec<ExportProgressDto> {
 }
 
 #[tauri::command]
-pub async fn eject_device(path: String) -> AppResult<()> {
+pub async fn eject_device(state: State<'_, Arc<AppState>>, path: String) -> AppResult<()> {
+    let handle = Arc::clone(&state);
     blocking("eject_device", move || {
         // Keep new exports from starting until the OS has finished ejecting.
         let jobs = EXPORT_PROGRESS.lock().map_err(|e| AppError::internal(e.to_string()))?;
@@ -1808,6 +1809,9 @@ pub async fn eject_device(path: String) -> AppResult<()> {
         }
         let result = rbl_devices::eject::eject(std::path::Path::new(&path))
             .map_err(|e| AppError::internal(e.to_string()));
+        if result.is_ok() {
+            handle.forget_device_assets(std::path::Path::new(&path));
+        }
         drop(jobs);
         result
     }).await

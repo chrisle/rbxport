@@ -271,7 +271,7 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
             .enumerate()
             .filter_map(|(at, id)| library.track(*id).map(|t| device_row(&mount, t, at)))
             .collect();
-        handle.remember_device_assets(library.tracks.iter().map(|t| assets_of(&mount, t)));
+        handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, t)));
         let view = DeviceView::open(rows, &parsed, field);
         let (view_id, len, generation) = handle.open_device_view(view);
         Ok(ViewHandleDto { view_id, len, gen: generation })
@@ -481,7 +481,7 @@ mod tests {
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
             let library = device::read(mount, format).unwrap();
             let state = Arc::new(AppState::new());
-            state.remember_device_assets(library.tracks.iter().map(|t| assets_of(mount, t)));
+            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, t)));
             let rows: Vec<RowDto> = library.tracks.iter().enumerate().map(|(at, t)| row_dto(&device_row(mount, t, at))).collect();
             let (full, bare) = (rows.iter().find(|r| r.title == "Track 1").unwrap(), rows.iter().find(|r| r.title == "Track 2").unwrap());
             assert_eq!((full.analysed, full.has_artwork), (1, true), "{format:?}");
@@ -508,6 +508,25 @@ mod tests {
         let assets = DeviceAssets { mount: stick.path().join("PIONEER"), analysis: "/../outside.DAT".into(), artwork: "../x.jpg".into() };
         std::fs::write(stick.path().join("outside.DAT"), b"x").unwrap();
         assert_eq!((assets.analysis_dat(), assets.artwork_file()), (None, None));
+    }
+
+    #[test]
+    fn a_reread_or_ejected_stick_forgets_its_earlier_tracks() {
+        let (first, other) = (Path::new("/Volumes/STICK"), Path::new("/Volumes/OTHER"));
+        let at = |mount: &Path, analysis: &str| DeviceAssets { mount: mount.to_path_buf(), analysis: analysis.into(), artwork: String::new() };
+        let state = AppState::new();
+        state.remember_device_assets(first, [("file:/Volumes/STICK/a.mp3".to_string(), at(first, "/a.DAT"))]);
+        state.remember_device_assets(other, [("file:/Volumes/OTHER/o.mp3".to_string(), at(other, "/o.DAT"))]);
+
+        // A different stick read at the same mount replaces the first one's tracks.
+        state.remember_device_assets(first, [("file:/Volumes/STICK/b.mp3".to_string(), at(first, "/b.DAT"))]);
+        assert_eq!(state.device_assets("file:/Volumes/STICK/a.mp3"), None);
+        assert_eq!(state.device_assets("file:/Volumes/STICK/b.mp3"), Some(at(first, "/b.DAT")));
+        assert_eq!(state.device_assets("file:/Volumes/OTHER/o.mp3"), Some(at(other, "/o.DAT")), "another mount is untouched");
+
+        state.forget_device_assets(first);
+        assert_eq!(state.device_assets("file:/Volumes/STICK/b.mp3"), None);
+        assert_eq!(state.device_assets("file:/Volumes/OTHER/o.mp3"), Some(at(other, "/o.DAT")));
     }
 
     #[test]

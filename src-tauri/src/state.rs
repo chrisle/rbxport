@@ -524,10 +524,19 @@ impl AppState {
         (id, len, inner.generation)
     }
 
-    /// Records the analysis and artwork of a stick's tracks, by row id. A
-    /// later read of the same stick replaces what an earlier one said.
-    pub(crate) fn remember_device_assets(&self, assets: impl IntoIterator<Item = (String, crate::device_library::DeviceAssets)>) {
-        self.device_assets.write().extend(assets);
+    /// Records the analysis and artwork of the tracks on the stick at
+    /// `mount`, by row id. Everything an earlier read of that mount said is
+    /// dropped first, so a different stick later mounted at the same place
+    /// is never answered with the previous stick's files.
+    pub(crate) fn remember_device_assets(&self, mount: &std::path::Path, assets: impl IntoIterator<Item = (String, crate::device_library::DeviceAssets)>) {
+        let mut known = self.device_assets.write();
+        known.retain(|_, a| a.mount != mount);
+        known.extend(assets);
+    }
+
+    /// Drops what was recorded for the stick at `mount`, as when it is ejected.
+    pub(crate) fn forget_device_assets(&self, mount: &std::path::Path) {
+        self.device_assets.write().retain(|_, a| a.mount != mount);
     }
 
     /// The analysis and artwork a stick's library names for one of its rows,
