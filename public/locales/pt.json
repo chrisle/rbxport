@@ -1609,5 +1609,7 @@
   "Missing or unreadable": "Missing or unreadable",
   "The written library did not read back correctly.": "The written library did not read back correctly.",
   "Adding track data to the Collection": "A adicionar dados de faixa à Coleção",
-  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files.",
+  "Don't ask me again": "Não perguntar novamente",
+  "Note: You can change this setting in [Preferences] > [Analysis].": "Nota: Pode alterar esta definição em [Preferências] > [Análise]."
 }

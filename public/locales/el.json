@@ -1609,5 +1609,7 @@
   "Missing or unreadable": "Missing or unreadable",
   "The written library did not read back correctly.": "The written library did not read back correctly.",
   "Adding track data to the Collection": "Προσθήκη δεδομένων κομματιών στη Συλλογή",
-  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files.",
+  "Don't ask me again": "Να μην εμφανιστεί ξανά ερώτηση",
+  "Note: You can change this setting in [Preferences] > [Analysis].": "Σημείωση: Μπορείτε να αλλάξετε αυτή τη ρύθμιση στις [Προτιμήσεις] > [Ανάλυση]."
 }

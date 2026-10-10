@@ -116,3 +116,59 @@ test("Auto Analysis does not ask when it is off or the library is read-only", as
   await page.waitForTimeout(500);
   await expect(dialog).toHaveCount(0);
 });
+
+// rekordbox 7.2.19 (static): loading a never-analysed Collection track onto a
+// deck asks with Analysis Setting ("Note: You can change this setting in
+// [Preferences] > [Analysis].", "Don't ask me again", OK only) and analyses
+// it, whether Auto Analysis is on or not; the deck then draws its waveform
+// (#330). Before, the deck stayed black until the track was loaded again.
+test("loading a never-analysed track analyses it and the deck draws its waveform", async ({ page }) => {
+  // Twenty mock tracks: the unanalysed ones among them are not the mock's
+  // every-seventh track that fails to analyse.
+  await page.goto("/?writable=1&tracks=20");
+  const titles = page.locator('[role="gridcell"][data-col="title"]');
+  // An analysed row has a preview canvas; wait for the first ones to show.
+  await expect(titles.nth(3).locator("xpath=..").locator('[data-col="preview"] canvas')).toHaveCount(1);
+  const unanalysed: number[] = [];
+  for (let row = 0; row < 20 && unanalysed.length < 2; row++) {
+    const canvases = await titles.nth(row).locator("xpath=..").locator('[data-col="preview"] canvas').count();
+    if (canvases === 0) unanalysed.push(row);
+  }
+  expect(unanalysed).toHaveLength(2);
+  const [first = 0, second = 0] = unanalysed;
+  const overview = page.getByTestId("player-overview");
+  const dialog = page.getByRole("dialog", { name: "Analysis Setting" });
+
+  await titles.nth(first).dblclick();
+  await expect(dialog).toContainText("Note: You can change this setting in [Preferences] > [Analysis].");
+  await expect(dialog).not.toContainText("selected");
+  await expect(dialog).not.toContainText("Auto Analysis is starting.");
+  const bpmGrid = dialog.getByRole("checkbox", { name: "BPM / Grid", exact: true });
+  await expect(bpmGrid).toBeChecked();
+  await expect(bpmGrid).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
+  await expect(overview.locator("canvas")).toHaveCount(0);
+  await dialog.getByRole("checkbox", { name: "Don't ask me again" }).check();
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  // The deck that was loaded black draws the waveform once it is analysed.
+  await expect(overview.locator("canvas")).toHaveCount(1, { timeout: 15_000 });
+
+  // Not asked again: the next never-analysed track is analysed straight away.
+  await titles.nth(second).dblclick();
+  await expect(page.getByRole("contentinfo")).toContainText("Analyzing ");
+  await expect(dialog).toHaveCount(0);
+  await expect(overview.locator("canvas")).toHaveCount(1, { timeout: 15_000 });
+});
+
+test("loading a never-analysed track into a read-only library asks nothing", async ({ page }) => {
+  await page.goto("/");
+  const titles = page.locator('[role="gridcell"][data-col="title"]');
+  await expect(titles.nth(3).locator("xpath=..").locator('[data-col="preview"] canvas')).toHaveCount(1);
+  let row = 0;
+  while (row < 30 && (await titles.nth(row).locator("xpath=..").locator('[data-col="preview"] canvas').count()) > 0) row++;
+  await titles.nth(row).dblclick();
+  await expect(page.getByRole("region", { name: "Preview player" }).getByRole("button", { name: "Play", exact: true })).toBeEnabled();
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("dialog", { name: "Analysis Setting" })).toHaveCount(0);
+});

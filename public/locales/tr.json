@@ -1608,5 +1608,7 @@
   "Missing or unreadable": "Missing or unreadable",
   "The written library did not read back correctly.": "The written library did not read back correctly.",
   "Adding track data to the Collection": "Parça verileri Koleksiyona ekleniyor",
-  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files.",
+  "Don't ask me again": "Tekrar sorma",
+  "Note: You can change this setting in [Preferences] > [Analysis].": "Not: Bu ayarı [Tercihler] > [Analiz] içinde değiştirebilirsiniz."
 }

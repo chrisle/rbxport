@@ -1608,5 +1608,7 @@
   "Missing or unreadable": "Missing or unreadable",
   "The written library did not read back correctly.": "The written library did not read back correctly.",
   "Adding track data to the Collection": "Přidávání dat stop do sbírky",
-  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files.",
+  "Don't ask me again": "Příště se již nedotazovat",
+  "Note: You can change this setting in [Preferences] > [Analysis].": "Poznámka: Toto na stavení lze změnit v nabídce [Nastavení] > [Analýza]."
 }

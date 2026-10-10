@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { UnanalysedTracks } from "@/ipc/types";
-import { autoAnalysisOffer, takeRemainingPages, UNANALYSED_PAGE } from "./autoAnalysis";
+import { analysesOnLoad, autoAnalysisOffer, takeRemainingPages, UNANALYSED_PAGE } from "./autoAnalysis";
 
 /** A backend over fixed pages, keyed by the row each starts from. */
 function pages(byRow: Record<number, UnanalysedTracks>) {
@@ -47,5 +47,28 @@ describe("the Auto Analysis launch prompt", () => {
     await takeRemainingPages(backend, 40, take);
     expect(take).toHaveBeenCalledTimes(1);
     expect(backend.unanalysedTracks).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("analysing a track as it is loaded onto a deck", () => {
+  const writable = { readOnly: false, queued: () => false };
+  it("analyses a never-analysed Collection track, as rekordbox's analyzeCollectionLoad does", () => {
+    expect(analysesOnLoad({ id: "100011", analysed: 0 }, writable)).toBe(true);
+  });
+
+  it("leaves analysed and locked tracks alone", () => {
+    expect(analysesOnLoad({ id: "100003", analysed: 1 }, writable)).toBe(false);
+    // rekordbox's Analysed with the analysis lock: bit 0x80.
+    expect(analysesOnLoad({ id: "100004", analysed: 0x80 }, writable)).toBe(false);
+  });
+
+  it("leaves files outside the library, missing files and a read-only library alone", () => {
+    expect(analysesOnLoad({ id: "file:/Volumes/USB/Contents/a.mp3", analysed: 0 }, writable)).toBe(false);
+    expect(analysesOnLoad({ id: "100011", analysed: 0, missing: true }, writable)).toBe(false);
+    expect(analysesOnLoad({ id: "100011", analysed: 0 }, { readOnly: true, queued: () => false })).toBe(false);
+  });
+
+  it("does not queue a track twice when Auto Analysis already has it", () => {
+    expect(analysesOnLoad({ id: "100011", analysed: 0 }, { readOnly: false, queued: (id) => id === "100011" })).toBe(false);
   });
 });

@@ -1605,5 +1605,7 @@
   "Missing or unreadable": "Missing or unreadable",
   "The written library did not read back correctly.": "The written library did not read back correctly.",
   "Adding track data to the Collection": "Lägger till spårdata till samlingen",
-  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files.",
+  "Don't ask me again": "Fråga mig inte igen",
+  "Note: You can change this setting in [Preferences] > [Analysis].": "Notera: Du kan ändra denna inställning i [Preferenser] > [Analys]."
 }

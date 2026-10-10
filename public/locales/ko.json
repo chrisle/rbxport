@@ -1605,5 +1605,7 @@
   "Missing or unreadable": "Missing or unreadable",
   "The written library did not read back correctly.": "The written library did not read back correctly.",
   "Adding track data to the Collection": "컬렉션에 트랙 데이터 추가하는 중",
-  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files.",
+  "Don't ask me again": "다시 묻지 않기",
+  "Note: You can change this setting in [Preferences] > [Analysis].": "참고: 이 설정은 [사용자 정의] > [분석]에서 변경할 수 있습니다."
 }

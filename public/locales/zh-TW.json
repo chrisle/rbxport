@@ -1610,5 +1610,7 @@
   "Missing or unreadable": "Missing or unreadable",
   "The written library did not read back correctly.": "The written library did not read back correctly.",
   "Adding track data to the Collection": "新增音軌資料至「收集」",
-  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files."
+  "Stopped: imported {imported} of {count} files.": "Stopped: imported {imported} of {count} files.",
+  "Don't ask me again": "別再詢問",
+  "Note: You can change this setting in [Preferences] > [Analysis].": "注意：您可以在 [喜好設定] > [分析] 中變更此設定。"
 }

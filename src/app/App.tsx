@@ -72,7 +72,7 @@ import type { PreferencePane } from "@/lib/preferences";
 import { answer, deckNumber, setPlaying, whenLoaded, withSetting, type ScriptHandler } from "@/lib/scripting";
 import { useAnalysis } from "@/store/useAnalysis";
 import type { AnalysisChoice } from "@/views/analysis/AnalysisDialog";
-import { autoAnalysisOffer, takeRemainingPages } from "@/lib/autoAnalysis";
+import { analysesOnLoad, asksAnalysisOnLoad, autoAnalysisOffer, stopAskingAnalysisOnLoad, takeRemainingPages } from "@/lib/autoAnalysis";
 import type { LibraryQuestion } from "@/views/library/NewLibraryDialog";
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
@@ -1228,6 +1228,20 @@ function AppBody() {
   );
 
   /**
+   * A never-analysed Collection track loaded onto a deck is analysed, after
+   * the Analysis Setting window unless "Don't ask me again" was ticked, as
+   * rekordbox does whether Auto Analysis is on or not; see `analysesOnLoad`.
+   */
+  const [loadAnalysis, setLoadAnalysis] = useState<QueueItem | null>(null);
+  const analyseOnLoad = useEventCallback((row: RowDto) => {
+    const queued = (id: string) =>
+      analysis.state.pending.some((item) => item.id === id) || analysis.state.running.some((item) => item.id === id);
+    if (!analysesOnLoad(row, { readOnly, queued })) return;
+    const item = { id: row.id, title: row.title };
+    if (asksAnalysisOnLoad()) setLoadAnalysis(item);
+    else analysis.add([item]);
+  });
+  /**
    * What loading a track onto a deck goes through: a track whose file is
    * missing is not loaded, the deck keeps what it had, and the status bar
    * says so in rekordbox's words [OBS rekordbox 7.2.19 static:
@@ -1242,9 +1256,10 @@ function AppBody() {
         return;
       }
       set(row);
+      if (row) analyseOnLoad(row);
     };
     return { a: guard(setPlayerTrack), b: guard(setPlayerTrackB) };
-  }, [refuse, t]);
+  }, [refuse, t, analyseOnLoad]);
 
   /**
    * Loading a dragged track into a deck.
@@ -3058,6 +3073,17 @@ function AppBody() {
             if (readOnly) { refuse(ANALYSIS_REFUSED); return; }
             analysis.add(analysisSelection, settings);
             setAnalysisSelection(null);
+          }} />
+      ) : null}
+      {loadAnalysis !== null ? (
+        <AnalysisDialog load count={1} initialMode={analysisPrefs.mode}
+          initialFirstBeatCue={analysisPrefs.firstBeatCue}
+          onCancel={() => setLoadAnalysis(null)}
+          onConfirm={(settings, dontAsk) => {
+            setLoadAnalysis(null);
+            if (dontAsk) stopAskingAnalysisOnLoad();
+            if (readOnly) { refuse(ANALYSIS_REFUSED); return; }
+            analysis.add([loadAnalysis], settings);
           }} />
       ) : null}
       {autoAnalysis !== null ? (
