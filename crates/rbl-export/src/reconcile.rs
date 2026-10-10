@@ -174,11 +174,16 @@ fn retain_device_only(
         .copied()
         .chain(before.history.iter().flat_map(|h| &h.tracks).copied())
         .collect();
+    // What an earlier export put there itself. A track it only carried
+    // (`preserved`) is still another writer's: counting it as ours would keep
+    // it for one sync and drop it, unannounced, at the next (#317).
     let previously_owned: BTreeSet<u32> = previous
-        .map(|m| m.tracks.iter().map(|t| t.export_id).collect())
+        .map(|m| m.tracks.iter().filter(|t| !t.preserved).map(|t| t.export_id).collect())
         .unwrap_or_default();
     // Tracks that arrived through another writer belong to the USB, not to our
-    // previous selection. Retain them even when no playlist references them.
+    // previous selection. Retain them even when no playlist references them,
+    // as rekordbox does: its export only adds and updates the tracks it is
+    // given and never revisits the rest of the device library.
     needed.extend(
         current
             .tracks

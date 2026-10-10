@@ -23,7 +23,7 @@ impl VerifyReport {
 }
 pub fn verify(root: &Path) -> Result<VerifyReport> {
     let snapshot = Snapshot::read(root)?;
-    let mut report = verify_staged(root, root, &snapshot)?;
+    let mut report = verify_staged(root, root, &snapshot, &BTreeSet::new())?;
     if let Some(manifest) = crate::Manifest::load(root) {
         for track in manifest.tracks {
             for extension in track.analysis_extensions {
@@ -57,10 +57,15 @@ pub fn verify_databases(root: &Path) -> Result<VerifyReport> {
     report.playlist_entries = legacy.playlists.iter().map(|playlist| playlist.tracks.len()).sum();
     Ok(report)
 }
+/// `absent` names, by [`crate::path_key`], audio the stick was already
+/// missing before the export and that the export carried without copying:
+/// another writer's track, kept as the stick had it (#317). Its absence is not
+/// a fault of the staged generation, so it is not reported as missing.
 pub(crate) fn verify_staged(
     root: &Path,
     existing: &Path,
     snapshot: &Snapshot,
+    absent: &BTreeSet<String>,
 ) -> Result<VerifyReport> {
     let mut report = VerifyReport::default();
     let resolve = |relative: &str| -> Result<std::path::PathBuf> {
@@ -88,7 +93,7 @@ pub(crate) fn verify_staged(
     if ids.len() != legacy.tracks.len() {
         report.errors.push("Duplicate track IDs".into());
     }
-    verify_assets(root, legacy, &resolve, &mut report)?;
+    verify_assets(root, legacy, &resolve, absent, &mut report)?;
     let playlists: BTreeSet<_> = legacy.playlists.iter().map(|p| p.id).collect();
     for p in &legacy.playlists {
         if p.parent != 0
@@ -222,6 +227,7 @@ fn verify_assets(
     root: &Path,
     legacy: &crate::snapshot::Library,
     resolve: &impl Fn(&str) -> Result<std::path::PathBuf>,
+    absent: &BTreeSet<String>,
     report: &mut VerifyReport,
 ) -> Result<()> {
     let mut paths = BTreeSet::new();
@@ -234,7 +240,7 @@ fn verify_assets(
         let path = resolve(&track.path)?;
         if path.is_file() {
             report.audio_present += 1;
-        } else {
+        } else if !absent.contains(&crate::path_key(&track.path)) {
             report.missing_audio.push(track.path.clone());
         }
         if !track.analysis.is_empty() {

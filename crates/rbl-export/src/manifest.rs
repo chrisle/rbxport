@@ -100,6 +100,13 @@ pub struct ManifestTrack {
     /// Absent in older records, which only ever name copies.
     #[serde(default)]
     pub in_place: bool,
+    /// Kept as the stick had it rather than exported: a track another writer
+    /// (rekordbox, a player) put there that this export carried because the
+    /// stick still holds it. It is the stick's, not the export's, so a later
+    /// sync keeps carrying it instead of taking it off as no longer selected
+    /// (#317). Absent in older records, which read as exported.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub preserved: bool,
     /// Size and modification time of the copy on the stick, as this export
     /// left it. While the copy still reads the same, a sync trusts
     /// `audio_hash` rather than reading every byte back off the stick.
@@ -226,6 +233,7 @@ mod tests {
                 conversion: String::new(),
                 conversion_source_hash: 0,
                 in_place: false,
+                preserved: false,
                 copy_stamp: Some((1234, 1_789_000_000_000_000_000)),
             }],
             playlists: vec![ManifestPlaylist { device_only: false, export_id: 1, folder: false, library_id: 9, name: "Set".to_owned() }],

@@ -862,12 +862,17 @@ pub fn export_cancellable(
     let in_place_paths = in_place_paths(destination, tracks, &previous_in_place);
     let layouts = layouts(tracks, &ids, root_name, previous.as_ref(), &in_place_paths, &previous_in_place);
     // Losing access to a selected source must never delete its good USB copy.
+    // A track only carried from the stick has no other source; its missing
+    // audio is the stick's own state, kept below as it is.
     for track in tracks {
-        if !track.source_path.is_file() && previous.as_ref().is_some_and(|m| m.tracks.iter().any(|t| t.key() == track_key(track.id, &track.source_path.to_string_lossy()))) {
+        if !track.source_path.is_file() && !track.device.as_ref().is_some_and(|d| d.preserve) && previous.as_ref().is_some_and(|m| m.tracks.iter().any(|t| t.key() == track_key(track.id, &track.source_path.to_string_lossy()))) {
             return Err(ExportError::Conflict(format!("Source unavailable for '{}'. Reconnect or relocate it before syncing; the USB has not been changed.", track.title)));
         }
     }
     let mut deletions = Vec::new();
+    // Audio a carried track names that was already missing from the stick
+    // before this export: the databases keep naming it, as they did.
+    let mut absent_audio: BTreeSet<String> = BTreeSet::new();
     let mut written_audio_paths = BTreeSet::new();
     let mut written_analysis_paths: BTreeSet<String> = tracks.iter()
         .filter_map(|t| t.device.as_ref().filter(|d| d.preserve).map(|d| path_key(&d.analysis_dir)))
@@ -886,8 +891,22 @@ pub fn export_cancellable(
         // Read the source before claiming the previous entry: a track whose
         // audio has gone leaves its entry in `stale`, so the copy on the stick
         // is removed rather than orphaned by databases that no longer name it.
+        let preserved = track.device.as_ref().is_some_and(|d| d.preserve);
+        // A track the stick holds without its audio (deleted by hand, or
+        // left by another writer) is carried as the stick has it: its rows,
+        // path and analysis stay and nothing is copied. Leaving it out would
+        // take another writer's track, its cues and its playlist entries off
+        // the stick, which the conflict check refuses, and every later sync
+        // to that stick with it (#317). rekordbox's export never revisits a
+        // device track it was not given, so it leaves such a row in place.
+        let mut absent = false;
         let (size, modified) = match std::fs::metadata(&track.source_path) {
             Ok(meta) => source_stamp(&meta),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && preserved => {
+                tracing::warn!(title = %track.title, path = %track.source_path.display(), "device track kept without its audio file");
+                absent = true;
+                (track.file_size, 0)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 report.skipped.push(track.title.clone());
                 continue;
@@ -938,7 +957,8 @@ pub fn export_cancellable(
         }
         // Still the library's own file on the stick, not renamed for a
         // conversion or an analysis collision: point at it, copy nothing.
-        let in_place = in_place_paths.get(index).and_then(Option::as_deref) == Some(place.audio.as_str());
+        let in_place = absent || in_place_paths.get(index).and_then(Option::as_deref) == Some(place.audio.as_str());
+        if absent { absent_audio.insert(path_key(&place.audio)); }
         let profile = conversion.map_or("", rbl_audio::compatibility::Format::profile);
         let audio_dest = under(destination, &place.audio);
         // Looked at, not yet claimed: a track that fails below must leave
@@ -1001,7 +1021,9 @@ pub fn export_cancellable(
         } else { false };
 
         let output_size;
-        if in_place {
+        if absent {
+            output_size = size;
+        } else if in_place {
             output_size = size;
             report.reused += 1;
             report.in_place += 1;
@@ -1171,7 +1193,8 @@ pub fn export_cancellable(
             conversion: profile.to_owned(),
             conversion_source_hash: source_hash,
             audio_hash,
-            in_place,
+            in_place: in_place && !absent,
+            preserved,
             copy_stamp: recorded_stamp,
         });
 
@@ -1401,7 +1424,7 @@ pub fn export_cancellable(
     before.check_retained_history(&after)?;
     before.check_changes(previous.as_ref(), &after)?;
     progress(&ExportProgress { stage: "verifying", done: tracks.len(), total: tracks.len(), title: String::new() });
-    let verified = verification::verify_staged(publication.stage(), destination, &after)?;
+    let verified = verification::verify_staged(publication.stage(), destination, &after, &absent_audio)?;
     if !verified.is_ok() {
         return Err(ExportError::Conflict(format!("The export did not verify, so the USB was left as it was: {}", verification_failure(&verified))));
     }
