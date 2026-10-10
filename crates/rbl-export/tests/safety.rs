@@ -466,3 +466,74 @@ fn keep_unlisted_adds_to_the_stick_without_taking_anything_off() {
     assert_eq!(names, ["On the deck", "Playlist 30"]);
     assert!(verify(usb.path()).unwrap().is_ok());
 }
+
+/// Makes `usb` a stick another writer filled: rbxport's record of it is
+/// gone, so nothing on it reads as this app's.
+fn forget_our_record(usb: &Path) {
+    std::fs::remove_file(usb.join("PIONEER/rbxport/manifest.json")).unwrap();
+}
+
+fn track_on_stick<'a>(s: &'a rbl_export::snapshot::Library, title: &str) -> Option<&'a rbl_export::snapshot::Track> {
+    s.tracks.iter().find(|t| t.title == title)
+}
+
+/// A stick that holds a track without its audio file, in exportLibrary.db
+/// alone, was refused by every sync with "OneLibrary: device-only track
+/// '…' would be lost": the export left the track out because it could not
+/// read the file, and the conflict check caught the loss (#317). rekordbox
+/// leaves a device track it was not asked to export as it is, so the sync
+/// carries it as the stick has it: same id, path, analysis and cues.
+#[test]
+fn a_device_track_without_its_audio_is_kept_as_the_stick_has_it() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = tempfile::tempdir().unwrap();
+    let (kept, chosen) = (track(src.path(), 1), track(src.path(), 2));
+    sync(usb.path(), &[kept], &[playlist(10, &[0])]).unwrap();
+    let audio = Manifest::load(usb.path()).unwrap().tracks[0].audio.clone();
+    forget_our_record(usb.path());
+    // Another writer's OneLibrary-only stick, and a cue made on a player.
+    std::fs::remove_file(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    edit(usb.path(), "INSERT INTO cue(cue_id,content_id,kind,inUsec,cueComment) VALUES(7,1,0,1000000,'device cue')");
+    std::fs::remove_file(usb.path().join(audio.trim_start_matches('/'))).unwrap();
+    let before = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+    let was = track_on_stick(before.one.as_ref().unwrap(), "Track 1").unwrap().clone();
+    let analysis = std::fs::read(usb.path().join(was.analysis.trim_start_matches('/'))).unwrap();
+
+    for attempt in ["first", "second"] {
+        let report = sync(usb.path(), std::slice::from_ref(&chosen), &[playlist(20, &[0])])
+            .unwrap_or_else(|e| panic!("{attempt} sync: {e}"));
+        assert!(report.skipped.is_empty() && report.failed.is_empty(), "{attempt} sync: {report:?}");
+        let after = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+        for (format, library) in [("OneLibrary", &after.one), ("Device Library", &after.legacy)] {
+            let now = track_on_stick(library.as_ref().unwrap(), "Track 1")
+                .unwrap_or_else(|| panic!("{attempt} sync: Track 1 left the {format}"));
+            assert_eq!((now.id, &now.path, &now.analysis), (was.id, &was.path, &was.analysis), "{attempt} sync, {format}");
+            assert!(track_on_stick(library.as_ref().unwrap(), "Track 2").is_some(), "{attempt} sync, {format}");
+        }
+        assert_eq!(after.cues, before.cues, "{attempt} sync: the player's cue stays");
+        assert_eq!(std::fs::read(usb.path().join(was.analysis.trim_start_matches('/'))).unwrap(), analysis);
+        assert!(!usb.path().join(audio.trim_start_matches('/')).exists(), "nothing is made up for the missing file");
+    }
+}
+
+/// A track another writer put on the stick, in no playlist, was kept by
+/// the first sync from here and then dropped, file and all, by the next:
+/// the first sync's record listed it as exported (#317).
+#[test]
+fn a_device_track_in_no_playlist_is_kept_by_every_later_sync() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = tempfile::tempdir().unwrap();
+    let (kept, chosen) = (track(src.path(), 1), track(src.path(), 2));
+    sync(usb.path(), &[kept], &[playlist(10, &[0])]).unwrap();
+    let audio = Manifest::load(usb.path()).unwrap().tracks[0].audio.clone();
+    forget_our_record(usb.path());
+    for attempt in ["first", "second", "third"] {
+        sync(usb.path(), std::slice::from_ref(&chosen), &[playlist(20, &[0])])
+            .unwrap_or_else(|e| panic!("{attempt} sync: {e}"));
+        let after = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+        assert!(track_on_stick(after.one.as_ref().unwrap(), "Track 1").is_some(), "{attempt} sync dropped it");
+        assert!(usb.path().join(audio.trim_start_matches('/')).is_file(), "{attempt} sync deleted its audio");
+        assert!(Manifest::load(usb.path()).unwrap().tracks.iter().any(|t| t.preserved && t.audio == audio));
+        assert!(verify(usb.path()).unwrap().is_ok());
+    }
+}
