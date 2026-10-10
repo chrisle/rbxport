@@ -43,9 +43,16 @@
 .node[data-selected] { background: var(--c-select); }
 .node:hover:not([data-selected]) { background: var(--c-button); }
 
+.twistyWrapper{
+  padding: 3px;
+  margin: 0 -3px;
+  cursor: pointer;
+}
+
 .twisty {
   width: 0;
   height: 0;
+  display: block;
   flex: none;
   border: 5px solid transparent;
   border-left-color: var(--c-text);
