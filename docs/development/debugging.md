@@ -27,6 +27,7 @@ app name in the status bar still opens the current log file itself.
 | `RUST_LOG` | Replaces the filter; for example `rbl_link=trace,rbxport_lib=info`. |
 | `RBXPORT_LOG_DIR` | Overrides the log directory. |
 | `RBXPORT_TEST` / `RB_LITE_TEST` | Refuses installed-library writes; does not create a fixture. |
+| `RBXPORT_MCP_PORT` | Changes the port of the MCP server from its default, 47200. |
 | `RBXPORT_OPTIONS` | Names an options file, used by private harnesses to select a fixture library. |
 | `E2E_PORT` | Selects the Playwright dev-server port; the production preview uses the next port. |
 | `RBXPORT_PRIVATE_REPO` | Overrides the private test checkout location. |

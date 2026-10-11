@@ -144,6 +144,7 @@ reading paths, API maps, and validation workflows.
 | Backups | `src-tauri/src/backups.rs`, backup helper modules, `crates/rbl-backup/`. |
 | Preferences and updates | `src-tauri/src/preferences.rs`, `update.rs`, corresponding frontend hooks. |
 | macOS scripting | `src-tauri/src/scripting/`; see [AppleScript](../user/applescript.md). |
+| MCP server | `src-tauri/src/mcp/` (reads in `query.rs`, tools in `tools.rs`); see [MCP server](../user/mcp.md). |
 
 ## Public and private boundaries
 
