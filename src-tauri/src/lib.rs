@@ -46,6 +46,7 @@ mod relocate;
 mod sync_window;
 mod report;
 mod scripting;
+mod mcp;
 mod device_settings;
 pub mod dto;
 mod error;
@@ -457,6 +458,9 @@ pub fn run() {
             // AppleScript: the bridge to the window, and on macOS the
             // scriptable classes, before any Apple Event can arrive.
             crate::scripting::install(app.handle());
+            // The MCP server's lifecycle. It listens only once the window's
+            // mirrored preferences turn it on.
+            crate::mcp::install(app.handle());
             spawn_library_load(app.handle().clone());
             // Join the network on start: a passive watcher that hears every
             // player and mixer and reports them, so the shell can offer LINK
@@ -734,6 +738,8 @@ pub fn run() {
             scripting::script_ready,
             scripting::script_reply,
             scripting::script_preferences,
+            // Whether the MCP server is listening, for Preferences.
+            mcp::mcp_status,
             // Test-only: the page answering `RBXPORT_TEST_PORT`'s questions.
             test_port::test_eval_result,
         ])

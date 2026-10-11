@@ -160,6 +160,11 @@ impl Bridge {
         }
     }
 
+    /// Keeps the window's preferences, as it mirrors them.
+    pub(crate) fn mirror_preferences(&self, preferences: Json) {
+        *self.preferences.write() = Some(preferences);
+    }
+
     /// The preferences as the window last mirrored them.
     pub fn preferences(&self) -> Option<Json> {
         self.preferences.read().clone()
@@ -237,8 +242,16 @@ pub async fn script_reply(
 #[tauri::command]
 // Tauri hands the argument over by value; it is stored as it is.
 #[allow(clippy::needless_pass_by_value)]
-pub async fn script_preferences(bridge: State<'_, Arc<Bridge>>, preferences: Json) -> Result<(), AppError> {
-    *bridge.preferences.write() = Some(preferences);
+pub async fn script_preferences(
+    app: AppHandle,
+    bridge: State<'_, Arc<Bridge>>,
+    preferences: Json,
+) -> Result<(), AppError> {
+    // The MCP server follows its preference from the same mirror.
+    if let Some(server) = app.try_state::<Arc<crate::mcp::McpServer>>() {
+        server.apply(&app, &preferences);
+    }
+    bridge.mirror_preferences(preferences);
     Ok(())
 }
 

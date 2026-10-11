@@ -69,6 +69,15 @@ sentry = { version = "0.46", default-features = false, features = ["backtrace", 
 
 zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 tempfile = "3"
+# The MCP server (`mcp/`): opt-in, loopback only. rmcp is the official SDK;
+# hyper serves its Streamable HTTP service without pulling in a web framework.
+rmcp = { version = "3.5", default-features = false, features = ["server", "macros", "transport-streamable-http-server"] }
+schemars = "1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio = { version = "1", features = ["net", "macros"] }
+tokio-util = "0.7"
 
 [dev-dependencies]
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
