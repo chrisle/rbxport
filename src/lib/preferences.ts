@@ -294,6 +294,11 @@ export interface AdvancedPreferences {
   /** A track played for `playbackTime` seconds goes on today's history and its count goes up. */
   recordHistory: boolean;
   /**
+   * The MCP server: AI assistants on this computer can search the library
+   * and, unless Library Protection is on, edit it. Off unless turned on.
+   */
+  mcpServer: boolean;
+  /**
    * Browse › Playback time setting: how many seconds of a track playing on
    * the deck before it is added to history and coloured as played (#540).
    * rekordbox 7.2.19 keeps 1–60, 60 by default (`SettingIF::getCurrentPlayedTime`
@@ -417,6 +422,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     checkUpdates: true,
     updateFrequency: "start",
     recordHistory: true,
+    mcpServer: false,
     playbackTime: PLAYBACK_TIME.default,
   },
   keyboard: {
@@ -608,6 +614,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       quantizeBeat: oneOf(advanced.quantizeBeat, QUANTIZE_BEATS, d.advanced.quantizeBeat),
       checkUpdates: bool(advanced.checkUpdates, d.advanced.checkUpdates),
       updateFrequency: oneOf(advanced.updateFrequency, UPDATE_FREQUENCIES, d.advanced.updateFrequency),
+      mcpServer: bool(advanced.mcpServer, d.advanced.mcpServer),
     },
     keyboard: {
       preset: oneOf(keyboard.preset, KEY_PRESETS, d.keyboard.preset),

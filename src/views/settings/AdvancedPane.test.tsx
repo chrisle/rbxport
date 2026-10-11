@@ -181,3 +181,51 @@ describe("Database management", () => {
     expect(select!.value).toBe(local.masterDb);
   });
 });
+
+describe("MCP server", () => {
+  const running = { enabled: true, running: true, url: "http://127.0.0.1:47200/mcp" };
+
+  async function mountMcp(mcpServer: boolean, status: object) {
+    let changed: ((status: object) => void) | undefined;
+    __setBackend({
+      listBackups,
+      mcpStatus: vi.fn().mockResolvedValue(status),
+      onMcpChanged: vi.fn((listener: (status: object) => void) => { changed = listener; return () => undefined; }),
+    } as unknown as Backend);
+    const preferences = { ...DEFAULT_PREFERENCES, advanced: { ...DEFAULT_PREFERENCES.advanced, mcpServer } };
+    act(() => root.render(
+      <PreferencesProvider value={{ preferences, update, reset: vi.fn() }}>
+        <AdvancedPane tab="browse" summary={null} />
+      </PreferencesProvider>,
+    ));
+    await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
+    return (next: object) => act(() => changed?.(next));
+  }
+
+  function mcpSwitch() {
+    return host.querySelector<HTMLInputElement>('section[aria-label="MCP server"] input[role="switch"]');
+  }
+
+  it("is off by default and turns on through the preference", async () => {
+    expect(DEFAULT_PREFERENCES.advanced.mcpServer).toBe(false);
+    await mountMcp(false, { enabled: false, running: false, url: running.url });
+    expect(mcpSwitch()?.checked).toBe(false);
+    expect(host.textContent).not.toContain("Listening on");
+    await act(async () => { mcpSwitch()?.click(); await Promise.resolve(); });
+    expect(update).toHaveBeenCalledWith("advanced", { mcpServer: true });
+  });
+
+  it("shows where it listens", async () => {
+    await mountMcp(true, running);
+    expect(host.textContent).toContain("Listening on http://127.0.0.1:47200/mcp");
+  });
+
+  it("follows the backend's changes and shows why it could not start", async () => {
+    const change = await mountMcp(true, { enabled: true, running: false, url: running.url });
+    change({ ...running, running: false, error: "Port 47200 could not be opened: in use" });
+    expect(host.textContent).toContain("Port 47200 could not be opened: in use");
+    expect(host.textContent).not.toContain("Listening on");
+    change(running);
+    expect(host.textContent).toContain("Listening on http://127.0.0.1:47200/mcp");
+  });
+});

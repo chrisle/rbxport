@@ -28,6 +28,9 @@ import { MY_TAG_LIMIT, newMyTagName } from "@/lib/myTags";
 import { referenceDeviceSettings } from "./mock-device-settings";
 import { createMockDeviceLibraries, type MockImportEntry } from "./mock-device-library";
 
+/** The MCP server's default port (`src-tauri/src/mcp/mod.rs`). */
+const MOCK_MCP_PORT = 47200;
+
 const ARTISTS = [
   "MORTEN", "ARTBAT", "Meduza", "Vintage Culture", "Tujamo", "UMEK", "Kryder", "Joel Corry",
   "Carl Bee", "Pretty Pink", "Dommo", "Eric Prydz", "Sarah de Warren", "Timmy Trumpet",
@@ -2768,6 +2771,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // A browser has no AppleScript to ask anything of the window.
     serveScripts: () => () => undefined,
     mirrorPreferences: () => wait(undefined),
+    // A browser cannot listen on a port: the server is never running here.
+    mcpStatus: () => wait({ enabled: false, running: false, url: `http://127.0.0.1:${MOCK_MCP_PORT}/mcp` }),
+    onMcpChanged: () => () => undefined,
 
     onMenu: (listener) => {
       const w = window as unknown as { __menu?: (id: string) => void };

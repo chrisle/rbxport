@@ -1763,5 +1763,8 @@
   "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
   "Playback time setting": "Playback time setting",
   "The length of time before a track is added to Histories": "The length of time before a track is added to Histories",
-  "seconds": "sekundy"
+  "seconds": "sekundy",
+  "Let AI assistants use the library": "Let AI assistants use the library",
+  "Listening on {url}": "Listening on {url}",
+  "MCP server": "MCP server"
 }

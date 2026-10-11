@@ -13,7 +13,7 @@ import type {
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, FolderPlaylistReport, Phrase, ImportReport,
   DatabaseDrive, EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
-  LinkStatus, MissingExportFile, MissingTrack, MissingTracks, PreviewState, UnanalysedTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
+  LinkStatus, McpStatus, MissingExportFile, MissingTrack, MissingTracks, PreviewState, UnanalysedTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
   TreeNode, ViewHandle,
   SelectionDetails, TrackDetails, TrackLookups,
 } from "./types";
@@ -490,6 +490,8 @@ async function realBackend(): Promise<Backend> {
       };
     },
     mirrorPreferences: (preferences) => invoke<void>("script_preferences", { preferences }),
+    mcpStatus: () => invoke<McpStatus>("mcp_status"),
+    onMcpChanged: (listener) => subscribe<McpStatus>("mcp:changed", listener),
     onDevicesChanged: (listener) => subscribe("devices:changed", () => listener()),
     linkStatus: () => invoke<LinkStatus>("link_status"),
     linkPeers: () => invoke<LinkPeerSeen[]>("link_peers"),

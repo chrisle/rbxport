@@ -18,9 +18,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { DatabaseDrive, LibrarySummary } from "@/ipc/types";
+import type { DatabaseDrive, LibrarySummary, McpStatus } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
-import { PLAYBACK_TIME, QUANTIZE_BEATS } from "@/lib/preferences";
+import { PLAYBACK_TIME, QUANTIZE_BEATS, type AdvancedPreferences } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import { Button, Note, Radios, Section, Select, Slider, Sub, Toggle } from "./controls";
@@ -140,6 +140,7 @@ export function AdvancedPane({ tab, summary }: {
           />
           <Note>{t("Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.")}</Note>
         </Section>
+        <McpSection enabled={advanced.mcpServer} set={set} />
         {unlockWarning ? <div className={styles.warningBackdrop} role="presentation">
           <section
             ref={warningDialog}
@@ -234,6 +235,39 @@ export function AdvancedPane({ tab, summary }: {
       {/* Last, as in rekordbox, under the external-drive settings. */}
       <DatabaseManagementSection readOnly={summary?.readOnly ?? false} />
     </>
+  );
+}
+
+/**
+ * The MCP server: AI assistants on this computer (Claude, Codex, …) reach
+ * the library through it. Off by default; the backend follows this switch
+ * through the mirrored preferences and reports back on `mcp:changed`.
+ * Edits it makes are refused while Library Protection is on, as every
+ * other edit is.
+ */
+function McpSection({ enabled, set }: {
+  enabled: boolean;
+  set: (patch: Partial<AdvancedPreferences>) => void;
+}) {
+  const t = useTranslation();
+  const [status, setStatus] = useState<McpStatus | null>(null);
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    void getBackend().then((backend) => {
+      stop = backend.onMcpChanged(setStatus);
+      return backend.mcpStatus().then(setStatus);
+    }).catch(() => undefined);
+    return () => stop?.();
+  }, []);
+
+  return (
+    <Section title="MCP server">
+      <Toggle label="Let AI assistants use the library" checked={enabled} onChange={(mcpServer) => set({ mcpServer })} />
+      {enabled && status ? (
+        <Note failed={!!status.error}>{status.error ?? t("Listening on {url}", { url: status.url })}</Note>
+      ) : null}
+    </Section>
   );
 }
 

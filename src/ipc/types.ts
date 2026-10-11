@@ -649,6 +649,10 @@ export interface Backend {
    * read: the whole set, as `src/lib/preferences.ts` stores it.
    */
   mirrorPreferences(preferences: object): Promise<void>;
+  /** Whether the MCP server is listening, and its address. */
+  mcpStatus(): Promise<McpStatus>;
+  /** Called when the MCP server starts, stops, or cannot open its port. */
+  onMcpChanged(listener: (status: McpStatus) => void): () => void;
 
   /** LINK as it stands: on or off, on what, and who is listening. */
   linkStatus(): Promise<LinkStatus>;
@@ -1624,6 +1628,18 @@ export interface LinkPlayer {
   linkCue: boolean;
   /** The player has mounted the library, so a track can be sent to it. */
   mounted: boolean;
+}
+
+/** The MCP server, which follows Advanced › Browse › MCP server. */
+export interface McpStatus {
+  /** The preference is on. */
+  enabled: boolean;
+  /** The port is open. */
+  running: boolean;
+  /** The endpoint an assistant connects to. */
+  url: string;
+  /** Why it is not running although it is enabled. */
+  error?: string;
 }
 
 export interface LinkStatus {
