@@ -14,6 +14,13 @@ on:
         required: false
         type: string
 
+# A newer push to a pull request makes the older run's result moot, so cancel
+# it instead of letting it hold a runner and several GB of build output. Manual
+# runs are keyed by their own id and are never cancelled.
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   # Same-repository PRs may receive deterministic autofix commits. The shared
   # validation workflow itself is read-only; fork PRs remain excluded below.

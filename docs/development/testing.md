@@ -42,6 +42,8 @@ Do not disable protection to make a test pass. Browser mocks do not open it.
 
 ## Public checks
 
+Which of these runs when, and where, is in [Test tiers](test-tiers.md).
+
 | Layer | Location / command | What it checks |
 | --- | --- | --- |
 | Frontend lint | `pnpm lint` | React, TypeScript, and architectural restrictions. |
