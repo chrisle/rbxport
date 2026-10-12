@@ -219,19 +219,21 @@ fn apply_edit(path: &str, format: &str, edit: DeviceEditDto, rekordbox_running: 
     Ok(DeviceEditResultDto { id: applied.id.to_string(), changed: u32::try_from(applied.changed).unwrap_or(u32::MAX) })
 }
 
-/// Where a track of the stick plays from: its mount point and the library's
-/// volume-relative path. The row id and the edit both come from here, so
-/// the two always agree.
-fn audio_path(mount: &Path, relative: &str) -> PathBuf {
-    mount.join(relative.trim_start_matches(['/', '\\']))
+/// Where a track of the stick plays from: the file the library's
+/// volume-relative path names under the mount point, found as the stick's
+/// own file system would, whatever the case it is spelled in (#334). The row
+/// id and the edit both come from here, so the two always agree.
+fn audio_path(files: &mut device::StickFiles, relative: &str) -> PathBuf {
+    files.locate(relative)
 }
 
 /// The stick's track ids behind rows' `file:` ids, in the rows' order.
 /// A row that is not a track of this library is refused.
 fn track_ids(mount: &Path, format: Format, rows: &[String]) -> AppResult<Vec<u32>> {
     let library = device::read(mount, format).map_err(|e| device_error(&e))?;
+    let mut files = device::StickFiles::new(mount);
     let by_path: std::collections::HashMap<PathBuf, u32> =
-        library.tracks.iter().map(|t| (audio_path(mount, &t.path), t.id)).collect();
+        library.tracks.iter().map(|t| (audio_path(&mut files, &t.path), t.id)).collect();
     rows.iter()
         .map(|row| {
             row.strip_prefix(rbl_index::folder::LOOSE_PREFIX)
@@ -266,12 +268,13 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
         } else {
             library.node(playlist).map(|n| n.tracks.clone()).unwrap_or_default()
         };
+        let mut files = device::StickFiles::new(&mount);
         let rows: Vec<DeviceRow> = ids
             .iter()
             .enumerate()
-            .filter_map(|(at, id)| library.track(*id).map(|t| device_row(&mount, t, at)))
+            .filter_map(|(at, id)| library.track(*id).map(|t| device_row(&mut files, t, at)))
             .collect();
-        handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, t)));
+        handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, &mut files, t)));
         let view = DeviceView::open(rows, &parsed, field);
         let (view_id, len, generation) = handle.open_device_view(view);
         Ok(ViewHandleDto { view_id, len, gen: generation })
@@ -279,11 +282,11 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
     .await
 }
 
-fn device_row(mount: &Path, track: &device::Track, at: usize) -> DeviceRow {
+fn device_row(files: &mut device::StickFiles, track: &device::Track, at: usize) -> DeviceRow {
     DeviceRow {
         id: track.id,
         position: u32::try_from(at + 1).unwrap_or(u32::MAX),
-        path: audio_path(mount, &track.path),
+        path: audio_path(files, &track.path),
         title: track.title.clone(),
         artist: track.artist.clone(),
         album: track.album.clone(),
@@ -302,9 +305,9 @@ fn device_row(mount: &Path, track: &device::Track, at: usize) -> DeviceRow {
 }
 
 /// A stick track's row id with what its library names beside the audio.
-fn assets_of(mount: &Path, track: &device::Track) -> (String, DeviceAssets) {
+fn assets_of(mount: &Path, files: &mut device::StickFiles, track: &device::Track) -> (String, DeviceAssets) {
     (
-        rbl_index::folder::loose_id(&audio_path(mount, &track.path)),
+        rbl_index::folder::loose_id(&audio_path(files, &track.path)),
         DeviceAssets { mount: mount.to_path_buf(), analysis: track.analysis_path.clone(), artwork: track.artwork_path.clone() },
     )
 }
@@ -399,12 +402,38 @@ mod tests {
         let (_src, dest) = stick();
         let mount = dest.path();
         let library = device::read(mount, Format::OneLibrary).unwrap();
-        let rows: Vec<RowDto> = library.tracks.iter().enumerate().map(|(at, t)| row_dto(&device_row(mount, t, at))).collect();
+        let mut files = device::StickFiles::new(mount);
+        let rows: Vec<RowDto> = library.tracks.iter().enumerate().map(|(at, t)| row_dto(&device_row(&mut files, t, at))).collect();
         assert!(rows.iter().all(|r| r.id.starts_with("file:") && Path::new(&r.id["file:".len()..]).is_file()));
         let ids = track_ids(mount, Format::OneLibrary, &[rows[2].id.clone(), rows[0].id.clone()]).unwrap();
         assert_eq!(ids, vec![library.tracks[2].id, library.tracks[0].id]);
         assert!(track_ids(mount, Format::OneLibrary, &["file:/elsewhere/x.mp3".into()]).is_err());
         assert!(track_ids(mount, Format::OneLibrary, &["7".into()]).is_err(), "a library track id is not a device track");
+    }
+
+    /// #334: a library names `/Contents/...` but the folder on the stick is
+    /// spelled `contents`, which a case-sensitive Linux mount does not take
+    /// for the same name. The rows still name files that are there, for the
+    /// deck and the preview, and edits still find their tracks.
+    #[test]
+    fn rows_find_their_files_when_the_stick_spells_them_in_another_case() {
+        let (_src, dest) = stick();
+        let mount = dest.path();
+        std::fs::rename(mount.join("Contents"), mount.join("contents.issue-334")).unwrap();
+        std::fs::rename(mount.join("contents.issue-334"), mount.join("contents")).unwrap();
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let library = device::read(mount, format).unwrap();
+            assert!(library.tracks.iter().all(|t| t.path.starts_with("/Contents/")), "{:?}", library.tracks);
+            let mut files = device::StickFiles::new(mount);
+            let rows: Vec<RowDto> = library.tracks.iter().enumerate().map(|(at, t)| row_dto(&device_row(&mut files, t, at))).collect();
+            for row in &rows {
+                let path = Path::new(&row.id["file:".len()..]);
+                assert!(path.is_file(), "{path:?}");
+                assert!(!crate::relocate::is_missing_path(path));
+            }
+            let ids = track_ids(mount, format, &[rows[1].id.clone()]).unwrap();
+            assert_eq!(ids, vec![library.tracks[1].id]);
+        }
     }
 
     #[test]
@@ -417,7 +446,7 @@ mod tests {
             .unwrap()
             .tracks
             .iter()
-            .map(|t| rbl_index::folder::loose_id(&audio_path(dest.path(), &t.path)))
+            .map(|t| rbl_index::folder::loose_id(&audio_path(&mut device::StickFiles::new(dest.path()), &t.path)))
             .collect();
         apply_edit(path, "deviceLibrary", DeviceEditDto::Add { playlist: made.id.clone(), tracks: rows }, false).unwrap();
         let found = libraries(dest.path());
@@ -481,8 +510,9 @@ mod tests {
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
             let library = device::read(mount, format).unwrap();
             let state = Arc::new(AppState::new());
-            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, t)));
-            let rows: Vec<RowDto> = library.tracks.iter().enumerate().map(|(at, t)| row_dto(&device_row(mount, t, at))).collect();
+            let mut files = device::StickFiles::new(mount);
+            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, &mut files, t)));
+            let rows: Vec<RowDto> = library.tracks.iter().enumerate().map(|(at, t)| row_dto(&device_row(&mut files, t, at))).collect();
             let (full, bare) = (rows.iter().find(|r| r.title == "Track 1").unwrap(), rows.iter().find(|r| r.title == "Track 2").unwrap());
             assert_eq!((full.analysed, full.has_artwork), (1, true), "{format:?}");
             assert_eq!((bare.analysed, bare.has_artwork), (0, false), "{format:?}");
@@ -534,7 +564,7 @@ mod tests {
         let (_src, dest) = stick();
         let library = device::read(dest.path(), Format::DeviceLibrary).unwrap();
         let friday = library.nodes.iter().find(|n| n.name == "Friday").unwrap();
-        let rows: Vec<DeviceRow> = friday.tracks.iter().enumerate().map(|(at, id)| device_row(dest.path(), library.track(*id).unwrap(), at)).collect();
+        let rows: Vec<DeviceRow> = friday.tracks.iter().enumerate().map(|(at, id)| device_row(&mut device::StickFiles::new(dest.path()), library.track(*id).unwrap(), at)).collect();
         let spec = rbl_index::ViewSpec {
             source: rbl_index::TrackSource::Collection,
             sort: rbl_index::SortColumn::Title,

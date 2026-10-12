@@ -33,7 +33,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::{ExportError, Result};
+use crate::{path_key, ExportError, Result};
 
 /// One of the two libraries a stick can hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -355,6 +355,82 @@ pub struct Applied {
     /// Playlists, folders or entries added, renamed or removed. Zero means
     /// nothing was written.
     pub changed: usize,
+}
+
+/// Finds the files a stick's library names, the way the stick's own file
+/// system would.
+///
+/// A library names each track by a volume-relative path, `/Contents/...` or
+/// wherever the file already sat on the stick, spelled as rekordbox had it.
+/// FAT32 and exFAT compare names without regard to case, and so do the
+/// Windows and macOS file systems rekordbox runs on, so a path whose case
+/// differs from the name on disk still opens there, and on a player
+/// [ASSUME: FAT/exFAT name lookup is case-insensitive by design]. Linux is
+/// not so forgiving: a FAT stick mounted with `iocharset=utf8` is case
+/// sensitive [OBS static: linux `fs/fat/inode.c` warns "utf8 is not a
+/// recommended IO charset for FAT filesystems, filesystem will be case
+/// sensitive!"; `fs/nls/nls_utf8.c` lowers through an identity table], as
+/// are NTFS and ext4 sticks. There the exact path is not found (#334).
+///
+/// So the exact path is tried first, and when nothing is there each part is
+/// looked up in its directory without regard to case or Unicode
+/// normalisation, as the export's own path keys compare them. A part two
+/// names match equally is left unresolved rather than guessed. Directory
+/// listings are kept for the resolver's life, so one per library read is
+/// enough for a whole playlist.
+#[derive(Debug)]
+pub struct StickFiles {
+    root: PathBuf,
+    listings: std::collections::HashMap<PathBuf, Vec<std::ffi::OsString>>,
+}
+
+impl StickFiles {
+    /// A resolver for the stick mounted at `root`.
+    #[must_use]
+    pub fn new(root: &Path) -> Self {
+        Self { root: root.to_path_buf(), listings: std::collections::HashMap::new() }
+    }
+
+    /// The file `relative` names on the stick: the name on disk when one
+    /// matches it, otherwise the path as the library spells it, under the
+    /// stick's root either way.
+    pub fn locate(&mut self, relative: &str) -> PathBuf {
+        let parts: Vec<&str> = relative.split(['/', '\\']).filter(|p| !p.is_empty() && *p != ".").collect();
+        let spelled = parts.iter().fold(self.root.clone(), |path, part| path.join(part));
+        // perf-ok: one `stat` per track of the library read, as rekordbox
+        // opens each before it plays it; the listings below only when that
+        // misses.
+        if parts.contains(&"..") || spelled.exists() {
+            return spelled;
+        }
+        self.on_disk(&parts).unwrap_or(spelled)
+    }
+
+    /// The names on disk along `parts`, or `None` when a part has no match
+    /// or more than one.
+    fn on_disk(&mut self, parts: &[&str]) -> Option<PathBuf> {
+        let mut path = self.root.clone();
+        for part in parts {
+            let names = self.listings.entry(path.clone()).or_insert_with(|| {
+                std::fs::read_dir(&path)
+                    .map(|entries| entries.filter_map(|e| e.ok().map(|e| e.file_name())).collect())
+                    .unwrap_or_default()
+            });
+            let found = if names.iter().any(|n| n == part) {
+                std::ffi::OsString::from(part)
+            } else {
+                let wanted = path_key(part);
+                let mut matching = names.iter().filter(|n| n.to_str().is_some_and(|n| path_key(n) == wanted));
+                let found = matching.next()?.clone();
+                if matching.next().is_some() {
+                    return None;
+                }
+                found
+            };
+            path = path.join(found);
+        }
+        Some(path)
+    }
 }
 
 fn refused(message: &str) -> ExportError {
@@ -691,6 +767,53 @@ fn next_row(bytes: &[u8], offset: usize, len: usize) -> Option<Vec<u8>> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    /// A stick as #334's: audio kept outside `Contents`, under names whose
+    /// case differs from how the library spells them.
+    fn stick_with_music() -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("Music").join("140 Club VI");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("03-von_d-thl-z0ne.mp3"), b"mp3").unwrap();
+        root
+    }
+
+    #[test]
+    fn a_library_path_finds_its_file_whatever_the_case_it_is_spelled_in() {
+        let root = stick_with_music();
+        let mut files = StickFiles::new(root.path());
+        let found = files.on_disk(&["MUSIC", "140 club vi", "03-Von_D-Thl-z0ne.mp3"]).unwrap();
+        assert_eq!(found, root.path().join("Music/140 Club VI/03-von_d-thl-z0ne.mp3"), "the names on disk");
+        // `locate` stats the spelling first, so on a case-insensitive disk it
+        // keeps it; either way the file it names is the one there.
+        assert!(files.locate("/MUSIC/140 club vi/03-Von_D-Thl-z0ne.mp3").is_file());
+        assert!(files.locate("\\Music\\140 Club VI\\03-von_d-thl-z0ne.mp3").is_file());
+        assert_eq!(files.locate("/Music/140 Club VI/03-von_d-thl-z0ne.mp3"), root.path().join("Music/140 Club VI/03-von_d-thl-z0ne.mp3"));
+    }
+
+    #[test]
+    fn a_path_with_no_file_or_two_candidates_is_not_guessed() {
+        let root = stick_with_music();
+        let mut files = StickFiles::new(root.path());
+        assert_eq!(files.locate("/Music/gone.mp3"), root.path().join("Music/gone.mp3"));
+        assert_eq!(files.on_disk(&["Music", "gone.mp3"]), None);
+        // On a case-sensitive disk two files can answer to one spelling;
+        // neither is guessed at.
+        std::fs::write(root.path().join("Music/Twin.mp3"), b"1").unwrap();
+        std::fs::write(root.path().join("Music/twin.mp3"), b"2").unwrap();
+        if std::fs::read_dir(root.path().join("Music")).unwrap().count() == 3 {
+            assert_eq!(StickFiles::new(root.path()).on_disk(&["Music", "TWIN.mp3"]), None);
+        }
+    }
+
+    #[test]
+    fn unicode_normalisation_is_no_difference_either() {
+        let root = stick_with_music();
+        // NFD on disk, NFC in the library.
+        std::fs::write(root.path().join("Music/Cafe\u{301}.mp3"), b"mp3").unwrap();
+        let found = StickFiles::new(root.path()).on_disk(&["music", "Caf\u{e9}.mp3"]).unwrap();
+        assert!(found.is_file());
+    }
 
     fn node(id: u32, parent: u32, name: &str, folder: bool, sequence: u32, tracks: &[u32]) -> Node {
         Node { id, parent, name: name.into(), folder, sequence, tracks: tracks.to_vec() }
