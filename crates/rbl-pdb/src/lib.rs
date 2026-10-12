@@ -137,9 +137,10 @@ pub(crate) fn u4(b: &[u8], at: usize) -> u32 {
 /// Reading `0x22` as the count dropped each full page's last row, so the
 /// stick's two databases looked as if they disagreed (#284).
 ///
-/// rbxport's own writer ([`build`]) holds `0x18` at `0xff` on a page of
-/// more than 255 rows and puts the true count at `0x22`; that count, larger
-/// than the packed one, is kept for such pages. On rekordbox's pages `0x22`
+/// rbxport's writer ([`build`]) before #349 held `0x18` at `0xff` on a page
+/// of more than 255 rows and put the true count at `0x22`; that count,
+/// larger than the packed one, is kept for such pages so sticks it wrote
+/// still read whole. It now writes them as rekordbox does. On rekordbox's pages `0x22`
 /// is a row's index, so it is never above the packed length.
 fn row_index_len(page: &[u8]) -> u32 {
     let packed = u32::from(u1(page, 0x18))

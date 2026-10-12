@@ -214,6 +214,48 @@ fn a_large_export_keeps_every_track_and_playlist_entry() {
     assert!(check.missing_audio.is_empty());
 }
 
+/// Every data page of a stick's `export.pdb` keeps rekordbox's `DeviceSQL`
+/// record of its last write inside its own row index: `0x20` rows counted
+/// from row group `0x22 / 16` in the groups' second words [static:
+/// rekordbox 7.2.19 `_TE_PSmgrClearDirtyBits` @0x102f694d4]. A playlist of
+/// a few hundred entries fills a page past 255 rows, which rbxport headed
+/// with the row count in both words; rekordbox, walking from past the last
+/// group, ran off the page and crashed (#349).
+#[test]
+fn every_export_pdb_page_keeps_rekordboxs_write_record_on_the_page() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let tracks: Vec<SourceTrack> = (1..=300).map(|i| track(src.path(), i, &format!("Track {i:03}"), "A")).collect();
+    let playlists = vec![SourcePlaylist { name: "All".into(), track_indices: (0..300).collect(), ..Default::default() }];
+    export(dest.path(), &tracks, &playlists).unwrap();
+
+    let bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let page_size = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+    let word = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+    let mut full_pages = 0;
+    for at in (page_size..bytes.len()).step_by(page_size) {
+        if bytes[at + 0x1b] & 0x40 != 0 || bytes[at + 0x1b] == 0 {
+            continue; // an index page or an empty candidate
+        }
+        let packed = u32::from_le_bytes([bytes[at + 0x18], bytes[at + 0x19], bytes[at + 0x1a], 0]);
+        let (length, present) = (packed & 0x1fff, packed >> 13);
+        assert_eq!(length, present, "page {}: every row is present", at / page_size);
+        if length > 0xff {
+            full_pages += 1;
+        }
+        let groups = length.div_ceil(16) as usize;
+        let mut count = word(at + 0x20) & 0x3fff;
+        let mut group = usize::from(word(at + 0x22) & 0x3fff) / 16;
+        while count != 0 && count != 0x1fff {
+            assert!(group < groups, "page {}: rekordbox's walk leaves the row index", at / page_size);
+            count = count.wrapping_sub(word(at + page_size - group * 0x24 - 2).count_ones() as u16) & 0x3fff;
+            group += 1;
+        }
+    }
+    assert!(full_pages > 0, "the export needs a page of more than 255 rows");
+    assert_eq!(verify(dest.path()).unwrap().playlist_entries, 300);
+}
+
 #[test]
 fn an_empty_export_writes_two_valid_empty_libraries() {
     let dest = tempfile::tempdir().unwrap();

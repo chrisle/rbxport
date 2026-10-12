@@ -110,10 +110,11 @@ pub fn push_device_sql_string(row: &mut Vec<u8>, text: &str) -> usize {
 /// `0x20` and `0x22`. Every other header field is the same either way.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PageStyle {
-    /// `0x20` the row count, `0x22` 0 (the count again past 255 rows),
-    /// and a new page once less than the next row plus eight bytes is
-    /// free: rbxport's `export.pdb` pages and `exportExt.pdb`'s tag and
-    /// master pages, whose bytes this style keeps as they always were.
+    /// `0x20` the row count and `0x22` 0, and a new page once less than
+    /// the next row plus eight bytes is free: rbxport's `export.pdb` pages
+    /// and `exportExt.pdb`'s tag and master pages, whose bytes this style
+    /// keeps as they always were. A page of more than 255 rows is headed
+    /// as in [`Self::LastRowIndex`] instead, as rekordbox heads one (#349).
     #[default]
     Counted,
     /// `0x20` 1 and `0x22` the last row's index, each row group's last
@@ -201,7 +202,8 @@ impl PageBuilder {
     /// `0x18` the row count, `0x19` and `0x1a` derived from it, `0x1b` the
     /// flags `0x24`, `0x1c` the free bytes, `0x1e` the used bytes rounded
     /// up to four, `0x20` the row count again. Each row group ends in the
-    /// present mask twice.
+    /// present mask twice. A page of more than 255 rows, or one in
+    /// [`PageStyle::LastRowIndex`], marks only its last row instead.
     pub fn finish(self) -> Vec<u8> {
         self.finish_with(0)
     }
@@ -211,6 +213,21 @@ impl PageBuilder {
     pub fn finish_with(self, sequence: u32) -> Vec<u8> {
         let mut page = vec![0_u8; self.page_size];
         let num_rows = self.row_offsets.len();
+        // Whether `0x20`, `0x22` and the row groups' second words name only
+        // the last row, as the last-row-index style does. A page of more
+        // than 255 rows always does, whatever its style, because that is how
+        // rekordbox heads one [OBS: rekordbox-written sticks from #284 and
+        // #321: playlist-entry pages of 284 rows hold `01 00 1b 01`, every
+        // row group's second word 0 but the last's `00 08`]. Those words
+        // are `DeviceSQL`'s record of the rows its last write touched:
+        // `0x20` how many, `0x22` the first one's index, and each group's
+        // second word which [static: rekordbox 7.2.19
+        // `_TE_PSmgrClearDirtyBits` @0x102f694d4 walks the groups from
+        // `0x22 / 16` until it has cleared `0x20` bits]. rbxport used to
+        // put the row count in both on such a page, so that walk
+        // started past the page's last group and never found its bits:
+        // rekordbox ran off the page and crashed (#349).
+        let last_row_marked = self.style == PageStyle::LastRowIndex || num_rows > 0xff;
 
         // Header.
         page[0x04..0x08].copy_from_slice(&self.page_index.to_le_bytes());
@@ -218,12 +235,14 @@ impl PageBuilder {
         page[0x0c..0x10].copy_from_slice(&self.next_page.to_le_bytes());
         page[0x10..0x14].copy_from_slice(&sequence.to_le_bytes());
         let rows_u16 = u16::try_from(num_rows).unwrap_or(u16::MAX);
-        page[0x18] = u8::try_from(num_rows.min(0xff)).unwrap_or(0xff);
-        // Two bytes rekordbox derives from the row count [OBS 7.2.11, twelve
-        // pages of 1 to 61 rows]: the count times 32 in its low byte, and
-        // the count over eight.
-        page[0x19] = u8::try_from((num_rows * 32) & 0xff).unwrap_or(0);
-        page[0x1a] = u8::try_from((num_rows / 8).min(0xff)).unwrap_or(0xff);
+        // The row index's length in the low 13 bits of `0x18..0x1b` and the
+        // present rows in the 11 above them [OBS 7.2.11, twelve pages of 1
+        // to 61 rows: the count, the count times 32 in its low byte, and
+        // the count over eight; OBS #284: `1c 81 23` on a page of 284 rows].
+        // Every row is present, so both are the row count.
+        let rows = u32::try_from(num_rows).unwrap_or(0);
+        let packed = (rows & 0x1fff) | (rows & 0x7ff) << 13;
+        page[0x18..0x1b].copy_from_slice(&packed.to_le_bytes()[..3]);
         page[0x1b] = 0x24; // ordinary data page
         let used = self.heap.len().div_ceil(4) * 4;
         // rekordbox's figure counts two bytes per row and four per group
@@ -236,17 +255,12 @@ impl PageBuilder {
             .saturating_sub(2 * num_rows + 4 * groups_for(num_rows));
         page[0x1c..0x1e].copy_from_slice(&u16::try_from(free).unwrap_or(0).to_le_bytes());
         page[0x1e..0x20].copy_from_slice(&u16::try_from(used).unwrap_or(u16::MAX).to_le_bytes());
-        match self.style {
-            PageStyle::Counted => {
-                page[0x20..0x22].copy_from_slice(&rows_u16.to_le_bytes());
-                if num_rows > 0xff {
-                    page[0x22..0x24].copy_from_slice(&rows_u16.to_le_bytes());
-                }
-            }
-            PageStyle::LastRowIndex => {
-                page[0x20..0x22].copy_from_slice(&1_u16.to_le_bytes());
-                page[0x22..0x24].copy_from_slice(&rows_u16.saturating_sub(1).to_le_bytes());
-            }
+        if last_row_marked {
+            page[0x20..0x22].copy_from_slice(&1_u16.to_le_bytes());
+            page[0x22..0x24].copy_from_slice(&rows_u16.saturating_sub(1).to_le_bytes());
+        } else {
+            // Every row, from row 0.
+            page[0x20..0x22].copy_from_slice(&rows_u16.to_le_bytes());
         }
 
         // Heap.
@@ -267,13 +281,14 @@ impl PageBuilder {
                     page[at..at + 2].copy_from_slice(&offset.to_le_bytes());
                 }
             }
-            // The mask, then the mask again, or in the last-row-index
-            // style only the last row's bit in the last group and 0 in
-            // the others.
-            let second = match self.style {
-                PageStyle::Counted => present,
-                PageStyle::LastRowIndex if group == groups - 1 => 1 << (in_group - 1),
-                PageStyle::LastRowIndex => 0,
+            // The mask, then the mask again, or when only the last row is
+            // marked, its bit in the last group and 0 in the others.
+            let second = if !last_row_marked {
+                present
+            } else if group == groups - 1 {
+                1 << (in_group - 1)
+            } else {
+                0
             };
             for (at, word) in [(base - 4, present), (base - 2, second)] {
                 if at + 2 <= page.len() {
@@ -410,7 +425,8 @@ impl FileBuilder {
         // with rows keeps the rest of its pages back until it is "written".
         let mut held: Vec<(usize, Vec<Vec<u8>>)> = Vec::new();
         for (table_at, (page_type, mut table_pages)) in self.tables.into_iter().enumerate() {
-            let has_rows = table_pages.iter().any(|p| p[0x18] != 0 || p[0x22] != 0 || p[0x23] != 0);
+            // The row index's length is the low 13 bits of `0x18..0x1b`.
+            let has_rows = table_pages.iter().any(|p| p[0x18] != 0 || p[0x19] & 0x1f != 0 || p[0x22] != 0 || p[0x23] != 0);
             let index_at = next_index;
             next_index += 1;
             if has_rows {
