@@ -252,15 +252,23 @@ impl LinkExport {
         }
         let handler: Arc<dyn rbl_dbserver::net::Handler> = Arc::new(handler);
         let listen_on = service_bind_address(&interface);
+        // A later bind failing stops what is already bound before the error
+        // goes back, so the ports are free for the very next try rather than
+        // once the dropped servers' threads get round to it (#348).
         let database =
-            rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database)
-                .map_err(|e| LinkError::Bind(explain(&e, "TCP", ports.query)))?;
+            match rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database) {
+                Ok(database) => database,
+                Err(e) => {
+                    beacon.stop();
+                    return Err(LinkError::Bind(explain(&e, "TCP", ports.query)));
+                }
+            };
         // The mount EXPORT reply must offer the export to the player's subnet,
         // which rekordbox names as its own `<ip>/<netmask>`; without it a CDJ
         // mounts nothing. Loopback tests have no meaningful subnet, so skip it.
         let export_host = (!interface.address.is_loopback())
             .then(|| format!("{}/{}", interface.address, interface.netmask));
-        let files = rbl_nfs::net::Bound::start(
+        let files = match rbl_nfs::net::Bound::start(
             files::exports(&library),
             listen_on,
             ports.portmap,
@@ -268,8 +276,14 @@ impl LinkExport {
             ports.nfs,
             export_host,
             Some(number),
-        )
-        .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.portmap)))?;
+        ) {
+            Ok(files) => files,
+            Err(e) => {
+                database.shutdown();
+                beacon.stop();
+                return Err(LinkError::Bind(explain(&e, "UDP", ports.portmap)));
+            }
+        };
 
         tracing::info!(
             interface = %interface.name,
@@ -375,7 +389,9 @@ impl LinkExport {
         self.beacon.load_track(player_number, track_id)
     }
 
-    /// Unbinds everything and waits for the threads.
+    /// Unbinds everything and waits for the threads. Every part stops on a
+    /// flag it polls, so this needs nothing from the network and returns
+    /// even after the interface has lost its address.
     pub fn stop(self) {
         self.beacon.stop();
         self.database.shutdown();
