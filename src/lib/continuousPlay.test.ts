@@ -83,11 +83,44 @@ describe("playedToEnd", () => {
 });
 
 describe("continuesFrom", () => {
-  it("is a playlist, intelligent ones included, and not the collection or a stick", () => {
-    expect(continuesFrom({ kind: "playlist", id: "12" })).toBe(true);
-    expect(continuesFrom({ kind: "collection" })).toBe(false);
-    expect(continuesFrom({ kind: "folder", path: "/Music" })).toBe(false);
-    expect(continuesFrom({ kind: "history", id: "3" })).toBe(false);
-    expect(continuesFrom({ kind: "device", path: "/Volumes/X", format: "deviceLibrary", playlist: "4" })).toBe(false);
+  // rekordbox 7.2.19 EXPORT mode, `ListViewer::canLoadNextTrack` @0x10040f380.
+  const playlist = { kind: "playlist", id: "12" } as const;
+  const collection = { kind: "collection" } as const;
+  const explorer = { kind: "folder", path: "/Music" } as const;
+  const history = { kind: "history", id: "3" } as const;
+  const folder = { kind: "playlistFolder", id: "5" } as const;
+  const tagList = { kind: "tagList" } as const;
+  const stickPlaylist = { kind: "device", path: "/Volumes/X", format: "deviceLibrary", playlist: "4" } as const;
+  const stickAllTracks = { ...stickPlaylist, playlist: "0" } as const;
+  const related = { kind: "related", track: "1", criterion: "bpmKey" } as const;
+
+  it("in 1 PLAYER is a playlist, a stick's included, or the Tag List", () => {
+    expect(continuesFrom(playlist, "one")).toBe(true);
+    expect(continuesFrom(stickPlaylist, "one")).toBe(true);
+    expect(continuesFrom(tagList, "one")).toBe(true);
+  });
+
+  it("in 1 PLAYER is not the collection, the Explorer, a history or a stick's All Tracks", () => {
+    expect(continuesFrom(collection, "one")).toBe(false);
+    expect(continuesFrom(explorer, "one")).toBe(false);
+    expect(continuesFrom(history, "one")).toBe(false);
+    expect(continuesFrom(stickAllTracks, "one")).toBe(false);
+    // [UNKNOWN] which list type rekordbox gives a folder: left stopping.
+    expect(continuesFrom(folder, "one")).toBe(false);
+  });
+
+  it("in SIMPLE PLAYER is every list the browser shows", () => {
+    for (const source of [playlist, collection, explorer, history, folder, tagList, stickPlaylist, stickAllTracks]) {
+      expect(continuesFrom(source, "simple")).toBe(true);
+    }
+  });
+
+  it("is never Related Tracks, and nothing in 2 PLAYER or FULL BROWSER", () => {
+    expect(continuesFrom(related, "one")).toBe(false);
+    expect(continuesFrom(related, "simple")).toBe(false);
+    for (const source of [playlist, collection, tagList]) {
+      expect(continuesFrom(source, "two")).toBe(false);
+      expect(continuesFrom(source, "browser")).toBe(false);
+    }
   });
 });

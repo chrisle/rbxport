@@ -1294,31 +1294,32 @@ function AppBody() {
   }, [selectedRow, deckLoaders]);
 
   /**
-   * Where deck 1's track was opened from, while that is a list that goes on
-   * into its next row when the track ends: see `src/lib/continuousPlay.ts`.
-   * A load from anywhere else leaves a stale entry behind, which the track
-   * id no longer matches.
+   * Where deck 1's track was opened from. Whether that list goes on into its
+   * next row is asked when the track ends, as rekordbox does, since it turns
+   * on the layout shown then: see `src/lib/continuousPlay.ts`. A load from
+   * anywhere else leaves a stale entry behind, which the track id no longer
+   * matches.
    */
   const continuation = useRef<{ position: ListPosition; trackId: string } | null>(null);
   const openInDeckA = useCallback((row: RowDto | null, from?: ListPosition) => {
-    continuation.current = row && from && row.missing !== true && continuesFrom(from.spec.source)
+    continuation.current = row && from && row.missing !== true
       ? { position: from, trackId: row.id }
       : null;
     deckLoaders.a(row);
   }, [deckLoaders]);
 
   /**
-   * Deck 1 played its track to the end: load the next row of its playlist
-   * and play it. Only where one player is shown — rekordbox's 2 PLAYER stops
-   * at the end, and FULL BROWSER has no deck on screen here to load it.
+   * Deck 1 played its track to the end: load the next row of its list and
+   * play it, where rekordbox would (`continuesFrom`). Its 2 PLAYER stops at
+   * the end, and FULL BROWSER has no deck on screen here to load it.
    */
   const continuePlaylist = useEventCallback(async () => {
     const from = continuation.current;
     const loaded = playerTrack;
-    if (!from || !loaded || from.trackId !== loaded.id || deckCount(layout) !== 1) return;
+    if (!from || !loaded || from.trackId !== loaded.id || !continuesFrom(from.position.spec.source, layout)) return;
     // rekordbox reads the next row off the list as the browser shows it now,
     // so a re-sort or a search since the load counts; a browser that has
-    // moved on to another list leaves the playlist as it was opened.
+    // moved on to another list leaves the list as it was opened.
     const shown = JSON.stringify(spec.source) === JSON.stringify(from.position.spec.source);
     const listed = shown ? spec : from.position.spec;
     try {

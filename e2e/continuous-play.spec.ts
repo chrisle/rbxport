@@ -1,7 +1,7 @@
 /**
- * A track played from a playlist goes on into the playlist's next row when
- * it ends, as rekordbox's EXPORT-mode player does in 1 PLAYER: see
- * `src/lib/continuousPlay.ts` for where that was read.
+ * A track goes on into its list's next row when it ends, where rekordbox's
+ * EXPORT-mode player does: from a playlist in 1 PLAYER, from any list in
+ * SIMPLE PLAYER. See `src/lib/continuousPlay.ts` for where that was read.
  */
 import { expect, test, type Page } from "@playwright/test";
 
@@ -23,7 +23,8 @@ const play = (page: Page, name = "Play") =>
 
 /** Puts the head a breath before the end, then presses PLAY. */
 async function playOutTheEnd(page: Page) {
-  const overview = await player(page).getByTestId("player-overview").boundingBox();
+  const overview = await player(page).getByTestId("player-overview")
+    .or(player(page).getByTestId("simple-player-overview")).boundingBox();
   if (!overview) throw new Error("no overview");
   await page.mouse.click(overview.x + overview.width - 1, overview.y + overview.height / 2);
   await play(page).click();
@@ -91,4 +92,21 @@ test("in 2 PLAYER the deck stops at the end, as rekordbox's does", async ({ page
   await expect(play(page)).toBeVisible({ timeout: 10_000 });
   await page.waitForTimeout(1500);
   await expect(deck.getByTestId("player-title")).toHaveText(loaded);
+});
+
+test("in SIMPLE PLAYER a track from the collection goes on to the next row", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "SIMPLE PLAYER" }).click();
+  await page.getByRole("treeitem", { name: "All Tracks" }).click();
+  await expect(page.getByTestId("browser-title")).toContainText("All Tracks");
+  const next = await titles(page).nth(4).innerText();
+  await titles(page).nth(3).dblclick();
+  await expect(play(page)).toBeEnabled();
+
+  await playOutTheEnd(page);
+
+  await expect(player(page).getByTestId("simple-player-title")).toHaveText(next, { timeout: 10_000 });
+  await expect(play(page, "Pause")).toBeVisible();
 });
