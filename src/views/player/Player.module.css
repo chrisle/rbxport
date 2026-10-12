@@ -979,6 +979,29 @@
 }
 .pad[data-set] .padInner { background: var(--cue-colour, var(--c-pad-set)); color: var(--c-black); }
 .pad:hover:not(:disabled) { background: #383838; }
+/* A pad and the ✕ that clears it. rekordbox shows the ✕ only while the
+   pointer is over a set pad, 11pt square in its top right corner
+   (`HotCuePad::resized` @0x10068ab20), drawn with skins/closeBtn.svg: an 8pt
+   cross in (150,150,150). */
+.padSlot { position: relative; display: flex; flex: none; }
+.padDelete {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-cue-delete);
+  font-size: 8px;
+  line-height: 11px;
+  text-align: center;
+  cursor: default;
+  visibility: hidden;
+}
+.padSlot:hover .padDelete,
+.padDelete:focus-visible { visibility: visible; }
 
 .memory,
 .auto,

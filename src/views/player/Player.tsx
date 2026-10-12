@@ -2641,8 +2641,8 @@ export const Player = memo(function Player({
                 const cue = hot.at(letter);
                 const key = HOT_CUE_KEYS[letter];
                 return (
+                  <span key={letter} className={styles.padSlot}>
                   <button
-                    key={letter}
                     type="button"
                     className={styles.pad}
                     data-set={cue ? "" : undefined}
@@ -2662,6 +2662,24 @@ export const Player = memo(function Player({
                   >
                     <span className={styles.padInner}>{letter}</span>
                   </button>
+                  {/* rekordbox's pad ✕: "To delete a Hot Cue, point on it
+                      with the mouse cursor, and then click [X]" (manual
+                      7.2.18 p.76). `HotCuePad::mouseEnter` @0x10068ad18 shows
+                      it over a set pad only, 11pt square in the pad's top
+                      right corner (`HotCuePad::resized` @0x10068ab20), and it
+                      clears the slot as the list's ✕ does. */}
+                  {cue && hot.canEdit && cue.id !== "" ? (
+                    <button
+                      type="button"
+                      className={styles.padDelete}
+                      aria-label={`Clear hot cue ${letter}`}
+                      title={tip(`Clear Hot Cue ${letter}`)}
+                      onClick={() => hot.clear(letter)}
+                    >
+                      ✕
+                    </button>
+                  ) : null}
+                  </span>
                 );
               })}
             </div>

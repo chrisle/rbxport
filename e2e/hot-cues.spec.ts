@@ -335,3 +335,31 @@ test("right-clicking a set pad opens the cue colour menu and recolours it (#272)
   await menu.getByRole("button", { name: "Color 6" }).click();
   await expect(menu).toBeHidden();
 });
+
+test("pointing at a set pad shows its ✕, which clears the hot cue (#341)", async ({ page }) => {
+  // rekordbox 7.2.18 manual p.76: "To delete a Hot Cue, point on it with the
+  // mouse cursor, and then click [X]." `HotCuePad::mouseEnter` shows it over a
+  // set pad only.
+  await load(page, "?writable=1");
+  const pads = player(page).locator('[aria-label="Hot cues"]');
+  const padClear = (letter: string) => pads.getByRole("button", { name: `Clear hot cue ${letter}` });
+  await expect(pad(page, "A")).toHaveAttribute("aria-pressed", "true");
+  await expect(padClear("A")).toBeHidden();
+  // An empty pad has none to show.
+  await expect(pad(page, "H")).toHaveAttribute("aria-pressed", "false");
+  await expect(padClear("H")).toHaveCount(0);
+
+  await pad(page, "A").hover();
+  await expect(padClear("A")).toBeVisible();
+  // In the pad's top right corner.
+  const padBox = await pad(page, "A").boundingBox();
+  const xBox = await padClear("A").boundingBox();
+  expect(xBox && padBox ? Math.round(xBox.x + xBox.width - (padBox.x + padBox.width)) : null).toBe(0);
+  expect(xBox && padBox ? Math.round(xBox.y - padBox.y) : null).toBe(0);
+
+  await padClear("A").click();
+  await expect(pad(page, "A")).toHaveAttribute("aria-pressed", "false");
+  await expect(listRow(page, "A")).toHaveAttribute("aria-disabled", "true");
+  await expect(overviewBadge(page, "A")).toHaveCount(0);
+  await expect(padClear("A")).toHaveCount(0);
+});
