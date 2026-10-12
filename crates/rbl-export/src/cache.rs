@@ -138,7 +138,7 @@ impl PreparationCache {
             .entry(key.clone()).or_insert_with(|| Arc::new(Mutex::new(()))).clone();
         let _guard = Self::lock_gate(&gate, cancelled)?;
         if let Some(hash) = self.hashes.lock().map_err(|e| std::io::Error::other(e.to_string()))?.get(&key) { return Ok(*hash); }
-        let hash = crate::file_hash(source)?;
+        let hash = crate::file_hash_cancellable(source, cancelled)?;
         if incremental::revision_fresh(source)?.as_ref() != Some(&revision) { return Err(ExportError::Conflict("Source changed while it was being prepared".into())); }
         self.hashes.lock().map_err(|e| std::io::Error::other(e.to_string()))?.insert(key, hash);
         Ok(hash)

@@ -653,8 +653,13 @@ flowchart TD
     J -->|No| Clean[Delete leftover .rbxport-staging-* and .rbxport-retired-*]
     J -->|Yes| Replay["finish(replay = true)"]
     Replay --> Ext{check_external_changes: a target written after the journal and matching neither the new image nor .previous?}
-    Ext -->|No| Forward[Roll forward] --> Clean
-    Ext -->|Yes: DeviceChanged| Aside[Publication::set_aside]
+    Ext -->|No| Forward[Roll forward] --> Validate{Retained generation?}
+    Validate -->|Yes| Verified{Independent validation succeeds?}
+    Verified -->|Yes| Seal[Seal actual receipts and finalize] --> Clean
+    Verified -->|No| Rollback[Replayable rollback to previous generation]
+    Validate -->|No: legacy journal| Clean
+    Ext -->|Retained or move journal conflict| Refuse[Preserve journal and require reconciliation]
+    Ext -->|Legacy DeviceChanged| Aside[Publication::set_aside]
     Aside --> Gen{Was the last file changed by the other writer already published?}
     Gen -->|Yes| Finish[Finish the remaining entries]
     Gen -->|No| Back[Roll back: restore .previous, remove created files]

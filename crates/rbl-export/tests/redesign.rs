@@ -213,6 +213,27 @@ fn full_integrity_check_detects_stamp_preserving_destination_edits() {
 }
 
 #[test]
+fn source_hashing_checks_cancellation_between_chunks_and_keeps_old_databases() {
+    let source = tempfile::tempdir().unwrap(); let cache_dir = tempfile::tempdir().unwrap();
+    let usb = tempfile::tempdir().unwrap(); let tracks = vec![track(source.path(), 1)];
+    run(usb.path(), &tracks, &playlists(vec![0]));
+    let before = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    std::fs::write(&tracks[0].source_path, vec![42; 1024 * 1024]).unwrap();
+    let cache = rbl_export::cache::PreparationCache::new(cache_dir.path().to_owned());
+    let checks = std::cell::Cell::new(0);
+    rbl_export::incremental::reset_metrics();
+    let hash = cache.source_hash(&tracks[0].source_path, &|| { checks.set(checks.get() + 1); checks.get() >= 3 });
+    assert!(hash.is_err());
+    assert!(rbl_export::incremental::metrics().audio_bytes_read < 1024 * 1024);
+    let stop = std::cell::Cell::new(false);
+    let result = rbl_export::export_cancellable(usb.path(), &tracks, &playlists(vec![0]), &[],
+        &ExportOptions { sync: Some(&SyncSource { db_id: 123, ..Default::default() }), ..Default::default() },
+        &mut |progress| { if progress.stage == "planning" && !progress.title.is_empty() { stop.set(true); } }, &|| stop.get());
+    assert!(matches!(result, Err(rbl_export::ExportError::Cancelled)));
+    assert_eq!(std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap(), before);
+}
+
+#[test]
 fn an_unavailable_local_cache_does_not_block_export() {
     let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
     let tracks = vec![track(source.path(), 1)];

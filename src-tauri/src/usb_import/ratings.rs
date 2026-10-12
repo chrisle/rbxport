@@ -12,20 +12,6 @@ pub(super) fn import(state: &AppState, root: &Path, manifest: Option<&Manifest>,
         return Ok(());
     };
     let current = Snapshot::read(root).map_err(err)?;
-    // Version 2 writes native 0–5 stars. Do not normalize an invalid current
-    // value as though it came from a historical XML-scale RBXport export.
-    if manifest.version >= 2 && current.one.is_some() {
-        let db = rbl_onelibrary::ExportLibrary::open_read_only(&rbl_export::export_root(root).join("rekordbox/exportLibrary.db")).map_err(err)?;
-        let mut query = db.connection().prepare("SELECT content_id, COALESCE(rating,0) FROM content").map_err(err)?;
-        let rows = query.query_map([], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, i64>(1)?))).map_err(err)?;
-        for row in rows {
-            let (id, rating) = row.map_err(err)?;
-            if matched.contains_key(&id) && !(0..=5).contains(&rating) {
-                let name = "OneLibrary";
-                return Err(err(format!("{name} track {id} has an invalid rating. Sync this USB with rating import disabled to regenerate 0–5 star ratings.")));
-            }
-        }
-    }
     let records: HashMap<_, _> = manifest.tracks.iter().map(|t| (t.export_id, t)).collect();
     let mut changes = BTreeMap::new();
     for (name, before, after) in [

@@ -659,11 +659,21 @@ fn files_equal_observed(a_path: &Path, b_path: &Path, progress: &mut dyn FnMut(u
 }
 
 fn file_hash(path: &Path) -> std::io::Result<u64> {
+    file_hash_cancellable(path, &|| false)
+}
+
+fn file_hash_cancellable(path: &Path, cancelled: &dyn Fn() -> bool) -> std::io::Result<u64> {
     use std::io::Read;
     let mut f = std::fs::File::open(path)?;
     let mut h = 0xcbf2_9ce4_8422_2325_u64;
     let mut buffer = vec![0_u8; 65536];
-    loop { let n = f.read(&mut buffer)?; if n == 0 { break; } incremental::read_bytes(path, n as u64); for b in &buffer[..n] { h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3); } }
+    loop {
+        if cancelled() { return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Export stopped.")); }
+        let n = f.read(&mut buffer)?;
+        if n == 0 { break; }
+        incremental::read_bytes(path, n as u64);
+        for b in &buffer[..n] { h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3); }
+    }
     Ok(h)
 }
 
@@ -898,10 +908,24 @@ pub fn export_with_options(
     export_cancellable(destination, tracks, playlists, my_tags, options, progress, &|| false)
 }
 
-/// Cancellation is checked between tracks and before publishing staged files.
-/// Once publication starts it finishes atomically rather than leaving a partial library.
+/// Cancellation is checked during streaming work and before publication.
+/// Publication is non-cancellable and journaled, not a filesystem-wide atomic operation.
 #[allow(clippy::too_many_lines, reason = "ordered export publication pipeline")]
 pub fn export_cancellable(
+    destination: &Path,
+    tracks: &[SourceTrack],
+    playlists: &[SourcePlaylist],
+    my_tags: &[SourceMyTag],
+    options: &ExportOptions<'_>,
+    progress: &mut dyn FnMut(&ExportProgress),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ExportReport> {
+    export_cancellable_inner(destination, tracks, playlists, my_tags, options, progress, cancelled)
+        .map_err(|error| if cancelled() { ExportError::Cancelled } else { error })
+}
+
+#[allow(clippy::too_many_lines, reason = "ordered export publication pipeline")]
+fn export_cancellable_inner(
     destination: &Path,
     tracks: &[SourceTrack],
     playlists: &[SourcePlaylist],
@@ -947,7 +971,7 @@ pub fn export_cancellable(
                 if cancelled() { return Err(ExportError::Cancelled); }
                 if !track.source_path.is_file() { continue; }
                 progress(&ExportProgress { stage: "checking", done: index, total: tracks.len(), unit: "tracks", title: track.title.clone(), ..Default::default() });
-                let hash = file_hash(&track.source_path)?;
+                let hash = file_hash_cancellable(&track.source_path, cancelled)?;
                 full_source_hashes.insert(track.source_path.clone(), hash);
                 if let Some(old) = recorded.get(&track_key(track.id, &track.source_path.to_string_lossy())) {
                     let expected = if old.conversion.is_empty() { old.audio_hash } else { old.conversion_source_hash };
@@ -1016,7 +1040,7 @@ pub fn export_cancellable(
         });
         if !revision_changed || track.source_unavailable || track.device.as_ref().is_some_and(|d| d.preserve) { continue; }
         progress(&ExportProgress { stage: "planning", done: index, total: tracks.len(), title: track.title.clone(), unit: "tracks", ..Default::default() });
-        let hash = cache.map_or_else(|| file_hash(&track.source_path), |cache| cache.source_hash(&track.source_path, cancelled).map_err(std::io::Error::other));
+        let hash = cache.map_or_else(|| file_hash_cancellable(&track.source_path, cancelled), |cache| cache.source_hash(&track.source_path, cancelled).map_err(std::io::Error::other));
         if let Ok(hash) = hash {
             let expected = if old.conversion.is_empty() { old.audio_hash } else { old.conversion_source_hash };
             if expected != 0 && hash == expected { source_contents_unchanged.insert(key.clone()); }
@@ -1271,7 +1295,7 @@ pub fn export_cancellable(
         let source_hash = if let Some(c) = previous_entry.filter(|_| conversion.is_some() && copy_unchanged) {
             c.conversion_source_hash
         } else if conversion.is_some() {
-            match inspected_source_hashes.get(&key).map_or_else(|| cache.map_or_else(|| file_hash(&track.source_path), |cache| cache.source_hash(&track.source_path, cancelled).map_err(std::io::Error::other)), |hash| Ok(*hash)) {
+            match inspected_source_hashes.get(&key).map_or_else(|| cache.map_or_else(|| file_hash_cancellable(&track.source_path, cancelled), |cache| cache.source_hash(&track.source_path, cancelled).map_err(std::io::Error::other)), |hash| Ok(*hash)) {
                 Ok(hash) => hash,
                 Err(e) if is_device_gone(&e) => return Err(ExportError::DeviceGone),
                 Err(e) if e.kind() == std::io::ErrorKind::StorageFull => return Err(e.into()),
@@ -1294,7 +1318,7 @@ pub fn export_cancellable(
             carried.map(|c| c.audio_hash)
         } else if unchanged_metadata {
             match carried.filter(|c| c.audio_hash != 0) {
-                Some(_) => match file_hash(&audio_dest) {
+                Some(_) => match file_hash_cancellable(&audio_dest, cancelled) {
                     Ok(hash) => Some(hash),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                     Err(e) => return Err(e.into()),
@@ -1303,7 +1327,7 @@ pub fn export_cancellable(
             }
         } else { None };
         let current_source_hash = if unchanged_metadata && !copy_unchanged && conversion.is_none() {
-            Some(inspected_source_hashes.get(&key).copied().map_or_else(|| file_hash(&track.source_path), Ok)?)
+            Some(inspected_source_hashes.get(&key).copied().map_or_else(|| file_hash_cancellable(&track.source_path, cancelled), Ok)?)
         } else { None };
         let unchanged = unchanged_metadata && if let Some(c) = carried {
             if copy_unchanged { true }
@@ -1564,15 +1588,13 @@ pub fn export_cancellable(
         } else if in_place {
             0
         } else if adopted {
-            // Recorded as the source's bytes, which the stick's copy is
-            // taken to hold by its identity and size, as rekordbox takes it
-            // without reading it back. The copy's stamp below then lets the
-            // next sync trust it as one this export wrote.
-            file_hash(&track.source_path)?
+            // Adoption already proved byte equality. Record the source hash
+            // and destination stamp so later syncs can avoid that full read.
+            file_hash_cancellable(&track.source_path, cancelled)?
         } else if unchanged {
-            existing_audio_hash.map_or_else(|| file_hash(&audio_dest), Ok)?
+            existing_audio_hash.map_or_else(|| file_hash_cancellable(&audio_dest, cancelled), Ok)?
         } else {
-            copied_hash.get().map_or_else(|| file_hash(&under(publication.stage(), &place.audio)), Ok)?
+            copied_hash.get().map_or_else(|| file_hash_cancellable(&under(publication.stage(), &place.audio), cancelled), Ok)?
         };
         // Publication renames the staged copy into place, which keeps its
         // size and time, so the staged file's stamp is the published one's.
@@ -1909,7 +1931,7 @@ pub fn export_cancellable(
     // Catch another writer changing a database while this export was staging.
     incremental::recheck();
     for (path, expected) in &full_source_hashes {
-        if file_hash(path)? != *expected { return Err(ExportError::Conflict("Source changed while it was being prepared".into())); }
+        if file_hash_cancellable(path, cancelled)? != *expected { return Err(ExportError::Conflict("Source changed while it was being prepared".into())); }
     }
     let trusted_after = incremental::trusted_paths(destination, previous.as_ref())?;
     if !trusted.is_subset(&trusted_after) {
