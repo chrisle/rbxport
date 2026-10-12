@@ -71,3 +71,39 @@ fn an_own_cloud_track_opens_and_shows_its_local_copy() {
     assert_eq!(path_of(&index, 0), LOCAL);
     assert_eq!(path_of(&index, 2), CLOUD);
 }
+
+/// Issue #340: the upload moved the file into the Dropbox folder (under a
+/// lowercased name) and `OrgFolderPath` is gone; rekordbox plays and shows
+/// the Dropbox copy (`checkAndUpdateCloudFilePath`, `updateMissingStatus`).
+#[test]
+fn an_own_cloud_track_whose_local_copy_is_gone_opens_the_dropbox_copy() {
+    let root = tempfile::tempdir().unwrap();
+    let location = fixture::build(root.path(), fixture::Shape::default()).unwrap();
+    share(&location, 0, rbl_db::track_path::SERVICE_DROPBOX, OWN);
+    share(&location, 1, rbl_db::track_path::SERVICE_DROPBOX, OWN);
+    let dropbox = root.path().join("Dropbox-340");
+    let copy = format!("{}/rekordbox{CLOUD}", dropbox.display());
+    std::fs::create_dir_all(std::path::Path::new(&copy).parent().unwrap()).unwrap();
+    std::fs::write(&copy, b"").unwrap();
+    // Track 1's local copy is on this machine too, so it keeps it.
+    let local = root.path().join("Music-340/track.mp3");
+    std::fs::create_dir_all(local.parent().unwrap()).unwrap();
+    std::fs::write(&local, b"").unwrap();
+    let writer = rbl_db::write::Writer::open(location.clone(), location.share_root.join("../backups")).unwrap();
+    writer
+        .library()
+        .connection()
+        .execute(
+            "UPDATE djmdContent SET OrgFolderPath = ?1 WHERE ID = ?2",
+            rusqlite::params![local.to_str().unwrap(), fixture::track_id(1)],
+        )
+        .unwrap();
+    drop(writer);
+
+    let db = Library::open(location, OpenMode::ReadOnly).unwrap();
+    assert!(db.set_dropbox_folder(Some(dropbox.to_str().unwrap().to_owned())));
+    let (index, _) = rbl_index::load(&db).unwrap();
+    assert_eq!(path_of(&index, 0), copy);
+    assert_eq!(db.track_details(&fixture::track_id(0)).unwrap().unwrap().path, copy);
+    assert_eq!(path_of(&index, 1), local.to_str().unwrap());
+}

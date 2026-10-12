@@ -31,6 +31,26 @@
 //! folder; otherwise rekordbox takes the Dropbox app's own folder from
 //! `~/.dropbox/info.json` ([`crate::dropbox`]).
 //!
+//! That working path is checked again when the file is used. [OBS rekordbox
+//! 7.2.19 macOS arm64, static] `DatabaseMediator::checkAndUpdateCloudFilePath`
+//! @0x100c48904 (called when a deck loads a track,
+//! `UiPlayer::handleMessageDragAndDrop`, and by export and the Missing File
+//! Manager) acts on every cloud-shared track. With `CLSSyncMethod` not 0
+//! (its default is 1) it keeps the working path when that is the local copy
+//! and the file is there; else it takes the local copy (`OrgFolderPath`, or
+//! for a shared desktop app track the service's folder + `FolderPath`) when
+//! that file is there; else the cloud copy when
+//! `DatabaseMediator::existAsFileOnCloud` @0x101e6ad9c finds it:
+//! `sharePath(ServiceID)` up to its last `/rekordbox`, then `/rekordbox` when
+//! `FolderPath` starts with `/Contents` (ignoring case), then `FolderPath`.
+//! Otherwise the working path stands and the track is missing.
+//! `BrowseBasicView::updateMissingStatus` @0x100321010 does the same for
+//! this machine's own cloud-shared tracks when a row is selected, and
+//! updates the cached path, so the Location column shows the copy found.
+//! This is how rekordbox plays a track whose upload moved the file into the
+//! Dropbox folder (issue #340): `OrgFolderPath` is gone, and the cloud copy,
+//! whose name rekordbox lowercased, is the path `FolderPath` already holds.
+//!
 //! The Location column is not always the opened path:
 //! `browse::ListViewer::getLocationString` @0x1003ec478 [OBS static] prints
 //! the working path plainly for this machine's tracks, but for a track
@@ -44,10 +64,10 @@
 //! `ExtInfo.ClsInfo.Download` and the "Moved from Cloud" folder) and the
 //! cloud folders of services 1, 3 and 4 are not modelled; a track that is
 //! not this machine's own keeps the Dropbox resolution of
-//! [`crate::resolve_folder_path`].
+//! [`crate::resolve_folder_path`] unless its local copy is on this machine.
 
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::DriveMapping;
 
@@ -135,9 +155,36 @@ impl TrackPaths {
         }
     }
 
-    /// The path rekordbox reads and shows for a track.
+    /// The path rekordbox reads and shows for a track: the working path
+    /// it sets when it reads the row, then for a cloud-shared track the
+    /// copy it finds on this machine when the file is used (see the module
+    /// docs). Looks at the file system only for cloud-shared tracks.
     #[must_use]
     pub fn resolve(&self, row: &StoredPath) -> String {
+        let working = self.working_path(row);
+        self.found_cloud_track_file(row, &working, Path::is_file).unwrap_or(working)
+    }
+
+    /// The path the browser's Location column and the Info panel show: for
+    /// this machine's own cloud-shared track the file [`Self::resolve`]
+    /// opens (its local copy, the path the reporter of issue #176 saw
+    /// rekordbox show, or the Dropbox copy once that is gone, issue #340),
+    /// else the stored path through the drive substitution, as before. A
+    /// cloud track from another device keeps its `/contents_` path here
+    /// rather than the Dropbox copy [`Self::resolve`] opens (see the module
+    /// docs).
+    #[must_use]
+    pub fn location(&self, row: &StoredPath) -> String {
+        if self.own_local_copy(row).is_some() {
+            return self.resolve(row);
+        }
+        self.drive.as_ref().map_or_else(|| row.folder_path.clone(), |d| d.apply(&row.folder_path).into_owned())
+    }
+
+    /// The working path `set_content_data` and
+    /// `modify_shared_relPath_to_absPath` give a row, before any file is
+    /// looked at.
+    fn working_path(&self, row: &StoredPath) -> String {
         if let Some(local) = self.own_local_copy(row) {
             return local.to_owned();
         }
@@ -146,18 +193,61 @@ impl TrackPaths {
         crate::resolve_folder_path(&path, cloud_root.as_deref())
     }
 
-    /// The path the browser's Location column and the Info panel show: the
-    /// local copy of this machine's own cloud-shared track (the path the
-    /// reporter of issue #176 saw rekordbox show), else the stored path
-    /// through the drive substitution, as before. A cloud track from
-    /// another device keeps its `/contents_` path here rather than the
-    /// Dropbox copy [`Self::resolve`] opens (see the module docs).
-    #[must_use]
-    pub fn location(&self, row: &StoredPath) -> String {
-        if let Some(local) = self.own_local_copy(row) {
-            return local.to_owned();
+    /// `DatabaseMediator::checkAndUpdateCloudFilePath` @0x100c48904 with
+    /// `CLSSyncMethod` 1: the file a cloud-shared track is played from when
+    /// that is not `working`, or `None` to keep `working`. `is_file` is
+    /// juce `File::existsAsFile`.
+    fn found_cloud_track_file(
+        &self,
+        row: &StoredPath,
+        working: &str,
+        is_file: impl Fn(&Path) -> bool,
+    ) -> Option<String> {
+        if row.content_link & CLOUD_SHARED == 0 {
+            return None;
         }
-        self.drive.as_ref().map_or_else(|| row.folder_path.clone(), |d| d.apply(&row.folder_path).into_owned())
+        let local = self.local_copy(row);
+        if local == working && is_file(Path::new(working)) {
+            return None;
+        }
+        if is_file(Path::new(&local)) {
+            return Some(local);
+        }
+        let cloud = self.cloud_copy(row)?;
+        (cloud != working && is_file(Path::new(&cloud))).then_some(cloud)
+    }
+
+    /// The local copy `checkAndUpdateCloudFilePath` and
+    /// `updateMissingStatus` look for first: `OrgFolderPath`, or for a
+    /// shared desktop app track not on service 3 the service's folder,
+    /// then `/rekordbox` when `FolderPath` starts with `/contents_`
+    /// (ignoring case), then `FolderPath`.
+    ///
+    /// [ASSUME] Other services' folders are not known here, so for them
+    /// the local copy stays `OrgFolderPath`, as rekordbox leaves it when
+    /// the service has no folder.
+    fn local_copy(&self, row: &StoredPath) -> String {
+        if row.service_id != SERVICE_GOOGLE_DRIVE && self.is_shared_desktop_app_track(row) {
+            if let Some(root) = self.dropbox.as_deref().filter(|_| row.service_id == SERVICE_DROPBOX) {
+                let sub = if starts_with_ignore_case(&row.folder_path, "/contents_") { "/rekordbox" } else { "" };
+                return format!("{root}{sub}{}", row.folder_path);
+            }
+        }
+        row.org_folder_path.clone()
+    }
+
+    /// `DatabaseMediator::existAsFileOnCloud` @0x101e6ad9c's path for a
+    /// Dropbox track: the Dropbox folder (`sharePath` up to its last
+    /// `/rekordbox`), then `/rekordbox` when the stored `FolderPath`
+    /// starts with `/Contents` (ignoring case), then `FolderPath`.
+    /// [UNKNOWN] Other services' folders; `None` for them.
+    fn cloud_copy(&self, row: &StoredPath) -> Option<String> {
+        if row.service_id != SERVICE_DROPBOX {
+            return None;
+        }
+        let root = self.dropbox.as_deref()?;
+        let sub = if starts_with_ignore_case(&row.folder_path, "/Contents") { "/rekordbox" } else { "" };
+        Some(format!("{root}{sub}{}", row.folder_path))
     }
 
     /// `OrgFolderPath` when rekordbox would read a cloud-shared track from
@@ -222,6 +312,7 @@ fn same_ignoring_case(a: char, b: char) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -328,6 +419,101 @@ mod tests {
         assert_eq!(resolver.resolve(&row), "/Volumes/Music/a.mp3");
         let plain = StoredPath { folder_path: "/Volumes/Music/b.mp3".into(), ..StoredPath::default() };
         assert_eq!(resolver.resolve(&plain), "/Volumes/Music 1/b.mp3");
+    }
+
+    /// A Dropbox folder and a music folder under a temporary directory,
+    /// with `files` (paths relative to it) created empty.
+    fn machine(files: &[&str]) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        for file in files {
+            let path = dir.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"").unwrap();
+        }
+        let root = dir.path().to_str().unwrap().to_owned();
+        (dir, root)
+    }
+
+    #[test]
+    fn an_own_cloud_track_whose_local_copy_is_gone_plays_the_dropbox_copy() {
+        // Issue #340: the upload moved the file into the Dropbox folder
+        // under a lowercased name; OrgFolderPath still names where it was
+        // imported from.
+        let (_dir, root) = machine(&["Dropbox/rekordbox/contents_777182204/artist/unknownalbum/track.wav"]);
+        let resolver = paths(Some(&format!("{root}/Dropbox")));
+        let row = shared(
+            "/contents_777182204/artist/unknownalbum/track.wav",
+            &format!("{root}/Music/Tracks/To Be Added/Track.wav"),
+            SERVICE_DROPBOX,
+            OWN,
+        );
+        let dropbox_copy = format!("{root}/Dropbox/rekordbox/contents_777182204/artist/unknownalbum/track.wav");
+        assert_eq!(resolver.resolve(&row), dropbox_copy);
+        assert_eq!(resolver.location(&row), dropbox_copy, "the Location column follows the copy found");
+    }
+
+    #[test]
+    fn an_own_cloud_track_keeps_its_local_copy_while_it_is_there() {
+        // Issue #176: both copies exist, rekordbox shows OrgFolderPath.
+        let (_dir, root) = machine(&["Music/a.mp3", "Dropbox/rekordbox/contents_1/x/a.mp3"]);
+        let resolver = paths(Some(&format!("{root}/Dropbox")));
+        let row = shared("/contents_1/x/a.mp3", &format!("{root}/Music/a.mp3"), SERVICE_DROPBOX, OWN);
+        assert_eq!(resolver.resolve(&row), row.org_folder_path);
+        assert_eq!(resolver.location(&row), row.org_folder_path);
+    }
+
+    #[test]
+    fn an_own_cloud_track_with_neither_copy_stays_missing_at_its_local_copy() {
+        let (_dir, root) = machine(&[]);
+        let resolver = paths(Some(&format!("{root}/Dropbox")));
+        let row = shared("/contents_1/x/a.mp3", &format!("{root}/Music/a.mp3"), SERVICE_DROPBOX, OWN);
+        assert_eq!(resolver.resolve(&row), row.org_folder_path);
+    }
+
+    #[test]
+    fn another_devices_cloud_track_plays_a_local_copy_found_on_this_machine() {
+        // checkAndUpdateCloudFilePath does not compare DeviceID with
+        // CLSSyncMethod 1: OrgFolderPath wins whenever that file is here.
+        let (_dir, root) = machine(&["Music/a.mp3", "Dropbox/rekordbox/contents_1/x/a.mp3"]);
+        let resolver = paths(Some(&format!("{root}/Dropbox")));
+        let row = shared("/contents_1/x/a.mp3", &format!("{root}/Music/a.mp3"), SERVICE_DROPBOX, "other-device");
+        assert_eq!(resolver.resolve(&row), row.org_folder_path);
+        assert_eq!(resolver.location(&row), "/contents_1/x/a.mp3", "Location is unchanged for another device's track");
+        let gone = shared("/contents_1/x/a.mp3", &format!("{root}/Elsewhere/a.mp3"), SERVICE_DROPBOX, "other-device");
+        assert_eq!(resolver.resolve(&gone), format!("{root}/Dropbox/rekordbox/contents_1/x/a.mp3"));
+    }
+
+    #[test]
+    fn the_file_check_follows_check_and_update_cloud_file_path() {
+        let resolver = paths(Some("/D"));
+        let own = shared("/Contents_1/a.mp3", "/M/a.mp3", SERVICE_DROPBOX, OWN);
+        let found = |hit: &'static str| move |p: &Path| p == Path::new(hit);
+        // The local copy is the working path and is there: kept.
+        assert_eq!(resolver.found_cloud_track_file(&own, "/M/a.mp3", found("/M/a.mp3")), None);
+        // existAsFileOnCloud adds /rekordbox for /Contents, ignoring case.
+        assert_eq!(
+            resolver.found_cloud_track_file(&own, "/M/a.mp3", found("/D/rekordbox/Contents_1/a.mp3")),
+            Some("/D/rekordbox/Contents_1/a.mp3".to_owned())
+        );
+        // A cloud copy that is already the working path changes nothing.
+        let other = shared("/contents_1/a.mp3", "/M/a.mp3", SERVICE_DROPBOX, "other");
+        assert_eq!(
+            resolver.found_cloud_track_file(&other, "/D/rekordbox/contents_1/a.mp3", found("/D/rekordbox/contents_1/a.mp3")),
+            None
+        );
+        // No cloud flag, or no Dropbox folder for a Dropbox track: nothing found.
+        let mut plain = own.clone();
+        plain.content_link = 0;
+        assert_eq!(resolver.found_cloud_track_file(&plain, "/x", |_| true), None);
+        let no_dropbox = paths(None);
+        assert_eq!(no_dropbox.found_cloud_track_file(&own, "/M/a.mp3", found("/rekordbox/Contents_1/a.mp3")), None);
+        // A shared desktop app track looks for its service-folder copy
+        // first, not OrgFolderPath.
+        let desktop = shared("/contents_1/a.mp3", "/D/Music/a.mp3", SERVICE_DROPBOX, OWN);
+        assert_eq!(
+            resolver.found_cloud_track_file(&desktop, "/elsewhere", |p: &Path| p == Path::new("/D/rekordbox/contents_1/a.mp3")),
+            Some("/D/rekordbox/contents_1/a.mp3".to_owned())
+        );
     }
 
     #[test]
