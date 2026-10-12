@@ -114,8 +114,26 @@ fn conflicting_device_edits_and_invalid_stars_fail_before_any_rating_writes() {
     fixture.legacy(2, 4);
     assert!(fixture.import().unwrap_err().message.contains("disagree"));
     assert_eq!((0..3).map(|index| fixture.desktop(index)).collect::<Vec<_>>(), before);
+    // OneLibrary's old 51 scale (v1.6.0 and earlier) reads as stars, so 255 is
+    // five stars, not an invalid rating: only the disagreement remains.
     fixture.one("UPDATE content SET rating=255 WHERE content_id=1");
+    assert!(fixture.import().unwrap_err().message.contains("disagree"));
+    // export.pdb's rating byte is read raw, so it can still hold an invalid value.
+    fixture.legacy(1, 7);
     assert!(fixture.import().unwrap_err().message.contains("invalid rating"));
+    assert_eq!((0..3).map(|index| fixture.desktop(index)).collect::<Vec<_>>(), before);
+}
+
+/// A USB written by v1.6.0 or earlier holds `OneLibrary` ratings as stars x 51
+/// (#347). Rating import must read them as the same stars, so SYNC with
+/// automatic rating import on goes ahead and rewrites them.
+#[test]
+fn an_old_scaled_onelibrary_imports_as_unchanged_stars() {
+    let fixture = Fixture::new();
+    let before: Vec<_> = (0..3).map(|index| fixture.desktop(index)).collect();
+    fixture.one("UPDATE content SET rating=rating*51");
+    let report = fixture.import().unwrap();
+    assert_eq!((report.ratings, report.skipped), (0, 0));
     assert_eq!((0..3).map(|index| fixture.desktop(index)).collect::<Vec<_>>(), before);
 }
 

@@ -22,10 +22,14 @@ already matching ratings make no further changes.
 
 Conflicting edits in the two device databases stop import and SYNC; reconcile
 them in rekordbox first. Devices without a matching RBXport export baseline
-are skipped with a warning. To establish a baseline, or repair an older USB
-with invalid OneLibrary ratings, temporarily turn automatic rating import
-off and sync it. Re-enable the preference afterward. Normal exports write
-0–5 stars to both device formats.
+are skipped with a warning. To establish a baseline, temporarily turn
+automatic rating import off and sync it. Re-enable the preference afterward.
+Normal exports write 0–5 stars to both device formats.
+
+RBXport 1.6.0 and earlier wrote OneLibrary ratings on rekordbox XML's scale
+(51 per star). Players that read OneLibrary, such as the CDJ-3000X, show no
+stars for those tracks. Sync the USB once to rewrite them as 0–5 stars;
+rating import reads the old values as the same stars, so it can stay on.
 
 ## What a selection exports
 
