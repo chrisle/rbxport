@@ -169,3 +169,25 @@ describe("PCM read-ahead", () => {
     });
   });
 });
+
+describe("backing store (#346)", () => {
+  it("is exactly the device pixels of the strip, so the bars are not squeezed onto it", async () => {
+    const ratio = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+    Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true });
+    try {
+      // The 1 PLAYER detail on a 1470pt window: 1,177pt wide, drawn two spans across.
+      act(() => root.render(
+        <WaveformDetail trackId="wheel-race-track" progress={0.5} span={0.02} width={2354} height={133} detail />,
+      ));
+      pwv7.resolve(new Uint8Array(3 * 2000).fill(40));
+      await settle();
+      const canvas = host.querySelector("canvas");
+      // A 16pt-quantised store was 2,368pt (4,736 px) squeezed onto 4,708.
+      expect(canvas?.width).toBe(4708);
+      expect(canvas?.height).toBe(266);
+    } finally {
+      if (ratio) Object.defineProperty(window, "devicePixelRatio", ratio);
+      else Reflect.deleteProperty(window, "devicePixelRatio");
+    }
+  });
+});

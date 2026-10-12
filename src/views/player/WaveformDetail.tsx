@@ -15,7 +15,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { drawPcmWave, drawWave, strideOf, waveformKindOf, type HalfWaveform } from "@/canvas";
 import { getBackend } from "@/ipc/client";
 import type { WaveformKind } from "@/ipc/types";
-import { backingSize } from "@/lib/canvasSize";
+import { exactBackingSize } from "@/lib/canvasSize";
 import { detailWaveOriginMs, detailWaveWindow, waveSlice } from "@/lib/player";
 import { usePreferences } from "@/store/usePreferences";
 
@@ -183,7 +183,10 @@ export const WaveformDetail = memo(function WaveformDetail({
   useLayoutEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const { width: w, height: h } = backingSize(width, height);
+    // Exactly the device pixels the strip covers: this redraws on every size
+    // change anyway, and a quantised store squeezed onto the strip resamples
+    // every bar differently after each redraw — a flicker while playing (#346).
+    const { width: w, height: h } = exactBackingSize(width, height);
     // Assigning either clears the canvas, so only when it actually changed.
     if (canvas.width !== w) canvas.width = w;
     if (canvas.height !== h) canvas.height = h;

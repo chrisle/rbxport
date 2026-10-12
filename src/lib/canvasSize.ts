@@ -50,6 +50,27 @@ export function backingSize(
   };
 }
 
+/**
+ * A backing store exactly the device pixels the element covers, unquantised.
+ *
+ * For a canvas that is redrawn on every size change anyway, where the step
+ * saves nothing and costs sharpness: a store 16 CSS pixels wider than its
+ * element is squeezed onto it, so every one-pixel bar is resampled across two
+ * columns. On the scrolling detail waveform that resampling lands differently
+ * after each redraw, which reads as the waveform flickering (#346).
+ */
+export function exactBackingSize(
+  cssWidth: number,
+  cssHeight: number,
+  ratio: number = typeof window === "undefined" ? 1 : window.devicePixelRatio,
+): BackingSize {
+  const scale = Math.min(Math.max(finite(ratio, 1), 1), MAX_RATIO);
+  return {
+    width: Math.min(MAX_WIDTH, Math.max(1, Math.round(Math.max(finite(cssWidth, 1), 1) * scale))),
+    height: Math.max(1, Math.round(Math.max(finite(cssHeight, 1), 1) * scale)),
+  };
+}
+
 function finite(value: number, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
 }
