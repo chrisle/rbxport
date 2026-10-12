@@ -434,9 +434,9 @@ describe("SyncManager", () => {
     expect(syncDevices.mock.calls[0]?.slice(5)).toEqual([true, "mp3"]);
   });
 
-  it("lists the playlists and folders, not All Tracks or the heading", () => {
+  it("lists the playlists and folders under rekordbox's [Playlists] row, not All Tracks", () => {
     const names = [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
-    expect(names).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "Closing"]);
+    expect(names).toEqual(["Playlists", "Sets", "Warm Up", "Main Set", "Peak Time", "Closing"]);
     expect(host.querySelector('button[aria-label="SYNC"]')).toHaveProperty("disabled", true);
   });
 
@@ -468,7 +468,7 @@ describe("SyncManager", () => {
     await settle();
 
     const names = [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
-    expect(names).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "New Playlist"]);
+    expect(names).toEqual(["Playlists", "Sets", "Warm Up", "Main Set", "Peak Time", "New Playlist"]);
     expect(box("Warm Up")?.checked).toBe(true);
     expect(host.textContent).toContain("1 of 4 playlists selected");
   });
@@ -490,11 +490,11 @@ describe("SyncManager", () => {
     await settle();
     const names = () => [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
     // Top folders open; deeper ones start closed.
-    expect(names()).toEqual(["Sets", "Archive", "Warm Up", "Main Set", "Peak Time", "Closing", "Gigs", "Friday"]);
+    expect(names()).toEqual(["Playlists", "Sets", "Archive", "Warm Up", "Main Set", "Peak Time", "Closing", "Gigs", "Friday"]);
 
     click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand Archive"]'));
     click(host.querySelector<HTMLButtonElement>('button[aria-label="Collapse Gigs"]'));
-    expect(names()).toEqual(["Sets", "Archive", "Old Set", "Warm Up", "Main Set", "Peak Time", "Closing", "Gigs"]);
+    expect(names()).toEqual(["Playlists", "Sets", "Archive", "Old Set", "Warm Up", "Main Set", "Peak Time", "Closing", "Gigs"]);
 
     // A new nested folder starts closed; the folders already seen stay as the user left them.
     tree = [
@@ -505,7 +505,7 @@ describe("SyncManager", () => {
     ];
     act(() => libraryChanged?.());
     await settle();
-    expect(names()).toEqual(["Sets", "Archive", "Old Set", "Warm Up", "Main Set", "Peak Time", "Later", "Closing", "Gigs"]);
+    expect(names()).toEqual(["Playlists", "Sets", "Archive", "Old Set", "Warm Up", "Main Set", "Peak Time", "Later", "Closing", "Gigs"]);
     expect(host.querySelector('[role="treeitem"][aria-expanded="true"] input[aria-label="Archive"]')).not.toBeNull();
     expect(host.querySelector('[role="treeitem"][aria-expanded="false"] input[aria-label="Gigs"]')).not.toBeNull();
     expect(host.querySelector('[role="treeitem"][aria-expanded="false"] input[aria-label="Later"]')).not.toBeNull();
@@ -529,7 +529,7 @@ describe("SyncManager", () => {
     await settle();
     act(() => { held[0]?.resolve(stale); });
     await settle();
-    expect(names()).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "Closing", "Fresh Playlist"]);
+    expect(names()).toEqual(["Playlists", "Sets", "Warm Up", "Main Set", "Peak Time", "Closing", "Fresh Playlist"]);
 
     // Nor does an older read that fails replace the list with an error.
     act(() => libraryChanged?.());
@@ -541,7 +541,7 @@ describe("SyncManager", () => {
     act(() => { held[2]?.reject(new Error("gone")); });
     await settle();
     expect(host.querySelector('[aria-label="Playlists"] [role="alert"]')).toBeNull();
-    expect(names()).toEqual(["Sets", "Warm Up", "Main Set", "Peak Time", "Closing", "Fresh Playlist"]);
+    expect(names()).toEqual(["Playlists", "Sets", "Warm Up", "Main Set", "Peak Time", "Closing", "Fresh Playlist"]);
   });
 
   it("shows the iTunes column and its SYNC off Linux, and looks for the library", () => {
@@ -714,6 +714,67 @@ describe("SyncManager", () => {
     expect(box("Warm Up")?.checked).toBe(false);
     expect(box("Main Set")?.checked).toBe(false);
     expect(box("Peak Time")?.checked).toBe(false);
+  });
+
+  it("the [Playlists] row ticks and clears every playlist, and shows mixed when only some are ticked (#335)", () => {
+    const all = box("Playlists");
+    expect(all?.checked).toBe(false);
+    expect(all?.getAttribute("aria-checked")).toBe("false");
+
+    click(all);
+    for (const name of ["Warm Up", "Main Set", "Peak Time", "Closing", "Sets"]) expect(box(name)?.checked, name).toBe(true);
+    expect(all?.getAttribute("aria-checked")).toBe("true");
+    expect(host.textContent).toContain("4 of 4 playlists selected");
+
+    click(box("Closing"));
+    expect(all?.checked).toBe(false);
+    expect(all?.indeterminate).toBe(true);
+    expect(all?.getAttribute("aria-checked")).toBe("mixed");
+
+    // Mixed ticks the rest, as a folder's box does; the next click clears all.
+    click(all);
+    expect(box("Closing")?.checked).toBe(true);
+    expect(all?.indeterminate).toBe(false);
+    click(all);
+    for (const name of ["Warm Up", "Main Set", "Peak Time", "Closing", "Sets"]) expect(box(name)?.checked, name).toBe(false);
+    expect(host.textContent).toContain("0 of 4 playlists selected");
+  });
+
+  it("ticking a single playlist leaves the [Playlists] row mixed", () => {
+    click(box("Warm Up"));
+    expect(box("Playlists")?.getAttribute("aria-checked")).toBe("mixed");
+  });
+
+  it("closing the [Playlists] row hides the tree and keeps the ticks", () => {
+    click(box("Playlists"));
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="Collapse Playlists"]'));
+    const names = [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
+    expect(names).toEqual(["Playlists"]);
+    expect(host.textContent).toContain("4 of 4 playlists selected");
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand Playlists"]'));
+    expect(box("Closing")?.checked).toBe(true);
+  });
+
+  it("a search lists matches without the [Playlists] row", () => {
+    const search = host.querySelector<HTMLInputElement>('input[aria-label="Search playlists"]');
+    if (!search) throw new Error("no search box");
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(search, "set");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const names = [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
+    expect(names).toEqual(["Main Set"]);
+    expect(box("Playlists")).toBeNull();
+  });
+
+  it("SYNC with the [Playlists] row ticked sends every playlist in tree order (#335)", async () => {
+    click(box("Playlists"));
+    click(box("USB B"));
+    await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+    await settle();
+    expect(validateExportFiles).toHaveBeenCalledWith(["p1", "p2", "s1", "p3"]);
+    expect(syncDevices.mock.calls[0]?.[0]).toEqual(["p1", "p2", "s1", "p3"]);
   });
 
   it("ticking a device restores its selection without expanding it", async () => {

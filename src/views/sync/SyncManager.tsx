@@ -123,6 +123,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   const [tree, setTree] = useState<readonly TreeNode[]>([]);
   const [devices, setDevices] = useState<readonly Device[]>([]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  // rekordbox's column is one tree under a [Playlists] row that can be
+  // closed like any folder; it opens open.
+  const [allOpen, setAllOpen] = useState(true);
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const [tickedDevices, setTickedDevices] = useState<ReadonlySet<string>>(new Set());
   const [expandedDevices, setExpandedDevices] = useState<ReadonlySet<string>>(new Set());
@@ -198,8 +201,10 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   const search = query.trim().toLocaleLowerCase();
   const visible = useMemo(() => search
     ? playlists.filter(node => node.name.toLocaleLowerCase().includes(search))
-    : visibleNodes(nodes, collapsed), [nodes, playlists, collapsed, search]);
+    : allOpen ? visibleNodes(nodes, collapsed) : [], [nodes, playlists, collapsed, search, allOpen]);
   const selectedCount = playlists.filter(node => ticked.has(node.id)).length;
+  // The [Playlists] row's box, as rekordbox's: every playlist, some, or none.
+  const allState: Tick = selectedCount === 0 ? "off" : selectedCount === playlists.length ? "on" : "some";
   // What the selection would use on each ticked stick, asked for once the
   // ticking has settled. A key rather than the device list: that is re-read
   // on a timer and would restart the estimate every time.
@@ -845,6 +850,32 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
             {query ? <button type="button" aria-label="Clear playlist search" onClick={() => setQuery("")}><X size={14} aria-hidden="true" /></button> : null}
           </div>
           <div className={styles.list} role="tree" aria-label="Playlists">
+            {/* rekordbox roots this column at [Playlists], whose box ticks or
+                clears every playlist at once. A search lists matches flat,
+                so the root is not shown then. */}
+            {!search && nodes.length > 0 ? (
+              <div
+                className={styles.row}
+                role="treeitem"
+                aria-expanded={allOpen}
+                aria-selected={allState === "on"}
+                style={{ paddingLeft: "8px" }}
+              >
+                <button
+                  type="button"
+                  className={styles.twisty}
+                  data-open={allOpen ? "" : undefined}
+                  aria-label={allOpen ? `Collapse ${t("Playlists")}` : `Expand ${t("Playlists")}`}
+                  onClick={() => setAllOpen((open) => !open)}
+                />
+                <label className={styles.rowSelection}>
+                  <FolderIcon className={styles.icon} />
+                  <span className={styles.name}>{t("Playlists")}</span>
+                  <TickBox state={allState} label={t("Playlists")} disabled={busy || playlists.length === 0}
+                    onChange={(on) => setTicked(on ? new Set(playlists.map((n) => n.id)) : new Set())} />
+                </label>
+              </div>
+            ) : null}
             {visible.map((node) => {
               const folder = node.kind === "folder";
               const open = !collapsed.has(node.id);
@@ -856,7 +887,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
                   role="treeitem"
                   aria-expanded={folder ? open : undefined}
                   aria-selected={state === "on"}
-                  style={{ paddingLeft: `${8 + (search ? 0 : node.depth - 1) * 18}px` }}
+                  style={{ paddingLeft: `${8 + (search ? 0 : node.depth) * 18}px` }}
                 >
                   <button
                     type="button"

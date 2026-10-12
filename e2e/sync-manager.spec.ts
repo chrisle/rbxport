@@ -32,7 +32,9 @@ test("the rail opens it with the library's playlists on the left and the devices
   const tree = dialog.getByRole("tree", { name: "Playlists", exact: true });
   // The mock's top folders, open one level: their playlists show, the third
   // folder is empty.
-  await expect(tree.getByRole("treeitem").first()).toHaveText(/CURRENT/);
+  // rekordbox roots the column at [Playlists]; its folders follow.
+  await expect(tree.getByRole("treeitem").first()).toHaveText(/Playlists/);
+  await expect(tree.getByRole("treeitem").nth(1)).toHaveText(/CURRENT/);
   await expect(tree.getByRole("checkbox", { name: "Melodic Vox" })).toBeVisible();
   await expect(tree.getByRole("checkbox", { name: "Fresh 128s" })).toBeVisible();
   await expect(tree.getByRole("treeitem", { name: /All Tracks/ })).toHaveCount(0);
@@ -132,4 +134,31 @@ test("playlist search preserves selections and explains what is needed to sync",
   await expect(sync).toHaveAccessibleDescription("Select playlists to sync.");
   await search.fill("no matching playlist");
   await expect(dialog.getByText("No playlists match “no matching playlist”.", { exact: true })).toBeVisible();
+});
+
+test("the [Playlists] box selects every playlist, shows mixed, and SYNC writes them all (#335)", async ({ page }) => {
+  const dialog = await openManager(page);
+  const tree = dialog.getByRole("tree", { name: "Playlists", exact: true });
+  const all = tree.getByRole("checkbox", { name: "Playlists", exact: true });
+  await expect(all).not.toBeChecked();
+  await all.check();
+  await expect(tree.getByRole("checkbox", { name: "Melodic Vox" })).toBeChecked();
+  await expect(tree.getByRole("checkbox", { name: "Hardstyle" })).toBeChecked();
+  await expect(tree.getByRole("checkbox", { name: "CURRENT" })).toBeChecked();
+  await tree.getByRole("checkbox", { name: "Hardstyle" }).uncheck();
+  await expect(all).toHaveAttribute("aria-checked", "mixed");
+  await all.click();
+  await expect(all).toBeChecked();
+  await expect(tree.getByRole("checkbox", { name: "Hardstyle" })).toBeChecked();
+
+  await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
+  await dialog.getByRole("button", { name: "SYNC", exact: true }).click();
+  await expect(dialog.getByLabel("DJ STICK export report")).toContainText(/\d+ tracks updated/);
+  await dialog.getByRole("button", { name: "Expand DJ STICK", exact: true }).click();
+  await expect(dialog.getByLabel("DJ STICK library")).toContainText("Melodic Vox");
+  await expect(dialog.getByLabel("DJ STICK library")).toContainText("Hardstyle");
+
+  await all.uncheck();
+  await expect(tree.getByRole("checkbox", { name: "Melodic Vox" })).not.toBeChecked();
+  await expect(dialog.getByRole("button", { name: "SYNC", exact: true })).toBeDisabled();
 });
