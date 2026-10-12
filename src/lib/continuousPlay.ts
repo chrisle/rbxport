@@ -98,8 +98,46 @@ export function playedToEnd(before: DeckTick | null, after: DeckTick): boolean {
  * empty list.
  */
 export function nextRowIndex(ids: readonly string[], trackId: string, loadedFrom: number): number {
+  return skipRowIndex(ids, trackId, loadedFrom, "next");
+}
+
+/**
+ * How far into its track deck 1 must be for the previous-track button to go
+ * back to the start of it rather than to the row before. rekordbox compares
+ * `DjEngineIF::getPlayingTime` with 1000 [OBS rekordbox 7.2.19 static,
+ * `ListViewer::getNextTrackIndex` @0x10040fb04]; that it is milliseconds of
+ * the head's place is [ASSUME].
+ */
+export const RESTART_AFTER_MS = 1000;
+
+/**
+ * Whether the previous-track button goes back to the start of the loaded
+ * track: it has played more than `RESTART_AFTER_MS` of it. Clicked again from
+ * there, it goes to the row before. rekordbox's manual (7.2.18 p.68): "Move
+ * to the beginning of the track currently playing. Click twice to move to the
+ * previous track."
+ */
+export function previousRestarts(positionMs: number): boolean {
+  return positionMs > RESTART_AFTER_MS;
+}
+
+/**
+ * The row the track skip buttons load, as rekordbox picks it
+ * (`ListViewer::getNextTrackIndex` @0x10040f920, called with `next` set for
+ * the next button and clear for the previous one): from the loaded track's
+ * row, found as `nextRowIndex` describes, the next row with the last one
+ * wrapping to the first, or the row before with the first one wrapping to the
+ * last. A track no longer in the list starts it again from its first row
+ * either way. -1 for an empty list.
+ *
+ * The previous button's restart is not a row: see `previousRestarts`.
+ */
+export function skipRowIndex(
+  ids: readonly string[], trackId: string, loadedFrom: number, direction: "previous" | "next",
+): number {
   if (ids.length === 0) return -1;
   const at = ids[loadedFrom] === trackId ? loadedFrom : ids.indexOf(trackId);
   if (at < 0) return 0;
-  return at === ids.length - 1 ? 0 : at + 1;
+  if (direction === "next") return at === ids.length - 1 ? 0 : at + 1;
+  return (at > 0 ? at : ids.length) - 1;
 }

@@ -90,6 +90,7 @@ import { SimplePlayer } from "./SimplePlayer";
 import { JumpMenu } from "./JumpMenu";
 import { VocalStrip } from "./VocalStrip";
 import { useTrackCues } from "./useTrackCues";
+import { previousRestarts } from "@/lib/continuousPlay";
 import { useTrackDetails } from "./useTrackDetails";
 import { useTrackGrid } from "./useTrackGrid";
 import { useGridEditor } from "./useGridEditor";
@@ -240,6 +241,13 @@ export interface PlayerProps {
    * selected, or several things — the empty deck is inert.
    */
   onLoadSelected?: (() => void) | undefined;
+  /**
+   * The track skip buttons' row change: load the next row, or the one before,
+   * of the list this deck's track came from, playing on if `playing`. The
+   * previous button's return to the start of the track is the deck's own and
+   * never comes here. Absent, the buttons are inert.
+   */
+  onSkipTrack?: ((direction: "previous" | "next", playing: boolean) => void) | undefined;
   /**
    * The id of the highlighted browser row, so Enter can load it onto Player 1
    * and — when this deck is already playing — carry the sound straight into it.
@@ -823,7 +831,7 @@ function CueName({ cue, renaming, setRenaming, canEdit, onSave }: {
 }
 
 export const Player = memo(function Player({
-  track, onEject, onError, onAnalyse, onDropTrack, onLoadSelected, selectedTrackId = null,
+  track, onEject, onError, onAnalyse, onDropTrack, onLoadSelected, onSkipTrack, selectedTrackId = null,
   onExportTrack, devices = [], onExportLoop,
   dragging = false, deck = "a",
   simple = false, transportSlot, flipped = false, dual = false, publishZoom,
@@ -1319,6 +1327,30 @@ export const Player = memo(function Player({
   });
   const playingLoop = useEventCallback(() => (playback.loop?.active ? playback.loop : null));
   const leaveLoop = useEventCallback(() => playback.setLoopActive(false));
+  /**
+   * The track skip buttons (rekordbox 7.2.18 manual p.68): the next one loads
+   * the next row of the list the track came from; the previous one goes back
+   * to the start of the track, and to the row before once less than a second
+   * has played (`previousRestarts`). Either keeps a playing deck playing and
+   * a paused one paused: see `src/lib/continuousPlay.ts`.
+   *
+   * rekordbox's restart loads the same row again
+   * (`ListViewer::getNextTrackIndex` @0x10040fb04 gives the loaded row back),
+   * so it is done here as a load leaves a deck: the head at 0, the loop let
+   * go, CUE on the first memory cue.
+   */
+  const skipTrack = useEventCallback((direction: "previous" | "next") => {
+    if (playback.idle) return;
+    if (direction === "previous" && previousRestarts(playback.positionNow() * 1000)) {
+      cancelCall();
+      if (playback.loop?.active) playback.setLoopActive(false);
+      const first = cuesFor(cues, "memory")[0];
+      setCuePoint(first ? first.positionMs / 1000 : 0);
+      playback.seek(0);
+      return;
+    }
+    onSkipTrack?.(direction, playback.playing);
+  });
   // A pause, a new track or an empty deck leaves no beat to wait for.
   useEffect(() => {
     if (!playback.playing) cancelCall();
@@ -2118,9 +2150,8 @@ export const Player = memo(function Player({
               type="button"
               className={styles.square}
               aria-label={button.label}
-              // No playlist cursor behind these yet, so they are drawn and
-              // inert rather than absent.
-              disabled
+              disabled={playback.idle || !onSkipTrack}
+              onClick={() => skipTrack(button.id)}
             >
               {button.glyph}
             </button>

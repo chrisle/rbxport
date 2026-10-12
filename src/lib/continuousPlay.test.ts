@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DeckTick } from "@/ipc/types";
-import { continuesFrom, nextRowIndex, playedToEnd } from "./continuousPlay";
+import { continuesFrom, nextRowIndex, playedToEnd, previousRestarts, skipRowIndex } from "./continuousPlay";
 
 const deck = (over: Partial<DeckTick> = {}): DeckTick => ({
   frames: 0,
@@ -48,6 +48,53 @@ describe("nextRowIndex", () => {
 
   it("has nothing to give from an empty list", () => {
     expect(nextRowIndex([], "a", 0)).toBe(-1);
+  });
+});
+
+describe("skipRowIndex", () => {
+  // rekordbox 7.2.19: the track skip buttons are `ListViewer::loadNextTrack`
+  // with `next` set or clear (`WidgetBrowse::operate` @0x100c89c54/@0x100c89c70),
+  // and `getNextTrackIndex` @0x10040f920 picks the row.
+  it("moves to the row after for the next button, the last going round to the first", () => {
+    expect(skipRowIndex(["a", "b", "c"], "b", 1, "next")).toBe(2);
+    expect(skipRowIndex(["a", "b", "c"], "c", 2, "next")).toBe(0);
+  });
+
+  it("moves to the row before for the previous button, the first going round to the last", () => {
+    expect(skipRowIndex(["a", "b", "c"], "b", 1, "previous")).toBe(0);
+    expect(skipRowIndex(["a", "b", "c"], "a", 0, "previous")).toBe(2);
+    expect(skipRowIndex(["a"], "a", 0, "previous")).toBe(0);
+  });
+
+  it("goes back from the copy that was played when a track is listed twice", () => {
+    expect(skipRowIndex(["a", "b", "a", "c"], "a", 2, "previous")).toBe(1);
+  });
+
+  it("finds the track again when the list has moved under it", () => {
+    expect(skipRowIndex(["c", "a", "b"], "a", 0, "previous")).toBe(0);
+    expect(skipRowIndex(["c", "b", "a"], "a", 0, "previous")).toBe(1);
+  });
+
+  it("starts the list from its first row when the track is no longer in it, either way", () => {
+    expect(skipRowIndex(["c", "d"], "a", 1, "previous")).toBe(0);
+    expect(skipRowIndex(["c", "d"], "a", 1, "next")).toBe(0);
+  });
+
+  it("has nothing to give from an empty list", () => {
+    expect(skipRowIndex([], "a", 0, "previous")).toBe(-1);
+  });
+});
+
+describe("previousRestarts", () => {
+  // `getNextTrackIndex` @0x10040fb04: more than 1000 played, the same row.
+  it("goes back to the start once more than a second has played", () => {
+    expect(previousRestarts(1001)).toBe(true);
+    expect(previousRestarts(60_000)).toBe(true);
+  });
+
+  it("goes to the row before within the first second", () => {
+    expect(previousRestarts(0)).toBe(false);
+    expect(previousRestarts(1000)).toBe(false);
   });
 });
 

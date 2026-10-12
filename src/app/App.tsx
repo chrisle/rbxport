@@ -70,7 +70,7 @@ import type { PreferencesTarget } from "@/views/settings/Preferences";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
 import type { PreferencePane } from "@/lib/preferences";
 import { answer, deckNumber, setPlaying, whenLoaded, withSetting, type ScriptHandler } from "@/lib/scripting";
-import { continuesFrom, nextRowIndex, playedToEnd, type ListPosition } from "@/lib/continuousPlay";
+import { continuesFrom, playedToEnd, skipRowIndex, type ListPosition } from "@/lib/continuousPlay";
 import { useAnalysis } from "@/store/useAnalysis";
 import type { AnalysisChoice } from "@/views/analysis/AnalysisDialog";
 import { autoAnalysisOffer, takeRemainingPages } from "@/lib/autoAnalysis";
@@ -1309,14 +1309,16 @@ function AppBody() {
   }, [deckLoaders]);
 
   /**
-   * Deck 1 played its track to the end: load the next row of its list and
-   * play it, where rekordbox would (`continuesFrom`). Its 2 PLAYER stops at
-   * the end, and FULL BROWSER has no deck on screen here to load it.
+   * Loads the row after (or before) deck 1's track in the list it came
+   * from, and plays it if `play`: the end of a track (`continuePlaylist`) and
+   * the track skip buttons, which rekordbox runs through the same
+   * `ListViewer::loadNextTrack` @0x10040f570. A track that did not come from
+   * a list has no row to move from, and nothing happens.
    */
-  const continuePlaylist = useEventCallback(async () => {
+  const loadAdjacentRow = useEventCallback(async (direction: "previous" | "next", play: boolean) => {
     const from = continuation.current;
     const loaded = playerTrack;
-    if (!from || !loaded || from.trackId !== loaded.id || !continuesFrom(from.position.spec.source, layout)) return;
+    if (!from || !loaded || from.trackId !== loaded.id) return;
     // rekordbox reads the next row off the list as the browser shows it now,
     // so a re-sort or a search since the load counts; a browser that has
     // moved on to another list leaves the list as it was opened.
@@ -1328,20 +1330,41 @@ function AppBody() {
       if (handle.len === 0) return;
       const ids = await backend.viewIdsInRange(handle.viewId, 0, handle.len - 1);
       const remembered = JSON.stringify(listed) === JSON.stringify(from.position.spec) ? from.position.index : -1;
-      const index = nextRowIndex(ids, loaded.id, remembered);
+      const index = skipRowIndex(ids, loaded.id, remembered, direction);
       if (index < 0) return;
       const [row] = await backend.fetchRows(handle.viewId, index, 1);
       // Something else was loaded while the list was read.
       if (!row || continuation.current !== from) return;
       openInDeckA(row, { spec: listed, index });
-      if (row.missing === true) return;
+      if (!play || row.missing === true) return;
       await whenLoaded("a", row.id);
       setPlaying("a", true);
     } catch {
       // The deck says why a track would not open; a list that could not be
-      // read leaves the deck at the end of the track, as before.
+      // read leaves the deck where it was.
     }
   });
+
+  /**
+   * Deck 1 played its track to the end: load the next row of its list and
+   * play it, where rekordbox would (`continuesFrom`). Its 2 PLAYER stops at
+   * the end, and FULL BROWSER has no deck on screen here to load it.
+   */
+  const continuePlaylist = useEventCallback(async () => {
+    const from = continuation.current;
+    if (!from || !continuesFrom(from.position.spec.source, layout)) return;
+    await loadAdjacentRow("next", true);
+  });
+
+  /**
+   * The track skip buttons on deck 1. rekordbox loads the row with the deck's
+   * play state carried over: `ListViewer::loadTrack` @0x100412500 takes it
+   * from `DjEngineIF::isPlaying` for a button, where the end of a track
+   * always plays [OBS rekordbox 7.2.19 static].
+   */
+  const skipTrackA = useCallback((direction: "previous" | "next", playing: boolean) => {
+    void loadAdjacentRow(direction, playing);
+  }, [loadAdjacentRow]);
 
   useEffect(() => {
     let live = true;
@@ -2839,6 +2862,7 @@ function AppBody() {
             dragging={draggedTracks !== null}
             onDropTrack={loadDroppedInto.a}
             onLoadSelected={loadSelectedInto.a}
+            onSkipTrack={skipTrackA}
             selectedTrackId={selectedRow?.id ?? null}
             transportSlot={deckCount(layout) > 1 ? transportA : null}
             dual={deckCount(layout) > 1}
