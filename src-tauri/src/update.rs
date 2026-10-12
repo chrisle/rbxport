@@ -27,6 +27,11 @@
 //!   a second, separate copy next to the Store's, and Windows would go on
 //!   launching the Store's older one (#189). A check says the Store keeps
 //!   this copy up to date instead, without asking the download server.
+//! - Nix: the package lives in the read-only Nix store and Nix installs its
+//!   updates, so the built-in updater is unavailable there too (#177). The
+//!   Nix launcher says so through [`NIX_ENV`]; a check names the Nix channel
+//!   as what updates this copy, without asking the download server, and
+//!   nothing is downloaded or installed.
 //!
 //! What has changed is worked out here, not in the interface: the notes are
 //! the full published release history, and the part that matters is the sections newer
@@ -37,7 +42,8 @@
 //! ten times a second: a chunk arrives every few kilobytes, and an event per
 //! chunk would be IPC for nothing.
 
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -164,6 +170,59 @@ fn store_refusal() -> AppError {
     AppError::new(ErrorKind::Internal, "The Microsoft Store installs this copy of rbxport's updates.")
 }
 
+/// The variable the Nix launcher (`packaging/nix/bin.nix`) sets, to `nix`,
+/// on the app it starts: the package manager that owns this copy's updates.
+pub const NIX_ENV: &str = "RBXPORT_PACKAGE_MANAGER";
+
+/// The file the first Nix launcher (`bin.nix` before #177) wrote beside the
+/// writable `AppImage` copy it seeded and let the built-in updater replace.
+const NIX_SEED_MARKER: &str = ".nix-seed-version";
+
+/// Whether this copy was installed through Nix, which then owns its updates.
+///
+/// Any one of three facts says so, taken as arguments to keep the decision
+/// testable:
+/// - the launcher's marker, [`NIX_ENV`] set to `nix`;
+/// - an `AppImage` path inside the Nix store, which nothing but Nix writes;
+/// - an `AppImage` with the first Nix launcher's seed marker beside it. That
+///   launcher ran a writable copy in the data directory and set no marker, so
+///   without this a copy it had already updated would go on updating itself
+///   outside Nix.
+fn installed_by_nix(marker: Option<&OsStr>, appimage: Option<&Path>, seeded: impl Fn(&Path) -> bool) -> bool {
+    if marker.is_some_and(|value| value == "nix") {
+        return true;
+    }
+    let Some(appimage) = appimage else { return false };
+    appimage.starts_with("/nix/store") || appimage.parent().is_some_and(|dir| seeded(&dir.join(NIX_SEED_MARKER)))
+}
+
+/// Whether this process was installed through Nix. Nix packages rbxport for
+/// Linux only.
+fn nix_install() -> bool {
+    cfg!(target_os = "linux")
+        && installed_by_nix(
+            std::env::var_os(NIX_ENV).as_deref(),
+            std::env::var_os("APPIMAGE").as_deref().map(Path::new),
+            Path::exists,
+        )
+}
+
+fn nix_refusal() -> AppError {
+    AppError::new(ErrorKind::Internal, "Nix installs this copy of rbxport's updates.")
+}
+
+/// The refusal for a copy whose updates a package manager or store installs,
+/// if this is one.
+fn managed_refusal() -> Option<AppError> {
+    if store_install() {
+        Some(store_refusal())
+    } else if nix_install() {
+        Some(nix_refusal())
+    } else {
+        None
+    }
+}
+
 /// Why this build cannot replace itself, if it cannot, mirroring the refusal
 /// the interface already shows for a development build.
 ///
@@ -218,6 +277,10 @@ pub struct UpdateCheckDto {
     /// This copy came from the Microsoft Store, which installs its updates;
     /// the check did not ask the download server, and `version` is `None`.
     pub store_install: bool,
+    /// This copy was installed through Nix, whose channel brings its
+    /// updates; the check did not ask the download server, and `version` is
+    /// `None`.
+    pub nix_install: bool,
 }
 
 /// A downloaded update, and whether it is already in the app's place.
@@ -258,6 +321,10 @@ pub async fn check_for_update(
         *updates.pending.lock() = None;
         return Ok(store_check(current_version));
     }
+    if nix_install() {
+        *updates.pending.lock() = None;
+        return Ok(nix_check(current_version));
+    }
     let found = app
         .updater()
         .map_err(|e| updater_error("The updater is not configured.", e))?
@@ -274,6 +341,7 @@ pub async fn check_for_update(
             changes: Vec::new(),
             ready: None,
             store_install: false,
+            nix_install: false,
         });
     };
 
@@ -307,6 +375,7 @@ pub async fn check_for_update(
         changes,
         ready,
         store_install: false,
+        nix_install: false,
     };
     *pending = Some(Pending { update, placement });
     Ok(dto)
@@ -322,6 +391,21 @@ fn store_check(current_version: String) -> UpdateCheckDto {
         changes: Vec::new(),
         ready: None,
         store_install: true,
+        nix_install: false,
+    }
+}
+
+/// What a check answers in a Nix install: nothing on offer from the download
+/// server, and the Nix channel named as what updates this copy.
+fn nix_check(current_version: String) -> UpdateCheckDto {
+    UpdateCheckDto {
+        current_version,
+        version: None,
+        date: None,
+        changes: Vec::new(),
+        ready: None,
+        store_install: false,
+        nix_install: true,
     }
 }
 
@@ -349,11 +433,11 @@ pub async fn download_update(
     app: AppHandle,
     updates: tauri::State<'_, std::sync::Arc<Updates>>,
 ) -> AppResult<UpdateReadyDto> {
-    if let Some(refusal) = self_update_refusal(cfg!(debug_assertions), bundle_type().as_ref()) {
+    if let Some(refusal) = managed_refusal() {
         return Err(refusal);
     }
-    if store_install() {
-        return Err(store_refusal());
+    if let Some(refusal) = self_update_refusal(cfg!(debug_assertions), bundle_type().as_ref()) {
+        return Err(refusal);
     }
     let (update, placement) = {
         let pending = updates.pending.lock();
@@ -459,8 +543,8 @@ pub async fn restart_to_update(
     app: AppHandle,
     updates: tauri::State<'_, std::sync::Arc<Updates>>,
 ) -> AppResult<()> {
-    if store_install() {
-        return Err(store_refusal());
+    if let Some(refusal) = managed_refusal() {
+        return Err(refusal);
     }
     let (update, placement) = {
         let pending = updates.pending.lock();
@@ -647,6 +731,79 @@ mod tests {
         let json = serde_json::to_value(&dto).unwrap();
         assert_eq!(json["storeInstall"], serde_json::Value::Bool(true));
         assert_eq!(json["currentVersion"], "1.2.0");
+    }
+
+    #[test]
+    fn a_nix_check_offers_nothing_and_names_nix() {
+        let dto = nix_check("1.3.0".to_owned());
+        assert!(dto.nix_install && !dto.store_install);
+        assert_eq!(dto.version, None);
+        assert!(dto.ready.is_none() && dto.changes.is_empty());
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["nixInstall"], serde_json::Value::Bool(true));
+        assert_eq!(json["storeInstall"], serde_json::Value::Bool(false));
+    }
+
+    #[test]
+    fn the_nix_launcher_marker_makes_a_nix_install() {
+        let never = |_: &Path| false;
+        assert!(installed_by_nix(Some(OsStr::new("nix")), None, never));
+        // The launcher runs the AppImage extracted from the store, with
+        // APPIMAGE naming the store copy.
+        assert!(installed_by_nix(
+            Some(OsStr::new("nix")),
+            Some(Path::new("/home/dj/.cache/rbxport/x/rbxport.AppImage")),
+            never
+        ));
+        assert!(!installed_by_nix(Some(OsStr::new("")), None, never));
+        assert!(!installed_by_nix(Some(OsStr::new("flatpak")), None, never));
+    }
+
+    #[test]
+    fn an_appimage_in_the_nix_store_is_a_nix_install() {
+        let never = |_: &Path| false;
+        let store = Path::new("/nix/store/abc-rbxport-bin-1.3.0/share/rbxport/rbxport.AppImage");
+        assert!(installed_by_nix(None, Some(store), never));
+        // A path that only starts with the same letters is not the store.
+        assert!(!installed_by_nix(None, Some(Path::new("/nix/storefront/rbxport.AppImage")), never));
+    }
+
+    #[test]
+    fn a_copy_seeded_by_the_first_nix_launcher_is_a_nix_install() {
+        // The first Nix launcher copied the AppImage into the data directory, wrote
+        // this marker beside it and set no variable. A copy it seeded must not
+        // go on replacing itself once it is running this build.
+        let seeded = Path::new("/home/dj/.local/share/rbxport/rbxport.AppImage");
+        let marker = Path::new("/home/dj/.local/share/rbxport/.nix-seed-version");
+        assert!(installed_by_nix(None, Some(seeded), |path: &Path| path == marker));
+    }
+
+    #[test]
+    fn a_downloaded_appimage_is_not_a_nix_install_and_keeps_its_updater() {
+        // The AppImage a person downloads and runs: no marker, outside the
+        // store, nothing seeded beside it.
+        let downloaded = Path::new("/home/dj/Applications/rbxport-1.3.0-linux-x86_64.AppImage");
+        assert!(!installed_by_nix(None, Some(downloaded), |_: &Path| false));
+        assert!(!installed_by_nix(None, None, |_: &Path| false));
+        // Without the Nix launcher's variable, this test process is not one.
+        if std::env::var_os(NIX_ENV).is_none() && std::env::var_os("APPIMAGE").is_none() {
+            assert!(!nix_install());
+            assert!(managed_refusal().is_none() || cfg!(windows));
+        }
+        // And an AppImage build may still replace itself.
+        assert!(self_update_refusal(false, Some(&BundleType::AppImage)).is_none());
+    }
+
+    #[test]
+    fn the_nix_launcher_sets_the_marker_the_app_reads_and_seeds_no_writable_copy() {
+        let launcher = include_str!("../../packaging/nix/bin.nix");
+        assert!(
+            launcher.contains(&format!("export {NIX_ENV}=nix")),
+            "bin.nix must tell the app that Nix owns its updates"
+        );
+        // The writable copy is what let the built-in updater update a Nix
+        // install outside Nix (#177).
+        assert!(!launcher.contains("chmod u+w"), "bin.nix must not seed a writable AppImage");
     }
 
     #[test]

@@ -38,7 +38,7 @@ const CHECK: UpdateCheck = {
     { version: "0.5.0", date: "2026-09-11", body: "## [0.5.0] — 2026-09-11\n\n### Fixed\n- A crash." },
   ],
   ready: null,
-  storeInstall: false,
+  storeInstall: false, nixInstall: false,
 };
 
 function mount(state: UpdaterState) {
@@ -103,6 +103,16 @@ describe("UpdateManager", () => {
     mount({ phase: "store", currentVersion: "1.2.0" });
     expect(text()).toContain("This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.");
     expect(text()).not.toContain("latest version");
+    expect(buttons()).toEqual(["OK"]);
+    click("OK");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("a Nix install points to its Nix channel, with only a way out (#177)", () => {
+    mount({ phase: "nix", currentVersion: "1.3.0" });
+    expect(text()).toContain("This copy of rbxport was installed with Nix. Get updates through your Nix channel.");
+    expect(text()).not.toContain("latest version");
+    expect(text()).not.toContain("Microsoft Store");
     expect(buttons()).toEqual(["OK"]);
     click("OK");
     expect(onClose).toHaveBeenCalledTimes(1);

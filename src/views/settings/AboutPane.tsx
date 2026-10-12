@@ -25,6 +25,7 @@ type UpdateStatus =
   | { kind: "checking" }
   | { kind: "upToDate"; version: string }
   | { kind: "store" }
+  | { kind: "nix" }
   | { kind: "available"; version: string }
   | { kind: "ready"; version: string };
 
@@ -125,6 +126,8 @@ export function AboutPane() {
         const found = await backend.checkForUpdate();
         if (found.storeInstall) {
           setUpdateStatus({ kind: "store" });
+        } else if (found.nixInstall) {
+          setUpdateStatus({ kind: "nix" });
         } else if (found.version === null) {
           setUpdateStatus({ kind: "upToDate", version: found.currentVersion });
         } else if (found.ready) {
@@ -148,6 +151,8 @@ export function AboutPane() {
     ? t("Checking for updates…")
     : updateStatus.kind === "store"
     ? t("This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.")
+    : updateStatus.kind === "nix"
+    ? t("This copy of rbxport was installed with Nix. Get updates through your Nix channel.")
     : updateStatus.kind === "upToDate"
     ? t("rbxport v{version} is up to date.", { version: updateStatus.version })
     : updateStatus.kind === "available"

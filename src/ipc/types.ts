@@ -1064,6 +1064,12 @@ export interface UpdateCheck {
    * updates. The check did not ask the download server; `version` is null.
    */
   storeInstall: boolean;
+  /**
+   * This copy was installed through Nix, whose channel brings its updates;
+   * the built-in updater is unavailable. The check did not ask the download
+   * server; `version` is null.
+   */
+  nixInstall: boolean;
 }
 
 /** A downloaded update, and whether it is already in the app's place. */

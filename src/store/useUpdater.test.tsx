@@ -32,12 +32,14 @@ const AVAILABLE: UpdateCheck = {
   date: "2026-09-11T00:00:00Z",
   changes: [{ version: "0.5.0", date: "2026-09-11", body: "## [0.5.0]\n\n- A thing." }],
   ready: null,
-  storeInstall: false,
+  storeInstall: false, nixInstall: false,
 };
 
-const UP_TO_DATE: UpdateCheck = { currentVersion: "0.4.0", version: null, date: null, changes: [], ready: null, storeInstall: false };
+const UP_TO_DATE: UpdateCheck = { currentVersion: "0.4.0", version: null, date: null, changes: [], ready: null, storeInstall: false, nixInstall: false };
 
 const STORE: UpdateCheck = { ...UP_TO_DATE, version: null, storeInstall: true };
+
+const NIX: UpdateCheck = { ...UP_TO_DATE, version: null, nixInstall: true };
 
 const INSTALLED: UpdateReady = { version: "0.5.0", installed: true };
 
@@ -161,6 +163,25 @@ describe("useUpdater", () => {
     act(() => updater.check(true));
     await settle();
     expect(updater.state).toEqual({ phase: "store", currentVersion: "0.4.0" });
+    expect(updater.open).toBe(true);
+    expect(fetched).not.toHaveBeenCalled();
+  });
+
+  it("a Nix install downloads nothing, on its own or when asked (#177)", async () => {
+    check = () => Promise.resolve(NIX);
+    const fetched = vi.fn(() => Promise.resolve(INSTALLED));
+    download = fetched;
+    await mount(true);
+    act(() => {
+      vi.advanceTimersByTime(15_000);
+    });
+    await settle();
+    expect(updater.state).toEqual({ phase: "nix", currentVersion: "0.4.0" });
+    expect(updater.open).toBe(false);
+
+    act(() => updater.check(true));
+    await settle();
+    expect(updater.state).toEqual({ phase: "nix", currentVersion: "0.4.0" });
     expect(updater.open).toBe(true);
     expect(fetched).not.toHaveBeenCalled();
   });

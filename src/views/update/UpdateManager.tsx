@@ -154,6 +154,10 @@ export function UpdateManager({ state, onCheck, onRetry, onRestart, onClose }: U
             // The Store installs this copy's updates; the app's own installer
             // would put a second copy beside it (#189).
             <p className={styles.status}>{t("This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.")}</p>
+          ) : state.phase === "nix" ? (
+            // Nix owns this copy's files; the built-in updater is unavailable
+            // and updates come through the Nix channel (#177).
+            <p className={styles.status}>{t("This copy of rbxport was installed with Nix. Get updates through your Nix channel.")}</p>
           ) : state.phase === "upToDate" ? (
             <p className={styles.status}>
               rbxport {state.currentVersion} is the latest version.

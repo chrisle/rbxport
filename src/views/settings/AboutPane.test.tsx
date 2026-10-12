@@ -123,7 +123,7 @@ describe("AboutPane › Updates", () => {
   it("the button checks here and reports an update found", async () => {
     downloadUpdate.mockReturnValue(new Promise(() => {}));
     checkForUpdate.mockResolvedValue({
-      currentVersion: "0.4.0", version: "0.5.0", date: null, changes: [], ready: null, storeInstall: false,
+      currentVersion: "0.4.0", version: "0.5.0", date: null, changes: [], ready: null, storeInstall: false, nixInstall: false,
     });
     mount();
     act(() => checkButton().click());
@@ -144,7 +144,7 @@ describe("AboutPane › Updates", () => {
 
   it("the button reports being up to date", async () => {
     checkForUpdate.mockResolvedValue({
-      currentVersion: "0.4.0", version: null, date: null, changes: [], ready: null, storeInstall: false,
+      currentVersion: "0.4.0", version: null, date: null, changes: [], ready: null, storeInstall: false, nixInstall: false,
     });
     mount();
     act(() => checkButton().click());
@@ -155,13 +155,25 @@ describe("AboutPane › Updates", () => {
 
   it("the button in a Microsoft Store install points to the Store and downloads nothing", async () => {
     checkForUpdate.mockResolvedValue({
-      currentVersion: "1.2.0", version: null, date: null, changes: [], ready: null, storeInstall: true,
+      currentVersion: "1.2.0", version: null, date: null, changes: [], ready: null, storeInstall: true, nixInstall: false,
     });
     mount();
     act(() => checkButton().click());
     await settle();
     expect(downloadUpdate).not.toHaveBeenCalled();
     expect(section().textContent).toContain("This copy of rbxport is from the Microsoft Store. Get updates from the Microsoft Store.");
+    expect(section().textContent).not.toContain("is up to date");
+  });
+
+  it("the button in a Nix install points to the Nix channel and downloads nothing (#177)", async () => {
+    checkForUpdate.mockResolvedValue({
+      currentVersion: "1.3.0", version: null, date: null, changes: [], ready: null, storeInstall: false, nixInstall: true,
+    });
+    mount();
+    act(() => checkButton().click());
+    await settle();
+    expect(downloadUpdate).not.toHaveBeenCalled();
+    expect(section().textContent).toContain("This copy of rbxport was installed with Nix. Get updates through your Nix channel.");
     expect(section().textContent).not.toContain("is up to date");
   });
 
