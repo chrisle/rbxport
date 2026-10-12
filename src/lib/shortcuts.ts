@@ -249,11 +249,20 @@ export function keyFromCode(code: string | undefined): string | null {
   }
 }
 
+function isAsciiLetter(key: string): boolean {
+  return /^[a-zA-Z]$/.test(key);
+}
+
 /** Whether an event's key is a binding's, letter case and shift aside. */
 function keyMatches(bound: string, chord: KeyChord): boolean {
   if (bound === "") return false;
   if (bound.length === 1) {
     if (chord.key.toLowerCase() === bound.toLowerCase()) return true;
+    // A letter the layout produced is that letter: on AZERTY the physical Q
+    // key (code KeyQ) types `a`, and command + the physical A key (code KeyA)
+    // types `q`, which is Quit, not Select All. The physical key only stands
+    // in when shift or option turned the key into something else.
+    if (isAsciiLetter(chord.key)) return false;
     return keyFromCode(chord.code) === bound.toLowerCase();
   }
   return chord.key === bound;
@@ -552,7 +561,9 @@ export function sameChord(a: KeyChord, b: KeyChord): boolean {
 export function chordFromEvent(event: KeyChord, platform: Platform): KeyChord | null {
   if (["Shift", "Meta", "Control", "Alt", "Dead", "Unidentified", ""].includes(event.key)) return null;
   if (platform.mac ? event.ctrlKey === true : event.metaKey === true) return null;
-  const chord: KeyChord = { key: keyFromCode(event.code) ?? event.key };
+  const chord: KeyChord = {
+    key: isAsciiLetter(event.key) ? event.key.toLowerCase() : (keyFromCode(event.code) ?? event.key),
+  };
   if (primary(event, platform)) chord.metaKey = true;
   if (event.shiftKey === true) chord.shiftKey = true;
   if (event.altKey === true) chord.altKey = true;

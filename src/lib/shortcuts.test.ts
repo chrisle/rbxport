@@ -386,4 +386,13 @@ describe("the mixer's EQ kill keys", () => {
     expect(eqKillBand("eqKillHigh")).toBe("high");
     expect(eqKillBand("cue")).toBeNull();
   });
+
+  it("follows the letter the layout types, not the physical key (#360)", () => {
+    const mac = { mac: true };
+    // AZERTY: the physical A key types q, so command + it is Q, never Select All.
+    expect(matchBinding({ key: "q", code: "KeyA", metaKey: true }, mac)).toBeNull();
+    // ...and the physical Q key types a, which is Select All.
+    expect(matchBinding({ key: "a", code: "KeyQ", metaKey: true }, mac)).toMatchObject({ action: "selectAll" });
+    expect(chordFromEvent({ key: "q", code: "KeyA", metaKey: true }, mac)).toEqual({ key: "q", metaKey: true });
+  });
 });
