@@ -77,6 +77,12 @@ pub enum SortColumn {
     PublishTrackInfo,
     /// `comparePublicComment`: `djmdContent.DeliveryComment`.
     Message,
+    /// When the file was created on this machine's file system, which
+    /// rekordbox has no column for (an RBXport-only exception, #308). Read
+    /// from the files on the first sort by it ([`crate::file_time`]), so it
+    /// is not in [`SortColumn::ALL`], which is built at load. Unknown times
+    /// sort first, as blanks do elsewhere.
+    FileCreated,
 }
 
 impl SortColumn {
@@ -131,6 +137,9 @@ impl SortColumn {
             SortColumn::DateCreated => 32,
             SortColumn::PublishTrackInfo => 33,
             SortColumn::Message => 34,
+            // Past the end of `ranks`: its order lives in
+            // `Library::file_created_rank`, built on first use.
+            SortColumn::FileCreated => SortColumn::ALL.len(),
         }
     }
 
@@ -295,7 +304,7 @@ impl Library {
             if spec.descending {
                 rows.reverse();
             }
-        } else if let Some(rank) = self.ranks.get(spec.sort.rank_slot()) {
+        } else if let Some(rank) = self.rank_of(spec.sort) {
             if spec.descending {
                 rows.sort_unstable_by_key(|&(row, _)| std::cmp::Reverse(rank.get(row as usize).copied().unwrap_or(0)));
             } else {
@@ -341,12 +350,21 @@ impl Library {
     /// export, whose menus sort scopes the views do not have (an artist's
     /// tracks, a key's) with the same ranks the browser uses.
     pub fn sort_rows(&self, rows: &mut [Row], column: SortColumn, descending: bool) {
-        let Some(rank) = self.ranks.get(column.rank_slot()) else { return };
+        let Some(rank) = self.rank_of(column) else { return };
         if descending {
             rows.sort_unstable_by_key(|&r| std::cmp::Reverse(rank.get(r as usize).copied().unwrap_or(0)));
         } else {
             rows.sort_unstable_by_key(|&r| rank.get(r as usize).copied().unwrap_or(0));
         }
+    }
+
+    /// A column's ranks: precomputed at load, or for the file creation
+    /// column, read from the files the first time it is asked for.
+    fn rank_of(&self, column: SortColumn) -> Option<&[u32]> {
+        if column == SortColumn::FileCreated {
+            return Some(self.file_created_rank());
+        }
+        self.ranks.get(column.rank_slot()).map(Vec::as_slice)
     }
 
     /// Ids of rows between two view positions, inclusive. Used for shift-click
@@ -370,7 +388,10 @@ impl Library {
     pub(crate) fn rebuild_ranks(&mut self, columns: &[SortColumn]) {
         self.ranks.resize_with(SortColumn::ALL.len(), Vec::new);
         for &column in columns {
-            self.ranks[column.rank_slot()] = self.column_rank(column);
+            let rank = self.column_rank(column);
+            if let Some(slot) = self.ranks.get_mut(column.rank_slot()) {
+                *slot = rank;
+            }
         }
     }
 
@@ -403,7 +424,7 @@ impl Library {
         self.search = search;
     }
 
-    fn column_rank(&self, column: SortColumn) -> Vec<u32> {
+    pub(crate) fn column_rank(&self, column: SortColumn) -> Vec<u32> {
         let n = self.count;
         let mut order: Vec<Row> = (0..u32::try_from(n).unwrap_or(u32::MAX)).collect();
         // Ties break on row order so a sort is reproducible: every sort here
@@ -444,6 +465,10 @@ impl Library {
             | SortColumn::DiscNo | SortColumn::TrackNumber | SortColumn::FileType | SortColumn::BitDepth
             | SortColumn::PublishTrackInfo => {
                 order.sort_by_key(|&r| self.sort_number(r, column));
+            }
+            SortColumn::FileCreated => {
+                let created = self.file_created_all();
+                order.sort_by_key(|&r| created.get(r as usize).copied().flatten());
             }
         }
         let mut rank = vec![0_u32; n];

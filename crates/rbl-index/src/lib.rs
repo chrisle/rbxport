@@ -15,6 +15,7 @@
 pub mod cache;
 mod category;
 pub mod device;
+pub mod file_time;
 mod filter;
 pub mod folder;
 pub mod key;
@@ -140,6 +141,13 @@ pub struct Library {
     /// Rows by a hash of the file path, for the Explorer. Built on the first
     /// folder opened, so a session that never opens one never pays for it.
     by_path: OnceLock<HashMap<u64, Vec<Row>>>,
+    /// When each track's file was created, read from the file system on the
+    /// first sort by it ([`file_time`]). A session that never sorts by it
+    /// never pays for it.
+    file_created: OnceLock<Vec<Option<i64>>>,
+    /// The sort ranks over `file_created`, outside `ranks` because they
+    /// cannot be built at load.
+    file_created_rank: OnceLock<Vec<u32>>,
 
     /// Every cue, grouped by track.
     ///
@@ -235,6 +243,8 @@ impl Clone for Library {
             tag_list: RwLock::new(self.tag_list.read().clone()),
             by_id: self.by_id.clone(),
             by_path: self.by_path.clone(),
+            file_created: self.file_created.clone(),
+            file_created_rank: self.file_created_rank.clone(),
             cues: RwLock::new(self.cues.read().clone()),
             ranks: self.ranks.clone(),
             search: self.search.clone(),
@@ -476,6 +486,7 @@ impl Library {
         }
         self.folder_path = paths;
         self.by_path = OnceLock::new();
+        self.forget_file_created();
     }
 
     /// Looks again for the file of every cloud-shared track, as rekordbox
@@ -499,6 +510,7 @@ impl Library {
         }
         self.folder_path.replace_rows(&changed);
         self.by_path = OnceLock::new();
+        self.forget_file_created();
         self.rebuild_ranks(&[SortColumn::Location]);
         changed.len()
     }

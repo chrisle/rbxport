@@ -345,7 +345,6 @@ pub async fn fetch_rows(
 
 /// Adds only requested browser fields, keeping ordinary row pages small.
 fn enrich_rows(state: &AppState, rows: &mut [RowDto], columns: &[String]) -> AppResult<()> {
-    use serde_json::{json, Value};
     const FIELDS: &[&str] = &[
         "size", "discNo", "albumArtist", "composer", "lyricist", "fileType", "year",
         "mixName", "remixer", "originalArtist", "sampleRate", "bitrate", "bitDepth",
@@ -353,7 +352,33 @@ fn enrich_rows(state: &AppState, rows: &mut [RowDto], columns: &[String]) -> App
         "djPlayCount", "myTag", "trackNumber", "cloud",
     ];
     let wanted: Vec<&str> = columns.iter().map(String::as_str).filter(|column| FIELDS.contains(column)).collect();
-    if wanted.is_empty() { return Ok(()); }
+    if !wanted.is_empty() {
+        enrich_from_db(state, rows, &wanted)?;
+    }
+    if columns.iter().any(|column| column == "fileCreated") {
+        enrich_file_created(state, rows)?;
+    }
+    Ok(())
+}
+
+/// The file system's creation time of each row's file, in seconds since the
+/// Unix epoch, or null where it cannot be read (#308). Read from the files on
+/// this page only, unless a sort by the column has already read them all.
+fn enrich_file_created(state: &AppState, rows: &mut [RowDto]) -> AppResult<()> {
+    let library = state.library()?;
+    for row in rows {
+        let created = match rbl_index::folder::loose_path(&row.id) {
+            Some(path) => rbl_index::file_time::created_secs(path),
+            None => library.row_of(&row.id).and_then(|index| library.file_created(index)),
+        };
+        row.extra.get_or_insert_with(Default::default).insert("fileCreated".to_owned(), serde_json::json!(created));
+    }
+    Ok(())
+}
+
+/// The requested fields the library database holds.
+fn enrich_from_db(state: &AppState, rows: &mut [RowDto], wanted: &[&str]) -> AppResult<()> {
+    use serde_json::{json, Value};
     state.read_db(|db| {
         // The location rekordbox shows: the stored path through the drive
         // substitution, or this machine's own cloud-shared track's local copy.
@@ -367,7 +392,7 @@ fn enrich_rows(state: &AppState, rows: &mut [RowDto], columns: &[String]) -> App
                 None => String::new(),
             };
             let mut values = serde_json::Map::new();
-            for &column in &wanted {
+            for &column in wanted {
                 let value: Value = match column {
                     "size" => json!(details.file_size),
                     "discNo" => json!(details.disc_number),

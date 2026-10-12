@@ -302,6 +302,23 @@ impl Library {
                 };
                 view.entries.sort_by(|a, b| crate::key::cmp_names(name(a), name(b)));
             }
+            // Only this folder's files are read, not the whole library's.
+            SortColumn::FileCreated => {
+                let files = &view.files;
+                let mut keyed: Vec<(Option<i64>, FolderEntry)> = view
+                    .entries
+                    .iter()
+                    .map(|&entry| {
+                        let created = match entry {
+                            FolderEntry::Track(row) => self.file_created(row),
+                            FolderEntry::File(index) => files.get(index).and_then(|f| crate::file_time::created_secs(&f.path)),
+                        };
+                        (created, entry)
+                    })
+                    .collect();
+                keyed.sort_by_key(|&(created, _)| created);
+                view.entries = keyed.into_iter().map(|(_, entry)| entry).collect();
+            }
             column => {
                 let files = &view.files;
                 let key = |entry: &FolderEntry| -> &str {

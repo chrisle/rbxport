@@ -55,8 +55,15 @@ fn shell() -> Shell {
 }
 
 fn shell_with_shape(shape: Shape) -> Shell {
+    shell_prepared(shape, |_, _| {})
+}
+
+/// A shell over a fixture `prepare` has changed before the library is
+/// indexed, given the temporary folder the fixture is in.
+fn shell_prepared(shape: Shape, prepare: impl FnOnce(&Path, &rbl_db::LibraryLocation)) -> Shell {
     let dir = tempfile::tempdir().unwrap();
     let location = fixture::build(dir.path(), shape).expect("build the fixture");
+    prepare(dir.path(), &location);
 
     let state = AppState::with_backups(dir.path().join("backups"));
     let db = Db::open(location.clone(), OpenMode::ReadOnly).expect("open the fixture");
@@ -412,6 +419,43 @@ fn visible_detail_columns_are_added_to_browser_pages() {
     assert_eq!(extra.get("cloud"), Some(&serde_json::json!(false)));
     assert_eq!(extra.len(), 22, "every requested browser detail has a value or a blank");
     assert!(!extra.contains_key("unknown"));
+}
+
+/// The file system's creation time (#308) is read from the track's file, in
+/// seconds since the Unix epoch, and is null where there is no file to read.
+#[test]
+fn the_file_created_column_reads_the_tracks_file_and_sorts_in_the_index() {
+    let s = shell_prepared(Shape::default(), |dir, location| {
+        let file = dir.join("audio-308.mp3");
+        std::fs::write(&file, b"x").unwrap();
+        fixture::point_at_audio(location, 3, &file.to_string_lossy(), 300).unwrap();
+    });
+    let file = s._dir.path().join("audio-308.mp3");
+    let expected = std::fs::metadata(&file)
+        .and_then(|m| m.created())
+        .ok()
+        .map(|created| created.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64);
+    let columns = Some(vec!["fileCreated".to_owned()]);
+
+    let (view, len) = s.open(collection_spec());
+    let rows = run(commands::fetch_rows(s.state(), view, 0, len, columns.clone())).unwrap();
+    for row in &rows {
+        let value = &row.extra.as_ref().unwrap()["fileCreated"];
+        if row.id == track_id(3) {
+            assert_eq!(value, &serde_json::json!(expected));
+        } else {
+            assert!(value.is_null(), "{} has no file on disk, so no creation time", row.id);
+        }
+    }
+
+    // Sorted by it, newest first: the one track with a known time leads where
+    // the file system records one; the blanks sort first ascending.
+    let (view, _) = s.open(ViewSpecDto { sort: "fileCreated".into(), descending: true, ..collection_spec() });
+    let rows = run(commands::fetch_rows(s.state(), view, 0, 1, columns)).unwrap();
+    if expected.is_some() {
+        assert_eq!(rows[0].id, track_id(3));
+        assert_eq!(rows[0].extra.as_ref().unwrap()["fileCreated"], serde_json::json!(expected));
+    }
 }
 
 #[test]

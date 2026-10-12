@@ -643,6 +643,7 @@ pub fn sort_from_wire(name: &str) -> SortColumn {
         "dateCreated" => SortColumn::DateCreated,
         "publishTrackInfo" => SortColumn::PublishTrackInfo,
         "message" => SortColumn::Message,
+        "fileCreated" => SortColumn::FileCreated,
         _ => SortColumn::TrackNo,
     }
 }
@@ -855,6 +856,7 @@ mod tests {
             ("fileType", SortColumn::FileType), ("bitDepth", SortColumn::BitDepth),
             ("lyricist", SortColumn::Lyricist), ("dateCreated", SortColumn::DateCreated),
             ("publishTrackInfo", SortColumn::PublishTrackInfo), ("message", SortColumn::Message),
+            ("fileCreated", SortColumn::FileCreated),
         ];
         for (name, column) in wire {
             assert_eq!(sort_from_wire(name), column, "{name}");
