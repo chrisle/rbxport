@@ -50,6 +50,12 @@ pub struct TrackInput {
     pub play_count: u16,
     pub disc_number: u16,
     pub sample_depth: u16,
+    /// `exportLibrary.db`'s `content.masterDbId`: the library the track was
+    /// exported from. Written at `0x18`; see [`track_row`].
+    pub master_db_id: u32,
+    /// `exportLibrary.db`'s `content.masterContentId`: the track's id in that
+    /// library. Written at `0x14`; see [`track_row`].
+    pub master_content_id: u32,
     pub title: String,
     pub filename: String,
     /// Media-relative, e.g. `/Contents/Artist/Album/Track.mp3`.
@@ -129,6 +135,15 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     put_u4(&mut row, 0x08, input.sample_rate);
     put_u4(&mut row, 0x0c, 0); // composer_id
     put_u4(&mut row, 0x10, input.file_size);
+    // The row is rekordbox's DJDBCONTENT row, and these two words are its
+    // MASTERCONTENTID and MASTERDBID columns: the same two numbers rekordbox
+    // puts in `exportLibrary.db`'s `content.masterContentId` and
+    // `masterDbId` [OBS: on a stick rekordbox 7 wrote, all 1563 tracks in
+    // both databases agree, e.g. track 1 `e4 ed d8 0c` = 215543268 and
+    // `8d 56 4c 1a` = 441210509]. The XDJ-700 1.15 firmware names both
+    // columns in its own DJDBCONTENT schema.
+    put_u4(&mut row, 0x14, input.master_content_id);
+    put_u4(&mut row, 0x18, input.master_db_id);
     put_u4(&mut row, 0x1c, input.artwork_id);
     put_u4(&mut row, 0x20, input.key_id);
     put_u4(&mut row, 0x24, 0); // original_artist_id

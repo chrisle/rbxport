@@ -1310,6 +1310,8 @@ pub fn export_cancellable(
         // cannot disagree about a path or a size.
         let mut metadata = track.metadata.clone();
         if conversion.is_some() { metadata.bit_depth = 16; }
+        let library_id = track.device.as_ref().map_or(track.id, |d| d.master_content_id);
+        let master_db_id = track.device.as_ref().map_or(db_id, |d| d.master_db_id);
         one_library_tracks.push(OneLibraryTrack {
             metadata,
             cues: track.cues.clone(),
@@ -1317,8 +1319,8 @@ pub fn export_cancellable(
             bitrate: if conversion.is_some() { 0 } else { track.bitrate },
             sample_rate: if conversion.is_some() { 44_100 } else { track.sample_rate },
             export_id,
-            library_id: track.device.as_ref().map_or(track.id, |d| d.master_content_id),
-            master_db_id: track.device.as_ref().map_or(db_id, |d| d.master_db_id),
+            library_id,
+            master_db_id,
             file_size: output_size,
             title: track.title.clone(),
             artist: track.artist.clone(),
@@ -1364,6 +1366,9 @@ pub fn export_cancellable(
             track_number: track.metadata.track_number,
             disc_number: track.metadata.disc_number,
             sample_depth: conversion.map_or(track.metadata.bit_depth, |_| 16),
+            // The same pair exportLibrary.db gets, as rekordbox writes both.
+            master_db_id: u32::try_from(master_db_id).unwrap_or(0),
+            master_content_id: u32::try_from(library_id).unwrap_or(0),
             play_count: u16::try_from(track.metadata.play_count).unwrap_or(u16::MAX),
             isrc: track.metadata.isrc.clone(),
             title: track.title.clone(),

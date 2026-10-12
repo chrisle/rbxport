@@ -157,3 +157,43 @@ fn playlists_are_numbered_from_0_within_their_folder_in_both_databases() {
     want.sort();
     assert_eq!(one, want);
 }
+
+/// A track row is rekordbox's DJDBCONTENT row, and its words at `0x14` and
+/// `0x18` are the MASTERCONTENTID and MASTERDBID columns: the track's id in
+/// the library it came from, and that library's DBID. rekordbox writes the
+/// same pair into `exportLibrary.db`'s `content.masterContentId` and
+/// `masterDbId` [OBS: all 1563 tracks of a stick rekordbox 7 wrote agree
+/// between the two databases, e.g. track 1 with masterContentId 215543268
+/// and masterDbId 441210509 as `e4 ed d8 0c 8d 56 4c 1a`]. rbxport wrote
+/// them only into `exportLibrary.db` and left 0 in `export.pdb` (#342).
+#[test]
+fn track_rows_carry_the_library_ids_exportlibrary_has() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let tracks: Vec<SourceTrack> = [215_543_268, 116_531_033, 7].iter().map(|&n| track(src.path(), n)).collect();
+    let playlists = [SourcePlaylist { id: 1, name: "All".into(), track_indices: (0..3).collect(), ..Default::default() }];
+    let sync = rbl_export::SyncSource { db_id: 441_210_509, ..Default::default() };
+    rbl_export::export_full(dest.path(), &tracks, &playlists, &[], None, Some(&sync), &mut |_| {}).unwrap();
+
+    let file = pdb(dest.path());
+    let mut in_pdb: Vec<(u32, u32, u32)> = rows(&file, 0).iter().map(|(_, _, row)| (u4(row, 0x48), u4(row, 0x14), u4(row, 0x18))).collect();
+    in_pdb.sort();
+
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(&dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    let mut in_library: Vec<(u32, u32, u32)> = db
+        .connection()
+        .prepare("SELECT content_id, masterContentId, masterDbId FROM content")
+        .unwrap()
+        .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, u32>(1)?, r.get::<_, u32>(2)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    in_library.sort();
+
+    assert_eq!(in_pdb, in_library, "export.pdb and exportLibrary.db name the same library ids");
+    let mut ids: Vec<(u32, u32)> = in_pdb.iter().map(|&(_, content, db)| (content, db)).collect();
+    ids.sort();
+    assert_eq!(ids, [(7, 441_210_509), (116_531_033, 441_210_509), (215_543_268, 441_210_509)]);
+
+    let first = rows(&file, 0).into_iter().find(|(_, _, row)| u4(row, 0x14) == 215_543_268).unwrap().2;
+    assert_eq!(&first[0x14..0x1c], &[0xe4, 0xed, 0xd8, 0x0c, 0x8d, 0x56, 0x4c, 0x1a]);
+}

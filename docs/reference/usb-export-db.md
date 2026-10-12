@@ -298,8 +298,9 @@ them as page-relative is the documented first mistake.
 
 ```text
 0x00 subtype=0x24
-0x02 index_shift   0x04 bitmask       0x08 sample_rate   0x0c composer_id
-0x10 file_size     0x1c artwork_id    0x20 key_id        0x24 original_artist_id
+0x02 index_shift   0x04 content_link  0x08 sample_rate   0x0c composer_id
+0x10 file_size     0x14 master_content_id                0x18 master_db_id
+0x1c artwork_id    0x20 key_id        0x24 original_artist_id
 0x28 label_id      0x2c remixer_id    0x30 bitrate       0x34 track_number
 0x38 tempo x100    0x3c genre_id      0x40 album_id      0x44 artist_id
 0x48 id            0x4c disc          0x4e play_count    0x50 year
@@ -313,6 +314,17 @@ semantic reader could find every track. The trailer meanings remain
 uncharacterized; the writer reproduces rekordbox's values. `audio_format`
 is derived from the final exported filename: MP3=1, M4A/AAC=4, FLAC=5,
 WAV=11, AIFF=12. A converted track must use its destination format.
+
+The words at `0x04`, `0x14` and `0x18` are columns of rekordbox's
+DJDBCONTENT table, which the XDJ-700 1.15 firmware also names: CONTENTLINK,
+MASTERCONTENTID and MASTERDBID. The track's library id and its library's
+DBID go at `0x14` and `0x18`, the same two numbers as `exportLibrary.db`'s
+`content.masterContentId` and `masterDbId` [OBS: a stick rekordbox 7 wrote,
+all 1563 tracks agree between the two databases; `0x04` there equals
+`content.contentLink`, `0xc0700` on all but one track, and the byte at
+`0x56` equals `content.analysedBits`, 41]. The writer fills `0x14` and
+`0x18` (#342). It leaves `0x04` at 0, as it leaves `contentLink` empty in
+`exportLibrary.db`: what rekordbox derives the value from is [UNKNOWN].
 
 String slots: 0 ISRC, 7 hot-cue auto-load, 10 date added, 11 release date, 12 mix name, 14
 analyze path, 15 analyze date, 16 comment, 17 title, 19 filename, 20 file
