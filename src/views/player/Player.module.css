@@ -1134,6 +1134,10 @@ button.pageNumber:disabled { color: var(--c-icon-off); }
 
 .cueTime { color: var(--c-text); font-variant-numeric: tabular-nums; flex: none; }
 .memoryCueDot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+/* A saved loop's mark beside its time, as the MEMORY panel draws it: orange,
+   red for the Active Loop. */
+.cueLoopIcon { width: 10px; height: 6px; flex: none; color: var(--c-cue-loop-icon); }
+.cueLoopIcon[data-active] { color: var(--c-cue-loop-icon-active); }
 .cueName { color: var(--c-text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
 .cueNameInput {
   flex: 1;

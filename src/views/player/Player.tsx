@@ -22,7 +22,7 @@ import { getBackend } from "@/ipc/client";
 import { useElementSize } from "@/store/useElementSize";
 import { Artwork } from "@/components/Artwork";
 import {
-  EjectIcon, GridAlignAllIcon, GridAlignHereIcon, GridCutIcon, GridDoubleIcon, GridHalveIcon,
+  CueLoopIcon, EjectIcon, GridAlignAllIcon, GridAlignHereIcon, GridCutIcon, GridDoubleIcon, GridHalveIcon,
   GridLockIcon, GridLockOpenIcon, GridMarkIcon, GridMetronomeIcon, GridNarrowIcon, GridRedoIcon,
   GridShiftBackIcon, GridShiftForwardIcon, GridUndoIcon, GridWidenIcon, RecordIcon,
 } from "@/components/icons";
@@ -2962,6 +2962,19 @@ export const Player = memo(function Player({
               >
                 {cue.colour ? <span className={styles.memoryCueDot} style={{background: cue.colour}} aria-hidden /> : null}
                 <span className={styles.cueTime}>{memoryTime(cue.positionMs)}</span>
+                {/* rekordbox's MEMORY panel marks a saved loop after its time,
+                    orange, and red for the Active Loop (`Kind` 4):
+                    `MemoryCueComp::addCue` shows the button when the out
+                    point is set and toggles it on for kind 4 [OBS static,
+                    rekordbox 7 @0x1006864e8]. Shown, not a control: setting
+                    the Active Loop is a write rbx does not make yet. */}
+                {cue.outMs > cue.positionMs ? (
+                  <CueLoopIcon
+                    className={styles.cueLoopIcon}
+                    data-testid="memory-cue-loop"
+                    data-active={cue.activeLoop ? "" : undefined}
+                  />
+                ) : null}
                 <CueName cue={cue} renaming={renamingCue} setRenaming={setRenamingCue}
                   canEdit={!readOnly} onSave={(text) => writeCue((edits) => edits.setCueComment(cue.id, text))} />
                 <button

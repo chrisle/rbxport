@@ -1197,7 +1197,13 @@ export interface Cue {
   outMs: number;
   /** `A` to `P` for a hot cue, empty for a memory cue. */
   letter: string;
+  /** A MEMORY panel row: a memory cue or loop, `djmdCue.Kind` 0 or 4. */
   memory: boolean;
+  /**
+   * The memory loop set as the track's Active Loop, `djmdCue.Kind` 4: its
+   * MEMORY row's loop icon is red rather than orange. Older backends omit it.
+   */
+  activeLoop?: boolean;
   /** `#RRGGBB`, or `null` where unmeasured. */
   colour: string | null;
 }

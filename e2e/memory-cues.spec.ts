@@ -235,3 +235,24 @@ test("memory cues draw red triangles in the overview and playlist preview", asyn
     return pixel ? Array.from(pixel).slice(0, 3) : [];
   })).not.toEqual([234, 51, 35]);
 });
+
+test("memory loops and the Active Loop are listed with rekordbox's loop mark and drawn on the waveforms", async ({ page }) => {
+  // #345: a memory loop is `Kind` 0 with an out point, the Active Loop
+  // `Kind` 4. Both are MEMORY rows: rekordbox marks each loop after its time,
+  // orange, and the Active Loop's mark red.
+  await load(page, "?memoryLoops=1");
+  const list = page.getByRole("complementary", { name: "Cue list" });
+  await expect(memoryRows(page)).toHaveCount(3);
+  const marks = list.getByTestId("memory-cue-loop");
+  await expect(marks).toHaveCount(2);
+  await expect(marks.nth(0)).not.toHaveAttribute("data-active");
+  await expect(marks.nth(1)).toHaveAttribute("data-active", "");
+  await expect(marks.nth(0)).toHaveCSS("color", "rgb(255, 130, 5)");
+  await expect(marks.nth(1)).toHaveCSS("color", "rgb(230, 55, 55)");
+
+  // Each is a memory marker on the overview, never an unlettered hot cue,
+  // and each loop is a band from its in point to its out point.
+  const overview = page.getByTestId("player-overview");
+  await expect(overview.locator('[data-cue=""]')).toHaveCount(3);
+  await expect(overview.locator('[class*="loopBand"]')).toHaveCount(2);
+});

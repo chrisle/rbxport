@@ -1492,6 +1492,19 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           { id: `cue-${nextCueId++}`, positionMs, outMs: 0, letter, memory: false, colour }
         )),
       );
+      // `?memoryLoops`: a memory loop and the Active Loop (`Kind` 4) beside
+      // the memory cue, four beats each at the mock's 136 BPM, for the
+      // MEMORY list's loop icons (#345). Off by default, as the rest of the
+      // suite counts one memory cue.
+      if (readFlagFromUrl("memoryLoops")) {
+        const fourBeats = Math.round((4 * 60_000) / 136);
+        const loopAt = Math.round(total * 0.3);
+        const activeAt = Math.round(total * 0.85);
+        made.push(
+          { id: `cue-${nextCueId++}`, positionMs: loopAt, outMs: loopAt + fourBeats, letter: "", memory: true, colour: null },
+          { id: `cue-${nextCueId++}`, positionMs: activeAt, outMs: activeAt + fourBeats, letter: "", memory: true, activeLoop: true, colour: null },
+        );
+      }
     }
     cueStore.set(trackId, made);
     return made;
