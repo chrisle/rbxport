@@ -44,6 +44,7 @@ import type { ListPosition } from "@/lib/continuousPlay";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
+import { autoscrollStep } from "@/lib/dragAutoscroll";
 import { setRowDragImage } from "./dragGhost";
 import { detectPlatform, dispatch, isTyping } from "@/lib/shortcuts";
 import { locateStep, needsCentering, restoredScrollTop, type SavedScroll } from "@/lib/locateLoaded";
@@ -1726,6 +1727,10 @@ export const TrackTable = memo(function TrackTable({
       data-file-over={fileOver || undefined}
       onDragOver={(e) => {
         if (carrying.current) {
+          const box = onReorder ? scrollRef.current?.getBoundingClientRect() : undefined;
+          if (box && scrollRef.current) {
+            scrollRef.current.scrollTop += autoscrollStep(e.clientY, box.top, box.bottom);
+          }
           if (onReorder && view.count > 0 && isBelowTracks(e.target, e.clientY)) {
             e.preventDefault();
             e.dataTransfer.dropEffect = nativeTrackDragging() ? "copy" : "move";
