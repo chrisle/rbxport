@@ -40,6 +40,7 @@ import { browseListVars, browseScale, formatKey } from "@/lib/preferences";
 import { trafficLightLit, type TrafficLightReach } from "@/lib/camelot";
 import { TickIcon } from "@/components/icons";
 import type { TrafficLightSource } from "@/lib/session";
+import type { ListPosition } from "@/lib/continuousPlay";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
@@ -766,8 +767,11 @@ export interface TrackTableProps {
   onColumnToggle: (key: ColumnKey) => void;
   onColumnAutoSize: (key: ColumnKey) => void;
   onColumnAutoSizeAll: () => void;
-  /** The row the player should show, as the selection moves. */
-  onFocusedRow?: (row: RowDto | null) => void;
+  /**
+   * The row the player should show, as the selection moves, and where in
+   * this list it was opened from, so the deck can go on to the row after it.
+   */
+  onFocusedRow?: (row: RowDto | null, from?: ListPosition) => void;
   /**
    * The single selected row, or `null` when the selection is not one row.
    *
@@ -1322,7 +1326,7 @@ export const TrackTable = memo(function TrackTable({
    */
   const handleOpen = useEventCallback(
     (index: number) => {
-      onFocusedRow?.(view.rowAt(index) ?? null);
+      onFocusedRow?.(view.rowAt(index) ?? null, { spec, index });
     },
   );
 

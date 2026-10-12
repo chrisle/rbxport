@@ -21,7 +21,7 @@ import type { TrackSearchField } from "@/lib/search";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { droppedFilePaths, getBackend, subscribeNativeFileDrops } from "@/ipc/client";
 import type {
-  Backend, DeckId, Device, ImportReport, LibraryProblem, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
+  Backend, DeckId, DeckTick, Device, ImportReport, LibraryProblem, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
 } from "@/ipc/types";
 import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
 import { clearWaveformPreviewCache } from "@/views/browser/WaveformPreview";
@@ -70,6 +70,7 @@ import type { PreferencesTarget } from "@/views/settings/Preferences";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
 import type { PreferencePane } from "@/lib/preferences";
 import { answer, deckNumber, setPlaying, whenLoaded, withSetting, type ScriptHandler } from "@/lib/scripting";
+import { continuesFrom, nextRowIndex, playedToEnd, type ListPosition } from "@/lib/continuousPlay";
 import { useAnalysis } from "@/store/useAnalysis";
 import type { AnalysisChoice } from "@/views/analysis/AnalysisDialog";
 import { autoAnalysisOffer, takeRemainingPages } from "@/lib/autoAnalysis";
@@ -1291,6 +1292,74 @@ function AppBody() {
       b: () => deckLoaders.b(selectedRow),
     };
   }, [selectedRow, deckLoaders]);
+
+  /**
+   * Where deck 1's track was opened from, while that is a list that goes on
+   * into its next row when the track ends: see `src/lib/continuousPlay.ts`.
+   * A load from anywhere else leaves a stale entry behind, which the track
+   * id no longer matches.
+   */
+  const continuation = useRef<{ position: ListPosition; trackId: string } | null>(null);
+  const openInDeckA = useCallback((row: RowDto | null, from?: ListPosition) => {
+    continuation.current = row && from && row.missing !== true && continuesFrom(from.spec.source)
+      ? { position: from, trackId: row.id }
+      : null;
+    deckLoaders.a(row);
+  }, [deckLoaders]);
+
+  /**
+   * Deck 1 played its track to the end: load the next row of its playlist
+   * and play it. Only where one player is shown — rekordbox's 2 PLAYER stops
+   * at the end, and FULL BROWSER has no deck on screen here to load it.
+   */
+  const continuePlaylist = useEventCallback(async () => {
+    const from = continuation.current;
+    const loaded = playerTrack;
+    if (!from || !loaded || from.trackId !== loaded.id || deckCount(layout) !== 1) return;
+    // rekordbox reads the next row off the list as the browser shows it now,
+    // so a re-sort or a search since the load counts; a browser that has
+    // moved on to another list leaves the playlist as it was opened.
+    const shown = JSON.stringify(spec.source) === JSON.stringify(from.position.spec.source);
+    const listed = shown ? spec : from.position.spec;
+    try {
+      const backend = await getBackend();
+      const handle = await backend.openView(listed);
+      if (handle.len === 0) return;
+      const ids = await backend.viewIdsInRange(handle.viewId, 0, handle.len - 1);
+      const remembered = JSON.stringify(listed) === JSON.stringify(from.position.spec) ? from.position.index : -1;
+      const index = nextRowIndex(ids, loaded.id, remembered);
+      if (index < 0) return;
+      const [row] = await backend.fetchRows(handle.viewId, index, 1);
+      // Something else was loaded while the list was read.
+      if (!row || continuation.current !== from) return;
+      openInDeckA(row, { spec: listed, index });
+      if (row.missing === true) return;
+      await whenLoaded("a", row.id);
+      setPlaying("a", true);
+    } catch {
+      // The deck says why a track would not open; a list that could not be
+      // read leaves the deck at the end of the track, as before.
+    }
+  });
+
+  useEffect(() => {
+    let live = true;
+    let stop: (() => void) | undefined;
+    let before: DeckTick | null = null;
+    void getBackend().then((backend) => {
+      const off = backend.onDeckTick((tick) => {
+        const ended = playedToEnd(before, tick.a);
+        before = tick.a;
+        if (ended) void continuePlaylist();
+      });
+      if (live) stop = off;
+      else off();
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [continuePlaylist]);
 
   /**
    * The tree's context menu, and the track's.
@@ -2687,14 +2756,14 @@ function AppBody() {
     onAnalysisLock: analysisLock, onAddToPlaylist: addToPlaylist, onAddToTagList: addToTagList,
     onRemoveFromTagList: removeFromTagList, onReloadTag: reloadTag, onExportTrack: exportTrackTo,
     playlists: menuPlaylists, devices: menuDevices, onEditField: editTrackField,
-    onEditBlocked: readOnly ? explainEditLock : undefined, onFocusedRow: deckLoaders.a,
+    onEditBlocked: readOnly ? explainEditLock : undefined, onFocusedRow: openInDeckA,
     onSelectedRow: setSelectedRow, onSelectedTracks: reportSubSelection, pendingEdits, readOnly,
     dragging: draggedTracks !== null,
     onDropTracks: addDraggedTo, onRemoveTracksFromPlaylist: removeTracksFromPlaylist,
     onRemoveTracksFromHistory: removeTracksFromHistory, onReorderPlaylist: reorderPlaylist,
     onDropFilesIntoPlaylist: importDroppedFilesTo, onAnalyseTracks: analyseTracks,
   }), [
-    layout, loadTrack, deckLoaders, showInformation, revealTrack, rateTrack, commentTrack, resetPlayCount,
+    layout, loadTrack, openInDeckA, showInformation, revealTrack, rateTrack, commentTrack, resetPlayCount,
     convertMemoryCues, removeFromCollection, importToCollection, autoRelocate, relocate, analysisLock, addToPlaylist,
     addToTagList, removeFromTagList, reloadTag, exportTrackTo, menuPlaylists, menuDevices,
     editTrackField, readOnly, explainEditLock, pendingEdits, draggedTracks, addDraggedTo,
@@ -2931,7 +3000,7 @@ function AppBody() {
           trafficLight={activeTrafficLight}
           onTrafficLight={setTrafficLight}
           trafficKey={trafficKey}
-          onFocusedRow={deckLoaders.a}
+          onFocusedRow={openInDeckA}
           onSelectedRow={setSelectedRow}
           onDragTracks={setDraggedTracks}
           dragging={draggedTracks !== null}
