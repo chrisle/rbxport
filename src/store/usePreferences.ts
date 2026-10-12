@@ -12,6 +12,7 @@ import {
   loadPreferences,
   PREFERENCES_KEY,
   savePreferences,
+  storedPreferences,
   type PreferencePane,
   type Preferences,
 } from "@/lib/preferences";
@@ -39,7 +40,10 @@ export function usePreferencesStore(initial?: Preferences): PreferencesStore {
   const update = useCallback(
     <P extends PreferencePane>(pane: P, patch: Partial<Preferences[P]>) => {
       setPreferences((current) => {
-        const next = { ...current, [pane]: { ...current[pane], ...patch } };
+        // On top of what is stored now, not this window's copy: another
+        // window's choices since then stay as that window left them.
+        const base = storedPreferences() ?? current;
+        const next = { ...base, [pane]: { ...base[pane], ...patch } };
         savePreferences(next);
         window.dispatchEvent(new CustomEvent("rbl-preferences"));
         return next;
@@ -50,7 +54,8 @@ export function usePreferencesStore(initial?: Preferences): PreferencesStore {
 
   const reset = useCallback((pane: PreferencePane) => {
     setPreferences((current) => {
-      const next = { ...current, [pane]: DEFAULT_PREFERENCES[pane] };
+      const base = storedPreferences() ?? current;
+      const next = { ...base, [pane]: DEFAULT_PREFERENCES[pane] };
       savePreferences(next);
       return next;
     });

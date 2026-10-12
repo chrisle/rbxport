@@ -532,13 +532,25 @@ const KEY = PREFERENCES_KEY;
 
 /** Reads the stored preferences, falling back to the defaults on anything odd. */
 export function loadPreferences(): Preferences {
+  return storedPreferences() ?? DEFAULT_PREFERENCES;
+}
+
+/**
+ * The stored preferences, or `null` when nothing readable is stored.
+ *
+ * Main, Preferences and Sync Manager are separate windows over one store. A
+ * change is applied to what is stored at that moment rather than to the
+ * window's own copy, so a window that missed another's `storage` event
+ * cannot write that window's choice back to what it was (#343).
+ */
+export function storedPreferences(): Preferences | null {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw === null ? DEFAULT_PREFERENCES : sanitisePreferences(JSON.parse(raw));
+    return raw === null ? null : sanitisePreferences(JSON.parse(raw));
   } catch {
     // A private window, cleared storage, or a browser that refuses it: the
-    // defaults are a working window, so there is nothing to report.
-    return DEFAULT_PREFERENCES;
+    // caller's own set is a working window, so there is nothing to report.
+    return null;
   }
 }
 
