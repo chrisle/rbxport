@@ -21,6 +21,11 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RBXPORT_TEST: "1"
+  # Debug info made each integration-test binary ~0.8 GB and a job's target/
+  # ~24 GB, and six jobs share one disk. Nothing in CI reads it: failures
+  # still print panic messages and line numbers. Keep this equal to the
+  # autofix job in ci.yml, or the two stop sharing a cache.
+  CARGO_PROFILE_DEV_DEBUG: "0"
 
 jobs:
   rust:
@@ -79,6 +84,15 @@ jobs:
           )
           echo "RUST_PACKAGES=${packages[*]}" >> "$GITHUB_ENV"
 
+      - name: Check free disk
+        run: |
+          avail_gb="$(df -BG --output=avail . | tail -1 | tr -dc '0-9')"
+          echo "Free disk: ${avail_gb} GB"
+          if [ "$avail_gb" -lt 10 ]; then
+            echo "::error::Only ${avail_gb} GB free on this runner; a Rust build needs about 10 GB. Free space on the host and re-run."
+            exit 1
+          fi
+
       - name: Clippy
         run: |
           read -ra packages <<< "$RUST_PACKAGES"
@@ -95,14 +109,26 @@ jobs:
         run: |
           set -euo pipefail
           read -ra packages <<< "$RUST_PACKAGES"
+          # Examples are only built, never run, by `cargo test`; Clippy's
+          # --all-targets already checks that they compile, and building them
+          # cost ~8 GB of disk per job. Doctests need their own invocation.
           if [ "${packages[0]}" = --workspace ]; then
-            cargo test --workspace
+            cargo test --workspace --lib --bins --tests
+            cargo test --workspace --doc
             exit 0
           fi
           args=()
           for package in "${packages[@]}"; do args+=(-p "$package"); done
           printf 'Testing affected Rust packages: %s\n' "${packages[*]}"
-          cargo test "${args[@]}"
+          cargo test "${args[@]}" --lib --bins --tests
+          cargo test "${args[@]}" --doc
+
+      - name: Report build size
+        if: always()
+        run: |
+          du -sh target 2>/dev/null || true
+          du -sh target/debug/* 2>/dev/null | sort -rh | head -5 || true
+          df -h . | tail -1
 
       - name: Clean the runner
         if: always()
