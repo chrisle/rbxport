@@ -25,12 +25,20 @@ pub fn prepare(
 ) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>)> {
     let mut tracks = tracks.to_vec();
     let mut playlists = playlists.to_vec();
-    let Some(current) = before.merged_library() else {
+    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
+    // A playlist carried under a new id must not take one an earlier export
+    // recorded: that would read as the library's playlist, and be taken off.
+    let recorded = previous
+        .into_iter()
+        .flat_map(|m| m.playlists.iter().map(|p| p.export_id))
+        .chain(record.iter().flat_map(|r| r.device_ids.values().copied()))
+        .max()
+        .unwrap_or(0);
+    let Some(current) = before.merged_library_above(recorded) else {
         return Ok((tracks, playlists));
     };
     let existing_sources = sources(root, before)?;
     identify_tracks(&mut tracks, before, previous, db_id, &existing_sources);
-    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
     identify_playlists(&mut playlists, previous, record.as_ref());
     retain_device_only(root, &current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref(), keep_unlisted)?;
     if keep_unlisted {

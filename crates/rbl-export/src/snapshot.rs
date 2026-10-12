@@ -121,6 +121,15 @@ impl Snapshot {
         Ok(out)
     }
     pub fn merged_library(&self) -> Option<Library> {
+        self.merged_library_above(0)
+    }
+
+    /// [`Self::merged_library`], where a playlist only `export.pdb` holds
+    /// whose id `exportLibrary.db` gives another playlist is carried under
+    /// an id above `floor` as well as above every id either library uses
+    /// (see [`legacy_playlist_ids`]). `floor` keeps it clear of ids an
+    /// earlier export recorded for playlists the stick no longer holds.
+    pub fn merged_library_above(&self, floor: u32) -> Option<Library> {
         let mut library = self.one.as_ref().or(self.legacy.as_ref())?.clone();
         if let Some(legacy) = &self.legacy {
             for track in &legacy.tracks {
@@ -128,9 +137,18 @@ impl Snapshot {
                     library.tracks.push(track.clone());
                 }
             }
-            for playlist in &legacy.playlists {
-                if !library.playlists.iter().any(|p| p.id == playlist.id) {
-                    library.playlists.push(playlist.clone());
+            if let Some(one) = &self.one {
+                let ids = legacy_playlist_ids(legacy, one, floor);
+                let id = |legacy_id: u32| ids.get(&legacy_id).copied().unwrap_or(legacy_id);
+                for playlist in &legacy.playlists {
+                    let merged = id(playlist.id);
+                    if !library.playlists.iter().any(|p| p.id == merged) {
+                        library.playlists.push(Playlist {
+                            id: merged,
+                            parent: if playlist.parent == 0 { 0 } else { id(playlist.parent) },
+                            ..playlist.clone()
+                        });
+                    }
                 }
             }
         }
@@ -303,17 +321,95 @@ fn first_difference(legacy: &Library, one: &Library, rewritten: &Rewritten) -> O
             return Some(Difference::Track(format!("the {} of track '{}'", differ.join(", "), track.title)));
         }
     }
+    let ids = legacy_playlist_ids(legacy, one, 0);
+    let id = |legacy_id: u32| ids.get(&legacy_id).copied().unwrap_or(legacy_id);
     let playlists: BTreeMap<u32, &Playlist> = one.playlists.iter().map(|p| (p.id, p)).collect();
     legacy
         .playlists
         .iter()
-        .filter(|p| !rewritten.playlists.contains(&p.id))
+        .filter(|p| !rewritten.playlists.contains(&p.id) && !rewritten.playlists.contains(&id(p.id)))
         .find(|p| {
-            playlists.get(&p.id).is_some_and(|other| {
-                other.name != p.name || other.parent != p.parent || other.folder != p.folder || other.tracks != p.tracks
+            let parent = if p.parent == 0 { 0 } else { id(p.parent) };
+            playlists.get(&id(p.id)).is_some_and(|other| {
+                other.name != p.name || other.parent != parent || other.folder != p.folder || other.tracks != p.tracks
             })
         })
         .map(|p| Difference::Playlist(format!("playlist '{}'", p.name)))
+}
+
+/// Which of `one`'s playlists each of `legacy`'s is, by id: the id it is
+/// carried under once the stick's two libraries are merged.
+///
+/// rekordbox keeps a stick's two libraries apart. An edit made under one of
+/// them changes that one alone [DOC: rekordbox FAQ "Device Library Plus"],
+/// and a playlist made on a player is saved in the library that player
+/// reads, and only there [DOC: the `AlphaTheta` USB export guide 251007,
+/// p.4: "The two types of libraries are managed separately."]. Each numbers its
+/// own playlists, as `device_library` does here (the highest id plus one). Where its export adds a playlist to both, it finds
+/// the place in the other library by name, never by id [OBS static,
+/// rekordbox 7.2.19: `DatabaseMediator::createListWithSameDevDbList`
+/// @0x1010e2ce4 → `SearchPlaylistPositionForSameDevDB::search`
+/// @0x1010dd828, which calls `getListWithName` and `existsListName`]. So
+/// one id can name two different playlists, one in each library: a Tag List
+/// a player saved to one of them, say, and another playlist made under the
+/// other (#353).
+///
+/// A legacy playlist is the `OneLibrary` playlist with its id when both
+/// give it the same name and kind; otherwise the one with its name and kind
+/// in the same folder that no other legacy playlist has claimed. One found
+/// in neither way is the legacy library's own: it keeps its id, or takes a
+/// new one above `floor` and every id either library uses when `OneLibrary`
+/// already gives that id to another playlist.
+pub(crate) fn legacy_playlist_ids(legacy: &Library, one: &Library, floor: u32) -> BTreeMap<u32, u32> {
+    let same = |a: &Playlist, b: &Playlist| a.name == b.name && a.folder == b.folder;
+    let by_id: BTreeMap<u32, &Playlist> = one.playlists.iter().map(|p| (p.id, p)).collect();
+    let mut ids = BTreeMap::new();
+    let mut claimed = BTreeSet::new();
+    for p in &legacy.playlists {
+        if by_id.get(&p.id).is_some_and(|other| same(p, other)) {
+            ids.insert(p.id, p.id);
+            claimed.insert(p.id);
+        }
+    }
+    // By name, a folder's playlists once the folder itself is placed. Each
+    // pass places at least one playlist or ends the search.
+    loop {
+        let mut placed = false;
+        for p in &legacy.playlists {
+            if ids.contains_key(&p.id) {
+                continue;
+            }
+            let parent = if p.parent == 0 {
+                0
+            } else if let Some(parent) = ids.get(&p.parent) {
+                *parent
+            } else {
+                continue;
+            };
+            if let Some(other) = one.playlists.iter().find(|o| !claimed.contains(&o.id) && o.parent == parent && same(p, o)) {
+                ids.insert(p.id, other.id);
+                claimed.insert(other.id);
+                placed = true;
+            }
+        }
+        if !placed {
+            break;
+        }
+    }
+    let mut next = legacy.playlists.iter().chain(&one.playlists).map(|p| p.id).fold(floor, u32::max);
+    for p in &legacy.playlists {
+        if ids.contains_key(&p.id) {
+            continue;
+        }
+        let id = if by_id.contains_key(&p.id) {
+            next = next.saturating_add(1);
+            next
+        } else {
+            p.id
+        };
+        ids.insert(p.id, id);
+    }
+    ids
 }
 
 /// The legacy `export.pdb` side of [`Snapshot::read_at`].
