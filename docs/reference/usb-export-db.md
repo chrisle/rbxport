@@ -859,12 +859,88 @@ carry the DJ's settings under the device root. Players can modify them.
 a playlist, 1 for a folder, 4 for an intelligent playlist. `CheckType` is 1
 for a ticked playlist and 2 for a folder with something ticked beneath it.
 
-`Timestamp` is milliseconds since the epoch when the playlist was *first*
-ticked for this device, not the export time — rekordbox reproduced the same
-value after the stick had been erased, so it keeps it in its own library.
+`Timestamp` is milliseconds since the epoch, and it is not the export
+time: rekordbox reproduced the same value after the stick had been erased,
+so it comes from its own library. It is the time the library playlist's
+contents last changed, not the time it was ticked [OBS rekordbox 7.2.14
+for Windows, chris-win11 2026-10-12, scratch library, #309]: a playlist
+whose second track was added at 23:06:11.399 UTC and which was ticked and
+synced about 30 s later was recorded as `1791846371399`, which is that
+entry's `djmdSongPlaylist.created_at` to the millisecond. A re-sync with
+the playlist unchanged rewrote the file with the same value. After a third
+track was added at 23:18:03.154 the next sync recorded `1791847083155`.
+The playlist row's own `updated_at` (23:05:47, its rename) was not used.
+[ASSUME] The value is the latest change to the playlist's entries; a
+removal or reorder was not tried.
 
 This is what rekordbox's Sync Manager reads back to open on the same
 selection and to drive automatic synchronisation.
+
+### What a later sync does to a playlist edited on the device
+
+rekordbox lets a synced playlist be edited on the stick itself, in the
+Devices tree in EXPORT mode (see [Device playlist edits](#device-playlist-edits)).
+A later Sync Manager sync of that playlist then does one of two things,
+depending on whether the library's copy of the playlist changed
+[OBS rekordbox 7.2.14.0323 for Windows, chris-win11 2026-10-12, #309]:
+
+| Step | Library `P309` | Stick `P309` (both libraries) | Stick tracks |
+| --- | --- | --- | --- |
+| 1. Sync Manager: tick `P309`, SYNC | House 1, House 2 | House 1, House 2 | House 1, House 2 |
+| 2. Devices tree: drag Techno 1 from the collection onto the stick's `P309` | House 1, House 2 (unchanged) | House 1, House 2, Techno 1 | + Techno 1 |
+| 3. SYNC again, library unchanged | House 1, House 2 | **House 1, House 2, Techno 1** | House 1, House 2, Techno 1 |
+| 4. Library: add House 3 to `P309`; SYNC | House 1, House 2, House 3 | **House 1, House 2, House 3** | House 1, House 2, Techno 1, House 3 |
+
+- Step 2 exported Techno 1 to the stick and appended it to `P309` in both
+  `export.pdb` and `exportLibrary.db`. It did not change the library's
+  `P309` or the sync record.
+- Step 3 wrote nothing but `playlists3.sync` and `playlists3Plus.sync`,
+  with the same content as before (only their modification times moved).
+  `export.pdb`, `exportExt.pdb`, `exportLibrary.db` and its `-wal` were
+  byte-identical afterwards. The device-added entry stayed.
+- Step 4 replaced the stick's `P309` with the library's list. Techno 1 was
+  taken out of the playlist, with no prompt or warning. Its track row
+  and audio file stayed on the stick: no playlist names it any more, so
+  only All Tracks and search on the stick reach it. The sync record's
+  `Timestamp` moved to the time House 3 was added.
+- Automatic synchronisation (`AutomaticSync="1"`) did not sync the step 4
+  library edit by itself while the Sync Manager was closed. Only SYNC did.
+
+So rekordbox keeps a device-side addition only until the library's copy of
+that playlist next changes. It does not merge the two, and it never adds
+the device-side entry to the library. [ASSUME] The rule is "skip a
+playlist whose `Timestamp` has not moved since the last sync, otherwise
+rewrite it from the library". It fits both observations and the
+`Timestamp` values above. The comparison itself was not found in the
+binary: `SyncThreadJob::sync_phase2` (`0x100fb0a24`, macOS 7.2.19 arm64)
+reads the library playlist (`DatabaseIF::getPlaylistData`) and calls
+`DatabaseIF::exportPlaylist` and `renumberSyncedDevicePlaylist`. The
+per-playlist decision goes through stubs that were not followed.
+
+How it was set up, and the limits of the observation:
+
+- The library was a scratch copy of a library rekordbox 7.2.14 had made
+  afresh (its eight sample tracks). It was opened by pointing
+  `masterDbDirectory` at it. The real library and settings were restored
+  afterwards.
+- The stick was an exFAT USB SSD with no `PIONEER` folder, so it started
+  blank. rekordbox did not list a FAT32 VHD mounted on the same machine
+  as a device. At the first tick, rekordbox's "Automatically backup the
+  library on this device" question was answered No and its OneLibrary
+  notice was accepted. Both libraries were written.
+- Only an addition was tried, of a track that is also in the collection,
+  through the Devices tree with both libraries on the stick. Not observed:
+  a removal or reorder on the device, an addition made on a CDJ (a Tag
+  List or a player-side playlist edit), a track that is not in the
+  collection, a stick with only `export.pdb`, the Sync Manager's other
+  settings, other rekordbox versions, and macOS.
+
+Evidence: `rbxport-worktrees/parity/issue-309/` (screenshots
+`rekordbox-*.png`, the stick's files after each step
+in `stick-sync1/`, `stick-after-device-add/`, `stick-sync2/`,
+`stick-after-library-edit/`, `stick-sync3/`, their dumps in
+`values-stick-*-309.txt`, and the scratch library's playlist rows in
+`values-scratch-library-playlists-309.txt`).
 
 ## 11. Verifying the result
 
@@ -946,6 +1022,10 @@ the pad recalls the saved cue.
   Category/Sort/Color tabs and writes inconsistently at `0x78`.
 - `Dev_ID`, `Lib_Type`, `AllPlaylists`, `IncludeCue`, `ForcedSync` in the
   sync record, and what a fully ticked folder gets.
+- What a later sync does to a synced playlist after a removal or reorder on
+  the device, an edit made on a player, or a stick with only `export.pdb`;
+  and the code that decides to skip an unchanged playlist (see
+  [What a later sync does to a playlist edited on the device](#what-a-later-sync-does-to-a-playlist-edited-on-the-device)).
 - The two constant bytes `19 1e` between the date and the version in
   `export.pdb`'s `property` row.
 - The embedded schema contains twenty-two tables while
@@ -1292,6 +1372,10 @@ throw away settings the player wrote.
 #### Sync-selection timestamps
 
 Preserve the first-selection timestamp by reading the stick's previous sync record before writing.
+
+This differs from rekordbox, whose `Timestamp` is the time the library
+playlist's contents last changed ([§10](#10-sync-records), #309). The code
+is unchanged; any change is a separate ticket.
 
 ### Publication, recovery and ejection
 

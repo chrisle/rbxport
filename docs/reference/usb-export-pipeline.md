@@ -412,6 +412,23 @@ the track is handled), `copying` (only when a track is actually written),
 - If neither database exists, reconcile does nothing (`merged_library` returns
   `None`).
 
+**A synced playlist edited on the stick.** rekordbox and rbxport differ
+here. This is recorded, not changed (#309):
+
+| A track was added on the stick to a synced playlist, then… | rekordbox 7.2.14 [OBS] | rbxport, stick with its manifest [OBS] | rbxport, stick without a manifest (as rekordbox leaves one) [OBS] |
+| --- | --- | --- | --- |
+| …sync, library playlist unchanged | keeps the added entry; writes nothing to the databases | refuses the sync ("playlist … changed on the USB. Import or reconcile it before syncing."); writes nothing | takes the entry out; the track stays on the stick |
+| …sync, library playlist changed | rewrites the playlist from the library: the entry is gone, the track stays on the stick | refuses, as above | rewrites the playlist from the library, as rekordbox does |
+
+The rbxport columns come from fixture probes that were not committed; their
+output is in `rbxport-worktrees/parity/issue-309/`
+(`values-rbx-same-steps-309.txt`, `values-rbx-no-manifest-stick-309.txt`).
+
+rekordbox's side is in
+[usb-export-db.md](usb-export-db.md#what-a-later-sync-does-to-a-playlist-edited-on-the-device).
+Every column follows the same steps: sync, add on the stick, sync, change
+the library, sync.
+
 ### Per track
 
 In loop order:
