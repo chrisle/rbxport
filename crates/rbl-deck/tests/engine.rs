@@ -524,6 +524,35 @@ fn a_track_that_ends_stops_the_deck_rather_than_running_on() {
     }
     assert!(!h.engine.snapshot().a.playing, "the deck never stopped at the end");
     assert!(h.position(Deck::A) >= 7_500, "it stopped at {}", h.position(Deck::A));
+    // Told apart from a pause, so the interface can go on to the next track.
+    assert!(h.engine.snapshot().a.played_out);
+}
+
+#[test]
+fn a_pause_is_not_playing_out_and_a_restart_clears_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("short.wav");
+    ramp(&path, 8_000);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.play(Deck::A);
+    h.sink.pull(512);
+    h.engine.pause(Deck::A);
+    let paused = h.engine.snapshot().a;
+    assert!(!paused.playing);
+    assert!(!paused.played_out, "a pause read as the end of the track");
+
+    h.engine.play(Deck::A);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.engine.snapshot().a.playing && Instant::now() < deadline {
+        h.sink.pull(512);
+    }
+    assert!(h.engine.snapshot().a.played_out);
+    // PLAY at the end starts the track over: no longer stopped at its end.
+    h.engine.play(Deck::A);
+    assert!(!h.engine.snapshot().a.played_out);
 }
 
 #[test]

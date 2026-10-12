@@ -1609,9 +1609,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const updateProgressListeners = new Set<(progress: UpdateProgress) => void>();
   let updateReady: UpdateReady | null = null;
 
+  // The mock's head stops exactly on the last frame, so standing there
+  // stopped is having played to the end.
+  const ended = (deck: typeof deckA): boolean =>
+    !deck.playing && deck.loaded && deck.totalFrames > 0 && deck.frames >= deck.totalFrames;
   const tick = (): Tick => ({
-    a: { ...deckA },
-    b: { ...deckB },
+    a: { ...deckA, ended: ended(deckA) },
+    b: { ...deckB, ended: ended(deckB) },
     sampleRate: SAMPLE_RATE,
     // A browser has no audio callback, so there is nothing to meter. Zero is
     // the truth here rather than a placeholder: nothing is coming out.

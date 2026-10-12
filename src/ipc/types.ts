@@ -1125,6 +1125,12 @@ export interface DeckTick {
   loopOutFrames: number;
   /** Whether the deck is inside the loop: RELOOP on, EXIT off. */
   looping: boolean;
+  /**
+   * Stopped because the track ran out rather than being paused: what deck 1
+   * goes on to the next row of its playlist from. Absent from a build that
+   * does not say.
+   */
+  ended?: boolean;
 }
 
 /** Both decks at one instant. About 200 bytes, well inside the event cap. */

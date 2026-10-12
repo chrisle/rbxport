@@ -57,6 +57,9 @@ pub struct DeckTickDto {
     pub loop_out_frames: u64,
     /// Whether the deck is inside the loop.
     pub looping: bool,
+    /// Stopped because the track ran out, rather than paused: what Continuous
+    /// play goes on to the next track from.
+    pub ended: bool,
 }
 
 /// Both decks, which is what one tick carries: about 200 bytes, well inside
@@ -97,6 +100,7 @@ impl TickDto {
             loop_in_frames: 0,
             loop_out_frames: 0,
             looping: false,
+            ended: false,
         };
         Self {
             a: empty,
@@ -480,6 +484,7 @@ pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> Tick
         loop_in_frames: s.loop_in_frames,
         loop_out_frames: s.loop_out_frames,
         looping: s.looping,
+        ended: s.played_out,
     };
     let (peak_left, peak_right) = master.peaks();
     TickDto {

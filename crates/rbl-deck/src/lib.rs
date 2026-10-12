@@ -838,6 +838,7 @@ impl OrEmptySnapshot for Option<DeckSnapshot> {
             loop_in_frames: 0,
             loop_out_frames: 0,
             looping: false,
+            played_out: false,
         })
     }
 }
@@ -1008,7 +1009,7 @@ impl DeckReader {
             && self.consumer.is_empty()
             && self.clock.end_of_stream()
         {
-            self.clock.set_playing(false);
+            self.clock.play_out();
         }
     }
 

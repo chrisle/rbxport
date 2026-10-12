@@ -37,6 +37,9 @@ pub struct DeckClock {
     /// The decode thread has pushed the last block it will push. The callback
     /// stops the deck when it has drained what is left.
     end_of_stream: AtomicBool,
+    /// The callback stopped the deck because the track ran out, rather than
+    /// anyone pausing it. Cleared by the next start, seek or load.
+    played_out: AtomicBool,
     /// How fast the deck is playing, as a multiple of the file's own speed,
     /// in an `f32`'s bits. Read by the interface for the tempo readout, and by
     /// anything extrapolating the playhead between ticks.
@@ -89,6 +92,8 @@ pub struct DeckSnapshot {
     pub loop_out_frames: u64,
     /// Whether the deck is inside the loop: RELOOP on, EXIT off.
     pub looping: bool,
+    /// Stopped because it played to the end of the track, not paused.
+    pub played_out: bool,
 }
 
 impl DeckClock {
@@ -109,6 +114,7 @@ impl DeckClock {
             loop_in_frames: self.loop_in.load(Ordering::Relaxed),
             loop_out_frames: self.loop_out.load(Ordering::Relaxed),
             looping: self.looping.load(Ordering::Relaxed),
+            played_out: self.played_out.load(Ordering::Relaxed),
         }
     }
 
@@ -233,7 +239,22 @@ impl DeckClock {
     }
 
     pub fn set_playing(&self, playing: bool) {
+        if playing {
+            self.played_out.store(false, Ordering::Relaxed);
+        }
         self.playing.store(playing, Ordering::Relaxed);
+    }
+
+    /// Stops the deck because the track has run out: the callback's stop,
+    /// which the interface tells from a pause to go on to the next track.
+    pub fn play_out(&self) {
+        self.played_out.store(true, Ordering::Relaxed);
+        self.playing.store(false, Ordering::Relaxed);
+    }
+
+    /// Whether the deck stopped at the end of its track; see `play_out`.
+    pub fn played_out(&self) -> bool {
+        self.played_out.load(Ordering::Relaxed)
     }
 
     /// Whether a drag is running.
@@ -314,6 +335,11 @@ impl DeckClock {
     }
 
     pub fn set_end_of_stream(&self, ended: bool) {
+        // More to come again — a seek, a load, a loop — so the deck is no
+        // longer stopped at the end.
+        if !ended {
+            self.played_out.store(false, Ordering::Relaxed);
+        }
         self.end_of_stream.store(ended, Ordering::Release);
     }
 
