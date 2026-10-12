@@ -690,6 +690,63 @@ mod tests {
     }
 
     #[test]
+    fn a_sticks_track_draws_every_palettes_waveforms_from_the_stick() {
+        // #372: a track loaded from a USB's library showed no waveform. The
+        // deck asks for the palette's overview and detail (3Band by default:
+        // PWV6/PWV7 in the .2EX), not the .DAT's PWAV that the #319 test
+        // checks, so each kind is pinned here as the deck and the browser ask
+        // for it, from the files an export puts on the stick.
+        let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        // Seeds of 2 and up: the export raises a preview column lower than
+        // that (#278), which would not compare.
+        let bytes = |len: usize, seed: u8| -> Vec<u8> { (0..len).map(|i| u8::try_from(i % 29).unwrap() + seed).collect() };
+        let (pwav, pwv3, pwv4, pwv5, pwv6, pwv7) = (bytes(400, 2), bytes(300, 2), bytes(1_200 * 6, 3), bytes(300 * 2, 4), bytes(1_200 * 3, 5), bytes(300 * 3, 6));
+        let path = src.path().join("t1.mp3");
+        std::fs::write(&path, vec![1; 512]).unwrap();
+        let track = rbl_export::SourceTrack {
+            id: 1,
+            source_path: path,
+            title: "Track 1".into(),
+            analysis: vec![
+                ("DAT".into(), rbl_anlz::AnlzBuilder::new().path("/t1.mp3").waveform_preview(b"PWAV", &pwav).finish()),
+                (
+                    "EXT".into(),
+                    rbl_anlz::AnlzBuilder::new()
+                        .path("/t1.mp3")
+                        .waveform_scroll(b"PWV3", 1, &pwv3)
+                        .waveform_scroll(b"PWV4", 6, &pwv4)
+                        .waveform_scroll(b"PWV5", 2, &pwv5)
+                        .finish(),
+                ),
+                ("2EX".into(), rbl_anlz::AnlzBuilder::new().path("/t1.mp3").waveform_scroll(b"PWV6", 3, &pwv6).waveform_scroll(b"PWV7", 3, &pwv7).finish()),
+            ],
+            ..Default::default()
+        };
+        rbl_export::export(dest.path(), &[track], &[]).unwrap();
+        let mount = dest.path();
+
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let library = device::read(mount, format).unwrap();
+            let state = Arc::new(AppState::new());
+            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, t)));
+            let row = row_dto(&device_row(mount, &library.tracks[0], 0));
+            assert_eq!(row.analysed, 1, "{format:?}: the deck draws only an analysed row's waveform");
+            let dat = state.device_assets(&row.id).unwrap().analysis_dat().unwrap();
+            // Each palette's pair, as `waveformKindOf` names them.
+            for (kind, want) in [
+                ("bands", &pwv6),
+                ("bandsDetail", &pwv7),
+                ("colour", &pwv4),
+                ("colourDetail", &pwv5),
+                ("mono", &pwav),
+                ("monoDetail", &pwv3),
+            ] {
+                assert_eq!(&crate::commands::waveform_of(&dat, kind, None, None), want, "{format:?} {kind}");
+            }
+        }
+    }
+
+    #[test]
     fn a_stick_path_that_climbs_out_is_not_read() {
         let stick = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(stick.path().join("PIONEER")).unwrap();
