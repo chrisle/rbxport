@@ -1,7 +1,8 @@
 # USB sync performance and recovery implementation plan
 
-Status: implemented on `codex/usb-sync-redesign`; final integrated validation
-and release are in progress. Nothing in this document establishes that the
+Status: implemented and locally validated on `codex/usb-sync-redesign`;
+release is blocked by the EOF CUE browser gate, pending cross-platform CI,
+and outstanding player/media validation. Nothing in this document establishes that the
 redesign is publicly shipped. This design
 covers Sync Manager, Export Playlist, Export Folder, Export Track, and scripted
 export. The objective is the shortest practical time from clicking SYNC to a
@@ -599,12 +600,25 @@ build, and recorded 200072 instrumented revision lookups. Cold synthetic media
 uses 8 KiB audio placeholders and DAT/EXT/2EX fixtures, so its timing is dominated
 by per-file work rather than realistic sequential USB copy throughput.
 
-Frontend unit, lint, type, production build, and existing size-budget checks
-passed before final rebasing. Sync Manager and production-window browser checks
-passed on Chromium and WebKit. The full browser run found an end-of-file CUE
-test failing on the untouched `1cd4505` baseline as well; it remains a release
-gate to resolve, not a waived test. Source `dev` has since advanced, so final
-integrated tests must be rerun after rebasing.
+Final integration includes `dev` through `1c1c39ee`, retaining its playlist,
+PDB, and historical rating migration fixes. Frontend lint/type checks, all
+1,257 unit tests, the production build, unchanged size budgets (148.3 KiB
+initial / 324.6 KiB total gzip), and all 17 locale catalogs passed. All 18
+Sync Manager/production-window checks passed on Chromium and WebKit.
+The complete browser run finished with 819 passed, 10 skipped, one WebKit
+process crash passing on retry, and the same EOF CUE test failing in both
+browsers. That test also failed on untouched `1cd4505`; it remains a release
+gate, not a waived test. The final `RB_LITE_TEST=1 cargo test --workspace`
+run passed, including all 48 native command tests and doc tests. Workspace
+Clippy with warnings denied and all 16 focused redesign tests passed.
+
+The implementation is pushed in [draft PR 385](https://github.com/chrisle/rbxport/pull/385).
+Cross-platform CI is pending. No release is dispatched. The public feed still
+reports version 1.6.0 as checked on October 12, 2026. Original issue 293 is
+closed for its earlier shipped optimization; PR 385 is the follow-on overhaul.
+Source hashing now checks
+cancellation between 64 KiB chunks. Compatibility conversions discard source
+VBR byte offsets, and volume identity handles close before automatic eject.
 
 Firmware gates were attempted. CDJ-3000 failed to become ready (control endpoint
 connection refused). XDJ-AZ failed before browse/load validation; its guest log

@@ -1720,5 +1720,6 @@
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "Библиотеки устройств расходятся во мнениях относительно рейтинга дорожки {}. Согласуйте его рейтинги в rekordbox перед импортом или синхронизацией.",
   "Exported media changed during sync. Retry after closing other writers.": "Экспортированные медиафайлы были изменены во время синхронизации. Повторите попытку после закрытия других средств записи.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Этот USB-накопитель требует восстановления, прежде чем можно будет оценить его пространство. Синхронизируйте его для восстановления.",
-  "The export has finished.": "Экспорт завершён."
+  "The export has finished.": "Экспорт завершён.",
+  "That device is no longer connected. It may have been unplugged or renamed.": "Это устройство больше не подключено. Возможно, оно было отключено или переименовано."
 }

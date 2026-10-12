@@ -1720,5 +1720,6 @@
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "设备库对轨道 {} 的评级存在分歧。在导入或同步之前，在 rekordbox 中协调其评级。",
   "Exported media changed during sync. Retry after closing other writers.": "导出的媒体在同步期间发生更改。关闭其他写入器后重试。",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "此 USB 需要先恢复才能估计其空间。同步即可恢复。",
-  "The export has finished.": "导出已完成。"
+  "The export has finished.": "导出已完成。",
+  "That device is no longer connected. It may have been unplugged or renamed.": "该设备已断开连接。它可能已被拔出或重命名。"
 }

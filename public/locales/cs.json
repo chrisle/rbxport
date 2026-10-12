@@ -1718,5 +1718,6 @@
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "Knihovny zařízení nesouhlasí s hodnocením stopy {}. Před importem nebo synchronizací srovnejte jeho hodnocení v softwaru rekordbox.",
   "Exported media changed during sync. Retry after closing other writers.": "Exportovaná média se během synchronizace změnila. Zkuste to znovu po zavření ostatních autorů.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Toto USB vyžaduje obnovení, než bude možné odhadnout jeho místo. Pro obnovení synchronizujte.",
-  "The export has finished.": "Export byl dokončen."
+  "The export has finished.": "Export byl dokončen.",
+  "That device is no longer connected. It may have been unplugged or renamed.": "Toto zařízení již není připojeno. Mohlo být odpojeno nebo přejmenováno."
 }

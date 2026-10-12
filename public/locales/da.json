@@ -1713,5 +1713,6 @@
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "Enhedsbibliotekerne er uenige om klassificeringen for spor {}. Afstem dens vurderinger i rekordbox før import eller synkronisering.",
   "Exported media changed during sync. Retry after closing other writers.": "Eksporterede medier blev ændret under synkronisering. Prøv igen efter at have lukket andre skribenter.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Denne USB kræver gendannelse, før dens plads kan estimeres. Synkroniser det for at gendanne.",
-  "The export has finished.": "Eksporten er færdig."
+  "The export has finished.": "Eksporten er færdig.",
+  "That device is no longer connected. It may have been unplugged or renamed.": "Enheden er ikke længere tilsluttet. Den kan være blevet frakoblet eller omdøbt."
 }

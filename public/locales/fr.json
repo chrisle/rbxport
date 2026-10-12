@@ -1717,5 +1717,6 @@
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "Les bibliothèques de périphériques ne sont pas d'accord sur la note de la piste {}. Réconciliez ses notes dans rekordbox avant de l'importer ou de le synchroniser.",
   "Exported media changed during sync. Retry after closing other writers.": "Les médias exportés ont changé pendant la synchronisation. Réessayez après avoir fermé les autres rédacteurs.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Cette clé USB nécessite une récupération avant que son espace puisse être estimé. Synchronisez-le pour récupérer.",
-  "The export has finished.": "L’exportation est terminée."
+  "The export has finished.": "L’exportation est terminée.",
+  "That device is no longer connected. It may have been unplugged or renamed.": "Cet appareil n’est plus connecté. Il a peut-être été débranché ou renommé."
 }

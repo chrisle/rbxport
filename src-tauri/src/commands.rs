@@ -1152,7 +1152,12 @@ pub async fn sync_devices<R: tauri::Runtime>(
                 let share = share.clone();
                 let defaults = defaults.clone();
                 scope.spawn(move || match reservation {
-                    Err(error) => SyncDeviceReportDto { path: destination, report: None, error: Some(error.to_string()), ejected: false, eject_error: None },
+                    Err(error) => {
+                        for state in ["writing", "failed"] {
+                            let _ = tauri::Emitter::emit(&app, "sync:progress", SyncProgressDto { path: destination.clone(), state });
+                        }
+                        SyncDeviceReportDto { path: destination, report: None, error: Some(error.full_message()), ejected: false, eject_error: None }
+                    },
                     Ok(mut reservation) => sync_one_device(
                     &app, &state, &library, &share, &selection, destination,
                     defaults.as_ref(), delete_unlisted_music.unwrap_or(false),
@@ -1860,6 +1865,9 @@ impl<R: tauri::Runtime> Drop for ExportReservation<R> {
 
 fn reserve_export<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &std::path::Path) -> AppResult<ExportReservation<R>> {
     if rbl_db::is_rekordbox_app_running() { return Err(AppError::new(ErrorKind::ReadOnly, "Quit rekordbox before syncing this USB.")); }
+    if !destination.is_dir() {
+        return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected. It may have been unplugged or renamed."));
+    }
     let volume = rbl_core::durable::VolumeIdentity::capture(destination).map_err(|e| AppError::new(ErrorKind::NotFound, e.to_string()))?;
     let path = destination.to_string_lossy().into_owned();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));

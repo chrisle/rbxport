@@ -1138,6 +1138,7 @@
   "Thank you for your report.",
   "That address could not be opened.",
   "That device is no longer connected.",
+  "That device is no longer connected. It may have been unplugged or renamed.",
   "That edit would leave the track without a beat.",
   "That file could not be decoded.",
   "That file could not be read.",
