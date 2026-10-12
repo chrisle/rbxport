@@ -57,7 +57,9 @@ the five newest versions, and announce the notes on Discord.
 
 When `PACKAGING_NIX` is set, the publish job also writes `packaging/nix/pin.json`
 (the published Linux AppImage's version and SRI hash) and pushes
-`chore(nix): seed <version>` to `dev`, so the Nix package seeds that release.
+`chore(nix): seed <version>` to `dev`, so the Nix package ships that release.
+That pin is the only way a Nix install updates: the built-in updater is
+unavailable under Nix (#177).
 
 ## Microsoft Store
 

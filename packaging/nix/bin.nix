@@ -37,38 +37,30 @@ let
     text = ''
       data="''${XDG_DATA_HOME:-$HOME/.local/share}/rbxport"
       cache="''${XDG_CACHE_HOME:-$HOME/.cache}/rbxport"
-      mutable="$data/rbxport.AppImage"
-      marker="$data/.nix-seed-version"
-      seed_version="@version@"
+      appimage="@appimage@"
+      key="@key@"
 
-      # The built-in updater replaces the AppImage with rename(2), which fails
-      # with EXDEV when the temp directory and the AppImage are on different
-      # mounts (as /tmp is inside appimage-run's sandbox), so keep temp files
-      # beside the AppImage it is replacing.
-      tmpdir="$data/tmp"
-      mkdir -p "$tmpdir"
-      export TMPDIR="$tmpdir"
+      # Nix owns this package's updates: the app runs the AppImage in the
+      # store, which nothing but Nix can replace, and this variable makes its
+      # built-in updater unavailable and point at the Nix channel instead.
+      export RBXPORT_PACKAGE_MANAGER=nix
 
-      # Seed the writable AppImage the built-in updater replaces in place,
-      # but only when it is missing. An existing one is kept as-is, so a Nix
-      # update cannot downgrade an app the updater has already advanced; the
-      # app decides for itself whether it is outdated.
-      if [ ! -e "$mutable" ] || [ ! -e "$marker" ]; then
-        mkdir -p "$data"
-        cp -L "@seed@" "$mutable"
-        chmod u+w "$mutable"
+      # The first Nix launcher seeded a writable copy here for the built-in
+      # updater to replace, which let a Nix install update outside Nix.
+      # Remove what it left; only it wrote the marker.
+      if [ -e "$data/.nix-seed-version" ]; then
+        rm -rf "$data/rbxport.AppImage" "$data/tmp" "$data/.nix-seed-version"
+        rmdir "$data" 2>/dev/null || true
       fi
-      printf '%s' "$seed_version" > "$marker"
 
-      # Extract each version once, dropping the AppImage's bundled GTK/WebKit:
+      # Extract each package once, dropping the AppImage's bundled GTK/WebKit:
       # that generic stack cannot create an EGL display on NixOS, so the host
       # libraries (provided by appimage-run) are used instead.
-      hash="$(sha256sum "$mutable" | cut -d' ' -f1)"
-      extracted="$cache/$hash"
+      extracted="$cache/$key"
       if [ ! -e "$extracted/.nix-ready" ]; then
         mkdir -p "$cache"
         rm -rf "$extracted"
-        ${lib.getExe appimageRunner} -x "$extracted" "$mutable"
+        ${lib.getExe appimageRunner} -x "$extracted" "$appimage"
         rm -rf "$extracted/usr/lib"
         # The bundled GTK hook forces its own GTK_THEME and schemas, so the
         # desktop's theme is ignored. Empty it out (AppRun still sources it).
@@ -77,7 +69,7 @@ let
         touch "$extracted/.nix-ready"
       fi
 
-      APPIMAGE="$mutable" exec ${lib.getExe appimageRunner} -w "$extracted" -- "$@"
+      APPIMAGE="$appimage" exec ${lib.getExe appimageRunner} -w "$extracted" -- "$@"
     '';
   };
 in
@@ -96,8 +88,8 @@ stdenv.mkDerivation {
 
     install -Dm755 ${lib.getExe launcher} "$out/bin/rbxport"
     substituteInPlace "$out/bin/rbxport" \
-      --replace-fail '@seed@' "$out/share/rbxport/rbxport.AppImage" \
-      --replace-fail '@version@' "${version}"
+      --replace-fail '@appimage@' "$out/share/rbxport/rbxport.AppImage" \
+      --replace-fail '@key@' "$(basename "$out")"
 
     runHook postInstall
   '';
@@ -106,9 +98,8 @@ stdenv.mkDerivation {
     description = "Rekordbox-compatible export-mode library manager (AppImage)";
     longDescription = common.meta.longDescription + ''
 
-      This build wraps the official AppImage. On first launch it is copied to
-      a writable location under the user's data directory so the built-in
-      updater can replace it in place.
+      This build wraps the official AppImage and runs it from the Nix store.
+      Updates come through Nix; the app's built-in updater is unavailable.
     '';
     sourceProvenance = [ lib.sourceTypes.binaryNativeCode ];
   };

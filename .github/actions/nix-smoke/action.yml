@@ -35,6 +35,22 @@ runs:
         out="$(nix build --no-link --print-out-paths --impure -f packaging/nix/ci.nix)"
         echo "out=$out" >> "$GITHUB_OUTPUT"
 
+    - name: Require the launcher to leave updates to Nix
+      shell: bash
+      run: |
+        set -euo pipefail
+        # A Nix install must not use the built-in updater (#177): the launcher
+        # marks the app as Nix-managed and runs the read-only store AppImage
+        # rather than a writable copy the updater could replace.
+        launcher="${{ steps.build.outputs.out }}/bin/rbxport"
+        grep -Fq 'export RBXPORT_PACKAGE_MANAGER=nix' "$launcher"
+        grep -Fq "APPIMAGE=\"\$appimage\"" "$launcher"
+        grep -Fq "${{ steps.build.outputs.out }}/share/rbxport/rbxport.AppImage" "$launcher"
+        if grep -Fq 'chmod u+w' "$launcher"; then
+          echo "::error::the Nix launcher seeds a writable AppImage"
+          exit 1
+        fi
+
     - name: Require the packaged AppImage to open a window
       shell: bash
       run: |

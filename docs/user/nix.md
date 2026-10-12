@@ -15,9 +15,8 @@ nix run github:chrisle/rbxport
 nix profile install github:chrisle/rbxport
 ```
 
-The seed is pushed to `dev` before `main`, so `github:chrisle/rbxport/dev` is
-the freshest seed; the default branch lags one release. The app self-updates on
-first launch either way.
+The pin is pushed to `dev` before `main`, so `github:chrisle/rbxport/dev` has
+the newest release first; the default branch lags one release.
 
 ## Install declaratively
 
@@ -55,15 +54,28 @@ nixpkgs), then reference its package from a module.
 
 ## How updates work under Nix
 
-Nix owns an immutable seed: the official AppImage stored in the Nix store. On
-first launch it is copied to a writable location under your data directory and
-run from there, and rbxport's own updater replaces that copy in place as it does
-for any other install. The store is never written to.
+Nix owns a Nix install, including its updates. The package runs the official
+AppImage straight from the read-only Nix store, and rbxport's built-in updater
+is unavailable: it does not check the download server, download, or replace
+anything. Check for updates in the app says the copy was installed with Nix
+and that updates come through your Nix channel.
 
-The version Nix records for the package is the seed it shipped with, not the
-version you are running. The app updates itself on launch, so the copy in your
-data directory can be newer than the store's label; trust the version shown in
-the app rather than `nix profile list`.
+To update, move your flake input or profile to the newer release, for example:
+
+```sh
+nix profile upgrade <name>   # an imperative install; `nix profile list` shows the name
+nix flake update rbxport     # a system flake that lists rbxport as an input, then rebuild
+```
+
+The version Nix records for the package is the version you run.
+
+Earlier Nix packages copied the AppImage into
+`${XDG_DATA_HOME:-$HOME/.local/share}/rbxport` and let the built-in updater
+replace that copy. The current launcher removes that copy on its first run, so
+the app you run is the one Nix installed, which can be older than the copy the
+updater had reached until your Nix channel catches up. A copy that an earlier
+launcher still starts recognises the copy it seeded and does not update itself
+either.
 
 ## Development
 
@@ -78,8 +90,9 @@ pnpm dev
 
 ## Removing
 
-`nix profile remove` removes the package but leaves the writable AppImage and
-its extraction cache behind. Delete both to reclaim the space:
+`nix profile remove` removes the package but leaves its extraction cache (and,
+from an earlier package, a copied AppImage) behind. Delete both to reclaim the
+space:
 
 ```sh
 rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/rbxport" \
