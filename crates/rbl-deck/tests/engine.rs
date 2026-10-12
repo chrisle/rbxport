@@ -877,6 +877,49 @@ fn the_metronome_clicks_on_the_grid_and_only_while_playing() {
     assert!(tail.iter().all(|s| s.abs() < 1e-4), "a paused deck does not click");
 }
 
+#[test]
+fn the_metronome_clicks_alike_on_all_four_beats_of_a_bar() {
+    // #344: only the downbeat was heard. rekordbox plays one sound on every
+    // beat (`rbxfrm::MetronomeUnit::processBlock` @0x1028f1e6c), so each of
+    // the bar's four clicks out of the engine is the same click.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("silence-344.wav");
+    write_wav(&path, RATE, 2, &vec![0.0_f32; RATE as usize * 2 * 2]);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.set_metronome_grid(Deck::A, &[(250, true), (750, false), (1250, false), (1750, false)]);
+    h.engine.set_metronome(Deck::A, true);
+    h.engine.play(Deck::A);
+    let mut out = h.play_until(Deck::A, u64::from(RATE) * 19 / 10);
+    // The last click's tail, whatever the deck does after it.
+    for _ in 0..20 {
+        out.extend(h.sink.pull(512));
+    }
+    let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+    // Each click starts after a stretch of silence.
+    let mut onsets = Vec::new();
+    let mut quiet = usize::MAX;
+    for (i, s) in left.iter().enumerate() {
+        if s.abs() > 1e-4 {
+            if quiet > 2_000 {
+                onsets.push(i);
+            }
+            quiet = 0;
+        } else {
+            quiet = quiet.saturating_add(1);
+        }
+    }
+    assert_eq!(onsets.len(), 4, "four clicks for four beats, at {onsets:?}");
+    let clicks: Vec<&[f32]> = onsets.iter().map(|&i| &left[i..i + 1_500]).collect();
+    let loudest = clicks[0].iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+    assert!(loudest > 0.2, "the click is heard: {loudest}");
+    for (n, click) in clicks.iter().enumerate().skip(1) {
+        let worst = click.iter().zip(clicks[0]).map(|(a, b)| (a - b).abs()).fold(0.0_f32, f32::max);
+        assert!(worst < 1e-3, "beat {} is not the downbeat's click: off by {worst}", n + 1);
+    }
+}
+
 /// Frequency of a tone from the median spacing of its rising zero crossings.
 ///
 /// The median rather than a count over the window, because these tests pull
