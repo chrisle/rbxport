@@ -121,6 +121,12 @@ fn three_destinations_share_one_conversion_and_warm_syncs_do_not_probe() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rbl-audio/tests/fixtures/stereo-96k.flac");
     let flac = source.path().join("source.flac"); std::fs::copy(fixture, &flac).unwrap();
     audio.source_path = flac; audio.sample_rate = 96_000; audio.duration_sec = 2;
+    let base = audio.analysis_source.as_ref().unwrap();
+    let mut analysis = rbl_anlz::parse(&std::fs::read(base).unwrap()).unwrap();
+    let mut seek = rbl_anlz::write::vbr_table_zero_section();
+    seek.payload.fill(42);
+    analysis.sections.push(seek);
+    std::fs::write(base, analysis.to_bytes()).unwrap();
     let devices = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
     let reports = std::thread::scope(|scope| {
         let workers: Vec<_> = devices.iter().map(|device| {
@@ -134,6 +140,11 @@ fn three_destinations_share_one_conversion_and_warm_syncs_do_not_probe() {
     assert_eq!(reports.iter().map(|r| r.metrics.conversions).sum::<u64>(), 1);
     for device in &devices {
         assert!(rbl_export::verify(device.path()).unwrap().is_ok());
+        let manifest = Manifest::load(device.path()).unwrap();
+        let dat = device.path().join(manifest.tracks[0].anlz_dir.trim_start_matches('/')).join("ANLZ0000.DAT");
+        let analysis = rbl_anlz::parse(&std::fs::read(dat).unwrap()).unwrap();
+        let seek = analysis.section(b"PVBR").unwrap();
+        assert!(seek.header.iter().chain(&seek.payload).all(|b| *b == 0));
         let report = rbl_export::export_with_options(device.path(), std::slice::from_ref(&audio), &playlists(vec![0]), &[],
             &ExportOptions { compatibility: Some(rbl_export::CompatibilityFormat::Mp3), cache: Some(&cache), ..Default::default() }, &mut |_| {}).unwrap();
         assert!(report.up_to_date); assert_eq!((report.metrics.probes, report.metrics.conversions, report.bytes_copied), (0, 0, 0));

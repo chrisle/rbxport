@@ -39,4 +39,13 @@ describe("exportSummary", () => {
       "did not read back",
     );
   });
+
+  it("distinguishes a no-op from retained and converted updates", () => {
+    expect(exportSummary("Set", { ...base, upToDate: true })).toBe("Set: Already up to date.");
+    const summary = exportSummary("Set", { ...base, keptExisting: 2, converted: 3, warnings: [{ title: "Review missing sources" }] });
+    expect(summary).toContain("2 existing versions kept");
+    expect(summary).toContain("3 tracks converted");
+    expect(summary).toContain("Export complete with warnings: Review missing sources");
+    expect(summary).not.toContain("{count}");
+  });
 });

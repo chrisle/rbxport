@@ -1475,7 +1475,11 @@ pub fn export_cancellable(
                 // PPTH and PQTZ, even when there are no VBR frames. Repair
                 // those stale files while exporting rather than asking the
                 // user to re-analyse every affected track.
-                if extension.eq_ignore_ascii_case("DAT") && parsed.section(b"PVBR").is_none() {
+                if extension.eq_ignore_ascii_case("DAT") && (conversion.is_some() || parsed.section(b"PVBR").is_none()) {
+                    // Seek offsets from the source must never point into a
+                    // different encoding. Compatibility outputs are PCM or
+                    // CBR MP3, so they need no source VBR seek table.
+                    parsed.sections.retain(|s| s.tag != rbl_core::FourCc::new(b"PVBR"));
                     parsed.sections.insert(1, rbl_anlz::write::vbr_table_zero_section());
                 }
                 parsed.sections = parsed.sections.iter().map(rbl_anlz::Section::with_export_phrase_mask).collect();

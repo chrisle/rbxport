@@ -1712,5 +1712,6 @@
   "The exported generation was not verified.": "De geëxporteerde generatie is niet geverifieerd.",
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "De apparaatbibliotheken zijn het niet eens over de beoordeling voor track {}. Stem de beoordelingen af ​​in rekordbox voordat u importeert of synchroniseert.",
   "Exported media changed during sync. Retry after closing other writers.": "Geëxporteerde media gewijzigd tijdens synchronisatie. Probeer het opnieuw nadat u andere schrijvers hebt gesloten.",
-  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Deze USB vereist herstel voordat de ruimte kan worden geschat. Synchroniseer het om te herstellen."
+  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Deze USB vereist herstel voordat de ruimte kan worden geschat. Synchroniseer het om te herstellen.",
+  "The export has finished.": "De export is voltooid."
 }

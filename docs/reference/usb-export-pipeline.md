@@ -59,7 +59,7 @@ is an optional slow content-integrity check separate from ordinary sync.
 | Main-window export (playlist, folder, Export Track, AppleScript) | `src/app/App.tsx` (`writeToDevice`, `exportTrackTo`) |
 | IPC boundary | `src/ipc/client.ts`, `src/ipc/types.ts`, `src/ipc/backend-mock.ts` |
 | Tauri commands and the export selection | `src-tauri/src/commands.rs`, `src-tauri/src/sync_window.rs` |
-| Stick defaults written after an export | `src-tauri/src/device_settings.rs` |
+| Stick defaults staged with the export | `src-tauri/src/device_settings.rs` |
 | Orchestration | `crates/rbl-export/src/lib.rs` (`export_cancellable`) |
 | Reconcile, conflict checks, verification | `crates/rbl-export/src/reconcile.rs`, `snapshot.rs`, `verification.rs` |
 | Incremental-sync record | `crates/rbl-export/src/manifest.rs`, `sync_record.rs` |
@@ -96,14 +96,14 @@ manifest that the previous run left at `PIONEER/rbxport/manifest.json`. Audio
 that has not changed is reused, files that changed are copied again, and files
 that are no longer selected are removed. Player-facing ids stay the same
 between syncs. If the manifest is missing, unreadable, or from a different
-`MANIFEST_VERSION`, the export writes everything again, except the tracks
-the stick's own database already holds for this library (below).
+supported manifest schema, the exporter establishes fresh receipts. Version 1
+still supplies ownership and stable IDs, but cannot authorize fast reuse.
 
 **A stick another writer exported.** On a stick rekordbox exported, the
 first sync from here has no manifest, but `exportLibrary.db` names each
 track's library row by `masterDbId`/`masterContentId`. A selected track the
 stick holds for this library (`db_id` not 0), whose file at that row's path
-has the source's size, is kept where it is and not copied again
+has proven byte equality with the source, is kept where it is and not copied again
 (`adopted_paths`). The manifest then records it as this export's, with the
 source's hash and the copy's stamp, so later syncs treat it as one they
 wrote. rekordbox's export does the same: `DatabaseMediator::execExport` asks
@@ -137,11 +137,11 @@ flowchart TD
     Guard --> Export[rbl_export::export_cancellable]
     Export --> Writers[rbl-pdb, ext_pdb, rbl-onelibrary, rbl-anlz, rbl-audio]
     Writers --> Stage[(.rbxport-staging-* on the stick)]
-    Stage --> Commit[rbl_core::durable::Publication::commit]
+    Stage --> Commit[rbl_core::durable::Publication::commit_retained]
     Commit --> Files[(Contents/, PIONEER/ on the stick)]
     Export -. ExportProgress .-> Events[export:progress / sync:progress events]
     Events -.-> UI[useExportProgress, SyncManager status]
-    Files --> After[write_dev_defaults, stashed MY SETTINGS, verify_databases]
+    Files --> After[Verify published databases, seal actual receipts, finalize journal]
 ```
 
 ## 2. Frontend
@@ -374,7 +374,7 @@ wrappers that fill in defaults.
 | 3 | Create `Contents/`, `<root>/USBANLZ/`, `<root>/rekordbox/` directly on the stick. | `rbl_core::durable::create_dir_all` | Directories only. Done even for an empty export. |
 | 4 | Finish an interrupted publication. | `rbl_export::recover` | Nothing may read the stick while a previous run's journal is pending. See [recovery](#recovery-of-an-interrupted-publication). |
 | 5 | Open the publication: take the exclusive lock, replay any journal, delete leftover stages, create `.rbxport-staging-*`. | `Publication::new` | All new files go into the stage. The lock (`.rbxport-write.lock`, `fs2` exclusive lock) is held until the end of the run. |
-| 6 | Load the previous manifest. Read a `Snapshot` of both databases. | `Manifest::load`, `snapshot::Snapshot::read` | The "before" picture, used for reconciling now and for detecting other writers just before commit. |
+| 6 | Load the manifest and database signatures; reuse the normalized baseline only when signatures match. Otherwise read both databases. | `Manifest::load`, `incremental`, `snapshot::Snapshot::read` | Identical verified requests return immediately; changed requests reconcile against current device state. |
 | 7 | Upgrade an old manifest that has no `db_id`, if rekordbox's sync record names the same `DBID`. | inline | Old manifests lack the field. |
 | 8 | Baseline checks and lightweight analysis file revisions. | `reconcile::rewritten`, `Snapshot::check_baseline_except`, `snapshot::analysis_stamp` | Refuses conflicting device/library ownership. `snapshot::legacy_playlist_ids` keeps distinct same-named playlists under separate free IDs, and recognizes the same playlist when both formats agree on its name, kind, contents, and folder (#353). Stamps use file information, not content reads. |
 | 9 | Reconcile the selection with the stick. | `reconcile::prepare` | Links selected tracks to their existing device rows (`identify_tracks`) and playlists to their device ids (`identify_playlists`). Keeps what the selection does not name but the stick still needs (`retain_device_only`). |
@@ -394,7 +394,7 @@ wrappers that fill in defaults.
 | 23 | Verify the staged generation. | `verification::verify_staged` | Both databases are present and agree, ids are unique, referenced files exist (stage first, then the stick), analysis parses, the playlist tree is valid. On failure: "The export did not verify, so the USB was left as it was". |
 | 24 | Write the manifest into the stage, with `baseline` = the staged snapshot. | `Manifest::save_at` | Written last into the stage. Published together with everything else. |
 | 25 | List the staged files. Add removals for `exportLibrary.db-wal`/`-shm` and for analysis extensions that are no longer exported. | `staged_files` | Names are mapped to NFC so they match the database paths ([why](#filesystems)). |
-| 26 | Read the stick's databases and analysis stamp again, and compare with step 6. | `Snapshot::read` + `analysis_stamp` | "The device changed during sync. Close other writers and retry." This catches rekordbox or a player writing during staging. |
+| 26 | Recheck database signatures, source revisions, analysis stamps, and reused output revisions. | `incremental::recheck`, `database_signatures`, `analysis_stamp` | Reject changes made during staging before publication begins. |
 | 27 | Last cancellation check, then report `publishing`. | `cancelled()` | After this point the run is not cancellable. |
 | 28 | Publish while retaining the previous generation. | `Publication::commit_retained` | Owned removals, settings, moves, databases, and receipts share the journal. |
 | 29 | Verify published databases, seal actual receipts, finalize. | `verify_databases`, `seal`, `finalize` | Failed validation rolls back; old content is reclaimed only after success. Empty-directory cleanup is cosmetic. |
@@ -536,10 +536,10 @@ In loop order:
 
 | Thing | Fresh stick | Later sync |
 | --- | --- | --- |
-| Audio of a selected track | Copied or converted into the stage, unless the stick's database already holds it for this library at the source's size | Reused if unchanged; copied again if changed or missing; left alone if in place |
+| Audio of a selected track | Copied or converted into the stage, unless an existing library-identified copy proves byte equality | Reused with valid receipts; changed uncertain inputs are hashed before copying; missing sources retain usable existing copies |
 | Audio of a track that left the selection | — | Removed after commit, unless it is the library's own file on the stick or still needed by device playlists or history |
 | Audio of device-only and history tracks | — | Kept as is |
-| Analysis | Re-emitted for every track that has it | Rewritten only if changed; missing companions repaired |
+| Analysis | Read and transformed lazily for new tracks | Reused by recipe and verified output stamp; rewritten when changed; stale analysis for changed audio is omitted with a warning |
 | Artwork | Four files per image | Skipped if the same bytes are already there |
 | `export.pdb`, `exportExt.pdb`, `exportLibrary.db` | Built | Always rebuilt from scratch, carrying device-only rows, history, tags, settings, and cues |
 | MY SETTINGS files | Copied if absent | Never overwritten by `rbl-export` |
@@ -585,7 +585,7 @@ No code path branches on FAT32 versus exFAT. What the code does:
 | AppleDouble `._` files | Data-only copies; `Publication::commit` and `finish` skip `._` paths. |
 | FAT time resolution and time zone | `published_at` adds 2 s of grace. A run's own commit skips the external-change check entirely (see below). |
 | HFS+ | `ExportRoot::for_file_system` chooses `.PIONEER` on a blank volume [OBS, as recorded in [Root selection](usb-export-db.md#root-selection)]. |
-| Large files | The DeviceSQL file size is clamped to `u32::MAX`. No check before copying for FAT32's 4 GiB file limit or for free space was found in this code path. A failed write appears as a copy error during staging. |
+| Large files | The DeviceSQL file size is clamped to `u32::MAX`. Peak free space is estimated before staging and checked during copying; filesystem size limits still surface as write errors, leaving the old published generation intact. |
 
 ### rekordbox-running checks
 
@@ -633,8 +633,11 @@ final names on the stick.
    into `.rbxport-publication/.previous/` and renames the new image into
    place, flushing the parent directory after each step. An entry with no
    image means "delete": the target moves to `.previous`.
-4. It renames the journal to `.rbxport-retired-*`, flushes the root, and then
-   deletes it.
+4. Export uses `commit_retained`, keeping `.previous` and the
+   `.verification-required` marker. Independent published verification runs
+   before actual receipts are sealed. `finalize` then renames the journal to
+   `.rbxport-retired-*`, flushes the root, and deletes it. Failed verification
+   requests replayable rollback instead of discarding the previous generation.
 
 Each file replacement is a rename within one filesystem, so it is atomic, and
 audio is never copied a second time. The **set of files** is not atomic as a
@@ -724,10 +727,11 @@ stays as it was:
 
 ### Errors after commit
 
-"The USB did not verify after the sync: …" comes from `verify_databases`
-in `write_export_with_phase`, after publication. Errors from
-`write_dev_defaults` or the stashed settings writes also come after commit.
-In these cases the new generation is already on the stick.
+The exporter independently verifies the published databases while the previous
+generation is retained. Verification failure rolls back; rollback intent stays
+journaled if restoration is interrupted. Defaults and imported settings are
+staged in the same transaction. Receipt sealing and journal retirement can also
+fail, leaving a recoverable pending generation rather than a false success.
 
 ## 7. Testing
 

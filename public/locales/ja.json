@@ -1725,5 +1725,6 @@
   "The exported generation was not verified.": "エクスポートされた世代は検証されませんでした。",
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "デバイス ライブラリは、トラック {} の評価について意見が一致していません。インポートまたは同期する前に、rekordbox で評価を調整してください。",
   "Exported media changed during sync. Retry after closing other writers.": "エクスポートされたメディアが同期中に変更されました。他のライタを閉じてから再試行してください。",
-  "This USB requires recovery before its space can be estimated. Sync it to recover.": "この USB の容量を見積もる前に、この USB をリカバリする必要があります。同期して回復します。"
+  "This USB requires recovery before its space can be estimated. Sync it to recover.": "この USB の容量を見積もる前に、この USB をリカバリする必要があります。同期して回復します。",
+  "The export has finished.": "エクスポートが完了しました。"
 }

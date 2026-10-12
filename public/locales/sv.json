@@ -1714,5 +1714,6 @@
   "The exported generation was not verified.": "Den exporterade generationen verifierades inte.",
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "Enhetsbiblioteken är inte överens om betyget för spår {}. Stäm av betygen i rekordbox innan du importerar eller synkroniserar.",
   "Exported media changed during sync. Retry after closing other writers.": "Exporterat media ändrades under synkronisering. Försök igen efter att ha stängt andra skribenter.",
-  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Denna USB kräver återställning innan dess utrymme kan uppskattas. Synkronisera det för att återställa."
+  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Denna USB kräver återställning innan dess utrymme kan uppskattas. Synkronisera det för att återställa.",
+  "The export has finished.": "Exporten är klar."
 }

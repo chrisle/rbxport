@@ -1716,5 +1716,6 @@
   "The exported generation was not verified.": "Az exportált generációt nem ellenőrizték.",
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "Az eszközkönyvtárak nem értenek egyet a(z) {} szám besorolásával kapcsolatban. Az importálás vagy szinkronizálás előtt egyeztetje a besorolásait a rekordboxban.",
   "Exported media changed during sync. Retry after closing other writers.": "Az exportált adathordozók megváltoztak a szinkronizálás során. Próbálja újra a többi író bezárása után.",
-  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Ezt az USB-t helyre kell állítani, mielőtt megbecsülhetnénk a tárhelyét. Szinkronizálja a helyreállításhoz."
+  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Ezt az USB-t helyre kell állítani, mielőtt megbecsülhetnénk a tárhelyét. Szinkronizálja a helyreállításhoz.",
+  "The export has finished.": "Az exportálás befejeződött."
 }

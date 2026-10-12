@@ -25,7 +25,7 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-export function exportSummary(name: string, report: ExportCounts, t: (text: string, values?: Readonly<Record<string, string | number>>) => string = text => text): string {
+export function exportSummary(name: string, report: ExportCounts, t: (text: string, values?: Readonly<Record<string, string | number>>) => string = (text, values) => text.replace(/\{(\w+)\}/g, (placeholder, key: string) => String(values?.[key] ?? placeholder))): string {
   const warnings = report.warnings ?? [];
   if (report.upToDate && warnings.length === 0) return `${name}: ${t("Already up to date")}.`;
   const copied = Math.max(0, report.tracks - report.reused);

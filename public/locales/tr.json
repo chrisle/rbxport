@@ -1717,5 +1717,6 @@
   "The exported generation was not verified.": "Dışa aktarılan nesil doğrulanmadı.",
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "Cihaz kitaplıkları, {} parçasının derecelendirmesi konusunda aynı fikirde değil. İçe aktarmadan veya senkronize etmeden önce rekordbox'taki derecelendirmelerini uzlaştırın.",
   "Exported media changed during sync. Retry after closing other writers.": "Dışa aktarılan medya senkronizasyon sırasında değiştirildi. Diğer yazarları kapattıktan sonra tekrar deneyin.",
-  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Bu USB'nin alanının tahmin edilebilmesi için kurtarma işlemi yapılması gerekiyor. Kurtarmak için senkronize edin."
+  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Bu USB'nin alanının tahmin edilebilmesi için kurtarma işlemi yapılması gerekiyor. Kurtarmak için senkronize edin.",
+  "The export has finished.": "Dışa aktarma tamamlandı."
 }

@@ -151,7 +151,6 @@ impl Snapshot {
                             ..playlist.clone()
                         });
                     }
-                    }
                 }
             }
         }

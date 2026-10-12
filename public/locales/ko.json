@@ -1714,5 +1714,6 @@
   "The exported generation was not verified.": "내보낸 세대가 확인되지 않았습니다.",
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "기기 라이브러리는 트랙 {} 등급에 동의하지 않습니다. 가져오기 또는 동기화하기 전에 rekordbox에서 등급을 조정하십시오.",
   "Exported media changed during sync. Retry after closing other writers.": "내보낸 미디어가 동기화 중에 변경되었습니다. 다른 작성자를 닫은 후 다시 시도하세요.",
-  "This USB requires recovery before its space can be estimated. Sync it to recover.": "이 USB의 공간을 추정하려면 먼저 복구가 필요합니다. 복구하려면 동기화하세요."
+  "This USB requires recovery before its space can be estimated. Sync it to recover.": "이 USB의 공간을 추정하려면 먼저 복구가 필요합니다. 복구하려면 동기화하세요.",
+  "The export has finished.": "내보내기가 완료되었습니다."
 }

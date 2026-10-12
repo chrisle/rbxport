@@ -1240,3 +1240,31 @@ it("passes the optional full integrity check to the backend", async () => {
   click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')); await settle();
   expect(syncDevices.mock.calls[0]?.[7]).toBe(true);
 });
+
+it("excludes only a stick without enough temporary space, even when the final files fit", async () => {
+  vi.useFakeTimers();
+  estimateSync.mockImplementation((_playlists: string[], destinations: string[]) => Promise.resolve(destinations.map(path => ({
+    path, copyBytes: 1024 ** 3, reuseBytes: 0, freeBytes: 2 * 1024 ** 3,
+    tracksNew: 1, tracksChanged: 0, tracksKept: 0, tracksRemoved: 2, tracksMissing: 0, approximate: false,
+    netAdditionalBytes: -(1024 ** 3), peakBytes: 26 * 1024 ** 3,
+    availableBytes: 24 * 1024 ** 3, enoughSpace: path.endsWith("USB B"),
+  }))));
+  click(box("USB A")); click(box("USB B")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(host.textContent).toContain("Needs 26.0 GB free while syncing");
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')); await settle();
+  expect(syncDevices.mock.calls[0]?.[1]).toEqual(["/Volumes/USB B"]);
+  expect(status()).toContain("USB A: Not enough temporary space to sync safely");
+});
+
+it("continues another destination when one pre-sync import fails", async () => {
+  await renderWith({ importHistory: true, importSettings: false, importRatings: false });
+  click(box("USB A")); click(box("USB B")); await settle();
+  importUsb.mockImplementation((path: string) => path.endsWith("USB A")
+    ? Promise.reject(new Error("Device disconnected"))
+    : Promise.resolve({ tracks: 0, histories: 0, settings: 0, ratings: 0, skipped: 0 }));
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')); await settle();
+  expect(importUsb).toHaveBeenCalledTimes(2);
+  expect(syncDevices.mock.calls[0]?.[1]).toEqual(["/Volumes/USB B"]);
+  expect(status()).toContain("USB A:"); expect(status()).toContain("Device disconnected");
+});

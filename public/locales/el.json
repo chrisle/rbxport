@@ -1718,5 +1718,6 @@
   "The exported generation was not verified.": "Η εξαγόμενη παραγωγή δεν επαληθεύτηκε.",
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "Οι βιβλιοθήκες συσκευών διαφωνούν σχετικά με την αξιολόγηση για το κομμάτι {}. Εναρμονίστε τις αξιολογήσεις του στο rekordbox πριν από την εισαγωγή ή τον συγχρονισμό.",
   "Exported media changed during sync. Retry after closing other writers.": "Τα εξαγόμενα μέσα άλλαξαν κατά τον συγχρονισμό. Δοκιμάστε ξανά αφού κλείσετε άλλους συγγραφείς.",
-  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Αυτό το USB απαιτεί ανάκτηση για να μπορέσει να εκτιμηθεί ο χώρος του. Συγχρονίστε το για ανάκτηση."
+  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Αυτό το USB απαιτεί ανάκτηση για να μπορέσει να εκτιμηθεί ο χώρος του. Συγχρονίστε το για ανάκτηση.",
+  "The export has finished.": "Η εξαγωγή ολοκληρώθηκε."
 }

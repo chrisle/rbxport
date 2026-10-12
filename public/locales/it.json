@@ -1716,5 +1716,6 @@
   "The exported generation was not verified.": "La generazione esportata non è stata verificata.",
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "Le librerie dei dispositivi non sono d'accordo sulla classificazione del brano {}. Riconcilia le sue valutazioni in rekordbox prima dell'importazione o della sincronizzazione.",
   "Exported media changed during sync. Retry after closing other writers.": "Il supporto esportato è stato modificato durante la sincronizzazione. Riprova dopo aver chiuso gli altri scrittori.",
-  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Questa USB richiede il ripristino prima di poter stimare il suo spazio. Sincronizzalo per ripristinarlo."
+  "This USB requires recovery before its space can be estimated. Sync it to recover.": "Questa USB richiede il ripristino prima di poter stimare il suo spazio. Sincronizzalo per ripristinarlo.",
+  "The export has finished.": "L’esportazione è terminata."
 }

@@ -1195,6 +1195,7 @@
   "The dropped files' locations could not be resolved. Please drag them from Finder again.",
   "The edited device library did not read back as planned. Nothing was changed.",
   "The export failed before the device could be verified. Check that it is connected, writable, and has enough free space.",
+  "The export has finished.",
   "The exported generation was not verified.",
   "The grid lock could not be saved.",
   "The key display format displayed on CDJ/XDJ",

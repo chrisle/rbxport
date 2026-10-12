@@ -1719,5 +1719,6 @@
   "The exported generation was not verified.": "導出的一代未經驗證。",
   "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.": "設備庫對軌道 {} 的評級有分歧。在匯入或同步之前，請在 rekordbox 中協調其評級。",
   "Exported media changed during sync. Retry after closing other writers.": "導出的媒體在同步期間發生變更。關閉其他寫入器後重試。",
-  "This USB requires recovery before its space can be estimated. Sync it to recover.": "此 USB 需要先恢復才能估計其空間。同步即可恢復。"
+  "This USB requires recovery before its space can be estimated. Sync it to recover.": "此 USB 需要先恢復才能估計其空間。同步即可恢復。",
+  "The export has finished.": "匯出已完成。"
 }

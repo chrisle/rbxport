@@ -1153,11 +1153,11 @@ pub async fn sync_devices<R: tauri::Runtime>(
                 let defaults = defaults.clone();
                 scope.spawn(move || match reservation {
                     Err(error) => SyncDeviceReportDto { path: destination, report: None, error: Some(error.to_string()), ejected: false, eject_error: None },
-                    Ok(reservation) => sync_one_device(
+                    Ok(mut reservation) => sync_one_device(
                     &app, &state, &library, &share, &selection, destination,
                     defaults.as_ref(), delete_unlisted_music.unwrap_or(false),
                     eject_after_sync.unwrap_or(false), compatibility_format,
-                    &reservation,
+                    &mut reservation,
                     ),
                 })
             }).collect();
@@ -1207,7 +1207,7 @@ fn sync_one_device<R: tauri::Runtime>(
     share: &std::path::Path, selection: &ExportSelection, destination: String,
     defaults: Option<&crate::device_settings::StickDefaultsDto>, delete_unlisted_music: bool,
     eject_after_sync: bool, compatibility_format: Option<rbl_export::CompatibilityFormat>,
-    reservation: &ExportReservation<R>,
+    reservation: &mut ExportReservation<R>,
 ) -> SyncDeviceReportDto {
     let progress = |state: &'static str| {
         let _ = tauri::Emitter::emit(app, "sync:progress", SyncProgressDto { path: destination.clone(), state });
@@ -1223,6 +1223,9 @@ fn sync_one_device<R: tauri::Runtime>(
                 if result.report.as_ref().is_some_and(|report| report.verified && report.skipped.is_empty() && report.failed.is_empty() && report.warnings.is_empty()) {
                     progress("ejecting");
                     set_export_stage(app, stick, "ejecting");
+                    // Keep the export reservation registered while ejecting,
+                    // but release its open directory handle before OS unmount.
+                    drop(reservation.volume.take());
                     match rbl_devices::eject::eject(stick) {
                         Ok(()) => result.ejected = true,
                         Err(e) => result.eject_error = Some(e.to_string()),
@@ -1825,14 +1828,15 @@ static NEXT_EXPORT_JOB: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 struct ExportReservation<R: tauri::Runtime> {
     app: tauri::AppHandle<R>, path: String, id: String,
     cancel: Arc<std::sync::atomic::AtomicBool>, started: std::time::Instant,
-    volume: rbl_core::durable::VolumeIdentity,
+    volume: Option<rbl_core::durable::VolumeIdentity>,
     verify_all: bool,
 }
 
 impl<R: tauri::Runtime> ExportReservation<R> {
     fn check(&self, destination: &std::path::Path) -> AppResult<()> {
         if self.cancel.load(std::sync::atomic::Ordering::Relaxed) { return Err(AppError::new(ErrorKind::Cancelled, "Export cancelled.")); }
-        self.volume.check(destination).map_err(|e| AppError::new(ErrorKind::NotFound, e.to_string()))
+        self.volume.as_ref().ok_or_else(|| AppError::internal("The export has finished."))?
+            .check(destination).map_err(|e| AppError::new(ErrorKind::NotFound, e.to_string()))
     }
 }
 
@@ -1871,7 +1875,7 @@ fn reserve_export<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &st
     jobs.insert(path.clone(), progress.clone());
     drop(jobs); drop(controls);
     let _ = tauri::Emitter::emit(app, "export:progress", progress);
-    Ok(ExportReservation { app: app.clone(), path, id, cancel, started: std::time::Instant::now(), volume, verify_all: false })
+    Ok(ExportReservation { app: app.clone(), path, id, cancel, started: std::time::Instant::now(), volume: Some(volume), verify_all: false })
 }
 
 fn set_export_stage<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &std::path::Path, state: &'static str) {
@@ -2044,7 +2048,7 @@ fn write_export_registered<R: tauri::Runtime>(
             copied: details.map_or(0, |p| u32::try_from(p.copied).unwrap_or(u32::MAX)),
             converted: details.map_or(0, |p| u32::try_from(p.converted).unwrap_or(u32::MAX)),
             elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-            can_cancel: matches!(state, "preparing" | "checking" | "copying" | "converting" | "database"),
+            can_cancel: matches!(state, "preparing" | "planning" | "checking" | "copying" | "converting" | "database"),
             up_to_date: false,
             warnings_count: 0,
         };
@@ -2057,7 +2061,7 @@ fn write_export_registered<R: tauri::Runtime>(
     let done = std::cell::Cell::new(0);
     let result = write_export_with_phase(
         destination, selection, defaults, compatibility_format,
-        Some(&reservation.volume),
+        reservation.volume.as_ref(),
         reservation.verify_all,
         &mut |p| {
             done.set(u32::try_from(p.done).unwrap_or(u32::MAX));
