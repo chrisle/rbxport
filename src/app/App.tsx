@@ -3217,6 +3217,7 @@ function AppBody() {
           ? () => openPreferences("libraryProtection") : undefined}
         onCancelAnalysis={analysis.running ? analysis.cancel : undefined}
         analysisFailures={analysis.state.failed.length}
+        analysisFailed={analysis.state.failed}
         selection={selectionText}
         readOnly={readOnly}
         protectedLibrary={advancedPrefs.protectLibrary}

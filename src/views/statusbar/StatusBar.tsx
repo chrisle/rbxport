@@ -43,6 +43,8 @@ export interface StatusBarProps {
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
   analysisFailures?: number;
+  /** Which tracks failed and why, listed in the failure badge's tooltip. */
+  analysisFailed?: readonly { title: string; reason: string }[];
   /** A short-lived status-bar action, such as a downloaded update. */
   updateNotice?: ReactNode;
 }
@@ -68,6 +70,7 @@ export function StatusBar({
   onOpenLog,
   onCancelAnalysis,
   analysisFailures = 0,
+  analysisFailed = [],
   updateNotice,
 }: StatusBarProps) {
   const tip = useTooltip();
@@ -172,7 +175,12 @@ export function StatusBar({
       {analysisFailures > 0 ? (
         <span
           className={styles.failures}
-          title={tip("These tracks could not be analysed; the run carried on past them")}
+          // The names are the only way to find what to fix, so they show even
+          // with tooltips switched off.
+          title={analysisFailed.length > 0
+            ? ["These tracks could not be analysed; the run carried on past them",
+              ...analysisFailed.map(f => `${f.title}: ${f.reason}`)].join("\n")
+            : tip("These tracks could not be analysed; the run carried on past them")}
         >
           {analysisFailures} failed
         </span>

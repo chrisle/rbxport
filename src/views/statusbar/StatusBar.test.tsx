@@ -89,3 +89,14 @@ it("shows a search that cannot be stopped without Stop, and analysis waiting beh
   expect(host.querySelector("progress[aria-label='Analysis progress']")).not.toBeNull();
   expect(host.textContent).not.toContain("Queued");
 });
+
+it("names each track that failed analysis and why in the failure badge (#351)", () => {
+  act(() => root.render(<StatusBar analysisFailures={2} analysisFailed={[
+    { title: "Broken One", reason: "probe reach EOF at 128 bytes" },
+    { title: "Broken Two", reason: "reached probe limit" },
+  ]} />));
+  const badge = host.querySelector<HTMLElement>("span[title*='Broken One']");
+  expect(badge?.textContent).toBe("2 failed");
+  expect(badge?.title).toContain("Broken One: probe reach EOF at 128 bytes");
+  expect(badge?.title).toContain("Broken Two: reached probe limit");
+});
