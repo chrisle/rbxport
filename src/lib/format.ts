@@ -38,6 +38,18 @@ export function formatShortDate(iso: string | null | undefined): string {
   return `${Number(mo)}/${Number(d)}/${y.slice(2)}`;
 }
 
+/**
+ * A moment in seconds since the Unix epoch as the date columns print a day,
+ * `M/D/YY`, on this machine's calendar: the File Created column's time is
+ * the file system's, not a date the library stored, so its day is local.
+ */
+export function formatEpochDate(seconds: number | null | undefined): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "";
+  const date = new Date(seconds * 1000);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(-2)}`;
+}
+
 /** `144.8 GB` / `15.2 MB` — status-bar totals. */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "";

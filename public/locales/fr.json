@@ -1624,5 +1624,6 @@
   "{device}: no new track ratings.": "{device}: no new track ratings.",
   "Nix installs this copy of rbxport's updates.": "Nix installe les mises à jour de cette copie de rbxport.",
   "This copy of rbxport was installed with Nix. Get updates through your Nix channel.": "Cette copie de rbxport a été installée avec Nix. Obtenez les mises à jour via votre canal Nix.",
-  "nix": "nix"
+  "nix": "nix",
+  "File Created": "Fichier créé"
 }

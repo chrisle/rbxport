@@ -1624,5 +1624,6 @@
   "{device}: no new track ratings.": "{device}: no new track ratings.",
   "Nix installs this copy of rbxport's updates.": "Az rbxport ezen példányának frissítéseit a Nix telepíti.",
   "This copy of rbxport was installed with Nix. Get updates through your Nix channel.": "Az rbxport ezen példánya Nix segítségével lett telepítve. A frissítéseket a Nix-csatornán keresztül kaphatja meg.",
-  "nix": "nix"
+  "nix": "nix",
+  "File Created": "Fájl létrehozva"
 }

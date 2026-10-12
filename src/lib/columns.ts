@@ -95,6 +95,10 @@ export const CATALOGUE: readonly ColumnSpec[] = [
   { key: "trackNumber", label: "Track number", width: 90, align: "right", sortable: true },
   { key: "cloud", label: "Cloud", width: 80, sortable: false },
   { key: "fileName", label: "File Name", width: 260, sortable: true },
+  // RBXport-only, approved as a narrow exception to rekordbox parity (#308):
+  // when the file was created on this machine's file system, read from the
+  // file. Not rekordbox's Date Created, which is a date stored in the library.
+  { key: "fileCreated", label: "File Created", width: 128, align: "right", sortable: true },
 ];
 
 /** Ticked in the header menu when nothing has been customised. */
@@ -117,7 +121,7 @@ export const EXTRA_COLUMNS: readonly ColumnKey[] = [
   "size", "discNo", "albumArtist", "composer", "lyricist", "fileType", "year",
   "mixName", "remixer", "originalArtist", "sampleRate", "bitrate", "bitDepth",
   "location", "dateCreated", "publishTrackInfo", "message", "color",
-  "djPlayCount", "myTag", "trackNumber", "cloud",
+  "djPlayCount", "myTag", "trackNumber", "cloud", "fileCreated",
 ];
 
 /** The header menu's order in the supplied rekordbox capture. */
@@ -128,6 +132,8 @@ const MENU_ORDER: readonly ColumnKey[] = [
   "originalArtist", "key", "sampleRate", "bitrate", "bitDepth", "fileName",
   "location", "dateAdded", "dateCreated", "hotCue", "publishTrackInfo", "message",
   "color", "djPlayCount", "myTag", "album", "cloud",
+  // Not in rekordbox's menu: RBXport's own column (#308), after all of its.
+  "fileCreated",
 ];
 export const MENU_COLUMNS: readonly ColumnSpec[] = MENU_ORDER
   .map((key) => CATALOGUE.find((column) => column.key === key))

@@ -189,6 +189,9 @@ function makeRows(count: number): RowDto[] {
         bitDepth: 16,
         location: `/Users/mock/Music/${artist}/${i + 1}.mp3`,
         dateCreated: dateAdded,
+        // Seconds since the epoch, and null, as the backend sends for a
+        // file whose file system records no creation time.
+        fileCreated: i % 10 === 9 ? null : Date.UTC(2025, 0, 1) / 1000 + i * 86_400,
         publishTrackInfo: false,
         message: "",
         color: i % 9,
@@ -339,7 +342,7 @@ function compare(a: RowDto, b: RowDto, col: SortKey): number {
     case "duration": return a.durationSec - b.durationSec;
     case "rating": return a.rating - b.rating;
     case "djPlayCount": case "size": case "year": case "sampleRate": case "bitrate": case "color":
-    case "discNo": case "trackNumber": case "fileType": case "bitDepth":
+    case "discNo": case "trackNumber": case "fileType": case "bitDepth": case "fileCreated":
       return extraNumber(a, col) - extraNumber(b, col);
     // Ticked first, as rekordbox's `comparePublic` orders the box.
     case "publishTrackInfo": return Number(b.extra?.publishTrackInfo === true) - Number(a.extra?.publishTrackInfo === true);

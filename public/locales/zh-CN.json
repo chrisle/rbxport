@@ -1627,5 +1627,6 @@
   "{device}: no new track ratings.": "{device}: no new track ratings.",
   "Nix installs this copy of rbxport's updates.": "此 rbxport 副本的更新由 Nix 安装。",
   "This copy of rbxport was installed with Nix. Get updates through your Nix channel.": "此 rbxport 副本是通过 Nix 安装的。请通过您的 Nix 频道获取更新。",
-  "nix": "nix"
+  "nix": "nix",
+  "File Created": "文件创建日期"
 }

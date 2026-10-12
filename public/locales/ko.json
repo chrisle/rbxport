@@ -1622,5 +1622,6 @@
   "{device}: no new track ratings.": "{device}: no new track ratings.",
   "Nix installs this copy of rbxport's updates.": "이 rbxport 사본의 업데이트는 Nix가 설치합니다.",
   "This copy of rbxport was installed with Nix. Get updates through your Nix channel.": "이 rbxport 사본은 Nix로 설치되었습니다. 업데이트는 Nix 채널을 통해 받으세요.",
-  "nix": "nix"
+  "nix": "nix",
+  "File Created": "파일 생성일"
 }

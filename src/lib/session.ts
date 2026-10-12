@@ -122,7 +122,7 @@ const SORTABLE: Readonly<Record<SortColumn, true>> = {
   bitrate: true, color: true, fileName: true, location: true, composer: true,
   albumArtist: true, remixer: true, originalArtist: true, mixName: true, discNo: true,
   trackNumber: true, fileType: true, bitDepth: true, lyricist: true, dateCreated: true,
-  publishTrackInfo: true, message: true,
+  publishTrackInfo: true, message: true, fileCreated: true,
 };
 const SORT_COLUMNS: readonly string[] = Object.keys(SORTABLE);
 

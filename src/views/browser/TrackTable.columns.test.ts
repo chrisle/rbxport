@@ -21,12 +21,20 @@ describe("browser detail columns", () => {
         bitrate: 320, bitDepth: 16, location: "/Music/track.mp3",
         dateCreated: "2026-09-24", publishTrackInfo: true, message: "Available",
         color: 1, djPlayCount: 3, myTag: "Peak", trackNumber: 4, cloud: true,
+        fileCreated: 1_790_000_000,
       },
     };
     for (const column of EXTRA_COLUMNS) {
       expect(cellText(row, column), column).not.toBe("");
     }
     expect(cellText(row, "hotCue")).toBe("A");
+  });
+
+  it("prints the file's creation day, and nothing where the file system has none (#308)", () => {
+    const row = { extra: { fileCreated: new Date(2026, 9, 12, 23, 30).getTime() / 1000 } } as unknown as RowDto;
+    expect(cellText(row, "fileCreated")).toBe("10/12/26");
+    expect(cellText({ ...row, extra: { fileCreated: null } }, "fileCreated")).toBe("");
+    expect(cellText({ ...row, extra: {} }, "fileCreated")).toBe("");
   });
 
   it("prints VBR for a bitrate the library holds at zero, and nothing for one it did not send", () => {

@@ -1626,5 +1626,6 @@
   "{device}: no new track ratings.": "{device}: no new track ratings.",
   "Nix installs this copy of rbxport's updates.": "Το Nix εγκαθιστά τις ενημερώσεις αυτού του αντιγράφου του rbxport.",
   "This copy of rbxport was installed with Nix. Get updates through your Nix channel.": "Αυτό το αντίγραφο του rbxport εγκαταστάθηκε με το Nix. Λάβετε ενημερώσεις μέσω του καναλιού Nix σας.",
-  "nix": "nix"
+  "nix": "nix",
+  "File Created": "Δημιουργία αρχείου"
 }

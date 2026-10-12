@@ -261,3 +261,20 @@ describe("mock preview", () => {
     expect((await backend.previewState()).track).toBeNull();
   });
 });
+
+describe("mock File Created column (#308)", () => {
+  it("sends seconds or null only when asked, and sorts the blanks first", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const plain = await backend.openView({ source: { kind: "collection" }, sort: "trackNo", descending: false, query: "" });
+    const [first] = await backend.fetchRows(plain.viewId, 0, 1);
+    expect(first?.extra?.fileCreated).toBeUndefined();
+
+    const view = await backend.openView({ source: { kind: "collection" }, sort: "fileCreated", descending: false, query: "" });
+    const rows = await backend.fetchRows(view.viewId, 0, 20, ["fileCreated"]);
+    const values = rows.map((row) => row.extra?.fileCreated);
+    expect(values.slice(0, 2)).toEqual([null, null]);
+    const known = values.slice(2) as number[];
+    expect(known.every((value) => typeof value === "number")).toBe(true);
+    expect([...known].sort((a, b) => a - b)).toEqual(known);
+  });
+});

@@ -18,7 +18,7 @@ import type { DeckId, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/typ
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
-import { formatBitrate, formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
+import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatShortDate } from "@/lib/format";
 import {
   applyClick, clickSettles, emptySelection, inListOrder, pressModifier, pressSelects, selectAll, selectedTracks,
   type SelectionState,
@@ -116,6 +116,7 @@ export function cellText(row: RowDto, key: Column["key"]): string {
     case "hotCue": return row.hotCues.map(([letter]) => letter).join(", ");
     case "size": return typeof value === "number" && value > 0 ? formatBytes(value) : "";
     case "dateCreated": return typeof value === "string" ? formatShortDate(value) : "";
+    case "fileCreated": return typeof value === "number" ? formatEpochDate(value) : "";
     case "fileType": {
       const types: Record<number, string> = { 1: "MP3", 4: "M4A", 5: "FLAC", 6: "M4A", 11: "WAV", 12: "AIFF" };
       return typeof value === "number" ? types[value] ?? (value ? String(value) : "") : "";

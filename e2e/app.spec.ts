@@ -456,6 +456,22 @@ test("DJ Play Count sorts numerically in both directions", async ({ page }) => {
   }).toBe(true);
 });
 
+test("File Created shows the file's creation day and sorts blanks first (#308)", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "File Created", exact: true }).click();
+
+  const header = page.getByRole("columnheader", { name: /^File Created/ });
+  const values = page.locator('[role="gridcell"][data-col="fileCreated"]');
+  await header.click();
+  await expect(header).toHaveAttribute("data-sorted", "true");
+  // The mock's files with no creation time lead, blank.
+  await expect(values.first()).toHaveText("");
+  await header.click();
+  await expect(values.first()).toHaveText(/^\d{1,2}\/\d{1,2}\/\d{2}$/);
+});
+
 test("Color sorts in rekordbox's palette order, not by name", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });

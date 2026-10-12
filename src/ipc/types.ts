@@ -50,7 +50,7 @@ export interface RowDto {
    */
   missing?: boolean;
   /** Extra database fields requested for visible browser columns. */
-  extra?: Record<string, string | number | boolean>;
+  extra?: Record<string, string | number | boolean | null>;
 }
 
 export type TrackSource =
@@ -87,7 +87,9 @@ export type SortColumn =
   | "dateAdded" | "releaseDate" | "size" | "year" | "sampleRate" | "bitrate"
   | "color" | "fileName" | "location" | "composer" | "albumArtist" | "remixer"
   | "originalArtist" | "mixName" | "discNo" | "trackNumber" | "fileType"
-  | "bitDepth" | "lyricist" | "dateCreated" | "publishTrackInfo" | "message";
+  | "bitDepth" | "lyricist" | "dateCreated" | "publishTrackInfo" | "message"
+  // RBXport-only (#308): when the file was created on the file system.
+  | "fileCreated";
 
 /**
  * What the backend sorts by. The columns, plus the key round the Camelot

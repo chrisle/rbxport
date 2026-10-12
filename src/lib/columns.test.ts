@@ -7,6 +7,7 @@ import {
   AVAILABLE_COLUMNS,
   CATALOGUE,
   DEFAULT_VISIBLE,
+  EXTRA_COLUMNS,
   FIXED,
   FOLDER_VISIBLE,
   MENU_COLUMNS,
@@ -31,9 +32,12 @@ describe("the catalogue", () => {
     // this number moves, the capture and the code have drifted apart. `#` is
     // not among them: it is a fixed column, and neither the capture nor
     // german.lang's column names has it.
-    expect(MENU_COLUMNS).toHaveLength(39);
-    expect(MENU_COLUMNS[0]?.label).toBe("Attribute");
-    expect(MENU_COLUMNS.at(-1)?.label).toBe("Cloud");
+    // RBXport's one column of its own (#308) follows them.
+    const rekordbox = MENU_COLUMNS.filter((column) => column.key !== "fileCreated");
+    expect(rekordbox).toHaveLength(39);
+    expect(rekordbox[0]?.label).toBe("Attribute");
+    expect(rekordbox.at(-1)?.label).toBe("Cloud");
+    expect(MENU_COLUMNS.at(-1)?.key).toBe("fileCreated");
     expect(MENU_COLUMNS.slice(3, 8).map((column) => column.label)).toEqual([
       "Track Title", "Release Date", "Artist", "Genre", "Comments",
     ]);
@@ -85,6 +89,18 @@ describe("the catalogue", () => {
     for (const column of CATALOGUE) {
       expect(column.sortable, column.key).toBe(!unsortable.includes(column.key));
     }
+  });
+});
+
+describe("the File Created column (#308)", () => {
+  it("is offered, sorted, and read only when shown", () => {
+    const column = specOf("fileCreated");
+    expect(column?.label).toBe("File Created");
+    expect(column?.sortable).toBe(true);
+    expect(DEFAULT_VISIBLE).not.toContain("fileCreated");
+    expect(AVAILABLE_COLUMNS).toContain("fileCreated");
+    expect(EXTRA_COLUMNS).toContain("fileCreated");
+    expect(toggleColumn(defaultLayout(), "fileCreated").order.at(-1)).toBe("fileCreated");
   });
 });
 

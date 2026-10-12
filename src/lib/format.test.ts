@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBitrate, formatBpm, formatBytes, formatDuration, formatSelectionSummary, formatShortDate, formatTotalTime } from "./format";
+import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatSelectionSummary, formatShortDate, formatTotalTime } from "./format";
 
 describe("formatDuration", () => {
   it("pads to two digits like rekordbox", () => {
@@ -37,6 +37,19 @@ describe("formatBitrate", () => {
   it("is blank for nonsense", () => {
     expect(formatBitrate(Number.NaN)).toBe("");
     expect(formatBitrate(-1)).toBe("");
+  });
+});
+
+describe("formatEpochDate", () => {
+  it("prints the local day of a moment in seconds as the date columns do", () => {
+    expect(formatEpochDate(new Date(2026, 8, 6, 0, 0, 1).getTime() / 1000)).toBe("9/6/26");
+    expect(formatEpochDate(new Date(2005, 11, 25, 23, 59).getTime() / 1000)).toBe("12/25/05");
+  });
+  it("is blank for a missing or unreadable time", () => {
+    expect(formatEpochDate(null)).toBe("");
+    expect(formatEpochDate(undefined)).toBe("");
+    expect(formatEpochDate(Number.NaN)).toBe("");
+    expect(formatEpochDate(Number.MAX_VALUE)).toBe("");
   });
 });
 
