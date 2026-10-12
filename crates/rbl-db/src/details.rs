@@ -287,13 +287,14 @@ pub fn cue_comments(
 }
 
 /// The `Color` value of each live memory cue. Rekordbox stores 0..7 for the
-/// named palette and 255 for no colour.
+/// named palette and 255 for no colour. Kind 4, the memory loop set as the
+/// Active Loop, is a memory cue too.
 pub fn memory_cue_colours(
     conn: &Connection,
     id: &str,
 ) -> Result<std::collections::HashMap<String, u8>> {
     let mut statement = conn.prepare(
-        "SELECT ID, Color FROM djmdCue WHERE ContentID = ?1 AND Kind = 0 AND rb_local_deleted = 0",
+        "SELECT ID, Color FROM djmdCue WHERE ContentID = ?1 AND Kind IN (0, 4) AND rb_local_deleted = 0",
     )?;
     let rows = statement.query_map([id], |row| {
         let value: i64 = row.get(1)?;

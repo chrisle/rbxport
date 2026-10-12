@@ -238,10 +238,16 @@ impl Clone for Library {
 
 /// One cue point.
 ///
-/// `Kind` 0 is a memory cue; 1, 2, 3 and 5 are hot cues A to D, 6 to 9 are E
-/// to H, and 10 to 17 are I to P — rekordbox 7 has sixteen. Kind 4 is unused,
-/// which is why D is 5. Counted across all 1,040,598 cues in the reference
-/// library.
+/// `Kind` 0 is a memory cue or memory loop; 1, 2, 3 and 5 are hot cues A to
+/// D, 6 to 9 are E to H, and 10 to 17 are I to P — rekordbox 7 has sixteen.
+/// Counted across all 1,040,598 cues in the reference library. Kind 4 is a
+/// memory loop set as the track's Active Loop, which is why D is 5: none was
+/// in the reference library, but rekordbox 7's `MstSetActiveLoop` writes
+/// `CUEKIND_ACTIVELOOP` (4, set by `_edb_MAS_MODULE1_init_forms`
+/// @0x100a1b228) into the cue's kind and `MstResetActiveLoop` writes 0 back,
+/// and its MEMORY panel lights a row's loop icon for kind 4
+/// (`MemoryCueComp::addCue` @0x1006864e8) [OBS static, rekordbox 7 arm64;
+/// issue #345's reporter saw the same in master.db].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Cue {
     /// `djmdCue.ID` parsed. Every id in the reference library is a decimal
@@ -364,10 +370,10 @@ impl Cue {
     /// `None` for a memory cue, otherwise `A` to `P`.
     #[must_use]
     pub fn hot_letter(&self) -> Option<char> {
-        // 1,2,3 then 5.. — kind 4 is not used, so D is 5 and the run is
-        // contiguous from there.
-        // Kind 0 is a memory cue and 4 is unused; both fall through to None
-        // for different reasons, which is why they are not one arm.
+        // 1,2,3 then 5.. — kind 4 is the active memory loop, so D is 5 and the
+        // run is contiguous from there.
+        // Kind 0 is a memory cue and 4 an active memory loop: neither has a
+        // slot.
         let slot = match self.kind {
             1..=3 => u32::from(self.kind) - 1,
             5..=17 => u32::from(self.kind) - 2,
@@ -376,9 +382,18 @@ impl Cue {
         char::from_u32(u32::from(b'A') + slot)
     }
 
+    /// A memory cue or memory loop: `Kind` 0, or 4 for the loop set as the
+    /// track's Active Loop, which is still one of the MEMORY panel's rows.
     #[must_use]
     pub const fn is_memory(&self) -> bool {
-        self.kind == 0
+        matches!(self.kind, Self::MEMORY | Self::ACTIVE_LOOP)
+    }
+
+    /// The memory loop set as the track's Active Loop, `Kind` 4. rekordbox
+    /// keeps at most one: setting another resets this one to 0.
+    #[must_use]
+    pub const fn is_active_loop(&self) -> bool {
+        self.kind == Self::ACTIVE_LOOP
     }
 
     /// The `Kind` a hot-cue letter is stored as: the inverse of
@@ -389,8 +404,8 @@ impl Cue {
             u8::try_from(u32::from(letter.to_ascii_uppercase()).checked_sub(u32::from(b'A'))?)
                 .ok()?;
         match slot {
-            // A to C are 1 to 3; 4 is unused, so D and everything after it
-            // sit one higher.
+            // A to C are 1 to 3; 4 is the active memory loop, so D and
+            // everything after it sit one higher.
             0..=2 => Some(slot + 1),
             3..=15 => Some(slot + 2),
             _ => None,
@@ -399,6 +414,9 @@ impl Cue {
 
     /// `Kind` 0: a memory cue.
     pub const MEMORY: u8 = 0;
+
+    /// `Kind` 4: a memory loop set as the Active Loop.
+    pub const ACTIVE_LOOP: u8 = 4;
 }
 
 /// A tree of named lists of tracks.

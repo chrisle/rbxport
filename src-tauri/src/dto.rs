@@ -281,7 +281,11 @@ pub struct CueDto {
     pub out_ms: u32,
     /// `A` to `P` for a hot cue, empty for a memory cue.
     pub letter: String,
+    /// A MEMORY panel row: a memory cue or loop, `Kind` 0 or 4.
     pub memory: bool,
+    /// The memory loop set as the Active Loop, `Kind` 4: rekordbox draws its
+    /// row's loop icon red rather than orange.
+    pub active_loop: bool,
     /// What rekordbox paints for the cue's `ColorTableIndex`, as `#RRGGBB`,
     /// or `None` when no colour is selected (or an index is invalid).
     pub colour: Option<String>,

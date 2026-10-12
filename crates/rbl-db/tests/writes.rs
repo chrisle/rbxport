@@ -3355,3 +3355,23 @@ fn a_players_cue_rekordbox_would_not_store_is_refused() {
     assert!(matches!(f.writer.save_player_cue("no-such-track", &player_cue(0, 0, None)), Err(DbError::WriteRefused(_))));
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue"), 0);
 }
+
+/// An Active Loop is `Kind` 4 (#345), and still a memory cue: its colour is
+/// the eight-value `Color`, as on a `Kind` 0 loop, never a hot cue's
+/// `ColorTableIndex`, and the MEMORY panel reads it back with the others.
+#[test]
+fn an_active_loop_takes_a_memory_cue_colour() {
+    let mut f = fixture();
+    let track = track_id(0);
+    let active = player_cue(4, 5_000, Some(6_875));
+    let id = f.writer.save_player_cue(&track, &active).unwrap();
+    f.writer.set_cue_colour(&id, Some(5)).unwrap();
+    let (colour, index): (i64, i64) = f.writer.library().connection().query_row(
+        "SELECT Color, ColorTableIndex FROM djmdCue WHERE ID=?1", [&id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    assert_eq!((colour, index), (5, 0));
+    assert!(f.writer.set_cue_colour(&id, Some(8)).is_err(), "a memory cue has eight colours");
+    let colours = rbl_db::details::memory_cue_colours(f.writer.library().connection(), &track).unwrap();
+    assert_eq!(colours.get(&id), Some(&5));
+}

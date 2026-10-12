@@ -226,3 +226,34 @@ fn a_track_s_hot_letters_read_in_letter_order_whatever_order_they_sit_in() {
     );
     assert_eq!(lib.cues().hot_letters_of(1), "A");
 }
+
+/// An Active Loop is a memory loop whose `Kind` rekordbox sets to 4 (#345):
+/// `MstSetActiveLoop` writes `CUEKIND_ACTIVELOOP`, 4, and the MEMORY panel
+/// lists it with its loop icon lit [OBS static, rekordbox 7]. It is one of
+/// the track's memory cues, keeps its out point, and has no hot-cue letter,
+/// so nothing draws it as an unlettered hot cue.
+#[test]
+fn an_active_loop_is_a_memory_loop_with_no_hot_cue_letter() {
+    let mut f = open();
+    let track = track_id(2);
+    let active = rbl_db::write::PlayerCue { kind: 4, in_ms: 200_000, out_ms: Some(201_875), ..Default::default() };
+    f.writer.save_player_cue(&track, &active).unwrap();
+    f.writer.add_loop(&track, 0, 30_000, 31_875, 4).unwrap();
+    f.writer.add_cue(&track, 0, 10_000).unwrap();
+    f.reload(&track);
+
+    let cues = f.cues(&track);
+    let read: Vec<_> = cues
+        .iter()
+        .map(|c| (c.position_ms, c.out_ms, c.is_memory(), c.is_active_loop(), c.hot_letter()))
+        .collect();
+    assert_eq!(
+        read,
+        vec![
+            (10_000, 0, true, false, None),
+            (30_000, 31_875, true, false, None),
+            (200_000, 201_875, true, true, None),
+        ]
+    );
+    assert_eq!(f.library.cues().hot_letters_of(f.library.row_of(&track).unwrap()), "");
+}

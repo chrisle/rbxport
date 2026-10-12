@@ -2825,6 +2825,7 @@ pub async fn track_cues(
                 out_ms: cue.out_ms,
                 letter: cue.hot_letter().map(String::from).unwrap_or_default(),
                 memory: cue.is_memory(),
+                active_loop: cue.is_active_loop(),
                 colour: if cue.is_memory() {
                     memory_colours.get(&cue.id.to_string()).and_then(|value| MEMORY_CSS.get(usize::from(*value))).map(|value| (*value).to_owned())
                 } else { cue_colour_css(cue.colour) },

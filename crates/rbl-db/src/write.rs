@@ -1680,7 +1680,8 @@ impl Writer {
     /// Adds a cue to a track.
     ///
     /// `kind` is rekordbox's own: 0 for a memory cue, 1-3 and 5 for hot cues
-    /// A to D, 6-9 for E to H, and 10-17 for I to P. Kind 4 is unused.
+    /// A to D, 6-9 for E to H, and 10-17 for I to P. Kind 4, the active memory
+    /// loop, is refused: a plain cue cannot be one.
     ///
     /// Every column is set to what the reference library shows for a plain,
     /// default-coloured cue — see the module docs. Loops are refused.
@@ -1756,13 +1757,15 @@ impl Writer {
         let kind: i64 = tx.query_row(
             "SELECT Kind FROM djmdCue WHERE ID=?1 AND rb_local_deleted=0", [cue], |row| row.get(0),
         )?;
-        let maximum = if kind == 0 { 7 } else { 64 };
+        // Kind 4, the memory loop set as the Active Loop, is a memory cue.
+        let memory = kind == 0 || kind == 4;
+        let maximum = if memory { 7 } else { 64 };
         if colour.is_some_and(|value| value > maximum) {
             return Err(DbError::WriteRefused("cue colour is outside rekordbox's palette".into()));
         }
         let usn = next_usn(&tx)?;
         let stamp = time::now();
-        let rows = if kind == 0 {
+        let rows = if memory {
             let value = colour.map_or(255, i64::from);
             tx.execute("UPDATE djmdCue SET Color=?2, rb_local_usn=?3, updated_at=?4 WHERE ID=?1 AND rb_local_deleted=0", params![cue, value, usn, stamp])?
         } else {
