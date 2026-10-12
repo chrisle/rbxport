@@ -1,13 +1,13 @@
 //! What a previous export left on the stick.
 //!
-//! Rekordbox re-copies everything on every export. We keep a small record of
+//! We keep a versioned record of
 //! what was written so a second export to the same stick copies only what
 //! actually changed — on a 200-track playlist that is the difference between
 //! minutes and seconds over USB 2.0.
 //!
 //! It lives outside `PIONEER/rekordbox/`, in a directory of our own, so no
 //! player and no version of rekordbox has to know about it. Losing it is
-//! harmless: the export falls back to writing everything.
+//! harmless: the export re-reads the device baseline and checks uncertain copies.
 
 use std::path::{Path, PathBuf};
 
@@ -16,13 +16,15 @@ use serde::{Deserialize, Serialize};
 /// Where the record sits, relative to the root of the stick.
 pub const MANIFEST_PATH: &str = "PIONEER/rbxport/manifest.json";
 
-/// Bumped when a field changes meaning. An older or newer manifest is ignored
-/// rather than guessed at, which costs one full export and never a wrong one.
-pub const MANIFEST_VERSION: u32 = 1;
+/// Version 1 retains ownership and IDs but must establish new receipts. Unknown
+/// future versions are ignored rather than treated as a trusted baseline.
+pub const MANIFEST_VERSION: u32 = 2;
 
 /// The state of one export.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
+    #[serde(default)]
+    pub generation: Option<crate::incremental::Generation>,
     #[serde(default)]
     pub db_id: u64,
     #[serde(default)]
@@ -148,8 +150,12 @@ impl Manifest {
     /// record", because the only cost of that is copying more than we had to.
     pub fn load(destination: &Path) -> Option<Self> {
         let bytes = std::fs::read(Self::path(destination)).ok()?;
-        let manifest: Self = serde_json::from_slice(&bytes).ok()?;
-        (manifest.version == MANIFEST_VERSION).then_some(manifest)
+        let mut manifest: Self = serde_json::from_slice(&bytes).ok()?;
+        if manifest.version == 1 || manifest.tracks.iter().any(|t| !t.in_place && t.preserved != Some(true) && t.copy_stamp.is_none())
+            || manifest.generation.as_ref().is_some_and(|g| !crate::incremental::manifest_structure(&manifest).is_ok_and(|hash| hash == g.structure)) {
+            manifest.generation = None;
+        }
+        (matches!(manifest.version, 1 | MANIFEST_VERSION)).then_some(manifest)
     }
 
     /// Writes the record, replacing any previous one.
@@ -216,6 +222,7 @@ mod tests {
     fn a_saved_record_reads_back() {
         let dir = tempfile::tempdir().unwrap();
         let manifest = Manifest {
+            generation: None,
             db_id: 0, baseline: None,
             version: MANIFEST_VERSION,
             written: "2026-09-08 00:00:00.000 +00:00".to_owned(),

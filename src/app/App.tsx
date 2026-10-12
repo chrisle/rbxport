@@ -5,6 +5,7 @@ import { JobQueue, slices, type JobView } from "@/lib/jobQueue";
 import { importInSlices, removeInSlices } from "@/lib/bulkJobs";
 import { useBackupProgress } from "@/store/useBackupProgress";
 import { useExportProgress } from "@/store/useExportProgress";
+import { isExportActive } from "@/lib/exportProgress";
 import { reportStartupPaint } from "@/lib/startup";
 import { useShowWindowWhenReady } from "@/lib/windowReady";
 import { waveformKindOf } from "@/canvas";
@@ -449,7 +450,7 @@ function AppBody() {
   const backupJob = useBackupProgress();
   const exportJobs = useExportProgress();
   const exportBatch = [...exportJobs.values()];
-  const exportRunning = exportBatch.some(job => ["preparing", "checking", "copying", "database", "verifying", "publishing", "ejecting"].includes(job.state));
+  const exportRunning = exportBatch.some(isExportActive);
   const readOnly = (summary?.readOnly ?? false) || advancedPrefs.protectLibrary;
   useEffect(() => {
     let live = true;
@@ -1965,7 +1966,7 @@ function AppBody() {
         try {
           const backend = await getBackend();
           const written = await backend.exportTracksToDevice([...ids], path, stickDefaults, compatibilityFormat);
-          report(exportSummary(name, written));
+          report(exportSummary(name, written, t));
           setDevices(await backend.listDevices());
         } catch (e) {
           if (e && typeof e === "object" && "kind" in e && e.kind === "cancelled" || e instanceof Error && e.message === "Export stopped.") report("Export stopped.");
@@ -1975,7 +1976,7 @@ function AppBody() {
         }
       })();
     },
-    [devices, report, refuse, stickDefaults, compatibilityFormat],
+    [devices, report, refuse, stickDefaults, compatibilityFormat, t],
   );
 
   // Export Loop As WAV: where to, then the loop's stretch of the track.
@@ -2688,7 +2689,7 @@ function AppBody() {
       try {
         const backend = await getBackend();
         const written = await backend.exportPlaylist(playlistId, device.path, stickDefaults, deleteUnlistedMusic, compatibilityFormat);
-        const said = exportSummary(device.name, written);
+        const said = exportSummary(device.name, written, t);
         report(said);
         setDevices(await backend.listDevices());
         return said;
@@ -2703,7 +2704,7 @@ function AppBody() {
         setSyncing(false);
       }
     },
-    [tree, report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat],
+    [tree, report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat, t],
   );
 
   const syncToDevice = useCallback(

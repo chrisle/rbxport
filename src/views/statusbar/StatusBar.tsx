@@ -6,6 +6,7 @@ import { refusal } from "@/lib/menu";
 import type { ExportProgress } from "@/ipc/types";
 import type { JobView } from "@/lib/jobQueue";
 import { useTranslation } from "@/i18n";
+import { stageLabel, stagePercent } from "@/lib/exportProgress";
 
 export interface StatusBarProps {
   /** Long library operations: the running one first, then those waiting. */
@@ -79,13 +80,12 @@ export function StatusBar({
     ? Math.min(100, Math.max(0, Math.floor(analysisProgress.completed / analysisProgress.total * 100))) : 0;
   const backupPercent = backupProgress && backupProgress.totalBytes > 0
     ? Math.min(100, Math.max(0, Math.floor(backupProgress.copiedBytes / backupProgress.totalBytes * 100))) : 0;
-  const exportTotal = exports.reduce((sum, job) => sum + job.total, 0);
-  const exportDone = exports.reduce((sum, job) => sum + job.done, 0);
-  const exportPercent = exportTotal > 0
-    ? Math.min(99, Math.max(0, Math.floor(exportDone / exportTotal * 100))) : 0;
+  const measured = exports.map(stagePercent);
+  const exportPercent = measured.length > 0 && measured.every((n): n is number => n !== undefined)
+    ? Math.floor(measured.reduce((sum, n) => sum + n, 0) / measured.length) : undefined;
   const activeExportStates = new Set(exports.filter(job => job.state !== "done").map(job => job.state));
   const exportNoun = `${exports.length} ${exports.length === 1 ? "USB" : "USBs"}`;
-  const exportLabel = activeExportStates.size !== 1 ? `Syncing ${exportNoun}`
+  const exportLabel = exports.length === 1 && exports[0] ? `${stageLabel(exports[0], t)} · ${exports[0].name}` : activeExportStates.size !== 1 ? t("Syncing {devices}", { devices: exportNoun })
     : activeExportStates.has("preparing") ? `Preparing ${exportNoun}`
     : activeExportStates.has("checking") ? `Checking ${exportNoun}`
     : activeExportStates.has("copying") ? `Exporting ${exportNoun}`
@@ -155,7 +155,7 @@ export function StatusBar({
       {exports.length > 0 ? <span className={styles.backupMeter}>
         <span>{exportLabel}</span>
         <progress className={styles.backupProgress} aria-label={`Exporting ${exports.length} ${exports.length === 1 ? "USB" : "USBs"}`} max={100} value={exportPercent} />
-        <span className={styles.backupPercent}>({exportPercent}%)</span>
+        {exportPercent === undefined ? null : <span className={styles.backupPercent}>({exportPercent}%)</span>}
       </span> : null}
       {backupProgress ? <span className={styles.backupMeter} title={backupActivity}>
         <span>Backup</span>

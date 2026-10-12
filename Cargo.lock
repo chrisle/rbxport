@@ -360,6 +360,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3"
+version = "1.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
+dependencies = [
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures 0.3.1",
+]
+
+[[package]]
 name = "block"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -682,6 +695,12 @@ name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "cookie"
@@ -3767,7 +3786,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3876,6 +3895,7 @@ dependencies = [
  "rbl-core",
  "rbl-db",
  "rbl-index",
+ "serde",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
@@ -3888,6 +3908,7 @@ dependencies = [
  "mp3lame-encoder",
  "rbl-core",
  "rubato",
+ "serde",
  "symphonia",
  "tempfile",
  "thiserror 2.0.20",
@@ -3922,6 +3943,7 @@ dependencies = [
  "dirs 5.0.1",
  "fs2",
  "rustix",
+ "same-file",
  "serde",
  "serde_json",
  "tempfile",
@@ -4016,6 +4038,7 @@ dependencies = [
 name = "rbl-export"
 version = "1.7.0"
 dependencies = [
+ "blake3",
  "fs2",
  "rbl-analysis",
  "rbl-anlz",

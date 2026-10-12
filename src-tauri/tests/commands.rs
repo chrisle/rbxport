@@ -1863,6 +1863,7 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         None,
         None,
         None,
+        None,
     ))
     .unwrap();
     let synced = reports[0].report.as_ref().expect("written");
@@ -1908,7 +1909,7 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         } else {
             run(commands::sync_devices(
                 s.handle(), s.state(), vec![playlist_id(1)], vec![stick.path().display().to_string()],
-                None, None, None, Some(true), None,
+                None, None, None, Some(true), None, None,
             )).unwrap().remove(0).report.unwrap()
         };
         assert_eq!((cleaned.tracks, cleaned.playlists, cleaned.removed), (1, 1, 1));
@@ -1942,7 +1943,7 @@ fn a_stick_pulled_during_a_sync_is_reported_as_disconnected() {
         }
     });
     let reports = run(commands::sync_devices(
-        s.handle(), s.state(), vec![playlist_id(1)], vec![mount.display().to_string()], None, None, None, None, None,
+        s.handle(), s.state(), vec![playlist_id(1)], vec![mount.display().to_string()], None, None, None, None, None, None,
     ))
     .unwrap();
     let error = reports[0].error.as_deref().expect("the sync failed");
@@ -1998,6 +1999,7 @@ fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them
         None,
         Some(true),
         Some(true),
+        None,
         None,
         None,
     ))

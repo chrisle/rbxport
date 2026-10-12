@@ -132,8 +132,10 @@ impl Snapshot {
     pub fn merged_library_above(&self, floor: u32) -> Option<Library> {
         let mut library = self.one.as_ref().or(self.legacy.as_ref())?.clone();
         if let Some(legacy) = &self.legacy {
+            let mut tracks: BTreeSet<_> = library.tracks.iter().map(|t| t.id).collect();
+            let mut playlists: BTreeSet<_> = library.playlists.iter().map(|p| p.id).collect();
             for track in &legacy.tracks {
-                if !library.tracks.iter().any(|t| t.id == track.id) {
+                if tracks.insert(track.id) {
                     library.tracks.push(track.clone());
                 }
             }
@@ -142,12 +144,13 @@ impl Snapshot {
                 let id = |legacy_id: u32| ids.get(&legacy_id).copied().unwrap_or(legacy_id);
                 for playlist in &legacy.playlists {
                     let merged = id(playlist.id);
-                    if !library.playlists.iter().any(|p| p.id == merged) {
+                    if playlists.insert(merged) {
                         library.playlists.push(Playlist {
                             id: merged,
                             parent: if playlist.parent == 0 { 0 } else { id(playlist.parent) },
                             ..playlist.clone()
                         });
+                    }
                     }
                 }
             }
@@ -689,9 +692,15 @@ fn check_database_changes(
     target: &Library,
     baseline: Option<&Library>,
 ) -> Result<()> {
+    let originals: BTreeMap<_, _> = baseline.into_iter().flat_map(|b| &b.tracks).map(|t| (t.id, t)).collect();
+    let targets: BTreeMap<_, _> = target.tracks.iter().map(|t| (t.id, t)).collect();
+    let current_ids: BTreeSet<_> = current.tracks.iter().map(|t| t.id).collect();
+    let original_playlists: BTreeMap<_, _> = baseline.into_iter().flat_map(|b| &b.playlists).map(|p| (p.id, p)).collect();
+    let target_playlists: BTreeMap<_, _> = target.playlists.iter().map(|p| (p.id, p)).collect();
+    let current_playlist_ids: BTreeSet<_> = current.playlists.iter().map(|p| p.id).collect();
     for track in &current.tracks {
-        let original = baseline.and_then(|b| b.tracks.iter().find(|t| t.id == track.id));
-        let next = target.tracks.iter().find(|t| t.id == track.id);
+        let original = originals.get(&track.id).copied();
+        let next = targets.get(&track.id).copied();
         let unchanged = original.is_some_and(|old| {
             if label == "OneLibrary" && track.rating > 5 && old.rating <= 5 && track.rating == old.rating * 51 {
                 let mut corrected = track.clone();
@@ -713,8 +722,8 @@ fn check_database_changes(
         }
     }
     for playlist in &current.playlists {
-        let original = baseline.and_then(|b| b.playlists.iter().find(|p| p.id == playlist.id));
-        let next = target.playlists.iter().find(|p| p.id == playlist.id);
+        let original = original_playlists.get(&playlist.id).copied();
+        let next = target_playlists.get(&playlist.id).copied();
         // Position changes caused only by inserting/removing siblings are harmless.
         let same = |a: &Playlist, b: &Playlist| {
             a.id == b.id
@@ -736,9 +745,9 @@ fn check_database_changes(
     // A deletion on the device is also an edit; don't silently resurrect it.
     if let Some(baseline) = baseline {
         if baseline.tracks.iter().any(|t| {
-            !current.tracks.iter().any(|c| c.id == t.id) && target.tracks.iter().any(|n| n.id == t.id)
+            !current_ids.contains(&t.id) && targets.contains_key(&t.id)
         }) || baseline.playlists.iter().any(|p| {
-            !current.playlists.iter().any(|c| c.id == p.id) && target.playlists.iter().any(|n| n.id == p.id)
+            !current_playlist_ids.contains(&p.id) && target_playlists.contains_key(&p.id)
         }) {
             return Err(ExportError::Conflict(format!("{label} contains device-side deletions. Reconcile them before syncing.")));
         }
@@ -806,7 +815,7 @@ pub fn analysis_hash(files: &[(String, Vec<u8>)]) -> u64 {
 
 /// Capture mutable player-side analysis before staging, then check it again
 /// before publication so a late cue edit cannot be overwritten unnoticed.
-pub fn analysis_stamp(root: &Path, snapshot: &Snapshot) -> Result<BTreeMap<String, Option<u64>>> {
+pub fn analysis_stamp(root: &Path, snapshot: &Snapshot) -> Result<BTreeMap<String, Option<crate::incremental::FileRevision>>> {
     let mut files = BTreeMap::new();
     for t in snapshot
         .merged_library()
@@ -823,11 +832,7 @@ pub fn analysis_stamp(root: &Path, snapshot: &Snapshot) -> Result<BTreeMap<Strin
                 .to_string_lossy()
                 .into_owned();
             let path = crate::checked_under(root, &relative)?;
-            let stamp = match std::fs::read(path) {
-                Ok(b) => Some(crate::manifest::hash(&b)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(e) => return Err(e.into()),
-            };
+            let stamp = crate::incremental::revision(&path)?;
             files.insert(relative, stamp);
         }
     }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { ExportProgress } from "@/ipc/types";
+import { isExportActive } from "@/lib/exportProgress";
 
 export function exportPercent(progress: ExportProgress): number {
   return progress.state === "done" ? 100 : progress.total > 0
@@ -21,7 +22,12 @@ export function useExportProgress() {
         updated.add(progress.path);
         if (progress.state === "preparing") batchStarted = true;
         if (live) setJobs(current => {
-          const active = [...current.values()].some(job => ["preparing", "checking", "copying", "database", "verifying", "publishing", "ejecting"].includes(job.state));
+          const previous = current.get(progress.path);
+          if (previous?.jobId && progress.jobId) {
+            if (Number(previous.jobId) > Number(progress.jobId)) return current;
+            if (previous.jobId === progress.jobId && (previous.sequence ?? 0) >= (progress.sequence ?? 0)) return current;
+          }
+          const active = [...current.values()].some(isExportActive);
           const next = progress.state === "preparing" && !active ? new Map<string, ExportProgress>() : new Map(current);
           return next.set(progress.path, progress);
         });

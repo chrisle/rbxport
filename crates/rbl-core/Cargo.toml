@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 tempfile = "3"
 serde_json = { workspace = true }
 fs2 = "0.4"
+same-file = "1"
 # Name forms: macOS FAT/exFAT drivers list NFD names but rename and delete
 # only under the form a name was stored in.
 unicode-normalization = "0.1"

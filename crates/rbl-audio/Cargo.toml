@@ -10,6 +10,7 @@ description = "Audio decoding for analysis."
 workspace = true
 
 [dependencies]
+serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "alac", "isomp4", "flac", "wav", "aiff", "pcm", "adpcm"] }

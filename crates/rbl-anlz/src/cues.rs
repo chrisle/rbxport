@@ -2,7 +2,7 @@
 //! contain empty cue lists. Layout checked against rekordbox 7 USB exports.
 use crate::Section;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExportCue {
     /// Master database kind: memory=0, A-C=1-3, D-P=5-17.
     pub kind: u8,

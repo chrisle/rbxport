@@ -405,6 +405,10 @@ pub struct DeviceExportDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportReportDto {
+    pub up_to_date: bool,
+    pub kept_existing: u32,
+    pub converted: u32,
+    pub warnings: Vec<rbl_export::ExportWarning>,
     pub tracks: u32,
     pub playlists: u32,
     pub bytes_copied: u64,
@@ -434,6 +438,15 @@ pub struct ExportReportDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncEstimateDto {
+    pub net_additional_bytes: i64,
+    pub peak_bytes: u64,
+    pub database_bytes: u64,
+    pub asset_bytes: u64,
+    pub projected_free_bytes: Option<u64>,
+    pub enough_space: Option<bool>,
+    pub unknown_size: bool,
+    pub kept_existing: u32,
+    pub error: Option<String>,
     pub path: String,
     /// Bytes of tracks that would be copied: new, or changed since written.
     pub copy_bytes: u64,
@@ -553,10 +566,23 @@ pub struct BackupDto {
 }
 
 /// Per-device progress, including verified completion or failure.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportProgressDto {
+    pub bytes_per_second: u64,
+    pub job_id: String,
+    pub sequence: u64,
+    pub unit: &'static str,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+    pub reused: u32,
+    pub copied: u32,
+    pub converted: u32,
+    pub elapsed_ms: u64,
+    pub can_cancel: bool,
+    pub up_to_date: bool,
     pub path: String,
+    pub warnings_count: u32,
     pub state: &'static str,
     pub done: u32,
     pub total: u32,

@@ -179,7 +179,8 @@ fn renaming_an_artist_moves_the_audio_and_leaves_no_copy_behind() {
 
     tracks[0].artist = "Triode Live".into();
     let second = export(dest.path(), &tracks, &[]).unwrap();
-    assert_eq!(second.reused, 0, "a different place on the stick means a copy");
+    assert_eq!(second.reused, 1, "unchanged audio is relocated without copying its bytes");
+    assert_eq!(second.bytes_copied, 0);
     assert!(dest.path().join("Contents/Triode Live/Single/source-1.mp3").is_file());
     assert!(
         !dest.path().join("Contents/TRIODE").exists(),

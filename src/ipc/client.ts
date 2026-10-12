@@ -553,7 +553,7 @@ async function realBackend(): Promise<Backend> {
       await invoke<void>("open_sync_window");
       return true;
     },
-    syncDevices: (playlists, destinations, defaults, automatic, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat) =>
+    syncDevices: (playlists, destinations, defaults, automatic, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll) =>
       invoke<SyncDeviceReport[]>("sync_devices", {
         playlists,
         destinations,
@@ -562,6 +562,7 @@ async function realBackend(): Promise<Backend> {
         ejectAfterSync: ejectAfterSync ?? false,
         deleteUnlistedMusic: deleteUnlistedMusic ?? false,
         compatibilityFormat: compatibilityFormat ?? null,
+        verifyAll: verifyAll ?? false,
       }),
     estimateSync: (playlists, destinations, deleteUnlistedMusic, compatibilityFormat) =>
       invoke<SyncEstimate[]>("estimate_sync", {

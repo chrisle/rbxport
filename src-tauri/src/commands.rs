@@ -1033,8 +1033,9 @@ pub async fn export_playlist<R: tauri::Runtime>(
     let progress_app = app.clone();
     let report = blocking("export_playlist", move || {
         let destination = std::path::Path::new(&destination);
+        let reservation = reserve_export(&progress_app, destination)?;
         let selection = playlist_export_selection(&state, &library, &share, destination, &playlist, delete_unlisted_music.unwrap_or(false))?;
-        write_export_with_progress(&progress_app, destination, &selection, defaults.as_ref(), compatibility_format)
+        write_export_registered(&progress_app, destination, &selection, defaults.as_ref(), compatibility_format, &reservation)
     })
     .await?;
 
@@ -1121,29 +1122,44 @@ pub async fn sync_devices<R: tauri::Runtime>(
     eject_after_sync: Option<bool>,
     delete_unlisted_music: Option<bool>,
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
+    verify_all: Option<bool>,
 ) -> AppResult<Vec<SyncDeviceReportDto>> {
     let library = state.library()?;
     let share = state.share_root();
     let state = Arc::clone(&state);
     blocking("sync_devices", move || {
+        let mut unique: Vec<&str> = Vec::new();
+        for destination in &destinations {
+            if unique.iter().any(|prior| rbl_core::durable::same_root(std::path::Path::new(prior), std::path::Path::new(destination)).unwrap_or(false)) {
+                return Err(AppError::internal("The same USB device was selected more than once. Select it once and retry."));
+            }
+            unique.push(destination);
+        }
+        let reservations: Vec<_> = destinations.iter().map(|path| reserve_export(&app, std::path::Path::new(path)).map(|mut ticket| {
+            ticket.verify_all = verify_all.unwrap_or(false); ticket
+        })).collect();
         let selection =
             ExportSelection::from_playlists(&state, &library, &share, &playlists, automatic.unwrap_or(false))?;
-        // The selection contains owned tracks and analysis. Clone it for each
-        // worker rather than rereading the library, then preserve the user's
-        // device order when collecting reports.
+        let selection = Arc::new(selection);
+        // Workers share lazy source descriptors; reservation failures belong
+        // only to their destination, not the other sticks in the batch.
         std::thread::scope(|scope| {
-            let workers: Vec<_> = destinations.into_iter().map(|destination| {
+            let workers: Vec<_> = destinations.into_iter().zip(reservations).map(|(destination, reservation)| {
                 let app = app.clone();
                 let state = Arc::clone(&state);
                 let library = Arc::clone(&library);
                 let selection = selection.clone();
                 let share = share.clone();
                 let defaults = defaults.clone();
-                scope.spawn(move || sync_one_device(
+                scope.spawn(move || match reservation {
+                    Err(error) => SyncDeviceReportDto { path: destination, report: None, error: Some(error.to_string()), ejected: false, eject_error: None },
+                    Ok(reservation) => sync_one_device(
                     &app, &state, &library, &share, &selection, destination,
                     defaults.as_ref(), delete_unlisted_music.unwrap_or(false),
                     eject_after_sync.unwrap_or(false), compatibility_format,
-                ))
+                    &reservation,
+                    ),
+                })
             }).collect();
             Ok(workers.into_iter().map(|worker| worker.join().unwrap_or_else(|_| SyncDeviceReportDto {
                 path: "Unknown device".to_owned(), report: None,
@@ -1191,19 +1207,20 @@ fn sync_one_device<R: tauri::Runtime>(
     share: &std::path::Path, selection: &ExportSelection, destination: String,
     defaults: Option<&crate::device_settings::StickDefaultsDto>, delete_unlisted_music: bool,
     eject_after_sync: bool, compatibility_format: Option<rbl_export::CompatibilityFormat>,
+    reservation: &ExportReservation<R>,
 ) -> SyncDeviceReportDto {
     let progress = |state: &'static str| {
         let _ = tauri::Emitter::emit(app, "sync:progress", SyncProgressDto { path: destination.clone(), state });
     };
     progress("writing");
     let stick = std::path::Path::new(&destination);
-    let written = selection.for_stick(state, library, share, stick, delete_unlisted_music)
-        .and_then(|selection| write_export_with_progress(app, stick, &selection, defaults, compatibility_format));
+    let written = reservation.check(stick).and_then(|()| selection.for_stick(state, library, share, stick, delete_unlisted_music))
+        .and_then(|selection| write_export_registered(app, stick, &selection, defaults, compatibility_format, reservation));
     match written {
         Ok(report) => {
             let mut result = SyncDeviceReportDto { path: destination.clone(), report: Some(report), error: None, ejected: false, eject_error: None };
             if eject_after_sync {
-                if result.report.as_ref().is_some_and(|report| report.verified && report.skipped.is_empty() && report.failed.is_empty()) {
+                if result.report.as_ref().is_some_and(|report| report.verified && report.skipped.is_empty() && report.failed.is_empty() && report.warnings.is_empty()) {
                     progress("ejecting");
                     set_export_stage(app, stick, "ejecting");
                     match rbl_devices::eject::eject(stick) {
@@ -1222,6 +1239,7 @@ fn sync_one_device<R: tauri::Runtime>(
                         if !report.verified {
                             causes.push("the written library did not read back correctly".to_owned());
                         }
+                        if !report.warnings.is_empty() { causes.push(format!("{} updates need attention", report.warnings.len())); }
                         format!(
                             "The sync was incomplete or could not be verified ({}). Review it before ejecting.",
                             causes.join(", ")
@@ -1260,16 +1278,20 @@ pub async fn estimate_sync(
     let state = Arc::clone(&state);
     blocking("estimate_sync", move || {
         let selection = ExportSelection::from_playlists(&state, &library, &share, &playlists, false)?;
+        let available: std::collections::HashMap<_, _> = rbl_devices::list().into_iter().filter(|d| d.total_bytes > 0).map(|d| (d.mount_point.to_string_lossy().into_owned(), d.free_bytes)).collect();
         Ok(destinations
             .into_iter()
             .map(|path| {
-                let found = rbl_export::estimate::estimate(
-                    std::path::Path::new(&path),
-                    selection.sync.db_id,
-                    &selection.tracks,
-                    delete_unlisted_music.unwrap_or(false),
-                    compatibility_format,
-                );
+                let options = rbl_export::ExportOptions { sync: Some(&selection.sync), compatibility: compatibility_format,
+                    cache: Some(&EXPORT_CACHE), ..Default::default() };
+                let plan = selection.for_stick_inspected(&state, &library, &share, std::path::Path::new(&path), delete_unlisted_music.unwrap_or(false), false)
+                    .map_err(|e| rbl_export::ExportError::Conflict(e.to_string()))
+                    .and_then(|selection| rbl_export::plan::preview(std::path::Path::new(&path), &selection.tracks, &selection.playlists, &selection.my_tags, &options));
+                let (found, net, peak, database_bytes, asset_bytes, unknown_size, kept_existing, approximate, error) = match plan {
+                    Ok(plan) => (plan.estimate, plan.net_additional_bytes, plan.peak_bytes, plan.database_bytes, plan.asset_bytes, plan.unknown_size, plan.kept_existing, plan.approximate, None),
+                    Err(error) => (rbl_export::estimate::Estimate::default(), 0, 0, 0, 0, true, 0, true, Some(error.to_string())),
+                };
+                let free = available.get(&path).copied();
                 tracing::debug!(
                     %path, selected = selection.tracks.len(), copy_bytes = found.copy_bytes, reuse_bytes = found.reuse_bytes,
                     free_bytes = found.free_bytes, new = found.tracks_new, changed = found.tracks_changed,
@@ -1277,6 +1299,10 @@ pub async fn estimate_sync(
                     "sync estimate"
                 );
                 crate::dto::SyncEstimateDto {
+                    net_additional_bytes: net, peak_bytes: peak, database_bytes, asset_bytes,
+                    projected_free_bytes: free.map(|free| if net < 0 { free.saturating_add(net.unsigned_abs()) } else { free.saturating_sub(net.unsigned_abs()) }),
+                    enough_space: free.filter(|_| !unknown_size && error.is_none()).map(|free| free >= peak),
+                    unknown_size, kept_existing: u32::try_from(kept_existing).unwrap_or(u32::MAX), error,
                     path,
                     copy_bytes: found.copy_bytes,
                     reuse_bytes: found.reuse_bytes,
@@ -1286,7 +1312,7 @@ pub async fn estimate_sync(
                     tracks_kept: found.tracks_kept,
                     tracks_removed: found.tracks_removed,
                     tracks_missing: found.tracks_missing,
-                    approximate: found.approximate,
+                    approximate: approximate || found.approximate,
                 }
             })
             .collect())
@@ -1312,8 +1338,9 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
     let progress_app = app.clone();
     let report = blocking("export_tracks_to_device", move || {
         let stick = std::path::Path::new(&destination);
+        let reservation = reserve_export(&progress_app, stick)?;
         let selection = track_export_selection(&state, &library, &share, stick, &tracks)?;
-        write_export_with_progress(&progress_app, stick, &selection, defaults.as_ref(), compatibility_format)
+        write_export_registered(&progress_app, stick, &selection, defaults.as_ref(), compatibility_format, &reservation)
     })
     .await?;
     let _ = tauri::Emitter::emit(&app, "export:done", &report);
@@ -1360,6 +1387,8 @@ pub async fn device_sync_state(state: State<'_, Arc<AppState>>, path: String) ->
     let state = Arc::clone(&state);
     blocking("device_sync_state", move || {
         let mount = std::path::Path::new(&path);
+        let _lease = rbl_core::durable::read_lease(mount).map_err(|e| AppError::internal(e.to_string()))?;
+        if rbl_export::recovery_pending(mount) { return Err(AppError::internal("This USB needs recovery. Sync it before browsing or ejecting it.")); }
         if !mount.is_dir() {
             return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
         }
@@ -1590,7 +1619,7 @@ impl ExportSelection {
             .flatten()
             .chain(loose_rows.iter())
             .map(|&row| library.ids.get(row as usize).copied().unwrap_or(0).to_string())
-            .collect();
+            .collect::<std::collections::BTreeSet<_>>().into_iter().collect();
         let (my_tags, extras, db_id) = state
             .read_db(|db| {
                 let conn = db.connection();
@@ -1630,7 +1659,7 @@ impl ExportSelection {
                 let at = if let Some(at)=position.get(&row) { *at } else {
                     let content = library.ids.get(row as usize).copied().unwrap_or(0).to_string();
                     let extra = extras.get(&content).cloned().unwrap_or_default();
-                    tracks.push(source_track(library, share, row, &extra)?);
+                    tracks.push(source_track(library, share, row, &extra));
                     let at=tracks.len()-1; position.insert(row,at); at
                 };
                 track_indices.push(at);
@@ -1641,7 +1670,7 @@ impl ExportSelection {
             if let std::collections::hash_map::Entry::Vacant(entry) = position.entry(row) {
                 let content = library.ids.get(row as usize).copied().unwrap_or(0).to_string();
                 let extra = extras.get(&content).cloned().unwrap_or_default();
-                tracks.push(source_track(library, share, row, &extra)?);
+                tracks.push(source_track(library, share, row, &extra));
                 entry.insert(tracks.len() - 1);
             }
         }
@@ -1689,10 +1718,18 @@ impl ExportSelection {
         destination: &std::path::Path,
         delete_unlisted_music: bool,
     ) -> AppResult<std::borrow::Cow<'a, Self>> {
+        self.for_stick_inspected(state, library, share, destination, delete_unlisted_music, true)
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "shared read-only preview and recovering execution selection")]
+    fn for_stick_inspected<'a>(
+        &'a self, state: &AppState, library: &rbl_index::Library, share: &std::path::Path,
+        destination: &std::path::Path, delete_unlisted_music: bool, recover_device: bool,
+    ) -> AppResult<std::borrow::Cow<'a, Self>> {
         if delete_unlisted_music {
             return Ok(std::borrow::Cow::Borrowed(self));
         }
-        rbl_export::recover(destination).map_err(|e| AppError::internal(e.to_string()))?;
+        if recover_device { rbl_export::recover(destination).map_err(|e| AppError::internal(e.to_string()))?; }
         let recorded = rbl_export::Manifest::load(destination).filter(|m| m.db_id == self.sync.db_id).map(|m| m.loose).unwrap_or_default();
         let held: std::collections::HashSet<u64> = self.tracks.iter().map(|t| t.id).collect();
         let missing: Vec<u64> = recorded.into_iter().filter(|id| !held.contains(id)).collect();
@@ -1721,7 +1758,7 @@ fn source_track(
     share: &std::path::Path,
     row: u32,
     extra: &rbl_db::export_info::TrackExtras,
-) -> AppResult<rbl_export::SourceTrack> {
+) -> rbl_export::SourceTrack {
     let i = row as usize;
     // What analysis wrote, from the row as it is now: an analysis run
     // re-reads the index only once it is over, and a sync made during one
@@ -1733,7 +1770,7 @@ fn source_track(
     let artwork = Some(artwork_path)
         .filter(|p| !p.is_empty())
         .map(|p| share.join(p.trim_start_matches(['/', '\\'])));
-    Ok(rbl_export::SourceTrack {
+    rbl_export::SourceTrack {
         cues: Some(extra.cues.clone()),
         metadata: extra.metadata.clone(),
         device: None,
@@ -1760,8 +1797,15 @@ fn source_track(
         sample_rate: library.sample_rate.get(i).copied().unwrap_or(0),
         file_size: library.file_size.get(i).copied().unwrap_or(0),
         year: library.year.get(i).copied().unwrap_or(0),
-        analysis: read_analysis(share, analysis_path)?,
-    })
+        analysis: Vec::new(),
+        analysis_source: (!analysis_path.is_empty()).then(|| share.join(analysis_path.trim_start_matches(['/', '\\']))),
+        source_unavailable: false,
+        fallback: None,
+        prepared_audio: None,
+        preparation_error: None,
+        retained_reason: None,
+        cache_bypass: false,
+    }
 }
 
 /// Writes a selection to one destination and reads it back.
@@ -1771,12 +1815,72 @@ static EXPORT_PROGRESS: std::sync::LazyLock<std::sync::Mutex<std::collections::H
     std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 static EXPORT_CANCEL: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+static EXPORT_CACHE: std::sync::LazyLock<rbl_export::cache::PreparationCache> = std::sync::LazyLock::new(|| {
+    let cache = rbl_export::cache::PreparationCache::new(rbl_backup::state_dir().join("cache/usb-export"));
+    if let Err(error) = cache.prune(8 * 1024 * 1024 * 1024) { tracing::warn!(%error, "could not prune export cache"); }
+    cache
+});
+static NEXT_EXPORT_JOB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+struct ExportReservation<R: tauri::Runtime> {
+    app: tauri::AppHandle<R>, path: String, id: String,
+    cancel: Arc<std::sync::atomic::AtomicBool>, started: std::time::Instant,
+    volume: rbl_core::durable::VolumeIdentity,
+    verify_all: bool,
+}
+
+impl<R: tauri::Runtime> ExportReservation<R> {
+    fn check(&self, destination: &std::path::Path) -> AppResult<()> {
+        if self.cancel.load(std::sync::atomic::Ordering::Relaxed) { return Err(AppError::new(ErrorKind::Cancelled, "Export cancelled.")); }
+        self.volume.check(destination).map_err(|e| AppError::new(ErrorKind::NotFound, e.to_string()))
+    }
+}
+
+impl<R: tauri::Runtime> Drop for ExportReservation<R> {
+    fn drop(&mut self) {
+        if let Ok(mut controls) = EXPORT_CANCEL.lock() {
+            if controls.get(&self.path).is_some_and(|c| Arc::ptr_eq(c, &self.cancel)) { controls.remove(&self.path); }
+            if controls.is_empty() {
+                if let Err(error) = EXPORT_CACHE.prune(8 * 1024 * 1024 * 1024) { tracing::warn!(%error, "could not prune export cache"); }
+            }
+        }
+        if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
+            if let Some(job) = jobs.get_mut(&self.path).filter(|j| j.job_id == self.id && !matches!(j.state, "done" | "failed" | "cancelled")) {
+                job.state = if self.cancel.load(std::sync::atomic::Ordering::Relaxed) { "cancelled" } else { "failed" };
+                job.sequence += 1; job.can_cancel = false;
+                let _ = tauri::Emitter::emit(&self.app, "export:progress", job.clone());
+            }
+        }
+    }
+}
+
+fn reserve_export<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &std::path::Path) -> AppResult<ExportReservation<R>> {
+    if rbl_db::is_rekordbox_app_running() { return Err(AppError::new(ErrorKind::ReadOnly, "Quit rekordbox before syncing this USB.")); }
+    let volume = rbl_core::durable::VolumeIdentity::capture(destination).map_err(|e| AppError::new(ErrorKind::NotFound, e.to_string()))?;
+    let path = destination.to_string_lossy().into_owned();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let id = NEXT_EXPORT_JOB.fetch_add(1, std::sync::atomic::Ordering::Relaxed).to_string();
+    let mut controls = EXPORT_CANCEL.lock().map_err(|e| AppError::internal(e.to_string()))?;
+    if controls.keys().any(|active| active == &path || rbl_core::durable::same_root(std::path::Path::new(active), destination).unwrap_or(false)) {
+        return Err(AppError::internal("An export to this device is already running."));
+    }
+    let mut jobs = EXPORT_PROGRESS.lock().map_err(|e| AppError::internal(e.to_string()))?;
+    if controls.is_empty() { jobs.clear(); }
+    controls.insert(path.clone(), Arc::clone(&cancel));
+    let progress = ExportProgressDto { path: path.clone(), state: "preparing", job_id: id.clone(), sequence: 1, can_cancel: true, unit: "tracks", ..Default::default() };
+    jobs.insert(path.clone(), progress.clone());
+    drop(jobs); drop(controls);
+    let _ = tauri::Emitter::emit(app, "export:progress", progress);
+    Ok(ExportReservation { app: app.clone(), path, id, cancel, started: std::time::Instant::now(), volume, verify_all: false })
+}
 
 fn set_export_stage<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &std::path::Path, state: &'static str) {
     let path = destination.to_string_lossy().into_owned();
     let progress = if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
         if let Some(job) = jobs.get_mut(&path) {
             job.state = state;
+            job.sequence += 1;
+            job.can_cancel = false;
             job.title.clear();
             Some(job.clone())
         } else {
@@ -1799,8 +1903,11 @@ fn set_export_failure<R: tauri::Runtime>(
             done: 0,
             total: 0,
             title: String::new(),
+            ..Default::default()
         });
         job.state = "failed";
+        job.sequence += 1;
+        job.can_cancel = false;
         job.title = message;
         Some(job.clone())
     } else {
@@ -1830,10 +1937,11 @@ pub async fn eject_device(state: State<'_, Arc<AppState>>, path: String) -> AppR
     let handle = Arc::clone(&state);
     blocking("eject_device", move || {
         // Keep new exports from starting until the OS has finished ejecting.
-        let jobs = EXPORT_PROGRESS.lock().map_err(|e| AppError::internal(e.to_string()))?;
-        if jobs.get(&path).is_some_and(|job| job.state == "writing") {
+        let jobs = EXPORT_CANCEL.lock().map_err(|e| AppError::internal(e.to_string()))?;
+        if jobs.keys().any(|active| active == &path || rbl_core::durable::same_root(std::path::Path::new(active), std::path::Path::new(&path)).unwrap_or(false)) {
             return Err(AppError::internal("This device is being exported to. Wait for the export to finish."));
         }
+        if rbl_export::recovery_pending(std::path::Path::new(&path)) { return Err(AppError::internal("This USB needs recovery. Sync it before ejecting it.")); }
         let result = rbl_devices::eject::eject(std::path::Path::new(&path))
             .map_err(|e| AppError::internal(e.to_string()));
         if result.is_ok() {
@@ -1857,8 +1965,8 @@ pub enum FormatLayout {
 pub async fn format_device(path: String, layout: FormatLayout) -> AppResult<()> {
     blocking("format_device", move || {
         // Keep new exports from starting until the stick has been formatted.
-        let jobs = EXPORT_PROGRESS.lock().map_err(|e| AppError::internal(e.to_string()))?;
-        if jobs.get(&path).is_some_and(|job| job.state == "writing") {
+        let jobs = EXPORT_CANCEL.lock().map_err(|e| AppError::internal(e.to_string()))?;
+        if jobs.keys().any(|active| active == &path || rbl_core::durable::same_root(std::path::Path::new(active), std::path::Path::new(&path)).unwrap_or(false)) {
             return Err(AppError::internal("This device is being exported to. Wait for the export to finish."));
         }
         let layout = match layout {
@@ -1891,64 +1999,99 @@ fn disconnected_during_export(destination: &std::path::Path, error: AppError) ->
     .with_detail(detail)
 }
 
-fn write_export_with_progress<R: tauri::Runtime>(
+fn write_export_registered<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     destination: &std::path::Path,
     selection: &ExportSelection,
     defaults: Option<&crate::device_settings::StickDefaultsDto>,
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
+    reservation: &ExportReservation<R>,
 ) -> AppResult<ExportReportDto> {
+    reservation.check(destination)?;
     let total = u32::try_from(selection.tracks.len()).unwrap_or(u32::MAX);
     let path = destination.to_string_lossy().into_owned();
-    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    {
-        let mut jobs = EXPORT_CANCEL.lock().map_err(|e| AppError::internal(e.to_string()))?;
-        if jobs.contains_key(&path) {
-            return Err(AppError::internal("An export to this device is already running."));
-        }
-        // A new batch replaces terminal progress from the previous one. When
-        // another job is active this export belongs to that same batch, so a
-        // stick that finishes early remains in the aggregate denominator.
-        if jobs.is_empty() {
-            if let Ok(mut progress) = EXPORT_PROGRESS.lock() {
-                progress.clear();
-            }
-        }
-        jobs.insert(path.clone(), Arc::clone(&cancel));
-    }
-    let emit = |state, done, title: String| {
+    let cancel = &reservation.cancel;
+    let started = reservation.started;
+    let job_id = &reservation.id;
+    let sequence = std::cell::Cell::new(1_u64);
+    let last_emit = std::cell::Cell::new(started.checked_sub(std::time::Duration::from_secs(1)).unwrap_or(started));
+    let last_stage = std::cell::Cell::new("");
+    let last_unit = std::cell::Cell::new("");
+    let stage_started = std::cell::Cell::new(started);
+    let last_title = std::cell::RefCell::new(String::new());
+    let emit = |state, done, title: String, details: Option<&rbl_export::ExportProgress>| {
+        let now = std::time::Instant::now();
+        let unit = details.map_or("tracks", |p| p.unit);
+        let same_phase = last_stage.get() == state && last_unit.get() == unit;
+        let same_operation = same_phase && *last_title.borrow() == title;
+        if same_phase && now.duration_since(last_emit.get()) < std::time::Duration::from_millis(100) { return; }
+        if !same_operation { stage_started.set(now); last_title.borrow_mut().clone_from(&title); }
+        last_emit.set(now);
+        last_stage.set(state);
+        last_unit.set(unit);
+        sequence.set(sequence.get() + 1);
         let progress = ExportProgressDto {
-            path: destination.to_string_lossy().into_owned(), state, done, total, title,
+            bytes_per_second: details.filter(|p| p.unit == "bytes").map_or(0, |p| {
+                let ms = u64::try_from(stage_started.get().elapsed().as_millis()).unwrap_or(u64::MAX);
+                if ms < 200 { 0 } else { p.bytes_done.saturating_mul(1000) / ms }
+            }),
+            path: destination.to_string_lossy().into_owned(), state, done,
+            total: details.map_or(total, |p| u32::try_from(p.total).unwrap_or(u32::MAX)), title,
+            job_id: job_id.clone(), sequence: sequence.get(),
+            unit: details.map_or("tracks", |p| p.unit),
+            bytes_done: details.map_or(0, |p| p.bytes_done), bytes_total: details.map_or(0, |p| p.bytes_total),
+            reused: details.map_or(0, |p| u32::try_from(p.reused).unwrap_or(u32::MAX)),
+            copied: details.map_or(0, |p| u32::try_from(p.copied).unwrap_or(u32::MAX)),
+            converted: details.map_or(0, |p| u32::try_from(p.converted).unwrap_or(u32::MAX)),
+            elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            can_cancel: matches!(state, "preparing" | "checking" | "copying" | "converting" | "database"),
+            up_to_date: false,
+            warnings_count: 0,
         };
         if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
             jobs.insert(progress.path.clone(), progress.clone());
         }
         let _ = tauri::Emitter::emit(app, "export:progress", progress);
     };
-    emit("preparing", 0, String::new());
+    emit("preparing", 0, String::new(), None);
     let done = std::cell::Cell::new(0);
     let result = write_export_with_phase(
         destination, selection, defaults, compatibility_format,
+        Some(&reservation.volume),
+        reservation.verify_all,
         &mut |p| {
             done.set(u32::try_from(p.done).unwrap_or(u32::MAX));
-            emit(p.stage, done.get(), p.title.clone());
+            emit(p.stage, done.get(), p.title.clone(), Some(p));
         },
-        &mut |phase| emit(phase, if phase == "verifying" { total } else { done.get() }, String::new()),
+        &mut |phase| emit(phase, 0, String::new(), None),
         &|| cancel.load(std::sync::atomic::Ordering::Relaxed),
     )
     .map_err(|error| disconnected_during_export(destination, error));
     let cancelled = result.as_ref().err().is_some_and(|e| matches!(e.kind, ErrorKind::Cancelled));
     emit(if result.is_ok() { "done" } else if cancelled { "cancelled" } else { "failed" }, if result.is_ok() { total } else { done.get() },
-        result.as_ref().err().map_or_else(String::new, |e| e.message.clone()));
-    if let Ok(mut jobs) = EXPORT_CANCEL.lock() { jobs.remove(&path); }
+        result.as_ref().err().map_or_else(String::new, |e| e.message.clone()), None);
+    if let Ok(report) = &result {
+        if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
+            if let Some(job) = jobs.get_mut(&path) {
+                job.up_to_date = report.up_to_date; job.reused = report.reused; job.converted = report.converted;
+                job.copied = report.tracks_added + report.tracks_updated;
+                job.warnings_count = u32::try_from(report.warnings.len() + report.skipped.len() + report.failed.len()).unwrap_or(u32::MAX);
+                job.sequence += 1;
+                let _ = tauri::Emitter::emit(app, "export:progress", job.clone());
+            }
+        }
+    }
     result
 }
 
+#[allow(clippy::too_many_arguments, reason = "export options and independent progress/cancellation callbacks")]
 fn write_export_with_phase(
     destination: &std::path::Path,
     selection: &ExportSelection,
     defaults: Option<&crate::device_settings::StickDefaultsDto>,
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
+    expected_volume: Option<&rbl_core::durable::VolumeIdentity>,
+    verify_all: bool,
     progress: &mut dyn FnMut(&rbl_export::ExportProgress),
     phase: &mut dyn FnMut(&'static str),
     cancelled: &dyn Fn() -> bool,
@@ -1970,9 +2113,14 @@ fn write_export_with_phase(
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
     let export_root = destination.join(root_name);
     let settings_root = crate::usb_import::settings_stash(&rbl_backup::state_dir());
-    let imported_settings: Vec<_> = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"].into_iter()
+    let mut imported_settings: Vec<_> = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"].into_iter()
         .filter(|name| !export_root.join(name).exists())
-        .filter_map(|name| std::fs::read(settings_root.join(name)).ok().map(|bytes| (name, bytes))).collect();
+        .filter_map(|name| std::fs::read(settings_root.join(name)).ok().map(|bytes| (name.to_owned(), bytes))).collect();
+    if !export_root.join("DEVSETTING.DAT").exists() {
+        if let Some(defaults) = defaults {
+            imported_settings.push(("DEVSETTING.DAT".to_owned(), crate::device_settings::dev_defaults(defaults)?.encode()));
+        }
+    }
     let library_defaults = defaults.map(crate::device_settings::library_defaults);
     let report = rbl_export::export_cancellable(
         destination,
@@ -1985,31 +2133,23 @@ fn write_export_with_phase(
             compatibility: compatibility_format,
             root: preferred_root,
             keep_unlisted: selection.keep_unlisted,
+            settings_files: &imported_settings,
+            cache: Some(&EXPORT_CACHE),
+            expected_volume,
+            verify_all,
         },
         progress,
         cancelled,
     )
     .map_err(|e| AppError::new(if matches!(e, rbl_export::ExportError::Cancelled) { ErrorKind::Cancelled } else { ErrorKind::Internal }, e.to_string()))?;
-    if let Some(defaults) = defaults {
-        crate::device_settings::write_dev_defaults(destination, defaults)?;
-    }
-
-    for (name, bytes) in imported_settings {
-        crate::durable::write(&export_root.join(name), &bytes).map_err(|e| AppError::internal(e.to_string()))?;
-    }
-    // Re-read what was written with the independent parser: an export that
-    // cannot be read back is not an export.
-    phase("verifying");
-    let check = rbl_export::verify_databases(destination)
-        .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
-    if !check.is_ok() {
-        return Err(AppError::internal(format!("The USB did not verify after the sync: {}", rbl_export::verification_failure(&check))));
-    }
-    if check.tracks != report.tracks {
-        return Err(AppError::internal(format!("The USB did not verify after the sync: it lists {} tracks where {} were written.", check.tracks, report.tracks)));
-    }
+    if !report.verified { return Err(AppError::internal("The exported generation was not verified.")); }
+    phase("finalizing");
 
     Ok(ExportReportDto {
+        up_to_date: report.up_to_date,
+        kept_existing: u32::try_from(report.kept_existing).unwrap_or(u32::MAX),
+        converted: u32::try_from(report.converted).unwrap_or(u32::MAX),
+        warnings: report.warnings,
         tracks: u32::try_from(report.tracks).unwrap_or(0),
         playlists: u32::try_from(report.playlists).unwrap_or(0),
         bytes_copied: report.bytes_copied,
@@ -2022,7 +2162,7 @@ fn write_export_with_phase(
         playlists_removed: u32::try_from(report.playlists_removed).unwrap_or(0),
         skipped: report.skipped,
         failed: report.failed,
-        verified: check.is_ok() && check.tracks == report.tracks,
+        verified: report.verified,
     })
 }
 
@@ -2081,6 +2221,7 @@ fn source_audio(folder_path: &str, alternates: &[String]) -> std::path::PathBuf 
 
 /// Reads a track's analysis files, so the export re-emits rather than
 /// re-analysing.
+#[cfg(test)]
 fn read_analysis(share: &std::path::Path, relative: &str) -> AppResult<Vec<(String, Vec<u8>)>> {
     if relative.is_empty() {
         return Ok(Vec::new());
@@ -3758,6 +3899,7 @@ async fn import_collection<R: tauri::Runtime>(
                     done: u32::try_from(done).unwrap_or(u32::MAX),
                     total: u32::try_from(total).unwrap_or(u32::MAX),
                     title: String::new(),
+                    ..Default::default()
                 },
             );
         };
@@ -4277,13 +4419,13 @@ mod tests {
     fn export_playlist_to(state: &crate::state::AppState, location: &rbl_db::LibraryLocation, stick: &std::path::Path, playlist: &str) {
         let library = state.library().unwrap();
         let selection = super::playlist_export_selection(state, &library, &location.share_root, stick, playlist, false).unwrap();
-        super::write_export_with_phase(stick, &selection, None, None, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export_with_phase(stick, &selection, None, None, None, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
     }
 
     fn export_track_to(state: &crate::state::AppState, location: &rbl_db::LibraryLocation, stick: &std::path::Path, track: &str) {
         let library = state.library().unwrap();
         let selection = super::track_export_selection(state, &library, &location.share_root, stick, &[track.to_owned()]).unwrap();
-        super::write_export_with_phase(stick, &selection, None, None, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export_with_phase(stick, &selection, None, None, None, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
     }
 
     /// Export Playlist from the tree adds the playlist to what the stick
@@ -4399,7 +4541,7 @@ mod tests {
         let library = state.library().unwrap();
         let everything: Vec<String> = [&first, &second, &in_first, &in_second].iter().map(|s| (*s).clone()).collect();
         let selection = super::ExportSelection::from_playlists(&state, &library, &location.share_root, &everything, false).unwrap();
-        super::write_export_with_phase(&stick, &selection, None, None, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export_with_phase(&stick, &selection, None, None, None, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
 
         let order: Vec<String> = on_stick(&stick).into_iter().map(|(id, _)| id).collect();
         let expected = [second.clone(), in_second.clone(), first.clone(), in_first.clone()];

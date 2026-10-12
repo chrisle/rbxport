@@ -56,7 +56,7 @@ impl core::fmt::Display for FourCc {
 
 
 /// Library metadata needed by both USB database formats beyond the browse index.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExportMetadata {
     pub track_number: u32,
     pub disc_number: u16,

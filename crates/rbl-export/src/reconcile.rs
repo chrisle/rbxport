@@ -118,28 +118,38 @@ fn identify_tracks(
     db_id: u64,
     existing_sources: &BTreeMap<u32, SourceTrack>,
 ) {
+    let mut identities = BTreeMap::new();
+    for (id, (db, content)) in &before.identity {
+        if *db == db_id && *content != 0 { identities.entry(*content).or_insert(*id); }
+    }
+    let recorded: BTreeMap<_, _> = previous.filter(|m| m.db_id == db_id).into_iter().flat_map(|m| &m.tracks)
+        .map(|t| (t.key(), t.export_id)).collect();
+    let exported: BTreeSet<_> = previous.into_iter().flat_map(|m| &m.tracks).filter(|t| t.preserved != Some(true)).map(|t| t.export_id).collect();
     for track in tracks {
         if track.device.is_some() {
             continue;
         }
-        let identity = before
-            .identity
-            .iter()
-            .find(|(_, (db, content))| *db == db_id && *content == track.id && track.id != 0)
-            .map(|(id, _)| *id)
-            .or_else(|| {
-                previous
-                    .filter(|m| m.db_id == db_id)
-                    .and_then(|m| {
-                        m.tracks.iter().find(|t| {
-                            t.key()
-                                == crate::track_key(track.id, &track.source_path.to_string_lossy())
-                        })
-                    })
-                    .map(|t| t.export_id)
-            });
+        let identity = identities.get(&track.id).copied().or_else(|| recorded.get(&crate::track_key(track.id, &track.source_path.to_string_lossy())).copied());
         if let Some(id) = identity {
             if let Some(source) = existing_sources.get(&id) {
+                track.fallback = Some(Box::new(source.clone()));
+                let source_changed = previous.and_then(|m| m.generation.as_ref())
+                    .and_then(|g| g.inputs.get(&track.source_path.to_string_lossy().into_owned()))
+                    .is_some_and(|old| crate::incremental::revision(&track.source_path).is_ok_and(|now| now != *old));
+                let unavailable = !track.source_path.is_file() || (source_changed && std::fs::File::open(&track.source_path).is_err());
+                if unavailable && source.source_path.is_file() {
+                    let master_id = track.id;
+                    *track = source.clone();
+                    track.id = master_id;
+                    track.source_unavailable = true;
+                    if let Some(device) = &mut track.device {
+                        device.master_db_id = db_id;
+                        device.master_content_id = master_id;
+                        device.preserve = true;
+                        device.exported = exported.contains(&id);
+                    }
+                    continue;
+                }
                 let mut device = source.device.clone().unwrap_or_default();
                 device.preserve = false;
                 device.master_db_id = db_id;
@@ -325,6 +335,33 @@ fn retain_device_only(
 /// Read complete track metadata from whichever database exists. Both formats
 /// share the audio and analysis files; only the explicit identity map is trusted.
 fn sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTrack>> {
+    let manifest = Manifest::load(root);
+    if let Some(generation) = manifest.as_ref().and_then(|m| m.generation.as_ref())
+        .filter(|g| !g.device_sources.is_empty() && crate::incremental::databases(root).is_ok_and(|signatures| signatures == g.databases)) {
+        let mut sources = generation.device_sources.clone();
+        for source in sources.values_mut() {
+            source.source_path = crate::checked_under(root, &source.source_path.to_string_lossy())?;
+            if let Some(path) = &source.analysis_source { source.analysis_source = Some(crate::checked_under(root, &path.to_string_lossy())?); }
+            if let Some(path) = &source.artwork { source.artwork = Some(crate::checked_under(root, &path.to_string_lossy())?); }
+        }
+        return Ok(sources);
+    }
+    read_sources(root, before)
+}
+
+/// Normalized metadata from the independently parsed staged generation.
+/// Persist relative paths so a volume rename cannot strand its cached rows.
+pub(crate) fn capture_sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTrack>> {
+    let mut sources = read_sources(root, before)?;
+    for source in sources.values_mut() {
+        source.source_path = source.source_path.strip_prefix(root).map_err(std::io::Error::other)?.to_owned();
+        if let Some(path) = &source.analysis_source { source.analysis_source = Some(path.strip_prefix(root).map_err(std::io::Error::other)?.to_owned()); }
+        if let Some(path) = &source.artwork { source.artwork = Some(path.strip_prefix(root).map_err(std::io::Error::other)?.to_owned()); }
+    }
+    Ok(sources)
+}
+
+fn read_sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTrack>> {
     let mut out = BTreeMap::new();
     let manifest = Manifest::load(root);
     let dir = crate::export_root(root).join("rekordbox");
@@ -455,6 +492,7 @@ fn fill_source_details(
     // Tracks only. Its playlist ids use no recorded floor, unlike
     // `prepare`'s `merged_library_above`: do not rely on them here.
     let current = before.merged_library();
+    let recorded: BTreeMap<_, _> = manifest.into_iter().flat_map(|m| m.tracks.iter().map(|t| (t.export_id, (m.db_id, t.library_id)))).collect();
     for t in current.as_ref().into_iter().flat_map(|l| &l.tracks) {
         let track = out
             .get_mut(&t.id)
@@ -470,26 +508,14 @@ fn fill_source_details(
             .map_or(String::new(), |p| p.to_string_lossy().into_owned());
         if !t.analysis.is_empty() {
             let base = crate::checked_under(root, &t.analysis)?;
-            for extension in ["DAT", "EXT", "2EX"] {
-                let path = base.with_extension(extension);
-                match std::fs::read(&path) {
-                    Ok(bytes) => track.analysis.push((extension.into(), bytes)),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(e.into()),
-                }
-            }
+            track.analysis_source = Some(base);
         }
         let (master_db_id, master_content_id) = before
             .identity
             .get(&t.id)
             .copied()
             .or_else(|| {
-                manifest.and_then(|m| {
-                    m.tracks
-                        .iter()
-                        .find(|old| old.export_id == t.id)
-                        .map(|old| (m.db_id, old.library_id))
-                })
+                recorded.get(&t.id).copied()
             })
             .unwrap_or_default();
         track.device = Some(DeviceTrack {

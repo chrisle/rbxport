@@ -28,6 +28,9 @@ const locales = {
 // or from a generic machine translation. Machine translation also tends to
 // give singular keys a plural form; those corrections live here too.
 const overrides = {
+  el: {
+    "Needs {space} free while syncing": "Απαιτούνται {space} ελεύθερα κατά τον συγχρονισμό",
+  },
   cs: {
     "{size} total · {count} track": "{size} celkem · {count} skladba",
   },

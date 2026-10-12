@@ -194,3 +194,24 @@ fn a_fat32_or_exfat_stick_takes_another_playlist_on_a_later_sync() {
         assert!(leftovers(root).is_empty(), "{file_system}: {:?}", leftovers(root));
     }
 }
+
+#[test]
+fn published_invalid_databases_roll_back_on_fat32_and_exfat() {
+    for (file_system, volume) in volumes() {
+        let root = volume.mount.join("retained");
+        let source = tempfile::tempdir().unwrap(); let selected = tracks(source.path());
+        sync(&root, &selected).unwrap();
+        let paths = ["PIONEER/rekordbox/export.pdb", "PIONEER/rekordbox/exportLibrary.db"];
+        let original: Vec<_> = paths.iter().map(|p| std::fs::read(root.join(p)).unwrap()).collect();
+        {
+            let publication = rbl_core::durable::Publication::new(&root, ".rbxport-publication").unwrap();
+            rbl_core::durable::create_dir_all(publication.stage().join("PIONEER/rekordbox")).unwrap();
+            for path in paths { rbl_core::durable::write(&publication.stage().join(path), b"invalid generation").unwrap(); }
+            publication.commit_retained(&paths.map(PathBuf::from)).unwrap();
+        }
+        assert!(rbl_export::recover(&root).is_err(), "{file_system}");
+        for (path, bytes) in paths.iter().zip(&original) { assert_eq!(&std::fs::read(root.join(path)).unwrap(), bytes, "{file_system}"); }
+        rbl_export::recover(&root).unwrap(); rbl_export::recover(&root).unwrap();
+        assert!(verify(&root).unwrap().is_ok()); assert!(leftovers(&root).is_empty());
+    }
+}

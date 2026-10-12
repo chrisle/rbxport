@@ -2116,13 +2116,23 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }
       return reports;
     },
-    // The mock holds no audio, so a playlist is worth a fixed 300 MB of new
-    // tracks on a stick that has not been synced.
+    // Synthetic sizes, but the same deduplication and peak/net distinction.
     estimateSync: (playlists, destinations) => wait(destinations.map((path) => {
-      const copyBytes = playlists.length * 300 * 1024 ** 2;
+      const selected = new Set(playlists.flatMap(membersOf));
+      const device = devices.find(d => d.path === path);
+      const kept = device?.export?.ours ? Math.min(device.export.tracks, selected.size) : 0;
+      const newTracks = selected.size - kept;
+      const copyBytes = newTracks * 8_000_000;
+      const databaseBytes = 256 * 1024;
+      const netAdditionalBytes = copyBytes;
+      const peakBytes = copyBytes + databaseBytes + 64 * 1024;
       return {
-        path, copyBytes, reuseBytes: 0, freeBytes: 0, tracksNew: playlists.length * 10, tracksChanged: 0,
-        tracksKept: 0, tracksRemoved: 0, tracksMissing: 0, approximate: false,
+        path, copyBytes, reuseBytes: kept * 8_000_000, freeBytes: 0, tracksNew: newTracks, tracksChanged: 0,
+        tracksKept: kept, tracksRemoved: 0, tracksMissing: 0, approximate: true,
+        netAdditionalBytes, peakBytes, databaseBytes, assetBytes: 0,
+        projectedFreeBytes: device ? Math.max(0, device.freeBytes - netAdditionalBytes) : null,
+        enoughSpace: device ? device.freeBytes >= peakBytes : null,
+        unknownSize: !device,
       };
     })),
     validateExportFiles: () => wait([]),

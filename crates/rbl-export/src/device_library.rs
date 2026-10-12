@@ -198,8 +198,12 @@ fn missing(format: Format) -> ExportError {
 
 /// Reads one library from the stick at `root`.
 pub fn read(root: &Path, format: Format) -> Result<Library> {
-    crate::recover(root)?;
-    read_unlocked(root, format)
+    loop {
+        crate::recover(root)?;
+        let lease = rbl_core::durable::read_lease(root)?;
+        if crate::recovery_pending(root) { drop(lease); continue; }
+        return read_unlocked(root, format);
+    }
 }
 
 fn read_unlocked(root: &Path, format: Format) -> Result<Library> {

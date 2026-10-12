@@ -10,6 +10,7 @@ description = "Reader for rekordbox ANLZ analysis files (.DAT/.EXT/.2EX)."
 workspace = true
 
 [dependencies]
+serde = { workspace = true }
 rbl-core = { path = "../rbl-core" }
 thiserror = { workspace = true }
 tracing = { workspace = true }

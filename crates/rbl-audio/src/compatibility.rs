@@ -78,6 +78,19 @@ fn open(path: &Path) -> Result<Box<dyn symphonia::core::formats::FormatReader>> 
 /// integer PCM WAV/AIFF, mono/stereo at 44.1/48 kHz. Probe the codec, not only
 /// its extension (a WAV can contain float PCM or ADPCM).
 pub fn needs_conversion(path: &Path) -> Result<bool> {
+    inspect(path).map(|p| !p.compatible)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AudioProperties {
+    pub compatible: bool,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
+    pub channels: Option<u32>,
+    pub frames: Option<u64>,
+}
+
+pub fn inspect(path: &Path) -> Result<AudioProperties> {
     let format = open(path)?;
     let track = format.default_track().ok_or(AudioError::NoTrack)?;
     let p = &track.codec_params;
@@ -92,9 +105,11 @@ pub fn needs_conversion(path: &Path) -> Result<bool> {
         "aif" | "aiff" => p.codec == CODEC_TYPE_PCM_S16BE || p.codec == CODEC_TYPE_PCM_S24BE,
         _ => false,
     };
-    Ok(!(codec_ok
+    Ok(AudioProperties { compatible: codec_ok
         && matches!(p.sample_rate, Some(44_100 | 48_000))
-        && p.channels.is_some_and(|c| matches!(c.count(), 1 | 2))))
+        && p.channels.is_some_and(|c| matches!(c.count(), 1 | 2)),
+        sample_rate: p.sample_rate, bit_depth: p.bits_per_sample,
+        channels: p.channels.and_then(|c| u32::try_from(c.count()).ok()), frames: p.n_frames })
 }
 
 struct Output {
@@ -251,6 +266,12 @@ impl Output {
     reason = "linear streaming decode and resample loop"
 )]
 pub fn convert(source: &Path, destination: &Path, target: Format) -> Result<u64> {
+    convert_observed(source, destination, target, &mut |_, _| true)
+}
+
+/// Progress is decoded milliseconds; false cancels between audio packets.
+#[allow(clippy::too_many_lines, reason = "linear streaming decode and resample loop")]
+pub fn convert_observed(source: &Path, destination: &Path, target: Format, progress: &mut dyn FnMut(u64, Option<u64>) -> bool) -> Result<u64> {
     let mut format = open(source)?;
     let track = format.default_track().ok_or(AudioError::NoTrack)?;
     let track_id = track.id;
@@ -291,6 +312,9 @@ pub fn convert(source: &Path, destination: &Path, target: Format) -> Result<u64>
     let mut pending = [Vec::<f32>::new(), Vec::<f32>::new()];
     let mut input_frames = 0_u64;
     loop {
+        if !progress(input_frames * 1000 / u64::from(rate), expected_frames.map(|n| n * 1000 / u64::from(rate))) {
+            return Err(error("Compatibility conversion cancelled"));
+        }
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(symphonia::core::errors::Error::IoError(e))

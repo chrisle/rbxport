@@ -41,6 +41,10 @@ export default defineConfig({
         selfDefending: false,
         disableConsoleOutput: false,
         stringArray: true,
+        // Keep shuffled string tables, but avoid per-chunk startup rotation
+        // loops and their duplicated code as stage feedback adds lazy chunks.
+        stringArrayRotate: false,
+        stringArrayIndexShift: false,
         stringArrayThreshold: 0.5,
         stringArrayEncoding: [],
       });

@@ -54,7 +54,7 @@ fn a_stick_someone_else_wrote_still_reports_its_contents() {
 #[test]
 fn a_stick_with_only_a_manifest_is_not_an_export() {
     let stick = tempfile::tempdir().unwrap();
-    let manifest = rbl_export::Manifest { db_id: 0, baseline: None,
+    let manifest = rbl_export::Manifest { generation: None, db_id: 0, baseline: None,
         version: rbl_export::manifest::MANIFEST_VERSION,
         written: "2026-09-08 00:00:00.000 +00:00".to_owned(),
         tracks: Vec::new(),

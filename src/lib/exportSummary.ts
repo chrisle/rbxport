@@ -15,13 +15,19 @@ export interface ExportCounts {
   skipped: string[];
   failed?: string[];
   verified: boolean;
+  upToDate?: boolean;
+  keptExisting?: number;
+  converted?: number;
+  warnings?: readonly { title: string }[];
 }
 
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-export function exportSummary(name: string, report: ExportCounts): string {
+export function exportSummary(name: string, report: ExportCounts, t: (text: string, values?: Readonly<Record<string, string | number>>) => string = text => text): string {
+  const warnings = report.warnings ?? [];
+  if (report.upToDate && warnings.length === 0) return `${name}: ${t("Already up to date")}.`;
   const copied = Math.max(0, report.tracks - report.reused);
   const parts = [
     `${name}: Updated ${plural(copied, "track")}`,
@@ -37,5 +43,8 @@ export function exportSummary(name: string, report: ExportCounts): string {
     parts.push(`${plural(report.failed.length, "track")} failed`);
   }
   if (!report.verified) parts.push("but the result did not read back");
+  if ((report.keptExisting ?? 0) > 0) parts.push(t("{count} existing versions kept", { count: report.keptExisting ?? 0 }));
+  if ((report.converted ?? 0) > 0) parts.push(t("{count} tracks converted", { count: report.converted ?? 0 }));
+  if (warnings.length > 0) parts.push(`${t("Export complete with warnings")}: ${warnings.map(w => w.title).join(", ")}`);
   return `${parts.join(". ")}.`;
 }

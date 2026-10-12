@@ -23,7 +23,7 @@ import { ArrowLeft, ArrowRight, LoaderCircle, Search, Settings2, X } from "lucid
 
 import { EjectIcon, FolderIcon, ListIcon, SmartListIcon } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
-import type { Device, DeviceSyncState, ExportReport, FormatLayout, ItunesLibrary, MissingExportFile, SyncEstimate, TreeNode } from "@/ipc/types";
+import type { Device, DeviceSyncState, ExportReport, FormatLayout, ItunesLibrary, MissingExportFile, SyncDeviceReport, SyncEstimate, TreeNode } from "@/ipc/types";
 import { formatSpace } from "@/lib/devices";
 import { errorMessage } from "@/lib/errorMessage";
 import { detectPlatform } from "@/lib/shortcuts";
@@ -31,8 +31,9 @@ import { askToReplaceLists } from "@/lib/xmlImport";
 import { nodesForSource, subtreeIds, toggle, visibleNodes } from "@/lib/tree";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { usePreferences } from "@/store/usePreferences";
-import { useExportProgress, exportPercent } from "@/store/useExportProgress";
-import { StopExport } from "@/components/StopExport";
+import { useExportProgress } from "@/store/useExportProgress";
+import { canStopExport, isExportActive } from "@/lib/exportProgress";
+import { ExportProgressDetails } from "@/components/ExportProgressDetails";
 import { FormatDeviceDialog } from "./FormatDeviceDialog";
 import { MissingFilesDialog } from "./MissingFilesDialog";
 import { useTranslation } from "@/i18n";
@@ -146,6 +147,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   const [deviceErrors, setDeviceErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const [states, setStates] = useState<ReadonlyMap<string, DeviceSyncState>>(new Map());
   const [estimates, setEstimates] = useState<ReadonlyMap<string, SyncEstimate>>(new Map());
+  const [estimatesLoading, setEstimatesLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [loadingTree, setLoadingTree] = useState(true);
   // Sync Manager can open before the library has finished loading; the tree is
@@ -175,8 +177,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   const [ejectingPath, setEjectingPath] = useState<string | null>(null);
   const [missingPrompt, setMissingPrompt] = useState<{ files: MissingExportFile[]; resolve: (proceed: boolean) => void } | null>(null);
   const [formatTarget, setFormatTarget] = useState<Device | null>(null);
-  const busy = operation !== null || [...exportJobs.values()].some(job => ["preparing", "checking", "copying", "database", "verifying", "publishing", "ejecting"].includes(job.state));
+  const busy = operation !== null || [...exportJobs.values()].some(isExportActive);
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
+  const [verifyAll, setVerifyAll] = useState(false);
   /** What is happening now, or what happened: one line, or one per stick. */
   const [status, setStatus] = useState<string[]>([]);
   const [showStatusDetails, setShowStatusDetails] = useState(false);
@@ -230,23 +233,27 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   // ticking has settled. A key rather than the device list: that is re-read
   // on a timer and would restart the estimate every time.
   const estimateDevices = [...tickedDevices].sort().join("\n");
+  const capacityRevision = devices.map(d => `${d.path}:${d.totalBytes}:${d.freeBytes}:${d.fileSystem}`).join("\n");
   const reported = completedReports.size;
   useEffect(() => {
     const ids = nodes.filter((n) => isExportablePlaylist(n) && ticked.has(n.id)).map((n) => n.id);
     const destinations = estimateDevices === "" ? [] : estimateDevices.split("\n");
     if (ids.length === 0 || destinations.length === 0) {
       setEstimates(new Map());
+      setEstimatesLoading(false);
       return;
     }
+    setEstimates(new Map());
+    setEstimatesLoading(true);
     let live = true;
     const timer = window.setTimeout(() => {
       void getBackend()
         .then((backend) => backend.estimateSync(ids, destinations, deleteUnlistedMusic, compatibilityFormat))
-        .then((found) => { if (live) setEstimates(new Map(found.map((e) => [e.path, e] as const))); })
-        .catch(() => { if (live) setEstimates(new Map()); });
-    }, 300);
+        .then((found) => { if (live) { setEstimates(new Map(found.map((e) => [e.path, e] as const))); setEstimatesLoading(false); } })
+        .catch(() => { if (live) { setEstimates(new Map(destinations.map(path => [path, { path, copyBytes: 0, freeBytes: 0, reuseBytes: 0, tracksNew: 0, tracksChanged: 0, tracksKept: 0, tracksRemoved: 0, tracksMissing: 0, approximate: true, unknownSize: true, error: t("Could not calculate space. Refresh the device and try again.") }]))); setEstimatesLoading(false); } });
+    }, 200);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [nodes, ticked, estimateDevices, deleteUnlistedMusic, compatibilityFormat, reported]);
+  }, [nodes, ticked, estimateDevices, capacityRevision, deleteUnlistedMusic, compatibilityFormat, reported, t]);
   const playlistCount = selectedCount === 1 ? t("{count} playlist", { count: selectedCount }) : t("{count} playlists", { count: selectedCount });
   const deviceCount = tickedDevices.size === 1 ? t("{count} USB device", { count: tickedDevices.size }) : t("{count} USB devices", { count: tickedDevices.size });
   const selectionSummary = t("{playlists} → {devices}", { playlists: playlistCount, devices: deviceCount });
@@ -699,20 +706,39 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
         }
         // SYNC only writes to the sticks; nothing on them comes back into the
         // library unless Import is clicked (#199).
+        const ineligible = new Map<string, string>();
+        for (const path of destinations) {
+          if (estimates.get(path)?.enoughSpace === false) ineligible.set(path, t("Not enough temporary space to sync safely"));
+        }
+        const eligible = destinations.filter(path => !ineligible.has(path));
+        if (eligible.length === 0) {
+          setStatus([...ineligible].map(([path, message]) => `${nameOf(path)}: ${message}`));
+          return;
+        }
         stop = backend.onSyncProgress((progress) => {
           if (progress.state === "writing") setStatus([t("Writing to {device}…", { device: nameOf(progress.path) })]);
           if (progress.state === "ejecting") setStatus([t("Ejecting {device}…", { device: nameOf(progress.path) })]);
         });
-        const reports = await backend.syncDevices(playlists, destinations, stickDefaults, false, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat);
+        const reports: SyncDeviceReport[] = [
+          ...await backend.syncDevices(playlists, eligible, stickDefaults, false, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll),
+          ...[...ineligible].map(([path, error]) => ({ path, error })),
+        ];
         setCompletedReports(new Map(reports.flatMap(r => r.report ? [[r.path, r.report] as const] : [])));
         const outcomes = reports.flatMap(r => r.error
           ? [`${nameOf(r.path)}: ${r.error}`]
           : r.ejected ? [`${nameOf(r.path)}: Safely ejected.`]
           : r.ejectError ? [`${nameOf(r.path)}: Not ejected: ${r.ejectError}`] : []);
-        setStatus(outcomes.length > 0 ? outcomes : [t("Sync complete.")]);
+        const hasWarnings = reports.some(r => r.report && ((r.report.warnings?.length ?? 0) + r.report.skipped.length + r.report.failed.length > 0));
+        setStatus(outcomes.length > 0 ? outcomes : [hasWarnings ? t("Sync complete with warnings.") : t("Sync complete.")]);
         setStatusDetail(reports.flatMap(r => [
           ...(r.report?.skipped ?? []).map(track => `${nameOf(r.path)}: ${t("Missing or unreadable")}: ${track}`),
           ...(r.report?.failed ?? []).map(track => `${nameOf(r.path)}: ${t("Could not be written")}: ${track}`),
+          ...(r.report?.warnings ?? []).map(warning => `${nameOf(r.path)}: ${warning.reason === "source-unavailable"
+            ? t("{track}: source unavailable; existing USB version kept", { track: warning.title })
+            : warning.reason === "analysis-kept" ? t("{track}: source analysis unavailable; existing USB analysis kept", { track: warning.title })
+            : warning.reason === "analysis-unavailable" ? t("{track}: exported without analysis", { track: warning.title })
+            : warning.reason === "analysis-stale" ? t("{track}: audio changed; reanalyze it before exporting waveforms and cues", { track: warning.title })
+            : t("{track}: could not update; existing USB version kept", { track: warning.title })}${warning.detail ? ` · ${warning.detail}` : ""}`),
           ...(r.report && !r.report.verified ? [`${nameOf(r.path)}: ${t("The written library did not read back correctly.")}`] : []),
         ]));
         // A track that could not be written does not stop the sync; tell the
@@ -738,7 +764,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
         setOperation(null);
       }
     })();
-  }, [canSync, nodes, ticked, tickedDevices, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
+  }, [canSync, nodes, ticked, tickedDevices, estimates, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll, refreshDevices, readDevice, onSynced, t]);
 
   /** One line for a cue import: what changed, and what already matched. */
   const cuesResult = (device: string, result: { tracks: number; skipped: number; unchanged?: number }) => {
@@ -1010,6 +1036,12 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
               aria-label="Eject after syncing" onChange={e => setEjectAfterSync(e.currentTarget.checked)} />
             Eject after syncing
           </label>
+          <label className={styles.option}>
+            <input type="checkbox" className={styles.tick} checked={verifyAll} disabled={busy}
+              aria-label={t("Verify all files (slower)")}
+              onChange={e => setVerifyAll(e.currentTarget.checked)} />
+            {t("Verify all files (slower)")}
+          </label>
           </div>
           <div className={styles.importActions}>
           <div className={styles.importRow}>
@@ -1056,8 +1088,11 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
               // What the ticked playlists would add, net of what the sync
               // takes off: the stick's own copies are already in "used".
               const estimate = on ? estimates.get(device.path) : undefined;
-              const adding = estimate ? Math.max(0, estimate.copyBytes - estimate.freeBytes) : 0;
-              const freeing = estimate ? Math.max(0, estimate.freeBytes - estimate.copyBytes) : 0;
+              const net = estimate?.netAdditionalBytes ?? (estimate ? estimate.copyBytes - estimate.freeBytes : 0);
+              const adding = Math.max(0, net);
+              const freeing = Math.max(0, -net);
+              const projectedFree = estimate?.projectedFreeBytes ?? Math.max(0, device.freeBytes - net);
+              const retainedPercent = usedPercent === null ? null : Math.max(0, usedPercent - freeing / device.totalBytes * 100);
               const addPercent = usedPercent !== null && device.totalBytes > 0 ? Math.min(100 - usedPercent, adding / device.totalBytes * 100) : 0;
               const overBy = adding - device.freeBytes;
               const approx = estimate?.approximate ? "~" : "";
@@ -1090,9 +1125,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
                   <p className={styles.capacity}>{fileSystem}{device.totalBytes > 0 ? ` · ${formatSpace(device.totalBytes)} total` : ""}</p>
                   <div className={styles.spaceBar} role={freePercent === null ? "img" : "meter"}
                     aria-label={`${device.name} storage used`} aria-valuemin={usedPercent === null ? undefined : 0}
-                    aria-valuemax={usedPercent === null ? undefined : 100} aria-valuenow={usedPercent ?? undefined}
-                    aria-valuetext={usedPercent === null ? "Space unknown" : `${used} used; ${free}${adding > 0 ? `; ${approx}${formatSpace(adding)} to add` : ""}`} title={estimateTitle ? `${free}\n${estimateTitle}` : free}>
-                    {usedPercent !== null ? <span style={{ width: `${usedPercent}%` }} /> : null}
+                    aria-valuemax={usedPercent === null ? undefined : 100} aria-valuenow={retainedPercent === null ? undefined : Math.min(100, retainedPercent + addPercent)}
+                    aria-valuetext={usedPercent === null ? t("Space unknown") : estimate ? t("{used} used now; {free} left after sync", { used, free: `${approx}${formatSpace(projectedFree) || "0 MB"}` }) : t("{used} used; {free}", { used, free })} title={estimateTitle ? `${free}\n${estimateTitle}` : free}>
+                    {retainedPercent !== null ? <span style={{ width: `${retainedPercent}%` }} /> : null}
                     {addPercent > 0 ? <span className={styles.pending} data-over={overBy > 0 || undefined} style={{ width: `${addPercent}%` }} /> : null}
                   </div>
                   <div className={styles.storageLabels}>
@@ -1103,10 +1138,14 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
                     {adding === 0 && freeing > 0 ? <span>{t("Frees {size}", { size: formatSpace(freeing) })}</span> : null}
                     <span>{free}</span>
                   </div>
+                  {on && estimatesLoading ? <p aria-live="polite">{t("Calculating space…")}</p> : estimate?.error ? <p aria-live="polite">{estimate.error}</p> : estimate ? <p aria-live="polite">
+                    {estimate.unknownSize ? t("Space estimate is incomplete") : t("{space} left after sync", { space: `${approx}${formatSpace(projectedFree) || "0 MB"}` })}
+                    {estimate.peakBytes !== undefined ? ` · ${t("Needs {space} free while syncing", { space: `${approx}${formatSpace(estimate.peakBytes) || "0 MB"}` })}` : ""}
+                    {estimate.enoughSpace === false ? <span role="alert"> · {t("Not enough temporary space to sync safely")}</span> : null}
+                    {(estimate.keptExisting ?? 0) > 0 ? ` · ${t("{count} existing tracks kept because their sources are unavailable", { count: estimate.keptExisting ?? 0 })}` : ""}
+                  </p> : null}
                   {job ? <div className={styles.exportProgress} data-state={job.state}>
-                    <progress data-state={job.state} aria-label={`Exporting ${device.name}`} max={100} value={exportPercent(job)} />
-                    <span>{job.state === "cancelled" ? "Export stopped" : job.state === "failed" ? "Export failed" : job.state === "done" ? "Export complete" : job.state === "preparing" ? "Preparing for export" : job.state === "checking" ? `Checking — ${job.title || device.name}` : job.state === "database" ? "Building databases" : job.state === "verifying" ? "Verifying databases" : job.state === "publishing" ? "Publishing safely" : job.state === "ejecting" ? `Ejecting ${device.name}` : `Exporting — ${job.title || device.name}`} ({exportPercent(job)}%)</span>
-                    {job.state === "preparing" || job.state === "checking" || job.state === "copying" || job.state === "database" ? <StopExport path={job.path} className={styles.button} /> : null}
+                    <ExportProgressDetails job={job} name={device.name} buttonClass={styles.button} />
                     {job.state === "failed" ? <span className={styles.exportError} role="alert">
                       {job.title || "The export failed before the device could be verified. Check that it is connected, writable, and has enough free space."}
                     </span> : null}
@@ -1119,6 +1158,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
                       <span><strong>{report.tracksUpdated}</strong> tracks updated</span>
                       <span><strong>{Math.max(0, report.tracks - report.tracksAdded - report.tracksUpdated)}</strong> unchanged</span>
                       {report.skipped.length > 0 ? <span className={styles.exportWarning}><strong>{report.skipped.length}</strong> missing</span> : null}
+                      {(report.keptExisting ?? 0) > 0 ? <span className={styles.exportWarning}>{t("{count} existing versions kept", { count: report.keptExisting ?? 0 })}</span> : null}
+                      {(report.converted ?? 0) > 0 ? <span>{t("{count} tracks converted", { count: report.converted ?? 0 })}</span> : null}
+                      {report.upToDate ? <span>{t("Already up to date")}</span> : null}
                     </div>;
                   })() : null}
                 </div>
@@ -1150,6 +1192,11 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
           </button> : null}
         </div>
         {status.length > 0 ? <span id="sync-selection-hint" hidden>{syncHint}</span> : null}
+        {[...exportJobs.values()].filter(job => isExportActive(job) && canStopExport(job)).length > 1 ? <button type="button" className={styles.button}
+          onClick={() => void getBackend().then(backend => Promise.all([...exportJobs.values()].filter(job => isExportActive(job) && canStopExport(job)).map(job => backend.cancelExport(job.path))))
+            .catch(() => setStatus([t("Could not stop the export. Try again.")]))}>
+          {t("Stop all exports")}
+        </button> : null}
         <button type="button" className={styles.button} onClick={onClose}>
           {busy ? "Run in background" : "Close"}
         </button>

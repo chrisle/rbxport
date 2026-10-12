@@ -10,10 +10,11 @@ description = "Writes rekordbox-compatible USB exports."
 workspace = true
 
 [dependencies]
+blake3 = "1"
+fs2 = "0.4"
 unicode-normalization = "0.1"
 rbl-audio = { path = "../rbl-audio" }
 tempfile = "3"
-fs2 = "0.4"
 rbl-core = { path = "../rbl-core" }
 rbl-pdb = { path = "../rbl-pdb" }
 rbl-onelibrary = { path = "../rbl-onelibrary" }

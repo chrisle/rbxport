@@ -29,8 +29,9 @@ export function MissingFilesDialog({ files, onChoose }: {
       <h2 id="missing-files-title" className={styles.title}>{t("Missing audio files")}</h2>
       <p id="missing-files-summary" className={styles.summary}>
         {files.length === 1
-          ? t("1 selected track has a missing audio file and will be skipped.")
-          : t("{count} selected tracks have missing audio files and will be skipped.", { count: files.length })}
+          ? t("1 selected track has a missing audio file.")
+          : t("{count} selected tracks have missing audio files.", { count: files.length })}
+        {" "}{t("Usable copies already on each USB will be kept. Tracks without a usable copy will be skipped.")}
       </p>
       <ul className={styles.list} aria-label={t("Missing audio files")}>
         {files.map((file, index) => <li key={`${index}:${file.path}`}>
@@ -40,7 +41,7 @@ export function MissingFilesDialog({ files, onChoose }: {
       </ul>
       <div className={styles.buttons}>
         <button type="button" autoFocus onClick={() => onChoose(false)}>{t("Cancel")}</button>
-        <button type="button" className={styles.primary} onClick={() => onChoose(true)}>{t("Skip them and sync")}</button>
+        <button type="button" className={styles.primary} onClick={() => onChoose(true)}>{t("Keep available copies and sync")}</button>
       </div>
     </dialog>
   );

@@ -9,6 +9,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 | --- | --- |
 | [Getting started](development/getting-started.md) | Setting up a checkout and choosing a safe run mode. |
 | [Architecture](development/architecture.md) | Finding the owner of a feature or tracing a request. |
+| [USB sync implementation plan](development/usb-sync-redesign.md) | Planning efficient exports, recovery, live space estimates, and progress as one coordinated change. |
 | [Conventions](development/conventions.md) | Writing code that fits the project. |
 | [Testing](development/testing.md) | Choosing checks and interpreting their results. |
 | [Contributing](../CONTRIBUTING.md) | Reporting an issue or preparing a change for review. |

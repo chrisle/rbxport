@@ -202,6 +202,8 @@ fn is_drive_root(text: &str) -> bool {
 #[must_use]
 pub fn inspect(mount_point: &Path) -> Option<DeviceExport> {
     // Discovery is read-only. Recover pending publications only during an explicit operation.
+    let _lease = rbl_core::durable::read_lease(mount_point).ok()?;
+    if rbl_export::recovery_pending(mount_point) { return None; }
     // `PIONEER` or `.PIONEER`: rekordbox 7 can write the export hidden.
     let pdb = settings::export_root(mount_point).join("rekordbox/export.pdb");
     if !pdb.is_file() {

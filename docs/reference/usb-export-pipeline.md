@@ -9,6 +9,50 @@ order, the safety checks, and where each step lives. The
 [USB export format](usb-export-db.md) reference covers what the files contain.
 This document links to it for format details and does not repeat them.
 
+## Incremental sync revision
+
+The [USB sync redesign](../development/usb-sync-redesign.md) introduces
+`incremental.rs`, `plan.rs`, and `cache.rs`. Manifest version 2 records source
+revisions, verified output stamps, BLAKE3 database/request/recipe signatures,
+a checksummed normalized device baseline, and structured warnings. Version 1
+keeps ownership/IDs but establishes fresh receipts. Identical verified requests
+are no-ops; playlist-only edits rebuild databases without reading media.
+
+Source analysis is lazy. Unchanged analysis/artwork recipes bypass content
+reads and transformation. Cold rekordbox adoption establishes byte equality,
+with cancellable checking progress. Missing source audio retains a complete
+usable USB version with a warning. Changed audio without updated source
+analysis omits stale cues/waveforms and asks for re-analysis.
+
+Destinations share immutable source descriptors and `PreparationCache`, with
+per-input/profile single-flight preparation and two bounded preparation slots.
+Each physical root has its own job, cancellation, plan, publication, and result.
+Volume identity is held from registration through publication; aliases cannot
+create duplicate writers. An unavailable local cache can fall back to direct
+staging; recovery never depends on that disposable cache.
+
+`plan::preview` is read-only; Sync Manager debounces it by 200 ms and discards
+stale responses. Shared audio counts once. The preview includes staged
+databases/assets and retained old generations, uses cached conversion sizes,
+and reports final net usage separately from peak temporary requirements.
+Estimates are labeled approximate/unknown when needed. Actual available space
+is checked again during staging. Each stick gets its own projected-free bar.
+
+`commit_retained` keeps the old generation through published database
+verification. Actual receipts are sealed before `finalize`. Settings and owned
+file cleanup join the journal; failed validation rolls back. Rollback is
+replayable. Same-volume audio moves avoid recopying content. Explicit device
+reads take a read lease; discovery does not replay journals, and pending
+recovery prevents eject. This is recoverability, not a filesystem-wide atomic
+transaction.
+
+Progress uses bytes for checking/copying, processed duration for conversion,
+and indeterminate feedback during database/verification/publication work.
+Transitions and terminal events are immediate; repeated updates are limited
+to about 10 Hz. Counters and elapsed time remain visible. Stop is disabled
+during publication; Stop All affects only cancellable jobs. “Verify all files”
+is an optional slow content-integrity check separate from ordinary sync.
+
 | Area | Code |
 | --- | --- |
 | Sync Manager window and progress | `src/views/sync/SyncManager.tsx`, `src/views/sync/SyncWindow.tsx`, `src/store/useExportProgress.ts`, `src/components/StopExport.tsx` |
@@ -134,7 +178,7 @@ The `sync` callback in `SyncManager.tsx` runs these steps in order:
    value is polled every 2 s to enable or disable the SYNC button.
 3. `validateExportFiles(playlists)` lists selected tracks whose audio file is
    missing. If any are found, `backend.confirm` asks whether to continue.
-   Those tracks are then skipped.
+   A usable existing USB version is retained; otherwise the track is skipped.
 4. Nothing is imported (#199). SYNC only writes: play history and CDJ/mixer
    settings already on the stick are kept by the export (`reconcile`
    retains device history; My Settings files are copied only where the
@@ -201,13 +245,9 @@ in-memory sticks. It emits `export:progress` and `sync:progress` and honors
 
 All of these are registered in `src-tauri/src/lib.rs` (`generate_handler!`).
 
-Export to a single playlist **replaces** the stick's selection. It does not
-add to it. `export_playlist` builds a selection containing only that playlist
-(plus the stick's recorded loose tracks), and the pipeline removes the
-playlists and tracks this app wrote before that are not in the new selection
-(see [reconcile](#step-by-step)). Playlists the app did not write stay on the
-stick. `export_tracks_to_device` is the only path that merges with the
-previous selection.
+Context-menu Export Playlist, Export Folder, and Export Track are additive
+(`keep_unlisted`). Sync Manager replaces its selected library playlists while
+retaining device-only data and tracks still needed by playlists or history.
 
 ### Thread model
 
@@ -247,9 +287,9 @@ flowchart LR
 - Each library row becomes one `SourceTrack`, however many playlists contain
   it. `source_track` fills the fields from the index. `source_audio` picks
   `FolderPath`, or else the first existing entry of `rb_LocalFolderPath` and
-  `OrgFolderPath`. `read_analysis` reads `ANLZ0000.DAT/.EXT/.2EX` from
-  `share/` and parses each one. A missing EXT or 2EX is allowed. A missing
-  DAT, when the row has an analysis path, is an error.
+  `OrgFolderPath`. It records `analysis_source`; `incremental::load_analysis`
+  reads companions only when needed. A missing DAT retains usable unchanged
+  device analysis or exports without analysis and reports a warning.
 - `cues` is always `Some(extra.cues)`, read from `djmdCue` through
   `rbl_db::export_info::track_extras`. Library cues therefore always replace
   the cue lists in the copied analysis files.
@@ -295,23 +335,15 @@ order: this recovery runs before the rekordbox check in the next step.
    sync, compatibility, root }`. `ExportError::Cancelled` maps to
    `ErrorKind::Cancelled`. Every other export error maps to `Internal`, with
    the error text as the message.
-6. After the export has been published:
-   - `device_settings::write_dev_defaults` writes `DEVSETTING.DAT` from the
-     DJ System defaults, only if the stick has none. It uses its own
-     `Publication` through `rbl_devices::settings::write_changes`.
-   - The stashed MY SETTINGS files from step 4 are written with
-     `durable::write`. They replace any copies the export staged from
-     rekordbox's settings directory.
-   - `rbl_export::verify_databases` reads both databases back. The export
-     fails if they disagree, or if the track count differs from
-     `report.tracks`.
+6. Settings images, including absent `DEVSETTING.DAT`, are supplied as
+   `settings_files` and staged inside the core transaction. Core verification
+   determines `report.verified`; Tauri no longer performs separate writes or
+   redundant verification after the recovery journal has retired.
 
 So the Tauri layer **does** create `DEVSETTING.DAT` on a stick that has none
 when stick defaults are passed. The `rbl-export` crate itself never creates
 it (see [Device settings creation](usb-export-db.md#device-settings-creation)).
-These post-publish steps are separate writes. If one fails after the commit,
-the stick already holds the new generation, and the error reports a
-completed publication as a failure.
+Settings are now part of the same recoverable generation as the databases.
 
 ### Eject
 
@@ -344,12 +376,12 @@ wrappers that fill in defaults.
 | 5 | Open the publication: take the exclusive lock, replay any journal, delete leftover stages, create `.rbxport-staging-*`. | `Publication::new` | All new files go into the stage. The lock (`.rbxport-write.lock`, `fs2` exclusive lock) is held until the end of the run. |
 | 6 | Load the previous manifest. Read a `Snapshot` of both databases. | `Manifest::load`, `snapshot::Snapshot::read` | The "before" picture, used for reconciling now and for detecting other writers just before commit. |
 | 7 | Upgrade an old manifest that has no `db_id`, if rekordbox's sync record names the same `DBID`. | inline | Old manifests lack the field. |
-| 8 | Baseline checks, then an `analysis_stamp` of every analysis file the databases name. | `reconcile::rewritten`, `Snapshot::check_baseline_except`, `snapshot::analysis_stamp` | Refuses a stick whose two libraries already describe a track or playlist differently (first sync only), naming it, unless the selection rewrites that row from the library; one whose track identities rekordbox changed; or one whose manifest belongs to another library (`db_id`). Playlists are matched across the two libraries by `snapshot::legacy_playlist_ids`: only a playlist both hold under one id, name and kind, filled differently, is a disagreement that refuses. Two playlists that differ in name or kind under one id, or share a name and kind under different ids, are two playlists, and both are kept (#353). The exception: where `exportLibrary.db` gives the `export.pdb` list's id to another playlist, a same-named list there with the same tracks in the same folder is the same playlist, carried once. The stamp reads every analysis file, so it comes after the checks: a refused sync says so at once. |
+| 8 | Baseline checks and lightweight analysis file revisions. | `reconcile::rewritten`, `Snapshot::check_baseline_except`, `snapshot::analysis_stamp` | Refuses conflicting device/library ownership. `snapshot::legacy_playlist_ids` keeps distinct same-named playlists under separate free IDs, and recognizes the same playlist when both formats agree on its name, kind, contents, and folder (#353). Stamps use file information, not content reads. |
 | 9 | Reconcile the selection with the stick. | `reconcile::prepare` | Links selected tracks to their existing device rows (`identify_tracks`) and playlists to their device ids (`identify_playlists`). Keeps what the selection does not name but the stick still needs (`retain_device_only`). |
 | 10 | Merge the stick's My Tags into the library's. | inline | Tags that exist only on the stick are kept. |
 | 11 | Assign ids: playlists first, then tracks. Check that ids are unique and playlist membership is valid. | `playlist_ids`, `assign_ids` | Ids are pinned to the previous manifest, so they stay the same between syncs ([why](usb-export-db.md#incremental-sync)). |
 | 12 | Work out where each track goes: in place or copied, the path, and the collision suffix. | `previous_in_place`, `in_place_paths`, `layouts`, `layout` | Every path is decided before any file is written. |
-| 13 | Refuse if a track that is already on the stick has lost its source file. | inline | "Source unavailable … the USB has not been changed." This stops a missing source from deleting a good copy on the stick. |
+| 13 | Retain the complete usable device version when its source is unavailable. | reconciliation and shared preparation | Report `source-unavailable` or `update-failed`; skip only tracks without a usable copy. |
 | 14 | Per track (below). | loop body | Produces the staged audio, analysis, and artwork, one `ManifestTrack`, one `OneLibraryTrack`, and one `track_row`. |
 | 15 | Mark manifest entries that were not matched as obsolete. | `stale` map | Tracks that left the selection. Library files that live on the stick (`owns_library_file`) are never deleted. |
 | 16 | Build playlist rows and entries. | `playlist_row`, `playlist_entry_row` | Must come after the tracks, because entries name export ids. A skipped track leaves no gap: positions stay dense. |
@@ -364,12 +396,11 @@ wrappers that fill in defaults.
 | 25 | List the staged files. Add removals for `exportLibrary.db-wal`/`-shm` and for analysis extensions that are no longer exported. | `staged_files` | Names are mapped to NFC so they match the database paths ([why](#filesystems)). |
 | 26 | Read the stick's databases and analysis stamp again, and compare with step 6. | `Snapshot::read` + `analysis_stamp` | "The device changed during sync. Close other writers and retry." This catches rekordbox or a player writing during staging. |
 | 27 | Last cancellation check, then report `publishing`. | `cancelled()` | After this point the run is not cancellable. |
-| 28 | Commit. | `Publication::commit` | [Publication](#publication). |
-| 29 | Remove obsolete audio and analysis directories that the new manifest does not keep. | `remove_under` | After commit, so a failed run never deletes anything. Best effort: errors are ignored. |
+| 28 | Publish while retaining the previous generation. | `Publication::commit_retained` | Owned removals, settings, moves, databases, and receipts share the journal. |
+| 29 | Verify published databases, seal actual receipts, finalize. | `verify_databases`, `seal`, `finalize` | Failed validation rolls back; old content is reclaimed only after success. Empty-directory cleanup is cosmetic. |
 
-Progress stages reported by the pipeline: `checking` (once per track, before
-the track is handled), `copying` (only when a track is actually written),
-`database`, `verifying`, and `publishing`.
+Progress stages include `preparing`, `recovering`, `checking`, `converting`,
+`copying`, `database`, `verifying`, `publishing`, and `finalizing`.
 
 ### Reconcile: what is kept, replaced, or removed
 
@@ -480,7 +511,8 @@ In loop order:
 6. If the track moved (for example, the artist was renamed), the old audio
    path and analysis directory go on the `obsolete` list. `same_file` stops a
    case-only rename on FAT or macOS from deleting the new copy.
-7. **Analysis re-emission.** Preserved tracks are skipped. For each source
+7. **Analysis re-emission.** Verified unchanged recipes and preserved tracks
+   are reused without reading their bundles. For each changed source
    DAT/EXT/2EX the code parses it, replaces `PPTH` with the stick path,
    inserts an empty `PVBR` into a DAT that has none, applies the export
    phrase mask, and replaces the DAT and EXT cue lists with the library cues

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend, getBackend } from "@/ipc/client";
 import type { Backend, Device, DeviceSyncState, ItunesLibrary, SyncDeviceReport, SyncProgress, TreeNode, ExportProgress } from "@/ipc/types";
+import type { SyncEstimate } from "@/ipc/types";
 import { SyncManager } from "./SyncManager";
 import { PreferencesProvider } from "@/store/usePreferences";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
@@ -20,7 +21,7 @@ declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
 }
 let exportProgress: ((progress: ExportProgress) => void) | undefined;
-const cancelExport = vi.fn(() => Promise.resolve());
+const cancelExport = vi.fn((_path: string) => Promise.resolve());
 
 const TREE: TreeNode[] = [
   { id: "all", name: "All Tracks", kind: "allTracks", depth: 0 },
@@ -296,7 +297,7 @@ describe("SyncManager", () => {
     click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
     await settle();
     expect(document.body.querySelector("dialog")?.textContent).toContain("1 selected track has a missing audio file");
-    click([...document.body.querySelectorAll<HTMLButtonElement>("dialog button")].find(b => b.textContent === "Skip them and sync"));
+    click([...document.body.querySelectorAll<HTMLButtonElement>("dialog button")].find(b => b.textContent === "Keep available copies and sync"));
     await settle();
     expect(syncDevices).toHaveBeenCalled();
   });
@@ -414,18 +415,18 @@ describe("SyncManager", () => {
     act(() => exportProgress?.(job));
     const meter = host.querySelector<HTMLProgressElement>('progress[aria-label="Exporting USB B"]');
     expect(meter?.value).toBe(30);
-    expect(host.textContent).toContain("Exporting — Track (30%)");
+    expect(host.textContent).toContain("Copying audio · Track (30%)");
     const background = [...host.querySelectorAll("button")].find(button => button.textContent === "Run in background");
     expect(background?.disabled).toBe(false);
     click(background ?? null);
     expect(onClose).toHaveBeenCalled();
     act(() => exportProgress?.({ ...job, done: 10 }));
-    expect(meter?.value).toBe(99);
+    expect(meter?.value).toBe(100);
     act(() => exportProgress?.({ ...job, state: "done", done: 10 }));
     expect(meter?.value).toBe(100);
     expect(meter?.dataset.state).toBe("done");
     act(() => exportProgress?.({ ...job, state: "failed", title: "Device disconnected" }));
-    expect(meter?.value).toBe(30);
+    expect(meter?.hasAttribute("value")).toBe(false);
     expect(meter?.dataset.state).toBe("failed");
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Device disconnected");
   });
@@ -443,7 +444,7 @@ describe("SyncManager", () => {
     await settle();
     click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
     await settle();
-    expect(syncDevices.mock.calls[0]?.slice(5)).toEqual([true, "mp3"]);
+    expect(syncDevices.mock.calls[0]?.slice(5)).toEqual([true, "mp3", false]);
   });
 
   it("lists the playlists and folders under rekordbox's [Playlists] row, not All Tracks", () => {
@@ -683,7 +684,7 @@ describe("SyncManager", () => {
     await settle();
     expect(tell).toHaveBeenCalledTimes(1);
     expect(tell.mock.calls[0]?.[0]).toContain("Move For Me: Could not copy it to the USB: unsupported audio");
-    expect(status()).toContain("Sync complete.");
+    expect(status()).toContain("Sync complete with warnings.");
   });
 
   it("requests post-sync ejection and distinguishes eject errors from sync errors", async () => {
@@ -1199,4 +1200,43 @@ it("SYNC imports nothing whatever Import is set to bring back, even under Librar
     act(() => root.unmount());
     root = createRoot(host);
   }
+});
+
+it("does not paint a late preview for an older playlist selection", async () => {
+  vi.useFakeTimers();
+  let old: ((value: SyncEstimate[]) => void) | undefined;
+  estimateSync.mockImplementationOnce(() => new Promise<SyncEstimate[]>(resolve => { old = resolve; }));
+  click(box("Closing")); click(box("USB B"));
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  click(box("Warm Up"));
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(host.textContent).toContain("2.0 GB to add");
+  act(() => { old?.([{ path: "/Volumes/USB B", copyBytes: 10 * 1024 ** 3, reuseBytes: 0, freeBytes: 0, tracksNew: 100, tracksChanged: 0, tracksKept: 0, tracksRemoved: 0, tracksMissing: 0, approximate: false }]); });
+  await settle();
+  expect(host.textContent).toContain("2.0 GB to add"); expect(host.textContent).not.toContain("10.0 GB to add");
+});
+
+it("does not apply older progress sequences or jobs to an active export", () => {
+  const job: ExportProgress = { path: "/Volumes/USB B", state: "copying", done: 2, total: 10, title: "Current", jobId: "20", sequence: 5 };
+  act(() => exportProgress?.(job));
+  act(() => exportProgress?.({ ...job, state: "failed", title: "Late event", sequence: 4 }));
+  act(() => exportProgress?.({ ...job, state: "done", jobId: "19", sequence: 100 }));
+  expect(host.textContent).toContain("Copying audio · Current (20%)"); expect(host.textContent).not.toContain("Late event");
+});
+
+it("stops each cancellable stick but leaves publication alone", async () => {
+  act(() => {
+    exportProgress?.({ path: "/Volumes/USB A", state: "copying", done: 0, total: 1, title: "A", canCancel: true });
+    exportProgress?.({ path: "/Volumes/USB B", state: "converting", done: 0, total: 1, title: "B", canCancel: true });
+    exportProgress?.({ path: "/Volumes/Other", state: "publishing", done: 0, total: 0, title: "", canCancel: false });
+  });
+  click([...host.querySelectorAll("button")].find(b => b.textContent === "Stop all exports")); await settle();
+  expect(cancelExport.mock.calls.map(call => call[0]).sort()).toEqual(["/Volumes/USB A", "/Volumes/USB B"]);
+});
+
+it("passes the optional full integrity check to the backend", async () => {
+  click(box("Closing")); click(box("USB B")); await settle();
+  click(box("Verify all files (slower)"));
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')); await settle();
+  expect(syncDevices.mock.calls[0]?.[7]).toBe(true);
 });

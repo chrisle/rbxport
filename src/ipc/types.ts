@@ -899,6 +899,8 @@ export interface Backend {
     deleteUnlistedMusic?: boolean,
     /** Convert incompatible USB copies; undefined preserves the source format. */
     compatibilityFormat?: "wav" | "aiff" | "mp3",
+    /** Read every exported asset instead of trusting unchanged receipts. */
+    verifyAll?: boolean,
   ): Promise<SyncDeviceReport[]>;
 
   /** Missing source audio in the exact playlists selected for USB export. */
@@ -1362,6 +1364,10 @@ export interface DeviceExport {
 
 /** What an export wrote. */
 export interface ExportReport {
+  upToDate?: boolean;
+  keptExisting?: number;
+  converted?: number;
+  warnings?: { trackId: number; title: string; reason: string; detail?: string | null }[];
   tracks: number;
   playlists: number;
   bytesCopied: number;
@@ -1413,6 +1419,15 @@ export interface SyncPlaylist {
 
 /** What a sync would do to one stick's space, before it runs. */
 export interface SyncEstimate {
+  netAdditionalBytes?: number;
+  peakBytes?: number;
+  databaseBytes?: number;
+  assetBytes?: number;
+  projectedFreeBytes?: number | null;
+  enoughSpace?: boolean | null;
+  unknownSize?: boolean;
+  keptExisting?: number;
+  error?: string | null;
   path: string;
   /** Bytes of tracks that would be copied: new, or changed since written. */
   copyBytes: number;
@@ -1575,8 +1590,21 @@ export interface Backup {
 
 /** Per-device progress; done counts tracks processed before the current one. */
 export interface ExportProgress {
+  bytesPerSecond?: number;
+  jobId?: string;
+  sequence?: number;
+  unit?: "tracks" | "bytes" | "milliseconds" | "";
+  bytesDone?: number;
+  bytesTotal?: number;
+  reused?: number;
+  copied?: number;
+  converted?: number;
+  elapsedMs?: number;
+  canCancel?: boolean;
+  upToDate?: boolean;
   path: string;
-  state: "preparing" | "checking" | "copying" | "database" | "verifying" | "publishing" | "ejecting" | "done" | "failed" | "cancelled";
+  warningsCount?: number;
+  state: "preparing" | "planning" | "recovering" | "checking" | "converting" | "copying" | "database" | "verifying" | "publishing" | "finalizing" | "ejecting" | "done" | "failed" | "cancelled";
   done: number;
   total: number;
   title: string;

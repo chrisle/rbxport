@@ -149,7 +149,7 @@ later leaves the selection or music cleanup is enabled.
 
 Off by default. When enabled, export removes RBXport-exported audio outside
 all selected playlists, including previously exported individual tracks.
-Cleanup runs after the new export is published. Empty playlist selections
+Owned-file cleanup is included in the recoverable export. Empty playlist selections
 are refused; original library audio and unrelated device files are preserved.
 
 ## Maximum CDJ compatibility
@@ -171,11 +171,32 @@ are one format reference, not proof of every player's compatibility.
 
 ## Conversion and incremental sync
 
+When playlists or export preferences change, Sync Manager updates each USB's
+space bar with projected additional use and space left. The separate temporary
+space line includes the room needed to keep the previous library recoverable.
+Conversion estimates are approximate until a completed cached copy is available.
+An identical sync says “Already up to date”; a playlist-only edit leaves
+unchanged audio, analysis, and artwork alone. Several sticks can share one
+conversion while retaining independent progress and results.
+
+Progress identifies checking, conversion, copying, database work, verification,
+and saving. Stop works before publication; “Stop all exports” stops cancellable
+jobs together. Saving must finish before eject. An interrupted export is
+recovered on the next explicit operation. Do not unplug while saving.
+
+Missing sources keep a usable existing USB version and report a warning. Tracks
+without a usable copy are skipped. If audio changed but its analysis did not,
+re-analyse it before expecting current waveforms/cues. “Verify all files
+(slower)” reads exported audio and analysis to detect changes that preserve
+size and timestamps; ordinary sync uses inexpensive verified receipts.
+
 Conversion changes export copies, preserving source audio and analysis timing.
 It updates device database/analysis paths and reuses unchanged conversions on
 later syncs. Changing format replaces the previous exported copy.
 
-Conversion errors stop publication. Surround audio is refused instead of
+Conversion errors retain usable older device copies or skip new failed tracks,
+with warnings. Publication/storage failures preserve the previous generation
+or leave a recovery journal. Surround audio is refused instead of
 dropping channels; WAV and AIFF output beyond their 32-bit container limits is
 refused.
 The app uses Symphonia, Rubato, built-in PCM WAV/AIFF writing, and bundled LAME. Running

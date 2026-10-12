@@ -100,7 +100,9 @@ fn missing_source_leaves_every_existing_database_and_audio_unchanged() {
     sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
     let pdb = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
     std::fs::remove_file(&t.source_path).unwrap();
-    assert!(sync(usb.path(), &[t], &[playlist(10, &[0])]).is_err());
+    let retained = sync(usb.path(), &[t], &[playlist(10, &[0])]).unwrap();
+    assert_eq!(retained.kept_existing, 1);
+    assert!(retained.verified);
     assert_eq!(
         pdb,
         std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap()
@@ -387,7 +389,7 @@ fn late_external_edit_aborts_publication() {
     let result = export_full(
         usb.path(),
         &[t],
-        &[],
+        &[playlist(10, &[0])],
         &[],
         None,
         Some(&SyncSource {

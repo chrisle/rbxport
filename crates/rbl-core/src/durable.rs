@@ -314,6 +314,27 @@ const STAGE_PREFIX: &str = ".rbxport-staging-";
 /// What a finished journal is renamed to before its images are deleted.
 const RETIRED_PREFIX: &str = ".rbxport-retired-";
 
+pub fn same_root(left: &Path, right: &Path) -> std::io::Result<bool> {
+    same_file::is_same_file(left, right)
+}
+
+/// Holds the directory identity across planning and staging, including Windows.
+/// Reusing a mount path for another device must not redirect an active export.
+pub struct VolumeIdentity(same_file::Handle);
+
+impl VolumeIdentity {
+    pub fn capture(root: &Path) -> std::io::Result<Self> {
+        Ok(Self(same_file::Handle::from_path(root)?))
+    }
+
+    pub fn check(&self, root: &Path) -> std::io::Result<()> {
+        if self.0 != same_file::Handle::from_path(root)? {
+            return Err(std::io::Error::other("The destination changed since export started"));
+        }
+        Ok(())
+    }
+}
+
 /// Durable commit intent for a set of files. Recovery rolls publication forward
 /// using retained images, so recovery itself can be interrupted repeatedly.
 /// Callers must serialize access and recover before exposing the file set.
@@ -322,11 +343,129 @@ pub struct Publication {
     journal: std::path::PathBuf,
     stage: tempfile::TempDir,
     _lock: std::fs::File,
-    #[cfg(unix)]
-    root_handle: std::fs::File,
+    root_handle: same_file::Handle,
 }
 
 impl Publication {
+    /// A same-volume relocation, applied only after publication intent is durable.
+    pub fn stage_move(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        self.check_root()?;
+        validate_paths(&[from.to_path_buf(), to.to_path_buf()])?;
+        let mut moves = Self::moves(self.stage.path())?;
+        if moves.values().any(|source| source == from) || moves.contains_key(to) || self.root.join(to).try_exists()? {
+            return Err(std::io::Error::other("Conflicting staged relocation"));
+        }
+        moves.insert(to.to_path_buf(), from.to_path_buf());
+        write(&self.stage.path().join(".moves.json"), &serde_json::to_vec(&moves)?)
+    }
+
+    fn moves(journal: &Path) -> std::io::Result<std::collections::BTreeMap<PathBuf, PathBuf>> {
+        match std::fs::read(journal.join(".moves.json")) {
+            Ok(bytes) => {
+                let moves: std::collections::BTreeMap<PathBuf, PathBuf> = serde_json::from_slice(&bytes)?;
+                for (to, from) in &moves { validate_paths(&[to.clone(), from.clone()])?; }
+                Ok(moves)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(std::collections::BTreeMap::new()),
+            Err(e) => Err(e),
+        }
+    }
+    /// Publish while retaining both generations until independent validation.
+    pub fn commit_retained(&self, paths: &[PathBuf]) -> std::io::Result<()> {
+        write(&self.stage.path().join(".verification-required"), b"1")?;
+        self.commit(paths)
+    }
+
+    /// Mark independently verified files committed before reclaiming old images.
+    pub fn finalize(&self) -> std::io::Result<()> {
+        self.check_root()?;
+        Self::finalize_at(&self.root, &self.journal)
+    }
+
+    pub fn validation_pending(root: &Path, name: &str) -> bool {
+        root.join(name).join(".verification-required").is_file()
+    }
+
+    pub fn finalize_pending(root: &Path, name: &str) -> std::io::Result<()> {
+        let _lock = lock(root)?;
+        Self::finalize_at(root, &root.join(name))
+    }
+
+    fn finalize_at(root: &Path, journal: &Path) -> std::io::Result<()> {
+        let marker = journal.join(".verification-required");
+        if marker.try_exists()? {
+            std::fs::remove_file(&marker)?;
+            sync_dir(journal)?;
+        }
+        Self::finish(root, journal, false)
+    }
+
+    /// Restore the complete previous generation, with replayable rollback intent.
+    pub fn rollback(&self) -> std::io::Result<()> {
+        self.check_root()?;
+        write(&self.journal.join(".rollback"), b"1")?;
+        Self::rollback_at(&self.root, &self.journal)
+    }
+
+    pub fn rollback_pending(root: &Path, name: &str) -> std::io::Result<()> {
+        let _lock = lock(root)?;
+        let journal = root.join(name);
+        write(&journal.join(".rollback"), b"1")?;
+        Self::rollback_at(root, &journal)
+    }
+
+    /// Seal a late validation receipt without losing the journal's expected image.
+    pub fn seal(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        self.check_root()?;
+        validate_paths(&[path.to_path_buf()])?;
+        let receipt = self.journal.join(".sealed").join(path);
+        if let Some(parent) = receipt.parent() { create_dir_all(parent)?; }
+        write(&receipt, bytes)?;
+        write(&self.root.join(path), bytes)
+    }
+
+    fn rollback_at(root: &Path, journal: &Path) -> std::io::Result<()> {
+        let root_handle = same_file::Handle::from_path(root)?;
+        let entries: Vec<PublicationEntry> = serde_json::from_slice(&std::fs::read(journal.join("publication.json"))?)?;
+        validate_paths(&entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>())?;
+        for (to, from) in Self::moves(journal)? {
+            let source = root.join(from);
+            let moved = root.join(to);
+            if moved.try_exists()? && !source.try_exists()? {
+                if let Some(parent) = source.parent() { create_dir_all(parent)?; }
+                rename(&moved, &source)?;
+                sync_dir(source.parent().unwrap_or(root))?;
+            } else if moved.try_exists()? && source.try_exists()? {
+                return Err(std::io::Error::other("Relocated audio changed during rollback; recovery data retained"));
+            }
+        }
+        for entry in entries.iter().rev() {
+            if root_handle != same_file::Handle::from_path(root)? {
+                return Err(std::io::Error::other("Destination volume changed during rollback"));
+            }
+            let path = publish_as(journal, entry);
+            let old = journal.join(".previous").join(&path);
+            let target = root.join(&path);
+            let rejected = journal.join(".rejected").join(&path);
+            if old.try_exists()? {
+                if target.try_exists()? && !rejected.try_exists()? {
+                    if let Some(parent) = rejected.parent() { create_dir_all(parent)?; }
+                    rename(&target, &rejected)?;
+                    sync_dir(target.parent().unwrap_or(root))?;
+                }
+                if let Some(parent) = target.parent() { create_dir_all(parent)?; }
+                rename(&old, &target)?;
+                sync_dir(target.parent().unwrap_or(root))?;
+            } else if entry.had_target == Some(false) && target.try_exists()? && !journal.join(&path).try_exists()? && !rejected.try_exists()? {
+                if let Some(parent) = rejected.parent() { create_dir_all(parent)?; }
+                rename(&target, &rejected)?;
+                sync_dir(target.parent().unwrap_or(root))?;
+            } else if entry.had_target == Some(true) && !target.try_exists()? {
+                return Err(std::io::Error::other(format!("Previous generation is unavailable for {}; recovery data retained", path.display())));
+            }
+        }
+        Self::retire(root, journal)
+    }
     pub fn new(root: &Path, name: &str) -> std::io::Result<Self> {
         create_dir_all(root)?;
         let lock = lock(root)?;
@@ -346,22 +485,13 @@ impl Publication {
                 .tempdir_in(root)
                 .map_err(at("create a staging folder in", root))?,
             _lock: lock,
-            #[cfg(unix)]
-            root_handle: std::fs::File::open(root)?,
+            root_handle: same_file::Handle::from_path(root)?,
         })
     }
 
     pub fn check_root(&self) -> std::io::Result<()> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let held = self.root_handle.metadata()?;
-            let current = std::fs::metadata(&self.root)?;
-            if held.dev() != current.dev() || held.ino() != current.ino() {
-                return Err(std::io::Error::other(
-                    "The destination volume changed during publication",
-                ));
-            }
+        if self.root_handle != same_file::Handle::from_path(&self.root)? {
+            return Err(std::io::Error::other("The destination volume changed during publication"));
         }
         Ok(())
     }
@@ -375,6 +505,7 @@ impl Publication {
     pub fn commit(&self, paths: &[std::path::PathBuf]) -> std::io::Result<()> {
         self.check_root()?;
         validate_paths(paths)?;
+        let moves = Self::moves(self.stage.path())?;
         let mut entries = Vec::with_capacity(paths.len());
         let mut directories = std::collections::BTreeSet::new();
         for path in paths {
@@ -385,8 +516,9 @@ impl Publication {
                 continue;
             }
             let image = self.stage.path().join(path);
-            let present = image.try_exists()?;
-            if present {
+            let image_present = image.try_exists()?;
+            let present = image_present || moves.contains_key(path);
+            if image_present {
                 std::fs::OpenOptions::new()
                     .write(true)
                     .open(&image)
@@ -562,6 +694,7 @@ impl Publication {
     /// `replay`: the journal was left by a run that stopped, so the device
     /// may have been written to since; see [`check_external_changes`].
     fn finish(root: &Path, journal: &Path, replay: bool) -> std::io::Result<()> {
+        if journal.join(".rollback").try_exists()? { return Self::rollback_at(root, journal); }
         let record = journal.join("publication.json");
         let entries: Vec<PublicationEntry> = serde_json::from_slice(
             &std::fs::read(&record).map_err(at("read the interrupted publication record", &record))?,
@@ -576,6 +709,7 @@ impl Publication {
             .into_iter()
             .map(|entry| PublicationEntry { path: publish_as(journal, &entry), exact: true, ..entry })
             .collect();
+        let moves = Self::moves(journal)?;
         let incomplete = journal.join(".incomplete");
         if incomplete.try_exists()? {
             return Err(std::io::Error::other(format!(
@@ -586,27 +720,30 @@ impl Publication {
         if replay {
             check_external_changes(root, journal, &entries)?;
         }
-        #[cfg(unix)]
-        let root_handle = std::fs::File::open(root)?;
+        let root_handle = same_file::Handle::from_path(root)?;
         // The previous generation stays inside the journal until every new
         // image is in place. All moves are within one filesystem, so a large
         // audio file is published with atomic renames instead of being copied
         // over the USB a second time. Every intermediate state is recognizable
         // and recovery always rolls forward.
         let publish = |entry: &PublicationEntry| -> std::io::Result<()> {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                let held = root_handle.metadata()?;
-                let current = std::fs::metadata(root)?;
-                if held.dev() != current.dev() || held.ino() != current.ino() {
-                    return Err(std::io::Error::other(
-                        "Destination volume changed during publication",
-                    ));
-                }
+            if root_handle != same_file::Handle::from_path(root)? {
+                return Err(std::io::Error::other("Destination volume changed during publication"));
             }
             let image = journal.join(&entry.path);
             let target = root.join(&entry.path);
+            if let Some(from) = moves.get(&entry.path) {
+                let source = root.join(from);
+                if source.try_exists()? && !target.try_exists()? {
+                    if let Some(parent) = target.parent() { create_dir_all(parent)?; }
+                    rename(&source, &target)?;
+                    sync_dir(source.parent().unwrap_or(root))?;
+                    sync_dir(target.parent().unwrap_or(root))?;
+                } else if source.try_exists()? || !target.try_exists()? {
+                    return Err(std::io::Error::other("Relocated audio is ambiguous; recovery data retained"));
+                }
+                return Ok(());
+            }
             let previous = journal.join(".previous").join(&entry.path);
             if is_appledouble(&entry.path) {
                 // Older journals included these transient files. Preserve an
@@ -712,6 +849,11 @@ impl Publication {
                 }
             })?;
         }
+        if journal.join(".verification-required").try_exists()? { return Ok(()); }
+        Self::retire(root, journal)
+    }
+
+    fn retire(root: &Path, journal: &Path) -> std::io::Result<()> {
         // Remove the commit intent atomically BEFORE deleting its images.
         // A crash during cleanup must never replay a missing image as deletion.
         let discarded = tempfile::Builder::new().prefix(RETIRED_PREFIX).tempdir_in(root)?;
@@ -797,8 +939,11 @@ fn check_external_changes(
             continue;
         }
         let image = journal.join(&entry.path);
+        let sealed = journal.join(".sealed").join(&entry.path);
         let previous = journal.join(".previous").join(&entry.path);
-        let expected = if entry.present && image.try_exists()? {
+        let expected = if sealed.try_exists()? {
+            Some(sealed.as_path())
+        } else if entry.present && image.try_exists()? {
             Some(image.as_path())
         } else if previous.try_exists()? {
             Some(previous.as_path())
@@ -875,6 +1020,17 @@ pub fn read_lock(root: &Path) -> std::io::Result<std::fs::File> {
         .open(root.join(".rbxport-write.lock"))?;
     fs2::FileExt::lock_shared(&file)?;
     Ok(file)
+}
+
+/// Read-only lease against our writer. Discovery never creates a lock file.
+pub fn read_lease(root: &Path) -> std::io::Result<Option<std::fs::File>> {
+    let file = match std::fs::File::open(root.join(".rbxport-write.lock")) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    fs2::FileExt::lock_shared(&file)?;
+    Ok(Some(file))
 }
 
 fn lock(root: &Path) -> std::io::Result<std::fs::File> {
@@ -1627,5 +1783,120 @@ mod tests {
         );
         let error = Publication::recover(root.path(), ".journal").unwrap_err();
         assert!(error.to_string().contains("Contents"), "{error}");
+    }
+
+    #[test]
+    fn retained_publication_keeps_the_whole_previous_generation_until_verified() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(&root.path().join("db-a"), b"old a");
+        write_file(&root.path().join("db-b"), b"old b");
+        write_file(&root.path().join("obsolete"), b"old track");
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        write_file(&publication.stage().join("db-a"), b"new a");
+        write_file(&publication.stage().join("db-b"), b"new b");
+        write_file(&publication.stage().join("new-track"), b"new audio");
+        publication.commit_retained(&["db-a".into(), "db-b".into(), "new-track".into(), "obsolete".into()]).unwrap();
+        assert!(Publication::validation_pending(root.path(), ".journal"));
+        assert_eq!(std::fs::read(root.path().join(".journal/.previous/db-a")).unwrap(), b"old a");
+        assert_eq!(std::fs::read(root.path().join(".journal/.previous/db-b")).unwrap(), b"old b");
+        publication.rollback().unwrap();
+        assert_eq!(std::fs::read(root.path().join("db-a")).unwrap(), b"old a");
+        assert_eq!(std::fs::read(root.path().join("db-b")).unwrap(), b"old b");
+        assert_eq!(std::fs::read(root.path().join("obsolete")).unwrap(), b"old track");
+        assert!(!root.path().join("new-track").exists());
+        drop(publication);
+        Publication::recover(root.path(), ".journal").unwrap();
+        Publication::recover(root.path(), ".journal").unwrap();
+    }
+
+    #[test]
+    fn recovery_after_publication_still_requires_validation_before_retirement() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(&root.path().join("db"), b"old");
+        {
+            let publication = Publication::new(root.path(), ".journal").unwrap();
+            write_file(&publication.stage().join("db"), b"new");
+            publication.commit_retained(&["db".into()]).unwrap();
+        }
+        Publication::recover(root.path(), ".journal").unwrap();
+        assert_eq!(std::fs::read(root.path().join("db")).unwrap(), b"new");
+        assert!(root.path().join(".journal/.previous/db").is_file());
+        Publication::finalize_pending(root.path(), ".journal").unwrap();
+        assert!(!root.path().join(".journal").exists());
+        Publication::recover(root.path(), ".journal").unwrap();
+    }
+
+    #[test]
+    fn rollback_can_restart_after_restoring_only_one_file() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(&root.path().join("a"), b"old a");
+        write_file(&root.path().join("b"), b"old b");
+        {
+            let publication = Publication::new(root.path(), ".journal").unwrap();
+            write_file(&publication.stage().join("a"), b"new a");
+            write_file(&publication.stage().join("b"), b"new b");
+            publication.commit_retained(&["a".into(), "b".into()]).unwrap();
+            write_file(&root.path().join(".journal/.rollback"), b"1");
+            create_dir_all(root.path().join(".journal/.rejected")).unwrap();
+            rename(&root.path().join("b"), &root.path().join(".journal/.rejected/b")).unwrap();
+            rename(&root.path().join(".journal/.previous/b"), &root.path().join("b")).unwrap();
+        }
+        Publication::recover(root.path(), ".journal").unwrap();
+        assert_eq!(std::fs::read(root.path().join("a")).unwrap(), b"old a");
+        assert_eq!(std::fs::read(root.path().join("b")).unwrap(), b"old b");
+        Publication::recover(root.path(), ".journal").unwrap();
+    }
+
+    #[test]
+    fn relocation_is_deferred_and_restored_by_rollback() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(&root.path().join("Contents/old.mp3"), b"audio");
+        write_file(&root.path().join("db"), b"old database");
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        publication.stage_move(Path::new("Contents/old.mp3"), Path::new("Contents/new.mp3")).unwrap();
+        write_file(&publication.stage().join("db"), b"new database");
+        assert!(root.path().join("Contents/old.mp3").is_file());
+        assert!(!root.path().join("Contents/new.mp3").exists());
+        publication.commit_retained(&["Contents/new.mp3".into(), "db".into()]).unwrap();
+        assert_eq!(std::fs::read(root.path().join("Contents/new.mp3")).unwrap(), b"audio");
+        publication.rollback().unwrap();
+        assert_eq!(std::fs::read(root.path().join("Contents/old.mp3")).unwrap(), b"audio");
+        assert_eq!(std::fs::read(root.path().join("db")).unwrap(), b"old database");
+        assert!(!root.path().join("Contents/new.mp3").exists());
+    }
+
+    #[test]
+    fn every_retained_publication_move_boundary_can_replay_or_roll_back_twice() {
+        // Every before/after rename state for a database pair and a deletion.
+        // The record is written after fixture images so replay's timestamp
+        // conflict detector sees these as the transaction's own operations.
+        for boundary in 0..=5 {
+            for rollback in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let journal = root.path().join(".journal");
+                let entries: Vec<_> = ["a", "b", "obsolete"].iter().map(|name| PublicationEntry {
+                    path: (*name).into(), present: *name != "obsolete", had_target: Some(true), exact: true,
+                }).collect();
+                for name in ["a", "b", "obsolete"] { write_file(&root.path().join(name), b"old"); }
+                for name in ["a", "b"] { write_file(&journal.join(name), b"new"); }
+                write_file(&journal.join(".verification-required"), b"1");
+                create_dir_all(journal.join(".previous")).unwrap();
+                let steps = [("a", true), ("a", false), ("b", true), ("b", false), ("obsolete", true)];
+                for (name, backup) in steps.iter().take(boundary) {
+                    if *backup { rename(&root.path().join(name), &journal.join(".previous").join(name)).unwrap(); }
+                    else { rename(&journal.join(name), &root.path().join(name)).unwrap(); }
+                }
+                write_file(&journal.join("publication.json"), &serde_json::to_vec(&entries).unwrap());
+                if rollback { write_file(&journal.join(".rollback"), b"1"); }
+                Publication::recover(root.path(), ".journal").unwrap();
+                Publication::recover(root.path(), ".journal").unwrap();
+                let expected: &[u8] = if rollback { b"old" } else { b"new" };
+                assert_eq!(std::fs::read(root.path().join("a")).unwrap(), expected, "boundary {boundary}, rollback {rollback}");
+                assert_eq!(std::fs::read(root.path().join("b")).unwrap(), expected);
+                assert_eq!(root.path().join("obsolete").exists(), rollback);
+                if !rollback { Publication::finalize_pending(root.path(), ".journal").unwrap(); }
+                assert!(!journal.exists());
+            }
+        }
     }
 }
