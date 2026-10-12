@@ -53,7 +53,11 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// 14 reads a cloud-shared track uploaded from this library's device from
 /// its `OrgFolderPath`, as rekordbox does: formats 1 to 13 kept the
 /// `/contents_` path, so such a track played as missing.
-pub const FORMAT: u32 = 14;
+/// 15 falls back to a cloud-shared track's Dropbox copy when its local copy
+/// is gone, and stores each such track's path columns so a start served from
+/// the snapshot looks for the file again (issue #340): format 14 kept the
+/// gone `OrgFolderPath`, and nothing in the snapshot could tell it had gone.
+pub const FORMAT: u32 = 15;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -314,6 +318,20 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
     let (bounds, keys) = library.my_tag_parts();
     w.u32s(bounds);
     w.u32s(&keys.iter().map(|&k| u32::from_ne_bytes(k.to_ne_bytes())).collect::<Vec<_>>());
+    // Format 15: the path columns of the cloud-shared tracks, as columns.
+    let cloud = &library.cloud_paths;
+    w.u32s(&cloud.iter().map(|(row, _)| *row).collect::<Vec<_>>());
+    let field: [fn(&rbl_db::StoredPath) -> &str; 3] =
+        [|p| &p.folder_path, |p| &p.org_folder_path, |p| &p.device_id];
+    for field in field {
+        let mut column = StrColumn::with_capacity(cloud.len(), cloud.len() * 64);
+        for (_, stored) in cloud {
+            column.push(field(stored));
+        }
+        w.strings(&column);
+    }
+    w.u64s(&cloud.iter().map(|(_, p)| p.content_link.cast_unsigned()).collect::<Vec<_>>());
+    w.u64s(&cloud.iter().map(|(_, p)| p.service_id.cast_unsigned()).collect::<Vec<_>>());
     w.u32(crc32fast::hash(&w.0));
     w.0
 }
@@ -563,6 +581,28 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     if !lib.set_my_tag_parts(tag_bounds, tag_keys) {
         return None;
     }
+    let cloud_rows = r.u32s()?;
+    let (folder, org, device) = (r.strings()?, r.strings()?, r.strings()?);
+    let (links, services) = (r.u64s()?, r.u64s()?);
+    let n = cloud_rows.len();
+    if [folder.len(), org.len(), device.len(), links.len(), services.len()] != [n; 5]
+        || cloud_rows.iter().any(|&row| row as usize >= count)
+    {
+        return None;
+    }
+    lib.cloud_paths = cloud_rows
+        .into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            (row, rbl_db::StoredPath {
+                folder_path: folder.get(i).to_owned(),
+                org_folder_path: org.get(i).to_owned(),
+                content_link: links[i].cast_signed(),
+                service_id: services[i].cast_signed(),
+                device_id: device.get(i).to_owned(),
+            })
+        })
+        .collect();
     if lib.search.len() != count || lib.bitrate.len() != count
         || lib.sample_rate.len() != count || lib.file_size.len() != count
         || lib.track_number.len() != count || lib.disc_no.len() != count

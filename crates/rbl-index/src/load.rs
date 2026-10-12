@@ -301,8 +301,14 @@ pub fn load_with_cue_reader(
         // on the machine that uploaded it, its local copy), and a drive
         // library's paths name the drive as it was mounted when the library
         // was made; all resolved here once, as rekordbox resolves them, so
-        // every reader sees the file rekordbox would open.
-        lib.folder_path.push(&track_paths.resolve(&stored_path(r)?));
+        // every reader sees the file rekordbox would open. A cloud-shared
+        // track's resolution also depends on which of its copies exist, so
+        // its path columns are kept for `Library::recheck_cloud_paths`.
+        let stored = stored_path(r)?;
+        lib.folder_path.push(&track_paths.resolve(&stored));
+        if stored.content_link & rbl_db::track_path::CLOUD_SHARED != 0 {
+            lib.cloud_paths.push((row_index, stored));
+        }
         lib.file_name.push(&text_or_default(r, 12)?);
         lib.analysis_path.push(&text_or_default(r, 13)?);
         lib.artwork_path.push(&text_or_default(r, 19)?);

@@ -118,7 +118,15 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
                 });
                 let prepared = snapshot.and_then(|job| job.join().ok()).flatten();
                 if let Some(fp) = fingerprint {
-                    if let Some(library) = prepared.and_then(|snapshot| snapshot.validated(fp)) {
+                    if let Some(mut library) = prepared.and_then(|snapshot| snapshot.validated(fp)) {
+                        // Which copy of a cloud-shared track exists is not
+                        // in master.db; rekordbox looks each time it uses
+                        // the file, so look again rather than trust the
+                        // snapshot's answer (issue #340).
+                        let moved = library.recheck_cloud_paths(&db.track_paths());
+                        if moved > 0 {
+                            tracing::debug!(moved, "cloud track files moved since the snapshot");
+                        }
                         let load_ms =
                             u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                         tracing::debug!(tracks = library.len(), load_ms, "library from cache");

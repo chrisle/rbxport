@@ -107,3 +107,73 @@ fn an_own_cloud_track_whose_local_copy_is_gone_opens_the_dropbox_copy() {
     assert_eq!(db.track_details(&fixture::track_id(0)).unwrap().unwrap().path, copy);
     assert_eq!(path_of(&index, 1), local.to_str().unwrap());
 }
+
+/// Issue #340, through the startup snapshot: the snapshot was built while
+/// both copies existed, then the local copy was deleted. `master.db` does
+/// not change, so the snapshot is still accepted; rekordbox looks for the
+/// file again when it uses it, and so must a library served from the
+/// snapshot.
+#[test]
+fn a_cached_library_follows_a_cloud_track_file_that_moved_after_the_snapshot() {
+    let root = tempfile::tempdir().unwrap();
+    let location = fixture::build(root.path(), fixture::Shape::default()).unwrap();
+    share(&location, 0, rbl_db::track_path::SERVICE_DROPBOX, OWN);
+    let dropbox = root.path().join("Dropbox-340");
+    let copy = format!("{}/rekordbox{CLOUD}", dropbox.display());
+    std::fs::create_dir_all(std::path::Path::new(&copy).parent().unwrap()).unwrap();
+    std::fs::write(&copy, b"").unwrap();
+    let local = root.path().join("Music-340/track.mp3");
+    std::fs::create_dir_all(local.parent().unwrap()).unwrap();
+    std::fs::write(&local, b"").unwrap();
+    let local = local.to_str().unwrap().to_owned();
+    let writer = rbl_db::write::Writer::open(location.clone(), location.share_root.join("../backups")).unwrap();
+    writer
+        .library()
+        .connection()
+        .execute("UPDATE djmdContent SET OrgFolderPath = ?1 WHERE ID = ?2", rusqlite::params![local, fixture::track_id(0)])
+        .unwrap();
+    drop(writer);
+
+    let db = Library::open(location, OpenMode::ReadOnly).unwrap();
+    assert!(db.set_dropbox_folder(Some(dropbox.to_str().unwrap().to_owned())));
+    let (index, _) = rbl_index::load(&db).unwrap();
+    assert_eq!(path_of(&index, 0), local, "both copies exist: the local copy (#176)");
+
+    let fingerprint = rbl_index::cache::Fingerprint {
+        format: rbl_index::cache::FORMAT,
+        db_len: 1,
+        db_modified_ns: 2,
+        wal_len: 3,
+        wal_modified_ns: 4,
+        db_version: 5,
+        content: 6,
+        database: 7,
+    };
+    let snapshot = root.path().join("snapshot-340.bin");
+    rbl_index::cache::save(&snapshot, &index, fingerprint).unwrap();
+
+    std::fs::remove_file(&local).unwrap();
+    let mut cached = rbl_index::cache::prepare(&snapshot).unwrap().validated(fingerprint).unwrap();
+    assert_eq!(path_of(&cached, 0), local, "the snapshot alone still names the deleted file");
+    assert_eq!(cached.recheck_cloud_paths(&db.track_paths()), 1);
+    assert_eq!(path_of(&cached, 0), copy);
+    let by_location = rbl_index::ViewSpec {
+        source: rbl_index::TrackSource::Collection,
+        sort: rbl_index::SortColumn::Location,
+        descending: false,
+        query: String::new(),
+        filter: rbl_index::TrackFilter::default(),
+    };
+    let fresh = rbl_index::load(&db).unwrap().0;
+    assert_eq!(path_of(&fresh, 0), copy);
+    let sorted = cached.open_view(&by_location).rows;
+    let expected = fresh.open_view(&by_location).rows;
+    assert_eq!(sorted, expected, "the Location sort follows the new path");
+
+    // The local copy comes back: rekordbox takes it again, and so does the
+    // next cached start.
+    std::fs::write(&local, b"").unwrap();
+    let mut cached = rbl_index::cache::prepare(&snapshot).unwrap().validated(fingerprint).unwrap();
+    assert_eq!(cached.recheck_cloud_paths(&db.track_paths()), 0);
+    assert_eq!(path_of(&cached, 0), local);
+}

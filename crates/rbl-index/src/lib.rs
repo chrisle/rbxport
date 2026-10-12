@@ -171,6 +171,15 @@ pub struct Library {
     /// not use it.
     pub(crate) my_tag_bounds: Vec<u32>,
     pub(crate) my_tag_keys: Vec<i32>,
+
+    /// The stored path columns of every cloud-shared track, by row, so a
+    /// library served from the startup snapshot can look for each file
+    /// again ([`Library::recheck_cloud_paths`]). rekordbox checks which
+    /// copy of such a track exists each time the file is used
+    /// (`checkAndUpdateCloudFilePath`, issue #340); deleting a copy does
+    /// not change `master.db`, so the snapshot alone would keep opening the
+    /// deleted one. Empty for a library without Cloud Library Sync.
+    pub(crate) cloud_paths: Vec<(Row, rbl_db::StoredPath)>,
 }
 
 // Copy-on-write snapshots keep readers on a consistent set of track columns.
@@ -232,6 +241,7 @@ impl Clone for Library {
             my_tags: self.my_tags.clone(),
             my_tag_bounds: self.my_tag_bounds.clone(),
             my_tag_keys: self.my_tag_keys.clone(),
+            cloud_paths: self.cloud_paths.clone(),
         }
     }
 }
@@ -448,6 +458,31 @@ impl Library {
         }
         self.folder_path = paths;
         self.by_path = OnceLock::new();
+    }
+
+    /// Looks again for the file of every cloud-shared track, as rekordbox
+    /// does each time it uses one (`DatabaseMediator::
+    /// checkAndUpdateCloudFilePath`, see `rbl_db::track_path`), and points
+    /// the row at the copy found. For a library read from the startup
+    /// snapshot, whose paths were resolved against the files that existed
+    /// when it was built. Returns how many rows changed.
+    pub fn recheck_cloud_paths(&mut self, paths: &rbl_db::TrackPaths) -> usize {
+        let changed: HashMap<usize, String> = self
+            .cloud_paths
+            .iter()
+            .filter_map(|(row, stored)| {
+                let row = *row as usize;
+                let path = paths.resolve(stored);
+                (row < self.folder_path.len() && self.folder_path.get(row) != path).then_some((row, path))
+            })
+            .collect();
+        if changed.is_empty() {
+            return 0;
+        }
+        self.folder_path.replace_rows(&changed);
+        self.by_path = OnceLock::new();
+        self.rebuild_ranks(&[SortColumn::Location]);
+        changed.len()
     }
 
     /// Sets the row count. Only the snapshot reader needs this: every other
