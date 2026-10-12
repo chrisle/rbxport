@@ -21,17 +21,18 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialFirstB
   /** The launch prompt for never-analysed Collection tracks. */
   auto?: boolean;
   initialMode: AnalysisMode;
-  /** The Preferences default; changing the box here applies to this batch only. */
+  /** The Preferences switch, which this window has no box for. */
   initialFirstBeatCue: boolean;
   onConfirm: (settings: AnalysisChoice) => void;
   onCancel: () => void;
 }) {
   // The launch prompt always starts from its defaults; Analyze Track starts
-  // from what it was last confirmed with.
+  // from what it was last confirmed with. The first-beat cue is always the
+  // Preferences switch as it stands now (#343).
   const [settings, setSettings] = useState<AnalysisChoice>(() => ({
     mode: initialMode, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180,
-    firstBeatCue: initialFirstBeatCue,
     ...(auto ? {} : lastAnalysisChoice()),
+    firstBeatCue: initialFirstBeatCue,
   }));
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
