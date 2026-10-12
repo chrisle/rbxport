@@ -335,7 +335,7 @@ wrappers that fill in defaults.
 | 5 | Open the publication: take the exclusive lock, replay any journal, delete leftover stages, create `.rbxport-staging-*`. | `Publication::new` | All new files go into the stage. The lock (`.rbxport-write.lock`, `fs2` exclusive lock) is held until the end of the run. |
 | 6 | Load the previous manifest. Read a `Snapshot` of both databases. | `Manifest::load`, `snapshot::Snapshot::read` | The "before" picture, used for reconciling now and for detecting other writers just before commit. |
 | 7 | Upgrade an old manifest that has no `db_id`, if rekordbox's sync record names the same `DBID`. | inline | Old manifests lack the field. |
-| 8 | Baseline checks, then an `analysis_stamp` of every analysis file the databases name. | `reconcile::rewritten`, `Snapshot::check_baseline_except`, `snapshot::analysis_stamp` | Refuses a stick whose two libraries already describe a track or playlist differently (first sync only), naming it (a playlist each library holds under the same id but by another name or kind is two playlists, not a disagreement, #353), unless the selection rewrites that row from the library; one whose track identities rekordbox changed; or one whose manifest belongs to another library (`db_id`). The stamp reads every analysis file, so it comes after the checks: a refused sync says so at once. |
+| 8 | Baseline checks, then an `analysis_stamp` of every analysis file the databases name. | `reconcile::rewritten`, `Snapshot::check_baseline_except`, `snapshot::analysis_stamp` | Refuses a stick whose two libraries already describe a track or playlist differently (first sync only), naming it, unless the selection rewrites that row from the library; one whose track identities rekordbox changed; or one whose manifest belongs to another library (`db_id`). Playlists are matched across the two libraries by `snapshot::legacy_playlist_ids`: only a playlist both hold under one id, name and kind, filled differently, is a disagreement that refuses. Two playlists that differ in name or kind under one id, or share a name and kind under different ids but hold different tracks, are two playlists, and both are kept (#353). The stamp reads every analysis file, so it comes after the checks: a refused sync says so at once. |
 | 9 | Reconcile the selection with the stick. | `reconcile::prepare` | Links selected tracks to their existing device rows (`identify_tracks`) and playlists to their device ids (`identify_playlists`). Keeps what the selection does not name but the stick still needs (`retain_device_only`). |
 | 10 | Merge the stick's My Tags into the library's. | inline | Tags that exist only on the stick are kept. |
 | 11 | Assign ids: playlists first, then tracks. Check that ids are unique and playlist membership is valid. | `playlist_ids`, `assign_ids` | Ids are pinned to the previous manifest, so they stay the same between syncs ([why](usb-export-db.md#incremental-sync)). |
@@ -378,11 +378,13 @@ the track is handled), `copying` (only when a track is actually written),
   rekordbox's Devices tree and the players do, so one id can name a
   different playlist in each (a Tag List a player saved to one library,
   say). `snapshot::legacy_playlist_ids` pairs an `export.pdb` playlist
-  with the `exportLibrary.db` one of the same id only when both have the
-  same name and kind, then by name and kind in the same folder, as
-  rekordbox's export finds a list in the other library by name; an
-  unpaired one is carried in both libraries, under a new id when its own
-  is taken (#353).
+  with the `exportLibrary.db` one of the same id when both have the
+  same name and kind; otherwise with an unclaimed one of the same name,
+  kind and tracks in the same folder, as rekordbox's export finds a list
+  in the other library by name. A same-named one with other tracks under
+  another id is not paired: pairing it would drop one of the two. An
+  unpaired one is carried in both libraries, under a new id above every
+  stick and recorded id when its own is taken (#353).
 - **Tracks the stick still needs** are added with `preserve: true`: tracks
   in device-only playlists, tracks in play history, and tracks another
   writer put on the stick. Their metadata is read back from

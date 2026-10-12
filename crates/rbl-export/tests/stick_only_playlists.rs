@@ -173,3 +173,80 @@ fn a_later_sync_keeps_a_tag_list_whose_id_the_other_library_gives_another_playli
     assert_eq!(playlists(dest.path(), Format::DeviceLibrary), expected, "export.pdb's Tag List is not lost");
     assert_eq!(playlists(dest.path(), Format::OneLibrary), expected);
 }
+
+/// "Gig" in each library under its own id, filled differently: export.pdb
+/// takes id 3 (a playlist made before it was deleted), exportLibrary.db id 2.
+/// Two playlists that share a name, not one the libraries disagree on.
+fn same_name_other_id_other_tracks(dest: &Path) {
+    let ids = device_ids(dest);
+    let pad = create(dest, Format::DeviceLibrary, "Pad", vec![]);
+    let legacy = create(dest, Format::DeviceLibrary, "Gig", vec![ids[0], ids[1]]);
+    device_library::apply(dest, Format::DeviceLibrary, &Edit::Delete { id: pad }).unwrap();
+    let one = create(dest, Format::OneLibrary, "Gig", vec![ids[2]]);
+    assert_ne!(legacy, one);
+}
+
+fn both_gigs() -> Vec<(String, Vec<String>)> {
+    vec![
+        ("Gig".to_owned(), titles(&["Track 1", "Track 2"])),
+        ("Gig".to_owned(), titles(&["Track 3"])),
+        ("Set".to_owned(), titles(&["Track 1", "Track 2", "Track 3", "Track 4"])),
+    ]
+}
+
+#[test]
+fn a_first_sync_keeps_two_same_named_playlists_under_other_ids_with_other_tracks() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (tracks, selection) = stick(src.path(), dest.path());
+    same_name_other_id_other_tracks(dest.path());
+
+    sync_to(dest.path(), &tracks, &selection).unwrap();
+    assert_eq!(playlists(dest.path(), Format::DeviceLibrary), both_gigs(), "export.pdb keeps its Gig");
+    assert_eq!(playlists(dest.path(), Format::OneLibrary), both_gigs(), "exportLibrary.db keeps its Gig");
+    assert!(rbl_export::verify_databases(dest.path()).unwrap().errors.is_empty());
+
+    sync_to(dest.path(), &tracks, &selection).unwrap();
+    assert_eq!(playlists(dest.path(), Format::DeviceLibrary), both_gigs());
+    assert_eq!(playlists(dest.path(), Format::OneLibrary), both_gigs());
+}
+
+#[test]
+fn a_later_sync_keeps_two_same_named_playlists_under_other_ids_with_other_tracks() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let tracks: Vec<SourceTrack> = (1..=4).map(|id| track(src.path(), id)).collect();
+    let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: (0..tracks.len()).collect(), ..Default::default() }];
+    sync_to(dest.path(), &tracks, &selection).unwrap();
+    same_name_other_id_other_tracks(dest.path());
+
+    sync_to(dest.path(), &tracks, &selection).unwrap();
+    assert_eq!(playlists(dest.path(), Format::DeviceLibrary), both_gigs(), "export.pdb's Gig is not lost");
+    assert_eq!(playlists(dest.path(), Format::OneLibrary), both_gigs());
+}
+
+/// The same, where exportLibrary.db gives export.pdb's id to another
+/// playlist: export.pdb's "Gig" is carried under a new id.
+#[test]
+fn a_same_named_playlist_with_other_tracks_whose_id_is_taken_is_carried_under_a_new_id() {
+    for record in [false, true] {
+        let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (tracks, selection) = stick(src.path(), dest.path());
+        if record {
+            sync_to(dest.path(), &tracks, &selection).unwrap();
+        }
+        let ids = device_ids(dest.path());
+        let legacy = create(dest.path(), Format::DeviceLibrary, "Gig", vec![ids[0], ids[1]]);
+        let other = create(dest.path(), Format::OneLibrary, "Warmup", vec![ids[3]]);
+        create(dest.path(), Format::OneLibrary, "Gig", vec![ids[2]]);
+        assert_eq!(legacy, other);
+
+        sync_to(dest.path(), &tracks, &selection).unwrap();
+        let expected = vec![
+            ("Gig".to_owned(), titles(&["Track 1", "Track 2"])),
+            ("Gig".to_owned(), titles(&["Track 3"])),
+            ("Set".to_owned(), titles(&["Track 1", "Track 2", "Track 3", "Track 4"])),
+            ("Warmup".to_owned(), titles(&["Track 4"])),
+        ];
+        assert_eq!(playlists(dest.path(), Format::DeviceLibrary), expected, "record: {record}");
+        assert_eq!(playlists(dest.path(), Format::OneLibrary), expected, "record: {record}");
+    }
+}

@@ -355,8 +355,10 @@ fn first_difference(legacy: &Library, one: &Library, rewritten: &Rewritten) -> O
 /// other (#353).
 ///
 /// A legacy playlist is the `OneLibrary` playlist with its id when both
-/// give it the same name and kind; otherwise the one with its name and kind
-/// in the same folder that no other legacy playlist has claimed. One found
+/// give it the same name and kind; otherwise the one with its name, kind
+/// and tracks in the same folder that no other legacy playlist has claimed.
+/// A same-named one with other tracks under another id is another playlist,
+/// not a disagreement: pairing it would drop one of the two. One found
 /// in neither way is the legacy library's own: it keeps its id, or takes a
 /// new one above `floor` and every id either library uses when `OneLibrary`
 /// already gives that id to another playlist.
@@ -386,7 +388,13 @@ pub(crate) fn legacy_playlist_ids(legacy: &Library, one: &Library, floor: u32) -
             } else {
                 continue;
             };
-            if let Some(other) = one.playlists.iter().find(|o| !claimed.contains(&o.id) && o.parent == parent && same(p, o)) {
+            // Only the same playlist: one each library fills differently
+            // is two playlists that share a name, and each is kept.
+            if let Some(other) = one
+                .playlists
+                .iter()
+                .find(|o| !claimed.contains(&o.id) && o.parent == parent && same(p, o) && o.tracks == p.tracks)
+            {
                 ids.insert(p.id, other.id);
                 claimed.insert(other.id);
                 placed = true;

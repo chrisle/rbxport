@@ -443,6 +443,8 @@ fn fill_source_details(
     manifest: Option<&Manifest>,
     out: &mut BTreeMap<u32, SourceTrack>,
 ) -> Result<()> {
+    // Tracks only. Its playlist ids use no recorded floor, unlike
+    // `prepare`'s `merged_library_above`: do not rely on them here.
     let current = before.merged_library();
     for t in current.as_ref().into_iter().flat_map(|l| &l.tracks) {
         let track = out
@@ -500,6 +502,8 @@ pub fn all(
     before: &Snapshot,
     manifest: Option<&Manifest>,
 ) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>)> {
+    // Runs only when one database is missing, so no playlist is re-id'd and
+    // the floor `prepare` passes to `merged_library_above` cannot matter.
     let current = before.merged_library();
     let sources = sources(root, before)?;
     let positions: BTreeMap<u32, usize> =
