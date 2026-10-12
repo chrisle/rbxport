@@ -176,14 +176,34 @@ Page header is `0x28` bytes:
 
 ```text
 0x04 page index   0x08 page type   0x0c next page   0x10 sequence
-0x18 row count (u8)
-0x19 (rows * 32) & 0xff
-0x1a rows / 8
+0x18 u24: row index length (low 13 bits), present rows (top 11 bits)
 0x1b flags        0x24 = data page; bit 0x40 set = not a data page
 0x1c free bytes   0x1e used bytes (rounded up to 4)
-0x20 row count u16
-0x22 row count u16, only when > 0xff
+0x20 u16: rows the last write touched
+0x22 u16: index of the first of them
 ```
+
+`0x20`, `0x22`, and the second of each row group's two mask words are
+DeviceSQL's record of its last write, not row counts. Before rekordbox adds
+or frees a row on a page, it walks the row groups from `0x22 / 16` and
+clears each group's second word until it has counted off `0x20` bits.
+`0x1fff` in both words means the page has no record. [static: rekordbox
+7.2.19 `_TE_PSmgrClearDirtyBits` @0x102f694d4; rollback flips the same
+bits, `_TE_PSmgrFlipDirtyBits` @0x102f6809c]
+
+A record that points past the page's row groups sends that walk off the
+page. rbxport wrote the row count into both words of its playlist-entry
+pages of more than 255 rows, and rekordbox 6.8.6 crashed on such a stick
+(#349). rbxport now writes what rekordbox itself writes:
+
+- Pages of up to 255 rows: `0x20` holds the row count, `0x22` holds 0,
+  and both mask words are the presence mask. [OBS 7.2.11, pages of 1 to 61
+  rows]
+- Pages of more than 255 rows: `0x20` holds 1, `0x22` holds the last row's
+  index, and the second mask word is 0 except in the last group, where it
+  holds only the last row's bit. For 284 rows that is `1c 81 23` at `0x18`
+  and `01 00 1b 01` at `0x20`. [OBS: rekordbox-written sticks, #284 and
+  #321]
 
 Chain walking stops at the table's last page, a self-link, or `next == 0`.
 
