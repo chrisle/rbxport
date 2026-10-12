@@ -499,6 +499,15 @@ rows. Several tables are required to exist while empty. `dbVersion` is
   as 255; corrected-export physical confirmation remains required. Raw SQL
   regression coverage verifies all six values independently of snapshot decoding,
   and checks OneLibrary-only conversion preserves those ratings.
+  The CDJ-3000X (firmware 1.40) takes `content.rating` as the star count
+  with no scaling: `SqliteTrackEntry::vfunc30` at `0x01218a90` reads the
+  `rating` column with `sqlite3_column_int64` into a byte. Static analysis
+  found no `export.pdb` reader in that firmware, so it is thought to browse
+  only `exportLibrary.db` [hypothesis, alphatheta-docs
+  `devices/cdj-3000x/application/music-library-and-db.md`, "No DeviceSQL
+  reader found"]. A stick written by v1.6.0 or earlier (stars × 51) showed no
+  stars on one (#347); the next sync rewrites the column as 0–5, which a
+  raw-SQL test pins.
 - `artist`, `album`, `genre`, `label`, `key`, `color` — interned and deduped;
   an empty name is id 0, which is how the reference spells "none".
 - `image` — `(image_id, path)`, the id being **the same one `export.pdb`'s

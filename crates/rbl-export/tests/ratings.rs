@@ -89,3 +89,33 @@ fn resync_repairs_the_old_xml_scale_without_discarding_other_device_edits() {
     }).collect::<Vec<_>>();
     assert!(matches!(rbl_export::export(usb.path(), &tracks, &[]), Err(rbl_export::ExportError::Conflict(_))));
 }
+
+fn raw_one_library_ratings(root: &Path) -> Vec<i64> {
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(
+        &root.join("PIONEER/rekordbox/exportLibrary.db"),
+    ).unwrap();
+    let mut query = db.connection().prepare("SELECT rating FROM content ORDER BY content_id").unwrap();
+    let ratings = query.query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+    ratings
+}
+
+/// A stick exported by v1.6.0 or earlier holds `content.rating` as stars x 51.
+/// The CDJ-3000X reads only `exportLibrary.db` and takes that column as the
+/// star count, so such a stick shows no stars (#347). The next sync must write
+/// the raw column back as 0 to 5, not merely read it as stars.
+#[test]
+fn resync_rewrites_an_old_scaled_stick_as_raw_star_counts() {
+    let source = tempfile::tempdir().unwrap();
+    let usb = tempfile::tempdir().unwrap();
+    export_stars(usb.path(), source.path());
+    let db = rusqlite::Connection::open(usb.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    db.pragma_update(None, "cipher", "sqlcipher").unwrap();
+    db.pragma_update(None, "legacy", 4).unwrap();
+    db.pragma_update(None, "key", rbl_onelibrary::key::passphrase().unwrap()).unwrap();
+    db.execute("UPDATE content SET rating=rating*51", []).unwrap();
+    drop(db);
+    assert_eq!(raw_one_library_ratings(usb.path()), vec![0, 51, 102, 153, 204, 255]);
+
+    export_stars(usb.path(), source.path());
+    assert_eq!(raw_one_library_ratings(usb.path()), vec![0, 1, 2, 3, 4, 5]);
+}
