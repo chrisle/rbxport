@@ -28,6 +28,13 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_millis(200);
 /// A session's reassembly buffer never legitimately grows past this.
 const MAX_PENDING: usize = 64 * 1024;
+/// How long an idle accept loop sleeps before looking for a connection or
+/// a stop again. The listeners are non-blocking and polled, because a
+/// blocked `accept` only wakes for a connection, and the one `shutdown`
+/// used to make to itself never arrives once the address the listener is
+/// on has left the host (Wi-Fi turned off under a running LINK, #348): the
+/// stop then waited forever and the ports stayed bound until the app quit.
+const ACCEPT_POLL: Duration = Duration::from_millis(25);
 
 /// Opens a session per connection. Implemented over the library index; kept
 /// as a trait so the codec and the socket layer can be tested without one.
@@ -216,6 +223,8 @@ impl Bound {
     ) -> io::Result<Self> {
         let query_listener = TcpListener::bind(SocketAddr::new(address, query_port))?;
         let database_listener = TcpListener::bind(SocketAddr::new(address, database_port))?;
+        query_listener.set_nonblocking(true)?;
+        database_listener.set_nonblocking(true)?;
         let (query, database) = (
             query_listener.local_addr()?,
             database_listener.local_addr()?,
@@ -268,15 +277,12 @@ impl Bound {
         self.database
     }
 
+    /// Stops accepting and waits for the accept loops, which closes both
+    /// listeners. Needs nothing from the network: the loops poll for the
+    /// stop, so this returns even when the address they are bound to is
+    /// gone. Sessions already open end on their next read timeout.
     pub fn shutdown(mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        // Unblock the accept loops by connecting to each once.
-        for address in [self.query, self.database] {
-            drop(TcpStream::connect_timeout(
-                &address,
-                Duration::from_millis(200),
-            ));
-        }
         for thread in self.threads.drain(..) {
             drop(thread.join());
         }
@@ -284,6 +290,8 @@ impl Bound {
     }
 }
 
+/// Dropped without [`Bound::shutdown`], the loops still see the stop within
+/// one poll and close the listeners; only the wait is skipped.
 impl Drop for Bound {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
@@ -297,13 +305,27 @@ where
     while !stop.load(Ordering::Relaxed) {
         let (mut stream, peer) = match listener.accept() {
             Ok(accepted) => accepted,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                std::thread::sleep(ACCEPT_POLL);
+                continue;
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => {
                 tracing::warn!(%error, "accept failed on the database server");
+                // Not a spin: an error that repeats (out of descriptors)
+                // would otherwise hold a core until it clears.
+                std::thread::sleep(ACCEPT_POLL);
                 continue;
             }
         };
         if stop.load(Ordering::Relaxed) {
             return;
+        }
+        // The listener is non-blocking, and on macOS and Windows an accepted
+        // stream inherits that; a session reads with a timeout instead.
+        if let Err(error) = stream.set_nonblocking(false) {
+            tracing::warn!(%peer, %error, "accepted connection could not be made blocking; dropped");
+            continue;
         }
         tracing::trace!(%peer, "connection accepted");
         let session = session.clone();
