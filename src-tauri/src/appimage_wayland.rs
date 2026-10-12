@@ -1,15 +1,15 @@
-//! Linux AppImage launch workaround for a blank window on Wayland (#337).
+//! Linux `AppImage` launch workaround for a blank window on Wayland (#337).
 //!
-//! The AppImage bundles its build host's `libwayland-client`. On rolling-release
-//! distributions (Manjaro, CachyOS, Arch) the host's Mesa/EGL needs the host's
-//! newer copy, so WebKitGTK aborts with
+//! The `AppImage` bundles its build host's `libwayland-client`. On rolling-release
+//! distributions (Manjaro, `CachyOS`, Arch) the host's Mesa/EGL needs the host's
+//! newer copy, so `WebKitGTK` aborts with
 //! `Could not create default EGL display: EGL_BAD_PARAMETER` and shows a blank
 //! window. [OBS] Both reporters on #337 start the app with
 //! `LD_PRELOAD=/usr/lib/libwayland-client.so`; the same fix is documented for
-//! other Tauri AppImages (gitbutlerapp/gitbutler#5282).
+//! other Tauri `AppImages` (gitbutlerapp/gitbutler#5282).
 //!
 //! `LD_PRELOAD` only takes effect at process start, so when running from an
-//! AppImage on a Wayland session we re-exec ourselves once with the host's
+//! `AppImage` on a Wayland session we re-exec ourselves once with the host's
 //! library preloaded. Anything unexpected falls through to a normal start.
 //! [UNKNOWN] Not verifiable off Linux; see the PR's Hardware/OS check.
 
