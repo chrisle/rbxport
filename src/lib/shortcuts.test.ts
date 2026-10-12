@@ -396,3 +396,10 @@ describe("the mixer's EQ kill keys", () => {
     expect(chordFromEvent({ key: "q", code: "KeyA", metaKey: true }, mac)).toEqual({ key: "q", metaKey: true });
   });
 });
+
+describe("Locate track loaded on deck (#338)", () => {
+  it("is command + L on a Mac, rekordbox's b139", () => {
+    expect(actionFor({ key: "l", metaKey: true }, MAC)).toBe("locateLoaded");
+    expect(actionFor({ key: "l" }, MAC)).toBe("callMemoryCue9");
+  });
+});

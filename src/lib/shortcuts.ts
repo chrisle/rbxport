@@ -26,6 +26,9 @@ export type Action =
   // Enter loads the highlighted track onto Player 1 (deck A), wherever the
   // focus is in the browser — the keyboard counterpart of double-clicking it.
   | "loadPlayer1"
+  // Track > Locate track loaded on deck (command + L): scrolls the list to
+  // the track a deck holds and highlights it.
+  | "locateLoaded"
   // The deck. Every key below is rekordbox's own, transcribed from the Export
   // preset in `KeyMappings/rekordbox_0000000000030.mappings` — the key map the
   // mode we clone ships with, not a guess at what feels natural. The same
@@ -492,6 +495,7 @@ export const BINDINGS: readonly Binding[] = [
   { id: "analyseSelection", group: "Browse", label: "Analyze Track", chord: { key: "a", metaKey: true, shiftKey: true }, action: "analyseSelection", pane: "Browse" },
   { id: "loadPlayer1", group: "Browse", label: "Load on Player 1", chord: { key: "Enter" }, action: "loadPlayer1", pane: "Browse" },
   { id: "loadPlayer1.shift", group: "Browse", label: "Load on Player 1", chord: { key: "Enter", shiftKey: true }, action: "loadPlayer1", alias: true },
+  { id: "locateLoaded", group: "Browse", label: "Locate track loaded on deck", chord: { key: "l", metaKey: true }, action: "locateLoaded", command: "b139" },
   ...PLAYER_A.map((row): Binding => ({ ...row, id: row.action ?? row.label, group: "Player A", deck: "a" })),
   // The preset gives Player B no clears for its pads, no `Adjust
   // BPM/BeatGrid`, and the metronome's sound is the engine's: none of those

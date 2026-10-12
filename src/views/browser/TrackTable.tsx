@@ -752,6 +752,8 @@ export interface TrackDrag {
 }
 
 export interface TrackTableProps {
+  /** The track a deck holds, for Locate track loaded on deck (command + L). */
+  locateTrackId?: string | null;
   spec: ViewSpec;
   onSortChange: (column: SortColumn) => void;
   onSelectionChange?: (count: number) => void;
@@ -932,7 +934,7 @@ function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: 
 }
 
 export const TrackTable = memo(function TrackTable({
-  spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
+  locateTrackId, spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, pendingRows = 0, onSelectedTracks, onAnalyse,
@@ -1078,6 +1080,36 @@ export const TrackTable = memo(function TrackTable({
     };
   }, [onColumnResize, onColumnMove]);
 
+  // Each list keeps its own scroll position, so going to a playlist and back
+  // returns to where the first list was left. Recorded on scroll while the
+  // rows on screen belong to the current source, restored once the new
+  // source's rows have landed.
+  const scrollPositions = useRef(new Map<string, number>());
+  const restoreFor = useRef<string | null>(null);
+  const sourceKeyRef = useRef(view.sourceKey);
+  sourceKeyRef.current = view.sourceKey;
+  const loadedRef = useRef(false);
+  loadedRef.current = !view.loading;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (loadedRef.current) scrollPositions.current.set(sourceKeyRef.current, el.scrollTop);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+  useLayoutEffect(() => {
+    if (view.loading) {
+      restoreFor.current = view.sourceKey;
+      return;
+    }
+    if (restoreFor.current !== view.sourceKey) return;
+    restoreFor.current = null;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = scrollPositions.current.get(view.sourceKey) ?? 0;
+  }, [view.loading, view.sourceKey, view.count]);
+
   const virtualizer = useVirtualizer({
     count: view.count + pendingRows,
     getScrollElement: () => scrollRef.current,
@@ -1177,6 +1209,19 @@ export const TrackTable = memo(function TrackTable({
         });
         return;
       }
+      // Command + L: bring the track a deck holds into view, if this list has it.
+      if (action === "locateLoaded") {
+        event.preventDefault();
+        const wanted = locateTrackId;
+        if (!wanted) return;
+        void view.idsInRange(0, view.count).then((ids) => {
+          const index = ids.indexOf(wanted);
+          if (index < 0) return;
+          virtualizer.scrollToIndex(index, { align: "center" });
+          setSelection({ ids: new Set([wanted]), anchorIndex: index });
+        });
+        return;
+      }
       // The first press with nothing highlighted picks the top visible row;
       // after that the keys step from where the highlight is.
       const start = firstIndex < 0 ? 0 : firstIndex;
@@ -1212,7 +1257,7 @@ export const TrackTable = memo(function TrackTable({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, preferences.keyboard.overrides]);
+  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, preferences.keyboard.overrides, locateTrackId, virtualizer]);
 
   const startDragOut = useCallback(
     (row: RowDto) => {

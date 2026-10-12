@@ -3019,6 +3019,7 @@ function AppBody() {
           // leave the real source permanently in its loading state.
           key={sessionReady ? "library-ready" : "library-loading"}
           spec={spec}
+          locateTrackId={playerTrack?.id ?? playerTrackB?.id ?? null}
           onSortChange={handleSort}
           onSelectionChange={setSelectedCount}
           onSelectedTracks={reportMainSelection}
