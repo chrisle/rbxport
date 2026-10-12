@@ -49,6 +49,7 @@ import {
   needsRedraw,
   OVERDRAW,
   scrollOffset,
+  snapOffset,
   pressCue,
   releaseCue,
   beatCountText,
@@ -1115,8 +1116,10 @@ export const Player = memo(function Player({
       // transform on the compositor rather than a redraw. Redrawing the canvas
       // from React state stepped it at the tick rate — ten times a second,
       // which is what made a scrolling waveform look like a slideshow.
+      // Whole device pixels: a fractional slide resamples the layer, and the
+      // one-pixel bars shimmer as the fraction changes frame to frame (#346).
       if (scroller.current) {
-        const dx = scrollOffset(at, drawn.current, span, detail.width);
+        const dx = snapOffset(scrollOffset(at, drawn.current, span, detail.width), globalThis.devicePixelRatio);
         scroller.current.style.transform = `translateX(${dx}px)`;
       }
       if (needsRedraw(at, drawn.current, span)) setAnchor(at);
@@ -1146,7 +1149,8 @@ export const Player = memo(function Player({
     drawn.current = anchor;
     if (scroller.current) {
       const at = total > 0 ? Math.min(positionRef.current / total, 1) : 0;
-      scroller.current.style.transform = `translateX(${scrollOffset(at, anchor, span, detail.width)}px)`;
+      const dx = snapOffset(scrollOffset(at, anchor, span, detail.width), globalThis.devicePixelRatio);
+      scroller.current.style.transform = `translateX(${dx}px)`;
     }
   }, [anchor, span, total, detail.width, positionRef]);
 

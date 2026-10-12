@@ -801,6 +801,25 @@ export function scrollOffset(
 }
 
 /**
+ * A slide for the scrolling layer in whole device pixels.
+ *
+ * A fractional slide makes the compositor resample the layer: every one-pixel
+ * bar and grid line is split across two columns at partial brightness, and as
+ * the head moves the split changes every frame, which is the waveform
+ * shimmering while it plays (#346). Measured: a slide of a quarter of a CSS
+ * pixel at 2x turned the 2-pixel white downbeat line (255, 255) into three
+ * columns (127, 255, 127); half a pixel at 1x turned a 1-pixel one into two at
+ * 127. The layer's own laid-out edge (`left: -50%`, which can be a half pixel)
+ * is snapped by the engine, so only the slide needs rounding.
+ */
+export function snapOffset(offset: number, ratio: number): number {
+  const scale = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  if (!Number.isFinite(offset)) return 0;
+  // `+ 0` folds the -0 that rounding a small negative slide gives.
+  return Math.round(offset * scale) / scale + 0;
+}
+
+/**
  * Whether the playhead has run far enough that the layer must be redrawn.
  *
  * The layer reaches half its width either side of the anchor, and the strip

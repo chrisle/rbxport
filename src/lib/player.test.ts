@@ -49,6 +49,7 @@ import {
   needsRedraw,
   NO_BEATS,
   scrollOffset,
+  snapOffset,
   pressCue,
   releaseCue,
   parseBeatGrid,
@@ -498,6 +499,33 @@ describe("scrollOffset", () => {
   it("stays at rest rather than dividing by zero", () => {
     expect(scrollOffset(0.5, 0.2, 0, 800)).toBe(0);
     expect(scrollOffset(0.5, 0.2, 0.1, 0)).toBe(0);
+  });
+});
+
+describe("snapOffset", () => {
+  it("puts the slide on whole device pixels (#346)", () => {
+    // Measured during playback: -164.155, -164.929 ... CSS px at 2x.
+    expect(snapOffset(-164.155, 2)).toBe(-164);
+    expect(snapOffset(-164.929, 2)).toBe(-165);
+    expect(snapOffset(-165.3, 2)).toBe(-165.5);
+    expect(snapOffset(-165.3, 1)).toBe(-165);
+    expect(snapOffset(12.74, 1.5)).toBeCloseTo(38 / 3, 9);
+  });
+
+  it("every snapped slide is a whole number of device pixels", () => {
+    for (const ratio of [1, 1.25, 1.5, 2, 3]) {
+      for (let offset = -600; offset <= 600; offset += 0.173) {
+        const device = snapOffset(offset, ratio) * ratio;
+        expect(Math.abs(device - Math.round(device))).toBeLessThan(1e-6);
+        expect(Math.abs(snapOffset(offset, ratio) - offset)).toBeLessThanOrEqual(0.5 / ratio + 1e-9);
+      }
+    }
+  });
+
+  it("never hands the transform NaN or -0", () => {
+    expect(snapOffset(Number.NaN, 2)).toBe(0);
+    expect(Object.is(snapOffset(-0.1, 2), 0)).toBe(true);
+    expect(snapOffset(10.4, Number.NaN)).toBe(10);
   });
 });
 
