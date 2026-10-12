@@ -376,8 +376,12 @@ pub struct Applied {
 /// looked up in its directory without regard to case or Unicode
 /// normalisation, as the export's own path keys compare them. A part two
 /// names match equally is left unresolved rather than guessed. Directory
-/// listings are kept for the resolver's life, so one per library read is
-/// enough for a whole playlist.
+/// listings are kept for the resolver's life.
+///
+/// This is for a file about to be opened whose spelled path was not there:
+/// callers join the spelling themselves for row ids and listings, which
+/// costs no I/O, and come here only on a miss. It is not meant to be run
+/// over a whole library.
 #[derive(Debug)]
 pub struct StickFiles {
     root: PathBuf,
@@ -397,9 +401,8 @@ impl StickFiles {
     pub fn locate(&mut self, relative: &str) -> PathBuf {
         let parts: Vec<&str> = relative.split(['/', '\\']).filter(|p| !p.is_empty() && *p != ".").collect();
         let spelled = parts.iter().fold(self.root.clone(), |path, part| path.join(part));
-        // perf-ok: one `stat` per track of the library read, as rekordbox
-        // opens each before it plays it; the listings below only when that
-        // misses.
+        // perf-ok: one `stat` of the one file about to be opened; the
+        // listings below only when that misses.
         if parts.contains(&"..") || spelled.exists() {
             return spelled;
         }

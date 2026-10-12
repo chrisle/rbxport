@@ -559,10 +559,12 @@ pub async fn track_pcm_waveform(
     let columns = columns.clamp(1, 7_500) as usize;
     let from_ms = from_ms.max(0.0);
     let to_ms = to_ms.max(from_ms);
+    let state = Arc::clone(&state);
     blocking("track_pcm_waveform", move || {
         let Some(path) = library.audio_path_of(&track_id).map(std::path::PathBuf::from) else {
             return Ok(Vec::new());
         };
+        let path = crate::device_library::openable(&state, &track_id, path);
         if !path.exists() || to_ms <= from_ms {
             return Ok(Vec::new());
         }
@@ -2167,6 +2169,7 @@ pub async fn deck_load<R: tauri::Runtime>(
         return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
             .with_detail(format!("track {track}")));
     };
+    let path = crate::device_library::openable(&state, &track, path);
     // [OBS rekordbox 7.2.19 static] `UiPlayer::handleMessageDragAndDrop`
     // @0x101abadc4 opens a track only when its file is there; otherwise the
     // status bar says `kPlayerOperateErrorLoadMissingFile` (@0x101abb0f4)
@@ -2635,6 +2638,7 @@ pub async fn reveal_track<R: tauri::Runtime>(
         return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
             .with_detail(format!("track {track}")));
     };
+    let path = crate::device_library::openable(&state, &track, path);
     if !path.exists() {
         return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
             .with_detail(path.display().to_string()));
@@ -2764,6 +2768,7 @@ pub async fn preview_play<R: tauri::Runtime>(
         return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
             .with_detail(format!("track {track}")));
     };
+    let path = crate::device_library::openable(&state, &track, path);
     let decks = Arc::clone(&player);
     let preview = Arc::clone(&preview);
     // Waits on the file opening, which may be a disk waking up: off the
@@ -3773,10 +3778,12 @@ pub async fn export_loop_wav(
     path: String,
 ) -> AppResult<u64> {
     let library = state.library()?;
+    let state = Arc::clone(&state);
     blocking("export_loop_wav", move || {
         let Some(source) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
             return Err(AppError::new(ErrorKind::NotFound, "That track has no file to read."));
         };
+        let source = crate::device_library::openable(&state, &track, source);
         rbl_audio::write_range_wav(&source, in_ms / 1000.0, out_ms / 1000.0, std::path::Path::new(&path))
             .map_err(|e| AppError::new(ErrorKind::Malformed, format!("The loop could not be written: {e}")))
     })
