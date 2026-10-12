@@ -355,13 +355,15 @@ fn first_difference(legacy: &Library, one: &Library, rewritten: &Rewritten) -> O
 /// other (#353).
 ///
 /// A legacy playlist is the `OneLibrary` playlist with its id when both
-/// give it the same name and kind; otherwise the one with its name, kind
-/// and tracks in the same folder that no other legacy playlist has claimed.
-/// A same-named one with other tracks under another id is another playlist,
-/// not a disagreement: pairing it would drop one of the two. One found
-/// in neither way is the legacy library's own: it keeps its id, or takes a
-/// new one above `floor` and every id either library uses when `OneLibrary`
-/// already gives that id to another playlist.
+/// give it the same name and kind. A legacy playlist whose id `OneLibrary`
+/// does not use keeps it, whatever `OneLibrary` holds under other ids, as
+/// before #353: two same-named playlists are both kept. Only one whose id
+/// `OneLibrary` gives to another playlist is looked for by name: the one
+/// with its name, kind and tracks in the same folder that no other legacy
+/// playlist has claimed. A same-named one with other tracks is another
+/// playlist, not a disagreement: pairing it would drop one of the two. One
+/// not found that way takes a new id above `floor` and every id either
+/// library uses.
 pub(crate) fn legacy_playlist_ids(legacy: &Library, one: &Library, floor: u32) -> BTreeMap<u32, u32> {
     let same = |a: &Playlist, b: &Playlist| a.name == b.name && a.folder == b.folder;
     let by_id: BTreeMap<u32, &Playlist> = one.playlists.iter().map(|p| (p.id, p)).collect();
@@ -378,7 +380,11 @@ pub(crate) fn legacy_playlist_ids(legacy: &Library, one: &Library, floor: u32) -
     loop {
         let mut placed = false;
         for p in &legacy.playlists {
-            if ids.contains_key(&p.id) {
+            // Only where `OneLibrary` gives its id to another playlist. One
+            // whose id is free keeps it, as before: each database is checked
+            // by id before the sync writes it (`check_database_changes`), so
+            // a playlist moved off its own id would read as lost.
+            if ids.contains_key(&p.id) || !by_id.contains_key(&p.id) {
                 continue;
             }
             let parent = if p.parent == 0 {

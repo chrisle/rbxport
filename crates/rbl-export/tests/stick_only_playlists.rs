@@ -60,7 +60,9 @@ fn stick(src: &Path, dest: &Path) -> (Vec<SourceTrack>, Vec<SourcePlaylist>) {
 /// A playlist made under one library only, holding `tracks` (device ids).
 fn create(dest: &Path, format: Format, name: &str, tracks: Vec<u32>) -> u32 {
     let id = device_library::apply(dest, format, &Edit::Create { parent: 0, name: name.into(), folder: false }).unwrap().id;
-    device_library::apply(dest, format, &Edit::Add { playlist: id, tracks }).unwrap();
+    if !tracks.is_empty() {
+        device_library::apply(dest, format, &Edit::Add { playlist: id, tracks }).unwrap();
+    }
     id
 }
 
@@ -113,6 +115,9 @@ fn a_tag_list_in_one_library_whose_id_the_other_gives_another_playlist_does_not_
     assert_eq!(playlists(dest.path(), Format::OneLibrary), expected);
 }
 
+/// Where each id names one playlist in export.pdb and another in
+/// exportLibrary.db, the same-named lists with the same tracks are one
+/// playlist: carrying export.pdb's under a new id would make a second copy.
 #[test]
 fn a_playlist_both_libraries_hold_under_different_ids_is_carried_once() {
     let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -248,5 +253,177 @@ fn a_same_named_playlist_with_other_tracks_whose_id_is_taken_is_carried_under_a_
         ];
         assert_eq!(playlists(dest.path(), Format::DeviceLibrary), expected, "record: {record}");
         assert_eq!(playlists(dest.path(), Format::OneLibrary), expected, "record: {record}");
+    }
+}
+
+/// "Gig" in each library under its own id, export.pdb's (3) free in
+/// exportLibrary.db, which holds its "Gig" under id 2: made under each
+/// library in turn, after export.pdb used and freed id 2 for "Pad".
+fn same_name_free_id(dest: &Path, legacy_tracks: Vec<u32>, one_tracks: Vec<u32>) {
+    let pad = create(dest, Format::DeviceLibrary, "Pad", vec![]);
+    let legacy = create(dest, Format::DeviceLibrary, "Gig", legacy_tracks);
+    device_library::apply(dest, Format::DeviceLibrary, &Edit::Delete { id: pad }).unwrap();
+    let one = create(dest, Format::OneLibrary, "Gig", one_tracks);
+    assert_ne!(legacy, one);
+    let library = device_library::read(dest, Format::OneLibrary).unwrap();
+    assert!(library.nodes.iter().all(|n| n.id != legacy), "export.pdb's id is free in exportLibrary.db");
+}
+
+/// The same list made under each library, the two numbering it apart, is
+/// kept twice, as before #353: export.pdb's keeps its own id, so the check
+/// of each database by id before writing finds it (the round-2 review of
+/// PR #369 found the sync refused here).
+#[test]
+fn same_named_playlists_with_the_same_tracks_under_free_ids_are_both_kept() {
+    for record in [false, true] {
+        for empty in [false, true] {
+            let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            let (tracks, selection) = stick(src.path(), dest.path());
+            if record {
+                sync_to(dest.path(), &tracks, &selection).unwrap();
+            }
+            let ids = device_ids(dest.path());
+            let gig = if empty { vec![] } else { vec![ids[0], ids[1]] };
+            same_name_free_id(dest.path(), gig.clone(), gig);
+
+            let case = format!("record: {record}, empty: {empty}");
+            sync_to(dest.path(), &tracks, &selection).unwrap_or_else(|e| panic!("{case}: {e}"));
+            let gig = if empty { vec![] } else { titles(&["Track 1", "Track 2"]) };
+            let expected = vec![
+                ("Gig".to_owned(), gig.clone()),
+                ("Gig".to_owned(), gig),
+                ("Set".to_owned(), titles(&["Track 1", "Track 2", "Track 3", "Track 4"])),
+            ];
+            assert_eq!(playlists(dest.path(), Format::DeviceLibrary), expected, "{case}");
+            assert_eq!(playlists(dest.path(), Format::OneLibrary), expected, "{case}");
+            let first = Snapshot::read(dest.path()).unwrap();
+
+            sync_to(dest.path(), &tracks, &selection).unwrap_or_else(|e| panic!("{case}, again: {e}"));
+            let again = Snapshot::read(dest.path()).unwrap();
+            assert_eq!((&again.legacy, &again.one), (&first.legacy, &first.one), "{case}: a repeat sync changes nothing");
+        }
+    }
+}
+
+/// How the two "Gig" lists' tracks relate.
+#[derive(Debug, Clone, Copy)]
+enum Contents {
+    Equal,
+    Empty,
+    Different,
+    Reordered,
+}
+
+/// `Gig` in each library, export.pdb's under an id exportLibrary.db gives
+/// "Pad" (`collide`) or under one it leaves free; first synced from here
+/// or not; then synced again. Each sync goes ahead (dev refuses only some
+/// first syncs that collide, and silently drops export.pdb's "Gig" on a
+/// later one), every list either library held is in both afterwards, the
+/// two libraries agree, and a repeat sync changes nothing.
+fn matrix(collide: bool) {
+    for contents in [Contents::Equal, Contents::Empty, Contents::Different, Contents::Reordered] {
+        for record in [false, true] {
+            let case = format!("collide: {collide}, {contents:?}, {}", if record { "later sync" } else { "first sync" });
+            let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            let (tracks, selection) = stick(src.path(), dest.path());
+            if record {
+                sync_to(dest.path(), &tracks, &selection).unwrap();
+            }
+            let ids = device_ids(dest.path());
+            let (legacy_gig, one_gig) = match contents {
+                Contents::Equal => (vec![ids[0], ids[1]], vec![ids[0], ids[1]]),
+                Contents::Empty => (vec![], vec![]),
+                Contents::Different => (vec![ids[0], ids[1]], vec![ids[2]]),
+                Contents::Reordered => (vec![ids[0], ids[1]], vec![ids[1], ids[0]]),
+            };
+            if collide {
+                let legacy = create(dest.path(), Format::DeviceLibrary, "Gig", legacy_gig);
+                let pad = create(dest.path(), Format::OneLibrary, "Pad", vec![]);
+                create(dest.path(), Format::OneLibrary, "Gig", one_gig);
+                assert_eq!(legacy, pad, "{case}");
+            } else {
+                same_name_free_id(dest.path(), legacy_gig, one_gig);
+            }
+            let before: Vec<_> = playlists(dest.path(), Format::DeviceLibrary)
+                .into_iter()
+                .chain(playlists(dest.path(), Format::OneLibrary))
+                .collect();
+
+            sync_to(dest.path(), &tracks, &selection).unwrap_or_else(|e| panic!("{case}: {e}"));
+            let after = playlists(dest.path(), Format::DeviceLibrary);
+            assert_eq!(playlists(dest.path(), Format::OneLibrary), after, "{case}: the two libraries agree");
+            for list in &before {
+                assert!(after.contains(list), "{case}: {list:?} is lost; after: {after:?}");
+            }
+            assert_eq!(device_ids(dest.path()).len(), tracks.len(), "{case}: no track is lost");
+            let gigs = after.iter().filter(|(name, _)| name == "Gig").count();
+            // Only the same list, under an id the other library gives to
+            // "Pad", is one playlist; every other layout keeps both, as dev.
+            let one_gig = collide && matches!(contents, Contents::Equal | Contents::Empty);
+            assert_eq!(gigs, if one_gig { 1 } else { 2 }, "{case}: {after:?}");
+            let first = Snapshot::read(dest.path()).unwrap();
+
+            sync_to(dest.path(), &tracks, &selection).unwrap_or_else(|e| panic!("{case}, repeat sync: {e}"));
+            let again = Snapshot::read(dest.path()).unwrap();
+            assert_eq!((&again.legacy, &again.one), (&first.legacy, &first.one), "{case}: a repeat sync changes nothing");
+        }
+    }
+}
+
+#[test]
+fn matrix_ids_that_collide() {
+    matrix(true);
+}
+
+#[test]
+fn matrix_ids_that_do_not_collide() {
+    matrix(false);
+}
+
+/// A folder "F" holding "Gig" made under each library, export.pdb's folder
+/// and list under ids exportLibrary.db leaves free: both folders are kept,
+/// each with its list, on a first sync and a later one, as before #353.
+#[test]
+fn same_named_folders_under_free_ids_are_both_kept() {
+    for record in [false, true] {
+        let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (tracks, selection) = stick(src.path(), dest.path());
+        if record {
+            sync_to(dest.path(), &tracks, &selection).unwrap();
+        }
+        let ids = device_ids(dest.path());
+        let folder = |format: Format| {
+            device_library::apply(dest.path(), format, &Edit::Create { parent: 0, name: "F".into(), folder: true }).unwrap().id
+        };
+        let child = |format: Format, parent: u32, tracks: Vec<u32>| {
+            let id = device_library::apply(dest.path(), format, &Edit::Create { parent, name: "Gig".into(), folder: false }).unwrap().id;
+            device_library::apply(dest.path(), format, &Edit::Add { playlist: id, tracks }).unwrap();
+        };
+        let pad = create(dest.path(), Format::DeviceLibrary, "Pad", vec![]);
+        let pad2 = create(dest.path(), Format::DeviceLibrary, "Pad2", vec![]);
+        let legacy = folder(Format::DeviceLibrary);
+        child(Format::DeviceLibrary, legacy, vec![ids[0]]);
+        device_library::apply(dest.path(), Format::DeviceLibrary, &Edit::Delete { id: pad }).unwrap();
+        device_library::apply(dest.path(), Format::DeviceLibrary, &Edit::Delete { id: pad2 }).unwrap();
+        let one = folder(Format::OneLibrary);
+        child(Format::OneLibrary, one, vec![ids[0]]);
+        let one_ids: Vec<u32> = device_library::read(dest.path(), Format::OneLibrary).unwrap().nodes.iter().map(|n| n.id).collect();
+        assert!(!one_ids.contains(&legacy) && !one_ids.contains(&(legacy + 1)), "record: {record}: {one_ids:?}");
+
+        let case = format!("record: {record}");
+        sync_to(dest.path(), &tracks, &selection).unwrap_or_else(|e| panic!("{case}: {e}"));
+        let expected = vec![
+            ("F".to_owned(), vec![]),
+            ("F".to_owned(), vec![]),
+            ("Gig".to_owned(), titles(&["Track 1"])),
+            ("Gig".to_owned(), titles(&["Track 1"])),
+            ("Set".to_owned(), titles(&["Track 1", "Track 2", "Track 3", "Track 4"])),
+        ];
+        assert_eq!(playlists(dest.path(), Format::DeviceLibrary), expected, "{case}");
+        assert_eq!(playlists(dest.path(), Format::OneLibrary), expected, "{case}");
+        let library = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
+        for f in library.nodes.iter().filter(|n| n.folder) {
+            assert_eq!(library.nodes.iter().filter(|n| n.parent == f.id).count(), 1, "{case}: each F keeps its Gig");
+        }
     }
 }

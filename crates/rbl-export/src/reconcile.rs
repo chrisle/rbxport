@@ -28,10 +28,19 @@ pub fn prepare(
     let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
     // A playlist carried under a new id must not take one an earlier export
     // recorded: that would read as the library's playlist, and be taken off.
+    // Nor one the stick held at that export and has since deleted: that
+    // would read as a deletion undone (`check_database_changes`).
+    let baseline = previous.and_then(|m| m.baseline.as_ref());
     let recorded = previous
         .into_iter()
         .flat_map(|m| m.playlists.iter().map(|p| p.export_id))
         .chain(record.iter().flat_map(|r| r.device_ids.values().copied()))
+        .chain(
+            baseline
+                .into_iter()
+                .flat_map(|b| b.legacy.iter().chain(&b.one))
+                .flat_map(|l| l.playlists.iter().map(|p| p.id)),
+        )
         .max()
         .unwrap_or(0);
     let Some(current) = before.merged_library_above(recorded) else {
