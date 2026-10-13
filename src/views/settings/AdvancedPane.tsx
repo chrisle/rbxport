@@ -99,6 +99,19 @@ export function AdvancedPane({ tab, summary }: {
             ]}
             onChange={(duplicateTracks) => set({ duplicateTracks })}
           />
+          <Sub>{t("When importing a playlist from a device")}</Sub>
+          <Note>{t("Tracks the collection does not have are copied to PioneerDJ/Imported from Device in your Music folder. Files already there are never replaced.")}</Note>
+          <Radios
+            label={t("When importing a playlist from a device")}
+            value={advanced.deviceImportMissing}
+            choices={[
+              { value: "copy", label: t("Copy missing tracks") },
+              { value: "ask", label: t("Ask each import") },
+              { value: "matched", label: t("Import only already-matched tracks") },
+              { value: "cancel", label: t("Cancel when any track is missing") },
+            ]}
+            onChange={(deviceImportMissing) => set({ deviceImportMissing })}
+          />
         </Section>
         {unlockWarning ? <div className={styles.warningBackdrop} role="presentation">
           <section

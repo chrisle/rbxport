@@ -112,12 +112,27 @@ playlists, with the stick's name and track order. If a playlist or folder
 there already has that name, the new one is numbered (`Name (1)`,
 `Name (2)`, ...) and a note says so. A track listed twice is imported twice.
 
-Only the tracks already in your collection are imported. A stick track is
-matched to the collection track at the same file, or to the collection track
-it was exported from. rekordbox offers to copy a track your collection lacks
-to the computer; RBXport leaves it out and the note counts what was left
-out. If none of the playlist's tracks are in the collection, nothing is
-imported. The stick is only read.
+A stick track is matched to the collection track at the same file, or to
+the collection track it was exported from. What happens to a track your
+collection does not have is set in **Preferences > Advanced > Browse >
+When importing a playlist from a device**:
+
+- **Copy missing tracks** (the default): its file is copied to
+  `PioneerDJ/Imported from Device` in your Music folder, under
+  `Contents/<Artist>/<Album>/`, added to your collection, and imported with
+  the rest, as rekordbox does when you click OK. A file already there is
+  never replaced: the copy gets a numbered name (`Track-1.mp3`). Each copy
+  is checked against the stick's file before it is used. If the import
+  fails, the copies it made are removed again.
+- **Ask each import**: rekordbox's question, with how many files would be
+  copied, their size and where they go. OK copies, Cancel imports nothing.
+- **Import only already-matched tracks**: the track is left out and the note
+  says how many were. If none of the tracks are in the collection, nothing
+  is imported.
+- **Cancel when any track is missing**: nothing is imported, and the note
+  says how many tracks are missing.
+
+A copied track is imported from its file's tags. The stick is only read.
 
 ## Music already on the device
 

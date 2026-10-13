@@ -24,7 +24,7 @@ import { applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBea
 import { toCamelot } from "@/lib/camelot";
 import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
 import { referenceDeviceSettings } from "./mock-device-settings";
-import { createMockDeviceLibraries } from "./mock-device-library";
+import { createMockDeviceLibraries, type MockImportEntry } from "./mock-device-library";
 
 const ARTISTS = [
   "MORTEN", "ARTBAT", "Meduza", "Vintage Culture", "Tujamo", "UMEK", "Kryder", "Joel Corry",
@@ -3047,30 +3047,64 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         return Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }
     },
-    // Import Playlist, as the real backend does it: the entries whose
-    // track the collection has, in the stick's order, into a new playlist
-    // at the end of the top level, numbered " (1)", " (2)"… when the name
-    // is taken there. None at all writes nothing.
-    devicePlaylistImport: (path, format, id) => {
+    // Import Playlist, as the real backend does it: a new playlist at the
+    // end of the top level, numbered " (1)", " (2)"… when the name is taken
+    // there, with the stick's entries in its order. An entry whose track
+    // the collection lacks is copied in as a new track (one per stick
+    // file), left out, or stops the import, as `missing` says.
+    devicePlaylistImport: (path, format, id, missing) => {
       if (!ready) return notReady();
-      let source: { name: string; masters: (string | null)[] };
+      let source: { name: string; entries: MockImportEntry[] };
       try {
         source = stickLibraries.playlist(path, format, id);
       } catch (error) {
         return Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }
-      const contents = source.masters.filter((m): m is string => m !== null && all.some((r) => r.id === m));
-      const missing = source.masters.length - contents.length;
-      if (contents.length === 0 && source.masters.length > 0) {
-        return wait({ id: null, name: source.name, renamed: false, tracks: 0, missing });
+      const held = (entry: MockImportEntry) => entry.master !== null && all.some((r) => r.id === entry.master);
+      const lacking = source.entries.filter((entry) => !held(entry)).length;
+      const none = (cancelled: boolean) => wait({ id: null, name: source.name, renamed: false, tracks: 0, missing: lacking, copied: 0, cancelled });
+      if (lacking > 0 && missing === "cancel") return none(true);
+      const copiedFrom = new Map<string, string>();
+      const contents: string[] = [];
+      for (const entry of source.entries) {
+        if (held(entry) && entry.master !== null) {
+          contents.push(entry.master);
+        } else if (missing === "copy") {
+          let copy = copiedFrom.get(entry.row.id);
+          if (copy === undefined) {
+            copy = String(100000 + all.length);
+            all.push({ ...entry.row, id: copy, trackNo: all.length + 1, dateAdded: "2026-10-12" });
+            indexOfId.set(copy, all.length - 1);
+            rowPositions.set(copy, all.length - 1);
+            copiedFrom.set(entry.row.id, copy);
+          }
+          contents.push(copy);
+        }
       }
+      if (contents.length === 0 && source.entries.length > 0) return none(false);
       const taken = new Set(childrenOf(TREE_ROOT).map((n) => n.name));
       let name = source.name;
       for (let n = 1; taken.has(name); n += 1) name = `${source.name} (${n})`;
       const made = `made-${nextId++}`;
       membership.set(made, contents);
       insertUnder(TREE_ROOT, { id: made, name, kind: "playlist", depth: 1, childCount: contents.length });
-      return bump().then(() => ({ id: made, name, renamed: name !== source.name, tracks: contents.length, missing }));
+      return bump().then(() => ({
+        id: made, name, renamed: name !== source.name, tracks: contents.length, missing: lacking, copied: copiedFrom.size, cancelled: false,
+      }));
+    },
+    devicePlaylistImportPlan: (path, format, id) => {
+      let source: { name: string; entries: MockImportEntry[] };
+      try {
+        source = stickLibraries.playlist(path, format, id);
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+      const lacking = source.entries.filter((entry) => entry.master === null || !all.some((r) => r.id === entry.master));
+      const files = new Set(lacking.map((entry) => entry.row.id)).size;
+      return wait({
+        name: source.name, listed: source.entries.length, missing: lacking.length, files,
+        bytes: files * 9_437_184, destination: "/Users/dj/Music/PioneerDJ/Imported from Device", freeBytes: 128 * 1024 ** 3,
+      });
     },
     explorerRoots: () => wait(EXPLORER_ROOTS.map((root) => ({ ...root }))),
     explorerChildren: (path) => {

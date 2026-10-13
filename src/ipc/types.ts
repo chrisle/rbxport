@@ -991,12 +991,18 @@ export interface Backend {
   /**
    * Import Playlist over one of a stick's playlists, as rekordbox's Devices
    * tree does: a playlist at the end of the collection's top level with the
-   * tracks of the stick's one that the collection has, in the stick's
-   * order. Writes the user's library; the stick is only read. Resolves
-   * with no id, having written nothing, when none of its tracks is in the
-   * collection.
+   * stick playlist's tracks in its order. `missing` says what happens to a
+   * track the collection does not have: `copy` copies its file to
+   * `PioneerDJ/Imported from Device` in the Music folder and imports it
+   * (never over an existing file), `matched` leaves it out, `cancel`
+   * imports nothing. Writes the user's library; the stick is only read.
    */
-  devicePlaylistImport(path: string, format: DeviceFormat, id: string): Promise<DevicePlaylistImportResult>;
+  devicePlaylistImport(path: string, format: DeviceFormat, id: string, missing: DeviceImportMissing): Promise<DevicePlaylistImportResult>;
+  /**
+   * What Import Playlist would copy for one of a stick's playlists, for the
+   * question rekordbox asks first. Only reads.
+   */
+  devicePlaylistImportPlan(path: string, format: DeviceFormat, id: string): Promise<DevicePlaylistImportPlan>;
 
   /**
    * One track's full record: what the information panel's Summary and Info
@@ -1302,6 +1308,9 @@ export interface DevicePlaylistEditResult {
   changed: number;
 }
 
+/** What Import Playlist does with a stick track the collection does not have. */
+export type DeviceImportMissing = "copy" | "matched" | "cancel";
+
 /** What Import Playlist did with a stick's playlist. */
 export interface DevicePlaylistImportResult {
   /** The collection playlist made, or null when nothing was imported. */
@@ -1312,8 +1321,28 @@ export interface DevicePlaylistImportResult {
   renamed: boolean;
   /** Entries added; a track listed twice counts twice. */
   tracks: number;
-  /** Entries left out because their track is not in the collection. */
+  /** Entries whose track the collection did not have. */
   missing: number;
+  /** Files copied to the computer and added to the collection. */
+  copied: number;
+  /** Nothing was imported because a track was missing and the choice was to cancel. */
+  cancelled: boolean;
+}
+
+/** What copying a stick playlist's missing tracks would take. */
+export interface DevicePlaylistImportPlan {
+  name: string;
+  /** Entries the stick lists. */
+  listed: number;
+  /** Entries whose track the collection does not have. */
+  missing: number;
+  /** Files to copy for them, each once, and their total size in bytes. */
+  files: number;
+  bytes: number;
+  /** Where they would be copied. */
+  destination: string;
+  /** Free space there in bytes, or null when it cannot be read. */
+  freeBytes: number | null;
 }
 
 /** What a device already holds. */

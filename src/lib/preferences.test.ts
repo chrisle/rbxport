@@ -160,6 +160,15 @@ describe("sanitisePreferences", () => {
 
 
 
+  it("copies a device playlist's missing tracks by default and keeps each other choice (#198)", () => {
+    expect(DEFAULT_PREFERENCES.advanced.deviceImportMissing).toBe("copy");
+    expect(sanitisePreferences({ advanced: {} }).advanced.deviceImportMissing).toBe("copy");
+    expect(sanitisePreferences({ advanced: { deviceImportMissing: "skip" } }).advanced.deviceImportMissing).toBe("copy");
+    for (const choice of ["copy", "ask", "matched", "cancel"] as const) {
+      expect(sanitisePreferences({ advanced: { deviceImportMissing: choice } }).advanced.deviceImportMissing).toBe(choice);
+    }
+  });
+
   it("creates database folders on a blank drive unless the store plainly says not to", () => {
     expect(sanitisePreferences({ djSystem: {} }).djSystem.createDatabaseFolders).toBe(true);
     expect(sanitisePreferences({ djSystem: { createDatabaseFolders: "no" } }).djSystem.createDatabaseFolders).toBe(true);

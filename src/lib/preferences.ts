@@ -238,6 +238,15 @@ export type UpdateFrequency = (typeof UPDATE_FREQUENCIES)[number];
 export const DUPLICATE_TRACKS = ["ask", "skip", "add"] as const;
 export type DuplicateTracks = (typeof DUPLICATE_TRACKS)[number];
 
+/**
+ * What Import Playlist does with the tracks of a device's playlist that the
+ * collection does not have: copy them to `PioneerDJ/Imported from Device`
+ * and import the whole playlist, ask first as rekordbox does, import only
+ * the tracks the collection has, or import nothing.
+ */
+export const DEVICE_IMPORT_MISSING = ["copy", "ask", "matched", "cancel"] as const;
+export type DeviceImportMissingPreference = (typeof DEVICE_IMPORT_MISSING)[number];
+
 export interface AdvancedPreferences {
   /** Auto Relocate Search Folders › Specified user folders: the list. */
   relocateFolders: string[];
@@ -257,6 +266,8 @@ export interface AdvancedPreferences {
   doubleClickToEdit: boolean;
   /** Adding tracks a playlist already holds: asked each time, or always skipped or added again. */
   duplicateTracks: DuplicateTracks;
+  /** Import Playlist from a device: what happens to tracks the collection lacks. */
+  deviceImportMissing: DeviceImportMissingPreference;
   syncType: SyncType;
   /** Allow BEAT/BPM SYNC with double/half BPM. */
   syncDoubleHalf: boolean;
@@ -367,6 +378,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     protectLibrary: true,
     doubleClickToEdit: false,
     duplicateTracks: "ask",
+    deviceImportMissing: "copy",
     syncType: "beat",
     syncDoubleHalf: true,
     quantizeBeat: "1/1",
@@ -550,6 +562,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       protectLibrary: bool(advanced.protectLibrary, hasStoredSection ? false : d.advanced.protectLibrary),
       doubleClickToEdit: bool(advanced.doubleClickToEdit, d.advanced.doubleClickToEdit),
       duplicateTracks: oneOf(advanced.duplicateTracks, DUPLICATE_TRACKS, d.advanced.duplicateTracks),
+      deviceImportMissing: oneOf(advanced.deviceImportMissing, DEVICE_IMPORT_MISSING, d.advanced.deviceImportMissing),
       syncType: oneOf(advanced.syncType, SYNC_TYPES, d.advanced.syncType),
       syncDoubleHalf: bool(advanced.syncDoubleHalf, d.advanced.syncDoubleHalf),
       quantizeBeat: oneOf(advanced.quantizeBeat, QUANTIZE_BEATS, d.advanced.quantizeBeat),

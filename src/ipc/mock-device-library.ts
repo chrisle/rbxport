@@ -61,6 +61,16 @@ function testLibrary(format: DeviceFormat): MockLibrary {
   };
 }
 
+/**
+ * One entry of a stick playlist for Import Playlist: the collection track it
+ * was exported from (null when the collection does not have it) and the
+ * stick's row for it.
+ */
+export interface MockImportEntry {
+  master: string | null;
+  row: RowDto;
+}
+
 export interface MockDeviceLibraries {
   libraries(path: string): DeviceLibrary[];
   edit(path: string, format: DeviceFormat, edit: DevicePlaylistEdit): DevicePlaylistEditResult;
@@ -73,7 +83,7 @@ export interface MockDeviceLibraries {
    * was exported from (null when the collection does not have it), for
    * Import Playlist.
    */
-  playlist(path: string, format: DeviceFormat, playlist: string): { name: string; masters: (string | null)[] };
+  playlist(path: string, format: DeviceFormat, playlist: string): { name: string; entries: MockImportEntry[] };
 }
 
 /** Depth first from the top level, siblings by sequence then id. */
@@ -171,7 +181,10 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
       if (!node) throw new Error("That playlist is no longer on the device.");
       return {
         name: node.name,
-        masters: node.tracks.map((id) => TRACKS.find((t) => t.id === id)?.masterContentId ?? null),
+        entries: node.tracks.flatMap((id) => {
+          const track = TRACKS.find((t) => t.id === id);
+          return track ? [{ master: track.masterContentId, row: trackRow(path, track, 0) }] : [];
+        }),
       };
     },
     edit: (path, format, edit) => {
