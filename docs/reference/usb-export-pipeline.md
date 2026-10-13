@@ -135,9 +135,18 @@ The `sync` callback in `SyncManager.tsx` runs these steps in order:
 3. `validateExportFiles(playlists)` lists selected tracks whose audio file is
    missing. If any are found, `backend.confirm` asks whether to continue.
    Those tracks are then skipped.
-4. If the History or Settings import preference is on, `importUsb` runs once
-   per stick. This brings back play history and CDJ settings before the
-   export replaces them.
+4. Nothing is imported (#199). SYNC only writes: play history and CDJ/mixer
+   settings already on the stick are kept by the export (`reconcile`
+   retains device history; My Settings files are copied only where the
+   stick has none), and a rating or cue edited on the stick stops the sync
+   with a conflict (see "Conflicts that leave the stick unchanged") until
+   **Import** brings it back. Import is a
+   separate action (`runUsbImport`), and what it brings back is the
+   `usbExport.importButton*` preferences. This is rekordbox's split [OBS
+   rekordbox 5.5.0 manual pp. 35-36, 84; USB Export Guide 2025-10 p. 5]:
+   its sync exports the ticked playlists "in the latest status", while
+   cues, beat grids, colors, ratings and comments come back only through
+   **Update Collection** or the Sync Manager's device-to-rekordbox arrow.
 5. The callback subscribes to `onSyncProgress` and calls `syncDevices`. The
    result is one `SyncDeviceReport` per stick, each with either `report` or
    `error`, plus the eject result.

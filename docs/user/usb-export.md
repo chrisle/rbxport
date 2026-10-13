@@ -6,13 +6,35 @@ USB export writes player libraries and audio copies to a device. These
 preferences apply to playlist export and Sync Manager; compatibility
 conversion also applies to individual track export.
 
-## Import track ratings
+## Import from a USB device
 
-Sync Manager's **Track ratings** checkbox imports ratings edited on a USB
-device since its last RBXport export. **Automatically import track ratings
-when syncing** runs the same import before SYNC; both preferences are on by
-default. Library Protection must be off and rekordbox must be closed. Import
-asks for confirmation; SYNC uses the automatic import preference.
+Sync Manager has two actions. **SYNC** writes the ticked playlists to the
+ticked USB devices and never brings anything back. **Import** brings back
+from the ticked USB devices what is turned on under **Preferences → USB
+Export**, with no further questions:
+
+| Preference | Default | What Import does |
+| --- | --- | --- |
+| Import cues and beat grids | On | Replaces cues and beat grids for matching tracks in your library with the device's. |
+| Import play history | On | Adds the device's new play-history entries to your library. |
+| Import CDJ/mixer settings | Off | Keeps the device's CDJ and mixer settings in RBXport; SYNC gives them to devices that have no settings of their own. |
+| Import track ratings | On | Brings back ratings changed on the device since its last sync. |
+
+The settings button beside **Import** (**Change import preferences**) opens
+that Preferences pane. Library Protection must be off to import cues, play
+history or ratings, and rekordbox must be closed to import play history or
+ratings; a kind that cannot be imported for either reason is left out and the
+status line says why.
+
+This matches rekordbox, which brings device edits back into its collection
+only when you ask (**Update Collection** on the device, or the device-to-
+rekordbox arrow in its Sync Manager), not as part of a sync.
+
+A rating or cue changed on the device stops SYNC for that device until it is
+imported (for a rating: "changed on the USB. Import its changes before
+syncing."), so a sync overwrites neither the device edit nor your library.
+
+### Track ratings
 
 Changes in either OneLibrary or legacy Device Library are imported, including
 clearing a rating to zero. Unchanged device ratings preserve desktop edits.
@@ -20,16 +42,15 @@ When both the device and desktop rating changed, the device wins and the
 result reports how many desktop edits were replaced. Repeated imports of
 already matching ratings make no further changes.
 
-Conflicting edits in the two device databases stop import and SYNC; reconcile
+Conflicting edits in the two device databases stop the import; reconcile
 them in rekordbox first. Devices without a matching RBXport export baseline
-are skipped with a warning. To establish a baseline, temporarily turn
-automatic rating import off and sync it. Re-enable the preference afterward.
-Normal exports write 0–5 stars to both device formats.
+are skipped with a warning; sync the device once to create one. Normal
+exports write 0–5 stars to both device formats.
 
 RBXport 1.6.0 and earlier wrote OneLibrary ratings on rekordbox XML's scale
 (51 per star). Players that read OneLibrary, such as the CDJ-3000X, show no
 stars for those tracks. Sync the USB once to rewrite them as 0–5 stars;
-rating import reads the old values as the same stars, so it can stay on.
+rating import reads the old values as the same stars.
 
 ## What a selection exports
 
