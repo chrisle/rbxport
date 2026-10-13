@@ -44,7 +44,7 @@ import type { ListPosition } from "@/lib/continuousPlay";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
-import { autoscrollStep } from "@/lib/dragAutoscroll";
+import { createDragAutoscroll } from "@/lib/dragAutoscroll";
 import { setRowDragImage } from "./dragGhost";
 import { detectPlatform, dispatch, isTyping } from "@/lib/shortcuts";
 import { locateStep, needsCentering, restoredScrollTop, type SavedScroll } from "@/lib/locateLoaded";
@@ -1358,9 +1358,33 @@ export const TrackTable = memo(function TrackTable({
     if (!dragging) carrying.current = null;
   }, [dragging]);
 
+  // Scrolls the rows while a reorder drag rests near their top or bottom, as
+  // rekordbox's ListViewer::itemDragMove does. The zone is measured from the
+  // rows, below the sticky column heading, as rekordbox measures its viewport.
+  const [autoscroll] = useState(() =>
+    createDragAutoscroll(
+      () => {
+        const scroller = scrollRef.current;
+        if (!scroller) return null;
+        const box = scroller.getBoundingClientRect();
+        const top = box.top + scroller.clientTop;
+        return { top: top + (headRef.current?.offsetHeight ?? 0), bottom: top + scroller.clientHeight };
+      },
+      (dy) => {
+        const scroller = scrollRef.current;
+        if (!scroller) return false;
+        const before = scroller.scrollTop;
+        scroller.scrollTop = before + dy;
+        return scroller.scrollTop !== before;
+      },
+    ),
+  );
+  useEffect(() => () => autoscroll.stop(), [autoscroll]);
+
   const nativeDrag = useRef(false);
   const dragGeneration = useRef(0);
   const finishDraggingTracks = useEventCallback(() => {
+    autoscroll.stop();
     carrying.current = null;
     nativeDrag.current = false;
     setDropAt(null);
@@ -1727,10 +1751,7 @@ export const TrackTable = memo(function TrackTable({
       data-file-over={fileOver || undefined}
       onDragOver={(e) => {
         if (carrying.current) {
-          const box = onReorder ? scrollRef.current?.getBoundingClientRect() : undefined;
-          if (box && scrollRef.current) {
-            scrollRef.current.scrollTop += autoscrollStep(e.clientY, box.top, box.bottom);
-          }
+          if (onReorder) autoscroll.move(e.clientX, e.clientY);
           if (onReorder && view.count > 0 && isBelowTracks(e.target, e.clientY)) {
             e.preventDefault();
             e.dataTransfer.dropEffect = nativeTrackDragging() ? "copy" : "move";
@@ -1751,9 +1772,11 @@ export const TrackTable = memo(function TrackTable({
       }}
       onDragLeave={(e) => {
         if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        autoscroll.stop();
         setFileOver(false);
       }}
       onDrop={(e) => {
+        autoscroll.stop();
         setFileOver(false);
         if (carrying.current) {
           e.preventDefault();

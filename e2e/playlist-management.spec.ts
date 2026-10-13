@@ -450,6 +450,65 @@ test("the line shows where the rows would land before they are let go", async ({
   await expect(page.locator('[role="row"][data-drop]')).toHaveCount(0);
 });
 
+test("a reorder drag held at the top of the rows scrolls the list up", async ({
+  page,
+  browserName,
+}) => {
+  // Held by hand, so the pointer can rest in the edge zone. Chromium alone
+  // synthesises HTML5 drag events from raw mouse moves.
+  // TODO: enable WebKit when raw mouse moves can start native HTML5 drags.
+  test.skip(browserName !== "chromium", "only Chromium drags from mouse events");
+  await page.setViewportSize({ width: 1400, height: 620 });
+  await open(page);
+  await openPlaylist(page);
+
+  const scroller = page.getByTestId("track-scroll");
+  await expect.poll(() => scroller.evaluate((el) => el.scrollHeight > el.clientHeight + 100)).toBe(true);
+  await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  const start = await scroller.evaluate((el) => el.scrollTop);
+  expect(start).toBeGreaterThan(0);
+
+  const list = rows(page);
+  const last = list.last();
+  await last.scrollIntoViewIfNeeded();
+  const a = await last.boundingBox();
+  const head = await page.locator('[role="row"]').first().boundingBox();
+  if (!a || !head) throw new Error("the rows are not on screen");
+  await page.mouse.move(a.x + 120, a.y + a.height / 2);
+  await page.mouse.down();
+  // Into rekordbox's 30px zone just below the column heading, then rest.
+  await page.mouse.move(a.x + 120, head.y + head.height + 5, { steps: 12 });
+  // Chromium sends dragover for only some synthesised moves; nudge so one
+  // lands in the zone. After that the pointer rests and the repeat does it.
+  await page.mouse.move(a.x + 121, head.y + head.height + 5);
+  await page.mouse.move(a.x + 122, head.y + head.height + 5);
+
+  // Resting there keeps scrolling (100ms repeats) until the top is reached.
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 10_000 }).toBe(0);
+  await page.mouse.up();
+});
+
+test("a drag resting mid-list does not scroll it", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "only Chromium drags from mouse events");
+  await page.setViewportSize({ width: 1400, height: 620 });
+  await open(page);
+  await openPlaylist(page);
+
+  const scroller = page.getByTestId("track-scroll");
+  await expect.poll(() => scroller.evaluate((el) => el.scrollHeight > el.clientHeight + 100)).toBe(true);
+  const box = await scroller.boundingBox();
+  const first = await rows(page).first().boundingBox();
+  if (!box || !first) throw new Error("the rows are not on screen");
+  await page.mouse.move(first.x + 120, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(first.x + 120, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.move(first.x + 121, box.y + box.height / 2);
+  await page.mouse.move(first.x + 122, box.y + box.height / 2);
+  await page.waitForTimeout(500);
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(0);
+  await page.mouse.up();
+});
+
 test("the order cannot be dragged where the rows are not the playlist's own", async ({ page }) => {
   await open(page);
   await openPlaylist(page);
