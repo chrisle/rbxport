@@ -747,6 +747,46 @@ mod tests {
     }
 
     #[test]
+    fn a_sticks_track_without_a_2ex_has_no_bands_but_keeps_its_dat_preview() {
+        // #372: a stick exported before 3Band data existed carries only the
+        // .DAT and .EXT. The 3Band kinds are then empty, which is what sends
+        // the deck's overview to the .DAT's PWAV, as rekordbox's does; that
+        // PWAV, and the .EXT's colour tags, must still come from the stick.
+        let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let bytes = |len: usize, seed: u8| -> Vec<u8> { (0..len).map(|i| u8::try_from(i % 29).unwrap() + seed).collect() };
+        let (pwav, pwv4) = (bytes(400, 2), bytes(1_200 * 6, 3));
+        let path = src.path().join("t1.mp3");
+        std::fs::write(&path, vec![1; 512]).unwrap();
+        let track = rbl_export::SourceTrack {
+            id: 1,
+            source_path: path,
+            title: "Track 1".into(),
+            analysis: vec![
+                ("DAT".into(), rbl_anlz::AnlzBuilder::new().path("/t1.mp3").waveform_preview(b"PWAV", &pwav).finish()),
+                ("EXT".into(), rbl_anlz::AnlzBuilder::new().path("/t1.mp3").waveform_scroll(b"PWV4", 6, &pwv4).finish()),
+            ],
+            ..Default::default()
+        };
+        rbl_export::export(dest.path(), &[track], &[]).unwrap();
+        let mount = dest.path();
+
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let library = device::read(mount, format).unwrap();
+            let state = Arc::new(AppState::new());
+            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, t)));
+            let row = row_dto(&device_row(mount, &library.tracks[0], 0));
+            assert_eq!(row.analysed, 1, "{format:?}");
+            let dat = state.device_assets(&row.id).unwrap().analysis_dat().unwrap();
+            assert!(!rbl_anlz::sibling(&dat, "2EX").exists(), "{format:?}: the export wrote no .2EX");
+            for kind in ["bands", "bandsDetail"] {
+                assert!(crate::commands::waveform_of(&dat, kind, None, None).is_empty(), "{format:?} {kind}");
+            }
+            assert_eq!(crate::commands::waveform_of(&dat, "mono", None, None), pwav, "{format:?}");
+            assert_eq!(crate::commands::waveform_of(&dat, "colour", None, None), pwv4, "{format:?}");
+        }
+    }
+
+    #[test]
     fn a_stick_path_that_climbs_out_is_not_read() {
         let stick = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(stick.path().join("PIONEER")).unwrap();
