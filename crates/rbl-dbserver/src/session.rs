@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::catalog::{
-    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, HotCueColour, PlayerCue, Query, Row,
-    Sort, TrackColumn, TrackDetails, TrackScope, UsbCue, HOT_CUE_DEFAULT, HOT_LOOP_DEFAULT,
+    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, HotCueColour, MyTag, PlayerCue, Query,
+    Row, Sort, TrackColumn, TrackDetails, TrackScope, UsbCue, HOT_CUE_DEFAULT, HOT_LOOP_DEFAULT,
 };
 use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
@@ -817,6 +817,149 @@ impl LinkSession {
         self.menu(message, Menu::Selectors(items))
     }
 
+    /// `0x1015`, `[ctx, 0, category, selected only]`: the My Tag categories
+    /// (category 0) or the tags under one, as rekordbox 7.2.19's
+    /// `Dsql_GetMyTag` (@`0x100f5f9c8`) lists them [OBS static, and every
+    /// row of the #316 captures].
+    ///
+    /// - A category lists every tag under it that some track in the
+    ///   collection carries; tags no track carries are left out.
+    /// - Rows go by `Seq`. The row's ninth slot is the `Seq` counted from 0
+    ///   (rekordbox reads its list buffer's `Seq` column there,
+    ///   `GetListBufRowContent` @`0x100e846c8`, as a `u16`).
+    /// - A category row carries its condition: type `0x4b` when it is on,
+    ///   and its mode (16 AND, 17 OR) in the seventh slot; a tag row is
+    ///   `0x4b` when it is ticked, whether or not its category is on.
+    /// - With "selected only" set, only rows that would be `0x4b` are sent.
+    fn my_tag_menu(&mut self, message: &Message) -> Vec<Message> {
+        let parent = Self::number(message, 2);
+        let selected_only = Self::number(message, 3) != 0;
+        let mut rows: Vec<MyTag> = self
+            .catalog
+            .my_tags()
+            .into_iter()
+            .filter(|tag| tag.parent == parent)
+            .collect();
+        if parent != 0 {
+            let in_use = self.catalog.my_tags_in_use();
+            rows.retain(|tag| in_use.contains(&tag.id));
+        }
+        rows.sort_by_key(|tag| (tag.seq, tag.id));
+        let ticked_in_parent = self.filter.my_tag_condition(parent).tags;
+        let items = rows
+            .into_iter()
+            .filter_map(|tag| {
+                let (on, mode) = if parent == 0 {
+                    let condition = self.filter.my_tag_condition(tag.id);
+                    (condition.enabled(), u32::from(condition.mode))
+                } else {
+                    (ticked_in_parent.contains(&tag.id), 0)
+                };
+                if selected_only && !on {
+                    return None;
+                }
+                Some(Item {
+                    id: tag.id,
+                    text: tag.name,
+                    item_type: if on { item_type::MY_TAG_TICKED } else { item_type::MY_TAG },
+                    c: mode,
+                    d: tag.seq.saturating_sub(1) & 0xffff,
+                    ..Item::default()
+                })
+            })
+            .collect();
+        self.menu(message, Menu::Selectors(items))
+    }
+
+    /// `0x1315`, `[ctx, 0, track]`: the track's My Tags, each category that
+    /// holds one as a heading (type 1) followed by its tags on the track
+    /// (type `0x4a`), categories and tags by `Seq`, and the category's id
+    /// first in every row, as `Dsql_GetMyTagOnTrack` (@`0x100f60728`) builds
+    /// them [OBS static]. A CDJ-3000 asks this for its track info
+    /// (`InfoMyTagListRequestTicket`) and reads each row's type, id and
+    /// name. [UNKNOWN] No capture holds this request; the slots past the
+    /// name are rekordbox's unset fields, 0.
+    fn my_tags_on_track(&mut self, message: &Message) -> Vec<Message> {
+        let on_track = self.catalog.track_my_tags(Self::number(message, 2));
+        let mut items = Vec::new();
+        if !on_track.is_empty() {
+            let mut all = self.catalog.my_tags();
+            all.sort_by_key(|tag| (tag.seq, tag.id));
+            for category in all.iter().filter(|tag| tag.parent == 0) {
+                let mut tags = all
+                    .iter()
+                    .filter(|tag| tag.parent == category.id && on_track.contains(&tag.id))
+                    .peekable();
+                if tags.peek().is_none() {
+                    continue;
+                }
+                items.push(Item {
+                    a: category.id,
+                    id: category.id,
+                    text: category.name.clone(),
+                    item_type: item_type::MY_TAG_HEADING,
+                    ..Item::default()
+                });
+                items.extend(tags.map(|tag| Item {
+                    a: category.id,
+                    id: tag.id,
+                    text: tag.name.clone(),
+                    item_type: item_type::MY_TAG,
+                    ..Item::default()
+                }));
+            }
+        }
+        self.menu(message, Menu::Selectors(items))
+    }
+
+    fn my_tag_category_exists(&self, category: u32) -> bool {
+        category != 0
+            && self
+                .catalog
+                .my_tags()
+                .iter()
+                .any(|tag| tag.parent == 0 && tag.id == category)
+    }
+
+    /// `0x3307`, `[ctx, 0, category, on, mode]`, answered `[0x3307, 0]`, or
+    /// `0x32` when the second argument is not 0, the mode is not 16 or 17,
+    /// or there is no such category: rekordbox 7.2.19's
+    /// `PSvDBMain::SetFilterConditionMyTag` (@`0x101e8bd20`) and
+    /// `FilterSettingManager::setMyTagCondition` [OBS static; the replies in
+    /// the #316 captures]. Only the low byte of `on` and of the mode is kept.
+    fn set_my_tag_filter(&mut self, message: &Message) -> Vec<Message> {
+        let category = Self::number(message, 2);
+        let mode = Self::number(message, 4);
+        let valid = Self::number(message, 1) == 0
+            && mode & !1 == u32::from(crate::filter::MY_TAG_AND)
+            && self.my_tag_category_exists(category);
+        if valid {
+            let flags = Self::number(message, 3).to_le_bytes()[0];
+            self.filter.set_my_tag_condition(category, flags, mode.to_le_bytes()[0]);
+        }
+        vec![menu_header(message.transaction, u32::from(message.kind), if valid { 0 } else { 0x32 })]
+    }
+
+    /// `0x3407`, `[ctx, 0, category, tag, on]`: ticks or unticks a tag;
+    /// tag `0xffffffff` unticks every tag in the category and cannot be
+    /// ticked. Answered `[0x3407, 0]`, or `0x32` as `0x3307` is
+    /// (`PSvDBMain::AddFilterConditionMyTag` @`0x101e8bea4`) [OBS static].
+    fn tick_my_tag_filter(&mut self, message: &Message) -> Vec<Message> {
+        let category = Self::number(message, 2);
+        let tag = Self::number(message, 3);
+        let on = Self::number(message, 4) != 0;
+        let valid = Self::number(message, 1) == 0
+            && !(tag == u32::MAX && on)
+            && self.my_tag_category_exists(category)
+            && if tag == u32::MAX {
+                self.filter.clear_my_tags(category);
+                true
+            } else {
+                self.filter.tick_my_tag(category, tag, on)
+            };
+        vec![menu_header(message.transaction, u32::from(message.kind), if valid { 0 } else { 0x32 })]
+    }
+
     /// A menu of one track's fields: metadata, track info or delivery info,
     /// all `[ctx, track_id]` and all opened the same way.
     fn track_menu(
@@ -1053,6 +1196,8 @@ impl LinkSession {
                 )
             }
             kind::TAG_LIST => self.tracks(message, TrackScope::TagList),
+            kind::MY_TAG => self.my_tag_menu(message),
+            kind::MY_TAG_ON_TRACK => self.my_tags_on_track(message),
             kind::KEY_TRACKS => {
                 let key = Self::number(message, 2);
                 let distance = Self::number(message, 3).min(2);
@@ -1429,6 +1574,8 @@ impl Session for LinkSession {
                 };
                 vec![menu_header(tx, u32::from(message.kind), if valid { 0 } else { 0x32 })]
             }
+            kind::FILTER_MY_TAG => self.set_my_tag_filter(message),
+            kind::FILTER_MY_TAG_ITEM => self.tick_my_tag_filter(message),
             kind::CHANGE_TAG | kind::CLEAR_TAGS | kind::CHANGE_RATING => {
                 let track = Self::number(message, 1);
                 let value = Self::number(message, 2);

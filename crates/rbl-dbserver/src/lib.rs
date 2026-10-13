@@ -538,6 +538,18 @@ pub mod kind {
     pub const FILTER_SWITCH: u16 = 0x3007;
     pub const FILTER_GET: u16 = 0x3107;
     pub const FILTER_SET: u16 = 0x3207;
+    /// `CMD_GET_MYTAG`: `[ctx, 0, category, selected only]`, the My Tag
+    /// categories (category 0) or the tags under one, for Track Filter.
+    pub const MY_TAG: u16 = 0x1015;
+    /// `CMD_GET_MYTAG_ON_TRACK`: `[ctx, 0, track]`, a track's My Tags under
+    /// their category headings (the CDJ-3000's track info).
+    pub const MY_TAG_ON_TRACK: u16 = 0x1315;
+    /// `CMD_SET_FILTER_CONDITION_MYTAG`: `[ctx, 0, category, on, mode]`,
+    /// mode 16 for AND and 17 for OR between the category's ticked tags.
+    pub const FILTER_MY_TAG: u16 = 0x3307;
+    /// `CMD_ADD_FILTER_MYTAG_ITEM`: `[ctx, 0, category, tag, on]`, ticks or
+    /// unticks one tag; tag `0xffffffff` with `on` 0 unticks them all.
+    pub const FILTER_MY_TAG_ITEM: u16 = 0x3407;
     /// The remote database's browse kind. RX3 asks this if its device
     /// property exchange did not already provide one.
     pub const BROWSE_TYPE: u16 = 0x3303;
@@ -663,6 +675,10 @@ pub mod kind {
             FILTER_SWITCH => "filter switch".to_owned(),
             FILTER_GET => "filter properties".to_owned(),
             FILTER_SET => "set filter properties".to_owned(),
+            MY_TAG => "my tag".to_owned(),
+            MY_TAG_ON_TRACK => "my tags on track".to_owned(),
+            FILTER_MY_TAG => "set my tag filter".to_owned(),
+            FILTER_MY_TAG_ITEM => "tick my tag filter item".to_owned(),
             BROWSE_TYPE => "browse type".to_owned(),
             LEGACY_KEY_TO_NEW_KEY => "legacy-to-new key id".to_owned(),
             TRACK_PLAY_STATE => "track play state".to_owned(),

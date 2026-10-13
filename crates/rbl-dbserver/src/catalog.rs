@@ -417,6 +417,21 @@ pub struct UsbCue {
     pub color_table_index: u32,
 }
 
+/// One live `djmdMyTag` row as a player sees it: a category (`parent` 0)
+/// or a tag under one.
+///
+/// Ids are the row's `ID` read as a number, the way rekordbox sends them
+/// (category 2, tag 108516952 in the #316 captures).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MyTag {
+    pub id: u32,
+    /// The category's id for a tag; 0 for a category.
+    pub parent: u32,
+    /// `djmdMyTag.Seq`, 1 for the first under its parent.
+    pub seq: u32,
+    pub name: String,
+}
+
 /// The per-track blobs a player asks for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Analysis {
@@ -534,14 +549,32 @@ pub trait Catalog: Send + Sync {
         false
     }
 
+    /// Every live My Tag category and tag, in any order.
+    fn my_tags(&self) -> Vec<MyTag> {
+        Vec::new()
+    }
+
+    /// The My Tags a track carries.
+    fn track_my_tags(&self, _track: u32) -> Vec<u32> {
+        Vec::new()
+    }
+
+    /// The My Tags at least one track in the collection carries: rekordbox
+    /// lists only these under a category (`Dsql_GetMyTagIDList_PutToAllContent`).
+    fn my_tags_in_use(&self) -> std::collections::HashSet<u32> {
+        std::collections::HashSet::new()
+    }
+
     fn filter_rows(&self, rows: &mut Vec<Row>, filter: &crate::filter::TrackFilter) {
         if !filter.enabled {
             return;
         }
+        let tags = filter.has_my_tag_conditions();
         rows.retain(|row| match row {
-            Row::Track { id, .. } => self
-                .track(*id)
-                .is_some_and(|t| filter.matches(t.row.bpm_x100, t.row.key, t.rating, t.colour)),
+            Row::Track { id, .. } => self.track(*id).is_some_and(|t| {
+                filter.matches(t.row.bpm_x100, t.row.key, t.rating, t.colour)
+                    && (!tags || filter.matches_my_tags(&self.track_my_tags(*id)))
+            }),
             _ => true,
         });
     }

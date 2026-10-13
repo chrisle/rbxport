@@ -62,6 +62,16 @@ pub mod item_type {
     /// A leaf Hot Cue Bank in the RX3's `0x2001` hierarchy.  It opens its
     /// assigned track list with mode 0, unlike a generic title row.
     pub const HOT_CUE_BANK: u32 = 0x2b;
+    /// A My Tag category or tag in Track Filter (`0x1015`), unticked; a
+    /// category that is off. [OBS: #316 captures]
+    pub const MY_TAG: u32 = 0x4a;
+    /// The same row ticked, or a category that is on: rekordbox adds one
+    /// (`Dsql_GetMyTag` @`0x100f5fe68`).
+    pub const MY_TAG_TICKED: u32 = 0x4b;
+    /// A category heading among a track's My Tags (`0x1315`):
+    /// `Dsql_GetMyTagOnTrack` (@`0x100f608d8`) writes type 1, which the
+    /// CDJ-3000 reads as "this row is a category" [OBS static].
+    pub const MY_TAG_HEADING: u32 = 0x01;
     /// The path row in track info.
     pub const PATH: u32 = 0x00;
     // Root-menu categories and sort options carry their own codes.
