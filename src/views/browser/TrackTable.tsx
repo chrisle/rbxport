@@ -913,6 +913,23 @@ const TRAFFIC_SOURCES: readonly { id: TrafficLightSource; label: string; short: 
   { id: "b", label: "PLAYER B - Traffic Light", short: "PLAYER B" },
 ];
 
+
+/**
+ * A row's React key: its id, so an edit, a sort or a search moves the row
+ * rather than rebuilding it. A playlist can list one track twice (rekordbox's
+ * "Add" on its duplicate question), and both entries carry the track's id, so
+ * a second copy on screen is keyed by its slot too: two siblings with one key
+ * leave a stale row behind when the list changes.
+ */
+function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: Set<string>): string {
+  if (!row) return `slot-${String(slot)}`;
+  if (!keyed.has(row.id)) {
+    keyed.add(row.id);
+    return row.id;
+  }
+  return `${row.id}#${String(slot)}`;
+}
+
 export const TrackTable = memo(function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
@@ -1080,6 +1097,8 @@ export const TrackTable = memo(function TrackTable({
   }, [virtualizer, rowH]);
 
   const items = virtualizer.getVirtualItems();
+  // Row keys handed out this render; see `rowKey`.
+  const keyed = new Set<string>();
 
   // The rows being drawn, as indices. These are what the fetch below keys on.
   //
@@ -1766,7 +1785,7 @@ export const TrackTable = memo(function TrackTable({
             const row = item.index < view.count ? view.rowAt(item.index) : undefined;
             return (
               <TrackRow
-                key={row?.id ?? `slot-${item.key}`}
+                key={rowKey(row, item.key, keyed)}
                 row={row}
                 index={item.index}
                 columns={columns}
