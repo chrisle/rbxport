@@ -4049,6 +4049,7 @@ dependencies = [
  "rbl-onelibrary",
  "rbl-pdb",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

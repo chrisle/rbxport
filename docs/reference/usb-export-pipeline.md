@@ -752,7 +752,7 @@ mounted volume. Use a temporary directory as the stick.
 | `tests/safety.rs` | Cancel, missing source, conflicts, retained device-only content, late external edits | `--test safety` |
 | `tests/recovery.rs` | Interrupted publication, rekordbox writes during recovery (#229), clock skew | `--test recovery` |
 | `tests/on_stick.rs` | Library files that already live on the stick | `--test on_stick` |
-| `tests/removable_media.rs` | Real FAT32/exFAT disk images through `hdiutil`. Skipped where `hdiutil` cannot attach an image. | `--test removable_media` |
+| `tests/removable_media.rs` | Real FAT32, exFAT, HFS+ and journaled HFS+ disk images through `hdiutil`, each exported under the root the app chooses for it (`.PIONEER` on HFS+), including a sync to every volume at once. Skipped where `hdiutil` cannot attach an image. `RBX_REAL_USB=1` runs them on real sticks named `USB A` and `USB B` instead; see [Testing](../development/testing.md#real-usb-sticks). | `--test removable_media` |
 | `tests/device_library.rs` | Editing a stick's playlists | `--test device_library` |
 | `tests/pipeline.rs` | Analyse generated audio, author analysis, export, verify | `--test pipeline` |
 | `rbl-core` `durable` unit tests | Journal replay, set-aside, NFC/NFD, no exclusive rename | `RB_LITE_TEST=1 cargo test -p rbl-core` |

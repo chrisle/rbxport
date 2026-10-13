@@ -33,3 +33,8 @@ rbl-index = { path = "../rbl-index" }
 rbl-audio = { path = "../rbl-audio" }
 rbl-analysis = { path = "../rbl-analysis" }
 rbl-onelibrary = { path = "../rbl-onelibrary" }
+
+# `statfs`, for the type of a mounted test volume (`tests/removable_media.rs`).
+# Already in the lock through rbl-core.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+rustix = { version = "1", features = ["fs"] }

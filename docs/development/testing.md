@@ -108,6 +108,24 @@ Physical USB formatting has a separate destructive opt-in harness and is not
 included in this default run. Private macOS/Windows app harnesses also retain
 their own entry points. Do not infer a physical pass from emulator audio.
 
+## Real USB sticks
+
+The removable-media tests run on FAT32, exFAT and HFS+ disk images by
+default. To run them on real sticks instead, name two disposable sticks
+`USB A` and `USB B`, put an empty `.rbxport-disposable` file at the root of
+each, and run:
+
+```sh
+RBX_REAL_USB=1 RB_LITE_TEST=1 cargo test -p rbl-export --test removable_media
+```
+
+The marker says the stick may be overwritten; without it the tests refuse to
+write. Before each test, `PIONEER`, `.PIONEER`, `Contents`, the tests' own
+folders and rbxport's working files are deleted from both sticks; nothing
+else on them is touched. The tests take the sticks one at a time, and one of
+them syncs both at once as the Sync Manager does. The last test's export stays
+on the sticks so it can be loaded on a player. Test order varies, so which export that is varies too.
+
 ## Before review
 
 For a substantial change, run all applicable checks:
