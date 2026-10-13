@@ -622,6 +622,33 @@ connection refused). XDJ-AZ failed before browse/load validation; its guest log
 reports `ENOSPC` in `TrackFileCache`. Neither establishes player compatibility.
 Physical Windows/Linux/macOS player/media timing targets remain unverified.
 
+Real sticks, 2026-10-13 (macOS, `USB A` FAT32, `USB B` journaled HFS+): every
+export test and the app's stick tests ran on each stick through
+`RBX_USB_STICK`, and the removable-media tests on both at once through
+`RBX_REAL_USB`. One test failed on FAT32 only: macOS had written a `._`
+sidecar for a folder, which the test compared as export output; listings now
+leave such sidecars out. [OBS] The benchmark's 10,000-track first export took
+16 minutes on the FAT32 stick and 32 on the HFS+ one.
+
+CDJ-3000 firmware 3.20 in AtEmu, same day: the emulator fixture's three tracks
+(one with a Unicode title) were exported to each stick with `rbl-export`, under
+the root the app chooses (`.PIONEER` on HFS+), copied into a raw image and
+played by `rbxport-private/e2e-usb-formats/test_exported_playlist.py`.
+[OBS] `USB A`'s export in a FAT32 image: SOURCE lists 3 songs and 1 playlist,
+and every track loads, plays and keeps playing (4 of 4 passed). `USB B`'s
+`.PIONEER` export in a FAT32 image: the same, 4 of 4. `USB B`'s export in a
+journaled HFS+ image could not be tested: AtEmu's guest kernel has no HFS+
+driver (`/proc/filesystems` lists vfat and exfat only; its kernel config has
+`CONFIG_HFSPLUS_FS` unset), so the stick never mounts. The real 3.20 kernel has
+`CONFIG_HFSPLUS_FS=y`, and its `device-mount.sh` mounts HFS+ with
+`rw,noatime,force` after `fsck.hfsplus` [OBS, alphatheta-docs static analysis].
+With the `.PIONEER` export, SOURCE showed the player's own disk (5.8 GB) as the
+stick's Total and Available, where the `PIONEER` export showed the stick's
+0.2 GB; browsing and playback were unaffected. Whether a real player shows
+the same for an HFS+ stick is [UNKNOWN]: it needs HFS+ in AtEmu's guest
+kernel or a physical CDJ-3000. Evidence:
+`rbxport-private/verification/e2e-usb-formats/20261013-150858-sticks-as-they-are`.
+
 Compatibility note: database/request/recipe signatures and converted cache
 digests use BLAKE3; existing media/analysis comparison hashes retain the legacy
 FNV representation. The slow integrity option checks source and USB contents,
