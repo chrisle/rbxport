@@ -58,6 +58,8 @@ function testLibrary(format: DeviceFormat): MockLibrary {
 export interface MockDeviceLibraries {
   libraries(path: string): DeviceLibrary[];
   edit(path: string, format: DeviceFormat, edit: DevicePlaylistEdit): DevicePlaylistEditResult;
+  /** The rows whose track `playlist` already holds, each once. */
+  duplicates(path: string, format: DeviceFormat, playlist: string, tracks: string[]): string[];
   /** A playlist's rows in its order, or every track for `"0"`. */
   rows(path: string, format: DeviceFormat, playlist: string): RowDto[];
 }
@@ -132,6 +134,16 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
           count: node.folder ? library.nodes.filter((n) => n.parent === node.id).length : node.tracks.length,
         })),
       })),
+    duplicates: (path, format, playlist, rows) => {
+      const node = libraryOf(path, format).nodes.find((n) => String(n.id) === playlist && !n.folder);
+      const held = new Set<number>();
+      return rows.filter((row) => {
+        const track = trackByRow(path, row);
+        if (!node?.tracks.includes(track) || held.has(track)) return false;
+        held.add(track);
+        return true;
+      });
+    },
     rows: (path, format, playlist) => {
       const library = libraryOf(path, format);
       const ids = playlist === "0"
@@ -197,7 +209,9 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
           const tracks = edit.tracks.map((row) => trackByRow(path, row));
           const before = node.tracks.length;
           if (edit.kind === "add") {
-            for (const track of tracks) if (!node.tracks.includes(track)) node.tracks.push(track);
+            // rekordbox's Add puts a held track on the end again; Skip
+            // leaves it [OBS 7.2.14, Winrig 2026-10-12, parity/issue-186].
+            for (const track of tracks) if (edit.duplicates === true || !node.tracks.includes(track)) node.tracks.push(track);
             return { id: edit.playlist, changed: node.tracks.length - before };
           }
           node.tracks = node.tracks.filter((t) => !tracks.includes(t));

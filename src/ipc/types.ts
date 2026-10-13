@@ -976,6 +976,11 @@ export interface Backend {
    * folder the edit was about (the new one for a create).
    */
   devicePlaylistEdit(path: string, format: DeviceFormat, edit: DevicePlaylistEdit): Promise<DevicePlaylistEditResult>;
+  /**
+   * The rows of `tracks` whose track a stick playlist already holds, each
+   * once: what rekordbox asks Add or Skip about before adding. Only reads.
+   */
+  devicePlaylistDuplicates(path: string, format: DeviceFormat, playlist: string, tracks: string[]): Promise<string[]>;
 
   /**
    * One track's full record: what the information panel's Summary and Info
@@ -1271,7 +1276,8 @@ export type DevicePlaylistEdit =
   | { kind: "create"; parent: string; name: string; folder: boolean }
   | { kind: "rename"; id: string; name: string }
   | { kind: "delete"; id: string }
-  | { kind: "add"; playlist: string; tracks: string[] }
+  /** `duplicates`: rekordbox's "Add" (true) or "Skip" (false, the default). */
+  | { kind: "add"; playlist: string; tracks: string[]; duplicates?: boolean }
   | { kind: "remove"; playlist: string; tracks: string[] };
 
 export interface DevicePlaylistEditResult {

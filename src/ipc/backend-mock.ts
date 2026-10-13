@@ -3036,6 +3036,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         return Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }
     },
+    devicePlaylistDuplicates: (path, format, playlist, tracks) => {
+      try {
+        return wait(stickLibraries.duplicates(path, format, playlist, tracks));
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    },
     explorerRoots: () => wait(EXPLORER_ROOTS.map((root) => ({ ...root }))),
     explorerChildren: (path) => {
       const names = [...(EXPLORER_CHILDREN.get(path) ?? [])];

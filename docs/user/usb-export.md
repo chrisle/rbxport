@@ -68,7 +68,10 @@ on the stick; right-click a playlist or folder to delete it. To rename one,
 click it again once it is selected, as in rekordbox. Over the stick's
 tracks, **Add To Playlist** lists that library's playlists, and inside a
 playlist **Remove from Playlist** takes tracks out. A new playlist goes at
-the top, as in rekordbox. When a playlist lists a track twice, selecting
+the top, as in rekordbox. When some of the tracks are already in the
+playlist, rbxport asks first, as rekordbox does: **Add duplicates** puts them
+on the end again, **Skip duplicates** adds only the others. The choice in
+Preferences > Advanced > Playlists applies here too. When a playlist lists a track twice, selecting
 either copy selects both, and Remove from Playlist takes both out (rekordbox
 selects and removes each row on its own).
 

@@ -1012,21 +1012,27 @@ function AppBody() {
   const [duplicatePrompt, setDuplicatePrompt] = useState<{
     playlist: string; duplicates: number; total: number; settle: (answer: DuplicateAnswer | null) => void;
   } | null>(null);
-  const resolveDuplicates = useCallback(
-    async (playlistId: string, trackIds: string[], name: string): Promise<boolean | null> => {
-      const backend = await getBackend();
-      const held = await backend.edits.playlistDuplicates(playlistId, trackIds);
-      if (held.length === 0) return false;
+  const askDuplicates = useCallback(
+    async (held: number, total: number, name: string): Promise<boolean | null> => {
+      if (held === 0) return false;
       const policy = advancedPrefs.duplicateTracks;
       if (policy !== "ask") return policy === "add";
       const answer = await new Promise<DuplicateAnswer | null>((settle) =>
-        setDuplicatePrompt({ playlist: name, duplicates: held.length, total: trackIds.length, settle }));
+        setDuplicatePrompt({ playlist: name, duplicates: held, total, settle }));
       setDuplicatePrompt(null);
       if (!answer) return null;
       if (answer.remember) prefs.update("advanced", { duplicateTracks: answer.choice });
       return answer.choice === "add";
     },
     [advancedPrefs.duplicateTracks, prefs],
+  );
+  const resolveDuplicates = useCallback(
+    async (playlistId: string, trackIds: string[], name: string): Promise<boolean | null> => {
+      const backend = await getBackend();
+      const held = await backend.edits.playlistDuplicates(playlistId, trackIds);
+      return askDuplicates(held.length, trackIds.length, name);
+    },
+    [askDuplicates],
   );
 
   /**
@@ -2542,10 +2548,25 @@ function AppBody() {
       // Greyed while the stick is synced, exported or ejected, as the tree's
       // own edits are, rather than refused on the click.
       busy: deviceBusy,
+      // A track the playlist already holds is asked about first, as
+      // rekordbox's Devices tree asks Add or Skip [OBS 7.2.14, Winrig
+      // 2026-10-12, parity/issue-186 `rekordbox-11`]; the same question and
+      // Preferences choice as the collection's playlists.
       onAdd: (playlist: string, ids: readonly string[]) => {
         const target = devicePlaylistsOf(treeNodes, selectedDeviceRef.path, selectedDeviceRef.format).find((p) => p.id === playlist);
         const name = target?.name ?? "";
-        void editDevice(selectedNode, { kind: "add", playlist, tracks: [...ids] }, () => t("Added to {name}.", { name }));
+        const tracks = [...ids];
+        void (async () => {
+          try {
+            const backend = await getBackend();
+            const held = await backend.devicePlaylistDuplicates(selectedDeviceRef.path, selectedDeviceRef.format, playlist, tracks);
+            const duplicates = await askDuplicates(held.length, tracks.length, name);
+            if (duplicates === null) return;
+            await editDevice(selectedNode, { kind: "add", playlist, tracks, duplicates }, () => t("Added to {name}.", { name }));
+          } catch (error) {
+            refuse(error instanceof Error ? error.message : t("The device library could not be changed."));
+          }
+        })();
       },
       // rekordbox's question names no count [OBS 7.2.14, `rekordbox-13`];
       // the note after it counts the entries that went. A track listed
@@ -2560,7 +2581,7 @@ function AppBody() {
         })();
       },
     };
-  }, [selectedNode, selectedDeviceRef, treeNodes, editDevice, deviceBusy, t, confirmRemoval]);
+  }, [selectedNode, selectedDeviceRef, treeNodes, editDevice, deviceBusy, t, confirmRemoval, askDuplicates, refuse]);
   const selectedDevice = useMemo(
     () => devices.find((device) => deviceId(device) === selectedNode?.id) ?? null,
     [devices, selectedNode],

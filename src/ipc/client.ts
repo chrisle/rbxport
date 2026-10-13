@@ -530,6 +530,8 @@ async function realBackend(): Promise<Backend> {
     deviceLibraries: (path) => invoke<DeviceLibrary[]>("device_libraries", { path }),
     devicePlaylistEdit: (path, format, edit) =>
       invoke<DevicePlaylistEditResult>("device_playlist_edit", { path, format, edit }),
+    devicePlaylistDuplicates: (path, format, playlist, tracks) =>
+      invoke<string[]>("device_playlist_duplicates", { path, format, playlist, tracks }),
     onLibraryChanged: (listener) => {
       // Tauri's listen resolves asynchronously; unsubscribing before it does
       // has to still work, so the flag is checked when it lands.

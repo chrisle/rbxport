@@ -98,6 +98,45 @@ test("a playlist made, filled and deleted on the stick changes only its own libr
   await expect(lists).toHaveCount(6);
 });
 
+test("adding a track a stick playlist already holds asks Add or Skip, as rekordbox does", async ({ page }) => {
+  await openStick(page);
+  // Melodic Vox holds the stick's tracks 2 to 4; tracks 1 and 2 are picked.
+  const addTo = async (count: number) => {
+    await kind(page, "deviceAllTracks").first().click();
+    await rows(page).first().click();
+    if (count > 1) await rows(page).nth(count - 1).click({ modifiers: ["Shift"] });
+    await rows(page).first().click({ button: "right" });
+    await page.getByRole("menu", { name: "Track" }).getByRole("menuitem", { name: "Add To Playlist" }).hover();
+    await page.getByRole("menuitem", { name: "Melodic Vox" }).first().click();
+    return page.getByRole("alertdialog", { name: "Duplicate tracks" });
+  };
+
+  // Skip: only the track it does not hold goes on.
+  let asked = await addTo(2);
+  await expect(asked).toContainText("1 of the 2 selected tracks are already in Melodic Vox.");
+  await asked.getByRole("button", { name: "Skip duplicates" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Added to Melodic Vox.");
+  await inLibrary(page, 0, "Melodic Vox").click();
+  await expect(rows(page)).toHaveCount(4);
+
+  // Cancel stops the add.
+  asked = await addTo(1);
+  await asked.getByRole("button", { name: "Cancel" }).click();
+  await expect(asked).toHaveCount(0);
+  await inLibrary(page, 0, "Melodic Vox").click();
+  await expect(rows(page)).toHaveCount(4);
+
+  // Add: the held track goes on the end again.
+  asked = await addTo(2);
+  await asked.getByRole("button", { name: "Add duplicates" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Added to Melodic Vox.");
+  await inLibrary(page, 0, "Melodic Vox").click();
+  await expect(rows(page)).toHaveCount(6);
+  // The other library is left as it was.
+  await inLibrary(page, 1, "Melodic Vox").click();
+  await expect(rows(page)).toHaveCount(3);
+});
+
 test("a stick's playlists cannot be changed while rekordbox holds the library", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
