@@ -4,6 +4,8 @@
     clippy::expect_used,
     clippy::panic
 )]
+
+mod common;
 use rbl_export::{export_full, verify, Manifest, SourcePlaylist, SourceTrack, SyncSource};
 use std::path::Path;
 
@@ -11,7 +13,7 @@ use std::path::Path;
 fn stopping_export_preserves_the_published_usb_library() {
     for stop_at in [3, 4] {
         let sources = tempfile::tempdir().unwrap();
-        let usb = tempfile::tempdir().unwrap();
+        let usb = common::stick();
         let tracks = vec![track(sources.path(), 1), track(sources.path(), 2)];
         sync(usb.path(), &tracks[..1], &[playlist(10, &[0])]).unwrap();
         let db = rbl_export::export_root(usb.path()).join("rekordbox/export.pdb");
@@ -95,7 +97,7 @@ fn edit(root: &Path, sql: &str) {
 #[test]
 fn missing_source_leaves_every_existing_database_and_audio_unchanged() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
     let pdb = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
@@ -112,7 +114,7 @@ fn missing_source_leaves_every_existing_database_and_audio_unchanged() {
 #[test]
 fn collisions_and_unicode_names_keep_distinct_audio() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let mut a = track(src.path(), 1);
     let mut b = track(src.path(), 2);
     std::fs::create_dir(src.path().join("second")).unwrap();
@@ -136,7 +138,7 @@ fn collisions_and_unicode_names_keep_distinct_audio() {
 #[test]
 fn identity_is_written_and_another_master_cannot_reuse_the_manifest() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 42);
     sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     let snap = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
@@ -162,7 +164,7 @@ fn identity_is_written_and_another_master_cannot_reuse_the_manifest() {
 #[test]
 fn device_metadata_conflict_does_not_replace_either_database() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     edit(
@@ -179,7 +181,7 @@ fn device_metadata_conflict_does_not_replace_either_database() {
 #[test]
 fn device_only_playlist_and_play_history_survive_deselection() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), &[t], &[playlist(10, &[0])]).unwrap();
     edit(usb.path(),"INSERT INTO playlist VALUES(99,1,'On the deck',NULL,0,0); INSERT INTO playlist_content VALUES(99,1,1); INSERT INTO history VALUES(7,1,'Tonight',0,0); INSERT INTO history_content VALUES(7,1,1)");
@@ -201,7 +203,7 @@ fn device_only_playlist_and_play_history_survive_deselection() {
 #[test]
 fn last_selected_playlist_can_be_removed() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), &[t], &[playlist(10, &[0])]).unwrap();
     sync(usb.path(), &[], &[]).unwrap();
@@ -213,7 +215,7 @@ fn last_selected_playlist_can_be_removed() {
 #[test]
 fn folders_and_playlist_ids_survive_reorder() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     let folder = SourcePlaylist {
         id: 90,
@@ -251,7 +253,7 @@ fn folders_and_playlist_ids_survive_reorder() {
 #[test]
 fn verification_rejects_missing_audio_and_disagreement() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), &[t], &[]).unwrap();
     let m = Manifest::load(usb.path()).unwrap();
@@ -263,7 +265,7 @@ fn verification_rejects_missing_audio_and_disagreement() {
 #[test]
 fn one_library_only_initialization_preserves_tracks() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), &[t], &[playlist(10, &[0])]).unwrap();
     std::fs::remove_file(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
@@ -285,7 +287,7 @@ fn one_library_only_initialization_preserves_tracks() {
 #[test]
 fn hidden_library_stays_hidden_and_plus_only_record_is_read() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     std::fs::create_dir_all(usb.path().join(".PIONEER")).unwrap();
     std::fs::write(usb.path().join(".PIONEER/DEVSETTING.DAT"), b"existing").unwrap();
@@ -302,7 +304,7 @@ fn hidden_library_stays_hidden_and_plus_only_record_is_read() {
 #[test]
 fn same_size_audio_corruption_is_repaired() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     let m = Manifest::load(usb.path()).unwrap();
@@ -315,7 +317,7 @@ fn same_size_audio_corruption_is_repaired() {
 #[test]
 fn unsupported_schema_is_left_untouched() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     edit(usb.path(), "UPDATE property SET dbVersion='9999'");
@@ -328,7 +330,7 @@ fn unsupported_schema_is_left_untouched() {
 #[test]
 fn legacy_only_conversion_preserves_history_and_master_identity() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
     edit(
@@ -356,7 +358,7 @@ fn legacy_only_conversion_preserves_history_and_master_identity() {
 #[test]
 fn same_size_artwork_change_and_removed_analysis_extension_are_published() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let mut t = track(src.path(), 1);
     let artwork = src.path().join("cover.jpg");
     std::fs::write(&artwork, b"first").unwrap();
@@ -382,7 +384,7 @@ fn same_size_artwork_change_and_removed_analysis_extension_are_published() {
 #[test]
 fn late_external_edit_aborts_publication() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     let pdb = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
@@ -407,7 +409,7 @@ fn late_external_edit_aborts_publication() {
 #[test]
 fn device_only_tags_and_cue_rows_are_preserved() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), &[t], &[playlist(10, &[0])]).unwrap();
     edit(usb.path(),"INSERT INTO playlist VALUES(99,1,'On the deck',NULL,0,0); INSERT INTO playlist_content VALUES(99,1,1); INSERT INTO myTag VALUES(111,1,'Device tag',0,0); INSERT INTO myTag_content VALUES(111,1); INSERT INTO cue(cue_id,content_id,kind,inUsec,cueComment) VALUES(7,1,0,1000000,'device cue')");
@@ -426,7 +428,7 @@ fn device_only_tags_and_cue_rows_are_preserved() {
 #[test]
 fn keep_unlisted_adds_to_the_stick_without_taking_anything_off() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let tracks = [track(src.path(), 1), track(src.path(), 2), track(src.path(), 3)];
     let folder = |id: u64, parent_id: u64| SourcePlaylist { id, name: format!("Folder {id}"), folder: true, parent_id, ..Default::default() };
     let mut a = playlist(10, &[0]);
@@ -488,7 +490,7 @@ fn track_on_stick<'a>(s: &'a rbl_export::snapshot::Library, title: &str) -> Opti
 #[test]
 fn a_device_track_without_its_audio_is_kept_as_the_stick_has_it() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let (kept, chosen) = (track(src.path(), 1), track(src.path(), 2));
     sync(usb.path(), &[kept], &[playlist(10, &[0])]).unwrap();
     let audio = Manifest::load(usb.path()).unwrap().tracks[0].audio.clone();
@@ -526,7 +528,7 @@ fn a_device_track_without_its_audio_is_kept_as_the_stick_has_it() {
 #[test]
 fn a_device_track_in_no_playlist_is_kept_by_every_later_sync() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let (kept, chosen) = (track(src.path(), 1), track(src.path(), 2));
     sync(usb.path(), &[kept], &[playlist(10, &[0])]).unwrap();
     let audio = Manifest::load(usb.path()).unwrap().tracks[0].audio.clone();
@@ -549,7 +551,7 @@ fn a_device_track_in_no_playlist_is_kept_by_every_later_sync() {
 #[test]
 fn a_track_an_older_build_carried_is_kept_by_the_next_sync() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let (kept, chosen) = (track(src.path(), 1), track(src.path(), 2));
     sync(usb.path(), &[kept], &[playlist(10, &[0])]).unwrap();
     let audio = Manifest::load(usb.path()).unwrap().tracks[0].audio.clone();
@@ -590,7 +592,7 @@ fn a_track_an_older_build_carried_is_kept_by_the_next_sync() {
 #[test]
 fn a_track_we_exported_and_a_device_playlist_kept_is_removed_once_unnamed() {
     let src = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     let tracks = [track(src.path(), 1), track(src.path(), 2)];
     sync(usb.path(), &tracks, &[playlist(10, &[0, 1])]).unwrap();
     let audio = Manifest::load(usb.path()).unwrap().tracks.iter().find(|t| t.library_id == 1).unwrap().audio.clone();

@@ -524,7 +524,7 @@ mod tests {
 
     #[test]
     fn a_fresh_stick_is_given_a_devsetting_and_a_stick_with_one_keeps_it() {
-        let stick = tempfile::tempdir().unwrap();
+        let stick = crate::test_stick::stick();
         // perf-ok: a test's fixture, not a command.
         std::fs::create_dir_all(stick.path().join("PIONEER")).unwrap();
 

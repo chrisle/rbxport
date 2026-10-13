@@ -6,6 +6,8 @@
 //! from then on, so it could not be synced again until it was reformatted.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod common;
+
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
@@ -73,7 +75,7 @@ fn recovered(root: &Path) -> Vec<std::path::PathBuf> {
 
 #[test]
 fn a_stick_rekordbox_wrote_to_after_an_interrupted_sync_syncs_again() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     let root = stick.path();
     let src = tempfile::tempdir().unwrap();
     let tracks = tracks(src.path());
@@ -125,7 +127,7 @@ fn a_stick_rekordbox_wrote_to_after_an_interrupted_sync_syncs_again() {
 /// databases before it stopped, as it does within a second on HFS+.
 #[test]
 fn a_stick_rewritten_after_an_interrupted_sync_published_its_databases_syncs_again() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     let root = stick.path();
     let src = tempfile::tempdir().unwrap();
     let tracks = tracks(src.path());
@@ -161,7 +163,7 @@ fn a_stick_rewritten_after_an_interrupted_sync_published_its_databases_syncs_aga
 
 #[test]
 fn a_first_sync_rekordbox_wrote_to_part_way_leaves_no_manifest_of_its_own() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     let root = stick.path();
     // A first sync stopped after placing its manifest; the stick had none.
     // rekordbox then wrote a database of its own where the sync had not yet
@@ -193,7 +195,7 @@ fn a_first_sync_rekordbox_wrote_to_part_way_leaves_no_manifest_of_its_own() {
 
 #[test]
 fn an_interrupted_sync_nothing_touched_since_is_still_finished() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     let root = stick.path();
     let src = tempfile::tempdir().unwrap();
     sync(root, &tracks(src.path())).unwrap();
@@ -221,7 +223,7 @@ fn an_interrupted_sync_nothing_touched_since_is_still_finished() {
 /// with "the device changed after sync failed".
 #[test]
 fn a_stick_whose_files_look_newer_than_this_clock_still_syncs() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     let root = stick.path();
     let src = tempfile::tempdir().unwrap();
     let tracks = tracks(src.path());

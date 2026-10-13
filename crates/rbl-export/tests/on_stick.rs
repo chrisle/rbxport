@@ -6,6 +6,8 @@
 //! written, not a second copy of every track under `Contents/`.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod common;
+
 use std::path::Path;
 
 use rbl_export::{export, export_full, verify, Manifest, SourcePlaylist, SourceTrack, SyncNode, SyncSource};
@@ -34,7 +36,7 @@ fn one_list(tracks: &[SourceTrack]) -> Vec<SourcePlaylist> {
 fn files_under(dir: &Path) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
+        for entry in entries.flatten().filter(|e| !common::is_os_metadata(&e.file_name())) {
             let path = entry.path();
             if path.is_dir() { out.extend(files_under(&path)); } else { out.push(path.to_string_lossy().into_owned()); }
         }
@@ -48,7 +50,7 @@ fn recorded(dest: &Path, library_id: u64) -> rbl_export::ManifestTrack {
 
 #[test]
 fn a_track_already_on_the_stick_is_pointed_at_not_copied() {
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let file = dest.path().join("Music/TRIODE/All U Need.mp3");
     let tracks = vec![track(&file, 1, "All U Need", "TRIODE", 1)];
 
@@ -77,7 +79,7 @@ fn a_track_already_on_the_stick_is_pointed_at_not_copied() {
 #[test]
 fn only_the_tracks_not_on_the_stick_are_copied() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(&dest.path().join("Music/one.mp3"), 1, "One", "TRIODE", 1),
         track(&src.path().join("two.mp3"), 2, "Two", "ARTBAT", 2),
@@ -94,7 +96,7 @@ fn only_the_tracks_not_on_the_stick_are_copied() {
 
 #[test]
 fn a_second_sync_still_copies_nothing_and_leaves_the_file_alone() {
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let file = dest.path().join("Music/one.mp3");
     let tracks = vec![track(&file, 1, "One", "TRIODE", 1)];
     export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
@@ -109,7 +111,7 @@ fn a_second_sync_still_copies_nothing_and_leaves_the_file_alone() {
 #[test]
 fn dropping_a_track_never_deletes_the_librarys_own_file() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     // Where a copy of it would go, too: before, a sync "copied" it onto
     // itself, recorded it as its own, and deleted it once deselected.
     let file = dest.path().join("Contents/TRIODE/Single/one.mp3");
@@ -132,7 +134,7 @@ fn dropping_a_track_never_deletes_the_librarys_own_file() {
 #[test]
 fn a_copied_track_never_lands_on_a_file_the_library_keeps_there() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     // The library's file sits exactly where a copy of another track would go.
     let file = dest.path().join("Contents/TRIODE/Single/song.mp3");
     let mine = track(&file, 1, "Mine", "TRIODE", 1);
@@ -154,7 +156,7 @@ fn a_copied_track_never_lands_on_a_file_the_library_keeps_there() {
 
 #[test]
 fn a_path_a_stick_cannot_name_is_copied_as_rekordbox_does() {
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     // A trailing dot is one of the things `hasSpecialCharInFilePath` rejects.
     let file = dest.path().join("Music/Vol. 2./one.mp3");
     let tracks = vec![track(&file, 1, "One", "TRIODE", 1)];
@@ -206,7 +208,7 @@ fn forget_in_place(root: &Path) {
 /// Deselects the in-place track while something on the stick still lists it,
 /// syncs, then (when given) drops that listing and syncs again.
 fn deselect_while_the_stick_lists_it(lists_it: &str, drop_it: Option<&str>, older_manifest: bool) {
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let file = dest.path().join("Music/one.mp3");
     let tracks = vec![track(&file, 1, "One", "TRIODE", 1)];
     sync(dest.path(), &tracks, &listed(10, &tracks)).unwrap();
@@ -256,7 +258,7 @@ fn a_track_an_older_manifest_names_in_place_survives_the_history_keeping_it() {
 #[test]
 fn an_older_manifest_without_in_place_never_deletes_the_librarys_file() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     // Where dev and v1.2.0 copied it onto itself and recorded it as theirs.
     let file = dest.path().join("Contents/TRIODE/Single/one.mp3");
     let tracks = vec![
@@ -278,7 +280,7 @@ fn an_older_manifest_without_in_place_never_deletes_the_librarys_file() {
 
 #[test]
 fn an_older_manifest_never_deletes_the_librarys_file_when_its_path_changes() {
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let file = dest.path().join("Contents/TRIODE/Single/one.mp3");
     let tracks = vec![track(&file, 1, "One", "TRIODE", 1)];
     sync(dest.path(), &tracks, &listed(10, &tracks)).unwrap();

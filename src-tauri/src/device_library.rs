@@ -1555,7 +1555,7 @@ mod tests {
 
     #[test]
     fn a_stick_path_that_climbs_out_is_not_read() {
-        let stick = tempfile::tempdir().unwrap();
+        let stick = crate::test_stick::stick();
         std::fs::create_dir_all(stick.path().join("PIONEER")).unwrap();
         let assets = DeviceAssets { mount: stick.path().join("PIONEER"), audio: String::new(), analysis: "/../outside.DAT".into(), artwork: "../x.jpg".into() };
         std::fs::write(stick.path().join("outside.DAT"), b"x").unwrap();
@@ -1566,7 +1566,7 @@ mod tests {
     fn a_stick_file_that_is_not_there_is_not_named() {
         // The join no longer asks the file system (#271), so a missing file
         // must still come back as nothing rather than as a path to open.
-        let stick = tempfile::tempdir().unwrap();
+        let stick = crate::test_stick::stick();
         std::fs::create_dir_all(stick.path().join("PIONEER/Artwork/00001")).unwrap();
         std::fs::write(stick.path().join("PIONEER/Artwork/00001/a1.jpg"), b"jpeg").unwrap();
         let assets = DeviceAssets {

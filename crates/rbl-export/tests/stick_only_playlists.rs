@@ -16,6 +16,8 @@
 //! rekordbox's Devices tree and a player do; nothing touches a real device.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod common;
+
 use std::path::Path;
 
 use rbl_export::device_library::{self, Edit, Format};
@@ -88,7 +90,7 @@ fn titles(names: &[&str]) -> Vec<String> {
 
 #[test]
 fn a_tag_list_in_one_library_whose_id_the_other_gives_another_playlist_does_not_stop_the_sync() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (tracks, selection) = stick(src.path(), dest.path());
     let ids = device_ids(dest.path());
     let legacy = create(dest.path(), Format::DeviceLibrary, "TAG LIST 367", vec![ids[0], ids[1]]);
@@ -120,7 +122,7 @@ fn a_tag_list_in_one_library_whose_id_the_other_gives_another_playlist_does_not_
 /// playlist: carrying export.pdb's under a new id would make a second copy.
 #[test]
 fn a_playlist_both_libraries_hold_under_different_ids_is_carried_once() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (tracks, selection) = stick(src.path(), dest.path());
     let ids = device_ids(dest.path());
     // Made in the opposite order under each library: each id names "A" in
@@ -143,7 +145,7 @@ fn a_playlist_both_libraries_hold_under_different_ids_is_carried_once() {
 
 #[test]
 fn one_playlist_the_two_libraries_fill_differently_still_stops_the_first_sync() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (tracks, selection) = stick(src.path(), dest.path());
     let ids = device_ids(dest.path());
     create(dest.path(), Format::DeviceLibrary, "TAG LIST 367", vec![ids[0], ids[1]]);
@@ -160,7 +162,7 @@ fn one_playlist_the_two_libraries_fill_differently_still_stops_the_first_sync() 
 
 #[test]
 fn a_later_sync_keeps_a_tag_list_whose_id_the_other_library_gives_another_playlist() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let tracks: Vec<SourceTrack> = (1..=4).map(|id| track(src.path(), id)).collect();
     let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: (0..tracks.len()).collect(), ..Default::default() }];
     // Synced from here before: the stick has a record of it.
@@ -201,7 +203,7 @@ fn both_gigs() -> Vec<(String, Vec<String>)> {
 
 #[test]
 fn a_first_sync_keeps_two_same_named_playlists_under_other_ids_with_other_tracks() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (tracks, selection) = stick(src.path(), dest.path());
     same_name_other_id_other_tracks(dest.path());
 
@@ -217,7 +219,7 @@ fn a_first_sync_keeps_two_same_named_playlists_under_other_ids_with_other_tracks
 
 #[test]
 fn a_later_sync_keeps_two_same_named_playlists_under_other_ids_with_other_tracks() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let tracks: Vec<SourceTrack> = (1..=4).map(|id| track(src.path(), id)).collect();
     let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: (0..tracks.len()).collect(), ..Default::default() }];
     sync_to(dest.path(), &tracks, &selection).unwrap();
@@ -233,7 +235,7 @@ fn a_later_sync_keeps_two_same_named_playlists_under_other_ids_with_other_tracks
 #[test]
 fn a_same_named_playlist_with_other_tracks_whose_id_is_taken_is_carried_under_a_new_id() {
     for record in [false, true] {
-        let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
         let (tracks, selection) = stick(src.path(), dest.path());
         if record {
             sync_to(dest.path(), &tracks, &selection).unwrap();
@@ -277,7 +279,7 @@ fn same_name_free_id(dest: &Path, legacy_tracks: Vec<u32>, one_tracks: Vec<u32>)
 fn same_named_playlists_with_the_same_tracks_under_free_ids_are_both_kept() {
     for record in [false, true] {
         for empty in [false, true] {
-            let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
             let (tracks, selection) = stick(src.path(), dest.path());
             if record {
                 sync_to(dest.path(), &tracks, &selection).unwrap();
@@ -324,7 +326,7 @@ fn matrix(collide: bool) {
     for contents in [Contents::Equal, Contents::Empty, Contents::Different, Contents::Reordered] {
         for record in [false, true] {
             let case = format!("collide: {collide}, {contents:?}, {}", if record { "later sync" } else { "first sync" });
-            let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
             let (tracks, selection) = stick(src.path(), dest.path());
             if record {
                 sync_to(dest.path(), &tracks, &selection).unwrap();
@@ -386,7 +388,7 @@ fn matrix_ids_that_do_not_collide() {
 #[test]
 fn same_named_folders_under_free_ids_are_both_kept() {
     for record in [false, true] {
-        let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
         let (tracks, selection) = stick(src.path(), dest.path());
         if record {
             sync_to(dest.path(), &tracks, &selection).unwrap();

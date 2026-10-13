@@ -132,6 +132,24 @@ them but not play them.
 RBX_REAL_USB=1 RB_LITE_TEST=1 cargo test -p rbl-export --test removable_media a_sync_writes_every_stick_at_once
 ```
 
+Every other test that exports to a stick writes to a temporary directory on
+the local disk. `RBX_USB_STICK` puts that directory on a real stick instead,
+so the whole export suite and the app's stick tests run through the stick's
+filesystem and driver. It takes one stick at a time, and the same
+`.rbxport-disposable` marker:
+
+```sh
+RBX_USB_STICK="/Volumes/USB A" RB_LITE_TEST=1 cargo test -p rbl-export -p rbxport
+```
+
+Each test's directory is named `.rbxport-test-*` and removed when the test
+ends. On FAT32 and exFAT, macOS keeps extended attributes in `._` sidecar
+files; listings in these tests leave them out (`common::is_os_metadata`).
+Add `-- --include-ignored` to the export crate's run for the opt-in
+200/2,000/10,000-track benchmark. It is slow on a stick: on 2026-10-13 its
+10,000-track first export alone took 16 minutes on a FAT32 stick and 32 on a
+journaled HFS+ one.
+
 ## Before review
 
 For a substantial change, run all applicable checks:

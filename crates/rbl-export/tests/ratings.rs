@@ -1,6 +1,8 @@
 //! OneLibrary stores star counts, independently of rekordbox XML's 51 scale.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
 use std::path::Path;
 
 fn export_stars(root: &Path, source: &Path) {
@@ -23,7 +25,7 @@ fn export_stars(root: &Path, source: &Path) {
 #[test]
 fn exported_one_library_ratings_are_raw_star_counts() {
     let source = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     export_stars(usb.path(), source.path());
 
     let db = rbl_onelibrary::ExportLibrary::open_read_only(
@@ -38,7 +40,7 @@ fn exported_one_library_ratings_are_raw_star_counts() {
 #[test]
 fn one_library_star_counts_survive_snapshot_and_legacy_conversion() {
     let source = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     export_stars(usb.path(), source.path());
     let dir = usb.path().join("PIONEER/rekordbox");
     // Supply independent device-format values rather than trusting the exporter.
@@ -64,7 +66,7 @@ fn one_library_star_counts_survive_snapshot_and_legacy_conversion() {
 #[test]
 fn resync_repairs_the_old_xml_scale_without_discarding_other_device_edits() {
     let source = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     export_stars(usb.path(), source.path());
     let db = rusqlite::Connection::open(usb.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
     db.pragma_update(None, "cipher", "sqlcipher").unwrap();
@@ -106,7 +108,7 @@ fn raw_one_library_ratings(root: &Path) -> Vec<i64> {
 #[test]
 fn resync_rewrites_an_old_scaled_stick_as_raw_star_counts() {
     let source = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
+    let usb = common::stick();
     export_stars(usb.path(), source.path());
     let db = rusqlite::Connection::open(usb.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
     db.pragma_update(None, "cipher", "sqlcipher").unwrap();

@@ -6,6 +6,8 @@
 //! Every stick here is written into a temporary directory.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod common;
+
 use std::path::Path;
 
 use rbl_export::{export, SourcePlaylist, SourceTrack};
@@ -80,7 +82,7 @@ const REKORDBOX_ALBUM_HEADS: [[u8; 4]; 3] = [[0x80, 0, 0x00, 0], [0x80, 0, 0x20,
 /// DeviceSQL engine every row of a page claimed slot 0.
 #[test]
 fn rows_carry_their_slot_on_the_page_as_rekordboxs_do() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let tracks: Vec<SourceTrack> = (1..=40).map(|n| track(src.path(), n)).collect();
     let playlists = [SourcePlaylist { id: 1, name: "All".into(), track_indices: (0..40).collect(), ..Default::default() }];
     export(dest.path(), &tracks, &playlists).unwrap();
@@ -110,7 +112,7 @@ fn rows_carry_their_slot_on_the_page_as_rekordboxs_do() {
 /// and the root's last a number higher than the root has playlists.
 #[test]
 fn playlists_are_numbered_from_0_within_their_folder_in_both_databases() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let tracks: Vec<SourceTrack> = (1..=2).map(|n| track(src.path(), n)).collect();
     let playlist = |id: u64, parent_id: u64, name: &str, folder: bool| SourcePlaylist {
         id,
@@ -168,7 +170,7 @@ fn playlists_are_numbered_from_0_within_their_folder_in_both_databases() {
 /// them only into `exportLibrary.db` and left 0 in `export.pdb` (#342).
 #[test]
 fn track_rows_carry_the_library_ids_exportlibrary_has() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let tracks: Vec<SourceTrack> = [215_543_268, 116_531_033, 7].iter().map(|&n| track(src.path(), n)).collect();
     let playlists = [SourcePlaylist { id: 1, name: "All".into(), track_indices: (0..3).collect(), ..Default::default() }];
     let sync = rbl_export::SyncSource { db_id: 441_210_509, ..Default::default() };

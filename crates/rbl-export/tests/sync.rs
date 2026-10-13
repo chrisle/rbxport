@@ -5,6 +5,8 @@
 //! while every track keeps the id a player already cached it under.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod common;
+
 use rbl_export::{export, verify, Manifest, SourcePlaylist, SourceTrack};
 
 /// Writes a dummy audio file and returns a track that points at it.
@@ -45,7 +47,7 @@ fn ids(destination: &std::path::Path) -> Vec<(u64, u32)> {
 #[test]
 fn a_second_export_of_the_same_tracks_copies_nothing() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(src.path(), 1, "All U Need", "TRIODE"),
         track(src.path(), 2, "The Abyss", "ARTBAT"),
@@ -79,7 +81,7 @@ fn a_second_export_of_the_same_tracks_copies_nothing() {
 #[test]
 fn a_changed_source_is_copied_again() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(src.path(), 1, "All U Need", "TRIODE"),
         track(src.path(), 2, "The Abyss", "ARTBAT"),
@@ -100,7 +102,7 @@ fn a_changed_source_is_copied_again() {
 #[test]
 fn a_rewrite_of_the_same_length_is_still_noticed() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &[]).unwrap();
 
@@ -118,7 +120,7 @@ fn a_rewrite_of_the_same_length_is_still_noticed() {
 #[test]
 fn a_track_dropped_from_the_selection_leaves_the_stick() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(src.path(), 1, "All U Need", "TRIODE"),
         track(src.path(), 2, "The Abyss", "ARTBAT"),
@@ -147,7 +149,7 @@ fn a_track_dropped_from_the_selection_leaves_the_stick() {
 #[test]
 fn export_ids_survive_a_removal_so_a_deck_does_not_repoint() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(src.path(), 10, "One", "A"),
         track(src.path(), 20, "Two", "B"),
@@ -172,7 +174,7 @@ fn export_ids_survive_a_removal_so_a_deck_does_not_repoint() {
 #[test]
 fn renaming_an_artist_moves_the_audio_and_leaves_no_copy_behind() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &[]).unwrap();
     assert!(dest.path().join("Contents/TRIODE/Single/source-1.mp3").is_file());
@@ -193,7 +195,7 @@ fn renaming_an_artist_moves_the_audio_and_leaves_no_copy_behind() {
 #[test]
 fn a_rename_that_only_changes_case_keeps_the_track() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &[]).unwrap();
 
@@ -211,7 +213,7 @@ fn a_rename_that_only_changes_case_keeps_the_track() {
 #[test]
 fn a_skipped_track_does_not_shift_the_playlist_under_the_ones_after_it() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(src.path(), 1, "Missing", "A"),
         track(src.path(), 2, "Present", "B"),
@@ -241,7 +243,7 @@ fn a_skipped_track_does_not_shift_the_playlist_under_the_ones_after_it() {
 #[test]
 fn a_stick_with_no_manifest_of_ours_is_written_in_full() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &[]).unwrap();
 
@@ -259,7 +261,7 @@ fn a_stick_with_no_manifest_of_ours_is_written_in_full() {
 #[test]
 fn a_file_deleted_off_the_stick_is_put_back() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &[]).unwrap();
 
@@ -284,7 +286,7 @@ fn a_sync_keeps_the_settings_the_stick_already_carries() {
     use rbl_onelibrary::settings::StickSettings;
 
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
 
@@ -309,7 +311,7 @@ fn a_sync_keeps_the_settings_the_stick_already_carries() {
 fn an_estimate_counts_what_a_sync_would_copy_keep_and_remove() {
     use rbl_export::estimate::estimate;
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(src.path(), 1, "All U Need", "TRIODE"),
         track(src.path(), 2, "The Abyss", "ARTBAT"),
@@ -361,6 +363,9 @@ fn assets(root: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>>
     fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
+            if path.file_name().is_some_and(common::is_os_metadata) {
+                continue;
+            }
             if path.is_dir() {
                 walk(root, &path, out);
             } else {
@@ -381,7 +386,7 @@ fn assets(root: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>>
 #[test]
 fn the_manifest_records_the_copy_as_the_stick_holds_it() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &[]).unwrap();
 
@@ -399,7 +404,7 @@ fn the_manifest_records_the_copy_as_the_stick_holds_it() {
 fn a_sync_of_unchanged_tracks_does_not_read_the_copies_back() {
     use std::os::unix::fs::PermissionsExt;
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(src.path(), 1, "All U Need", "TRIODE"),
         track(src.path(), 2, "The Abyss", "ARTBAT"),
@@ -432,7 +437,7 @@ fn a_sync_of_unchanged_tracks_does_not_read_the_copies_back() {
 #[test]
 fn a_copy_rewritten_on_the_stick_is_replaced_as_a_full_export_would() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(src.path(), 1, "All U Need", "TRIODE"),
         track(src.path(), 2, "The Abyss", "ARTBAT"),
@@ -462,7 +467,7 @@ fn a_copy_rewritten_on_the_stick_is_replaced_as_a_full_export_would() {
 #[test]
 fn a_copy_touched_but_unchanged_is_kept_and_its_new_time_recorded() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &[]).unwrap();
     let before = Manifest::load(dest.path()).unwrap().tracks[0].copy_stamp.unwrap();
@@ -482,7 +487,7 @@ fn a_copy_touched_but_unchanged_is_kept_and_its_new_time_recorded() {
 #[test]
 fn an_older_record_without_the_copy_stamp_is_checked_by_hash_once() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
     export(dest.path(), &tracks, &[]).unwrap();
 

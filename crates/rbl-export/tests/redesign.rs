@@ -1,5 +1,7 @@
 //! End-to-end incremental planning and execution on disposable media.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+mod common;
 use std::path::Path;
 use rbl_export::{ExportOptions, Manifest, SourcePlaylist, SourceTrack, SyncSource};
 
@@ -26,7 +28,7 @@ fn run(root: &Path, tracks: &[SourceTrack], playlists: &[SourcePlaylist]) -> rbl
 
 #[test]
 fn unchanged_and_playlist_only_syncs_do_not_read_any_media() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1), track(source.path(), 2)];
     run(usb.path(), &tracks, &playlists(vec![0, 1]));
     let before = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
@@ -44,7 +46,7 @@ fn unchanged_and_playlist_only_syncs_do_not_read_any_media() {
 
 #[test]
 fn changed_analysis_does_not_copy_audio_and_only_reads_its_source_bundle() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1), track(source.path(), 2)];
     run(usb.path(), &tracks, &playlists(vec![0, 1]));
     let base = tracks[0].analysis_source.as_ref().unwrap();
@@ -61,7 +63,7 @@ fn changed_analysis_does_not_copy_audio_and_only_reads_its_source_bundle() {
 
 #[test]
 fn missing_source_keeps_the_old_device_track_and_new_playlist_membership() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let mut tracks = vec![track(source.path(), 1), track(source.path(), 2)];
     run(usb.path(), &tracks, &playlists(vec![0, 1]));
     let old = Manifest::load(usb.path()).unwrap();
@@ -80,7 +82,7 @@ fn missing_source_keeps_the_old_device_track_and_new_playlist_membership() {
 
 #[test]
 fn source_change_while_staging_preserves_the_entire_old_generation() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)];
     run(usb.path(), &tracks, &playlists(vec![0]));
     let before = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
@@ -95,7 +97,7 @@ fn source_change_while_staging_preserves_the_entire_old_generation() {
 
 #[test]
 fn preview_deduplicates_shared_tracks_and_accounts_for_temporary_space() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)];
     let mut lists = playlists(vec![0, 0]);
     lists.push(SourcePlaylist { id: 11, name: "Other".into(), track_indices: vec![0], ..Default::default() });
@@ -154,7 +156,7 @@ fn three_destinations_share_one_conversion_and_warm_syncs_do_not_probe() {
 #[cfg(unix)]
 #[test]
 fn same_size_source_rewrite_with_restored_mtime_is_detected_by_change_time() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)];
     run(usb.path(), &tracks, &playlists(vec![0]));
     let stamp = std::fs::metadata(&tracks[0].source_path).unwrap().modified().unwrap();
@@ -168,7 +170,7 @@ fn same_size_source_rewrite_with_restored_mtime_is_detected_by_change_time() {
 
 #[test]
 fn cancellation_during_copy_keeps_the_previous_generation() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)];
     run(usb.path(), &tracks, &playlists(vec![0]));
     let before = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
@@ -198,7 +200,7 @@ fn a_reused_mount_path_is_rejected_before_any_export_writes() {
 
 #[test]
 fn full_integrity_check_detects_stamp_preserving_destination_edits() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)]; run(usb.path(), &tracks, &playlists(vec![0]));
     let m = Manifest::load(usb.path()).unwrap();
     let audio = usb.path().join(m.tracks[0].audio.trim_start_matches('/'));
@@ -215,7 +217,7 @@ fn full_integrity_check_detects_stamp_preserving_destination_edits() {
 #[test]
 fn source_hashing_checks_cancellation_between_chunks_and_keeps_old_databases() {
     let source = tempfile::tempdir().unwrap(); let cache_dir = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap(); let tracks = vec![track(source.path(), 1)];
+    let usb = common::stick(); let tracks = vec![track(source.path(), 1)];
     run(usb.path(), &tracks, &playlists(vec![0]));
     let before = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
     std::fs::write(&tracks[0].source_path, vec![42; 1024 * 1024]).unwrap();
@@ -235,7 +237,7 @@ fn source_hashing_checks_cancellation_between_chunks_and_keeps_old_databases() {
 
 #[test]
 fn an_unavailable_local_cache_does_not_block_export() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)];
     let unavailable = source.path().join("not-a-directory"); std::fs::write(&unavailable, b"occupied").unwrap();
     let cache = rbl_export::cache::PreparationCache::new(unavailable.join("cache"));
@@ -246,7 +248,7 @@ fn an_unavailable_local_cache_does_not_block_export() {
 
 #[test]
 fn changed_audio_does_not_keep_analysis_for_the_previous_contents() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)]; run(usb.path(), &tracks, &playlists(vec![0]));
     std::fs::write(&tracks[0].source_path, vec![50; 8192]).unwrap();
     let report = run(usb.path(), &tracks, &playlists(vec![0]));
@@ -271,7 +273,7 @@ fn compatibility_profiles_are_independent_and_corrupt_cache_outputs_are_reprepar
 
 #[test]
 fn touching_a_source_without_changing_bytes_reuses_audio_and_analysis() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)]; run(usb.path(), &tracks, &playlists(vec![0]));
     let file = std::fs::OpenOptions::new().write(true).open(&tracks[0].source_path).unwrap();
     file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(2)).unwrap();
@@ -284,7 +286,7 @@ fn touching_a_source_without_changing_bytes_reuses_audio_and_analysis() {
 
 #[test]
 fn full_verification_compares_source_contents_as_well_as_usb_copies() {
-    let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)]; run(usb.path(), &tracks, &playlists(vec![0]));
     let modified = std::fs::metadata(&tracks[0].source_path).unwrap().modified().unwrap();
     std::fs::write(&tracks[0].source_path, vec![99; 8192]).unwrap();

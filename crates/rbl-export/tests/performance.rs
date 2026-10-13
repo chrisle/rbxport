@@ -1,5 +1,8 @@
-//! Deterministic operation budgets and local timing. Never writes real media.
+//! Deterministic operation budgets and timing. Writes to a real stick only when
+//! `RBX_USB_STICK` names one (see `common`).
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+mod common;
 use rbl_export::{ExportOptions, SourcePlaylist, SourceTrack, SyncSource};
 
 #[test]
@@ -7,7 +10,7 @@ use rbl_export::{ExportOptions, SourcePlaylist, SourceTrack, SyncSource};
 #[allow(clippy::print_stdout, reason = "opt-in benchmark emits machine-readable measurements")]
 fn incremental_sync_operation_budgets() {
     for count in [200, 2_000, 10_000] {
-        let source = tempfile::tempdir().unwrap(); let usb = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap(); let usb = common::stick();
         let mut tracks = Vec::with_capacity(count);
         for i in 0..count {
             let path = source.path().join(format!("{i}.mp3"));

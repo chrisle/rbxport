@@ -5,6 +5,8 @@
 //! device.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod common;
+
 use std::path::Path;
 
 use rbl_export::device_library::{self, Format};
@@ -41,7 +43,7 @@ fn rekordbox_stick(src: &Path, dest: &Path) {
 
 #[test]
 fn rekordboxs_star_ratings_do_not_make_a_sticks_libraries_disagree() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     rekordbox_stick(src.path(), dest.path());
     let snapshot = Snapshot::read(dest.path()).unwrap();
     let stars = |library: &rbl_export::snapshot::Library| {
@@ -57,7 +59,7 @@ fn rekordboxs_star_ratings_do_not_make_a_sticks_libraries_disagree() {
 
 #[test]
 fn rbxports_own_ratings_still_read_as_stars() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let tracks: Vec<SourceTrack> = (0..=5).map(|stars| track(src.path(), u64::from(stars) + 1, stars)).collect();
     let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: (0..tracks.len()).collect(), ..Default::default() }];
     export(dest.path(), &tracks, &playlists).unwrap();
@@ -69,7 +71,7 @@ fn rbxports_own_ratings_still_read_as_stars() {
 
 #[test]
 fn the_first_sync_of_a_rekordbox_stick_is_not_refused_as_a_conflict() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     rekordbox_stick(src.path(), dest.path());
     let tracks: Vec<SourceTrack> = (0..=5).map(|stars| track(src.path(), u64::from(stars) + 1, stars)).collect();
     let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: (0..tracks.len()).collect(), ..Default::default() }];
@@ -79,7 +81,7 @@ fn the_first_sync_of_a_rekordbox_stick_is_not_refused_as_a_conflict() {
 
 #[test]
 fn the_sticks_onelibrary_browses_with_rekordboxs_stars() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     rekordbox_stick(src.path(), dest.path());
     let one = device_library::read(dest.path(), Format::OneLibrary).unwrap();
     let legacy = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
@@ -123,8 +125,8 @@ fn exported_elsewhere(src: &Path, dest: &Path, count: u64, db_id: u64) -> (Vec<S
 
 fn audio_files(dest: &Path) -> Vec<String> {
     fn walk(dir: &Path, out: &mut Vec<String>) {
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
+        for entry in std::fs::read_dir(dir).unwrap().map(|e| e.unwrap()).filter(|e| !common::is_os_metadata(&e.file_name())) {
+            let path = entry.path();
             if path.is_dir() { walk(&path, out) } else { out.push(path.to_string_lossy().into_owned()) }
         }
     }
@@ -136,7 +138,7 @@ fn audio_files(dest: &Path) -> Vec<String> {
 
 #[test]
 fn the_first_sync_keeps_the_copies_the_stick_already_holds() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (tracks, playlists) = exported_elsewhere(src.path(), dest.path(), 4, DB_ID);
     let files = audio_files(dest.path());
 
@@ -157,7 +159,7 @@ fn the_first_sync_keeps_the_copies_the_stick_already_holds() {
 
 #[test]
 fn a_held_copy_of_another_size_is_copied_again() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (mut tracks, playlists) = exported_elsewhere(src.path(), dest.path(), 2, DB_ID);
     std::fs::write(&tracks[0].source_path, vec![9_u8; 4096]).unwrap();
     tracks[0].file_size = 4096;
@@ -171,7 +173,7 @@ fn a_held_copy_of_another_size_is_copied_again() {
 
 #[test]
 fn another_librarys_copies_are_not_taken_for_this_ones() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (tracks, _) = exported_elsewhere(src.path(), dest.path(), 2, DB_ID);
     let estimate = rbl_export::estimate::estimate(dest.path(), DB_ID + 1, &tracks, false, None);
     assert_eq!((estimate.tracks_new, estimate.tracks_kept), (2, 0));
@@ -191,7 +193,7 @@ fn device_id(dest: &Path, library_id: u64) -> u32 {
 
 #[test]
 fn a_disagreement_on_a_track_the_sync_rewrites_does_not_stop_it() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (tracks, playlists) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
     disagree_on_comment(dest.path(), device_id(dest.path(), 2));
     let report = sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
@@ -202,7 +204,7 @@ fn a_disagreement_on_a_track_the_sync_rewrites_does_not_stop_it() {
 
 #[test]
 fn a_disagreement_the_sync_would_carry_names_what_differs() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (tracks, _) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
     disagree_on_comment(dest.path(), device_id(dest.path(), 3));
     // Track 3 is not selected: the stick keeps it as it has it.

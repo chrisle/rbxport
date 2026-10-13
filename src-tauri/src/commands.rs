@@ -4388,7 +4388,7 @@ mod tests {
     fn export_rig(
         dir: &std::path::Path,
         prepare: impl FnOnce(&mut rbl_db::write::Writer),
-    ) -> (crate::state::AppState, rbl_db::LibraryLocation, std::path::PathBuf) {
+    ) -> (crate::state::AppState, rbl_db::LibraryLocation, tempfile::TempDir) {
         let shape = rbl_db::fixture::Shape::default();
         let location = rbl_db::fixture::build(dir, shape).unwrap();
         let audio = dir.join("audio");
@@ -4404,9 +4404,7 @@ mod tests {
         drop(writer);
         let state = crate::state::AppState::with_backups(dir.join("backups"));
         reload(&state, &location);
-        let stick = dir.join("usb");
-        std::fs::create_dir_all(&stick).unwrap();
-        (state, location, stick)
+        (state, location, crate::test_stick::stick())
     }
 
     /// Reads the library into `state` again, as an edit does.
@@ -4447,7 +4445,8 @@ mod tests {
     #[test]
     fn export_playlist_adds_to_what_the_stick_holds() {
         let dir = tempfile::tempdir().unwrap();
-        let (state, location, stick) = export_rig(dir.path(), |_| {});
+        let (state, location, stick_dir) = export_rig(dir.path(), |_| {});
+        let stick = stick_dir.path().to_path_buf();
         let (a, b) = (rbl_db::fixture::playlist_id(0), rbl_db::fixture::playlist_id(1));
         let leaf = |id: &String| (id.clone(), false);
 
@@ -4467,7 +4466,8 @@ mod tests {
     #[test]
     fn a_track_analysed_since_the_index_was_read_is_exported_analysed() {
         let dir = tempfile::tempdir().unwrap();
-        let (state, location, stick) = export_rig(dir.path(), |_| {});
+        let (state, location, stick_dir) = export_rig(dir.path(), |_| {});
+        let stick = stick_dir.path().to_path_buf();
         let track = rbl_db::fixture::track_id(0);
         let relative = "/PIONEER/USBANLZ/P309/00000309/ANLZ0000.DAT";
         let dat = location.share_root.join(relative.trim_start_matches('/'));
@@ -4503,7 +4503,8 @@ mod tests {
     #[test]
     fn export_playlist_and_track_keep_a_playlist_the_library_deleted() {
         let dir = tempfile::tempdir().unwrap();
-        let (state, location, stick) = export_rig(dir.path(), |_| {});
+        let (state, location, stick_dir) = export_rig(dir.path(), |_| {});
+        let stick = stick_dir.path().to_path_buf();
         let (a, b, c) = (rbl_db::fixture::playlist_id(0), rbl_db::fixture::playlist_id(1), rbl_db::fixture::playlist_id(2));
         let leaf = |id: &String| (id.clone(), false);
         export_playlist_to(&state, &location, &stick, &a);
@@ -4538,7 +4539,7 @@ mod tests {
     fn folders_and_playlists_reach_the_stick_in_tree_order() {
         let dir = tempfile::tempdir().unwrap();
         let mut ids = Vec::new();
-        let (state, location, stick) = export_rig(dir.path(), |w| {
+        let (state, location, stick_dir) = export_rig(dir.path(), |w| {
             let first = w.create_folder("First", rbl_db::write::ROOT).unwrap();
             let second = w.create_folder("Second", rbl_db::write::ROOT).unwrap();
             let in_first = w.create_playlist("In first", &first).unwrap();
@@ -4549,6 +4550,7 @@ mod tests {
             w.move_to(&second, rbl_db::write::ROOT, Some(0)).unwrap();
             ids = vec![first, second, in_first, in_second];
         });
+        let stick = stick_dir.path().to_path_buf();
         let [first, second, in_first, in_second]: [String; 4] = ids.try_into().unwrap();
         let library = state.library().unwrap();
         let everything: Vec<String> = [&first, &second, &in_first, &in_second].iter().map(|s| (*s).clone()).collect();
@@ -4577,13 +4579,14 @@ mod tests {
     fn export_playlist_keeps_an_empty_folder_export_folder_put_there() {
         let dir = tempfile::tempdir().unwrap();
         let mut ids = (String::new(), String::new(), String::new());
-        let (state, location, stick) = export_rig(dir.path(), |w| {
+        let (state, location, stick_dir) = export_rig(dir.path(), |w| {
             let folder = w.create_folder("F", rbl_db::write::ROOT).unwrap();
             let empty = w.create_folder("E", &folder).unwrap();
             let inside = w.create_playlist("P", &folder).unwrap();
             w.add_tracks(&inside, &[rbl_db::fixture::track_id(30)]).unwrap();
             ids = (folder, empty, inside);
         });
+        let stick = stick_dir.path().to_path_buf();
         let (folder, empty, inside) = ids;
         let a = rbl_db::fixture::playlist_id(0);
 
@@ -4607,7 +4610,8 @@ mod tests {
     #[test]
     fn held_on_stick_accepts_an_older_record_this_library_synced() {
         let dir = tempfile::tempdir().unwrap();
-        let (state, location, stick) = export_rig(dir.path(), |_| {});
+        let (state, location, stick_dir) = export_rig(dir.path(), |_| {});
+        let stick = stick_dir.path().to_path_buf();
         let (a, b) = (rbl_db::fixture::playlist_id(0), rbl_db::fixture::playlist_id(1));
         export_playlist_to(&state, &location, &stick, &a);
         assert!(rbl_export::sync_record::read(&stick).is_some_and(|r| r.db_id != 0), "the export left rekordbox's record");

@@ -3,6 +3,8 @@
 //! No database, no webview, no rekordbox — this is what runs on any machine.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod common;
+
 use std::path::Path;
 
 const SR: u32 = 44_100;
@@ -47,7 +49,7 @@ fn write_click_wav(path: &Path, bpm: f64, secs: f64) {
 #[test]
 fn analyse_author_export_and_read_it_back() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
 
     // 1. A track with a tempo we know.
     let audio_path = src.path().join("click-128.wav");
@@ -147,7 +149,7 @@ fn a_track_that_cannot_be_decoded_does_not_break_the_pipeline() {
     assert!(rbl_audio::decode_mono(&path, None).is_err());
 
     // Exporting it still works: the file exists, so it is copied as-is.
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let track = rbl_export::SourceTrack {
         source_path: path,
         title: "Broken".into(),

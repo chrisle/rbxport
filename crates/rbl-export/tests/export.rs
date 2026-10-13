@@ -2,6 +2,8 @@
 //! a player would.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod common;
+
 use std::path::PathBuf;
 
 use rbl_export::{export, verify, SourcePlaylist, SourceTrack};
@@ -29,7 +31,7 @@ fn track(dir: &std::path::Path, n: u32, title: &str, artist: &str) -> SourceTrac
 #[test]
 fn writes_a_tree_a_player_can_browse() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![
         track(src.path(), 1, "All U Need", "TRIODE"),
         track(src.path(), 2, "The Abyss", "ARTBAT"),
@@ -60,7 +62,7 @@ fn writes_a_tree_a_player_can_browse() {
 #[test]
 fn hfs_export_uses_hidden_filesystem_and_database_paths() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = [track(src.path(), 1, "Hidden", "Artist")];
     rbl_export::export_with_options(
         dest.path(),
@@ -91,7 +93,7 @@ fn hfs_export_uses_hidden_filesystem_and_database_paths() {
 #[test]
 fn metadata_survives_the_round_trip() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut t = track(src.path(), 1, "Ébano — Tiësto Remix", "Tiësto");
     t.comment = "8A - C - 128".into();
     t.bpm_x100 = 12_345;
@@ -117,7 +119,7 @@ fn metadata_survives_the_round_trip() {
 #[test]
 fn verification_rejects_player_incompatible_records_and_sync_repairs_them() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut t = track(src.path(), 1, "Kept", "Artist");
     t.id = 1;
     let tracks = vec![t];
@@ -151,7 +153,7 @@ fn verification_rejects_player_incompatible_records_and_sync_repairs_them() {
 #[test]
 fn every_export_carries_rekordboxs_eight_colours() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     export(dest.path(), &[track(src.path(), 1, "T", "A")], &[]).unwrap();
 
     let bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
@@ -167,7 +169,7 @@ fn every_export_carries_rekordboxs_eight_colours() {
 #[test]
 fn a_missing_source_file_skips_that_track_rather_than_failing_the_export() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let good = track(src.path(), 1, "Present", "A");
     let mut bad = track(src.path(), 2, "Missing", "B");
     bad.source_path = PathBuf::from("/definitely/not/here.mp3");
@@ -181,7 +183,7 @@ fn a_missing_source_file_skips_that_track_rather_than_failing_the_export() {
 #[test]
 fn names_that_fat32_cannot_hold_are_made_safe() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut t = track(src.path(), 1, "Title", "AC/DC: Live?");
     t.album = "Best of *".into();
     export(dest.path(), &[t], &[]).unwrap();
@@ -194,7 +196,7 @@ fn names_that_fat32_cannot_hold_are_made_safe() {
 #[test]
 fn a_large_export_keeps_every_track_and_playlist_entry() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks: Vec<SourceTrack> = (1..=300)
         .map(|i| track(src.path(), i, &format!("Track {i:03}"), &format!("Artist {}", i % 20)))
         .collect();
@@ -224,7 +226,7 @@ fn a_large_export_keeps_every_track_and_playlist_entry() {
 #[test]
 fn every_export_pdb_page_keeps_rekordboxs_write_record_on_the_page() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks: Vec<SourceTrack> = (1..=300).map(|i| track(src.path(), i, &format!("Track {i:03}"), "A")).collect();
     let playlists = vec![SourcePlaylist { name: "All".into(), track_indices: (0..300).collect(), ..Default::default() }];
     export(dest.path(), &tracks, &playlists).unwrap();
@@ -258,7 +260,7 @@ fn every_export_pdb_page_keeps_rekordboxs_write_record_on_the_page() {
 
 #[test]
 fn an_empty_export_writes_two_valid_empty_libraries() {
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     export(dest.path(), &[], &[]).unwrap();
     assert!(verify(dest.path()).unwrap().is_ok());
 }
@@ -266,7 +268,7 @@ fn an_empty_export_writes_two_valid_empty_libraries() {
 #[test]
 fn analysis_files_land_where_the_database_says_they_do() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     export(dest.path(), &[track(src.path(), 1, "T", "A")], &[]).unwrap();
 
     let bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
@@ -334,7 +336,7 @@ fn a_fresh_stick_takes_the_defaults_it_is_given_and_keeps_them_after() {
     use rbl_onelibrary::settings::StickSettings;
 
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
 
     // The Preferences window's choices: GENRE turned on as the first
@@ -365,7 +367,7 @@ fn the_pdb_property_row_names_the_stick_and_keeps_its_background_colour() {
     use rbl_onelibrary::settings::StickSettings;
 
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let tracks = vec![track(src.path(), 1, "One", "A"), track(src.path(), 2, "Two", "B")];
     let defaults = StickSettings { device_name: "FRIDAY".into(), ..StickSettings::default() };
     rbl_export::export_with(dest.path(), &tracks, &[], Some(&defaults)).unwrap();
@@ -397,7 +399,7 @@ fn the_pdb_property_row_names_the_stick_and_keeps_its_background_colour() {
 
 #[test]
 fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     assert!(rbl_export::create_library(stick.path(), None, &[], None).expect("create"), "a blank stick gets a database");
     assert!(stick.path().join("PIONEER/rekordbox/export.pdb").is_file());
     assert!(stick.path().join("PIONEER/rekordbox/exportLibrary.db").is_file());
@@ -437,7 +439,7 @@ fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
 
 #[test]
 fn a_blank_hfs_stick_gets_only_the_hidden_rekordbox_root() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     assert!(rbl_export::create_library_with_root(
         stick.path(),
         None,
@@ -464,8 +466,8 @@ fn directory_names_are_cut_where_rekordbox_cuts_them_and_the_file_name_is_not() 
     assert_eq!(report.tracks, 1);
     let album_dir = std::fs::read_dir(dir.path().join("Contents/Disco Lines & Tinashe"))
         .unwrap()
-        .next()
-        .unwrap()
+        .map(|e| e.unwrap())
+        .find(|e| !common::is_os_metadata(&e.file_name()))
         .unwrap()
         .file_name()
         .to_string_lossy()
@@ -489,7 +491,7 @@ fn directory_names_are_cut_where_rekordbox_cuts_them_and_the_file_name_is_not() 
 #[test]
 fn my_settings_are_copied_from_rekordbox_and_a_sticks_own_are_kept() {
     let source = tempfile::tempdir().unwrap();
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     for name in rbl_export::MY_SETTINGS_FILES {
         std::fs::write(source.path().join(name), format!("from rekordbox: {name}")).unwrap();
     }
@@ -520,7 +522,7 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     use rbl_export::{export_full, SourceMyTag};
 
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     // The library keeps three sizes in one folder; the track names the big
     // one, the stick gets the small and the medium.
     let folder = src.path().join("Artwork/abc/def");
@@ -626,7 +628,7 @@ fn artwork_without_the_library_sizes_is_copied_as_it_is_and_folders_hold_twenty(
     use rbl_export::export_full;
 
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     // Twenty-one images, each its own file with no `_s`/`_m` beside it.
     let mut tracks = Vec::new();
     for i in 1..=21u32 {
@@ -653,7 +655,7 @@ fn artwork_without_the_library_sizes_is_copied_as_it_is_and_folders_hold_twenty(
 #[test]
 fn a_track_that_cannot_be_read_is_left_out_and_the_rest_is_published() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut tracks = vec![track(src.path(), 1, "First", "Artist"), track(src.path(), 2, "Second", "Artist")];
     let playlists = vec![SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id: 1, name: "Set".into(), track_indices: vec![0, 1] }];
     export(dest.path(), &tracks, &playlists).unwrap();
@@ -671,7 +673,7 @@ fn a_track_that_cannot_be_read_is_left_out_and_the_rest_is_published() {
 fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
     use rbl_export::{CompatibilityFormat, ExportOptions, export_with_options};
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let source = src.path().join("source.flac");
     let original = include_bytes!("../../rbl-audio/tests/fixtures/stereo-96k.flac");
     std::fs::write(&source, original).unwrap();
@@ -743,7 +745,7 @@ fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
 #[test]
 fn compatibility_does_not_reencode_already_compatible_audio() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let source = src.path().join("compatible.wav");
     rbl_audio::compatibility::convert(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rbl-audio/tests/fixtures/stereo-96k.flac"),
@@ -765,7 +767,7 @@ fn compatibility_does_not_reencode_already_compatible_audio() {
 fn exports_cues_metadata_and_all_companions_and_repairs_a_missing_ext() {
     use rbl_anlz::cues::ExportCue;
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut t = track(src.path(), 1, "Complete", "Artist");
     t.id = 11;
     t.metadata = rbl_core::ExportMetadata {
@@ -829,7 +831,7 @@ fn an_export_brings_an_old_pwv2_into_the_range_players_accept() {
     // XDJ-1000MK2 drops the whole preview. The export repairs both; PWAV
     // keeps its whiteness.
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut t = track(src.path(), 1, "Old Analysis", "Artist");
     let dat = rbl_anlz::AnlzBuilder::new().path("?/library.mp3")
         .beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 0 }])
@@ -848,7 +850,7 @@ fn an_export_brings_an_old_pwv2_into_the_range_players_accept() {
 #[test]
 fn a_firmware_path_hash_collision_keeps_both_analysis_bundles() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut tracks = Vec::new();
     for number in [890,7142] {
         let mut t = track(src.path(), number, "Collision", "Artist");
@@ -876,7 +878,7 @@ fn a_firmware_path_hash_collision_keeps_both_analysis_bundles() {
 #[test]
 fn a_track_with_more_text_than_a_pdb_row_holds_is_refused_by_name() {
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let mut long = track(src.path(), 1, "Very Long Notes", "TRIODE");
     long.comment = "é".repeat(2500);
     let tracks = vec![long, track(src.path(), 2, "Short", "ARTBAT")];
@@ -891,7 +893,7 @@ fn a_track_with_more_text_than_a_pdb_row_holds_is_refused_by_name() {
 fn a_track_that_cannot_be_converted_is_reported_and_the_rest_still_sync() {
     use rbl_export::{CompatibilityFormat, ExportOptions, export_with_options};
     let src = tempfile::tempdir().unwrap();
-    let dest = tempfile::tempdir().unwrap();
+    let dest = common::stick();
     let flac = include_bytes!("../../rbl-audio/tests/fixtures/stereo-96k.flac");
     let mut tracks = Vec::new();
     for (id, title, bytes) in [

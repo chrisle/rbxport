@@ -2,8 +2,10 @@
 //! rekordbox's Devices tree does.
 //!
 //! Every stick here is written by the export pipeline into a temporary
-//! directory; nothing touches a real device.
+//! directory, or one on the stick `RBX_USB_STICK` names (see `common`).
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+mod common;
 
 use std::path::Path;
 
@@ -68,7 +70,7 @@ fn id_of(dest: &Path, format: Format, name: &str) -> u32 {
 
 #[test]
 fn both_libraries_of_an_export_read_as_the_same_tree() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     stick(src.path(), dest.path());
     assert_eq!(device_library::formats(dest.path()), vec![Format::DeviceLibrary, Format::OneLibrary]);
     let legacy = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
@@ -93,7 +95,7 @@ fn both_libraries_name_each_tracks_analysis_and_artwork_on_the_stick() {
     // The Devices tree draws a stick track's waveforms and artwork from the
     // stick itself (#319), so both readers must carry the paths the
     // library names, and those paths must be files on the stick.
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let image = src.path().join("cover.jpg");
     std::fs::write(&image, b"\xff\xd8cover\xff\xd9").unwrap();
     let mut tracks: Vec<SourceTrack> = (1..=2).map(|i| track(src.path(), i, &format!("Track {i}"))).collect();
@@ -115,7 +117,7 @@ fn both_libraries_name_each_tracks_analysis_and_artwork_on_the_stick() {
 #[test]
 fn an_edit_changes_its_own_library_and_leaves_the_other_byte_for_byte() {
     for format in [Format::DeviceLibrary, Format::OneLibrary] {
-        let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
         stick(src.path(), dest.path());
         let untouched = db(dest.path(), other(format));
         let audio = std::fs::read(dest.path().join("Contents/TRIODE/Single/source-1.mp3")).unwrap();
@@ -146,7 +148,7 @@ fn an_edit_changes_its_own_library_and_leaves_the_other_byte_for_byte() {
 
 #[test]
 fn the_same_edits_made_in_both_libraries_leave_a_stick_that_verifies() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     stick(src.path(), dest.path());
     for format in [Format::DeviceLibrary, Format::OneLibrary] {
         let folder = device_library::apply(dest.path(), format, &Edit::Create { parent: 0, name: "Gigs".into(), folder: true }).unwrap();
@@ -178,7 +180,7 @@ fn the_same_edits_made_in_both_libraries_leave_a_stick_that_verifies() {
 /// rig-raw-186.txt`]. The same steps on a stick of ours come out the same.
 #[test]
 fn a_track_added_again_is_a_second_entry_as_rekordbox_writes_it() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let tracks: Vec<SourceTrack> = (1..=4).map(|i| track(src.path(), i, &format!("Track {i}"))).collect();
     let playlists = vec![
         SourcePlaylist { id: 10, name: "P186".into(), track_indices: vec![0, 1], ..Default::default() },
@@ -224,7 +226,7 @@ fn a_track_added_again_is_a_second_entry_as_rekordbox_writes_it() {
 
 #[test]
 fn a_large_playlist_grows_and_shrinks_across_pages() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let tracks: Vec<SourceTrack> = (1..=600).map(|i| track(src.path(), i, &format!("T{i}"))).collect();
     export(dest.path(), &tracks, &[SourcePlaylist { id: 1, name: "All".into(), track_indices: (0..600).collect(), ..Default::default() }]).unwrap();
     let all = id_of(dest.path(), Format::DeviceLibrary, "All");
@@ -243,7 +245,7 @@ fn a_large_playlist_grows_and_shrinks_across_pages() {
 
 #[test]
 fn a_refused_edit_writes_nothing() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     stick(src.path(), dest.path());
     let before = (db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary));
     let friday = id_of(dest.path(), Format::DeviceLibrary, "Friday");
@@ -259,7 +261,7 @@ fn a_refused_edit_writes_nothing() {
 
 #[test]
 fn a_playlist_made_on_the_device_survives_the_next_sync() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let tracks: Vec<SourceTrack> = (1..=3).map(|i| track(src.path(), i, &format!("Track {i}"))).collect();
     let playlists = vec![SourcePlaylist { id: 1, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
     export(dest.path(), &tracks, &playlists).unwrap();
@@ -279,7 +281,7 @@ fn a_playlist_made_on_the_device_survives_the_next_sync() {
 
 #[test]
 fn a_hidden_root_stick_is_edited_where_it_is() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     rbl_export::export_with_options(
         dest.path(),
         &[track(src.path(), 1, "Hidden")],
@@ -342,7 +344,7 @@ fn row(id: u32, parent: u32, sequence: u32, name: &str, tracks: &[u32]) -> (u32,
 /// `parity/issue-186/rig-stick-0-connected` to `rig-stick-9`].
 #[test]
 fn the_rigs_rekordbox_edits_leave_the_same_rows_here() {
-    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     rig_stick(src.path(), dest.path());
     let d = dest.path();
     // What rekordbox read before any edit [OBS rig-stick-0-connected].
@@ -381,7 +383,7 @@ fn the_rigs_rekordbox_edits_leave_the_same_rows_here() {
 fn an_edit_waits_for_a_write_in_progress_and_plans_against_its_result() {
     for format in [Format::DeviceLibrary, Format::OneLibrary] {
         let src = tempfile::tempdir().unwrap();
-        let (dest, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (dest, elsewhere) = (common::stick(), common::stick());
         stick(src.path(), dest.path());
         stick(src.path(), elsewhere.path());
         // What the other write is about to publish: the same stick with a

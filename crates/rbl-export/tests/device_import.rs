@@ -2,6 +2,8 @@
 //! works in its own tempdir.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod common;
+
 use rbl_export::device_import::{candidate, destination, numbered, Copies};
 use std::path::Path;
 
@@ -38,7 +40,7 @@ fn a_clash_is_numbered_before_the_extension_within_48_characters() {
 
 #[test]
 fn a_copy_never_replaces_a_file_and_matches_the_source() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     let music = tempfile::tempdir().unwrap();
     let source = stick.path().join("a.mp3");
     std::fs::write(&source, b"device audio").unwrap();
@@ -64,7 +66,7 @@ fn a_copy_never_replaces_a_file_and_matches_the_source() {
 
 #[test]
 fn rolling_back_removes_only_what_the_import_made() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     let music = tempfile::tempdir().unwrap();
     let source = stick.path().join("b.wav");
     std::fs::write(&source, b"wav").unwrap();
@@ -98,7 +100,7 @@ fn a_missing_source_copies_nothing() {
 
 #[test]
 fn an_earlier_copy_of_the_same_file_is_found_and_another_file_is_not() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     let music = tempfile::tempdir().unwrap();
     let source = stick.path().join("a.mp3");
     std::fs::write(&source, b"device audio").unwrap();
@@ -113,7 +115,7 @@ fn an_earlier_copy_of_the_same_file_is_found_and_another_file_is_not() {
 
 #[test]
 fn a_copy_keeps_the_device_files_modification_time() {
-    let stick = tempfile::tempdir().unwrap();
+    let stick = common::stick();
     let music = tempfile::tempdir().unwrap();
     let source = stick.path().join("a.mp3");
     std::fs::write(&source, b"device audio").unwrap();

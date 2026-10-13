@@ -11,6 +11,8 @@ mod file_drag;
 mod startup;
 mod screen_cache;
 mod sentry;
+#[cfg(test)]
+mod test_stick;
 pub mod analysis;
 pub mod commands;
 mod usb_import;
