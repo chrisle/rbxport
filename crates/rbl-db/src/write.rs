@@ -2085,7 +2085,12 @@ impl Writer {
         self.touch_content(content, "Rating", &Value::Integer(i64::from(stars)))
     }
 
+    /// [`Self::set_rating`] as an edit to undo; a track already at `stars`
+    /// is left as it is (see [`Self::set_field_with_undo`]).
     pub fn set_rating_with_undo(&mut self, content: &str, stars: u8) -> Result<(Changed, TrackEdit)> {
+        if stars <= 5 && self.row_shows(content, "COALESCE(c.Rating, 0)", &Value::Integer(i64::from(stars)))? {
+            return self.unchanged_edit(content, "Rating");
+        }
         self.track_edit(content, "Rating", |writer| writer.set_rating(content, stars))
     }
 
@@ -2110,7 +2115,12 @@ impl Writer {
         self.touch_content(content, "Commnt", &Value::Text(comment.to_owned()))
     }
 
+    /// [`Self::set_comment`] as an edit to undo; a track whose comment is
+    /// already `comment` is left as it is (see [`Self::set_field_with_undo`]).
     pub fn set_comment_with_undo(&mut self, content: &str, comment: &str) -> Result<(Changed, TrackEdit)> {
+        if self.row_shows(content, "COALESCE(c.Commnt, '')", &Value::Text(comment.to_owned()))? {
+            return self.unchanged_edit(content, "Commnt");
+        }
         self.track_edit(content, "Commnt", |writer| writer.set_comment(content, comment))
     }
 
@@ -2123,7 +2133,19 @@ impl Writer {
         )
     }
 
+    /// [`Self::set_color`] as an edit to undo; a track already in that
+    /// colour is left as it is (see [`Self::set_field_with_undo`]). No
+    /// colour is `0`, and NULL or empty reads as it.
     pub fn set_color_with_undo(&mut self, content: &str, color: Option<&str>) -> Result<(Changed, TrackEdit)> {
+        let wanted = match color.map(str::trim) {
+            None | Some("") => Some(0),
+            Some(id) => id.parse::<i64>().ok(),
+        };
+        if let Some(wanted) = wanted {
+            if self.row_shows(content, "COALESCE(CAST(NULLIF(c.ColorID, '') AS INTEGER), 0)", &Value::Integer(wanted))? {
+                return self.unchanged_edit(content, "ColorID");
+            }
+        }
         self.track_edit(content, "ColorID", |writer| writer.set_color(content, color))
     }
 
@@ -2133,24 +2155,32 @@ impl Writer {
     /// makes its lookup row with [`intern`] — the same shape [`Self::import_file`]
     /// gives a new track's artist, album, genre and label — and points the
     /// track at it, in one transaction. An empty value clears the reference to
-    /// NULL, which is how the reference library spells an absent artist on
-    /// 3,942 of its 38,681 tracks (75 carry `""`).
+    /// `""`, as rekordbox 7.2.14 writes a Composer or Remixer box emptied in
+    /// its Information Window [OBS: chris-win11, #279; the other reference
+    /// boxes go through the same `modifyTrackData` string path, ASSUME]. The
+    /// reference library also holds NULL for an absent artist; both read as
+    /// none.
     ///
     /// The key is found, never made: `djmdKey` rows carry a `Seq` whose rule
-    /// is not known, so a name that is not already there is refused.
+    /// is not known, so a name that is not already there is refused. An empty
+    /// key clears to NULL [UNKNOWN: what rekordbox writes for a cleared key].
     ///
-    /// A number that does not parse is refused rather than written as zero:
-    /// a typo in the year box must not erase the year.
+    /// An emptied number box is written as zero, as rekordbox writes an
+    /// emptied Year box [OBS: chris-win11, #279]. Anything else that does
+    /// not parse is refused rather than written as zero: a typo in the year
+    /// box must not erase the year.
     pub fn set_field(&mut self, content: &str, field: TrackField, value: &str) -> Result<Changed> {
         match field {
             TrackField::Title => self.touch_content(content, "Title", &Value::Text(value.to_owned())),
             TrackField::Lyricist => {
                 self.touch_content(content, "Lyricist", &Value::Text(value.to_owned()))
             }
-            TrackField::Year => self.touch_number(content, "ReleaseYear", value, 9999),
-            TrackField::TrackNumber => self.touch_number(content, "TrackNo", value, 9999),
-            TrackField::DiscNumber => self.touch_number(content, "DiscNo", value, 999),
-            TrackField::PlayCount => self.touch_number(content, "DJPlayCount", value, 999_999),
+            TrackField::Year | TrackField::TrackNumber | TrackField::DiscNumber | TrackField::PlayCount => {
+                match (field_column(field), number_max(field)) {
+                    (Some(column), Some(max)) => self.touch_number(content, column, value, max),
+                    _ => Err(DbError::WriteRefused(format!("{field:?} is not a number"))),
+                }
+            }
             TrackField::Artist => self.touch_reference(content, "ArtistID", "djmdArtist", value),
             TrackField::OriginalArtist => {
                 self.touch_reference(content, "OrgArtistID", "djmdArtist", value)
@@ -2193,32 +2223,89 @@ impl Writer {
     /// Writes one information-panel field and retains its exact stored value.
     /// BPM is deliberately excluded: it owns analysis-file history in the
     /// grid editor rather than this database-only history.
+    ///
+    /// A track that already shows `value` is not written: its row, USN and
+    /// `updated_at` stay as they are, and the edit returned is empty. That is
+    /// how rekordbox's Information Window writes a multiple selection: it
+    /// compares each selected track's value with the new one and hands only
+    /// the tracks that differ to `DatabaseIF::modifyTrackData` [static:
+    /// 7.2.19 `TrackInfoConcreteMediator::updateDB` @0x100371814 (text),
+    /// @0x100371a84 and @0x100371e98 (numbers)]. Observed on rekordbox
+    /// 7.2.14: Remixer set to "R1" on three tracks, one of which already
+    /// had it, rewrote the other two and left that one's `rb_local_usn` and
+    /// `updated_at` alone [OBS: chris-win11, #279].
     pub fn set_field_with_undo(
         &mut self,
         content: &str,
         field: TrackField,
         value: &str,
     ) -> Result<(Changed, TrackEdit)> {
-        let column = match field {
-            TrackField::Title => "Title",
-            TrackField::Artist => "ArtistID",
-            TrackField::Album => "AlbumID",
-            TrackField::Year => "ReleaseYear",
-            TrackField::TrackNumber => "TrackNo",
-            TrackField::DiscNumber => "DiscNo",
-            TrackField::OriginalArtist => "OrgArtistID",
-            TrackField::Composer => "ComposerID",
-            TrackField::Remixer => "RemixerID",
-            TrackField::Lyricist => "Lyricist",
-            TrackField::PlayCount => "DJPlayCount",
-            TrackField::Genre => "GenreID",
-            TrackField::Label => "LabelID",
-            TrackField::Key => "KeyID",
-            TrackField::Bpm => return Err(DbError::WriteRefused(
-                "BPM history belongs to the beat grid editor".to_owned(),
-            )),
-        };
+        let column = field_column(field).ok_or_else(|| {
+            DbError::WriteRefused("BPM history belongs to the beat grid editor".to_owned())
+        })?;
+        if self.already_shows(content, field, value)? {
+            return self.unchanged_edit(content, column);
+        }
         self.track_edit(content, column, |writer| writer.set_field(content, field, value))
+    }
+
+    /// Whether `content` already shows `value` in `field`, compared as the
+    /// panel shows it: a reference by its name, NULL as empty or zero. A
+    /// value the writer would refuse never matches, so the refusal still
+    /// comes from [`Self::set_field`].
+    fn already_shows(&self, content: &str, field: TrackField, value: &str) -> Result<bool> {
+        let text = |column: &str| (format!("COALESCE(c.{column}, '')"), Value::Text(value.to_owned()));
+        let name = |column: &str, table: &str, name_column: &str| {
+            (
+                format!("COALESCE((SELECT {name_column} FROM {table} WHERE ID = c.{column}), '')"),
+                Value::Text(value.trim().to_owned()),
+            )
+        };
+        let (expression, wanted) = match field {
+            TrackField::Title => text("Title"),
+            TrackField::Lyricist => text("Lyricist"),
+            TrackField::Year | TrackField::TrackNumber | TrackField::DiscNumber | TrackField::PlayCount => {
+                let (Some(column), Some(max)) = (field_column(field), number_max(field)) else {
+                    return Ok(false);
+                };
+                let Ok(n) = parse_number(value, max) else { return Ok(false) };
+                (format!("COALESCE(c.{column}, 0)"), Value::Integer(n))
+            }
+            TrackField::Artist => name("ArtistID", "djmdArtist", "Name"),
+            TrackField::OriginalArtist => name("OrgArtistID", "djmdArtist", "Name"),
+            TrackField::Composer => name("ComposerID", "djmdArtist", "Name"),
+            TrackField::Remixer => name("RemixerID", "djmdArtist", "Name"),
+            TrackField::Album => name("AlbumID", "djmdAlbum", "Name"),
+            TrackField::Genre => name("GenreID", "djmdGenre", "Name"),
+            TrackField::Label => name("LabelID", "djmdLabel", "Name"),
+            TrackField::Key => name("KeyID", "djmdKey", "ScaleName"),
+            TrackField::Bpm => return Ok(false),
+        };
+        self.row_shows(content, &expression, &wanted)
+    }
+
+    /// Whether `expression`, over the track's `djmdContent` row as `c`,
+    /// equals `wanted`. A track that is not there shows nothing.
+    fn row_shows(&self, content: &str, expression: &str, wanted: &Value) -> Result<bool> {
+        let same: Option<bool> = self
+            .library
+            .connection()
+            .query_row(
+                &format!("SELECT ({expression}) = ?2 FROM djmdContent c WHERE c.ID = ?1 AND c.rb_local_deleted = 0"),
+                params![content, wanted],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(same == Some(true))
+    }
+
+    /// The edit for a track left as it was: nothing written, nothing to undo.
+    fn unchanged_edit(&self, content: &str, column: &'static str) -> Result<(Changed, TrackEdit)> {
+        let value = self.track_value(content, column)?;
+        Ok((
+            Changed::default(),
+            TrackEdit { content: content.to_owned(), column, before: value.clone(), after: value },
+        ))
     }
 
     /// Whether `content` is a track in the library: a row that is there and
@@ -2778,12 +2865,7 @@ impl Writer {
 
     /// A non-negative integer column, refused when the text is not one.
     fn touch_number(&mut self, content: &str, column: &str, value: &str, max: i64) -> Result<Changed> {
-        let n: i64 = value.trim().parse().map_err(|_| {
-            DbError::WriteRefused(format!("{value:?} is not a whole number"))
-        })?;
-        if !(0..=max).contains(&n) {
-            return Err(DbError::WriteRefused(format!("{n} is outside 0 to {max}")));
-        }
+        let n = parse_number(value, max)?;
         self.touch_content(content, column, &Value::Integer(n))
     }
 
@@ -2802,7 +2884,9 @@ impl Writer {
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let id = intern(&tx, table, "Name", name.trim(), &mut self.rng, &stamp)?;
+        // An emptied box points the track at `""`, not NULL [OBS: rekordbox
+        // 7.2.14, Composer and Remixer, #279].
+        let id = intern(&tx, table, "Name", name.trim(), &mut self.rng, &stamp)?.unwrap_or_default();
         let usn = next_usn(&tx)?;
         let sql = format!(
             "UPDATE djmdContent SET {column} = ?1, rb_local_usn = ?2, updated_at = ?3
@@ -3346,6 +3430,55 @@ fn insert_content(conn: &Connection, row: &NewContent<'_>) -> Result<()> {
 ///
 /// An empty name is `NO_ID` — the empty string — because rekordbox leaves the
 /// reference off rather than pointing at a blank row.
+/// The `djmdContent` column an information-panel field is stored in; `None`
+/// for the BPM, which the beat grid owns.
+fn field_column(field: TrackField) -> Option<&'static str> {
+    Some(match field {
+        TrackField::Title => "Title",
+        TrackField::Artist => "ArtistID",
+        TrackField::Album => "AlbumID",
+        TrackField::Year => "ReleaseYear",
+        TrackField::TrackNumber => "TrackNo",
+        TrackField::DiscNumber => "DiscNo",
+        TrackField::OriginalArtist => "OrgArtistID",
+        TrackField::Composer => "ComposerID",
+        TrackField::Remixer => "RemixerID",
+        TrackField::Lyricist => "Lyricist",
+        TrackField::PlayCount => "DJPlayCount",
+        TrackField::Genre => "GenreID",
+        TrackField::Label => "LabelID",
+        TrackField::Key => "KeyID",
+        TrackField::Bpm => return None,
+    })
+}
+
+/// The largest value a number box takes; `None` for a field that is not one.
+fn number_max(field: TrackField) -> Option<i64> {
+    match field {
+        TrackField::Year | TrackField::TrackNumber => Some(9999),
+        TrackField::DiscNumber => Some(999),
+        TrackField::PlayCount => Some(999_999),
+        _ => None,
+    }
+}
+
+/// A number box's text as the number to store: empty is zero, as rekordbox
+/// writes an emptied Year box [OBS: rekordbox 7.2.14, #279]; anything else
+/// must be a whole number from 0 to `max`.
+fn parse_number(value: &str, max: i64) -> Result<i64> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(0);
+    }
+    let n: i64 = value
+        .parse()
+        .map_err(|_| DbError::WriteRefused(format!("{value:?} is not a whole number")))?;
+    if !(0..=max).contains(&n) {
+        return Err(DbError::WriteRefused(format!("{n} is outside 0 to {max}")));
+    }
+    Ok(n)
+}
+
 fn intern(
     conn: &Connection,
     table: &str,

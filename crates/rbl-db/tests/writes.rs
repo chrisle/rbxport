@@ -632,7 +632,7 @@ fn a_number_that_is_not_one_is_refused_rather_than_zeroed() {
     let mut f = fixture();
     let t = track_id(4);
     f.writer.set_field(&t, TrackField::Year, "2019").unwrap();
-    for bad in ["", "abc", "-1", "20x", "10000"] {
+    for bad in ["abc", "-1", "20x", "10000"] {
         assert!(
             matches!(f.writer.set_field(&t, TrackField::Year, bad), Err(DbError::WriteRefused(_))),
             "{bad:?} must be refused"
@@ -640,6 +640,22 @@ fn a_number_that_is_not_one_is_refused_rather_than_zeroed() {
     }
     let year: i64 = f.one("SELECT ReleaseYear FROM djmdContent WHERE ID = ?1", &[&t]);
     assert_eq!(year, 2019, "a refused write leaves the year alone");
+}
+
+#[test]
+fn an_emptied_number_box_is_written_as_zero() {
+    // rekordbox 7.2.14 wrote ReleaseYear 0 for a Year box typed in and
+    // emptied over three tracks holding 2001, 2002 and 0 [OBS: chris-win11,
+    // #279, values-s3-year-type-delete.txt].
+    let mut f = fixture();
+    let t = track_id(4);
+    f.writer.set_field(&t, TrackField::Year, "2001").unwrap();
+    f.writer.set_field(&t, TrackField::Year, "").unwrap();
+    let year: i64 = f.one("SELECT ReleaseYear FROM djmdContent WHERE ID = ?1", &[&t]);
+    assert_eq!(year, 0);
+    f.writer.set_field(&t, TrackField::TrackNumber, " ").unwrap();
+    let number: i64 = f.one("SELECT TrackNo FROM djmdContent WHERE ID = ?1", &[&t]);
+    assert_eq!(number, 0);
 }
 
 #[test]
@@ -704,13 +720,16 @@ fn album_genre_and_label_go_through_their_own_tables() {
 }
 
 #[test]
-fn an_emptied_reference_clears_to_null_and_leaves_the_lookup_row() {
+fn an_emptied_reference_clears_to_empty_and_leaves_the_lookup_row() {
     let mut f = fixture();
     let t = track_id(7);
     f.writer.set_field(&t, TrackField::Artist, "Gone Soon").unwrap();
     f.writer.set_field(&t, TrackField::Artist, "   ").unwrap();
     let artist: Option<String> = f.one("SELECT ArtistID FROM djmdContent WHERE ID = ?1", &[&t]);
-    assert_eq!(artist, None, "NULL, as 3,942 of the reference library's artist-less tracks are");
+    // rekordbox 7.2.14 wrote ComposerID and RemixerID "" for an emptied
+    // box, on one track and on several [OBS: chris-win11, #279,
+    // values-s2-composer-type-delete.txt, values-s5-single-remixer-clear.txt].
+    assert_eq!(artist.as_deref(), Some(""), "\"\", as rekordbox writes an emptied box");
     // Another track may still point at it; nothing is ever hard-deleted.
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdArtist WHERE Name = 'Gone Soon'"), 1);
 }
@@ -3374,4 +3393,91 @@ fn an_active_loop_takes_a_memory_cue_colour() {
     assert!(f.writer.set_cue_colour(&id, Some(8)).is_err(), "a memory cue has eight colours");
     let colours = rbl_db::details::memory_cue_colours(f.writer.library().connection(), &track).unwrap();
     assert_eq!(colours.get(&id), Some(&5));
+}
+
+// ------------------------------------- the information panel, several tracks
+
+/// `(rb_local_usn, updated_at)` of a track.
+fn stamp_of(f: &Fixture, track: &str) -> (Option<i64>, String) {
+    f.conn()
+        .query_row(
+            "SELECT rb_local_usn, updated_at FROM djmdContent WHERE ID = ?1",
+            params![track],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+}
+
+#[test]
+fn a_track_already_showing_the_value_is_not_written() {
+    // rekordbox 7.2.14, Remixer "R1" typed over House 1 (R1), House 2 and
+    // Techno 1 (none): House 2 and Techno 1 were written, House 1 kept
+    // rb_local_usn 399 and its updated_at [OBS: chris-win11, #279,
+    // values-s0-prepared.txt -> values-s1-remixer-R1-on-three.txt].
+    let mut f = fixture();
+    let [house1, house2, techno1] = [track_id(0), track_id(1), track_id(2)];
+    f.writer.set_field(&house1, TrackField::Remixer, "R1").unwrap();
+    let kept = stamp_of(&f, &house1);
+    let counter: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+
+    let mut edits = Vec::new();
+    for t in [&house1, &house2, &techno1] {
+        let (changed, edit) = f.writer.set_field_with_undo(t, TrackField::Remixer, "R1").unwrap();
+        edits.push((changed.rows, edit.is_empty()));
+    }
+    assert_eq!(edits, vec![(0, true), (1, false), (1, false)]);
+    assert_eq!(stamp_of(&f, &house1), kept, "the track that had R1 is not touched");
+    let after: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    assert_eq!(after, counter + 2, "one USN per track written, none for the one skipped");
+    let r1: String = f.one("SELECT ID FROM djmdArtist WHERE Name = 'R1'", &[]);
+    for t in [&house1, &house2, &techno1] {
+        let id: String = f.one("SELECT RemixerID FROM djmdContent WHERE ID = ?1", &[t]);
+        assert_eq!(id, r1);
+    }
+}
+
+#[test]
+fn an_emptied_box_skips_the_tracks_that_are_already_empty() {
+    // rekordbox 7.2.14, Composer typed in and emptied over C1, C2 and none:
+    // the first two went to "", the third kept its NULL, USN and
+    // updated_at; Year emptied over 2001, 2002 and 0 likewise left the 0
+    // alone [OBS: chris-win11, #279, values-s2/values-s3].
+    let mut f = fixture();
+    let [a, b, c] = [track_id(0), track_id(1), track_id(2)];
+    f.writer.set_field(&a, TrackField::Composer, "C1").unwrap();
+    f.writer.set_field(&b, TrackField::Composer, "C2").unwrap();
+    f.writer.set_field(&a, TrackField::Year, "2001").unwrap();
+    f.writer.set_field(&b, TrackField::Year, "2002").unwrap();
+    f.conn().execute("UPDATE djmdContent SET ComposerID = NULL, ReleaseYear = 0 WHERE ID = ?1", params![c]).unwrap();
+    let kept = stamp_of(&f, &c);
+
+    for t in [&a, &b, &c] {
+        f.writer.set_field_with_undo(t, TrackField::Composer, "").unwrap();
+        f.writer.set_field_with_undo(t, TrackField::Year, "").unwrap();
+    }
+    let composer = |t: &str| -> Option<String> { f.one("SELECT ComposerID FROM djmdContent WHERE ID = ?1", &[&t]) };
+    assert_eq!((composer(&a).as_deref(), composer(&b).as_deref(), composer(&c)), (Some(""), Some(""), None));
+    for t in [&a, &b, &c] {
+        let year: i64 = f.one("SELECT ReleaseYear FROM djmdContent WHERE ID = ?1", &[t]);
+        assert_eq!(year, 0);
+    }
+    assert_eq!(stamp_of(&f, &c), kept, "the track already empty is not touched");
+}
+
+#[test]
+fn rating_comment_and_colour_skip_a_track_that_already_has_them() {
+    let mut f = fixture();
+    let t = track_id(5);
+    f.writer.set_rating(&t, 3).unwrap();
+    f.writer.set_comment(&t, "same").unwrap();
+    f.writer.set_color(&t, Some("4")).unwrap();
+    let kept = stamp_of(&f, &t);
+    assert!(f.writer.set_rating_with_undo(&t, 3).unwrap().1.is_empty());
+    assert!(f.writer.set_comment_with_undo(&t, "same").unwrap().1.is_empty());
+    assert!(f.writer.set_color_with_undo(&t, Some("4")).unwrap().1.is_empty());
+    assert_eq!(stamp_of(&f, &t), kept);
+
+    // A different value is still written.
+    assert!(!f.writer.set_rating_with_undo(&t, 4).unwrap().1.is_empty());
+    assert_ne!(stamp_of(&f, &t), kept);
 }
