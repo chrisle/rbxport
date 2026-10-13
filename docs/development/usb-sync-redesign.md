@@ -1,8 +1,7 @@
 # USB sync performance and recovery implementation plan
 
 Status: implemented and locally validated on `codex/usb-sync-redesign`;
-release is blocked by the EOF CUE browser gate, pending cross-platform CI,
-and outstanding player/media validation. Nothing in this document establishes that the
+release is blocked by outstanding player/media validation. Nothing in this document establishes that the
 redesign is publicly shipped. This design
 covers Sync Manager, Export Playlist, Export Folder, Export Track, and scripted
 export. The objective is the shortest practical time from clicking SYNC to a
@@ -254,11 +253,11 @@ behavior: selected records that will be replaced can be resolved by this
 export; unrelated ambiguity is explained and blocks publication on that
 stick. Do not silently choose one database for unrelated data.
 
-Before a fresh export, existing optional history/settings/rating imports run
-under their current preferences, permissions, and Library Protection rules.
-Imports remain ordered before capturing the final source snapshot. Cache
-invalidation must include imported changes. An import failure makes that stick
-ineligible for export while other eligible sticks can continue. Preserve the
+SYNC imports nothing from the stick (#199); history, settings and ratings
+come back only through Import. A rating edited on the stick stops SYNC for that
+stick until it is imported, so a sync overwrites neither the edit nor the
+library. A stick without enough temporary space is ineligible for export while
+other eligible sticks continue. Preserve the
 current documented rating precedence; do not introduce concurrent library
 imports or silently change how conflicting device values are resolved.
 
@@ -388,7 +387,7 @@ Debounce selection changes by approximately 150–250 ms. Each request carries
 selection/options/library revision and device identity/signature tokens. Cancel
 superseded work and reject stale responses in the UI. Update immediately to a
 “Calculating space…” state; do not keep presenting an old number as current.
-Register jobs and progress before expensive planning or automatic imports.
+Register jobs and progress before expensive planning.
 
 The backend returns per-device fields with confidence/status:
 
@@ -600,20 +599,18 @@ build, and recorded 200072 instrumented revision lookups. Cold synthetic media
 uses 8 KiB audio placeholders and DAT/EXT/2EX fixtures, so its timing is dominated
 by per-file work rather than realistic sequential USB copy throughput.
 
-Final integration includes `dev` through `1c1c39ee`, retaining its playlist,
-PDB, and historical rating migration fixes. Frontend lint/type checks, all
-1,257 unit tests, the production build, unchanged size budgets (148.3 KiB
-initial / 324.6 KiB total gzip), and all 17 locale catalogs passed. All 18
-Sync Manager/production-window checks passed on Chromium and WebKit.
-The complete browser run finished with 819 passed, 10 skipped, one WebKit
-process crash passing on retry, and the same EOF CUE test failing in both
-browsers. That test also failed on untouched `1cd4505`; it remains a release
-gate, not a waived test. The final `RB_LITE_TEST=1 cargo test --workspace`
-run passed, including all 48 native command tests and doc tests. Workspace
-Clippy with warnings denied and all 16 focused redesign tests passed.
+Final integration is rebased onto `dev` through `3e9eac20` (1.7.0), including
+its decision on #199 that SYNC imports nothing and Import alone brings device
+changes back; the pre-sync import step from this redesign was dropped to match.
+Frontend lint/type checks, all 1,344 unit tests, the production build, size
+budgets (147.2 KiB initial / 333.6 KiB total gzip), and all 17 locale catalogs
+passed. The complete browser run finished with 856 passed, 15 skipped and one
+WebKit playlist drag-and-drop test passing on retry; the EOF CUE test that
+failed before the rebase now passes. `RB_LITE_TEST=1 cargo test --workspace`
+and workspace Clippy with warnings denied passed.
 
 The implementation is pushed in [draft PR 385](https://github.com/chrisle/rbxport/pull/385).
-Cross-platform CI is pending. No release is dispatched. The public feed still
+No release is dispatched. The public feed still
 reports version 1.6.0 as checked on October 12, 2026. Original issue 293 is
 closed for its earlier shipped optimization; PR 385 is the follow-on overhaul.
 Source hashing now checks
