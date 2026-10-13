@@ -21,10 +21,17 @@
  * `db::operate`], so those are the two offered [ASSUME: the words its own
  * dialog uses for them]. A property this list does not know — one a newer
  * rekordbox wrote — is shown as it is and cannot be chosen again.
+ *
+ * Values are shown and typed as rekordbox's dialog shows them; the backend
+ * stores them as rekordbox stores them (a BPM in hundredths, see
+ * `rbl_index::smart`), checked against rules rekordbox 7.2.14 wrote
+ * (issue #151). A colour is picked from the eight and No Color, as
+ * rekordbox's list offers, and stored by its `ColorID`.
  */
 import { useEffect, useRef, useState } from "react";
 
 import type { SmartCondition, SmartRule, TrackLookups } from "@/ipc/types";
+import { COLOR_NAMES } from "@/lib/trackFilter";
 import styles from "./SmartPlaylistEditor.module.css";
 
 export interface SmartPlaylistEditorProps {
@@ -38,7 +45,7 @@ export interface SmartPlaylistEditorProps {
   onCancel: () => void;
 }
 
-type Kind = "text" | "number" | "date" | "tag";
+type Kind = "text" | "number" | "date" | "tag" | "color";
 
 /**
  * The properties, in rekordbox's order and words [OBS 7.2.11]. `value` is
@@ -50,7 +57,7 @@ const PROPERTIES: readonly { value: string; label: string; kind: Kind }[] = [
   { value: "albumArtist", label: "Album artist", kind: "text" },
   { value: "artist", label: "Artist", kind: "text" },
   { value: "bpm", label: "BPM", kind: "number" },
-  { value: "grouping", label: "Color", kind: "text" },
+  { value: "grouping", label: "Color", kind: "color" },
   { value: "comments", label: "Comments", kind: "text" },
   { value: "producer", label: "Composer", kind: "text" },
   { value: "stockDate", label: "Date Added", kind: "date" },
@@ -73,8 +80,8 @@ const PROPERTIES: readonly { value: string; label: string; kind: Kind }[] = [
 
 /** The operators, numbered as rekordbox numbers them and drawn as it draws them [OBS 7.2.11]. */
 const OPERATORS: readonly { value: string; label: string; for: readonly Kind[] }[] = [
-  { value: "1", label: "=", for: ["text", "number", "date"] },
-  { value: "2", label: "≠", for: ["text", "number", "date"] },
+  { value: "1", label: "=", for: ["text", "number", "date", "color"] },
+  { value: "2", label: "≠", for: ["text", "number", "date", "color"] },
   { value: "3", label: ">", for: ["number", "date"] },
   { value: "4", label: "<", for: ["number", "date"] },
   { value: "6", label: "is in the last", for: ["date"] },
@@ -86,11 +93,29 @@ const OPERATORS: readonly { value: string; label: string; for: readonly Kind[] }
   { value: "11", label: "ends with", for: ["text"] },
 ];
 
+/**
+ * The units of "is in the last", and the words `ValueUnit` holds for them:
+ * rekordbox offers only these two [OBS: rekordbox 7.2.14's unit list on
+ * chris-win11, issue #151; static, 7.2.19 `Condition::getRangeUnitList` and
+ * the `xml_range_unit` table, `day` and `month`]. Any other unit counts days
+ * in rekordbox, so offering more would write rules it reads differently.
+ */
 const UNITS: readonly { value: string; label: string }[] = [
   { value: "day", label: "day(s)" },
-  { value: "week", label: "week(s)" },
   { value: "month", label: "month(s)" },
-  { value: "year", label: "year(s)" },
+];
+
+/**
+ * The colours a Color condition picks from, and the `ColorID` it stores:
+ * the eight colours in `ColorID` order, then No Color, stored as `0`
+ * [OBS: rekordbox 7.2.14's Color condition on chris-win11, issue #151, is a
+ * list of the eight and No Color with only `=` and `≠`, and it wrote Pink
+ * as `ValueLeft="1"` and No Color as `ValueLeft="0"`; static, 7.2.19
+ * `db::getSmartlistCondition` reads `grouping` with `getIntAttribute`].
+ */
+const COLOURS: readonly { value: string; label: string }[] = [
+  ...COLOR_NAMES.map((label, i) => ({ value: String(i + 1), label })),
+  { value: "0", label: "No Color" },
 ];
 
 function kindOf(property: string): Kind {
@@ -151,9 +176,10 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
     const current = conditions[at];
     const keep = current && OPERATORS.some((o) => o.value === current.operator && o.for.includes(kind));
     const operator = keep ? current.operator : (OPERATORS.find((o) => o.for.includes(kind))?.value ?? "1");
-    // A tag is picked, not typed: text carried into it would name no tag,
-    // and a tag id carried out of it is not a word anyone wrote.
-    const crossesTag = current !== undefined && (kind === "tag") !== (kindOf(current.property) === "tag");
+    // A tag or a colour is picked, not typed: text carried into it would
+    // name nothing, and an id carried out of it is not a word anyone wrote.
+    const picked = (k: Kind) => k === "tag" || k === "color";
+    const crossesTag = current !== undefined && (picked(kind) || picked(kindOf(current.property))) && kind !== kindOf(current.property);
     update(at, {
       property,
       operator,
@@ -255,7 +281,27 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                   </select>
-                  {kind === "tag" ? (
+                  {kind === "color" ? (
+                    <select
+                      className={styles.select}
+                      aria-label="Value"
+                      value={condition.left}
+                      onChange={(e) => update(at, { left: e.target.value })}
+                    >
+                      <option value="" disabled />
+                      {condition.left !== "" && !COLOURS.some((c) => c.value === condition.left) ? (
+                        // A value rekordbox would not have written (an
+                        // earlier rbx stored the colour's name): kept as
+                        // it is rather than silently swapped.
+                        <option value={condition.left} disabled>
+                          {condition.left}
+                        </option>
+                      ) : null}
+                      {COLOURS.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                  ) : kind === "tag" ? (
                     <select
                       className={styles.select}
                       aria-label="Value"
@@ -284,6 +330,7 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                       className={styles.input}
                       aria-label="Value"
                       type={kind === "number" || relative ? "number" : kind === "date" ? "date" : "text"}
+                      step={condition.property === "bpm" ? "0.01" : undefined}
                       value={condition.left}
                       onChange={(e) => update(at, { left: e.target.value })}
                     />
@@ -295,6 +342,7 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                         className={styles.input}
                         aria-label="Upper value"
                         type={kind === "date" ? "date" : "number"}
+                        step={condition.property === "bpm" ? "0.01" : undefined}
                         value={condition.right}
                         onChange={(e) => update(at, { right: e.target.value })}
                       />
@@ -307,6 +355,11 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                       value={condition.unit || "day"}
                       onChange={(e) => update(at, { unit: e.target.value })}
                     >
+                      {condition.unit !== "" && !UNITS.some((u) => u.value === condition.unit) ? (
+                        <option value={condition.unit} disabled>
+                          {condition.unit}
+                        </option>
+                      ) : null}
                       {UNITS.map((u) => (
                         <option key={u.value} value={u.value}>{u.label}</option>
                       ))}

@@ -2144,6 +2144,47 @@ fn an_intelligent_playlist_is_made_from_a_rule_and_its_rule_is_edited() {
     .is_err());
 }
 
+/// Issue #151: the rule is written as rekordbox 7.2.14's own dialog writes
+/// it, a BPM in hundredths, so rekordbox reads the BPM rbx was given. Before,
+/// "128" went in as written and rekordbox (and rbx) read it as 1.28 BPM.
+#[test]
+fn an_intelligent_playlist_is_written_in_rekordboxs_smartlist_format() {
+    use rbxport_lib::dto::{SmartConditionDto, SmartRuleDto};
+    let s = shell();
+    // Fixture tempos are 128.00 + i/100: tracks 5 to 10 are 128.05 to 128.10.
+    let rule = SmartRuleDto {
+        logic: "all".to_owned(),
+        conditions: vec![SmartConditionDto {
+            property: "bpm".to_owned(),
+            operator: "5".to_owned(),
+            left: "128.05".to_owned(),
+            right: "128.1".to_owned(),
+            unit: String::new(),
+        }],
+    };
+    run(commands::create_smart_playlist(s.handle(), s.state(), "Tempo".to_owned(), ROOT.to_owned(), rule)).unwrap();
+    let node = s.node("Tempo");
+    assert_eq!(s.playlist_rows(&node.id).len(), 6, "128.05 to 128.10 inclusive");
+
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let stored: String = db
+        .connection()
+        .query_row("SELECT SmartList FROM djmdPlaylist WHERE ID = ?1", [&node.id], |r| r.get(0))
+        .unwrap();
+    let id = node.id.parse::<u64>().unwrap() as u32 as i32;
+    assert_eq!(
+        stored,
+        format!(
+            r#"<NODE Id="{id}" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="bpm" Operator="5" ValueUnit="0" ValueLeft="12805" ValueRight="12810"/></NODE>"#
+        )
+    );
+
+    // The editor gets the BPM back as it was typed.
+    let read = run(commands::smart_rule(s.state(), node.id.clone())).unwrap();
+    let c = &read.conditions[0];
+    assert_eq!((c.left.as_str(), c.right.as_str(), c.unit.as_str()), ("128.05", "128.1", ""));
+}
+
 #[test]
 fn an_intelligent_playlist_on_a_my_tag_holds_the_tracks_carrying_it() {
     // Issue #84: a rule on a My Tag opened empty and read back with no

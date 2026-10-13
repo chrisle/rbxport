@@ -294,9 +294,8 @@ describe("changing an operator", () => {
     expect(sel(1, "Unit")?.value).toBe("day");
     // A relative date is counted, not dated.
     expect(inp(1, "Value")?.type).toBe("number");
-    expect([...(sel(1, "Unit")?.options ?? [])].map((o) => o.value)).toEqual([
-      "day", "week", "month", "year",
-    ]);
+    // rekordbox offers days and months only (issue #151).
+    expect([...(sel(1, "Unit")?.options ?? [])].map((o) => o.value)).toEqual(["day", "month"]);
 
     set(sel(1, "Operator")!, "7");
     expect(sel(1, "Unit")?.value).toBe("day");
@@ -497,5 +496,39 @@ describe("closing without saving", () => {
     expect(onCancel).not.toHaveBeenCalled();
     // The afterEach unmount has to find something to unmount.
     root = createRoot(host);
+  });
+});
+
+describe("a Color condition", () => {
+  // rekordbox 7.2.14 (issue #151): Color offers = and ≠ only, picks from the
+  // eight colours and No Color, and stores the ColorID, No Color as 0.
+  it("picks a colour and saves its ColorID", () => {
+    open();
+    set(sel(1, "Property")!, "grouping");
+    expect([...(sel(1, "Operator")?.options ?? [])].map((o) => o.value)).toEqual(["1", "2"]);
+    const values = [...(sel(1, "Value")?.options ?? [])].filter((o) => !o.disabled);
+    expect(values.map((o) => [o.value, o.textContent])).toEqual([
+      ["1", "Pink"], ["2", "Red"], ["3", "Orange"], ["4", "Yellow"],
+      ["5", "Green"], ["6", "Aqua"], ["7", "Blue"], ["8", "Purple"], ["0", "No Color"],
+    ]);
+    set(sel(1, "Value")!, "0");
+    set(sel(1, "Operator")!, "2");
+    expect(saved().conditions[0]).toEqual({ property: "grouping", operator: "2", left: "0", right: "", unit: "" });
+  });
+
+  it("does not carry typed text into the colour, nor a ColorID out of it", () => {
+    open();
+    set(inp(1, "Value")!, "Pink");
+    set(sel(1, "Property")!, "grouping");
+    expect(sel(1, "Value")?.value).toBe("");
+    set(sel(1, "Value")!, "6");
+    set(sel(1, "Property")!, "artist");
+    expect(inp(1, "Value")?.value).toBe("");
+  });
+
+  it("keeps a value rekordbox would not have written as it is", () => {
+    open({ rule: { logic: "all", conditions: [{ property: "grouping", operator: "1", left: "Pink", right: "", unit: "" }] } });
+    expect(sel(1, "Value")?.value).toBe("Pink");
+    expect(saved().conditions[0]?.left).toBe("Pink");
   });
 });

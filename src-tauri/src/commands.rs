@@ -3281,13 +3281,18 @@ fn rule_to_dto(rule: &rbl_index::SmartRule) -> AppResult<SmartRuleDto> {
     let mut conditions = Vec::with_capacity(rule.root.items.len());
     for item in &rule.root.items {
         match item {
-            Item::Condition(c) => conditions.push(SmartConditionDto {
-                property: c.property.name().to_owned(),
-                operator: c.operator.code().to_owned(),
-                left: c.left.clone(),
-                right: c.right.clone(),
-                unit: c.unit.clone(),
-            }),
+            Item::Condition(c) => {
+                // As the editor shows them: a BPM in BPM, not the
+                // hundredths `SmartList` holds.
+                let (left, right, unit) = c.editor_values();
+                conditions.push(SmartConditionDto {
+                    property: c.property.name().to_owned(),
+                    operator: c.operator.code().to_owned(),
+                    left,
+                    right,
+                    unit,
+                });
+            }
             Item::Group(_) => {
                 return Err(AppError::new(
                     ErrorKind::Malformed,
@@ -3317,13 +3322,9 @@ fn rule_from_dto(dto: &SmartRuleDto) -> AppResult<rbl_index::SmartRule> {
         let Some(operator) = Operator::from_code(&c.operator) else {
             return Err(AppError::new(ErrorKind::Malformed, format!("{:?} is not an operator.", c.operator)));
         };
-        items.push(Item::Condition(Condition {
-            property,
-            operator,
-            left: c.left.clone(),
-            right: c.right.clone(),
-            unit: c.unit.clone(),
-        }));
+        // Stored as rekordbox's own dialog stores them (a BPM in
+        // hundredths), so rekordbox reads the rule rbx wrote as written.
+        items.push(Item::Condition(Condition::from_editor(property, operator, &c.left, &c.right, &c.unit)));
     }
     Ok(rbl_index::SmartRule {
         root: Group { logic: if dto.logic == "any" { Logic::Any } else { Logic::All }, items },

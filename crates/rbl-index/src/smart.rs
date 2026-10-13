@@ -1,14 +1,26 @@
 //! Intelligent playlists: the rule in `djmdPlaylist.SmartList`, parsed and
 //! evaluated over the columns.
 //!
-//! rekordbox stores the rule as a small XML document:
+//! rekordbox stores the rule as a small XML document on one line, with no
+//! XML declaration (spaced out here):
 //!
 //! ```xml
-//! <NODE Id="123" LogicalOperator="1" AutomaticUpdate="1">
+//! <NODE Id="-1535466113" LogicalOperator="1" AutomaticUpdate="0">
 //!   <CONDITION PropertyName="genre" Operator="8" ValueUnit="" ValueLeft="House" ValueRight=""/>
-//!   <CONDITION PropertyName="bpm" Operator="5" ValueUnit="" ValueLeft="120" ValueRight="130"/>
+//!   <CONDITION PropertyName="bpm" Operator="5" ValueUnit="0" ValueLeft="12000" ValueRight="12650"/>
 //! </NODE>
 //! ```
+//!
+//! [OBS: rekordbox 7.2.14 on chris-win11, issue #151: the `SmartList` of
+//! intelligent playlists made in its Create New Intelligent Playlist dialog
+//! on a scratch library; static, rekordbox 7.2.19 arm64
+//! `SmartPlaylistComp::buttonClicked` builds the rule with
+//! `SmartPlaylist::Node::createNode(id, logic, false)` and
+//! `Condition::createCondition`, and stores
+//! `XmlElement::toString` with no default header and no new-line characters
+//! through `db::DatabaseIF::modifySmartListCriteria`]. `Id` is the
+//! playlist's own id as a signed 32-bit integer, `AutomaticUpdate` is always
+//! `0`, and a BPM is stored times 100 ([`bpm_to_stored`]).
 //!
 //! `LogicalOperator` 1 is "all of the following", 2 "any of". The operators
 //! are numbered as rekordbox's picker lists them: equal, not equal, greater,
@@ -29,11 +41,14 @@
 //! elements with quoted attributes, and a rule that does not parse is
 //! simply a playlist with nothing in it.
 //!
-//! The format is what rekordbox 6 and 7 write, as documented by the
-//! community (pyrekordbox's `smartlist` module) rather than measured against
-//! this library: there was no rekordbox library on the machine that wrote
-//! this, so the value conventions marked `[ASSUME]` below want checking
-//! against a recorded rule the first time one is to hand.
+//! How each property's value is written [OBS: the same rekordbox 7.2.14
+//! rules, and 7.2.19 `db::getSmartlistCondition`, which reads each one]:
+//! text properties (`key` among them, by its name) as typed; `bpm` as an
+//! integer times 100 in `ValueLeft`, `ValueRight` and `ValueUnit`;
+//! `duration` in whole seconds; `rating` in stars, with `ValueRight` `0`
+//! outside a range; `grouping` as the `ColorID`, `0` for No Color; dates as
+//! `YYYY-MM-DD`; "in the last" as a count with `ValueUnit` `day` or `month`,
+//! the only two units rekordbox offers; `myTag` as the tag's id.
 
 use rbl_core::xml::{tags, Tag};
 
@@ -286,11 +301,13 @@ impl SmartRule {
     }
 
     /// The rule as `djmdPlaylist.SmartList` holds it, for the playlist with
-    /// `id`: the root `NODE` names the playlist, `AutomaticUpdate` is on,
-    /// and each condition is one `CONDITION`. The shape is the one parsed
-    /// above, written back without whitespace between the elements
-    /// [ASSUME: no rekordbox-written rule has been captured to copy its
-    /// spacing; the reader here and rekordbox's both ignore it].
+    /// `id`, byte for byte as rekordbox writes it (see the module notes):
+    /// one line, `NODE Id` the playlist id as a signed 32-bit integer,
+    /// `AutomaticUpdate="0"`, then one `CONDITION` per condition, its
+    /// attributes in rekordbox's order and escaped as JUCE escapes them
+    /// ([`escape_attribute`]). A group with no conditions closes itself
+    /// (`<NODE …/>`), as JUCE writes an element with no children; the
+    /// editor never saves one.
     #[must_use]
     pub fn to_xml(&self, id: u64) -> String {
         use std::fmt::Write as _;
@@ -301,12 +318,18 @@ impl SmartRule {
             };
             match id {
                 Some(id) => {
-                    let _ = write!(out, "<NODE Id=\"{id}\" LogicalOperator=\"{logic}\" AutomaticUpdate=\"1\">");
+                    let id = node_id(id);
+                    let _ = write!(out, "<NODE Id=\"{id}\" LogicalOperator=\"{logic}\" AutomaticUpdate=\"0\"");
                 }
                 None => {
-                    let _ = write!(out, "<NODE LogicalOperator=\"{logic}\">");
+                    let _ = write!(out, "<NODE LogicalOperator=\"{logic}\"");
                 }
             }
+            if group.items.is_empty() {
+                out.push_str("/>");
+                return;
+            }
+            out.push('>');
             for item in &group.items {
                 match item {
                     Item::Condition(c) => {
@@ -315,9 +338,9 @@ impl SmartRule {
                             "<CONDITION PropertyName=\"{}\" Operator=\"{}\" ValueUnit=\"{}\" ValueLeft=\"{}\" ValueRight=\"{}\"/>",
                             c.property.name(),
                             c.operator.code(),
-                            rbl_core::xml::escape(&c.unit),
-                            rbl_core::xml::escape(&c.left),
-                            rbl_core::xml::escape(&c.right),
+                            escape_attribute(&c.unit),
+                            escape_attribute(&c.left),
+                            escape_attribute(&c.right),
                         );
                     }
                     Item::Group(g) => write_group(out, g, None),
@@ -401,6 +424,120 @@ fn attribute<'a>(attributes: &'a [(String, String)], name: &str) -> &'a str {
 
 fn integer(text: &str) -> Option<i32> {
     text.trim().parse().ok()
+}
+
+// ------------------------------------------------------------------- writing
+
+/// The `NODE Id` rekordbox writes: the playlist's id, an unsigned 32-bit
+/// `djmdPlaylist.ID`, passed to `XmlElement::setAttribute(…, int)`, so an id
+/// past 2^31 is written negative [OBS: rekordbox 7.2.14, playlist 2759501183
+/// written `Id="-1535466113"`, 93964985 written as itself].
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    reason = "rekordbox's own int conversion of the id: keep the low 32 bits, read them signed"
+)]
+fn node_id(id: u64) -> i32 {
+    id as u32 as i32
+}
+
+/// An attribute value escaped as JUCE's `XmlElement` escapes one, which is
+/// how rekordbox writes `SmartList` [OBS: static, rekordbox 7.2.19
+/// `juce::XmlOutputFunctions::escapeIllegalXmlChars` @0x1024f3014 and its
+/// `legalChars` table @0x103882c84, which is JUCE's: a printable ASCII
+/// character other than `"`, `&`, `<` and `>` is written as it is, those
+/// four as `&quot;`, `&amp;`, `&lt;` and `&gt;`, and everything else
+/// (control characters, new lines, and every non-ASCII character) as a
+/// decimal character reference; rekordbox 7.2.14 wrote `<&">` as
+/// `&lt;&amp;&quot;&gt;`]. So `'` stays as it is and `é` becomes `&#233;`.
+#[must_use]
+pub fn escape_attribute(text: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("&quot;"),
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            ' '..='~' => out.push(c),
+            _ => {
+                let _ = write!(out, "&#{};", u32::from(c));
+            }
+        }
+    }
+    out
+}
+
+/// A BPM as the editor shows it (`128`, `126.5`) turned into what
+/// rekordbox stores: the BPM times 100, as text [OBS: rekordbox 7.2.14
+/// stored `120` to `126.5` as `ValueLeft="12000" ValueRight="12650"`;
+/// static, rekordbox 7.2.19 `SmartPlaylist::Condition::createCondition`
+/// @0x102164dd8 takes the whole part times 100, plus the first digit after
+/// the point times 10, plus the second, each read with `getIntValue`, and
+/// does the same to `ValueUnit`, so an empty value is stored `0`].
+#[must_use]
+pub fn bpm_to_stored(text: &str) -> String {
+    let stored = match text.find('.') {
+        None => my_tag_key(text).wrapping_mul(100),
+        Some(point) => {
+            let whole = my_tag_key(text.get(..point).unwrap_or_default());
+            let digit = |at: usize| my_tag_key(text.get(at..at + 1).unwrap_or_default());
+            whole.wrapping_mul(100).wrapping_add(digit(point + 1).wrapping_mul(10)).wrapping_add(digit(point + 2))
+        }
+    };
+    stored.to_string()
+}
+
+/// A stored BPM (`12650`) as the editor shows it (`126.5`): hundredths,
+/// with trailing zeros dropped [OBS: rekordbox 7.2.14 shows a stored `120`
+/// and `126` as `1.2` and `1.26`].
+#[must_use]
+pub fn bpm_for_editor(stored: &str) -> String {
+    let value = i64::from(my_tag_key(stored));
+    let sign = if value < 0 { "-" } else { "" };
+    let whole = value.abs() / 100;
+    let hundredths = value.abs() % 100;
+    match hundredths {
+        0 => format!("{sign}{whole}"),
+        h if h % 10 == 0 => format!("{sign}{whole}.{}", h / 10),
+        h => format!("{sign}{whole}.{h:02}"),
+    }
+}
+
+impl Condition {
+    /// A condition from the editor's values, stored as rekordbox's dialog
+    /// stores them (see the module notes): a BPM times 100 in all three
+    /// values, and a rating outside a range with `ValueRight` `0`.
+    #[must_use]
+    pub fn from_editor(property: Property, operator: Operator, left: &str, right: &str, unit: &str) -> Self {
+        let (left, right, unit) = match property {
+            Property::Bpm => (bpm_to_stored(left), bpm_to_stored(right), bpm_to_stored(unit)),
+            // [OBS: rekordbox 7.2.14 stored "more than two stars" as
+            // `ValueLeft="2" ValueRight="0"`; static, 7.2.19
+            // `ConditionComp::sliderValueChanged` sets `ValueRight` to `0`
+            // whenever the second slider, the range's, is hidden.]
+            Property::Rating if operator != Operator::InRange => (left.to_owned(), "0".to_owned(), unit.to_owned()),
+            _ => (left.to_owned(), right.to_owned(), unit.to_owned()),
+        };
+        Self { property, operator, left, right, unit }
+    }
+
+    /// The condition's values as the editor shows them: `(left, right,
+    /// unit)`, a BPM in BPM rather than hundredths, and no unit on one.
+    #[must_use]
+    pub fn editor_values(&self) -> (String, String, String) {
+        match self.property {
+            Property::Bpm => {
+                let right = if self.operator == Operator::InRange { bpm_for_editor(&self.right) } else { String::new() };
+                (bpm_for_editor(&self.left), right, String::new())
+            }
+            Property::Rating if self.operator != Operator::InRange => {
+                (self.left.clone(), String::new(), self.unit.clone())
+            }
+            _ => (self.left.clone(), self.right.clone(), self.unit.clone()),
+        }
+    }
 }
 
 // ---------------------------------------------------------------- evaluation
@@ -974,8 +1111,117 @@ mod tests {
             },
         };
         let xml = rule.to_xml(4_290_236_987);
-        assert!(xml.starts_with("<NODE Id=\"4290236987\" LogicalOperator=\"2\" AutomaticUpdate=\"1\"><CONDITION PropertyName=\"genre\" Operator=\"8\""));
+        assert!(xml.starts_with("<NODE Id=\"-4730309\" LogicalOperator=\"2\" AutomaticUpdate=\"0\"><CONDITION PropertyName=\"genre\" Operator=\"8\""));
         assert_eq!(SmartRule::parse(&xml).unwrap(), rule);
+    }
+
+    fn one(property: Property, operator: Operator, left: &str, right: &str, unit: &str) -> SmartRule {
+        SmartRule {
+            root: Group {
+                logic: Logic::All,
+                items: vec![Item::Condition(Condition::from_editor(property, operator, left, right, unit))],
+            },
+        }
+    }
+
+    /// The `SmartList` bytes rekordbox 7.2.14 wrote for rules made in its own
+    /// Create New Intelligent Playlist dialog on chris-win11 (issue #151,
+    /// `parity/issue-151/values-rekordbox-session1-dump.txt`), with the
+    /// values rbx's editor sends for the same rules.
+    #[test]
+    fn rules_are_written_byte_for_byte_as_rekordbox_writes_them() {
+        let cases: [(u64, SmartRule, &str); 11] = [
+            (2_759_501_183, one(Property::Genre, Operator::Contains, "House", "", ""),
+             r#"<NODE Id="-1535466113" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="genre" Operator="8" ValueUnit="" ValueLeft="House" ValueRight=""/></NODE>"#),
+            (3_213_900_474, one(Property::Bpm, Operator::InRange, "120", "126.5", ""),
+             r#"<NODE Id="-1081066822" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="bpm" Operator="5" ValueUnit="0" ValueLeft="12000" ValueRight="12650"/></NODE>"#),
+            (2_465_685_253, one(Property::DateAdded, Operator::InLast, "30", "", "day"),
+             r#"<NODE Id="-1829282043" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="stockDate" Operator="6" ValueUnit="day" ValueLeft="30" ValueRight=""/></NODE>"#),
+            (3_744_254_916, one(Property::DateAdded, Operator::InLast, "2", "", "month"),
+             r#"<NODE Id="-550712380" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="stockDate" Operator="6" ValueUnit="month" ValueLeft="2" ValueRight=""/></NODE>"#),
+            (3_632_566_146, one(Property::Rating, Operator::Greater, "2", "", ""),
+             r#"<NODE Id="-662401150" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="rating" Operator="3" ValueUnit="" ValueLeft="2" ValueRight="0"/></NODE>"#),
+            (93_964_985, one(Property::Color, Operator::Equal, "1", "", ""),
+             r#"<NODE Id="93964985" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="grouping" Operator="1" ValueUnit="" ValueLeft="1" ValueRight=""/></NODE>"#),
+            (4_045_890_599, one(Property::Color, Operator::Equal, "0", "", ""),
+             r#"<NODE Id="-249076697" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="grouping" Operator="1" ValueUnit="" ValueLeft="0" ValueRight=""/></NODE>"#),
+            (1_755_093_896, one(Property::Duration, Operator::Greater, "300", "", ""),
+             r#"<NODE Id="1755093896" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="duration" Operator="3" ValueUnit="" ValueLeft="300" ValueRight=""/></NODE>"#),
+            (1_473_708_092, SmartRule {
+                root: Group {
+                    logic: Logic::Any,
+                    items: vec![
+                        Item::Condition(Condition::from_editor(Property::Artist, Operator::StartsWith, "a", "", "")),
+                        Item::Condition(Condition::from_editor(Property::FileName, Operator::Contains, "<&\">", "", "")),
+                    ],
+                },
+            },
+             r#"<NODE Id="1473708092" LogicalOperator="2" AutomaticUpdate="0"><CONDITION PropertyName="artist" Operator="10" ValueUnit="" ValueLeft="a" ValueRight=""/><CONDITION PropertyName="fileName" Operator="8" ValueUnit="" ValueLeft="&lt;&amp;&quot;&gt;" ValueRight=""/></NODE>"#),
+            (745_864_668, one(Property::DateAdded, Operator::Greater, "2020-01-31", "", ""),
+             r#"<NODE Id="745864668" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="stockDate" Operator="3" ValueUnit="" ValueLeft="2020-01-31" ValueRight=""/></NODE>"#),
+            (3_975_680_467, one(Property::Key, Operator::Equal, "Am", "", ""),
+             r#"<NODE Id="-319286829" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="key" Operator="1" ValueUnit="" ValueLeft="Am" ValueRight=""/></NODE>"#),
+        ];
+        for (id, rule, rekordbox) in cases {
+            assert_eq!(rule.to_xml(id), rekordbox);
+            // And what rekordbox wrote reads back as the same rule.
+            assert_eq!(SmartRule::parse(rekordbox).unwrap(), rule);
+        }
+    }
+
+    #[test]
+    fn attribute_values_are_escaped_as_juce_escapes_them() {
+        assert_eq!(escape_attribute("<&\">"), "&lt;&amp;&quot;&gt;");
+        assert_eq!(escape_attribute("Tom's"), "Tom's");
+        assert_eq!(escape_attribute("Caf\u{e9} \u{65e5}\u{1f600}"), "Caf&#233; &#26085;&#128512;");
+        assert_eq!(escape_attribute("a\tb\nc\r"), "a&#9;b&#10;c&#13;");
+        assert_eq!(escape_attribute("~ !#$%()*+,-./:;=?@[]^_`{|}"), "~ !#$%()*+,-./:;=?@[]^_`{|}");
+        // What is escaped reads back as it was.
+        let rule = one(Property::Title, Operator::Contains, "Caf\u{e9} 'x' <&\">\t", "", "");
+        assert_eq!(SmartRule::parse(&rule.to_xml(1)).unwrap(), rule);
+    }
+
+    #[test]
+    fn an_empty_group_closes_itself() {
+        let rule = SmartRule { root: Group { logic: Logic::All, items: Vec::new() } };
+        assert_eq!(rule.to_xml(7), r#"<NODE Id="7" LogicalOperator="1" AutomaticUpdate="0"/>"#);
+    }
+
+    #[test]
+    fn a_bpm_is_stored_in_hundredths_as_rekordbox_stores_it() {
+        assert_eq!(bpm_to_stored("120"), "12000");
+        assert_eq!(bpm_to_stored("126.5"), "12650");
+        assert_eq!(bpm_to_stored("126.55"), "12655");
+        // rekordbox reads two digits after the point and ignores the rest.
+        assert_eq!(bpm_to_stored("126.559"), "12655");
+        assert_eq!(bpm_to_stored("126.05"), "12605");
+        assert_eq!(bpm_to_stored(".5"), "50");
+        assert_eq!(bpm_to_stored("128."), "12800");
+        assert_eq!(bpm_to_stored(""), "0");
+        assert_eq!(bpm_to_stored(" 98"), "9800");
+
+        assert_eq!(bpm_for_editor("12000"), "120");
+        assert_eq!(bpm_for_editor("12650"), "126.5");
+        assert_eq!(bpm_for_editor("12605"), "126.05");
+        // A rule an earlier rbx wrote in whole BPM reads as rekordbox reads it.
+        assert_eq!(bpm_for_editor("120"), "1.2");
+        assert_eq!(bpm_for_editor("126"), "1.26");
+        assert_eq!(bpm_for_editor("0"), "0");
+
+        let rule = one(Property::Bpm, Operator::Equal, "128", "", "");
+        let Item::Condition(c) = &rule.root.items[0] else { panic!() };
+        assert_eq!((c.left.as_str(), c.right.as_str(), c.unit.as_str()), ("12800", "0", "0"));
+        assert_eq!(c.editor_values(), ("128".to_owned(), String::new(), String::new()));
+    }
+
+    #[test]
+    fn a_rating_outside_a_range_stores_zero_on_the_right() {
+        let Item::Condition(c) = &one(Property::Rating, Operator::Equal, "3", "", "").root.items[0] else { panic!() };
+        assert_eq!(c.right, "0");
+        assert_eq!(c.editor_values(), ("3".to_owned(), String::new(), String::new()));
+        let Item::Condition(c) = &one(Property::Rating, Operator::InRange, "1", "4", "").root.items[0] else { panic!() };
+        assert_eq!((c.left.as_str(), c.right.as_str()), ("1", "4"));
+        assert_eq!(c.editor_values(), ("1".to_owned(), "4".to_owned(), String::new()));
     }
 
     /// [OBS: issue #255, rekordbox on 2026-10-09] The first included day of
