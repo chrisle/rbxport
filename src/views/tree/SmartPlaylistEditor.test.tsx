@@ -314,6 +314,26 @@ describe("changing an operator", () => {
     expect(sel(1, "Unit")?.value).toBe("month");
   });
 
+  // An earlier rbx offered weeks and years. rekordbox counts any unit but
+  // `month` as days, and so does rbx (`Date::minus`): the editor shows day(s).
+  it.each(["week", "year", "", "weeks"])("shows a stored unit %j as the day(s) it is counted in", (unit) => {
+    open({ rule: { logic: "all", conditions: [{ property: "stockDate", operator: "6", left: "2", right: "", unit }] } });
+    const units = sel(1, "Unit");
+    expect(units?.value).toBe("day");
+    expect([...(units?.options ?? [])].map((o) => o.value)).toEqual(["day", "month"]);
+    expect(saved().conditions[0]?.unit).toBe("day");
+  });
+
+  it("shows a stored Month as the month(s) rbx counts it in", () => {
+    open({ rule: { logic: "all", conditions: [{ property: "dateCreated", operator: "7", left: "3", right: "", unit: "Month" }] } });
+    expect(sel(1, "Unit")?.value).toBe("month");
+  });
+
+  it("leaves the unit of a condition that takes none as it is", () => {
+    open({ rule: { logic: "all", conditions: [{ property: "stockDate", operator: "1", left: "2026-01-01", right: "", unit: "week" }] } });
+    expect(saved().conditions[0]?.unit).toBe("week");
+  });
+
   it("shows the upper value only for the range, and forgets it on the way out", () => {
     open();
     set(sel(1, "Property")!, "bpm");
@@ -526,9 +546,34 @@ describe("a Color condition", () => {
     expect(inp(1, "Value")?.value).toBe("");
   });
 
-  it("keeps a value rekordbox would not have written as it is", () => {
+  // rbx 1.6.0 and earlier stored the colour's name. rekordbox (and rbx since
+  // #151) reads it as an integer, so "Pink" lists the No Color tracks: the
+  // editor shows No Color, the colour the rule really picks.
+  it("shows a stored colour name as the No Color it is read as", () => {
     open({ rule: { logic: "all", conditions: [{ property: "grouping", operator: "1", left: "Pink", right: "", unit: "" }] } });
-    expect(sel(1, "Value")?.value).toBe("Pink");
-    expect(saved().conditions[0]?.left).toBe("Pink");
+    const value = sel(1, "Value");
+    expect(value?.value).toBe("0");
+    expect(value?.selectedOptions[0]?.textContent).toBe("No Color");
+    expect([...(value?.options ?? [])].some((o) => o.textContent === "Pink" && o.disabled)).toBe(false);
+    expect(saved().conditions[0]?.left).toBe("0");
+  });
+
+  it("shows a ColorID written with a sign or spaces as its colour", () => {
+    open({ rule: { logic: "all", conditions: [{ property: "grouping", operator: "2", left: " +6", right: "", unit: "" }] } });
+    expect(sel(1, "Value")?.value).toBe("6");
+  });
+
+  it("keeps a number that names no colour as it is", () => {
+    open({ rule: { logic: "all", conditions: [{ property: "grouping", operator: "1", left: "12", right: "", unit: "" }] } });
+    expect(sel(1, "Value")?.value).toBe("12");
+    expect(saved().conditions[0]?.left).toBe("12");
+  });
+
+  it("writes nothing until the rule is saved", () => {
+    const rule = { logic: "all" as const, conditions: [{ property: "grouping", operator: "1", left: "Pink", right: "", unit: "" }] };
+    open({ rule });
+    act(() => button("Cancel").click());
+    expect(onSave).not.toHaveBeenCalled();
+    expect(rule.conditions[0]?.left).toBe("Pink");
   });
 });

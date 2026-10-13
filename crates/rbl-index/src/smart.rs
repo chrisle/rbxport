@@ -904,8 +904,8 @@ pub fn my_tag_key(text: &str) -> i32 {
 /// rekordbox 7.2.19 reads `grouping`'s `ValueLeft` with
 /// `XmlElement::getIntAttribute`; rekordbox 7.2.14 wrote Pink as
 /// `ValueLeft="1"` and No Color as `"0"`, issue #151]. rbx lists the same
-/// tracks for such a rule as rekordbox does; the editor shows the stored
-/// name as it is until a colour is picked again.
+/// tracks for such a rule as rekordbox does, and the editor shows it as the
+/// colour it is read as (`asRead` in `SmartPlaylistEditor.tsx`).
 fn color_id(text: &str) -> i64 {
     i64::from(my_tag_key(text))
 }

@@ -132,6 +132,36 @@ function tagKey(id: string): number {
   return match?.[1] ? Number(BigInt.asIntN(32, BigInt(match[1]))) : 0;
 }
 
+/**
+ * A stored condition as the editor shows it: the way rekordbox and rbx read
+ * it, so the dialog never shows a rule the playlist does not list.
+ *
+ * - A Color value that is not a ColorID (rbx 1.6.0 and earlier stored the
+ *   colour's name, such as `"Pink"`) is read as rekordbox reads it, as an
+ *   integer [static, 7.2.19 `db::getSmartlistCondition` reads `grouping`
+ *   with `getIntAttribute`; `rbl_index::smart::color_id`], so `"Pink"` is
+ *   `0`, No Color. A number that names no colour is left as written.
+ * - A unit of "is in the last" other than `day` or `month` (an earlier rbx
+ *   offered `week` and `year`) counts days in both apps [static, 7.2.19
+ *   `xml_range_unit`; `rbl_index::smart::Date::minus`], so it is shown as
+ *   day(s).
+ *
+ * Nothing is written unless the user saves, and saving the converted value
+ * does not change what rekordbox lists.
+ */
+export function asRead(condition: SmartCondition): SmartCondition {
+  const c = { ...condition };
+  if (kindOf(c.property) === "color" && !COLOURS.some((colour) => colour.value === c.left)) {
+    const id = String(tagKey(c.left));
+    if (COLOURS.some((colour) => colour.value === id)) c.left = id;
+  }
+  if ((c.operator === "6" || c.operator === "7") && !UNITS.some((u) => u.value === c.unit)) {
+    // rbx counts months for any spelling of `month` (`Date::minus`).
+    c.unit = c.unit.toLowerCase() === "month" ? "month" : "day";
+  }
+  return c;
+}
+
 /** A fresh condition: Artist = (empty), as rekordbox's new row is [OBS 7.2.11]. */
 export function emptyCondition(): SmartCondition {
   return { property: "artist", operator: "1", left: "", right: "", unit: "" };
@@ -141,7 +171,7 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
   const [name, setName] = useState(initialName);
   const [logic, setLogic] = useState<"all" | "any">(initialRule.logic === "any" ? "any" : "all");
   const [conditions, setConditions] = useState<SmartCondition[]>(
-    initialRule.conditions.length === 0 ? [emptyCondition()] : initialRule.conditions.map((c) => ({ ...c })),
+    initialRule.conditions.length === 0 ? [emptyCondition()] : initialRule.conditions.map(asRead),
   );
   const nameField = useRef<HTMLInputElement>(null);
   const cancel = useRef(onCancel);
@@ -290,9 +320,8 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                     >
                       <option value="" disabled />
                       {condition.left !== "" && !COLOURS.some((c) => c.value === condition.left) ? (
-                        // A value rekordbox would not have written (an
-                        // earlier rbx stored the colour's name): kept as
-                        // it is rather than silently swapped.
+                        // A number that names no colour (see `asRead`):
+                        // kept as it is rather than silently swapped.
                         <option value={condition.left} disabled>
                           {condition.left}
                         </option>
@@ -355,11 +384,6 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                       value={condition.unit || "day"}
                       onChange={(e) => update(at, { unit: e.target.value })}
                     >
-                      {condition.unit !== "" && !UNITS.some((u) => u.value === condition.unit) ? (
-                        <option value={condition.unit} disabled>
-                          {condition.unit}
-                        </option>
-                      ) : null}
                       {UNITS.map((u) => (
                         <option key={u.value} value={u.value}>{u.label}</option>
                       ))}
