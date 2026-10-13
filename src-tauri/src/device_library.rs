@@ -56,8 +56,15 @@ pub enum DeviceEditDto {
     Rename { id: String, name: String },
     #[serde(rename = "delete")]
     Delete { id: String },
+    /// `duplicates` is the answer to rekordbox's question about tracks the
+    /// playlist already holds: true for "Add", false for "Skip".
     #[serde(rename = "add")]
-    Add { playlist: String, tracks: Vec<String> },
+    Add {
+        playlist: String,
+        tracks: Vec<String>,
+        #[serde(default)]
+        duplicates: bool,
+    },
     #[serde(rename = "remove")]
     Remove { playlist: String, tracks: Vec<String> },
 }
@@ -220,6 +227,24 @@ pub async fn device_playlist_edit(path: String, format: String, edit: DeviceEdit
     blocking("device_playlist_edit", move || apply_edit(&path, &format, edit, rbl_db::is_rekordbox_app_running())).await
 }
 
+/// The rows of `tracks` whose track `playlist` already holds, each once, so
+/// the interface can ask rekordbox's Add or Skip question before adding.
+/// Only reads the stick.
+#[tauri::command]
+pub async fn device_playlist_duplicates(path: String, format: String, playlist: String, tracks: Vec<String>) -> AppResult<Vec<String>> {
+    blocking("device_playlist_duplicates", move || duplicates_of(&path, &format, &playlist, &tracks)).await
+}
+
+fn duplicates_of(path: &str, format: &str, playlist: &str, rows: &[String]) -> AppResult<Vec<String>> {
+    let mount = connected(path)?;
+    let format = format_from(format)?;
+    let library = device::read(&mount, format).map_err(|e| device_error(&e))?;
+    let ids = track_ids_in(&library, &mount, rows)?;
+    let held: std::collections::BTreeSet<u32> = library.held(id_from(playlist)?, &ids).into_iter().collect();
+    let mut named = std::collections::BTreeSet::new();
+    Ok(rows.iter().zip(&ids).filter(|(_, id)| held.contains(id) && named.insert(**id)).map(|(row, _)| row.clone()).collect())
+}
+
 /// Why an edit to a stick must be refused, if it must.
 ///
 /// rekordbox holds a connected stick's databases open and writes them on its
@@ -243,7 +268,9 @@ fn apply_edit(path: &str, format: &str, edit: DeviceEditDto, rekordbox_running: 
         DeviceEditDto::Create { parent, name, folder } => Edit::Create { parent: id_from(&parent)?, name, folder },
         DeviceEditDto::Rename { id, name } => Edit::Rename { id: id_from(&id)?, name },
         DeviceEditDto::Delete { id } => Edit::Delete { id: id_from(&id)? },
-        DeviceEditDto::Add { playlist, tracks } => Edit::Add { playlist: id_from(&playlist)?, tracks: track_ids(&mount, format, &tracks)? },
+        DeviceEditDto::Add { playlist, tracks, duplicates } => {
+            Edit::Add { playlist: id_from(&playlist)?, tracks: track_ids(&mount, format, &tracks)?, duplicates }
+        }
         DeviceEditDto::Remove { playlist, tracks } => Edit::Remove { playlist: id_from(&playlist)?, tracks: track_ids(&mount, format, &tracks)? },
     };
     let applied = device::apply(&mount, format, &edit).map_err(|e| device_error(&e))?;
@@ -262,6 +289,10 @@ fn audio_path(mount: &Path, relative: &str) -> PathBuf {
 /// A row that is not a track of this library is refused.
 fn track_ids(mount: &Path, format: Format, rows: &[String]) -> AppResult<Vec<u32>> {
     let library = device::read(mount, format).map_err(|e| device_error(&e))?;
+    track_ids_in(&library, mount, rows)
+}
+
+fn track_ids_in(library: &device::Library, mount: &Path, rows: &[String]) -> AppResult<Vec<u32>> {
     let by_path: std::collections::HashMap<PathBuf, u32> =
         library.tracks.iter().map(|t| (audio_path(mount, &t.path), t.id)).collect();
     rows.iter()
@@ -456,7 +487,7 @@ mod tests {
             .iter()
             .map(|t| rbl_index::folder::loose_id(&audio_path(dest.path(), &t.path)))
             .collect();
-        apply_edit(path, "deviceLibrary", DeviceEditDto::Add { playlist: made.id.clone(), tracks: rows }, false).unwrap();
+        apply_edit(path, "deviceLibrary", DeviceEditDto::Add { playlist: made.id.clone(), tracks: rows, duplicates: false }, false).unwrap();
         let found = libraries(dest.path());
         let opening = found[0].nodes.iter().find(|n| n.name == "Opening").unwrap();
         assert_eq!(opening.count, 3);
@@ -464,6 +495,37 @@ mod tests {
         let refused = apply_edit(path, "deviceLibrary", DeviceEditDto::Rename { id: made.id, name: "   ".into() }, false).unwrap_err();
         assert!(matches!(refused.kind, ErrorKind::Malformed));
         assert!(apply_edit(path, "elsewhere", DeviceEditDto::Delete { id: "1".into() }, false).is_err());
+    }
+
+    #[test]
+    fn the_interface_learns_which_rows_a_playlist_holds_and_adds_them_again_only_when_told() {
+        let (_src, dest) = stick();
+        let path = dest.path().to_str().unwrap();
+        for format in ["deviceLibrary", "oneLibrary"] {
+            let library = device::read(dest.path(), format_from(format).unwrap()).unwrap();
+            let row = |id: u32| rbl_index::folder::loose_id(&audio_path(dest.path(), &library.track(id).unwrap().path));
+            let friday = library.nodes.iter().find(|n| n.name == "Friday").unwrap();
+            let (inside, outside) = (friday.tracks[0], library.tracks.iter().map(|t| t.id).find(|t| !friday.tracks.contains(t)).unwrap());
+            let picked = vec![row(outside), row(inside), row(inside)];
+            let held = duplicates_of(path, format, &friday.id.to_string(), &picked).unwrap();
+            assert_eq!(held, vec![row(inside)], "{format}: each held row once, the new one not at all");
+
+            let add = |duplicates| {
+                apply_edit(path, format, DeviceEditDto::Add { playlist: friday.id.to_string(), tracks: vec![row(outside), row(inside)], duplicates }, false).unwrap()
+            };
+            assert_eq!(add(false).changed, 1, "{format}: Skip adds only the new track");
+            assert_eq!(add(true).changed, 2, "{format}: Add puts both on the end again");
+            let after = device::read(dest.path(), format_from(format).unwrap()).unwrap();
+            let mut expected = friday.tracks.clone();
+            expected.extend([outside, outside, inside]);
+            assert_eq!(after.node(friday.id).unwrap().tracks, expected, "{format}");
+        }
+        // An add the interface sends without the answer skips, as before.
+        let edit: DeviceEditDto = serde_json::from_str(r#"{"kind":"add","playlist":"1","tracks":[]}"#).unwrap();
+        assert!(matches!(edit, DeviceEditDto::Add { duplicates: false, .. }));
+        let edit: DeviceEditDto = serde_json::from_str(r#"{"kind":"add","playlist":"1","tracks":[],"duplicates":true}"#).unwrap();
+        assert!(matches!(edit, DeviceEditDto::Add { duplicates: true, .. }));
+        assert!(duplicates_of(path, "deviceLibrary", "1", &["file:/elsewhere/x.mp3".into()]).is_err());
     }
 
     #[test]

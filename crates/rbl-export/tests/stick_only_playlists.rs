@@ -61,7 +61,7 @@ fn stick(src: &Path, dest: &Path) -> (Vec<SourceTrack>, Vec<SourcePlaylist>) {
 fn create(dest: &Path, format: Format, name: &str, tracks: Vec<u32>) -> u32 {
     let id = device_library::apply(dest, format, &Edit::Create { parent: 0, name: name.into(), folder: false }).unwrap().id;
     if !tracks.is_empty() {
-        device_library::apply(dest, format, &Edit::Add { playlist: id, tracks }).unwrap();
+        device_library::apply(dest, format, &Edit::Add { playlist: id, tracks, duplicates: false }).unwrap();
     }
     id
 }
@@ -397,7 +397,7 @@ fn same_named_folders_under_free_ids_are_both_kept() {
         };
         let child = |format: Format, parent: u32, tracks: Vec<u32>| {
             let id = device_library::apply(dest.path(), format, &Edit::Create { parent, name: "Gig".into(), folder: false }).unwrap().id;
-            device_library::apply(dest.path(), format, &Edit::Add { playlist: id, tracks }).unwrap();
+            device_library::apply(dest.path(), format, &Edit::Add { playlist: id, tracks, duplicates: false }).unwrap();
         };
         let pad = create(dest.path(), Format::DeviceLibrary, "Pad", vec![]);
         let pad2 = create(dest.path(), Format::DeviceLibrary, "Pad2", vec![]);

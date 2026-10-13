@@ -124,6 +124,21 @@ impl Library {
         self.tracks.binary_search_by_key(&id, |t| t.id).ok().and_then(|at| self.tracks.get(at))
     }
 
+    /// The tracks of `tracks` that `playlist` already holds, each once, in
+    /// the order given: what rekordbox asks about before adding ("There are
+    /// duplicates being added to the playlist. Would you like to add the
+    /// duplicates or skip them?", Add / Skip) [OBS rekordbox 7.2.14 for
+    /// Windows, Winrig 2026-10-12, `parity/issue-186/rekordbox-11`, `-18`,
+    /// `-21`; static, rekordbox 7.2.11 macOS, the strings beside "Add To
+    /// Playlist" and the USB device list limits]. Empty for a playlist that
+    /// is not there or a folder.
+    #[must_use]
+    pub fn held(&self, playlist: u32, tracks: &[u32]) -> Vec<u32> {
+        let Some(node) = self.node(playlist).filter(|n| !n.folder) else { return Vec::new() };
+        let mut seen = BTreeSet::new();
+        tracks.iter().copied().filter(|t| node.tracks.contains(t) && seen.insert(*t)).collect()
+    }
+
     /// How deep a node sits: 0 for the top level.
     #[must_use]
     pub fn depth(&self, id: u32) -> usize {
@@ -338,9 +353,11 @@ pub enum Edit {
     /// A playlist, or a folder and everything under it. The tracks stay on
     /// the stick.
     Delete { id: u32 },
-    /// Tracks of this library appended to a playlist; one already in it is
-    /// not added twice.
-    Add { playlist: u32, tracks: Vec<u32> },
+    /// Tracks of this library appended to a playlist, in the order given.
+    /// A track the playlist already holds is appended again with
+    /// `duplicates`, and left out without it: rekordbox's "Add" and "Skip"
+    /// on the question it asks first (see [`Library::held`]).
+    Add { playlist: u32, tracks: Vec<u32>, duplicates: bool },
     /// Every entry of these tracks taken out of a playlist. The interface
     /// names a stick's rows by their file, so two entries of one track are
     /// one row id there and are selected, and taken out, together.
@@ -464,8 +481,14 @@ fn checked_name(name: &str) -> Result<String> {
 /// - added tracks go on the end; entries are numbered from 1 with no gaps
 ///   after a removal.
 ///
-/// rekordbox asks whether to add a track a playlist already holds; this
-/// takes its "Skip", as the collection's own Add To Playlist here does.
+/// - a track the playlist already holds is appended again on "Add", every
+///   copy numbered on from the last, and left out on "Skip", the other
+///   tracks of the selection still going on the end [OBS rekordbox 7.2.14
+///   for Windows, Winrig 2026-10-12, both libraries of a fixture stick: P186
+///   `[1, 2]` + Skip on `[2, 3]` = `[1, 2, 3]`; + Add on `[2, 3, 4]` =
+///   `[1, 2, 3, 2, 3, 4]`, entries 1 to 6; `exportLibrary.db` `[1, 2, 3]` + Add on
+///   `[1]` = `[1, 2, 3, 1]`, `sequenceNo` 1 to 4; evidence in
+///   `parity/issue-186/rig-1-dl-skip` to `rig-4-one-add`].
 fn plan(nodes: &[Node], tracks: &BTreeSet<u32>, edit: &Edit) -> Result<(Vec<Node>, Applied)> {
     let find = |id: u32| nodes.iter().position(|n| n.id == id);
     let mut after = nodes.to_vec();
@@ -510,7 +533,7 @@ fn plan(nodes: &[Node], tracks: &BTreeSet<u32>, edit: &Edit) -> Result<(Vec<Node
             }
             Applied { id: *id, changed: gone.len() }
         }
-        Edit::Add { playlist, tracks: added } | Edit::Remove { playlist, tracks: added } => {
+        Edit::Add { playlist, tracks: added, .. } | Edit::Remove { playlist, tracks: added } => {
             let at = find(*playlist).ok_or_else(|| refused("That playlist is no longer on the device."))?;
             if after[at].folder {
                 return Err(refused("A folder holds playlists, not tracks."));
@@ -520,9 +543,9 @@ fn plan(nodes: &[Node], tracks: &BTreeSet<u32>, edit: &Edit) -> Result<(Vec<Node
             }
             let list = &mut after[at].tracks;
             let before = list.len();
-            if matches!(edit, Edit::Add { .. }) {
+            if let Edit::Add { duplicates, .. } = edit {
                 for track in added {
-                    if !list.contains(track) {
+                    if *duplicates || !list.contains(track) {
                         list.push(*track);
                     }
                 }
@@ -884,7 +907,7 @@ mod tests {
         ]);
         // Add To Playlist > RB New, then Remove from Playlist in Top List,
         // then the rename: rig-stick-4, -6 and -7.
-        let added = step(&folder, Edit::Add { playlist: 4, tracks: vec![3] });
+        let added = step(&folder, Edit::Add { playlist: 4, tracks: vec![3], duplicates: false });
         let removed = step(&added, Edit::Remove { playlist: 3, tracks: vec![4] });
         let renamed = step(&removed, Edit::Rename { id: 3, name: "Top Renamed".into() });
         assert_eq!(shape(&renamed), vec![
@@ -913,6 +936,47 @@ mod tests {
         ]);
     }
 
+    /// rekordbox's answers to its duplicate question, replayed from the
+    /// rows it started from [OBS rekordbox 7.2.14 for Windows, Winrig
+    /// 2026-10-12, `parity/issue-186/rig-1-dl-skip` to `rig-4-one-add`;
+    /// both libraries began as P186 `[1, 2]`, Q186 `[3]`].
+    #[test]
+    fn rekordboxs_add_and_skip_on_duplicates_come_out_the_same() {
+        let tracks: BTreeSet<u32> = (1..=4).collect();
+        let start = vec![node(1, 0, "P186", false, 0, &[1, 2]), node(2, 0, "Q186", false, 1, &[3])];
+        let add = |nodes: &[Node], picked: &[u32], duplicates: bool| {
+            plan(nodes, &tracks, &Edit::Add { playlist: 1, tracks: picked.to_vec(), duplicates }).unwrap()
+        };
+        let p186 = |nodes: &[Node]| nodes[0].tracks.clone();
+
+        // Device Library: Track 2 and 3 picked, rekordbox asks, Skip.
+        assert_eq!(Library { format: Format::DeviceLibrary, nodes: start.clone(), tracks: Vec::new() }.held(1, &[2, 3]), vec![2]);
+        let (skipped, applied) = add(&start, &[2, 3], false);
+        assert_eq!((p186(&skipped), applied.changed), (vec![1, 2, 3], 1));
+        // Then Track 2, 3 and 4, and Add: every copy goes on the end.
+        let (added, applied) = add(&skipped, &[2, 3, 4], true);
+        assert_eq!((p186(&added), applied.changed), (vec![1, 2, 3, 2, 3, 4], 3));
+        assert_eq!(added[1], start[1], "the other playlist is left alone");
+
+        // OneLibrary: Skip on Track 2 and 3, then Add on Track 1 alone.
+        let (skipped, _) = add(&start, &[2, 3], false);
+        let (added, applied) = add(&skipped, &[1], true);
+        assert_eq!((p186(&added), applied.changed), (vec![1, 2, 3, 1], 1));
+        // Skip on a selection the playlist already holds writes nothing.
+        assert_eq!(add(&skipped, &[1], false).1.changed, 0);
+    }
+
+    #[test]
+    fn held_names_each_track_already_in_the_playlist_once() {
+        let mut nodes = library();
+        nodes[0].tracks = vec![1, 2, 1, 3];
+        let library = Library { format: Format::OneLibrary, nodes, tracks: Vec::new() };
+        assert_eq!(library.held(1, &[4, 3, 1, 1]), vec![3, 1]);
+        assert_eq!(library.held(1, &[5, 6]), Vec::<u32>::new());
+        assert_eq!(library.held(4, &[1]), Vec::<u32>::new(), "a folder holds no tracks");
+        assert_eq!(library.held(77, &[1]), Vec::<u32>::new(), "a playlist no longer there");
+    }
+
     #[test]
     fn creating_under_a_playlist_or_with_no_name_is_refused() {
         assert!(plan(&library(), &tracks(), &Edit::Create { parent: 1, name: "X".into(), folder: false }).is_err());
@@ -932,7 +996,7 @@ mod tests {
 
     #[test]
     fn adding_appends_what_is_not_there_yet_and_removing_takes_every_entry() {
-        let (after, applied) = plan(&library(), &tracks(), &Edit::Add { playlist: 2, tracks: vec![6, 1, 1, 3] }).unwrap();
+        let (after, applied) = plan(&library(), &tracks(), &Edit::Add { playlist: 2, tracks: vec![6, 1, 1, 3], duplicates: false }).unwrap();
         assert_eq!(applied.changed, 2);
         assert_eq!(after[1].tracks, vec![5, 6, 1, 3]);
         let mut nodes = library();
@@ -944,8 +1008,8 @@ mod tests {
 
     #[test]
     fn tracks_go_into_playlists_of_their_own_library_only() {
-        assert!(plan(&library(), &tracks(), &Edit::Add { playlist: 4, tracks: vec![1] }).is_err(), "a folder");
-        assert!(plan(&library(), &tracks(), &Edit::Add { playlist: 2, tracks: vec![99] }).is_err(), "a stranger");
+        assert!(plan(&library(), &tracks(), &Edit::Add { playlist: 4, tracks: vec![1], duplicates: false }).is_err(), "a folder");
+        assert!(plan(&library(), &tracks(), &Edit::Add { playlist: 2, tracks: vec![99], duplicates: false }).is_err(), "a stranger");
     }
 
     #[test]

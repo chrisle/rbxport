@@ -118,7 +118,7 @@ fn an_edit_changes_its_own_library_and_leaves_the_other_byte_for_byte() {
         let sets = id_of(dest.path(), format, "Sets");
         let created = device_library::apply(dest.path(), format, &Edit::Create { parent: sets, name: "Saturday".into(), folder: false }).unwrap();
         assert_eq!(created.changed, 1);
-        device_library::apply(dest.path(), format, &Edit::Add { playlist: created.id, tracks: vec![4, 3] }).unwrap();
+        device_library::apply(dest.path(), format, &Edit::Add { playlist: created.id, tracks: vec![4, 3], duplicates: false }).unwrap();
         let warm = id_of(dest.path(), format, "Warm Up");
         device_library::apply(dest.path(), format, &Edit::Rename { id: warm, name: "Opening".into() }).unwrap();
 
@@ -146,7 +146,7 @@ fn the_same_edits_made_in_both_libraries_leave_a_stick_that_verifies() {
     for format in [Format::DeviceLibrary, Format::OneLibrary] {
         let folder = device_library::apply(dest.path(), format, &Edit::Create { parent: 0, name: "Gigs".into(), folder: true }).unwrap();
         let list = device_library::apply(dest.path(), format, &Edit::Create { parent: folder.id, name: "Club".into(), folder: false }).unwrap();
-        device_library::apply(dest.path(), format, &Edit::Add { playlist: list.id, tracks: vec![1, 2, 3] }).unwrap();
+        device_library::apply(dest.path(), format, &Edit::Add { playlist: list.id, tracks: vec![1, 2, 3], duplicates: false }).unwrap();
         device_library::apply(dest.path(), format, &Edit::Remove { playlist: list.id, tracks: vec![2] }).unwrap();
         let friday = id_of(dest.path(), format, "Friday");
         device_library::apply(dest.path(), format, &Edit::Remove { playlist: friday, tracks: vec![1] }).unwrap();
@@ -165,6 +165,58 @@ fn the_same_edits_made_in_both_libraries_leave_a_stick_that_verifies() {
     assert_eq!(check.playlists, 3);
 }
 
+/// rekordbox's "Add" on its duplicate question writes each copy as an entry
+/// of its own, numbered on from the last, in both libraries [OBS rekordbox
+/// 7.2.14, Winrig 2026-10-12: `export.pdb` P186 entries 1..6 =
+/// `[1, 2, 3, 2, 3, 4]`; `exportLibrary.db` `playlist_content` rows
+/// `(1,1,1) (1,2,2) (1,3,3) (1,1,4)`; `parity/issue-186/values-rekordbox-
+/// rig-raw-186.txt`]. The same steps on a stick of ours come out the same.
+#[test]
+fn a_track_added_again_is_a_second_entry_as_rekordbox_writes_it() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let tracks: Vec<SourceTrack> = (1..=4).map(|i| track(src.path(), i, &format!("Track {i}"))).collect();
+    let playlists = vec![
+        SourcePlaylist { id: 10, name: "P186".into(), track_indices: vec![0, 1], ..Default::default() },
+        SourcePlaylist { id: 11, name: "Q186".into(), track_indices: vec![2], ..Default::default() },
+    ];
+    export(dest.path(), &tracks, &playlists).unwrap();
+    let (pdb, one) = (Format::DeviceLibrary, Format::OneLibrary);
+    let p186 = id_of(dest.path(), pdb, "P186");
+    assert_eq!(p186, id_of(dest.path(), one, "P186"));
+    let held = |format| device_library::read(dest.path(), format).unwrap().held(p186, &[2, 3]);
+    assert_eq!((held(pdb), held(one)), (vec![2], vec![2]));
+
+    let add = |format, picked: Vec<u32>, duplicates| {
+        device_library::apply(dest.path(), format, &Edit::Add { playlist: p186, tracks: picked, duplicates }).unwrap()
+    };
+    assert_eq!(add(pdb, vec![2, 3], false).changed, 1);
+    assert_eq!(add(pdb, vec![2, 3, 4], true).changed, 3);
+    assert_eq!(add(one, vec![2, 3], false).changed, 1);
+    assert_eq!(add(one, vec![1], true).changed, 1);
+
+    let bytes = db(dest.path(), pdb);
+    let file = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let mut entries: Vec<(u32, u32)> = file
+        .playlist_entries(file.table(rbl_pdb::PageType::PlaylistEntries).unwrap())
+        .into_iter()
+        .filter(|e| e.playlist_id == p186)
+        .map(|e| (e.entry_index, e.track_id))
+        .collect();
+    entries.sort_unstable();
+    assert_eq!(entries, vec![(1, 1), (2, 2), (3, 3), (4, 2), (5, 3), (6, 4)]);
+
+    let library = rbl_onelibrary::ExportLibrary::open_read_only(&dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    let mut statement = library
+        .connection()
+        .prepare("SELECT content_id, sequenceNo FROM playlist_content WHERE playlist_id = ?1 ORDER BY sequenceNo")
+        .unwrap();
+    let rows: Vec<(i64, i64)> = statement.query_map([i64::from(p186)], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect();
+    assert_eq!(rows, vec![(1, 1), (2, 2), (3, 3), (1, 4)]);
+
+    let q186 = |format| device_library::read(dest.path(), format).unwrap().node(id_of(dest.path(), format, "Q186")).unwrap().tracks.clone();
+    assert_eq!((q186(pdb), q186(one)), (vec![3], vec![3]));
+}
+
 #[test]
 fn a_large_playlist_grows_and_shrinks_across_pages() {
     let (src, dest) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -172,7 +224,7 @@ fn a_large_playlist_grows_and_shrinks_across_pages() {
     export(dest.path(), &tracks, &[SourcePlaylist { id: 1, name: "All".into(), track_indices: (0..600).collect(), ..Default::default() }]).unwrap();
     let all = id_of(dest.path(), Format::DeviceLibrary, "All");
     let copy = device_library::apply(dest.path(), Format::DeviceLibrary, &Edit::Create { parent: 0, name: "Copy".into(), folder: false }).unwrap();
-    device_library::apply(dest.path(), Format::DeviceLibrary, &Edit::Add { playlist: copy.id, tracks: (1..=600).collect() }).unwrap();
+    device_library::apply(dest.path(), Format::DeviceLibrary, &Edit::Add { playlist: copy.id, tracks: (1..=600).collect(), duplicates: false }).unwrap();
     let read = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
     assert_eq!(read.node(copy.id).unwrap().tracks.len(), 600);
     assert_eq!(read.node(all).unwrap().tracks, (1..=600).collect::<Vec<u32>>());
@@ -191,7 +243,7 @@ fn a_refused_edit_writes_nothing() {
     let before = (db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary));
     let friday = id_of(dest.path(), Format::DeviceLibrary, "Friday");
     for format in [Format::DeviceLibrary, Format::OneLibrary] {
-        assert!(device_library::apply(dest.path(), format, &Edit::Add { playlist: friday, tracks: vec![99] }).is_err());
+        assert!(device_library::apply(dest.path(), format, &Edit::Add { playlist: friday, tracks: vec![99], duplicates: false }).is_err());
         assert!(device_library::apply(dest.path(), format, &Edit::Create { parent: friday, name: "x".into(), folder: false }).is_err());
         assert!(device_library::apply(dest.path(), format, &Edit::Rename { id: 404, name: "x".into() }).is_err());
         let unchanged = device_library::apply(dest.path(), format, &Edit::Rename { id: friday, name: "Friday".into() }).unwrap();
@@ -208,7 +260,7 @@ fn a_playlist_made_on_the_device_survives_the_next_sync() {
     export(dest.path(), &tracks, &playlists).unwrap();
     for format in [Format::DeviceLibrary, Format::OneLibrary] {
         let made = device_library::apply(dest.path(), format, &Edit::Create { parent: 0, name: "Made on the stick".into(), folder: false }).unwrap();
-        device_library::apply(dest.path(), format, &Edit::Add { playlist: made.id, tracks: vec![2] }).unwrap();
+        device_library::apply(dest.path(), format, &Edit::Add { playlist: made.id, tracks: vec![2], duplicates: false }).unwrap();
     }
     // The same selection synced again keeps what the stick gained.
     export(dest.path(), &tracks, &playlists).unwrap();
@@ -298,7 +350,7 @@ fn the_rigs_rekordbox_edits_leave_the_same_rows_here() {
     device_library::apply(d, pdb, &Edit::Rename { id: 4, name: "RB New".into() }).unwrap();
     assert_eq!(rows(d, pdb), vec![row(1, 0, 2, "Folder A", &[]), row(2, 1, 2, "Inside A", &[1, 2]), row(3, 0, 4, "Top List", &[3, 4, 1]), row(4, 0, 0, "RB New", &[])]);
     device_library::apply(d, pdb, &Edit::Create { parent: 0, name: "Untitled Folder".into(), folder: true }).unwrap();
-    device_library::apply(d, pdb, &Edit::Add { playlist: 4, tracks: vec![3] }).unwrap();
+    device_library::apply(d, pdb, &Edit::Add { playlist: 4, tracks: vec![3], duplicates: false }).unwrap();
     device_library::apply(d, pdb, &Edit::Remove { playlist: 3, tracks: vec![4] }).unwrap();
     device_library::apply(d, pdb, &Edit::Rename { id: 3, name: "Top Renamed".into() }).unwrap();
     assert_eq!(rows(d, pdb), vec![
