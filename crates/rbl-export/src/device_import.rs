@@ -140,7 +140,9 @@ impl Copies {
         if let Ok(modified) = from.metadata().and_then(|m| m.modified()) {
             let _ = temp.as_file().set_modified(modified);
         }
-        temp.as_file().sync_all()?;
+        // The Music folder may be on an exFAT drive, where macOS has no
+        // F_FULLFSYNC: `durable::flush` falls back to fsync there.
+        rbl_core::durable::flush(temp.as_file())?;
         if !same_bytes(source, temp.path())? {
             return Err(std::io::Error::other(format!("the copy of {} did not match the device's file", source.display())));
         }
