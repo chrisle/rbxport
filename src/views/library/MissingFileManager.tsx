@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { MissingTrack, RelocateSearch } from "@/ipc/types";
-import { listIds, missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
+import { autoRelocated, listIds, missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
 import { useTranslation } from "@/i18n";
 import styles from "./MissingFileManager.module.css";
 
@@ -192,9 +192,7 @@ export function MissingFileManager({ readOnly, search, searching = now, onWrote,
     const backend = await getBackend();
     setNote(t("Searching..."));
     const report = await searching(() => backend.autoRelocate(search, targets));
-    const said = report.unresolved > 0
-      ? t("{relocated} relocated, {unresolved} not found in the search folders.", { ...report })
-      : t("{relocated} relocated.", { ...report });
+    const said = await autoRelocated(report, backend, t);
     setNote(said);
     return report.relocated > 0 ? said : null;
   });

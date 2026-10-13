@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { MissingTrack } from "@/ipc/types";
+import type { MissingTrack, RelocateReport } from "@/ipc/types";
 import {
-  fileNameOf, folderOf, forgetRelocateFolder, listIds, missingAmong, movedRoots, relocateTracks, type RelocateSteps,
+  autoRelocated, fileNameOf, folderOf, forgetRelocateFolder, listIds, missingAmong, movedRoots, relocateTracks, type RelocateSteps,
 } from "./relocate";
 
 const track = (id: string, path: string): MissingTrack => ({ id, title: `Title ${id}`, artist: "", album: "", path });
@@ -165,5 +165,37 @@ describe("Relocate over several tracks, as rekordbox's relocateSelectedFiles run
     const said = base.said;
     expect(await relocateTracks(tracks, steps)).toBe(5);
     expect(said.filter((line) => line.startsWith("relocate"))).toHaveLength(5);
+  });
+});
+
+describe("autoRelocated", () => {
+  const t = (text: string, values?: Readonly<Record<string, string | number>>) =>
+    text.replace(/\{(\w+)\}/g, (_, key: string) => String(values?.[key] ?? ""));
+  const report = (over: Partial<RelocateReport>): RelocateReport =>
+    ({ relocated: 0, unresolved: 0, inCollection: [], inCollectionTotal: 0, ...over });
+
+  it("lists files the collection already has under rekordbox's title, then says what moved", async () => {
+    const told: [string, string][] = [];
+    const tell = (message: string, title: string) => { told.push([message, title]); return Promise.resolve(); };
+    const said = await autoRelocated(
+      report({ relocated: 2, unresolved: 1, inCollection: ["/a/x.mp3", "/b/y.mp3"], inCollectionTotal: 2 }),
+      { tell }, t,
+    );
+    expect(told).toEqual([["/a/x.mp3\n/b/y.mp3", "Track exists in the collection"]]);
+    expect(said).toBe("2 relocated, 1 not found in the search folders.");
+  });
+
+  it("ends a cut-short list with rekordbox's \"and more...\"", async () => {
+    const told: string[] = [];
+    await autoRelocated(report({ inCollection: ["/a/x.mp3"], inCollectionTotal: 1001 }),
+      { tell: (message) => { told.push(message); return Promise.resolve(); } }, t);
+    expect(told).toEqual(["/a/x.mp3\nand more..."]);
+  });
+
+  it("asks nothing when every file found was free", async () => {
+    let asked = false;
+    const said = await autoRelocated(report({ relocated: 3 }), { tell: () => { asked = true; return Promise.resolve(); } }, t);
+    expect(asked).toBe(false);
+    expect(said).toBe("3 relocated.");
   });
 });

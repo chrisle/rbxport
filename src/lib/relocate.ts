@@ -30,7 +30,7 @@
  *
  * rbxport says "RBXport" where rekordbox names itself, as it does elsewhere.
  */
-import type { Backend, MissingTrack } from "@/ipc/types";
+import type { Backend, MissingTrack, RelocateReport } from "@/ipc/types";
 
 /** What the run needs from the user and the library. */
 export interface RelocateSteps {
@@ -173,4 +173,25 @@ export function relocateSteps(backend: Backend, t: Translate): RelocateSteps {
     findOthers: (ids, from, to) => backend.relocateByLocation(ids, from, to),
     found: (count) => backend.tell(t("RBXport found {count} files.", { count }), manager()),
   };
+}
+
+/**
+ * What Auto Relocate says when it is done: the status line, after
+ * rekordbox's "Track exists in the collection" list when it found files
+ * that already belong to tracks.
+ *
+ * [OBS rekordbox 7.2.19 static, `relocateSelectedFiles` @0x1012a6c14..
+ * 0x1012a6f28] That list is a window titled "Track exists in the collection"
+ * holding the found files' paths, one per line, the first 1000 and then
+ * "and more...", with OK.
+ */
+export async function autoRelocated(report: RelocateReport, backend: Pick<Backend, "tell">, t: Translate): Promise<string> {
+  if (report.inCollectionTotal > 0) {
+    const more = report.inCollectionTotal > report.inCollection.length ? [t("and more...")] : [];
+    await backend.tell([...report.inCollection, ...more].join("\n"), t("Track exists in the collection"));
+  }
+  const counts = { relocated: report.relocated, unresolved: report.unresolved };
+  return report.unresolved > 0
+    ? t("{relocated} relocated, {unresolved} not found in the search folders.", counts)
+    : t("{relocated} relocated.", counts);
 }

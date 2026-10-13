@@ -1684,8 +1684,16 @@ export interface RelocateSearch {
 /** What an automatic relocate did. */
 export interface RelocateReport {
   relocated: number;
-  /** Missing tracks whose file name was found in none of the folders. */
+  /** Missing tracks for which nothing was found. */
   unresolved: number;
+  /**
+   * Files found that are already tracks in the collection, so were not
+   * taken: the first 1000 paths of rekordbox's "Track exists in the
+   * collection" list.
+   */
+  inCollection: string[];
+  /** How many such files there were in all. */
+  inCollectionTotal: number;
 }
 
 /** A track whose audio file is no longer where the library says. */

@@ -79,7 +79,7 @@ import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
 import type { AnalysisResult, DeviceImportMissing, DevicePlaylistEdit, DevicePlaylistImportPlan, FilterValues, LinkPeerSeen, LinkStatus, RelocateSearch, SmartRule, TrackLookups, UnanalysedTracks } from "@/ipc/types";
-import { missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
+import { autoRelocated, missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
 import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
 import { nativeMenuLabels } from "@/lib/nativeMenu";
@@ -1809,9 +1809,7 @@ function AppBody() {
       if (ids.length === 0) return;
       write(async (b) => {
         const done = await searching(() => b.autoRelocate(relocateSearch, [...ids]));
-        return done.unresolved > 0
-          ? t("{relocated} relocated, {unresolved} not found in the search folders.", { ...done })
-          : t("{relocated} relocated.", { ...done });
+        return autoRelocated(done, b, t);
       });
     },
     [write, searching, relocateSearch, t],

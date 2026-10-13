@@ -2887,7 +2887,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const found = searched ? gone.filter((_, at) => at % 2 === 0) : [];
       for (const row of found) delete row.missing;
       if (found.length > 0) await bump();
-      return { relocated: found.length, unresolved: gone.length - found.length };
+      return { relocated: found.length, unresolved: gone.length - found.length, inCollection: [], inCollectionTotal: 0 };
     },
     // No dialogs in a browser: the folder is a fixed one, so the search
     // folders list can be driven end to end.
