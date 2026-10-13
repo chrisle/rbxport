@@ -46,6 +46,7 @@ import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
 import { setRowDragImage } from "./dragGhost";
 import { detectPlatform, dispatch, isTyping } from "@/lib/shortcuts";
+import { locateStep, needsCentering, restoredScrollTop, type SavedScroll } from "@/lib/locateLoaded";
 
 const ROW_H = 25; // --s-row-height
 /**
@@ -70,6 +71,8 @@ const SKELETON_WIDTHS = ["42%", "66%", "54%"];
 /// --s-col-header-h. The column header sits inside the scroller so it moves
 /// with the rows horizontally, which costs it this much of the vertical scroll.
 const COL_HEADER_H = 24;
+/** No deck holds anything: the table outside the app's own decks. */
+const NO_DECKS: readonly (string | null)[] = [];
 /// --s-preview-band-h: the strip the row's waveform and its cue badges share.
 /// The canvas needs the number for its backing store; the cell's CSS places it.
 const PREVIEW_BAND_H = 15;
@@ -752,8 +755,13 @@ export interface TrackDrag {
 }
 
 export interface TrackTableProps {
-  /** The track a deck holds, for Locate track loaded on deck (command + L). */
-  locateTrackId?: string | null;
+  /**
+   * The track id each deck holds, Deck 1 first, for Track › Locate track
+   * loaded on deck (command + L).
+   */
+  deckTrackIds?: readonly (string | null)[];
+  /** Opens All Tracks, where Locate looks for a track the open list lacks. */
+  onShowCollection?: () => void;
   spec: ViewSpec;
   onSortChange: (column: SortColumn) => void;
   onSelectionChange?: (count: number) => void;
@@ -934,7 +942,7 @@ function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: 
 }
 
 export const TrackTable = memo(function TrackTable({
-  locateTrackId, spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
+  deckTrackIds = NO_DECKS, onShowCollection, spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, pendingRows = 0, onSelectedTracks, onAnalyse,
@@ -1080,35 +1088,55 @@ export const TrackTable = memo(function TrackTable({
     };
   }, [onColumnResize, onColumnMove]);
 
-  // Each list keeps its own scroll position, so going to a playlist and back
-  // returns to where the first list was left. Recorded on scroll while the
-  // rows on screen belong to the current source, restored once the new
+  // Each list keeps its own scroll position, as rekordbox's RowStateList
+  // does: going to a playlist and back returns to where the first list was
+  // left, as long as it is sorted as it was and the list is as tall as it
+  // was; otherwise, and for a list not opened before, it starts at the top.
+  // The position is followed on scroll while the rows on screen belong to the
+  // current source, filed when the source changes, and put back once the new
   // source's rows have landed.
-  const scrollPositions = useRef(new Map<string, number>());
+  const scrollPositions = useRef(new Map<string, SavedScroll>());
   const restoreFor = useRef<string | null>(null);
-  const sourceKeyRef = useRef(view.sourceKey);
-  sourceKeyRef.current = view.sourceKey;
+  const sortKey = `${spec.sort}:${spec.descending ? "desc" : "asc"}`;
+  const sortKeyRef = useRef(sortKey);
+  const shownSource = useRef(view.sourceKey);
+  const shownTop = useRef(0);
   const loadedRef = useRef(false);
   loadedRef.current = !view.loading;
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
-      if (loadedRef.current) scrollPositions.current.set(sourceKeyRef.current, el.scrollTop);
+      if (loadedRef.current) shownTop.current = el.scrollTop;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
   useLayoutEffect(() => {
-    if (view.loading) {
+    if (shownSource.current !== view.sourceKey) {
+      scrollPositions.current.set(shownSource.current, {
+        top: shownTop.current,
+        sort: sortKeyRef.current,
+        height: scrollRef.current?.clientHeight ?? 0,
+      });
+      shownSource.current = view.sourceKey;
+      shownTop.current = 0;
       restoreFor.current = view.sourceKey;
-      return;
     }
-    if (restoreFor.current !== view.sourceKey) return;
+    sortKeyRef.current = sortKey;
+    if (view.loading || restoreFor.current !== view.sourceKey) return;
     restoreFor.current = null;
     const el = scrollRef.current;
-    if (el) el.scrollTop = scrollPositions.current.get(view.sourceKey) ?? 0;
-  }, [view.loading, view.sourceKey, view.count]);
+    if (!el) return;
+    el.scrollTop = restoredScrollTop(scrollPositions.current.get(view.sourceKey), sortKey, el.clientHeight);
+    shownTop.current = el.scrollTop;
+  }, [view.loading, view.sourceKey, view.count, sortKey]);
+
+  // Track › Locate track loaded on deck. The deck cursor lives as long as
+  // the table, as rekordbox's lives as long as the app; a track the open list
+  // lacks is looked for in All Tracks once that has opened.
+  const locateCursor = useRef(0);
+  const pendingLocate = useRef<string | null>(null);
 
   const virtualizer = useVirtualizer({
     count: view.count + pendingRows,
@@ -1188,10 +1216,54 @@ export const TrackTable = memo(function TrackTable({
     },
     [view, virtualizer],
   );
+  // Selects the track's first row in this list, scrolling it to the middle
+  // only when it is not wholly on screen (rekordbox's `browseCenterAt`).
+  // Resolves false when the list does not have it.
+  const locateHere = useCallback(
+    async (id: string): Promise<boolean> => {
+      if (view.count === 0) return false;
+      const index = (await view.idsInRange(0, view.count)).indexOf(id);
+      if (index < 0) return false;
+      const el = scrollRef.current;
+      if (el && needsCentering(COL_HEADER_H + index * rowH, rowH, el.scrollTop, el.clientHeight, COL_HEADER_H)) {
+        virtualizer.scrollToIndex(index, { align: "center" });
+      }
+      setSelection({ ids: new Set([id]), anchorIndex: index });
+      return true;
+    },
+    [view, virtualizer, rowH],
+  );
+  const showsCollection = spec.source.kind === "collection";
+  const locateLoaded = useCallback(() => {
+    const step = locateStep(locateCursor.current, deckTrackIds);
+    locateCursor.current = step.cursor;
+    const id = step.trackId;
+    if (id === null) return;
+    void locateHere(id).then((found) => {
+      if (found || showsCollection || !onShowCollection) return;
+      pendingLocate.current = id;
+      onShowCollection();
+    });
+  }, [deckTrackIds, locateHere, showsCollection, onShowCollection]);
+  // All Tracks has opened for a track the list before it lacked.
+  useEffect(() => {
+    if (view.loading) return;
+    const id = pendingLocate.current;
+    if (id === null) return;
+    pendingLocate.current = null;
+    if (showsCollection) void locateHere(id);
+  }, [view.loading, view.sourceKey, showsCollection, locateHere]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const action = dispatch(event, platform, target, preferences.keyboard.overrides);
+      // Command + L: whatever the open list holds, even nothing, since a
+      // track it lacks is found in All Tracks.
+      if (action === "locateLoaded") {
+        event.preventDefault();
+        locateLoaded();
+        return;
+      }
       if (action === null || view.count === 0) return;
       // A focused knob or fader owns the up/down keys — turning one must not
       // also walk the track list. `dispatch` already yields the text fields.
@@ -1206,19 +1278,6 @@ export const TrackTable = memo(function TrackTable({
         event.preventDefault();
         void view.idsInRange(0, view.count).then((ids) => {
           setSelection((s) => selectAll(s, ids));
-        });
-        return;
-      }
-      // Command + L: bring the track a deck holds into view, if this list has it.
-      if (action === "locateLoaded") {
-        event.preventDefault();
-        const wanted = locateTrackId;
-        if (!wanted) return;
-        void view.idsInRange(0, view.count).then((ids) => {
-          const index = ids.indexOf(wanted);
-          if (index < 0) return;
-          virtualizer.scrollToIndex(index, { align: "center" });
-          setSelection({ ids: new Set([wanted]), anchorIndex: index });
         });
         return;
       }
@@ -1257,7 +1316,7 @@ export const TrackTable = memo(function TrackTable({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, preferences.keyboard.overrides, locateTrackId, virtualizer]);
+  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, preferences.keyboard.overrides, locateLoaded]);
 
   const startDragOut = useCallback(
     (row: RowDto) => {

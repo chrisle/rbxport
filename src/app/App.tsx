@@ -828,6 +828,17 @@ function AppBody() {
   // track on whichever deck is MASTER. `[ASSUME]` the track's own BPM, not
   // the deck's tempo-adjusted one — the tempo lives in the player and the
   // capture cannot say which rekordbox uses.
+  // What each deck holds, Deck 1 first, for Track › Locate track loaded on
+  // deck; and All Tracks, where it looks for a track the open list lacks
+  // (rekordbox selects Collection).
+  const deckTrackIds = useMemo(() => [playerTrack?.id ?? null, playerTrackB?.id ?? null], [playerTrack?.id, playerTrackB?.id]);
+  // With All Tracks hidden from the tree (View › Layout), the Playlists
+  // heading lists the same collection.
+  const showCollection = useCallback(() => {
+    const target = (viewPrefs.allTracks ? tree.find((item) => item.kind === "allTracks") : undefined)
+      ?? tree.find((item) => item.kind === "collection");
+    if (target) setSelectedNode(target);
+  }, [tree, viewPrefs.allTracks]);
   const masterBpmX100 = (syncMaster === "b" ? playerTrackB : playerTrack)?.bpmX100 ?? null;
   // Related Tracks relate to the track on Player 1, as rekordbox's do.
   const relatedTo = playerTrack?.id ?? null;
@@ -3019,7 +3030,8 @@ function AppBody() {
           // leave the real source permanently in its loading state.
           key={sessionReady ? "library-ready" : "library-loading"}
           spec={spec}
-          locateTrackId={playerTrack?.id ?? playerTrackB?.id ?? null}
+          deckTrackIds={deckTrackIds}
+          onShowCollection={showCollection}
           onSortChange={handleSort}
           onSelectionChange={setSelectedCount}
           onSelectedTracks={reportMainSelection}
