@@ -1,6 +1,6 @@
-//! Exports to FAT32 and exFAT volumes as macOS mounts them, from disk
+//! Exports to FAT32, exFAT and HFS+ volumes as macOS mounts them, from disk
 //! images: the filesystems DJ sticks use, whose drivers behave unlike the
-//! APFS temporary directory the other tests write to (#122, #161).
+//! APFS temporary directory the other tests write to (#122, #161, #285).
 //!
 //! [OBS 2026-10-08, macOS 26.6.2, `hdiutil` images]: both drivers list names
 //! in NFD whatever form they were written in; FAT32 renames, and exFAT
@@ -14,7 +14,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use rbl_export::{export_full, verify, SourcePlaylist, SourceTrack, SyncNode, SyncSource};
+use rbl_export::{
+    export_full, export_with_options, verify, ExportOptions, ExportRoot, SourcePlaylist, SourceTrack, SyncNode, SyncSource,
+};
 
 /// A disk image formatted and mounted for one test, detached on drop.
 struct Volume {
@@ -193,4 +195,83 @@ fn a_fat32_or_exfat_stick_takes_another_playlist_on_a_later_sync() {
         assert_eq!(check.tracks, 3, "{file_system}");
         assert!(leftovers(root).is_empty(), "{file_system}: {:?}", leftovers(root));
     }
+}
+
+/// A Journaled HFS+ image at its root: what rbxport's Format HFS+ and Disk
+/// Utility make, mounted read-write as macOS mounts it.
+fn hfs_plus() -> Option<Volume> {
+    let volume = Volume::new("Journaled HFS+");
+    if volume.is_none() {
+        eprintln!("skipping Journaled HFS+: hdiutil could not create or attach an image here");
+    }
+    volume
+}
+
+/// The Sync Manager's SYNC to an HFS+ stick: the hidden `.PIONEER` root
+/// rekordbox uses there, then a resync that adds a playlist and one that
+/// drops a track (#285).
+///
+/// [OBS 2026-10-13, macOS 26, `hdiutil` image]: HFS+ stores names in NFD
+/// but, unlike FAT32 and exFAT, renames and deletes them by either form,
+/// and accepts `F_FULLFSYNC`; plain and case-sensitive HFS+ behave the same.
+#[test]
+fn an_hfs_plus_stick_takes_a_sync_and_its_resyncs_under_the_hidden_root() {
+    let Some(volume) = hfs_plus() else { return };
+    let root = &volume.mount;
+    let src = tempfile::tempdir().unwrap();
+    let tracks = tracks(src.path());
+    let set = SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() };
+    let added = SourcePlaylist { id: 11, name: "Warm-up".into(), track_indices: vec![2], ..Default::default() };
+    let node = |id| SyncNode { id, parent: 0, attribute: 0 };
+    let sync = |tracks: &[SourceTrack], playlists: &[SourcePlaylist], tree: Vec<SyncNode>| {
+        let source = SyncSource { db_id: 123, tree, automatic: false };
+        let options = ExportOptions { sync: Some(&source), root: Some(ExportRoot::Hidden), ..Default::default() };
+        export_with_options(root, tracks, playlists, &[], &options, &mut |_| {}).unwrap()
+    };
+
+    let first = sync(&tracks[..2], std::slice::from_ref(&set), vec![node(10)]);
+    assert_eq!((first.tracks, first.failed.len()), (2, 0));
+    let second = sync(&tracks, &[set.clone(), added], vec![node(10), node(11)]);
+    assert_eq!((second.tracks, second.reused, second.failed.len()), (3, 2, 0));
+    let set = SourcePlaylist { track_indices: vec![0], ..set };
+    let third = sync(&tracks[..1], &[set], vec![node(10)]);
+    assert_eq!((third.removed, third.failed.len()), (2, 0));
+
+    assert!(root.join(".PIONEER/rekordbox/exportLibrary.db").is_file());
+    assert!(!root.join("PIONEER").exists());
+    let check = verify(root).unwrap();
+    assert!(check.is_ok(), "{:?}", check.errors);
+    assert_eq!(check.tracks, 1);
+    assert!(root.join("Contents/Bj\u{f6}rk/Album/Kes\u{e4} (On Kaunis).mp3").is_file());
+    assert!(leftovers(root).is_empty(), "{:?}", leftovers(root));
+}
+
+/// A stick mounted read-only, as Linux mounts a Journaled HFS+ volume
+/// without `force` (AlphaTheta's players pass `force`; see alphatheta-docs
+/// `devices/xdj-rx3/operating-system/storage-mounting.md`), is refused
+/// before anything is written, with the system's reason (#285).
+#[test]
+fn a_read_only_hfs_plus_stick_is_refused_up_front_with_the_reason() {
+    let Some(volume) = hfs_plus() else { return };
+    let src = tempfile::tempdir().unwrap();
+    let tracks = tracks(src.path());
+    sync(&volume.mount, &tracks).unwrap();
+    let before = verify(&volume.mount).unwrap();
+
+    let image = volume._dir.path().join("stick.dmg");
+    assert!(Command::new("hdiutil").args(["detach", "-quiet", "-force"]).arg(&volume.mount).status().unwrap().success());
+    let attached = Command::new("hdiutil")
+        .args(["attach", "-quiet", "-readonly", "-nobrowse", "-mountpoint"])
+        .arg(&volume.mount)
+        .arg(&image)
+        .status()
+        .unwrap();
+    assert!(attached.success());
+
+    let error = sync(&volume.mount, &tracks[..1]).unwrap_err();
+    let rbl_export::ExportError::Io(io) = &error else { panic!("{error:?}") };
+    assert_eq!(io.kind(), std::io::ErrorKind::ReadOnlyFilesystem, "{error}");
+    assert!(error.to_string().contains("Read-only file system"), "{error}");
+    let after = verify(&volume.mount).unwrap();
+    assert_eq!((after.tracks, after.is_ok()), (before.tracks, true));
 }
