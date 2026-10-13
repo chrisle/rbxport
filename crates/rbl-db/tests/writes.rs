@@ -3099,6 +3099,80 @@ fn a_replacement_that_fails_partway_leaves_the_old_list_and_library_as_they_were
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 0"), members);
 }
 
+/// The folder import reads `next_usn` once for its playlist rows and counts up
+/// (#355 review): every live row the transaction writes or renumbers still
+/// gets its own `rb_local_usn`, past everything before it, the memberships in
+/// `TrackNo` order, and the registry counter ends on the highest.
+#[test]
+fn a_folder_import_gives_every_row_its_own_increasing_usn() {
+    let audio = tempfile::tempdir().unwrap();
+    let names = ["a.wav", "b.wav", "c.wav", "d.wav"];
+    for name in names {
+        write_wav(&audio.path().join(name), 1);
+    }
+    let mut f = fixture();
+    let crate_folder = f.writer.create_folder("Crates", ROOT).unwrap();
+    // The list replaced is a folder holding a playlist of two tracks.
+    let old = f.writer.create_folder("Old", &crate_folder).unwrap();
+    let inner = f.writer.create_playlist("Inner", &old).unwrap();
+    f.writer.add_tracks(&inner, &[track_id(0), track_id(1)]).unwrap();
+    f.writer.create_playlist("Keep", &crate_folder).unwrap();
+    // One file is in the library already, so the drop both reuses and imports.
+    let known = f.writer.import_file(&audio.path().join("a.wav")).unwrap();
+    let files: Vec<_> = names.iter().map(|n| audio.path().join(n)).collect();
+
+    let max_usn = |f: &Fixture| {
+        // The fixture has no `djmdSongHotCueBanklist`, the fourth sync table.
+        ["djmdContent", "djmdPlaylist", "djmdSongPlaylist"]
+            .iter()
+            .map(|t| f.count(&format!("SELECT COALESCE(MAX(rb_local_usn), 0) FROM {t}")))
+            .max()
+            .unwrap()
+    };
+    let before = max_usn(&f);
+
+    // Replace `Old` and insert at the front, so the import tombstones,
+    // imports, appends and renumbers in the one transaction.
+    let outcome =
+        f.writer.import_folder_as_playlist("Old", &crate_folder, &files, FolderClash::Replace(&old), Some(0)).unwrap();
+    let playlist = outcome.playlist.unwrap();
+    assert_eq!(outcome.existing, vec![known]);
+    assert_eq!(f.children(&crate_folder)[0], playlist);
+
+    let mut stmt = f
+        .conn()
+        .prepare(
+            "SELECT rb_local_usn FROM djmdSongPlaylist
+             WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo",
+        )
+        .unwrap();
+    let members: Vec<i64> = stmt.query_map(params![playlist], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+    drop(stmt);
+    assert_eq!(members.len(), names.len());
+    assert!(members.windows(2).all(|w| w[1] == w[0] + 1), "counted up one per membership: {members:?}");
+
+    // Every live row written by the import, in any sync table, has a USN of
+    // its own. (A tombstoned list's memberships share theirs: one UPDATE.)
+    let mut written = Vec::new();
+    for table in ["djmdContent", "djmdPlaylist", "djmdSongPlaylist"] {
+        let mut stmt = f
+            .conn()
+            .prepare(&format!("SELECT rb_local_usn FROM {table} WHERE rb_local_usn > ?1 AND rb_local_deleted = 0"))
+            .unwrap();
+        written.extend(stmt.query_map(params![before], |r| r.get::<_, i64>(0)).unwrap().map(Result::unwrap));
+    }
+    let unique: std::collections::BTreeSet<i64> = written.iter().copied().collect();
+    assert_eq!(unique.len(), written.len(), "no two rows share a USN: {written:?}");
+    let playlist_usn = f.one::<i64>("SELECT rb_local_usn FROM djmdPlaylist WHERE ID = ?1", &[&playlist]);
+    assert!(members[0] > playlist_usn, "memberships come after the list and its renumbering");
+    let new_content = f.count(&format!(
+        "SELECT MAX(rb_local_usn) FROM djmdContent WHERE rb_local_usn > {before}"
+    ));
+    assert!(playlist_usn > new_content, "the list comes after the tracks it imports");
+    assert_eq!(f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'"), max_usn(&f));
+    assert_eq!(max_usn(&f), *members.last().unwrap());
+}
+
 // ------------------------------------------------------------ batch writes
 
 /// What a track row says about its file and its artist, album, genre and key,

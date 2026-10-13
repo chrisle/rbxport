@@ -1078,7 +1078,8 @@ impl Writer {
         }
         outcome.at = Some(at);
 
-        // Each write below takes `next_usn`, which counts on from these.
+        // `insert_files` counts its own USNs up from one `next_usn` read; the
+        // playlist rows below start past them.
         let (imported, _) = insert_files(&tx, &mut self.rng, &paths, tags, &stamp)?;
         let mut members = Vec::with_capacity(paths.len());
         for (file, imported) in paths.iter().zip(imported) {
@@ -1105,7 +1106,14 @@ impl Writer {
             params![parent],
             |r| r.get(0),
         )?;
+        // `next_usn` scans every sync table, so it is read once here, after
+        // `insert_files` and any tombstones, and counted up for each row
+        // below, as `add_tracks` does.
         let mut usn = next_usn(&tx)?;
+        let bump = |usn: i64| -> Result<i64> {
+            usn.checked_add(1)
+                .ok_or_else(|| DbError::WriteRefused("local update counter overflow".into()))
+        };
         tx.execute(
             "INSERT INTO djmdPlaylist
                 (ID, Seq, Name, ImagePath, Attribute, ParentID, SmartList, UUID,
@@ -1119,7 +1127,7 @@ impl Writer {
             order.retain(|sibling| *sibling != id);
             order.insert(at.min(order.len()), id.clone());
             for (seq, node) in order.iter().enumerate() {
-                usn = next_usn(&tx)?;
+                usn = bump(usn)?;
                 let seq = i64::try_from(seq).unwrap_or(i64::MAX);
                 tx.execute(
                     "UPDATE djmdPlaylist SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3
@@ -1138,7 +1146,7 @@ impl Writer {
                 continue;
             }
             track_no += 1;
-            usn = next_usn(&tx)?;
+            usn = bump(usn)?;
             tx.execute(
                 "INSERT INTO djmdSongPlaylist
                     (ID, PlaylistID, ContentID, TrackNo, UUID,
@@ -3770,7 +3778,6 @@ fn intern(
     Ok(Some(id))
 }
 
-/// Whether a playlist or folder exists and is not deleted.
 /// Soft-deletes a playlist or folder, everything inside it, and every
 /// membership that pointed at it, inside the caller's transaction. The
 /// caller sets the USN counter to [`Changed::usn`] before committing.
@@ -3835,6 +3842,7 @@ fn tombstone_subtree(tx: &Connection, id: &str, stamp: &str) -> Result<(Changed,
     }))
 }
 
+/// Whether a playlist or folder exists and is not deleted.
 fn node_exists(conn: &Connection, id: &str) -> Result<bool> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
