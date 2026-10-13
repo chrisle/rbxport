@@ -1728,7 +1728,5 @@
   "The export has finished.": "エクスポートが完了しました。",
   "That device is no longer connected. It may have been unplugged or renamed.": "そのデバイスは接続されていません。取り外されたか、名前が変更された可能性があります。",
   "Change sync preferences": "同期の環境設定を変更",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "同期のたびに、同期で変更されたファイルだけでなく、USBデバイス上のすべてのファイルを元のファイルと照合します。",
-  "CDJ Compatibility": "CDJ互換性",
-  "New USB Drives": "新しいUSBドライブ"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "同期のたびに、同期で変更されたファイルだけでなく、USBデバイス上のすべてのファイルを元のファイルと照合します。"
 }

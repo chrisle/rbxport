@@ -54,10 +54,15 @@ it("explains the import and sync options and shows their defaults", () => {
   expect(host.textContent).toContain("Device ratings win when a track was also rated in your library.");
   expect(host.textContent).toContain("Free space on your USB stick by removing songs that aren't in any playlist.");
   expect([...host.querySelectorAll(`.${styles.default}`)].map(node => node.textContent)).toEqual([
-    "Default: Off", "Default: Off", "Default: On", "Default: On", "Default: Off", "Default: On",
+    "Default: On", "Default: Off", "Default: Off", "Default: On", "Default: On", "Default: Off", "Default: On",
   ]);
-  expect([...host.querySelectorAll("section")].map(section => section.getAttribute("aria-label")))
-    .toEqual(["Sync", "CDJ Compatibility", "Import", "New USB Drives"]);
+  const sections = [...host.querySelectorAll("section")];
+  expect(sections.map(section => section.getAttribute("aria-label"))).toEqual(["Sync", "Import"]);
+  expect(sections.map(section => section.id)).toEqual(["usb-export-sync", "usb-export-import"]);
+  // Everything SYNC does is set in its own section.
+  for (const option of ["Setup PIONEER folder on USB drives", "Delete music not in any playlist", "Maximum CDJ compatibility", "Verify all files (slower)"]) {
+    expect(sections[0]?.textContent).toContain(option);
+  }
   expect(host.textContent).toContain("compare every file on the USB device with its original");
 });
 

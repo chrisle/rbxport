@@ -47,6 +47,21 @@ test("Import brings back only what Preferences turns on, and Change import prefe
   await expect(dialog.getByRole("status")).not.toContainText("cues and beat grids");
 });
 
+test("each settings button opens USB Export at its own section", async ({ page }) => {
+  const dialog = await openManager(page);
+  const preferences = page.getByRole("dialog", { name: "Preferences" });
+  const heading = (name: string) => preferences.getByRole("heading", { name, exact: true });
+
+  await dialog.getByRole("button", { name: "Change import preferences" }).click();
+  await expect(heading("Import")).toBeInViewport();
+  await preferences.getByRole("button", { name: "Close" }).click();
+  await expect(preferences).toBeHidden();
+
+  await dialog.getByRole("button", { name: "Change sync preferences" }).click();
+  await expect(heading("Sync")).toBeInViewport();
+  await expect(preferences.getByRole("switch", { name: "Verify all files (slower)" })).toBeVisible();
+});
+
 test("the rail opens it with the library's playlists on the left and the devices on the right", async ({ page }) => {
   const dialog = await openManager(page);
   const tree = dialog.getByRole("tree", { name: "Playlists", exact: true });

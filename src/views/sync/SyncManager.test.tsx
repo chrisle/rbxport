@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __setBackend, getBackend } from "@/ipc/client";
 import type { Backend, Device, DeviceSyncState, ItunesLibrary, SyncDeviceReport, SyncProgress, TreeNode, ExportProgress } from "@/ipc/types";
 import type { SyncEstimate } from "@/ipc/types";
-import { SyncManager } from "./SyncManager";
+import { SyncManager, type UsbExportTarget } from "./SyncManager";
 import { PreferencesProvider } from "@/store/usePreferences";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
 
@@ -927,7 +927,7 @@ describe("SyncManager", () => {
 const importButton = () => [...host.querySelectorAll("button")].find(b => b.textContent?.trim() === "Import")!;
 const importPreferencesButton = () => host.querySelector<HTMLButtonElement>('button[aria-label="Change import preferences"]');
 const syncButton = () => host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]');
-const renderWith = async (usbExport: Partial<typeof DEFAULT_PREFERENCES.usbExport>, protectLibrary = false, onOpenPreferences?: (pane: "usbExport") => void) => {
+const renderWith = async (usbExport: Partial<typeof DEFAULT_PREFERENCES.usbExport>, protectLibrary = false, onOpenPreferences?: (target: UsbExportTarget) => void) => {
   const preferences = {
     ...DEFAULT_PREFERENCES,
     usbExport: { ...DEFAULT_PREFERENCES.usbExport, importButtonRatings: false, ...usbExport },
@@ -1049,7 +1049,7 @@ it("Import cannot be pressed when nothing is turned on in Preferences, and says 
   expect(importButton().title).toBe("Nothing is set to import. Choose what Import brings back in Preferences.");
 });
 
-it("Change import preferences opens the USB Export pane", async () => {
+it("Change import preferences opens USB Export at its Import section", async () => {
   const fallback = vi.fn();
   await renderWith(ALL_IMPORTS, false, fallback);
   const open = importPreferencesButton();
@@ -1057,19 +1057,19 @@ it("Change import preferences opens the USB Export pane", async () => {
   expect(open?.title).toBe("Change import preferences");
   click(open);
   await settle();
-  expect(openPreferences).toHaveBeenCalledExactlyOnceWith("usbExport");
+  expect(openPreferences).toHaveBeenCalledExactlyOnceWith("usbExportImport");
   expect(fallback).not.toHaveBeenCalled();
   expect(importUsb).not.toHaveBeenCalled();
 });
 
-it("Change sync preferences beside SYNC opens the USB Export pane", async () => {
+it("Change sync preferences beside SYNC opens USB Export at its Sync section", async () => {
   const fallback = vi.fn();
   await renderWith(ALL_IMPORTS, false, fallback);
   const open = host.querySelector<HTMLButtonElement>('button[aria-label="Change sync preferences"]');
   expect(open?.title).toBe("Change sync preferences");
   click(open);
   await settle();
-  expect(openPreferences).toHaveBeenCalledExactlyOnceWith("usbExport");
+  expect(openPreferences).toHaveBeenCalledExactlyOnceWith("usbExportSync");
   expect(fallback).not.toHaveBeenCalled();
   expect(syncDevices).not.toHaveBeenCalled();
 });
@@ -1086,7 +1086,7 @@ it("Change import preferences draws Preferences over the window where none can o
   await renderWith(ALL_IMPORTS, false, fallback);
   click(importPreferencesButton());
   await settle();
-  expect(fallback).toHaveBeenCalledExactlyOnceWith("usbExport");
+  expect(fallback).toHaveBeenCalledExactlyOnceWith("usbExportImport");
 });
 
 it("library protection leaves only settings to import, and says why the rest were left out", async () => {

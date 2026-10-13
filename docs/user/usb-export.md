@@ -21,9 +21,10 @@ Export**, with no further questions:
 | Import track ratings | On | Brings back ratings changed on the device since its last sync. |
 
 The settings button beside **Import** (**Change import preferences**) opens
-that Preferences pane, as does the one beside **SYNC** (**Change sync
-preferences**). The pane is grouped into Sync, CDJ Compatibility, Import and
-New USB Drives. Library Protection must be off to import cues, play
+that Preferences pane at its Import section, and the one beside **SYNC**
+(**Change sync preferences**) opens it at its Sync section, which holds
+everything SYNC does: setting up the PIONEER folder on a new drive, deleting
+music not in any playlist, Maximum CDJ compatibility and Verify all files. Library Protection must be off to import cues, play
 history or ratings, and rekordbox must be closed to import play history or
 ratings; a kind that cannot be imported for either reason is left out and the
 status line says why.

@@ -6,12 +6,26 @@ import layout from "./PaneLayout.module.css";
 import controls from "./Preferences.module.css";
 import styles from "./UsbExportPane.module.css";
 
+/** The ids of the pane's sections, which Preferences can open it scrolled to. */
+export const USB_EXPORT_SECTIONS = { sync: "usb-export-sync", import: "usb-export-import" } as const;
+
 export function UsbExportPane() {
   const t = useTranslation();
   const { preferences, update } = usePreferencesContext();
   const id = useId();
   return <>
-    <Section title={t("Sync")}>
+    <Section title={t("Sync")} id={USB_EXPORT_SECTIONS.sync}>
+      <label className={`${layout.summary} ${styles.option}`}>
+        <span className={styles.details}>
+          <strong id={`${id}-database-folders`}>Setup PIONEER folder on USB drives</strong>
+          <span id={`${id}-database-folders-help`} className={styles.description}>Create the PIONEER folders automatically when a new USB drive is synced for the first time.</span>
+          <span className={styles.default}>{t("Default: On")}</span>
+        </span>
+        <input type="checkbox" role="switch" className={controls.toggle}
+          aria-labelledby={`${id}-database-folders`} aria-describedby={`${id}-database-folders-help`}
+          checked={preferences.djSystem.createDatabaseFolders}
+          onChange={event => update("djSystem", { createDatabaseFolders: event.target.checked })} />
+      </label>
       <label className={`${layout.summary} ${styles.option}`}>
         <span className={styles.details}>
           <strong id={`${id}-cleanup`}>Delete music not in any playlist</strong>
@@ -23,19 +37,6 @@ export function UsbExportPane() {
           checked={preferences.usbExport.deleteUnlistedMusic}
           onChange={event => update("usbExport", { deleteUnlistedMusic: event.target.checked })} />
       </label>
-      <label className={`${layout.summary} ${styles.option}`}>
-        <span className={styles.details}>
-          <strong id={`${id}-verify-all`}>{t("Verify all files (slower)")}</strong>
-          <span id={`${id}-verify-all-help`} className={styles.description}>{t("After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.")}</span>
-          <span className={styles.default}>{t("Default: Off")}</span>
-        </span>
-        <input type="checkbox" role="switch" className={controls.toggle}
-          aria-labelledby={`${id}-verify-all`} aria-describedby={`${id}-verify-all-help`}
-          checked={preferences.usbExport.verifyAllFiles}
-          onChange={event => update("usbExport", { verifyAllFiles: event.target.checked })} />
-      </label>
-    </Section>
-    <Section title={t("CDJ Compatibility")}>
       <div className={`${layout.summary} ${styles.conversion}`}>
         <label className={styles.conversionToggle}>
           <span className={styles.details}>
@@ -59,8 +60,19 @@ export function UsbExportPane() {
         </div>
         <p className={styles.description}>{t("WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.")}</p>
       </div>
+      <label className={`${layout.summary} ${styles.option}`}>
+        <span className={styles.details}>
+          <strong id={`${id}-verify-all`}>{t("Verify all files (slower)")}</strong>
+          <span id={`${id}-verify-all-help`} className={styles.description}>{t("After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.")}</span>
+          <span className={styles.default}>{t("Default: Off")}</span>
+        </span>
+        <input type="checkbox" role="switch" className={controls.toggle}
+          aria-labelledby={`${id}-verify-all`} aria-describedby={`${id}-verify-all-help`}
+          checked={preferences.usbExport.verifyAllFiles}
+          onChange={event => update("usbExport", { verifyAllFiles: event.target.checked })} />
+      </label>
     </Section>
-    <Section title={t("Import")}>
+    <Section title={t("Import")} id={USB_EXPORT_SECTIONS.import}>
       {/* What Import brings back. SYNC never imports: device changes reach
           the library only when Import is clicked, as rekordbox's reach its
           collection only through Update Collection. */}
@@ -108,18 +120,6 @@ export function UsbExportPane() {
           aria-labelledby={`${id}-import-ratings`} aria-describedby={`${id}-import-ratings-help`}
           checked={preferences.usbExport.importButtonRatings}
           onChange={event => update("usbExport", { importButtonRatings: event.target.checked })} />
-      </label>
-    </Section>
-    <Section title={t("New USB Drives")}>
-      <label className={`${layout.summary} ${styles.option}`}>
-        <span className={styles.details}>
-          <strong id={`${id}-database-folders`}>Setup PIONEER folder on USB drives</strong>
-          <span id={`${id}-database-folders-help`} className={styles.description}>Create the PIONEER folders automatically when a new USB drive is synced for the first time.</span>
-        </span>
-        <input type="checkbox" role="switch" className={controls.toggle}
-          aria-labelledby={`${id}-database-folders`} aria-describedby={`${id}-database-folders-help`}
-          checked={preferences.djSystem.createDatabaseFolders}
-          onChange={event => update("djSystem", { createDatabaseFolders: event.target.checked })} />
       </label>
     </Section>
   </>;

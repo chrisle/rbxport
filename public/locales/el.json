@@ -1721,7 +1721,5 @@
   "The export has finished.": "Η εξαγωγή ολοκληρώθηκε.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Αυτή η συσκευή δεν είναι πλέον συνδεδεμένη. Ίσως αποσυνδέθηκε ή μετονομάστηκε.",
   "Change sync preferences": "Αλλαγή προτιμήσεων συγχρονισμού",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Μετά από κάθε συγχρονισμό, σύγκριση κάθε αρχείου στη συσκευή USB με το πρωτότυπο αντί για έλεγχο μόνο όσων άλλαξε ο συγχρονισμός.",
-  "CDJ Compatibility": "Συμβατότητα CDJ",
-  "New USB Drives": "Νέες μονάδες USB"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Μετά από κάθε συγχρονισμό, σύγκριση κάθε αρχείου στη συσκευή USB με το πρωτότυπο αντί για έλεγχο μόνο όσων άλλαξε ο συγχρονισμός."
 }

@@ -1720,7 +1720,5 @@
   "The export has finished.": "Export byl dokončen.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Toto zařízení již není připojeno. Mohlo být odpojeno nebo přejmenováno.",
   "Change sync preferences": "Změnit nastavení synchronizace",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Po každé synchronizaci porovnat každý soubor na USB zařízení s originálem, místo kontroly jen toho, co synchronizace změnila.",
-  "CDJ Compatibility": "Kompatibilita s CDJ",
-  "New USB Drives": "Nové USB disky"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Po každé synchronizaci porovnat každý soubor na USB zařízení s originálem, místo kontroly jen toho, co synchronizace změnila."
 }

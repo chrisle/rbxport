@@ -1715,7 +1715,5 @@
   "The export has finished.": "De export is voltooid.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Dat apparaat is niet meer verbonden. Het is mogelijk losgekoppeld of hernoemd.",
   "Change sync preferences": "Synchronisatievoorkeuren wijzigen",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Vergelijk na elke synchronisatie elk bestand op het USB-apparaat met het origineel in plaats van alleen te controleren wat de synchronisatie heeft gewijzigd.",
-  "CDJ Compatibility": "CDJ-compatibiliteit",
-  "New USB Drives": "Nieuwe USB-stations"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Vergelijk na elke synchronisatie elk bestand op het USB-apparaat met het origineel in plaats van alleen te controleren wat de synchronisatie heeft gewijzigd."
 }

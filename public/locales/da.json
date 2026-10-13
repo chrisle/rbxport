@@ -1715,7 +1715,5 @@
   "The export has finished.": "Eksporten er færdig.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Enheden er ikke længere tilsluttet. Den kan være blevet frakoblet eller omdøbt.",
   "Change sync preferences": "Skift synkroniseringsindstillinger",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Efter hver synkronisering sammenlignes hver fil på USB-enheden med originalen i stedet for kun at kontrollere det, synkroniseringen ændrede.",
-  "CDJ Compatibility": "CDJ-kompatibilitet",
-  "New USB Drives": "Nye USB-drev"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Efter hver synkronisering sammenlignes hver fil på USB-enheden med originalen i stedet for kun at kontrollere det, synkroniseringen ændrede."
 }

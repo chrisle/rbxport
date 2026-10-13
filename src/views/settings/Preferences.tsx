@@ -32,7 +32,7 @@ import { AnalysisPane, ANALYSIS_TABS, type AnalysisTab } from "./AnalysisPane";
 import { AudioPane, AUDIO_TABS, type AudioTab } from "./AudioPane";
 import { DjSystemPane, DJ_SYSTEM_TABS, type DjSystemTab } from "./DjSystemPane";
 import { KeyboardPane } from "./KeyboardPane";
-import { UsbExportPane } from "./UsbExportPane";
+import { USB_EXPORT_SECTIONS, UsbExportPane } from "./UsbExportPane";
 import { BackupsPane } from "./BackupsPane";
 import { ArchiveRestore, RefreshCw } from "lucide-react";
 import { LinkPane } from "./LinkPane";
@@ -47,7 +47,25 @@ import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
  */
 export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "backups" | "usbExport" | "rekordbox" | "about";
 
-export type PreferencesTarget = Pane | "libraryProtection";
+/** A place in Preferences that opens a pane at one of its sections. */
+type SectionTarget = "usbExportSync" | "usbExportImport";
+
+export type PreferencesTarget = Pane | "libraryProtection" | SectionTarget;
+
+/** The pane each section target opens, and the id of the section it scrolls to. */
+const SECTION_TARGETS: Record<SectionTarget, { pane: Pane; section: string }> = {
+  usbExportSync: { pane: "usbExport", section: USB_EXPORT_SECTIONS.sync },
+  usbExportImport: { pane: "usbExport", section: USB_EXPORT_SECTIONS.import },
+};
+
+const isSectionTarget = (value: string | undefined): value is SectionTarget =>
+  value !== undefined && Object.hasOwn(SECTION_TARGETS, value);
+
+/** The pane a target opens. */
+function paneOf(target: PreferencesTarget): Pane {
+  if (target === "libraryProtection") return "advanced";
+  return isSectionTarget(target) ? SECTION_TARGETS[target].pane : target;
+}
 
 function UsbStickIcon(props: SVGProps<SVGSVGElement>) {
   return <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -109,6 +127,11 @@ export function asPane(value: string | undefined): Pane {
   return PANES.some((p) => p.id === value) ? (value as Pane) : "view";
 }
 
+/** The target a name from outside (a URL hash) stands for; an unknown one is View. */
+export function asTarget(value: string | undefined): PreferencesTarget {
+  return value === "libraryProtection" || isSectionTarget(value) ? value : asPane(value);
+}
+
 interface Tabs {
   view: ViewTab;
   audio: AudioTab;
@@ -131,11 +154,11 @@ export function Preferences({
 }: PreferencesProps) {
   const window_ = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  const [pane, setPane] = useState<Pane>(initialPane === "libraryProtection" ? "advanced" : initialPane);
+  const [pane, setPane] = useState<Pane>(paneOf(initialPane));
   // The window is turned to another pane from outside — the File menu's
   // Missing File Manager while it is already open.
   useEffect(() => {
-    setPane(initialPane === "libraryProtection" ? "advanced" : initialPane);
+    setPane(paneOf(initialPane));
     if (initialPane === "libraryProtection") {
       setTabs((current) => ({ ...current, advanced: "browse" }));
       setQuery("");
@@ -165,6 +188,14 @@ export function Preferences({
       window.removeEventListener("keydown", onKey);
     };
   }, [onClose, reportOpen]);
+
+  // A section target lands on its section, once its pane is the one shown.
+  useLayoutEffect(() => {
+    if (!isSectionTarget(initialPane)) return;
+    const { pane: target, section } = SECTION_TARGETS[initialPane];
+    if (pane !== target) return;
+    scroller.current?.querySelector(`#${section}`)?.scrollIntoView({ block: "start" });
+  }, [initialPane, pane]);
 
   // The search box narrows the pane to the sections that mention the words
   // typed. The sections' own text is the index: every label in them is what

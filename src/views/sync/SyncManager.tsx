@@ -39,6 +39,9 @@ import { MissingFilesDialog } from "./MissingFilesDialog";
 import { useTranslation } from "@/i18n";
 import styles from "./SyncManager.module.css";
 
+/** Where Sync Manager's settings buttons open Preferences: USB Export's Sync or Import section. */
+export type UsbExportTarget = "usbExportSync" | "usbExportImport";
+
 export interface SyncManagerProps {
   /** Drawn as a window of its own, so the shell's chrome is around it. */
   windowed?: boolean;
@@ -51,7 +54,7 @@ export interface SyncManagerProps {
    * Opens Preferences on a pane where the shell has no Preferences window to
    * open (the browser build), so it is drawn over this one.
    */
-  onOpenPreferences?: ((pane: "usbExport") => void) | undefined;
+  onOpenPreferences?: ((target: UsbExportTarget) => void) | undefined;
 }
 
 /** Ticked, not ticked, or a folder with some of its playlists ticked. */
@@ -841,11 +844,12 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   };
 
   /** The USB Export pane, where what Import brings back is chosen. */
-  const openUsbExportPreferences = () => {
+  /** Opens Preferences › USB Export at the section a settings button is beside. */
+  const openUsbExportPreferences = (target: UsbExportTarget) => {
     void getBackend()
-      .then(backend => backend.openPreferences("usbExport"))
+      .then(backend => backend.openPreferences(target))
       .catch(() => false)
-      .then(opened => { if (!opened) onOpenPreferences?.("usbExport"); });
+      .then(opened => { if (!opened) onOpenPreferences?.(target); });
   };
 
   const body = (
@@ -1032,7 +1036,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
           >
             {operation === "sync" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> Syncing…</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
           </button>
-          <button type="button" className={`${styles.button} ${styles.actionPreferences}`} onClick={openUsbExportPreferences}
+          <button type="button" className={`${styles.button} ${styles.actionPreferences}`} onClick={() => openUsbExportPreferences("usbExportSync")}
             aria-label={t("Change sync preferences")} title={t("Change sync preferences")}>
             <Settings2 size={14} aria-hidden="true" />
           </button>
@@ -1050,7 +1054,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
             title={importTitle}>
             {operation === "import" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> {t("Importing…")}</> : <><ArrowLeft size={16} aria-hidden="true" /> {t("Import")}</>}
           </button>
-          <button type="button" className={`${styles.button} ${styles.actionPreferences}`} onClick={openUsbExportPreferences}
+          <button type="button" className={`${styles.button} ${styles.actionPreferences}`} onClick={() => openUsbExportPreferences("usbExportImport")}
             aria-label={t("Change import preferences")} title={t("Change import preferences")}>
             <Settings2 size={14} aria-hidden="true" />
           </button>

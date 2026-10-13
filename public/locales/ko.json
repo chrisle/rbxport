@@ -1717,7 +1717,5 @@
   "The export has finished.": "내보내기가 완료되었습니다.",
   "That device is no longer connected. It may have been unplugged or renamed.": "해당 장치가 더 이상 연결되어 있지 않습니다. 분리되었거나 이름이 변경되었을 수 있습니다.",
   "Change sync preferences": "동기화 환경설정 변경",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "동기화할 때마다 동기화로 변경된 파일만 확인하지 않고 USB 장치의 모든 파일을 원본과 비교합니다.",
-  "CDJ Compatibility": "CDJ 호환성",
-  "New USB Drives": "새 USB 드라이브"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "동기화할 때마다 동기화로 변경된 파일만 확인하지 않고 USB 장치의 모든 파일을 원본과 비교합니다."
 }

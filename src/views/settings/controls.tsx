@@ -8,14 +8,16 @@ import { useId, type ReactNode } from "react";
 
 import styles from "./Preferences.module.css";
 
-export function Section({ title, children, label }: {
+export function Section({ title, children, label, id }: {
   title: string;
   /** The accessible name when the title is not the whole story. */
   label?: string;
+  /** Lets Preferences open its pane scrolled to this section. */
+  id?: string;
   children?: ReactNode;
 }) {
   return (
-    <section className={styles.section} aria-label={label ?? title}>
+    <section id={id} className={styles.section} aria-label={label ?? title}>
       <h3 className={styles.title}>{title}</h3>
       {children}
     </section>

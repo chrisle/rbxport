@@ -15,12 +15,11 @@ import type { LibrarySummary } from "@/ipc/types";
 import { useLimiter } from "@/store/useLimiter";
 import { useMaster } from "@/store/useMaster";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
-import { asPane, Preferences, type PreferencesTarget } from "./Preferences";
+import { asTarget, Preferences, type PreferencesTarget } from "./Preferences";
 
-/** The pane the hash names: `#preferences/advanced` is Advanced. */
+/** The pane, or place in one, the hash names: `#preferences/advanced` is Advanced. */
 export function paneFromHash(hash: string): PreferencesTarget {
-  const target = hash.replace(/^#preferences\/?/, "").split(/[/?]/)[0];
-  return target === "libraryProtection" ? target : asPane(target);
+  return asTarget(hash.replace(/^#preferences\/?/, "").split(/[/?]/)[0]);
 }
 
 export function PreferencesWindow() {

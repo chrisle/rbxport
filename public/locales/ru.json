@@ -1722,7 +1722,5 @@
   "The export has finished.": "Экспорт завершён.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Это устройство больше не подключено. Возможно, оно было отключено или переименовано.",
   "Change sync preferences": "Изменить настройки синхронизации",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "После каждой синхронизации сравнивать каждый файл на USB-устройстве с оригиналом, а не проверять только то, что изменила синхронизация.",
-  "CDJ Compatibility": "Совместимость с CDJ",
-  "New USB Drives": "Новые USB-накопители"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "После каждой синхронизации сравнивать каждый файл на USB-устройстве с оригиналом, а не проверять только то, что изменила синхронизация."
 }

@@ -1716,7 +1716,5 @@
   "The export has finished.": "Der Export ist abgeschlossen.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Dieses Gerät ist nicht mehr verbunden. Es wurde möglicherweise getrennt oder umbenannt.",
   "Change sync preferences": "Synchronisierungseinstellungen ändern",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Nach jeder Synchronisierung jede Datei auf dem USB-Gerät mit dem Original vergleichen, statt nur zu prüfen, was die Synchronisierung geändert hat.",
-  "CDJ Compatibility": "CDJ-Kompatibilität",
-  "New USB Drives": "Neue USB-Laufwerke"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Nach jeder Synchronisierung jede Datei auf dem USB-Gerät mit dem Original vergleichen, statt nur zu prüfen, was die Synchronisierung geändert hat."
 }

@@ -1722,7 +1722,5 @@
   "The export has finished.": "匯出已完成。",
   "That device is no longer connected. It may have been unplugged or renamed.": "該裝置已中斷連線。它可能已被拔除或重新命名。",
   "Change sync preferences": "變更同步喜好設定",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "每次同步後，將 USB 裝置上的每個檔案與原始檔案比對，而不是只檢查此次同步變更的檔案。",
-  "CDJ Compatibility": "CDJ 相容性",
-  "New USB Drives": "新的 USB 隨身碟"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "每次同步後，將 USB 裝置上的每個檔案與原始檔案比對，而不是只檢查此次同步變更的檔案。"
 }
