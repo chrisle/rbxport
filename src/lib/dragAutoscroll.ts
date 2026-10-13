@@ -18,6 +18,12 @@
  * makes a timer send a forced mouse move every 100ms while the button is
  * held, so the list keeps scrolling while the pointer rests in the zone, on
  * top of a step for every real pointer move.
+ *
+ * [OBS static, same function] each pass of `itemDragMove`, the repeat's
+ * included, first finds the insertion index under the pointer
+ * (`CustomListBox::getInsertionIndexForPosition`, 0x1003dfe84) and moves the
+ * insertion marker there (`setBounds`, 0x1003e01c0), so the marker follows the
+ * rows scrolling under a resting pointer. `scrolled` is that hook here.
  */
 export const AUTOSCROLL_BORDER_PX = 30;
 export const AUTOSCROLL_MAX_STEP_PX = 50;
@@ -56,6 +62,12 @@ export function createDragAutoscroll(
   rows: () => { top: number; bottom: number } | null,
   /** Returns false when the list could not move (already at that end). */
   scrollBy: (dy: number) => boolean,
+  /**
+   * After a step that moved the list, with the pointer position: the rows
+   * under the pointer changed, so whatever marks the drop place must be
+   * worked out again there.
+   */
+  scrolled?: (clientX: number, clientY: number) => void,
 ): DragAutoscroll {
   let at: { x: number; y: number } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -65,7 +77,9 @@ export function createDragAutoscroll(
     const box = rows();
     if (!at || !box) return false;
     const dy = autoscrollStep(at.y, box.top, box.bottom);
-    return dy !== 0 && scrollBy(dy);
+    if (dy === 0 || !scrollBy(dy)) return false;
+    scrolled?.(at.x, at.y);
+    return true;
   };
   // The repeat is armed only while a step moves the list, so a drag resting
   // mid-list or against the end of the list runs no timer.

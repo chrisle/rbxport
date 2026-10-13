@@ -98,4 +98,22 @@ describe("createDragAutoscroll", () => {
     expect(steps).toEqual([-30, -30, -30]);
     auto.stop();
   });
+
+  it("reports the pointer after every step that moved the list, as rekordbox re-places its marker", () => {
+    const seen: Array<[number, number]> = [];
+    let room = 2;
+    const auto = createDragAutoscroll(
+      () => ({ top: TOP, bottom: BOTTOM }),
+      () => room-- > 0,
+      (x, y) => seen.push([x, y]),
+    );
+    auto.move(10, 300);
+    expect(seen).toEqual([]);
+    auto.move(12, 110);
+    expect(seen).toEqual([[12, 110]]);
+    vi.advanceTimersByTime(AUTOSCROLL_REPEAT_MS * 5);
+    // One more repeat moved the list; the one after found it at the end.
+    expect(seen).toEqual([[12, 110], [12, 110]]);
+    auto.stop();
+  });
 });

@@ -508,6 +508,7 @@ async function holdLastRowAtTop(page: Page, depth: number) {
   // view) would drop the source row once the list is at its top.
   const reach = await scroller.evaluate((el) => el.scrollTop);
   expect(reach).toBeGreaterThan(a.height * 17);
+  const dragged = await last.locator('[data-col="title"]').textContent();
   // `depth` px into rekordbox's 30px zone, which scrolls 30 - depth px a step.
   const zone = { x: a.x + 120, y: head.y + head.height + depth };
   await page.mouse.move(a.x + 120, a.y + a.height / 2);
@@ -515,7 +516,7 @@ async function holdLastRowAtTop(page: Page, depth: number) {
   await page.mouse.move(zone.x, zone.y, { steps: 12 });
   await page.mouse.move(zone.x + 1, zone.y);
   await page.mouse.move(zone.x + 2, zone.y);
-  return { scroller, reach, zone: { x: zone.x + 2, y: zone.y }, head };
+  return { scroller, reach, zone: { x: zone.x + 2, y: zone.y }, head, dragged };
 }
 
 /** A Finder file dropped on a tree playlist: refused in the browser, not added. */
@@ -556,6 +557,60 @@ test("a reorder drop made while the list scrolls ends the drag and stops the scr
   // The drag is over: a file let go on a playlist is a file, not the row.
   await dropFileOnHardstyle(page);
   await expect(page.getByRole("contentinfo")).toContainText("Drop files in the desktop app to import them.");
+});
+
+test("the line follows the rows scrolling under a resting pointer, and the drop lands on it", async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== "chromium", "only Chromium drags from mouse events");
+  // rekordbox re-places its insertion marker at the pointer on every 100ms
+  // repeat (ListViewer::itemDragMove), so the line never drifts off with the
+  // rows. The pointer does not move again after `holdLastRowAtTop`.
+  const { scroller, zone, dragged } = await holdLastRowAtTop(page, 20);
+
+  /** The line's row, its edge, and whether the pointer is over that row. */
+  const line = () => page.evaluate((y) => {
+    const marked = [...document.querySelectorAll<HTMLElement>('[role="row"][data-drop]')];
+    const row = marked[0];
+    if (marked.length !== 1 || !row) return { count: marked.length, under: false, edge: null, title: null };
+    const box = row.getBoundingClientRect();
+    return {
+      count: 1,
+      under: y >= box.top && y <= box.bottom,
+      edge: row.dataset.drop ?? null,
+      title: row.querySelector('[data-col="title"]')?.textContent ?? null,
+    };
+  }, zone.y);
+
+  // While the list moves under it, sampled at several scroll positions.
+  const seen = new Set<number>();
+  const off: string[] = [];
+  await expect.poll(async () => {
+    const top = await scroller.evaluate((el) => el.scrollTop);
+    const at = await line();
+    if (at.count !== 1 || !at.under) off.push(`scrollTop ${top}: ${JSON.stringify(at)}`);
+    seen.add(top);
+    return top;
+  }, { timeout: 15_000, intervals: [60] }).toBe(0);
+  expect(off).toEqual([]);
+  expect(seen.size).toBeGreaterThan(3);
+
+  // At the top, at rest: the line is still under the pointer, and a release
+  // with no move since puts the row exactly there.
+  const at = await line();
+  expect(at.under).toBe(true);
+  const before = await titles(page);
+  const index = before.indexOf(at.title ?? "");
+  expect(index).toBeGreaterThanOrEqual(0);
+  // A drag update at the very same point, which a real browser sends on its
+  // own while the pointer rests; Chromium's synthesised drag sends none, and
+  // will not drop without a fresh one. It does not move the pointer.
+  await page.mouse.move(zone.x, zone.y);
+  await page.mouse.up();
+  await expect(page.getByRole("contentinfo")).toContainText("Playlist reordered.");
+  await expect.poll(async () => (await titles(page))[index + (at.edge === "below" ? 1 : 0)]).toBe(dragged);
+  await expect(page.locator('[role="row"][data-drop]')).toHaveCount(0);
 });
 
 test("a drag scrolled away from its row and let go over nothing still ends", async ({

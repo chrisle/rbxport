@@ -13,6 +13,7 @@ import { useEventCallback } from "@/store/useEventCallback";
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { DeckId, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/types";
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
@@ -451,7 +452,7 @@ const TrackRow = memo(function TrackRow({
   /** Which edge the line is drawn on, or null for a row that is not the target. */
   dropEdge: "above" | "below" | null;
   onReorderOver: (index: number, below: boolean) => void;
-  onReorderDrop: () => void;
+  onReorderDrop: (at: { index: number; below: boolean }) => void;
   startupCache: boolean;
 }) {
   // Stops watching a press that might become a native drag. The pointer is
@@ -577,10 +578,14 @@ const TrackRow = memo(function TrackRow({
       }}
       onDrop={(e) => {
         // External files must bubble to the playlist's import target.
-        if (!reorderable || !isLocalDrag() || dropEdge === null) return;
+        if (!reorderable || !isLocalDrag()) return;
         e.preventDefault();
         e.stopPropagation();
-        onReorderDrop();
+        // Placed where the pointer is now, as `dragover` places the line, so
+        // a line left behind by a list that scrolled under a resting pointer
+        // can never send the rows somewhere else or lose the drop.
+        const box = e.currentTarget.getBoundingClientRect();
+        onReorderDrop({ index, below: e.clientY > box.top + box.height / 2 });
       }}
       data-drop={dropEdge ?? undefined}
       role="row"
@@ -1385,6 +1390,32 @@ export const TrackTable = memo(function TrackTable({
     if (!dragging) carrying.current = null;
   }, [dragging]);
 
+  /** Where the carried rows would go, as the pointer moves over a row. */
+  const reorderOver = useEventCallback(
+    (index: number, below: boolean) => {
+      if (!onReorder || carrying.current === null) return;
+      setDropAt((at) => (at?.index === index && at.below === below ? at : { index, below }));
+    },
+  );
+
+  /**
+   * Re-places the line at a pointer that stayed put while the list scrolled
+   * under it: the row there, by its position in the list, and which half of
+   * it. Below the last row is below the last row, as the table's own
+   * `dragover` has it.
+   */
+  const reorderAtPoint = useEventCallback((clientY: number) => {
+    const rows = rowsRef.current;
+    if (!rows || view.count === 0) return;
+    const offset = clientY - rows.getBoundingClientRect().top;
+    if (offset >= view.count * rowH) {
+      reorderOver(view.count - 1, true);
+      return;
+    }
+    const index = Math.min(Math.max(Math.floor(offset / rowH), 0), view.count - 1);
+    reorderOver(index, offset - index * rowH > rowH / 2);
+  });
+
   // Scrolls the rows while a reorder drag rests near their top or bottom, as
   // rekordbox's ListViewer::itemDragMove does. The zone is measured from the
   // rows, below the sticky column heading, as rekordbox measures its viewport.
@@ -1404,6 +1435,10 @@ export const TrackTable = memo(function TrackTable({
         scroller.scrollTop = before + dy;
         return scroller.scrollTop !== before;
       },
+      // Each step moves the line with it, so it stays under the pointer. In
+      // the same task as the scroll, as rekordbox moves its marker in the
+      // same pass: a line drawn a render later is a frame on the wrong row.
+      (_x, y) => flushSync(() => reorderAtPoint(y)),
     ),
   );
   useEffect(() => () => autoscroll.stop(), [autoscroll]);
@@ -1465,14 +1500,6 @@ export const TrackTable = memo(function TrackTable({
   const isBelowTracks = (target: EventTarget, y: number) =>
     scrollRef.current?.contains(target as Node) && rowsRef.current !== null &&
     y >= rowsRef.current.getBoundingClientRect().bottom;
-
-  /** Where the carried rows would go, as the pointer moves over a row. */
-  const reorderOver = useEventCallback(
-    (index: number, below: boolean) => {
-      if (!onReorder || carrying.current === null) return;
-      setDropAt((at) => (at?.index === index && at.below === below ? at : { index, below }));
-    },
-  );
 
   /**
    * Lands the carried rows at the line drawn, as the whole playlist's order.
