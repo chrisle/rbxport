@@ -1649,9 +1649,9 @@
   "Import Playlist from Device": "Importovat seznam skladeb ze zařízení",
   "{count} file {size} to the folder : ": "{count} soubor {size} do složky: ",
   "{count} files {size} to the folder : ": "{count} souborů {size} do složky: ",
-  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "",
-  "These music files will be copied to this computer.": "",
-  "Music files to be copied:": "",
-  "Music file copy destination:": "",
+  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "Seznam skladeb, který se pokoušíte importovat, obsahuje hudební soubory, které v rekordbox ve vašem počítači nejsou.",
+  "These music files will be copied to this computer.": "Tyto hudební soubory budou zkopírovány do tohoto počítače.",
+  "Music files to be copied:": "Hudební soubory ke zkopírování:",
+  "Music file copy destination:": "Cíl kopírování hudebních souborů:",
   "Free space of {drive} is {size}": "Volné místo {drive} je {size}"
 }

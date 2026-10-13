@@ -1651,9 +1651,9 @@
   "Import Playlist from Device": "Импорт списка воспроизведения с устройства",
   "{count} file {size} to the folder : ": "{count} файл{size} в папку: ",
   "{count} files {size} to the folder : ": "{count} файлы {size} в папку: ",
-  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "",
-  "These music files will be copied to this computer.": "",
-  "Music files to be copied:": "",
-  "Music file copy destination:": "",
+  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "Список воспроизведения, который вы пытаетесь импортировать, содержит музыкальные файлы, отсутствующие в rekordbox на вашем компьютере.",
+  "These music files will be copied to this computer.": "Эти музыкальные файлы будут скопированы на этот компьютер.",
+  "Music files to be copied:": "Музыкальные файлы для копирования:",
+  "Music file copy destination:": "Папка для копирования музыкальных файлов:",
   "Free space of {drive} is {size}": "На {drive} доступно {size} свободного объема"
 }

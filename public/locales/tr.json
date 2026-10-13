@@ -1649,9 +1649,9 @@
   "Import Playlist from Device": "Çalma Listesini Aygıttan Al",
   "{count} file {size} to the folder : ": "{count} dosya {size} klasöre: ",
   "{count} files {size} to the folder : ": "{count} dosyaları {size} klasöre: ",
-  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "",
-  "These music files will be copied to this computer.": "",
-  "Music files to be copied:": "",
-  "Music file copy destination:": "",
+  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "Almaya çalıştığınız çalma listesi, bilgisayarınızdaki rekordbox'ta bulunmayan müzik dosyaları içeriyor.",
+  "These music files will be copied to this computer.": "Bu müzik dosyaları bu bilgisayara kopyalanacak.",
+  "Music files to be copied:": "Kopyalanacak müzik dosyaları:",
+  "Music file copy destination:": "Müzik dosyası kopyalama hedefi:",
   "Free space of {drive} is {size}": "{drive} boş alanı {size}"
 }

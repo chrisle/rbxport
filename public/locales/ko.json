@@ -546,7 +546,7 @@
   "BLUE": "블루",
   "RGB": "RGB",
   "3Band": "3밴드",
-  "Do you want to replace them with the one you're importing?": "",
+  "Do you want to replace them with the one you're importing?": "들여오려는 항목으로 바꾸시겠습니까?",
   "Drop folders onto Playlists or a playlist folder to make playlists of them.": "Drop folders onto Playlists or a playlist folder to make playlists of them.",
   "1 file skipped.": "1 file skipped.",
   "{count} files skipped.": "{count} files skipped.",
@@ -1646,9 +1646,9 @@
   "Import Playlist from Device": "장치에서 플레이리스트 가져오기",
   "{count} file {size} to the folder : ": "{count} 파일 {size}을 폴더로: ",
   "{count} files {size} to the folder : ": "{count} 파일 {size}을 폴더로: ",
-  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "",
-  "These music files will be copied to this computer.": "",
-  "Music files to be copied:": "",
-  "Music file copy destination:": "",
+  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "들여오려는 플레이리스트에 컴퓨터의 rekordbox에 없는 음악 파일이 포함되어 있습니다.",
+  "These music files will be copied to this computer.": "이 음악 파일은 이 컴퓨터로 복사됩니다.",
+  "Music files to be copied:": "복사할 음악 파일:",
+  "Music file copy destination:": "음악 파일 복사 위치:",
   "Free space of {drive} is {size}": "{drive}의 여유 공간: {size}"
 }

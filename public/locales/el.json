@@ -1650,9 +1650,9 @@
   "Import Playlist from Device": "Εισαγωγή Λίστας αναπαραγωγής από τη Συσκευή",
   "{count} file {size} to the folder : ": "{count} αρχείο {size} στον φάκελο: ",
   "{count} files {size} to the folder : ": "{count} αρχεία {size} στον φάκελο: ",
-  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "",
-  "These music files will be copied to this computer.": "",
-  "Music files to be copied:": "",
-  "Music file copy destination:": "",
+  "The playlist you are trying to import contains music files that are not present in rekordbox on your computer.": "Η λίστα αναπαραγωγής που προσπαθείτε να εισαγάγετε περιέχει αρχεία μουσικής που δεν υπάρχουν στο rekordbox του υπολογιστή σας.",
+  "These music files will be copied to this computer.": "Αυτά τα αρχεία μουσικής θα αντιγραφούν σε αυτόν τον υπολογιστή.",
+  "Music files to be copied:": "Αρχεία μουσικής προς αντιγραφή:",
+  "Music file copy destination:": "Προορισμός αντιγραφής αρχείων μουσικής:",
   "Free space of {drive} is {size}": "Ο διαθέσιμος χώρος του {drive} είναι {size}"
 }

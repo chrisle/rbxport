@@ -30,6 +30,16 @@ describe("localization", () => {
     }
   });
 
+  it("never shows a blank string for a non-blank one", async () => {
+    // translate() shows "" verbatim; rekordbox's own .lang files leave some
+    // sentences blank (the device import copy question, #248), so a copied
+    // blank would leave a dialog without its explanation or labels.
+    for (const locale of LOCALES.filter((value) => value !== "en")) {
+      const catalog = (await import(`../../public/locales/${locale}.json`)).default as Catalog;
+      expect(Object.keys(catalog).filter((text) => text !== "" && catalog[text] === ""), locale).toEqual([]);
+    }
+  });
+
   it("preserves named placeholders in translated dynamic messages", async () => {
     const placeholders = (text: string) => text.match(/\{[a-z][a-z0-9]*\}/gi) ?? [];
     const dynamic = uiStrings.filter((text) => placeholders(text).length > 0);
