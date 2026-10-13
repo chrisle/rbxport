@@ -637,16 +637,17 @@ played by `rbxport-private/e2e-usb-formats/test_exported_playlist.py`.
 [OBS] `USB A`'s export in a FAT32 image: SOURCE lists 3 songs and 1 playlist,
 and every track loads, plays and keeps playing (4 of 4 passed). `USB B`'s
 `.PIONEER` export in a FAT32 image: the same, 4 of 4. `USB B`'s export in a
-journaled HFS+ image could not be tested: AtEmu's guest kernel has no HFS+
-driver (`/proc/filesystems` lists vfat and exfat only; its kernel config has
-`CONFIG_HFSPLUS_FS` unset), so the stick never mounts. The real 3.20 kernel has
-`CONFIG_HFSPLUS_FS=y`, and its `device-mount.sh` mounts HFS+ with
-`rw,noatime,force` after `fsck.hfsplus` [OBS, alphatheta-docs static analysis].
+journaled HFS+ image laid out as Disk Utility formats a stick (GUID scheme,
+EFI partition first, HFS+ second): the same, 4 of 4, mounted as `hfsplus` rw
+from the second partition. That needed AtEmu changes (its commit 99115d5):
+Alpine's linux-virt guest kernel has no HFS+ driver, so the guest now builds
+`hfsplus.ko`, and picks and mounts the partition as the 3.20 `device-mount.sh`
+does (skip the EFI partition; HFS+ with `force`). The real 3.20 kernel has
+`CONFIG_HFSPLUS_FS=y` [OBS, alphatheta-docs static analysis].
 With the `.PIONEER` export, SOURCE showed the player's own disk (5.8 GB) as the
-stick's Total and Available, where the `PIONEER` export showed the stick's
-0.2 GB; browsing and playback were unaffected. Whether a real player shows
-the same for an HFS+ stick is [UNKNOWN]: it needs HFS+ in AtEmu's guest
-kernel or a physical CDJ-3000. Evidence:
+stick's Total and Available, on the FAT32 image and on the HFS+ one alike,
+where the `PIONEER` export showed the stick's 0.2 GB; browsing and playback
+were unaffected. Whether a physical CDJ-3000 shows the same is [UNKNOWN]. Evidence:
 `rbxport-private/verification/e2e-usb-formats/20261013-150858-sticks-as-they-are`.
 
 Compatibility note: database/request/recipe signatures and converted cache
