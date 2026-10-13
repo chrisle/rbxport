@@ -19,7 +19,7 @@
 //! rekordbox opens the file at `masterDbDirectory + "/share"` joined with
 //! `ImagePath` as it is (`getCloudSharedPath`,
 //! `rekordboxDBController::getArtworkInfo`, `ArtworkCache::getFromURI`
-//! loading `juce::File(path)`) [OBS static, rekordbox 7.2.11 macOS]. It does
+//! loading `juce::File(path)`) [OBS static, rekordbox 7.2.19.0342 macOS]. It does
 //! not resolve links first, so a share whose `Artwork` folder is a link to
 //! another disk, or a volume the system cannot give a final path for, still
 //! shows its artwork there. The check here is on the stored path's own
@@ -192,17 +192,32 @@ pub(crate) fn resolve_under(root: &Path, relative: &str) -> Option<PathBuf> {
     for part in relative.split(['/', '\\']) {
         match part {
             "" | "." => {}
-            ".." => return None,
-            _ => {
-                let mut components = Path::new(part).components();
-                match (components.next(), components.next()) {
-                    (Some(Component::Normal(_)), None) => out.push(part),
-                    _ => return None,
-                }
-            }
+            _ if plain_part(part, cfg!(windows)) => out.push(part),
+            _ => return None,
         }
     }
     Some(out)
+}
+
+/// Whether one part of a stored path (already split on `/` and `\`) is a
+/// plain name that `push` will add below the root, rather than `..`, a drive
+/// or a root of its own.
+///
+/// `windows` is a parameter, not a `cfg`, so the Windows rules are tested on
+/// every platform. On Windows a `:` is refused anywhere in a part: it is how
+/// a drive (`C:`, `C:x`) or an alternate data stream (`a.jpg:hidden`) is
+/// named, and no name rekordbox writes holds one. A part made only of dots
+/// and spaces is refused too, as Windows trims trailing dots and spaces from
+/// a name and could leave `..`.
+fn plain_part(part: &str, windows: bool) -> bool {
+    if part.is_empty() || part == "." || part == ".." {
+        return false;
+    }
+    if windows && (part.contains(':') || part.trim_end_matches(['.', ' ']).is_empty()) {
+        return false;
+    }
+    let mut components = Path::new(part).components();
+    matches!((components.next(), components.next()), (Some(Component::Normal(_)), None))
 }
 
 fn content_type(path: &Path) -> &'static str {
@@ -311,6 +326,33 @@ mod tests {
         assert_eq!(handle(&state, &request).status(), StatusCode::BAD_REQUEST);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_link_on_a_stick_does_not_serve_the_file_it_points_to() {
+        // A stick is not the user's own data: an artwork path its library
+        // names may be a link to any file, which must not reach the page.
+        let dir = tempfile::tempdir().unwrap();
+        let (stick, secret) = (dir.path().join("STICK"), dir.path().join("id_rsa"));
+        std::fs::create_dir_all(stick.join("PIONEER/Artwork/00001")).unwrap();
+        std::fs::write(&secret, b"secret").unwrap();
+        std::fs::write(stick.join("PIONEER/Artwork/00001/a1.jpg"), b"jpeg").unwrap();
+        std::os::unix::fs::symlink(&secret, stick.join("PIONEER/Artwork/00001/a2.jpg")).unwrap();
+
+        let state = Arc::new(AppState::new());
+        let asset = |artwork: &str| crate::device_library::DeviceAssets { mount: stick.clone(), audio: String::new(), analysis: String::new(), artwork: artwork.into() };
+        state.remember_device_assets(&stick, [
+            ("file:plain".to_string(), asset("/PIONEER/Artwork/00001/a1.jpg")),
+            ("file:linked".to_string(), asset("/PIONEER/Artwork/00001/a2.jpg")),
+        ]);
+        let get = |id: &str| handle(&state, &Request::builder().uri(format!("rbl://localhost/artwork/{id}")).body(Vec::new()).unwrap());
+
+        let plain = get("file%3Aplain");
+        assert_eq!((plain.status(), plain.body().as_slice()), (StatusCode::OK, b"jpeg".as_slice()));
+        let linked = get("file%3Alinked");
+        assert_eq!(linked.status(), StatusCode::NOT_FOUND);
+        assert_eq!(linked.body().len(), 0);
+    }
+
     #[test]
     fn a_request_that_is_not_for_artwork_is_refused() {
         let state = Arc::new(AppState::new());
@@ -395,12 +437,35 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
     #[test]
-    fn a_part_that_names_a_drive_is_refused() {
-        let root = Path::new("C:\\share");
-        for attempt in ["/PIONEER/C:/Windows/win.ini", "D:\\secret.jpg", "/PIONEER/D:"] {
+    fn a_part_that_names_a_drive_or_root_is_refused_on_windows() {
+        // Pure checks, so they run on every platform's CI, not only Windows.
+        for part in ["C:", "D:secret.jpg", "a1.jpg:hidden", "..", ".", "...", ". .", ".. ", ""] {
+            assert!(!plain_part(part, true), "{part:?}");
+        }
+        for part in ["PIONEER", "Artwork", "a1.jpg", "artwork.jpg", "00a", ".hidden", "a.b.c"] {
+            assert!(plain_part(part, true), "{part:?}");
+        }
+        // Elsewhere ':' is an ordinary character, but `..` is still refused.
+        assert!(plain_part("a:b", false));
+        assert!(!plain_part("..", false));
+        assert!(!plain_part("/abs", false));
+    }
+
+    #[test]
+    fn a_stored_path_that_names_a_drive_root_or_share_is_refused() {
+        // Split on both separators, so a UNC or rooted spelling becomes plain
+        // parts under the root; a drive or `..` anywhere refuses the path.
+        let root = Path::new("/share");
+        for attempt in ["/PIONEER/../../x.jpg", "..\\..\\x.jpg"] {
             assert!(resolve_under(root, attempt).is_none(), "{attempt}");
+        }
+        assert_eq!(resolve_under(root, "\\\\server\\share\\a.jpg"), Some(root.join("server").join("share").join("a.jpg")));
+        assert_eq!(resolve_under(root, "/abs/a.jpg"), Some(root.join("abs").join("a.jpg")));
+        if cfg!(windows) {
+            for attempt in ["/PIONEER/C:/Windows/win.ini", "C:\\x", "D:\\secret.jpg", "/PIONEER/D:"] {
+                assert!(resolve_under(root, attempt).is_none(), "{attempt}");
+            }
         }
     }
 

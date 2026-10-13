@@ -122,14 +122,40 @@ impl DeviceAssets {
         }
         // `resolve_under` only joins (#271), so whether the file is there is
         // asked here: a miss is what sends the lookup to the listings.
-        // perf-ok: one `stat`, as the canonicalising join it replaces did.
-        let there = |relative: &str| crate::protocol::resolve_under(mount, relative).filter(|path| path.exists());
+        let there = |relative: &str| crate::protocol::resolve_under(mount, relative).filter(|path| plainly_under(mount, path));
         there(relative).or_else(|| {
             let found = device::StickFiles::new(mount).locate(relative);
             let within = found.strip_prefix(mount).ok()?.to_str()?.to_owned();
             there(&within)
         })
     }
+}
+
+/// Whether `path` is there below `mount` with no link on the way down.
+///
+/// A stick is not the user's own data: HFS+, APFS and ext4 sticks can hold
+/// symbolic links, and one named where the stick's library expects artwork
+/// or a `.DAT` could otherwise hand any file the app can read to the webview.
+/// Each part is looked at with `symlink_metadata`, as the backups do, rather
+/// than by resolving the whole path: asking a volume for a file's final path
+/// fails on some Windows volumes (#271). On Windows a junction counts as a
+/// link too.
+// perf-ok: one `lstat` per part (four or five for a stick file), only for a
+// stick's own track.
+fn plainly_under(mount: &Path, path: &Path) -> bool {
+    let Ok(below) = path.strip_prefix(mount) else { return false };
+    let mut at = mount.to_path_buf();
+    let mut any = false;
+    for part in below.components() {
+        let std::path::Component::Normal(part) = part else { return false };
+        at.push(part);
+        any = true;
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if !meta.file_type().is_symlink() => {}
+            _ => return false,
+        }
+    }
+    any
 }
 
 /// The file a deck, the preview or the waveform should open for `track`,
@@ -687,6 +713,35 @@ mod tests {
         };
         assert_eq!((assets.audio_file(), assets.analysis_dat()), (None, None));
         assert_eq!(assets.artwork_file(), Some(stick.path().join("PIONEER/Artwork/00001/a1.jpg")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stick_file_reached_through_a_link_is_not_named() {
+        // A stick's library is untrusted: a link where it names a `.DAT` or
+        // artwork, or a linked folder on the way, must not lead out of the
+        // stick to another file (#271 review).
+        let dir = tempfile::tempdir().unwrap();
+        let (stick, outside) = (dir.path().join("STICK"), dir.path().join("outside"));
+        std::fs::create_dir_all(stick.join("PIONEER/Artwork/00001")).unwrap();
+        std::fs::create_dir_all(stick.join("PIONEER/USBANLZ")).unwrap();
+        std::fs::create_dir_all(outside.join("00000001")).unwrap();
+        std::fs::write(outside.join("00000001/ANLZ0000.DAT"), b"dat").unwrap();
+        std::fs::write(outside.join("secret"), b"secret").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret"), stick.join("PIONEER/Artwork/00001/a1.jpg")).unwrap();
+        std::os::unix::fs::symlink(&outside, stick.join("PIONEER/USBANLZ/P000")).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret"), stick.join("Contents.mp3")).unwrap();
+
+        let assets = DeviceAssets {
+            mount: stick.clone(),
+            audio: "/Contents.mp3".into(),
+            analysis: "/PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT".into(),
+            artwork: "/PIONEER/Artwork/00001/a1.jpg".into(),
+        };
+        assert_eq!((assets.audio_file(), assets.analysis_dat(), assets.artwork_file()), (None, None, None));
+        // The case-insensitive fallback (#334) does not get round it either.
+        let shouted = DeviceAssets { analysis: assets.analysis.to_uppercase(), artwork: assets.artwork.to_uppercase(), ..assets };
+        assert_eq!((shouted.analysis_dat(), shouted.artwork_file()), (None, None));
     }
 
     #[test]
