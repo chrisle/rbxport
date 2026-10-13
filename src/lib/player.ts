@@ -1080,6 +1080,21 @@ export function resizedLoopRange(
   return { range: [fromMs, fromMs + length], beats };
 }
 
+/** A loop's two ends, in seconds. */
+export interface LoopRange {
+  inSeconds: number;
+  outSeconds: number;
+}
+
+/**
+ * Whether two loops are the same range. The engine reports its loop in
+ * frames, so a loop set in seconds comes back up to half a frame off; a
+ * millisecond either way is the same loop.
+ */
+export function sameLoopRange(a: LoopRange, b: LoopRange): boolean {
+  return Math.abs(a.inSeconds - b.inSeconds) < 0.001 && Math.abs(a.outSeconds - b.outSeconds) < 0.001;
+}
+
 /**
  * The head after its loop changes to `from`–`to`. A head at or past the
  * end goes back by whole loops, so it keeps its place in the beat. A head

@@ -67,7 +67,9 @@ import {
   LOOP_BEATS_MIN,
   loopBeatsLabel,
   resizedLoopRange,
+  sameLoopRange,
   wrapIntoLoop,
+  type LoopRange,
   tempoAtMs,
   tempoAnnotations,
   type BeatGrid as TrackBeatGrid,
@@ -1458,6 +1460,17 @@ export const Player = memo(function Player({
   /** A LOOP IN pressed and waiting for its OUT, in seconds. */
   const [loopIn, setLoopIn] = useState<number | null>(null);
   const activeLoop = playback.loop?.active ?? false;
+  /**
+   * The beat loop AU or a beat loop key last set. The length field is lit
+   * only while that loop is the one playing: rekordbox 7.2.19's
+   * `PlayCuePanelDJ::LoopController::updateLoopState` @0x1000171b0 lights it
+   * from the deck's auto beat loop state alone, and calling a memory cue or
+   * loop clears that state (`CueBehavior::doSetCurrentCue` @0x102b02e34,
+   * `CueState::clearAutoBeatLoopState`). A called memory loop of four beats
+   * is not shown as the field's 32 (#352).
+   */
+  const [beatLoop, setBeatLoop] = useState<LoopRange | null>(null);
+  const beatLoopOn = activeLoop && beatLoop !== null && playback.loop !== null && sameLoopRange(playback.loop, beatLoop);
   // A locked deck loops on whole beats: a loop IN between two beats, or a
   // length such as 1.5 beats, takes the deck off the master's beat.
   const loopSnap = quantize ? (phaseLocked ? grid : quantizeGrid) : null;
@@ -1465,7 +1478,9 @@ export const Player = memo(function Player({
   const loopOfBeats = useCallback((beats: number) => {
     if (playback.idle) return;
     const range = beatLoopRange(grid, loopSnap, playback.positionNow() * 1000, beats);
-    if (range) playback.setLoop(range[0] / 1000, range[1] / 1000);
+    if (!range) return;
+    setBeatLoop({ inSeconds: range[0] / 1000, outSeconds: range[1] / 1000 });
+    playback.setLoop(range[0] / 1000, range[1] / 1000);
   }, [playback, grid, loopSnap]);
   const autoLoop = useCallback(() => {
     if (playback.idle) return;
@@ -1510,6 +1525,9 @@ export const Player = memo(function Player({
    * beat loop on the grid, a manual loop in time. A head past the new out
    * point keeps its place in the beat: it goes back by whole loops, not to
    * the in point. With no loop playing, only the next beat loop changes.
+   * The field's length goes with the beat loop AU set; a memory, hot or
+   * manual loop changes length and leaves the field as it is, as rekordbox's
+   * field shows its auto beat loop length only (see `beatLoop`).
    */
   const resizeLoop = useCallback((factor: number) => {
     const loop = playback.loop;
@@ -1520,13 +1538,16 @@ export const Player = memo(function Player({
     // Rounded, so a loop from an on-beat IN finds its beat on the grid.
     const resized = resizedLoopRange(grid, Math.round(loop.inSeconds * 1000), loop.outSeconds * 1000, loopBeats, factor);
     if (!resized) return;
-    setLoopBeats(resized.beats);
     const [from, to] = [resized.range[0] / 1000, resized.range[1] / 1000];
+    if (beatLoopOn) {
+      setLoopBeats(resized.beats);
+      setBeatLoop({ inSeconds: from, outSeconds: to });
+    }
     playback.setLoop(from, to);
     const head = playback.positionNow();
     const wrapped = wrapIntoLoop(head, from, to);
     if (wrapped !== head) playback.seek(wrapped);
-  }, [playback, grid, loopBeats]);
+  }, [playback, grid, loopBeats, beatLoopOn]);
   /** AU or MA. A change drops an IN that waits for its OUT. */
   const chooseLoopMode = useCallback((mode: "auto" | "manual") => {
     setLoopMode(mode);
@@ -1547,6 +1568,7 @@ export const Player = memo(function Player({
     onShorter: () => resizeLoop(0.5),
     onLonger: () => resizeLoop(2),
     active: activeLoop,
+    beatLoopOn,
     pendingIn: loopIn !== null,
     canLoop: !playback.idle && grid.times.length >= 2,
     idle: playback.idle,
@@ -1554,7 +1576,7 @@ export const Player = memo(function Player({
     onIn: loopMode === "auto" ? () => loopOfBeats(loopBeats) : markLoopIn,
     onOut: loopOut,
     hasLoop: playback.loop !== null,
-  }), [loopMode, chooseLoopMode, loopBeats, resizeLoop, activeLoop, loopIn, playback.idle, playback.loop, grid.times.length,
+  }), [loopMode, chooseLoopMode, loopBeats, resizeLoop, activeLoop, beatLoopOn, loopIn, playback.idle, playback.loop, grid.times.length,
     autoLoop, loopOfBeats, markLoopIn, loopOut]);
   // A play is recorded after a minute of the track sounding, once per load,
   // when Preferences › Advanced › History says so and the library can be
@@ -2796,8 +2818,8 @@ export const Player = memo(function Player({
                 <button
                   type="button"
                   className={styles.pageNumber}
-                  data-on={activeLoop || undefined}
-                  aria-pressed={activeLoop}
+                  data-on={beatLoopOn || undefined}
+                  aria-pressed={beatLoopOn}
                   aria-label={activeLoop ? "Exit loop" : `${loopBeats} beat loop`}
                   title={tip(activeLoop ? "Exit the loop" : `${loopBeatsLabel(loopBeats)} Beat Loop`)}
                   disabled={playback.idle || grid.times.length < 2}

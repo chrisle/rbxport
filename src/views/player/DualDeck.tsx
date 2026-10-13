@@ -154,6 +154,11 @@ export interface DualLoop {
   onLonger: () => void;
   /** A loop is playing. */
   active: boolean;
+  /**
+   * The playing loop is the beat loop the field set, which lights the
+   * field. A memory, hot or manual loop plays with the field unlit.
+   */
+  beatLoopOn: boolean;
   /** MA: an IN is set and waits for its OUT. */
   pendingIn: boolean;
   /** A track with a grid to count beats on. */
@@ -242,8 +247,8 @@ export const DualControls = memo(function DualControls({
         <button
           type="button"
           className={styles.loopField}
-          data-on={loop.active || undefined}
-          aria-pressed={loop.active}
+          data-on={loop.beatLoopOn || undefined}
+          aria-pressed={loop.beatLoopOn}
           aria-label={loop.active ? "Exit loop" : `${loop.beats} beat loop`}
           title={tip(loop.active ? "Exit the loop" : `${loopBeatsLabel(loop.beats)} Beat Loop`)}
           disabled={!loop.canLoop}

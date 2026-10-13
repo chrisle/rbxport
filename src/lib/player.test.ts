@@ -7,6 +7,7 @@ import {
   beatLoopRange,
   loopBeatsLabel,
   resizedLoopRange,
+  sameLoopRange,
   wrapIntoLoop,
   BEATS_PER_BAR,
   DETAIL_BARS,
@@ -1176,5 +1177,22 @@ describe("callLeavesFrom", () => {
 
   it("still drops a call the head moved away from inside a loop", () => {
     expect(callLeavesFrom(1.75, 1.5, 0.5, 0.15)).toBeNull();
+  });
+});
+
+describe("sameLoopRange", () => {
+  it("takes a loop read back from the engine's frames as the loop that was set", () => {
+    const set = { inSeconds: 12.345, outSeconds: 14.109 };
+    // 48 kHz frames, rounded: half a frame either way.
+    const read = { inSeconds: Math.round(12.345 * 48_000) / 48_000, outSeconds: Math.round(14.109 * 48_000) / 48_000 };
+    expect(sameLoopRange(set, read)).toBe(true);
+  });
+
+  it("tells a called memory loop from the beat loop the field set", () => {
+    // #352: four beats at 136 BPM from the same in point is not 32.
+    const beatLoop = { inSeconds: 10, outSeconds: 10 + (32 * 60) / 136 };
+    const memoryLoop = { inSeconds: 10, outSeconds: 10 + (4 * 60) / 136 };
+    expect(sameLoopRange(beatLoop, memoryLoop)).toBe(false);
+    expect(sameLoopRange(beatLoop, { ...beatLoop, inSeconds: 10.01 })).toBe(false);
   });
 });
