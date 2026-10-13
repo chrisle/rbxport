@@ -154,7 +154,8 @@ async function realBackend(): Promise<Backend> {
       if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
-    analyseTrack: (trackId, mode = "rbxport", settings) => invoke<AnalysisResult>("analyse_track", { trackId, mode, settings }),
+    analyseTrack: (trackId, mode = "rbxport", settings, keyTag) =>
+      invoke<AnalysisResult>("analyse_track", { trackId, mode, settings, keyTag: keyTag ?? null }),
     trackBeats: async (trackId) => {
       // Raw bytes rather than a JSON array of objects: a long mix has tens of
       // thousands of beats, and `{"timeMs":123,"downbeat":true}` each is an
@@ -594,8 +595,8 @@ async function realBackend(): Promise<Backend> {
       gridRedo: (track, deck) => invoke<GridState>("grid_redo", { track, deck: deck ?? null }),
       gridLock: (track, on) => invoke<GridState>("grid_lock", { track, on }),
       convertMemoryCuesToHot: (track) => invoke<number>("convert_memory_cues_to_hot", { track }),
-      setTrackField: (tracks, field, value) =>
-        invoke<EditHistoryState>("set_track_field", { tracks, field, value }),
+      setTrackField: (tracks, field, value, options) =>
+        invoke<EditHistoryState>("set_track_field", { tracks, field, value, writeKeyTag: options?.writeKeyTag ?? false }),
       addArtwork: (tracks, image) => invoke<EditHistoryState>("add_artwork", { tracks, image }),
       addPlaylistArtwork: (playlist, image) => invoke<number>("add_playlist_artwork", { playlist, image }),
       setMyTags: (track, tags) => invoke<EditHistoryState>("set_my_tags", { track, tags }),

@@ -1620,5 +1620,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "Nessun elemento da importare. Scegli nelle Preferenze cosa recupera Importa.",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "Sostituisci i cue e le griglie di battute dei brani corrispondenti nella libreria con quelli del dispositivo USB.",
   "cues and beat grids": "cue e griglie di battute",
-  "play history": "cronologia di riproduzione"
+  "play history": "cronologia di riproduzione",
+  "Key Analysis": "Rilevamento della tonalità",
+  "Write the value to the ID3 tag": "Scrive il valore nel tag ID3",
+  "Store the detected key in the ID3 tag.": "Salva la tonalità rilevata nel tag ID3."
 }

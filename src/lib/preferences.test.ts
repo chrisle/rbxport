@@ -66,6 +66,11 @@ describe("sanitisePreferences", () => {
     expect(DEFAULT_PREFERENCES.analysis.firstBeatCue).toBe(false);
     expect(sanitisePreferences({ analysis: { firstBeatCue: "yes" } }).analysis.firstBeatCue).toBe(false);
     expect(sanitisePreferences({ analysis: { firstBeatCue: true } }).analysis.firstBeatCue).toBe(true);
+    // "Write the value to the ID3 tag" is off until asked for, as rekordbox's
+    // `writeKeyInTag` is (#204).
+    expect(DEFAULT_PREFERENCES.analysis.writeKeyTag).toBe(false);
+    expect(sanitisePreferences({ analysis: { writeKeyTag: "yes" } }).analysis.writeKeyTag).toBe(false);
+    expect(sanitisePreferences({ analysis: { writeKeyTag: true } }).analysis.writeKeyTag).toBe(true);
   });
 
   it("offers rekordbox's ten BPM ranges with 70-180 the default", () => {

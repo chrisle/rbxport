@@ -1469,6 +1469,13 @@ test("the Analysis pane says what Auto Analysis will do", async ({ page }) => {
   await expect(automatic).not.toBeChecked();
   await automatic.click();
   await expect(automatic).toBeChecked();
+
+  // rekordbox's Key Analysis > Write the value to the ID3 tag: off by default (#204).
+  const writeKey = dialog.getByRole("region", { name: "Key Analysis" })
+    .getByRole("switch", { name: "Write the value to the ID3 tag" });
+  await expect(writeKey).not.toBeChecked();
+  await writeKey.click();
+  await expect(writeKey).toBeChecked();
 });
 
 test("a rating appears at once rather than waiting for the reload", async ({ page }) => {

@@ -1622,5 +1622,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "Δεν έχει οριστεί τίποτα για εισαγωγή. Επιλέξτε στις Προτιμήσεις τι φέρνει πίσω η Εισαγωγή.",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "Αντικατάσταση των cue και των beat grid των αντίστοιχων κομματιών της βιβλιοθήκης σας με εκείνα της συσκευής USB.",
   "cues and beat grids": "cue και beat grid",
-  "play history": "ιστορικού αναπαραγωγής"
+  "play history": "ιστορικού αναπαραγωγής",
+  "Key Analysis": "Εντοπισμός τονικότητας",
+  "Write the value to the ID3 tag": "Εγγραφή της τιμής στο ID3",
+  "Store the detected key in the ID3 tag.": "Αποθηκεύει την τονικότητα που εντοπίστηκε στην ετικέτα ID3."
 }

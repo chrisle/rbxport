@@ -1,4 +1,5 @@
 /** Analysis presets retain high-precision beat placement and key detection. */
+import { useTranslation } from "@/i18n";
 import { BPM_RANGES } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
@@ -12,8 +13,10 @@ export const ANALYSIS_TABS: readonly { id: AnalysisTab; label: string }[] = [
 
 export function AnalysisPane(_: { tab: AnalysisTab }) {
   const { preferences, update } = usePreferencesContext();
+  const t = useTranslation();
   const auto = preferences.analysis.auto;
   return (
+    <>
     <Section title="Track Analysis">
       <p className={styles.analysisIntro}>Choose how tracks are analysed and how much processing power to use.</p>
       <div className={styles.analysisField}>
@@ -46,5 +49,14 @@ export function AnalysisPane(_: { tab: AnalysisTab }) {
         <p>Adds a memory cue on the first beat of the beat grid, unless the track already has one there.</p>
       </div>
     </Section>
+    {/* rekordbox's Preferences > Analysis > Key Analysis, off by default. */}
+    <Section title={t("Key Analysis")}>
+      <div className={styles.analysisSwitch}>
+        <Toggle label={t("Write the value to the ID3 tag")} checked={preferences.analysis.writeKeyTag}
+          onChange={(writeKeyTag) => update("analysis", { writeKeyTag })} />
+        <p>{t("Store the detected key in the ID3 tag.")}</p>
+      </div>
+    </Section>
+    </>
   );
 }

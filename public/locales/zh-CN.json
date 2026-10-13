@@ -1623,5 +1623,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "未设置任何导入项目。请在优先选项中选择“导入”要取回的内容。",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "用 USB 设备上的 cue 点和节拍网格替换媒体库中匹配曲目的 cue 点和节拍网格。",
   "cues and beat grids": "cue 点和节拍网格",
-  "play history": "播放历史记录"
+  "play history": "播放历史记录",
+  "Key Analysis": "调性检测",
+  "Write the value to the ID3 tag": "将此数值写入ID3",
+  "Store the detected key in the ID3 tag.": "将检测到的调性保存到 ID3 标签中。"
 }

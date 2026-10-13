@@ -326,6 +326,7 @@ pub async fn set_track_field<R: tauri::Runtime>(
     tracks: Vec<String>,
     field: String,
     value: String,
+    write_key_tag: Option<bool>,
 ) -> AppResult<crate::dto::EditHistoryDto> {
     let Some(which) = rbl_db::write::TrackField::parse(&field) else {
         return Err(AppError::new(ErrorKind::ReadOnly, format!("{field} cannot be edited here.")));
@@ -361,8 +362,27 @@ pub async fn set_track_field<R: tauri::Runtime>(
         let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
         return Ok(dto);
     }
-    recorded_edit(app, state, "set_track_field", Touched::Tracks, "Track Edit", move |w| {
+    // "Write the value to the ID3 tag": rekordbox's `modifyTrack` writes an
+    // edited key into each track's file after saving it, with the name as
+    // edited [OBS chris-win11: `Am` typed under Alphanumeric wrote `Am`].
+    let key_tag = (which == rbl_db::write::TrackField::Key && write_key_tag == Some(true))
+        .then(|| (tracks.clone(), value.trim().to_owned()));
+    let shared = Arc::clone(&state);
+    let dto = recorded_edit(app, state, "set_track_field", Touched::Tracks, "Track Edit", move |w| {
         each_track(w, &tracks, |w, track| w.set_field_with_undo(track, which, &value))
     })
-    .await
+    .await?;
+    if let Some((tracks, key)) = key_tag {
+        let library = shared.library()?;
+        blocking("write_key_tag", move || {
+            for track in &tracks {
+                if let Some(row) = library.row_of(track) {
+                    crate::key_tag::write_logged(track, library.folder_path.get(row as usize), &key);
+                }
+            }
+            Ok(())
+        })
+        .await?;
+    }
+    Ok(dto)
 }

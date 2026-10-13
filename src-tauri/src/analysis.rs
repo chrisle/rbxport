@@ -100,6 +100,10 @@ pub struct AnalysisResultDto {
     /// command can tell decks showing the track to refetch its cues.
     #[serde(skip)]
     pub added_first_beat_cue: bool,
+    /// The key this pass found, for "Write the value to the ID3 tag"; `None`
+    /// when it found none or did not look.
+    #[serde(skip)]
+    pub detected_key: Option<crate::key_tag::DetectedKey>,
 }
 
 /// Analyses one track and keeps the result: the files in the share tree,
@@ -117,6 +121,7 @@ pub async fn analyse_track<R: tauri::Runtime>(
     track_id: String,
     mode: Option<String>,
     settings: Option<AnalysisSettings>,
+    key_tag: Option<crate::key_tag::KeyNotation>,
 ) -> AppResult<AnalysisResultDto> {
     let preset = match mode.as_deref().unwrap_or("rbxport") {
         "rekordbox" => rbl_analysis::AnalysisPreset::Rekordbox,
@@ -129,7 +134,15 @@ pub async fn analyse_track<R: tauri::Runtime>(
     let editor = Arc::clone(&editor);
     let settings = settings.unwrap_or_default();
     let result = blocking("analyse_track", move || {
-        analyse_and_save(&state, &library, &share, &track_id, preset, &settings, &editor)
+        let result = analyse_and_save(&state, &library, &share, &track_id, preset, &settings, &editor)?;
+        // After the library has the key, as rekordbox writes the tag after
+        // `modTrackKeyInfo` stores it. Only with the preference on, which is
+        // what `key_tag` being sent says.
+        if let (Some(notation), Some(key)) = (key_tag, result.detected_key.as_ref()) {
+            let path = library.row_of(&track_id).map_or("", |row| library.folder_path.get(row as usize));
+            crate::key_tag::write_logged(&track_id, path, key.name_for(notation));
+        }
+        Ok(result)
     }).await?;
     // The track's id, well inside the 1 KB event cap: a deck showing the
     // track redraws its waveform and grid from the new files.
@@ -224,7 +237,8 @@ fn analyse_and_save(
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped into 0..=u32::MAX on the line above")]
     let to_u32 = |v: f64| v.round().clamp(0.0, f64::from(u32::MAX)) as u32;
     let bpm_x100 = to_u32(analysis.tempo.bpm * 100.0);
-    let detected_key = settings.key.then(|| analysis.key.map(|k| k.name)).flatten();
+    let found_key = settings.key.then(|| analysis.key.as_ref().map(detected)).flatten();
+    let detected_key = found_key.as_ref().map(|k| k.classic.clone());
     let key = detected_key.clone().unwrap_or_else(|| library.keys.name(library.key.get(row).copied().unwrap_or(0)).to_owned());
     let duration_sec = to_u32(duration_secs);
     // The whole file was decoded, however long, so this is its length.
@@ -247,7 +261,12 @@ fn analyse_and_save(
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         analysis_path: relative,
         added_first_beat_cue,
+        detected_key: found_key,
     })
+}
+
+fn detected(key: &rbl_analysis::key::MusicalKey) -> crate::key_tag::DetectedKey {
+    crate::key_tag::DetectedKey { classic: key.name.clone(), camelot: key.camelot() }
 }
 
 fn decode_error(e: &rbl_audio::AudioError) -> AppError {
@@ -405,7 +424,8 @@ fn ensure_analysis_unlocked(state: &AppState, editor: &crate::grid::GridEditor, 
 /// A key-only pass never authors files or updates grid metadata.
 fn analyse_key_only(state: &AppState, library: &rbl_index::Library, row: usize, track_id: &str,
     audio: &rbl_audio::Audio, editor: &crate::grid::GridEditor, started: std::time::Instant) -> AppResult<AnalysisResultDto> {
-    let key = rbl_analysis::detect_key(&audio.samples, audio.sample_rate).map(|key| key.name);
+    let found_key = rbl_analysis::detect_key(&audio.samples, audio.sample_rate).as_ref().map(detected);
+    let key = found_key.as_ref().map(|key| key.classic.clone());
     let _edit_guard = state.edit_gate.lock();
     ensure_analysis_unlocked(state, editor, track_id)?;
     // Match full analysis: only use keys already named by this library.
@@ -428,6 +448,7 @@ fn analyse_key_only(state: &AppState, library: &rbl_index::Library, row: usize, 
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         analysis_path: library.analysis_path.get(row).to_owned(),
         added_first_beat_cue: false,
+        detected_key: found_key,
     })
 }
 

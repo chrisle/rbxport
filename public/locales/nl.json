@@ -1616,5 +1616,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "Er is niets ingesteld om te importeren. Kies in Voorkeuren wat Importeren ophaalt.",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "Cues en beatgrids van overeenkomende nummers in je bibliotheek vervangen door die van het USB-apparaat.",
   "cues and beat grids": "cues en beatgrids",
-  "play history": "afspeelgeschiedenis"
+  "play history": "afspeelgeschiedenis",
+  "Key Analysis": "Toonsoortdetectie",
+  "Write the value to the ID3 tag": "Schrijf waarde naar de ID3-tag",
+  "Store the detected key in the ID3 tag.": "Slaat de gedetecteerde toonsoort op in de ID3-tag."
 }

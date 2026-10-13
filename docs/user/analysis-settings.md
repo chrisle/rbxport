@@ -37,6 +37,35 @@ The app's local analysis lock and the library analysis-lock flag both prevent
 analysis. Locks are checked before decoding and before writing. A refused
 track contributes to the queue's failure count without stopping other tracks.
 
+## Write the key into the audio file
+
+Preferences > Analysis > **Key Analysis** > **Write the value to the ID3 tag**
+is rekordbox's setting of the same name (`writeKeyInTag`), and is off by
+default as it is there. With it on, the key also goes into the track's own
+file at the two moments rekordbox writes it:
+
+- when an analysis with KEY selected finds a key, and
+- when the key is edited in the information panel (a cleared key empties the
+  file's key).
+
+| File | Where the key goes |
+| --- | --- |
+| MP3 | ID3v2 `TKEY` (the tag is saved as ID3v2.4) |
+| AIFF | `TKEY` in the file's `ID3 ` chunk |
+| FLAC | Vorbis comment `INITIALKEY` |
+| M4A, WAV, others | Nothing; rekordbox writes no key into these either |
+
+After analysis the key is written in View > Key display format: `Dbm` under
+Classic, `12A` under Alphanumeric, as rekordbox writes it. An edited key is
+written as edited. Read-only files are passed over, as rekordbox passes them
+over; the log says so.
+
+The file is never rewritten in place. A copy beside it is written, read back
+and compared with the original — the audio byte for byte and every other tag
+item as it was — and only then renamed over it. A file whose tag cannot be
+read completely is left unchanged and the log says why. The evidence is in
+`crates/rbl-db/src/key_tag.rs`.
+
 ## Queued settings
 
 Each queued track holds a copy of its settings. Later preference changes or

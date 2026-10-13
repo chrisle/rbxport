@@ -1618,5 +1618,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "Inget är valt att importera. Välj i Preferenser vad Importera hämtar tillbaka.",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "Ersätt cues och beatgrids för matchande spår i ditt bibliotek med USB-enhetens.",
   "cues and beat grids": "cues och beatgrids",
-  "play history": "spelhistorik"
+  "play history": "spelhistorik",
+  "Key Analysis": "Identifiering av tonalitet",
+  "Write the value to the ID3 tag": "Skriv värdet till ID3",
+  "Store the detected key in the ID3 tag.": "Sparar den identifierade tonarten i ID3-taggen."
 }

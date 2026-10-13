@@ -1621,5 +1621,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "K importu není nic vybráno. V Nastavení zvolte, co má Importovat načíst.",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "Nahradit cue body a beat gridy odpovídajících skladeb v knihovně těmi z USB zařízení.",
   "cues and beat grids": "cue body a beat gridy",
-  "play history": "historii přehrávání"
+  "play history": "historii přehrávání",
+  "Key Analysis": "Detekce tóniny",
+  "Write the value to the ID3 tag": "Zapsat hodnotu do ID3",
+  "Store the detected key in the ID3 tag.": "Uloží zjištěnou tóninu do tagu ID3."
 }

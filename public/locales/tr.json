@@ -1621,5 +1621,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "İçe aktarılacak bir şey seçilmedi. Al'ın neyi geri getireceğini Tercihler'de seçin.",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "Kitaplığınızdaki eşleşen parçaların cue noktalarını ve beat grid'lerini USB aygıtındakilerle değiştirin.",
   "cues and beat grids": "cue noktaları ve beat grid'ler",
-  "play history": "çalma geçmişi"
+  "play history": "çalma geçmişi",
+  "Key Analysis": "Ton Algılama",
+  "Write the value to the ID3 tag": "Değeri ID3 etiketine yaz",
+  "Store the detected key in the ID3 tag.": "Algılanan tonu ID3 etiketine kaydeder."
 }

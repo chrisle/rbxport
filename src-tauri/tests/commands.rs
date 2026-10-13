@@ -631,7 +631,7 @@ fn library_history_names_and_reverses_each_supported_edit() {
     assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().rating, 4);
 
     let field = run(details::set_track_field(
-        s.handle(), s.state(), vec![track.clone()], "title".into(), "Seven".into(),
+        s.handle(), s.state(), vec![track.clone()], "title".into(), "Seven".into(), None,
     )).unwrap();
     assert_eq!(field.undo_label.as_deref(), Some("Track Edit"));
     run(commands::undo_edit(s.handle(), s.state())).unwrap();
@@ -718,7 +718,7 @@ fn library_backups_are_manual_only() {
     run(commands::set_track_comment(s.handle(), s.state(), vec![track_id(0)], "x".into())).unwrap();
     run(commands::create_playlist(s.handle(), s.state(), "Later".into(), ROOT.into(), None)).unwrap();
     run(cues::add_cue(s.handle(), s.state(), track_id(0), CueKind::Memory, 1_000)).unwrap();
-    run(details::set_track_field(s.handle(), s.state(), vec![track_id(0)], "title".into(), "T".into())).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![track_id(0)], "title".into(), "T".into(), None)).unwrap();
     assert!(!backups.exists(), "edits must not back up automatically");
 
     let path = run(commands::back_up_library(s.state())).unwrap();
@@ -954,10 +954,10 @@ fn the_information_panel_reads_the_record_and_writes_a_field_the_rows_follow() {
     assert_eq!(record.rating, 0);
     assert_eq!(record.duration_sec, 300);
 
-    run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "title".into(), "Nine".into())).unwrap();
-    run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "artist".into(), "Somebody".into()))
+    run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "title".into(), "Nine".into(), None)).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "artist".into(), "Somebody".into(), None))
         .unwrap();
-    run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "year".into(), "2019".into())).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "year".into(), "2019".into(), None)).unwrap();
     run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 2)).unwrap();
 
     let record = run(details::track_details(s.state(), track.clone())).unwrap();
@@ -972,10 +972,10 @@ fn the_information_panel_reads_the_record_and_writes_a_field_the_rows_follow() {
     assert_eq!(s.rows(view)[0].id, track, "the one track with an artist sorts first");
 
     // A field the writer does not take is refused before anything is opened.
-    let err = run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "bitrate".into(), "320".into()))
+    let err = run(details::set_track_field(s.handle(), s.state(), vec![track.clone()], "bitrate".into(), "320".into(), None))
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::ReadOnly);
-    let err = run(details::set_track_field(s.handle(), s.state(), vec![track], "year".into(), "soon".into())).unwrap_err();
+    let err = run(details::set_track_field(s.handle(), s.state(), vec![track], "year".into(), "soon".into(), None)).unwrap_err();
     assert_eq!(err.kind, ErrorKind::ReadOnly);
 }
 
@@ -994,7 +994,7 @@ fn the_information_panel_reads_and_writes_a_multiple_selection() {
     assert!(!selection.mixed.iter().any(|f| f == "genre"), "{:?}", selection.mixed);
     assert!(!selection.mixed.iter().any(|f| f == "artwork"), "none has artwork");
 
-    let edit = run(details::set_track_field(s.handle(), s.state(), tracks.clone(), "genre".into(), "Techno".into()))
+    let edit = run(details::set_track_field(s.handle(), s.state(), tracks.clone(), "genre".into(), "Techno".into(), None))
         .unwrap();
     assert_eq!(edit.undo_label.as_deref(), Some("Track Edit"));
     run(commands::set_track_rating(s.handle(), s.state(), tracks.clone(), 5)).unwrap();
@@ -1017,7 +1017,7 @@ fn the_information_panel_reads_and_writes_a_multiple_selection() {
 
     // rekordbox greys the Track Title box for several tracks; the command
     // refuses a title for more than one.
-    let err = run(details::set_track_field(s.handle(), s.state(), tracks, "title".into(), "Same".into()))
+    let err = run(details::set_track_field(s.handle(), s.state(), tracks, "title".into(), "Same".into(), None))
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::ReadOnly);
 }
@@ -1032,7 +1032,7 @@ fn an_edit_over_a_selection_with_a_removed_track_writes_the_rest_as_one_step() {
     let tracks = vec![track_id(2), track_id(3), track_id(4)];
     run(commands::remove_from_collection(s.handle(), s.state(), vec![track_id(3)])).unwrap();
 
-    run(details::set_track_field(s.handle(), s.state(), tracks.clone(), "genre".into(), "Techno".into()))
+    run(details::set_track_field(s.handle(), s.state(), tracks.clone(), "genre".into(), "Techno".into(), None))
         .unwrap();
     for track in [track_id(2), track_id(4)] {
         let record = run(details::track_details(s.state(), track.clone())).unwrap();
@@ -1344,6 +1344,105 @@ fn write_click_wav(path: &Path, seconds: u32) {
     std::fs::write(path, out).unwrap();
 }
 
+/// Preferences > Analysis > Key Analysis > "Write the value to the ID3 tag"
+/// (#204): an edited key goes into the file's `TKEY` only with the setting
+/// on, which the frontend says by sending `writeKeyTag`. The name goes in as
+/// edited, as rekordbox's `modifyTrack` writes it [OBS chris-win11].
+#[test]
+fn an_edited_key_goes_into_the_files_tag_only_with_the_preference_on() {
+    let s = shell();
+    let audio = s._dir.path().join("issue-204 Key.mp3");
+    let mut mp3 = Vec::new();
+    for i in 0..40u8 {
+        mp3.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]);
+        mp3.extend(std::iter::repeat_n(i, 413));
+    }
+    std::fs::write(&audio, &mp3).unwrap();
+    let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
+    let id = report.tracks[0].id.clone();
+    s.state().write(|w| w.ensure_detected_key("Am")).unwrap();
+
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Am".into(), None)).unwrap();
+    assert_eq!(std::fs::read(&audio).unwrap(), mp3, "off, the default: the file is not touched");
+
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Am".into(), Some(true))).unwrap();
+    assert_eq!(rbl_db::key_tag::read_key(&audio).unwrap().as_deref(), Some("Am"));
+    assert!(std::fs::read(&audio).unwrap().ends_with(&mp3), "the audio is as it was");
+
+    run(details::set_track_field(s.handle(), s.state(), vec![id], "key".into(), String::new(), Some(true))).unwrap();
+    assert_eq!(rbl_db::key_tag::read_key(&audio).unwrap().unwrap_or_default(), "", "a cleared key empties the tag's");
+}
+
+/// Twenty seconds of an A minor triad as 16-bit mono AIFF: something with a
+/// key for analysis to find, in a format rekordbox writes a key into.
+fn write_chord_aiff(path: &Path) {
+    let rate = 44_100u32;
+    let frames = rate * 20;
+    let mut ssnd = vec![0u8; 8];
+    for n in 0..frames {
+        let t = f64::from(n) / f64::from(rate);
+        let v: f64 = [220.0, 261.63, 329.63].iter().map(|f| (2.0 * std::f64::consts::PI * f * t).sin()).sum::<f64>() / 4.0;
+        ssnd.extend_from_slice(&((v * 20_000.0) as i16).to_be_bytes());
+    }
+    let mut comm = Vec::new();
+    comm.extend_from_slice(&1_u16.to_be_bytes());
+    comm.extend_from_slice(&frames.to_be_bytes());
+    comm.extend_from_slice(&16_u16.to_be_bytes());
+    comm.extend_from_slice(&[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]);
+    let mut body = b"AIFF".to_vec();
+    for (id, chunk) in [(b"COMM", &comm), (b"SSND", &ssnd)] {
+        body.extend_from_slice(id);
+        body.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
+        body.extend_from_slice(chunk);
+    }
+    let mut out = b"FORM".to_vec();
+    out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    out.extend_from_slice(&body);
+    std::fs::write(path, out).unwrap();
+}
+
+/// "Write the value to the ID3 tag" after analysis (#204): the detected key
+/// goes into the file in the notation rekordbox stores it in — the classic
+/// name under Classic, the Camelot code under Alphanumeric [OBS chris-win11:
+/// `Dbm`, then `12A`, for the same track] — and nothing goes in without it.
+#[test]
+fn analysis_writes_the_detected_key_into_the_file_in_the_display_notation() {
+    use rbxport_lib::analysis::AnalysisSettings;
+    let s = shell();
+    s.app.manage(Arc::new(rbxport_lib::grid::GridEditor::at(&s._dir.path().join("editor"))));
+    let audio = s._dir.path().join("issue-204 Chord.aiff");
+    write_chord_aiff(&audio);
+    let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
+    let id = report.tracks[0].id.clone();
+    let key_only = AnalysisSettings { bpm_grid: false, ..AnalysisSettings::default() };
+    let analyse = |notation: Option<&str>| {
+        run(rbxport_lib::analysis::analyse_track(
+            s.handle(),
+            s.state(),
+            s.app.state::<Arc<rbxport_lib::grid::GridEditor>>(),
+            id.clone(),
+            None,
+            Some(key_only),
+            notation.map(|n| serde_json::from_str(&format!("\"{n}\"")).unwrap()),
+        ))
+        .expect("the chord analyses")
+    };
+
+    let untouched = std::fs::read(&audio).unwrap();
+    let result = analyse(None);
+    assert!(!result.key.is_empty(), "a triad has a key");
+    assert_eq!(std::fs::read(&audio).unwrap(), untouched, "the preference off: no write");
+
+    let result = analyse(Some("classic"));
+    assert_eq!(rbl_db::key_tag::read_key(&audio).unwrap().as_deref(), Some(result.key.as_str()));
+
+    analyse(Some("alphanumeric"));
+    let camelot = rbl_core::musickey::parse(&result.key).map(|k| {
+        rbl_analysis::MusicalKey { name: result.key.clone(), tonic: k.pitch, minor: k.mode == rbl_core::musickey::Mode::Minor }.camelot()
+    });
+    assert_eq!(rbl_db::key_tag::read_key(&audio).unwrap(), camelot);
+}
+
 /// What Auto Analysis does after File > Import: the imported track's id goes
 /// to `analyse_track`, and once the queue drains the library is re-read. The
 /// track must then have a waveform and a grid to edit (#132).
@@ -1370,6 +1469,7 @@ fn an_imported_file_analyses_into_a_waveform_and_a_grid() {
         s.state(),
         s.app.state::<Arc<rbxport_lib::grid::GridEditor>>(),
         id.clone(),
+        None,
         None,
         None,
     ))

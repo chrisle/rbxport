@@ -367,7 +367,12 @@ export interface Backend {
    *
    * Slow — a decode and a DSP pass — so callers run these one at a time.
    */
-  analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport", settings?: AnalysisSettings): Promise<AnalysisResult>;
+  /**
+   * `keyTag` is "Write the value to the ID3 tag": the notation a key this
+   * pass finds is written into the track's file in, or absent to leave the
+   * file alone.
+   */
+  analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport", settings?: AnalysisSettings, keyTag?: KeyDisplay): Promise<AnalysisResult>;
 
   /**
    * A track's whole beat grid, as raw bytes: seven per beat, a little-endian
@@ -1765,7 +1770,8 @@ export interface Edits {
    * and the panel's BPM box is locked anyway, so the refusal only guards
    * other callers.
    */
-  setTrackField(tracks: readonly string[], field: TrackField, value: string): Promise<EditHistoryState>;
+  /** `writeKeyTag`: an edited key also goes into each track's file. */
+  setTrackField(tracks: readonly string[], field: TrackField, value: string, options?: { writeKeyTag?: boolean }): Promise<EditHistoryState>;
   /** Sets the My Tags on a track to exactly these ids. */
   setMyTags(track: string, tags: string[]): Promise<EditHistoryState>;
   /** Add Artwork: the image is filed in the share tree and the track points at it. */

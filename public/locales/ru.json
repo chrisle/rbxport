@@ -1623,5 +1623,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "Ничего не выбрано для импорта. Выберите в «Предпочтениях», что возвращает «Импорт».",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "Заменить метки и сетки битов совпадающих треков в библиотеке на метки и сетки с USB-устройства.",
   "cues and beat grids": "метки и сетки битов",
-  "play history": "историю воспроизведения"
+  "play history": "историю воспроизведения",
+  "Key Analysis": "Определение ключа",
+  "Write the value to the ID3 tag": "Записать значение в ID3",
+  "Store the detected key in the ID3 tag.": "Сохраняет определённую тональность в теге ID3."
 }

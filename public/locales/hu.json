@@ -1620,5 +1620,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "Nincs semmi kijelölve importálásra. A Kedvencek ablakban válassza ki, mit hozzon vissza az Importálás.",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "Az egyező számok jelzéseinek és ütemrácsainak cseréje a könyvtárban az USB-eszközön lévőkre.",
   "cues and beat grids": "jelzések és ütemrácsok",
-  "play history": "lejátszási előzmények"
+  "play history": "lejátszási előzmények",
+  "Key Analysis": "Hangnemérzékelés",
+  "Write the value to the ID3 tag": "Érték ID3-ba írása",
+  "Store the detected key in the ID3 tag.": "Az érzékelt hangnemet az ID3-címkébe menti."
 }

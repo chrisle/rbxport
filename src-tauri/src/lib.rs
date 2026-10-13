@@ -17,6 +17,7 @@ mod usb_import;
 pub mod cues;
 pub mod details;
 pub mod grid;
+mod key_tag;
 mod durable;
 mod backups;
 mod backup_copy;

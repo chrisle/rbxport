@@ -1629,5 +1629,8 @@
   "Nothing is set to import. Choose what Import brings back in Preferences.": "インポートする項目がありません。[インポート]で取り込む項目を環境設定で選択してください。",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "ライブラリ内の一致するトラックのキューとビートグリッドを、USBデバイスのもので置き換えます。",
   "cues and beat grids": "キューとビートグリッド",
-  "play history": "再生履歴"
+  "play history": "再生履歴",
+  "Key Analysis": "キー検出",
+  "Write the value to the ID3 tag": "ID3タグに値を保存",
+  "Store the detected key in the ID3 tag.": "検出したキーを ID3 タグに保存します。"
 }

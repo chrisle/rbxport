@@ -50,7 +50,7 @@ import styles from "./InfoPanel.module.css";
 import {
   acceptable, COLORS, commitsTyping, dateSegments, selectionView, singleView, summaryFacts, type InfoView,
 } from "./fields";
-import { useTooltip } from "@/store/usePreferences";
+import { usePreferences, useTooltip } from "@/store/usePreferences";
 
 export type InfoTab = "summary" | "info" | "artwork";
 
@@ -352,12 +352,16 @@ export const FIELD_LABEL: Record<TrackField, string> = {
 
 function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFormProps) {
   const { ids, text } = view;
+  // Key Analysis > "Write the value to the ID3 tag": an edited key also goes
+  // into each file, as rekordbox's `modifyTrack` writes it.
+  const writeKeyTag = usePreferences().analysis.writeKeyTag;
 
   const commit = useCallback(
     (field: TrackField, value: string) => {
-      void onEdit(`${FIELD_LABEL[field]} saved.`, (b) => b.edits.setTrackField(ids, field, value));
+      void onEdit(`${FIELD_LABEL[field]} saved.`, (b) =>
+        b.edits.setTrackField(ids, field, value, { writeKeyTag: field === "key" && writeKeyTag }));
     },
-    [ids, onEdit],
+    [ids, onEdit, writeKeyTag],
   );
 
   const setColor = useCallback(

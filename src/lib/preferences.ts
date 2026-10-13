@@ -191,6 +191,13 @@ export interface AnalysisPreferences {
   firstBeatCue: boolean;
   /** The tempo range automatic analysis searches; also the Analysis Setting default. */
   bpmRange: BpmRange;
+  /**
+   * Key Analysis > "Write the value to the ID3 tag": a key analysis finds,
+   * or an edited key, also goes into the track's audio file (MP3 and AIFF
+   * `TKEY`, FLAC `INITIALKEY`), as rekordbox's `writeKeyInTag` does. Off by
+   * default, as it is in rekordbox.
+   */
+  writeKeyTag: boolean;
 }
 
 /**
@@ -335,6 +342,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     auto: false,
     firstBeatCue: false,
     bpmRange: "70-180",
+    writeKeyTag: false,
   },
   djSystem: {
     waveformColor: "3band",
@@ -509,6 +517,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       auto: bool(analysis.auto, d.analysis.auto),
       firstBeatCue: bool(analysis.firstBeatCue, d.analysis.firstBeatCue),
       bpmRange: oneOf(analysis.bpmRange, BPM_RANGES, d.analysis.bpmRange),
+      writeKeyTag: bool(analysis.writeKeyTag, d.analysis.writeKeyTag),
     },
     djSystem: {
       waveformColor: oneOf(dj.waveformColor, WAVEFORM_COLORS, d.djSystem.waveformColor),

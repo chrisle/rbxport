@@ -48,8 +48,17 @@ export function useAnalysis(
    */
   held = false,
 ): Analysis {
-  const storedPreferences = usePreferences().analysis;
-  const { mode, concurrentTracks, firstBeatCue, bpmRange } = preferences ?? storedPreferences;
+  const stored = usePreferences();
+  const storedPreferences = stored.analysis;
+  const { mode, concurrentTracks, firstBeatCue, bpmRange, writeKeyTag } = preferences ?? storedPreferences;
+  // "Write the value to the ID3 tag" is read when a track's analysis is
+  // sent, not when it was queued: rekordbox reads `writeKeyInTag` as each
+  // analysis completes. The key display format decides the notation.
+  const keyTag = useRef<"classic" | "alphanumeric" | undefined>(undefined);
+  const keyDisplay = stored.view.keyDisplay;
+  useEffect(() => {
+    keyTag.current = writeKeyTag ? keyDisplay : undefined;
+  }, [writeKeyTag, keyDisplay]);
   const [state, setState] = useState<QueueState>(emptyQueue);
   // The tracks whose request is in flight, so the effect below never sends
   // one twice.
@@ -80,7 +89,10 @@ export function useAnalysis(
       void (async () => {
         try {
           const backend = await getBackend();
-          const result = await backend.analyseTrack(track.id, track.analysis?.mode ?? mode, track.analysis);
+          const trackMode = track.analysis?.mode ?? mode;
+          const result = keyTag.current
+            ? await backend.analyseTrack(track.id, trackMode, track.analysis, keyTag.current)
+            : await backend.analyseTrack(track.id, trackMode, track.analysis);
           setState((s) => succeed(s, track.id));
           onAnalysed?.(track.id, result);
         } catch (e) {

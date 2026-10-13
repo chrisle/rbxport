@@ -575,7 +575,7 @@ fn edit_track(id: u64, edit: TrackEdit) {
                 done(crate::commands::set_track_color(app.clone(), state, vec![track], Some(color)).await)
             }
             TrackEdit::Field(field, value) => {
-                done(crate::details::set_track_field(app.clone(), state, vec![track], field.to_owned(), value).await)
+                done(crate::details::set_track_field(app.clone(), state, vec![track], field.to_owned(), value, None).await)
             }
         }
     });

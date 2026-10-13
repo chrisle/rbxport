@@ -1001,10 +1001,10 @@ function AppBody() {
       // belong to the information panel and arrive with the re-read.
       if (ROW_FIELDS.has(field)) showPending(id, { [field]: value });
       void runEdit(`${FIELD_LABEL[field]} saved.`, (b) =>
-        b.edits.setTrackField([id], field, value),
+        b.edits.setTrackField([id], field, value, { writeKeyTag: field === "key" && analysisPrefs.writeKeyTag }),
       );
     },
-    [runEdit, showPending, refuseLoose],
+    [runEdit, showPending, refuseLoose, analysisPrefs.writeKeyTag],
   );
 
   // Tracks a playlist already holds: left out, added again, or asked about
