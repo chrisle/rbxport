@@ -1656,5 +1656,13 @@
   "These music files will be copied to this computer.": "Αυτά τα αρχεία μουσικής θα αντιγραφούν σε αυτόν τον υπολογιστή.",
   "Music files to be copied:": "Αρχεία μουσικής προς αντιγραφή:",
   "Music file copy destination:": "Προορισμός αντιγραφής αρχείων μουσικής:",
-  "Free space of {drive} is {size}": "Ο διαθέσιμος χώρος του {drive} είναι {size}"
+  "Free space of {drive} is {size}": "Ο διαθέσιμος χώρος του {drive} είναι {size}",
+  "When a dropped folder has the same name as a list": "Όταν ένας φάκελος που αποθέτετε έχει το ίδιο όνομα με μια λίστα",
+  "Import as a copy": "Εισαγωγή ως αντίγραφο",
+  "Replace existing": "Αντικατάσταση της υπάρχουσας",
+  "Keep existing": "Διατήρηση της υπάρχουσας",
+  "Ask me": "Να ερωτώμαι",
+  "A list named {name} already exists here.": "Υπάρχει ήδη εδώ λίστα με το όνομα {name}.",
+  "Apply to the rest of all": "Εφαρμογή σε όλα τα υπόλοιπα",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Υπήρχε ήδη λίστα με το όνομα {name}, οπότε ο φάκελος εισήχθη ως {copy}."
 }

@@ -1650,5 +1650,13 @@
   "These music files will be copied to this computer.": "Disse musikfiler vil blive kopieret til denne computer.",
   "Music files to be copied:": "Musikfiler, der skal kopieres:",
   "Music file copy destination:": "Destination for kopiering af musikfiler:",
-  "Free space of {drive} is {size}": "Ledig plads på {drive} er {size}"
+  "Free space of {drive} is {size}": "Ledig plads på {drive} er {size}",
+  "When a dropped folder has the same name as a list": "Når en sluppet mappe har samme navn som en liste",
+  "Import as a copy": "Importér som kopi",
+  "Replace existing": "Erstat eksisterende",
+  "Keep existing": "Behold eksisterende",
+  "Ask me": "Spørg mig",
+  "A list named {name} already exists here.": "Der findes allerede en liste med navnet {name} her.",
+  "Apply to the rest of all": "Anvend på resten af alle",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Der fandtes allerede en liste med navnet {name}, så mappen blev importeret som {copy}."
 }

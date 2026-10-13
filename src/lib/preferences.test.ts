@@ -169,6 +169,15 @@ describe("sanitisePreferences", () => {
     }
   });
 
+  it("imports a same-named dropped folder as a copy by default and keeps each other choice (#355)", () => {
+    expect(DEFAULT_PREFERENCES.advanced.folderDropClash).toBe("copy");
+    expect(sanitisePreferences({ advanced: {} }).advanced.folderDropClash).toBe("copy");
+    expect(sanitisePreferences({ advanced: { folderDropClash: "merge" } }).advanced.folderDropClash).toBe("copy");
+    for (const choice of ["copy", "replace", "keep", "ask"] as const) {
+      expect(sanitisePreferences({ advanced: { folderDropClash: choice } }).advanced.folderDropClash).toBe(choice);
+    }
+  });
+
   it("creates database folders on a blank drive unless the store plainly says not to", () => {
     expect(sanitisePreferences({ djSystem: {} }).djSystem.createDatabaseFolders).toBe(true);
     expect(sanitisePreferences({ djSystem: { createDatabaseFolders: "no" } }).djSystem.createDatabaseFolders).toBe(true);

@@ -112,6 +112,18 @@ export function AdvancedPane({ tab, summary }: {
             ]}
             onChange={(deviceImportMissing) => set({ deviceImportMissing })}
           />
+          <Sub>{t("When a dropped folder has the same name as a list")}</Sub>
+          <Radios
+            label={t("When a dropped folder has the same name as a list")}
+            value={advanced.folderDropClash}
+            choices={[
+              { value: "copy", label: t("Import as a copy") },
+              { value: "replace", label: t("Replace existing") },
+              { value: "keep", label: t("Keep existing") },
+              { value: "ask", label: t("Ask me") },
+            ]}
+            onChange={(folderDropClash) => set({ folderDropClash })}
+          />
         </Section>
         {unlockWarning ? <div className={styles.warningBackdrop} role="presentation">
           <section

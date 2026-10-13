@@ -1655,5 +1655,13 @@
   "These music files will be copied to this computer.": "Tyto hudební soubory budou zkopírovány do tohoto počítače.",
   "Music files to be copied:": "Hudební soubory ke zkopírování:",
   "Music file copy destination:": "Cíl kopírování hudebních souborů:",
-  "Free space of {drive} is {size}": "Volné místo {drive} je {size}"
+  "Free space of {drive} is {size}": "Volné místo {drive} je {size}",
+  "When a dropped folder has the same name as a list": "Když má přetažená složka stejný název jako seznam",
+  "Import as a copy": "Importovat jako kopii",
+  "Replace existing": "Nahradit stávající",
+  "Keep existing": "Ponechat stávající",
+  "Ask me": "Zeptat se",
+  "A list named {name} already exists here.": "Seznam s názvem {name} zde již existuje.",
+  "Apply to the rest of all": "Použít na celý zbytek",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Seznam s názvem {name} již existoval, proto byla složka importována jako {copy}."
 }

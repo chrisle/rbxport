@@ -1652,5 +1652,13 @@
   "These music files will be copied to this computer.": "Dessa musikfiler kommer att kopieras till den här datorn.",
   "Music files to be copied:": "Musikfiler som ska kopieras:",
   "Music file copy destination:": "Mål för kopiering av musikfiler:",
-  "Free space of {drive} is {size}": "Ledigt utrymme på {drive} är {size}"
+  "Free space of {drive} is {size}": "Ledigt utrymme på {drive} är {size}",
+  "When a dropped folder has the same name as a list": "När en släppt mapp har samma namn som en lista",
+  "Import as a copy": "Importera som kopia",
+  "Replace existing": "Ersätt befintlig",
+  "Keep existing": "Behåll befintlig",
+  "Ask me": "Fråga mig",
+  "A list named {name} already exists here.": "Det finns redan en lista med namnet {name} här.",
+  "Apply to the rest of all": "Applicera på resten av alla",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Det fanns redan en lista med namnet {name}, så mappen importerades som {copy}."
 }

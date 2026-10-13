@@ -156,11 +156,38 @@ test("a folder dropped on the Playlists root becomes a playlist named after it",
   await expect(made).toHaveCount(1);
   await expect(made).toHaveAttribute("data-kind", "playlist");
 
-  // Again: rekordbox's question, answered yes by the mock, replaces it.
+  // Again: by default the old list stays and the folder lands beside it as
+  // a copy, with no question, and the summary says so (#355).
   const again = await folderDrop(page, ["/Music/Friday Set"]);
   await root.dispatchEvent("drop", { dataTransfer: again });
-  await expect(page.getByRole("contentinfo")).toContainText("Made playlists: Friday Set.");
-  await expect(page.getByRole("treeitem").filter({ hasText: "Friday Set" })).toHaveCount(1);
+  await expect(page.getByRole("contentinfo")).toContainText(
+    "Made playlists: Friday Set (1). A list named Friday Set was already there, so the folder was imported as Friday Set (1).",
+  );
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(page.getByRole("treeitem").filter({ hasText: "Friday Set" })).toHaveCount(2);
+  await expect(page.getByRole("treeitem").filter({ hasText: "Friday Set (1)" })).toHaveCount(1);
+});
+
+test("Ask me asks about a same-named folder, and an answer for the rest of the drop is not asked again", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences",
+    JSON.stringify({ advanced: { protectLibrary: false, folderDropClash: "ask" } })));
+  await page.goto("/?writable=1");
+  const root = page.getByRole("treeitem").filter({ hasText: /^Playlists/ }).first();
+  const first = await folderDrop(page, ["/Music/Set A", "/Music/Set B"]);
+  await root.dispatchEvent("drop", { dataTransfer: first });
+  await expect(page.getByRole("contentinfo")).toContainText("Made playlists: Set A, Set B.");
+
+  const again = await folderDrop(page, ["/Music/Set A", "/Music/Set B"]);
+  await root.dispatchEvent("drop", { dataTransfer: again });
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("A list named Set A already exists here.");
+  await dialog.getByRole("checkbox", { name: "Apply to the rest of all" }).check();
+  await dialog.getByRole("button", { name: "Replace existing" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Made playlists: Set A, Set B.");
+  await expect(dialog).toHaveCount(0);
+  // Both replaced, the second without a question: one of each, no copies.
+  await expect(page.getByRole("treeitem").filter({ hasText: "Set A" })).toHaveCount(1);
+  await expect(page.getByRole("treeitem").filter({ hasText: "Set B" })).toHaveCount(1);
 });
 
 test("a folder dropped on a playlist folder lands inside it; loose files are ignored", async ({ page }) => {

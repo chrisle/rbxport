@@ -1650,5 +1650,13 @@
   "These music files will be copied to this computer.": "Deze muziekbestanden zullen naar deze computer worden gekopieerd.",
   "Music files to be copied:": "Muziekbestanden die worden gekopieerd:",
   "Music file copy destination:": "Kopieerbestemming muziekbestanden:",
-  "Free space of {drive} is {size}": "Vrije ruimte van {drive} is {size}"
+  "Free space of {drive} is {size}": "Vrije ruimte van {drive} is {size}",
+  "When a dropped folder has the same name as a list": "Als een neergezette map dezelfde naam heeft als een lijst",
+  "Import as a copy": "Als kopie importeren",
+  "Replace existing": "Bestaande vervangen",
+  "Keep existing": "Bestaande behouden",
+  "Ask me": "Vraag het mij",
+  "A list named {name} already exists here.": "Hier bestaat al een lijst met de naam {name}.",
+  "Apply to the rest of all": "Toepassen op de rest",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Er was al een lijst met de naam {name}, dus de map is geïmporteerd als {copy}."
 }

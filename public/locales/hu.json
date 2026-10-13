@@ -1654,5 +1654,13 @@
   "These music files will be copied to this computer.": "Ezek a zenefájlok erre a számítógépre lesznek másolva.",
   "Music files to be copied:": "Másolandó zenefájlok:",
   "Music file copy destination:": "Zenefájlok másolási célhelye:",
-  "Free space of {drive} is {size}": "{drive} szabad területe: {size}"
+  "Free space of {drive} is {size}": "{drive} szabad területe: {size}",
+  "When a dropped folder has the same name as a list": "Ha egy behúzott mappa neve megegyezik egy listáéval",
+  "Import as a copy": "Importálás másolatként",
+  "Replace existing": "Meglévő cseréje",
+  "Keep existing": "Meglévő megtartása",
+  "Ask me": "Kérdezzen meg",
+  "A list named {name} already exists here.": "Itt már van {name} nevű lista.",
+  "Apply to the rest of all": "Alkalmazás a többire",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Már létezett {name} nevű lista, ezért a mappa {copy} néven lett importálva."
 }

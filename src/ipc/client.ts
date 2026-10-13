@@ -266,8 +266,10 @@ async function realBackend(): Promise<Backend> {
     importPaths: (paths) => invoke<ImportReport>("import_files", { paths }),
     listImportFiles: (paths) => invoke<string[]>("list_import_files", { paths }),
     importPathsSlice: (paths) => invoke<ImportReport>("import_files_slice", { paths }),
-    importFolderPlaylist: (path, parent, replace, at) =>
-      invoke<FolderPlaylistReport>("import_folder_playlist", { path, parent, replace: replace ?? null, at: at ?? null }),
+    importFolderPlaylist: (path, parent, replace, at, copy) =>
+      invoke<FolderPlaylistReport>("import_folder_playlist", {
+        path, parent, replace: replace ?? null, at: at ?? null, copy: copy ?? null,
+      }),
     exportLoopWav: async (track, title, inMs, outMs) => {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const picked = await save({

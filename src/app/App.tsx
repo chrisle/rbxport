@@ -1,5 +1,6 @@
 import { ConfirmHost } from "@/components/ConfirmDialog";
 import type { DuplicateAnswer } from "@/components/DuplicateTracksDialog";
+import type { FolderClashAnswer } from "@/lib/folderDrop";
 import { JobQueue, slices, type JobView } from "@/lib/jobQueue";
 import { importInSlices, removeInSlices } from "@/lib/bulkJobs";
 import { useBackupProgress } from "@/store/useBackupProgress";
@@ -94,6 +95,7 @@ const ROW_FIELDS: ReadonlySet<TrackField> = new Set<TrackField>([
 ]);
 
 const DuplicateTracksDialog = lazy(() => import("@/components/DuplicateTracksDialog").then(m => ({ default: m.DuplicateTracksDialog })));
+const FolderClashDialog = lazy(() => import("@/components/FolderClashDialog").then(m => ({ default: m.FolderClashDialog })));
 const DeviceImportCopyDialog = lazy(() => import("@/components/DeviceImportCopyDialog").then(m => ({ default: m.DeviceImportCopyDialog })));
 const AnalysisDialog = lazy(() => import("@/views/analysis/AnalysisDialog").then(m => ({ default: m.AnalysisDialog })));
 const NewLibraryDialog = lazy(() => import("@/views/library/NewLibraryDialog").then(m => ({ default: m.NewLibraryDialog })));
@@ -1121,6 +1123,17 @@ function AppBody() {
     [draggedTracks, refuse, advancedPrefs.protectLibrary, addTracksTo],
   );
 
+  // Preferences › Playlists' Ask me for a dropped folder whose name a list
+  // beside it has (#355): the question for one folder at a time.
+  const [folderClashPrompt, setFolderClashPrompt] = useState<{
+    name: string; settle: (answer: FolderClashAnswer) => void;
+  } | null>(null);
+  const askFolderClash = useCallback(async (name: string): Promise<FolderClashAnswer> => {
+    const answer = await new Promise<FolderClashAnswer>((settle) => setFolderClashPrompt({ name, settle }));
+    setFolderClashPrompt(null);
+    return answer;
+  }, []);
+
   /**
    * Files dragged in from outside the app (Finder, Explorer) and dropped on
    * a playlist: imported, then added to that playlist, the way a dragged
@@ -1144,7 +1157,7 @@ function AppBody() {
           run: async ({ signal, update }) => {
             const { dropFolders } = await import("@/lib/folderDrop");
             await dropFolders(playlistId, paths, t, report, refuse, setTree, analysisPrefs.auto ? analysis.add : undefined,
-              signal, (done) => update({ done }));
+              { mode: advancedPrefs.folderDropClash, ask: askFolderClash }, signal, (done) => update({ done }));
           },
         });
         return;
@@ -1201,7 +1214,8 @@ function AppBody() {
         },
       });
     },
-    [tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates],
+    [tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates,
+      advancedPrefs.folderDropClash, askFolderClash],
   );
 
   const importDroppedFilesTo = useCallback(
@@ -3213,6 +3227,7 @@ function AppBody() {
         <DuplicateTracksDialog playlist={duplicatePrompt.playlist} duplicates={duplicatePrompt.duplicates}
           total={duplicatePrompt.total} onAnswer={duplicatePrompt.settle} />
       ) : null}
+      {folderClashPrompt ? <FolderClashDialog name={folderClashPrompt.name} onAnswer={folderClashPrompt.settle} /> : null}
       {copyPrompt ? <DeviceImportCopyDialog plan={copyPrompt.plan} onAnswer={copyPrompt.settle} /> : null}
       {missingLibrary !== null ? (
         <NewLibraryDialog key={missingLibrary.kind} problem={missingLibrary}

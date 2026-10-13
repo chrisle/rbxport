@@ -427,12 +427,17 @@ export interface Backend {
    * playlist folder: one playlist under `parent` named after the folder,
    * holding every audio file under it with subfolders flattened, as
    * rekordbox does. A same-named sibling stops it with nothing written and
-   * comes back as `conflict`; call again with `replace` set to that id once
-   * the user agrees to replace it. `at` is the drop's insert index under
+   * comes back as `conflict`; call again with `replace` set to that id to
+   * replace it, or with `copy` to import the folder beside it under the next
+   * free name (`"<name> (1)"`, reported in `renamed`). `copy` on the first
+   * call does that without stopping. `at` is the drop's insert index under
    * `parent` (omitted: the end); rekordbox puts every folder of one drop at
    * the same index, so pass each folder the `at` the previous one returned.
+   * Each folder is one transaction.
    */
-  importFolderPlaylist(path: string, parent: string, replace?: string, at?: number | null): Promise<FolderPlaylistReport>;
+  importFolderPlaylist(
+    path: string, parent: string, replace?: string, at?: number | null, copy?: boolean,
+  ): Promise<FolderPlaylistReport>;
   /**
    * Export Loop As WAV: asks where, then writes the loop's stretch of the
    * track as a WAV. Resolves to the frames written, or null when cancelled.
@@ -1618,8 +1623,10 @@ export interface ImportReport {
 
 /** What dropping one folder onto the playlist tree did. */
 export interface FolderPlaylistReport {
-  /** The folder's name, which is the playlist's. */
+  /** The folder's name, which is the playlist's unless `renamed` says so. */
   name: string;
+  /** The name the playlist took instead, as a copy beside a same-named list. */
+  renamed: string | null;
   /** The playlist made, or null when nothing was written. */
   playlist: string | null;
   /** A same-named sibling awaiting the user's answer; nothing was written. */

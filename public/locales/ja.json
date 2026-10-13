@@ -1663,5 +1663,13 @@
   "These music files will be copied to this computer.": "これらの楽曲ファイルはこのコンピューターにコピーされます。",
   "Music files to be copied:": "コピーされる楽曲ファイル：",
   "Music file copy destination:": "楽曲ファイルのコピー先：",
-  "Free space of {drive} is {size}": "{drive} の空き容量は {size}"
+  "Free space of {drive} is {size}": "{drive} の空き容量は {size}",
+  "When a dropped folder has the same name as a list": "ドロップしたフォルダーがリストと同じ名前のとき",
+  "Import as a copy": "コピーとしてインポート",
+  "Replace existing": "既存のものを置き換える",
+  "Keep existing": "既存のものを残す",
+  "Ask me": "確認する",
+  "A list named {name} already exists here.": "{name} という名前のリストがすでにあります。",
+  "Apply to the rest of all": "残りの全てに同じ設定",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "{name} という名前のリストがすでにあったため、フォルダーを {copy} としてインポートしました。"
 }

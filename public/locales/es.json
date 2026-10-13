@@ -1655,5 +1655,13 @@
   "These music files will be copied to this computer.": "Los archivos de música se copiarán a este ordenador.",
   "Music files to be copied:": "Archivos de música copiados:",
   "Music file copy destination:": "Destino de copia de los archivos de música:",
-  "Free space of {drive} is {size}": "El espacio libre de {drive} es {size}"
+  "Free space of {drive} is {size}": "El espacio libre de {drive} es {size}",
+  "When a dropped folder has the same name as a list": "Cuando una carpeta soltada tiene el mismo nombre que una lista",
+  "Import as a copy": "Importar como copia",
+  "Replace existing": "Reemplazar la existente",
+  "Keep existing": "Conservar la existente",
+  "Ask me": "Preguntarme",
+  "A list named {name} already exists here.": "Ya existe aquí una lista llamada {name}.",
+  "Apply to the rest of all": "Aplicar a todo el resto",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Ya había una lista llamada {name}, así que la carpeta se importó como {copy}."
 }

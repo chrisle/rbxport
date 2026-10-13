@@ -94,6 +94,20 @@ it("turns protection on without checking backups", async () => {
   expect(listBackups).not.toHaveBeenCalled();
 });
 
+it("offers the four same-name folder choices, Import as a copy first and chosen by default (#355)", () => {
+  mount();
+  const group = host.querySelector('[role="radiogroup"][aria-label="When a dropped folder has the same name as a list"]');
+  if (!group) throw new Error("same-name folder choices missing");
+  const radios = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+  expect(radios.map((radio) => radio.value)).toEqual(["copy", "replace", "keep", "ask"]);
+  expect([...group.querySelectorAll("label")].map((label) => label.textContent))
+    .toEqual(["Import as a copy", "Replace existing", "Keep existing", "Ask me"]);
+  expect(radios.find((radio) => radio.checked)?.value).toBe("copy");
+
+  act(() => radios.at(3)?.click());
+  expect(update).toHaveBeenCalledWith("advanced", { folderDropClash: "ask" });
+});
+
 describe("Database management", () => {
   const local = { name: "Macintosh HD", masterDb: "/Users/x/Library/Pioneer/rekordbox/master.db", current: true };
   const drive = { name: "DJ SSD", masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db", current: false };

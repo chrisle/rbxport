@@ -1591,5 +1591,13 @@
   "There is not enough free space to copy the music files.",
   "The music files could not be copied.",
   "Your Music folder could not be found.",
-  "rekordbox is running. Quit it before making changes."
+  "rekordbox is running. Quit it before making changes.",
+  "When a dropped folder has the same name as a list",
+  "Import as a copy",
+  "Replace existing",
+  "Keep existing",
+  "Ask me",
+  "A list named {name} already exists here.",
+  "Apply to the rest of all",
+  "A list named {name} was already there, so the folder was imported as {copy}."
 ]

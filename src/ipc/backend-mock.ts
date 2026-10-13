@@ -2730,23 +2730,30 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // Every folder of one drop goes to the drop's one insert index, as in
     // the real backend (rekordbox's createNewList), so a later folder lands
     // before an earlier one.
-    importFolderPlaylist: async (path, parent, replace, given) => {
+    // `copy` names it as the real backend does beside a clash: "<name> (1)".
+    importFolderPlaylist: async (path, parent, replace, given, copy) => {
       const name = path.split(/[\\/]/).filter(Boolean).pop() ?? "";
-      const report = { name, playlist: null, conflict: null, folder: false, imported: 0, skipped: [], tracks: [], existing: 0, at: given ?? null };
+      const report = {
+        name, renamed: null, playlist: null, conflict: null, folder: false, imported: 0, skipped: [], tracks: [],
+        existing: 0, at: given ?? null,
+      };
       if (!name || /\.[a-z0-9]+$/i.test(name)) return wait(report);
       const siblings = childrenOf(parent);
       let at = given ?? siblings.length;
       const clash = siblings.find((n) => n.name === name);
-      if (clash && clash.id !== replace) return wait({ ...report, folder: true, conflict: clash.id, at });
-      if (clash) {
+      if (clash && clash.id !== replace && !copy) return wait({ ...report, folder: true, conflict: clash.id, at });
+      let listName = name;
+      if (clash && clash.id === replace) {
         if (siblings.indexOf(clash) < at) at -= 1;
         await edits.deletePlaylist(clash.id);
+      } else if (clash) {
+        for (let n = 1; siblings.some((sibling) => sibling.name === listName); n += 1) listName = `${name} (${n})`;
       }
       const before = new Set(tree.map((n) => n.id));
-      await edits.createPlaylist(name, parent);
+      await edits.createPlaylist(listName, parent);
       const made = tree.find((n) => !before.has(n.id))?.id ?? null;
       if (made && childrenOf(parent).findIndex((n) => n.id === made) !== at) await edits.movePlaylist(made, parent, at);
-      return wait({ ...report, folder: true, playlist: made, at });
+      return wait({ ...report, folder: true, playlist: made, at, renamed: listName === name ? null : listName });
     },
     exportLoopWav: () => wait(null),
     importItunes: () => wait(null),

@@ -1657,5 +1657,13 @@
   "These music files will be copied to this computer.": "Эти музыкальные файлы будут скопированы на этот компьютер.",
   "Music files to be copied:": "Музыкальные файлы для копирования:",
   "Music file copy destination:": "Папка для копирования музыкальных файлов:",
-  "Free space of {drive} is {size}": "На {drive} доступно {size} свободного объема"
+  "Free space of {drive} is {size}": "На {drive} доступно {size} свободного объема",
+  "When a dropped folder has the same name as a list": "Если перетащенная папка называется так же, как список",
+  "Import as a copy": "Импортировать как копию",
+  "Replace existing": "Заменить существующий",
+  "Keep existing": "Оставить существующий",
+  "Ask me": "Спрашивать",
+  "A list named {name} already exists here.": "Список с именем {name} здесь уже существует.",
+  "Apply to the rest of all": "Применить к остальному",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Список с именем {name} уже существовал, поэтому папка импортирована как {copy}."
 }

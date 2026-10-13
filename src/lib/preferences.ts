@@ -247,6 +247,15 @@ export type DuplicateTracks = (typeof DUPLICATE_TRACKS)[number];
 export const DEVICE_IMPORT_MISSING = ["copy", "ask", "matched", "cancel"] as const;
 export type DeviceImportMissingPreference = (typeof DEVICE_IMPORT_MISSING)[number];
 
+/**
+ * What a folder dropped onto the playlist tree does when a list there already
+ * has its name. rekordbox asks every time (`TreeViewer::showReplaceListAlert`);
+ * rbxport imports it as a copy beside the old list unless told otherwise, and
+ * only `ask` asks (#355, Chris's 2026-10-12 decision).
+ */
+export const FOLDER_DROP_CLASH = ["copy", "replace", "keep", "ask"] as const;
+export type FolderDropClash = (typeof FOLDER_DROP_CLASH)[number];
+
 export interface AdvancedPreferences {
   /** Auto Relocate Search Folders › Specified user folders: the list. */
   relocateFolders: string[];
@@ -268,6 +277,8 @@ export interface AdvancedPreferences {
   duplicateTracks: DuplicateTracks;
   /** Import Playlist from a device: what happens to tracks the collection lacks. */
   deviceImportMissing: DeviceImportMissingPreference;
+  /** A dropped folder whose name a list beside it already has: copy, replace, keep, or ask. */
+  folderDropClash: FolderDropClash;
   syncType: SyncType;
   /** Allow BEAT/BPM SYNC with double/half BPM. */
   syncDoubleHalf: boolean;
@@ -379,6 +390,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     doubleClickToEdit: false,
     duplicateTracks: "ask",
     deviceImportMissing: "copy",
+    folderDropClash: "copy",
     syncType: "beat",
     syncDoubleHalf: true,
     quantizeBeat: "1/1",
@@ -563,6 +575,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       doubleClickToEdit: bool(advanced.doubleClickToEdit, d.advanced.doubleClickToEdit),
       duplicateTracks: oneOf(advanced.duplicateTracks, DUPLICATE_TRACKS, d.advanced.duplicateTracks),
       deviceImportMissing: oneOf(advanced.deviceImportMissing, DEVICE_IMPORT_MISSING, d.advanced.deviceImportMissing),
+      folderDropClash: oneOf(advanced.folderDropClash, FOLDER_DROP_CLASH, d.advanced.folderDropClash),
       syncType: oneOf(advanced.syncType, SYNC_TYPES, d.advanced.syncType),
       syncDoubleHalf: bool(advanced.syncDoubleHalf, d.advanced.syncDoubleHalf),
       quantizeBeat: oneOf(advanced.quantizeBeat, QUANTIZE_BEATS, d.advanced.quantizeBeat),

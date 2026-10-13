@@ -1657,5 +1657,13 @@
   "These music files will be copied to this computer.": "這些音樂檔案將複製到此電腦。",
   "Music files to be copied:": "要複製的音樂檔案：",
   "Music file copy destination:": "音樂檔案複製目的地：",
-  "Free space of {drive} is {size}": "{drive} 的可用空間為 {size}"
+  "Free space of {drive} is {size}": "{drive} 的可用空間為 {size}",
+  "When a dropped folder has the same name as a list": "拖入的資料夾與清單同名時",
+  "Import as a copy": "以副本匯入",
+  "Replace existing": "取代現有清單",
+  "Keep existing": "保留現有清單",
+  "Ask me": "詢問我",
+  "A list named {name} already exists here.": "此處已有名為 {name} 的清單。",
+  "Apply to the rest of all": "套用至其餘全部",
+  "A list named {name} was already there, so the folder was imported as {copy}.": "已有名為 {name} 的清單，因此該資料夾已以 {copy} 匯入。"
 }
