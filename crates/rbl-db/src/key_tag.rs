@@ -266,7 +266,8 @@ fn keep_created(file: &File, meta: &fs::Metadata) {
 /// rekordbox's in-place write. The group is set where the user may (they
 /// belong to it); a file owned by another user that this user may still
 /// write (mode `0666`, say) cannot be given back to them without root, so it
-/// is not replaced.
+/// is not replaced. A group the user is not in cannot be kept either; that is
+/// logged, and the file is still replaced, since its owner keeps it.
 fn keep_owner(file: &File, meta: &fs::Metadata) -> Result<()> {
     #[cfg(unix)]
     {
@@ -277,8 +278,13 @@ fn keep_owner(file: &File, meta: &fs::Metadata) -> Result<()> {
         } else if mine.gid() != meta.gid() {
             let _ = fchown(file, None, Some(meta.gid()));
         }
-        if file.metadata()?.uid() != meta.uid() {
+        let now = file.metadata()?;
+        if now.uid() != meta.uid() {
             return Err(KeyTagError::Tag("the file belongs to another user, and a replacement would take it from them".into()));
+        }
+        if now.gid() != meta.gid() {
+            // Not refused: the owner may still read and write it, as before.
+            tracing::warn!(from = meta.gid(), to = now.gid(), "the key tag write could not keep the file's group");
         }
     }
     #[cfg(not(unix))]
