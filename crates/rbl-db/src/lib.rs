@@ -19,6 +19,7 @@ pub mod fixture;
 pub mod import;
 pub mod itunes;
 pub mod key;
+pub mod key_tag;
 pub mod locate;
 pub mod new_library;
 pub mod write;
