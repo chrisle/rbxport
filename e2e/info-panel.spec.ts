@@ -233,3 +233,33 @@ test("an edit with several tracks selected goes to every one of them", async ({ 
   for (const n of [3, 4, 5]) await expect(keys.nth(n)).not.toHaveText("Dm");
   for (const n of [3, 4, 5]) await expect(artists.nth(n)).toHaveText("Same Artist For All");
 });
+
+test("a blank box the selection does not share is cleared on all of them once typed in and emptied (#279)", async ({ page }) => {
+  // rekordbox 7.2.14 [OBS]: three tracks' Composer reads blank (C1, C2 and
+  // none); clicked into and left, nothing is written; typed in and emptied,
+  // every one of them is emptied.
+  const panel = await openPanel(page, "/?writable");
+  const artists = page.locator('[role="gridcell"][data-col="artist"]');
+  const titles = page.locator('[role="gridcell"][data-col="title"]');
+  await panel.getByRole("tab", { name: "Info" }).click();
+  const artist = panel.getByRole("textbox", { name: "Artist", exact: true });
+  // The fourth track gets an artist of its own, so the three are mixed.
+  await titles.nth(3).click();
+  await artist.fill("Only The Fourth");
+  await artist.press("Enter");
+  await expect(artists.nth(3)).toHaveText("Only The Fourth");
+
+  await selectThree(page);
+  await expect(artist).toHaveValue("");
+  // Only clicked into: nothing is written.
+  await artist.click();
+  await artist.press("Enter");
+  await expect(artists.nth(3)).toHaveText("Only The Fourth");
+
+  await artist.click();
+  await artist.pressSequentially("x");
+  await artist.press("Backspace");
+  await artist.press("Enter");
+  await expect(page.getByRole("contentinfo")).toContainText("Artist saved");
+  for (const n of [3, 4, 5]) await expect(artists.nth(n)).toHaveText("");
+});

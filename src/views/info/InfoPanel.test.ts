@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  acceptable, dateSegments, fieldText, fileTypeLabel, selectionView, singleView, summaryFacts,
+  acceptable, commitsTyping, dateSegments, fieldText, fileTypeLabel, selectionView, singleView, summaryFacts,
 } from "./fields";
 import type { RowDto, SelectionDetails, TrackDetails } from "@/ipc/types";
 
@@ -140,7 +140,9 @@ describe("the Info tab's fields", () => {
   it("refuses what the writer would refuse before the round trip", () => {
     expect(acceptable("year", "2023")).toBe(true);
     expect(acceptable("year", " 7 ")).toBe(true);
-    expect(acceptable("year", "")).toBe(false);
+    // An emptied number box is written as 0, as rekordbox writes one (#279).
+    expect(acceptable("year", "")).toBe(true);
+    expect(acceptable("playCount", " ")).toBe(true);
     expect(acceptable("year", "abc")).toBe(false);
     expect(acceptable("year", "-1")).toBe(false);
     expect(acceptable("year", "10000")).toBe(false);
@@ -222,6 +224,18 @@ describe("the Info tab for several selected tracks", () => {
     expect(view.text("year")).toBe("");
     expect(view.bpm).toBe("");
     expect(view.color).toBe("0");
+  });
+
+  it("writes a box once it is typed in, so a blank one emptied clears every track (#279)", () => {
+    // [OBS rekordbox 7.2.14] Composer blank over C1, C2 and none, typed in
+    // and emptied: written as empty. Comments only clicked into: not written.
+    expect(commitsTyping(true, "", "", true)).toBe(true);
+    expect(commitsTyping(false, "", "", true)).toBe(false);
+    expect(commitsTyping(true, "R1", "", true)).toBe(true);
+    // One track: a box that ends as it started has nothing to write.
+    expect(commitsTyping(true, "House 1", "House 1", false)).toBe(false);
+    expect(commitsTyping(true, "House 2", "House 1", false)).toBe(true);
+    expect(commitsTyping(false, "House 2", "House 1", false)).toBe(false);
   });
 
   it("leaves one track as it was: its own record, its My Tags, its own id", () => {

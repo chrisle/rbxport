@@ -119,14 +119,16 @@ export function fieldText(d: TrackDetails, field: TrackField): string {
 
 /**
  * Whether a typed value is one the writer will take, so a refusal is shown
- * before the round trip rather than after it. Mirrors `Writer::set_field`.
+ * before the round trip rather than after it. Mirrors `Writer::set_field`:
+ * an emptied number box is taken and stored as 0, as rekordbox stores an
+ * emptied Year box [OBS: rekordbox 7.2.14, #279].
  */
 export function acceptable(field: TrackField, value: string): boolean {
   switch (field) {
-    case "year": return /^\s*\d{1,4}\s*$/.test(value);
-    case "trackNumber": return /^\s*\d{1,4}\s*$/.test(value);
-    case "discNumber": return /^\s*\d{1,3}\s*$/.test(value);
-    case "playCount": return /^\s*\d{1,6}\s*$/.test(value);
+    case "year": return /^\s*\d{0,4}\s*$/.test(value);
+    case "trackNumber": return /^\s*\d{0,4}\s*$/.test(value);
+    case "discNumber": return /^\s*\d{0,3}\s*$/.test(value);
+    case "playCount": return /^\s*\d{0,6}\s*$/.test(value);
     // 20 to 400, as the writer takes it.
     case "bpm": {
       const bpm = Number.parseFloat(value.trim());
@@ -134,6 +136,25 @@ export function acceptable(field: TrackField, value: string): boolean {
     }
     default: return true;
   }
+}
+
+/**
+ * Whether a box left with `draft` is written.
+ *
+ * rekordbox writes a box once it has been typed in, whatever it ends as: its
+ * Info tab sets a flag on each keystroke and writes the box's text when it
+ * loses focus only if that flag is set [static: 7.2.19
+ * `InfoComponent::textEditorTextChanged` @0x100761184,
+ * `updateTrackInfo` @0x1007616f4]. So with several tracks selected, a blank
+ * box (their values differ) typed in and emptied writes the empty value to
+ * all of them, and a box only clicked into writes nothing [OBS: rekordbox
+ * 7.2.14, chris-win11, #279]. Each track that already holds the value is
+ * skipped by the writer. One track keeps the simpler rule — nothing to write
+ * when the box ends as it started — since the writer would skip it anyway.
+ */
+export function commitsTyping(typed: boolean, draft: string, initial: string, commitUnchanged: boolean): boolean {
+  if (!typed) return false;
+  return commitUnchanged || draft !== initial;
 }
 
 /**

@@ -1157,7 +1157,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         year: "year", trackNumber: "trackNumber", discNumber: "discNumber", playCount: "playCount",
       };
       const which = numeric[field];
-      const n = /^\s*\d+\s*$/.test(value) ? Number.parseInt(value, 10) : NaN;
+      // An emptied number box is 0, as the writer stores it (#279).
+      const n = value.trim() === "" ? 0 : /^\s*\d+\s*$/.test(value) ? Number.parseInt(value, 10) : NaN;
       if (which && !Number.isFinite(n)) {
         return Promise.reject(new Error(`${JSON.stringify(value)} is not a whole number`));
       }

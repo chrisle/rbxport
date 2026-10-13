@@ -48,7 +48,7 @@ import { RatingStar } from "@/components/RatingStar";
 import { useTranslation } from "@/i18n";
 import styles from "./InfoPanel.module.css";
 import {
-  acceptable, COLORS, dateSegments, selectionView, singleView, summaryFacts, type InfoView,
+  acceptable, COLORS, commitsTyping, dateSegments, selectionView, singleView, summaryFacts, type InfoView,
 } from "./fields";
 import { useTooltip } from "@/store/usePreferences";
 
@@ -378,6 +378,7 @@ function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFo
       name={name}
       initial={text(name)}
       disabled={readOnly}
+      commitUnchanged={view.multiple}
       onCommit={(value) => commit(name, value)}
       {...extra}
     />
@@ -430,6 +431,7 @@ function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFo
         <CommentBox
           initial={view.comment}
           disabled={readOnly}
+          commitUnchanged={view.multiple}
           onCommit={(value) => onComment(ids, value)}
         />
         <div className={styles.side}>
@@ -517,6 +519,12 @@ interface FieldProps {
   numeric?: boolean;
   /** Suggestions, for a box that is also a dropdown. */
   list?: string[];
+  /**
+   * Commit a box that was typed in even when it ends as it started — a
+   * multiple selection's blank box, typed in and emptied, clears the field
+   * on every track. See `commitsTyping`.
+   */
+  commitUnchanged?: boolean;
   onCommit: (value: string) => void;
 }
 
@@ -526,7 +534,9 @@ interface FieldProps {
  * escape hatch that makes committing on blur safe. A value the writer would
  * refuse is put back too, so a typo in the year box never reaches it.
  */
-function Field({ label, name, initial, disabled, greyed = false, numeric = false, list, onCommit }: FieldProps) {
+function Field({
+  label, name, initial, disabled, greyed = false, numeric = false, list, commitUnchanged = false, onCommit,
+}: FieldProps) {
   const [draft, setDraft] = useState(initial);
   // A new record for the same track (after an edit) refreshes the box,
   // unless the box is what is being typed in.
@@ -538,12 +548,15 @@ function Field({ label, name, initial, disabled, greyed = false, numeric = false
   // Escape blurs the box, and the blur would otherwise commit the draft it
   // was meant to throw away: the blur handler closes over the old draft.
   const abandoned = useRef(false);
+  const typed = useRef(false);
   const finish = () => {
     if (abandoned.current) {
       abandoned.current = false;
       return;
     }
-    if (draft === initial) return;
+    const write = commitsTyping(typed.current, draft, initial, commitUnchanged);
+    typed.current = false;
+    if (!write) return;
     if (!acceptable(name, draft)) {
       setDraft(initial);
       return;
@@ -563,7 +576,10 @@ function Field({ label, name, initial, disabled, greyed = false, numeric = false
           disabled={disabled}
           inputMode={numeric ? "numeric" : undefined}
           list={listId}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            typed.current = true;
+            setDraft(e.target.value);
+          }}
           onBlur={finish}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -572,6 +588,7 @@ function Field({ label, name, initial, disabled, greyed = false, numeric = false
               e.currentTarget.blur();
             } else if (e.key === "Escape") {
               abandoned.current = true;
+              typed.current = false;
               setDraft(initial);
               e.currentTarget.blur();
             }
@@ -680,10 +697,11 @@ function Select({
 }
 
 function CommentBox({
-  initial, disabled, onCommit,
+  initial, disabled, commitUnchanged, onCommit,
 }: {
   initial: string;
   disabled: boolean;
+  commitUnchanged: boolean;
   onCommit: (value: string) => void;
 }) {
   const [draft, setDraft] = useState(initial);
@@ -693,6 +711,7 @@ function CommentBox({
     setDraft(initial);
   }
   const abandoned = useRef(false);
+  const typed = useRef(false);
   return (
     <div className={styles.fieldBlock}>
       <label className={styles.formLabel} htmlFor="info-field-comment">Comments</label>
@@ -701,17 +720,23 @@ function CommentBox({
         className={styles.comments}
         value={draft}
         disabled={disabled}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          typed.current = true;
+          setDraft(e.target.value);
+        }}
         onBlur={() => {
           if (abandoned.current) {
             abandoned.current = false;
             return;
           }
-          if (draft !== initial) onCommit(draft);
+          const write = commitsTyping(typed.current, draft, initial, commitUnchanged);
+          typed.current = false;
+          if (write) onCommit(draft);
         }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             abandoned.current = true;
+            typed.current = false;
             setDraft(initial);
             e.currentTarget.blur();
           }
