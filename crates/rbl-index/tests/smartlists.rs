@@ -189,8 +189,18 @@ fn number_conditions_read_the_columns() {
         vec![1, 3]
     );
     assert_eq!(
-        rows_of(&lib, &rule(1, &[("grouping", 1, "Aqua", "", "")])),
+        rows_of(&lib, &rule(1, &[("grouping", 1, "6", "", "")])),
         vec![2]
+    );
+    // A colour stored by name (rbx 1.6.0's free-text Color condition) is
+    // read as rekordbox reads it, with getIntAttribute: 0, No Color.
+    assert_eq!(
+        rows_of(&lib, &rule(1, &[("grouping", 1, "Pink", "", "")])),
+        vec![3]
+    );
+    assert_eq!(
+        rows_of(&lib, &rule(1, &[("grouping", 1, "0", "", "")])),
+        vec![3]
     );
 }
 

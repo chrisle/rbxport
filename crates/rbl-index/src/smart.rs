@@ -444,12 +444,17 @@ fn node_id(id: u64) -> i32 {
 /// An attribute value escaped as JUCE's `XmlElement` escapes one, which is
 /// how rekordbox writes `SmartList` [OBS: static, rekordbox 7.2.19
 /// `juce::XmlOutputFunctions::escapeIllegalXmlChars` @0x1024f3014 and its
-/// `legalChars` table @0x103882c84, which is JUCE's: a printable ASCII
-/// character other than `"`, `&`, `<` and `>` is written as it is, those
-/// four as `&quot;`, `&amp;`, `&lt;` and `&gt;`, and everything else
-/// (control characters, new lines, and every non-ASCII character) as a
-/// decimal character reference; rekordbox 7.2.14 wrote `<&">` as
-/// `&lt;&amp;&quot;&gt;`]. So `'` stays as it is and `é` becomes `&#233;`.
+/// `legalChars` table @0x103882c84, which is JUCE's stock table
+/// `{0,0,0,0,187,255,255,175,255,255,255,191,254,255,255,127}`: a printable
+/// ASCII character other than `"`, `&`, `<`, `>`, `^` and `` ` `` is written
+/// as it is; the function's switch covers only 0x0a..0x3e, so `"`, `&`, `<`
+/// and `>` become `&quot;`, `&amp;`, `&lt;` and `&gt;`, and everything else
+/// (`^`, `` ` ``, control characters, new lines — attributes are written
+/// with `changeNewLines` set, `writeElementAsText` @0x1024f2b6c — and every
+/// non-ASCII character) goes to the default branch and becomes a decimal
+/// character reference; rekordbox 7.2.14 wrote `<&">` as
+/// `&lt;&amp;&quot;&gt;`]. So `'` stays as it is, `^` becomes `&#94;`,
+/// `` ` `` becomes `&#96;` and `é` becomes `&#233;`.
 #[must_use]
 pub fn escape_attribute(text: &str) -> String {
     use std::fmt::Write as _;
@@ -460,7 +465,7 @@ pub fn escape_attribute(text: &str) -> String {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
-            ' '..='~' => out.push(c),
+            ' '..='~' if c != '^' && c != '`' => out.push(c),
             _ => {
                 let _ = write!(out, "&#{};", u32::from(c));
             }
@@ -893,16 +898,16 @@ pub fn my_tag_key(text: &str) -> i32 {
     }
 }
 
-/// A colour by its `ColorID`, or by name for a rule written with one.
+/// A colour's `ColorID` as rekordbox reads it from a rule: the value read
+/// as JUCE's `String::getIntValue` reads it, so a colour name that rbx
+/// 1.6.0 and earlier stored (`"Pink"`) is `0`, No Color [OBS: static,
+/// rekordbox 7.2.19 reads `grouping`'s `ValueLeft` with
+/// `XmlElement::getIntAttribute`; rekordbox 7.2.14 wrote Pink as
+/// `ValueLeft="1"` and No Color as `"0"`, issue #151]. rbx lists the same
+/// tracks for such a rule as rekordbox does; the editor shows the stored
+/// name as it is until a colour is picked again.
 fn color_id(text: &str) -> i64 {
-    let text = text.trim();
-    if let Ok(id) = text.parse::<i64>() {
-        return id;
-    }
-    crate::filter::COLOR_NAMES
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case(text))
-        .map_or(0, |i| i64::try_from(i).unwrap_or(0) + 1)
+    i64::from(my_tag_key(text))
 }
 
 /// A calendar day, for the date conditions.
@@ -1175,7 +1180,11 @@ mod tests {
         assert_eq!(escape_attribute("Tom's"), "Tom's");
         assert_eq!(escape_attribute("Caf\u{e9} \u{65e5}\u{1f600}"), "Caf&#233; &#26085;&#128512;");
         assert_eq!(escape_attribute("a\tb\nc\r"), "a&#9;b&#10;c&#13;");
-        assert_eq!(escape_attribute("~ !#$%()*+,-./:;=?@[]^_`{|}"), "~ !#$%()*+,-./:;=?@[]^_`{|}");
+        assert_eq!(escape_attribute("~ !#$%()*+,-./:;=?@[]_{|}"), "~ !#$%()*+,-./:;=?@[]_{|}");
+        // JUCE's legalChars table leaves `^` and `` ` `` out, and its switch
+        // has no entity for them, so they are written as numbers.
+        assert_eq!(escape_attribute("a^b`c"), "a&#94;b&#96;c");
+        assert_eq!(escape_attribute("\u{7f}"), "&#127;");
         // What is escaped reads back as it was.
         let rule = one(Property::Title, Operator::Contains, "Caf\u{e9} 'x' <&\">\t", "", "");
         assert_eq!(SmartRule::parse(&rule.to_xml(1)).unwrap(), rule);
@@ -1377,8 +1386,11 @@ mod tests {
         assert_eq!(whole("2147483648"), i64::from(i32::MAX));
         assert_eq!(seconds("5:30"), 330);
         assert_eq!(seconds("330"), 330);
-        assert_eq!(color_id("Aqua"), 6);
+        // rekordbox reads a colour with getIntAttribute: a name is 0.
+        assert_eq!(color_id("Aqua"), 0);
+        assert_eq!(color_id("Pink"), 0);
         assert_eq!(color_id("3"), 3);
+        assert_eq!(color_id(" 3x"), 3);
         assert_eq!(rbl_core::xml::unescape("a &lt;b&gt; &#39;c&#x27; &unknown; &"), "a <b> 'c' &unknown; &");
     }
 }
