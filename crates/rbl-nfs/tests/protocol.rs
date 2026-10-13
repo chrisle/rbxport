@@ -1335,3 +1335,115 @@ fn an_allowed_folder_lists_what_the_host_has_and_a_decomposed_name_finds_a_compo
     assert_eq!(read_whole(&server, &cafe), b"composed on disk");
     assert_eq!(lookup(&server, &allowed, "Caf\u{e9}.wav"), Ok(cafe));
 }
+
+// ---------------------------------------------------------------- #40: foreign paths and symlinks
+
+/// #40: a macOS library opened on a Linux host. Its tracks are stored as
+/// `/Volumes/Transcend/Music/…`, and the host makes that path real with a
+/// `/Volumes` symlink (or a bind mount) to where the card is mounted. The
+/// tree serves the stored path as it is; the host resolves the link above
+/// the allowed folder, so a player walks the stored path to the bytes.
+#[cfg(unix)]
+#[test]
+fn a_mac_library_path_on_a_linux_host_resolves_through_a_volumes_symlink_or_bind_mount() {
+    let dir = tempfile::tempdir().unwrap();
+    // Where the card really is, as on the reporter's host: /media/ron/Transcend.
+    let card = dir.path().join("media/ron/Transcend/Music/Len Faki & Juxta Position");
+    fs::create_dir_all(&card).unwrap();
+    let track = "Len Faki & Juxta Position - Caf\u{e9} (Original Mix).mp3";
+    fs::write(card.join(track), b"the track").unwrap();
+    // `/Volumes` as a symlink to /media/ron, and as a real directory whose
+    // `Transcend` is linked one level further down (a bind mount itself
+    // needs root; either way the host resolves it above the allowed folder).
+    std::os::unix::fs::symlink(dir.path().join("media/ron"), dir.path().join("Volumes-link")).unwrap();
+    fs::create_dir_all(dir.path().join("Volumes-bind")).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("media/ron/Transcend"), dir.path().join("Volumes-bind/Transcend"))
+        .unwrap();
+
+    for volumes in ["Volumes-link", "Volumes-bind"] {
+        let mut vfs = Vfs::new("/");
+        // What `rbl-link` makes of `/Volumes/Transcend/Music/<artist>/<track>`:
+        // the first three components, served from the same path on the host.
+        vfs.allow_folder("Volumes/Transcend/Music", dir.path().join(volumes).join("Transcend/Music"));
+        let mut exports = Exports::new();
+        exports.insert(vfs);
+        let server = Server::new(exports, NFS_PORT, MOUNT_PORT);
+        let root = mount_root(&server);
+
+        let stored = format!("Volumes/Transcend/Music/Len Faki & Juxta Position/{track}");
+        let handle = lookup_path(&server, &root, &stored).unwrap_or_else(|e| panic!("{volumes}: {e}"));
+        assert_eq!(read_whole(&server, &handle), b"the track", "{volumes}");
+        // The name as an Apple player decomposes it finds the same file.
+        let decomposed = format!("Volumes/Transcend/Music/Len Faki & Juxta Position/{}", track.replace('\u{e9}', "e\u{301}"));
+        assert_eq!(lookup_path(&server, &root, &decomposed), Ok(handle), "{volumes}");
+        // Names on the way are matched as the database server sent them.
+        assert_eq!(lookup_path(&server, &root, "Volumes/SD"), Err(nfs_status::NOENT), "{volumes}");
+        assert_eq!(lookup_path(&server, &root, "volumes"), Err(nfs_status::NOENT), "{volumes}");
+    }
+}
+
+/// A server over `<tmp>/Music` allowed as a whole, with symlinks under it:
+/// a folder link and a file link that library tracks go through, and a
+/// folder link and a file link that no track goes through.
+#[cfg(unix)]
+fn symlink_fixture() -> (tempfile::TempDir, Server, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let music = dir.path().join("Music");
+    let elsewhere = dir.path().join("elsewhere");
+    fs::create_dir_all(music.join("Real")).unwrap();
+    fs::create_dir_all(elsewhere.join("Album")).unwrap();
+    fs::create_dir_all(elsewhere.join("Private")).unwrap();
+    fs::write(elsewhere.join("Album/one.mp3"), b"one through a folder link").unwrap();
+    fs::write(elsewhere.join("Album/stray.txt"), b"beside one").unwrap();
+    fs::write(elsewhere.join("two.mp3"), b"two through a file link").unwrap();
+    fs::write(elsewhere.join("Private/secret.txt"), b"no track goes here").unwrap();
+    fs::write(elsewhere.join("secret.mp3"), b"nor here").unwrap();
+    std::os::unix::fs::symlink(elsewhere.join("Album"), music.join("Album")).unwrap();
+    std::os::unix::fs::symlink(elsewhere.join("two.mp3"), music.join("Real/two.mp3")).unwrap();
+    std::os::unix::fs::symlink(elsewhere.join("Private"), music.join("Private")).unwrap();
+    std::os::unix::fs::symlink(elsewhere.join("secret.mp3"), music.join("Real/secret.mp3")).unwrap();
+
+    let (export, folder) = split_export(music.to_str().unwrap()).unwrap();
+    let mut vfs = Vfs::new(export);
+    vfs.allow_folder(&folder, &music);
+    vfs.allow_track(music.join("Album/one.mp3"));
+    vfs.allow_track(music.join("Real/two.mp3"));
+    let mut exports = Exports::new();
+    exports.insert(vfs);
+    (dir, Server::new(exports, NFS_PORT, MOUNT_PORT), folder)
+}
+
+/// #40: rekordbox `stat`s every name a player looks up, so a track whose
+/// path runs through a symlink plays from it ([OBS, static] libFilSiNE
+/// `tkfFSLookupFile` calls `_stat`, rekordbox 7.2.19). Symlinked music
+/// folders are common on Linux. A link a library track goes through
+/// resolves; one no track goes through still does not.
+#[cfg(unix)]
+#[test]
+fn a_symlink_on_a_library_tracks_path_is_followed_and_no_other() {
+    let (_dir, server, folder) = symlink_fixture();
+    let root = mount_root(&server);
+    let one = lookup_path(&server, &root, &format!("{folder}/Album/one.mp3")).unwrap();
+    assert_eq!(read_whole(&server, &one), b"one through a folder link");
+    let two = lookup_path(&server, &root, &format!("{folder}/Real/two.mp3")).unwrap();
+    assert_eq!(read_whole(&server, &two), b"two through a file link");
+    // A linked folder on a track's path is a folder like any other in the
+    // library: what it holds is listed and found.
+    let album = lookup_path(&server, &root, &format!("{folder}/Album")).unwrap();
+    let mut names = list(&server, &album, 8192);
+    names.sort();
+    assert_eq!(names, ["one.mp3", "stray.txt"]);
+    // `..` from inside it is the allowed folder, not the link's target's parent.
+    let allowed = lookup_path(&server, &root, &folder).unwrap();
+    assert_eq!(lookup(&server, &album, ".."), Ok(allowed));
+    assert_eq!(lookup(&server, &album, "Private"), Err(nfs_status::NOENT));
+    // Links no track goes through lead nowhere, by lookup or listing.
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Private")), Err(nfs_status::NOENT));
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Private/secret.txt")), Err(nfs_status::NOENT));
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Real/secret.mp3")), Err(nfs_status::NOENT));
+    let mut top = list(&server, &allowed, 8192);
+    top.sort();
+    assert_eq!(top, ["Album", "Real"]);
+    let real = lookup_path(&server, &root, &format!("{folder}/Real")).unwrap();
+    assert_eq!(list(&server, &real, 8192), ["two.mp3"]);
+}

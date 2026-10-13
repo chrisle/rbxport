@@ -16,6 +16,13 @@
 //! player mounts `/C/` — `[ASSUME]` from alphatheta-connect's client, which
 //! resolves a Windows path that way; not yet measured against a capture on
 //! Windows.
+//!
+//! The host path is the stored path, unchanged, whatever system wrote the
+//! library: a macOS library opened on Linux is served from the Linux
+//! host's own `/Volumes/<name>/…`. A symlink or bind mount there works,
+//! because the host resolves every component of an allowed folder's path
+//! and of anything above it (#40). Under an allowed folder a symlink is
+//! followed only where a track's path runs through it.
 
 use rbl_index::Library;
 use rbl_nfs::{Exports, Vfs};
@@ -45,7 +52,12 @@ pub fn exports(library: &Library) -> Exports {
             continue;
         };
         match root_of(path, &relative) {
-            Some((folder, host)) => tree.allow_folder(folder, host),
+            Some((folder, host)) => {
+                tree.allow_folder(folder, host);
+                // A symlink on the track's own path resolves, as rekordbox's
+                // `stat` resolves it; no other link does.
+                tree.allow_track(path);
+            }
             None => {
                 tree.add_file_unsized(&relative, path);
             }
@@ -289,5 +301,39 @@ mod tests {
                 .to_str(),
             Some("/Users/me/three.mp3")
         );
+    }
+
+    /// #40: a library track whose folder is a symlink (common on Linux,
+    /// `~/Music/<artist>` linked to another disk) resolves over LINK, as
+    /// rekordbox's `stat` resolves it; a link no track goes through does not.
+    #[cfg(unix)]
+    #[test]
+    fn a_tracks_symlinked_folder_resolves_and_other_links_do_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let music = dir.path().join("Music");
+        let disk = dir.path().join("disk");
+        std::fs::create_dir_all(&music).unwrap();
+        std::fs::create_dir_all(disk.join("Artist")).unwrap();
+        std::fs::create_dir_all(disk.join("Other")).unwrap();
+        std::fs::write(disk.join("Artist/one.mp3"), b"one").unwrap();
+        std::fs::write(disk.join("Other/two.mp3"), b"two").unwrap();
+        std::os::unix::fs::symlink(disk.join("Artist"), music.join("Artist")).unwrap();
+        std::os::unix::fs::symlink(disk.join("Other"), music.join("Other")).unwrap();
+        let one: &'static str =
+            Box::leak(music.join("Artist/one.mp3").to_str().unwrap().to_owned().into_boxed_str());
+        let library = library_from(&[TestTrack {
+            id: 1,
+            title: "t",
+            path: one,
+            ..TestTrack::default()
+        }]);
+        let exports = exports(&library);
+        let root = exports.get("/").unwrap();
+        let (_, relative) = split(one).unwrap();
+        let node = root.resolve(&relative).expect("the track through its folder link");
+        assert_eq!(root.source(node).unwrap().to_str(), Some(one));
+        let (music_rel, _) = relative.rsplit_once("/Artist/").unwrap();
+        assert_eq!(root.resolve(&format!("{music_rel}/Other/two.mp3")), None);
+        assert_eq!(root.resolve(&format!("{music_rel}/Other")), None);
     }
 }

@@ -13,14 +13,16 @@
 //!
 //! Names are never joined onto a path and re-opened from the root: `.` and
 //! `..` are answered from the tree, a name with a separator in it is not a
-//! name, and a symlink is not followed, so a player cannot reach outside
+//! name, and a symlink is followed only where a library track's own path
+//! runs through it ([`Vfs::allow_track`]), so a player cannot reach outside
 //! what was registered or allowed. rekordbox's own file server goes
-//! further and exports `/`, resolving every name against the host.
+//! further and exports `/`, resolving every name against the host with
+//! `stat`, which follows every symlink.
 //!
 //! Nodes grow while the server runs, so the table is behind a lock; a node's
 //! index, and so its handle, never changes once issued.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
@@ -211,6 +213,10 @@ pub struct Vfs {
     nodes: RwLock<Vec<Node>>,
     /// The folders allowed as a whole.
     roots: Vec<Root>,
+    /// The host paths of the library's tracks under the allowed folders, as
+    /// the library names them: a symlink under an allowed folder is
+    /// followed only when it is one of these or a folder above one.
+    tracks: BTreeSet<PathBuf>,
     /// Where this export's file ids start: libFilSiNE numbers every node
     /// of every export from one table, so a handle names its export by its
     /// ids alone. Set when the export joins an [`Exports`].
@@ -223,6 +229,7 @@ impl Clone for Vfs {
             export: self.export.clone(),
             nodes: RwLock::new(self.read().clone()),
             roots: self.roots.clone(),
+            tracks: self.tracks.clone(),
             id_base: self.id_base,
         }
     }
@@ -289,10 +296,8 @@ fn is_plain_name(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
 }
 
-/// Asks the host what `name` is inside `dir`, without following a symlink
-/// out of the export.
-fn host_entry(dir: &Path, name: &str) -> Option<HostEntry> {
-    let meta = std::fs::symlink_metadata(dir.join(name)).ok()?;
+/// What a host entry is, if it is a plain directory or file.
+fn entry_kind(meta: &std::fs::Metadata) -> Option<HostEntry> {
     if meta.is_dir() {
         Some(HostEntry::Directory)
     } else if meta.is_file() {
@@ -311,6 +316,7 @@ impl Vfs {
             export,
             nodes: RwLock::new(vec![Node::new("", NodeKind::Directory, 0, None, Some(Stat::directory(0)), false)]),
             roots: Vec::new(),
+            tracks: BTreeSet::new(),
         }
     }
 
@@ -354,6 +360,44 @@ impl Vfs {
             return;
         }
         self.roots.push(Root { parts, host: host.into() });
+    }
+
+    /// Names a library track's host path, as the library stores it, so a
+    /// symlink on that path under an allowed folder is followed: the track
+    /// file itself, or a folder its path runs through.
+    ///
+    /// rekordbox `stat`s every name a player looks up, which follows any
+    /// symlink ([OBS, static] libFilSiNE `tkfFSLookupFile` calls `_stat` at
+    /// `0x2c10`, rekordbox 7.2.19; alphatheta-docs
+    /// `platform/assets/rekordbox-link-export/library-verification.json`).
+    /// Here only the links a track of the library goes through are
+    /// followed, so a link elsewhere under an allowed folder still leads
+    /// nowhere (#40).
+    pub fn allow_track(&mut self, host: impl Into<PathBuf>) {
+        self.tracks.insert(host.into());
+    }
+
+    /// Whether `path` is a library track's path or a folder above one.
+    /// Paths compare by component, so everything under `path` sorts right
+    /// after it.
+    fn on_a_track_path(&self, path: &Path) -> bool {
+        self.tracks.range::<Path, _>((std::ops::Bound::Included(path), std::ops::Bound::Unbounded))
+            .next()
+            .is_some_and(|track| track.starts_with(path))
+    }
+
+    /// Asks the host what `name` is inside `dir`. A symlink is followed only
+    /// when a library track's path runs through it; any other is nothing.
+    fn host_entry(&self, dir: &Path, name: &str) -> Option<HostEntry> {
+        let path = dir.join(name);
+        let meta = std::fs::symlink_metadata(&path).ok()?;
+        if meta.file_type().is_symlink() {
+            if !self.on_a_track_path(&path) {
+                return None;
+            }
+            return entry_kind(&std::fs::metadata(&path).ok()?);
+        }
+        entry_kind(&meta)
     }
 
     /// Adds a file at a slash-separated path inside the export, creating the
@@ -456,9 +500,9 @@ impl Vfs {
             // decomposed may be composed on a volume that keeps names as
             // written.
             let composed: String = name.nfc().collect();
-            let (found, as_named) = match host_entry(&dir, name) {
+            let (found, as_named) = match self.host_entry(&dir, name) {
                 Some(entry) => (entry, name),
-                None if composed != name => (host_entry(&dir, &composed)?, composed.as_str()),
+                None if composed != name => (self.host_entry(&dir, &composed)?, composed.as_str()),
                 None => return None,
             };
             let host = dir.join(as_named);
@@ -523,7 +567,7 @@ impl Vfs {
                     if !is_plain_name(&name) {
                         return None;
                     }
-                    let kind = host_entry(&dir, &name)?;
+                    let kind = self.host_entry(&dir, &name)?;
                     Some((name, kind))
                 })
                 .collect();
