@@ -29,6 +29,11 @@ test("Windows-only desktop Rust adds the Windows-native check", () => {
   assert.deepEqual(enabled("src-tauri/Cargo.toml"), ["rust", "windows_rust"]);
 });
 
+test("the library's Windows file-index code runs the Windows-native Rust lane", () => {
+  assert.deepEqual(enabled("crates/rbl-db/src/file_id.rs"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("crates/rbl-db/Cargo.toml"), ["rust", "windows_rust"]);
+});
+
 test("backup changes also run the Windows-native Rust lane", () => {
   assert.deepEqual(enabled("src-tauri/src/backups.rs"), ["rust", "windows_rust"]);
   assert.deepEqual(enabled("crates/rbl-backup/src/restore.rs"), ["rust", "windows_rust"]);

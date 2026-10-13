@@ -80,6 +80,13 @@ export function planValidation(paths, { all = false } = {}) {
       continue;
     }
 
+    // rb_file_id is the NTFS file index on Windows, read through a cfg(windows)
+    // Win32 call; the crate manifest holds that dependency.
+    if (path === "crates/rbl-db/src/file_id.rs" || path === "crates/rbl-db/Cargo.toml") {
+      enable(plan, "rust", "windows_rust");
+      continue;
+    }
+
     if (path.startsWith("src-tauri/")) {
       enable(plan, "rust");
       // Installer hooks and scripts only ever run on Windows. The file-drop

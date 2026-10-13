@@ -1070,6 +1070,33 @@ fn a_track_can_be_pointed_at_a_moved_file() {
 }
 
 #[test]
+fn relocating_records_the_new_files_number_as_rekordbox_does() {
+    // [OBS rekordbox 7.2.19 static, issue #201] `modifyContentFilePath`
+    // sets `rb_file_id` to the new file's `getFileIdentifier`; left at the
+    // old file's, Auto Relocate could later take another file with it.
+    let f_dir = tempfile::tempdir().unwrap();
+    let moved = f_dir.path().join("moved.mp3");
+    std::fs::write(&moved, b"audio").unwrap();
+
+    let mut f = fixture();
+    f.conn().execute("UPDATE djmdContent SET rb_file_id = '1' WHERE ID = ?1", params![track_id(0)]).unwrap();
+    f.writer.relocate(&track_id(0), &moved).unwrap();
+
+    let stored: String = f.one("SELECT rb_file_id FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    assert_eq!(stored, rbl_db::file_id::of(&moved).to_string());
+    assert_ne!(stored, "0");
+    assert_eq!(f.writer.library().file_id(&track_id(0)).unwrap(), rbl_db::file_id::of(&moved));
+}
+
+#[test]
+fn a_track_without_a_file_number_reads_as_zero() {
+    let f = fixture();
+    f.conn().execute("UPDATE djmdContent SET rb_file_id = NULL WHERE ID = ?1", params![track_id(0)]).unwrap();
+    assert_eq!(f.writer.library().file_id(&track_id(0)).unwrap(), 0);
+    assert_eq!(f.writer.library().file_id("no such track").unwrap(), 0);
+}
+
+#[test]
 fn relocating_to_something_that_is_not_a_file_is_refused() {
     // Pointing a track at a directory, or at nothing, loses the old location
     // for no gain.
@@ -1421,6 +1448,22 @@ fn a_file_is_imported_in_the_shape_a_local_row_has() {
     // The shape all 634 locally-created tracks in the reference library have.
     assert_eq!((status, local_status, synced), (0, 0, 0));
     assert_eq!(usn, None, "usn is the sync's to assign");
+}
+
+#[test]
+fn an_import_records_the_files_number_as_rekordbox_does() {
+    // [OBS rekordbox 7.2.19 static, issue #201] `importFile` takes the file's
+    // `getFileIdentifier` and `insertTrack` writes it as `rb_file_id`.
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Numbered.wav");
+    write_wav(&path, 2);
+
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+
+    let stored: String = f.one("SELECT rb_file_id FROM djmdContent WHERE ID = ?1", &[&id]);
+    assert_eq!(stored, rbl_db::file_id::of(&path).to_string());
+    assert_ne!(stored, "0");
 }
 
 #[test]

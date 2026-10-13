@@ -3017,7 +3017,10 @@ impl Writer {
     ///
     /// For a track whose audio has moved. Only the location changes — the
     /// analysis, cues and playlist memberships all key off the track's id and
-    /// stay where they are.
+    /// stay where they are. `rb_file_id` follows the file, as rekordbox's
+    /// `modifyContentFilePath` sets it ([`crate::file_id`]): left at the old
+    /// file's number, a later Auto Relocate could take another file that
+    /// happens to have it.
     pub fn relocate(&mut self, content: &str, path: &Path) -> Result<Changed> {
         if !path.is_file() {
             return Err(DbError::WriteRefused(format!(
@@ -3033,8 +3036,9 @@ impl Writer {
         self.prepare()?;
         let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
-        let rows = tx.execute("UPDATE djmdContent SET FolderPath=?1, FileNameL=?2, rb_local_usn=?3, updated_at=?4 WHERE ID=?5 AND rb_local_deleted=0",
-            params![full, name, usn, time::now(), content])?;
+        let file_id = crate::file_id::column(path);
+        let rows = tx.execute("UPDATE djmdContent SET FolderPath=?1, FileNameL=?2, rb_file_id=?6, rb_local_usn=?3, updated_at=?4 WHERE ID=?5 AND rb_local_deleted=0",
+            params![full, name, usn, time::now(), content, file_id])?;
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })
@@ -3564,10 +3568,11 @@ fn insert_content(conn: &Connection, row: &NewContent<'_>) -> Result<()> {
     } = row;
 // Every column rekordbox 7 fills on a file it imports itself, as on
 // the 645 rows it made on this machine [OBS] — the empty strings are
-// empty strings there, not NULLs. Left unset because their values are
-// [UNKNOWN]: `rb_file_id` (a counter of unknown ownership),
-// `ContentLink` (one constant on 643 of 645 rows), and the three
-// `*Updated` counters, which rekordbox sets as it goes.
+// empty strings there, not NULLs. `rb_file_id` is the file system's number
+// for the file, as rekordbox writes it ([`crate::file_id`]). Left unset
+// because their values are [UNKNOWN]: `ContentLink` (one constant on 643 of
+// 645 rows), and the three `*Updated` counters, which rekordbox sets as it
+// goes.
     conn.execute(
         "INSERT INTO djmdContent
                 (ID, FolderPath, FileNameL, FileNameS, Title, Subtitle, ArtistID, AlbumID, GenreID, LabelID, KeyID,
@@ -3577,7 +3582,7 @@ fn insert_content(conn: &Connection, row: &NewContent<'_>) -> Result<()> {
                  OrgFolderPath, ModifiedByRBM, DeliveryControl, DeliveryComment, Lyricist, Reserved1, ExtInfo,
                  SamplerTrackInfo, SamplerPlayOffset, SamplerGain, VideoAssociate, LyricStatus, ServiceID,
                  rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
-                 usn, rb_local_usn, created_at, updated_at)
+                 usn, rb_local_usn, created_at, updated_at, rb_file_id)
              VALUES (?1, ?2, ?3, '', ?4, '', ?5, ?6, ?7, ?8, ?24,
                      ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0,
                      ?17, 0, 0, 0, NULL, ?18,
@@ -3585,7 +3590,7 @@ fn insert_content(conn: &Connection, row: &NewContent<'_>) -> Result<()> {
                      '', '', '', '', '', '', 'null',
                      0, 0, 0, 0, 0, 0,
                      0, 0, 0, 0,
-                     NULL, ?22, ?23, ?23)",
+                     NULL, ?22, ?23, ?23, ?25)",
         params![
             id,
             folder,
@@ -3610,7 +3615,8 @@ fn insert_content(conn: &Connection, row: &NewContent<'_>) -> Result<()> {
             device,
             usn,
             stamp,
-            key
+            key,
+            crate::file_id::column(path)
         ],
     )?;
     Ok(())

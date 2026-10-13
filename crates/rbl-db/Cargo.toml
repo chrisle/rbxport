@@ -32,6 +32,11 @@ lofty = { version = "0.22", default-features = false }
 # 240×240 and an 80×80), and a stick takes the two small ones.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
+# `rb_file_id` on Windows is the NTFS file index, read with
+# GetFileInformationByHandle.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 # The cue-colour probe reads an export's analysis files beside the library.
 rbl-anlz = { path = "../rbl-anlz" }

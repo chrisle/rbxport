@@ -15,6 +15,7 @@ pub mod cipher;
 pub mod details;
 pub mod dropbox;
 pub mod export_info;
+pub mod file_id;
 pub mod fixture;
 pub mod import;
 pub mod itunes;
@@ -543,6 +544,21 @@ impl Library {
                 StoredPath::from_row,
             )
             .optional()?)
+    }
+
+    /// The `rb_file_id` of one live track as rekordbox reads it
+    /// ([`file_id::parse`]): 0 when the track has none or is not there.
+    pub fn file_id(&self, id: &str) -> Result<u64> {
+        use rusqlite::OptionalExtension;
+        let stored: Option<Option<String>> = self
+            .conn
+            .query_row(
+                "SELECT CAST(rb_file_id AS TEXT) FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(stored.flatten().map_or(0, |text| file_id::parse(&text)))
     }
 
     /// A stored `FolderPath` as rekordbox reads it: through the drive
