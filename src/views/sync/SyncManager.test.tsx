@@ -45,10 +45,14 @@ const stick = (name: string): Device => ({
 });
 const DEVICES = [stick("USB A"), stick("USB B")];
 
-const STATES: Record<string, DeviceSyncState> = {
-  "/Volumes/USB A": { selected: [{ libraryId: "p3", name: "Closing" }], onDevice: ["Closing"], automatic: true },
+// USB A was last synced with Closing; its record is given to it only by
+// the tests about that record, since a stick with one is ticked on open.
+const RECORDED_A: DeviceSyncState = { selected: [{ libraryId: "p3", name: "Closing" }], onDevice: ["Closing"], automatic: true };
+const UNRECORDED: Record<string, DeviceSyncState> = {
+  "/Volumes/USB A": { selected: [], onDevice: ["Closing"], automatic: false },
   "/Volumes/USB B": { selected: [], onDevice: [], automatic: false },
 };
+let STATES: Record<string, DeviceSyncState>;
 
 const report = (path: string, tracks: number): SyncDeviceReport => ({
   path,
@@ -103,6 +107,7 @@ beforeEach(async () => {
   devicesChanged = undefined;
   libraryChanged = undefined;
   tree = TREE;
+  STATES = { ...UNRECORDED };
   readTree = () => Promise.resolve(tree.map((n) => ({ ...n })));
   listDevices = vi.fn(() => Promise.resolve(DEVICES.map(d => ({ ...d }))));
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -365,6 +370,9 @@ describe("SyncManager", () => {
     expect(dialog()).toBeNull();
     expect(status()).toBe("USB A: Formatted.");
     expect(box("USB A")?.checked).toBe(false);
+    // What it holds now is read again, not left at "Reading…".
+    await settle();
+    expect(host.querySelector('[aria-label="USB A library"]')?.textContent).toContain("Device Library");
   });
 
   it("formats as plain FAT32 by default and can be cancelled without touching the drive", async () => {
@@ -655,6 +663,7 @@ describe("SyncManager", () => {
 
   it("says why a sync failed when the backend rejects with its error object", async () => {
     syncDevices.mockRejectedValueOnce({ kind: "internal", message: "The USB ran out of space." });
+    click(box("Closing"));
     click(box("USB A"));
     click(box("USB B"));
     await settle();
@@ -667,6 +676,7 @@ describe("SyncManager", () => {
     syncDevices.mockResolvedValueOnce([
       { ...report("/Volumes/USB A", 5), report: { ...report("/Volumes/USB A", 5).report, failed: ["Move For Me: Could not copy it to the USB: unsupported audio"] } },
     ]);
+    click(box("Closing"));
     click(box("USB A"));
     await settle();
     click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
@@ -682,6 +692,7 @@ describe("SyncManager", () => {
       { ...report("/Volumes/USB B", 5), ejectError: "Device is busy." },
     ]);
     expect(box("Eject after syncing")?.checked).toBe(false);
+    click(box("Closing"));
     click(box("USB A"));
     click(box("USB B"));
     click(box("Eject after syncing"));
@@ -781,15 +792,13 @@ describe("SyncManager", () => {
     expect(syncDevices.mock.calls[0]?.[0]).toEqual(["p1", "p2", "s1", "p3"]);
   });
 
-  it("ticking a device restores its selection without expanding it", async () => {
+  it("ticking a device restores its selection, and a stick with no record ticks nothing", async () => {
+    // The record is read again when the stick is ticked.
+    STATES["/Volumes/USB A"] = RECORDED_A;
     expect(box("Closing")?.checked).toBe(false);
     click(box("USB A"));
     await settle();
     expect(box("Closing")?.checked).toBe(true);
-    expect(host.querySelector('[aria-label="USB A library"]')).toBeNull();
-    expect(box("USB A")?.closest('[role="treeitem"]')?.getAttribute("aria-expanded")).toBe("false");
-    click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand USB A"]'));
-    await settle();
     const library = host.querySelector('[aria-label="USB A library"]');
     expect(library?.textContent).toContain("Device Library");
     expect(library?.textContent).toContain("Closing");
@@ -797,11 +806,59 @@ describe("SyncManager", () => {
     // A stick with nothing on it says so, and ticks nothing.
     click(box("USB B"));
     await settle();
-    expect(host.querySelector('[aria-label="USB B library"]')).toBeNull();
-    click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand USB B"]'));
-    await settle();
     expect(host.querySelector('[aria-label="USB B library"]')?.textContent).toContain("No playlists on this device yet.");
     expect(box("Warm Up")?.checked).toBe(false);
+  });
+
+  it("shows each stick's playlists on open, without ticking or opening it, and guesses no selection (#178)", () => {
+    // Neither stick has a record from this library. USB A holds a playlist
+    // named like one in the library; that does not tick it, or the stick.
+    for (const name of ["USB A", "USB B"]) {
+      expect(box(name)?.checked).toBe(false);
+      expect(box(name)?.closest('[role="treeitem"]')?.getAttribute("aria-expanded")).toBe("true");
+    }
+    expect(host.querySelector('[aria-label="USB A library"]')?.textContent).toContain("Closing");
+    expect(host.querySelector('[aria-label="USB B library"]')?.textContent).toContain("No playlists on this device yet.");
+    expect(box("Closing")?.checked).toBe(false);
+    expect(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')?.disabled).toBe(true);
+  });
+
+  it("opens on the first stick with a record from this library, with its selection ticked, as rekordbox does (#178)", async () => {
+    act(() => root.unmount());
+    STATES["/Volumes/USB B"] = { ...RECORDED_A, onDevice: [] };
+    STATES["/Volumes/USB A"] = { selected: [{ libraryId: "gone", name: "Deleted" }], onDevice: ["Closing"], automatic: false };
+    root = createRoot(host);
+    act(() => root.render(<SyncManager onClose={onClose} />));
+    await settle();
+    await settle();
+    // USB A's record names nothing this library has, so USB B is the one.
+    expect(box("USB A")?.checked).toBe(false);
+    expect(box("USB B")?.checked).toBe(true);
+    expect(box("Closing")?.checked).toBe(true);
+    expect(box("Warm Up")?.checked).toBe(false);
+  });
+
+  it("chooses a stick plugged in later only while no stick is ticked (#178)", async () => {
+    STATES["/Volumes/USB C"] = RECORDED_A;
+    click(box("USB B"));
+    await settle();
+    listDevices.mockResolvedValueOnce([...DEVICES, stick("USB C")]);
+    act(() => { devicesChanged?.(); });
+    await settle();
+    await settle();
+    expect(host.querySelector('[aria-label="USB C library"]')?.textContent).toContain("Closing");
+    expect(box("USB C")?.checked).toBe(false);
+    expect(box("Closing")?.checked).toBe(false);
+    click(box("USB B"));
+    STATES["/Volumes/USB D"] = RECORDED_A;
+    listDevices.mockResolvedValueOnce([...DEVICES, stick("USB C"), stick("USB D")]);
+    act(() => { devicesChanged?.(); });
+    await settle();
+    await settle();
+    // The first stick in the list with a record, as rekordbox picks.
+    expect(box("USB C")?.checked).toBe(true);
+    expect(box("USB D")?.checked).toBe(false);
+    expect(box("Closing")?.checked).toBe(true);
   });
 
   it("SYNC sends the ticked playlists to both ticked sticks and reports on each", async () => {
@@ -814,6 +871,7 @@ describe("SyncManager", () => {
         }),
     );
     click(box("Sets"));
+    click(box("Closing"));
     click(box("USB A"));
     click(box("USB B"));
     await settle();
@@ -1096,7 +1154,10 @@ it("rechecks rekordbox when Import is clicked", async () => {
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("Quit rekordbox to import track ratings.");
 });
 
-it("expanding a USB does not select it for synchronization", async () => {
+it("closing and opening a USB does not select it for synchronization", async () => {
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="Collapse USB A"]'));
+  await settle();
+  expect(host.querySelector('[aria-label="USB A library"]')).toBeNull();
   click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand USB A"]'));
   await settle();
   expect(box("USB A")?.checked).toBe(false);

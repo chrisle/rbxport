@@ -139,7 +139,10 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   const [allOpen, setAllOpen] = useState(true);
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const [tickedDevices, setTickedDevices] = useState<ReadonlySet<string>>(new Set());
-  const [expandedDevices, setExpandedDevices] = useState<ReadonlySet<string>>(new Set());
+  // Every stick opens open, showing the playlists it holds, as rekordbox's
+  // Device column shows the selected device's playlists (#178). These are
+  // the ones closed by hand.
+  const [collapsedDevices, setCollapsedDevices] = useState<ReadonlySet<string>>(new Set());
   const [deviceErrors, setDeviceErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const [states, setStates] = useState<ReadonlyMap<string, DeviceSyncState>>(new Map());
   const [estimates, setEstimates] = useState<ReadonlyMap<string, SyncEstimate>>(new Map());
@@ -383,20 +386,24 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  /** Ticks a stick's recorded selection back on, adding to what is ticked. */
+  const restoreSelection = useCallback((read: DeviceSyncState) => {
+    if (read.selected.length === 0) return;
+    setTicked((current) => {
+      const next = new Set(current);
+      for (const playlist of read.selected) if (byId.has(playlist.libraryId)) next.add(playlist.libraryId);
+      return next;
+    });
+  }, [byId]);
+
   /** Reads what a stick holds and was last given, and ticks that back on. */
   const readDevice = useCallback(async (path: string, restore: boolean) => {
     const backend = await getBackend();
     const read = await backend.deviceSyncState(path);
     setDeviceErrors(current => { const next = new Map(current); next.delete(path); return next; });
     setStates((current) => new Map(current).set(path, read));
-    if (restore && read.selected.length > 0) {
-      setTicked((current) => {
-        const next = new Set(current);
-        for (const playlist of read.selected) if (byId.has(playlist.libraryId)) next.add(playlist.libraryId);
-        return next;
-      });
-    }
-  }, [byId]);
+    if (restore) restoreSelection(read);
+  }, [restoreSelection]);
 
   const tickDevice = useCallback((path: string, on: boolean) => {
     setTickedDevices((current) => {
@@ -414,6 +421,51 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
       });
     }
   }, [readDevice]);
+
+  // Each stick is read as soon as it is listed, so what it holds shows
+  // without ticking or opening it (#178). A stick is read once per
+  // appearance, not on every re-scan; one pulled and plugged back is new.
+  const listed = useRef(new Set<string>());
+  // A stick has appeared since one was last chosen for the window.
+  const [choosePending, setChoosePending] = useState(false);
+  useEffect(() => {
+    const present = new Set(devices.map((d) => d.path));
+    for (const path of listed.current) if (!present.has(path)) listed.current.delete(path);
+    const fresh = devices.filter((d) => !listed.current.has(d.path)).map((d) => d.path);
+    if (fresh.length === 0) return;
+    for (const path of fresh) listed.current.add(path);
+    // What was read from a path before it was pulled is not this stick's.
+    setStates((current) => {
+      if (!fresh.some((path) => current.has(path))) return current;
+      const next = new Map(current);
+      for (const path of fresh) next.delete(path);
+      return next;
+    });
+    setChoosePending(true);
+    for (const path of fresh) {
+      void readDevice(path, false).catch(e => setDeviceErrors(current => new Map(current).set(path, e instanceof Error ? e.message : t("Could not read this USB device."))));
+    }
+  }, [devices, readDevice, t]);
+
+  // rekordbox's Sync Manager opens on a device, choosing the first one whose
+  // sync record it finds, and shows that record's selection ticked
+  // (PlaylistSyncManager's constructor and handleCommonMessage, rekordbox
+  // 7.2.19). Here the first stick with a record from this library is ticked
+  // and its selection comes back, as ticking it by hand does. A stick with no
+  // record is left unticked: nothing is guessed from names or paths, and
+  // ticking it would only make it a destination. Nothing is chosen once a
+  // stick is already ticked.
+  useEffect(() => {
+    if (!choosePending || loadingTree || loadingDevices || busy) return;
+    if (devices.some((d) => !states.has(d.path) && !deviceErrors.has(d.path))) return;
+    setChoosePending(false);
+    if (tickedDevices.size > 0) return;
+    const recorded = devices.find((d) => (states.get(d.path)?.selected ?? []).some((p) => byId.has(p.libraryId)));
+    const read = recorded ? states.get(recorded.path) : undefined;
+    if (!recorded || !read) return;
+    setTickedDevices(new Set([recorded.path]));
+    restoreSelection(read);
+  }, [choosePending, loadingTree, loadingDevices, busy, devices, states, deviceErrors, tickedDevices, byId, restoreSelection]);
 
   const tickState = useCallback((node: TreeNode): Tick => {
     if (node.kind !== "folder") return ticked.has(node.id) ? "on" : "off";
@@ -566,10 +618,12 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
       // what was read from the old path is gone either way.
       const forget = <T,>(current: ReadonlyMap<string, T>) => { const next = new Map(current); next.delete(device.path); return next; };
       setTickedDevices(current => new Set([...current].filter(path => path !== device.path)));
-      setExpandedDevices(current => new Set([...current].filter(path => path !== device.path)));
+      setCollapsedDevices(current => new Set([...current].filter(path => path !== device.path)));
       setStates(forget);
       setDeviceErrors(forget);
       setCompletedReports(forget);
+      // Read again when it is listed, wherever it mounts.
+      listed.current.delete(device.path);
       await refreshDevices().catch(() => {});
       setStatus([t("{device}: Formatted.", { device: device.name })]);
       onSynced?.();
@@ -591,7 +645,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
       await backend.ejectDevice(device.path);
       setDevices(current => current.filter(d => d.path !== device.path));
       setTickedDevices(current => new Set([...current].filter(path => path !== device.path)));
-      setExpandedDevices(current => new Set([...current].filter(path => path !== device.path)));
+      setCollapsedDevices(current => new Set([...current].filter(path => path !== device.path)));
       setStates(current => { const next = new Map(current); next.delete(device.path); return next; });
       setDeviceErrors(current => { const next = new Map(current); next.delete(device.path); return next; });
       setStatus([`${device.name}: Safely ejected.`]);
@@ -991,7 +1045,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
           <div className={styles.list} role="tree" aria-label="Devices">
             {devices.map((device) => {
               const on = tickedDevices.has(device.path);
-              const expanded = expandedDevices.has(device.path);
+              const expanded = !collapsedDevices.has(device.path);
               const read = states.get(device.path);
               const job = exportJobs.get(device.path);
               const fileSystem = device.fileSystem?.toUpperCase().replace(/^VFAT$|^MSDOS$/, "FAT") || "Unknown filesystem";
@@ -1016,7 +1070,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
                 <div className={styles.row}>
                   <button type="button" className={styles.twisty} data-open={expanded ? "" : undefined}
                     aria-label={`${expanded ? "Collapse" : "Expand"} ${device.name}`} disabled={busy} onClick={() => {
-                      setExpandedDevices(current => toggle(current, device.path));
+                      setCollapsedDevices(current => toggle(current, device.path));
                       if (!expanded) void readDevice(device.path, false).catch(e => setDeviceErrors(current => new Map(current).set(device.path, e instanceof Error ? e.message : "Could not read this USB device.")));
                     }} />
                   <label className={styles.rowSelection}>
