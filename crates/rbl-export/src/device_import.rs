@@ -133,7 +133,13 @@ impl Copies {
             .to_owned();
         self.make_dirs(parent)?;
         let mut temp = tempfile::Builder::new().prefix(".rbx-import-").suffix(".part").tempfile_in(parent)?;
-        std::io::copy(&mut std::fs::File::open(source)?, temp.as_file_mut())?;
+        let mut from = std::fs::File::open(source)?;
+        std::io::copy(&mut from, temp.as_file_mut())?;
+        // rekordbox's copy keeps the file's modification time [OBS rekordbox
+        // 7.2.14, chris-win11, #198]; so does this one, where it can.
+        if let Ok(modified) = from.metadata().and_then(|m| m.modified()) {
+            let _ = temp.as_file().set_modified(modified);
+        }
         temp.as_file().sync_all()?;
         if !same_bytes(source, temp.path())? {
             return Err(std::io::Error::other(format!("the copy of {} did not match the device's file", source.display())));
@@ -146,6 +152,33 @@ impl Copies {
         rbl_core::durable::sync_dir(parent)?;
         self.files.push(target.clone());
         Ok(target)
+    }
+
+    /// An earlier copy of `source` under `wanted`'s name or one of its
+    /// numbered names ([`numbered`]), byte for byte the same, if there is
+    /// one: what a second import of the same stick track can use instead of
+    /// copying it again. Only reads.
+    ///
+    /// rekordbox avoids that second copy another way: after an import it
+    /// writes the new collection track's `masterDbId` and `masterContentId`
+    /// into the stick's `exportLibrary.db` row, so the next import matches
+    /// it [OBS rekordbox 7.2.14, chris-win11, #198: both rows changed, the
+    /// second import asked nothing and made no copy]. rbx leaves the stick
+    /// unwritten and finds its own copy instead.
+    pub fn existing_copy(source: &Path, wanted: &Path) -> std::io::Result<Option<PathBuf>> {
+        let (Some(parent), Some(name)) = (wanted.parent(), wanted.file_name().and_then(|n| n.to_str())) else {
+            return Ok(None);
+        };
+        for n in 0..10_000_u32 {
+            let at = if n == 0 { parent.join(name) } else { parent.join(numbered(name, n)) };
+            match std::fs::metadata(&at) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(e) => return Err(e),
+                Ok(meta) if meta.is_file() && same_bytes(source, &at)? => return Ok(Some(at)),
+                Ok(_) => {}
+            }
+        }
+        Ok(None)
     }
 
     /// Removes every file this import copied and the folders it made for

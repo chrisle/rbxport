@@ -546,6 +546,13 @@ fn copy_missing(
                 .with_detail(format!("{} is not a file on the device", file.source.display())));
         }
         let wanted = rbl_export::device_import::candidate(destination, &file.artist, &file.album, &file.name);
+        // A copy an earlier import made of this very file is used again,
+        // rather than a second copy and a second collection track.
+        let earlier = rbl_export::device_import::Copies::existing_copy(&file.source, &wanted).ok().flatten();
+        if let Some(at) = earlier {
+            copy_of.insert(file.source.clone(), at);
+            continue;
+        }
         match copies.copy(&file.source, &wanted) {
             Ok(at) => {
                 copy_of.insert(file.source.clone(), at);
@@ -1197,6 +1204,28 @@ mod tests {
         assert_eq!(made.added[0].1, copy);
         assert_eq!(rig.entries(&made.id), vec![new_track.clone(), rbl_db::fixture::track_id(1), new_track]);
         assert_eq!(std::fs::read(&stick_file).unwrap(), stick_bytes, "the stick is only read");
+    }
+
+    #[test]
+    fn importing_the_same_playlist_again_uses_the_earlier_copies() {
+        // rekordbox's second import of the playlist asked nothing and made no
+        // copy: "P186 (1)" held the two tracks the first import made [OBS
+        // rekordbox 7.2.14, chris-win11, #198].
+        let rig = rig();
+        rig.came_from_elsewhere(3);
+        let music = tempfile::tempdir().unwrap();
+        let destination = rbl_export::device_import::destination(music.path());
+        let plan = rig.plan(Format::OneLibrary, "TAG LIST");
+        let (entries, _) = copy_missing(&plan, &plan.copies(), &destination).unwrap();
+        let first = rig.writer().import_device_playlist_entries(&plan.name, &entries).unwrap();
+        let plan = rig.plan(Format::OneLibrary, "TAG LIST");
+        let (entries, copies) = copy_missing(&plan, &plan.copies(), &destination).unwrap();
+        assert_eq!(copies.files(), Vec::<PathBuf>::new(), "no second copy");
+        let second = rig.writer().import_device_playlist_entries(&plan.name, &entries).unwrap();
+        assert_eq!(second.name, "TAG LIST (1)");
+        assert_eq!(second.added, vec![]);
+        assert_eq!(rig.entries(&second.id), rig.entries(&first.id));
+        assert_eq!(files_under(music.path()).len(), 1);
     }
 
     #[test]

@@ -95,3 +95,30 @@ fn a_missing_source_copies_nothing() {
     assert!(copies.files().is_empty());
     assert!(!wanted.exists());
 }
+
+#[test]
+fn an_earlier_copy_of_the_same_file_is_found_and_another_file_is_not() {
+    let stick = tempfile::tempdir().unwrap();
+    let music = tempfile::tempdir().unwrap();
+    let source = stick.path().join("a.mp3");
+    std::fs::write(&source, b"device audio").unwrap();
+    let wanted = candidate(music.path(), "A", "B", "a.mp3");
+    assert_eq!(Copies::existing_copy(&source, &wanted).unwrap(), None, "nothing there yet");
+    std::fs::create_dir_all(wanted.parent().unwrap()).unwrap();
+    std::fs::write(&wanted, b"the user's own a.mp3").unwrap();
+    assert_eq!(Copies::existing_copy(&source, &wanted).unwrap(), None, "a different file of that name");
+    let made = Copies::new().copy(&source, &wanted).unwrap();
+    assert_eq!(Copies::existing_copy(&source, &wanted).unwrap(), Some(made));
+}
+
+#[test]
+fn a_copy_keeps_the_device_files_modification_time() {
+    let stick = tempfile::tempdir().unwrap();
+    let music = tempfile::tempdir().unwrap();
+    let source = stick.path().join("a.mp3");
+    std::fs::write(&source, b"device audio").unwrap();
+    let then = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    std::fs::File::options().write(true).open(&source).unwrap().set_modified(then).unwrap();
+    let made = Copies::new().copy(&source, &candidate(music.path(), "A", "B", "a.mp3")).unwrap();
+    assert_eq!(std::fs::metadata(made).unwrap().modified().unwrap(), then);
+}
