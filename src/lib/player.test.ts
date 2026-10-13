@@ -53,6 +53,7 @@ import {
   snapOffset,
   OVERVIEW_HEAD_DEVICE_PX,
   overviewHeadWidth,
+  playheadWidth,
   pressCue,
   releaseCue,
   parseBeatGrid,
@@ -544,6 +545,28 @@ describe("snapOffset", () => {
     expect(snapOffset(Number.NaN, 2)).toBe(0);
     expect(Object.is(snapOffset(-0.1, 2), 0)).toBe(true);
     expect(snapOffset(10.4, Number.NaN)).toBe(10);
+  });
+});
+
+describe("playheadWidth", () => {
+  it("is two whole device pixels at 150%, as rekordbox draws it (#393)", () => {
+    // rekordbox 7.2.14 at 150%: the detail playhead is two full device columns.
+    expect(playheadWidth(1.5) * 1.5).toBeCloseTo(2, 9);
+  });
+
+  it("keeps one CSS pixel at 1x and 2x, and is always whole device pixels", () => {
+    expect(playheadWidth(1)).toBe(1);
+    expect(playheadWidth(2)).toBe(1);
+    for (const ratio of [1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
+      const device = playheadWidth(ratio) * ratio;
+      expect(Math.abs(device - Math.round(device))).toBeLessThan(1e-9);
+      expect(device).toBeGreaterThanOrEqual(ratio - 1e-9);
+    }
+  });
+
+  it("falls back to one CSS pixel for a ratio the browser did not report", () => {
+    expect(playheadWidth(Number.NaN)).toBe(1);
+    expect(playheadWidth(0)).toBe(1);
   });
 });
 

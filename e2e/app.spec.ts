@@ -2012,7 +2012,11 @@ test("the detail playhead is pinned to the middle, whatever the track does", asy
 
   const detail = await page.getByTestId("player-detail").boundingBox();
   const head = await page.getByTestId("player-detail-head").boundingBox();
-  expect((head?.x ?? 0) - (detail?.x ?? 0)).toBeCloseTo((detail?.width ?? 0) / 2, 0);
+  // Within half a device pixel of the middle: the head is put on whole device
+  // pixels so it draws solid rather than blended across two (#393).
+  const ratio = await page.evaluate(() => globalThis.devicePixelRatio);
+  expect(Math.abs((head?.x ?? 0) - (detail?.x ?? 0) - (detail?.width ?? 0) / 2)).toBeLessThanOrEqual(0.5 / ratio + 1e-6);
+  expect(((head?.x ?? 0) - (detail?.x ?? 0)) * ratio % 1).toBeCloseTo(0, 6);
 });
 
 test("dragging the detail waveform scrubs, and dragging the overview seeks", async ({ page }) => {

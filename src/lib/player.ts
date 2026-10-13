@@ -841,6 +841,23 @@ export function overviewHeadWidth(ratio: number): number {
 }
 
 /**
+ * The playhead's width in CSS pixels: whole device pixels, never less than one.
+ *
+ * rekordbox 7.2.14 at 150% scaling draws the detail's playhead as two full
+ * device columns of flat colour, (255, 0, 0) paused and (224, 224, 224)
+ * playing, over the waveform (#393, observed on chris-win11). A 1px CSS line
+ * at 1.5x covers one and a half device pixels, which the compositor spreads
+ * over two columns at three quarters of the colour, (176, 38, 26) for the red
+ * and blended into the waveform under it: the line rekordbox paints solid
+ * reads faint. Rounding the width up to whole device pixels keeps one CSS
+ * pixel at 1x and 2x and gives 1.5x its two solid columns.
+ */
+export function playheadWidth(ratio: number): number {
+  const scale = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  return Math.max(1, Math.ceil(scale - 1e-9)) / scale;
+}
+
+/**
  * Whether the playhead has run far enough that the layer must be redrawn.
  *
  * The layer reaches half its width either side of the anchor, and the strip

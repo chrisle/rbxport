@@ -663,8 +663,10 @@
   top: 0;
   bottom: 0;
   left: 0;
+  /* Whole device pixels, written by the frame loop with its place: 1px
+     here is what it is before the first frame. */
   width: 1px;
-  background: var(--c-text);
+  background: var(--c-playhead);
   pointer-events: none;
   will-change: transform;
 }

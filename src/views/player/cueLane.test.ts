@@ -42,4 +42,10 @@ describe("the detail's cue lane", () => {
     // The beat markers still reach 15px above the waveform (by request, 2026-09-18).
     expect(wave - px("--s-beat-marker-top")).toBe(15);
   });
+
+  it("paints the playhead in the colours rekordbox does", () => {
+    // Two device columns of flat colour at 150%: paused and playing.
+    expect(token("--c-playhead-armed").toUpperCase()).toBe("#FF0000");
+    expect(token("--c-playhead").toUpperCase()).toBe("#E0E0E0");
+  });
 });

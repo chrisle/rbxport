@@ -52,6 +52,7 @@ import {
   scrollOffset,
   snapOffset,
   overviewHeadWidth,
+  playheadWidth,
   pressCue,
   releaseCue,
   beatCountText,
@@ -1138,14 +1139,21 @@ export const Player = memo(function Player({
    * the deck only updates its canvas anchor when the buffered slice runs out.
    */
   useEffect(() => {
+    // Both heads in whole device pixels, at their width and their place: a
+    // line straddling a pixel boundary is blended at partial colour into
+    // the waveform under it, where rekordbox paints it solid (#393).
+    const ratio = globalThis.devicePixelRatio;
+    const headWidth = `${playheadWidth(ratio)}px`;
     const x = (headPercent() / 100) * detail.width;
-    if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
+    if (detailHead.current) {
+      detailHead.current.style.width = headWidth;
+      detailHead.current.style.transform = `translateX(${snapOffset(x, ratio)}px)`;
+    }
     if (barsLabel.current) barsLabel.current.style.transform = `translateX(${x}px)`;
     // The deck overview's head is two device pixels wide and slides by whole
     // device pixels, as rekordbox draws it (#570): two CSS pixels at 1x, one
     // at 2x. The simple player shares this ref but keeps its own 1pt head from
     // its stylesheet, measured from its own capture, so it is left alone.
-    const ratio = globalThis.devicePixelRatio;
     if (overviewHead.current && !simple) overviewHead.current.style.width = `${overviewHeadWidth(ratio)}px`;
     const apply = (seconds: number) => {
       const at = total > 0 ? Math.min(seconds / total, 1) : 0;
