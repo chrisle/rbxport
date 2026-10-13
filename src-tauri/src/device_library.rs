@@ -134,12 +134,13 @@ impl DeviceAssets {
 /// Whether `path` is there below `mount` with no link on the way down.
 ///
 /// A stick is not the user's own data: HFS+, APFS and ext4 sticks can hold
-/// symbolic links, and one named where the stick's library expects artwork
-/// or a `.DAT` could otherwise hand any file the app can read to the webview.
-/// Each part is looked at with `symlink_metadata`, as the backups do, rather
-/// than by resolving the whole path: asking a volume for a file's final path
-/// fails on some Windows volumes (#271). On Windows a junction counts as a
-/// link too.
+/// symbolic links, and one named where the stick's library expects artwork,
+/// a `.DAT` or a track could otherwise hand any file the app can read to the
+/// webview, or have Import Playlist copy it into the Music folder. Each part
+/// is looked at with `symlink_metadata`, as the backups do, rather than by
+/// resolving the whole path: asking a volume for a file's final path fails
+/// on some Windows volumes (#271). On Windows a junction counts as a link
+/// too.
 // perf-ok: one `lstat` per part (four or five for a stick file), only for a
 // stick's own track.
 fn plainly_under(mount: &Path, path: &Path) -> bool {
@@ -536,15 +537,10 @@ fn copy_missing(
     let mut copy_of: std::collections::HashMap<PathBuf, PathBuf> = std::collections::HashMap::new();
     for file in to_copy {
         // Only ever a file of the stick: a library path that climbs out of
-        // it (`..`) is not copied.
-        let on_stick = match (file.source.canonicalize(), plan.mount.canonicalize()) {
-            (Ok(f), Ok(m)) => f.starts_with(m),
-            // A volume that cannot canonicalize (WinFsp-style mounts): the
-            // spelled path must at least stay under the mount.
-            _ => file.source.starts_with(&plan.mount)
-                && !file.source.components().any(|c| matches!(c, std::path::Component::ParentDir)),
-        };
-        if !on_stick {
+        // it (`..`), or a link on the stick that leads elsewhere, is not
+        // copied. Walked part by part rather than canonicalized, which fails
+        // on WinFsp-style mounts.
+        if !plainly_under(&plan.mount, &file.source) {
             if let Err(left) = copies.roll_back() {
                 tracing::warn!(error = %left, "could not remove the copies of a failed device import");
             }
@@ -722,7 +718,9 @@ fn plan_import(db: &rbl_db::Library, stick: &StickTracks, node: &device::Node) -
         // perf-ok: a `stat` or two per missing track, for the size the
         // question shows; the stick's listings only when the spelling misses.
         let source = if file.exists() { file } else { device::StickFiles::new(&stick.mount).locate(&track.path) };
-        let bytes = std::fs::metadata(&source).map_or(0, |m| m.len());
+        // A link on the stick is never copied (see `copy_missing`), so its
+        // target's size is not asked for either.
+        let bytes = if plainly_under(&stick.mount, &source) { std::fs::metadata(&source).map_or(0, |m| m.len()) } else { 0 };
         let name = Path::new(&track.path.replace('\\', "/"))
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -1289,6 +1287,63 @@ mod tests {
         let destination = rbl_export::device_import::destination(music.path());
         assert!(copy_missing(&plan, &plan.copies(), &destination).is_err());
         assert_eq!(files_under(music.path()), Vec::<String>::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_on_the_stick_to_a_file_elsewhere_is_not_copied() {
+        // #248 review: a stick (ext4, APFS, HFS+) can hold a symbolic link
+        // where its library names a track. Import Playlist must not copy
+        // the file it leads to into the Music folder or the collection.
+        let rig = rig();
+        rig.came_from_elsewhere(1);
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.wav");
+        std::fs::write(&secret, wav(10)).unwrap();
+        let tracks = || -> i64 {
+            let db = rbl_db::Library::open(rig.location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+            db.connection().query_row("SELECT COUNT(*) FROM djmdContent", [], |r| r.get(0)).unwrap()
+        };
+        let before = tracks();
+        let on_stick = rig.sticks_file(1);
+        std::fs::remove_file(&on_stick).unwrap();
+        std::os::unix::fs::symlink(&secret, &on_stick).unwrap();
+
+        let plan = rig.plan(Format::OneLibrary, "TAG LIST");
+        let copies = plan.copies();
+        assert_eq!((copies.len(), copies[0].bytes), (1, 0), "the linked file's size is not asked for");
+        let music = tempfile::tempdir().unwrap();
+        let destination = rbl_export::device_import::destination(music.path());
+        assert!(copy_missing(&plan, &copies, &destination).is_err());
+        assert_eq!(files_under(music.path()), Vec::<String>::new());
+        assert_eq!(tracks(), before, "nothing added to the collection");
+    }
+
+    #[test]
+    fn only_a_plain_file_below_the_mount_counts_as_the_sticks() {
+        // The check is made without canonicalizing, which fails on
+        // WinFsp-style mounts, so it must see `..`, other volumes and
+        // missing files by itself.
+        let dir = tempfile::tempdir().unwrap();
+        let (stick, outside) = (dir.path().join("STICK"), dir.path().join("outside"));
+        std::fs::create_dir_all(stick.join("Contents/A")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(stick.join("Contents/A/t.wav"), b"wav").unwrap();
+        std::fs::write(outside.join("secret.wav"), b"secret").unwrap();
+
+        assert!(plainly_under(&stick, &stick.join("Contents/A/t.wav")));
+        assert!(!plainly_under(&stick, &stick.join("Contents/A/../../../outside/secret.wav")), "climbs out");
+        assert!(!plainly_under(&stick, &stick.join("Contents/../Contents/A/t.wav")), "any `..` is refused");
+        assert!(!plainly_under(&stick, &outside.join("secret.wav")), "not under the mount");
+        assert!(!plainly_under(&stick, &stick.join("Contents/A/gone.wav")), "not there");
+        assert!(!plainly_under(&stick, &stick), "the mount itself is not a file of it");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, stick.join("Contents/B")).unwrap();
+            std::os::unix::fs::symlink(outside.join("secret.wav"), stick.join("Contents/A/u.wav")).unwrap();
+            assert!(!plainly_under(&stick, &stick.join("Contents/B/secret.wav")), "a linked folder on the way");
+            assert!(!plainly_under(&stick, &stick.join("Contents/A/u.wav")), "a linked file");
+        }
     }
 
     #[test]
