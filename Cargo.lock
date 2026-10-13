@@ -4015,6 +4015,7 @@ dependencies = [
 name = "rbl-export"
 version = "1.6.0"
 dependencies = [
+ "fs2",
  "rbl-analysis",
  "rbl-anlz",
  "rbl-audio",
