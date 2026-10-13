@@ -407,8 +407,11 @@ test("the header menu lists every column and toggles one on", async ({ page }) =
   const menu = page.getByRole("menu", { name: "Columns" });
   await expect(menu).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "Auto-size all columns" })).toBeVisible();
-  // Transcribed from rekordbox's own menu.
-  await expect(menu.getByRole("menuitemcheckbox")).toHaveCount(39);
+  // The 39 columns transcribed from rekordbox's own menu, then File Created
+  // (#308), which rbx appends after them.
+  const items = menu.getByRole("menuitemcheckbox");
+  await expect(items).toHaveCount(40);
+  await expect(items.last()).toHaveAccessibleName("File Created");
   await expect(menu.getByRole("menuitemcheckbox", { name: "Track Title" })).toBeDisabled();
   await expect(menu.getByRole("menuitemcheckbox", { name: "Size", exact: true })).toBeEnabled();
   await expect(menu.getByRole("menuitemcheckbox", { name: "Cloud" })).toBeEnabled();
