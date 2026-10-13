@@ -27,14 +27,25 @@ test("eject after syncing removes successfully synced devices", async ({ page })
   await expect(dialog.getByRole("checkbox", { name: "TEST", exact: true })).toBeVisible();
 });
 
-test("imports ratings independently of cues, history and settings", async ({ page }) => {
+test("Import brings back only what Preferences turns on, and Change import preferences opens them (#199)", async ({ page }) => {
   const dialog = await openManager(page);
-  await dialog.getByRole("checkbox", { name: "Cues and beat grids", exact: true }).uncheck();
-  await dialog.getByRole("checkbox", { name: "Play history", exact: true }).uncheck();
-  await expect(dialog.getByRole("checkbox", { name: "Track ratings", exact: true })).toBeChecked();
+  // Two actions, no import ticks in the window.
+  await expect(dialog.getByRole("checkbox", { name: "Track ratings", exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("checkbox", { name: "Play history", exact: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Change import preferences" }).click();
+  const preferences = page.getByRole("dialog", { name: "Preferences" });
+  await expect(preferences).toBeVisible();
+  await expect(preferences.getByRole("switch", { name: "Import track ratings" })).toBeChecked();
+  await preferences.getByRole("switch", { name: "Import cues and beat grids" }).uncheck();
+  await preferences.getByRole("switch", { name: "Import play history" }).uncheck();
+  await preferences.getByRole("button", { name: "Close" }).click();
+  await expect(preferences).toBeHidden();
+  await expect(dialog).toBeVisible();
   await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
   await dialog.getByRole("button", { name: "Import", exact: true }).click();
   await expect(dialog.getByRole("status")).toContainText("DJ STICK: no new track ratings.");
+  await expect(dialog.getByRole("status")).not.toContainText("play-history");
+  await expect(dialog.getByRole("status")).not.toContainText("cues and beat grids");
 });
 
 test("the rail opens it with the library's playlists on the left and the devices on the right", async ({ page }) => {

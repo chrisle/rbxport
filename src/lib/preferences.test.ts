@@ -14,9 +14,15 @@ import {
 
 describe("sanitisePreferences", () => {
   it("enables rating imports for older settings and remembers explicit off choices", () => {
-    expect(DEFAULT_PREFERENCES.usbExport).toMatchObject({ importRatings: true, importButtonRatings: true });
-    expect(sanitisePreferences({ usbExport: {} }).usbExport).toMatchObject({ importRatings: true, importButtonRatings: true });
-    expect(sanitisePreferences({ usbExport: { importRatings: false, importButtonRatings: false } }).usbExport).toMatchObject({ importRatings: false, importButtonRatings: false });
+    expect(DEFAULT_PREFERENCES.usbExport).toMatchObject({ importButtonRatings: true });
+    expect(sanitisePreferences({ usbExport: {} }).usbExport).toMatchObject({ importButtonRatings: true });
+    expect(sanitisePreferences({ usbExport: { importButtonRatings: false } }).usbExport).toMatchObject({ importButtonRatings: false });
+  });
+  it("drops the old import-when-syncing choices: SYNC never imports (#199)", () => {
+    const usb = sanitisePreferences({ usbExport: { importSettings: true, importHistory: true, importRatings: true } }).usbExport;
+    expect(usb).not.toHaveProperty("importSettings");
+    expect(usb).not.toHaveProperty("importHistory");
+    expect(usb).not.toHaveProperty("importRatings");
   });
   it("enables rekordbox browse sync by default and remembers an explicit off choice", () => {
     expect(DEFAULT_PREFERENCES.rekordbox.syncBrowseSettings).toBe(true);
@@ -187,9 +193,9 @@ describe("the sliders and the quantize value", () => {
   });
 });
 
- it("defaults USB imports to history and ratings and preserves saved choices", () => {
-  expect(sanitisePreferences({}).usbExport).toEqual({ importSettings: false, importHistory: true, importRatings: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
-  expect(sanitisePreferences({ usbExport: { importSettings: true, importHistory: false } }).usbExport).toEqual({ importSettings: true, importHistory: false, importRatings: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
+ it("defaults Import to cues, history and ratings and preserves saved choices", () => {
+  expect(sanitisePreferences({}).usbExport).toEqual({ deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
+  expect(sanitisePreferences({ usbExport: { importButtonHistory: false, importButtonRatings: false } }).usbExport).toEqual({ deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: false, importButtonSettings: false, importButtonRatings: false });
   expect(sanitisePreferences({ usbExport: { importButtonCues: false, importButtonSettings: true } }).usbExport).toMatchObject({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
 });
 

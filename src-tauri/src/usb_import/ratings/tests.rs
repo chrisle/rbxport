@@ -177,3 +177,34 @@ fn native_writer_refuses_an_unsupported_schema_even_without_device_changes() {
     drop(db);
     assert!(fixture.import().unwrap_err().message.contains("writes are disabled"));
 }
+
+#[test]
+fn a_sync_without_import_changes_neither_the_library_nor_the_device_edit() {
+    // #199: SYNC never imports. A device rating edit that Import has not
+    // brought back stops the sync with a pointer to Import, as a device cue
+    // edit does, so neither the library nor the device edit is overwritten.
+    let fixture = Fixture::new();
+    fixture.rate(0, 4);
+    let library = fixture.desktop(0);
+    fixture.one("UPDATE content SET rating=1 WHERE content_id=1");
+    fixture.legacy(1, 1);
+    let sync = |fixture: &Fixture| {
+        let mut tracks = fixture.tracks.clone();
+        for (index, track) in tracks.iter_mut().enumerate() { track.rating = fixture.desktop(index).0; }
+        rbl_export::export_full(&fixture.usb, &tracks, &[], &[], None, Some(&fixture.sync), &mut |_| {})
+    };
+    let refused = sync(&fixture).unwrap_err().to_string();
+    assert!(refused.contains("changed on the USB. Import its changes before syncing."), "{refused}");
+    assert_eq!(fixture.desktop(0), library, "the refused sync wrote nothing to the library");
+    let snapshot = rbl_export::snapshot::Snapshot::read(&fixture.usb).unwrap();
+    assert_eq!(snapshot.legacy.as_ref().unwrap().tracks[0].rating, 1, "the device edit is still there to import");
+    assert_eq!(snapshot.one.as_ref().unwrap().tracks[0].rating, 1);
+    // Import brings it back (the device wins over the library edit), and the
+    // sync after it goes through.
+    let report = fixture.import().unwrap();
+    assert_eq!(report.ratings, 1);
+    assert!(report.warnings.iter().any(|warning| warning.contains("replaced 1")));
+    assert_eq!(fixture.desktop(0).0, 1);
+    sync(&fixture).unwrap();
+    assert_eq!(fixture.import().unwrap().ratings, 0);
+}

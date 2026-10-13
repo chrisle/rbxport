@@ -8,7 +8,7 @@ pub(super) fn import(state: &AppState, root: &Path, manifest: Option<&Manifest>,
     // unrecognised stick must also pass the native rekordbox-running guard.
     state.write(|_| Ok(())).map_err(write_error)?;
     let Some((manifest, baseline)) = manifest.and_then(|m| m.baseline.as_ref().map(|b| (m, b))) else {
-        report.warnings.push("Track ratings were not imported: no export baseline for this library was found. Sync this USB with rating import disabled first.".into());
+        report.warnings.push("Track ratings were not imported: no export baseline for this library was found. Sync this USB to create one.".into());
         return Ok(());
     };
     let current = Snapshot::read(root).map_err(err)?;
@@ -39,11 +39,11 @@ pub(super) fn import(state: &AppState, root: &Path, manifest: Option<&Manifest>,
                 continue;
             }
             if track.rating > 5 || old.rating > 5 {
-                return Err(err(format!("{name} track {} has an invalid rating. Sync this USB with rating import disabled to regenerate 0–5 star ratings.", track.id)));
+                return Err(err(format!("{name} track {} has an invalid rating. Sync this USB to regenerate 0–5 star ratings.", track.id)));
             }
             if let Some(previous) = changes.insert(track.id, track.rating) {
                 if previous != track.rating {
-                    return Err(err(format!("The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing or syncing.", track.id)));
+                    return Err(err(format!("The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing.", track.id)));
                 }
             }
         }

@@ -3157,6 +3157,10 @@ function AppBody() {
           onCancel={() => setAutoAnalysis(null)}
           onConfirm={settings => void startAutoAnalysis(autoAnalysis, settings)} />
       ) : null}
+      {/* Before Preferences, so the import preferences it opens are drawn over it. */}
+      {syncOpen ? (
+        <SyncManager onClose={() => setSyncOpen(false)} onSynced={refreshDevices} onOpenPreferences={setSettingsOpen} />
+      ) : null}
       {settingsOpen !== null ? (
         <ConnectedPreferences
           summary={summary}
@@ -3171,9 +3175,6 @@ function AppBody() {
           }}
           onClose={() => setSettingsOpen(null)}
         />
-      ) : null}
-      {syncOpen ? (
-        <SyncManager onClose={() => setSyncOpen(false)} onSynced={refreshDevices} />
       ) : null}
       {reportOpen ? <ReportBug onClose={() => setReportOpen(false)} /> : null}
       {smartEditor ? (

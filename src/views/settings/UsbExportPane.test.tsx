@@ -43,24 +43,32 @@ it("keeps the blank-drive database option in USB Export and updates its existing
   expect(update).toHaveBeenCalledWith("djSystem", { createDatabaseFolders: false });
 });
 
-it("explains the sync options and shows their defaults", () => {
+it("explains the import and sync options and shows their defaults", () => {
   act(() => root.render(
     <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update: vi.fn(), reset: vi.fn() }}>
       <UsbExportPane />
     </PreferencesProvider>,
   ));
 
-  expect(host.textContent).toContain("Automatically import CDJ/mixer settings when syncing");
-  expect(host.textContent).toContain("Copy valid CDJ and mixer settings from selected USB devices into rbxport when you click SYNC in Sync Manager.");
-  expect(host.textContent).toContain("Automatically import play history when syncing");
-  expect(host.textContent).toContain("Add new play-history entries from selected USB devices to your library when you click SYNC in Sync Manager.");
+  expect(host.textContent).toContain("Import in Sync Manager brings back what is turned on here. SYNC only writes to USB devices and never imports.");
+  expect(host.textContent).toContain("Device ratings win when a track was also rated in your library.");
   expect(host.textContent).toContain("Free space on your USB stick by removing songs that aren't in any playlist.");
   expect([...host.querySelectorAll(`.${styles.default}`)].map(node => node.textContent)).toEqual([
-    "Default: Off", "Default: On", "Default: On", "Default: On", "Default: On", "Default: Off", "Default: On", "Default: Off",
+    "Default: On", "Default: On", "Default: Off", "Default: On", "Default: Off",
   ]);
 });
 
-it("sets what Sync Manager's Import has ticked when it opens", () => {
+it("has no option that imports when syncing (#199)", () => {
+  act(() => root.render(
+    <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update: vi.fn(), reset: vi.fn() }}>
+      <UsbExportPane />
+    </PreferencesProvider>,
+  ));
+  expect(host.textContent).not.toMatch(/when syncing/i);
+  expect(host.textContent).not.toContain("when you click SYNC");
+});
+
+it("sets what Sync Manager's Import brings back", () => {
   const update = vi.fn();
   act(() => root.render(
     <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update, reset: vi.fn() }}>
@@ -73,13 +81,14 @@ it("sets what Sync Manager's Import has ticked when it opens", () => {
   expect(toggle("Import play history").checked).toBe(true);
   expect(toggle("Import CDJ/mixer settings").checked).toBe(false);
   expect(toggle("Import track ratings").checked).toBe(true);
-  expect(toggle("Automatically import track ratings when syncing").checked).toBe(true);
+  act(() => toggle("Import cues and beat grids").click());
+  expect(update).toHaveBeenCalledWith("usbExport", { importButtonCues: false });
+  act(() => toggle("Import play history").click());
+  expect(update).toHaveBeenCalledWith("usbExport", { importButtonHistory: false });
   act(() => toggle("Import CDJ/mixer settings").click());
   expect(update).toHaveBeenCalledWith("usbExport", { importButtonSettings: true });
   act(() => toggle("Import track ratings").click());
   expect(update).toHaveBeenCalledWith("usbExport", { importButtonRatings: false });
-  act(() => toggle("Automatically import track ratings when syncing").click());
-  expect(update).toHaveBeenCalledWith("usbExport", { importRatings: false });
 });
 
 it("offers AIFF as a compatibility conversion target", () => {

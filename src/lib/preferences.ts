@@ -276,8 +276,12 @@ export interface Preferences {
   advanced: AdvancedPreferences;
   keyboard: KeyboardPreferences;
   usbExport: {
-    importSettings: boolean; importHistory: boolean; importRatings: boolean; deleteUnlistedMusic: boolean; maximumCompatibility: boolean; conversionFormat: "wav" | "aiff" | "mp3";
-    /** What Sync Manager's Import button has ticked when the window opens. */
+    deleteUnlistedMusic: boolean; maximumCompatibility: boolean; conversionFormat: "wav" | "aiff" | "mp3";
+    /**
+     * What Sync Manager's Import brings back from a stick. SYNC never brings
+     * anything back: device changes reach the library only through Import,
+     * as rekordbox's reach its collection only through Update Collection.
+     */
     importButtonCues: boolean; importButtonHistory: boolean; importButtonSettings: boolean; importButtonRatings: boolean;
   };
 }
@@ -345,7 +349,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     autoJoinLink: false,
     linkKeySort: "musical",
   },
-  usbExport: { importSettings: false, importHistory: true, importRatings: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true },
+  usbExport: { deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true },
   advanced: {
     relocateFolders: [],
     relocateMusic: true,
@@ -462,7 +466,7 @@ export function sanitisePreferences(value: unknown): Preferences {
   const d = DEFAULT_PREFERENCES;
   return {
     rekordbox: { syncBrowseSettings: bool(rekordbox.syncBrowseSettings, true) },
-    usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true), importRatings: bool(usb.importRatings, true), deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: oneOf(usb.conversionFormat, ["wav", "aiff", "mp3"] as const, "wav"), importButtonCues: bool(usb.importButtonCues, true), importButtonHistory: bool(usb.importButtonHistory, true), importButtonSettings: bool(usb.importButtonSettings, false), importButtonRatings: bool(usb.importButtonRatings, true) },
+    usbExport: { deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: oneOf(usb.conversionFormat, ["wav", "aiff", "mp3"] as const, "wav"), importButtonCues: bool(usb.importButtonCues, true), importButtonHistory: bool(usb.importButtonHistory, true), importButtonSettings: bool(usb.importButtonSettings, false), importButtonRatings: bool(usb.importButtonRatings, true) },
     view: {
       locale: oneOf(view.locale, LOCALES, d.view.locale),
       showBpmChanges: bool(view.showBpmChanges, d.view.showBpmChanges),

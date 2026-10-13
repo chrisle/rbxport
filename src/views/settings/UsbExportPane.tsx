@@ -22,44 +22,15 @@ export function UsbExportPane() {
         checked={preferences.djSystem.createDatabaseFolders}
         onChange={event => update("djSystem", { createDatabaseFolders: event.target.checked })} />
     </label>
+    {/* What Import brings back. SYNC never imports: device changes reach
+        the library only when Import is clicked, as rekordbox's reach its
+        collection only through Update Collection. */}
+    <p className={layout.help}>{t("Import in Sync Manager brings back what is turned on here. SYNC only writes to USB devices and never imports.")}</p>
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
-        <strong id={`${id}-settings`}>Automatically import CDJ/mixer settings when syncing</strong>
-        <span id={`${id}-settings-help`} className={styles.description}>Copy valid CDJ and mixer settings from selected USB devices into rbxport when you click SYNC in Sync Manager.</span>
-        <span className={styles.default}>Default: Off</span>
-      </span>
-      <input type="checkbox" role="switch" className={controls.toggle}
-        aria-labelledby={`${id}-settings`} aria-describedby={`${id}-settings-help`}
-        checked={preferences.usbExport.importSettings}
-        onChange={event => update("usbExport", { importSettings: event.target.checked })} />
-    </label>
-    <label className={`${layout.summary} ${styles.option}`}>
-      <span className={styles.details}>
-        <strong id={`${id}-history`}>Automatically import play history when syncing</strong>
-        <span id={`${id}-history-help`} className={styles.description}>Add new play-history entries from selected USB devices to your library when you click SYNC in Sync Manager.</span>
-        <span className={styles.default}>Default: On</span>
-      </span>
-      <input type="checkbox" role="switch" className={controls.toggle}
-        aria-labelledby={`${id}-history`} aria-describedby={`${id}-history-help`}
-        checked={preferences.usbExport.importHistory}
-        onChange={event => update("usbExport", { importHistory: event.target.checked })} />
-    </label>
-    <label className={`${layout.summary} ${styles.option}`}>
-      <span className={styles.details}>
-        <strong id={`${id}-ratings`}>{t("Automatically import track ratings when syncing")}</strong>
-        <span id={`${id}-ratings-help`} className={styles.description}>{t("Import device rating changes before SYNC. Device ratings win when a track was also rated in your library.")}</span>
+        <strong id={`${id}-import-cues`}>{t("Import cues and beat grids")}</strong>
+        <span id={`${id}-import-cues-help`} className={styles.description}>{t("Replace cues and beat grids for matching tracks in your library with the USB device's.")}</span>
         <span className={styles.default}>{t("Default: On")}</span>
-      </span>
-      <input type="checkbox" role="switch" className={controls.toggle}
-        aria-labelledby={`${id}-ratings`} aria-describedby={`${id}-ratings-help`}
-        checked={preferences.usbExport.importRatings}
-        onChange={event => update("usbExport", { importRatings: event.target.checked })} />
-    </label>
-    <label className={`${layout.summary} ${styles.option}`}>
-      <span className={styles.details}>
-        <strong id={`${id}-import-cues`}>Import cues and beat grids</strong>
-        <span id={`${id}-import-cues-help`} className={styles.description}>Ticked for Import in Sync Manager when the window opens.</span>
-        <span className={styles.default}>Default: On</span>
       </span>
       <input type="checkbox" role="switch" className={controls.toggle}
         aria-labelledby={`${id}-import-cues`} aria-describedby={`${id}-import-cues-help`}
@@ -68,9 +39,9 @@ export function UsbExportPane() {
     </label>
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
-        <strong id={`${id}-import-history`}>Import play history</strong>
-        <span id={`${id}-import-history-help`} className={styles.description}>Ticked for Import in Sync Manager when the window opens.</span>
-        <span className={styles.default}>Default: On</span>
+        <strong id={`${id}-import-history`}>{t("Import play history")}</strong>
+        <span id={`${id}-import-history-help`} className={styles.description}>{t("Add new play-history entries from the USB device to your library.")}</span>
+        <span className={styles.default}>{t("Default: On")}</span>
       </span>
       <input type="checkbox" role="switch" className={controls.toggle}
         aria-labelledby={`${id}-import-history`} aria-describedby={`${id}-import-history-help`}
@@ -79,9 +50,9 @@ export function UsbExportPane() {
     </label>
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
-        <strong id={`${id}-import-settings`}>Import CDJ/mixer settings</strong>
-        <span id={`${id}-import-settings-help`} className={styles.description}>Ticked for Import in Sync Manager when the window opens.</span>
-        <span className={styles.default}>Default: Off</span>
+        <strong id={`${id}-import-settings`}>{t("Import CDJ/mixer settings")}</strong>
+        <span id={`${id}-import-settings-help`} className={styles.description}>{t("Keep the USB device's CDJ and mixer settings in rbxport. Sync gives them to USB devices that have no settings of their own.")}</span>
+        <span className={styles.default}>{t("Default: Off")}</span>
       </span>
       <input type="checkbox" role="switch" className={controls.toggle}
         aria-labelledby={`${id}-import-settings`} aria-describedby={`${id}-import-settings-help`}
@@ -91,7 +62,7 @@ export function UsbExportPane() {
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
         <strong id={`${id}-import-ratings`}>{t("Import track ratings")}</strong>
-        <span id={`${id}-import-ratings-help`} className={styles.description}>{t("Ticked for Import in Sync Manager when the window opens.")}</span>
+        <span id={`${id}-import-ratings-help`} className={styles.description}>{t("Bring back ratings changed on the USB device since its last sync. Device ratings win when a track was also rated in your library.")}</span>
         <span className={styles.default}>{t("Default: On")}</span>
       </span>
       <input type="checkbox" role="switch" className={controls.toggle}
