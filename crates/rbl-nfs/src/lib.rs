@@ -613,7 +613,9 @@ impl Server {
             .child(parent, &name)
             .and_then(|index| Some((vfs.handle(index)?, vfs.attributes(index)?)));
         let Some((child_handle, attributes)) = found else {
-            tracing::trace!(xid = call.xid, parent = %vfs.name(parent).unwrap_or_default(), %name, "lookup found nothing");
+            // Debug, not trace: a player shows E-8306 NO FILE for a track
+            // whose path stops here, and the log must say where (#40).
+            tracing::debug!(xid = call.xid, parent = %vfs.name(parent).unwrap_or_default(), %name, "lookup found nothing");
             return Self::status_only(call.xid, nfs_status::NOENT);
         };
         tracing::trace!(xid = call.xid, %name, size = attributes.size, "lookup found a node");
