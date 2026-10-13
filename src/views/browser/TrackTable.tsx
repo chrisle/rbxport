@@ -13,7 +13,7 @@ import { useEventCallback } from "@/store/useEventCallback";
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { DeckId, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/types";
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { PAGE_SIZE } from "@/lib/rowCache";
@@ -433,7 +433,8 @@ const TrackRow = memo(function TrackRow({
   onSelect: (index: number, id: string, e: React.MouseEvent) => void;
   /** Load the track into the player. A double-click, as in rekordbox. */
   onOpen: (index: number) => void;
-  onDragStart: (row: RowDto) => boolean;
+  /** The row a drag starts from, and its index, so the table keeps it mounted. */
+  onDragStart: (row: RowDto, index: number) => boolean;
   /** Set the track's rating. Absent in a build that cannot write. */
   onRate: ((id: string, stars: number) => void) | undefined;
   /** Set the track's comment. */
@@ -520,7 +521,7 @@ const TrackRow = memo(function TrackRow({
             stop();
             suppressClick.current = true;
             ev.preventDefault();
-            onDragStart(row);
+            onDragStart(row, index);
           };
           window.addEventListener("pointermove", move);
           window.addEventListener("pointerup", stop);
@@ -544,7 +545,7 @@ const TrackRow = memo(function TrackRow({
       }}
       draggable={!nativeTrackDragging()}
       onDragStart={(e) => {
-        if (onDragStart(row)) {
+        if (onDragStart(row, index)) {
           // Replace the HTML source with a native file source. Destinations
           // inside the app still receive normal DOM drag/drop events.
           e.preventDefault();
@@ -1139,7 +1140,25 @@ export const TrackTable = memo(function TrackTable({
   const locateCursor = useRef(0);
   const pendingLocate = useRef<string | null>(null);
 
+  // The row a drag started from stays mounted until the drag ends, wherever
+  // the list has scrolled. The browser sends `dragend` to the element the drag
+  // started on; once the virtualizer unmounts it (a drag autoscrolled or wheeled
+  // away from it), that event reaches nothing and the drag never ends: the
+  // shell kept offering the old tracks to the next drop, a file included.
+  const [dragSource, setDragSource] = useState<number | null>(null);
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const indexes = defaultRangeExtractor(range);
+      if (dragSource === null || dragSource >= range.count || indexes.includes(dragSource)) {
+        return indexes;
+      }
+      return dragSource < (indexes[0] ?? 0) ? [dragSource, ...indexes] : [...indexes, dragSource];
+    },
+    [dragSource],
+  );
+
   const virtualizer = useVirtualizer({
+    rangeExtractor,
     count: view.count + pendingRows,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowH,
@@ -1174,8 +1193,16 @@ export const TrackTable = memo(function TrackTable({
   // when the scroll outran the fetches or moved after they had all settled.
   // Measured in the app: a drag ended on row 19,329 with the last request made
   // for rows 17,065-17,105, and nothing asked again for eight seconds.
-  const firstIndex = items.length > 0 ? (items[0]?.index ?? 0) : -1;
-  const lastIndex = items.length > 0 ? (items[items.length - 1]?.index ?? 0) : -1;
+  //
+  // A pinned drag source outside the window is left out, so it does not
+  // stretch the fetch across every row between it and the window.
+  const pinnedOutside = (at: number, next: number) =>
+    items[at]?.index === dragSource && items[next] !== undefined &&
+    Math.abs((items[next]?.index ?? 0) - (items[at]?.index ?? 0)) > 1;
+  const lo = pinnedOutside(0, 1) ? 1 : 0;
+  const hi = pinnedOutside(items.length - 1, items.length - 2) ? items.length - 2 : items.length - 1;
+  const firstIndex = hi >= lo ? (items[lo]?.index ?? 0) : -1;
+  const lastIndex = hi >= lo ? (items[hi]?.index ?? 0) : -1;
 
   // Ask for the pages covering what is on screen, plus a margin either side so a
   // fast scroll lands on cached rows. Cheap and idempotent.
@@ -1388,12 +1415,34 @@ export const TrackTable = memo(function TrackTable({
     carrying.current = null;
     nativeDrag.current = false;
     setDropAt(null);
+    setDragSource(null);
     onDragTracks?.(null);
   });
 
+  // A drop anywhere in the window ends a drag begun here, without waiting for
+  // the source row's `dragend`: that row may have been replaced by a refresh
+  // before the browser sends it. Seen in the capture phase, so nothing below
+  // can stop it, and finished a turn later, after every drop handler has read
+  // the payload. A native (desktop) drag ends through its own promise instead.
+  useEffect(() => {
+    const dropped = () => {
+      if (carrying.current === null || nativeDrag.current) return;
+      autoscroll.stop();
+      const generation = dragGeneration.current;
+      window.setTimeout(() => {
+        if (dragGeneration.current === generation && !nativeDrag.current) {
+          finishDraggingTracks();
+        }
+      }, 0);
+    };
+    window.addEventListener("drop", dropped, true);
+    return () => window.removeEventListener("drop", dropped, true);
+  }, [autoscroll, finishDraggingTracks]);
+
   const startDraggingTracks = useEventCallback(
-    (row: RowDto) => {
+    (row: RowDto, index: number) => {
       const generation = ++dragGeneration.current;
+      setDragSource(index);
       carrying.current = selection.ids.has(row.id) ? [...selection.ids] : [row.id];
       startDragOut(row);
       if (!nativeTrackDragging()) return false;
@@ -1434,6 +1483,9 @@ export const TrackTable = memo(function TrackTable({
    */
   const reorderDrop = useEventCallback((at: { index: number; below: boolean } | null = dropAt) => {
     const moved = carrying.current;
+    // A drop on a row never reaches the table's own `onDrop`; the repeat stops
+    // here as well, rather than waiting on the source row's `dragend`.
+    autoscroll.stop();
     setDropAt(null);
     if (!onReorder || moved === null || at === null || moved.length === 0) return;
     void (async () => {

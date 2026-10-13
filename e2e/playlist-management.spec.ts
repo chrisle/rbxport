@@ -488,6 +488,94 @@ test("a reorder drag held at the top of the rows scrolls the list up", async ({
   await page.mouse.up();
 });
 
+/**
+ * Starts a mouse drag on the last row of the open playlist, scrolled to its
+ * end, and rests it in the top edge zone so the list scrolls up under it.
+ */
+async function holdLastRowAtTop(page: Page, depth: number) {
+  await page.setViewportSize({ width: 1400, height: 620 });
+  await open(page);
+  await openPlaylist(page);
+  const scroller = page.getByTestId("track-scroll");
+  await expect.poll(() => scroller.evaluate((el) => el.scrollHeight > el.clientHeight + 100)).toBe(true);
+  await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  const last = rows(page).last();
+  await last.scrollIntoViewIfNeeded();
+  const a = await last.boundingBox();
+  const head = await page.locator('[role="row"]').first().boundingBox();
+  if (!a || !head) throw new Error("the rows are not on screen");
+  // Far enough that the virtualizer (16 rows of overscan past what is in
+  // view) would drop the source row once the list is at its top.
+  const reach = await scroller.evaluate((el) => el.scrollTop);
+  expect(reach).toBeGreaterThan(a.height * 17);
+  // `depth` px into rekordbox's 30px zone, which scrolls 30 - depth px a step.
+  const zone = { x: a.x + 120, y: head.y + head.height + depth };
+  await page.mouse.move(a.x + 120, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(zone.x, zone.y, { steps: 12 });
+  await page.mouse.move(zone.x + 1, zone.y);
+  await page.mouse.move(zone.x + 2, zone.y);
+  return { scroller, reach, zone: { x: zone.x + 2, y: zone.y }, head };
+}
+
+/** A Finder file dropped on a tree playlist: refused in the browser, not added. */
+async function dropFileOnHardstyle(page: Page) {
+  const target = item(page, "Hardstyle");
+  const files = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(["audio"], "a.mp3", { type: "audio/mpeg" }));
+    return transfer;
+  });
+  await target.dispatchEvent("dragover", { dataTransfer: files });
+  await target.dispatchEvent("drop", { dataTransfer: files });
+}
+
+test("a reorder drop made while the list scrolls ends the drag and stops the scroll", async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== "chromium", "only Chromium drags from mouse events");
+  // Slowly (10px a step), so the drop can be timed while the list moves.
+  const { scroller, zone } = await holdLastRowAtTop(page, 20);
+  // Let go on a row while the repeat is still moving the list, once the
+  // dragged row has left the rows drawn (what is in view plus 16 each way).
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 15_000, intervals: [25] })
+    .toBeLessThan(90);
+  // A dragover over the row now under the pointer, which the drop lands on.
+  for (let i = 1; i <= 4; i++) {
+    await page.mouse.move(zone.x + i, zone.y);
+    await page.waitForTimeout(20);
+  }
+  await page.mouse.up();
+  await expect(page.getByRole("contentinfo")).toContainText("Playlist reordered.");
+  const after = await scroller.evaluate((el) => el.scrollTop);
+  expect(after).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(after);
+
+  // The drag is over: a file let go on a playlist is a file, not the row.
+  await dropFileOnHardstyle(page);
+  await expect(page.getByRole("contentinfo")).toContainText("Drop files in the desktop app to import them.");
+});
+
+test("a drag scrolled away from its row and let go over nothing still ends", async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== "chromium", "only Chromium drags from mouse events");
+  const { scroller, zone, head } = await holdLastRowAtTop(page, 5);
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 10_000 }).toBe(0);
+  // Over the column heading, which takes no drop: only the source row's
+  // dragend can end this drag, and the row is far out of view.
+  await page.mouse.move(zone.x, head.y + head.height / 2);
+  await page.mouse.move(zone.x + 1, head.y + head.height / 2);
+  await page.mouse.up();
+  await expect(page.locator('[role="row"][data-drop]')).toHaveCount(0);
+
+  await dropFileOnHardstyle(page);
+  await expect(page.getByRole("contentinfo")).toContainText("Drop files in the desktop app to import them.");
+});
+
 test("a drag resting mid-list does not scroll it", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "only Chromium drags from mouse events");
   await page.setViewportSize({ width: 1400, height: 620 });
