@@ -360,6 +360,13 @@ pub struct TrackRow {
     pub bitrate: u32,
     pub sample_rate: u32,
     pub file_size: u32,
+    /// `MASTERCONTENTID` (0x14) and `MASTERDBID` (0x18): the desktop
+    /// library's id of the track and that library's `DBID`, the same values
+    /// as `exportLibrary.db`'s `masterContentId` and `masterDbId` [OBS #342:
+    /// equal on 1563/1563 tracks of a rekordbox 7 stick]. 0 when the writer
+    /// left them blank.
+    pub master_content_id: u32,
+    pub master_db_id: u32,
     pub track_number: u32,
     pub play_count: u16,
     pub title: String,
@@ -483,6 +490,8 @@ impl Pdb<'_> {
                     disc_number: self.u2_at(row, 0x4c),
                     sample_rate: self.u4_at(row, 0x08),
                     file_size: self.u4_at(row, 0x10),
+                    master_content_id: self.u4_at(row, 0x14),
+                    master_db_id: self.u4_at(row, 0x18),
                     artwork_id: self.u4_at(row, 0x1c),
                     key_id: self.u4_at(row, 0x20),
                     label_id: self.u4_at(row, 0x28),

@@ -103,8 +103,8 @@ pub struct Track {
     pub artwork_path: String,
     /// The desktop library the track was exported from (its `DBID`), and
     /// the track's id there: the `exportLibrary.db` columns `masterDbId` and
-    /// `masterContentId`. 0 when the library does not say, which is always
-    /// so for the Device Library.
+    /// `masterContentId`, and the `export.pdb` track row's `MASTERDBID` and
+    /// `MASTERCONTENTID` (0x18, 0x14). 0 when the library does not say.
     pub master_db_id: u64,
     pub master_content_id: u64,
 }
@@ -279,8 +279,8 @@ fn read_pdb(bytes: &[u8]) -> Result<(Vec<Node>, Vec<Track>)> {
             path: t.file_path,
             analysis_path: t.analyze_path,
             artwork_path: name(&artwork, t.artwork_id),
-            master_db_id: 0,
-            master_content_id: 0,
+            master_db_id: u64::from(t.master_db_id),
+            master_content_id: u64::from(t.master_content_id),
         })
         .collect();
     Ok((nodes, tracks))
