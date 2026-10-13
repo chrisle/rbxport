@@ -123,8 +123,14 @@ The marker says the stick may be overwritten; without it the tests refuse to
 write. Before each test, `PIONEER`, `.PIONEER`, `Contents`, the tests' own
 folders and rbxport's working files are deleted from both sticks; nothing
 else on them is touched. The tests take the sticks one at a time, and one of
-them syncs both at once as the Sync Manager does. The last test's export stays
-on the sticks so it can be loaded on a player. Test order varies, so which export that is varies too.
+them syncs both at once as the Sync Manager does. What the last test leaves
+need not be a library a player can read; for one at each stick's root, run
+that test on its own. Its tracks are placeholder bytes, so a player can browse
+them but not play them.
+
+```sh
+RBX_REAL_USB=1 RB_LITE_TEST=1 cargo test -p rbl-export --test removable_media a_sync_writes_every_stick_at_once
+```
 
 ## Before review
 

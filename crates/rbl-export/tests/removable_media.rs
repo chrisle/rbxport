@@ -21,7 +21,10 @@
 //! rbxport and rekordbox keep on it may be deleted; without it the tests
 //! refuse to write. Before each test, `PIONEER`, `.PIONEER`, `Contents`, the
 //! tests' own folders and rbxport's working files are deleted from the
-//! stick. Whichever test runs last leaves its export there to load on a player.
+//! stick. What the last test leaves need not be a library a player can read;
+//! run `a_sync_writes_every_stick_at_once` on its own for one at each stick's
+//! root. Its tracks are placeholder bytes, so a player can browse them but
+//! not play them.
 #![cfg(target_os = "macos")]
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
