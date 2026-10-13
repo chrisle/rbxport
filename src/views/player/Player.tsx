@@ -81,6 +81,7 @@ import { TempoToggle } from "./TempoToggle";
 import { TempoSlider } from "./TempoSlider";
 import type { HotCueColor } from "@/lib/preferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
+import { loadDeckQuantize, saveDeckQuantize } from "@/lib/deckQuantize";
 import {
   beatNudgeFor, beatWait, inPhaseAt, MAX_TEMPO, MIN_TEMPO, syncTo, tempoFor, type Deck as SyncDeck,
 } from "@/lib/sync";
@@ -932,9 +933,12 @@ export const Player = memo(function Player({
   /**
    * Quantize — the Q button at the end of the pad row. On by default, as a CDJ
    * ships: a cue set by hand lands tens of milliseconds off the beat, and every
-   * loop and mix taken from it inherits that.
+   * loop and mix taken from it inherits that. Remembered per deck, as rekordbox
+   * keeps `Player%d_Quantize` (see `deckQuantize.ts`): it is the one switch
+   * that makes a hot cue jump at once in EXPORT mode.
    */
-  const [quantize, setQuantize] = useState(true);
+  const [quantize, setQuantize] = useState(() => loadDeckQuantize(deck));
+  useEffect(() => saveDeckQuantize(deck, quantize), [deck, quantize]);
   const { preferences, update: updatePreferences } = usePreferencesContext();
   const [metronomeMenu, setMetronomeMenu] = useState<{x: number; y: number} | null>(null);
   const [metronome, setMetronome] = useState(false);

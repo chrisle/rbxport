@@ -2063,6 +2063,22 @@ test("Q toggles quantize, and starts on the way a CDJ ships", async ({ page }) =
   await expect(q).toHaveAttribute("aria-pressed", "true");
 });
 
+test("Q stays as it was left after a restart, as rekordbox's Player%d_Quantize does (#277)", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const q = page.getByRole("button", { name: "Quantize" });
+  await expect(q).toHaveAttribute("aria-pressed", "true");
+  await q.click();
+  await expect(q).toHaveAttribute("aria-pressed", "false");
+
+  await page.reload();
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(q).toHaveAttribute("aria-pressed", "false");
+  await q.click();
+  await page.reload();
+  await expect(q).toHaveAttribute("aria-pressed", "true");
+});
+
 test("the detail waveform scrolls by transform, not by a redraw a tick", async ({ page }) => {
   // The engine ticks ten times a second. Drawing the waveform from that made
   // the scroll step rather than move, once the playhead stopped moving itself.

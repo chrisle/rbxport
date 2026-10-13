@@ -1093,6 +1093,19 @@ describe("quantizedLaunchMs", () => {
     expect(quantizedLaunchMs(halves, 1600, 1000)).toBe(1750);
   });
 
+  it("waits up to a whole beat at the 1/1 default and an eighth at 1/8 (#277)", () => {
+    // rekordbox EXPORT mode always waits with Q on: every settings update
+    // puts the deck back in wait mode with hot cues quantized
+    // (`DjPlayerUnit::setQuantizeUnit(Fraction, bool)` @0x102b90274 stores
+    // +0x22 = 1 and enables every type) [OBS static, parity/issue-277]. Only
+    // Q off, or a finer Quantize Beat Value, shortens the wait.
+    const pressed = 1510;
+    expect((quantizedLaunchMs(grid, pressed, 1000) ?? Number.NaN) - pressed).toBe(490);
+    const eighths = subdivideGrid(grid, 8);
+    // The eighth after 1500 ms is 1562.5 ms, held to a whole millisecond.
+    expect((quantizedLaunchMs(eighths, pressed, 1000) ?? Number.NaN) - pressed).toBe(53);
+  });
+
   it("carries the edge spacing past the ends of the grid", () => {
     expect(quantizedLaunchMs(grid, 3100, 1000)).toBe(3500);
     expect(quantizedLaunchMs(grid, 200, 1000)).toBe(500);
