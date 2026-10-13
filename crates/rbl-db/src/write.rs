@@ -351,6 +351,18 @@ pub struct ImportedPlaylist {
     pub name: String,
     /// Entries added, a track listed twice counted twice.
     pub tracks: usize,
+    /// The collection tracks the import made for the files it was given
+    /// ([`DeviceEntry::File`]), each once, with its file.
+    pub added: Vec<(String, PathBuf)>,
+}
+
+/// One entry of a playlist imported from a device: a track the collection
+/// already has, or a file to add to the collection first (a copy of the
+/// device's file that rekordbox makes in `PioneerDJ/Imported from Device`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceEntry {
+    Track(String),
+    File(PathBuf),
 }
 
 /// The name rekordbox gives a playlist it imports from a device, among the
@@ -1185,18 +1197,61 @@ impl Writer {
     /// `addMultiTracksToPlaylist` @0x1008df574, which inserts every id it
     /// is given.]
     pub fn import_device_playlist(&mut self, name: &str, contents: &[String]) -> Result<ImportedPlaylist> {
+        let entries: Vec<DeviceEntry> = contents.iter().cloned().map(DeviceEntry::Track).collect();
+        self.import_device_playlist_entries(name, &entries)
+    }
+
+    /// [`Self::import_device_playlist`] for entries some of which are files
+    /// to add to the collection first, the copies rekordbox makes of the
+    /// device tracks the collection lacks (`importFromDeviceThread::
+    /// import_from_d_file_copy`, rekordbox 7.2.19 @0x1001daa68). The new
+    /// tracks, the playlist and its entries are one transaction: a file that
+    /// cannot be imported (unreadable, not audio) or a track that is gone
+    /// refuses the whole import and nothing is written, so the caller can
+    /// remove the copies it made. A file listed twice is added once and
+    /// appears twice in the playlist; a file the collection already holds is
+    /// used as it is.
+    pub fn import_device_playlist_entries(&mut self, name: &str, entries: &[DeviceEntry]) -> Result<ImportedPlaylist> {
+        let files: Vec<PathBuf> = entries
+            .iter()
+            .filter_map(|e| match e {
+                DeviceEntry::File(path) => Some(normalized(path)),
+                DeviceEntry::Track(_) => None,
+            })
+            .collect();
+        let tags = read_tags_parallel(&files);
         self.prepare()?;
         let id = self.unused_id("djmdPlaylist")?;
         let uuid = self.rng.uuid4();
         let stamp = time::now();
-        let mut rows: Vec<(String, String)> = Vec::with_capacity(contents.len());
-        for _ in contents {
+        let mut rows: Vec<(String, String)> = Vec::with_capacity(entries.len());
+        for _ in entries {
             rows.push((self.rng.uuid4(), self.rng.uuid4()));
         }
 
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for content in contents {
+        let (outcomes, _) = insert_files(&tx, &mut self.rng, &files, tags, &stamp)?;
+        let mut added: Vec<(String, PathBuf)> = Vec::new();
+        let mut made = outcomes.into_iter().zip(&files);
+        let mut contents: Vec<String> = Vec::with_capacity(entries.len());
+        for entry in entries {
+            match entry {
+                DeviceEntry::Track(content) => contents.push(content.clone()),
+                DeviceEntry::File(_) => match made.next() {
+                    Some((ImportOutcome::Added(content), file)) => {
+                        added.push((content.clone(), file.clone()));
+                        contents.push(content);
+                    }
+                    Some((ImportOutcome::Existing(content), _)) => contents.push(content),
+                    Some((ImportOutcome::Refused(reason), file)) => {
+                        return Err(DbError::WriteRefused(format!("{} could not be imported: {reason}", file.display())));
+                    }
+                    None => return Err(DbError::WriteRefused("an imported file went missing".to_owned())),
+                },
+            }
+        }
+        for content in &contents {
             let live: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
                 params![content],
@@ -1220,6 +1275,7 @@ impl Writer {
             params![ROOT],
             |r| r.get(0),
         )?;
+        // After the new tracks' rows, so it counts on from their USNs.
         let mut usn = next_usn(&tx)?;
         tx.execute(
             "INSERT INTO djmdPlaylist
@@ -1242,7 +1298,7 @@ impl Writer {
         }
         set_counter(&tx, usn)?;
         tx.commit()?;
-        Ok(ImportedPlaylist { id, name, tracks: contents.len() })
+        Ok(ImportedPlaylist { id, name, tracks: contents.len(), added })
     }
 
     /// Removes tracks from a playlist and closes the gaps in `TrackNo`.
@@ -1596,101 +1652,14 @@ impl Writer {
     /// One commit covers the batch. A database error, unlike a refused file,
     /// stops the batch and nothing in it is kept.
     pub fn import_files(&mut self, paths: &[PathBuf]) -> Result<Vec<ImportOutcome>> {
-        use std::collections::HashMap;
-
         let paths: Vec<PathBuf> = paths.iter().map(|p| normalized(p)).collect();
         let tags = read_tags_parallel(&paths);
         self.prepare()?;
         let stamp = time::now();
-        let today = stamp.get(..10).unwrap_or_default().to_owned();
 
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (master_db, device): (Option<String>, Option<String>) = tx
-            .query_row("SELECT DBID, DeviceID FROM djmdProperty LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
-            .unwrap_or((None, None));
-
-        // Where the library already holds each path, the lowest id first as
-        // `track_id_at` answers it. One pass over the table, kept for the
-        // paths of this batch only.
-        let wanted: std::collections::HashSet<String> =
-            paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
-        let mut held: HashMap<String, String> = HashMap::new();
-        {
-            let mut stmt = tx.prepare(
-                "SELECT FolderPath, ID FROM djmdContent WHERE rb_local_deleted = 0 ORDER BY ID",
-            )?;
-            let mut rows = stmt.query([])?;
-            while let Some(row) = rows.next()? {
-                let folder: Option<String> = row.get(0)?;
-                if let Some(folder) = folder.filter(|f| wanted.contains(f)) {
-                    held.entry(folder).or_insert(row.get::<_, String>(1)?);
-                }
-            }
-        }
-
-        let mut names: HashMap<(&'static str, String), Option<String>> = HashMap::new();
-        let mut next_usn_value: Option<i64> = None;
-        let mut last_usn: Option<i64> = None;
-        let mut outcomes = Vec::with_capacity(paths.len());
-
-        for (path, tags) in paths.iter().zip(tags) {
-            let folder = path.to_string_lossy().into_owned();
-            if let Some(id) = held.get(&folder) {
-                outcomes.push(ImportOutcome::Existing(id.clone()));
-                continue;
-            }
-            let tags = match tags {
-                Ok(tags) => tags,
-                Err(e) => {
-                    outcomes.push(ImportOutcome::Refused(e.to_string()));
-                    continue;
-                }
-            };
-
-            let mut name_id = |table: &'static str, column: &str, name: &str, rng: &mut Rng| -> Result<Option<String>> {
-                if let Some(id) = names.get(&(table, name.to_owned())) {
-                    return Ok(id.clone());
-                }
-                let id = if table == "djmdKey" {
-                    tag_key_id(&tx, name, rng, &stamp)?
-                } else {
-                    intern(&tx, table, column, name, rng, &stamp)?
-                };
-                names.insert((table, name.to_owned()), id.clone());
-                Ok(id)
-            };
-            let artist = name_id("djmdArtist", "Name", &tags.artist, &mut self.rng)?;
-            let album = name_id("djmdAlbum", "Name", &tags.album, &mut self.rng)?;
-            let genre = name_id("djmdGenre", "Name", &tags.genre, &mut self.rng)?;
-            let label = name_id("djmdLabel", "Name", &tags.label, &mut self.rng)?;
-            let key = name_id("djmdKey", "ScaleName", &tags.key, &mut self.rng)?;
-
-            let id = unused_id_in(&tx, &mut self.rng, "djmdContent", MAX_CONTENT_ID)?;
-            let uuid = self.rng.uuid4();
-            // Making a lookup row above moves the registry's counter, so the
-            // next USN is whichever is larger: what this batch has counted to,
-            // or what the registry now says.
-            let usn = match next_usn_value {
-                None => next_usn(&tx)?,
-                Some(counted) => counted.max(registry_counter(&tx)?.saturating_add(1)),
-            };
-            let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            insert_content(
-                &tx,
-                &NewContent {
-                    id: &id, uuid: &uuid, folder: &folder, file_name: &file_name, path, tags: &tags,
-                    artist: &artist, album: &album, genre: &genre, label: &label, key: &key,
-                    today: &today, stamp: &stamp, master_db: &master_db, device: &device, usn,
-                },
-            )?;
-            next_usn_value = Some(usn.checked_add(1).ok_or_else(|| {
-                DbError::WriteRefused("local update counter overflow".into())
-            })?);
-            last_usn = Some(usn);
-            held.insert(folder, id.clone());
-            outcomes.push(ImportOutcome::Added(id));
-        }
+        let (outcomes, last_usn) = insert_files(&tx, &mut self.rng, &paths, tags, &stamp)?;
         if let Some(usn) = last_usn {
             set_counter(&tx, usn)?;
         }
@@ -3449,6 +3418,110 @@ fn registry_counter(conn: &Connection) -> Result<i64> {
         [],
         |r| r.get(0),
     )?)
+}
+
+/// The rows [`Writer::import_files`] makes, inside a transaction the caller
+/// owns: one outcome per path, in order, and the last USN used, if any, for
+/// the caller to set the counter to before it commits.
+fn insert_files(
+    tx: &Connection,
+    rng: &mut Rng,
+    paths: &[PathBuf],
+    tags: Vec<std::result::Result<crate::import::TrackTags, crate::import::ImportError>>,
+    stamp: &str,
+) -> Result<(Vec<ImportOutcome>, Option<i64>)> {
+    use std::collections::HashMap;
+
+    if paths.is_empty() {
+        return Ok((Vec::new(), None));
+    }
+    let today = stamp.get(..10).unwrap_or_default().to_owned();
+    let (master_db, device): (Option<String>, Option<String>) = tx
+        .query_row("SELECT DBID, DeviceID FROM djmdProperty LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap_or((None, None));
+
+    // Where the library already holds each path, the lowest id first as
+    // `track_id_at` answers it. One pass over the table, kept for the
+    // paths of this batch only.
+    let wanted: std::collections::HashSet<String> =
+        paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let mut held: HashMap<String, String> = HashMap::new();
+    {
+        let mut stmt = tx.prepare(
+            "SELECT FolderPath, ID FROM djmdContent WHERE rb_local_deleted = 0 ORDER BY ID",
+        )?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let folder: Option<String> = row.get(0)?;
+            if let Some(folder) = folder.filter(|f| wanted.contains(f)) {
+                held.entry(folder).or_insert(row.get::<_, String>(1)?);
+            }
+        }
+    }
+
+    let mut names: HashMap<(&'static str, String), Option<String>> = HashMap::new();
+    let mut next_usn_value: Option<i64> = None;
+    let mut last_usn: Option<i64> = None;
+    let mut outcomes = Vec::with_capacity(paths.len());
+
+    for (path, tags) in paths.iter().zip(tags) {
+        let folder = path.to_string_lossy().into_owned();
+        if let Some(id) = held.get(&folder) {
+            outcomes.push(ImportOutcome::Existing(id.clone()));
+            continue;
+        }
+        let tags = match tags {
+            Ok(tags) => tags,
+            Err(e) => {
+                outcomes.push(ImportOutcome::Refused(e.to_string()));
+                continue;
+            }
+        };
+
+        let mut name_id = |table: &'static str, column: &str, name: &str, rng: &mut Rng| -> Result<Option<String>> {
+            if let Some(id) = names.get(&(table, name.to_owned())) {
+                return Ok(id.clone());
+            }
+            let id = if table == "djmdKey" {
+                tag_key_id(tx, name, rng, stamp)?
+            } else {
+                intern(tx, table, column, name, rng, stamp)?
+            };
+            names.insert((table, name.to_owned()), id.clone());
+            Ok(id)
+        };
+        let artist = name_id("djmdArtist", "Name", &tags.artist, rng)?;
+        let album = name_id("djmdAlbum", "Name", &tags.album, rng)?;
+        let genre = name_id("djmdGenre", "Name", &tags.genre, rng)?;
+        let label = name_id("djmdLabel", "Name", &tags.label, rng)?;
+        let key = name_id("djmdKey", "ScaleName", &tags.key, rng)?;
+
+        let id = unused_id_in(tx, rng, "djmdContent", MAX_CONTENT_ID)?;
+        let uuid = rng.uuid4();
+        // Making a lookup row above moves the registry's counter, so the
+        // next USN is whichever is larger: what this batch has counted to,
+        // or what the registry now says.
+        let usn = match next_usn_value {
+            None => next_usn(tx)?,
+            Some(counted) => counted.max(registry_counter(tx)?.saturating_add(1)),
+        };
+        let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        insert_content(
+            tx,
+            &NewContent {
+                id: &id, uuid: &uuid, folder: &folder, file_name: &file_name, path, tags: &tags,
+                artist: &artist, album: &album, genre: &genre, label: &label, key: &key,
+                today: &today, stamp, master_db: &master_db, device: &device, usn,
+            },
+        )?;
+        next_usn_value = Some(usn.checked_add(1).ok_or_else(|| {
+            DbError::WriteRefused("local update counter overflow".into())
+        })?);
+        last_usn = Some(usn);
+        held.insert(folder, id.clone());
+        outcomes.push(ImportOutcome::Added(id));
+    }
+    Ok((outcomes, last_usn))
 }
 
 /// What importing one path of a batch came to.

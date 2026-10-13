@@ -11,7 +11,7 @@
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use rbl_db::fixture::{self, track_id, Shape};
-use rbl_db::write::{device_import_name, Writer, ATTRIBUTE_FOLDER, ATTRIBUTE_PLAYLIST, ROOT};
+use rbl_db::write::{device_import_name, DeviceEntry, Writer, ATTRIBUTE_FOLDER, ATTRIBUTE_PLAYLIST, ROOT};
 use rbl_db::DbError;
 use rusqlite::params;
 
@@ -203,4 +203,111 @@ fn every_new_row_gets_a_rising_usn_and_the_counter_follows() {
         .query_row("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", [], |r| r.get(0))
         .unwrap();
     assert_eq!(counter, entry_usns[1]);
+}
+
+/// A minimal but genuine WAV, so the tag reader has something real to open.
+fn write_wav(path: &std::path::Path, seconds: u32) {
+    let rate = 44_100_u32;
+    let data_len = rate * seconds * 2;
+    let mut out = Vec::with_capacity(44 + data_len as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16_u32.to_le_bytes());
+    out.extend_from_slice(&1_u16.to_le_bytes());
+    out.extend_from_slice(&1_u16.to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 2).to_le_bytes());
+    out.extend_from_slice(&2_u16.to_le_bytes());
+    out.extend_from_slice(&16_u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    out.resize(44 + data_len as usize, 0);
+    std::fs::write(path, out).unwrap();
+}
+
+#[test]
+fn copied_files_become_tracks_and_take_their_place_in_the_devices_order() {
+    // rekordbox copies the tracks the collection lacks and imports the whole
+    // playlist (`import_from_d_file_copy`, 7.2.19 @0x1001daa68).
+    let mut f = fixture_with(Shape::default());
+    let audio = tempfile::tempdir().unwrap();
+    let (a, b) = (audio.path().join("New A.wav"), audio.path().join("New B.wav"));
+    write_wav(&a, 1);
+    write_wav(&b, 1);
+    let tracks_before = f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0");
+    let entries = vec![
+        DeviceEntry::Track(track_id(4)),
+        DeviceEntry::File(a.clone()),
+        DeviceEntry::Track(track_id(2)),
+        DeviceEntry::File(b.clone()),
+        // The device lists the new track A again: one new row, two entries.
+        DeviceEntry::File(a.clone()),
+    ];
+    let made = f.writer.import_device_playlist_entries("TAG LIST", &entries).unwrap();
+    assert_eq!(made.tracks, 5);
+    assert_eq!(made.added.len(), 2);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"), tracks_before + 2);
+    let (new_a, new_b) = (made.added[0].0.clone(), made.added[1].0.clone());
+    assert_eq!((made.added[0].1.as_path(), made.added[1].1.as_path()), (a.as_path(), b.as_path()));
+    let folder: String = f
+        .conn()
+        .query_row("SELECT FolderPath FROM djmdContent WHERE ID = ?1", params![new_a], |r| r.get(0))
+        .unwrap();
+    assert_eq!(folder, a.to_string_lossy());
+    assert_eq!(
+        f.entries(&made.id),
+        vec![(1, track_id(4)), (2, new_a.clone()), (3, track_id(2)), (4, new_b), (5, new_a)]
+    );
+    // The new rows are counted before the playlist's, and the counter follows.
+    let counter: i64 = f
+        .conn()
+        .query_row("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", [], |r| r.get(0))
+        .unwrap();
+    let highest: i64 = f.count("SELECT MAX(rb_local_usn) FROM djmdSongPlaylist");
+    assert_eq!(counter, highest);
+}
+
+#[test]
+fn a_file_that_cannot_be_imported_writes_nothing_at_all() {
+    let mut f = fixture_with(Shape::default());
+    let audio = tempfile::tempdir().unwrap();
+    let good = audio.path().join("Good.wav");
+    write_wav(&good, 1);
+    let bad = audio.path().join("Broken.wav");
+    std::fs::write(&bad, b"not audio").unwrap();
+    let before = (
+        f.count("SELECT COUNT(*) FROM djmdContent"),
+        f.count("SELECT COUNT(*) FROM djmdPlaylist"),
+        f.count("SELECT COUNT(*) FROM djmdSongPlaylist"),
+    );
+    let refused = f
+        .writer
+        .import_device_playlist_entries(
+            "Broken",
+            &[DeviceEntry::File(good), DeviceEntry::Track(track_id(1)), DeviceEntry::File(bad)],
+        )
+        .unwrap_err();
+    assert!(matches!(refused, DbError::WriteRefused(_)), "{refused:?}");
+    assert_eq!(
+        (
+            f.count("SELECT COUNT(*) FROM djmdContent"),
+            f.count("SELECT COUNT(*) FROM djmdPlaylist"),
+            f.count("SELECT COUNT(*) FROM djmdSongPlaylist"),
+        ),
+        before,
+        "neither the good file's track nor the playlist is kept"
+    );
+}
+
+#[test]
+fn a_file_the_collection_already_holds_is_used_as_it_is() {
+    let mut f = fixture_with(Shape::default());
+    let audio = tempfile::tempdir().unwrap();
+    let held = audio.path().join("Held.wav");
+    write_wav(&held, 1);
+    let id = f.writer.import_file(&held).unwrap();
+    let made = f.writer.import_device_playlist_entries("Held", &[DeviceEntry::File(held)]).unwrap();
+    assert!(made.added.is_empty());
+    assert_eq!(f.entries(&made.id), vec![(1, id)]);
 }
