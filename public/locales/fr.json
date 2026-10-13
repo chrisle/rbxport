@@ -1205,7 +1205,6 @@
   "Keep browse settings synchronized": "Garder les paramètres du navigateur synchronisés",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "Importez la visibilité, l’ordre et les largeurs des colonnes prises en charge, ainsi que les largeurs des volets du navigateur, depuis rekordbox au démarrage de RBXport.",
   "Default: On": "Par défaut : Activé",
-  "USB import and export options.": "Options d'importation et d'exportation USB.",
   "Setup PIONEER folder on USB drives": "Configurer le dossier PIONEER sur les clés USB",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Créez automatiquement les dossiers PIONEER lorsqu'une nouvelle clé USB est synchronisée pour la première fois.",
   "Default: Off": "Par défaut : Désactivé",
@@ -1718,5 +1717,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "Les médias exportés ont changé pendant la synchronisation. Réessayez après avoir fermé les autres rédacteurs.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Cette clé USB nécessite une récupération avant que son espace puisse être estimé. Synchronisez-le pour récupérer.",
   "The export has finished.": "L’exportation est terminée.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Cet appareil n’est plus connecté. Il a peut-être été débranché ou renommé."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Cet appareil n’est plus connecté. Il a peut-être été débranché ou renommé.",
+  "Change sync preferences": "Modifier les préférences de synchronisation",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Après chaque synchronisation, compare chaque fichier du périphérique USB à son original au lieu de vérifier uniquement ce que la synchronisation a modifié.",
+  "CDJ Compatibility": "Compatibilité CDJ",
+  "New USB Drives": "Nouvelles clés USB"
 }

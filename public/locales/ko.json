@@ -1188,7 +1188,6 @@
   "Keep browse settings synchronized": "탐색 설정을 동기화된 상태로 유지",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "RBXport가 시작되면 rekordbox에서 지원되는 열 가시성, 순서 및 너비와 브라우저 패널 너비를 가져옵니다.",
   "Default: On": "기본값: 켜짐",
-  "USB import and export options.": "USB 가져오기 및 내보내기 옵션.",
   "Setup PIONEER folder on USB drives": "USB 드라이브에 PIONEER 폴더 설정",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "새 USB 드라이브가 처음으로 동기화되면 PIONEER 폴더가 자동으로 생성됩니다.",
   "Default: Off": "기본값: 끄기",
@@ -1716,5 +1715,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "내보낸 미디어가 동기화 중에 변경되었습니다. 다른 작성자를 닫은 후 다시 시도하세요.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "이 USB의 공간을 추정하려면 먼저 복구가 필요합니다. 복구하려면 동기화하세요.",
   "The export has finished.": "내보내기가 완료되었습니다.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "해당 장치가 더 이상 연결되어 있지 않습니다. 분리되었거나 이름이 변경되었을 수 있습니다."
+  "That device is no longer connected. It may have been unplugged or renamed.": "해당 장치가 더 이상 연결되어 있지 않습니다. 분리되었거나 이름이 변경되었을 수 있습니다.",
+  "Change sync preferences": "동기화 환경설정 변경",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "동기화할 때마다 동기화로 변경된 파일만 확인하지 않고 USB 장치의 모든 파일을 원본과 비교합니다.",
+  "CDJ Compatibility": "CDJ 호환성",
+  "New USB Drives": "새 USB 드라이브"
 }

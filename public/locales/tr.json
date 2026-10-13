@@ -1201,7 +1201,6 @@
   "Keep browse settings synchronized": "Göz atma ayarlarını senkronize tutun",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "RBXport başlatıldığında, desteklenen sütun görünürlüğünü, sırasını ve genişliklerinin yanı sıra tarayıcı bölmesi genişliklerini rekordbox'tan içe aktarın.",
   "Default: On": "Varsayılan: Açık",
-  "USB import and export options.": "USB içe ve dışa aktarma seçenekleri.",
   "Setup PIONEER folder on USB drives": "PIONEER klasörünü USB sürücülere kurun",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Yeni bir USB sürücüsü ilk kez senkronize edildiğinde PIONEER klasörlerini otomatik olarak oluşturun.",
   "Default: Off": "Varsayılan: Kapalı",
@@ -1719,5 +1718,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "Dışa aktarılan medya senkronizasyon sırasında değiştirildi. Diğer yazarları kapattıktan sonra tekrar deneyin.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Bu USB'nin alanının tahmin edilebilmesi için kurtarma işlemi yapılması gerekiyor. Kurtarmak için senkronize edin.",
   "The export has finished.": "Dışa aktarma tamamlandı.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Bu aygıt artık bağlı değil. Çıkarılmış veya yeniden adlandırılmış olabilir."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Bu aygıt artık bağlı değil. Çıkarılmış veya yeniden adlandırılmış olabilir.",
+  "Change sync preferences": "Eşitleme tercihlerini değiştir",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Her eşitlemeden sonra, yalnızca eşitlemenin değiştirdiklerini denetlemek yerine USB aygıtındaki her dosyayı aslıyla karşılaştırır.",
+  "CDJ Compatibility": "CDJ uyumluluğu",
+  "New USB Drives": "Yeni USB sürücüler"
 }

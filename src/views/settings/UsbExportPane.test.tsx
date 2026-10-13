@@ -54,8 +54,11 @@ it("explains the import and sync options and shows their defaults", () => {
   expect(host.textContent).toContain("Device ratings win when a track was also rated in your library.");
   expect(host.textContent).toContain("Free space on your USB stick by removing songs that aren't in any playlist.");
   expect([...host.querySelectorAll(`.${styles.default}`)].map(node => node.textContent)).toEqual([
-    "Default: On", "Default: On", "Default: Off", "Default: On", "Default: Off",
+    "Default: Off", "Default: Off", "Default: On", "Default: On", "Default: Off", "Default: On",
   ]);
+  expect([...host.querySelectorAll("section")].map(section => section.getAttribute("aria-label")))
+    .toEqual(["Sync", "CDJ Compatibility", "Import", "New USB Drives"]);
+  expect(host.textContent).toContain("compare every file on the USB device with its original");
 });
 
 it("has no option that imports when syncing (#199)", () => {
@@ -89,6 +92,20 @@ it("sets what Sync Manager's Import brings back", () => {
   expect(update).toHaveBeenCalledWith("usbExport", { importButtonSettings: true });
   act(() => toggle("Import track ratings").click());
   expect(update).toHaveBeenCalledWith("usbExport", { importButtonRatings: false });
+});
+
+it("sets whether SYNC verifies every file", () => {
+  const update = vi.fn();
+  act(() => root.render(
+    <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update, reset: vi.fn() }}>
+      <UsbExportPane />
+    </PreferencesProvider>,
+  ));
+  const toggle = [...host.querySelectorAll<HTMLInputElement>('input[role="switch"]')]
+    .find(input => document.getElementById(input.getAttribute("aria-labelledby") ?? "")?.textContent === "Verify all files (slower)")!;
+  expect(toggle.checked).toBe(false);
+  act(() => toggle.click());
+  expect(update).toHaveBeenCalledWith("usbExport", { verifyAllFiles: true });
 });
 
 it("offers AIFF as a compatibility conversion target", () => {

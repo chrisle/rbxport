@@ -1062,6 +1062,24 @@ it("Change import preferences opens the USB Export pane", async () => {
   expect(importUsb).not.toHaveBeenCalled();
 });
 
+it("Change sync preferences beside SYNC opens the USB Export pane", async () => {
+  const fallback = vi.fn();
+  await renderWith(ALL_IMPORTS, false, fallback);
+  const open = host.querySelector<HTMLButtonElement>('button[aria-label="Change sync preferences"]');
+  expect(open?.title).toBe("Change sync preferences");
+  click(open);
+  await settle();
+  expect(openPreferences).toHaveBeenCalledExactlyOnceWith("usbExport");
+  expect(fallback).not.toHaveBeenCalled();
+  expect(syncDevices).not.toHaveBeenCalled();
+});
+
+it("Import is drawn as SYNC is", async () => {
+  await renderWith(ALL_IMPORTS);
+  const sync = host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')!;
+  expect(importButton().className).toBe(sync.className);
+});
+
 it("Change import preferences draws Preferences over the window where none can open", async () => {
   const fallback = vi.fn();
   openPreferences.mockResolvedValueOnce(false);
@@ -1234,9 +1252,10 @@ it("stops each cancellable stick but leaves publication alone", async () => {
   expect(cancelExport.mock.calls.map(call => call[0]).sort()).toEqual(["/Volumes/USB A", "/Volumes/USB B"]);
 });
 
-it("passes the optional full integrity check to the backend", async () => {
+it("passes the full integrity check set in Preferences to the backend", async () => {
+  await renderWith({ verifyAllFiles: true });
   click(box("Closing")); click(box("USB B")); await settle();
-  click(box("Verify all files (slower)"));
+  expect(box("Verify all files (slower)")).toBeNull();
   click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')); await settle();
   expect(syncDevices.mock.calls[0]?.[7]).toBe(true);
 });

@@ -1200,7 +1200,6 @@
   "Keep browse settings synchronized": "Udržujte nastavení procházení synchronizovaná",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "Importujte podporovanou viditelnost sloupců, pořadí a šířky plus šířky panelu prohlížeče ze softwaru rekordbox při spuštění RBXport.",
   "Default: On": "Výchozí: Zapnuto",
-  "USB import and export options.": "Možnosti importu a exportu USB.",
   "Setup PIONEER folder on USB drives": "Nastavte složku PIONEER na jednotkách USB",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Vytvořte složky PIONEER automaticky při první synchronizaci nového USB disku.",
   "Default: Off": "Výchozí: Vypnuto",
@@ -1719,5 +1718,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "Exportovaná média se během synchronizace změnila. Zkuste to znovu po zavření ostatních autorů.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Toto USB vyžaduje obnovení, než bude možné odhadnout jeho místo. Pro obnovení synchronizujte.",
   "The export has finished.": "Export byl dokončen.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Toto zařízení již není připojeno. Mohlo být odpojeno nebo přejmenováno."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Toto zařízení již není připojeno. Mohlo být odpojeno nebo přejmenováno.",
+  "Change sync preferences": "Změnit nastavení synchronizace",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Po každé synchronizaci porovnat každý soubor na USB zařízení s originálem, místo kontroly jen toho, co synchronizace změnila.",
+  "CDJ Compatibility": "Kompatibilita s CDJ",
+  "New USB Drives": "Nové USB disky"
 }

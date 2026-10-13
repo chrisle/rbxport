@@ -1206,7 +1206,6 @@
   "Keep browse settings synchronized": "Mantenha as configurações de navegação sincronizadas",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "Importe a visibilidade, a ordem e as larguras das colunas suportadas, além das larguras dos painéis do navegador, do rekordbox quando o RBXport for iniciado.",
   "Default: On": "Padrão: ativado",
-  "USB import and export options.": "Opções de importação e exportação USB.",
   "Setup PIONEER folder on USB drives": "Configure a pasta PIONEER em unidades USB",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Crie as pastas PIONEER automaticamente quando uma nova unidade USB for sincronizada pela primeira vez.",
   "Default: Off": "Padrão: desligado",
@@ -1720,5 +1719,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "A mídia exportada foi alterada durante a sincronização. Tente novamente após fechar outros gravadores.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Este USB requer recuperação antes que seu espaço possa ser estimado. Sincronize-o para recuperar.",
   "The export has finished.": "A exportação foi concluída.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Esse dispositivo já não está ligado. Pode ter sido desligado ou renomeado."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Esse dispositivo já não está ligado. Pode ter sido desligado ou renomeado.",
+  "Change sync preferences": "Alterar preferências de sincronização",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Após cada sincronização, compara cada arquivo do dispositivo USB com o original em vez de verificar apenas o que a sincronização alterou.",
+  "CDJ Compatibility": "Compatibilidade com CDJ",
+  "New USB Drives": "Novas unidades USB"
 }

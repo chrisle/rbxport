@@ -1197,7 +1197,6 @@
   "Keep browse settings synchronized": "Håll bläddringsinställningarna synkroniserade",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "Importera kolumnsynlighet, ordning och bredder som stöds, plus webbläsarfönsterbredder, från rekordbox när RBXport startar.",
   "Default: On": "Standard: På",
-  "USB import and export options.": "USB-import och exportalternativ.",
   "Setup PIONEER folder on USB drives": "Ställ in PIONEER-mappen på USB-enheter",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Skapa PIONEER-mapparna automatiskt när en ny USB-enhet synkroniseras för första gången.",
   "Default: Off": "Standard: Av",
@@ -1716,5 +1715,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "Exporterat media ändrades under synkronisering. Försök igen efter att ha stängt andra skribenter.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Denna USB kräver återställning innan dess utrymme kan uppskattas. Synkronisera det för att återställa.",
   "The export has finished.": "Exporten är klar.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Enheten är inte längre ansluten. Den kan ha kopplats från eller bytt namn."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Enheten är inte längre ansluten. Den kan ha kopplats från eller bytt namn.",
+  "Change sync preferences": "Ändra synkroniseringsinställningar",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Efter varje synkronisering jämförs varje fil på USB-enheten med originalet i stället för att bara kontrollera det som synkroniseringen ändrade.",
+  "CDJ Compatibility": "CDJ-kompatibilitet",
+  "New USB Drives": "Nya USB-enheter"
 }

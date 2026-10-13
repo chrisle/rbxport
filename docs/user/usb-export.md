@@ -21,7 +21,9 @@ Export**, with no further questions:
 | Import track ratings | On | Brings back ratings changed on the device since its last sync. |
 
 The settings button beside **Import** (**Change import preferences**) opens
-that Preferences pane. Library Protection must be off to import cues, play
+that Preferences pane, as does the one beside **SYNC** (**Change sync
+preferences**). The pane is grouped into Sync, CDJ Compatibility, Import and
+New USB Drives. Library Protection must be off to import cues, play
 history or ratings, and rekordbox must be closed to import play history or
 ratings; a kind that cannot be imported for either reason is left out and the
 status line says why.
@@ -186,8 +188,8 @@ recovered on the next explicit operation. Do not unplug while saving.
 
 Missing sources keep a usable existing USB version and report a warning. Tracks
 without a usable copy are skipped. If audio changed but its analysis did not,
-re-analyse it before expecting current waveforms/cues. “Verify all files
-(slower)” reads exported audio and analysis to detect changes that preserve
+re-analyse it before expecting current waveforms/cues. **Verify all files
+(slower)** in Preferences › USB Export › Sync reads exported audio and analysis to detect changes that preserve
 size and timestamps; ordinary sync uses inexpensive verified receipts.
 
 Conversion changes export copies, preserving source audio and analysis timing.

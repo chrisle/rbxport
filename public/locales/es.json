@@ -1204,7 +1204,6 @@
   "Keep browse settings synchronized": "Mantener sincronizada la configuración del navegador",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "Importe la visibilidad, el orden y los anchos de las columnas admitidas, además del ancho del panel del navegador, desde rekordbox cuando se inicie RBXport.",
   "Default: On": "Valor predeterminado: activado",
-  "USB import and export options.": "Opciones de importación y exportación USB.",
   "Setup PIONEER folder on USB drives": "Configurar la carpeta PIONEER en unidades USB",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Cree las carpetas PIONEER automáticamente cuando se sincronice una nueva unidad USB por primera vez.",
   "Default: Off": "Predeterminado: Desactivado",
@@ -1719,5 +1718,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "Los medios exportados cambiaron durante la sincronización. Vuelva a intentarlo después de cerrar a otros escritores.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Este USB requiere recuperación antes de que se pueda estimar su espacio. Sincronízalo para recuperarlo.",
   "The export has finished.": "La exportación ha finalizado.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Ese dispositivo ya no está conectado. Es posible que se haya desconectado o cambiado de nombre."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Ese dispositivo ya no está conectado. Es posible que se haya desconectado o cambiado de nombre.",
+  "Change sync preferences": "Cambiar las preferencias de sincronización",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Después de cada sincronización, compara cada archivo del dispositivo USB con su original en lugar de comprobar solo lo que cambió la sincronización.",
+  "CDJ Compatibility": "Compatibilidad con CDJ",
+  "New USB Drives": "Unidades USB nuevas"
 }

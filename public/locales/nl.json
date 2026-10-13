@@ -1200,7 +1200,6 @@
   "Keep browse settings synchronized": "Houd de browserinstellingen gesynchroniseerd",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "Importeer de ondersteunde zichtbaarheid, volgorde en breedte van kolommen, plus de breedte van het browservenster, uit rekordbox wanneer RBXport start.",
   "Default: On": "Standaard: Aan",
-  "USB import and export options.": "USB-import- en exportopties.",
   "Setup PIONEER folder on USB drives": "Stel de PIONEER-map in op USB-drives",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Maak de PIONEER-mappen automatisch aan wanneer een nieuw USB-station voor de eerste keer wordt gesynchroniseerd.",
   "Default: Off": "Standaard: Uit",
@@ -1714,5 +1713,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "Geëxporteerde media gewijzigd tijdens synchronisatie. Probeer het opnieuw nadat u andere schrijvers hebt gesloten.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Deze USB vereist herstel voordat de ruimte kan worden geschat. Synchroniseer het om te herstellen.",
   "The export has finished.": "De export is voltooid.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Dat apparaat is niet meer verbonden. Het is mogelijk losgekoppeld of hernoemd."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Dat apparaat is niet meer verbonden. Het is mogelijk losgekoppeld of hernoemd.",
+  "Change sync preferences": "Synchronisatievoorkeuren wijzigen",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Vergelijk na elke synchronisatie elk bestand op het USB-apparaat met het origineel in plaats van alleen te controleren wat de synchronisatie heeft gewijzigd.",
+  "CDJ Compatibility": "CDJ-compatibiliteit",
+  "New USB Drives": "Nieuwe USB-stations"
 }

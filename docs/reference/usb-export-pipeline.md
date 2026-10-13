@@ -51,7 +51,8 @@ and indeterminate feedback during database/verification/publication work.
 Transitions and terminal events are immediate; repeated updates are limited
 to about 10 Hz. Counters and elapsed time remain visible. Stop is disabled
 during publication; Stop All affects only cancellable jobs. “Verify all files”
-is an optional slow content-integrity check separate from ordinary sync.
+(`usbExport.verifyAllFiles`, Preferences › USB Export) is an optional slow
+content-integrity check separate from ordinary sync.
 
 | Area | Code |
 | --- | --- |

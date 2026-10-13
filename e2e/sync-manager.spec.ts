@@ -62,7 +62,7 @@ test("the rail opens it with the library's playlists on the left and the devices
   await expect(devices.getByRole("checkbox", { name: "DJ STICK", exact: true })).toBeVisible();
   await expect(devices.getByRole("checkbox", { name: "TEST", exact: true })).toBeVisible();
   // Nothing ticked yet, so nothing to sync.
-  await expect(dialog.getByRole("button", { name: "SYNC" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "SYNC", exact: true })).toBeDisabled();
 });
 
 test("ticking a folder ticks its playlists, and a device shows what it holds", async ({ page }) => {
@@ -95,7 +95,7 @@ test("SYNC writes the ticked playlists to both sticks, reports on each, and Clos
   await tree.getByRole("checkbox", { name: "Melodic Vox" }).check();
   await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
   await dialog.getByRole("checkbox", { name: "TEST", exact: true }).check();
-  const sync = dialog.getByRole("button", { name: "SYNC" });
+  const sync = dialog.getByRole("button", { name: "SYNC", exact: true });
   await expect(sync).toBeEnabled();
   await sync.click();
 
@@ -121,7 +121,7 @@ test("ticking a stick again brings back what it was last synced with", async ({ 
   const tree = dialog.getByRole("tree", { name: "Playlists", exact: true });
   await tree.getByRole("checkbox", { name: "Hardstyle" }).check();
   await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
-  await dialog.getByRole("button", { name: "SYNC" }).click();
+  await dialog.getByRole("button", { name: "SYNC", exact: true }).click();
   await expect(dialog.getByLabel("DJ STICK export report")).toContainText(/\d+ tracks updated/);
 
   // Untick everything, tick the stick: its last selection comes back.
@@ -137,7 +137,7 @@ test("reopened, it shows the stick's playlists and ticks what it was last synced
   let tree = dialog.getByRole("tree", { name: "Playlists", exact: true });
   await tree.getByRole("checkbox", { name: "Hardstyle" }).check();
   await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
-  await dialog.getByRole("button", { name: "SYNC" }).click();
+  await dialog.getByRole("button", { name: "SYNC", exact: true }).click();
   await expect(dialog.getByLabel("DJ STICK export report")).toContainText(/\d+ tracks updated/);
   await dialog.getByRole("button", { name: "Close" }).filter({ hasText: "Close" }).click();
   await expect(dialog).toBeHidden();

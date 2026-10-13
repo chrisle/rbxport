@@ -1203,7 +1203,6 @@
   "Keep browse settings synchronized": "保持瀏覽器設定同步",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "RBXport 啟動時從 rekordbox 匯入支援的列可見性、順序和寬度以及瀏覽器窗格寬度。",
   "Default: On": "預設值：開",
-  "USB import and export options.": "USB 匯入和匯出選項。",
   "Setup PIONEER folder on USB drives": "在 USB 驱动器上设置 PIONEER 文件夹",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "首次同步新 USB 隨身碟時，會自動建立 PIONEER 資料夾。",
   "Default: Off": "預設值：關閉",
@@ -1721,5 +1720,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "導出的媒體在同步期間發生變更。關閉其他寫入器後重試。",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "此 USB 需要先恢復才能估計其空間。同步即可恢復。",
   "The export has finished.": "匯出已完成。",
-  "That device is no longer connected. It may have been unplugged or renamed.": "該裝置已中斷連線。它可能已被拔除或重新命名。"
+  "That device is no longer connected. It may have been unplugged or renamed.": "該裝置已中斷連線。它可能已被拔除或重新命名。",
+  "Change sync preferences": "變更同步喜好設定",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "每次同步後，將 USB 裝置上的每個檔案與原始檔案比對，而不是只檢查此次同步變更的檔案。",
+  "CDJ Compatibility": "CDJ 相容性",
+  "New USB Drives": "新的 USB 隨身碟"
 }

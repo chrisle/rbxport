@@ -217,8 +217,8 @@ describe("the sliders and the quantize value", () => {
 });
 
  it("defaults Import to cues, history and ratings and preserves saved choices", () => {
-  expect(sanitisePreferences({}).usbExport).toEqual({ deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
-  expect(sanitisePreferences({ usbExport: { importButtonHistory: false, importButtonRatings: false } }).usbExport).toEqual({ deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: false, importButtonSettings: false, importButtonRatings: false });
+  expect(sanitisePreferences({}).usbExport).toEqual({ deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", verifyAllFiles: false, importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
+  expect(sanitisePreferences({ usbExport: { importButtonHistory: false, importButtonRatings: false } }).usbExport).toEqual({ deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", verifyAllFiles: false, importButtonCues: true, importButtonHistory: false, importButtonSettings: false, importButtonRatings: false });
   expect(sanitisePreferences({ usbExport: { importButtonCues: false, importButtonSettings: true } }).usbExport).toMatchObject({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
 });
 

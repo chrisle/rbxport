@@ -179,7 +179,6 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   const [formatTarget, setFormatTarget] = useState<Device | null>(null);
   const busy = operation !== null || [...exportJobs.values()].some(isExportActive);
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
-  const [verifyAll, setVerifyAll] = useState(false);
   /** What is happening now, or what happened: one line, or one per stick. */
   const [status, setStatus] = useState<string[]>([]);
   const [showStatusDetails, setShowStatusDetails] = useState(false);
@@ -218,6 +217,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
 
   const deleteUnlistedMusic = preferences.usbExport.deleteUnlistedMusic;
   const compatibilityFormat = preferences.usbExport.maximumCompatibility ? preferences.usbExport.conversionFormat : undefined;
+  const verifyAll = preferences.usbExport.verifyAllFiles;
 
   const nodes = useMemo(() => playlistNodes(tree), [tree]);
   const playlists = useMemo(() => nodes.filter(isExportablePlaylist), [nodes]);
@@ -841,7 +841,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   };
 
   /** The USB Export pane, where what Import brings back is chosen. */
-  const openImportPreferences = () => {
+  const openUsbExportPreferences = () => {
     void getBackend()
       .then(backend => backend.openPreferences("usbExport"))
       .catch(() => false)
@@ -1019,9 +1019,10 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
 
         <div className={styles.middle}>
           <div className={styles.syncActions}>
+          <div className={styles.actionRow}>
           <button
             type="button"
-            className={styles.sync}
+            className={`${styles.sync} ${styles.actionButton}`}
             onClick={sync}
             disabled={!canSync}
             title={rekordboxOpen ? "Quit rekordbox to enable synchronization." : undefined}
@@ -1031,26 +1032,25 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
           >
             {operation === "sync" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> Syncing…</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
           </button>
+          <button type="button" className={`${styles.button} ${styles.actionPreferences}`} onClick={openUsbExportPreferences}
+            aria-label={t("Change sync preferences")} title={t("Change sync preferences")}>
+            <Settings2 size={14} aria-hidden="true" />
+          </button>
+          </div>
           <label className={styles.option}>
             <input type="checkbox" className={styles.tick} checked={ejectAfterSync} disabled={busy}
               aria-label="Eject after syncing" onChange={e => setEjectAfterSync(e.currentTarget.checked)} />
             Eject after syncing
           </label>
-          <label className={styles.option}>
-            <input type="checkbox" className={styles.tick} checked={verifyAll} disabled={busy}
-              aria-label={t("Verify all files (slower)")}
-              onChange={e => setVerifyAll(e.currentTarget.checked)} />
-            {t("Verify all files (slower)")}
-          </label>
           </div>
           <div className={styles.importActions}>
-          <div className={styles.importRow}>
-          <button type="button" className={`${styles.button} ${styles.importButton}`} onClick={() => runUsbImport(importKinds, importBlockedNotes)}
+          <div className={styles.actionRow}>
+          <button type="button" className={`${styles.sync} ${styles.actionButton}`} onClick={() => runUsbImport(importKinds, importBlockedNotes)}
             disabled={busy || tickedDevices.size === 0 || importKinds.length === 0}
             title={importTitle}>
-            {operation === "import" ? <><LoaderCircle size={14} className={styles.spinner} aria-hidden="true" /> {t("Importing…")}</> : <><ArrowLeft size={14} aria-hidden="true" /> {t("Import")}</>}
+            {operation === "import" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> {t("Importing…")}</> : <><ArrowLeft size={16} aria-hidden="true" /> {t("Import")}</>}
           </button>
-          <button type="button" className={`${styles.button} ${styles.importPreferences}`} onClick={openImportPreferences}
+          <button type="button" className={`${styles.button} ${styles.actionPreferences}`} onClick={openUsbExportPreferences}
             aria-label={t("Change import preferences")} title={t("Change import preferences")}>
             <Settings2 size={14} aria-hidden="true" />
           </button>

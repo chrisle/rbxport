@@ -1203,7 +1203,6 @@
   "Keep browse settings synchronized": "Διατηρήστε τις ρυθμίσεις περιήγησης συγχρονισμένες",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "Εισαγάγετε την υποστηριζόμενη ορατότητα, σειρά και πλάτη στηλών, καθώς και πλάτη πλαισίων προγράμματος περιήγησης, από το rekordbox όταν ξεκινά το RBXport.",
   "Default: On": "Προεπιλογή: Ενεργό",
-  "USB import and export options.": "Επιλογές εισαγωγής και εξαγωγής USB.",
   "Setup PIONEER folder on USB drives": "Ρυθμίστε το φάκελο PIONEER σε μονάδες USB",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Δημιουργήστε αυτόματα τους φακέλους PIONEER όταν συγχρονίζεται μια νέα μονάδα USB για πρώτη φορά.",
   "Default: Off": "Προεπιλογή: Απενεργοποίηση",
@@ -1720,5 +1719,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "Τα εξαγόμενα μέσα άλλαξαν κατά τον συγχρονισμό. Δοκιμάστε ξανά αφού κλείσετε άλλους συγγραφείς.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Αυτό το USB απαιτεί ανάκτηση για να μπορέσει να εκτιμηθεί ο χώρος του. Συγχρονίστε το για ανάκτηση.",
   "The export has finished.": "Η εξαγωγή ολοκληρώθηκε.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Αυτή η συσκευή δεν είναι πλέον συνδεδεμένη. Ίσως αποσυνδέθηκε ή μετονομάστηκε."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Αυτή η συσκευή δεν είναι πλέον συνδεδεμένη. Ίσως αποσυνδέθηκε ή μετονομάστηκε.",
+  "Change sync preferences": "Αλλαγή προτιμήσεων συγχρονισμού",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Μετά από κάθε συγχρονισμό, σύγκριση κάθε αρχείου στη συσκευή USB με το πρωτότυπο αντί για έλεγχο μόνο όσων άλλαξε ο συγχρονισμός.",
+  "CDJ Compatibility": "Συμβατότητα CDJ",
+  "New USB Drives": "Νέες μονάδες USB"
 }

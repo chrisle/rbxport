@@ -1204,7 +1204,6 @@
   "Keep browse settings synchronized": "Синхронизируйте настройки просмотра",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "Импортируйте видимость, порядок и ширину поддерживаемых столбцов, а также ширину панели браузера из rekordbox при запуске RBXport.",
   "Default: On": "По умолчанию: Вкл.",
-  "USB import and export options.": "Возможности импорта и экспорта USB.",
   "Setup PIONEER folder on USB drives": "Настройка папки PIONEER на USB-накопителях",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Папки PIONEER создаются автоматически при первой синхронизации нового USB-накопителя.",
   "Default: Off": "По умолчанию: Выкл.",
@@ -1721,5 +1720,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "Экспортированные медиафайлы были изменены во время синхронизации. Повторите попытку после закрытия других средств записи.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Этот USB-накопитель требует восстановления, прежде чем можно будет оценить его пространство. Синхронизируйте его для восстановления.",
   "The export has finished.": "Экспорт завершён.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Это устройство больше не подключено. Возможно, оно было отключено или переименовано."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Это устройство больше не подключено. Возможно, оно было отключено или переименовано.",
+  "Change sync preferences": "Изменить настройки синхронизации",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "После каждой синхронизации сравнивать каждый файл на USB-устройстве с оригиналом, а не проверять только то, что изменила синхронизация.",
+  "CDJ Compatibility": "Совместимость с CDJ",
+  "New USB Drives": "Новые USB-накопители"
 }

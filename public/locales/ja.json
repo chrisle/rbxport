@@ -1214,7 +1214,6 @@
   "Keep browse settings synchronized": "ブラウザ設定を同期する",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "RBXport の起動時に、サポートされている列の表示/順序、幅、およびブラウザペインの幅を rekordbox からインポートします。",
   "Default: On": "デフォルト: オン",
-  "USB import and export options.": "USB インポートおよびエクスポート オプション。",
   "Setup PIONEER folder on USB drives": "USB ドライブに PIONEER フォルダーをセットアップする",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "新しい USB ドライブが初めて同期されるときに、PIONEER フォルダーが自動的に作成されます。",
   "Default: Off": "デフォルト: オフ",
@@ -1727,5 +1726,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "エクスポートされたメディアが同期中に変更されました。他のライタを閉じてから再試行してください。",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "この USB の容量を見積もる前に、この USB をリカバリする必要があります。同期して回復します。",
   "The export has finished.": "エクスポートが完了しました。",
-  "That device is no longer connected. It may have been unplugged or renamed.": "そのデバイスは接続されていません。取り外されたか、名前が変更された可能性があります。"
+  "That device is no longer connected. It may have been unplugged or renamed.": "そのデバイスは接続されていません。取り外されたか、名前が変更された可能性があります。",
+  "Change sync preferences": "同期の環境設定を変更",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "同期のたびに、同期で変更されたファイルだけでなく、USBデバイス上のすべてのファイルを元のファイルと照合します。",
+  "CDJ Compatibility": "CDJ互換性",
+  "New USB Drives": "新しいUSBドライブ"
 }

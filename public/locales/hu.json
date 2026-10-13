@@ -1200,7 +1200,6 @@
   "Keep browse settings synchronized": "Tartsa szinkronban a böngészési beállításokat",
   "Import supported column visibility, order, and widths, plus browser pane widths, from rekordbox when RBXport starts.": "Importálhatja a támogatott oszlopok láthatóságát, sorrendjét és szélességét, valamint a böngészőablak szélességét a rekordboxból, amikor az RBXport elindul.",
   "Default: On": "Alapértelmezett: Be",
-  "USB import and export options.": "USB importálási és exportálási lehetőségek.",
   "Setup PIONEER folder on USB drives": "Állítsa be a PIONEER mappát az USB-meghajtókon",
   "Create the PIONEER folders automatically when a new USB drive is synced for the first time.": "Új USB-meghajtó első szinkronizálásakor hozza létre automatikusan a PIONEER mappákat.",
   "Default: Off": "Alapértelmezett: Ki",
@@ -1718,5 +1717,9 @@
   "Exported media changed during sync. Retry after closing other writers.": "Az exportált adathordozók megváltoztak a szinkronizálás során. Próbálja újra a többi író bezárása után.",
   "This USB requires recovery before its space can be estimated. Sync it to recover.": "Ezt az USB-t helyre kell állítani, mielőtt megbecsülhetnénk a tárhelyét. Szinkronizálja a helyreállításhoz.",
   "The export has finished.": "Az exportálás befejeződött.",
-  "That device is no longer connected. It may have been unplugged or renamed.": "Ez az eszköz már nincs csatlakoztatva. Lehet, hogy leválasztották vagy átnevezték."
+  "That device is no longer connected. It may have been unplugged or renamed.": "Ez az eszköz már nincs csatlakoztatva. Lehet, hogy leválasztották vagy átnevezték.",
+  "Change sync preferences": "Szinkronizálási beállítások módosítása",
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Minden szinkronizálás után az USB-eszköz összes fájlját összeveti az eredetivel, ahelyett hogy csak a szinkronizálás által módosítottakat ellenőrizné.",
+  "CDJ Compatibility": "CDJ-kompatibilitás",
+  "New USB Drives": "Új USB-meghajtók"
 }
