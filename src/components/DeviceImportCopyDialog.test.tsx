@@ -43,7 +43,10 @@ it("says what rekordbox says before it copies, with OK focused", () => {
   expect(text).toContain("Import Playlist from Device");
   expect(text).toContain("contains music files that are not present in rekordbox on your computer.");
   expect(text).toContain("These music files will be copied to this computer.");
-  expect(text).toContain("2 files 20.0 MB to the folder : /Users/dj/Music/PioneerDJ/Imported from Device");
+  expect(text).toContain("2 files 20.0 MB to the folder : ");
+  // The folder is shown once, as rekordbox shows it in its field.
+  expect(text).not.toContain("to the folder : /Users");
+  expect(host.querySelectorAll("p")[4]?.textContent).toBe("/Users/dj/Music/PioneerDJ/Imported from Device");
   expect(text).toContain("Music file copy destination:");
   expect(text).toContain("Free space of /Users/dj/Music/PioneerDJ/Imported from Device is 128.0 GB");
   expect(document.activeElement?.textContent).toBe("OK");

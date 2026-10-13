@@ -13,8 +13,9 @@ import styles from "./ConfirmDialog.module.css";
  * yyyy to the folder : " (count, then `descriptionOfSizeInBytes`), "Music
  * file copy destination:", "Free space of xxxx is yyyy", OK and Cancel].
  * As rekordbox 7.2.14 draws it [OBS chris-win11, #198]: "2 files 256 bytes
- * to the folder :", the size without brackets, OK left of Cancel. Its
- * Change… button (another destination) is not offered here.
+ * to the folder :", the size without brackets, the free space beside
+ * "Music file copy destination:", the folder once, below both, OK left of
+ * Cancel. Its Change… button (another destination) is not offered here.
  * OK copies and imports; Cancel and Escape import nothing.
  */
 export function DeviceImportCopyDialog({ plan, onAnswer }: {
@@ -49,11 +50,13 @@ export function DeviceImportCopyDialog({ plan, onAnswer }: {
         <div id="device-import-copy-message" className={styles.message}>
           <p>{t("The playlist you are trying to import contains music files that are not present in rekordbox on your computer.")}</p>
           <p>{t("These music files will be copied to this computer.")}</p>
-          <p><strong>{t("Music files to be copied:")}</strong><br />{files}{plan.destination}</p>
-          <p><strong>{t("Music file copy destination:")}</strong><br />{plan.destination}</p>
-          {plan.freeBytes !== null
-            ? <p>{t("Free space of {drive} is {size}", { drive: plan.destination, size: formatBytes(plan.freeBytes) })}</p>
-            : null}
+          <p><strong>{t("Music files to be copied:")}</strong><br />{files}</p>
+          <p><strong>{t("Music file copy destination:")}</strong>
+            {plan.freeBytes !== null
+              ? <><br />{t("Free space of {drive} is {size}", { drive: plan.destination, size: formatBytes(plan.freeBytes) })}</>
+              : null}
+          </p>
+          <p>{plan.destination}</p>
         </div>
         <div className={styles.buttons}>
           <button ref={ok} type="button" className={`${styles.button} ${styles.primary}`}
