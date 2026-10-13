@@ -376,7 +376,7 @@ describe("SyncManager", () => {
     expect(host.querySelector('[aria-label="USB A library"]')?.textContent).toContain("Device Library");
   });
 
-  it("formats as plain FAT32 by default and can be cancelled without touching the drive", async () => {
+  it("formats a FAT32 drive as FAT32 by default and can be cancelled without touching the drive", async () => {
     await openFormat("USB B");
     click([...document.body.querySelectorAll<HTMLButtonElement>("dialog button")].find(b => b.textContent === "Cancel"));
     expect(dialog()).toBeNull();
