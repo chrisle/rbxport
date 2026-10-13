@@ -683,6 +683,7 @@ pub fn run() {
             device_library::device_playlist_edit,
             device_library::device_playlist_duplicates,
             device_library::device_playlist_import,
+            device_library::device_playlist_import_plan,
             // The information panel: one track's full record, the lookup
             // lists its dropdowns offer, and the fields it may write.
             details::track_details,
