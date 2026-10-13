@@ -46,7 +46,10 @@ file at the two moments rekordbox writes it:
 
 - when an analysis with KEY selected finds a key, and
 - when the key is edited in the information panel (a cleared key empties the
-  file's key).
+  file's key). Only the tracks whose key the edit changed are written: a
+  selected track that already had that key, or had no key to clear, keeps its
+  file as it was, as in rekordbox. Analysis writes the key it finds each time,
+  even when it is the key the track already had, as rekordbox does.
 
 | File | Where the key goes |
 | --- | --- |
@@ -64,7 +67,7 @@ over; the log says so.
 The file is never rewritten in place. A copy beside it is written, read back
 and compared with the original — the audio byte for byte and every other tag
 item as it was — and only then renamed over it, keeping the original's owner,
-group and creation date. These files are left unchanged, and the log says
+group (where you belong to it; otherwise the log says so) and creation date. These files are left unchanged, and the log says
 why:
 
 - a tag that cannot be read completely;

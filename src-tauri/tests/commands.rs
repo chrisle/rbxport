@@ -1344,33 +1344,100 @@ fn write_click_wav(path: &Path, seconds: u32) {
     std::fs::write(path, out).unwrap();
 }
 
-/// Preferences > Analysis > Key Analysis > "Write the value to the ID3 tag"
-/// (#204): an edited key goes into the file's `TKEY` only with the setting
-/// on, which the frontend says by sending `writeKeyTag`. The name goes in as
-/// edited, as rekordbox's `modifyTrack` writes it [OBS chris-win11].
-#[test]
-fn an_edited_key_goes_into_the_files_tag_only_with_the_preference_on() {
-    let s = shell();
-    let audio = s._dir.path().join("issue-204 Key.mp3");
+/// A small MP3 the import takes, under `name` in the shell's directory: the
+/// file and its bytes.
+fn write_key_mp3(s: &Shell, name: &str) -> (std::path::PathBuf, Vec<u8>) {
+    let audio = s._dir.path().join(name);
+    let seed = name.bytes().fold(0u8, u8::wrapping_add);
     let mut mp3 = Vec::new();
     for i in 0..40u8 {
         mp3.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]);
-        mp3.extend(std::iter::repeat_n(i, 413));
+        mp3.extend(std::iter::repeat_n(i.wrapping_add(seed), 413));
     }
     std::fs::write(&audio, &mp3).unwrap();
+    (audio, mp3)
+}
+
+/// A file's bytes and, where there is one, its inode: a write that replaces
+/// the file shows even when it puts the same bytes back.
+fn file_identity(path: &Path) -> (Vec<u8>, u64) {
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(path).unwrap());
+    #[cfg(not(unix))]
+    let inode = 0;
+    (std::fs::read(path).unwrap(), inode)
+}
+
+/// Preferences > Analysis > Key Analysis > "Write the value to the ID3 tag"
+/// (#204): an edited key goes into the file's `TKEY` only with the setting
+/// on, which the frontend says by sending `writeKeyTag`. The name goes in as
+/// edited, as rekordbox's `modifyTrack` writes it [OBS chris-win11]. An edit
+/// that leaves the key as it was does not touch the file: rekordbox's
+/// `updateDB` hands only changed tracks on to `modifyTrackData` [static
+/// 7.2.19 @0x100371814; #279].
+#[test]
+fn an_edited_key_goes_into_the_files_tag_only_with_the_preference_on() {
+    let s = shell();
+    let (audio, mp3) = write_key_mp3(&s, "issue-204 Key.mp3");
     let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
     let id = report.tracks[0].id.clone();
-    s.state().write(|w| w.ensure_detected_key("Am")).unwrap();
+    s.state().write(|w| { w.ensure_detected_key("Am")?; w.ensure_detected_key("Fm") }).unwrap();
 
     run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Am".into(), None)).unwrap();
     assert_eq!(std::fs::read(&audio).unwrap(), mp3, "off, the default: the file is not touched");
 
-    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Am".into(), Some(true))).unwrap();
-    assert_eq!(rbl_db::key_tag::read_key(&audio).unwrap().as_deref(), Some("Am"));
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Fm".into(), Some(true))).unwrap();
+    assert_eq!(rbl_db::key_tag::read_key(&audio).unwrap().as_deref(), Some("Fm"));
     assert!(std::fs::read(&audio).unwrap().ends_with(&mp3), "the audio is as it was");
 
-    run(details::set_track_field(s.handle(), s.state(), vec![id], "key".into(), String::new(), Some(true))).unwrap();
+    // The box typed into but left as it was: the panel still sends it.
+    let tagged = file_identity(&audio);
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Fm".into(), Some(true))).unwrap();
+    assert_eq!(file_identity(&audio), tagged, "an unchanged key leaves the file alone");
+
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), String::new(), Some(true))).unwrap();
     assert_eq!(rbl_db::key_tag::read_key(&audio).unwrap().unwrap_or_default(), "", "a cleared key empties the tag's");
+
+    let cleared = file_identity(&audio);
+    run(details::set_track_field(s.handle(), s.state(), vec![id], "key".into(), String::new(), Some(true))).unwrap();
+    assert_eq!(file_identity(&audio), cleared, "clearing a key the track does not have leaves the file alone");
+}
+
+/// A key edited over several tracks, one of which already has it (#204):
+/// rekordbox writes only the tracks whose key differs, so only their files
+/// get the tag [static 7.2.19 `TrackInfoConcreteMediator::updateDB`
+/// @0x100371814, `modifyTrack` -> `modifyTagData`; OBS #279 for the rows].
+#[test]
+fn a_key_edited_over_several_tracks_is_tagged_only_into_the_files_it_changed() {
+    let s = shell();
+    let (holding, holding_bytes) = write_key_mp3(&s, "issue-204 Holding.mp3");
+    let (other, other_bytes) = write_key_mp3(&s, "issue-204 Other.mp3");
+    let import = |path: &Path| {
+        run(commands::import_files(s.handle(), s.state(), vec![path.display().to_string()])).unwrap().tracks[0].id.clone()
+    };
+    let (holding_id, other_id) = (import(&holding), import(&other));
+    s.state().write(|w| w.ensure_detected_key("Am")).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![holding_id.clone()], "key".into(), "Am".into(), None))
+        .unwrap();
+    assert_eq!(std::fs::read(&holding).unwrap(), holding_bytes);
+    let before = file_identity(&holding);
+
+    run(details::set_track_field(
+        s.handle(),
+        s.state(),
+        vec![holding_id.clone(), other_id.clone()],
+        "key".into(),
+        "Am".into(),
+        Some(true),
+    ))
+    .unwrap();
+
+    assert_eq!(file_identity(&holding), before, "the track that already had Am keeps its file byte for byte");
+    assert_eq!(rbl_db::key_tag::read_key(&other).unwrap().as_deref(), Some("Am"));
+    assert!(std::fs::read(&other).unwrap().ends_with(&other_bytes), "the audio is as it was");
+    for id in [holding_id, other_id] {
+        assert_eq!(run(details::track_details(s.state(), id)).unwrap().key, "Am");
+    }
 }
 
 /// Twenty seconds of an A minor triad as 16-bit mono AIFF: something with a

@@ -365,14 +365,32 @@ pub async fn set_track_field<R: tauri::Runtime>(
     // "Write the value to the ID3 tag": rekordbox's `modifyTrack` writes an
     // edited key into each track's file after saving it, with the name as
     // edited [OBS chris-win11: `Am` typed under Alphanumeric wrote `Am`].
+    // Only the tracks the edit changed: `updateDB` hands `modifyTrackData`
+    // (and so `modifyTrack` -> `modifyTagData`) only the tracks whose value
+    // differs [static 7.2.19 `TrackInfoConcreteMediator::updateDB`
+    // @0x100371814; #279], so a file whose key already matched, or a cleared
+    // key on a track that had none, is not rewritten.
     let key_tag = (which == rbl_db::write::TrackField::Key && write_key_tag == Some(true))
-        .then(|| (tracks.clone(), value.trim().to_owned()));
+        .then(|| (Arc::new(parking_lot::Mutex::new(Vec::<String>::new())), value.trim().to_owned()));
+    let changed = key_tag.as_ref().map(|(changed, _)| Arc::clone(changed));
     let shared = Arc::clone(&state);
     let dto = recorded_edit(app, state, "set_track_field", Touched::Tracks, "Track Edit", move |w| {
-        each_track(w, &tracks, |w, track| w.set_field_with_undo(track, which, &value))
+        each_track(w, &tracks, |w, track| {
+            let step = w.set_field_with_undo(track, which, &value)?;
+            if let Some(changed) = &changed {
+                if !step.1.is_empty() {
+                    changed.lock().push(track.to_owned());
+                }
+            }
+            Ok(step)
+        })
     })
     .await?;
-    if let Some((tracks, key)) = key_tag {
+    if let Some((changed, key)) = key_tag {
+        let tracks = std::mem::take(&mut *changed.lock());
+        if tracks.is_empty() {
+            return Ok(dto);
+        }
         let library = shared.library()?;
         blocking("write_key_tag", move || {
             for track in &tracks {
