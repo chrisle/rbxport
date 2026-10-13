@@ -43,7 +43,7 @@ it("says what rekordbox says before it copies, with OK focused", () => {
   expect(text).toContain("Import Playlist from Device");
   expect(text).toContain("contains music files that are not present in rekordbox on your computer.");
   expect(text).toContain("These music files will be copied to this computer.");
-  expect(text).toContain("2 files (20.0 MB) to the folder : /Users/dj/Music/PioneerDJ/Imported from Device");
+  expect(text).toContain("2 files 20.0 MB to the folder : /Users/dj/Music/PioneerDJ/Imported from Device");
   expect(text).toContain("Music file copy destination:");
   expect(text).toContain("Free space of /Users/dj/Music/PioneerDJ/Imported from Device is 128.0 GB");
   expect(document.activeElement?.textContent).toBe("OK");
@@ -51,7 +51,7 @@ it("says what rekordbox says before it copies, with OK focused", () => {
 
 it("names one file in the singular", () => {
   act(() => root.render(<DeviceImportCopyDialog plan={{ ...PLAN, files: 1, freeBytes: null }} onAnswer={() => {}} />));
-  expect(host.textContent).toContain("1 file (20.0 MB) to the folder : ");
+  expect(host.textContent).toContain("1 file 20.0 MB to the folder : ");
   expect(host.textContent).not.toContain("Free space of");
 });
 

@@ -123,7 +123,8 @@ When importing a playlist from a device**:
   the rest, as rekordbox does when you click OK. A file already there is
   never replaced: the copy gets a numbered name (`Track-1.mp3`). Each copy
   is checked against the stick's file before it is used. If the import
-  fails, the copies it made are removed again.
+  fails, the copies it made are removed again. Importing the same playlist
+  again uses the earlier copies instead of copying the files a second time.
 - **Ask each import**: rekordbox's question, with how many files would be
   copied, their size and where they go. OK copies, Cancel imports nothing.
 - **Import only already-matched tracks**: the track is left out and the note

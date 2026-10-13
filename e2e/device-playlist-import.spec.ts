@@ -120,7 +120,7 @@ test("Ask each import asks rekordbox's question: Cancel imports nothing, OK copi
   await importPlaylist(page, "NP3-TEST-MP3");
   const question = page.getByRole("alertdialog", { name: "Import Playlist from Device" });
   await expect(question).toContainText("These music files will be copied to this computer.");
-  await expect(question).toContainText("1 file (9.0 MB) to the folder : /Users/dj/Music/PioneerDJ/Imported from Device");
+  await expect(question).toContainText("1 file 9.0 MB to the folder : /Users/dj/Music/PioneerDJ/Imported from Device");
   await question.getByRole("button", { name: "Cancel" }).click();
   await expect(question).toHaveCount(0);
   await source(page, "Playlists").click();

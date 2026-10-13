@@ -12,6 +12,9 @@ import styles from "./ConfirmDialog.module.css";
  * from Device", the message, "Music files to be copied:" with "xxxx files
  * yyyy to the folder : " (count, then `descriptionOfSizeInBytes`), "Music
  * file copy destination:", "Free space of xxxx is yyyy", OK and Cancel].
+ * As rekordbox 7.2.14 draws it [OBS chris-win11, #198]: "2 files 256 bytes
+ * to the folder :", the size without brackets, OK left of Cancel. Its
+ * Change… button (another destination) is not offered here.
  * OK copies and imports; Cancel and Escape import nothing.
  */
 export function DeviceImportCopyDialog({ plan, onAnswer }: {
@@ -34,7 +37,7 @@ export function DeviceImportCopyDialog({ plan, onAnswer }: {
   }, [onAnswer]);
 
   const title = t("Import Playlist from Device");
-  const size = `(${formatBytes(plan.bytes)})`;
+  const size = formatBytes(plan.bytes);
   const files = plan.files === 1
     ? t("{count} file {size} to the folder : ", { count: plan.files, size })
     : t("{count} files {size} to the folder : ", { count: plan.files, size });
@@ -53,9 +56,9 @@ export function DeviceImportCopyDialog({ plan, onAnswer }: {
             : null}
         </div>
         <div className={styles.buttons}>
-          <button type="button" className={styles.button} onClick={() => onAnswer(false)}>{t("Cancel")}</button>
           <button ref={ok} type="button" className={`${styles.button} ${styles.primary}`}
             onClick={() => onAnswer(true)}>{t("OK")}</button>
+          <button type="button" className={styles.button} onClick={() => onAnswer(false)}>{t("Cancel")}</button>
         </div>
       </div>
     </div>
