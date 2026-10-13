@@ -1662,5 +1662,7 @@
   "Ask me": "Kérdezzen meg",
   "A list named {name} already exists here.": "Itt már van {name} nevű lista.",
   "Apply to the rest of all": "Alkalmazás a többire",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "Már létezett {name} nevű lista, ezért a mappa {copy} néven lett importálva."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Már létezett {name} nevű lista, ezért a mappa {copy} néven lett importálva.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "A Meglévő cseréje kérdés nélkül törli az ilyen nevű listát, és ha mappa, a benne lévő összes listát is. Ez nem vonható vissza.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "A régi {name} lecserélve. Eltávolított listák: {lists}. Belőlük kivett számok: {tracks}; ezek a gyűjteményben maradnak."
 }

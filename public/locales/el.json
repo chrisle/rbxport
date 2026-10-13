@@ -1664,5 +1664,7 @@
   "Ask me": "Να ερωτώμαι",
   "A list named {name} already exists here.": "Υπάρχει ήδη εδώ λίστα με το όνομα {name}.",
   "Apply to the rest of all": "Εφαρμογή σε όλα τα υπόλοιπα",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "Υπήρχε ήδη λίστα με το όνομα {name}, οπότε ο φάκελος εισήχθη ως {copy}."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Υπήρχε ήδη λίστα με το όνομα {name}, οπότε ο φάκελος εισήχθη ως {copy}.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Η Αντικατάσταση της υπάρχουσας διαγράφει χωρίς ερώτηση τη λίστα με αυτό το όνομα και, αν είναι φάκελος, κάθε λίστα μέσα της. Δεν μπορεί να αναιρεθεί.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "Η παλιά {name} αντικαταστάθηκε. Λίστες που αφαιρέθηκαν: {lists}. Κομμάτια που βγήκαν από αυτές: {tracks}· παραμένουν στη συλλογή."
 }

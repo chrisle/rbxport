@@ -1660,5 +1660,7 @@
   "Ask me": "Fråga mig",
   "A list named {name} already exists here.": "Det finns redan en lista med namnet {name} här.",
   "Apply to the rest of all": "Applicera på resten av alla",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "Det fanns redan en lista med namnet {name}, så mappen importerades som {copy}."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Det fanns redan en lista med namnet {name}, så mappen importerades som {copy}.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Ersätt befintlig tar utan att fråga bort listan med det namnet och, om det är en mapp, alla listor i den. Det går inte att ångra.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "Den gamla {name} ersattes. Borttagna listor: {lists}. Spår borttagna ur dem: {tracks}; de finns kvar i samlingen."
 }

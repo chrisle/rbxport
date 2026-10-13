@@ -1665,5 +1665,7 @@
   "Ask me": "Спрашивать",
   "A list named {name} already exists here.": "Список с именем {name} здесь уже существует.",
   "Apply to the rest of all": "Применить к остальному",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "Список с именем {name} уже существовал, поэтому папка импортирована как {copy}."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Список с именем {name} уже существовал, поэтому папка импортирована как {copy}.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "«Заменить существующий» без вопроса удаляет список с этим именем, а если это папка, то и все списки в ней. Это действие нельзя отменить.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "Прежний список {name} заменён. Удалено списков: {lists}. Треков убрано из них: {tracks}; они остаются в коллекции."
 }

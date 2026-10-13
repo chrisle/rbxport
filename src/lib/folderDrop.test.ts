@@ -8,7 +8,7 @@ const t = (text: string, values?: Readonly<Record<string, string | number>>) =>
   text.replace(/\{(\w+)\}/g, (_, key: string) => String(values?.[key] ?? `{${key}}`));
 
 const report = (name: string, extra: Partial<FolderPlaylistReport> = {}): FolderPlaylistReport => ({
-  name, renamed: null, playlist: null, conflict: null, folder: true, imported: 0, skipped: [], tracks: [], existing: 0,
+  name, renamed: null, replaced: null, playlist: null, conflict: null, folder: true, imported: 0, skipped: [], tracks: [], existing: 0,
   at: null, ...extra,
 });
 
@@ -24,7 +24,9 @@ function clashing() {
   return vi.fn((path: string, _parent: string, replace?: string, at?: number | null, copy?: boolean) => {
     const held = path === "Old" || path === "Older";
     if (held && copy) return Promise.resolve(report(path, { playlist: `copy-${path}`, renamed: `${path} (1)`, at: at ?? 0 }));
-    if (held && replace) return Promise.resolve(report(path, { playlist: `new-${path}`, at: at ?? 0 }));
+    if (held && replace) {
+      return Promise.resolve(report(path, { playlist: `new-${path}`, at: at ?? 0, replaced: { lists: 2, tracks: 5 } }));
+    }
     if (held) return Promise.resolve(report(path, { conflict: `id-${path}`, at: at ?? 0 }));
     return Promise.resolve(report(path, { playlist: `id-${path}`, at: at ?? 0 }));
   });
@@ -56,14 +58,16 @@ describe("importFolderDrop", () => {
     );
   });
 
-  it("replaces without asking when Preferences says Replace existing", async () => {
+  it("replaces without asking when Preferences says Replace existing, and says what that removed", async () => {
     const importFolderPlaylist = clashing();
     const done = await importFolderDrop({ importFolderPlaylist }, "f1", ["Old"], t, policy("replace"));
     expect(importFolderPlaylist.mock.calls).toEqual([
       ["Old", "f1", undefined, null, false],
       ["Old", "f1", "id-Old", 0],
     ]);
-    expect(done.message).toBe("Made playlists: Old.");
+    expect(done.message).toBe(
+      "Made playlists: Old. Replaced the old Old. Lists removed: 2. Tracks taken out of them: 5; they stay in the collection.",
+    );
   });
 
   it("leaves the folder untouched when Stop is pressed while Ask me is waiting", async () => {
@@ -103,7 +107,8 @@ describe("importFolderDrop", () => {
       ["Older", "root", undefined, 0, true],
     ]);
     expect(done.message).toBe(
-      "Made playlists: Old, Older (1). A list named Older was already there, so the folder was imported as Older (1).",
+      "Made playlists: Old, Older (1). Replaced the old Old. Lists removed: 2. Tracks taken out of them: 5; " +
+        "they stay in the collection. A list named Older was already there, so the folder was imported as Older (1).",
     );
 
     const batch = clashing();

@@ -1659,5 +1659,7 @@
   "Ask me": "Nachfragen",
   "A list named {name} already exists here.": "Hier gibt es bereits eine Liste namens {name}.",
   "Apply to the rest of all": "Auf alle übrigen anwenden",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "Eine Liste namens {name} war bereits vorhanden, daher wurde der Ordner als {copy} importiert."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Eine Liste namens {name} war bereits vorhanden, daher wurde der Ordner als {copy} importiert.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Vorhandene ersetzen löscht die Liste mit diesem Namen und, wenn sie ein Ordner ist, jede Liste darin, ohne nachzufragen. Das kann nicht rückgängig gemacht werden.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "Die alte Liste {name} wurde ersetzt. Entfernte Listen: {lists}. Daraus entfernte Titel: {tracks}; sie bleiben in der Sammlung."
 }

@@ -398,6 +398,18 @@ pub struct PlaylistDeletion {
     pub membership_ids: Vec<String>,
 }
 
+/// What replacing a same-named list removed, so the caller can say so:
+/// Replace existing has no undo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReplacedList {
+    /// Playlists, folders and intelligent playlists soft-deleted: the
+    /// replaced one and everything inside it.
+    pub lists: usize,
+    /// Track entries taken out of those lists. The tracks stay in the
+    /// collection.
+    pub tracks: usize,
+}
+
 /// What [`Writer::import_folder_as_playlist`] did with one folder.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FolderPlaylist {
@@ -416,6 +428,9 @@ pub struct FolderPlaylist {
     /// The name the playlist was given when it is not the folder's: the
     /// copy [`FolderClash::Copy`] makes beside a same-named sibling.
     pub renamed: Option<String>,
+    /// What [`FolderClash::Replace`] removed: the replaced list, and every
+    /// list and membership inside it.
+    pub replaced: Option<ReplacedList>,
     /// The place under the target the playlist was put, or would have been:
     /// the insert index rekordbox keeps for every folder of one drop. Pass it
     /// back as `at` for the drop's next folder. `None` when the folder held
@@ -1066,7 +1081,11 @@ impl Writer {
         if let Some(old) = &replacing {
             let place = siblings(&tx)?.iter().position(|(sibling, _)| sibling == old)
                 .ok_or_else(|| DbError::WriteRefused(format!("no playlist or folder {old}")))?;
-            tombstone_subtree(&tx, old, &stamp)?;
+            let (_, deletion) = tombstone_subtree(&tx, old, &stamp)?;
+            outcome.replaced = Some(ReplacedList {
+                lists: deletion.playlist_ids.len(),
+                tracks: deletion.membership_ids.len(),
+            });
             if place < at {
                 at -= 1;
             }

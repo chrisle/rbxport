@@ -1665,5 +1665,7 @@
   "Ask me": "詢問我",
   "A list named {name} already exists here.": "此處已有名為 {name} 的清單。",
   "Apply to the rest of all": "套用至其餘全部",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "已有名為 {name} 的清單，因此該資料夾已以 {copy} 匯入。"
+  "A list named {name} was already there, so the folder was imported as {copy}.": "已有名為 {name} 的清單，因此該資料夾已以 {copy} 匯入。",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "「取代現有清單」會直接刪除同名清單；若它是資料夾，其中的所有清單也會一併刪除，不會詢問。此動作無法復原。",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "已取代原本的 {name}。移除的清單：{lists}。從中移除的曲目：{tracks}；這些曲目仍保留在集合中。"
 }

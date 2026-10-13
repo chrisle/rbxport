@@ -1663,5 +1663,7 @@
   "Ask me": "Preguntarme",
   "A list named {name} already exists here.": "Ya existe aquí una lista llamada {name}.",
   "Apply to the rest of all": "Aplicar a todo el resto",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "Ya había una lista llamada {name}, así que la carpeta se importó como {copy}."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Ya había una lista llamada {name}, así que la carpeta se importó como {copy}.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Reemplazar la existente elimina sin preguntar la lista con ese nombre y, si es una carpeta, todas las listas que contiene. No se puede deshacer.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "Se reemplazó la antigua {name}. Listas eliminadas: {lists}. Pistas quitadas de ellas: {tracks}; siguen en la colección."
 }

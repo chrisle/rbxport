@@ -1663,5 +1663,7 @@
   "Ask me": "Bana sor",
   "A list named {name} already exists here.": "Burada zaten {name} adlı bir liste var.",
   "Apply to the rest of all": "Geri kalana uygula",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "{name} adlı bir liste zaten vardı, bu yüzden klasör {copy} olarak içe aktarıldı."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "{name} adlı bir liste zaten vardı, bu yüzden klasör {copy} olarak içe aktarıldı.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Mevcut olanı değiştir, bu ada sahip listeyi ve bir klasörse içindeki tüm listeleri sormadan siler. Bu işlem geri alınamaz.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "Eski {name} değiştirildi. Kaldırılan listeler: {lists}. Bunlardan çıkarılan parçalar: {tracks}; parçalar koleksiyonda kalır."
 }

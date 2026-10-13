@@ -333,6 +333,8 @@ pub struct FolderPlaylistDto {
     /// The name the playlist was given instead, when it was imported as a
     /// copy beside a same-named list (`"<name> (1)"`).
     pub renamed: Option<String>,
+    /// What replacing a same-named list removed, when it was replaced.
+    pub replaced: Option<ReplacedListDto>,
     /// The playlist made, or `None` when nothing was written.
     pub playlist: Option<String>,
     /// A same-named sibling the user must agree to replace; nothing was
@@ -350,6 +352,16 @@ pub struct FolderPlaylistDto {
     /// The drop's insert index under the target, to pass to the next folder
     /// of the same drop; `None` until one was worked out.
     pub at: Option<u32>,
+}
+
+/// What replacing a same-named list removed: the lists (it and everything
+/// inside it) and the track entries in them. The tracks stay in the
+/// collection.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplacedListDto {
+    pub lists: u32,
+    pub tracks: u32,
 }
 
 /// One track an import added.

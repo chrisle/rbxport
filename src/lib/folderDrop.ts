@@ -45,9 +45,10 @@ export interface FolderClashPolicy {
  * rekordbox, which asks about each one (#355, Chris's 2026-10-12 decision):
  * `clash.mode` says what happens. `copy` (the default) keeps the old list and
  * imports the folder beside it under the next free name, which the summary
- * reports; `replace` replaces the old list; `keep` leaves it and skips the
- * folder; only `ask` asks, and an answer given for the rest of the drop is
- * not asked again.
+ * reports; `replace` replaces the old list, and the summary says how many
+ * lists and track entries that removed, since it has no undo; `keep` leaves
+ * it and skips the folder; only `ask` asks, and an answer given for the rest
+ * of the drop is not asked again.
  *
  * rekordbox reads the drop's insert index once and puts every folder there,
  * so a later folder lands before an earlier one; each call gets the index the
@@ -72,6 +73,7 @@ export async function importFolderDrop(
 ): Promise<FolderDropResult> {
   const made: string[] = [];
   const renamed: { name: string; copy: string }[] = [];
+  const replaced: { name: string; lists: number; tracks: number }[] = [];
   const tracks: { id: string; title: string }[] = [];
   let folders = 0;
   let skipped = 0;
@@ -107,6 +109,7 @@ export async function importFolderDrop(
       if (result.playlist) {
         made.push(result.renamed ?? result.name);
         if (result.renamed) renamed.push({ name: result.name, copy: result.renamed });
+        if (result.replaced) replaced.push({ name: result.name, ...result.replaced });
       }
       tracks.push(...result.tracks);
       skipped += result.skipped.length;
@@ -121,12 +124,18 @@ export async function importFolderDrop(
   const copies = renamed
     .map(({ name, copy }) => ` ${t("A list named {name} was already there, so the folder was imported as {copy}.", { name, copy })}`)
     .join("");
+  const replacements = replaced
+    .map(({ name, lists, tracks }) => ` ${t(
+      "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.",
+      { name, lists, tracks },
+    )}`)
+    .join("");
   const tail = skipped === 0
     ? ""
     : ` ${skipped === 1 ? t("1 file skipped.") : t("{count} files skipped.", { count: skipped })}`;
   const message = made.length === 0
     ? `${kept > 0 || signal?.aborted ? t("No playlist was made.") : t("No playlist was made: the folders hold no audio files.")}${tail}`
-    : `${t("Made playlists: {names}.", { names: made.join(", ") })}${copies}${tail}`;
+    : `${t("Made playlists: {names}.", { names: made.join(", ") })}${replacements}${copies}${tail}`;
   return { message, refused: false, tracks };
 }
 

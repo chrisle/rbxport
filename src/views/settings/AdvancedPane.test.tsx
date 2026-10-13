@@ -103,6 +103,10 @@ it("offers the four same-name folder choices, Import as a copy first and chosen 
   expect([...group.querySelectorAll("label")].map((label) => label.textContent))
     .toEqual(["Import as a copy", "Replace existing", "Keep existing", "Ask me"]);
   expect(radios.find((radio) => radio.checked)?.value).toBe("copy");
+  expect(host.textContent).toContain(
+    "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. " +
+      "This cannot be undone.",
+  );
 
   act(() => radios.at(3)?.click());
   expect(update).toHaveBeenCalledWith("advanced", { folderDropClash: "ask" });

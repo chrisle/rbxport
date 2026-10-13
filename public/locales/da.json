@@ -1658,5 +1658,7 @@
   "Ask me": "Spørg mig",
   "A list named {name} already exists here.": "Der findes allerede en liste med navnet {name} her.",
   "Apply to the rest of all": "Anvend på resten af alle",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "Der fandtes allerede en liste med navnet {name}, så mappen blev importeret som {copy}."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Der fandtes allerede en liste med navnet {name}, så mappen blev importeret som {copy}.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Erstat eksisterende sletter listen med det navn, og alle lister i den, hvis det er en mappe, uden at spørge. Det kan ikke fortrydes.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "Den gamle {name} blev erstattet. Lister fjernet: {lists}. Numre taget ud af dem: {tracks}; de bliver i samlingen."
 }

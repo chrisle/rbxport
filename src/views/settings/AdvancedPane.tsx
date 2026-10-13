@@ -124,6 +124,7 @@ export function AdvancedPane({ tab, summary }: {
             ]}
             onChange={(folderDropClash) => set({ folderDropClash })}
           />
+          <Note>{t("Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.")}</Note>
         </Section>
         {unlockWarning ? <div className={styles.warningBackdrop} role="presentation">
           <section

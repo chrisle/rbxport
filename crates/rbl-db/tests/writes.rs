@@ -3102,7 +3102,8 @@ fn a_replacement_that_fails_partway_leaves_the_old_list_and_library_as_they_were
 /// The folder import reads `next_usn` once for its playlist rows and counts up
 /// (#355 review): every live row the transaction writes or renumbers still
 /// gets its own `rb_local_usn`, past everything before it, the memberships in
-/// `TrackNo` order, and the registry counter ends on the highest.
+/// `TrackNo` order, and the registry counter ends on the highest. What the
+/// replacement removed is reported, since Replace existing has no undo.
 #[test]
 fn a_folder_import_gives_every_row_its_own_increasing_usn() {
     let audio = tempfile::tempdir().unwrap();
@@ -3137,6 +3138,7 @@ fn a_folder_import_gives_every_row_its_own_increasing_usn() {
         f.writer.import_folder_as_playlist("Old", &crate_folder, &files, FolderClash::Replace(&old), Some(0)).unwrap();
     let playlist = outcome.playlist.unwrap();
     assert_eq!(outcome.existing, vec![known]);
+    assert_eq!(outcome.replaced, Some(rbl_db::write::ReplacedList { lists: 2, tracks: 2 }));
     assert_eq!(f.children(&crate_folder)[0], playlist);
 
     let mut stmt = f

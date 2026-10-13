@@ -1627,6 +1627,12 @@ export interface FolderPlaylistReport {
   name: string;
   /** The name the playlist took instead, as a copy beside a same-named list. */
   renamed: string | null;
+  /**
+   * What replacing a same-named list removed: the lists (it and everything
+   * inside it) and the track entries in them. The tracks stay in the
+   * collection. Null when nothing was replaced.
+   */
+  replaced: { lists: number; tracks: number } | null;
   /** The playlist made, or null when nothing was written. */
   playlist: string | null;
   /** A same-named sibling awaiting the user's answer; nothing was written. */

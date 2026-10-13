@@ -3144,6 +3144,7 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
         let mut report = FolderPlaylistDto {
             name: name.clone(),
             renamed: None,
+            replaced: None,
             playlist: None,
             conflict: None,
             folder: dir.is_dir(),
@@ -3176,6 +3177,10 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
             .map_err(write_error)?;
         report.playlist = outcome.playlist;
         report.renamed = outcome.renamed;
+        report.replaced = outcome.replaced.map(|r| crate::dto::ReplacedListDto {
+            lists: u32::try_from(r.lists).unwrap_or(u32::MAX),
+            tracks: u32::try_from(r.tracks).unwrap_or(u32::MAX),
+        });
         report.conflict = outcome.conflict;
         report.imported = u32::try_from(outcome.imported.len()).unwrap_or(u32::MAX);
         report.existing = u32::try_from(outcome.existing.len()).unwrap_or(u32::MAX);

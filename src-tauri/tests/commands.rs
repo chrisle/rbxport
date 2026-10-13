@@ -2262,6 +2262,8 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
     ))
     .unwrap();
     assert_eq!(replaced.existing, 3, "the files are reused, not imported twice");
+    let removed = replaced.replaced.unwrap();
+    assert_eq!((removed.lists, removed.tracks), (1, 3), "what the replacement removed is reported");
     let new_id = replaced.playlist.unwrap();
     assert_ne!(new_id, playlist);
     assert_eq!(s.tree().iter().filter(|n| n.name == "Warm Up").count(), 1);
@@ -2281,6 +2283,7 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
     .unwrap();
     assert_eq!(copied.conflict, None);
     assert_eq!(copied.renamed.as_deref(), Some("Warm Up (1)"));
+    assert!(copied.replaced.is_none());
     assert_eq!(s.node("Warm Up (1)").id, copied.playlist.unwrap());
     assert_eq!(s.node("Warm Up").id, new_id);
 

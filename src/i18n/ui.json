@@ -1599,5 +1599,7 @@
   "Ask me",
   "A list named {name} already exists here.",
   "Apply to the rest of all",
-  "A list named {name} was already there, so the folder was imported as {copy}."
+  "A list named {name} was already there, so the folder was imported as {copy}.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection."
 ]

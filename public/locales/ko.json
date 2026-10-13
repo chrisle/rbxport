@@ -1660,5 +1660,7 @@
   "Ask me": "나에게 묻기",
   "A list named {name} already exists here.": "{name}(이)라는 목록이 이미 여기에 있습니다.",
   "Apply to the rest of all": "나머지 모든 부분에 적용",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "{name}(이)라는 목록이 이미 있어서 폴더를 {copy}(으)로 가져왔습니다."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "{name}(이)라는 목록이 이미 있어서 폴더를 {copy}(으)로 가져왔습니다.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "기존 항목 바꾸기는 묻지 않고 해당 이름의 목록을 삭제하며, 폴더인 경우 그 안의 모든 목록도 삭제합니다. 이 작업은 실행 취소할 수 없습니다.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "이전 {name}을(를) 바꿨습니다. 삭제된 목록: {lists}. 목록에서 빠진 트랙: {tracks}. 트랙은 컬렉션에 남아 있습니다."
 }

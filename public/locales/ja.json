@@ -1671,5 +1671,7 @@
   "Ask me": "確認する",
   "A list named {name} already exists here.": "{name} という名前のリストがすでにあります。",
   "Apply to the rest of all": "残りの全てに同じ設定",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "{name} という名前のリストがすでにあったため、フォルダーを {copy} としてインポートしました。"
+  "A list named {name} was already there, so the folder was imported as {copy}.": "{name} という名前のリストがすでにあったため、フォルダーを {copy} としてインポートしました。",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "「既存のものを置き換える」を選ぶと、その名前のリストが確認なしで削除されます。フォルダーの場合は、その中のすべてのリストも削除されます。元に戻すことはできません。",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "以前の {name} を置き換えました。削除したリスト: {lists}。そこから外したトラック: {tracks}。トラックはコレクションに残ります。"
 }

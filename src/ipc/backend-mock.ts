@@ -2734,7 +2734,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     importFolderPlaylist: async (path, parent, replace, given, copy) => {
       const name = path.split(/[\\/]/).filter(Boolean).pop() ?? "";
       const report = {
-        name, renamed: null, playlist: null, conflict: null, folder: false, imported: 0, skipped: [], tracks: [],
+        name, renamed: null, replaced: null, playlist: null, conflict: null, folder: false, imported: 0, skipped: [],
+        tracks: [],
         existing: 0, at: given ?? null,
       };
       if (!name || /\.[a-z0-9]+$/i.test(name)) return wait(report);
@@ -2743,8 +2744,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const clash = siblings.find((n) => n.name === name);
       if (clash && clash.id !== replace && !copy) return wait({ ...report, folder: true, conflict: clash.id, at });
       let listName = name;
+      let replaced: { lists: number; tracks: number } | null = null;
       if (clash && clash.id === replace) {
         if (siblings.indexOf(clash) < at) at -= 1;
+        const start = tree.findIndex((n) => n.id === clash.id);
+        const doomed = tree.slice(start, start + subtreeLength(start));
+        replaced = {
+          lists: doomed.length,
+          tracks: doomed.reduce((sum, n) => sum + (membership.get(n.id)?.length ?? 0), 0),
+        };
         await edits.deletePlaylist(clash.id);
       } else if (clash) {
         for (let n = 1; siblings.some((sibling) => sibling.name === listName); n += 1) listName = `${name} (${n})`;
@@ -2753,7 +2761,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       await edits.createPlaylist(listName, parent);
       const made = tree.find((n) => !before.has(n.id))?.id ?? null;
       if (made && childrenOf(parent).findIndex((n) => n.id === made) !== at) await edits.movePlaylist(made, parent, at);
-      return wait({ ...report, folder: true, playlist: made, at, renamed: listName === name ? null : listName });
+      return wait({ ...report, folder: true, playlist: made, at, renamed: listName === name ? null : listName, replaced });
     },
     exportLoopWav: () => wait(null),
     importItunes: () => wait(null),

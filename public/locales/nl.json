@@ -1658,5 +1658,7 @@
   "Ask me": "Vraag het mij",
   "A list named {name} already exists here.": "Hier bestaat al een lijst met de naam {name}.",
   "Apply to the rest of all": "Toepassen op de rest",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "Er was al een lijst met de naam {name}, dus de map is geïmporteerd als {copy}."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Er was al een lijst met de naam {name}, dus de map is geïmporteerd als {copy}.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Bestaande vervangen verwijdert zonder te vragen de lijst met die naam en, als het een map is, elke lijst daarin. Dit kan niet ongedaan worden gemaakt.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "De oude {name} is vervangen. Verwijderde lijsten: {lists}. Nummers daaruit gehaald: {tracks}; ze blijven in de verzameling."
 }

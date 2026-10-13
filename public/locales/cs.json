@@ -1663,5 +1663,7 @@
   "Ask me": "Zeptat se",
   "A list named {name} already exists here.": "Seznam s názvem {name} zde již existuje.",
   "Apply to the rest of all": "Použít na celý zbytek",
-  "A list named {name} was already there, so the folder was imported as {copy}.": "Seznam s názvem {name} již existoval, proto byla složka importována jako {copy}."
+  "A list named {name} was already there, so the folder was imported as {copy}.": "Seznam s názvem {name} již existoval, proto byla složka importována jako {copy}.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Možnost Nahradit stávající bez dotazu smaže seznam s tímto názvem, a pokud jde o složku, i všechny seznamy v ní. Tuto akci nelze vrátit.",
+  "Replaced the old {name}. Lists removed: {lists}. Tracks taken out of them: {tracks}; they stay in the collection.": "Původní {name} byl nahrazen. Odstraněné seznamy: {lists}. Skladby z nich odebrané: {tracks}; ve sbírce zůstávají."
 }
