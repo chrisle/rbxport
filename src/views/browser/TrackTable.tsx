@@ -1151,6 +1151,11 @@ export const TrackTable = memo(function TrackTable({
   // away from it), that event reaches nothing and the drag never ends: the
   // shell kept offering the old tracks to the next drop, a file included.
   const [dragSource, setDragSource] = useState<number | null>(null);
+  // Its React key, frozen when the drag starts. `rowKey` keys a second copy of
+  // a track by its slot, so which copy is "second" changes as the other copy
+  // scrolls in or out of the window; a changed key remounts the row, and the
+  // remount loses `dragend` just as an unmount does.
+  const [dragSourceKey, setDragSourceKey] = useState<string | null>(null);
   const rangeExtractor = useCallback(
     (range: Range) => {
       const indexes = defaultRangeExtractor(range);
@@ -1183,8 +1188,9 @@ export const TrackTable = memo(function TrackTable({
   }, [virtualizer, rowH]);
 
   const items = virtualizer.getVirtualItems();
-  // Row keys handed out this render; see `rowKey`.
-  const keyed = new Set<string>();
+  // Row keys handed out this render; see `rowKey`. The drag source's frozen
+  // key is taken first, so no other row can be handed it.
+  const keyed = new Set<string>(dragSource !== null && dragSourceKey !== null ? [dragSourceKey] : []);
 
   // The rows being drawn, as indices. These are what the fetch below keys on.
   //
@@ -1451,6 +1457,7 @@ export const TrackTable = memo(function TrackTable({
     nativeDrag.current = false;
     setDropAt(null);
     setDragSource(null);
+    setDragSourceKey(null);
     onDragTracks?.(null);
   });
 
@@ -1478,6 +1485,11 @@ export const TrackTable = memo(function TrackTable({
     (row: RowDto, index: number) => {
       const generation = ++dragGeneration.current;
       setDragSource(index);
+      // The key `rowKey` gave this row on the render being dragged from.
+      const slot = items.find((item) => item.index === index)?.key ?? index;
+      const copyAbove = items.some((item) =>
+        item.index < index && item.index < view.count && view.rowAt(item.index)?.id === row.id);
+      setDragSourceKey(copyAbove ? `${row.id}#${String(slot)}` : row.id);
       carrying.current = selection.ids.has(row.id) ? [...selection.ids] : [row.id];
       startDragOut(row);
       if (!nativeTrackDragging()) return false;
@@ -1997,7 +2009,7 @@ export const TrackTable = memo(function TrackTable({
             const row = item.index < view.count ? view.rowAt(item.index) : undefined;
             return (
               <TrackRow
-                key={rowKey(row, item.key, keyed)}
+                key={item.index === dragSource && dragSourceKey !== null ? dragSourceKey : rowKey(row, item.key, keyed)}
                 row={row}
                 index={item.index}
                 columns={columns}
