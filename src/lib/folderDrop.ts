@@ -55,8 +55,9 @@ export interface FolderClashPolicy {
  *
  * Each folder is one backend call and one transaction, so a Stop (`signal`)
  * lands between folders: the folders before it are whole playlists, the
- * ones after are not touched (#291). `progress` hears how many folders are
- * done after each.
+ * ones after are not touched (#291). A Stop pressed while Ask me is waiting
+ * for an answer leaves that folder untouched too. `progress` hears how many
+ * folders are done after each.
  *
  * Kept out of `App` so the initial bundle does not carry it.
  */
@@ -89,6 +90,8 @@ export async function importFolderDrop(
         let choice = settled;
         if (choice === null) {
           const answer = await clash.ask(result.name);
+          // Stopped while the question was up: this folder is not touched.
+          if (signal?.aborted) break;
           choice = answer.choice;
           if (answer.all) settled = choice;
         }

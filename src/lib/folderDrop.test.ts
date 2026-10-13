@@ -66,6 +66,20 @@ describe("importFolderDrop", () => {
     expect(done.message).toBe("Made playlists: Old.");
   });
 
+  it("leaves the folder untouched when Stop is pressed while Ask me is waiting", async () => {
+    const stop = new AbortController();
+    const importFolderPlaylist = clashing();
+    const ask = vi.fn(() => {
+      stop.abort();
+      return Promise.resolve<FolderClashAnswer>({ choice: "replace", all: false });
+    });
+    const done = await importFolderDrop({ importFolderPlaylist }, "root", ["Old", "New"], t, policy("ask", ask),
+      stop.signal);
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(importFolderPlaylist.mock.calls.map((call) => call.slice(0, 3))).toEqual([["Old", "root", undefined]]);
+    expect(done.message).toBe("No playlist was made.");
+  });
+
   it("keeps the old list without asking when Preferences says Keep existing", async () => {
     const importFolderPlaylist = clashing();
     const done = await importFolderDrop({ importFolderPlaylist }, "root", ["Old", "New"], t, policy("keep"));
