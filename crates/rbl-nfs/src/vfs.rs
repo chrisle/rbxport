@@ -14,8 +14,11 @@
 //! Names are never joined onto a path and re-opened from the root: `.` and
 //! `..` are answered from the tree, a name with a separator in it is not a
 //! name, and a symlink is followed only where a library track's own path
-//! runs through it ([`Vfs::allow_track`]), so a player cannot reach outside
-//! what was registered or allowed. rekordbox's own file server goes
+//! runs through it ([`Vfs::allow_track`]), and then only to a file at the
+//! track's own path or a directory above it, so a player cannot reach
+//! outside what was registered or allowed and the links a library names.
+//! Everything under a followed folder link's target is reachable, as
+//! everything under an allowed folder is. rekordbox's own file server goes
 //! further and exports `/`, resolving every name against the host with
 //! `stat`, which follows every symlink.
 //!
@@ -377,25 +380,35 @@ impl Vfs {
         self.tracks.insert(host.into());
     }
 
-    /// Whether `path` is a library track's path or a folder above one.
+    /// What a symlink at `path` may lead to: a file when `path` is exactly a
+    /// library track's path, a directory when it is a folder above one.
     /// Paths compare by component, so everything under `path` sorts right
     /// after it.
-    fn on_a_track_path(&self, path: &Path) -> bool {
-        self.tracks.range::<Path, _>((std::ops::Bound::Included(path), std::ops::Bound::Unbounded))
+    fn track_path_role(&self, path: &Path) -> (bool, bool) {
+        let is_track = self.tracks.contains(path);
+        let is_folder_above = self
+            .tracks
+            .range::<Path, _>((std::ops::Bound::Excluded(path), std::ops::Bound::Unbounded))
             .next()
-            .is_some_and(|track| track.starts_with(path))
+            .is_some_and(|track| track.starts_with(path));
+        (is_track, is_folder_above)
     }
 
     /// Asks the host what `name` is inside `dir`. A symlink is followed only
-    /// when a library track's path runs through it; any other is nothing.
+    /// when a library track's path runs through it, and only to what that
+    /// place on the path is: the track's own path to a file, a folder above
+    /// a track to a directory. Any other link is nothing, so a track path
+    /// linked to a directory does not open that directory.
     fn host_entry(&self, dir: &Path, name: &str) -> Option<HostEntry> {
         let path = dir.join(name);
         let meta = std::fs::symlink_metadata(&path).ok()?;
         if meta.file_type().is_symlink() {
-            if !self.on_a_track_path(&path) {
-                return None;
-            }
-            return entry_kind(&std::fs::metadata(&path).ok()?);
+            let (is_track, is_folder_above) = self.track_path_role(&path);
+            return match entry_kind(&std::fs::metadata(&path).ok()?)? {
+                HostEntry::File if is_track => Some(HostEntry::File),
+                HostEntry::Directory if is_folder_above => Some(HostEntry::Directory),
+                _ => None,
+            };
         }
         entry_kind(&meta)
     }

@@ -1447,3 +1447,107 @@ fn a_symlink_on_a_library_tracks_path_is_followed_and_no_other() {
     let real = lookup_path(&server, &root, &format!("{folder}/Real")).unwrap();
     assert_eq!(list(&server, &real, 8192), ["two.mp3"]);
 }
+
+/// A server over `<tmp>/Music` allowed as a whole, beside a `<tmp>/secret`
+/// folder that no player may reach; `setup` adds the links and tracks.
+#[cfg(unix)]
+fn link_probe_server(setup: impl FnOnce(&std::path::Path, &mut Vfs)) -> (tempfile::TempDir, Server, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let music = dir.path().join("Music");
+    fs::create_dir_all(music.join("Real")).unwrap();
+    fs::create_dir_all(dir.path().join("secret/inner")).unwrap();
+    fs::write(dir.path().join("secret/id_rsa"), b"PRIVATE").unwrap();
+    fs::write(dir.path().join("secret/inner/deep"), b"DEEP").unwrap();
+    let (export, folder) = split_export(music.to_str().unwrap()).unwrap();
+    let mut vfs = Vfs::new(export);
+    vfs.allow_folder(&folder, &music);
+    setup(dir.path(), &mut vfs);
+    let mut exports = Exports::new();
+    exports.insert(vfs);
+    (dir, Server::new(exports, NFS_PORT, MOUNT_PORT), folder)
+}
+
+/// A track's own path is followed to a file only: a library naming
+/// `Real/x.mp3` where `x.mp3` is a link to a directory does not open that
+/// directory, by lookup or listing.
+#[cfg(unix)]
+#[test]
+fn a_track_path_linked_to_a_directory_is_not_followed() {
+    let (_dir, server, folder) = link_probe_server(|root, vfs| {
+        let music = root.join("Music");
+        std::os::unix::fs::symlink(root.join("secret"), music.join("Real/x.mp3")).unwrap();
+        vfs.allow_track(music.join("Real/x.mp3"));
+    });
+    let root = mount_root(&server);
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Real/x.mp3")), Err(nfs_status::NOENT));
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Real/x.mp3/id_rsa")), Err(nfs_status::NOENT));
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Real/x.mp3/inner/deep")), Err(nfs_status::NOENT));
+    let real = lookup_path(&server, &root, &format!("{folder}/Real")).unwrap();
+    assert!(list(&server, &real, 8192).is_empty());
+}
+
+/// A folder above a track is followed to a directory only: a link where
+/// the library's path needs a folder, pointing at a file, is nothing.
+#[cfg(unix)]
+#[test]
+fn a_folder_link_above_a_track_that_points_to_a_file_is_not_followed() {
+    let (_dir, server, folder) = link_probe_server(|root, vfs| {
+        let music = root.join("Music");
+        std::os::unix::fs::symlink(root.join("secret/id_rsa"), music.join("Album")).unwrap();
+        vfs.allow_track(music.join("Album/one.mp3"));
+    });
+    let root = mount_root(&server);
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Album")), Err(nfs_status::NOENT));
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Album/one.mp3")), Err(nfs_status::NOENT));
+    let allowed = lookup_path(&server, &root, &folder).unwrap();
+    assert_eq!(list(&server, &allowed, 8192), ["Real"]);
+}
+
+/// Where a link sits decides how far it reaches: a `..` in a stored track
+/// path, a name that only prefixes a track's folder, and a link nested in
+/// a followed folder that no track goes through all lead nowhere, and `..`
+/// from a followed folder is the folder it was reached from.
+#[cfg(unix)]
+#[test]
+fn links_off_a_track_path_lead_nowhere() {
+    let (_dir, server, folder) = link_probe_server(|root, vfs| {
+        let music = root.join("Music");
+        fs::create_dir_all(root.join("ext/Album")).unwrap();
+        fs::write(root.join("ext/Album/one.mp3"), b"one").unwrap();
+        std::os::unix::fs::symlink(root.join("secret"), root.join("ext/Album/escape")).unwrap();
+        std::os::unix::fs::symlink(root.join("ext/Album"), music.join("Album")).unwrap();
+        std::os::unix::fs::symlink(root.join("secret"), music.join("Priv")).unwrap();
+        std::os::unix::fs::symlink(root.join("secret"), music.join("Al")).unwrap();
+        vfs.allow_track(music.join("Album/one.mp3"));
+        vfs.allow_track(music.join("Real/../Priv/x.mp3"));
+    });
+    let root = mount_root(&server);
+    let one = lookup_path(&server, &root, &format!("{folder}/Album/one.mp3")).unwrap();
+    assert_eq!(read_whole(&server, &one), b"one");
+    for path in ["Priv/id_rsa", "Real/../Priv/id_rsa", "Al/id_rsa", "Album/escape", "Album/escape/id_rsa"] {
+        assert_eq!(lookup_path(&server, &root, &format!("{folder}/{path}")), Err(nfs_status::NOENT), "{path}");
+    }
+    let album = lookup_path(&server, &root, &format!("{folder}/Album")).unwrap();
+    let up = lookup(&server, &album, "..").unwrap();
+    assert_eq!(lookup_path(&server, &root, &folder), Ok(up));
+    assert_eq!(lookup(&server, &up, "secret"), Err(nfs_status::NOENT));
+    assert_eq!(lookup(&server, &up, "ext"), Err(nfs_status::NOENT));
+}
+
+/// A link loop on a track path ends in nothing, and a link back to its own
+/// folder resolves only as deep as a track's path goes.
+#[cfg(unix)]
+#[test]
+fn a_link_loop_on_a_track_path_ends() {
+    let (_dir, server, folder) = link_probe_server(|root, vfs| {
+        let music = root.join("Music");
+        std::os::unix::fs::symlink(music.join("Loop"), music.join("Loop")).unwrap();
+        std::os::unix::fs::symlink(&music, music.join("Self")).unwrap();
+        vfs.allow_track(music.join("Loop/x.mp3"));
+        vfs.allow_track(music.join("Self/Self/Self/x.mp3"));
+    });
+    let root = mount_root(&server);
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Loop/x.mp3")), Err(nfs_status::NOENT));
+    let deepest = lookup_path(&server, &root, &format!("{folder}/Self/Self/Self")).unwrap();
+    assert_eq!(lookup(&server, &deepest, "Self"), Err(nfs_status::NOENT));
+}
