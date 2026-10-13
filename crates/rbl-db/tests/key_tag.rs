@@ -463,3 +463,142 @@ fn clearing_the_key_empties_it() {
     assert_eq!(read_key(&mp3).unwrap().as_deref().unwrap_or(""), "");
     assert_eq!(flac_comments(&flac).0, ["INITIALKEY="]);
 }
+
+/// An ID3v2.3 MP3 whose tag holds `frames` (id, body) as written.
+fn mp3_with_v23_frames(path: &Path, frames: &[(&[u8; 4], &[u8])]) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (id, data) in frames {
+        body.extend_from_slice(*id);
+        body.extend_from_slice(&u32::try_from(data.len()).unwrap().to_be_bytes());
+        body.extend_from_slice(&[0, 0]);
+        body.extend_from_slice(data);
+    }
+    let size = body.len();
+    let mut bytes = b"ID3\x03\x00\x00".to_vec();
+    bytes.extend_from_slice(&[(size >> 21) as u8 & 0x7f, (size >> 14) as u8 & 0x7f, (size >> 7) as u8 & 0x7f, size as u8 & 0x7f]);
+    bytes.extend_from_slice(&body);
+    bytes.extend_from_slice(&mp3_audio());
+    std::fs::write(path, &bytes).unwrap();
+    bytes
+}
+
+#[test]
+fn a_tag_that_repeats_a_frame_is_left_alone_rather_than_lose_the_repeat() {
+    // lofty keeps one frame per id (text), per description (TXXX) and per
+    // language and description (COMM) as it reads; TagLib, and so rekordbox,
+    // keeps every one. Each repeat on its own, then all of them together.
+    let cases: [&[(&[u8; 4], &[u8])]; 4] = [
+        &[(b"TIT2", b"\x03Title"), (b"COMM", b"\x03eng\x00first comment"), (b"COMM", b"\x03eng\x00second comment")],
+        &[(b"TIT2", b"\x03Title"), (b"TXXX", b"\x03DESC\x00one"), (b"TXXX", b"\x03DESC\x00two")],
+        &[(b"TIT2", b"\x03Title"), (b"TKEY", b"\x03Am"), (b"TKEY", b"\x03Cm")],
+        &[
+            (b"TIT2", b"\x03Title"),
+            (b"COMM", b"\x03eng\x00first comment"),
+            (b"COMM", b"\x03eng\x00second comment"),
+            (b"TXXX", b"\x03DESC\x00one"),
+            (b"TXXX", b"\x03DESC\x00two"),
+            (b"TKEY", b"\x03Am"),
+            (b"TKEY", b"\x03Cm"),
+        ],
+    ];
+    for (i, frames) in cases.iter().enumerate() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("issue-204-repeat-{i}.mp3"));
+        let bytes = mp3_with_v23_frames(&path, frames);
+
+        let result = write_key(&path, "12A");
+
+        assert!(result.is_err(), "case {i}: {result:?}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "case {i}: the file is unchanged");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "case {i}: no temporary file is left");
+    }
+}
+
+#[test]
+fn frames_that_share_an_id_but_not_a_key_are_all_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-204-many.mp3");
+    mp3_with_v23_frames(&path, &[
+        (b"TIT2", b"\x03Title"),
+        (b"COMM", b"\x03eng\x00first comment"),
+        (b"COMM", b"\x03engother\x00second comment"),
+        (b"COMM", b"\x03deu\x00dritter"),
+        (b"TYER", b"\x002024"),
+        (b"TDAT", b"\x000102"),
+        (b"TXXX", b"\x03ONE\x001"),
+        (b"TXXX", b"\x03TWO\x002"),
+        (b"TKEY", b"\x03Am"),
+    ]);
+    let before = read_id3(&path);
+    assert_eq!(others(&before).iter().filter(|f| f.contains("COMM")).count(), 3);
+
+    assert_eq!(write_key(&path, "12A").unwrap(), KeyTagOutcome::Written);
+
+    let after = read_id3(&path);
+    assert_eq!(tkeys(&after), vec![("12A".to_owned(), TextEncoding::UTF8)]);
+    assert_eq!(others(&after), others(&before));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_this_user_cannot_open_for_writing_is_passed_over_though_it_has_write_bits() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-204-theirs.mp3");
+    write_mp3(&path, Some(&busy_tag(Some("Am"))), false);
+    // Group read-write, nothing for the owner: write bits are set, so
+    // `Permissions::readonly()` says no, yet the owner cannot write it, as
+    // with a 0644 file another user owns. (The real case needs two users.)
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o060)).unwrap();
+    if std::fs::OpenOptions::new().write(true).open(&path).is_ok() {
+        // Root may write anything; nothing to show here.
+        return;
+    }
+
+    assert_eq!(write_key(&path, "Dbm").unwrap(), KeyTagOutcome::ReadOnly);
+
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o060);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "nothing was put beside it");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(read_key(&path).unwrap().as_deref(), Some("Am"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_hard_linked_file_is_not_split_from_its_other_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-204-linked.mp3");
+    write_mp3(&path, Some(&busy_tag(Some("Am"))), false);
+    let other = dir.path().join("issue-204-other-name.mp3");
+    std::fs::hard_link(&path, &other).unwrap();
+    let before = std::fs::read(&path).unwrap();
+
+    assert!(write_key(&path, "Dbm").is_err());
+
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(std::fs::read(&other).unwrap(), before);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn a_replacement_left_by_a_crash_is_cleared_on_the_next_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-204-crash.mp3");
+    write_mp3(&path, Some(&busy_tag(Some("Am"))), false);
+    let old = dir.path().join(".issue-204-crash.mp3.rbx-key-4242-1700000000000000000.tmp");
+    let fresh = dir.path().join(".issue-204-crash.mp3.rbx-key-4243-1800000000000000000.tmp");
+    let unrelated = dir.path().join(".issue-204-crash.mp3.rbx-key-notes.tmp");
+    for p in [&old, &fresh, &unrelated] {
+        std::fs::write(p, b"partial").unwrap();
+    }
+    let two_hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+    for p in [&old, &unrelated] {
+        std::fs::File::options().write(true).open(p).unwrap().set_modified(two_hours_ago).unwrap();
+    }
+
+    assert_eq!(write_key(&path, "Dbm").unwrap(), KeyTagOutcome::Written);
+
+    assert!(!old.exists(), "a stale replacement of this file is removed");
+    assert!(fresh.exists(), "one written in the last hour may still be in use");
+    assert!(unrelated.exists(), "a name not of that shape is not ours");
+}

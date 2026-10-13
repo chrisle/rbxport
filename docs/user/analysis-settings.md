@@ -57,14 +57,24 @@ file at the two moments rekordbox writes it:
 
 After analysis the key is written in View > Key display format: `Dbm` under
 Classic, `12A` under Alphanumeric, as rekordbox writes it. An edited key is
-written as edited. Read-only files are passed over, as rekordbox passes them
+written as edited. Files you may not write (read-only, or owned by another
+user without write access for you) are passed over, as rekordbox passes them
 over; the log says so.
 
 The file is never rewritten in place. A copy beside it is written, read back
 and compared with the original — the audio byte for byte and every other tag
-item as it was — and only then renamed over it. A file whose tag cannot be
-read completely is left unchanged and the log says why. The evidence is in
-`crates/rbl-db/src/key_tag.rs`.
+item as it was — and only then renamed over it, keeping the original's owner,
+group and creation date. These files are left unchanged, and the log says
+why:
+
+- a tag that cannot be read completely;
+- an ID3 tag that repeats a frame of the same kind (two `TKEY` frames, two
+  comments with the same language and description, two `TXXX` with the same
+  description), which rekordbox keeps but the rewrite could not;
+- a file with other hard links, which a replacement would split off;
+- a file owned by another user that rbx could not hand back to them.
+
+The evidence is in `crates/rbl-db/src/key_tag.rs`.
 
 ## Queued settings
 

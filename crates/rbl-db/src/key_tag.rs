@@ -19,14 +19,19 @@
 //!
 //! A file rekordbox cannot write to is passed over without a word
 //! (`Metadata::update` @0x1009e3630 checks `File::hasWriteAccess` and
-//! returns). This passes it over too and says so to the caller.
+//! returns). This passes it over too, judged by opening it for writing rather
+//! than by its permission bits, and says so to the caller.
 //!
 //! rekordbox rewrites the file in place through `TagLib`. This never does: the
 //! new file is built beside the original, read back and compared with it —
 //! the audio byte for byte, every other tag item as it was — and only then
-//! renamed over it. A file whose tag cannot be read strictly is left alone,
-//! since rewriting a tag that was only partly understood is how other
-//! frames get lost.
+//! renamed over it, with the original's owner, group and creation date. A
+//! file whose tag cannot be read strictly is left alone, since rewriting a
+//! tag that was only partly understood is how other frames get lost; so is
+//! an ID3 tag that repeats a frame lofty cannot keep twice (two `TKEY`s, two
+//! `COMM`s with one description), a file with other hard links (a
+//! replacement would split them off, where the in-place write keeps them),
+//! and a file another user owns that cannot be handed back to them.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
@@ -101,12 +106,18 @@ pub fn write_key(path: &Path, key: &str) -> Result<KeyTagOutcome> {
     if !meta.is_file() {
         return Err(KeyTagError::Io(io::Error::new(io::ErrorKind::InvalidInput, "not a file")));
     }
-    if meta.permissions().readonly() {
+    if !can_write(&path, &meta)? {
         return Ok(KeyTagOutcome::ReadOnly);
     }
     let Some(format) = format_of(&path)? else {
         return Ok(KeyTagOutcome::Unsupported);
     };
+    if links(&meta) > 1 {
+        // rekordbox writes in place, so every name of the file sees the key.
+        // A replacement would leave the other names on the old file.
+        return Err(KeyTagError::Tag("the file has other hard links, which a replacement would split off".into()));
+    }
+    remove_stale_temps(&path);
     let temp = temp_beside(&path);
     let result = replace_via(&path, &temp, format, key, &meta);
     if result.is_err() {
@@ -145,13 +156,75 @@ fn format_of(path: &Path) -> Result<Option<Format>> {
     })
 }
 
+/// Whether this user may write the file, as rekordbox's `File::hasWriteAccess`
+/// (`access(W_OK)`) asks. The permission bits alone do not say: a `0644` file
+/// owned by someone else has write bits and still cannot be written, and a
+/// rename over it would replace it anyway, since that needs only the folder.
+/// So the file is opened for writing, without truncating or writing to it.
+fn can_write(path: &Path, meta: &fs::Metadata) -> Result<bool> {
+    if meta.permissions().readonly() {
+        return Ok(false);
+    }
+    match OpenOptions::new().write(true).open(path) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// How many names the file has.
+fn links(meta: &fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.nlink()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        1
+    }
+}
+
+const TEMP_TAG: &str = ".rbx-key-";
+
 /// A name in the same directory, so the rename is a rename and not a copy.
 fn temp_beside(path: &Path) -> PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
-    path.with_file_name(format!(".{name}.rbx-key-{}-{stamp}.tmp", std::process::id()))
+    path.with_file_name(format!(".{name}{TEMP_TAG}{}-{stamp}.tmp", std::process::id()))
+}
+
+/// Removes this file's replacements left behind by a crash between the copy
+/// and the rename: names of exactly `temp_beside`'s shape for this file, last
+/// changed over an hour ago, so a write still in progress elsewhere is safe.
+fn remove_stale_temps(path: &Path) {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return };
+    let prefix = format!(".{}{TEMP_TAG}", name.to_string_lossy());
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let entry_name = entry.file_name();
+        let entry_name = entry_name.to_string_lossy();
+        let Some(rest) = entry_name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".tmp")) else { continue };
+        let ours = rest.split_once('-').is_some_and(|(pid, stamp)| {
+            !pid.is_empty()
+                && !stamp.is_empty()
+                && pid.bytes().all(|b| b.is_ascii_digit())
+                && stamp.bytes().all(|b| b.is_ascii_digit())
+        });
+        let stale = entry
+            .metadata()
+            .ok()
+            .filter(fs::Metadata::is_file)
+            .and_then(|m| m.modified().ok())
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age > std::time::Duration::from_secs(3600));
+        if ours && stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn replace_via(path: &Path, temp: &Path, format: Format, key: &str, meta: &fs::Metadata) -> Result<()> {
@@ -166,6 +239,7 @@ fn replace_via(path: &Path, temp: &Path, format: Format, key: &str, meta: &fs::M
     verify(path, temp, format, key)?;
     let file = OpenOptions::new().write(true).open(temp)?;
     keep_created(&file, meta);
+    keep_owner(&file, meta)?;
     file.sync_all()?;
     drop(file);
     fs::rename(temp, path)?;
@@ -186,6 +260,30 @@ fn keep_created(file: &File, meta: &fs::Metadata) {
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = (file, meta);
+}
+
+/// The replacement belongs to whoever the original did, as it does after
+/// rekordbox's in-place write. The group is set where the user may (they
+/// belong to it); a file owned by another user that this user may still
+/// write (mode `0666`, say) cannot be given back to them without root, so it
+/// is not replaced.
+fn keep_owner(file: &File, meta: &fs::Metadata) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{fchown, MetadataExt};
+        let mine = file.metadata()?;
+        if mine.uid() != meta.uid() {
+            let _ = fchown(file, Some(meta.uid()), Some(meta.gid()));
+        } else if mine.gid() != meta.gid() {
+            let _ = fchown(file, None, Some(meta.gid()));
+        }
+        if file.metadata()?.uid() != meta.uid() {
+            return Err(KeyTagError::Tag("the file belongs to another user, and a replacement would take it from them".into()));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (file, meta);
+    Ok(())
 }
 
 fn sync_parent(path: &Path) {
@@ -322,24 +420,54 @@ fn raw_frame_ids(tag: &[u8]) -> Result<Vec<String>> {
     Ok(ids)
 }
 
-/// Whether lofty's reading of the tag holds something for every frame the
-/// raw walk found, by id or by the id lofty upgrades it to.
+/// Whether lofty's reading of the tag holds every frame the raw walk found,
+/// by id or by the id lofty upgrades it to, as many times as the raw tag
+/// has it.
+///
+/// lofty keeps one frame per key as it reads (the id for text and URL
+/// frames, the description for `TXXX`/`WXXX`, the language and description
+/// for `COMM`/`USLT`, ...): a later frame with the same key replaces the
+/// earlier one. A tag with two `COMM eng ""` frames, or two `TKEY`s, would
+/// lose one in the rewrite. `TagLib` keeps them all, and rekordbox replaces
+/// only the first `TKEY`; this cannot, so it leaves such a file alone.
 fn lofty_read_everything(raw: &[u8], tag: Option<&Id3v2Tag>) -> Result<()> {
+    use std::collections::HashMap;
     let version = raw.get(3).copied().unwrap_or(4);
-    let ids: std::collections::HashSet<&str> = tag.into_iter().flatten().map(Frame::id_str).collect();
+    let mut kept: HashMap<&str, usize> = HashMap::new();
+    for frame in tag.into_iter().flatten() {
+        *kept.entry(frame.id_str()).or_default() += 1;
+    }
+    let mut found: HashMap<String, usize> = HashMap::new();
     for id in raw_frame_ids(raw)? {
+        // lofty folds an ID3v2.3 date and time into the v2.4 TDRC (or keeps
+        // one it cannot fold as it is).
+        if matches!(id.as_str(), "TDAT" | "TIME" | "TRDA") {
+            if !kept.contains_key(id.as_str()) && !kept.contains_key("TDRC") {
+                return Err(KeyTagError::Tag(format!("the {id} frame could not be read")));
+            }
+            *found.entry(id).or_default() += 1;
+            continue;
+        }
         let upgraded = match version {
             2 => lofty::id3::v2::upgrade_v2(&id),
             3 => lofty::id3::v2::upgrade_v3(&id),
             _ => None,
         };
-        // lofty folds an ID3v2.3 date and time into the v2.4 TDRC.
-        let folded = matches!(id.as_str(), "TDAT" | "TIME" | "TRDA").then_some("TDRC");
-        let found = ids.contains(id.as_str())
-            || upgraded.is_some_and(|u| ids.contains(u))
-            || folded.is_some_and(|u| ids.contains(u));
-        if !found {
+        // An id lofty keeps as it is, or the one it upgrades it to.
+        let as_kept = if kept.contains_key(id.as_str()) { id.clone() } else { upgraded.map_or(id.clone(), str::to_owned) };
+        if !kept.contains_key(as_kept.as_str()) {
             return Err(KeyTagError::Tag(format!("the {id} frame could not be read")));
+        }
+        *found.entry(as_kept).or_default() += 1;
+    }
+    for (id, count) in &found {
+        let folded = matches!(id.as_str(), "TDAT" | "TIME" | "TRDA");
+        let has = kept.get(id.as_str()).copied().unwrap_or(0);
+        if (folded && *count > 1) || (!folded && *count > has) {
+            return Err(KeyTagError::Tag(format!(
+                "the tag repeats a {id} frame ({count} in the file, {} told apart), and rewriting it would lose the repeat",
+                if folded { 1 } else { has }
+            )));
         }
     }
     Ok(())
