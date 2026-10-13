@@ -328,8 +328,11 @@ pub struct ImportReportDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderPlaylistDto {
-    /// The folder's name, which is the playlist's.
+    /// The folder's name, which is the playlist's unless `renamed` says so.
     pub name: String,
+    /// The name the playlist was given instead, when it was imported as a
+    /// copy beside a same-named list (`"<name> (1)"`).
+    pub renamed: Option<String>,
     /// The playlist made, or `None` when nothing was written.
     pub playlist: Option<String>,
     /// A same-named sibling the user must agree to replace; nothing was

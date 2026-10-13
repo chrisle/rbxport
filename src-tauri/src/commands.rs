@@ -3114,9 +3114,12 @@ async fn import_files_then<R: tauri::Runtime>(
 /// under it, subfolders flattened, the way rekordbox does it (see
 /// [`rbl_db::write::Writer::import_folder_as_playlist`]).
 ///
-/// One folder per call, because a same-named sibling stops that folder until
-/// the user says whether to replace it: the clash comes back in `conflict`
-/// with nothing written, and the call is repeated with `replace` set to it.
+/// One folder per call, because a same-named sibling may stop that folder
+/// until the user says what to do with it: the clash comes back in
+/// `conflict` with nothing written, and the call is repeated with `replace`
+/// set to it to replace it, or with `copy` to import the folder beside it
+/// under a free name (`renamed`). `copy` on the first call does that without
+/// asking. The whole folder is one transaction.
 ///
 /// `at` is the drop's insert index among `parent`'s children (`None`: the
 /// end). rekordbox puts every folder of one drop at that same index, so the
@@ -3129,6 +3132,7 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
     parent: String,
     replace: Option<String>,
     at: Option<u32>,
+    copy: Option<bool>,
 ) -> AppResult<FolderPlaylistDto> {
     let writing = Arc::clone(&state);
     let report = blocking("import_folder_playlist", move || {
@@ -3139,6 +3143,7 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
             .unwrap_or_default();
         let mut report = FolderPlaylistDto {
             name: name.clone(),
+            renamed: None,
             playlist: None,
             conflict: None,
             folder: dir.is_dir(),
@@ -3155,16 +3160,22 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
         let files = rbl_db::import::audio_files_in(&dir, &mut budget);
         let outcome = writing
             .write(|writer| {
+                let clash = match (replace.as_deref(), copy.unwrap_or(false)) {
+                    (Some(id), _) => rbl_db::write::FolderClash::Replace(id),
+                    (None, true) => rbl_db::write::FolderClash::Copy,
+                    (None, false) => rbl_db::write::FolderClash::Ask,
+                };
                 writer.import_folder_as_playlist(
                     &name,
                     &parent,
                     &files,
-                    replace.as_deref(),
+                    clash,
                     at.and_then(|at| usize::try_from(at).ok()),
                 )
             })
             .map_err(write_error)?;
         report.playlist = outcome.playlist;
+        report.renamed = outcome.renamed;
         report.conflict = outcome.conflict;
         report.imported = u32::try_from(outcome.imported.len()).unwrap_or(u32::MAX);
         report.existing = u32::try_from(outcome.existing.len()).unwrap_or(u32::MAX);

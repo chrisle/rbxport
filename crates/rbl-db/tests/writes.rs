@@ -7,6 +7,7 @@
 
 use rbl_db::fixture::{self, playlist_id, track_id, Shape};
 use rbl_db::write::{
+    FolderClash,
     AnalysisRegistration, Changed, TrackField, Unsupported, Writer, ANALYSED_FULL, ATTRIBUTE_FOLDER,
     ATTRIBUTE_PLAYLIST, ROOT,
 };
@@ -2899,7 +2900,7 @@ fn a_dropped_folder_becomes_one_flat_playlist_named_after_it() {
 
     let mut budget = rbl_db::import::WalkBudget::new(16, 1000);
     let files = rbl_db::import::audio_files_in(&folder, &mut budget);
-    let outcome = f.writer.import_folder_as_playlist("Friday Set", ROOT, &files, None, None).unwrap();
+    let outcome = f.writer.import_folder_as_playlist("Friday Set", ROOT, &files, FolderClash::Ask, None).unwrap();
 
     let playlist = outcome.playlist.clone().expect("a playlist is made");
     assert_eq!(outcome.conflict, None);
@@ -2930,7 +2931,7 @@ fn a_folder_dropped_on_a_playlist_folder_lands_inside_it() {
     let mut f = fixture();
     let crate_folder = f.writer.create_folder("Crates", ROOT).unwrap();
     let files = vec![audio.path().join("t.wav")];
-    let outcome = f.writer.import_folder_as_playlist("Techno", &crate_folder, &files, None, None).unwrap();
+    let outcome = f.writer.import_folder_as_playlist("Techno", &crate_folder, &files, FolderClash::Ask, None).unwrap();
     let playlist = outcome.playlist.unwrap();
     assert_eq!(f.children(&crate_folder), [playlist]);
 }
@@ -2939,7 +2940,7 @@ fn a_folder_dropped_on_a_playlist_folder_lands_inside_it() {
 fn a_folder_without_audio_makes_nothing() {
     let mut f = fixture();
     let before = f.children(ROOT);
-    let outcome = f.writer.import_folder_as_playlist("Artwork", ROOT, &[], None, None).unwrap();
+    let outcome = f.writer.import_folder_as_playlist("Artwork", ROOT, &[], FolderClash::Ask, None).unwrap();
     assert_eq!(outcome, rbl_db::write::FolderPlaylist::default());
     assert_eq!(f.children(ROOT), before);
 }
@@ -2957,13 +2958,13 @@ fn a_name_clash_writes_nothing_until_the_replacement_is_agreed() {
     let before = f.children(ROOT);
     let tracks_before = f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0");
 
-    let asked = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, None, None).unwrap();
+    let asked = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, FolderClash::Ask, None).unwrap();
     assert_eq!(asked.conflict, Some(clash.clone()));
     assert_eq!(asked.playlist, None);
     assert_eq!(f.children(ROOT), before);
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"), tracks_before);
 
-    let replaced = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, Some(&clash), None).unwrap();
+    let replaced = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, FolderClash::Replace(&clash), None).unwrap();
     let playlist = replaced.playlist.unwrap();
     assert_eq!(replaced.conflict, None);
     assert_eq!(
@@ -2996,23 +2997,106 @@ fn folders_dropped_together_share_the_drop_index_like_rekordbox() {
     let names = |f: &Fixture| f.children(&crate_folder).iter().map(|id| name(f, id)).collect::<Vec<_>>();
 
     // A drop of `A` then `B` onto the middle of the `Crates` row.
-    let a = f.writer.import_folder_as_playlist("A", &crate_folder, &files, None, None).unwrap();
+    let a = f.writer.import_folder_as_playlist("A", &crate_folder, &files, FolderClash::Ask, None).unwrap();
     assert_eq!(a.at, Some(2), "the end of the target when the drop was made");
-    let b = f.writer.import_folder_as_playlist("B", &crate_folder, &files, None, a.at).unwrap();
+    let b = f.writer.import_folder_as_playlist("B", &crate_folder, &files, FolderClash::Ask, a.at).unwrap();
     assert_eq!(b.at, Some(2));
     assert_eq!(names(&f), ["Old 1", "Old 2", "B", "A"]);
 
     // A drop of `Old 1` (replaced) then `C`: the index starts at 4, drops to 3
     // when `Old 1` at 0 is deleted, and `C` goes in before the new `Old 1`.
-    let asked = f.writer.import_folder_as_playlist("Old 1", &crate_folder, &files, None, None).unwrap();
+    let asked = f.writer.import_folder_as_playlist("Old 1", &crate_folder, &files, FolderClash::Ask, None).unwrap();
     assert_eq!((asked.conflict.as_ref(), asked.at), (Some(&old_1), Some(4)));
     let replaced =
-        f.writer.import_folder_as_playlist("Old 1", &crate_folder, &files, Some(&old_1), asked.at).unwrap();
+        f.writer.import_folder_as_playlist("Old 1", &crate_folder, &files, FolderClash::Replace(&old_1), asked.at).unwrap();
     assert_eq!(replaced.at, Some(3));
-    let c = f.writer.import_folder_as_playlist("C", &crate_folder, &files, None, replaced.at).unwrap();
+    let c = f.writer.import_folder_as_playlist("C", &crate_folder, &files, FolderClash::Ask, replaced.at).unwrap();
     assert_eq!(c.at, Some(3));
     assert_eq!(names(&f), ["Old 2", "B", "A", "C", "Old 1"]);
     assert_eq!(f.children(&crate_folder)[0], old_2);
+}
+
+/// rbxport's default for a same-named folder (#355, Chris's 2026-10-12
+/// decision): the existing list is kept and the folder is imported beside it
+/// as a copy, named as rekordbox names a device playlist it imports beside a
+/// same-named one (`device_import_name`: `"<name> (1)"`, `"<name> (2)"`, …).
+#[test]
+fn a_name_clash_imported_as_a_copy_keeps_the_old_list_and_takes_the_next_free_name() {
+    let audio = tempfile::tempdir().unwrap();
+    write_wav(&audio.path().join("t.wav"), 1);
+    let files = vec![audio.path().join("t.wav")];
+    let mut f = fixture();
+    let clash = playlist_id(0);
+    let old_members = f.count(&format!(
+        "SELECT COUNT(*) FROM djmdSongPlaylist WHERE PlaylistID = '{clash}' AND rb_local_deleted = 0"
+    ));
+    let name = |f: &Fixture, id: &String| f.one::<String>("SELECT Name FROM djmdPlaylist WHERE ID = ?1", &[id]);
+
+    let first = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, FolderClash::Copy, None).unwrap();
+    let copy = first.playlist.clone().expect("a copy is made");
+    assert_eq!(first.conflict, None);
+    assert_eq!(first.renamed.as_deref(), Some("Playlist 0 (1)"));
+    assert_eq!(name(&f, &copy), "Playlist 0 (1)");
+    assert_eq!(member_files(&f, &copy), ["t.wav"]);
+
+    let second = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, FolderClash::Copy, first.at).unwrap();
+    assert_eq!(second.renamed.as_deref(), Some("Playlist 0 (2)"));
+    assert_eq!(second.existing.len(), 1, "the file is reused, not imported twice");
+
+    assert_eq!(f.one::<i64>("SELECT rb_local_deleted FROM djmdPlaylist WHERE ID = ?1", &[&clash]), 0);
+    assert_eq!(name(&f, &clash), "Playlist 0");
+    assert_eq!(
+        f.count(&format!("SELECT COUNT(*) FROM djmdSongPlaylist WHERE PlaylistID = '{clash}' AND rb_local_deleted = 0")),
+        old_members,
+        "the existing list's tracks are untouched"
+    );
+
+    // No clash: the folder's own name, nothing reported.
+    let plain = f.writer.import_folder_as_playlist("Fresh", ROOT, &files, FolderClash::Copy, None).unwrap();
+    assert_eq!(plain.renamed, None);
+    assert_eq!(name(&f, &plain.playlist.unwrap()), "Fresh");
+}
+
+/// A replacement agreed for one list does not replace another that has
+/// since taken the name: it comes back as a conflict with nothing written.
+#[test]
+fn a_replacement_is_only_for_the_list_it_was_agreed_for() {
+    let audio = tempfile::tempdir().unwrap();
+    write_wav(&audio.path().join("t.wav"), 1);
+    let files = vec![audio.path().join("t.wav")];
+    let mut f = fixture();
+    let clash = playlist_id(0);
+    let before = f.children(ROOT);
+    let outcome = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, FolderClash::Replace("nope"), None).unwrap();
+    assert_eq!((outcome.conflict, outcome.playlist), (Some(clash), None));
+    assert_eq!(f.children(ROOT), before);
+}
+
+/// Replace existing deletes a user's list, so the folder is one transaction:
+/// a failure after the old list is tombstoned rolls the deletion and the
+/// imported tracks back with it.
+#[test]
+fn a_replacement_that_fails_partway_leaves_the_old_list_and_library_as_they_were() {
+    let audio = tempfile::tempdir().unwrap();
+    write_wav(&audio.path().join("t.wav"), 1);
+    let files = vec![audio.path().join("t.wav")];
+    let mut f = fixture();
+    let clash = playlist_id(0);
+    let before = f.children(ROOT);
+    let tracks = f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0");
+    let members = f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 0");
+    f.conn()
+        .execute_batch(
+            "CREATE TRIGGER fail_playlist BEFORE INSERT ON djmdPlaylist BEGIN SELECT RAISE(ABORT, 'injected failure'); END",
+        )
+        .unwrap();
+
+    let failed = f.writer.import_folder_as_playlist("Playlist 0", ROOT, &files, FolderClash::Replace(&clash), None);
+    assert!(failed.is_err());
+    assert_eq!(f.one::<i64>("SELECT rb_local_deleted FROM djmdPlaylist WHERE ID = ?1", &[&clash]), 0);
+    assert_eq!(f.children(ROOT), before);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"), tracks);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 0"), members);
 }
 
 // ------------------------------------------------------------ batch writes

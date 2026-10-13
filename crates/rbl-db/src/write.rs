@@ -413,11 +413,26 @@ pub struct FolderPlaylist {
     pub existing: Vec<String>,
     /// Files that could not be imported, each with the reason.
     pub skipped: Vec<String>,
+    /// The name the playlist was given when it is not the folder's: the
+    /// copy [`FolderClash::Copy`] makes beside a same-named sibling.
+    pub renamed: Option<String>,
     /// The place under the target the playlist was put, or would have been:
     /// the insert index rekordbox keeps for every folder of one drop. Pass it
     /// back as `at` for the drop's next folder. `None` when the folder held
     /// no audio, so nothing was looked at.
     pub at: Option<usize>,
+}
+
+/// What [`Writer::import_folder_as_playlist`] does when the target already
+/// holds a playlist, folder or intelligent playlist with the folder's name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderClash<'a> {
+    /// Write nothing and hand the clash back, for the caller to ask about.
+    Ask,
+    /// Replace that sibling, which must be this one; another is handed back.
+    Replace(&'a str),
+    /// Keep the sibling and import the folder beside it under a free name.
+    Copy,
 }
 
 /// One playlist or folder move, with both positions counted among the
@@ -776,67 +791,10 @@ impl Writer {
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-
-        let exists = tx.query_row(
-            "SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
-            params![id],
-            |_| Ok(()),
-        ).optional()?.is_some();
-        if !exists {
-            return Err(DbError::WriteRefused(format!("no playlist or folder {id}")));
-        }
-
-        // Collect the subtree first: deleting as we walk would hide children
-        // from the walk.
-        let mut doomed = vec![id.to_owned()];
-        let mut frontier = vec![id.to_owned()];
-        while let Some(parent) = frontier.pop() {
-            let mut stmt = tx.prepare(
-                "SELECT ID FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0",
-            )?;
-            let children: Vec<String> = stmt
-                .query_map(params![parent], |r| r.get::<_, String>(0))?
-                .collect::<rusqlite::Result<_>>()?;
-            for child in children {
-                doomed.push(child.clone());
-                frontier.push(child);
-            }
-        }
-
-        let mut membership_ids = Vec::new();
-        for node in &doomed {
-            let mut stmt = tx.prepare(
-                "SELECT ID FROM djmdSongPlaylist
-                 WHERE PlaylistID = ?1 AND rb_local_deleted = 0",
-            )?;
-            membership_ids.extend(
-                stmt.query_map(params![node], |r| r.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?,
-            );
-        }
-
-        let mut rows = 0;
-        let mut usn = 0;
-        for node in &doomed {
-            usn = next_usn(&tx)?;
-            rows += tx.execute(
-                "UPDATE djmdSongPlaylist SET rb_local_deleted = 1, rb_local_usn = ?1,
-                    updated_at = ?2 WHERE PlaylistID = ?3 AND rb_local_deleted = 0",
-                params![usn, stamp, node],
-            )?;
-            usn = next_usn(&tx)?;
-            rows += tx.execute(
-                "UPDATE djmdPlaylist SET rb_local_deleted = 1, rb_local_usn = ?1,
-                    updated_at = ?2 WHERE ID = ?3 AND rb_local_deleted = 0",
-                params![usn, stamp, node],
-            )?;
-        }
-        set_counter(&tx, usn)?;
+        let (changed, deletion) = tombstone_subtree(&tx, id, &stamp)?;
+        set_counter(&tx, changed.usn)?;
         tx.commit()?;
-        Ok((Changed { rows, usn }, PlaylistDeletion {
-            playlist_ids: doomed,
-            membership_ids,
-        }))
+        Ok((changed, deletion))
     }
 
     /// Restores exactly the rows made into tombstones by a deletion.
@@ -1021,9 +979,19 @@ impl Writer {
     /// A sibling with the same name is the one question rekordbox asks
     /// ("One or several lists with the same name already exist. Do you want
     /// to replace them with the one you're importing?",
-    /// `TreeViewer::showReplaceListAlert`). Nothing is written until it is
-    /// answered: the clash comes back in [`FolderPlaylist::conflict`], and the
-    /// caller calls again with `replace` set to that id to replace it.
+    /// `TreeViewer::showReplaceListAlert`). rbxport lets Preferences answer it
+    /// ahead (#355), so `clash` says what a same-named sibling does:
+    /// [`FolderClash::Ask`] writes nothing and hands the clash back in
+    /// [`FolderPlaylist::conflict`] for the caller to call again with the
+    /// answer; [`FolderClash::Replace`] replaces that sibling (and only that
+    /// one: a different id still comes back as a conflict);
+    /// [`FolderClash::Copy`] leaves the sibling alone and names the new list
+    /// as [`device_import_name`] does, `"<name> (1)"`, `"<name> (2)"`, …,
+    /// reported in [`FolderPlaylist::renamed`].
+    ///
+    /// Everything (the new tracks, the deletion of a replaced list, the new
+    /// playlist, its place and its members) is one transaction: a failure
+    /// partway leaves the library, and a list being replaced, as they were.
     ///
     /// `at` is where the playlist goes among `parent`'s children; `None`
     /// means the end, as for a drop onto the middle of a folder row. Every
@@ -1043,7 +1011,7 @@ impl Writer {
         name: &str,
         parent: &str,
         files: &[PathBuf],
-        replace: Option<&str>,
+        clash: FolderClash<'_>,
         at: Option<usize>,
     ) -> Result<FolderPlaylist> {
         let mut outcome = FolderPlaylist::default();
@@ -1051,47 +1019,138 @@ impl Writer {
             outcome.at = at;
             return Ok(outcome);
         }
-        let mut at = match at {
-            Some(at) => at,
-            None => self.child_ids(parent)?.len(),
-        };
-        if let Some(clash) = self.child_named(parent, name)? {
-            if replace != Some(clash.as_str()) {
-                outcome.conflict = Some(clash);
-                outcome.at = Some(at);
+        let existing = self.child_named(parent, name)?;
+        let replacing = match (&existing, clash) {
+            // No clash, or a copy that leaves the clash where it is.
+            (None, _) | (Some(_), FolderClash::Copy) => None,
+            (Some(found), FolderClash::Replace(id)) if found == id => Some(found.clone()),
+            (Some(found), _) => {
+                outcome.conflict = Some(found.clone());
+                outcome.at = Some(match at {
+                    Some(at) => at,
+                    None => self.child_ids(parent)?.len(),
+                });
                 return Ok(outcome);
             }
-            let (_, place) = self.playlist_position(&clash)?;
-            self.delete_playlist(&clash)?;
+        };
+
+        let paths: Vec<PathBuf> = files.iter().map(|p| normalized(p)).collect();
+        let tags = read_tags_parallel(&paths);
+        self.prepare()?;
+        let id = self.unused_id("djmdPlaylist")?;
+        let uuid = self.rng.uuid4();
+        let stamp = time::now();
+        let mut rows: Vec<(String, String)> = Vec::with_capacity(paths.len());
+        for _ in &paths {
+            rows.push((self.rng.uuid4(), self.rng.uuid4()));
+        }
+
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if parent != ROOT && !node_exists(&tx, parent)? {
+            return Err(DbError::WriteRefused(format!("no playlist or folder {parent}")));
+        }
+        let siblings = |tx: &Connection| -> Result<Vec<(String, String)>> {
+            let mut stmt = tx.prepare(
+                "SELECT ID, COALESCE(Name, '') FROM djmdPlaylist
+                 WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+            )?;
+            let found = stmt.query_map(params![parent], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            Ok(found)
+        };
+        let mut at = match at {
+            Some(at) => at,
+            None => siblings(&tx)?.len(),
+        };
+        if let Some(old) = &replacing {
+            let place = siblings(&tx)?.iter().position(|(sibling, _)| sibling == old)
+                .ok_or_else(|| DbError::WriteRefused(format!("no playlist or folder {old}")))?;
+            tombstone_subtree(&tx, old, &stamp)?;
             if place < at {
                 at -= 1;
             }
         }
-        outcome.at = Some(at);
-        let playlist = self.create_playlist(name, parent)?;
-        if self.child_ids(parent)?.iter().position(|id| *id == playlist) != Some(at) {
-            self.move_to(&playlist, parent, Some(at))?;
+        let names: Vec<String> = siblings(&tx)?.into_iter().map(|(_, name)| name).collect();
+        let list_name = device_import_name(name, &names);
+        if list_name != name {
+            outcome.renamed = Some(list_name.clone());
         }
-        let mut members = Vec::with_capacity(files.len());
-        for (file, imported) in files.iter().zip(self.import_files(files)?) {
+        outcome.at = Some(at);
+
+        // Each write below takes `next_usn`, which counts on from these.
+        let (imported, _) = insert_files(&tx, &mut self.rng, &paths, tags, &stamp)?;
+        let mut members = Vec::with_capacity(paths.len());
+        for (file, imported) in paths.iter().zip(imported) {
             match imported {
-                ImportOutcome::Existing(id) => {
-                    outcome.existing.push(id.clone());
-                    members.push(id);
+                ImportOutcome::Existing(content) => {
+                    outcome.existing.push(content.clone());
+                    members.push(content);
                 }
-                ImportOutcome::Added(id) => {
-                    outcome.imported.push((id.clone(), file.clone()));
-                    members.push(id);
+                ImportOutcome::Added(content) => {
+                    outcome.imported.push((content.clone(), file.clone()));
+                    members.push(content);
                 }
                 ImportOutcome::Refused(reason) => {
                     outcome.skipped.push(format!("{}: {reason}", file.display()));
                 }
             }
         }
-        if !members.is_empty() {
-            self.add_tracks(&playlist, &members)?;
+
+        // As `create_playlist` then `move_to`: appended one past the last
+        // `Seq`, and the whole run renumbered only when that is not `at`.
+        let seq: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(Seq), -1) + 1 FROM djmdPlaylist
+             WHERE ParentID = ?1 AND rb_local_deleted = 0",
+            params![parent],
+            |r| r.get(0),
+        )?;
+        let mut usn = next_usn(&tx)?;
+        tx.execute(
+            "INSERT INTO djmdPlaylist
+                (ID, Seq, Name, ImagePath, Attribute, ParentID, SmartList, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5, NULL, ?6, 0, 0, 0, 0, NULL, ?7, ?8, ?8)",
+            params![id, seq, list_name, ATTRIBUTE_PLAYLIST, parent, uuid, usn, stamp],
+        )?;
+        let mut order: Vec<String> = siblings(&tx)?.into_iter().map(|(sibling, _)| sibling).collect();
+        if order.iter().position(|sibling| *sibling == id) != Some(at) {
+            order.retain(|sibling| *sibling != id);
+            order.insert(at.min(order.len()), id.clone());
+            for (seq, node) in order.iter().enumerate() {
+                usn = next_usn(&tx)?;
+                let seq = i64::try_from(seq).unwrap_or(i64::MAX);
+                tx.execute(
+                    "UPDATE djmdPlaylist SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3
+                     WHERE ID = ?4 AND rb_local_deleted = 0",
+                    params![seq, usn, stamp, node],
+                )?;
+            }
         }
-        outcome.playlist = Some(playlist);
+
+        // A file listed twice (two paths to one track) is a member once, as
+        // `add_tracks` leaves it.
+        let mut seen = std::collections::HashSet::new();
+        let mut track_no = 0_i64;
+        for (content, (row_id, row_uuid)) in members.iter().zip(rows) {
+            if !seen.insert(content.as_str()) {
+                continue;
+            }
+            track_no += 1;
+            usn = next_usn(&tx)?;
+            tx.execute(
+                "INSERT INTO djmdSongPlaylist
+                    (ID, PlaylistID, ContentID, TrackNo, UUID,
+                     rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                     usn, rb_local_usn, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+                params![row_id, id, content, track_no, row_uuid, usn, stamp],
+            )?;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        outcome.playlist = Some(id);
         Ok(outcome)
     }
 
@@ -3712,6 +3771,70 @@ fn intern(
 }
 
 /// Whether a playlist or folder exists and is not deleted.
+/// Soft-deletes a playlist or folder, everything inside it, and every
+/// membership that pointed at it, inside the caller's transaction. The
+/// caller sets the USN counter to [`Changed::usn`] before committing.
+fn tombstone_subtree(tx: &Connection, id: &str, stamp: &str) -> Result<(Changed, PlaylistDeletion)> {
+    let exists = tx.query_row(
+        "SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+        params![id],
+        |_| Ok(()),
+    ).optional()?.is_some();
+    if !exists {
+        return Err(DbError::WriteRefused(format!("no playlist or folder {id}")));
+    }
+
+    // Collect the subtree first: deleting as we walk would hide children
+    // from the walk.
+    let mut doomed = vec![id.to_owned()];
+    let mut frontier = vec![id.to_owned()];
+    while let Some(parent) = frontier.pop() {
+        let mut stmt = tx.prepare(
+            "SELECT ID FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0",
+        )?;
+        let children: Vec<String> = stmt
+            .query_map(params![parent], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        for child in children {
+            doomed.push(child.clone());
+            frontier.push(child);
+        }
+    }
+
+    let mut membership_ids = Vec::new();
+    for node in &doomed {
+        let mut stmt = tx.prepare(
+            "SELECT ID FROM djmdSongPlaylist
+             WHERE PlaylistID = ?1 AND rb_local_deleted = 0",
+        )?;
+        membership_ids.extend(
+            stmt.query_map(params![node], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+        );
+    }
+
+    let mut rows = 0;
+    let mut usn = 0;
+    for node in &doomed {
+        usn = next_usn(tx)?;
+        rows += tx.execute(
+            "UPDATE djmdSongPlaylist SET rb_local_deleted = 1, rb_local_usn = ?1,
+                updated_at = ?2 WHERE PlaylistID = ?3 AND rb_local_deleted = 0",
+            params![usn, stamp, node],
+        )?;
+        usn = next_usn(tx)?;
+        rows += tx.execute(
+            "UPDATE djmdPlaylist SET rb_local_deleted = 1, rb_local_usn = ?1,
+                updated_at = ?2 WHERE ID = ?3 AND rb_local_deleted = 0",
+            params![usn, stamp, node],
+        )?;
+    }
+    Ok((Changed { rows, usn }, PlaylistDeletion {
+        playlist_ids: doomed,
+        membership_ids,
+    }))
+}
+
 fn node_exists(conn: &Connection, id: &str) -> Result<bool> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",

@@ -2234,7 +2234,7 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
     let path = folder.display().to_string();
 
     let report =
-        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None)).unwrap();
+        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None, None)).unwrap();
     assert!(report.folder);
     assert_eq!(report.name, "Warm Up");
     assert_eq!(report.imported, 3);
@@ -2248,7 +2248,7 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
 
     // The same folder again: nothing written until the replacement is agreed.
     let asked =
-        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None)).unwrap();
+        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None, None)).unwrap();
     assert_eq!(asked.conflict.as_deref(), Some(playlist.as_str()));
     assert_eq!(asked.playlist, None);
     let replaced = run(commands::import_folder_playlist(
@@ -2258,6 +2258,7 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
         "root".into(),
         Some(playlist.clone()),
         asked.at,
+        None,
     ))
     .unwrap();
     assert_eq!(replaced.existing, 3, "the files are reused, not imported twice");
@@ -2266,11 +2267,29 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
     assert_eq!(s.tree().iter().filter(|n| n.name == "Warm Up").count(), 1);
     assert_eq!(s.playlist_rows(&new_id).len(), 3);
 
+    // Imported as a copy (rbxport's default, #355): the list stays and the
+    // folder lands beside it as "Warm Up (1)", reported in `renamed`.
+    let copied = run(commands::import_folder_playlist(
+        s.handle(),
+        s.state(),
+        folder.display().to_string(),
+        "root".into(),
+        None,
+        None,
+        Some(true),
+    ))
+    .unwrap();
+    assert_eq!(copied.conflict, None);
+    assert_eq!(copied.renamed.as_deref(), Some("Warm Up (1)"));
+    assert_eq!(s.node("Warm Up (1)").id, copied.playlist.unwrap());
+    assert_eq!(s.node("Warm Up").id, new_id);
+
     let loose = run(commands::import_folder_playlist(
         s.handle(),
         s.state(),
         folder.join("a.wav").display().to_string(),
         "root".into(),
+        None,
         None,
         None,
     ))
