@@ -537,7 +537,13 @@ fn copy_missing(
     for file in to_copy {
         // Only ever a file of the stick: a library path that climbs out of
         // it (`..`) is not copied.
-        let on_stick = file.source.canonicalize().ok().zip(plan.mount.canonicalize().ok()).is_some_and(|(f, m)| f.starts_with(m));
+        let on_stick = match (file.source.canonicalize(), plan.mount.canonicalize()) {
+            (Ok(f), Ok(m)) => f.starts_with(m),
+            // A volume that cannot canonicalize (WinFsp-style mounts): the
+            // spelled path must at least stay under the mount.
+            _ => file.source.starts_with(&plan.mount)
+                && !file.source.components().any(|c| matches!(c, std::path::Component::ParentDir)),
+        };
         if !on_stick {
             if let Err(left) = copies.roll_back() {
                 tracing::warn!(error = %left, "could not remove the copies of a failed device import");
