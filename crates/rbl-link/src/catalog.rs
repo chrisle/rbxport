@@ -19,7 +19,7 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use rbl_anlz::Anlz;
 use rbl_dbserver::catalog::{
-    Analysis as Wanted, ArtistRole, Catalog, Edit, HotCueBank, HotCueBankCue, Query, RootCategory, Row, Sort,
+    Analysis as Wanted, ArtistRole, Catalog, Edit, HotCueBank, HotCueBankCue, MyTag, Query, RootCategory, Row, Sort,
     TrackColumn,
     TrackDetails, TrackScope, UsbCue,
 };
@@ -91,6 +91,8 @@ pub trait Source: Send + Sync {
     fn hot_cue_banks(&self, _parent: Option<u32>) -> Vec<rbl_db::details::HotCueBank> { Vec::new() }
     fn hot_cue_bank_cues(&self, _bank: u32) -> Vec<rbl_db::details::HotCueBankCue> { Vec::new() }
     fn hot_cue_bank_track_ids(&self, _bank: u32) -> Vec<u32> { Vec::new() }
+    /// The live `djmdMyTag` rows, categories and tags.
+    fn my_tags(&self) -> Vec<rbl_db::export_info::MyTagRow> { Vec::new() }
     fn edit(&self, _edit: &Edit) -> bool {
         false
     }
@@ -282,6 +284,15 @@ impl IndexCatalog {
             }
             _ => false,
         }
+    }
+
+    /// A track's My Tags as the wire carries them.
+    fn wire_my_tags(library: &Library, row: rbl_index::Row) -> Vec<u32> {
+        library
+            .my_tag_keys(row as usize)
+            .iter()
+            .map(|&key| u32::from_ne_bytes(key.to_ne_bytes()))
+            .collect()
     }
 
     fn row_of(library: &Library, id: u32) -> Option<rbl_index::Row> {
@@ -1031,6 +1042,15 @@ impl IndexCatalog {
     }
 }
 
+/// A `djmdMyTag.ID` as a player sees it: the 32 bits of the id the index
+/// reads the track's tags as ([`rbl_index::smart::my_tag_key`]), so a
+/// category's tags and a track's tags compare as rekordbox compares them.
+/// rekordbox sends these ids as unsigned numbers (tag 108516952 in the #316
+/// captures).
+fn wire_my_tag_id(text: &str) -> u32 {
+    u32::from_ne_bytes(rbl_index::smart::my_tag_key(text).to_ne_bytes())
+}
+
 fn album_constrained(scope: &TrackScope) -> bool {
     matches!(
         scope,
@@ -1474,6 +1494,7 @@ impl Catalog for IndexCatalog {
             rows.clear();
             return;
         };
+        let tags = filter.has_my_tag_conditions();
         rows.retain(|row| match row {
             Row::Track { id, .. } => Self::row_of(&lib, *id).is_some_and(|row| {
                 let at = row as usize;
@@ -1482,10 +1503,40 @@ impl Catalog for IndexCatalog {
                     Self::key_id(&lib, row),
                     u32::from(lib.rating[at]),
                     u32::from(lib.color[at]),
-                )
+                ) && (!tags || filter.matches_my_tags(&Self::wire_my_tags(&lib, row)))
             }),
             _ => true,
         });
+    }
+
+    fn my_tags(&self) -> Vec<MyTag> {
+        self.source
+            .my_tags()
+            .into_iter()
+            .map(|row| MyTag {
+                id: wire_my_tag_id(&row.id),
+                // A category's parent is `root`, which reads as 0.
+                parent: wire_my_tag_id(&row.parent),
+                seq: u32::try_from(row.seq).unwrap_or(0),
+                name: row.name,
+            })
+            .collect()
+    }
+
+    fn track_my_tags(&self, track: u32) -> Vec<u32> {
+        self.source
+            .library()
+            .and_then(|lib| Self::row_of(&lib, track).map(|row| Self::wire_my_tags(&lib, row)))
+            .unwrap_or_default()
+    }
+
+    fn my_tags_in_use(&self) -> HashSet<u32> {
+        let Some(lib) = self.source.library() else {
+            return HashSet::new();
+        };
+        (0..lib.bpm_x100.len())
+            .flat_map(|row| lib.my_tag_keys(row).iter().map(|&key| u32::from_ne_bytes(key.to_ne_bytes())))
+            .collect()
     }
 
     fn played(&self, track: u32) -> bool {
@@ -2542,5 +2593,77 @@ mod tests {
         assert_eq!(camelot_name(6), "3B");
         assert_eq!(format_nonzero(320, " kbps"), "320 kbps");
         assert_eq!(format_nonzero(0, " kbps"), "");
+    }
+
+    /// My Tags reach the player with the ids rekordbox sends: a category's
+    /// `ID` and `root` parent read as numbers, a tag past 2^31 the same 32
+    /// bits whether named by `djmdMyTag` or by a track's `djmdSongMyTag`.
+    #[test]
+    fn my_tags_reach_the_server_with_the_ids_a_track_carries() {
+        struct Tagged(Arc<Library>);
+        impl Source for Tagged {
+            fn library(&self) -> Option<Arc<Library>> {
+                Some(Arc::clone(&self.0))
+            }
+            fn share_root(&self) -> PathBuf {
+                PathBuf::from("/nonexistent")
+            }
+            fn details(&self, _id: &str) -> Option<rbl_db::details::TrackDetails> {
+                None
+            }
+            fn my_tags(&self) -> Vec<rbl_db::export_info::MyTagRow> {
+                let row = |id: &str, seq, name: &str, attribute, parent: &str| rbl_db::export_info::MyTagRow {
+                    id: id.into(),
+                    seq,
+                    name: name.into(),
+                    attribute,
+                    parent: parent.into(),
+                };
+                vec![
+                    row("2", 2, "Traits", 1, "root"),
+                    row("108516952", 1, "reese", 0, "2"),
+                    row("3000000000", 2, "wide", 0, "2"),
+                    row("242910998", 3, "wubby", 0, "2"),
+                ]
+            }
+        }
+        let mut lib = library();
+        // Rows 0, 1, 2 are tracks 10, 11, 12.
+        rbl_index::testing::set_track_my_tags(
+            &mut lib,
+            vec![
+                (0, rbl_index::smart::my_tag_key("108516952")),
+                (0, rbl_index::smart::my_tag_key("3000000000")),
+                (1, rbl_index::smart::my_tag_key("3000000000")),
+            ],
+        );
+        let c = IndexCatalog::new(Arc::new(Tagged(Arc::new(lib))), Played::default());
+        let tags = c.my_tags();
+        assert_eq!(
+            tags.iter().map(|t| (t.id, t.parent, t.seq)).collect::<Vec<_>>(),
+            [(2, 0, 2), (108_516_952, 2, 1), (3_000_000_000, 2, 2), (242_910_998, 2, 3)]
+        );
+        let mut on_ten = c.track_my_tags(10);
+        on_ten.sort_unstable();
+        assert_eq!(on_ten, [108_516_952, 3_000_000_000]);
+        assert_eq!(c.track_my_tags(12), Vec::<u32>::new());
+        assert_eq!(c.my_tags_in_use(), HashSet::from([108_516_952, 3_000_000_000]));
+
+        let mut filter = rbl_dbserver::filter::TrackFilter::default();
+        filter.enabled = true;
+        filter.set_my_tag_condition(2, 1, rbl_dbserver::filter::MY_TAG_AND);
+        assert!(filter.tick_my_tag(2, 3_000_000_000, true));
+        let all = || c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Default });
+        let mut rows = all();
+        c.filter_rows(&mut rows, &filter);
+        assert_eq!(ids(&rows), [11, 10]);
+        assert!(filter.tick_my_tag(2, 108_516_952, true));
+        let mut rows = all();
+        c.filter_rows(&mut rows, &filter);
+        assert_eq!(ids(&rows), [10]);
+        filter.set_my_tag_condition(2, 1, rbl_dbserver::filter::MY_TAG_OR);
+        let mut rows = all();
+        c.filter_rows(&mut rows, &filter);
+        assert_eq!(ids(&rows), [11, 10]);
     }
 }

@@ -179,3 +179,9 @@ fn add_list_with(lib: &mut Library, name: &str, rows: &[Row], attribute: u8, rul
 pub fn set_my_tags(lib: &mut Library, categories: Vec<crate::TagCategory>) {
     lib.set_my_tags(categories);
 }
+
+/// Sets which tracks carry which My Tag: `(row, tag id)` pairs, the id read
+/// as [`crate::smart::my_tag_key`] reads `djmdSongMyTag.MyTagID`.
+pub fn set_track_my_tags(lib: &mut Library, pairs: Vec<(Row, i32)>) {
+    lib.set_track_my_tags(pairs);
+}
