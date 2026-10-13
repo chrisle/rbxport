@@ -4,6 +4,12 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Flushes a directory's entries to the device, with [`flush`].
+///
+/// Where `F_FULLFSYNC` is unsupported, [`flush`] first tries a plain `fsync`
+/// on the directory; only if that too answers "unsupported" is the flush
+/// skipped. Any other error from either call fails, so this is stricter than
+/// tolerating every error from `F_FULLFSYNC` alone.
 pub fn sync_dir(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     if let Err(error) = flush(&std::fs::File::open(path)?) {
