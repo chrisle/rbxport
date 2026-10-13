@@ -824,9 +824,17 @@ impl LinkSession {
     ///
     /// - A category lists every tag under it that some track in the
     ///   collection carries; tags no track carries are left out.
-    /// - Rows go by `Seq`. The row's ninth slot is the `Seq` counted from 0
-    ///   (rekordbox reads its list buffer's `Seq` column there,
-    ///   `GetListBufRowContent` @`0x100e846c8`, as a `u16`).
+    /// - Rows go by `Seq`. The row's ninth slot is its position, counted
+    ///   from 0, among the rows the category lists (its in-use tags, or
+    ///   every category), not `Seq - 1`: a tag no track carries takes no
+    ///   number [OBS the #316 captures send Vocals 0..6 over its seven
+    ///   in-use tags, while the reporter's `djmdMyTag` has the unused "sung"
+    ///   at `Seq` 2 and "mc-bars", sent as 1, at `Seq` 3; #316 comment
+    ///   2026-10-13T09:31Z]. rekordbox takes it from column 1 of the
+    ///   materialized My Tag ext table (`str w26,[sp,#0x60]` @`0x100f5fe7c`,
+    ///   column read @`0x100f5fe3c`) and never renumbers in the row loop, so
+    ///   "selected only" leaves each row its number [ASSUME static; neither
+    ///   capture asks for selected only].
     /// - A category row carries its condition: type `0x4b` when it is on,
     ///   and its mode (16 AND, 17 OR) in the seventh slot; a tag row is
     ///   `0x4b` when it is ticked, whether or not its category is on.
@@ -848,7 +856,8 @@ impl LinkSession {
         let ticked_in_parent = self.filter.my_tag_condition(parent).tags;
         let items = rows
             .into_iter()
-            .filter_map(|tag| {
+            .enumerate()
+            .filter_map(|(position, tag)| {
                 let (on, mode) = if parent == 0 {
                     let condition = self.filter.my_tag_condition(tag.id);
                     (condition.enabled(), u32::from(condition.mode))
@@ -863,7 +872,7 @@ impl LinkSession {
                     text: tag.name,
                     item_type: if on { item_type::MY_TAG_TICKED } else { item_type::MY_TAG },
                     c: mode,
-                    d: tag.seq.saturating_sub(1) & 0xffff,
+                    d: u32::try_from(position).unwrap_or(u32::MAX) & 0xffff,
                     ..Item::default()
                 })
             })

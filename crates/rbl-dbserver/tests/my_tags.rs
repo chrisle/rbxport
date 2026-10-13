@@ -86,13 +86,16 @@ fn my_tags() -> Vec<MyTag> {
         "Vocals",
         &[
             (0x0e72_3f7d, "vocals"),
+            // Unused, at its real Seq 2 in the reporter's djmdMyTag (#316
+            // comment 2026-10-13T09:31Z): the rows after it are still
+            // numbered 1, 2, ... in slot 9.
+            (0x054e_6c12, "sung"),
             (MC_BARS, "mc-bars"),
             (0x0538_c9ea, "ragga"),
             (0x04b6_11c1, "one-shot"),
             (0x0991_213e, "full-vocal"),
             (0x07c7_3257, "us-vocal"),
             (0x0e5c_721e, "uk-vocal"),
-            (0x054e_6c12, "sung"),
         ],
     );
     out
@@ -366,6 +369,43 @@ fn ticks_are_a_set_and_selected_only_lists_what_is_ticked() {
     ask(&mut s, kind::FILTER_MY_TAG_ITEM, &[CTX, 0, 2, u32::MAX, 0]);
     assert_eq!(status(&ask(&mut s, 0x1015, &[0x0b05_0401, 0, 2, 1])), Argument::Number(0));
     assert_eq!(playlist_count(&mut s), Argument::Number(41));
+}
+
+/// Slot 9 of a `0x1015` tag row is the row's position among the tags the
+/// category lists, so an unused tag between used ones takes no number
+/// [OBS #316: the reporter's Vocals has the unused "sung" at `Seq` 2 and
+/// rekordbox sent "mc-bars", `Seq` 3, as 1]. "Selected only" keeps each
+/// row's number [ASSUME static: rekordbox reads it from the row, never
+/// from a counter in the loop that drops unticked rows].
+#[test]
+fn a_tag_rows_number_skips_unused_tags_and_survives_selected_only() {
+    fn rows(replies: &[Message]) -> Vec<(String, u32)> {
+        replies
+            .iter()
+            .map(|m| match (&m.arguments[3], &m.arguments[9]) {
+                (Argument::String(name), Argument::Number(n)) => (name.clone(), *n),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+    let mut s = session();
+    assert_eq!(status(&ask(&mut s, kind::MY_TAG, &[0x0b05_0401, 0, 3, 0])), Argument::Number(7));
+    let listed = rows(&items(&mut s, 5, 7));
+    let expected: Vec<(String, u32)> =
+        ["vocals", "mc-bars", "ragga", "one-shot", "full-vocal", "us-vocal", "uk-vocal"]
+            .iter()
+            .zip(0..)
+            .map(|(name, n)| ((*name).to_owned(), n))
+            .collect();
+    assert_eq!(listed, expected);
+
+    ask(&mut s, kind::FILTER_MY_TAG_ITEM, &[CTX, 0, 3, MC_BARS, 1]);
+    ask(&mut s, kind::FILTER_MY_TAG_ITEM, &[CTX, 0, 3, 0x07c7_3257, 1]);
+    assert_eq!(status(&ask(&mut s, kind::MY_TAG, &[0x0b05_0401, 0, 3, 1])), Argument::Number(2));
+    assert_eq!(
+        rows(&items(&mut s, 5, 2)),
+        vec![("mc-bars".to_owned(), 1), ("us-vocal".to_owned(), 5)]
+    );
 }
 
 /// A category that is on with no tag ticked, or with more than fifty,
