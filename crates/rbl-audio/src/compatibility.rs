@@ -236,7 +236,9 @@ impl Output {
             }
         }
         self.file.flush()?;
-        self.file.get_ref().sync_all()?;
+        // The destination is staged on the stick: `sync_all` alone is
+        // `F_FULLFSYNC` on macOS, which exFAT rejects with ENOTSUP (#283).
+        rbl_core::durable::flush(self.file.get_ref())?;
         Ok(self.file.get_ref().metadata()?.len())
     }
 }
