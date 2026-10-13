@@ -12,7 +12,7 @@
  */
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { drawPcmWave, drawWave, strideOf, waveformKindOf, type HalfWaveform } from "@/canvas";
+import { drawPcmWave, drawWave, strideOf, waveformKindOf, type HalfWaveform, type WavePalette } from "@/canvas";
 import { getBackend } from "@/ipc/client";
 import type { WaveformKind } from "@/ipc/types";
 import { exactBackingSize } from "@/lib/canvasSize";
@@ -29,6 +29,11 @@ const inFlight = new Map<string, Promise<Uint8Array>>();
 interface LoadedWaveform {
   trackId: string;
   bytes: Uint8Array;
+}
+/** Tag bytes with the palette whose layout they are in, which is not the
+ * chosen palette when the overview fell back to the `.DAT`'s preview. */
+interface LoadedTag extends LoadedWaveform {
+  palette: WavePalette;
 }
 interface PcmBuffer extends LoadedWaveform {
   revision: number;
@@ -58,6 +63,21 @@ async function load(trackId: string, kind: WaveformKind): Promise<Uint8Array> {
   })();
   inFlight.set(key, pending);
   return pending;
+}
+
+/**
+ * The bytes to draw for `palette`, and the palette they are in. A deck's
+ * overview whose palette tag is missing (a 3Band `PWV6` on a track with no
+ * `.2EX`, or an RGB `PWV4`) shows the `.DAT`'s 400-column `PWAV` in blue, as
+ * rekordbox's deck does: `UiPlayer::updateTrackData` and
+ * `UiPlayer::repaintWidgetPlayer` (7.2.19) use the 3-band or colour overview
+ * only when it was loaded, and otherwise the `PWAV` one (#372). The detail
+ * has no such fallback here.
+ */
+async function loadTag(trackId: string, palette: WavePalette, detail: boolean): Promise<LoadedTag> {
+  const bytes = await load(trackId, waveformKindOf(palette, detail));
+  if (bytes.length > 0 || detail || palette === "blue") return { trackId, bytes, palette };
+  return { trackId, bytes: await load(trackId, waveformKindOf("blue", false)), palette: "blue" };
 }
 
 export interface WaveformDetailProps {
@@ -95,7 +115,7 @@ export const WaveformDetail = memo(function WaveformDetail({
   durationMs = 0, firstBeatMs, inset = { top: 0, bottom: 0 }, pcmWindow: requestedPcmWindow,
 }: WaveformDetailProps) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const [data, setData] = useState<LoadedWaveform | null>(null);
+  const [data, setData] = useState<LoadedTag | null>(null);
   const [pcmData, setPcmData] = useState<PcmBuffer | null>(null);
   const pendingPcm = useRef<Omit<PcmBuffer, "bytes"> | null>(null);
   const pcmMode = requestedPcmWindow !== undefined;
@@ -119,8 +139,8 @@ export const WaveformDetail = memo(function WaveformDetail({
     if (pcmMode) return;
     let live = true;
     setData(null);
-    void load(trackId, waveformKindOf(palette, detail)).then((bytes) => {
-      if (live) setData({ trackId, bytes });
+    void loadTag(trackId, palette, detail).then((loaded) => {
+      if (live) setData(loaded);
     });
     return () => { live = false; };
   }, [trackId, detail, palette, revision, pcmMode]);
@@ -216,7 +236,9 @@ export const WaveformDetail = memo(function WaveformDetail({
     // edge. The overhang is drawn as nothing rather than as a stretched copy
     // of the first bar. Both tags cover the whole track, so a window into one
     // is a slice of its columns rather than a second fetch.
-    const stride = strideOf(palette, detail);
+    // The bytes' own palette: the chosen one, or blue for the overview's
+    // `PWAV` fallback, whose layout differs.
+    const stride = strideOf(data.palette, detail);
     const originMs = detailWaveOriginMs(firstBeatMs, data.bytes, stride);
     const timed = detailWaveWindow(progress, span, durationMs, Math.floor(data.bytes.length / stride), originMs);
     const { first, last, x0, width: span_ } = waveSlice(timed.progress, timed.span, data.bytes.length, w, stride);
@@ -226,7 +248,7 @@ export const WaveformDetail = memo(function WaveformDetail({
     if (last <= first || span_ < 1) return;
     ctx.save();
     ctx.translate(x0, 0);
-    drawWave(ctx, data.bytes.subarray(first, last), span_, h, palette, detail, half, {
+    drawWave(ctx, data.bytes.subarray(first, last), span_, h, data.palette, detail, half, {
       top: inset.top * scale,
       bottom: inset.bottom * scale,
     });

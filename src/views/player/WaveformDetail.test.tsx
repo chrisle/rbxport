@@ -13,8 +13,12 @@ const drawn = vi.hoisted(() => ({ wave: vi.fn(), pcm: vi.fn() }));
 vi.mock("@/canvas", () => ({
   drawWave: drawn.wave,
   drawPcmWave: drawn.pcm,
-  strideOf: () => 3,
-  waveformKindOf: () => "bandsDetail",
+  strideOf: (palette: string, detail: boolean) => palette === "3band" ? 3 : palette === "blue" ? 1 : detail ? 2 : 6,
+  waveformKindOf: (palette: string, detail: boolean) => ({
+    "3band": detail ? "bandsDetail" : "bands",
+    blue: detail ? "monoDetail" : "mono",
+    rgb: detail ? "colourDetail" : "colour",
+  })[palette],
 }));
 
 import { __setBackend } from "@/ipc/client";
@@ -189,5 +193,53 @@ describe("backing store (#346)", () => {
       if (ratio) Object.defineProperty(window, "devicePixelRatio", ratio);
       else Reflect.deleteProperty(window, "devicePixelRatio");
     }
+  });
+});
+
+describe("overview without the palette's tag (#372)", () => {
+  // A stick exported before 3Band data existed has no .2EX: rekordbox's deck
+  // overview then shows the .DAT's PWAV in blue (UiPlayer::updateTrackData).
+  const pwav = new Uint8Array(400).fill(0x35);
+
+  function overview(tags: Partial<Record<string, Uint8Array>>) {
+    const asked: string[] = [];
+    __setBackend({
+      trackPcmWaveform: fetchPcm,
+      trackWaveform: (_track: string, kind: string) => {
+        asked.push(kind);
+        return Promise.resolve(tags[kind] ?? new Uint8Array());
+      },
+      onAnalysisChanged: () => () => {},
+    } as unknown as Backend);
+    return asked;
+  }
+
+  it("draws the .DAT's PWAV in blue when the 3Band PWV6 is missing", async () => {
+    const asked = overview({ mono: pwav });
+    act(() => root.render(<WaveformDetail trackId="no-2ex-track" progress={0.5} span={1} width={400} height={40} />));
+    await settle();
+    expect(asked).toEqual(["bands", "mono"]);
+    expect(drawn.wave).toHaveBeenLastCalledWith(
+      expect.anything(), pwav, expect.any(Number), expect.any(Number), "blue", false, false, expect.anything(),
+    );
+  });
+
+  it("draws the PWV6 when it is there, without asking for the PWAV", async () => {
+    const pwv6 = new Uint8Array(1_200 * 3).fill(20);
+    const asked = overview({ bands: pwv6, mono: pwav });
+    act(() => root.render(<WaveformDetail trackId="with-2ex-track" progress={0.5} span={1} width={400} height={40} />));
+    await settle();
+    expect(asked).toEqual(["bands"]);
+    expect(drawn.wave).toHaveBeenLastCalledWith(
+      expect.anything(), pwv6, expect.any(Number), expect.any(Number), "3band", false, false, expect.anything(),
+    );
+  });
+
+  it("does not put the PWAV in the detail, which has no such fallback", async () => {
+    const asked = overview({ mono: pwav });
+    act(() => root.render(<WaveformDetail trackId="no-2ex-detail" progress={0.5} span={0.02} width={400} height={80} detail />));
+    await settle();
+    expect(asked).toEqual(["bandsDetail"]);
+    expect(drawn.wave).not.toHaveBeenCalled();
   });
 });
