@@ -325,9 +325,10 @@ export function cueStyle(
  * same `InMsec` as each of its four hot cues, so the red belongs to those.
  *
  * The detail draws the same two things larger, measured off the user's crop of
- * a hot cue there: a 16pt red triangle pointing down from 8.25pt under the
- * band's top for the memory cue, and the 11pt badge centred on the cue 15pt
- * down for the hot cue. The white line belongs to the beat grid; an off-grid
+ * a hot cue there: a 16pt red triangle pointing down for the memory cue, and
+ * the 11pt badge centred on the cue for the hot cue. Both keep to a lane along
+ * the band's top, above the beat heads and the waveform, so neither covers the
+ * audio: the order rekordbox 7.2.14 draws them in (#393). The white line belongs to the beat grid; an off-grid
  * hot cue has a badge at its saved position without an extra vertical line.
  *
  * A badge takes the colour rekordbox paints for the cue's `ColorTableIndex`.
@@ -573,8 +574,8 @@ const JUMPS = [
 /**
  * What the waveform leaves clear at the top and bottom of its band: the
  * `--s-wave-inset-*` tokens, read once. The strip above carries the bar
- * count and the heads of the cue markers, and the beat markers reach 15px
- * past the waveform at both ends, which is why it is inset as far as it is.
+ * count and the cue markers' lane, and the beat markers reach 15px past the
+ * waveform at both ends, which is why it is inset as far as it is.
  * The overview does not take it: its own grid row is already the 30pt the
  * capture paints.
  */
@@ -586,7 +587,7 @@ function waveInsetOf(): { top: number; bottom: number } {
     const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
     return Number.isFinite(value) ? value : fallback;
   };
-  waveInset = { top: read("--s-wave-inset-top", 20), bottom: read("--s-wave-inset-bottom", 16) };
+  waveInset = { top: read("--s-wave-inset-top", 33), bottom: read("--s-wave-inset-bottom", 16) };
   return waveInset;
 }
 

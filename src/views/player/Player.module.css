@@ -685,7 +685,12 @@
 /* Cues sit over the waveform, the grid and the bar count — a marker behind a
    downbeat line is a marker nobody can find. A hot cue sits over a memory cue:
    rekordbox keeps one beside each hot cue, and the user's crop shows the badge
-   covering the red triangle's point. */
+   covering the red triangle's point.
+
+   Vertically they keep to a lane of their own along the band's top: the
+   memory cue's triangle and the hot cue's badge first, the beat heads on the
+   row after the badge's last, then the waveform, so no marker covers the
+   audio. That is the order rekordbox 7.2.14 draws them in (#393). */
 /* A loop is a band over the waveform: a stored memory loop dim, the deck's
    own lit while it plays, in the pad blue the AU button lights with. */
 .loopBand {
@@ -728,8 +733,9 @@
 }
 
 /* In the detail a memory cue is a red triangle pointing down at what it marks,
-   16pt across and 11pt tall, centred on the cue and 8.25pt under the band's
-   top: measured off the user's crop, where it shows over the hot cue's badge.
+   16pt across and 11pt tall, centred on the cue, at the top of the cue lane
+   above the beat heads: measured off the user's crop, where it shows over the
+   hot cue's badge, and placed by rekordbox 7.2.14's own (#393).
    No line under it — the only line in the crop is the downbeat's, and a memory
    cue on its own is in no capture. */
 .cueMarker {
@@ -766,9 +772,9 @@
   font-weight: 700;
   line-height: 1;
 }
-/* The detail centres the same badge on the cue, 15pt under the band's top:
-   measured off the user's crop, where its last row is the one before the beat
-   head's first. */
+/* The detail centres the same badge on the cue in the cue lane, its last row
+   the one before the beat head's first, as both the user's crop and rekordbox
+   7.2.14 on the rig have it (#393). */
 .hotCue[data-band="detail"] .hotCueBadge {
   top: var(--s-cue-badge-top);
   left: 0;
@@ -784,10 +790,9 @@
   pointer-events: none;
 }
 /* A beat marker is a line with a small triangle at each end, and it does not
-   span the band: measured, the head starts 26pt below the band's top and the
-   foot ends 6.5pt above its bottom, with the line between them a point's gap
-   inside each — 31pt to 11.5pt, which the user's crop has too. Every fourth
-   is white with red heads. */
+   span the band: the head starts under the cue lane (#393) and the foot ends
+   just above the band's bottom, with the line between them a point's gap
+   inside each. Every fourth is white with red heads. */
 .beat,
 .downbeat {
   position: absolute;
