@@ -440,49 +440,96 @@ pub fn author_with_overview(
     ppth: &str, beats: &[Beat], columns: &[BandColumn],
     overview: Option<&[[u8; 3]; OVERVIEW_COLUMNS]>, existing: Existing<'_>,
 ) -> AnalysisFiles {
-    let dat = {
-        let mut builder = AnlzBuilder::new();
-        header_of(&mut builder, existing.dat);
-        builder.path(ppth);
-        // `PVBR` sits between the path and the grid in every rekordbox `.DAT`
-        // (1,558 of 1,558 reference files [OBS]); rekordbox 6/7 reject a `.DAT`
-        // that lacks it. A real VBR seek table cannot be re-derived from the
-        // analysis here, so an existing one is carried through unchanged, and a
-        // file that has none gets the zero table rekordbox itself writes for a
-        // track with no VBR frames to index — see [`AnlzBuilder::vbr_table_zero`].
-        match existing.dat.and_then(|file| file.section(b"PVBR")) {
-            Some(pvbr) => { builder.copy_section(pvbr); }
-            None => { builder.vbr_table_zero(); }
-        }
-        builder.beat_grid(beats);
-        builder.waveform_preview(b"PWAV", &pwav(columns));
-        builder.waveform_preview(b"PWV2", &pwv2(columns));
-        cue_lists_of(&mut builder, existing.dat, false);
-        carry(&mut builder, existing.dat);
-        builder.finish()
+    let preview = overview.map_or_else(|| pwv6(columns), |bands| bands.iter().flatten().map(|v| (*v).min(127)).collect());
+    AnalysisFiles {
+        dat: dat_of(ppth, beats, columns, existing.dat),
+        ext: ext_of(ppth, &pwv3(columns), &pwv5(columns), &pwv4(columns), existing.ext),
+        two_ex: two_ex_of(ppth, &pwv7(columns), &preview, None, existing.two_ex),
+    }
+}
+
+/// rekordbox's own colour and 3-band waveforms, each section's payload as
+/// rekordbox writes it: what `rbl_analysis::wave_creator` computes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RekordboxWaves {
+    /// The per-band gain `PWV6` and `PWV7` are drawn at, low, mid and high.
+    pub pwvc: [u16; 3],
+    pub pwv3: Vec<u8>,
+    pub pwv4: Vec<u8>,
+    pub pwv5: Vec<u8>,
+    pub pwv6: Vec<u8>,
+    pub pwv7: Vec<u8>,
+}
+
+/// Authors analysis whose colour and 3-band waveforms are rekordbox's own,
+/// in the same layout as [`author`]. `PWAV` and `PWV2` still come from the
+/// columns. `PWVC` is written after `PWV6`, where rekordbox writes it, in
+/// place of any carried one: it is the gain these `PWV6` and `PWV7` were
+/// drawn at, and a stale one beside them draws them at another.
+#[must_use]
+pub fn author_with_rekordbox_waves(
+    ppth: &str, beats: &[Beat], columns: &[BandColumn], waves: &RekordboxWaves, existing: Existing<'_>,
+) -> AnalysisFiles {
+    AnalysisFiles {
+        dat: dat_of(ppth, beats, columns, existing.dat),
+        ext: ext_of(ppth, &waves.pwv3, &waves.pwv5, &waves.pwv4, existing.ext),
+        two_ex: two_ex_of(ppth, &waves.pwv7, &waves.pwv6, Some(waves.pwvc), existing.two_ex),
+    }
+}
+
+fn dat_of(ppth: &str, beats: &[Beat], columns: &[BandColumn], existing: Option<&Anlz>) -> Vec<u8> {
+    let mut builder = AnlzBuilder::new();
+    header_of(&mut builder, existing);
+    builder.path(ppth);
+    // `PVBR` sits between the path and the grid in every rekordbox `.DAT`
+    // (1,558 of 1,558 reference files [OBS]); rekordbox 6/7 reject a `.DAT`
+    // that lacks it. A real VBR seek table cannot be re-derived from the
+    // analysis here, so an existing one is carried through unchanged, and a
+    // file that has none gets the zero table rekordbox itself writes for a
+    // track with no VBR frames to index — see [`AnlzBuilder::vbr_table_zero`].
+    match existing.and_then(|file| file.section(b"PVBR")) {
+        Some(pvbr) => { builder.copy_section(pvbr); }
+        None => { builder.vbr_table_zero(); }
+    }
+    builder.beat_grid(beats);
+    builder.waveform_preview(b"PWAV", &pwav(columns));
+    builder.waveform_preview(b"PWV2", &pwv2(columns));
+    cue_lists_of(&mut builder, existing, false);
+    carry(&mut builder, existing, &[]);
+    builder.finish()
+}
+
+fn ext_of(ppth: &str, pwv3: &[u8], pwv5: &[u8], pwv4: &[u8], existing: Option<&Anlz>) -> Vec<u8> {
+    let mut builder = AnlzBuilder::new();
+    header_of(&mut builder, existing);
+    builder.path(ppth);
+    builder.waveform_scroll(b"PWV3", 1, pwv3);
+    cue_lists_of(&mut builder, existing, true);
+    builder.waveform_scroll(b"PWV5", 2, pwv5);
+    builder.waveform_scroll(b"PWV4", 6, pwv4);
+    carry(&mut builder, existing, &[]);
+    builder.finish()
+}
+
+fn two_ex_of(ppth: &str, pwv7: &[u8], pwv6: &[u8], gain: Option<[u16; 3]>, existing: Option<&Anlz>) -> Vec<u8> {
+    let mut builder = AnlzBuilder::new();
+    header_of(&mut builder, existing);
+    builder.path(ppth);
+    builder.waveform_scroll(b"PWV7", 3, pwv7);
+    builder.waveform_scroll(b"PWV6", 3, pwv6);
+    let Some(gain) = gain else {
+        carry(&mut builder, existing, &[]);
+        return builder.finish();
     };
-    let ext = {
-        let mut builder = AnlzBuilder::new();
-        header_of(&mut builder, existing.ext);
-        builder.path(ppth);
-        builder.waveform_scroll(b"PWV3", 1, &pwv3(columns));
-        cue_lists_of(&mut builder, existing.ext, true);
-        builder.waveform_scroll(b"PWV5", 2, &pwv5(columns));
-        builder.waveform_scroll(b"PWV4", 6, &pwv4(columns));
-        carry(&mut builder, existing.ext);
-        builder.finish()
-    };
-    let two_ex = {
-        let mut builder = AnlzBuilder::new();
-        header_of(&mut builder, existing.two_ex);
-        builder.path(ppth);
-        let preview = overview.map_or_else(|| pwv6(columns), |bands| bands.iter().flatten().map(|v| (*v).min(127)).collect());
-        builder.waveform_scroll(b"PWV7", 3, &pwv7(columns));
-        builder.waveform_scroll(b"PWV6", 3, &preview);
-        carry(&mut builder, existing.two_ex);
-        builder.finish()
-    };
-    AnalysisFiles { dat, ext, two_ex }
+    builder.copy_section(&pwvc_section(gain));
+    carry(&mut builder, existing, &[b"PWVC"]);
+    builder.finish()
+}
+
+/// `PWVC`: the three gains as big-endian `u16`s behind a two-byte header of
+/// zeros [OBS: every `.2EX` rekordbox 7.2.19 wrote in a 7,800-track library].
+fn pwvc_section(gains: [u16; 3]) -> Section {
+    Section::new(b"PWVC", vec![0; 2], gains.iter().flat_map(|gain| gain.to_be_bytes()).collect())
 }
 
 /// An existing file's header bytes, kept as they were.
@@ -512,10 +559,11 @@ fn cue_lists_of(builder: &mut AnlzBuilder, existing: Option<&Anlz>, extended: bo
 }
 
 /// Copies an existing file's sections this analysis neither writes nor
-/// places, in their own order.
-fn carry(builder: &mut AnlzBuilder, existing: Option<&Anlz>) {
+/// places, in their own order; `also` names any more it wrote this time.
+fn carry(builder: &mut AnlzBuilder, existing: Option<&Anlz>, also: &[&[u8; 4]]) {
     if let Some(file) = existing {
-        for section in file.sections.iter().filter(|s| !is_authored(s) && !is_cue_list(s)) {
+        let written = |s: &Section| also.iter().any(|tag| s.tag == FourCc::new(tag));
+        for section in file.sections.iter().filter(|s| !is_authored(s) && !is_cue_list(s) && !written(s)) {
             builder.copy_section(section);
         }
     }
@@ -848,6 +896,40 @@ mod tests {
         assert!(!reread.has_extended_grid());
         assert_eq!(reread.header_extra, vec![9; 16]);
         assert_eq!(reread.sections.iter().filter(|s| s.tag == FourCc::new(b"PWV3")).count(), 1);
+    }
+
+    /// rekordbox's own waveforms go in as given, and `PWVC` after `PWV6`
+    /// once, in place of a carried one: a stale gain beside new waveforms
+    /// would draw them at another.
+    #[test]
+    fn rekordbox_waves_are_written_as_given_with_their_own_gain() {
+        let beats = beat_grid_of([(1, 12_800, 0), (2, 12_800, 469)]);
+        let columns = ramp(600);
+        let waves = RekordboxWaves {
+            pwvc: [123, 456, 289],
+            pwv3: vec![7; 600],
+            pwv4: vec![8; 1_200 * 6],
+            pwv5: vec![9; 600 * 2],
+            pwv6: vec![10; 1_200 * 3],
+            pwv7: vec![11; 600 * 3],
+        };
+        let mut previous = crate::parse(&author("?/track.mp3", &beats, &columns, Existing::default()).two_ex).unwrap();
+        previous.sections.push(Section::new(b"PWVC", vec![0; 2], vec![0, 80, 0, 80, 0, 80]));
+        previous.sections.push(Section::new(b"PVDI", vec![0; 8], vec![1]));
+        let files = author_with_rekordbox_waves(
+            "?/track.mp3", &beats, &columns, &waves, Existing { two_ex: Some(&previous), ..Existing::default() },
+        );
+
+        assert_eq!(tags(&files.two_ex), ["PPTH", "PWV7", "PWV6", "PWVC", "PVDI"]);
+        let two = crate::parse(&files.two_ex).unwrap();
+        assert_eq!(two.section(b"PWVC").unwrap().payload, [0, 123, 1, 200, 1, 33]);
+        assert_eq!(two.waveform(b"PWV6").unwrap(), (3, &waves.pwv6[..]));
+        assert_eq!(two.waveform(b"PWV7").unwrap(), (3, &waves.pwv7[..]));
+        let ext = crate::parse(&files.ext).unwrap();
+        assert_eq!(ext.waveform(b"PWV3").unwrap(), (1, &waves.pwv3[..]));
+        assert_eq!(ext.waveform(b"PWV4").unwrap(), (6, &waves.pwv4[..]));
+        assert_eq!(ext.waveform(b"PWV5").unwrap(), (2, &waves.pwv5[..]));
+        assert_eq!(crate::parse(&files.dat).unwrap().waveform(b"PWAV").unwrap().1, pwav(&columns));
     }
 
     /// The tags of a file, in order.

@@ -23,6 +23,7 @@ pub mod onset;
 pub mod phrase;
 pub mod tempo;
 pub mod vocal;
+pub mod wave_creator;
 pub mod waveform;
 
 pub use key::{detect_key, MusicalKey};

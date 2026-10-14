@@ -238,7 +238,7 @@ fn analyse_and_save(
         let audio = rbl_audio::decode_mono(std::path::Path::new(path), Some(DECODE_CAP_SECS)).map_err(|e| decode_error(&e))?;
         return analyse_key_only(state, library, row, track_id, &audio, editor, started);
     }
-    let (analysis, duration_secs) = analyse_file(std::path::Path::new(path), &options, DECODE_CAP_SECS, drawing)?;
+    let (analysis, waves, duration_secs) = analyse_file(std::path::Path::new(path), &options, DECODE_CAP_SECS, drawing)?;
 
     let _edit_guard = state.edit_gate.lock();
     ensure_analysis_unlocked(state, editor, track_id)?;
@@ -277,11 +277,13 @@ fn analyse_and_save(
     // `PPTH` as rekordbox writes it in the share tree: `?/<file name>`. The
     // full path this wrote before is not what rekordbox derives for the
     // track (issue #323).
-    let files = rbl_anlz::author_with_overview(
+    // The colour and 3-band waveforms are rekordbox's own; `PWAV` and `PWV2`
+    // still come from the columns.
+    let files = rbl_anlz::author_with_rekordbox_waves(
         &rbl_anlz::share_tree_ppth(path),
         &beats,
         &columns,
-        analysis.waveform.overview.as_slice().try_into().ok(),
+        &waves,
         rbl_anlz::Existing { dat: existing[0].as_ref(), ext: existing[1].as_ref(), two_ex: existing[2].as_ref() },
     );
     // Clamp before narrowing so the conversion cannot truncate.
@@ -342,14 +344,18 @@ fn decode_error(e: &rbl_audio::AudioError) -> AppError {
 /// waveform pass, about a fifth of the analysis, so only a deck that is
 /// watching asks for it.
 ///
-/// Resolves to the analysis and the file's length in seconds.
+/// rekordbox's own colour and 3-band waveforms are drawn from every frame
+/// of the file, in stereo, as the decode goes.
+///
+/// Resolves to the analysis, those waveforms and the file's length in seconds.
 fn analyse_file(
     path: &std::path::Path,
     options: &rbl_analysis::AnalysisOptions,
     head_secs: f64,
     drawing: Option<&Drawing<'_>>,
-) -> AppResult<(rbl_analysis::Analysis, f64)> {
+) -> AppResult<(rbl_analysis::Analysis, rbl_anlz::RekordboxWaves, f64)> {
     let mut stream = rbl_audio::MonoStream::open(path).map_err(|e| decode_error(&e))?;
+    let mut creator = rbl_analysis::wave_creator::WaveCreator::new(stream.sample_rate());
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a positive number of seconds at an audio rate")]
     let cap = (head_secs.max(0.0) * f64::from(stream.sample_rate())) as usize;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a positive number of seconds at an audio rate")]
@@ -364,7 +370,8 @@ fn analyse_file(
     let mut fed = 0;
     let mut past_head = false;
     let mut shown = std::time::Instant::now();
-    while let Some(chunk) = stream.next_chunk() {
+    while let Some((chunk, frames)) = stream.next_frames() {
+        creator.push(frames);
         if past_head {
             if let Some(builder) = builder.as_mut() {
                 builder.push(chunk);
@@ -399,15 +406,28 @@ fn analyse_file(
     let rate = stream.sample_rate();
     let audio = rbl_audio::Audio { samples: head, sample_rate: rate, source_channels: stream.source_channels() };
     let mut analysis = rbl_analysis::analyse_with(&audio.samples, rate, *options);
+    let waves = rekordbox_waves(creator.finish());
     let Some(builder) = builder.filter(|_| past_head) else {
-        return Ok((analysis, audio.duration_secs()));
+        return Ok((analysis, waves, audio.duration_secs()));
     };
     #[allow(clippy::cast_precision_loss, reason = "a sample count well inside f64's exact range")]
     let duration_secs = builder.samples() as f64 / f64::from(rate.max(1));
     analysis.peak = analysis.peak.max(builder.peak());
     analysis.tempo.extend_to(duration_secs);
     analysis.waveform = builder.finish();
-    Ok((analysis, duration_secs))
+    Ok((analysis, waves, duration_secs))
+}
+
+/// The analyser's waveforms as the file author takes them: the same payloads.
+fn rekordbox_waves(waves: rbl_analysis::wave_creator::Waves) -> rbl_anlz::RekordboxWaves {
+    rbl_anlz::RekordboxWaves {
+        pwvc: waves.pwvc,
+        pwv3: waves.pwv3,
+        pwv4: waves.pwv4,
+        pwv5: waves.pwv5,
+        pwv6: waves.pwv6,
+        pwv7: waves.pwv7,
+    }
 }
 
 /// Adds a memory cue at `first_beat_ms` unless a memory cue is already
@@ -804,7 +824,8 @@ mod tests {
         assert_eq!(ext.waveform(b"PWV5").unwrap().0, 2);
         assert_eq!(tags(&ext), ["PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PWV5", "PWV4"]);
         let two = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat_path, "2EX")).expect("the 2EX is there");
-        assert_eq!(tags(&two), ["PPTH", "PWV7", "PWV6"]);
+        // `PWVC` after `PWV6`, as rekordbox writes its own: the gain they were drawn at.
+        assert_eq!(tags(&two), ["PPTH", "PWV7", "PWV6", "PWVC"]);
         assert_eq!(ext.path().unwrap(), "?/click.wav");
         assert_eq!(two.path().unwrap(), "?/click.wav");
         assert_eq!(two.waveform(b"PWV6").unwrap().1.len(), 3600);
@@ -911,9 +932,12 @@ mod tests {
         write_click_wav(&audio, 24, 0.5);
         let options = AnalysisSettings::default().options(rbl_analysis::AnalysisPreset::Rbxport).unwrap();
 
-        let (whole, whole_secs) = analyse_file(&audio, &options, 60.0, None).unwrap();
-        let (headed, headed_secs) = analyse_file(&audio, &options, 8.0, None).unwrap();
+        let (whole, whole_waves, whole_secs) = analyse_file(&audio, &options, 60.0, None).unwrap();
+        let (headed, headed_waves, headed_secs) = analyse_file(&audio, &options, 8.0, None).unwrap();
         assert!((whole_secs - 24.0).abs() < 0.01 && (headed_secs - 24.0).abs() < 0.01, "{whole_secs} {headed_secs}");
+        // rekordbox's own waveforms are drawn from every frame either way.
+        assert_eq!(headed_waves, whole_waves);
+        assert_eq!(headed_waves.pwv7.len(), 24 * 150 * 3);
 
         // Every 1/150 s column of all 24 seconds, identical to the whole decode's.
         assert_eq!(headed.waveform.columns.len(), 24 * 150);
