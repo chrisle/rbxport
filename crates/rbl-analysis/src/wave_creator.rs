@@ -116,13 +116,14 @@ impl WaveCreator {
     }
 }
 
-/// Channels that agree in level keep the louder one; otherwise their mean.
+/// Channels that agree in level keep the louder one, the right on an exact
+/// tie [OBS: the `inverted` fixture]; otherwise their mean.
 fn to_mono(frame: [i16; 2]) -> f64 {
     let left = f64::from(frame[0]) / 32767.0;
     let right = f64::from(frame[1]) / 32767.0;
     if (left.abs() - right.abs()).abs() >= 0.001 {
         (left + right) / 2.0
-    } else if left.abs() >= right.abs() {
+    } else if left.abs() > right.abs() {
         left
     } else {
         right
@@ -634,7 +635,7 @@ mod tests {
     /// where their mean would be silence.
     #[test]
     fn channels_equal_in_level_keep_one_rather_than_cancel() {
-        assert!((to_mono([16_000, -16_000]) - 16_000.0 / 32_767.0).abs() < 1e-12);
+        assert!((to_mono([16_000, -16_000]) + 16_000.0 / 32_767.0).abs() < 1e-12);
         assert!((to_mono([16_000, 0]) - 8_000.0 / 32_767.0).abs() < 1e-12);
     }
 }

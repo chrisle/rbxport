@@ -30,8 +30,9 @@ frame off that timeline by one MP3 frame takes the 150-a-second sections
 from nearly all exact to about one value in ten.
 
 Each frame becomes one mono value: `L/32767` and `R/32767`; where
-`||L| − |R|| < 0.001` the louder of the two, otherwise their mean. Channels
-equal in level and opposite in sign keep one rather than cancel.
+`||L| − |R|| < 0.001` the louder of the two — the right on an exact tie —
+otherwise their mean. Channels equal in level and opposite in sign keep one
+rather than cancel; the `inverted` fixture shows which.
 
 A filtered or raw sample is kept as `trunc(x · 32768)` clamped into 16 bits.
 
