@@ -1661,7 +1661,6 @@
   "{seconds} seconds processed": "{seconds} seconden verwerkt",
   "{reused} reused · {copied} copied · {converted} converted": "{reused} hergebruikt · {copied} gekopieerd · {converted} geconverteerd",
   "{rate}/s": "{rate}/s",
-  "{seconds} seconds elapsed": "{seconds} seconden verstreken",
   "Stop export to {device}": "Exporteren naar {device} stoppen",
   "Preparing export": "Export voorbereiden",
   "Planning changes": "Wijzigingen in de planning",
@@ -1715,5 +1714,7 @@
   "The export has finished.": "De export is voltooid.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Dat apparaat is niet meer verbonden. Het is mogelijk losgekoppeld of hernoemd.",
   "Change sync preferences": "Synchronisatievoorkeuren wijzigen",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Vergelijk na elke synchronisatie elk bestand op het USB-apparaat met het origineel in plaats van alleen te controleren wat de synchronisatie heeft gewijzigd."
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Vergelijk na elke synchronisatie elk bestand op het USB-apparaat met het origineel in plaats van alleen te controleren wat de synchronisatie heeft gewijzigd.",
+  "Track {done} of {total}": "Nummer {done} van {total}",
+  "{time} elapsed": "{time} verstreken"
 }

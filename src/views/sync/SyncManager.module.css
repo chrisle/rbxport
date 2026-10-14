@@ -338,8 +338,11 @@
   .middleSlim { width: 92px; }
   .headingRow { flex-wrap: wrap; }
 }
-.exportProgress { display: grid; gap: 6px; margin-top: 10px; font-size: var(--f-size-xs); font-variant-numeric: tabular-nums; }
-.exportProgress > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exportProgress { margin-top: 10px; }
+.exportError { display: block; margin-top: 4px; color: var(--c-error); font-size: var(--f-size-pref-small); white-space: normal; }
+/* What the ticked playlists leave on the stick, in the storage labels' size. */
+.estimate { margin: 6px 0 0; color: var(--c-text-dim); font-size: var(--f-size-pref-small); line-height: 16px; }
+.estimate [role="alert"] { color: var(--c-error); }
 .exportReport {
   display: flex;
   flex-wrap: wrap;
@@ -357,22 +360,3 @@
 .exportReport strong { color: var(--c-text); font-weight: 700; }
 .exportReport .exportWarning,
 .exportReport .exportWarning strong { color: var(--c-error); }
-.exportProgress progress {
-  width: 100%;
-  height: 8px;
-  appearance: none;
-  border: 1px solid var(--c-cue-ring);
-  border-radius: 4px;
-  overflow: hidden;
-  background: transparent;
-  accent-color: var(--c-cue-ring);
-}
-.exportProgress progress::-webkit-progress-bar { background: transparent; }
-.exportProgress progress::-webkit-progress-value {
-  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c-cue-ring) 65%, transparent) 0 3px, transparent 3px 6px);
-}
-.exportProgress progress[data-state="done"] { border-color: var(--c-meter-green); accent-color: var(--c-meter-green); }
-.exportProgress progress[data-state="done"]::-webkit-progress-value { background: var(--c-meter-green); }
-.exportProgress progress[data-state="failed"] { border-color: var(--c-error); accent-color: var(--c-error); }
-.exportProgress progress[data-state="failed"]::-webkit-progress-value { background: var(--c-error); }
-.exportError { color: var(--c-error); white-space: normal !important; overflow: visible !important; }

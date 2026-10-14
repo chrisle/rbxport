@@ -1,0 +1,44 @@
+.progress {
+  display: grid;
+  gap: 2px;
+  font-size: var(--f-size-pref-small);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+/* Each line keeps its height when it has nothing to say, so the block does
+   not grow and shrink between progress events. */
+.line { display: flex; align-items: baseline; gap: 8px; min-height: 16px; min-width: 0; }
+.text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aside { flex: none; }
+.figures { color: var(--c-text-dim); }
+.progress > button { margin-top: 4px; }
+
+.progress progress {
+  width: 100%;
+  height: 8px;
+  margin: 0 0 2px;
+  appearance: none;
+  border: 1px solid var(--c-cue-ring);
+  border-radius: 4px;
+  overflow: hidden;
+  background: transparent;
+  accent-color: var(--c-cue-ring);
+}
+.progress progress::-webkit-progress-bar { background: transparent; }
+.progress progress::-webkit-progress-value { background: var(--c-cue-ring); transition: width 0.2s linear; }
+.progress progress::-moz-progress-bar { background: var(--c-cue-ring); }
+/* A stage with no measure moves rather than sitting empty. */
+.progress progress:indeterminate,
+.progress progress:indeterminate::-webkit-progress-bar {
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c-cue-ring) 55%, transparent) 0 4px, transparent 4px 8px);
+  background-size: 11.3px 100%;
+  animation: exportBusy 0.8s linear infinite;
+}
+@keyframes exportBusy { to { background-position: 11.3px 0; } }
+.progress progress[data-state="done"] { border-color: var(--c-meter-green); accent-color: var(--c-meter-green); }
+.progress progress[data-state="done"]::-webkit-progress-value { background: var(--c-meter-green); }
+.progress progress[data-state="failed"],
+.progress progress[data-state="cancelled"] { border-color: var(--c-error); accent-color: var(--c-error); animation: none; background: transparent; }
+.progress progress[data-state="failed"]::-webkit-progress-bar,
+.progress progress[data-state="cancelled"]::-webkit-progress-bar { animation: none; background: transparent; }
+.progress progress[data-state="failed"]::-webkit-progress-value { background: var(--c-error); }

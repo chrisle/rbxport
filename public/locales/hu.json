@@ -1665,7 +1665,6 @@
   "{seconds} seconds processed": "{seconds} másodperc feldolgozva",
   "{reused} reused · {copied} copied · {converted} converted": "{reused} újrafelhasználva · {copied} másolva · {converted} konvertálva",
   "{rate}/s": "{rate}/s",
-  "{seconds} seconds elapsed": "{seconds} másodperc telt el",
   "Stop export to {device}": "Exportálás leállítása a következőre: {device}",
   "Preparing export": "Exportálás előkészítése",
   "Planning changes": "Változások tervezése",
@@ -1719,5 +1718,7 @@
   "The export has finished.": "Az exportálás befejeződött.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Ez az eszköz már nincs csatlakoztatva. Lehet, hogy leválasztották vagy átnevezték.",
   "Change sync preferences": "Szinkronizálási beállítások módosítása",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Minden szinkronizálás után az USB-eszköz összes fájlját összeveti az eredetivel, ahelyett hogy csak a szinkronizálás által módosítottakat ellenőrizné."
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Minden szinkronizálás után az USB-eszköz összes fájlját összeveti az eredetivel, ahelyett hogy csak a szinkronizálás által módosítottakat ellenőrizné.",
+  "Track {done} of {total}": "{done}/{total}. szám",
+  "{time} elapsed": "{time} telt el"
 }

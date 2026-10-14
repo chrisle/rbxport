@@ -575,6 +575,8 @@ pub struct ExportProgressDto {
     pub unit: &'static str,
     pub bytes_done: u64,
     pub bytes_total: u64,
+    pub tracks_done: u32,
+    pub tracks_total: u32,
     pub reused: u32,
     pub copied: u32,
     pub converted: u32,

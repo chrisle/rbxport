@@ -1596,6 +1596,9 @@ export interface ExportProgress {
   unit?: "tracks" | "bytes" | "milliseconds" | "";
   bytesDone?: number;
   bytesTotal?: number;
+  /** With a bytes or milliseconds event: tracks before this one, and in the stage. */
+  tracksDone?: number;
+  tracksTotal?: number;
   reused?: number;
   copied?: number;
   converted?: number;

@@ -1665,7 +1665,6 @@
   "{seconds} seconds processed": "{seconds} secondes traitées",
   "{reused} reused · {copied} copied · {converted} converted": "{reused} réutilisé · {copied} copié · {converted} converti",
   "{rate}/s": "{rate}/s",
-  "{seconds} seconds elapsed": "{seconds} secondes écoulées",
   "Stop export to {device}": "Arrêter l'exportation vers {device}",
   "Preparing export": "Préparation de l'exportation",
   "Planning changes": "Planification des changements",
@@ -1719,5 +1718,7 @@
   "The export has finished.": "L’exportation est terminée.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Cet appareil n’est plus connecté. Il a peut-être été débranché ou renommé.",
   "Change sync preferences": "Modifier les préférences de synchronisation",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Après chaque synchronisation, compare chaque fichier du périphérique USB à son original au lieu de vérifier uniquement ce que la synchronisation a modifié."
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Après chaque synchronisation, compare chaque fichier du périphérique USB à son original au lieu de vérifier uniquement ce que la synchronisation a modifié.",
+  "Track {done} of {total}": "Piste {done} sur {total}",
+  "{time} elapsed": "{time} écoulées"
 }

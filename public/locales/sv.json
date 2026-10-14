@@ -1663,7 +1663,6 @@
   "{seconds} seconds processed": "{seconds} sekunder behandlade",
   "{reused} reused · {copied} copied · {converted} converted": "{reused} återanvänd · {copied} kopierad · {converted} konverterad",
   "{rate}/s": "{rate}/s",
-  "{seconds} seconds elapsed": "{seconds} sekunder har gått",
   "Stop export to {device}": "Stoppa export till {device}",
   "Preparing export": "Förbereder export",
   "Planning changes": "Planeringsförändringar",
@@ -1717,5 +1716,7 @@
   "The export has finished.": "Exporten är klar.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Enheten är inte längre ansluten. Den kan ha kopplats från eller bytt namn.",
   "Change sync preferences": "Ändra synkroniseringsinställningar",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Efter varje synkronisering jämförs varje fil på USB-enheten med originalet i stället för att bara kontrollera det som synkroniseringen ändrade."
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Efter varje synkronisering jämförs varje fil på USB-enheten med originalet i stället för att bara kontrollera det som synkroniseringen ändrade.",
+  "Track {done} of {total}": "Spår {done} av {total}",
+  "{time} elapsed": "{time} har gått"
 }

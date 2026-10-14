@@ -1668,7 +1668,6 @@
   "{seconds} seconds processed": "已处理 {seconds} 秒",
   "{reused} reused · {copied} copied · {converted} converted": "{reused} 重用 · {copied} 复制 · {converted} 转换",
   "{rate}/s": "{rate}/s",
-  "{seconds} seconds elapsed": "已过去 {seconds} 秒",
   "Stop export to {device}": "停止导出到 {device}",
   "Preparing export": "准备出口",
   "Planning changes": "规划变更",
@@ -1722,5 +1721,7 @@
   "The export has finished.": "导出已完成。",
   "That device is no longer connected. It may have been unplugged or renamed.": "该设备已断开连接。它可能已被拔出或重命名。",
   "Change sync preferences": "更改同步偏好设置",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "每次同步后，将 USB 设备上的每个文件与原始文件比较，而不是只检查本次同步更改的文件。"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "每次同步后，将 USB 设备上的每个文件与原始文件比较，而不是只检查本次同步更改的文件。",
+  "Track {done} of {total}": "曲目 {done}/{total}",
+  "{time} elapsed": "已用时 {time}"
 }

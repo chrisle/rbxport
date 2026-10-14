@@ -1142,7 +1142,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
                     {adding === 0 && freeing > 0 ? <span>{t("Frees {size}", { size: formatSpace(freeing) })}</span> : null}
                     <span>{free}</span>
                   </div>
-                  {on && estimatesLoading ? <p aria-live="polite">{t("Calculating space…")}</p> : estimate?.error ? <p aria-live="polite">{estimate.error}</p> : estimate ? <p aria-live="polite">
+                  {on && estimatesLoading ? <p className={styles.estimate} aria-live="polite">{t("Calculating space…")}</p> : estimate?.error ? <p className={styles.estimate} aria-live="polite">{estimate.error}</p> : estimate ? <p className={styles.estimate} aria-live="polite">
                     {estimate.unknownSize ? t("Space estimate is incomplete") : t("{space} left after sync", { space: `${approx}${formatSpace(projectedFree) || "0 MB"}` })}
                     {estimate.peakBytes !== undefined ? ` · ${t("Needs {space} free while syncing", { space: `${approx}${formatSpace(estimate.peakBytes) || "0 MB"}` })}` : ""}
                     {estimate.enoughSpace === false ? <span role="alert"> · {t("Not enough temporary space to sync safely")}</span> : null}

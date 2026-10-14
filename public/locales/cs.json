@@ -1666,7 +1666,6 @@
   "{seconds} seconds processed": "Zpracováno: {seconds} sekund",
   "{reused} reused · {copied} copied · {converted} converted": "{reused} znovu použito · {copied} zkopírováno · {converted} převedeno",
   "{rate}/s": "{rate}/s",
-  "{seconds} seconds elapsed": "Uplynulo {seconds} sekund",
   "Stop export to {device}": "Zastavit export do {device}",
   "Preparing export": "Příprava exportu",
   "Planning changes": "Plánování změn",
@@ -1720,5 +1719,7 @@
   "The export has finished.": "Export byl dokončen.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Toto zařízení již není připojeno. Mohlo být odpojeno nebo přejmenováno.",
   "Change sync preferences": "Změnit nastavení synchronizace",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Po každé synchronizaci porovnat každý soubor na USB zařízení s originálem, místo kontroly jen toho, co synchronizace změnila."
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Po každé synchronizaci porovnat každý soubor na USB zařízení s originálem, místo kontroly jen toho, co synchronizace změnila.",
+  "Track {done} of {total}": "Skladba {done} z {total}",
+  "{time} elapsed": "Uplynulo {time}"
 }

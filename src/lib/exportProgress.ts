@@ -5,12 +5,33 @@ export function isExportActive(job: ExportProgress): boolean { return active.has
 export function canStopExport(job: ExportProgress): boolean {
   return job.canCancel ?? ["preparing", "planning", "checking", "converting", "copying", "database"].includes(job.state);
 }
+const unmeasured = new Set(["recovering", "database", "verifying", "publishing", "finalizing", "ejecting", "failed", "cancelled"]);
+/** How far through the current stage the export is, or undefined when the stage reports no measure. */
 export function stagePercent(job: ExportProgress): number | undefined {
   if (job.state === "done") return 100;
-  if (["preparing", "planning", "recovering", "database", "verifying", "publishing", "finalizing", "ejecting", "failed", "cancelled"].includes(job.state)) return undefined;
-  const done = job.unit === "bytes" ? job.bytesDone ?? 0 : job.done;
-  const total = job.unit === "bytes" ? job.bytesTotal ?? 0 : job.total;
-  return total > 0 ? Math.min(100, Math.max(0, Math.floor(done / total * 100))) : undefined;
+  if (unmeasured.has(job.state)) return undefined;
+  const percent = (done: number, total: number) => Math.min(100, Math.max(0, Math.floor(done / total * 100)));
+  const file = job.unit === "bytes" ? fraction(job.bytesDone ?? 0, job.bytesTotal ?? 0)
+    : job.unit === "milliseconds" ? fraction(job.done, job.total) : undefined;
+  // A per-file event that names its place in the stage measures the stage:
+  // the tracks before it plus how far through this one it is.
+  const tracks = job.tracksTotal ?? 0;
+  if (job.unit !== "tracks" && tracks > 0) return percent((job.tracksDone ?? 0) + (file ?? 0), tracks);
+  // Preparing reports a measure only per file; until it does, it has none.
+  if (job.state === "preparing") return undefined;
+  if (job.unit === "bytes" || job.unit === "milliseconds") return file === undefined ? undefined : percent(file, 1);
+  return job.total > 0 ? percent(job.done, job.total) : undefined;
+}
+function fraction(done: number, total: number): number | undefined {
+  return total > 0 ? Math.min(1, Math.max(0, done / total)) : undefined;
+}
+
+/** Elapsed time as m:ss, or h:mm:ss from an hour. */
+export function formatElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const s = String(seconds % 60).padStart(2, "0");
+  const minutes = Math.floor(seconds / 60);
+  return minutes >= 60 ? `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}:${s}` : `${minutes}:${s}`;
 }
 
 type Translate = (text: string, values?: Readonly<Record<string, string | number>>) => string;

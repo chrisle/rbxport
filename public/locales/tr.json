@@ -1666,7 +1666,6 @@
   "{seconds} seconds processed": "{seconds} saniye işlendi",
   "{reused} reused · {copied} copied · {converted} converted": "{reused} yeniden kullanıldı · {copied} kopyalandı · {converted} dönüştürüldü",
   "{rate}/s": "{rate}/s",
-  "{seconds} seconds elapsed": "{seconds} saniye geçti",
   "Stop export to {device}": "{device} cihazına aktarımı durdur",
   "Preparing export": "Dışa aktarım hazırlanıyor",
   "Planning changes": "Değişiklikleri planlama",
@@ -1720,5 +1719,7 @@
   "The export has finished.": "Dışa aktarma tamamlandı.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Bu aygıt artık bağlı değil. Çıkarılmış veya yeniden adlandırılmış olabilir.",
   "Change sync preferences": "Eşitleme tercihlerini değiştir",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Her eşitlemeden sonra, yalnızca eşitlemenin değiştirdiklerini denetlemek yerine USB aygıtındaki her dosyayı aslıyla karşılaştırır."
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Her eşitlemeden sonra, yalnızca eşitlemenin değiştirdiklerini denetlemek yerine USB aygıtındaki her dosyayı aslıyla karşılaştırır.",
+  "Track {done} of {total}": "Parça {done}/{total}",
+  "{time} elapsed": "{time} geçti"
 }

@@ -415,7 +415,7 @@ describe("SyncManager", () => {
     act(() => exportProgress?.(job));
     const meter = host.querySelector<HTMLProgressElement>('progress[aria-label="Exporting USB B"]');
     expect(meter?.value).toBe(30);
-    expect(host.textContent).toContain("Copying audio · Track (30%)");
+    expect(host.textContent).toContain("Copying audio30%Track");
     const background = [...host.querySelectorAll("button")].find(button => button.textContent === "Run in background");
     expect(background?.disabled).toBe(false);
     click(background ?? null);
@@ -1239,7 +1239,7 @@ it("does not apply older progress sequences or jobs to an active export", () => 
   act(() => exportProgress?.(job));
   act(() => exportProgress?.({ ...job, state: "failed", title: "Late event", sequence: 4 }));
   act(() => exportProgress?.({ ...job, state: "done", jobId: "19", sequence: 100 }));
-  expect(host.textContent).toContain("Copying audio · Current (20%)"); expect(host.textContent).not.toContain("Late event");
+  expect(host.textContent).toContain("Copying audio20%Current"); expect(host.textContent).not.toContain("Late event");
 });
 
 it("stops each cancellable stick but leaves publication alone", async () => {

@@ -2052,6 +2052,8 @@ fn write_export_registered<R: tauri::Runtime>(
             job_id: job_id.clone(), sequence: sequence.get(),
             unit: details.map_or("tracks", |p| p.unit),
             bytes_done: details.map_or(0, |p| p.bytes_done), bytes_total: details.map_or(0, |p| p.bytes_total),
+            tracks_done: details.map_or(0, |p| u32::try_from(p.tracks_done).unwrap_or(u32::MAX)),
+            tracks_total: details.map_or(0, |p| u32::try_from(p.tracks_total).unwrap_or(u32::MAX)),
             reused: details.map_or(0, |p| u32::try_from(p.reused).unwrap_or(u32::MAX)),
             copied: details.map_or(0, |p| u32::try_from(p.copied).unwrap_or(u32::MAX)),
             converted: details.map_or(0, |p| u32::try_from(p.converted).unwrap_or(u32::MAX)),

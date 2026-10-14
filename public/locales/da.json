@@ -1661,7 +1661,6 @@
   "{seconds} seconds processed": "{seconds} sekunder behandlet",
   "{reused} reused · {copied} copied · {converted} converted": "{reused} genbrugt · {copied} kopieret · {converted} konverteret",
   "{rate}/s": "{rate}/s",
-  "{seconds} seconds elapsed": "{seconds} sekunder er forløbet",
   "Stop export to {device}": "Stop eksport til {device}",
   "Preparing export": "Forbereder eksport",
   "Planning changes": "Planlægningsændringer",
@@ -1715,5 +1714,7 @@
   "The export has finished.": "Eksporten er færdig.",
   "That device is no longer connected. It may have been unplugged or renamed.": "Enheden er ikke længere tilsluttet. Den kan være blevet frakoblet eller omdøbt.",
   "Change sync preferences": "Skift synkroniseringsindstillinger",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Efter hver synkronisering sammenlignes hver fil på USB-enheden med originalen i stedet for kun at kontrollere det, synkroniseringen ændrede."
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Efter hver synkronisering sammenlignes hver fil på USB-enheden med originalen i stedet for kun at kontrollere det, synkroniseringen ændrede.",
+  "Track {done} of {total}": "Nummer {done} af {total}",
+  "{time} elapsed": "{time} forløbet"
 }

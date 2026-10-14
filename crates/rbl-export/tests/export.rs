@@ -551,11 +551,14 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     let playlists = vec![SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id: 0, name: "Set".into(), track_indices: vec![0, 1, 2] }];
 
     let mut seen: Vec<(usize, usize)> = Vec::new();
+    let mut files: Vec<(usize, usize)> = Vec::new();
     let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None, None, &mut |p| {
         if p.stage == "copying" && p.unit == "tracks" { seen.push((p.done, p.total)); }
+        if p.stage == "copying" && p.unit == "bytes" && files.last() != Some(&(p.tracks_done, p.tracks_total)) { files.push((p.tracks_done, p.tracks_total)); }
     }).unwrap();
     assert_eq!(report.tracks, 3);
     assert_eq!(seen, vec![(0, 3), (1, 3), (2, 3)], "progress is reported per track");
+    assert_eq!(files, vec![(0, 3), (1, 3), (2, 3)], "each file's byte progress names its place among the tracks");
     assert_eq!(report.artwork_files, 4, "one image, written under its four names");
     for (name, source) in [("a1.jpg", &small), ("a1_m.jpg", &medium), ("b1.jpg", &small), ("b1_m.jpg", &medium)] {
         let file = dest.path().join("PIONEER/Artwork/00001").join(name);

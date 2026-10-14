@@ -197,6 +197,9 @@ pub struct SourcePlaylist {
 /// Where an export has got to, reported after each track.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExportProgress {
+    /// For a per-file event (bytes or milliseconds), the tracks before this
+    /// one and the tracks in the stage, so the stage's overall progress can
+    /// be drawn rather than only this file's. Zero when not known.
     pub tracks_done: usize,
     pub tracks_total: usize,
     pub unit: &'static str,
@@ -1049,7 +1052,8 @@ fn export_cancellable_inner(
     }
     if let Some(cache) = cache {
         let recorded: BTreeMap<_, _> = previous.as_ref().into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();
-        for track in &mut tracks {
+        let count = tracks.len();
+        for (index, track) in tracks.iter_mut().enumerate() {
             if cancelled() { return Err(ExportError::Cancelled); }
             if !track.source_path.is_file() || track.device.as_ref().is_some_and(|d| d.preserve) || on_stick(destination, &track.source_path).is_some() { continue; }
             let old = recorded.get(&track_key(track.id, &track.source_path.to_string_lossy())).copied();
@@ -1064,14 +1068,14 @@ fn export_cancellable_inner(
                 if (same_source || source_contents_unchanged.contains(&track_key(track.id, &track.source_path.to_string_lossy()))) && same_profile { return Ok(None); }
                 if let Some(target) = conversion {
                     let (path, _, _) = cache.converted(&track.source_path, target, &mut |done, total| {
-                        progress(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), unit: "milliseconds", title: track.title.clone(), ..Default::default() });
+                        progress(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), unit: "milliseconds", title: track.title.clone(), tracks_done: index, tracks_total: count, ..Default::default() });
                     }, cancelled)?;
                     Ok(Some(path))
                 } else if track.device.is_some() && old.is_none() {
                     // Cold adoption is checked against the existing copy below.
                     Ok(None)
                 } else { cache.original(&track.source_path, &mut |done, total| {
-                    progress(&ExportProgress { stage: "preparing", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, ..Default::default() });
+                    progress(&ExportProgress { stage: "preparing", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, tracks_done: index, tracks_total: count, ..Default::default() });
                 }, cancelled).map(Some) }
             })();
             match prepared {
@@ -1372,11 +1376,11 @@ fn export_cancellable_inner(
                     report.converted += 1;
                     if let Some(cache) = cache.filter(|_| !track.cache_bypass) {
                         match cache.converted(&track.source_path, target, &mut |done, total| {
-                            progress(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), title: track.title.clone(), unit: "milliseconds", reused: report.reused, converted: report.converted, ..Default::default() });
+                            progress(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), title: track.title.clone(), unit: "milliseconds", reused: report.reused, converted: report.converted, tracks_done: index, tracks_total: tracks.len(), ..Default::default() });
                         }, cancelled) {
                             Ok((path, _, _)) => {
                                 copy_staged_observed(&path, &audio_dest, &mut |done, total| {
-                                    progress(&ExportProgress { stage: "copying", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, ..Default::default() });
+                                    progress(&ExportProgress { stage: "copying", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, tracks_done: index, tracks_total: tracks.len() });
                                     !cancelled()
                                 }).map(|(bytes, hash)| { copied_hash.set(Some(hash)); bytes })
                             }
@@ -1385,13 +1389,13 @@ fn export_cancellable_inner(
                         }
                     } else {
                         rbl_audio::compatibility::convert_observed(&track.source_path, &audio_dest, target, &mut |done, total| {
-                            progress(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), title: track.title.clone(), unit: "milliseconds", reused: report.reused, converted: report.converted, ..Default::default() });
+                            progress(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), title: track.title.clone(), unit: "milliseconds", reused: report.reused, converted: report.converted, tracks_done: index, tracks_total: tracks.len(), ..Default::default() });
                             !cancelled()
                         }).map_err(|e| std::io::Error::other(format!("{}: {e}", track.title)))
                     }
                 },
                 None => copy_staged_observed(track.prepared_audio.as_deref().unwrap_or(&track.source_path), &audio_dest, &mut |done, total| {
-                    progress(&ExportProgress { stage: "copying", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, ..Default::default() });
+                    progress(&ExportProgress { stage: "copying", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, tracks_done: index, tracks_total: tracks.len() });
                     !cancelled()
                 }).map(|(bytes, hash)| { copied_hash.set(Some(hash)); bytes }),
             };

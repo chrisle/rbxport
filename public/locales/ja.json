@@ -1674,7 +1674,6 @@
   "{seconds} seconds processed": "{seconds} 秒処理されました",
   "{reused} reused · {copied} copied · {converted} converted": "{reused} 再利用 · {copied} コピー · {converted} 変換",
   "{rate}/s": "{rate}/s",
-  "{seconds} seconds elapsed": "{seconds} 秒経過",
   "Stop export to {device}": "{device} へのエクスポートを停止します",
   "Preparing export": "輸出の準備中",
   "Planning changes": "計画変更",
@@ -1728,5 +1727,7 @@
   "The export has finished.": "エクスポートが完了しました。",
   "That device is no longer connected. It may have been unplugged or renamed.": "そのデバイスは接続されていません。取り外されたか、名前が変更された可能性があります。",
   "Change sync preferences": "同期の環境設定を変更",
-  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "同期のたびに、同期で変更されたファイルだけでなく、USBデバイス上のすべてのファイルを元のファイルと照合します。"
+  "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "同期のたびに、同期で変更されたファイルだけでなく、USBデバイス上のすべてのファイルを元のファイルと照合します。",
+  "Track {done} of {total}": "トラック {done}/{total}",
+  "{time} elapsed": "{time} 経過"
 }
