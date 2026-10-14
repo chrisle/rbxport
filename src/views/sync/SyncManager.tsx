@@ -143,10 +143,10 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   const [allOpen, setAllOpen] = useState(true);
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const [tickedDevices, setTickedDevices] = useState<ReadonlySet<string>>(new Set());
-  // Every stick opens open, showing the playlists it holds, as rekordbox's
-  // Device column shows the selected device's playlists (#178). These are
-  // the ones closed by hand.
-  const [collapsedDevices, setCollapsedDevices] = useState<ReadonlySet<string>>(new Set());
+  // Every stick starts closed, so several fit without scrolling; what it
+  // holds is still read as soon as it is listed (#178). These are the ones
+  // opened by hand.
+  const [expandedDevices, setExpandedDevices] = useState<ReadonlySet<string>>(new Set());
   const [deviceErrors, setDeviceErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const [states, setStates] = useState<ReadonlyMap<string, DeviceSyncState>>(new Map());
   const [estimates, setEstimates] = useState<ReadonlyMap<string, SyncEstimate>>(new Map());
@@ -627,8 +627,8 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
       // A FAT volume comes back upper-cased, so it may mount somewhere new:
       // what was read from the old path is gone either way.
       const forget = <T,>(current: ReadonlyMap<string, T>) => { const next = new Map(current); next.delete(device.path); return next; };
+      // It stays open, as it was to reach Format, so what it holds now shows.
       setTickedDevices(current => new Set([...current].filter(path => path !== device.path)));
-      setCollapsedDevices(current => new Set([...current].filter(path => path !== device.path)));
       setStates(forget);
       setDeviceErrors(forget);
       setCompletedReports(forget);
@@ -655,7 +655,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
       await backend.ejectDevice(device.path);
       setDevices(current => current.filter(d => d.path !== device.path));
       setTickedDevices(current => new Set([...current].filter(path => path !== device.path)));
-      setCollapsedDevices(current => new Set([...current].filter(path => path !== device.path)));
+      setExpandedDevices(current => new Set([...current].filter(path => path !== device.path)));
       setStates(current => { const next = new Map(current); next.delete(device.path); return next; });
       setDeviceErrors(current => { const next = new Map(current); next.delete(device.path); return next; });
       setStatus([`${device.name}: Safely ejected.`]);
@@ -1081,7 +1081,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
           <div className={styles.list} role="tree" aria-label="Devices">
             {devices.map((device) => {
               const on = tickedDevices.has(device.path);
-              const expanded = !collapsedDevices.has(device.path);
+              const expanded = expandedDevices.has(device.path);
               const read = states.get(device.path);
               const job = exportJobs.get(device.path);
               const fileSystem = device.fileSystem?.toUpperCase().replace(/^VFAT$|^MSDOS$/, "FAT") || "Unknown filesystem";
@@ -1109,7 +1109,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
                 <div className={styles.row}>
                   <button type="button" className={styles.twisty} data-open={expanded ? "" : undefined}
                     aria-label={`${expanded ? "Collapse" : "Expand"} ${device.name}`} disabled={busy} onClick={() => {
-                      setCollapsedDevices(current => toggle(current, device.path));
+                      setExpandedDevices(current => toggle(current, device.path));
                       if (!expanded) void readDevice(device.path, false).catch(e => setDeviceErrors(current => new Map(current).set(device.path, e instanceof Error ? e.message : "Could not read this USB device.")));
                     }} />
                   <label className={styles.rowSelection}>

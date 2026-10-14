@@ -92,6 +92,11 @@ const settle = () =>
   });
 
 const box = (label: string) => host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
+/** Devices start closed; this opens one to show what it holds. */
+const expand = async (name: string) => {
+  act(() => { host.querySelector<HTMLButtonElement>(`button[aria-label="Expand ${name}"]`)?.click(); });
+  await act(async () => { await Promise.resolve(); });
+};
 const click = (el: HTMLElement | null | undefined) => {
   if (!el) throw new Error("nothing to click");
   act(() => el.click());
@@ -800,6 +805,7 @@ describe("SyncManager", () => {
     click(box("USB A"));
     await settle();
     expect(box("Closing")?.checked).toBe(true);
+    await expand("USB A");
     const library = host.querySelector('[aria-label="USB A library"]');
     expect(library?.textContent).toContain("Device Library");
     expect(library?.textContent).toContain("Closing");
@@ -807,17 +813,21 @@ describe("SyncManager", () => {
     // A stick with nothing on it says so, and ticks nothing.
     click(box("USB B"));
     await settle();
+    await expand("USB B");
     expect(host.querySelector('[aria-label="USB B library"]')?.textContent).toContain("No playlists on this device yet.");
     expect(box("Warm Up")?.checked).toBe(false);
   });
 
-  it("shows each stick's playlists on open, without ticking or opening it, and guesses no selection (#178)", () => {
+  it("starts each stick closed, reads its playlists without ticking it, and guesses no selection (#178)", async () => {
     // Neither stick has a record from this library. USB A holds a playlist
     // named like one in the library; that does not tick it, or the stick.
     for (const name of ["USB A", "USB B"]) {
       expect(box(name)?.checked).toBe(false);
-      expect(box(name)?.closest('[role="treeitem"]')?.getAttribute("aria-expanded")).toBe("true");
+      expect(box(name)?.closest('[role="treeitem"]')?.getAttribute("aria-expanded")).toBe("false");
+      expect(host.querySelector(`[aria-label="${name} library"]`)).toBeNull();
     }
+    await expand("USB A");
+    await expand("USB B");
     expect(host.querySelector('[aria-label="USB A library"]')?.textContent).toContain("Closing");
     expect(host.querySelector('[aria-label="USB B library"]')?.textContent).toContain("No playlists on this device yet.");
     expect(box("Closing")?.checked).toBe(false);
@@ -847,6 +857,7 @@ describe("SyncManager", () => {
     act(() => { devicesChanged?.(); });
     await settle();
     await settle();
+    await expand("USB C");
     expect(host.querySelector('[aria-label="USB C library"]')?.textContent).toContain("Closing");
     expect(box("USB C")?.checked).toBe(false);
     expect(box("Closing")?.checked).toBe(false);
@@ -1173,14 +1184,15 @@ it("rechecks rekordbox when Import is clicked", async () => {
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("Quit rekordbox to import track ratings.");
 });
 
-it("closing and opening a USB does not select it for synchronization", async () => {
-  click(host.querySelector<HTMLButtonElement>('button[aria-label="Collapse USB A"]'));
-  await settle();
+it("opening and closing a USB does not select it for synchronization", async () => {
   expect(host.querySelector('[aria-label="USB A library"]')).toBeNull();
   click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand USB A"]'));
   await settle();
-  expect(box("USB A")?.checked).toBe(false);
   expect(host.querySelector('[aria-label="USB A library"]')?.textContent).toContain("Closing");
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="Collapse USB A"]'));
+  await settle();
+  expect(host.querySelector('[aria-label="USB A library"]')).toBeNull();
+  expect(box("USB A")?.checked).toBe(false);
 });
 
 

@@ -91,9 +91,12 @@ test("ticking a folder ticks its playlists, and a device shows what it holds", a
   await expect(tree.getByRole("checkbox", { name: "CURRENT" })).toHaveAttribute("aria-checked", "mixed");
 
   // TEST is rekordbox's stick: it holds playlists but remembers no selection.
-  // Its playlists show without ticking or opening it (#178), and nothing is
-  // ticked for it from their names.
+  // It starts closed; opening it shows its playlists without ticking it, and
+  // nothing is ticked for it from their names.
   const library = dialog.getByLabel("TEST library");
+  await expect(dialog.getByRole("checkbox", { name: "TEST", exact: true })).not.toBeChecked();
+  await expect(library).toBeHidden();
+  await dialog.getByRole("button", { name: "Expand TEST", exact: true }).click();
   await expect(dialog.getByRole("checkbox", { name: "TEST", exact: true })).not.toBeChecked();
   await expect(library).toContainText("Device Library");
   await expect(library).toContainText("Main Set");
@@ -117,6 +120,8 @@ test("SYNC writes the ticked playlists to both sticks, reports on each, and Clos
   await expect(dialog.getByLabel("DJ STICK export report")).toContainText(/\d+ tracks updated/);
   await expect(dialog.getByLabel("TEST export report")).toContainText(/\d+ tracks updated/);
   // Both sticks now hold the one playlist, and say so.
+  await dialog.getByRole("button", { name: "Expand DJ STICK", exact: true }).click();
+  await dialog.getByRole("button", { name: "Expand TEST", exact: true }).click();
   await expect(dialog.getByLabel("DJ STICK library")).toContainText("Melodic Vox");
   await expect(dialog.getByLabel("TEST library")).toContainText("Melodic Vox");
   await expect(dialog.getByLabel("TEST library")).not.toContainText("Main Set");
@@ -161,10 +166,12 @@ test("reopened, it shows the stick's playlists and ticks what it was last synced
   dialog = page.getByRole("dialog", { name: "Sync Manager" });
   tree = dialog.getByRole("tree", { name: "Playlists", exact: true });
   // Without a click: the stick with a record is chosen and its selection is
-  // back, and every stick's playlists are on show.
+  // back. Opened, each stick shows its playlists.
   await expect(dialog.getByRole("checkbox", { name: "DJ STICK", exact: true })).toBeChecked();
   await expect(tree.getByRole("checkbox", { name: "Hardstyle" })).toBeChecked();
   await expect(tree.getByRole("checkbox", { name: "Melodic Vox" })).not.toBeChecked();
+  await dialog.getByRole("button", { name: "Expand DJ STICK", exact: true }).click();
+  await dialog.getByRole("button", { name: "Expand TEST", exact: true }).click();
   await expect(dialog.getByLabel("DJ STICK library")).toContainText("Hardstyle");
   await expect(dialog.getByLabel("TEST library")).toContainText("Main Set");
   // TEST has no record, so it is not chosen.
@@ -213,6 +220,7 @@ test("the [Playlists] box selects every playlist, shows mixed, and SYNC writes t
   await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
   await dialog.getByRole("button", { name: "SYNC", exact: true }).click();
   await expect(dialog.getByLabel("DJ STICK export report")).toContainText(/\d+ tracks updated/);
+  await dialog.getByRole("button", { name: "Expand DJ STICK", exact: true }).click();
   await expect(dialog.getByLabel("DJ STICK library")).toContainText("Melodic Vox");
   await expect(dialog.getByLabel("DJ STICK library")).toContainText("Hardstyle");
 
