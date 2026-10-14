@@ -98,6 +98,8 @@ pub struct MonoStream {
     source_channels: u16,
     buffer: Option<SampleBuffer<f32>>,
     mono: Vec<f32>,
+    /// The same frames as 16-bit stereo: see [`MonoStream::next_frames`].
+    stereo: Vec<[i16; 2]>,
     /// What is left of the file's lead on rekordbox's timeline: frames of
     /// silence still to hand out when positive, decoded frames still to drop
     /// when negative. See [`rekordbox_lead`].
@@ -151,7 +153,7 @@ impl MonoStream {
             .map_or(2, |c| u16::try_from(c.count()).unwrap_or(2));
         let lead = rekordbox_lead(path, track.codec_params.codec);
         let expected = track.codec_params.n_frames.map(|frames| frames.saturating_add_signed(lead));
-        Ok(Self { format, decoder, track_id, sample_rate, source_channels, buffer: None, mono: Vec::new(), lead, expected })
+        Ok(Self { format, decoder, track_id, sample_rate, source_channels, buffer: None, mono: Vec::new(), stereo: Vec::new(), lead, expected })
     }
 
     /// How many samples the stream is expected to hand out in all, from the
@@ -172,6 +174,14 @@ impl MonoStream {
         self.source_channels
     }
 
+    /// The next packet's samples, downmixed, beside the same frames as
+    /// 16-bit stereo: what rekordbox's waveform analysis reads, one channel
+    /// twice for a mono file and the first two of any more.
+    pub fn next_frames(&mut self) -> Option<(&[f32], &[[i16; 2]])> {
+        self.next_chunk()?;
+        Some((&self.mono, &self.stereo))
+    }
+
     /// The next packet's samples, downmixed; `None` at the end of the file.
     ///
     /// `next_packet` reports the end of the stream as an error, so any error
@@ -179,8 +189,11 @@ impl MonoStream {
     /// discarding what came before it.
     pub fn next_chunk(&mut self) -> Option<&[f32]> {
         if self.lead > 0 {
+            let lead = usize::try_from(self.lead).unwrap_or(0);
             self.mono.clear();
-            self.mono.resize(usize::try_from(self.lead).unwrap_or(0), 0.0);
+            self.mono.resize(lead, 0.0);
+            self.stereo.clear();
+            self.stereo.resize(lead, [0, 0]);
             self.lead = 0;
             return Some(&self.mono);
         }
@@ -195,8 +208,11 @@ impl MonoStream {
                 // as it does in rekordbox: dropping it would move everything
                 // after it earlier.
                 Err(symphonia::core::errors::Error::DecodeError(_)) => {
+                    let silence = usize::try_from(packet.dur).unwrap_or(0);
                     self.mono.clear();
-                    self.mono.resize(usize::try_from(packet.dur).unwrap_or(0), 0.0);
+                    self.mono.resize(silence, 0.0);
+                    self.stereo.clear();
+                    self.stereo.resize(silence, [0, 0]);
                     if self.drop_lead() {
                         return Some(&self.mono);
                     }
@@ -216,6 +232,10 @@ impl MonoStream {
             let channels = spec.channels.count().max(1);
             self.mono.clear();
             self.mono.extend(interleaved.samples().chunks(channels).map(|frame| frame.iter().sum::<f32>() / channels as f32));
+            self.stereo.clear();
+            self.stereo.extend(
+                interleaved.samples().chunks(channels).map(|frame| [to_i16(frame[0]), to_i16(*frame.get(1).unwrap_or(&frame[0]))]),
+            );
             if self.drop_lead() {
                 return Some(&self.mono);
             }
@@ -229,10 +249,17 @@ impl MonoStream {
             let owed = usize::try_from(self.lead.unsigned_abs()).unwrap_or(usize::MAX);
             let dropped = owed.min(self.mono.len());
             self.mono.drain(..dropped);
+            self.stereo.drain(..dropped);
             self.lead += dropped as i64;
         }
         !self.mono.is_empty()
     }
+}
+
+/// A decoded sample as a 16-bit decode holds it: symphonia's own conversion,
+/// so the frames match what decoding straight to `i16` gives.
+fn to_i16(sample: f32) -> i16 {
+    (sample.clamp(-1.0, 1.0) * 32_768.0) as i16
 }
 
 /// Writes the stretch of a file between `from_secs` and `to_secs` as a
@@ -396,6 +423,32 @@ mod tests {
         // The mono mix of the ramp from 0.5 s: half of 0.25.
         assert!((back.samples[0] - 0.125).abs() < 0.01, "{}", back.samples[0]);
         assert!(write_range_wav(&source, 1.0, 0.5, &out).is_err());
+    }
+
+    /// rekordbox's waveforms read both channels, so the stream hands out each
+    /// chunk's frames as the file holds them beside the downmix; a mono file's
+    /// one channel stands for both.
+    #[test]
+    fn the_frames_beside_the_downmix_are_the_files_own_stereo() {
+        let dir = tempfile::tempdir().unwrap();
+        let stereo = dir.path().join("stereo.wav");
+        let samples: Vec<f32> = (0..2_000).flat_map(|i| [i as f32 / 4_000.0, -0.25]).collect();
+        write_wav(&stereo, 8_000, 2, &samples);
+        let mut stream = MonoStream::open(&stereo).unwrap();
+        let mut frames = Vec::new();
+        while let Some((mono, chunk)) = stream.next_frames() {
+            assert_eq!(mono.len(), chunk.len());
+            frames.extend_from_slice(chunk);
+        }
+        let written = |x: f32| (x * 32767.0) as i16;
+        assert_eq!(frames.len(), 2_000);
+        assert_eq!(frames[1_000], [written(0.25), written(-0.25)]);
+
+        let mono = dir.path().join("mono.wav");
+        write_wav(&mono, 8_000, 1, &[0.5; 100]);
+        let mut stream = MonoStream::open(&mono).unwrap();
+        let (_, chunk) = stream.next_frames().unwrap();
+        assert_eq!(chunk[0], [written(0.5), written(0.5)]);
     }
 
     #[test]
