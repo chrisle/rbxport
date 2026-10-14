@@ -51,7 +51,10 @@ pub enum AnlzError {
 
 pub type Result<T> = std::result::Result<T, AnlzError>;
 
-pub use encode::{author, author_with_overview, share_tree_ppth, AnalysisFiles, BandColumn, Existing};
+pub use encode::{
+    author, author_with_overview, author_with_rekordbox_waves, share_tree_ppth, AnalysisFiles, BandColumn, Existing,
+    RekordboxWaves,
+};
 pub use phrase::{Mood, Phrase, PhraseEdit, SongStructure};
 pub use vocal::{VOCAL_FRAME_MS, VOCAL_MAX};
 pub use write::AnlzBuilder;

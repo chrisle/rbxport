@@ -32,9 +32,16 @@ records the algorithms, measured errors, and remaining limitations.
 
 ## Packing and persistence
 
+The app writes `PWVC`, `PWV3`, `PWV4`, `PWV5`, `PWV6` and `PWV7` as rekordbox
+computes them itself, from `src/wave_creator.rs`; see
+[rekordbox's colour and 3-band waveforms](rekordbox-waveforms.md). The columns
+here still give `PWAV` and `PWV2`, and the helpers for the other
+representations remain for callers that have only columns.
+
 The crate has helpers for PWAV, PWV2, PWV3, PWV4, and PWV5 representations.
 Their counts and bit layouts are tested in `src/waveform.rs`. Two PWV4 bytes
-remain `[UNKNOWN]` and are written zero; retain that evidence boundary.
+remain `[UNKNOWN]` in that column encoding and are written zero; rekordbox's
+own values for them are in the `wave_creator` reference.
 
 Complete ANLZ framing and production PWV6/PWV7 encoding belong to
 `rbl-anlz`, not this crate. Use the [USB format reference](../../../../docs/reference/usb-export-db.md#waveforms)
