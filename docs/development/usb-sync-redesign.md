@@ -650,6 +650,22 @@ where the `PIONEER` export showed the stick's 0.2 GB; browsing and playback
 were unaffected. Whether a physical CDJ-3000 shows the same is [UNKNOWN]. Evidence:
 `rbxport-private/verification/e2e-usb-formats/20261013-150858-sticks-as-they-are`.
 
+HFS+ layouts, same day, each from a fresh export to the physical sticks and
+copied into an image Disk Utility formatted (`diskutil eraseDisk`), all on one
+CDJ-3000 3.20 deck. [OBS] Every one mounted as `hfsplus` read-write and passed
+4 of 4 (every track loads, plays and keeps playing):
+
+| Image | Partition mounted | Export root |
+| --- | --- | --- |
+| Journaled HFS+, GUID (EFI, then HFS+) | `sda2` | `.PIONEER` |
+| HFS+ (not journaled), GUID | `sda2` | `.PIONEER` |
+| Journaled HFS+, MBR | `sda1` | `.PIONEER` |
+| Journaled HFS+, GUID, holding a `PIONEER` library | `sda2` | `PIONEER` |
+
+The last one showed the stick's own 2.7 GB on SOURCE, so the 5.8 GB readout
+follows the `.PIONEER` root rather than the filesystem. Evidence:
+`rbxport-private/verification/e2e-usb-formats/20261013-203545-hfs-exports`.
+
 Compatibility note: database/request/recipe signatures and converted cache
 digests use BLAKE3; existing media/analysis comparison hashes retain the legacy
 FNV representation. The slow integrity option checks source and USB contents,
