@@ -144,13 +144,7 @@ pub(crate) fn default_library_dir() -> Result<PathBuf> {
 /// is set to use, else the one chosen in this application. See
 /// [`locate`](mod@locate) for the order and what happens when it is missing.
 pub fn detect() -> Result<LibraryLocation> {
-    match locate::locate()? {
-        locate::Located::Found { location, .. } => Ok(location),
-        locate::Located::Unavailable { master_db, .. } => {
-            Err(DbError::NotInstalled(format!("{} is not there; is its drive connected?", master_db.display())))
-        }
-        locate::Located::Absent { master_db } => Err(DbError::NotInstalled(format!("{} not found", master_db.display()))),
-    }
+    locate::locate()?.into_location()
 }
 
 /// The entries of rekordbox's agent `options.json` this application reads.

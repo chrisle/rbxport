@@ -125,10 +125,12 @@ pub fn plan() -> Result<Option<Plan>> {
 /// holds no database. `None` when there is a library to open, and when the
 /// configured library is on a drive that is missing: rekordbox asks for the
 /// drive instead, and only its "open Master Database in the default drive"
-/// (`locate::use_default`) leads back here.
+/// (`locate::use_default`) leads back here. `None` too when the default
+/// folder is a drive's export reached through a link
+/// ([`Located::DeviceExport`]).
 pub fn plan_with(sources: &Sources) -> Result<Option<Plan>> {
     let master_db = match locate_with(sources)? {
-        Located::Found { .. } | Located::Unavailable { .. } => return Ok(None),
+        Located::Found { .. } | Located::Unavailable { .. } | Located::DeviceExport { .. } => return Ok(None),
         Located::Absent { master_db } => master_db,
     };
     if master_db.exists() {
@@ -149,6 +151,11 @@ pub fn create(plan: &Plan) -> Result<LibraryLocation> {
         .master_db
         .parent()
         .ok_or_else(|| DbError::Open(format!("{} has no folder", plan.master_db.display())))?;
+    // Planned before, and looked at again: a stick's export is never where
+    // a library is made, even one linked into place since (#422).
+    if crate::locate::is_device_export(dir) {
+        return Err(DbError::Open(Located::device_export_message(dir, crate::locate::resolved(dir).as_deref())));
+    }
     let share_root = dir.join("share");
     for folder in ["PIONEER/Artwork", "PIONEER/USBANLZ"] {
         std::fs::create_dir_all(share_root.join(folder))?;
@@ -443,6 +450,82 @@ mod tests {
 
         assert!(create(&plan).is_err());
         assert_eq!(std::fs::read(library.join("master.db")).unwrap(), b"someone else's");
+    }
+
+    /// A stick's `PIONEER` folder under `root/stick`, with what rekordbox
+    /// exports there, and every file in it.
+    fn stick(root: &Path) -> (PathBuf, Vec<(PathBuf, Vec<u8>)>) {
+        let pioneer = root.join("stick/PIONEER");
+        std::fs::create_dir_all(pioneer.join("rekordbox")).unwrap();
+        std::fs::create_dir_all(pioneer.join("USBANLZ/P016/0000875E")).unwrap();
+        std::fs::write(pioneer.join("rekordbox/export.pdb"), b"the players' library").unwrap();
+        std::fs::write(pioneer.join("rekordbox/exportLibrary.db"), b"the OneLibrary database").unwrap();
+        std::fs::write(pioneer.join("USBANLZ/P016/0000875E/ANLZ0000.DAT"), b"analysis").unwrap();
+        let files = contents(&root.join("stick"));
+        (pioneer, files)
+    }
+
+    fn contents(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut found = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(next) = stack.pop() {
+            for entry in std::fs::read_dir(&next).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path.clone());
+                    found.push((path, Vec::new()));
+                } else {
+                    let bytes = std::fs::read(&path).unwrap();
+                    found.push((path, bytes));
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
+    /// #422: `%APPDATA%\Pioneer` linked to a stick's `D:\PIONEER`. The
+    /// stick's export is not a library, and none is made on it.
+    #[cfg(unix)]
+    #[test]
+    fn no_library_is_made_through_a_pioneer_folder_linked_to_a_stick() {
+        let (root, sources, library) = fresh();
+        let (pioneer, before) = stick(root.path());
+        std::os::unix::fs::symlink(&pioneer, root.path().join("Pioneer")).unwrap();
+
+        assert_eq!(plan_with(&sources).unwrap(), None, "nothing is offered");
+        let earlier = Plan { master_db: library.join("master.db"), passphrase: sources.passphrase().unwrap() };
+        let refused = create(&earlier).unwrap_err().to_string();
+        assert!(refused.contains("is in a USB drive's export"), "{refused}");
+        assert_eq!(contents(&root.path().join("stick")), before, "the stick is as it was");
+        assert!(!pioneer.join("rekordbox/master.db").exists());
+    }
+
+    /// The same, for a plan made before the link was: making it looks again.
+    #[test]
+    fn a_plan_is_not_carried_out_in_an_export() {
+        let root = tempfile::tempdir().unwrap();
+        let (pioneer, before) = stick(root.path());
+        let plan = Plan {
+            master_db: pioneer.join("rekordbox/master.db"),
+            passphrase: crate::key::derive_password(crate::key::REKORDBOX_DP).unwrap(),
+        };
+        assert!(create(&plan).is_err());
+        assert_eq!(contents(&root.path().join("stick")), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pioneer_folder_linked_to_another_drive_still_gets_a_library() {
+        // rekordbox's folders moved to an SSD with a link: not an export.
+        let (root, sources, library) = fresh();
+        let elsewhere = root.path().join("Volumes/SSD/Pioneer");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, root.path().join("Pioneer")).unwrap();
+        let plan = plan_with(&sources).unwrap().expect("a plan");
+        assert_eq!(plan.master_db, library.join("master.db"));
+        create(&plan).unwrap();
+        assert!(elsewhere.join("rekordbox/master.db").is_file());
     }
 
     #[test]

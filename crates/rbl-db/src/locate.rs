@@ -60,6 +60,24 @@
 //!    [`Located::Unavailable`], and no library is ever made there; a
 //!    missing library in the default folder is [`Located::Absent`], and one
 //!    may be made there.
+//! 4. Unless the default folder is a drive's export: rekordbox's folders
+//!    pointed at a stick's `PIONEER` folder with a symbolic link or
+//!    junction, so that `…/Pioneer/rekordbox` is the stick's
+//!    `PIONEER/rekordbox`, which holds `export.pdb` and `exportLibrary.db`
+//!    and never a `master.db`. That is [`Located::DeviceExport`]: an export
+//!    is not a library, and nothing is made on the stick (#422).
+//!
+//! # A drive's export, seen through rekordbox's folders
+//!
+//! A rekordbox export is `PIONEER/rekordbox/export.pdb` (the players'
+//! Device SQL library), `PIONEER/rekordbox/exportLibrary.db` (the One Library database) and
+//! `PIONEER/USBANLZ/` (analysis), with the root spelled `PIONEER` or
+//! `.PIONEER` (alphatheta-docs `platform/rekordbox-usb-layout.md`, "Export
+//! assets and their consumers"). A library folder holds `master.db` and
+//! `share/`, its analysis under `share/PIONEER/USBANLZ`, so none of those
+//! marks are ever in the library folder or the folder above it. The marks
+//! are looked for through the links, as every other read here is; the link
+//! is only resolved to name the drive in the message.
 
 use std::path::{Path, PathBuf};
 
@@ -79,6 +97,68 @@ pub enum Located {
     /// There is no library in the default folder, which is where one may be
     /// made.
     Absent { master_db: PathBuf },
+    /// There is no library in the default folder, and that folder is in a
+    /// drive's export (its `PIONEER/rekordbox`, or the `PIONEER` folder
+    /// itself), reached through a link: nothing may be made there.
+    /// `resolved` is where the default folder leads, when it resolves.
+    DeviceExport { default_dir: PathBuf, resolved: Option<PathBuf> },
+}
+
+impl Located {
+    /// The library found, or why there is none as an error.
+    pub fn into_location(self) -> Result<LibraryLocation> {
+        match self {
+            Self::Found { location } => Ok(location),
+            Self::Unavailable { master_db, .. } => {
+                Err(DbError::NotInstalled(format!("{} is not there; is its drive connected?", master_db.display())))
+            }
+            Self::Absent { master_db } => Err(DbError::NotInstalled(format!("{} not found", master_db.display()))),
+            Self::DeviceExport { default_dir, resolved } => {
+                Err(DbError::NotInstalled(Self::device_export_message(&default_dir, resolved.as_deref())))
+            }
+        }
+    }
+
+    /// Why there is nothing to open, for a [`Located::DeviceExport`]:
+    /// `default_dir` is rekordbox's default library folder, and `resolved`
+    /// where it leads.
+    #[must_use]
+    pub fn device_export_message(default_dir: &Path, resolved: Option<&Path>) -> String {
+        let shown = match resolved {
+            Some(target) if target != default_dir => format!("{} ({})", default_dir.display(), target.display()),
+            _ => default_dir.display().to_string(),
+        };
+        format!(
+            "{shown} is in a USB drive's export, not a rekordbox library, so no library was made there. \
+             Remove the link that leads there, and open the drive from Devices."
+        )
+    }
+}
+
+/// Whether `default_dir`, rekordbox's default library folder, is in a
+/// drive's export. See the module docs: it is the export's
+/// `PIONEER/rekordbox` when the `rekordbox` folder or the `Pioneer` folder
+/// above it links to a drive, and the `PIONEER` folder itself when
+/// `rekordbox` links straight to it.
+#[must_use]
+pub fn is_device_export(default_dir: &Path) -> bool {
+    let exports = |pioneer: &Path| {
+        pioneer.join("rekordbox/export.pdb").is_file()
+            || pioneer.join("rekordbox/exportLibrary.db").is_file()
+            || pioneer.join("USBANLZ").is_dir()
+    };
+    exports(default_dir) || default_dir.parent().is_some_and(exports)
+}
+
+/// `dir` with its links resolved, as a person would type it: without the
+/// `\\?\` Windows puts in front of a resolved path.
+pub(crate) fn resolved(dir: &Path) -> Option<PathBuf> {
+    let target = std::fs::canonicalize(dir).ok()?;
+    let text = target.to_string_lossy();
+    Some(match text.strip_prefix(r"\\?\UNC\") {
+        Some(share) => PathBuf::from(format!(r"\\{share}")),
+        None => text.strip_prefix(r"\\?\").map_or_else(|| target.clone(), PathBuf::from),
+    })
 }
 
 /// The files [`locate`] reads, so a test can point each at a folder of its own.
@@ -255,6 +335,9 @@ pub fn locate_with(sources: &Sources) -> Result<Located> {
     let default_master_db = sources.default_master_db();
     if master_db != default_master_db {
         return Ok(Located::Unavailable { master_db, default_master_db });
+    }
+    if is_device_export(&sources.default_dir) {
+        return Ok(Located::DeviceExport { default_dir: sources.default_dir.clone(), resolved: resolved(&sources.default_dir) });
     }
     Ok(Located::Absent { master_db })
 }
@@ -507,6 +590,129 @@ mod tests {
         assert!(!drive.exists(), "nothing is made on the missing drive");
         assert!(!sources.default_master_db().exists(), "nor in the default folder");
         assert!(matches!(locate_with(&sources).unwrap(), Located::Absent { .. }));
+    }
+
+    /// A stick's export under `root/stick`, as rekordbox writes one: its
+    /// `PIONEER` folder.
+    fn stick(root: &Path) -> PathBuf {
+        let pioneer = root.join("stick/PIONEER");
+        std::fs::create_dir_all(pioneer.join("rekordbox")).unwrap();
+        std::fs::create_dir_all(pioneer.join("USBANLZ/P000/00000001")).unwrap();
+        std::fs::write(pioneer.join("rekordbox/export.pdb"), b"pdb").unwrap();
+        std::fs::write(pioneer.join("rekordbox/exportLibrary.db"), b"one library").unwrap();
+        pioneer
+    }
+
+    /// Everything under `dir`, to show nothing was added.
+    fn tree(dir: &Path) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(next) = stack.pop() {
+            for entry in std::fs::read_dir(&next).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path.clone());
+                }
+                found.push(path);
+            }
+        }
+        found.sort();
+        found
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pioneer_folder_linked_to_a_stick_is_a_device_export_not_absent() {
+        // #422: `%APPDATA%\Pioneer` made a link to `D:\PIONEER`.
+        let (root, sources) = machine();
+        let pioneer = stick(root.path());
+        std::os::unix::fs::symlink(&pioneer, root.path().join("Pioneer")).unwrap();
+
+        match locate_with(&sources).unwrap() {
+            Located::DeviceExport { default_dir, resolved } => {
+                assert_eq!(default_dir, sources.default_dir);
+                assert_eq!(resolved, Some(pioneer.join("rekordbox").canonicalize().unwrap()));
+            }
+            other => panic!("expected a device export, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_rekordbox_folder_linked_to_a_stick_s_pioneer_folder_is_a_device_export() {
+        let (root, sources) = machine();
+        let pioneer = stick(root.path());
+        std::fs::create_dir_all(root.path().join("Pioneer")).unwrap();
+        std::os::unix::fs::symlink(&pioneer, &sources.default_dir).unwrap();
+        assert!(matches!(locate_with(&sources).unwrap(), Located::DeviceExport { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_rekordbox_folder_linked_to_a_stick_s_rekordbox_folder_is_a_device_export() {
+        let (root, sources) = machine();
+        let pioneer = stick(root.path());
+        std::fs::create_dir_all(root.path().join("Pioneer")).unwrap();
+        std::os::unix::fs::symlink(pioneer.join("rekordbox"), &sources.default_dir).unwrap();
+        assert!(matches!(locate_with(&sources).unwrap(), Located::DeviceExport { .. }));
+    }
+
+    #[test]
+    fn each_mark_of_an_export_is_enough() {
+        for mark in ["rekordbox/export.pdb", "rekordbox/exportLibrary.db"] {
+            let root = tempfile::tempdir().unwrap();
+            let file = root.path().join("PIONEER").join(mark);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, b"x").unwrap();
+            assert!(is_device_export(&root.path().join("PIONEER/rekordbox")), "{mark}");
+            assert!(is_device_export(&root.path().join("PIONEER")), "{mark}");
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".PIONEER/USBANLZ")).unwrap();
+        assert!(is_device_export(&root.path().join(".PIONEER/rekordbox")), "the hidden root, as on HFS");
+    }
+
+    #[test]
+    fn a_library_folder_is_not_mistaken_for_an_export() {
+        let (_root, sources) = machine();
+        // A library's own analysis lives under share/PIONEER/USBANLZ.
+        std::fs::create_dir_all(sources.default_dir.join("share/PIONEER/USBANLZ")).unwrap();
+        std::fs::create_dir_all(sources.default_dir.parent().unwrap().join("rekordbox6")).unwrap();
+        assert!(!is_device_export(&sources.default_dir));
+        assert!(matches!(locate_with(&sources).unwrap(), Located::Absent { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pioneer_folder_linked_to_another_drive_s_empty_folder_is_still_absent() {
+        // Moving rekordbox's folders to another drive with a link is not an export.
+        let (root, sources) = machine();
+        let elsewhere = root.path().join("Volumes/SSD/Pioneer");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, root.path().join("Pioneer")).unwrap();
+        assert!(matches!(locate_with(&sources).unwrap(), Located::Absent { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn looking_at_a_linked_stick_writes_nothing_on_it() {
+        let (root, sources) = machine();
+        let pioneer = stick(root.path());
+        std::os::unix::fs::symlink(&pioneer, root.path().join("Pioneer")).unwrap();
+        let before = tree(&root.path().join("stick"));
+        let error = locate_with(&sources).unwrap().into_location().unwrap_err().to_string();
+        assert!(error.contains("is in a USB drive's export"), "{error}");
+        assert_eq!(tree(&root.path().join("stick")), before);
+    }
+
+    #[test]
+    fn the_device_export_message_names_both_folders() {
+        let link = Path::new("C:/Users/Admin/AppData/Roaming/Pioneer/rekordbox");
+        let message = Located::device_export_message(link, Some(Path::new("D:/PIONEER/rekordbox")));
+        assert!(message.starts_with("C:/Users/Admin/AppData/Roaming/Pioneer/rekordbox (D:/PIONEER/rekordbox) is in a USB drive's export"), "{message}");
+        assert!(message.contains("no library was made there"), "{message}");
+        let same = Located::device_export_message(link, Some(link));
+        assert!(!same.contains('('), "the folder is named once when it is not a link: {same}");
     }
 
     #[test]
