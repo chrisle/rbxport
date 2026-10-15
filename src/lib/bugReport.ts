@@ -44,11 +44,16 @@ export function readReceipt(value: unknown): BugReportReceipt | null {
   };
 }
 
+/**
+ * Send a report. The email travels in its own field, whether or not the log is
+ * attached: the report service keeps it in the report's private archive and
+ * never puts it on the public issue, which gets only the description.
+ */
 export async function submitBugReport(submission: BugReportSubmission): Promise<BugReportReceipt> {
   const response = await fetch(REPORT_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(submission),
+    body: JSON.stringify({ ...submission, email: submission.email.trim() }),
   });
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {

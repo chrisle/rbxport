@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { formatBugReportAttachment, readReceipt } from "./bugReport";
+import { formatBugReportAttachment, readReceipt, submitBugReport } from "./bugReport";
 
 describe("formatBugReportAttachment", () => {
   it("includes the current email and every supplied preference before the diagnostic log", () => {
@@ -52,5 +52,28 @@ describe("readReceipt", () => {
   it("rejects a response that is not a receipt", () => {
     expect(readReceipt(null)).toBeNull();
     expect(readReceipt({ url: "https://github.com/chrisle/rbxport/issues/42" })).toBeNull();
+  });
+});
+
+describe("submitBugReport", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function stubService() {
+    const fetch = vi.fn((_url: string, _init: { body: string }) =>
+      Promise.resolve(new Response(JSON.stringify({ key: "#42", attachmentAdded: true }), { status: 200 })));
+    vi.stubGlobal("fetch", fetch);
+    return () => JSON.parse(fetch.mock.calls[0]?.[1].body ?? "null") as Record<string, unknown>;
+  }
+
+  it("sends the trimmed email in its own field, apart from the public description", async () => {
+    const sent = stubService();
+    await submitBugReport({ email: "  dj@example.test ", description: "Playback stopped.", attachment: "", turnstileToken: "t" });
+    expect(sent()).toEqual({ email: "dj@example.test", description: "Playback stopped.", attachment: "", turnstileToken: "t" });
+  });
+
+  it("sends a blank email as an empty string", async () => {
+    const sent = stubService();
+    await submitBugReport({ email: "   ", description: "Playback stopped.", attachment: "log", turnstileToken: "t" });
+    expect(sent().email).toBe("");
   });
 });
