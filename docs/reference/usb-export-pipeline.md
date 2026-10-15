@@ -553,10 +553,10 @@ is reported as `ExportError::Cancelled`.
 before, a sync now does what rekordbox's does with a track added on the
 stick to a synced playlist (#429, after the research in #309):
 
-| A track was added on the stick to a synced playlist, then… | rekordbox 7.2.14 [OBS] | rbxport, stick with its manifest | rbxport, stick without a manifest (as rekordbox leaves one) [OBS #309] |
+| A track was added on the stick to a synced playlist, then… | rekordbox 7.2.14 [OBS] | rbxport, stick with its manifest | rbxport, stick rekordbox synced, no manifest (#471) |
 | --- | --- | --- | --- |
-| …sync, library playlist unchanged | keeps the added entry; writes nothing to the databases | keeps the added entry, in both databases, and at every later sync while the library's playlist stays unchanged | takes the entry out; the track stays on the stick |
-| …sync, library playlist changed | rewrites the playlist from the library: the entry is gone, the track stays on the stick | rewrites the playlist from the library; the track stays on the stick, in no playlist | rewrites the playlist from the library, as rekordbox does |
+| …sync, library playlist unchanged | keeps the added entry; writes nothing to the databases | keeps the added entry, in both databases, and at every later sync while the library's playlist stays unchanged | keeps the added entry, in both databases; later syncs go by the manifest this one writes |
+| …sync, library playlist changed | rewrites the playlist from the library: the entry is gone, the track stays on the stick | rewrites the playlist from the library; the track stays on the stick, in no playlist | rewrites the playlist from the library; the track stays on the stick, in no playlist |
 
 `reconcile::device_additions` makes the call. The manifest records each
 selected playlist's library entries, by track key
@@ -579,14 +579,39 @@ or an edit in one database alone, as a player makes [UNKNOWN: what
 rekordbox does with each of those; observing one needs the #309 setup with
 that edit in step 2].
 
-A stick without a manifest still takes the added entry out at the first
-sync from here: telling an unchanged library playlist there needs the
-library entries' change times to set against the sync record's
-`Timestamp`, which the export is not given.
+A stick rekordbox synced has no manifest, only rekordbox's sync record.
+There `reconcile::rekordbox_device_additions` goes by the record's
+`Timestamp` for the playlist, which is when the library playlist's entries
+last changed ([§10](usb-export-db.md#10-sync-records)). The export is given
+the library's own time for each plain playlist,
+`SourcePlaylist::entries_changed_ms`: the latest `created_at` of its live
+`djmdSongPlaylist` rows (`rbl_db::export_info::playlist_entries_changed`).
+When the two are within a second (`SAME_CHANGE_MS`; rekordbox recorded
+`.155` for an entry created at `.154` [OBS #309]), the library playlist is
+unchanged and the stick's copy is written as it is, under the same rule as
+above: the library's entries in their order plus entries added on the
+stick, the same in both databases. Otherwise, or with no record from this
+library, no time for the playlist (an empty one, or an intelligent
+playlist), or a time with no offset, the playlist is written from the
+library, as the first sync from here always did. The record keeps
+rekordbox's time ([`sync_record::write`](../../crates/rbl-export/src/sync_record.rs)),
+and later syncs go by the manifest. [ASSUME] The latest `created_at` is
+rekordbox's value: it matched both observed records, but a removal or
+reorder in the library was not tried. A removal leaves the remaining
+entries' times as they were, so a playlist the library removed an entry
+from, and that the stick also added to, would keep the stick's copy
+[UNKNOWN: what rekordbox does there].
+
+When a playlist is rewritten over entries added on the stick, the added
+tracks stay on the stick as the stick's (`preserved`), as rekordbox leaves
+them. That holds for a track an earlier export put there for another
+playlist that this sync no longer selects: the #317 cleanup of this app's
+own deselected tracks would otherwise take it off (#471). [ASSUME]
+rekordbox does the same, since it kept the added track in no playlist at
+step 4; its handling of a deselected playlist's tracks was not observed.
 
 `crates/rbl-export/tests/device_playlist_edits.rs` runs the rekordbox steps
-on a temporary stick. The no-manifest column comes from the #309 fixture
-probes (`rbxport-worktrees/parity/issue-309/values-rbx-no-manifest-stick-309.txt`).
+on a temporary stick, with and without a manifest, using the #309 times.
 
 rekordbox's side is in
 [usb-export-db.md](usb-export-db.md#what-a-later-sync-does-to-a-playlist-edited-on-the-device).
