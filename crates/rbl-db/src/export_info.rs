@@ -73,15 +73,24 @@ pub fn db_id(conn: &Connection) -> Result<u64> {
 }
 
 /// When each of `ids`' entries last changed, as milliseconds since the
-/// epoch: the latest `djmdSongPlaylist.created_at` of its live entries,
-/// keyed by `djmdPlaylist.ID`.
+/// epoch, keyed by `djmdPlaylist.ID`: the latest of its live entries'
+/// `created_at` and of every entry's `updated_at`, live or removed.
 ///
-/// That is the value rekordbox's sync record keeps as a playlist's
-/// `Timestamp` [OBS rekordbox 7.2.14 for Windows, #309: `1791846371399` was
-/// the second entry's `created_at`, `23:06:11.399`; after a third entry
-/// created at `23:18:03.154` the record read `1791847083155`]. A sync can
-/// set it against a stick rekordbox made to tell whether the library's
-/// playlist changed since.
+/// The live entries' latest `created_at` is the value rekordbox's sync
+/// record keeps as a playlist's `Timestamp` [OBS rekordbox 7.2.14 for
+/// Windows, #309: `1791846371399` was the second entry's `created_at`,
+/// `23:06:11.399`; after a third entry created at `23:18:03.154` the record
+/// read `1791847083155`]. Its syncs left every entry's `updated_at` equal to
+/// its `created_at` [OBS #309 scratch library after three syncs], so where
+/// the library has only added entries since, this is that value too.
+///
+/// `updated_at` is what moves on any other edit. A removal keeps the row,
+/// sets `rb_local_deleted` and stamps `updated_at`, and the entries after
+/// it are renumbered, which stamps theirs (`write.rs`); a reorder stamps the
+/// entries it moves. Taking the latest of those makes such a playlist read
+/// as changed, rather than as unchanged because no entry was added. A sync
+/// can set the value against a stick rekordbox made to tell whether the
+/// library's playlist changed since.
 ///
 /// A playlist with no entries, or with one whose time does not read, is
 /// left out: there is nothing to compare.
@@ -95,16 +104,23 @@ pub fn playlist_entries_changed(conn: &Connection, ids: &[u64]) -> Result<HashMa
     for chunk in ids.chunks(900) {
         let marks = vec!["?"; chunk.len()].join(",");
         let mut stmt = conn.prepare(&format!(
-            "SELECT PlaylistID, created_at FROM djmdSongPlaylist
-             WHERE rb_local_deleted = 0 AND PlaylistID IN ({marks})"
+            "SELECT PlaylistID, COALESCE(rb_local_deleted, 0), created_at, updated_at FROM djmdSongPlaylist
+             WHERE PlaylistID IN ({marks})"
         ))?;
         let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0, r.get::<_, Option<String>>(2)?, r.get::<_, Option<String>>(3)?))
         })?;
+        let time = |stamp: Option<&str>| stamp.and_then(rbl_core::time::parse_millis);
         for row in rows {
-            let (playlist, created) = row?;
+            let (playlist, deleted, created, updated) = row?;
             let Ok(playlist) = playlist.trim().parse::<u64>() else { continue };
-            match created.as_deref().and_then(rbl_core::time::parse_millis) {
+            let updated = time(updated.as_deref());
+            let at = if deleted {
+                updated
+            } else {
+                time(created.as_deref()).zip(updated).map(|(created, updated)| created.max(updated))
+            };
+            match at {
                 Some(at) => {
                     let latest = out.entry(playlist).or_insert(at);
                     *latest = (*latest).max(at);
@@ -343,30 +359,37 @@ mod tests {
     use super::{playlist_entries_changed, track_extras, AnalysisFacts};
 
     /// The times are #309's scratch library's: `P309`'s entries as
-    /// rekordbox wrote them, against the `Timestamp` its sync record kept.
+    /// rekordbox left them after three syncs (`updated_at` equal to
+    /// `created_at`), against the `Timestamp` its sync record kept.
     #[test]
-    fn a_playlists_entries_changed_at_its_latest_live_entry() {
+    fn a_playlists_entries_changed_at_its_latest_entry_change() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE djmdSongPlaylist (PlaylistID TEXT, created_at TEXT, rb_local_deleted INTEGER);
+            "CREATE TABLE djmdSongPlaylist (PlaylistID TEXT, created_at TEXT, updated_at TEXT, rb_local_deleted INTEGER);
              INSERT INTO djmdSongPlaylist VALUES
-                ('3498738517', '2026-10-12 23:05:59.107 +00:00', 0),
-                ('3498738517', '2026-10-12 23:06:11.399 +00:00', 0),
-                ('3498738517', '2026-10-12 23:30:00.000 +00:00', 1),
-                ('7', '2026-10-12 23:06:11.399 +02:00', 0),
-                ('8', '2026-10-12 23:06:11', 0),
-                ('8', '2026-10-12 23:06:12.000 +00:00', 0);",
+                ('3498738517', '2026-10-12 23:05:59.107 +00:00', '2026-10-12 23:05:59.107 +00:00', 0),
+                ('3498738517', '2026-10-12 23:06:11.399 +00:00', '2026-10-12 23:06:11.399 +00:00', 0),
+                -- [A, X, B] with X removed later: X's row stays, stamped, and B is renumbered.
+                ('5', '2026-10-12 23:00:00.000 +00:00', '2026-10-12 23:00:00.000 +00:00', 0),
+                ('5', '2026-10-12 23:00:01.000 +00:00', '2026-10-12 23:40:00.000 +00:00', 1),
+                ('5', '2026-10-12 23:00:02.000 +00:00', '2026-10-12 23:40:00.000 +00:00', 0),
+                ('6', '2026-10-12 23:00:00.000 +00:00', '2026-10-12 23:00:00.000 +00:00', 0),
+                ('6', '2026-10-12 23:00:01.000 +00:00', '2026-10-12 23:41:00.000 +00:00', 1),
+                ('7', '2026-10-12 23:06:11.399 +02:00', '2026-10-12 23:06:11.399 +02:00', 0),
+                ('8', '2026-10-12 23:06:11', '2026-10-12 23:06:11', 0),
+                ('8', '2026-10-12 23:06:12.000 +00:00', '2026-10-12 23:06:12.000 +00:00', 0);",
         )
         .unwrap();
-        let changed = playlist_entries_changed(&conn, &[3_498_738_517, 7, 8, 9]).unwrap();
-        assert_eq!(changed.get(&3_498_738_517), Some(&1_791_846_371_399), "the record's Timestamp; the deleted entry does not count");
+        let changed = playlist_entries_changed(&conn, &[3_498_738_517, 5, 6, 7, 8, 9]).unwrap();
+        let at = |stamp: &str| rbl_core::time::parse_millis(stamp).unwrap();
+        assert_eq!(changed.get(&3_498_738_517), Some(&1_791_846_371_399), "the record's Timestamp");
+        assert_eq!(changed.get(&5), Some(&at("2026-10-12 23:40:00.000 +00:00")), "a removal in the middle moves it");
+        assert_eq!(changed.get(&6), Some(&at("2026-10-12 23:41:00.000 +00:00")), "so does removing the newest entry");
         assert_eq!(changed.get(&7), Some(&(1_791_846_371_399 - 2 * 3_600_000)), "an older row's local offset");
         assert!(!changed.contains_key(&8), "a time with no offset is not guessed at");
         assert!(!changed.contains_key(&9), "no entries");
     }
 
-    /// The export takes what analysis wrote from the row as it is now, not
-    /// from an index read before the analysis (#309).
     #[test]
     fn the_extras_carry_what_analysis_wrote_to_the_row() {
         let conn = Connection::open_in_memory().unwrap();

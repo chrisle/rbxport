@@ -153,10 +153,11 @@ fn device_additions(
 /// keeps for a playlist and the library entries' latest change time
 /// (`SourcePlaylist::entries_changed_ms`) may be and still be the same
 /// change. rekordbox recorded `1791846371399` for an entry created at
-/// `.399` and `1791847083155` for one created at `.154` [OBS #309]; a later
-/// change to the library's playlist comes after the sync that wrote the
-/// record, which takes longer than this.
-const SAME_CHANGE_MS: u64 = 1_000;
+/// `.399` (0 ms) and `1791847083155` for one created at `.154` (1 ms)
+/// [OBS #309]: its own clock against the millisecond the row keeps. Any
+/// library edit made since is later than the sync that wrote the record,
+/// which takes far longer than this.
+const SAME_CHANGE_MS: u64 = 2;
 
 /// [`device_additions`] for a stick rekordbox synced and rbxport has not:
 /// with no record of its own, it goes by rekordbox's. Its sync record keeps,

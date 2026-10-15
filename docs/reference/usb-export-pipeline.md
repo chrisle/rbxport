@@ -584,23 +584,34 @@ There `reconcile::rekordbox_device_additions` goes by the record's
 `Timestamp` for the playlist, which is when the library playlist's entries
 last changed ([§10](usb-export-db.md#10-sync-records)). The export is given
 the library's own time for each plain playlist,
-`SourcePlaylist::entries_changed_ms`: the latest `created_at` of its live
-`djmdSongPlaylist` rows (`rbl_db::export_info::playlist_entries_changed`).
-When the two are within a second (`SAME_CHANGE_MS`; rekordbox recorded
-`.155` for an entry created at `.154` [OBS #309]), the library playlist is
-unchanged and the stick's copy is written as it is, under the same rule as
-above: the library's entries in their order plus entries added on the
-stick, the same in both databases. Otherwise, or with no record from this
-library, no time for the playlist (an empty one, or an intelligent
-playlist), or a time with no offset, the playlist is written from the
-library, as the first sync from here always did. The record keeps
-rekordbox's time ([`sync_record::write`](../../crates/rbl-export/src/sync_record.rs)),
-and later syncs go by the manifest. [ASSUME] The latest `created_at` is
-rekordbox's value: it matched both observed records, but a removal or
-reorder in the library was not tried. A removal leaves the remaining
-entries' times as they were, so a playlist the library removed an entry
-from, and that the stick also added to, would keep the stick's copy
-[UNKNOWN: what rekordbox does there].
+`SourcePlaylist::entries_changed_ms`
+(`rbl_db::export_info::playlist_entries_changed`): the latest of its live
+`djmdSongPlaylist` rows' `created_at` and of every row's `updated_at`,
+removed rows included. Where the library only added entries, that is the
+latest `created_at`, which is what rekordbox recorded; its syncs left every
+entry's `updated_at` equal to its `created_at` [OBS #309 scratch library
+after three syncs, `rbxport-worktrees/parity/issue-471/values-scratch-entries-471.txt`].
+A removal stamps the removed row's `updated_at` and renumbers the rows after
+it, and a reorder stamps the rows it moves, so either moves the time and the
+playlist is written from the library.
+When the two times are within 2 ms (`SAME_CHANGE_MS`; rekordbox recorded
+`.155` for an entry created at `.154` and `.399` for one at `.399` [OBS
+#309]), the library playlist is unchanged and the stick's copy is written
+as it is, under the same rule as above: the library's entries in their
+order plus entries added on the stick, the same in both databases.
+Otherwise, or with no record from this library, no time for the playlist
+(an empty one, or an intelligent playlist), or a time with no offset, the
+playlist is written from the library, as the first sync from here always
+did. The record keeps rekordbox's time
+([`sync_record::write`](../../crates/rbl-export/src/sync_record.rs)), and
+later syncs go by the manifest. [ASSUME] rekordbox's own test is the same:
+the `Timestamp` matched both observed records, but a removal or reorder in
+the library was not tried with rekordbox, and neither was an entry removed
+before a rekordbox sync (its stamped row makes the playlist read as changed
+here, which writes it from the library). [UNKNOWN: whether rekordbox
+deletes an entry's row outright in some path; a removal of the newest
+entry with no row left would still move the time back, and any other with
+the later entries renumbered would still stamp them.]
 
 When a playlist is rewritten over entries added on the stick, the added
 tracks stay on the stick as the stick's (`preserved`), as rekordbox leaves

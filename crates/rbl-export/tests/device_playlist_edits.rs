@@ -344,6 +344,43 @@ mod rekordbox_made {
         assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2", "House 3", "Techno 1"]));
     }
 
+    /// A removal in the library is a change too, though it adds no entry:
+    /// it stamps the removed row's and the renumbered rows' `updated_at`,
+    /// which `entries_changed_ms` takes. Here House 2 is removed from the
+    /// library's P after rekordbox synced it, and Techno 1 added on the
+    /// stick. The stick's P holds the library's [House 1, House 3] in
+    /// order, but it is written from the library, so House 2 does not stay
+    /// in it; Techno 1 stays on the stick.
+    #[test]
+    fn a_library_removal_with_a_stick_addition_is_written_from_the_library() {
+        const HOUSE_2_REMOVED: u64 = HOUSE_3_ADDED + 60_000;
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let lib = library(src.path());
+        let techno = rekordbox_stick(&lib, dest.path(), &[0, 1, 3], DB_ID, RECORD_AFTER_HOUSE_3);
+        add_on_stick(dest.path(), &[Format::DeviceLibrary, Format::OneLibrary], "P", techno);
+        assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2", "House 3", "Techno 1"]));
+        let selection = [lib[0].clone(), lib[3].clone()];
+        for step in ["first sync", "again"] {
+            sync(dest.path(), &selection, &[changed_at(playlist(P, "P", &[0, 1]), Some(HOUSE_2_REMOVED))]).unwrap_or_else(|e| panic!("{step}: {e}"));
+            assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 3"]), "{step}");
+            techno_still_on_stick(dest.path(), step);
+        }
+    }
+
+    /// The margin is the millisecond rekordbox was seen to add, and no more:
+    /// a library time a few milliseconds off is another change.
+    #[test]
+    fn a_library_time_a_few_milliseconds_off_is_another_change() {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let lib = library(src.path());
+        let techno = rekordbox_stick(&lib, dest.path(), &[0, 1, 3], DB_ID, RECORD_AFTER_HOUSE_3);
+        add_on_stick(dest.path(), &[Format::DeviceLibrary, Format::OneLibrary], "P", techno);
+        let selection = [lib[0].clone(), lib[1].clone(), lib[3].clone()];
+        sync(dest.path(), &selection, &[changed_at(playlist(P, "P", &[0, 1, 2]), Some(RECORD_AFTER_HOUSE_3 + 5))]).unwrap();
+        assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2", "House 3"]));
+        techno_still_on_stick(dest.path(), "written from the library");
+    }
+
     /// Without the library's time, or with a record another library wrote,
     /// nothing tells an unchanged playlist: the sync writes it from the
     /// library, as the first sync from here always did.
