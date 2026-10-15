@@ -96,7 +96,7 @@ test("clicking the tempo readout toggles the tempo slider", async ({ page }) => 
   await expect(page.getByRole("slider", { name: "Tempo", exact: true })).toHaveCount(0);
 });
 
-test("View › Color offers the three palettes and the two hot cue colours, and keeps them", async ({ page }) => {
+test("View › Color offers the three palettes and the four hot cue colours, and keeps them", async ({ page }) => {
   await open(page);
   const dialog = await prefs(page);
   await dialog.getByRole("tab", { name: "Color" }).click();
