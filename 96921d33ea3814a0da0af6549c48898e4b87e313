@@ -1,0 +1,1 @@
+{"changes":["(Fixed) Reordering tracks while the list scrolls and dropping tracks or playlists onto the library tree no longer misses drops made just as the pointer reaches a row.","(Fixed) Clicking the waveform overview while a track is still loading now keeps the chosen position so playback starts from there."]}
