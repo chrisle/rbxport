@@ -93,6 +93,7 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
                 return;
             }
         }
+        backups::sweep_discarded(&app.state::<Arc<state::AppState>>().backup_destination());
         let cache_path = cache_path(&app);
         let snapshot = cache_path.clone().and_then(|path| {
             std::thread::Builder::new().name("startup-snapshot".into())

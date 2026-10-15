@@ -120,6 +120,89 @@ fn remove(path: &Path) -> AppResult<()> {
         Err(e) => Err(error(e)),
     }
 }
+/// Prefix of an unfinished backup that was set aside for deletion. Like
+/// `.partial-`, it is never listed, restored, or offered for deletion.
+const DISCARD_PREFIX: &str = ".discard-";
+
+/// Paths a background thread is deleting, so a sweep never starts a second
+/// deletion of the same tree.
+static DISCARDING: parking_lot::Mutex<std::collections::BTreeSet<PathBuf>> =
+    parking_lot::const_mutex(std::collections::BTreeSet::new());
+
+/// Held for writing by tests that need to see a tree before its deletion.
+#[cfg(test)]
+static HOLD_DISCARDS: parking_lot::RwLock<()> = parking_lot::const_rwlock(());
+
+/// Renames each existing path to a fresh `.discard-` name in `root`. A rename
+/// within one folder is a single directory operation however many files the
+/// tree holds. A path that cannot be renamed is returned as it is, to be
+/// deleted where it lies.
+fn set_aside(root: &Path, paths: &[&Path]) -> Vec<PathBuf> {
+    let mut doomed = Vec::new();
+    for path in paths {
+        if fs::symlink_metadata(path).is_err() {
+            continue;
+        }
+        let aside = root.join(format!("{DISCARD_PREFIX}{}", uuid::Uuid::new_v4()));
+        doomed.push(if fs::rename(path, &aside).is_ok() { aside } else { path.to_path_buf() });
+    }
+    doomed
+}
+
+/// Deletes `paths` on a background thread. Errors are only logged: whatever
+/// is left keeps its hidden name and the next sweep tries again.
+fn delete_in_background(paths: Vec<PathBuf>) {
+    let paths: Vec<_> = {
+        let mut busy = DISCARDING.lock();
+        paths.into_iter().filter(|path| busy.insert(path.clone())).collect()
+    };
+    if paths.is_empty() {
+        return;
+    }
+    let delete = |paths: &[PathBuf]| {
+        #[cfg(test)]
+        let _held = HOLD_DISCARDS.read();
+        for path in paths {
+            if let Err(e) = remove(path) {
+                tracing::warn!(path = %path.display(), error = %e, "could not delete an unfinished backup");
+            }
+        }
+        let mut busy = DISCARDING.lock();
+        for path in paths {
+            busy.remove(path);
+        }
+    };
+    let owned = paths.clone();
+    if std::thread::Builder::new()
+        .name("backup-discard".into())
+        .spawn(move || delete(&owned))
+        .is_err()
+    {
+        delete(&paths);
+    }
+}
+
+/// Stopping a backup used to delete its staging folder before the job could
+/// report "cancelled". A large library stages one file per analysis file, and
+/// deleting 150,000 of them took minutes on Windows with the edit gate held
+/// (#472). Moving the unfinished parts aside is immediate; the files are then
+/// deleted without holding anything.
+fn discard(root: &Path, paths: &[&Path]) {
+    delete_in_background(set_aside(root, paths));
+}
+
+/// Deletes unfinished backups set aside by an earlier run, for example one
+/// that quit before its background deletion finished.
+pub fn sweep_discarded(root: &Path) {
+    let Ok(entries) = fs::read_dir(root) else { return; };
+    let doomed = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(DISCARD_PREFIX))
+        .map(|entry| entry.path())
+        .collect();
+    delete_in_background(doomed);
+}
+
 fn checked(root: &Path, path: &Path) -> AppResult<PathBuf> {
     let root = root.canonicalize().map_err(error)?;
     let meta = fs::symlink_metadata(path).map_err(error)?;
@@ -249,6 +332,7 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
     let destination = state.backup_destination();
     let root = destination.as_path();
     crate::durable::create_dir_all(root).map_err(error)?;
+    sweep_discarded(root);
     validate_destination(&root.canonicalize().map_err(error)?, &location)?;
     let created_at = millis();
     let id = uuid::Uuid::new_v4();
@@ -416,7 +500,8 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
         });
         if let Some(error) = refused { return Err(error); }
         packed.map_err(error)?;
-        remove(&partial)?;
+        // The archive holds everything now; the staged copies go in the background.
+        discard(root, &[&partial]);
         // A backup folder on an external exFAT or FAT32 drive has no
         // exclusive rename on macOS; `persist_new` still never replaces one.
         rbl_core::durable::persist_new(tempfile::TempPath::try_from_path(&archive).map_err(error)?, &target).map_err(error)?;
@@ -424,8 +509,7 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
         Ok(target.to_string_lossy().into_owned())
     })();
     if result.is_err() {
-        let _ = remove(&partial);
-        let _ = remove(&archive);
+        discard(root, &[&partial, &archive]);
     }
     result
 }
@@ -756,6 +840,93 @@ mod tests {
         assert!(list(&state).unwrap().is_empty());
         assert!(fs::read_dir(state.backup_dir()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".partial-")));
         assert_eq!(fs::metadata(file).unwrap().len(), 3 * 1024 * 1024);
+    }
+
+    fn discarded(root: &Path) -> Vec<PathBuf> {
+        fs::read_dir(root).unwrap().map(|e| e.unwrap().path())
+            .filter(|path| path.file_name().unwrap().to_string_lossy().starts_with(DISCARD_PREFIX))
+            .collect()
+    }
+
+    fn files_under(path: &Path) -> usize {
+        if path.is_file() { return 1; }
+        fs::read_dir(path).unwrap().map(|e| files_under(&e.unwrap().path())).sum()
+    }
+
+    fn wait_until_gone(path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while path.exists() {
+            assert!(std::time::Instant::now() < deadline, "{} was never deleted", path.display());
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    /// Stopping a backup of a large library took minutes because the staged
+    /// copy, one file per analysis file, was deleted before the job could
+    /// end (#472). The deletion is held back here, so the job can only have
+    /// returned if it did not delete the staged files itself.
+    #[test]
+    fn a_stopped_backup_ends_before_its_staged_files_are_deleted() {
+        let (_dir, state, location) = fixture();
+        let tree = analysis(&location);
+        for i in 0..400 {
+            let file = tree.join(format!("P{:03}/{i:04}/ANLZ0000.DAT", i % 16));
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, [1; 64]).unwrap();
+        }
+        let root = state.backup_destination();
+        let held = HOLD_DISCARDS.write();
+        let mut staged = std::collections::HashSet::new();
+        let result = create_with_progress(&state, &mut |phase, _, _, item| {
+            if phase == "copying" && item.starts_with("Analysis files ·") {
+                staged.insert(item.to_owned());
+                if staged.len() == 300 {
+                    return Err(AppError::new(crate::error::ErrorKind::Cancelled, "Backup stopped."));
+                }
+            }
+            Ok(())
+        });
+        assert_eq!(result.unwrap_err().kind, crate::error::ErrorKind::Cancelled);
+        assert!(fs::read_dir(&root).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".partial-")));
+        let aside = discarded(&root);
+        assert_eq!(aside.len(), 1, "the staging folder is set aside, not deleted in place");
+        // A file is reported just before its worker creates it.
+        let workers = std::thread::available_parallelism().map_or(2, usize::from);
+        assert!(files_under(&aside[0]) >= 300 - workers, "no staged file was deleted before the job ended");
+        assert!(list(&state).unwrap().is_empty());
+        drop(held);
+        wait_until_gone(&aside[0]);
+        assert_eq!(files_under(&tree), 400, "the library's own analysis files are untouched");
+    }
+
+    #[test]
+    fn leftovers_from_an_earlier_run_are_swept_and_nothing_else_is() {
+        let (_dir, state, _location) = fixture();
+        let saved = PathBuf::from(create(&state).unwrap());
+        let root = state.backup_destination();
+        let leftover = root.join(format!("{DISCARD_PREFIX}earlier-run"));
+        fs::create_dir_all(leftover.join("analysis/P001")).unwrap();
+        fs::write(leftover.join("analysis/P001/ANLZ0000.DAT.zip"), b"staged").unwrap();
+        let foreign = root.join(".partial-another-process");
+        fs::create_dir(&foreign).unwrap();
+        fs::write(root.join("notes.txt"), b"keep").unwrap();
+        sweep_discarded(&root);
+        wait_until_gone(&leftover);
+        assert!(saved.is_file());
+        assert!(foreign.is_dir());
+        assert!(root.join("notes.txt").is_file());
+    }
+
+    #[test]
+    fn a_completed_backup_leaves_no_staging_behind() {
+        let (_dir, state, _location) = fixture();
+        let saved = PathBuf::from(create(&state).unwrap());
+        let root = state.backup_destination();
+        for path in discarded(&root) {
+            wait_until_gone(&path);
+        }
+        let names: Vec<_> = fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, [saved.file_name().unwrap()]);
     }
 
     #[test]
