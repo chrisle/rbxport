@@ -154,7 +154,7 @@ pub fn create(plan: &Plan) -> Result<LibraryLocation> {
     // Planned before, and looked at again: a stick's export is never where
     // a library is made, even one linked into place since (#422).
     if crate::locate::is_device_export(dir) {
-        return Err(DbError::Open(Located::device_export_message(dir, crate::locate::resolved(dir).as_deref())));
+        return Err(DbError::Open(Located::device_export_message(dir, crate::locate::resolved(dir).as_deref(), None)));
     }
     let share_root = dir.join("share");
     for folder in ["PIONEER/Artwork", "PIONEER/USBANLZ"] {

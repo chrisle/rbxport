@@ -31,8 +31,9 @@ pub(crate) fn problem_from(located: &rbl_db::locate::Located) -> Option<LibraryP
             default_master_db: default_master_db.display().to_string(),
         }),
         // Not a question: there is nothing to make, only a link to undo.
-        Located::DeviceExport { default_dir, resolved } => Some(LibraryProblemDto::Failed {
-            message: Located::device_export_message(default_dir, resolved.as_deref()),
+        // #473: also when an earlier RBXport made an empty library there.
+        Located::DeviceExport { default_dir, resolved, unused_master_db } => Some(LibraryProblemDto::Failed {
+            message: Located::device_export_message(default_dir, resolved.as_deref(), unused_master_db.as_deref()),
         }),
     }
 }
@@ -158,11 +159,30 @@ mod tests {
         let located = Located::DeviceExport {
             default_dir: PathBuf::from("C:/Users/Admin/AppData/Roaming/Pioneer/rekordbox"),
             resolved: Some(PathBuf::from("D:/PIONEER/rekordbox")),
+            unused_master_db: None,
         };
         match problem_from(&located) {
             Some(LibraryProblemDto::Failed { message }) => {
                 assert!(message.contains("D:/PIONEER/rekordbox"), "{message}");
                 assert!(message.contains("no library was made there"), "{message}");
+            }
+            other => panic!("expected a failure, got {other:?}"),
+        }
+    }
+
+    /// #473: a stick holding an empty library an earlier RBXport made is
+    /// reported the same way, naming the file, and not opened.
+    #[test]
+    fn an_unused_library_on_a_stick_is_reported_not_opened() {
+        let located = Located::DeviceExport {
+            default_dir: PathBuf::from("C:/Users/Admin/AppData/Roaming/Pioneer/rekordbox"),
+            resolved: Some(PathBuf::from("D:/PIONEER/rekordbox")),
+            unused_master_db: Some(PathBuf::from("C:/Users/Admin/AppData/Roaming/Pioneer/rekordbox/master.db")),
+        };
+        match problem_from(&located) {
+            Some(LibraryProblemDto::Failed { message }) => {
+                assert!(message.contains("rekordbox/master.db, with the share folder"), "{message}");
+                assert!(message.contains("was not opened"), "{message}");
             }
             other => panic!("expected a failure, got {other:?}"),
         }
