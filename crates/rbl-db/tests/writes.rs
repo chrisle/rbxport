@@ -3684,3 +3684,57 @@ fn rating_comment_and_colour_skip_a_track_that_already_has_them() {
     assert!(!f.writer.set_rating_with_undo(&t, 4).unwrap().1.is_empty());
     assert_ne!(stamp_of(&f, &t), kept);
 }
+
+/// #458, #459: a file whose name holds "É" or "ä ö ü" imports like any
+/// other, in either Unicode form, and its row keeps the path byte for byte
+/// as it was handed in, which is what rekordbox stores for a dropped file
+/// (`juce::NSViewComponentPeer::getDroppedFiles` takes `-[NSURL path]`
+/// unchanged) [OBS static, rekordbox 7.2.19]. Importing the same path again
+/// finds the row rather than making a second one.
+#[test]
+fn files_named_with_accents_import_and_keep_their_exact_path() {
+    use rbl_db::write::ImportOutcome;
+
+    let root = tempfile::tempdir().unwrap();
+    let audio = root.path().join("imports");
+    std::fs::create_dir(&audio).unwrap();
+    let files: Vec<std::path::PathBuf> = [
+        // Precomposed (NFC), as a browser download or a copy from Windows names it.
+        "John Beltran - \u{c9}ire.mp3",
+        "\u{e4} \u{f6} \u{fc}.mp3",
+        // Decomposed (NFD), as a Cocoa app names it.
+        "Ka\u{308}lte.mp3",
+    ]
+    .iter()
+    .map(|name| {
+        let path = audio.join(name);
+        tagged_mp3(&path, &[]);
+        path
+    })
+    .collect();
+
+    let mut f = fixture();
+    let outcomes = f.writer.import_files(&files).unwrap();
+    assert!(outcomes.iter().all(|o| matches!(o, ImportOutcome::Added(_))), "{outcomes:?}");
+    for (file, outcome) in files.iter().zip(&outcomes) {
+        let ImportOutcome::Added(id) = outcome else { unreachable!() };
+        let (folder, name, title): (Vec<u8>, Vec<u8>, String) = f
+            .conn()
+            .query_row(
+                "SELECT CAST(FolderPath AS BLOB), CAST(FileNameL AS BLOB), Title FROM djmdContent WHERE ID = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        let path = file.to_str().unwrap();
+        let file_name = file.file_name().unwrap().to_str().unwrap();
+        assert_eq!(folder, path.as_bytes(), "FolderPath of {path}");
+        assert_eq!(name, file_name.as_bytes(), "FileNameL of {path}");
+        // An untagged file is titled after its name, accents and all.
+        assert_eq!(title, file.file_stem().unwrap().to_str().unwrap());
+    }
+
+    let again = f.writer.import_files(&files).unwrap();
+    assert!(again.iter().all(|o| matches!(o, ImportOutcome::Existing(_))), "{again:?}");
+    assert_consistent(&f);
+}
