@@ -555,3 +555,225 @@ fn exclusions_keep_the_original_device_library_category_and_content_ids() {
             .any(|d| u32::from_le_bytes(d[0x188..0x18c].try_into().unwrap()) == 2));
     }
 }
+
+#[test]
+fn cancellation_during_audio_inspection_preserves_the_previous_generation() {
+    use std::sync::atomic::AtomicUsize;
+    let dir = tempfile::tempdir().unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    let mut tracks = vec![source(dir.path(), 1)];
+    run(stick.path(), &tracks, true);
+    let before = set(stick.path());
+    tracks[0].title = "Changed".into();
+    let database = AtomicBool::new(false);
+    let calls = AtomicUsize::new(0);
+    let error = rbl_export::export_cancellable(
+        stick.path(),
+        &tracks,
+        &[],
+        &[],
+        &options(true),
+        &mut |p| {
+            if p.stage == "database" {
+                database.store(true, Ordering::Relaxed);
+            }
+        },
+        &|| database.load(Ordering::Relaxed) && calls.fetch_add(1, Ordering::Relaxed) >= 1,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, rbl_export::ExportError::Cancelled),
+        "{error}"
+    );
+    assert_eq!(set(stick.path()), before);
+    assert!(rbl_export::verify(stick.path()).unwrap().is_ok());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn generated_aac_uses_media_timebase_instead_of_sample_rate() {
+    // Generated with the system encoder, not a stock rekordbox capture.
+    fn retime(data: &mut [u8]) -> usize {
+        let mut at = 0;
+        let mut changed = 0;
+        while at + 8 <= data.len() {
+            let size = u32::from_be_bytes(data[at..at + 4].try_into().unwrap()) as usize;
+            assert!(size >= 8 && at + size <= data.len());
+            let tag: [u8; 4] = data[at + 4..at + 8].try_into().unwrap();
+            let body = &mut data[at + 8..at + size];
+            if [*b"moov", *b"trak", *b"mdia", *b"minf", *b"stbl"].contains(&tag) {
+                changed += retime(body);
+            } else if &tag == b"mdhd" {
+                assert_eq!(body[0], 0);
+                for field in [12, 16] {
+                    let value = u32::from_be_bytes(body[field..field + 4].try_into().unwrap());
+                    body[field..field + 4].copy_from_slice(&(value * 2).to_be_bytes());
+                }
+                changed += 1;
+            } else if &tag == b"stts" {
+                let count = u32::from_be_bytes(body[4..8].try_into().unwrap()) as usize;
+                for i in 0..count {
+                    let field = 12 + 8 * i;
+                    let value = u32::from_be_bytes(body[field..field + 4].try_into().unwrap());
+                    body[field..field + 4].copy_from_slice(&(value * 2).to_be_bytes());
+                }
+            }
+            at += size;
+        }
+        assert_eq!(at, data.len());
+        changed
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let t = source(dir.path(), 1);
+    let mut pcm = std::fs::read(&t.source_path).unwrap();
+    let mut noise = 12345_u32;
+    for sample in pcm[44..].chunks_exact_mut(2) {
+        noise = noise.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        sample.copy_from_slice(&((noise >> 16) as i16).to_le_bytes());
+    }
+    std::fs::write(&t.source_path, pcm).unwrap();
+    let output = dir.path().join("generated.m4a");
+    let conversion = std::process::Command::new("/usr/bin/afconvert")
+        .args(["-f", "m4af", "-d", "aac", "-b", "128000"])
+        .arg(&t.source_path)
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        conversion.status.success(),
+        "{}",
+        String::from_utf8_lossy(&conversion.stderr)
+    );
+    let original = rbl_audio::legacy::inspect(&output, &|| false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(original.format, 0x41);
+    assert!((74..=80).contains(&original.frames75));
+    let mut movie = std::fs::read(&output).unwrap();
+    assert_eq!(retime(&mut movie), 1);
+    std::fs::write(&output, movie).unwrap();
+    let retimed = rbl_audio::legacy::inspect(&output, &|| false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retimed.frames75, original.frames75);
+    assert_eq!(retimed.rate, original.rate);
+    assert_eq!(retimed.offset, original.offset);
+    let stick = tempfile::tempdir().unwrap();
+    let mut exported = t;
+    exported.source_path = output;
+    run(stick.path(), &[exported], true);
+    let parsed = cbm::parse_contents(&set(stick.path())[cbm::FILES[0]]).unwrap();
+    assert_eq!(parsed.records.len(), 1);
+    let record = &parsed.records[0];
+    assert_eq!(record[0x23], 0x41);
+    assert_eq!(
+        u32::from_le_bytes(record[0x9e8..0x9ec].try_into().unwrap()),
+        original.frames75
+    );
+}
+
+#[test]
+fn oversized_foreign_cbm_file_is_refused_before_reading_and_preserves_audio() {
+    let dir = tempfile::tempdir().unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    let tracks = vec![source(dir.path(), 1)];
+    run(stick.path(), &tracks, false);
+    let before = rbl_export::Manifest::load(stick.path()).unwrap();
+    let audio = stick
+        .path()
+        .join(before.tracks[0].audio.trim_start_matches('/'));
+    let bytes = std::fs::read(&audio).unwrap();
+    let dbh = stick.path().join("PIONEER/DBH");
+    std::fs::create_dir_all(&dbh).unwrap();
+    let oversized = std::fs::File::create(dbh.join("CbmDB.DBH")).unwrap();
+    oversized.set_len(cbm::MAX_FILE_BYTES as u64 + 1).unwrap();
+    for enabled in [true, false] {
+        let error = rbl_export::export_with_options(
+            stick.path(),
+            &[],
+            &[],
+            &[],
+            &options(enabled),
+            &mut |_| {},
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("allocation limit"), "{error}");
+    }
+    assert_eq!(std::fs::read(audio).unwrap(), bytes);
+    assert_eq!(
+        oversized.metadata().unwrap().len(),
+        cbm::MAX_FILE_BYTES as u64 + 1
+    );
+}
+
+#[test]
+fn the_previous_r1_profile_rebuilds_unchanged_input_without_recopying_audio() {
+    use rbl_export::incremental;
+    let dir = tempfile::tempdir().unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    let tracks = vec![source(dir.path(), 1)];
+    let playlists = vec![SourcePlaylist {
+        id: 1,
+        name: "Set".into(),
+        track_indices: vec![0],
+        ..Default::default()
+    }];
+    let tags = Vec::<rbl_export::SourceMyTag>::new();
+    let opts = options(true);
+    run(stick.path(), &tracks, true);
+    // Simulate the exact v1 request receipt, preserving valid ownership hashes.
+    let normal = (
+        &tracks,
+        &playlists,
+        &tags,
+        opts.compatibility,
+        opts.keep_unlisted,
+        format!("{:?}", opts.sync),
+        format!("{:?}", opts.defaults),
+        incremental::TRANSFORM_VERSION,
+    );
+    let old_request = incremental::digest(&("xdj-r1-v1", normal)).unwrap();
+    let current = incremental::request(&tracks, &playlists, &tags, &opts).unwrap();
+    assert_ne!(old_request, current);
+    let mut manifest = rbl_export::Manifest::load(stick.path()).unwrap();
+    manifest.generation.as_mut().unwrap().request = old_request;
+    manifest.save(stick.path()).unwrap();
+    let report = run(stick.path(), &tracks, true);
+    assert!(!report.up_to_date);
+    assert_eq!(report.bytes_copied, 0);
+    assert!(report.verified);
+    assert_eq!(
+        rbl_export::Manifest::load(stick.path())
+            .unwrap()
+            .generation
+            .unwrap()
+            .request,
+        current
+    );
+    assert!(run(stick.path(), &tracks, true).up_to_date);
+}
+
+#[test]
+fn oversized_foreign_analysis_candidate_is_preserved_without_reading_it_all() {
+    let dir = tempfile::tempdir().unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    let t = source(dir.path(), 1);
+    let path = stick
+        .path()
+        .join(native_dat("/Contents/Artist/Album/track1.wav"));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let foreign = std::fs::File::create(&path).unwrap();
+    foreign.set_len(cbm::MAX_FILE_BYTES as u64 + 1).unwrap();
+    let error =
+        rbl_export::export_with_options(stick.path(), &[t], &[], &[], &options(true), &mut |_| {})
+            .unwrap_err()
+            .to_string();
+    assert!(error.contains("allocation limit"), "{error}");
+    assert_eq!(
+        std::fs::metadata(path).unwrap().len(),
+        cbm::MAX_FILE_BYTES as u64 + 1
+    );
+    assert!(!stick.path().join("PIONEER/DBH/CbmDB.DBH").exists());
+    assert!(!stick.path().join("PIONEER/rekordbox/export.pdb").exists());
+}

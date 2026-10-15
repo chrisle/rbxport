@@ -21,6 +21,9 @@ pub const FILES: [&str; 6] = [
 ];
 pub const MAX_TRACKS: usize = 10_000;
 pub const MAX_DIRECTORIES: usize = 10_000;
+/// RBXport allocation limits, not measured device/stock format restrictions.
+pub const MAX_FILE_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_SET_BYTES: usize = 128 * 1024 * 1024;
 
 fn invalid(message: impl Into<String>) -> ExportError {
     ExportError::Conflict(format!("XDJ-R1: {}", message.into()))
@@ -447,12 +450,21 @@ fn category(
             "more than 10,000 directories would overwrite the zero sentinel",
         ));
     }
-    let mut b = header(time);
-    put32(&mut b, 8, capacity);
-    for (i, (text, key, ids)) in groups.iter().enumerate() {
+    let mut size = HEADER;
+    for (_, _, ids) in groups {
         if ids.len() > MAX_TRACKS {
             return Err(invalid("category has more than 10,000 entries"));
         }
+        size = size
+            .checked_add(ids.len() * TOC + DIRECTORY)
+            .ok_or_else(|| invalid("category size overflow"))?;
+        if size > MAX_FILE_BYTES {
+            return Err(invalid("category exceeds the 64 MiB safe allocation limit"));
+        }
+    }
+    let mut b = header(time);
+    put32(&mut b, 8, capacity);
+    for (i, (text, key, ids)) in groups.iter().enumerate() {
         let first = if ids.is_empty() { 0 } else { number(b.len())? };
         let mut position = 150_u32;
         for id in ids {
@@ -509,7 +521,7 @@ pub struct Parsed {
     pub pending_edits: bool,
 }
 fn check_header(b: &[u8]) -> Result<()> {
-    if b.len() < HEADER || word(b, 0)? != 0 || word(b, 12)? != 0x2001 {
+    if b.len() < HEADER || b.len() > MAX_FILE_BYTES || word(b, 0)? != 0 || word(b, 12)? != 0x2001 {
         return Err(invalid("invalid Cbm header"));
     }
     Ok(())
@@ -659,6 +671,13 @@ pub fn parse_category(b: &[u8], contents: &[Vec<u8>]) -> Result<Parsed> {
     })
 }
 pub fn validate(files: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+    if files
+        .values()
+        .try_fold(0_usize, |n, b| n.checked_add(b.len()))
+        .is_none_or(|size| size > MAX_SET_BYTES)
+    {
+        return Err(invalid("Cbm set exceeds the 128 MiB safe allocation limit"));
+    }
     let contents = parse_contents(
         files
             .get(FILES[0])
@@ -891,5 +910,24 @@ mod category_tests {
         assert_eq!(word(albums, HEADER + 20).unwrap(), 2);
         assert_eq!(word(albums, HEADER + TOC + 20).unwrap(), 3);
         assert_eq!(word(albums, HEADER + 2 * TOC + 20).unwrap(), 1);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod allocation_bounds {
+    use super::*;
+    #[test]
+    fn oversized_repeated_playlist_is_refused_without_allocating_its_database() {
+        let track = super::tests::track();
+        let locations = BTreeMap::from([(track.id, (u32::try_from(HEADER).unwrap(), &track, 1))]);
+        // Hundreds of valid 10,000-entry groups exceed the allocation budget.
+        let groups: Vec<_> = (0..300)
+            .map(|i| (format!("Set {i}"), i, vec![track.id; MAX_TRACKS]))
+            .collect();
+        let error = category(&groups, &locations, 512, 0, 0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("64 MiB"), "{error}");
     }
 }

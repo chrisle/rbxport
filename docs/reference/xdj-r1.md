@@ -6,7 +6,10 @@ Sync preferences button opens that section. Playlist, folder, Export Track,
 AppleScript export and manual/automatic Sync Manager requests capture the
 same preference before their job starts. Changing it during a job affects the
 next job. It participates in the request digest, so enabling it rebuilds the
-databases even when the selection and sources are unchanged.
+databases even when the selection and sources are unchanged. The corrected
+AAC probe uses request profile xdj-r1-v2, forcing one rebuild of an owned v1
+R1 generation without recopying shared audio. Its ownership schema remains v1
+so the rebuild still recognizes existing assets; OFF digests are unchanged.
 
 Enabled exports also stage PIONEER/DBH/CbmDB.DBH, CbmTT.DBH, CbmAR.DBH,
 CbmAB.DBH, CbmBP.DBH and CbmPL.DBH. Device Library (export.pdb) and
@@ -85,6 +88,10 @@ Safe deviations from unsafe or unstable stock behavior:
 - Reject oversized paths, files above u32 byte size, more than 10,000 tracks,
   directories or group entries, and invalid offsets instead of wrapping.
   All 10,000 directory slots can be occupied; both tail words remain zero.
+- Bound R1 database/sidecar reads and Cbm output to 64 MiB per file,
+  with 128 MiB per loaded Cbm set. Category sizes are checked before serialization; reads remain bounded even
+  if a file grows after its metadata check. These are RBXport resource limits,
+  not stock format or hardware limits.
 - Empty/all-excluded selections produce a coherent six-file empty library,
   rather than stock's delete-before-replacement/empty-file publication.
 - Preserve surrogate boundaries; never reproduce the 255-unit comment copy's
@@ -92,8 +99,17 @@ Safe deviations from unsafe or unstable stock behavior:
   retains the observed U+DFFF endpoint discrepancy without unsafe reads.
 - Equal title keys retain deterministic source order; stock heap sort has
   no stable-order contract for those ties. Group equality stays separate.
-- AAC MP4 requires one unambiguous chunk table. Unsupported/ambiguous files
-  are excluded or fail contextually instead of inventing offsets.
+- AAC MP4 requires one unambiguous chunk table. Every chunk offset must
+  point inside an mdat payload, not an atom header or unrelated file bytes.
+  Box/table scanning checks cancellation. Duration and payload bitrate use
+  the media timebase, which can differ from the audio sample rate. If the
+  demuxer omits AAC channels, codec configuration and one decoded packet
+  establish them instead of guessing stereo or excluding ordinary M4A.
+  Unsupported/ambiguous files are excluded or fail contextually.
+- R1 artwork decoding is limited to 4096 pixels per dimension and 64 MiB of
+  decoder allocations before RGB/square conversion. The square allocation
+  is at most 48 MiB. This is an RBXport safety bound, not a stock format or
+  hardware limit. Oversized artwork fails staging and preserves the old set.
 
 [OBS] Native timing loads serialized start/end only when runtime values are
 zero and block counts agree. Its guarded signed-span check clamps spans

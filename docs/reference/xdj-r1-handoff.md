@@ -72,3 +72,43 @@ FAT32 media, retain before/after trees and hashes, then follow the concrete
 physical acceptance steps in [xdj-r1.md](xdj-r1.md). Full R1 edit import remains
 separate. No physical compatibility or complete unknown-field semantics is
 claimed.
+
+
+## Review validation, 2026-10-15
+
+The review fixes AAC channel discovery and media-timebase calculations,
+validates every MP4 chunk offset against media payloads, preserves cancellation
+status, bounds artwork decoding and R1 database/sidecar allocations, and bumps
+only the enabled request profile to v2. Old ownership and OFF digests remain
+compatible. See [the evidence coverage and findings](xdj-r1-review.md).
+
+| Check on chris-m2-mac | Result |
+| --- | --- |
+| Workspace Clippy, all targets, -D warnings, final Rust tree | Passed |
+| RB_LITE_TEST=1 cargo test --workspace | 1,803 passed, 8 ignored |
+| Final affected rbl-export suite | 219 passed, 1 ignored |
+| Final R1 integration subset | 18 passed |
+| Final export unit subset | 48 passed |
+| Audio malformed-MP4 structural test | Passed |
+| Final backend R1 option/default fixture test | Passed |
+| git diff --check | Passed |
+
+The workspace run covers the AAC/artwork/cancellation fixes. The final
+allocation/sidecar guards and profile migration were then covered by the
+complete final export suite, Clippy and backend fixture test. All tests passed;
+the existing block 0.1.6 future-incompatibility notice remains. Intermediate
+development test/lint failures were corrected before these final checks.
+No frontend sources or token/icon sources changed in this review, so frontend
+checks were not repeated; the implementation run's results remain above.
+
+Logs: /private/tmp/r1-review-workspace.log, r1-review-export-frozen.log,
+r1-review-clippy-final.log, r1-review-integration-final.log,
+r1-review-audio.log and r1-review-ipc-frozen.log on the M2.
+
+Fixtures are generated disposable files and rbl_db::fixture libraries.
+The macOS AAC test uses afconvert to generate audio and modifies its media
+timescale without changing real duration. It is not a stock export capture.
+No installed library or real user's USB was written. Resource bounds are
+RBXport safety limits, not measured stock/device limits. Stock differential
+captures and physical R1 acceptance remain open as described above.
+No merge, push or release was performed.

@@ -154,7 +154,7 @@ pub fn request(tracks: &[SourceTrack], playlists: &[SourcePlaylist], tags: &[Sou
     let normal = (tracks, playlists, tags, options.compatibility, options.keep_unlisted,
         format!("{:?}", options.sync), options.db_id_override, options.my_tag_master_db_id_override,
         format!("{:?}", options.defaults), TRANSFORM_VERSION, PDB_LAYOUT);
-    if options.xdj_r1_support { digest(&("xdj-r1-v1", normal)) } else { digest(&normal) }
+    if options.xdj_r1_support { digest(&("xdj-r1-v2", normal)) } else { digest(&normal) }
 }
 
 pub fn inputs(tracks: &[SourceTrack]) -> std::io::Result<BTreeMap<String, Option<FileRevision>>> {

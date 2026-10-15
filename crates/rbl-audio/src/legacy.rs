@@ -63,16 +63,34 @@ fn chunks(f: &mut File, len: u64, aiff: bool) -> Result<u32> {
     }
     Err(error("missing PCM data chunk"))
 }
-fn mp4_offsets(f: &mut File, start: u64, end: u64, depth: u8, out: &mut Vec<u64>) -> Result<()> {
+#[derive(Default)]
+struct Mp4 {
+    table: Option<(u64, u64, u64)>,
+    media: Vec<(u64, u64)>,
+}
+fn mp4_offsets(
+    f: &mut File,
+    start: u64,
+    end: u64,
+    depth: u8,
+    out: &mut Mp4,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<()> {
     if depth > 8 {
         return Err(error("MP4 nesting exceeds limit"));
     }
     let mut at = start;
     while at + 8 <= end {
+        if cancelled() {
+            return Err(error("cancelled"));
+        }
         let mut size = u64::from(be32(f, at)?);
         let tag = bytes::<4>(f, at + 4)?;
         let mut head = 8;
         if size == 1 {
+            if end - at < 16 {
+                return Err(error("short extended MP4 box"));
+            }
             size = u64::from_be_bytes(bytes(f, at + 8)?);
             head = 16;
         } else if size == 0 {
@@ -85,7 +103,13 @@ fn mp4_offsets(f: &mut File, start: u64, end: u64, depth: u8, out: &mut Vec<u64>
             return Err(error("MP4 box outside file"));
         }
         if [*b"moov", *b"trak", *b"mdia", *b"minf", *b"stbl"].contains(&tag) {
-            mp4_offsets(f, at + head, next, depth + 1, out)?;
+            mp4_offsets(f, at + head, next, depth + 1, out, cancelled)?;
+        }
+        if &tag == b"mdat" {
+            if out.media.len() >= 10_000 {
+                return Err(error("too many MP4 media extents"));
+            }
+            out.media.push((at + head, next));
         }
         if &tag == b"stco" || &tag == b"co64" {
             if size < head + 8 {
@@ -96,16 +120,42 @@ fn mp4_offsets(f: &mut File, start: u64, end: u64, depth: u8, out: &mut Vec<u64>
             if count == 0 || count > (size - head - 8) / width {
                 return Err(error("invalid MP4 chunk count"));
             }
-            let offset = if width == 4 {
-                u64::from(be32(f, at + head + 8)?)
-            } else {
-                u64::from_be_bytes(bytes(f, at + head + 8)?)
-            };
-            out.push(offset);
+            if out.table.replace((at + head + 8, count, width)).is_some() {
+                return Err(error("AAC needs one unambiguous audio chunk table"));
+            }
         }
         at = next;
     }
+    if at != end {
+        return Err(error("trailing bytes outside MP4 boxes"));
+    }
     Ok(())
+}
+fn mp4_audio_offset(f: &mut File, len: u64, cancelled: &dyn Fn() -> bool) -> Result<u32> {
+    let mut map = Mp4::default();
+    mp4_offsets(f, 0, len, 0, &mut map, cancelled)?;
+    let (table, count, width) = map.table.ok_or_else(|| error("missing AAC chunk table"))?;
+    let mut first = None;
+    for index in 0..count {
+        if cancelled() {
+            return Err(error("cancelled"));
+        }
+        let at = table + index * width; // Bounded by the validated table size.
+        let offset = if width == 4 {
+            u64::from(be32(f, at)?)
+        } else {
+            u64::from_be_bytes(bytes(f, at)?)
+        };
+        if !map
+            .media
+            .iter()
+            .any(|(start, end)| (*start..*end).contains(&offset))
+        {
+            return Err(error("AAC chunk offset is outside media data"));
+        }
+        first.get_or_insert(offset);
+    }
+    u32::try_from(first.ok_or_else(|| error("empty AAC chunk table"))?).map_err(error)
 }
 /// Unsupported formats are excluded from Cbm only. Invalid admitted files fail safely.
 #[allow(
@@ -114,9 +164,12 @@ fn mp4_offsets(f: &mut File, start: u64, end: u64, depth: u8, out: &mut Vec<u64>
 )]
 pub fn inspect(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<Option<Info>> {
     use symphonia::core::{
-        codecs::{CODEC_TYPE_AAC, CODEC_TYPE_MP3},
+        codecs::{DecoderOptions, CODEC_TYPE_AAC, CODEC_TYPE_MP3},
         errors::Error,
     };
+    if cancelled() {
+        return Err(error("cancelled"));
+    }
     let ext = path
         .extension()
         .and_then(|s| s.to_str())
@@ -137,12 +190,29 @@ pub fn inspect(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<Option<Info>
     let track = reader.default_track().ok_or(AudioError::NoTrack)?;
     let id = track.id;
     let codec = track.codec_params.codec;
+    let time_base = track.codec_params.time_base;
+    let (numer, denom) = time_base.map_or((1, rate), |t| (t.numer, t.denom));
+    if numer == 0 || denom == 0 {
+        return Err(error("invalid media time base"));
+    }
     let mut frames = track.codec_params.n_frames.unwrap_or(0);
     let mut last = 0;
     let mut payload = 0_u64;
-    if !matches!(properties.channels, Some(1 | 2)) {
-        return Ok(None);
-    }
+    // The ISO MP4 demuxer can leave channels absent even for ordinary AAC.
+    // In that case use the codec configuration and one decoded packet, rather
+    // than excluding every such M4A file or guessing stereo.
+    let mut channel_probe = if codec == CODEC_TYPE_AAC && properties.channels.is_none() {
+        Some(
+            symphonia::default::get_codecs()
+                .make(&track.codec_params, &DecoderOptions::default())
+                .map_err(error)?,
+        )
+    } else {
+        if !matches!(properties.channels, Some(1 | 2)) {
+            return Ok(None);
+        }
+        None
+    };
     let (format, offset, emphasis, bitrate) = match ext.as_str() {
         "wav" | "aif" | "aiff" => {
             if !properties.compatible {
@@ -232,12 +302,7 @@ pub fn inspect(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<Option<Info>
             let offset = if ext == "aac" {
                 0
             } else {
-                let mut offsets = Vec::new();
-                mp4_offsets(&mut file, 0, len, 0, &mut offsets)?;
-                if offsets.len() != 1 {
-                    return Err(error("AAC needs one unambiguous audio chunk table"));
-                }
-                u32::try_from(offsets[0]).map_err(error)?
+                mp4_audio_offset(&mut file, len, cancelled)?
             };
             (0x41, offset, false, 0)
         }
@@ -251,6 +316,16 @@ pub fn inspect(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<Option<Info>
             }
             match reader.next_packet() {
                 Ok(packet) if packet.track_id() == id => {
+                    if let Some(decoder) = channel_probe.as_mut() {
+                        let decoded = decoder.decode(&packet).map_err(error)?;
+                        if !matches!(decoded.spec().channels.count(), 1 | 2) {
+                            return Ok(None);
+                        }
+                        if decoded.spec().rate != rate {
+                            return Err(error("AAC decoded sample rate differs from container"));
+                        }
+                        channel_probe = None;
+                    }
                     last = last.max(packet.ts.saturating_add(packet.dur));
                     payload = payload.saturating_add(packet.data.len() as u64);
                 }
@@ -266,15 +341,12 @@ pub fn inspect(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<Option<Info>
     if frames == 0 || offset >= byte_count {
         return Err(error("missing duration or invalid data offset"));
     }
-    let frames75 = u32::try_from(
-        frames
-            .checked_mul(75)
-            .ok_or_else(|| error("duration overflow"))?
-            / u64::from(rate),
-    )
-    .map_err(error)?;
+    // MP4 durations and packet timestamps use the media timescale, which need
+    // not equal the audio sample rate. Wide arithmetic preserves that rational.
+    let duration = u128::from(frames) * u128::from(numer);
+    let frames75 = u32::try_from(duration * 75 / u128::from(denom)).map_err(error)?;
     let bitrate = if codec == CODEC_TYPE_AAC {
-        u32::try_from(payload.saturating_mul(8).saturating_mul(u64::from(rate)) / frames / 100)
+        u32::try_from(u128::from(payload) * 8 * u128::from(denom) / duration / 100)
             .map_err(error)?
     } else {
         bitrate
@@ -290,4 +362,63 @@ pub fn inspect(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<Option<Info>
         format,
         emphasis,
     }))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    fn atom(tag: [u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut out = u32::try_from(payload.len() + 8)
+            .unwrap()
+            .to_be_bytes()
+            .to_vec();
+        out.extend(tag);
+        out.extend(payload);
+        out
+    }
+    fn container(offsets: &[u64], wide: bool) -> Vec<u8> {
+        let mut table = vec![0; 4];
+        table.extend(u32::try_from(offsets.len()).unwrap().to_be_bytes());
+        for offset in offsets {
+            if wide {
+                table.extend(offset.to_be_bytes());
+            } else {
+                table.extend(u32::try_from(*offset).unwrap().to_be_bytes());
+            }
+        }
+        let mut data = atom(*b"mdat", &[0; 32]); // Media payload is [8, 40).
+        data.extend(atom(
+            *b"moov",
+            &atom(if wide { *b"co64" } else { *b"stco" }, &table),
+        ));
+        data
+    }
+    fn check(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<u32> {
+        let mut file = tempfile::tempfile().unwrap();
+        std::io::Write::write_all(&mut file, data).unwrap();
+        mp4_audio_offset(&mut file, data.len() as u64, cancelled)
+    }
+    #[test]
+    fn all_mp4_chunk_offsets_must_name_media_payload() {
+        // Generated structural fixtures, not captured stock AAC exports.
+        for wide in [false, true] {
+            assert_eq!(check(&container(&[8, 39], wide), &|| false).unwrap(), 8);
+            for invalid in [0, 7, 40, u64::from(u32::MAX)] {
+                assert!(check(&container(&[8, invalid], wide), &|| false).is_err());
+            }
+            assert!(check(&container(&[], wide), &|| false).is_err());
+            let mut truncated = container(&[8], wide);
+            truncated.pop();
+            assert!(check(&truncated, &|| false).is_err());
+            let mut duplicate = container(&[8], wide);
+            duplicate.extend_from_within(40..);
+            assert!(check(&duplicate, &|| false).is_err());
+            let mut trailing = container(&[8], wide);
+            trailing.push(0);
+            assert!(check(&trailing, &|| false).is_err());
+            assert!(check(&container(&[8], wide), &|| true).is_err());
+        }
+        assert!(check(&[0, 0, 0, 1, b'm', b'd', b'a', b't'], &|| false).is_err());
+    }
 }

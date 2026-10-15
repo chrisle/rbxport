@@ -8,17 +8,40 @@ type Files = BTreeMap<String, String>;
 fn conflict(s: impl std::fmt::Display) -> ExportError {
     ExportError::Conflict(format!("XDJ-R1: {s}"))
 }
+fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let failed = |e| conflict(format!("cannot read {}: {e}", path.display()));
+    let source = std::fs::File::open(path).map_err(failed)?;
+    if source.metadata().map_err(failed)?.len() > limit as u64 {
+        return Err(conflict(format!(
+            "{} exceeds the safe R1 allocation limit",
+            path.display()
+        )));
+    }
+    // A concurrent grow after metadata cannot bypass the allocation bound.
+    let mut data = Vec::new();
+    source
+        .take(limit as u64 + 1)
+        .read_to_end(&mut data)
+        .map_err(failed)?;
+    if data.len() > limit {
+        return Err(conflict(format!(
+            "{} grew beyond the safe R1 allocation limit",
+            path.display()
+        )));
+    }
+    Ok(data)
+}
 fn read_set(root: &Path, name: &str) -> Result<BTreeMap<String, Vec<u8>>> {
-    cbm::FILES
-        .into_iter()
-        .map(|file| {
-            Ok((
-                file.into(),
-                std::fs::read(root.join(name).join("DBH").join(file))
-                    .map_err(|e| conflict(format!("cannot read {file}: {e}")))?,
-            ))
-        })
-        .collect()
+    let mut set = BTreeMap::new();
+    let mut total = 0;
+    for file in cbm::FILES {
+        let limit = cbm::MAX_FILE_BYTES.min(cbm::MAX_SET_BYTES - total);
+        let data = read_limited(&root.join(name).join("DBH").join(file), limit)?;
+        total += data.len();
+        set.insert(file.into(), data);
+    }
+    Ok(set)
 }
 /// Fail closed for foreign, incomplete, malformed or changed libraries, even with
 /// support OFF. Blocking also protects all audio a foreign Cbm library may name.
@@ -168,8 +191,13 @@ pub(crate) fn stage(
                 audio = crate::checked_under(existing, &old.audio)?;
             }
         }
-        let properties = rbl_audio::legacy::inspect(&audio, cancelled)
-            .map_err(|e| conflict(format!("{}: {e}", t.title)))?;
+        let properties = rbl_audio::legacy::inspect(&audio, cancelled).map_err(|e| {
+            if cancelled() {
+                ExportError::Cancelled
+            } else {
+                conflict(format!("{}: {e}", t.title))
+            }
+        })?;
         let Some(info) = properties else {
             warnings.push(crate::ExportWarning {
                 track_id: t.library_id,
@@ -184,11 +212,10 @@ pub(crate) fn stage(
         let mut dat = if t.analysis_path.is_empty() {
             rbl_anlz::parse(&builder.finish()).map_err(conflict)?
         } else {
-            rbl_anlz::parse(&std::fs::read(resolved(
-                stage,
-                existing,
-                &t.analysis_path,
-            )?)?)
+            rbl_anlz::parse(&read_limited(
+                &resolved(stage, existing, &t.analysis_path)?,
+                cbm::MAX_FILE_BYTES,
+            )?)
             .map_err(conflict)?
         };
         if let Some(cues) = &t.cues {
@@ -208,7 +235,7 @@ pub(crate) fn stage(
             let path = format!("{directory}/ANLZ{i:04}.DAT");
             let source = resolved(stage, existing, &path)?;
             if source.is_file() {
-                let old = std::fs::read(&source)?;
+                let old = read_limited(&source, cbm::MAX_FILE_BYTES)?;
                 if dat_path(&old)? != t.audio_path {
                     continue;
                 }
@@ -241,12 +268,14 @@ pub(crate) fn stage(
         if !artwork.is_empty() && !files.contains_key(large.trim_start_matches('/')) {
             if normal_root != name {
                 let normal = artwork.replacen("/PIONEER/", &format!("/{normal_root}/"), 1);
-                let small = std::fs::read(resolved(stage, existing, &normal)?)?;
+                let small =
+                    read_limited(&resolved(stage, existing, &normal)?, cbm::MAX_FILE_BYTES)?;
                 let target = crate::checked_under(existing, &artwork)?;
                 let owned = previous
                     .and_then(|m| m.generation.as_ref())
                     .is_some_and(|g| g.r1_files.contains_key(artwork.trim_start_matches('/')));
-                if target.exists() && !owned && std::fs::read(target)? != small {
+                if target.exists() && !owned && read_limited(&target, cbm::MAX_FILE_BYTES)? != small
+                {
                     return Err(conflict("unowned R1 artwork would be replaced"));
                 }
                 store(stage, &artwork, &small, &mut files)?;
@@ -273,33 +302,13 @@ pub(crate) fn stage(
                     },
                     Ok,
                 )?;
-            let image = image::ImageReader::open(image_path)?
-                .decode()
-                .map_err(conflict)?
-                .to_rgb8();
-            let side = image.width().max(image.height());
-            if side == 0 || side > 16384 {
-                return Err(conflict("invalid or oversized artwork"));
-            }
-            let mut square = image::RgbImage::new(side, side);
-            image::imageops::replace(
-                &mut square,
-                &image,
-                i64::from((side - image.width()) / 2),
-                i64::from((side - image.height()) / 2),
-            );
-            let resized =
-                image::imageops::resize(&square, 320, 320, image::imageops::FilterType::CatmullRom);
-            let mut jpeg = Vec::new();
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85)
-                .encode_image(&image::DynamicImage::ImageRgb8(resized))
-                .map_err(conflict)?;
+            let jpeg = large_artwork(&image_path)?;
             let target = crate::checked_under(existing, &output)?;
             if target.exists()
                 && !previous
                     .and_then(|m| m.generation.as_ref())
                     .is_some_and(|g| g.r1_files.contains_key(output.trim_start_matches('/')))
-                && std::fs::read(target)? != jpeg
+                && read_limited(&target, cbm::MAX_FILE_BYTES)? != jpeg
             {
                 return Err(conflict("unowned large artwork would be replaced"));
             }
@@ -354,12 +363,44 @@ pub(crate) fn stage(
     Ok(files)
 }
 
+/// Bound decoder and square allocations before decoding untrusted artwork.
+/// 4096-square RGB needs at most 48 MiB; this is a deliberate safe admission limit.
+fn large_artwork(path: &Path) -> Result<Vec<u8>> {
+    let mut reader = image::ImageReader::open(path)?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(4096);
+    limits.max_image_height = Some(4096);
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    reader.limits(limits);
+    let image = reader.decode().map_err(conflict)?.to_rgb8();
+    let side = image.width().max(image.height());
+    if side == 0 || side > 4096 {
+        return Err(conflict(
+            "invalid or oversized R1 artwork (maximum 4096 pixels)",
+        ));
+    }
+    let mut square = image::RgbImage::new(side, side);
+    image::imageops::replace(
+        &mut square,
+        &image,
+        i64::from((side - image.width()) / 2),
+        i64::from((side - image.height()) / 2),
+    );
+    let resized =
+        image::imageops::resize(&square, 320, 320, image::imageops::FilterType::CatmullRom);
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85)
+        .encode_image(&image::DynamicImage::ImageRgb8(resized))
+        .map_err(conflict)?;
+    Ok(jpeg)
+}
+
 pub(crate) fn analysis_collision(root: &Path, directory: &str, audio: &str) -> Result<bool> {
     let path = crate::checked_under(root, &format!("{directory}/ANLZ0000.DAT"))?;
     if !path.is_file() {
         return Ok(false);
     }
-    Ok(dat_path(&std::fs::read(path)?)? != audio)
+    Ok(dat_path(&read_limited(&path, cbm::MAX_FILE_BYTES)?)? != audio)
 }
 
 fn visit(
@@ -498,5 +539,22 @@ mod cue_bounds {
         dat.sections[collection].payload[12..16].copy_from_slice(&1_u32.to_be_bytes());
         dat.sections.push(dat.sections[collection].clone());
         assert!(super::validate_cues(&dat).is_err());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod artwork_bounds {
+    #[test]
+    fn oversized_artwork_is_refused_before_square_allocation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.png");
+        // A narrow generated fixture keeps the test allocation small.
+        image::RgbImage::new(4097, 1).save(&path).unwrap();
+        assert!(super::large_artwork(&path).is_err());
+        image::RgbImage::new(4096, 1).save(&path).unwrap();
+        let jpeg = super::large_artwork(&path).unwrap();
+        let decoded = image::load_from_memory(&jpeg).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (320, 320));
     }
 }
