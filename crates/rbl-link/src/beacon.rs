@@ -2307,8 +2307,7 @@ mod all_in_one_tests {
         fn list(&self, _: &rbl_dbserver::catalog::Query) -> Vec<rbl_dbserver::catalog::Row> { Vec::new() }
         fn track_row(&self, _: u32, _: Option<rbl_dbserver::catalog::TrackColumn>) -> Option<rbl_dbserver::item::TrackRow> { None }
         fn track(&self, _: u32) -> Option<rbl_dbserver::catalog::TrackDetails> { None }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn artwork(&self, _: u32, _: rbl_dbserver::catalog::ArtworkSize) -> Option<Vec<u8>> { None }
         fn analysis(&self, _: u32, _: &rbl_dbserver::catalog::Analysis) -> Option<Vec<u8>> { None }
     }
 

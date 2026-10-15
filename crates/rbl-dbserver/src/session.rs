@@ -10,8 +10,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::catalog::{
-    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, HotCueColour, MyTag, PlayerCue, Query,
-    Row, Sort, TrackColumn, TrackDetails, TrackScope, UsbCue, HOT_CUE_DEFAULT, HOT_LOOP_DEFAULT,
+    Analysis, ArtistRole, ArtworkSize, Catalog, Edit, HotCueBankCue, HotCueColour, MyTag,
+    PlayerCue, Query, Row, Sort, TrackColumn, TrackDetails, TrackScope, UsbCue, HOT_CUE_DEFAULT,
+    HOT_LOOP_DEFAULT,
 };
 use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
@@ -1310,14 +1311,17 @@ impl LinkSession {
             ),
             kind::ARTWORK | kind::CONTENT_ARTWORK => {
                 let id = Self::number(message, 1);
-                // `0x2003` with the size argument names a menu item's own id,
-                // rather than the artwork field in it. `0x2103` uses that same
-                // content-id lookup directly (RX3 `dbcl_GetImage2`).
-                let art = if message.kind == kind::CONTENT_ARTWORK || message.arguments.len() > 2 {
-                    self.catalog.item_artwork(id)
+                // The id is the one a title row's artwork field carried (the
+                // track's own) or the row a CDJ-3000 drew, with or without
+                // the size argument; `0x2103` names a content id the same
+                // way (RX3 `dbcl_GetImage2`). Only the third argument's
+                // value picks the file, as in rekordbox's `OnImgCmd`.
+                let size = if Self::number(message, 2) != 0 {
+                    ArtworkSize::Medium
                 } else {
-                    self.catalog.artwork(id)
+                    ArtworkSize::Small
                 };
+                let art = self.catalog.artwork(id, size);
                 Self::blob(message, kind::ARTWORK_REPLY, art, None)
             }
             kind::WAVEFORM_PREVIEW => {

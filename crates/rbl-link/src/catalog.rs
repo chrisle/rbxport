@@ -8,9 +8,8 @@
 //!
 //! IDs on the wire preserve their `djmd*` database values so requests remain
 //! stable across reloads. Tracks fit a `u32` in every library measured;
-//! 0 means "none" in an album row. Artwork uses the track's
-//! row plus two (1 means "no artwork" to a player). A CDJ-3000 asks for
-//! artwork by the track's or album's id instead, and is answered that way.
+//! 0 means "none" in an album row. Artwork is asked for by the track's or
+//! album's id, the one a track row's artwork field carries.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -19,7 +18,7 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use rbl_anlz::Anlz;
 use rbl_dbserver::catalog::{
-    Analysis as Wanted, ArtistRole, Catalog, Edit, HotCueBank, HotCueBankCue, MyTag, Query, RootCategory, Row, Sort,
+    Analysis as Wanted, ArtistRole, ArtworkSize, Catalog, Edit, HotCueBank, HotCueBankCue, MyTag, Query, RootCategory, Row, Sort,
     TrackColumn,
     TrackDetails, TrackScope, UsbCue,
 };
@@ -117,11 +116,14 @@ const MAX_ARTWORK: u64 = 4 * 1024 * 1024;
 
 /// rekordbox keeps each artwork three ways beside `djmdContent.ImagePath`:
 /// the file it names (`artwork.jpg`, up to a few hundred KB), a medium
-/// `artwork_m.jpg` and a small `artwork_s.jpg`. It serves a player the medium
-/// one (measured: rekordbox 7.2.11's 127 artwork replies to a CDJ-3000 ran
-/// 2.5–32 KB, the `_m` files' range); sent the full file, a CDJ-3000 left
-/// much of its list without art.
+/// `artwork_m.jpg` and a small `artwork_s.jpg`. It serves a player that asks
+/// with the size argument the medium one (measured: rekordbox 7.2.11's 127
+/// artwork replies to a CDJ-3000 ran 2.5–32 KB, the `_m` files' range); sent
+/// the full file, a CDJ-3000 left much of its list without art.
 const MEDIUM_ARTWORK_SUFFIX: &str = "_m";
+/// The small file, served to a request without the size argument (see
+/// [`ArtworkSize`]).
+const SMALL_ARTWORK_SUFFIX: &str = "_s";
 
 /// A player asks for a dozen blobs when it loads a track and two for every
 /// row it draws; this many parsed analysis files stay in memory so each is
@@ -142,6 +144,7 @@ struct QueryCacheEntry {
 struct ArtworkCacheEntry {
     library: Weak<Library>,
     row: rbl_index::Row,
+    size: ArtworkSize,
     bytes: Arc<[u8]>,
 }
 
@@ -319,14 +322,21 @@ impl IndexCatalog {
             .and_then(|(row, _)| rbl_index::Row::try_from(row).ok())
     }
 
-    /// The artwork file of a row, read whole: the medium file rekordbox
-    /// keeps beside the one the library names, or the named one where
-    /// rekordbox has not made it.
-    fn artwork_at(&self, library: &Arc<Library>, row: rbl_index::Row) -> Option<Vec<u8>> {
+    /// The artwork file of a row, read whole, in rekordbox's order: for
+    /// [`ArtworkSize::Medium`] the `_m` file it keeps beside the one the
+    /// library names, else the `_s` one, else the named one; for
+    /// [`ArtworkSize::Small`] the `_s` file, else the named one.
+    fn artwork_at(
+        &self,
+        library: &Arc<Library>,
+        row: rbl_index::Row,
+        size: ArtworkSize,
+    ) -> Option<Vec<u8>> {
         {
             let mut cache = self.browse.lock();
             if let Some(at) = cache.artwork.iter().position(|entry| {
                 entry.row == row
+                    && entry.size == size
                     && entry
                         .library
                         .upgrade()
@@ -350,7 +360,7 @@ impl IndexCatalog {
             return None;
         }
         let share = self.source.share_root();
-        let path = [medium_artwork(relative), relative.to_owned()]
+        let path = artwork_candidates(relative, size)
             .iter()
             .filter_map(|candidate| resolve_under(&share, candidate))
             .find(|candidate| candidate.is_file())?;
@@ -369,6 +379,7 @@ impl IndexCatalog {
             cache.artwork.push(ArtworkCacheEntry {
                 library: Arc::downgrade(library),
                 row,
+                size,
                 bytes: Arc::clone(&bytes),
             });
         }
@@ -1347,16 +1358,10 @@ impl Catalog for IndexCatalog {
         })
     }
 
-    fn artwork(&self, id: u32) -> Option<Vec<u8>> {
-        let library = self.source.library()?;
-        let row = id.checked_sub(2)?;
-        self.artwork_at(&library, row)
-    }
-
-    fn item_artwork(&self, id: u32) -> Option<Vec<u8>> {
+    fn artwork(&self, id: u32, size: ArtworkSize) -> Option<Vec<u8>> {
         let library = self.source.library()?;
         let row = Self::item_row(&library, id)?;
-        self.artwork_at(&library, row)
+        self.artwork_at(&library, row, size)
     }
 
     fn analysis(&self, track: u32, what: &Wanted) -> Option<Vec<u8>> {
@@ -1544,15 +1549,27 @@ impl Catalog for IndexCatalog {
     }
 }
 
-/// The medium file beside the artwork `ImagePath` names: `_m` before the
+/// The files to try for artwork of `size`, first first: the sized files
+/// beside the one `ImagePath` names, then that one.
+fn artwork_candidates(relative: &str, size: ArtworkSize) -> Vec<String> {
+    let mut candidates = Vec::with_capacity(3);
+    if size == ArtworkSize::Medium {
+        candidates.push(sized_artwork(relative, MEDIUM_ARTWORK_SUFFIX));
+    }
+    candidates.push(sized_artwork(relative, SMALL_ARTWORK_SUFFIX));
+    candidates.push(relative.to_owned());
+    candidates
+}
+
+/// The sized file beside the artwork `ImagePath` names: `suffix` before the
 /// extension. A path with no extension is returned as it is.
-fn medium_artwork(relative: &str) -> String {
+fn sized_artwork(relative: &str, suffix: &str) -> String {
     let stem_end = relative
         .rfind('.')
         .filter(|&dot| !relative[dot..].contains(['/', '\\']));
     match stem_end {
         Some(dot) => format!(
-            "{}{MEDIUM_ARTWORK_SUFFIX}{}",
+            "{}{suffix}{}",
             &relative[..dot],
             &relative[dot..]
         ),
@@ -2575,14 +2592,71 @@ mod tests {
         assert_eq!(IndexCatalog::item_row(&lib, 99), None);
     }
 
+    /// #462: a client without the size argument (prolink-connect, so
+    /// Prolink Tools; older players) names the track by the id a title
+    /// row's artwork field carries, as one with it does, and gets the small
+    /// file rekordbox would send; RBX used to read that id as a row plus two.
     #[test]
-    fn artwork_is_the_medium_file_beside_the_one_the_library_names() {
-        assert_eq!(
-            medium_artwork("/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg"),
-            "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_m.jpg"
+    fn artwork_is_found_by_track_id_with_or_without_the_size_argument() {
+        struct Share(Arc<Library>, PathBuf);
+        impl Source for Share {
+            fn library(&self) -> Option<Arc<Library>> {
+                Some(Arc::clone(&self.0))
+            }
+            fn share_root(&self) -> PathBuf {
+                self.1.clone()
+            }
+            fn details(&self, _id: &str) -> Option<rbl_db::details::TrackDetails> {
+                None
+            }
+        }
+        let share = tempfile::tempdir().unwrap();
+        let mut lib = library();
+        for relative in ["", "/PIONEER/Artwork/a/artwork.jpg", "/PIONEER/Artwork/b/artwork.jpg"] {
+            lib.artwork_path.push(relative);
+        }
+        for (relative, bytes) in [
+            ("PIONEER/Artwork/a/artwork.jpg", b"a-full".as_slice()),
+            ("PIONEER/Artwork/a/artwork_m.jpg", b"a-m"),
+            ("PIONEER/Artwork/a/artwork_s.jpg", b"a-s"),
+            ("PIONEER/Artwork/b/artwork.jpg", b"b-full"),
+        ] {
+            let path = share.path().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        let c = IndexCatalog::new(
+            Arc::new(Share(Arc::new(lib), share.path().to_owned())),
+            Played::default(),
         );
-        assert_eq!(medium_artwork("art.v2.png"), "art.v2_m.png");
-        assert_eq!(medium_artwork("/a.b/artwork"), "/a.b/artwork");
+        assert_eq!(c.artwork(11, ArtworkSize::Small).unwrap(), b"a-s");
+        assert_eq!(c.artwork(11, ArtworkSize::Medium).unwrap(), b"a-m");
+        // Asked twice, each size keeps its own cached file.
+        assert_eq!(c.artwork(11, ArtworkSize::Small).unwrap(), b"a-s");
+        assert_eq!(c.artwork(12, ArtworkSize::Small).unwrap(), b"b-full");
+        assert_eq!(c.artwork(12, ArtworkSize::Medium).unwrap(), b"b-full");
+        assert_eq!(c.artwork(10, ArtworkSize::Small), None, "track 10 has none");
+    }
+
+    #[test]
+    fn artwork_is_the_sized_file_beside_the_one_the_library_names() {
+        assert_eq!(
+            artwork_candidates("/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg", ArtworkSize::Medium),
+            [
+                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_m.jpg",
+                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_s.jpg",
+                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg",
+            ]
+        );
+        assert_eq!(
+            artwork_candidates("/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg", ArtworkSize::Small),
+            [
+                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_s.jpg",
+                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg",
+            ]
+        );
+        assert_eq!(sized_artwork("art.v2.png", "_m"), "art.v2_m.png");
+        assert_eq!(sized_artwork("/a.b/artwork", "_s"), "/a.b/artwork");
     }
 
     #[test]

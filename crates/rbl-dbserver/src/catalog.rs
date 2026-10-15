@@ -115,6 +115,21 @@ impl TrackColumn {
 }
 
 /// The artist-reference field used by an advanced browse category.
+/// Which of rekordbox's artwork files an artwork request asks for.
+///
+/// rekordbox keeps three beside the file `djmdContent.ImagePath` names: a
+/// medium `_m` (240x240) and a small `_s` (80x80). [OBS static] rekordbox
+/// 7.2.19 `PSvDBMain::GetDBImgData_common` @`0x1018cbe44` reads the
+/// request's third argument: present and non-zero sends `_m`, else `_s`,
+/// falling back to `_s` and then the named file when one is missing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArtworkSize {
+    /// `[ctx, id]`, or a third argument of 0: the `_s` file.
+    Small,
+    /// `[ctx, id, n]` with `n` non-zero (a CDJ-3000 sends 1): the `_m` file.
+    Medium,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArtistRole {
     Original,
@@ -498,17 +513,21 @@ pub trait Catalog: Send + Sync {
     /// The whole record, for metadata and track info.
     fn track(&self, id: u32) -> Option<TrackDetails>;
 
-    /// Artwork bytes (JPEG) for the artwork id a title item carries, the
-    /// way a player without the size argument asks (`[ctx, artwork]`).
-    fn artwork(&self, id: u32) -> Option<Vec<u8>>;
-
-    /// Artwork bytes (JPEG) for a menu item's own id: a track's, or an
-    /// album's. A CDJ-3000 asking with the size argument (`[ctx, id, 1]`)
-    /// names the row it drew, not the artwork field in it: every one of the
-    /// 244 requests in a rekordbox 7.2.11 browse capture carried a track
-    /// row's id (180) or an album row's (64), and rekordbox answered 135 of
-    /// the track ones and 3 of the album ones with an image.
-    fn item_artwork(&self, id: u32) -> Option<Vec<u8>>;
+    /// Artwork bytes (JPEG) for a menu item's id: a track's, or an album's.
+    ///
+    /// The id is the same whichever size is asked for. A track row's
+    /// artwork field carries the track's own id (rekordbox 7 sets it so on
+    /// every track row, and so does RBX), and a client sends back whatever
+    /// that field held: a CDJ-3000 or XDJ-RX3 as `[ctx, id, 1]`, an older
+    /// player or a third-party client (prolink-connect, so Prolink Tools) as
+    /// `[ctx, id]`. Every one of the 244 requests in a rekordbox 7.2.11
+    /// browse capture carried a track row's id (180) or an album row's (64),
+    /// and rekordbox answered 135 of the track ones and 3 of the album ones
+    /// with an image. [OBS static] rekordbox 7.2.19 resolves the id the
+    /// same way with or without the size argument (`PSvDBMain::OnImgCmd`
+    /// @`0x101b0efa4` -> `GetDBImgData` @`0x1018cbca0`); the argument only
+    /// picks the file (`GetDBImgData_common` @`0x1018cbe44`).
+    fn artwork(&self, id: u32, size: ArtworkSize) -> Option<Vec<u8>>;
 
     /// A track's analysis blob, in the layout the reply carries.
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>>;

@@ -12,7 +12,7 @@
 use std::sync::{Arc, Mutex};
 
 use rbl_dbserver::catalog::{
-    Analysis, Catalog, Edit, HotCueBank, HotCueBankCue, Query, RootCategory, Row, Sort,
+    Analysis, ArtworkSize, Catalog, Edit, HotCueBank, HotCueBankCue, Query, RootCategory, Row, Sort,
     TrackColumn, TrackDetails, TrackScope, UsbCue,
 };
 use rbl_dbserver::item::{root_menu, TrackRow};
@@ -249,11 +249,13 @@ impl Catalog for Small {
     fn edit(&self, edit: &Edit) -> bool {
         matches!(edit, Edit::HotCueBankCue { bank: 42, .. })
     }
-    fn artwork(&self, id: u32) -> Option<Vec<u8>> {
-        (id == 0x14).then(|| vec![0xff, 0xd8, 0xff, 0xe1])
-    }
-    fn item_artwork(&self, id: u32) -> Option<Vec<u8>> {
-        (id == 0x6272).then(|| vec![0xff, 0xd8, 0xff, 0xe0])
+    /// Tracks 0x6272 and [`TRACK`] have artwork: four bytes medium, five
+    /// small, so a reply shows which file was asked for.
+    fn artwork(&self, id: u32, size: ArtworkSize) -> Option<Vec<u8>> {
+        (id == 0x6272 || id == TRACK).then(|| match size {
+            ArtworkSize::Medium => vec![0xff, 0xd8, 0xff, 0xe0],
+            ArtworkSize::Small => vec![0xff, 0xd8, 0xff, 0xe1, 0],
+        })
     }
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>> {
         match what {
@@ -611,11 +613,7 @@ fn the_sort_menu_uses_the_catalog_configuration() {
             None
         }
 
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
-            None
-        }
-
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
             None
         }
 
@@ -697,10 +695,7 @@ fn key_menus_use_catalog_display_names() {
         fn track(&self, _: u32) -> Option<TrackDetails> {
             None
         }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
-            None
-        }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
             None
         }
         fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
@@ -742,10 +737,7 @@ fn rx3_legacy_key_tracks_are_exact_key_matches() {
         fn track(&self, _: u32) -> Option<TrackDetails> {
             None
         }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
-            None
-        }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
             None
         }
         fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
@@ -1019,6 +1011,33 @@ fn a_played_track_carries_the_played_bit_everywhere() {
     assert!(args(&items[0]).contains("0x2304, 0x100, 0x475f, 0x0, 0x100"));
 }
 
+/// #462: Prolink Tools (prolink-connect) reads a track's artwork id from
+/// the title row of its metadata, argument 8, and asks `[ctx, id]` with no
+/// size argument. [OBS] rekordbox 7 puts the track's own id in that field
+/// on every track row (664 rows over two XDJ-RX3 captures) and answers a
+/// request naming it with the image (75 of 75). RBX put the same id there
+/// but read a two-argument request as its old row-based artwork id, so the
+/// client got the no-art reply.
+#[test]
+fn a_title_rows_artwork_field_fetches_its_art_without_the_size_argument() {
+    for setup in [None, Some(5)] {
+        let mut s = session();
+        if let Some(legacy) = setup {
+            s.handle(&numbers(kind::SETUP, 0xffff_fffe, &[legacy]));
+        }
+        let (_, rows) = browse(&mut s, kind::METADATA, &[0x0102_0301, TRACK]);
+        let field = match rows[0].arguments.get(8) {
+            Some(Argument::Number(field)) => *field,
+            other => panic!("title row argument 8: {other:?}"),
+        };
+        assert_eq!(field, TRACK, "rekordbox's artwork field is the track id");
+        let art = s.handle(&numbers(kind::ARTWORK, 0x200, &[0x0108_0301, field]));
+        assert_eq!(args(&art[0]), "0x2003, 0x0, 0x5, blob[5]");
+        let medium = s.handle(&numbers(kind::ARTWORK, 0x201, &[0x0108_0301, field, 1]));
+        assert_eq!(args(&medium[0]), "0x2003, 0x0, 0x4, blob[4]");
+    }
+}
+
 #[test]
 fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
     let mut s = session();
@@ -1035,18 +1054,28 @@ fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
     assert_eq!(args(&some[0]), "0x2003, 0x0, 0x4, blob[4]");
     // RX3 uses `0x2103` while loading: its content id is resolved as a menu
     // item's artwork, but the binary reply has the request kind it carried.
+    // Its third argument picks the size as for `0x2003` (`dbcl_GetImage2`
+    // sends 1 or 0; rekordbox's `GetDBImgData_common` reads it the same).
     let by_content = s.handle(&numbers(
+        kind::CONTENT_ARTWORK,
+        0x1a3,
+        &[0x0108_0301, 0x6272, 1],
+    ));
+    assert_eq!(args(&by_content[0]), "0x2103, 0x0, 0x4, blob[4]");
+    let small_by_content = s.handle(&numbers(
         kind::CONTENT_ARTWORK,
         0x1a3,
         &[0x0108_0301, 0x6272, 0],
     ));
-    assert_eq!(args(&by_content[0]), "0x2103, 0x0, 0x4, blob[4]");
-    // Without the size argument the id is the title item's artwork field,
-    // not the track's id.
-    let by_field = s.handle(&numbers(kind::ARTWORK, 0x1a4, &[0x0108_0301, 0x14]));
-    assert_eq!(args(&by_field[0]), "0x2003, 0x0, 0x4, blob[4]");
-    let not_a_field = s.handle(&numbers(kind::ARTWORK, 0x1a5, &[0x0108_0301, 0x6272]));
-    assert_eq!(args(&not_a_field[0]), "0x2003, 0x32, 0x0, blob[0]");
+    assert_eq!(args(&small_by_content[0]), "0x2103, 0x0, 0x5, blob[5]");
+    // Without the size argument (or with 0) the same id names the same
+    // track; only the file differs: the small one, as rekordbox sends.
+    let small = s.handle(&numbers(kind::ARTWORK, 0x1a4, &[0x0108_0301, 0x6272]));
+    assert_eq!(args(&small[0]), "0x2003, 0x0, 0x5, blob[5]");
+    let zero = s.handle(&numbers(kind::ARTWORK, 0x1a5, &[0x0108_0301, 0x6272, 0]));
+    assert_eq!(args(&zero[0]), "0x2003, 0x0, 0x5, blob[5]");
+    let unknown = s.handle(&numbers(kind::ARTWORK, 0x1a6, &[0x0108_0301, 0xdc0d_0bca]));
+    assert_eq!(args(&unknown[0]), "0x2003, 0x32, 0x0, blob[0]");
 
     let tag = s.handle(&numbers(
         kind::ANLZ_TAG,
@@ -1183,10 +1212,7 @@ fn a_page_of_a_long_list_is_the_window_asked_for() {
         fn track(&self, _: u32) -> Option<TrackDetails> {
             None
         }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
-            None
-        }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
             None
         }
         fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
@@ -1275,10 +1301,7 @@ fn tracks_are_sorted_the_way_the_player_asked() {
         fn track(&self, _: u32) -> Option<TrackDetails> {
             None
         }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
-            None
-        }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
             None
         }
         fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
@@ -1362,10 +1385,7 @@ fn the_extended_cue_reply_counts_its_entries_not_a_header_word() {
         fn track(&self, _: u32) -> Option<TrackDetails> {
             None
         }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
-            None
-        }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
             None
         }
         fn analysis(&self, _: u32, what: &Analysis) -> Option<Vec<u8>> {
@@ -1529,10 +1549,7 @@ fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() 
                 track
             })
         }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
-            None
-        }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
             None
         }
         fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
@@ -1622,10 +1639,7 @@ fn history_commands_reach_the_catalog_and_only_the_removal_is_answered() {
         fn track(&self, id: u32) -> Option<TrackDetails> {
             Small(false).track(id)
         }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
-            None
-        }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
             None
         }
         fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
@@ -2076,8 +2090,7 @@ impl Catalog for AnalysisBoundaryCatalog {
         Small(false).track_row(id, column)
     }
     fn track(&self, id: u32) -> Option<TrackDetails> { Small(false).track(id) }
-    fn artwork(&self, id: u32) -> Option<Vec<u8>> { Small(false).artwork(id) }
-    fn item_artwork(&self, id: u32) -> Option<Vec<u8>> { Small(false).item_artwork(id) }
+    fn artwork(&self, id: u32, size: ArtworkSize) -> Option<Vec<u8>> { Small(false).artwork(id, size) }
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>> {
         self.reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         (track == TRACK && matches!(what, Analysis::Vbr)).then(|| vec![0; 1604])

@@ -25,7 +25,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
-use rbl_dbserver::catalog::{Analysis, Catalog, MyTag, Query, Row, TrackColumn, TrackDetails, TrackScope};
+use rbl_dbserver::catalog::{Analysis, ArtworkSize, Catalog, MyTag, Query, Row, TrackColumn, TrackDetails, TrackScope};
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::net::Session;
 use rbl_dbserver::session::LinkSession;
@@ -185,11 +185,7 @@ impl Catalog for Library {
         Some(TrackDetails { row: self.track_row(id, None)?, ..TrackDetails::default() })
     }
 
-    fn artwork(&self, _id: u32) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn item_artwork(&self, _id: u32) -> Option<Vec<u8>> {
+    fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
         None
     }
 

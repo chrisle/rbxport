@@ -11,7 +11,7 @@
 use std::sync::{Arc, Mutex};
 
 use rbl_dbserver::catalog::{
-    Analysis, Catalog, Edit, HotCueColour, PlayerCue, Query, Row, TrackColumn, TrackDetails,
+    Analysis, ArtworkSize, Catalog, Edit, HotCueColour, PlayerCue, Query, Row, TrackColumn, TrackDetails,
     UsbCue,
 };
 use rbl_dbserver::item::TrackRow;
@@ -47,10 +47,7 @@ impl Catalog for Recording {
     fn track(&self, _: u32) -> Option<TrackDetails> {
         None
     }
-    fn artwork(&self, _: u32) -> Option<Vec<u8>> {
-        None
-    }
-    fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+    fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> {
         None
     }
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>> {
