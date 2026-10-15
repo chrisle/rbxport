@@ -21,10 +21,10 @@
 //! against real players, not against this crate.
 
 pub mod beacon;
-mod interface_mode;
 pub mod blobs;
 pub mod catalog;
 pub mod files;
+mod interface_mode;
 pub mod join;
 pub mod watch;
 
@@ -36,7 +36,9 @@ use rbl_index::Library;
 
 pub use beacon::{LinkState, Player};
 pub use catalog::{IndexCatalog, KeyNotation, KeyOrder, Played, Source};
-pub use rbl_dbserver::catalog::{ArtistRole, Edit, HotCueColour, PlayerCue, RootCategory, Sort, TrackColumn};
+pub use rbl_dbserver::catalog::{
+    ArtistRole, Edit, HotCueColour, PlayerCue, RootCategory, Sort, TrackColumn,
+};
 pub use rbl_prolink::DeviceType;
 pub use watch::Watcher;
 
@@ -130,7 +132,14 @@ pub fn interface_toward(interfaces: &[Interface], peer: Ipv4Addr) -> Option<Inte
 /// The interfaces a link network could be on: every IPv4 one that is not
 /// loopback, in the order the OS lists them.
 pub fn interfaces() -> Vec<Interface> {
-    alphatheta_connect::utils::network_interfaces()
+    link_candidates(alphatheta_connect::utils::network_interfaces())
+}
+
+/// Which of the discovered adapters a link network could be on: everything
+/// but loopback. Link-local (169.254.x.x) addresses stay: that is where a
+/// player's USB LINK adapter sits when nothing hands it a lease.
+fn link_candidates(found: Vec<alphatheta_connect::utils::InterfaceInfo>) -> Vec<Interface> {
+    found
         .into_iter()
         .filter(|i| !i.internal)
         .map(|i| Interface {
@@ -255,14 +264,18 @@ impl LinkExport {
         // A later bind failing stops what is already bound before the error
         // goes back, so the ports are free for the very next try rather than
         // once the dropped servers' threads get round to it (#348).
-        let database =
-            match rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database) {
-                Ok(database) => database,
-                Err(e) => {
-                    beacon.stop();
-                    return Err(LinkError::Bind(explain(&e, "TCP", ports.query)));
-                }
-            };
+        let database = match rbl_dbserver::net::Bound::start(
+            handler,
+            listen_on,
+            ports.query,
+            ports.database,
+        ) {
+            Ok(database) => database,
+            Err(e) => {
+                beacon.stop();
+                return Err(LinkError::Bind(explain(&e, "TCP", ports.query)));
+            }
+        };
         // The mount EXPORT reply must offer the export to the player's subnet,
         // which rekordbox names as its own `<ip>/<netmask>`; without it a CDJ
         // mounts nothing. Loopback tests have no meaningful subnet, so skip it.
@@ -480,6 +493,40 @@ mod tests {
         fn details(&self, _id: &str) -> Option<rbl_db::details::TrackDetails> {
             None
         }
+    }
+
+    fn found(
+        name: &str,
+        address: Ipv4Addr,
+        internal: bool,
+    ) -> alphatheta_connect::utils::InterfaceInfo {
+        alphatheta_connect::utils::InterfaceInfo {
+            name: name.into(),
+            address,
+            netmask: if address.is_link_local() {
+                Ipv4Addr::new(255, 255, 0, 0)
+            } else {
+                Ipv4Addr::new(255, 255, 255, 0)
+            },
+            mac: [0, 1, 2, 3, 4, 5],
+            internal,
+        }
+    }
+
+    #[test]
+    fn link_candidates_keep_link_local_and_ordinary_adapters_but_not_loopback() {
+        let candidates = link_candidates(vec![
+            found("Loopback", Ipv4Addr::LOCALHOST, true),
+            found("Ethernet", Ipv4Addr::new(192, 168, 1, 10), false),
+            found("Ethernet 2", Ipv4Addr::new(169, 254, 210, 13), false),
+        ]);
+
+        let names: Vec<_> = candidates.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["Ethernet", "Ethernet 2"]);
+        let link_local = &candidates[1];
+        assert_eq!(link_local.address, Ipv4Addr::new(169, 254, 210, 13));
+        assert_eq!(link_local.netmask, Ipv4Addr::new(255, 255, 0, 0));
+        assert_eq!(link_local.broadcast(), Ipv4Addr::new(169, 254, 255, 255));
     }
 
     #[test]

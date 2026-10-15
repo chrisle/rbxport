@@ -14,6 +14,12 @@ workspace = true
 # interface discovery with MAC addresses, and the CDJ status packet, which
 # is how we learn which player has loaded which of our tracks.
 alphatheta-connect = { git = "https://github.com/chrisle/alphatheta-connect-rs", rev = "b54d9e9c53059f11e04f4de9898f4abae3b46480", default-features = false }
+# The same crate alphatheta-connect lists interfaces with (and, on Apple
+# targets, the interface index the pin takes). `link-local` is on for every
+# target because Cargo unifies features: without it, if-addrs drops
+# 169.254.x.x IPv4 addresses on Windows, which is where a Pioneer USB LINK
+# adapter (XDJ-RX3) with no DHCP lease lives (#408).
+if-addrs = { version = "0.15", features = ["link-local"] }
 parking_lot = "0.12"
 rbl-anlz = { path = "../rbl-anlz" }
 rbl-db = { path = "../rbl-db" }
@@ -27,14 +33,10 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
-# The interface index, which the pin takes; the same crate alphatheta-connect
-# lists interfaces with.
-if-addrs = "0.15"
 core-foundation = "0.10"
 system-configuration-sys = "0.6"
 
 [dev-dependencies]
-if-addrs = "0.15"
 # The emulator fixture (`examples/emu_fixture.rs`) analyses its own WAVs so
 # the deck has a grid and waveforms to draw.
 rbl-analysis = { path = "../rbl-analysis" }

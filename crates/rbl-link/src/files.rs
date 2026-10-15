@@ -182,11 +182,8 @@ mod tests {
             [sd, loose, transcend],
             [sd, transcend, loose],
         ] {
-            let library = library_from(&[
-                track(1, order[0]),
-                track(2, order[1]),
-                track(3, order[2]),
-            ]);
+            let library =
+                library_from(&[track(1, order[0]), track(2, order[1]), track(3, order[2])]);
             let exports = exports(&library);
             let root = exports.get("/").unwrap();
             // The allowed folders resolve, and are the host's.
@@ -319,8 +316,14 @@ mod tests {
         std::fs::write(disk.join("Other/two.mp3"), b"two").unwrap();
         std::os::unix::fs::symlink(disk.join("Artist"), music.join("Artist")).unwrap();
         std::os::unix::fs::symlink(disk.join("Other"), music.join("Other")).unwrap();
-        let one: &'static str =
-            Box::leak(music.join("Artist/one.mp3").to_str().unwrap().to_owned().into_boxed_str());
+        let one: &'static str = Box::leak(
+            music
+                .join("Artist/one.mp3")
+                .to_str()
+                .unwrap()
+                .to_owned()
+                .into_boxed_str(),
+        );
         let library = library_from(&[TestTrack {
             id: 1,
             title: "t",
@@ -330,7 +333,9 @@ mod tests {
         let exports = exports(&library);
         let root = exports.get("/").unwrap();
         let (_, relative) = split(one).unwrap();
-        let node = root.resolve(&relative).expect("the track through its folder link");
+        let node = root
+            .resolve(&relative)
+            .expect("the track through its folder link");
         assert_eq!(root.source(node).unwrap().to_str(), Some(one));
         let (music_rel, _) = relative.rsplit_once("/Artist/").unwrap();
         assert_eq!(root.resolve(&format!("{music_rel}/Other/two.mp3")), None);

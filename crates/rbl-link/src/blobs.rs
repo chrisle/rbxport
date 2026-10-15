@@ -65,7 +65,10 @@ pub fn waveform_preview_blob(pwav: &[u8], pwv2: &[u8]) -> Vec<u8> {
         out.push(column & 0x1f);
         out.push(column >> 5);
     }
-    out.extend(pwv2.iter().map(|&b| rbl_anlz::encode::device_tiny_preview_byte(b)));
+    out.extend(
+        pwv2.iter()
+            .map(|&b| rbl_anlz::encode::device_tiny_preview_byte(b)),
+    );
     out.extend_from_slice(&PREVIEW_TAIL);
     out
 }

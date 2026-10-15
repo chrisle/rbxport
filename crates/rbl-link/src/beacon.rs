@@ -175,7 +175,9 @@ struct Shared {
 }
 
 impl Shared {
-    fn rejected(&self) -> bool { self.join.as_ref().is_some_and(Join::rejected) }
+    fn rejected(&self) -> bool {
+        self.join.as_ref().is_some_and(Join::rejected)
+    }
 
     fn clear_members(&mut self) {
         self.peers = DeviceTable::new();
@@ -192,8 +194,15 @@ impl Shared {
     fn remove_member(&mut self, number: u8) {
         let peer = self.peers.remove_number(number);
         let player = self.players.remove(&number);
-        for address in peer.map(|peer| peer.ip).into_iter().chain(player.map(|player| player.address)) {
-            if !self.players.values().any(|player| player.address == address)
+        for address in peer
+            .map(|peer| peer.ip)
+            .into_iter()
+            .chain(player.map(|player| player.address))
+        {
+            if !self
+                .players
+                .values()
+                .any(|player| player.address == address)
                 && !self.peers.peers().iter().any(|peer| peer.ip == address)
             {
                 self.forget_greeting(address);
@@ -212,24 +221,29 @@ impl Shared {
             }
         }
         if !expired.is_empty() {
-            tracing::debug!(expired = expired.len(), "peers timed out of the keep-alive table");
+            tracing::debug!(
+                expired = expired.len(),
+                "peers timed out of the keep-alive table"
+            );
         }
     }
 
     fn observe_player(&mut self, keep_alive: &KeepAlive, sender: Ipv4Addr) {
-        self.players.entry(keep_alive.device_number).or_insert_with(|| Player {
-            number: keep_alive.device_number,
-            name: keep_alive.name.clone(),
-            address: sender,
-            kind: keep_alive.device_type,
-            loaded: None,
-            playing: false,
-            master: false,
-            sync: false,
-            cued: false,
-            bpm_x100: 0,
-            last_seen: Instant::now(),
-        });
+        self.players
+            .entry(keep_alive.device_number)
+            .or_insert_with(|| Player {
+                number: keep_alive.device_number,
+                name: keep_alive.name.clone(),
+                address: sender,
+                kind: keep_alive.device_type,
+                loaded: None,
+                playing: false,
+                master: false,
+                sync: false,
+                cued: false,
+                bpm_x100: 0,
+                last_seen: Instant::now(),
+            });
         if let Some(player) = self.players.get_mut(&keep_alive.device_number) {
             player.last_seen = Instant::now();
             player.name.clone_from(&keep_alive.name);
@@ -240,7 +254,10 @@ impl Shared {
                 player.address = keep_alive.ip;
                 player.kind = keep_alive.device_type;
                 if old_address != keep_alive.ip
-                    && !self.players.values().any(|other| other.address == old_address)
+                    && !self
+                        .players
+                        .values()
+                        .any(|other| other.address == old_address)
                     && !self.peers.peers().iter().any(|peer| peer.ip == old_address)
                 {
                     self.forget_greeting(old_address);
@@ -251,8 +268,10 @@ impl Shared {
 
     fn synthesize_members(&mut self, primary: &KeepAlive, sender: Ipv4Addr, now_ms: u64) {
         // V1 readConfigNotify adds these identities only in running states.
-        if !matches!(self.join.as_ref().map(Join::state), Some(join::State::Running { .. }))
-            || !(1..=9).contains(&primary.device_type.to_u8())
+        if !matches!(
+            self.join.as_ref().map(Join::state),
+            Some(join::State::Running { .. })
+        ) || !(1..=9).contains(&primary.device_type.to_u8())
         {
             return;
         }
@@ -262,7 +281,11 @@ impl Shared {
             (11, _) => &[12],
             _ => &[],
         };
-        let flags = self.peers.peers().iter().find(|peer| peer.device_number == primary.device_number)
+        let flags = self
+            .peers
+            .peers()
+            .iter()
+            .find(|peer| peer.device_number == primary.device_number)
             .and_then(|peer| peer.member_flags);
         for &number in numbers {
             let mut logical = primary.clone();
@@ -273,17 +296,23 @@ impl Shared {
     }
 
     fn rediscover(&mut self, discovery: &rbl_prolink::Discovery) {
-        let leaving: Vec<_> = self.peers.peers().iter().filter(|peer| {
-            let in_range = match discovery.device_type {
-                1 => (1..=4).contains(&peer.device_number),
-                2 | 3 => peer.device_number == 33,
-                4 => [17, 18, 41, 42, 43, 44].contains(&peer.device_number),
-                6 => (41..=44).contains(&peer.device_number),
-                7 => (9..=12).contains(&peer.device_number),
-                _ => false,
-            };
-            in_range && peer.mac == discovery.mac
-        }).map(|peer| peer.device_number).collect();
+        let leaving: Vec<_> = self
+            .peers
+            .peers()
+            .iter()
+            .filter(|peer| {
+                let in_range = match discovery.device_type {
+                    1 => (1..=4).contains(&peer.device_number),
+                    2 | 3 => peer.device_number == 33,
+                    4 => [17, 18, 41, 42, 43, 44].contains(&peer.device_number),
+                    6 => (41..=44).contains(&peer.device_number),
+                    7 => (9..=12).contains(&peer.device_number),
+                    _ => false,
+                };
+                in_range && peer.mac == discovery.mac
+            })
+            .map(|peer| peer.device_number)
+            .collect();
         for number in leaving {
             self.remove_member(number);
             if discovery.device_type == 7 && (number == 9 || number == 11) {
@@ -671,7 +700,8 @@ fn announce_loop(
     let started = Instant::now();
     let broadcast = SocketAddr::V4(SocketAddrV4::new(config.broadcast, config.announce_port));
     let mut buffer = [0_u8; DATAGRAM];
-    shared.lock().join = Some(Join::new(config.mac, config.address, started).with_mode(config.mode));
+    shared.lock().join =
+        Some(Join::new(config.mac, config.address, started).with_mode(config.mode));
 
     let mut next_keep_alive: Option<Instant> = None;
     let mut next_monitor = Instant::now() + NETWORK_MONITOR_EVERY;
@@ -692,7 +722,9 @@ fn announce_loop(
             // Rejection already cleared the shared number synchronously.
             // Do not leave the old keep-alive schedule armed just because
             // the next tick observes two equal zero values.
-            if settled == 0 { next_keep_alive = None; }
+            if settled == 0 {
+                next_keep_alive = None;
+            }
             if let Some(join::State::Failed(why)) = shared.join.as_ref().map(Join::state) {
                 if shared.down.is_none() {
                     shared.down = Some(why.clone());
@@ -811,19 +843,31 @@ fn hear_announce(
     // V5 messageReceived rejects own/off-subnet senders using cached NetIF
     // before dispatch, not just in the rejection handler. Fresh/Unknown
     // sessions retain their uninitialized cache boundary.
-    if !shared.lock().join.as_ref().map_or(*from.ip() != Ipv4Addr::UNSPECIFIED, |join|
-        join.announcement_sender_allowed(*from.ip(), config.netmask)) {
+    if !shared
+        .lock()
+        .join
+        .as_ref()
+        .map_or(*from.ip() != Ipv4Addr::UNSPECIFIED, |join| {
+            join.announcement_sender_allowed(*from.ip(), config.netmask)
+        })
+    {
         return None;
     }
-    if kind != Some(9) && shared.lock().rejected() { return None; }
+    if kind != Some(9) && shared.lock().rejected() {
+        return None;
+    }
     // V1 frameRead checks runtime mode, initially 0xff. Known wireless
     // becomes active only on the first LinkUp attempt; Unknown keeps RBX's
     // conservative existing exclusion without pretending it is vendor 0xff.
     let original_model = packet.get(0x21) == Some(&0)
-        && rbl_prolink::device_name(packet).is_ok_and(|name| name == "CDJ-2000" || name == "CDJ-900");
+        && rbl_prolink::device_name(packet)
+            .is_ok_and(|name| name == "CDJ-2000" || name == "CDJ-900");
     let model_gate = match config.mode {
-        rbl_prolink::ConnectionMode::Wired | rbl_prolink::ConnectionMode::Wireless =>
-            shared.lock().join.as_ref().is_some_and(Join::excludes_original_models),
+        rbl_prolink::ConnectionMode::Wired | rbl_prolink::ConnectionMode::Wireless => shared
+            .lock()
+            .join
+            .as_ref()
+            .is_some_and(Join::excludes_original_models),
         rbl_prolink::ConnectionMode::Unknown => true,
     };
     if model_gate && original_model {
@@ -838,7 +882,11 @@ fn hear_announce(
         Some(AnnounceKind::ClaimStage2) => {
             if packet.get(11) == Some(&rbl_prolink::PROBE_SUBTYPE_BLOCK) {
                 let block = rbl_prolink::NumberBlock::decode(packet).ok()?;
-                return shared.lock().join.as_mut().and_then(|join| join.hear_block(&block));
+                return shared
+                    .lock()
+                    .join
+                    .as_mut()
+                    .and_then(|join| join.hear_block(&block));
             }
             let probe = NumberProbe::decode(packet).ok()?;
             return shared
@@ -863,12 +911,17 @@ fn hear_announce(
                 return None;
             }
             let mut shared = shared.lock();
-            let join = shared.join.get_or_insert_with(||
-                Join::new(config.mac, config.address, Instant::now()).with_mode(config.mode));
+            let join = shared.join.get_or_insert_with(|| {
+                Join::new(config.mac, config.address, Instant::now()).with_mode(config.mode)
+            });
             let outgoing = join.reject(Instant::now());
             shared.assigned.store(0, Ordering::Relaxed);
             shared.clear_members();
-            shared.master = MasterState { on: false, bpm_x100: 0, bar_beat: 0 };
+            shared.master = MasterState {
+                on: false,
+                bpm_x100: 0,
+                bar_beat: 0,
+            };
             shared.down = Some("announcement rejected; restart Link to recover".into());
             return outgoing;
         }
@@ -877,7 +930,11 @@ fn hear_announce(
         Some(AnnounceKind::Other(0x0b)) => {
             let mut shared = shared.lock();
             // V2 readCompatiRes returns immediately in the idle state.
-            if shared.join.as_ref().is_none_or(|join| *join.state() == join::State::Waiting) {
+            if shared
+                .join
+                .as_ref()
+                .is_none_or(|join| *join.state() == join::State::Waiting)
+            {
                 return None;
             }
             tracing::warn!(%from, "compatibility response; leaving the link and starting over");
@@ -894,10 +951,20 @@ fn hear_announce(
                 return None;
             }
             let mut shared = shared.lock();
-            if !matches!(shared.join.as_ref().map(Join::state), Some(
-                join::State::Discovery { .. } | join::State::Probing { .. }
-                | join::State::Assigning { .. } | join::State::Running { .. }
-            )) || !shared.peers.peers().iter().any(|peer| peer.device_number == number) {
+            if !matches!(
+                shared.join.as_ref().map(Join::state),
+                Some(
+                    join::State::Discovery { .. }
+                        | join::State::Probing { .. }
+                        | join::State::Assigning { .. }
+                        | join::State::Running { .. }
+                )
+            ) || !shared
+                .peers
+                .peers()
+                .iter()
+                .any(|peer| peer.device_number == number)
+            {
                 return None;
             }
             shared.remove_member(number);
@@ -927,7 +994,11 @@ fn hear_announce(
         if config.mode == rbl_prolink::ConnectionMode::Wireless && original_model {
             return None;
         }
-        if shared.join.as_ref().is_some_and(|join| !join.allows_running_member(keep_alive.device_number)) {
+        if shared
+            .join
+            .as_ref()
+            .is_some_and(|join| !join.allows_running_member(keep_alive.device_number))
+        {
             return None;
         }
         let known = shared
@@ -937,7 +1008,9 @@ fn hear_announce(
             .any(|p| p.device_number == keep_alive.device_number);
         // KeepAlive::decode has validated both offsets. Preserve these opaque
         // member flags through synthesis without guessing their meanings.
-        shared.peers.observe_with_flags(&keep_alive, now, [packet[0x25], packet[0x35]]);
+        shared
+            .peers
+            .observe_with_flags(&keep_alive, now, [packet[0x25], packet[0x35]]);
         if !known {
             tracing::info!(
                 number = keep_alive.device_number,
@@ -1042,7 +1115,9 @@ fn status_loop(
         let SocketAddr::V4(from) = from else { continue };
         // A receive begun before rejection must not revive membership or
         // answer from the stale pre-rejection assigned-number snapshot.
-        if shared.lock().rejected() { continue; }
+        if shared.lock().rejected() {
+            continue;
+        }
         // Our own status comes back off the broadcast; its kind is one
         // nothing below handles.
         let Ok(kind) = packet_kind(packet) else {
@@ -1180,7 +1255,9 @@ fn hear_player_status(
         "player status"
     );
     let mut shared = shared.lock();
-    if shared.rejected() { return; }
+    if shared.rejected() {
+        return;
+    }
     if !shared.greeted.contains(from.ip()) {
         // The first status from a player is what rekordbox
         // answers with the greeting `[ASSUME]`; it sent one just
@@ -1560,7 +1637,9 @@ mod all_in_one_tests {
         for &number in numbers {
             let packet = keep_alive(number, address);
             shared.peers.observe(&packet, 0);
-            shared.players.insert(number, player(number, address, DeviceType::Cdj));
+            shared
+                .players
+                .insert(number, player(number, address, DeviceType::Cdj));
             shared.join.as_mut().unwrap().hear_keep_alive(&packet, now);
         }
         shared
@@ -1570,8 +1649,13 @@ mod all_in_one_tests {
     fn numbered_disconnect_covers_both_kinds_pairs_sender_and_state_guards() {
         let now = Instant::now();
         for kind in [7, 8] {
-            for (leaving, remaining) in [(1, vec![2, 9, 10, 11, 12]), (9, vec![1, 2, 11, 12]),
-                (10, vec![1, 2, 9, 11, 12]), (11, vec![1, 2, 9, 10]), (12, vec![1, 2, 9, 10, 11])] {
+            for (leaving, remaining) in [
+                (1, vec![2, 9, 10, 11, 12]),
+                (9, vec![1, 2, 11, 12]),
+                (10, vec![1, 2, 9, 11, 12]),
+                (11, vec![1, 2, 9, 10]),
+                (12, vec![1, 2, 9, 10, 11]),
+            ] {
                 let shared = Mutex::new(members(&[1, 2, 9, 10, 11, 12], now));
                 // Complete synthetic 41-byte vendor-shaped disconnect. Its
                 // sender is intentionally unrelated to the numbered member.
@@ -1589,7 +1673,15 @@ mod all_in_one_tests {
                 let mut actual: Vec<_> = state.players.keys().copied().collect();
                 actual.sort_unstable();
                 assert_eq!(actual, remaining);
-                assert_eq!(state.peers.peers().iter().map(|p| p.device_number).collect::<Vec<_>>(), remaining);
+                assert_eq!(
+                    state
+                        .peers
+                        .peers()
+                        .iter()
+                        .map(|p| p.device_number)
+                        .collect::<Vec<_>>(),
+                    remaining
+                );
                 assert!(state.greeted.contains(&Ipv4Addr::new(169, 254, 20, 2)));
             }
         }
@@ -1606,7 +1698,12 @@ mod all_in_one_tests {
         shared.lock().join.as_mut().unwrap().reset(now);
         hear_announce(&wire, sender, &config(), &shared, now);
         assert_eq!(shared.lock().peers.len(), 2);
-        shared.lock().join.as_mut().unwrap().hear_keep_alive(&keep_alive(9, Ipv4Addr::new(169, 254, 20, 2)), now);
+        shared
+            .lock()
+            .join
+            .as_mut()
+            .unwrap()
+            .hear_keep_alive(&keep_alive(9, Ipv4Addr::new(169, 254, 20, 2)), now);
         hear_announce(&wire, sender, &config(), &shared, now);
         let state = shared.lock();
         assert!(state.players.is_empty());
@@ -1625,18 +1722,35 @@ mod all_in_one_tests {
         announcement.mac = [6, 5, 4, 3, 2, 1];
         let wire = announcement.encode();
         for _ in 0..2 {
-            hear_announce(&wire, SocketAddr::from((new, 50000)), &config(), &shared, now);
+            hear_announce(
+                &wire,
+                SocketAddr::from((new, 50000)),
+                &config(),
+                &shared,
+                now,
+            );
             let state = shared.lock();
             assert_eq!(player_address(&state.players, 1), Some(new));
             assert_eq!(player_address(&state.players, 2), Some(old));
-            let peer = state.peers.peers().iter().find(|p| p.device_number == 1).unwrap();
+            let peer = state
+                .peers
+                .peers()
+                .iter()
+                .find(|p| p.device_number == 1)
+                .unwrap();
             assert_eq!(peer.ip, new);
             assert_eq!(peer.mac, announcement.mac);
             assert!(state.greeted.contains(&old));
         }
         // The old greeting is forgotten only when its final member moves.
         announcement.device_number = 2;
-        hear_announce(&announcement.encode(), SocketAddr::from((new, 50000)), &config(), &shared, now);
+        hear_announce(
+            &announcement.encode(),
+            SocketAddr::from((new, 50000)),
+            &config(),
+            &shared,
+            now,
+        );
         assert!(!shared.lock().greeted.contains(&old));
     }
 
@@ -1655,8 +1769,20 @@ mod all_in_one_tests {
         shared.expire_peers(rbl_prolink::PEER_TIMEOUT_MS + 1001);
         assert!(shared.peers.is_empty());
         assert_eq!(shared.players.len(), 2);
-        assert_eq!(KeepAlive::decode(&KeepAlive::rekordbox_as(17, [0; 6], Ipv4Addr::LOCALHOST,
-            u8::try_from(shared.peers.len()).unwrap()).encode()).unwrap().peers, 0);
+        assert_eq!(
+            KeepAlive::decode(
+                &KeepAlive::rekordbox_as(
+                    17,
+                    [0; 6],
+                    Ipv4Addr::LOCALHOST,
+                    u8::try_from(shared.peers.len()).unwrap()
+                )
+                .encode()
+            )
+            .unwrap()
+            .peers,
+            0
+        );
     }
 
     #[test]
@@ -1666,8 +1792,14 @@ mod all_in_one_tests {
         shared.lock().join.as_mut().unwrap().reset(now);
         let mut wire = keep_alive(1, Ipv4Addr::new(169, 254, 20, 2)).encode();
         wire[10] = 0x0b;
-        assert!(hear_announce(&wire, SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1), 50000)),
-            &config(), &shared, now).is_none());
+        assert!(hear_announce(
+            &wire,
+            SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1), 50000)),
+            &config(),
+            &shared,
+            now
+        )
+        .is_none());
         let state = shared.lock();
         assert_eq!(state.peers.len(), 1);
         assert_eq!(state.players.len(), 1);
@@ -1701,16 +1833,30 @@ mod all_in_one_tests {
             (join::State::Failed("fixture".into()), false),
         ] {
             let mut state_fixture = members(&[1, 2], now);
-            state_fixture.join = Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now).test_state(state));
+            state_fixture.join =
+                Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now).test_state(state));
             let shared = Mutex::new(state_fixture);
-            assert!(hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now).is_none());
+            assert!(hear_announce(
+                &wire,
+                SocketAddr::from((ip, 50000)),
+                &config(),
+                &shared,
+                now
+            )
+            .is_none());
             assert_eq!(shared.lock().players.contains_key(&1), !accepted);
             assert_eq!(shared.lock().players.len(), if accepted { 1 } else { 2 });
         }
         let mut state_fixture = members(&[1], now);
         state_fixture.join = None;
         let shared = Mutex::new(state_fixture);
-        hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now);
+        hear_announce(
+            &wire,
+            SocketAddr::from((ip, 50000)),
+            &config(),
+            &shared,
+            now,
+        );
         assert_eq!(shared.lock().players.len(), 1);
     }
 
@@ -1719,7 +1865,9 @@ mod all_in_one_tests {
         let now = Instant::now();
         let shared = Arc::new(Mutex::new(members(&[1], now)));
         let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        receiver.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
         let commands = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let command_source = commands.local_addr().unwrap();
         let beacon = Beacon {
@@ -1733,13 +1881,22 @@ mod all_in_one_tests {
             number: Arc::new(AtomicU8::new(17)),
         };
         let changed = keep_alive(1, Ipv4Addr::LOCALHOST).encode();
-        assert!(hear_announce(&changed, SocketAddr::from((Ipv4Addr::LOCALHOST, 50000)),
-            &config(), &shared, now).is_none());
+        assert!(hear_announce(
+            &changed,
+            SocketAddr::from((Ipv4Addr::LOCALHOST, 50000)),
+            &config(),
+            &shared,
+            now
+        )
+        .is_none());
         beacon.load_track(1, 0x1234).unwrap();
         let mut bytes = [0; 256];
         let (length, source) = receiver.recv_from(&mut bytes).unwrap();
         assert_eq!(source, command_source);
-        assert_eq!(bytes[..length], rbl_prolink::load_track_command(REKORDBOX_NAME, 17, 1, 0x1234));
+        assert_eq!(
+            bytes[..length],
+            rbl_prolink::load_track_command(REKORDBOX_NAME, 17, 1, 0x1234)
+        );
     }
 
     #[test]
@@ -1748,22 +1905,35 @@ mod all_in_one_tests {
         // Keep the sender on the selected loopback /8 so this exercises
         // the model gate, not V5's earlier cached-NetIF subnet guard.
         let ip = Ipv4Addr::new(127, 0, 0, 2);
-        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless,
-            rbl_prolink::ConnectionMode::Unknown] {
+        for mode in [
+            rbl_prolink::ConnectionMode::Wired,
+            rbl_prolink::ConnectionMode::Wireless,
+            rbl_prolink::ConnectionMode::Unknown,
+        ] {
             for name in ["CDJ-2000", "CDJ-900"] {
                 let shared = Mutex::new(members(&[1], now));
                 let mut configuration = config();
                 configuration.mode = mode;
-                let mut initialized = Join::new(configuration.mac, configuration.address, now).with_mode(mode);
+                let mut initialized =
+                    Join::new(configuration.mac, configuration.address, now).with_mode(mode);
                 initialized.hear_keep_alive(&keep_alive(1, ip), now);
                 shared.lock().join = Some(initialized);
-                let mut wire = rbl_prolink::rekordbox_claim_stage1([1,2,3,4,5,6], 1);
+                let mut wire = rbl_prolink::rekordbox_claim_stage1([1, 2, 3, 4, 5, 6], 1);
                 wire[12..32].fill(0);
                 wire[12..12 + name.len()].copy_from_slice(name.as_bytes());
                 wire[33] = 0;
                 wire[37] = 1;
-                hear_announce(&wire, SocketAddr::from((ip, 50000)), &configuration, &shared, now);
-                assert_eq!(shared.lock().peers.is_empty(), mode == rbl_prolink::ConnectionMode::Wired);
+                hear_announce(
+                    &wire,
+                    SocketAddr::from((ip, 50000)),
+                    &configuration,
+                    &shared,
+                    now,
+                );
+                assert_eq!(
+                    shared.lock().peers.is_empty(),
+                    mode == rbl_prolink::ConnectionMode::Wired
+                );
             }
         }
     }
@@ -1773,33 +1943,85 @@ mod all_in_one_tests {
         let now = Instant::now();
         let ip = Ipv4Addr::new(169, 254, 20, 2);
         let numbers = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 17, 18, 33, 41, 42, 43, 44];
-        for (kind, removed) in [(1, vec![1,2,3,4]), (2,vec![33]), (3,vec![33]),
-            (4,vec![17,18,41,42,43,44]), (6,vec![41,42,43,44]), (7,vec![9,10,11,12]), (5,vec![])] {
+        for (kind, removed) in [
+            (1, vec![1, 2, 3, 4]),
+            (2, vec![33]),
+            (3, vec![33]),
+            (4, vec![17, 18, 41, 42, 43, 44]),
+            (6, vec![41, 42, 43, 44]),
+            (7, vec![9, 10, 11, 12]),
+            (5, vec![]),
+        ] {
             let shared = Mutex::new(members(&numbers, now));
-            let mut wire = rbl_prolink::rekordbox_claim_stage1([1,2,3,4,5,6], 1);
+            let mut wire = rbl_prolink::rekordbox_claim_stage1([1, 2, 3, 4, 5, 6], 1);
             wire[37] = kind;
             for cut in 0..44 {
-                hear_announce(&wire[..cut], SocketAddr::from((ip, 50000)), &config(), &shared, now);
+                hear_announce(
+                    &wire[..cut],
+                    SocketAddr::from((ip, 50000)),
+                    &config(),
+                    &shared,
+                    now,
+                );
                 assert_eq!(shared.lock().peers.len(), numbers.len());
             }
             let before = shared.lock().join.as_ref().unwrap().state().clone();
-            assert!(hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now).is_none());
+            assert!(hear_announce(
+                &wire,
+                SocketAddr::from((ip, 50000)),
+                &config(),
+                &shared,
+                now
+            )
+            .is_none());
             let state = shared.lock();
-            let remaining: Vec<_> = numbers.into_iter().filter(|number| !removed.contains(number)).collect();
-            assert_eq!(state.peers.peers().iter().map(|p| p.device_number).collect::<Vec<_>>(), remaining);
+            let remaining: Vec<_> = numbers
+                .into_iter()
+                .filter(|number| !removed.contains(number))
+                .collect();
+            assert_eq!(
+                state
+                    .peers
+                    .peers()
+                    .iter()
+                    .map(|p| p.device_number)
+                    .collect::<Vec<_>>(),
+                remaining
+            );
             assert_eq!(state.players.len(), remaining.len());
             assert_eq!(state.join.as_ref().unwrap().state(), &before);
-            assert!(state.greeted.contains(&ip), "out-of-range shared-IP survivors retain greeting");
+            assert!(
+                state.greeted.contains(&ip),
+                "out-of-range shared-IP survivors retain greeting"
+            );
             drop(state);
             // Fresh registration succeeds; an unrelated MAC cannot remove it.
             let number = removed.first().copied().unwrap_or(1);
-            hear_announce(&keep_alive(number, ip).encode(), SocketAddr::from((ip, 50000)), &config(), &shared, now);
+            hear_announce(
+                &keep_alive(number, ip).encode(),
+                SocketAddr::from((ip, 50000)),
+                &config(),
+                &shared,
+                now,
+            );
             wire[38] ^= 0xff;
-            hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now);
+            hear_announce(
+                &wire,
+                SocketAddr::from((ip, 50000)),
+                &config(),
+                &shared,
+                now,
+            );
             assert!(shared.lock().players.contains_key(&number));
             wire[11] = 1;
             wire[38] ^= 0xff;
-            hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now);
+            hear_announce(
+                &wire,
+                SocketAddr::from((ip, 50000)),
+                &config(),
+                &shared,
+                now,
+            );
             assert!(shared.lock().players.contains_key(&number));
         }
     }
@@ -1808,12 +2030,18 @@ mod all_in_one_tests {
     fn running_multideck_keepalives_add_only_the_established_identities_and_flags() {
         let now = Instant::now();
         let ip = Ipv4Addr::new(169, 254, 20, 2);
-        for (number, name, expected) in [(9, "XDJ-RX3", vec![9, 10]),
-            (11, "XDJ-RX3", vec![11, 12]), (9, "OPUS-QUAD", vec![9, 10, 11, 12]),
-            (9, "OPUS-QUAD-X", vec![9, 10]), (11, "OPUS-QUAD", vec![11, 12])] {
+        for (number, name, expected) in [
+            (9, "XDJ-RX3", vec![9, 10]),
+            (11, "XDJ-RX3", vec![11, 12]),
+            (9, "OPUS-QUAD", vec![9, 10, 11, 12]),
+            (9, "OPUS-QUAD-X", vec![9, 10]),
+            (11, "OPUS-QUAD", vec![11, 12]),
+        ] {
             let mut fixture = members(&[1, 2], now);
-            fixture.join = Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
-                .test_state(join::State::Running { number: 17 }));
+            fixture.join = Some(
+                Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
+                    .test_state(join::State::Running { number: 17 }),
+            );
             let shared = Mutex::new(fixture);
             let mut primary = keep_alive(number, ip);
             primary.name = name.into();
@@ -1822,24 +2050,79 @@ mod all_in_one_tests {
             wire[0x25] = 0xa5;
             wire[0x35] = 0x5a;
             for _ in 0..2 {
-                assert!(hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now).is_none());
+                assert!(hear_announce(
+                    &wire,
+                    SocketAddr::from((ip, 50000)),
+                    &config(),
+                    &shared,
+                    now
+                )
+                .is_none());
             }
             let state = shared.lock();
             let mut all = vec![1, 2];
             all.extend_from_slice(&expected);
-            assert_eq!(state.peers.peers().iter().map(|peer| peer.device_number).collect::<Vec<_>>(), all);
+            assert_eq!(
+                state
+                    .peers
+                    .peers()
+                    .iter()
+                    .map(|peer| peer.device_number)
+                    .collect::<Vec<_>>(),
+                all
+            );
             assert_eq!(state.players.len(), all.len());
-            assert_eq!(state.join.as_ref().unwrap().state(), &join::State::Running { number: 17 });
-            assert_eq!(KeepAlive::decode(&KeepAlive::rekordbox_as(17, [0; 6], Ipv4Addr::LOCALHOST,
-                u8::try_from(state.peers.len()).unwrap()).encode()).unwrap().peers, u8::try_from(all.len()).unwrap());
+            assert_eq!(
+                state.join.as_ref().unwrap().state(),
+                &join::State::Running { number: 17 }
+            );
+            assert_eq!(
+                KeepAlive::decode(
+                    &KeepAlive::rekordbox_as(
+                        17,
+                        [0; 6],
+                        Ipv4Addr::LOCALHOST,
+                        u8::try_from(state.peers.len()).unwrap()
+                    )
+                    .encode()
+                )
+                .unwrap()
+                .peers,
+                u8::try_from(all.len()).unwrap()
+            );
             for number in expected {
-                let peer = state.peers.peers().iter().find(|peer| peer.device_number == number).unwrap();
-                assert_eq!((&peer.name, peer.ip, peer.mac, peer.device_type, peer.member_flags),
-                    (&primary.name, ip, primary.mac, primary.device_type, Some([0xa5, 0x5a])));
+                let peer = state
+                    .peers
+                    .peers()
+                    .iter()
+                    .find(|peer| peer.device_number == number)
+                    .unwrap();
+                assert_eq!(
+                    (
+                        &peer.name,
+                        peer.ip,
+                        peer.mac,
+                        peer.device_type,
+                        peer.member_flags
+                    ),
+                    (
+                        &primary.name,
+                        ip,
+                        primary.mac,
+                        primary.device_type,
+                        Some([0xa5, 0x5a])
+                    )
+                );
                 assert_eq!(state.players[&number].address, ip);
-                assert_eq!(state.peers.is_synthetic(number), number != primary.device_number);
+                assert_eq!(
+                    state.peers.is_synthetic(number),
+                    number != primary.device_number
+                );
             }
-            assert!(state.greeted.contains(&ip), "the unrelated same-IP members retain ownership");
+            assert!(
+                state.greeted.contains(&ip),
+                "the unrelated same-IP members retain ownership"
+            );
         }
     }
 
@@ -1850,26 +2133,59 @@ mod all_in_one_tests {
         let mut primary = keep_alive(9, ip);
         primary.name = "OPUS-QUAD".into();
         let wire = primary.encode();
-        for state in [join::State::Waiting, join::State::Discovery { sent: 1 },
-            join::State::Probing { round: 1, index: 0 }, join::State::Assigning { sent: 1 },
-            join::State::Failed("fixture".into())] {
+        for state in [
+            join::State::Waiting,
+            join::State::Discovery { sent: 1 },
+            join::State::Probing { round: 1, index: 0 },
+            join::State::Assigning { sent: 1 },
+            join::State::Failed("fixture".into()),
+        ] {
             let mut fixture = members(&[], now);
             fixture.join = Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now).test_state(state));
             let shared = Mutex::new(fixture);
-            hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now);
-            assert_eq!(shared.lock().peers.peers().iter().map(|peer| peer.device_number).collect::<Vec<_>>(), vec![9]);
+            hear_announce(
+                &wire,
+                SocketAddr::from((ip, 50000)),
+                &config(),
+                &shared,
+                now,
+            );
+            assert_eq!(
+                shared
+                    .lock()
+                    .peers
+                    .peers()
+                    .iter()
+                    .map(|peer| peer.device_number)
+                    .collect::<Vec<_>>(),
+                vec![9]
+            );
         }
         let mut fixture = members(&[], now);
-        fixture.join = Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
-            .test_state(join::State::Running { number: 17 }));
+        fixture.join = Some(
+            Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
+                .test_state(join::State::Running { number: 17 }),
+        );
         let shared = Mutex::new(fixture);
         for cut in 0..wire.len() {
-            hear_announce(&wire[..cut], SocketAddr::from((ip, 50000)), &config(), &shared, now);
+            hear_announce(
+                &wire[..cut],
+                SocketAddr::from((ip, 50000)),
+                &config(),
+                &shared,
+                now,
+            );
             assert!(shared.lock().peers.is_empty());
         }
         let mut invalid = wire;
         invalid[11] = 1;
-        hear_announce(&invalid, SocketAddr::from((ip, 50000)), &config(), &shared, now);
+        hear_announce(
+            &invalid,
+            SocketAddr::from((ip, 50000)),
+            &config(),
+            &shared,
+            now,
+        );
         assert!(shared.lock().peers.is_empty());
     }
 
@@ -1878,26 +2194,49 @@ mod all_in_one_tests {
         let now = Instant::now();
         let ip = Ipv4Addr::new(169, 254, 20, 2);
         let mut state = members(&[], now);
-        state.join = Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
-            .test_state(join::State::Running { number: 17 }));
+        state.join = Some(
+            Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
+                .test_state(join::State::Running { number: 17 }),
+        );
         let mut primary = keep_alive(9, ip);
         primary.name = "OPUS-QUAD".into();
         state.peers.observe_with_flags(&primary, 0, [0xa5, 0x5a]);
         state.observe_player(&primary, ip);
         state.synthesize_members(&primary, ip, 0);
         for number in [10, 11, 12] {
-            state.players.get_mut(&number).unwrap().last_seen = now.checked_sub(PLAYER_TIMEOUT + Duration::from_secs(1)).unwrap();
+            state.players.get_mut(&number).unwrap().last_seen = now
+                .checked_sub(PLAYER_TIMEOUT + Duration::from_secs(1))
+                .unwrap();
         }
         state.expire_silent_players();
-        assert_eq!(state.players.len(), 4, "synthetic members have no independent activity expiry");
+        assert_eq!(
+            state.players.len(),
+            4,
+            "synthetic members have no independent activity expiry"
+        );
         state.expire_peers(rbl_prolink::PEER_TIMEOUT_MS);
         assert_eq!(state.peers.len(), 4);
         state.expire_peers(rbl_prolink::PEER_TIMEOUT_MS + 1);
-        assert_eq!(state.peers.peers().iter().map(|peer| peer.device_number).collect::<Vec<_>>(), vec![11, 12]);
+        assert_eq!(
+            state
+                .peers
+                .peers()
+                .iter()
+                .map(|peer| peer.device_number)
+                .collect::<Vec<_>>(),
+            vec![11, 12]
+        );
         assert_eq!(state.players.len(), 2);
-        assert!(state.greeted.contains(&ip), "remaining OPUS identities retain shared resources");
+        assert!(
+            state.greeted.contains(&ip),
+            "remaining OPUS identities retain shared resources"
+        );
         state.expire_peers(u64::MAX);
-        assert_eq!(state.peers.len(), 2, "no invented all-four OPUS ageing rule");
+        assert_eq!(
+            state.peers.len(),
+            2,
+            "no invented all-four OPUS ageing rule"
+        );
         primary.device_number = 11;
         state.peers.observe_with_flags(&primary, 10_000, [1, 2]);
         state.observe_player(&primary, ip);
@@ -1915,16 +2254,28 @@ mod all_in_one_tests {
         let old = Ipv4Addr::new(169, 254, 20, 2);
         let new = Ipv4Addr::new(169, 254, 20, 3);
         let mut state = members(&[1, 11], now);
-        state.join = Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
-            .test_state(join::State::Running { number: 17 }));
+        state.join = Some(
+            Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
+                .test_state(join::State::Running { number: 17 }),
+        );
         let mut primary = keep_alive(9, new);
         primary.name = "OPUS-QUAD".into();
         primary.mac = [7; 6];
-        state.peers.observe_with_flags(&primary, 5_000, [0xa5, 0x5a]);
+        state
+            .peers
+            .observe_with_flags(&primary, 5_000, [0xa5, 0x5a]);
         state.observe_player(&primary, new);
         state.synthesize_members(&primary, new, 5_000);
-        let eleven = state.peers.peers().iter().find(|peer| peer.device_number == 11).unwrap();
-        assert_eq!((eleven.ip, eleven.mac, eleven.last_seen_ms), (new, [7; 6], 0));
+        let eleven = state
+            .peers
+            .peers()
+            .iter()
+            .find(|peer| peer.device_number == 11)
+            .unwrap();
+        assert_eq!(
+            (eleven.ip, eleven.mac, eleven.last_seen_ms),
+            (new, [7; 6], 0)
+        );
         assert_eq!(state.players[&1].address, old);
         assert_eq!(state.players[&11].address, new);
         state.peers.observe(&keep_alive(1, old), 5_000);
@@ -1942,13 +2293,21 @@ mod all_in_one_tests {
         let ip = Ipv4Addr::new(169, 254, 20, 2);
         for removal in [7, 0, 0x0b] {
             let mut state = members(&[], now);
-            state.join = Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
-                .test_state(join::State::Running { number: 17 }));
+            state.join = Some(
+                Join::new([0; 6], Ipv4Addr::LOCALHOST, now)
+                    .test_state(join::State::Running { number: 17 }),
+            );
             let shared = Mutex::new(state);
             let mut primary = keep_alive(9, ip);
             primary.name = "OPUS-QUAD".into();
             primary.device_type = DeviceType::AllInOne;
-            hear_announce(&primary.encode(), SocketAddr::from((ip, 50000)), &config(), &shared, now);
+            hear_announce(
+                &primary.encode(),
+                SocketAddr::from((ip, 50000)),
+                &config(),
+                &shared,
+                now,
+            );
             assert_eq!(shared.lock().peers.len(), 4);
             let mut packet = if removal == 0 {
                 let mut discovery = rbl_prolink::rekordbox_claim_stage1(primary.mac, 1);
@@ -1959,15 +2318,36 @@ mod all_in_one_tests {
                 packet[10] = removal;
                 packet
             };
-            assert!(hear_announce(&packet, SocketAddr::from((ip, 50000)), &config(), &shared, now).is_none());
+            assert!(hear_announce(
+                &packet,
+                SocketAddr::from((ip, 50000)),
+                &config(),
+                &shared,
+                now
+            )
+            .is_none());
             if removal == 7 {
                 let state = shared.lock();
-                assert_eq!(state.peers.peers().iter().map(|peer| peer.device_number).collect::<Vec<_>>(), vec![11, 12]);
+                assert_eq!(
+                    state
+                        .peers
+                        .peers()
+                        .iter()
+                        .map(|peer| peer.device_number)
+                        .collect::<Vec<_>>(),
+                    vec![11, 12]
+                );
                 assert_eq!(state.players.len(), 2);
                 assert!(state.greeted.contains(&ip));
                 drop(state);
                 packet[36] = 11;
-                hear_announce(&packet, SocketAddr::from((ip, 50000)), &config(), &shared, now);
+                hear_announce(
+                    &packet,
+                    SocketAddr::from((ip, 50000)),
+                    &config(),
+                    &shared,
+                    now,
+                );
             }
             let state = shared.lock();
             assert!(state.peers.is_empty());
@@ -1978,9 +2358,13 @@ mod all_in_one_tests {
     }
 
     fn rejection_config(mode: rbl_prolink::ConnectionMode) -> BeaconConfig {
-        BeaconConfig { address: Ipv4Addr::new(192, 168, 50, 2),
+        BeaconConfig {
+            address: Ipv4Addr::new(192, 168, 50, 2),
             netmask: Ipv4Addr::new(255, 255, 255, 0),
-            broadcast: Ipv4Addr::new(192, 168, 50, 255), mode, ..config() }
+            broadcast: Ipv4Addr::new(192, 168, 50, 255),
+            mode,
+            ..config()
+        }
     }
 
     /// Acquire through the actual first keepalive and discovery/probe timers,
@@ -1990,12 +2374,28 @@ mod all_in_one_tests {
             join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode)),
             ..Shared::default()
         });
-        hear_announce(&first.encode(), SocketAddr::from((first.ip, 50000)), cfg, &shared, now);
-        assert!(matches!(shared.lock().join.as_ref().unwrap().state(), join::State::Discovery { .. }));
+        hear_announce(
+            &first.encode(),
+            SocketAddr::from((first.ip, 50000)),
+            cfg,
+            &shared,
+            now,
+        );
+        assert!(matches!(
+            shared.lock().join.as_ref().unwrap().state(),
+            join::State::Discovery { .. }
+        ));
         let tick_start = Instant::now();
         for tick in 0..50 {
-            shared.lock().join.as_mut().unwrap().tick(tick_start + join::TICK * tick);
-            if shared.lock().join.as_ref().unwrap().number().is_some() { break; }
+            shared
+                .lock()
+                .join
+                .as_mut()
+                .unwrap()
+                .tick(tick_start + join::TICK * tick);
+            if shared.lock().join.as_ref().unwrap().number().is_some() {
+                break;
+            }
         }
         assert_eq!(shared.lock().join.as_ref().unwrap().number(), Some(17));
         shared
@@ -2004,33 +2404,69 @@ mod all_in_one_tests {
     #[test]
     fn acquired_session_classification_gates_coexistence_before_membership_and_synthesis() {
         let now = Instant::now();
-        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless,
-            rbl_prolink::ConnectionMode::Unknown] {
-        let cfg = rejection_config(mode);
-        for all_in_one in [false, true] {
-            let ip = Ipv4Addr::new(192, 168, 50, 10);
-            let mut first = keep_alive(if all_in_one { 9 } else { 1 }, ip);
-            if all_in_one { first.device_type = DeviceType::AllInOne; first.name = "XDJ-RX3".into(); }
-            let shared = acquired(&cfg, &first, now);
-            let before = shared.lock().peers.peers().to_vec();
-            let greetings = shared.lock().to_greet.clone();
-            for number in if all_in_one { 1..=4 } else { 9..=12 } {
-                let mut other = keep_alive(number, Ipv4Addr::new(192, 168, 50, 20));
-                // Even a later different device type must not reclassify the session.
-                if !all_in_one { other.device_type = DeviceType::AllInOne; other.name = "OPUS-QUAD".into(); }
-                hear_announce(&other.encode(), SocketAddr::from((other.ip, 50000)), &cfg, &shared, now);
-                assert_eq!(shared.lock().peers.peers(), before);
-                assert_eq!(shared.lock().players.len(), before.len());
-                assert_eq!(shared.lock().to_greet, greetings);
-                assert_eq!(shared.lock().join.as_ref().unwrap().number(), Some(17));
+        for mode in [
+            rbl_prolink::ConnectionMode::Wired,
+            rbl_prolink::ConnectionMode::Wireless,
+            rbl_prolink::ConnectionMode::Unknown,
+        ] {
+            let cfg = rejection_config(mode);
+            for all_in_one in [false, true] {
+                let ip = Ipv4Addr::new(192, 168, 50, 10);
+                let mut first = keep_alive(if all_in_one { 9 } else { 1 }, ip);
+                if all_in_one {
+                    first.device_type = DeviceType::AllInOne;
+                    first.name = "XDJ-RX3".into();
+                }
+                let shared = acquired(&cfg, &first, now);
+                let before = shared.lock().peers.peers().to_vec();
+                let greetings = shared.lock().to_greet.clone();
+                for number in if all_in_one { 1..=4 } else { 9..=12 } {
+                    let mut other = keep_alive(number, Ipv4Addr::new(192, 168, 50, 20));
+                    // Even a later different device type must not reclassify the session.
+                    if !all_in_one {
+                        other.device_type = DeviceType::AllInOne;
+                        other.name = "OPUS-QUAD".into();
+                    }
+                    hear_announce(
+                        &other.encode(),
+                        SocketAddr::from((other.ip, 50000)),
+                        &cfg,
+                        &shared,
+                        now,
+                    );
+                    assert_eq!(shared.lock().peers.peers(), before);
+                    assert_eq!(shared.lock().players.len(), before.len());
+                    assert_eq!(shared.lock().to_greet, greetings);
+                    assert_eq!(shared.lock().join.as_ref().unwrap().number(), Some(17));
+                }
+                // The original family remains admissible, with the bounded OPUS synthesis.
+                let mut accepted = first.clone();
+                if all_in_one {
+                    accepted.name = "OPUS-QUAD".into();
+                }
+                hear_announce(
+                    &accepted.encode(),
+                    SocketAddr::from((ip, 50000)),
+                    &cfg,
+                    &shared,
+                    now,
+                );
+                let expected = if all_in_one {
+                    vec![9, 10, 11, 12]
+                } else {
+                    vec![1]
+                };
+                assert_eq!(
+                    shared
+                        .lock()
+                        .peers
+                        .peers()
+                        .iter()
+                        .map(|p| p.device_number)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
             }
-            // The original family remains admissible, with the bounded OPUS synthesis.
-            let mut accepted = first.clone();
-            if all_in_one { accepted.name = "OPUS-QUAD".into(); }
-            hear_announce(&accepted.encode(), SocketAddr::from((ip, 50000)), &cfg, &shared, now);
-            let expected = if all_in_one { vec![9,10,11,12] } else { vec![1] };
-            assert_eq!(shared.lock().peers.peers().iter().map(|p| p.device_number).collect::<Vec<_>>(), expected);
-        }
         }
     }
 
@@ -2043,23 +2479,51 @@ mod all_in_one_tests {
         discovery[37] = 1;
         let mut disconnect = disconnect_bytes(1, first.ip);
         disconnect[10] = 7;
-        let mut conflict = disconnect.clone(); conflict[10] = 8;
-        let mut compatibility = first.encode(); compatibility[10] = 0x0b;
-        let mut block = rbl_prolink::rekordbox_claim_stage2([9;6], first.ip, 17, 1);
-        block[11] = 2; block.resize(68, 0); block[34..36].copy_from_slice(&68_u16.to_be_bytes());
-        block[48] = 1; block[67] = 0xa5;
-        assert!(rbl_prolink::NumberBlock::decode(&block).unwrap().names(17, cfg.mode));
-        let probe = rbl_prolink::rekordbox_claim_stage2([9;6], first.ip, 17, 1);
-        let new_member = keep_alive(2, Ipv4Addr::new(192,168,50,20));
+        let mut conflict = disconnect.clone();
+        conflict[10] = 8;
+        let mut compatibility = first.encode();
+        compatibility[10] = 0x0b;
+        let mut block = rbl_prolink::rekordbox_claim_stage2([9; 6], first.ip, 17, 1);
+        block[11] = 2;
+        block.resize(68, 0);
+        block[34..36].copy_from_slice(&68_u16.to_be_bytes());
+        block[48] = 1;
+        block[67] = 0xa5;
+        assert!(rbl_prolink::NumberBlock::decode(&block)
+            .unwrap()
+            .names(17, cfg.mode));
+        let probe = rbl_prolink::rekordbox_claim_stage2([9; 6], first.ip, 17, 1);
+        let new_member = keep_alive(2, Ipv4Addr::new(192, 168, 50, 20));
         let changed_address = keep_alive(1, new_member.ip);
-        let frames = [discovery, disconnect.clone(), conflict, compatibility,
-            new_member.encode(), changed_address.encode(), block.clone(), probe.clone(), rejection_frame()];
-        for sender in [cfg.address, Ipv4Addr::new(192,168,51,10)] {
+        let frames = [
+            discovery,
+            disconnect.clone(),
+            conflict,
+            compatibility,
+            new_member.encode(),
+            changed_address.encode(),
+            block.clone(),
+            probe.clone(),
+            rejection_frame(),
+        ];
+        for sender in [cfg.address, Ipv4Addr::new(192, 168, 51, 10)] {
             for frame in &frames {
                 let shared = acquired(&cfg, &first, now);
                 let before = shared.lock().peers.peers().to_vec();
-                assert!(hear_announce(frame, SocketAddr::from((sender,50000)), &cfg, &shared, now).is_none());
-                assert_eq!(shared.lock().peers.peers(), before, "kind {} sender {sender}", frame[10]);
+                assert!(hear_announce(
+                    frame,
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &shared,
+                    now
+                )
+                .is_none());
+                assert_eq!(
+                    shared.lock().peers.peers(),
+                    before,
+                    "kind {} sender {sender}",
+                    frame[10]
+                );
                 assert_eq!(shared.lock().players.len(), 1);
                 assert_eq!(shared.lock().join.as_ref().unwrap().number(), Some(17));
                 assert!(!shared.lock().rejected());
@@ -2067,51 +2531,97 @@ mod all_in_one_tests {
         }
         // The common guard does not authenticate the disconnect payload's owner.
         let shared = acquired(&cfg, &first, now);
-        hear_announce(&disconnect, SocketAddr::from((Ipv4Addr::new(192,168,50,99),50000)), &cfg, &shared, now);
+        hear_announce(
+            &disconnect,
+            SocketAddr::from((Ipv4Addr::new(192, 168, 50, 99), 50000)),
+            &cfg,
+            &shared,
+            now,
+        );
         assert!(shared.lock().peers.is_empty());
         assert!(shared.lock().players.is_empty());
         // Same-subnet occupancy and single-number probes keep their exact
         // response bytes, echoed counters and advertised unicast target.
-        for (frame,counter) in [(block,0xa5),(probe,1)] {
-            let shared = acquired(&cfg,&first,now);
-            let out = hear_announce(&frame,SocketAddr::from((Ipv4Addr::new(192,168,50,99),50000)),&cfg,&shared,now).unwrap();
-            assert_eq!(out.packet,rbl_prolink::number_in_use_reply_with_counter(REKORDBOX_NAME,17,counter));
-            assert_eq!(out.to,Some(first.ip));
-            assert_eq!(shared.lock().peers.len(),1);
+        for (frame, counter) in [(block, 0xa5), (probe, 1)] {
+            let shared = acquired(&cfg, &first, now);
+            let out = hear_announce(
+                &frame,
+                SocketAddr::from((Ipv4Addr::new(192, 168, 50, 99), 50000)),
+                &cfg,
+                &shared,
+                now,
+            )
+            .unwrap();
+            assert_eq!(
+                out.packet,
+                rbl_prolink::number_in_use_reply_with_counter(REKORDBOX_NAME, 17, counter)
+            );
+            assert_eq!(out.to, Some(first.ip));
+            assert_eq!(shared.lock().peers.len(), 1);
         }
-        let shared = acquired(&cfg,&first,now);
-        hear_announce(&changed_address.encode(),SocketAddr::from((changed_address.ip,50000)),&cfg,&shared,now);
-        assert_eq!(shared.lock().peers.peers()[0].ip,changed_address.ip);
-        assert_eq!(shared.lock().players[&1].address,changed_address.ip);
+        let shared = acquired(&cfg, &first, now);
+        hear_announce(
+            &changed_address.encode(),
+            SocketAddr::from((changed_address.ip, 50000)),
+            &cfg,
+            &shared,
+            now,
+        );
+        assert_eq!(shared.lock().peers.peers()[0].ip, changed_address.ip);
+        assert_eq!(shared.lock().players[&1].address, changed_address.ip);
     }
 
     #[test]
     fn netif_guard_preserves_fresh_unknown_and_cached_after_reset_boundaries() {
         let now = Instant::now();
-        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless,
-            rbl_prolink::ConnectionMode::Unknown] {
+        for mode in [
+            rbl_prolink::ConnectionMode::Wired,
+            rbl_prolink::ConnectionMode::Wireless,
+            rbl_prolink::ConnectionMode::Unknown,
+        ] {
             let cfg = rejection_config(mode);
-            let first = keep_alive(1, Ipv4Addr::new(192,168,50,10));
+            let first = keep_alive(1, Ipv4Addr::new(192, 168, 50, 10));
             let disconnect = disconnect_bytes(1, first.ip);
-            for sender in [cfg.address, Ipv4Addr::new(10,1,2,3)] {
+            for sender in [cfg.address, Ipv4Addr::new(10, 1, 2, 3)] {
                 let mut fresh = members(&[1], now);
-                fresh.join = Some(Join::new(cfg.mac, cfg.address, now).with_mode(mode)
-                    .test_state(join::State::Discovery { sent: 0 }));
+                fresh.join = Some(
+                    Join::new(cfg.mac, cfg.address, now)
+                        .with_mode(mode)
+                        .test_state(join::State::Discovery { sent: 0 }),
+                );
                 let shared = Mutex::new(fresh);
                 // No cached NetIF yet: neither own selected IP nor off-subnet is filtered.
-                hear_announce(&disconnect, SocketAddr::from((sender,50000)), &cfg, &shared, now);
+                hear_announce(
+                    &disconnect,
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &shared,
+                    now,
+                );
                 assert!(shared.lock().peers.is_empty());
             }
             let shared = acquired(&cfg, &first, now);
             shared.lock().join.as_mut().unwrap().reset(now);
-            let other = keep_alive(2, Ipv4Addr::new(10,1,2,3));
-            hear_announce(&other.encode(), SocketAddr::from((other.ip,50000)), &cfg, &shared, now);
+            let other = keep_alive(2, Ipv4Addr::new(10, 1, 2, 3));
+            hear_announce(
+                &other.encode(),
+                SocketAddr::from((other.ip, 50000)),
+                &cfg,
+                &shared,
+                now,
+            );
             if mode == rbl_prolink::ConnectionMode::Unknown {
                 assert_eq!(shared.lock().peers.len(), 2);
-                assert!(matches!(shared.lock().join.as_ref().unwrap().state(), join::State::Discovery { .. }));
+                assert!(matches!(
+                    shared.lock().join.as_ref().unwrap().state(),
+                    join::State::Discovery { .. }
+                ));
             } else {
                 assert_eq!(shared.lock().peers.len(), 1);
-                assert_eq!(*shared.lock().join.as_ref().unwrap().state(), join::State::Waiting);
+                assert_eq!(
+                    *shared.lock().join.as_ref().unwrap().state(),
+                    join::State::Waiting
+                );
             }
         }
     }
@@ -2120,64 +2630,161 @@ mod all_in_one_tests {
     fn netif_guard_filters_number_replies_and_keepalive_occupancy_during_real_probing() {
         let now = Instant::now();
         let cfg = rejection_config(rbl_prolink::ConnectionMode::Wired);
-        let first = keep_alive(1,Ipv4Addr::new(192,168,50,10));
-        let reply = rbl_prolink::number_in_use_reply_with_counter("rekordbox",17,0xa5);
-        assert_eq!(reply.len(),39);
-        let occupied = KeepAlive::rekordbox_as(17,[9;6],Ipv4Addr::new(192,168,50,99),0).encode();
-        for frame in [&reply,&occupied] {
-        for (sender,number) in [(cfg.address,17),(Ipv4Addr::new(192,168,51,10),17),
-            (Ipv4Addr::new(192,168,50,99),18)] {
-            let shared = Mutex::new(Shared {
-                join: Some(Join::new(cfg.mac,cfg.address,now).with_mode(cfg.mode)), ..Shared::default()
-            });
-            hear_announce(&first.encode(),SocketAddr::from((first.ip,50000)),&cfg,&shared,now);
-            let tick_start = Instant::now();
-            for tick in 0..3 { shared.lock().join.as_mut().unwrap().tick(tick_start + join::TICK * tick); }
-            assert!(matches!(shared.lock().join.as_ref().unwrap().state(),join::State::Probing { .. }));
-            hear_announce(frame,SocketAddr::from((sender,50000)),&cfg,&shared,now);
-            for tick in 3..50 { shared.lock().join.as_mut().unwrap().tick(tick_start + join::TICK * tick); }
-            assert_eq!(shared.lock().join.as_ref().unwrap().number(),Some(number),"{sender}");
-            let admitted = number == 18 && frame[10] == 6;
-            assert_eq!(shared.lock().peers.len(),if admitted { 2 } else { 1 });
-            assert_eq!(shared.lock().players.contains_key(&17),admitted);
-        }
+        let first = keep_alive(1, Ipv4Addr::new(192, 168, 50, 10));
+        let reply = rbl_prolink::number_in_use_reply_with_counter("rekordbox", 17, 0xa5);
+        assert_eq!(reply.len(), 39);
+        let occupied =
+            KeepAlive::rekordbox_as(17, [9; 6], Ipv4Addr::new(192, 168, 50, 99), 0).encode();
+        for frame in [&reply, &occupied] {
+            for (sender, number) in [
+                (cfg.address, 17),
+                (Ipv4Addr::new(192, 168, 51, 10), 17),
+                (Ipv4Addr::new(192, 168, 50, 99), 18),
+            ] {
+                let shared = Mutex::new(Shared {
+                    join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode)),
+                    ..Shared::default()
+                });
+                hear_announce(
+                    &first.encode(),
+                    SocketAddr::from((first.ip, 50000)),
+                    &cfg,
+                    &shared,
+                    now,
+                );
+                let tick_start = Instant::now();
+                for tick in 0..3 {
+                    shared
+                        .lock()
+                        .join
+                        .as_mut()
+                        .unwrap()
+                        .tick(tick_start + join::TICK * tick);
+                }
+                assert!(matches!(
+                    shared.lock().join.as_ref().unwrap().state(),
+                    join::State::Probing { .. }
+                ));
+                hear_announce(frame, SocketAddr::from((sender, 50000)), &cfg, &shared, now);
+                for tick in 3..50 {
+                    shared
+                        .lock()
+                        .join
+                        .as_mut()
+                        .unwrap()
+                        .tick(tick_start + join::TICK * tick);
+                }
+                assert_eq!(
+                    shared.lock().join.as_ref().unwrap().number(),
+                    Some(number),
+                    "{sender}"
+                );
+                let admitted = number == 18 && frame[10] == 6;
+                assert_eq!(shared.lock().peers.len(), if admitted { 2 } else { 1 });
+                assert_eq!(shared.lock().players.contains_key(&17), admitted);
+            }
         }
     }
 
     #[test]
     fn session_classification_allows_eleven_pair_and_reclassifies_only_on_next_successful_linkup() {
         let now = Instant::now();
-        for mode in [rbl_prolink::ConnectionMode::Wired,rbl_prolink::ConnectionMode::Wireless,
-            rbl_prolink::ConnectionMode::Unknown] {
+        for mode in [
+            rbl_prolink::ConnectionMode::Wired,
+            rbl_prolink::ConnectionMode::Wireless,
+            rbl_prolink::ConnectionMode::Unknown,
+        ] {
             let cfg = rejection_config(mode);
-            let ip = Ipv4Addr::new(192,168,50,10);
-            let mut first = keep_alive(9,ip); first.device_type = DeviceType::AllInOne; first.name = "XDJ-RX3".into();
-            let shared = acquired(&cfg,&first,now);
+            let ip = Ipv4Addr::new(192, 168, 50, 10);
+            let mut first = keep_alive(9, ip);
+            first.device_type = DeviceType::AllInOne;
+            first.name = "XDJ-RX3".into();
+            let shared = acquired(&cfg, &first, now);
             // The number gate permits 11/12 even if this later peer's type
             // differs from the original type7; it cannot reclassify LinkUp.
-            let second = keep_alive(11,Ipv4Addr::new(192,168,50,20));
-            let mut wire = second.encode(); wire[0x25] = 0xa5; wire[0x35] = 0x5a;
-            hear_announce(&wire,SocketAddr::from((second.ip,50000)),&cfg,&shared,now);
-            assert_eq!(shared.lock().peers.peers().iter().map(|p|p.device_number).collect::<Vec<_>>(),vec![9,11,12]);
-            for number in [11,12] {
+            let second = keep_alive(11, Ipv4Addr::new(192, 168, 50, 20));
+            let mut wire = second.encode();
+            wire[0x25] = 0xa5;
+            wire[0x35] = 0x5a;
+            hear_announce(
+                &wire,
+                SocketAddr::from((second.ip, 50000)),
+                &cfg,
+                &shared,
+                now,
+            );
+            assert_eq!(
+                shared
+                    .lock()
+                    .peers
+                    .peers()
+                    .iter()
+                    .map(|p| p.device_number)
+                    .collect::<Vec<_>>(),
+                vec![9, 11, 12]
+            );
+            for number in [11, 12] {
                 let state = shared.lock();
-                let peer = state.peers.peers().iter().find(|p|p.device_number==number).unwrap();
-                assert_eq!(peer.member_flags,Some([0xa5,0x5a]));
-                assert_eq!(peer.ip,second.ip);
-                assert_eq!(state.players[&number].address,second.ip);
+                let peer = state
+                    .peers
+                    .peers()
+                    .iter()
+                    .find(|p| p.device_number == number)
+                    .unwrap();
+                assert_eq!(peer.member_flags, Some([0xa5, 0x5a]));
+                assert_eq!(peer.ip, second.ip);
+                assert_eq!(state.players[&number].address, second.ip);
             }
-            hear_announce(&keep_alive(1,ip).encode(),SocketAddr::from((ip,50000)),&cfg,&shared,now);
+            hear_announce(
+                &keep_alive(1, ip).encode(),
+                SocketAddr::from((ip, 50000)),
+                &cfg,
+                &shared,
+                now,
+            );
             assert!(!shared.lock().players.contains_key(&1));
-            let mut reset = first.encode(); reset[10] = 0x0b;
-            hear_announce(&reset,SocketAddr::from((ip,50000)),&cfg,&shared,now);
+            let mut reset = first.encode();
+            reset[10] = 0x0b;
+            hear_announce(&reset, SocketAddr::from((ip, 50000)), &cfg, &shared, now);
             assert!(shared.lock().peers.is_empty());
-            assert_eq!(*shared.lock().join.as_ref().unwrap().state(),join::State::Waiting);
-            hear_announce(&keep_alive(1,ip).encode(),SocketAddr::from((ip,50000)),&cfg,&shared,now);
-            for tick in 0..50 { shared.lock().join.as_mut().unwrap().tick(now + join::TICK * tick); }
-            assert_eq!(shared.lock().join.as_ref().unwrap().number(),Some(17));
-            hear_announce(&first.encode(),SocketAddr::from((ip,50000)),&cfg,&shared,now);
-            assert_eq!(shared.lock().peers.peers().iter().map(|p|p.device_number).collect::<Vec<_>>(),vec![1]);
-            assert_eq!(shared.lock().players.len(),1);
+            assert_eq!(
+                *shared.lock().join.as_ref().unwrap().state(),
+                join::State::Waiting
+            );
+            hear_announce(
+                &keep_alive(1, ip).encode(),
+                SocketAddr::from((ip, 50000)),
+                &cfg,
+                &shared,
+                now,
+            );
+            for tick in 0..50 {
+                shared
+                    .lock()
+                    .join
+                    .as_mut()
+                    .unwrap()
+                    .tick(now + join::TICK * tick);
+            }
+            assert_eq!(shared.lock().join.as_ref().unwrap().number(), Some(17));
+            hear_announce(
+                &first.encode(),
+                SocketAddr::from((ip, 50000)),
+                &cfg,
+                &shared,
+                now,
+            );
+            assert_eq!(
+                shared
+                    .lock()
+                    .peers
+                    .peers()
+                    .iter()
+                    .map(|p| p.device_number)
+                    .collect::<Vec<_>>(),
+                vec![1]
+            );
+            assert_eq!(shared.lock().players.len(), 1);
         }
     }
 
@@ -2185,104 +2792,204 @@ mod all_in_one_tests {
     fn failed_wireless_original_attempt_does_not_classify_the_later_successful_session() {
         let now = Instant::now();
         let cfg = rejection_config(rbl_prolink::ConnectionMode::Wireless);
-        let ip = Ipv4Addr::new(192,168,50,10);
-        let mut first = keep_alive(1, ip); first.name = "CDJ-2000".into(); first.generation = 0;
+        let ip = Ipv4Addr::new(192, 168, 50, 10);
+        let mut first = keep_alive(1, ip);
+        first.name = "CDJ-2000".into();
+        first.generation = 0;
         let shared = Mutex::new(Shared {
-            join: Some(Join::new(cfg.mac,cfg.address,now).with_mode(cfg.mode)), ..Shared::default()
+            join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode)),
+            ..Shared::default()
         });
-        hear_announce(&first.encode(), SocketAddr::from((ip,50000)), &cfg, &shared, now);
-        assert_eq!(*shared.lock().join.as_ref().unwrap().state(), join::State::Waiting);
+        hear_announce(
+            &first.encode(),
+            SocketAddr::from((ip, 50000)),
+            &cfg,
+            &shared,
+            now,
+        );
+        assert_eq!(
+            *shared.lock().join.as_ref().unwrap().state(),
+            join::State::Waiting
+        );
         assert!(shared.lock().peers.is_empty());
-        first = keep_alive(9, ip); first.device_type = DeviceType::AllInOne; first.name = "OPUS-QUAD".into();
-        hear_announce(&first.encode(), SocketAddr::from((ip,50000)), &cfg, &shared, now);
-        for tick in 0..50 { shared.lock().join.as_mut().unwrap().tick(now + join::TICK * tick); }
-        assert_eq!(shared.lock().join.as_ref().unwrap().number(),Some(17));
-        hear_announce(&keep_alive(1,ip).encode(), SocketAddr::from((ip,50000)), &cfg, &shared, now);
+        first = keep_alive(9, ip);
+        first.device_type = DeviceType::AllInOne;
+        first.name = "OPUS-QUAD".into();
+        hear_announce(
+            &first.encode(),
+            SocketAddr::from((ip, 50000)),
+            &cfg,
+            &shared,
+            now,
+        );
+        for tick in 0..50 {
+            shared
+                .lock()
+                .join
+                .as_mut()
+                .unwrap()
+                .tick(now + join::TICK * tick);
+        }
+        assert_eq!(shared.lock().join.as_ref().unwrap().number(), Some(17));
+        hear_announce(
+            &keep_alive(1, ip).encode(),
+            SocketAddr::from((ip, 50000)),
+            &cfg,
+            &shared,
+            now,
+        );
         assert!(!shared.lock().players.contains_key(&1));
-        assert_eq!(shared.lock().peers.peers().iter().map(|p|p.device_number).collect::<Vec<_>>(), vec![9]);
+        assert_eq!(
+            shared
+                .lock()
+                .peers
+                .peers()
+                .iter()
+                .map(|p| p.device_number)
+                .collect::<Vec<_>>(),
+            vec![9]
+        );
     }
 
     #[test]
     fn slot_deadlines_survive_disconnect_rediscovery_and_paired_removal_before_recreation() {
         // Make wall-derived receipt deliberately nonzero: controlled slot
         // deadlines below must not depend on the acquisition helper's runtime.
-        let now = Instant::now().checked_sub(Duration::from_millis(10)).unwrap();
+        let now = Instant::now()
+            .checked_sub(Duration::from_millis(10))
+            .unwrap();
         let cfg = rejection_config(rbl_prolink::ConnectionMode::Wired);
-        let ip = Ipv4Addr::new(192,168,50,10);
-        let mut primary = keep_alive(9,ip);
-        primary.device_type = DeviceType::AllInOne; primary.name = "XDJ-RX3".into();
-        let mut secondary = primary.clone(); secondary.device_number = 10;
-        for removal in ["disconnect", "rediscovery", "paired_disconnect", "paired_expiry"] {
+        let ip = Ipv4Addr::new(192, 168, 50, 10);
+        let mut primary = keep_alive(9, ip);
+        primary.device_type = DeviceType::AllInOne;
+        primary.name = "XDJ-RX3".into();
+        let mut secondary = primary.clone();
+        secondary.device_number = 10;
+        for removal in [
+            "disconnect",
+            "rediscovery",
+            "paired_disconnect",
+            "paired_expiry",
+        ] {
             let shared = acquired(&cfg, &primary, now);
             let secondary_seen = if removal == "paired_expiry" { 1_000 } else { 0 };
             {
                 let mut state = shared.lock();
-                state.peers.observe_with_flags(&primary,0,[1,2]);
-                state.peers.observe_with_flags(&secondary,secondary_seen,[0xa5,0x5a]);
-                state.observe_player(&secondary,ip);
+                state.peers.observe_with_flags(&primary, 0, [1, 2]);
+                state
+                    .peers
+                    .observe_with_flags(&secondary, secondary_seen, [0xa5, 0x5a]);
+                state.observe_player(&secondary, ip);
                 state.greeted.push(ip);
             }
             match removal {
                 "rediscovery" => {
-                    let mut wire = rbl_prolink::rekordbox_claim_stage1(primary.mac,1); wire[37] = 7;
-                    assert_eq!(rbl_prolink::Discovery::decode(&wire).unwrap().device_type,7);
-                    hear_announce(&wire,SocketAddr::from((ip,50000)),&cfg,&shared,now);
+                    let mut wire = rbl_prolink::rekordbox_claim_stage1(primary.mac, 1);
+                    wire[37] = 7;
+                    assert_eq!(
+                        rbl_prolink::Discovery::decode(&wire).unwrap().device_type,
+                        7
+                    );
+                    hear_announce(&wire, SocketAddr::from((ip, 50000)), &cfg, &shared, now);
                 }
-                "paired_expiry" => { shared.lock().expire_peers(6_001); }
+                "paired_expiry" => {
+                    shared.lock().expire_peers(6_001);
+                }
                 _ => {
-                    let wire = disconnect_bytes(if removal == "disconnect" { 10 } else { 9 },ip);
-                    hear_announce(&wire,SocketAddr::from((ip,50000)),&cfg,&shared,now);
+                    let wire = disconnect_bytes(if removal == "disconnect" { 10 } else { 9 }, ip);
+                    hear_announce(&wire, SocketAddr::from((ip, 50000)), &cfg, &shared, now);
                 }
             }
-            assert!(!shared.lock().peers.peers().iter().any(|peer|peer.device_number==10),"{removal}");
+            assert!(
+                !shared
+                    .lock()
+                    .peers
+                    .peers()
+                    .iter()
+                    .any(|peer| peer.device_number == 10),
+                "{removal}"
+            );
             assert!(!shared.lock().players.contains_key(&10));
-            assert_eq!(shared.lock().greeted.contains(&ip),removal == "disconnect");
-            let recreated_at = if removal == "paired_expiry" { 6_500 } else { 1_000 };
+            assert_eq!(shared.lock().greeted.contains(&ip), removal == "disconnect");
+            let recreated_at = if removal == "paired_expiry" {
+                6_500
+            } else {
+                1_000
+            };
             {
                 let mut state = shared.lock();
-                state.peers.observe_with_flags(&primary,recreated_at,[1,2]);
-                state.observe_player(&primary,ip);
-                state.synthesize_members(&primary,ip,recreated_at);
-                let recreated = state.peers.peers().iter().find(|peer|peer.device_number==10).unwrap();
-                assert_eq!(recreated.last_seen_ms,secondary_seen,"{removal}");
-                assert_eq!(recreated.member_flags,Some([1,2]));
+                state
+                    .peers
+                    .observe_with_flags(&primary, recreated_at, [1, 2]);
+                state.observe_player(&primary, ip);
+                state.synthesize_members(&primary, ip, recreated_at);
+                let recreated = state
+                    .peers
+                    .peers()
+                    .iter()
+                    .find(|peer| peer.device_number == 10)
+                    .unwrap();
+                assert_eq!(recreated.last_seen_ms, secondary_seen, "{removal}");
+                assert_eq!(recreated.member_flags, Some([1, 2]));
                 assert!(!state.peers.is_synthetic(10));
                 let deadline = secondary_seen + rbl_prolink::PEER_TIMEOUT_MS;
                 state.expire_peers(deadline);
-                assert!(state.peers.peers().iter().any(|peer|peer.device_number==10));
+                assert!(state
+                    .peers
+                    .peers()
+                    .iter()
+                    .any(|peer| peer.device_number == 10));
                 state.expire_peers(deadline + 1);
-                assert!(!state.peers.peers().iter().any(|peer|peer.device_number==10),"{removal}");
+                assert!(
+                    !state
+                        .peers
+                        .peers()
+                        .iter()
+                        .any(|peer| peer.device_number == 10),
+                    "{removal}"
+                );
                 // Retain issue08's distinct ordinary Player activity policy;
                 // secondary peer expiry is not a new Player timer policy.
-                state.players.get_mut(&10).unwrap().last_seen = now.checked_sub(PLAYER_TIMEOUT + Duration::from_millis(1)).unwrap();
+                state.players.get_mut(&10).unwrap().last_seen = now
+                    .checked_sub(PLAYER_TIMEOUT + Duration::from_millis(1))
+                    .unwrap();
                 state.expire_silent_players();
                 assert!(!state.players.contains_key(&10));
                 assert!(state.players.contains_key(&9));
-                assert_eq!(state.greeted.contains(&ip),removal == "disconnect");
+                assert_eq!(state.greeted.contains(&ip), removal == "disconnect");
             }
         }
     }
 
     #[test]
-    fn inactive_primary_deadline_does_not_remove_a_new_secondary_and_session_clear_stops_all_timers() {
+    fn inactive_primary_deadline_does_not_remove_a_new_secondary_and_session_clear_stops_all_timers(
+    ) {
         let now = Instant::now();
-        let mut shared = members(&[],now);
-        let ip = Ipv4Addr::new(169,254,20,2);
-        let primary = keep_alive(9,ip);
-        let secondary = keep_alive(10,ip);
-        shared.peers.observe(&primary,0);
+        let mut shared = members(&[], now);
+        let ip = Ipv4Addr::new(169, 254, 20, 2);
+        let primary = keep_alive(9, ip);
+        let secondary = keep_alive(10, ip);
+        shared.peers.observe(&primary, 0);
         shared.remove_member(9);
-        shared.peers.observe_synthetic(&secondary,1_000,None);
-        shared.observe_player(&secondary,ip);
+        shared.peers.observe_synthetic(&secondary, 1_000, None);
+        shared.observe_player(&secondary, ip);
         shared.expire_peers(6_001);
-        assert_eq!(shared.peers.peers().iter().map(|p|p.device_number).collect::<Vec<_>>(),vec![10]);
+        assert_eq!(
+            shared
+                .peers
+                .peers()
+                .iter()
+                .map(|p| p.device_number)
+                .collect::<Vec<_>>(),
+            vec![10]
+        );
         assert!(shared.players.contains_key(&10));
-        shared.peers.observe(&secondary,10_000);
+        shared.peers.observe(&secondary, 10_000);
         shared.remove_member(10); // pending inactive timer is still session state
         shared.clear_members();
-        shared.peers.observe_synthetic(&secondary,11_000,None);
+        shared.peers.observe_synthetic(&secondary, 11_000, None);
         assert!(shared.peers.is_synthetic(10));
-        assert_eq!(shared.peers.expire_received(u64::MAX), [] as [u8;0]);
+        assert_eq!(shared.peers.expire_received(u64::MAX), [] as [u8; 0]);
     }
 
     fn rejection_frame() -> Vec<u8> {
@@ -2295,21 +3002,39 @@ mod all_in_one_tests {
     }
 
     fn disconnect_bytes(number: u8, ip: Ipv4Addr) -> Vec<u8> {
-        let mut bytes = vec![0x51,0x73,0x70,0x74,0x31,0x57,0x6d,0x4a,0x4f,0x4c,8,0,
-            b'r',b'e',b'k',b'o',b'r',b'd',b'b',b'o',b'x',0,0,0,0,0,0,0,0,0,0,0,
-            1,3,0,41,number];
+        let mut bytes = vec![
+            0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a, 0x4f, 0x4c, 8, 0, b'r', b'e', b'k',
+            b'o', b'r', b'd', b'b', b'o', b'x', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 0, 41,
+            number,
+        ];
         bytes.extend_from_slice(&ip.octets());
         bytes
     }
 
     struct EmptyCatalog;
     impl rbl_dbserver::catalog::Catalog for EmptyCatalog {
-        fn list(&self, _: &rbl_dbserver::catalog::Query) -> Vec<rbl_dbserver::catalog::Row> { Vec::new() }
-        fn track_row(&self, _: u32, _: Option<rbl_dbserver::catalog::TrackColumn>) -> Option<rbl_dbserver::item::TrackRow> { None }
-        fn track(&self, _: u32) -> Option<rbl_dbserver::catalog::TrackDetails> { None }
-        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
-        fn analysis(&self, _: u32, _: &rbl_dbserver::catalog::Analysis) -> Option<Vec<u8>> { None }
+        fn list(&self, _: &rbl_dbserver::catalog::Query) -> Vec<rbl_dbserver::catalog::Row> {
+            Vec::new()
+        }
+        fn track_row(
+            &self,
+            _: u32,
+            _: Option<rbl_dbserver::catalog::TrackColumn>,
+        ) -> Option<rbl_dbserver::item::TrackRow> {
+            None
+        }
+        fn track(&self, _: u32) -> Option<rbl_dbserver::catalog::TrackDetails> {
+            None
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn analysis(&self, _: u32, _: &rbl_dbserver::catalog::Analysis) -> Option<Vec<u8>> {
+            None
+        }
     }
 
     #[test]
@@ -2317,26 +3042,62 @@ mod all_in_one_tests {
         use rbl_dbserver::net::Handler;
         let now = Instant::now();
         let sender = Ipv4Addr::new(192, 168, 50, 10);
-        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless] {
+        for mode in [
+            rbl_prolink::ConnectionMode::Wired,
+            rbl_prolink::ConnectionMode::Wireless,
+        ] {
             let cfg = rejection_config(mode);
-            let candidate = if mode == rbl_prolink::ConnectionMode::Wireless { 41 } else { 17 };
-            let running = if mode == rbl_prolink::ConnectionMode::Wireless { 44 } else { 18 };
-            for state in [join::State::Waiting, join::State::Discovery { sent: 2 },
-                join::State::Probing { round: 4, index: 2 }, join::State::Assigning { sent: 3 },
-                join::State::Running { number: running }, join::State::Failed("fixture".into())] {
-                let assigned = if matches!(state, join::State::Running { .. }) { running } else { 0 };
+            let candidate = if mode == rbl_prolink::ConnectionMode::Wireless {
+                41
+            } else {
+                17
+            };
+            let running = if mode == rbl_prolink::ConnectionMode::Wireless {
+                44
+            } else {
+                18
+            };
+            for state in [
+                join::State::Waiting,
+                join::State::Discovery { sent: 2 },
+                join::State::Probing { round: 4, index: 2 },
+                join::State::Assigning { sent: 3 },
+                join::State::Running { number: running },
+                join::State::Failed("fixture".into()),
+            ] {
+                let assigned = if matches!(state, join::State::Running { .. }) {
+                    running
+                } else {
+                    0
+                };
                 let mut fixture = members(&[1, 9, 10, 11, 12, 33], now);
                 let mut initialized = Join::new(cfg.mac, cfg.address, now).with_mode(mode);
                 initialized.hear_keep_alive(&keep_alive(1, sender), now);
                 fixture.join = Some(initialized.test_state(state.clone()));
-                fixture.master = MasterState { on: true, bpm_x100: 12_300, bar_beat: 3 };
+                fixture.master = MasterState {
+                    on: true,
+                    bpm_x100: 12_300,
+                    bar_beat: 3,
+                };
                 fixture.assigned.store(assigned, Ordering::Relaxed);
                 let cell = Arc::clone(&fixture.assigned);
-                let handler = rbl_dbserver::session::CatalogHandler::new(Arc::new(EmptyCatalog)).with_device(cell.clone());
+                let handler = rbl_dbserver::session::CatalogHandler::new(Arc::new(EmptyCatalog))
+                    .with_device(cell.clone());
                 assert_eq!(handler.open_ready().is_some(), assigned != 0);
                 let shared = Mutex::new(fixture);
-                let out = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).unwrap();
-                assert_eq!(out.packet, disconnect_bytes(if assigned == 0 { candidate } else { running }, cfg.address), "{mode:?} {state:?}");
+                let out = hear_announce(
+                    &rejection_frame(),
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &shared,
+                    now,
+                )
+                .unwrap();
+                assert_eq!(
+                    out.packet,
+                    disconnect_bytes(if assigned == 0 { candidate } else { running }, cfg.address),
+                    "{mode:?} {state:?}"
+                );
                 assert_eq!(out.to, None);
                 // The gate is already zero before the caller sends this output.
                 assert_eq!(cell.load(Ordering::Relaxed), 0);
@@ -2344,28 +3105,65 @@ mod all_in_one_tests {
                 let snapshot = shared.lock();
                 assert!(snapshot.rejected());
                 assert!(snapshot.down.as_ref().unwrap().contains("rejected"));
-                assert_eq!(snapshot.join.as_ref().unwrap().state(), &join::State::Waiting);
+                assert_eq!(
+                    snapshot.join.as_ref().unwrap().state(),
+                    &join::State::Waiting
+                );
                 assert!(snapshot.peers.is_empty());
                 assert!(snapshot.players.is_empty());
                 assert_eq!(snapshot.greeted, Vec::<Ipv4Addr>::new());
                 assert_eq!(snapshot.to_greet, Vec::<Ipv4Addr>::new());
-                assert_eq!(snapshot.master, MasterState { on: false, bpm_x100: 0, bar_beat: 0 });
+                assert_eq!(
+                    snapshot.master,
+                    MasterState {
+                        on: false,
+                        bpm_x100: 0,
+                        bar_beat: 0
+                    }
+                );
                 drop(snapshot);
-                let repeat = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).unwrap();
-                assert_eq!(repeat.packet, disconnect_bytes(candidate, Ipv4Addr::UNSPECIFIED));
+                let repeat = hear_announce(
+                    &rejection_frame(),
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &shared,
+                    now,
+                )
+                .unwrap();
+                assert_eq!(
+                    repeat.packet,
+                    disconnect_bytes(candidate, Ipv4Addr::UNSPECIFIED)
+                );
 
-                let mut frames = vec![keep_alive(1, sender).encode(), rbl_prolink::rekordbox_claim_stage1([1;6], 1),
-                    rbl_prolink::rekordbox_claim_stage2([1;6], sender, running, 5),
-                    rbl_prolink::number_in_use_reply(REKORDBOX_NAME, running)];
+                let mut frames = vec![
+                    keep_alive(1, sender).encode(),
+                    rbl_prolink::rekordbox_claim_stage1([1; 6], 1),
+                    rbl_prolink::rekordbox_claim_stage2([1; 6], sender, running, 5),
+                    rbl_prolink::number_in_use_reply(REKORDBOX_NAME, running),
+                ];
                 for kind in [4, 7, 8, 0x0b] {
-                    let mut frame = keep_alive(1, sender).encode(); frame[10] = kind; frames.push(frame);
+                    let mut frame = keep_alive(1, sender).encode();
+                    frame[10] = kind;
+                    frames.push(frame);
                 }
                 for frame in frames {
-                    assert!(hear_announce(&frame, SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+                    assert!(hear_announce(
+                        &frame,
+                        SocketAddr::from((sender, 50000)),
+                        &cfg,
+                        &shared,
+                        now
+                    )
+                    .is_none());
                 }
                 let mut snapshot = shared.lock();
                 snapshot.join.as_mut().unwrap().reset(now);
-                assert!(snapshot.join.as_mut().unwrap().tick(now + Duration::from_secs(60)).is_none());
+                assert!(snapshot
+                    .join
+                    .as_mut()
+                    .unwrap()
+                    .tick(now + Duration::from_secs(60))
+                    .is_none());
                 assert!(snapshot.rejected());
                 assert!(snapshot.peers.is_empty() && snapshot.players.is_empty());
                 assert!(snapshot.greeted.is_empty() && snapshot.to_greet.is_empty());
@@ -2378,27 +3176,61 @@ mod all_in_one_tests {
     fn fresh_rejection_is_terminal_without_an_outgoing_datagram_and_unknown_is_unchanged() {
         let now = Instant::now();
         let sender = Ipv4Addr::new(10, 9, 8, 7); // before NetIF setup, no subnet guard
-        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless,
-            rbl_prolink::ConnectionMode::Unknown] {
+        for mode in [
+            rbl_prolink::ConnectionMode::Wired,
+            rbl_prolink::ConnectionMode::Wireless,
+            rbl_prolink::ConnectionMode::Unknown,
+        ] {
             let cfg = rejection_config(mode);
             let mut fixture = members(&[1], now);
             fixture.join = Some(Join::new(cfg.mac, cfg.address, now).with_mode(mode));
             let shared = Mutex::new(fixture);
-            assert!(hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+            assert!(hear_announce(
+                &rejection_frame(),
+                SocketAddr::from((sender, 50000)),
+                &cfg,
+                &shared,
+                now
+            )
+            .is_none());
             let mut snapshot = shared.lock();
             let known = mode != rbl_prolink::ConnectionMode::Unknown;
             assert_eq!(snapshot.rejected(), known);
             assert_eq!(snapshot.peers.is_empty(), known);
             assert_eq!(snapshot.players.is_empty(), known);
             assert_eq!(snapshot.down.is_some(), known);
-            assert!(snapshot.join.as_mut().unwrap().tick(now + Duration::from_secs(60)).is_none());
+            assert!(snapshot
+                .join
+                .as_mut()
+                .unwrap()
+                .tick(now + Duration::from_secs(60))
+                .is_none());
             drop(snapshot);
-            assert!(hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+            assert!(hear_announce(
+                &rejection_frame(),
+                SocketAddr::from((sender, 50000)),
+                &cfg,
+                &shared,
+                now
+            )
+            .is_none());
             // A new object is RBX's bounded explicit recovery policy.
-            let replacement = Mutex::new(Shared { join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(mode)), ..Shared::default() });
-            hear_announce(&keep_alive(1, sender).encode(), SocketAddr::from((sender, 50000)), &cfg, &replacement, now);
+            let replacement = Mutex::new(Shared {
+                join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(mode)),
+                ..Shared::default()
+            });
+            hear_announce(
+                &keep_alive(1, sender).encode(),
+                SocketAddr::from((sender, 50000)),
+                &cfg,
+                &replacement,
+                now,
+            );
             assert!(!replacement.lock().rejected());
-            assert!(matches!(replacement.lock().join.as_ref().unwrap().state(), join::State::Discovery { .. }));
+            assert!(matches!(
+                replacement.lock().join.as_ref().unwrap().state(),
+                join::State::Discovery { .. }
+            ));
         }
     }
 
@@ -2408,19 +3240,54 @@ mod all_in_one_tests {
         let cfg = rejection_config(rbl_prolink::ConnectionMode::Wired);
         let on_subnet = Ipv4Addr::new(192, 168, 50, 10);
         for initialized in [false, true] {
-            for sender in [Ipv4Addr::UNSPECIFIED, cfg.address, Ipv4Addr::new(192, 168, 51, 10), on_subnet] {
+            for sender in [
+                Ipv4Addr::UNSPECIFIED,
+                cfg.address,
+                Ipv4Addr::new(192, 168, 51, 10),
+                on_subnet,
+            ] {
                 let mut join = Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode);
-                if initialized { join.hear_keep_alive(&keep_alive(1, on_subnet), now); }
-                let shared = Mutex::new(Shared { join: Some(join), ..Shared::default() });
+                if initialized {
+                    join.hear_keep_alive(&keep_alive(1, on_subnet), now);
+                }
+                let shared = Mutex::new(Shared {
+                    join: Some(join),
+                    ..Shared::default()
+                });
                 for cut in 0..36 {
-                    assert!(hear_announce(&rejection_frame()[..cut], SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+                    assert!(hear_announce(
+                        &rejection_frame()[..cut],
+                        SocketAddr::from((sender, 50000)),
+                        &cfg,
+                        &shared,
+                        now
+                    )
+                    .is_none());
                     assert!(!shared.lock().rejected());
                 }
-                let mut invalid = rejection_frame(); invalid[0] ^= 0xff;
-                assert!(hear_announce(&invalid, SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+                let mut invalid = rejection_frame();
+                invalid[0] ^= 0xff;
+                assert!(hear_announce(
+                    &invalid,
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &shared,
+                    now
+                )
+                .is_none());
                 assert!(!shared.lock().rejected());
-                let accepted = if initialized { sender == on_subnet } else { sender != Ipv4Addr::UNSPECIFIED };
-                let out = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now);
+                let accepted = if initialized {
+                    sender == on_subnet
+                } else {
+                    sender != Ipv4Addr::UNSPECIFIED
+                };
+                let out = hear_announce(
+                    &rejection_frame(),
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &shared,
+                    now,
+                );
                 assert_eq!(shared.lock().rejected(), accepted);
                 assert_eq!(out.is_some(), initialized && accepted);
             }
@@ -2433,20 +3300,47 @@ mod all_in_one_tests {
         let cfg = rejection_config(rbl_prolink::ConnectionMode::Wireless);
         let sender = Ipv4Addr::new(192, 168, 50, 10);
         for name in ["CDJ-2000", "CDJ-900"] {
-            let shared = Mutex::new(Shared { join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode)), ..Shared::default() });
+            let shared = Mutex::new(Shared {
+                join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode)),
+                ..Shared::default()
+            });
             let mut original = keep_alive(1, sender);
-            original.name = name.into(); original.generation = 0;
-            hear_announce(&original.encode(), SocketAddr::from((sender, 50000)), &cfg, &shared, now);
+            original.name = name.into();
+            original.generation = 0;
+            hear_announce(
+                &original.encode(),
+                SocketAddr::from((sender, 50000)),
+                &cfg,
+                &shared,
+                now,
+            );
             let snapshot = shared.lock();
-            assert_eq!(snapshot.join.as_ref().unwrap().state(), &join::State::Waiting);
+            assert_eq!(
+                snapshot.join.as_ref().unwrap().state(),
+                &join::State::Waiting
+            );
             assert!(snapshot.join.as_ref().unwrap().network_initialized());
             assert!(snapshot.peers.is_empty() && snapshot.players.is_empty());
             assert!(snapshot.greeted.is_empty() && snapshot.to_greet.is_empty());
             assert_eq!(snapshot.assigned.load(Ordering::Relaxed), 0);
             drop(snapshot);
-            let out = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).unwrap();
+            let out = hear_announce(
+                &rejection_frame(),
+                SocketAddr::from((sender, 50000)),
+                &cfg,
+                &shared,
+                now,
+            )
+            .unwrap();
             assert_eq!(out.packet, disconnect_bytes(41, cfg.address));
-            let repeat = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).unwrap();
+            let repeat = hear_announce(
+                &rejection_frame(),
+                SocketAddr::from((sender, 50000)),
+                &cfg,
+                &shared,
+                now,
+            )
+            .unwrap();
             assert_eq!(repeat.packet, disconnect_bytes(41, Ipv4Addr::UNSPECIFIED));
         }
     }
@@ -2455,15 +3349,28 @@ mod all_in_one_tests {
     fn rejection_disconnect_output_uses_configured_broadcast_destination() {
         let now = Instant::now();
         let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        receiver.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
         let port = receiver.local_addr().unwrap().port();
         let sender = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let mut cfg = config(); cfg.announce_port = port;
+        let mut cfg = config();
+        cfg.announce_port = port;
         let remote = Ipv4Addr::new(127, 0, 0, 2);
         let mut join = Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode);
         join.hear_keep_alive(&keep_alive(1, remote), now);
-        let shared = Mutex::new(Shared { join: Some(join.test_state(join::State::Running { number: 18 })), ..Shared::default() });
-        let out = hear_announce(&rejection_frame(), SocketAddr::from((remote, port + 1)), &cfg, &shared, now).unwrap();
+        let shared = Mutex::new(Shared {
+            join: Some(join.test_state(join::State::Running { number: 18 })),
+            ..Shared::default()
+        });
+        let out = hear_announce(
+            &rejection_frame(),
+            SocketAddr::from((remote, port + 1)),
+            &cfg,
+            &shared,
+            now,
+        )
+        .unwrap();
         assert_eq!(out.to, None);
         send_announce(&sender, &out, SocketAddr::from((cfg.broadcast, port)), port);
         let mut buffer = [0; 100];
@@ -2474,9 +3381,14 @@ mod all_in_one_tests {
 
     #[test]
     fn fresh_known_mode_rejection_sends_no_udp_in_the_real_announce_loop() {
-        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless] {
+        for mode in [
+            rbl_prolink::ConnectionMode::Wired,
+            rbl_prolink::ConnectionMode::Wireless,
+        ] {
             let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-            receiver.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+            receiver
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
             let announce = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
             announce.set_read_timeout(Some(POLL)).unwrap();
             let destination = announce.local_addr().unwrap();
@@ -2486,8 +3398,11 @@ mod all_in_one_tests {
             let stop = Arc::new(AtomicBool::new(false));
             let shared = Arc::new(Mutex::new(Shared::default()));
             let cell = Arc::clone(&shared.lock().assigned);
-            let (thread_stop, thread_shared, thread_cell) = (stop.clone(), shared.clone(), cell.clone());
-            let worker = std::thread::spawn(move || announce_loop(&announce, &cfg, &thread_stop, &thread_shared, &thread_cell));
+            let (thread_stop, thread_shared, thread_cell) =
+                (stop.clone(), shared.clone(), cell.clone());
+            let worker = std::thread::spawn(move || {
+                announce_loop(&announce, &cfg, &thread_stop, &thread_shared, &thread_cell)
+            });
             receiver.send_to(&rejection_frame(), destination).unwrap();
             let deadline = Instant::now() + Duration::from_secs(1);
             while !shared.lock().rejected() && Instant::now() < deadline {
@@ -2495,7 +3410,9 @@ mod all_in_one_tests {
             }
             // Subsequent ordinary input and repeated rejection still have no
             // initialized network interface through which to broadcast.
-            receiver.send_to(&keep_alive(1, Ipv4Addr::LOCALHOST).encode(), destination).unwrap();
+            receiver
+                .send_to(&keep_alive(1, Ipv4Addr::LOCALHOST).encode(), destination)
+                .unwrap();
             receiver.send_to(&rejection_frame(), destination).unwrap();
             let mut bytes = [0; 100];
             let observed = receiver.recv_from(&mut bytes);
@@ -2512,20 +3429,32 @@ mod all_in_one_tests {
     fn a_late_player_status_cannot_revive_terminal_membership_or_report_a_load() {
         struct Loads(std::sync::atomic::AtomicUsize);
         impl LibraryFacts for Loads {
-            fn track_count(&self) -> u16 { 1 }
-            fn playlist_count(&self) -> u16 { 0 }
-            fn track_loaded(&self, _: u32) { self.0.fetch_add(1, Ordering::Relaxed); }
+            fn track_count(&self) -> u16 {
+                1
+            }
+            fn playlist_count(&self) -> u16 {
+                0
+            }
+            fn track_loaded(&self, _: u32) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
         }
         let now = Instant::now();
         let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        receiver.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
         let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let mut cfg = config(); cfg.player_port = receiver.local_addr().unwrap().port();
+        let mut cfg = config();
+        cfg.player_port = receiver.local_addr().unwrap().port();
         let sender = Ipv4Addr::new(127, 0, 0, 2);
         let from = SocketAddrV4::new(sender, 50002);
         let mut join = Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode);
         join.hear_keep_alive(&keep_alive(1, sender), now);
-        let mut fixture = Shared { join: Some(join.test_state(join::State::Running { number: 17 })), ..Shared::default() };
+        let mut fixture = Shared {
+            join: Some(join.test_state(join::State::Running { number: 17 })),
+            ..Shared::default()
+        };
         fixture.assigned.store(17, Ordering::Relaxed);
         // Use localhost for the observed status sender so its greeting can
         // be received without adding another OS loopback alias.
@@ -2536,10 +3465,20 @@ mod all_in_one_tests {
         let mut packet = include_bytes!("../tests/fixtures/cdj-status-playing-ours.bin").to_vec();
         packet[0x28] = 17;
         assert!(status_from_packet(&packet).unwrap().is_some());
-        assert!(hear_announce(&rejection_frame(), SocketAddr::V4(from), &cfg, &shared, now).is_some());
+        assert!(
+            hear_announce(&rejection_frame(), SocketAddr::V4(from), &cfg, &shared, now).is_some()
+        );
         // Stale `ours` is exactly the snapshot StatusLoop could have taken
         // before the rejection cleared its shared assigned-number cell.
-        hear_player_status(&packet, SocketAddrV4::new(Ipv4Addr::LOCALHOST, 50002), &socket, &cfg, &shared, &facts, 17);
+        hear_player_status(
+            &packet,
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 50002),
+            &socket,
+            &cfg,
+            &shared,
+            &facts,
+            17,
+        );
         let snapshot = shared.lock();
         assert!(snapshot.players.is_empty() && snapshot.peers.is_empty());
         assert!(snapshot.greeted.is_empty() && snapshot.to_greet.is_empty());
@@ -2551,7 +3490,15 @@ mod all_in_one_tests {
         // report a load using a fresh non-rejected object below.
         assert_eq!(counter.0.load(Ordering::Relaxed), 0);
         let replacement = Mutex::new(Shared::default());
-        hear_player_status(&packet, SocketAddrV4::new(Ipv4Addr::LOCALHOST, 50002), &socket, &cfg, &replacement, &facts, 17);
+        hear_player_status(
+            &packet,
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 50002),
+            &socket,
+            &cfg,
+            &replacement,
+            &facts,
+            17,
+        );
         assert_eq!(counter.0.load(Ordering::Relaxed), 1);
         assert_eq!(replacement.lock().players.len(), 1);
     }
@@ -2565,33 +3512,93 @@ mod all_in_one_tests {
             original[12..32].fill(0);
             original[12..12 + name.len()].copy_from_slice(name.as_bytes());
             original[33] = 0;
-            for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless] {
+            for mode in [
+                rbl_prolink::ConnectionMode::Wired,
+                rbl_prolink::ConnectionMode::Wireless,
+            ] {
                 let cfg = rejection_config(mode);
                 // Constructor runtime mode 0xff permits original-named 09
                 // even on selected wireless; no initialized IF means no UDP.
-                let fresh = Mutex::new(Shared { join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(mode)), ..Shared::default() });
-                assert!(!fresh.lock().join.as_ref().unwrap().excludes_original_models());
-                assert!(hear_announce(&original, SocketAddr::from((sender, 50000)), &cfg, &fresh, now).is_none());
+                let fresh = Mutex::new(Shared {
+                    join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(mode)),
+                    ..Shared::default()
+                });
+                assert!(!fresh
+                    .lock()
+                    .join
+                    .as_ref()
+                    .unwrap()
+                    .excludes_original_models());
+                assert!(hear_announce(
+                    &original,
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &fresh,
+                    now
+                )
+                .is_none());
                 assert!(fresh.lock().rejected());
-                assert!(fresh.lock().join.as_ref().unwrap().excludes_original_models());
+                assert!(fresh
+                    .lock()
+                    .join
+                    .as_ref()
+                    .unwrap()
+                    .excludes_original_models());
 
                 let mut join = Join::new(cfg.mac, cfg.address, now).with_mode(mode);
                 join.hear_keep_alive(&keep_alive(1, sender), now);
-                let active = Mutex::new(Shared { join: Some(join), ..Shared::default() });
-                let out = hear_announce(&original, SocketAddr::from((sender, 50000)), &cfg, &active, now);
+                let active = Mutex::new(Shared {
+                    join: Some(join),
+                    ..Shared::default()
+                });
+                let out = hear_announce(
+                    &original,
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &active,
+                    now,
+                );
                 assert_eq!(out.is_some(), mode == rbl_prolink::ConnectionMode::Wired);
                 if mode == rbl_prolink::ConnectionMode::Wireless {
                     // Runtime wireless exclusion precedes 09 dispatch.
                     assert!(!active.lock().rejected());
-                    assert!(hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &active, now).is_some());
+                    assert!(hear_announce(
+                        &rejection_frame(),
+                        SocketAddr::from((sender, 50000)),
+                        &cfg,
+                        &active,
+                        now
+                    )
+                    .is_some());
                 }
                 assert!(active.lock().rejected());
                 // readReject clears the runtime byte to zero, so original
                 // repeats are excluded even after a wired first rejection.
-                assert!(hear_announce(&original, SocketAddr::from((sender, 50000)), &cfg, &active, now).is_none());
-                let modern = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &active, now).unwrap();
-                let candidate = if mode == rbl_prolink::ConnectionMode::Wireless { 41 } else { 17 };
-                assert_eq!(modern.packet, disconnect_bytes(candidate, Ipv4Addr::UNSPECIFIED));
+                assert!(hear_announce(
+                    &original,
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &active,
+                    now
+                )
+                .is_none());
+                let modern = hear_announce(
+                    &rejection_frame(),
+                    SocketAddr::from((sender, 50000)),
+                    &cfg,
+                    &active,
+                    now,
+                )
+                .unwrap();
+                let candidate = if mode == rbl_prolink::ConnectionMode::Wireless {
+                    41
+                } else {
+                    17
+                };
+                assert_eq!(
+                    modern.packet,
+                    disconnect_bytes(candidate, Ipv4Addr::UNSPECIFIED)
+                );
             }
         }
     }
