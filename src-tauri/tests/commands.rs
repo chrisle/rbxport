@@ -3488,6 +3488,7 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         stick.path().display().to_string(),
         None,
         None,
+        None,
     ))
     .unwrap();
     assert_eq!((written.tracks, written.playlists), (1, 0));
@@ -3501,6 +3502,7 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         s.state(),
         vec![playlist_id(1)],
         vec![stick.path().display().to_string()],
+        None,
         None,
         None,
         None,
@@ -3525,6 +3527,7 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         stick.path().display().to_string(),
         None,
         None,
+        None,
     ))
     .unwrap();
     assert_eq!((again.tracks, again.playlists, again.removed), (2, 1, 0));
@@ -3539,6 +3542,7 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
     for single_playlist in [false, true] {
         run(commands::export_tracks_to_device(
             s.handle(), s.state(), vec![second.clone()], stick.path().display().to_string(), None, None,
+            None,
         )).unwrap();
         let before = rbl_export::Manifest::load(stick.path()).unwrap();
         let loose = before.tracks.iter().find(|t| t.library_id.to_string() == second).unwrap();
@@ -3548,11 +3552,13 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         let cleaned = if single_playlist {
             run(commands::export_playlist(
                 s.handle(), s.state(), playlist_id(1), stick.path().display().to_string(), None, Some(true), None,
+                None,
             )).unwrap()
         } else {
             run(commands::sync_devices(
                 s.handle(), s.state(), vec![playlist_id(1)], vec![stick.path().display().to_string()],
                 None, None, None, Some(true), None, None,
+                None,
             )).unwrap().remove(0).report.unwrap()
         };
         assert_eq!((cleaned.tracks, cleaned.playlists, cleaned.removed), (1, 1, 1));
@@ -3587,6 +3593,7 @@ fn a_stick_pulled_during_a_sync_is_reported_as_disconnected() {
     });
     let reports = run(commands::sync_devices(
         s.handle(), s.state(), vec![playlist_id(1)], vec![mount.display().to_string()], None, None, None, None, None, None,
+        None,
     ))
     .unwrap();
     let error = reports[0].error.as_deref().expect("the sync failed");
@@ -3642,6 +3649,7 @@ fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them
         None,
         Some(true),
         Some(true),
+        None,
         None,
         None,
         None,
@@ -3721,6 +3729,7 @@ fn exporting_a_folder_writes_the_folder_with_its_playlists_inside() {
     let stick = tempfile::tempdir().unwrap();
     let written = run(commands::export_playlist(
         s.handle(), s.state(), set.id.clone(), stick.path().display().to_string(), None, None, None,
+        None,
     ))
     .unwrap();
     assert_eq!(written.tracks, 1, "one track, however many playlists hold it");
@@ -4617,4 +4626,46 @@ fn missing_export_files_name_only_the_selected_containing_playlists() {
     assert_eq!(entry(&y)["playlists"], serde_json::json!([
         { "id": b.id, "path": "Archive / Play" },
     ]));
+}
+
+#[test]
+fn r1_option_is_captured_by_usb_export_commands_and_defaults_off() {
+    let s = shell();
+    let audio = s._dir.path().join("R1 generated.wav");
+    write_wav(&audio, 1);
+    let imported = run(commands::import_files(
+        s.handle(),
+        s.state(),
+        vec![audio.display().to_string()],
+    ))
+    .unwrap();
+    let id = imported.tracks[0].id.clone();
+    let stick = tempfile::tempdir().unwrap();
+    let report = run(commands::export_tracks_to_device(
+        s.handle(),
+        s.state(),
+        vec![id.clone()],
+        stick.path().display().to_string(),
+        None,
+        None,
+        Some(true),
+    ))
+    .unwrap();
+    assert!(report.verified);
+    let file = stick.path().join("PIONEER/DBH/CbmDB.DBH");
+    let parsed = rbl_export::cbm::parse_contents(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(parsed.records.len(), 1);
+    let report = run(commands::export_tracks_to_device(
+        s.handle(),
+        s.state(),
+        vec![id],
+        stick.path().display().to_string(),
+        None,
+        None,
+        None,
+    ))
+    .unwrap();
+    assert!(report.verified);
+    assert!(!file.exists());
+    assert!(rbl_export::verify(stick.path()).unwrap().is_ok());
 }

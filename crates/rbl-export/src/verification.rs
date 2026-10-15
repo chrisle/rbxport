@@ -22,6 +22,7 @@ impl VerifyReport {
     }
 }
 pub fn verify(root: &Path) -> Result<VerifyReport> {
+    crate::r1::verify(root)?;
     let snapshot = Snapshot::read(root)?;
     let mut report = verify_staged(root, root, &snapshot, &BTreeSet::new())?;
     if let Some(manifest) = crate::Manifest::load(root) {
@@ -63,6 +64,7 @@ pub fn verify_content(root: &Path) -> Result<VerifyReport> {
 /// both database formats readable and equivalent without rereading every
 /// analysis file from slow removable media.
 pub fn verify_databases(root: &Path) -> Result<VerifyReport> {
+    crate::r1::verify(root)?;
     let snapshot = Snapshot::read(root)?;
     let mut report = VerifyReport::default();
     let (Some(legacy), Some(one)) = (&snapshot.legacy, &snapshot.one) else {

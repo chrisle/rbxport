@@ -704,3 +704,5 @@ mod tests {
         assert!(drift < 1e-3, "{drift}");
     }
 }
+
+pub mod legacy;

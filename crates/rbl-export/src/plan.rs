@@ -28,6 +28,7 @@ pub fn preview(destination: &Path, tracks: &[SourceTrack], playlists: &[SourcePl
         return Err(crate::ExportError::Conflict("This USB requires recovery before its space can be estimated. Sync it to recover.".into()));
     }
     let previous = Manifest::load(destination);
+    crate::r1::protect(destination, previous.as_ref())?;
     let signatures = incremental::databases(destination)?;
     if let Some(manifest) = previous.as_ref().filter(|m| m.generation.as_ref().is_some_and(|g| {
         g.request == incremental::request(tracks, playlists, tags, options).unwrap_or_default()
@@ -56,6 +57,7 @@ pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Opt
 /// [`from_baseline`] for a stick that stores files in `unit`-byte clusters.
 #[allow(clippy::too_many_arguments, reason = "from_baseline's inputs and the allocation unit it measured")]
 fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Manifest>, tracks: &[SourceTrack], playlists: &[SourcePlaylist], options: &ExportOptions<'_>, record: Option<&crate::sync_record::SyncRecord>, unit: u64) -> Result<SyncPlan> {
+    crate::r1::protect(destination, previous)?;
     let on_disk = |bytes: u64| allocation(bytes, unit);
     let db_id = options.db_id_override.unwrap_or_else(|| options.sync.map_or(0, |s| s.db_id));
     let crate::reconcile::Prepared { tracks, playlists, device_additions } = crate::reconcile::prepare(destination, before, previous, tracks, playlists, db_id, options.keep_unlisted, record)?;
@@ -139,8 +141,23 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
         .map(|p| std::fs::metadata(root.join(p)).map_or(0, |m| on_disk(m.len()))).sum();
     let entry_count: usize = playlists.iter().map(|p| p.track_indices.len()).sum();
     // Each of the files takes at least a cluster, and part of one more at its end.
-    let database_bytes = old_database_bytes.max(256 * 1024 + tracks.len() as u64 * 4096 + entry_count as u64 * 32 + playlists.len() as u64 * 1024)
+    let mut database_bytes = old_database_bytes.max(256 * 1024 + tracks.len() as u64 * 4096 + entry_count as u64 * 32 + playlists.len() as u64 * 1024)
         .saturating_add(DATABASE_FILES * unit);
+    if options.xdj_r1_support {
+        database_bytes = database_bytes.saturating_add(6 * 40_028 + 4096 + 416 + tracks.len() as u64 * (2552 + 6 * 24 + 4 * 416) + playlists.len() as u64 * 416 + entry_count as u64 * 24);
+        database_bytes = database_bytes.saturating_add(6 * unit);
+        // Every R1 base DAT and each distinct 320-square JPEG is staged.
+        let mut r1_artwork_sources = std::collections::HashSet::new();
+        for track in &tracks {
+            asset_bytes = asset_bytes.saturating_add(track.analysis.iter().map(|(_, b)| on_disk(b.len() as u64 + 256)).sum::<u64>() + on_disk(8192));
+            if let Some(base) = &track.analysis_source {
+                asset_bytes = asset_bytes.saturating_add(std::fs::metadata(base.with_extension("DAT")).map_or(0, |m| on_disk(m.len())));
+            }
+            if let Some(image) = track.artwork.as_ref().filter(|image| r1_artwork_sources.insert((*image).clone())) {
+                asset_bytes = asset_bytes.saturating_add(on_disk(512 * 1024) + std::fs::metadata(crate::artwork_source(image, false)).map_or(0, |m| on_disk(m.len())));
+            }
+        }
+    }
     let old_replacements: u64 = previous.into_iter().flat_map(|m| &m.tracks).filter(|c| {
         selected.contains(&c.key()) && estimate.actions.get(&c.key()).is_some_and(|action| matches!(action, crate::estimate::AudioAction::Copy | crate::estimate::AudioAction::Convert))
     }).map(|c| std::fs::metadata(crate::under(destination, &c.audio)).map_or(0, |m| on_disk(m.len()))).sum();

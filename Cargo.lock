@@ -4099,6 +4099,7 @@ dependencies = [
  "blake3",
  "flate2",
  "fs2",
+ "image",
  "rbl-analysis",
  "rbl-anlz",
  "rbl-audio",

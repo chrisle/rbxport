@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 blake3 = "1"
 fs2 = "0.4"
 unicode-normalization = "0.1"

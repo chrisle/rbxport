@@ -11,6 +11,8 @@
 //! Nothing here touches the user's library: it reads from an already-loaded
 //! index and writes only under the destination directory.
 
+pub mod cbm;
+mod r1;
 pub mod device_import;
 pub mod device_library;
 pub mod estimate;
@@ -1121,6 +1123,8 @@ impl CompatibilityFormat {
 
 #[derive(Default)]
 pub struct ExportOptions<'a> {
+    /// Immutable global preference captured when this job starts.
+    pub xdj_r1_support: bool,
     pub defaults: Option<&'a rbl_onelibrary::settings::StickSettings>,
     pub sync: Option<&'a SyncSource>,
     pub compatibility: Option<CompatibilityFormat>,
@@ -1197,7 +1201,7 @@ fn export_cancellable_inner(
     let _inspection = incremental::Inspection::new();
     let started = std::time::Instant::now();
     let requested_tracks = tracks;
-    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all, db_id_override, my_tag_master_db_id_override } = options;
+    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all, db_id_override, my_tag_master_db_id_override, xdj_r1_support } = options;
     if let Some(volume) = expected_volume { volume.check(destination)?; }
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
@@ -1218,6 +1222,7 @@ fn export_cancellable_inner(
     let publication = rbl_core::durable::Publication::new(destination, PUBLICATION)?;
     if let Some(volume) = expected_volume { volume.check(destination)?; }
     let mut previous = Manifest::load(destination);
+    r1::protect(destination, previous.as_ref())?;
     let mut full_source_hashes = BTreeMap::new();
     if verify_all && previous.is_some() {
         progress(&ExportProgress { stage: "verifying-all", ..Default::default() });
@@ -1429,7 +1434,7 @@ fn export_cancellable_inner(
     let mut absent_audio: BTreeSet<String> = BTreeSet::new();
     let audio_plan = prepared_audio::batch(destination, tracks, &ids, layouts, previous.as_ref(), root_name,
         &in_place_paths, &adopted_paths, compatibility, cache, &source_contents_unchanged, &inspected_source_hashes,
-        cancelled, &mut |index, track| {
+        xdj_r1_support, cancelled, &mut |index, track| {
             publication.check_root()?;
             progress(&ExportProgress { stage: "planning", done: index, total: tracks.len(), title: track.title.clone(), unit: "tracks", ..Default::default() });
             Ok(())
@@ -2069,6 +2074,13 @@ fn export_cancellable_inner(
 
     write_one_library(&staged_db, &one_library_tracks, playlists, &playlist_ids, &export_ids, &artwork_paths, my_tags, settings.as_ref().or(defaults), master_db_id, &before, Some(&existing_database))?;
     report.one_library = true;
+    let r1_files = if xdj_r1_support {
+        r1::stage(publication.stage(), destination, root_name, &one_library_tracks, tracks, &artists, &albums, playlists,
+            &playlist_ids, &export_ids, previous.as_ref(), &mut report.warnings, cancelled)?
+    } else { BTreeMap::new() };
+
+    report.analysis_files += r1_files.keys().filter(|path| Path::new(path).extension().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("dat"))).count();
+    report.artwork_files += r1_files.keys().filter(|path| Path::new(path).extension().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("jpg"))).count();
 
     // The DJ's My Settings, as rekordbox puts them on every stick it writes.
     if let Some(source) = rbl_core::paths::rekordbox_settings_dir() {
@@ -2127,6 +2139,7 @@ fn export_cancellable_inner(
     let mut manifest = Manifest {
         generation: Some(incremental::Generation {
             structure: String::new(),
+            r1_files,
             device_sources: reconcile::capture_sources(publication.stage(), &after)?,
             kept_existing: report.kept_existing, warnings: report.warnings.clone(),
             request, inputs: source_revisions.clone(), outputs: BTreeMap::new(), databases: BTreeMap::new(),
@@ -2157,6 +2170,18 @@ fn export_cancellable_inner(
     // A rebuilt database never inherits WAL pages from its previous image.
     files.splice(0..0, [format!("{root_name}/rekordbox/exportLibrary.db-wal").into(), format!("{root_name}/rekordbox/exportLibrary.db-shm").into()]);
     files.extend(deletions);
+    // Remove only unchanged, owned R1 outputs, inside the same retained journal.
+    // Shared base DATs remain owned by the normal library when support is OFF.
+    let shared = incremental::output_paths(&manifest.tracks);
+    let current_r1 = manifest.generation.as_ref().map(|g| &g.r1_files);
+    if let Some(old) = previous.as_ref().and_then(|m| m.generation.as_ref()) {
+        for path in old.r1_files.keys() {
+            if !shared.contains(path) && !current_r1.is_some_and(|files| files.contains_key(path)) {
+                files.push(path.into());
+            }
+        }
+    }
+
     // Reclaim only our known files, inside the recoverable transaction. Never
     // recursively remove an analysis directory: another writer may own extras.
     for (path, directory) in &obsolete {
@@ -2203,6 +2228,7 @@ fn export_cancellable_inner(
     if !trusted.is_subset(&trusted_after) {
         return Err(ExportError::Conflict("Exported media changed during sync. Retry after closing other writers.".into()));
     }
+    r1::protect(destination, previous.as_ref())?;
     // SQLite readers can rebuild or update the WAL index themselves. It is
     // shared coordination/cache state, not database content (sqlite.org/walformat.html).
     // Ignore only that file in this late conflict check. Keep committed receipt

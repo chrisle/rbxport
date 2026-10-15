@@ -36,6 +36,7 @@ pub(super) fn prepare(
     mut place: Layout,
     previous: Option<&ManifestTrack>,
     root_name: &str,
+    r1_lookup: Option<&Path>,
     compatibility: Option<CompatibilityFormat>,
     cache: Option<&cache::PreparationCache>,
     written_analysis_paths: &mut BTreeSet<String>,
@@ -123,7 +124,14 @@ pub(super) fn prepare(
             .map_or(String::new(), |e| format!(".{}", e.to_string_lossy()));
         let parent = original.parent().unwrap_or(Path::new("/Contents"));
         let mut suffix = 0_u32;
-        while !written_analysis_paths.insert(analysis_slot_key(&place.anlz_dir, &place.anlz_name)) {
+        while !written_analysis_paths.insert(analysis_slot_key(&place.anlz_dir, &place.anlz_name))
+            || match r1_lookup {
+                Some(destination) => super::r1::analysis_collision(
+                    destination, &analysis_directory(&place.audio, "PIONEER"), &place.audio,
+                )?,
+                None => false,
+            }
+        {
             suffix += 1;
             if suffix > 200_003 {
                 return Err(ExportError::Conflict(
@@ -389,6 +397,7 @@ pub(super) fn batch(
     cache: Option<&cache::PreparationCache>,
     source_contents_unchanged: &BTreeSet<String>,
     inspected_source_hashes: &std::collections::BTreeMap<String, u64>,
+    xdj_r1_support: bool,
     cancelled: &dyn Fn() -> bool,
     check_root: &mut dyn FnMut(usize, &SourceTrack) -> Result<()>,
     preview: bool,
@@ -426,6 +435,7 @@ pub(super) fn batch(
                 place,
                 old,
                 root_name,
+                xdj_r1_support.then_some(destination),
                 compatibility,
                 cache,
                 &mut written_analysis_paths,
@@ -631,6 +641,7 @@ pub(super) fn preview_overlap(
         options.cache,
         &BTreeSet::new(),
         &std::collections::BTreeMap::new(),
+        options.xdj_r1_support,
         &|| false,
         &mut |_, _| Ok(()),
         true,
@@ -770,6 +781,7 @@ mod tests {
             options.cache,
             unchanged,
             hashes,
+            options.xdj_r1_support,
             &|| false,
             &mut |_, _| Ok(()),
             false,

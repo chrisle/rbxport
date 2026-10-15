@@ -51,7 +51,7 @@ impl Format {
 fn error(e: impl std::fmt::Display) -> AudioError {
     AudioError::Unsupported(e.to_string())
 }
-fn open(path: &Path) -> Result<(Box<dyn symphonia::core::formats::FormatReader>, crate::aifc::Aifc)> {
+pub(crate) fn open(path: &Path) -> Result<(Box<dyn symphonia::core::formats::FormatReader>, crate::aifc::Aifc)> {
     let (source, aifc) = crate::aifc::open(path)?;
     let stream = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
     let mut hint = Hint::new();

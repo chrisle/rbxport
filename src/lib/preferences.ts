@@ -350,7 +350,7 @@ export interface Preferences {
   advanced: AdvancedPreferences;
   keyboard: KeyboardPreferences;
   usbExport: {
-    deleteUnlistedMusic: boolean; maximumCompatibility: boolean; conversionFormat: "wav" | "aiff" | "mp3";
+    xdjR1Support: boolean; deleteUnlistedMusic: boolean; maximumCompatibility: boolean; conversionFormat: "wav" | "aiff" | "mp3";
     /** After SYNC, compare every file on the stick with its source, not only what the sync changed. */
     verifyAllFiles: boolean;
     /**
@@ -430,7 +430,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     autoJoinLink: false,
     linkKeySort: "musical",
   },
-  usbExport: { deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", verifyAllFiles: false, importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true },
+  usbExport: { xdjR1Support: false, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", verifyAllFiles: false, importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true },
   advanced: {
     relocateFolders: [],
     relocateMusic: true,
@@ -553,7 +553,7 @@ export function sanitisePreferences(value: unknown): Preferences {
   const d = DEFAULT_PREFERENCES;
   return {
     rekordbox: { syncBrowseSettings: bool(rekordbox.syncBrowseSettings, true) },
-    usbExport: { deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: oneOf(usb.conversionFormat, ["wav", "aiff", "mp3"] as const, "wav"), verifyAllFiles: bool(usb.verifyAllFiles, false), importButtonCues: bool(usb.importButtonCues, true), importButtonHistory: bool(usb.importButtonHistory, true), importButtonSettings: bool(usb.importButtonSettings, false), importButtonRatings: bool(usb.importButtonRatings, true) },
+    usbExport: { xdjR1Support: bool(usb.xdjR1Support, false), deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: oneOf(usb.conversionFormat, ["wav", "aiff", "mp3"] as const, "wav"), verifyAllFiles: bool(usb.verifyAllFiles, false), importButtonCues: bool(usb.importButtonCues, true), importButtonHistory: bool(usb.importButtonHistory, true), importButtonSettings: bool(usb.importButtonSettings, false), importButtonRatings: bool(usb.importButtonRatings, true) },
     view: {
       locale: oneOf(view.locale, LOCALES, d.view.locale),
       showBpmChanges: bool(view.showBpmChanges, d.view.showBpmChanges),

@@ -37,6 +37,17 @@ export function UsbExportPane() {
           checked={preferences.usbExport.deleteUnlistedMusic}
           onChange={event => update("usbExport", { deleteUnlistedMusic: event.target.checked })} />
       </label>
+      <label className={[layout.summary, styles.option].join(" ")}>
+        <span className={styles.details}>
+          <strong id={id + "-r1"}>{t("XDJ-R1 support")}</strong>
+          <span id={id + "-r1-help"} className={styles.description}>{t("Create an additional legacy XDJ-R1 database on USB exports.")}</span>
+          <span className={styles.default}>{t("Default: Off")}</span>
+        </span>
+        <input type="checkbox" role="switch" className={controls.toggle}
+          aria-labelledby={id + "-r1"} aria-describedby={id + "-r1-help"}
+          checked={preferences.usbExport.xdjR1Support}
+          onChange={event => update("usbExport", { xdjR1Support: event.target.checked })} />
+      </label>
       <div className={`${layout.summary} ${styles.conversion}`}>
         <label className={styles.conversionToggle}>
           <span className={styles.details}>

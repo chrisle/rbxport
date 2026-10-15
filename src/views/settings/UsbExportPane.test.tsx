@@ -54,7 +54,7 @@ it("explains the import and sync options and shows their defaults", () => {
   expect(host.textContent).toContain("Device ratings win when a track was also rated in your library.");
   expect(host.textContent).toContain("Free space on your USB stick by removing songs that aren't in any playlist.");
   expect([...host.querySelectorAll(`.${styles.default}`)].map(node => node.textContent)).toEqual([
-    "Default: On", "Default: Off", "Default: Off", "Default: On", "Default: On", "Default: Off", "Default: On",
+    "Default: On", "Default: Off", "Default: Off", "Default: Off", "Default: On", "Default: On", "Default: Off", "Default: On",
   ]);
   const sections = [...host.querySelectorAll("section")];
   expect(sections.map(section => section.getAttribute("aria-label"))).toEqual(["Sync", "Import"]);
@@ -143,4 +143,14 @@ it("says Maximum CDJ compatibility also converts low-sample-rate MP3s", () => {
   const help = host.querySelector('[id$="-compatibility-help"]');
   expect(help?.textContent).toContain("FLAC and M4A");
   expect(help?.textContent).toContain("low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast");
+});
+
+it("defaults R1 support off and updates the global USB export preference", () => {
+  const update = vi.fn();
+  act(() => root.render(<PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update, reset: vi.fn() }}><UsbExportPane /></PreferencesProvider>));
+  const toggle = host.querySelector<HTMLInputElement>('input[aria-labelledby$="-r1"]')!;
+  expect(toggle.checked).toBe(false);
+  expect(host.textContent).toContain("Create an additional legacy XDJ-R1 database on USB exports.");
+  act(() => toggle.click());
+  expect(update).toHaveBeenCalledWith("usbExport", { xdjR1Support: true });
 });

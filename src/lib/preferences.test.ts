@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   BPM_RANGES,
@@ -10,6 +10,8 @@ import {
   formatKey,
   quantizeFraction,
   sanitisePreferences,
+  savePreferences,
+  loadPreferences,
 } from "./preferences";
 
 describe("sanitisePreferences", () => {
@@ -247,8 +249,8 @@ describe("the sliders and the quantize value", () => {
 });
 
  it("defaults Import to cues, history and ratings and preserves saved choices", () => {
-  expect(sanitisePreferences({}).usbExport).toEqual({ deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", verifyAllFiles: false, importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
-  expect(sanitisePreferences({ usbExport: { importButtonHistory: false, importButtonRatings: false } }).usbExport).toEqual({ deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", verifyAllFiles: false, importButtonCues: true, importButtonHistory: false, importButtonSettings: false, importButtonRatings: false });
+  expect(sanitisePreferences({}).usbExport).toEqual({ xdjR1Support: false, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", verifyAllFiles: false, importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true });
+  expect(sanitisePreferences({ usbExport: { importButtonHistory: false, importButtonRatings: false } }).usbExport).toEqual({ xdjR1Support: false, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", verifyAllFiles: false, importButtonCues: true, importButtonHistory: false, importButtonSettings: false, importButtonRatings: false });
   expect(sanitisePreferences({ usbExport: { importButtonCues: false, importButtonSettings: true } }).usbExport).toMatchObject({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
 });
 
@@ -298,4 +300,21 @@ it("keeps the Playback time setting in rekordbox's 1 to 60 seconds, 60 by defaul
   for (const stored of [0, 61, 12.5, "30", null]) {
     expect(sanitisePreferences({ advanced: { playbackTime: stored } }).advanced.playbackTime).toBe(60);
   }
+});
+
+it("persists the global R1 preference and defaults old settings to off", () => {
+  expect(sanitisePreferences({}).usbExport.xdjR1Support).toBe(false);
+  expect(sanitisePreferences({ usbExport: { xdjR1Support: true } }).usbExport.xdjR1Support).toBe(true);
+  expect(sanitisePreferences({ usbExport: { xdjR1Support: "true" } }).usbExport.xdjR1Support).toBe(false);
+  let saved: string | null = null;
+  vi.stubGlobal("localStorage", { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } });
+  try {
+    savePreferences(sanitisePreferences({ usbExport: { xdjR1Support: true } }));
+    expect(loadPreferences().usbExport.xdjR1Support).toBe(true);
+    savePreferences(sanitisePreferences({ usbExport: { xdjR1Support: false } }));
+    expect(loadPreferences().usbExport.xdjR1Support).toBe(false);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+
 });

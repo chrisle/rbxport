@@ -109,6 +109,9 @@ pub fn copy_revision_fresh(path: &Path) -> std::io::Result<Option<FileRevision>>
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Generation {
+    /// Exact ownership/profile for Cbm databases and their dependent assets.
+    #[serde(default)]
+    pub r1_files: BTreeMap<String, String>,
     #[serde(default)]
     pub structure: String,
     #[serde(default)]
@@ -138,16 +141,20 @@ pub fn digest(value: &impl Serialize) -> Result<String> {
 }
 
 pub fn manifest_structure(manifest: &Manifest) -> Result<String> {
-    digest(&(manifest.db_id, &manifest.tracks, &manifest.playlists, &manifest.loose, &manifest.baseline,
-        manifest.generation.as_ref().map(|g| &g.device_sources)))
+    let normal = digest(&(manifest.db_id, &manifest.tracks, &manifest.playlists, &manifest.loose, &manifest.baseline,
+        manifest.generation.as_ref().map(|g| &g.device_sources)))?;
+    match manifest.generation.as_ref().map(|g| &g.r1_files).filter(|files| !files.is_empty()) {
+        Some(files) => digest(&("xdj-r1-v1", normal, files)),
+        None => Ok(normal),
+    }
 }
 
 pub fn request(tracks: &[SourceTrack], playlists: &[SourcePlaylist], tags: &[SourceMyTag], options: &ExportOptions<'_>) -> Result<String> {
-    // SyncSource and StickSettings have complete, deterministic Debug forms;
-    // the transform/schema version controls changes to this representation.
-    digest(&(tracks, playlists, tags, options.compatibility, options.keep_unlisted,
+    // Preserve current dev's OFF digest, including DB IDs and PDB layout.
+    let normal = (tracks, playlists, tags, options.compatibility, options.keep_unlisted,
         format!("{:?}", options.sync), options.db_id_override, options.my_tag_master_db_id_override,
-        format!("{:?}", options.defaults), TRANSFORM_VERSION, PDB_LAYOUT))
+        format!("{:?}", options.defaults), TRANSFORM_VERSION, PDB_LAYOUT);
+    if options.xdj_r1_support { digest(&("xdj-r1-v1", normal)) } else { digest(&normal) }
 }
 
 pub fn inputs(tracks: &[SourceTrack]) -> std::io::Result<BTreeMap<String, Option<FileRevision>>> {
@@ -188,6 +195,14 @@ pub fn databases(root: &Path) -> Result<BTreeMap<String, Option<String>>> {
     for path in paths {
         let relative = format!("{name}/rekordbox/{path}");
         out.insert(relative.clone(), content_digest(&root.join(relative))?);
+    }
+    for family_root in ["PIONEER", ".PIONEER"] {
+        for file in crate::cbm::FILES {
+            let relative = format!("{family_root}/DBH/{file}");
+            if let Some(hash) = content_digest(&root.join(&relative))? {
+                out.insert(relative, Some(hash));
+            }
+        }
     }
     for path in crate::sync_record::FILES {
         let relative = path.replacen("PIONEER/", &format!("{name}/"), 1);

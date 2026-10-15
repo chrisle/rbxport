@@ -341,16 +341,17 @@ async function realBackend(): Promise<Backend> {
       if (typeof picked !== "string") return null;
       return invoke<number>("export_xml", { path: picked });
     },
-    exportPlaylist: (playlistId, destination, defaults, deleteUnlistedMusic, compatibilityFormat) =>
+    exportPlaylist: (playlistId, destination, defaults, deleteUnlistedMusic, compatibilityFormat, xdjR1Support) =>
       invoke<ExportReport>("export_playlist", {
         playlist: playlistId,
         destination,
         defaults: defaults ?? null,
         deleteUnlistedMusic: deleteUnlistedMusic ?? false,
         compatibilityFormat: compatibilityFormat ?? null,
+        xdjR1Support: xdjR1Support ?? false,
       }),
-    exportTracksToDevice: (tracks, destination, defaults, compatibilityFormat) =>
-      invoke<ExportReport>("export_tracks_to_device", { tracks, destination, defaults: defaults ?? null, compatibilityFormat: compatibilityFormat ?? null }),
+    exportTracksToDevice: (tracks, destination, defaults, compatibilityFormat, xdjR1Support) =>
+      invoke<ExportReport>("export_tracks_to_device", { tracks, destination, defaults: defaults ?? null, compatibilityFormat: compatibilityFormat ?? null, xdjR1Support: xdjR1Support ?? false }),
     referenceStickSettings: () => invoke<ReferenceStickSettings>("reference_stick_settings"),
     listDevices: () => invoke<Device[]>("list_devices"),
     onExportProgress: (listener) => subscribe<ExportProgress>("export:progress", listener),
@@ -589,7 +590,7 @@ async function realBackend(): Promise<Backend> {
     openMissingFiles: async () => { await invoke<void>("open_missing_files"); return true; },
     onMissingFilesRequested: (listener) => subscribe<string>("missing-files:open", listener),
     missingFilesReady: (id, opened) => invoke<boolean>("missing_files_ready", { id, opened }),
-    syncDevices: (playlists, destinations, defaults, automatic, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll) =>
+    syncDevices: (playlists, destinations, defaults, automatic, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll, xdjR1Support) =>
       invoke<SyncDeviceReport[]>("sync_devices", {
         playlists,
         destinations,
@@ -598,14 +599,16 @@ async function realBackend(): Promise<Backend> {
         ejectAfterSync: ejectAfterSync ?? false,
         deleteUnlistedMusic: deleteUnlistedMusic ?? false,
         compatibilityFormat: compatibilityFormat ?? null,
+        xdjR1Support: xdjR1Support ?? false,
         verifyAll: verifyAll ?? false,
       }),
-    estimateSync: (playlists, destinations, deleteUnlistedMusic, compatibilityFormat) =>
+    estimateSync: (playlists, destinations, deleteUnlistedMusic, compatibilityFormat, xdjR1Support) =>
       invoke<SyncEstimate[]>("estimate_sync", {
         playlists,
         destinations,
         deleteUnlistedMusic: deleteUnlistedMusic ?? false,
         compatibilityFormat: compatibilityFormat ?? null,
+        xdjR1Support: xdjR1Support ?? false,
       }),
     validateExportFiles: (playlists) => invoke<MissingExportFile[]>("validate_export_files", { playlists }),
     importUsb: (path, cues, history, settings, ratings) => invoke("import_usb", { path, cues, history, settings, ratings }),

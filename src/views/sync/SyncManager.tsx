@@ -225,6 +225,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
     : t("Import {kinds} from the selected USB devices.", { kinds: IMPORT_KINDS.filter(({ kind }) => importKinds.includes(kind)).map(({ noun }) => t(noun)).join(", ") });
 
   const deleteUnlistedMusic = preferences.usbExport.deleteUnlistedMusic;
+  const xdjR1Support = preferences.usbExport.xdjR1Support;
   const compatibilityFormat = preferences.usbExport.maximumCompatibility ? preferences.usbExport.conversionFormat : undefined;
   const verifyAll = preferences.usbExport.verifyAllFiles;
 
@@ -260,7 +261,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
     let live = true;
     const timer = window.setTimeout(() => {
       void getBackend()
-        .then((backend) => backend.estimateSync(ids, destinations, deleteUnlistedMusic, compatibilityFormat))
+        .then((backend) => backend.estimateSync(ids, destinations, deleteUnlistedMusic, compatibilityFormat, xdjR1Support))
         .then((found) => { if (live) { setEstimates(new Map(found.map((e) => [e.path, { estimate: e, volumeId: owners.get(e.path) }] as const))); setEstimatesLoading(false); } })
         .catch((error: unknown) => {
           if (!live) return;
@@ -276,7 +277,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
         });
     }, 200);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [nodes, ticked, estimateDevices, capacityRevision, estimateRefresh, deleteUnlistedMusic, compatibilityFormat, reported, t]);
+  }, [nodes, ticked, estimateDevices, capacityRevision, estimateRefresh, deleteUnlistedMusic, compatibilityFormat, xdjR1Support, reported, t]);
   const playlistCount = selectedCount === 1 ? t("{count} playlist", { count: selectedCount }) : t("{count} playlists", { count: selectedCount });
   const deviceCount = tickedDevices.size === 1 ? t("{count} USB device", { count: tickedDevices.size }) : t("{count} USB devices", { count: tickedDevices.size });
   const selectionSummary = t("{playlists} → {devices}", { playlists: playlistCount, devices: deviceCount });
@@ -765,7 +766,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
           if (progress.state === "ejecting") setStatus([t("Ejecting {device}…", { device: nameOf(progress.path) })]);
         });
         const reports: SyncDeviceReport[] = [
-          ...await backend.syncDevices(playlists, eligible, stickDefaults, false, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll),
+          ...await backend.syncDevices(playlists, eligible, stickDefaults, false, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll, xdjR1Support),
           ...[...ineligible].map(([path, error]) => ({ path, error })),
         ];
         setCompletedReports(new Map(reports.flatMap(r => r.report ? [[r.path, r.report] as const] : [])));
@@ -780,6 +781,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
           ...(r.report?.failed ?? []).map(track => `${nameOf(r.path)}: ${t("Could not be written")}: ${track}`),
           ...(r.report?.warnings ?? []).map(warning => `${nameOf(r.path)}: ${warning.reason === "source-unavailable"
             ? t("{track}: source unavailable; existing USB version kept", { track: warning.title })
+            : warning.reason === "r1-format-excluded" ? t("{track}: format excluded from XDJ-R1", { track: warning.title })
             : warning.reason === "analysis-kept" ? t("{track}: source analysis unavailable; existing USB analysis kept", { track: warning.title })
             : warning.reason === "analysis-unavailable" ? t("{track}: exported without analysis", { track: warning.title })
             : warning.reason === "analysis-stale" ? t("{track}: audio changed; reanalyze it before exporting waveforms and cues", { track: warning.title })
@@ -812,7 +814,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
         setOperation(null);
       }
     })();
-  }, [canSync, nodes, ticked, tickedDevices, estimates, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll, refreshDevices, readDevice, onSynced, t]);
+  }, [canSync, nodes, ticked, tickedDevices, estimates, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll, xdjR1Support, refreshDevices, readDevice, onSynced, t]);
 
   /** One line for a cue import: what changed, and what already matched. */
   const cuesResult = (device: string, result: { tracks: number; skipped: number; unchanged?: number; warnings?: string[] }) => {

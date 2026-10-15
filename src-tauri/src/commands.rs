@@ -1296,6 +1296,7 @@ pub async fn link_take_master_tempo(state: State<'_, Arc<AppState>>) -> AppResul
 /// rekordbox 7.2.18 manual p. 256); only the Sync Manager's SYNC makes a
 /// stick hold exactly a selection (#304).
 #[tauri::command]
+#[allow(clippy::too_many_arguments, reason = "USB export IPC fields captured as one immutable job")]
 pub async fn export_playlist<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
@@ -1306,6 +1307,7 @@ pub async fn export_playlist<R: tauri::Runtime>(
     defaults: Option<crate::device_settings::StickDefaultsDto>,
     delete_unlisted_music: Option<bool>,
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
+    xdj_r1_support: Option<bool>,
 ) -> AppResult<ExportReportDto> {
     let library = state.library()?;
     let share = state.share_root();
@@ -1313,7 +1315,8 @@ pub async fn export_playlist<R: tauri::Runtime>(
     let progress_app = app.clone();
     let report = blocking("export_playlist", move || {
         let destination = std::path::Path::new(&destination);
-        let reservation = reserve_export(&progress_app, destination)?;
+        let mut reservation = reserve_export(&progress_app, destination)?;
+        reservation.xdj_r1_support = xdj_r1_support.unwrap_or(false);
         let selection = playlist_export_selection(&state, &library, &share, destination, &playlist, delete_unlisted_music.unwrap_or(false))?;
         write_export_registered(&progress_app, destination, &selection, defaults.as_ref(), compatibility_format, &reservation)
     })
@@ -1403,6 +1406,7 @@ pub async fn sync_devices<R: tauri::Runtime>(
     delete_unlisted_music: Option<bool>,
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
     verify_all: Option<bool>,
+    xdj_r1_support: Option<bool>,
 ) -> AppResult<Vec<SyncDeviceReportDto>> {
     let library = state.library()?;
     let share = state.share_root();
@@ -1416,7 +1420,7 @@ pub async fn sync_devices<R: tauri::Runtime>(
             unique.push(destination);
         }
         let reservations: Vec<_> = destinations.iter().map(|path| reserve_export(&app, std::path::Path::new(path)).map(|mut ticket| {
-            ticket.verify_all = verify_all.unwrap_or(false); ticket
+            ticket.verify_all = verify_all.unwrap_or(false); ticket.xdj_r1_support = xdj_r1_support.unwrap_or(false); ticket
         })).collect();
         let selection =
             ExportSelection::from_playlists(&state, &library, &share, &playlists, automatic.unwrap_or(false))?;
@@ -1601,6 +1605,7 @@ pub async fn estimate_sync(
     destinations: Vec<String>,
     delete_unlisted_music: Option<bool>,
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
+    xdj_r1_support: Option<bool>,
 ) -> AppResult<Vec<crate::dto::SyncEstimateDto>> {
     let library = state.library()?;
     let share = state.share_root();
@@ -1619,7 +1624,7 @@ pub async fn estimate_sync(
                 let plan = match &selection {
                     Err(e) => Err(rbl_export::ExportError::Conflict(e.full_message())),
                     Ok(selection) => {
-                        let options = rbl_export::ExportOptions { sync: Some(&selection.sync), compatibility: compatibility_format,
+                        let options = rbl_export::ExportOptions { xdj_r1_support: xdj_r1_support.unwrap_or(false), sync: Some(&selection.sync), compatibility: compatibility_format,
                             cache: Some(&EXPORT_CACHE), ..Default::default() };
                         selection.for_stick_inspected(&state, &library, &share, std::path::Path::new(&path), delete_unlisted_music.unwrap_or(false), false)
                             .map_err(|e| rbl_export::ExportError::Conflict(e.to_string()))
@@ -1670,6 +1675,7 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
     destination: String,
     defaults: Option<crate::device_settings::StickDefaultsDto>,
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
+    xdj_r1_support: Option<bool>,
 ) -> AppResult<ExportReportDto> {
     let library = state.library()?;
     let share = state.share_root();
@@ -1677,7 +1683,8 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
     let progress_app = app.clone();
     let report = blocking("export_tracks_to_device", move || {
         let stick = std::path::Path::new(&destination);
-        let reservation = reserve_export(&progress_app, stick)?;
+        let mut reservation = reserve_export(&progress_app, stick)?;
+        reservation.xdj_r1_support = xdj_r1_support.unwrap_or(false);
         let selection = track_export_selection(&state, &library, &share, stick, &tracks)?;
         write_export_registered(&progress_app, stick, &selection, defaults.as_ref(), compatibility_format, &reservation)
     })
@@ -2171,6 +2178,7 @@ struct ExportReservation<R: tauri::Runtime> {
     cancel: Arc<std::sync::atomic::AtomicBool>, started: std::time::Instant,
     volume: Option<rbl_core::durable::VolumeIdentity>,
     verify_all: bool,
+    xdj_r1_support: bool,
 }
 
 impl<R: tauri::Runtime> ExportReservation<R> {
@@ -2219,7 +2227,7 @@ fn reserve_export<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &st
     jobs.insert(path.clone(), progress.clone());
     drop(jobs); drop(controls);
     let _ = tauri::Emitter::emit(app, "export:progress", progress);
-    Ok(ExportReservation { app: app.clone(), path, id, cancel, started: std::time::Instant::now(), volume: Some(volume), verify_all: false })
+    Ok(ExportReservation { app: app.clone(), path, id, cancel, started: std::time::Instant::now(), volume: Some(volume), verify_all: false, xdj_r1_support: false })
 }
 
 fn set_export_stage<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &std::path::Path, state: &'static str) {
@@ -2413,6 +2421,7 @@ fn write_export_registered<R: tauri::Runtime>(
         destination, selection, defaults, compatibility_format,
         reservation.volume.as_ref(),
         reservation.verify_all,
+        reservation.xdj_r1_support,
         &mut |p| {
             done.set(u32::try_from(p.done).unwrap_or(u32::MAX));
             emit(p.stage, done.get(), p.title.clone(), Some(p));
@@ -2520,6 +2529,7 @@ fn write_export_with_phase(
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
     expected_volume: Option<&rbl_core::durable::VolumeIdentity>,
     verify_all: bool,
+    xdj_r1_support: bool,
     progress: &mut dyn FnMut(&rbl_export::ExportProgress),
     phase: &mut dyn FnMut(&'static str),
     cancelled: &dyn Fn() -> bool,
@@ -2567,6 +2577,7 @@ fn write_export_with_phase(
             cache: Some(&EXPORT_CACHE),
             expected_volume,
             verify_all,
+            xdj_r1_support,
         },
         progress,
         cancelled,
@@ -5480,13 +5491,13 @@ mod tests {
     fn export_playlist_to(state: &crate::state::AppState, location: &rbl_db::LibraryLocation, stick: &std::path::Path, playlist: &str) {
         let library = state.library().unwrap();
         let selection = super::playlist_export_selection(state, &library, &location.share_root, stick, playlist, false).unwrap();
-        super::write_export_with_phase(stick, &selection, None, None, None, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export_with_phase(stick, &selection, None, None, None, false, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
     }
 
     fn export_track_to(state: &crate::state::AppState, location: &rbl_db::LibraryLocation, stick: &std::path::Path, track: &str) {
         let library = state.library().unwrap();
         let selection = super::track_export_selection(state, &library, &location.share_root, stick, &[track.to_owned()]).unwrap();
-        super::write_export_with_phase(stick, &selection, None, None, None, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export_with_phase(stick, &selection, None, None, None, false, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
     }
 
     /// Export Playlist from the tree adds the playlist to what the stick
@@ -5606,7 +5617,7 @@ mod tests {
         let library = state.library().unwrap();
         let everything: Vec<String> = [&first, &second, &in_first, &in_second].iter().map(|s| (*s).clone()).collect();
         let selection = super::ExportSelection::from_playlists(&state, &library, &location.share_root, &everything, false).unwrap();
-        super::write_export_with_phase(&stick, &selection, None, None, None, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export_with_phase(&stick, &selection, None, None, None, false, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
 
         let order: Vec<String> = on_stick(&stick).into_iter().map(|(id, _)| id).collect();
         let expected = [second.clone(), in_second.clone(), first.clone(), in_first.clone()];

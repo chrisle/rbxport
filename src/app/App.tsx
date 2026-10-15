@@ -584,6 +584,7 @@ function AppBody() {
   // gets on export; the same shape goes with every export call.
   const stickDefaults = prefs.preferences.djSystem;
   const deleteUnlistedMusic = prefs.preferences.usbExport.deleteUnlistedMusic;
+  const xdjR1Support = prefs.preferences.usbExport.xdjR1Support;
   const compatibilityFormat = prefs.preferences.usbExport.maximumCompatibility ? prefs.preferences.usbExport.conversionFormat : undefined;
   /** How much of the window the deck takes, kept across restarts. */
   const [layout, setLayout] = useState<PlayerLayout>(restored.layout);
@@ -2233,7 +2234,7 @@ function AppBody() {
       void (async () => {
         try {
           const backend = await getBackend();
-          const written = await backend.exportTracksToDevice([...ids], path, stickDefaults, compatibilityFormat);
+          const written = await backend.exportTracksToDevice([...ids], path, stickDefaults, compatibilityFormat, xdjR1Support);
           report(exportSummary(name, written, t));
           setDevices(await backend.listDevices());
         } catch (e) {
@@ -2244,7 +2245,7 @@ function AppBody() {
         }
       })();
     },
-    [devices, report, refuse, stickDefaults, compatibilityFormat, t],
+    [devices, report, refuse, stickDefaults, compatibilityFormat, xdjR1Support, t],
   );
 
   // Tracks dropped on a stick in the Devices tree: Export Track to it, as
@@ -3103,7 +3104,7 @@ function AppBody() {
       report(t("Writing to {device}…", { device: device.name }));
       try {
         const backend = await getBackend();
-        const written = await backend.exportPlaylist(playlistId, device.path, stickDefaults, deleteUnlistedMusic, compatibilityFormat);
+        const written = await backend.exportPlaylist(playlistId, device.path, stickDefaults, deleteUnlistedMusic, compatibilityFormat, xdjR1Support);
         const said = exportSummary(device.name, written, t);
         report(said);
         setDevices(await backend.listDevices());
@@ -3119,7 +3120,7 @@ function AppBody() {
         setSyncing(false);
       }
     },
-    [report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat, t],
+    [report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat, xdjR1Support, t],
   );
 
   const syncToDevice = useCallback(

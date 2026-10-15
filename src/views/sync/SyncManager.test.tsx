@@ -496,7 +496,7 @@ describe("SyncManager", () => {
   it("passes cleanup and the chosen compatibility format to sync", async () => {
     const preferences = { ...DEFAULT_PREFERENCES, advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary: false }, usbExport: {
       ...DEFAULT_PREFERENCES.usbExport, deleteUnlistedMusic: true,
-      maximumCompatibility: true, conversionFormat: "mp3" as const,
+      maximumCompatibility: true, conversionFormat: "mp3" as const, xdjR1Support: true,
     } };
     act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
       <SyncManager onClose={onClose} />
@@ -507,7 +507,7 @@ describe("SyncManager", () => {
     await settle();
     click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
     await settle();
-    expect(syncDevices.mock.calls[0]?.slice(5)).toEqual([true, "mp3", false]);
+    expect(syncDevices.mock.calls[0]?.slice(5)).toEqual([true, "mp3", false, true]);
   });
 
   it("lists the playlists and folders under rekordbox's [Playlists] row, not All Tracks", () => {
