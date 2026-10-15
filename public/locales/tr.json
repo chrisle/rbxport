@@ -1678,5 +1678,8 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Bu USB, farklı veya daha eski, doğrulanmamış bir ana kitaplığa ait. Sahipliğini değiştirmeden önce içeriğini rekordbox'a aktarın.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary, bu dışa aktarımın yerini alacağı işaret kayıtlarını içerir. Önce ipuçlarını rekordbox'a aktarın.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Kaldırılan bir parçaya USB geçmişi tarafından hâlâ başvurulmaktadır. Öncelikle bu geçmişi rekordbox'a aktarın ve temizleyin."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Kaldırılan bir parçaya USB geçmişi tarafından hâlâ başvurulmaktadır. Öncelikle bu geçmişi rekordbox'a aktarın ve temizleyin.",
+  "rekordbox is running. Quit it before analysing.": "rekordbox çalışıyor. Analiz yapmadan önce kapatın.",
+  "rekordbox is running. Quit it before editing phrases.": "rekordbox çalışıyor. Cümleleri düzenlemeden önce kapatın.",
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox cihazdaki parça kimliklerini değiştirdi. Önceki seçimini yeniden kullanmadan önce bu cihazı uzlaştırın."
 }

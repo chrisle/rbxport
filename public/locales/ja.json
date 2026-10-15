@@ -1686,5 +1686,8 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "この USB は、別の、または古い未検証のマスター ライブラリに属しています。所有権を変更する前に、コンテンツを rekordbox にインポートしてください。",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary には、このエクスポートによって置き換えられるキュー レコードが含まれています。まずrekordboxにキューをインポートします。",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "削除されたトラックは、USB 履歴によって引き続き参照されます。まずその履歴を rekordbox にインポートしてクリアします。"
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "削除されたトラックは、USB 履歴によって引き続き参照されます。まずその履歴を rekordbox にインポートしてクリアします。",
+  "rekordbox is running. Quit it before analysing.": "rekordbox が起動しています。解析する前に終了してください。",
+  "rekordbox is running. Quit it before editing phrases.": "rekordbox が起動しています。フレーズを編集する前に終了してください。",
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox がデバイスのトラック ID を変更しました。以前の選択を再利用する前に、このデバイスを再照合してください。"
 }

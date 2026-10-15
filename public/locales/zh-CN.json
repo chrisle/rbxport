@@ -1682,5 +1682,8 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "此 USB 属于不同的或更旧的未经验证的主库。在更改其所有权之前，将其内容导入 rekordbox。",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary 包含此导出将替换的提示记录。首先导入 rekordbox 中的提示。",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 历史记录仍会引用被删除的曲目。首先导入并清除 rekordbox 中的历史记录。"
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 历史记录仍会引用被删除的曲目。首先导入并清除 rekordbox 中的历史记录。",
+  "rekordbox is running. Quit it before analysing.": "rekordbox 正在运行。请先退出再进行分析。",
+  "rekordbox is running. Quit it before editing phrases.": "rekordbox 正在运行。请先退出再编辑乐句。",
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox 更改了设备的曲目标识。请先核对此设备，再重复使用其之前的选择。"
 }

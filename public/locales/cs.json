@@ -1263,7 +1263,7 @@
   "Verify all files (slower)": "Ověřit všechny soubory (pomalejší)",
   "After each sync, compare every file on the USB device with its original instead of checking only what the sync changed.": "Po každé synchronizaci porovnat každý soubor na USB zařízení s originálem, místo kontroly jen toho, co synchronizace změnila.",
   "Import in Sync Manager brings back what is turned on here. SYNC only writes to USB devices and never imports.": "Importovat ve Sync Manageru načte zpět to, co je zde zapnuto. SYNC pouze zapisuje na USB zařízení a nikdy nic neimportuje.",
-  "Import cues and beat grids": "Importujte tága a mřížky beatů",
+  "Import cues and beat grids": "Importovat cue body a beat gridy",
   "Replace cues and beat grids for matching tracks in your library with the USB device's.": "Nahradit cue body a beat gridy odpovídajících skladeb v knihovně těmi z USB zařízení.",
   "Import play history": "Importovat historii přehrávání",
   "Add new play-history entries from the USB device to your library.": "Přidat do knihovny nové položky historie přehrávání z USB zařízení.",
@@ -1416,7 +1416,7 @@
   "…and {count} more. See the log for the full list.": "…and {count} more. See the log for the full list.",
   "Some tracks were left out": "Some tracks were left out",
   "The sync could not be written.": "Synchronizaci nebylo možné zapsat.",
-  "{device}: cues and beat grids already match your library; nothing was changed.": "{device}: cues and beat grids already match your library; nothing was changed.",
+  "{device}: cues and beat grids already match your library; nothing was changed.": "{device}: cue body a beat gridy se shodují s vaší knihovnou, nic se nezměnilo.",
   "{device}: updated {count} track": "{device}: updated {count} track",
   "{device}: updated {count} tracks": "{device}: updated {count} tracks",
   "{count} already up to date": "{count} already up to date",
@@ -1678,5 +1678,8 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Toto USB patří do jiné nebo starší neověřené hlavní knihovny. Importujte jeho obsah do rekordboxu před změnou jeho vlastnictví.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary obsahuje záznamy cue, které by tento export nahradil. Nejprve importujte podněty do softwaru rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Odstraňovaná skladba je stále odkazována historií USB. Nejprve importujte a vymažte historii v softwaru rekordbox."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Odstraňovaná skladba je stále odkazována historií USB. Nejprve importujte a vymažte historii v softwaru rekordbox.",
+  "rekordbox is running. Quit it before analysing.": "rekordbox je spuštěný. Před analýzou jej ukončete.",
+  "rekordbox is running. Quit it before editing phrases.": "rekordbox je spuštěný. Před úpravou frází jej ukončete.",
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox změnil identity skladeb v zařízení. Před opětovným použitím předchozího výběru zařízení sesouhlaste."
 }

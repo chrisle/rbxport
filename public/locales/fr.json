@@ -1418,7 +1418,7 @@
   "…and {count} more. See the log for the full list.": "…and {count} more. See the log for the full list.",
   "Some tracks were left out": "Some tracks were left out",
   "The sync could not be written.": "La synchronisation n'a pas pu être écrite.",
-  "{device}: cues and beat grids already match your library; nothing was changed.": "{device}: cues and beat grids already match your library; nothing was changed.",
+  "{device}: cues and beat grids already match your library; nothing was changed.": "{device} : les cues et les grilles rythmiques correspondent déjà à votre bibliothèque ; rien n’a été modifié.",
   "{device}: updated {count} track": "{device}: updated {count} track",
   "{device}: updated {count} tracks": "{device}: updated {count} tracks",
   "{count} already up to date": "{count} already up to date",
@@ -1679,5 +1679,8 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Cette clé USB appartient à une bibliothèque principale non vérifiée différente ou plus ancienne. Importez son contenu dans rekordbox avant de changer de propriétaire.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary contient des enregistrements de repères que cette exportation remplacerait. Importez d’abord les cues dans rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Une piste en cours de suppression est toujours référencée par l'historique USB. Importez et effacez d’abord cet historique dans rekordbox."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Une piste en cours de suppression est toujours référencée par l'historique USB. Importez et effacez d’abord cet historique dans rekordbox.",
+  "rekordbox is running. Quit it before analysing.": "rekordbox est en cours d’exécution. Quittez-le avant d’analyser.",
+  "rekordbox is running. Quit it before editing phrases.": "rekordbox est en cours d’exécution. Quittez-le avant de modifier les phrases.",
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox a modifié les identifiants des pistes de l’appareil. Réconciliez cet appareil avant de réutiliser sa sélection précédente."
 }

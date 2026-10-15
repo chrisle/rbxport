@@ -1677,5 +1677,8 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Ez az USB egy másik vagy régebbi, ellenőrizetlen főkönyvtárhoz tartozik. Importálja a tartalmát a rekordboxba, mielőtt megváltoztatná a tulajdonjogát.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "A OneLibrary cue rekordokat tartalmaz, amelyeket ez az exportálás lecserélne. Először importálja a jelzéseket a rekordboxba.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Az USB-előzmények továbbra is hivatkoznak az eltávolítandó műsorszámra. Először importálja és törölje az előzményeket a rekordboxból."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Az USB-előzmények továbbra is hivatkoznak az eltávolítandó műsorszámra. Először importálja és törölje az előzményeket a rekordboxból.",
+  "rekordbox is running. Quit it before analysing.": "A rekordbox fut. Lépjen ki belőle az elemzés előtt.",
+  "rekordbox is running. Quit it before editing phrases.": "A rekordbox fut. Lépjen ki belőle a frázisok szerkesztése előtt.",
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "A rekordbox megváltoztatta az eszköz számazonosítóit. Egyeztesse az eszközt, mielőtt újra felhasználja a korábbi kijelölését."
 }
