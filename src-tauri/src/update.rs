@@ -302,8 +302,32 @@ pub struct ProgressDto {
     pub total: Option<u64>,
 }
 
+/// An updater failure, as the interface shows it and as the log keeps it.
+///
+/// The log is what a bug report carries, and the plugin's own messages are
+/// below the level it keeps for dependencies, so without this line a report
+/// of an update that would not install says nothing about why (#457): not
+/// whether a password prompt was refused, a package manager failed, or a
+/// file could not be moved.
 fn updater_error(message: &str, err: impl std::fmt::Display) -> AppError {
-    AppError::new(ErrorKind::Internal, message).with_detail(err.to_string())
+    let detail = err.to_string();
+    tracing::warn!(error = %detail, bundle = bundle_name(bundle_type().as_ref()), "{message}");
+    AppError::new(ErrorKind::Internal, message).with_detail(detail)
+}
+
+/// The bundle this process runs from, as a log field: the updater takes a
+/// different route for each one.
+fn bundle_name(bundle: Option<&BundleType>) -> &'static str {
+    match bundle {
+        Some(BundleType::App) => "app",
+        Some(BundleType::Dmg) => "dmg",
+        Some(BundleType::AppImage) => "appimage",
+        Some(BundleType::Deb) => "deb",
+        Some(BundleType::Rpm) => "rpm",
+        Some(BundleType::Nsis) => "nsis",
+        Some(BundleType::Msi) => "msi",
+        None => "none",
+    }
 }
 
 /// Asks the bucket what the newest version is.
@@ -558,6 +582,15 @@ pub async fn restart_to_update(
             }
         }
     };
+    // Which route the restart takes, so a report of one that did not come
+    // back says whether an installer still had to run (and ask for a
+    // password) or the new version was already on disk.
+    tracing::info!(
+        version = %update.version,
+        bundle = bundle_name(bundle_type().as_ref()),
+        staged = matches!(placement, Placement::Staged(_)),
+        "restarting into the update"
+    );
     match placement {
         Placement::Installed => app.restart(),
         Placement::Staged(path) => {
@@ -708,6 +741,65 @@ mod tests {
 
     fn v(s: &str) -> Version {
         Version::parse(s).unwrap()
+    }
+
+    /// What the log keeps while `f` runs, as plain text.
+    fn logged(f: impl FnOnce()) -> String {
+        #[derive(Clone, Default)]
+        struct Buffer(std::sync::Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Buffer {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let buffer = Buffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let bytes = buffer.0.lock().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    #[test]
+    fn an_update_that_will_not_install_says_why_in_the_log() {
+        // #457: a report of an update that asked for a password and then did
+        // not install carried nothing about the failure, because the error
+        // went only to the window and the plugin logs below the kept level.
+        let mut error = None;
+        let log = logged(|| {
+            error = Some(updater_error("The update could not be installed.", "Failed to move the new app into place"));
+        });
+        let error = error.unwrap();
+        assert_eq!(error.message, "The update could not be installed.");
+        assert_eq!(error.detail.as_deref(), Some("Failed to move the new app into place"));
+        assert!(log.contains("WARN"), "not a warning: {log}");
+        assert!(log.contains("The update could not be installed."), "the message is missing: {log}");
+        assert!(log.contains("Failed to move the new app into place"), "the plugin's reason is missing: {log}");
+        assert!(log.contains("bundle="), "the bundle the updater took a route for is missing: {log}");
+    }
+
+    #[test]
+    fn every_bundle_has_its_own_log_name() {
+        let all = [
+            BundleType::App,
+            BundleType::Dmg,
+            BundleType::AppImage,
+            BundleType::Deb,
+            BundleType::Rpm,
+            BundleType::Nsis,
+            BundleType::Msi,
+        ];
+        let mut names: Vec<&str> = all.iter().map(|b| bundle_name(Some(b))).collect();
+        names.push(bundle_name(None));
+        assert_eq!(names, ["app", "dmg", "appimage", "deb", "rpm", "nsis", "msi", "none"]);
     }
 
     #[test]
