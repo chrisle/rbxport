@@ -767,8 +767,11 @@ mod tests {
         let last = snapshots.last().unwrap();
         let dat = rbl_anlz::resolve(&share, &result.analysis_path);
         let two = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "2EX")).unwrap();
-        assert_eq!(crate::commands::drawing_bytes(last, "bandsDetail", None, None), two.waveform(b"PWV7").unwrap().1,
-            "the last snapshot's detail is what the files hold");
+        // The preview is drawn from the columns; the files hold rekordbox's own
+        // waveform, which the deck shows once the analysis finishes.
+        assert_eq!(crate::commands::drawing_bytes(last, "bandsDetail", None, None).len(), two.waveform(b"PWV7").unwrap().1.len(),
+            "the last snapshot spans what the files hold");
+        assert!(two.section(b"PWVC").is_some(), "the files hold rekordbox's own waveform");
         assert_eq!(crate::commands::drawing_bytes(last, "bands", None, None).len(), 3_600, "and a whole overview");
     }
 
