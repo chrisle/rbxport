@@ -1026,11 +1026,18 @@ fn export_cancellable_inner(
     // ahead: on a large stick that is most of what preparing takes, and a
     // refused sync should say so at once (#331).
     let analysis_before = snapshot::analysis_stamp(destination, &before)?;
+    // What the library's playlists hold now, for the record: the next sync
+    // tells by it whether each changed since (#429).
+    let library_entries: BTreeMap<u64, Vec<String>> = playlists
+        .iter()
+        .filter(|p| !p.folder && !p.device_only && p.id != 0 && p.id < reconcile::DEVICE_PLAYLIST_ID_BASE)
+        .map(|p| (p.id, p.track_indices.iter().filter_map(|i| tracks.get(*i)).map(|t| track_key(t.id, &t.source_path.to_string_lossy())).collect()))
+        .collect();
     let plan = plan::from_baseline(destination, &before, previous.as_ref(), tracks, playlists, options)?;
     if !plan.unknown_size && fs2::available_space(destination)? < plan.peak_bytes {
         return Err(ExportError::Conflict(format!("Not enough temporary space to sync safely: approximately {} bytes required while the previous library is retained", plan.peak_bytes)));
     }
-    let (mut tracks, playlists) = (plan.tracks, plan.playlists);
+    let (mut tracks, playlists, device_additions) = (plan.tracks, plan.playlists, plan.device_additions);
     let mut source_contents_unchanged = BTreeSet::new();
     let mut inspected_source_hashes = BTreeMap::new();
     let recorded_sources: BTreeMap<_, _> = previous.as_ref().into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();
@@ -1870,7 +1877,7 @@ fn export_cancellable_inner(
     let named: Vec<String> = recorded.iter().map(|track| track.audio.clone()).collect();
     let after = snapshot::Snapshot::read_at(publication.stage(), root_name)?;
     before.check_retained_history(&after)?;
-    before.check_changes(previous.as_ref(), &after)?;
+    before.check_changes_except(previous.as_ref(), &after, &device_additions)?;
     progress(&ExportProgress { stage: "verifying", done: 0, total: 0, title: String::new(), reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, ..Default::default() });
     let verified_reused: BTreeSet<String> = trusted.iter().filter(|p| !publication.stage().join(p).is_file()).cloned().collect();
     let verified = verification::verify_staged_incremental(publication.stage(), destination, &after, &absent_audio, &verified_reused)?;
@@ -1900,7 +1907,10 @@ fn export_cancellable_inner(
         playlists: playlists
             .iter()
             .enumerate()
-            .map(|(i, p)| manifest::ManifestPlaylist { library_id: p.id, name: p.name.clone(), export_id: playlist_ids[i], folder: p.folder, device_only: p.device_only })
+            .map(|(i, p)| manifest::ManifestPlaylist {
+                library_id: p.id, name: p.name.clone(), export_id: playlist_ids[i], folder: p.folder, device_only: p.device_only,
+                library_entries: if p.device_only { None } else { library_entries.get(&p.id).cloned() },
+            })
             .collect(),
         loose,
     };

@@ -201,6 +201,13 @@ impl Snapshot {
         Ok(())
     }
     pub fn check_changes(&self, previous: Option<&Manifest>, next: &Self) -> Result<()> {
+        self.check_changes_except(previous, next, &BTreeSet::new())
+    }
+
+    /// [`Self::check_changes`], leaving out the playlists, by device id,
+    /// that the sync rewrites on purpose although the stick added entries
+    /// to them (`reconcile::Prepared::device_additions`, #429).
+    pub fn check_changes_except(&self, previous: Option<&Manifest>, next: &Self, device_additions: &BTreeSet<u32>) -> Result<()> {
         for (label, current, target, baseline) in [
             (
                 "Device Library",
@@ -223,7 +230,7 @@ impl Snapshot {
                 let Some(target) = target else {
                     return Err(ExportError::Conflict(format!("Missing {label} output")));
                 };
-                check_database_changes(label, current, target, baseline)?;
+                check_database_changes(label, current, target, baseline, device_additions)?;
             }
         }
         if let Some(baseline) = previous.and_then(|m| m.baseline.as_ref()) {
@@ -690,6 +697,7 @@ fn check_database_changes(
     current: &Library,
     target: &Library,
     baseline: Option<&Library>,
+    device_additions: &BTreeSet<u32>,
 ) -> Result<()> {
     let originals: BTreeMap<_, _> = baseline.into_iter().flat_map(|b| &b.tracks).map(|t| (t.id, t)).collect();
     let targets: BTreeMap<_, _> = target.tracks.iter().map(|t| (t.id, t)).collect();
@@ -731,7 +739,7 @@ fn check_database_changes(
                 && a.folder == b.folder
                 && a.tracks == b.tracks
         };
-        if original.is_some_and(|b| !same(b, playlist)) && !next.is_some_and(|n| same(n, playlist)) {
+        if original.is_some_and(|b| !same(b, playlist)) && !next.is_some_and(|n| same(n, playlist)) && !device_additions.contains(&playlist.id) {
             return Err(ExportError::Conflict(format!("{label}: playlist '{}' changed on the USB. Import or reconcile it before syncing.", playlist.name)));
         }
         if original.is_none() && next.is_none() {

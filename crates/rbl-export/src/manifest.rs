@@ -58,6 +58,12 @@ pub struct ManifestPlaylist {
     /// `djmdPlaylist.ID`, or 0 when the playlist did not come from the library.
     pub library_id: u64,
     pub name: String,
+    /// The library's entries of the playlist at this sync, in order, by
+    /// [`track_key`]: what the next sync compares the library's playlist
+    /// with to tell whether it changed since (#429). `None` for a folder, a
+    /// playlist that is not the library's, and in older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library_entries: Option<Vec<String>>,
 }
 
 /// One track as it was left on the stick.
@@ -245,7 +251,7 @@ mod tests {
                 preserved: Some(false),
                 copy_stamp: Some((1234, 1_789_000_000_000_000_000)),
             }],
-            playlists: vec![ManifestPlaylist { device_only: false, export_id: 1, folder: false, library_id: 9, name: "Set".to_owned() }],
+            playlists: vec![ManifestPlaylist { device_only: false, export_id: 1, folder: false, library_id: 9, name: "Set".to_owned(), library_entries: Some(vec!["#42".to_owned()]) }],
             loose: vec![42],
         };
         manifest.save(dir.path()).unwrap();
@@ -254,6 +260,7 @@ mod tests {
         assert_eq!(read.tracks[0].export_id, 7);
         assert_eq!(read.tracks[0].key(), "#42");
         assert_eq!(read.playlists[0].library_id, 9);
+        assert_eq!(read.playlists[0].library_entries, Some(vec!["#42".to_owned()]));
         assert_eq!(read.loose, vec![42]);
         assert_eq!(read.tracks[0].copy_stamp, Some((1234, 1_789_000_000_000_000_000)));
         // The temporary must not survive the rename.
