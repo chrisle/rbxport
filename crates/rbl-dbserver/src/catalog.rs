@@ -114,14 +114,15 @@ impl TrackColumn {
     }
 }
 
-/// The artist-reference field used by an advanced browse category.
 /// Which of rekordbox's artwork files an artwork request asks for.
 ///
-/// rekordbox keeps three beside the file `djmdContent.ImagePath` names: a
+/// rekordbox keeps two beside the file `djmdContent.ImagePath` names: a
 /// medium `_m` (240x240) and a small `_s` (80x80). [OBS static] rekordbox
 /// 7.2.19 `PSvDBMain::GetDBImgData_common` @`0x1018cbe44` reads the
-/// request's third argument: present and non-zero sends `_m`, else `_s`,
-/// falling back to `_s` and then the named file when one is missing.
+/// request's third argument. Present and non-zero picks `_m`; when that
+/// file is missing it first calls `createMediumArtImage(<named>, <_m>)`
+/// @`0x1018cc000` to build it from the named file, and only then falls back
+/// to `_s` and the named file. Otherwise it picks `_s`, else the named file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArtworkSize {
     /// `[ctx, id]`, or a third argument of 0: the `_s` file.
@@ -130,6 +131,7 @@ pub enum ArtworkSize {
     Medium,
 }
 
+/// The artist-reference field used by an advanced browse category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArtistRole {
     Original,

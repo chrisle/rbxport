@@ -322,10 +322,10 @@ impl IndexCatalog {
             .and_then(|(row, _)| rbl_index::Row::try_from(row).ok())
     }
 
-    /// The artwork file of a row, read whole, in rekordbox's order: for
-    /// [`ArtworkSize::Medium`] the `_m` file it keeps beside the one the
-    /// library names, else the `_s` one, else the named one; for
-    /// [`ArtworkSize::Small`] the `_s` file, else the named one.
+    /// The artwork file of a row, read whole: for [`ArtworkSize::Medium`]
+    /// the `_m` file rekordbox keeps beside the one the library names, for
+    /// [`ArtworkSize::Small`] the `_s` one, else the named one (see
+    /// [`artwork_candidates`]).
     fn artwork_at(
         &self,
         library: &Arc<Library>,
@@ -1549,16 +1549,22 @@ impl Catalog for IndexCatalog {
     }
 }
 
-/// The files to try for artwork of `size`, first first: the sized files
+/// The files to try for artwork of `size`, first first: the sized file
 /// beside the one `ImagePath` names, then that one.
+///
+/// [OBS static] With `_m` missing, rekordbox 7.2.19 builds a 240px `_m` from
+/// the named file (`createMediumArtImage` @`0x1018cc000`, writing it beside
+/// the original) before it would fall back to `_s`, so a deck asking for the
+/// medium image gets roughly 240px either way. RBXport must not write to
+/// the library share, so the named file stands in for that generated image
+/// rather than the 80x80 `_s`. [UNKNOWN] whether scaling it to 240px in
+/// memory changes anything on a deck.
 fn artwork_candidates(relative: &str, size: ArtworkSize) -> Vec<String> {
-    let mut candidates = Vec::with_capacity(3);
-    if size == ArtworkSize::Medium {
-        candidates.push(sized_artwork(relative, MEDIUM_ARTWORK_SUFFIX));
-    }
-    candidates.push(sized_artwork(relative, SMALL_ARTWORK_SUFFIX));
-    candidates.push(relative.to_owned());
-    candidates
+    let suffix = match size {
+        ArtworkSize::Medium => MEDIUM_ARTWORK_SUFFIX,
+        ArtworkSize::Small => SMALL_ARTWORK_SUFFIX,
+    };
+    vec![sized_artwork(relative, suffix), relative.to_owned()]
 }
 
 /// The sized file beside the artwork `ImagePath` names: `suffix` before the
@@ -2620,6 +2626,7 @@ mod tests {
             ("PIONEER/Artwork/a/artwork_m.jpg", b"a-m"),
             ("PIONEER/Artwork/a/artwork_s.jpg", b"a-s"),
             ("PIONEER/Artwork/b/artwork.jpg", b"b-full"),
+            ("PIONEER/Artwork/b/artwork_s.jpg", b"b-s"),
         ] {
             let path = share.path().join(relative);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2633,7 +2640,9 @@ mod tests {
         assert_eq!(c.artwork(11, ArtworkSize::Medium).unwrap(), b"a-m");
         // Asked twice, each size keeps its own cached file.
         assert_eq!(c.artwork(11, ArtworkSize::Small).unwrap(), b"a-s");
-        assert_eq!(c.artwork(12, ArtworkSize::Small).unwrap(), b"b-full");
+        assert_eq!(c.artwork(12, ArtworkSize::Small).unwrap(), b"b-s");
+        // No `_m`: the named file, which a deck asking for the medium image
+        // got before #462, rather than the 80x80 `_s`.
         assert_eq!(c.artwork(12, ArtworkSize::Medium).unwrap(), b"b-full");
         assert_eq!(c.artwork(10, ArtworkSize::Small), None, "track 10 has none");
     }
@@ -2644,9 +2653,9 @@ mod tests {
             artwork_candidates("/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg", ArtworkSize::Medium),
             [
                 "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_m.jpg",
-                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_s.jpg",
                 "/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg",
-            ]
+            ],
+            "with no _m, a medium request gets the named file (what it got before #462), not the 80x80 _s"
         );
         assert_eq!(
             artwork_candidates("/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg", ArtworkSize::Small),

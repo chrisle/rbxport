@@ -25,7 +25,9 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
-use rbl_dbserver::catalog::{Analysis, ArtworkSize, Catalog, MyTag, Query, Row, TrackColumn, TrackDetails, TrackScope};
+use rbl_dbserver::catalog::{
+    Analysis, ArtworkSize, Catalog, MyTag, Query, Row, TrackColumn, TrackDetails, TrackScope,
+};
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::net::Session;
 use rbl_dbserver::session::LinkSession;

@@ -11,8 +11,8 @@
 use std::sync::{Arc, Mutex};
 
 use rbl_dbserver::catalog::{
-    Analysis, ArtworkSize, Catalog, Edit, HotCueColour, PlayerCue, Query, Row, TrackColumn, TrackDetails,
-    UsbCue,
+    Analysis, ArtworkSize, Catalog, Edit, HotCueColour, PlayerCue, Query, Row, TrackColumn,
+    TrackDetails, UsbCue,
 };
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::net::{Handler, Session};
