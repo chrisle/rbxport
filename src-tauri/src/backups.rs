@@ -165,8 +165,13 @@ fn is_listed_backup(path: &Path) -> bool {
     name.starts_with("rbexport-") && meta.is_file() && !meta.file_type().is_symlink() && is_zip(path)
 }
 
+/// Reads the backup folder without the edit gate. A backup holds that gate
+/// from start to finish, minutes on a large library, and Library
+/// Protection asks this list before it unlocks, so taking the gate here left
+/// the switch greyed out for the whole backup (#436). Nothing here needs it:
+/// a backup is written under a `.partial-` name and renamed into place
+/// complete, and an entry that disappears while it is read is skipped.
 pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
-    let _gate = state.edit_gate.lock();
     let location = state.location()?;
     let mut result = Vec::new();
     let entries = match fs::read_dir(state.backup_destination()) {
@@ -175,7 +180,10 @@ pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
         Err(e) => return Err(error(e)),
     };
     for entry in entries {
-        let path = entry.map_err(error)?.path();
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
         if !is_listed_backup(&path) {
             continue;
         }
@@ -186,7 +194,10 @@ pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
             continue;
         };
         let created_at = saved.created_at;
-        let bytes = fs::metadata(&path).map_err(error)?.len();
+        let Ok(meta) = fs::metadata(&path) else {
+            continue;
+        };
+        let bytes = meta.len();
         let includes_analysis = true;
         let includes_artwork = saved.includes_artwork;
         result.push(BackupDto {
@@ -494,6 +505,29 @@ mod tests {
         delete(&state, &path).unwrap();
         state.write(|w| w.set_rating(&track, 2)).unwrap();
         assert_eq!(rating(&state), 2);
+    }
+
+    /// Library Protection asks for this list before it unlocks. A running
+    /// backup holds the edit gate until it ends, so the list must not wait
+    /// on it, or the switch stays greyed out for the whole backup (#436).
+    #[test]
+    fn listing_does_not_wait_for_a_running_backup() {
+        let (_dir, state, _location) = fixture();
+        let saved = PathBuf::from(create(&state).unwrap());
+        let listed = std::thread::scope(|scope| {
+            let running_backup = state.edit_gate.lock();
+            let (send, receive) = std::sync::mpsc::channel();
+            let state = &state;
+            scope.spawn(move || {
+                let _ = send.send(list(state).map(|backups| backups.len()));
+            });
+            let listed = receive.recv_timeout(std::time::Duration::from_secs(10));
+            drop(running_backup);
+            listed
+        });
+        assert!(listed.is_ok(), "the list waited for the edit gate");
+        assert_eq!(listed.unwrap().unwrap(), 1);
+        assert!(saved.is_file());
     }
 
     #[test]
