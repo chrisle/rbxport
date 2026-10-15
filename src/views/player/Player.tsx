@@ -82,6 +82,7 @@ import { KeyShift } from "./KeyShift";
 import { TempoToggle } from "./TempoToggle";
 import { TempoSlider } from "./TempoSlider";
 import type { HotCueColor } from "@/lib/preferences";
+import { hotCueColour } from "@/lib/hotCueColours";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
 import { loadDeckQuantize, saveDeckQuantize } from "@/lib/deckQuantize";
 import {
@@ -273,19 +274,23 @@ export interface PlayerProps {
 /**
  * A cue's colour, as the CSS variable the marker, pad and chip styles read.
  *
- * Only set when the cue has one; the stylesheet's `var(--cue-colour,
- * var(--c-cue-hot))` falls back to the token green otherwise, so the default
- * lives in one place.
+ * A hot cue always gets one: its own, or the default View › Color › HOT CUE
+ * color gives its slot when it has none (`hotCueColour`), as rekordbox draws
+ * an uncoloured cue. A memory cue only gets its own; without one the
+ * stylesheet's fallback draws it. An empty pad gets none.
  */
 export function cueStyle(
   left: string | undefined,
-  colour: string | null | undefined,
-  /** View › Color › HOT CUE color: CDJ draws every cue in the fallback green. */
+  cue: Pick<Cue, "colour" | "memory" | "letter" | "positionMs" | "outMs"> | null | undefined,
   hotCueColor: HotCueColor = "colorful",
 ): React.CSSProperties {
   const style: Record<string, string> = {};
   if (left !== undefined) style.left = left;
-  if (colour && hotCueColor === "colorful") style["--cue-colour"] = colour;
+  if (cue && !cue.memory && cue.letter !== "") {
+    style["--cue-colour"] = hotCueColour(cue.colour, cue.letter, cue.outMs > cue.positionMs, hotCueColor);
+  } else if (cue?.colour) {
+    style["--cue-colour"] = cue.colour;
+  }
   return style;
 }
 
@@ -308,11 +313,9 @@ export function cueStyle(
  * down for the hot cue. The white line belongs to the beat grid; an off-grid
  * hot cue has a badge at its saved position without an extra vertical line.
  *
- * A badge takes the colour rekordbox paints for the cue's `ColorTableIndex`,
- * which arrives with the cue from the nine indices measured off the captures.
- * An index outside those arrives without one and draws the token green —
- * index 21's colour, which 735,427 of the library's 850,000 hot cues carry —
- * rather than a guess at a neighbour's.
+ * A badge takes the colour rekordbox paints for the cue's `ColorTableIndex`.
+ * A cue without one takes its slot's default from View › Color › HOT CUE
+ * color, as rekordbox's waveform does (`hotCueColours.ts`).
  *
  * Exported for the simple player's overview, which is the same strip.
  */
@@ -386,7 +389,7 @@ export const CueMarkers = memo(function CueMarkers({
             className={cue.memory ? styles.memoryCue : styles.hotCue}
             data-band={band}
             data-cue={cue.memory ? "" : cue.letter}
-            style={cueStyle(left, cue.colour, hotCueColor)}
+            style={cueStyle(left, cue, hotCueColor)}
             title={tip(cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`)}
             aria-hidden
           >
@@ -2707,7 +2710,7 @@ export const Player = memo(function Player({
                     type="button"
                     className={styles.pad}
                     data-set={cue ? "" : undefined}
-                    style={cueStyle(undefined, cue?.colour, viewPrefs.hotCueColor)}
+                    style={cueStyle(undefined, cue, viewPrefs.hotCueColor)}
                     aria-label={`Hot cue ${letter}`}
                     aria-pressed={cue !== null}
                     title={cue
@@ -3015,7 +3018,7 @@ export const Player = memo(function Player({
                   <span
                     className={styles.cueChip}
                     data-set={cue ? "" : undefined}
-                    style={cueStyle(undefined, cue?.colour, viewPrefs.hotCueColor)}
+                    style={cueStyle(undefined, cue, viewPrefs.hotCueColor)}
                   >
                     {letter}
                   </span>

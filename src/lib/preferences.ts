@@ -20,8 +20,11 @@ import type {
 /** BEAT SYNC matches the tempo and the bar; BPM SYNC the tempo alone. */
 export type SyncType = "beat" | "bpm";
 
-/** View › Color › HOT CUE color: each cue its own, or every one the CDJ green. */
-export type HotCueColor = "colorful" | "cdj";
+/**
+ * View › Color › HOT CUE color: the default colours of hot cues that have
+ * none of their own, rekordbox's four tables (see `hotCueColours.ts`).
+ */
+export type HotCueColor = "cdj" | "cold1" | "cold2" | "colorful";
 
 /**
  * View › Display Type › Beat Count Display: what the number beside the
@@ -467,7 +470,7 @@ const OVERVIEWS: readonly OverviewWaveform[] = ["half", "full"];
 const WAVEFORM_COLORS: readonly WaveformColor[] = ["blue", "rgb", "3band"];
 const POSITIONS: readonly WaveformPosition[] = ["center", "left"];
 const SYNC_TYPES: readonly SyncType[] = ["beat", "bpm"];
-const HOT_CUE_COLORS: readonly HotCueColor[] = ["colorful", "cdj"];
+const HOT_CUE_COLORS: readonly HotCueColor[] = ["cdj", "cold1", "cold2", "colorful"];
 const BEAT_COUNTS: readonly BeatCount[] = ["position", "toMemoryBars", "toMemoryBeats"];
 const METRONOME_SOUNDS: readonly MetronomeSound[] = [1, 2, 3];
 const METRONOME_VOLUMES: readonly MetronomeVolume[] = ["small", "middle", "large"];

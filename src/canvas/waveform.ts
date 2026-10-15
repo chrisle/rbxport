@@ -628,7 +628,7 @@ export function drawPreview(
  * The `RowCue` tuple from the IPC contract, by shape rather than by import so
  * the canvas module stays free of it.
  */
-export type PreviewCue = readonly [letter: string, positionMs: number, colour: string | null];
+export type PreviewCue = readonly [letter: string, positionMs: number, colour: string | null, loop?: boolean];
 
 /**
  * Canvas measurements and colours come from the same theme source as CSS.

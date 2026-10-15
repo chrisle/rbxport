@@ -1261,8 +1261,11 @@ export interface Cue {
 /** Which slot a new cue goes in: a memory cue, or a hot cue by its letter. */
 export type CueKind = "memory" | { hot: string };
 
-/** A hot cue on a track-list row: letter, position in ms, drawn colour. */
-export type RowCue = readonly [letter: string, positionMs: number, colour: string | null];
+/**
+ * A hot cue on a track-list row: letter, position in ms, drawn colour (`null`
+ * for none of its own), and whether it is a hot loop.
+ */
+export type RowCue = readonly [letter: string, positionMs: number, colour: string | null, loop?: boolean];
 
 /** A volume an export could be written to. */
 export interface Device {

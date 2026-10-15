@@ -114,7 +114,7 @@ export function rowCuesOf(cues: readonly Cue[]): RowCue[] {
   for (const cue of cues) {
     if (cue.memory || cue.letter === "" || seen.has(cue.letter)) continue;
     seen.add(cue.letter);
-    out.push([cue.letter, cue.positionMs, cue.colour]);
+    out.push([cue.letter, cue.positionMs, cue.colour, cue.outMs > cue.positionMs]);
   }
   return out.sort((a, b) => a[0].localeCompare(b[0]));
 }

@@ -802,7 +802,7 @@ fn hot_cues_in_slot_order(library: &Library, row: rbl_index::Row) -> Vec<RowCueD
         .iter()
         .filter_map(|cue| {
             let letter = cue.hot_letter()?;
-            Some((cue.kind, RowCueDto(letter, cue.position_ms, cue_colour_css(cue.colour))))
+            Some((cue.kind, RowCueDto(letter, cue.position_ms, cue_colour_css(cue.colour), cue.out_ms > cue.position_ms)))
         })
         .collect();
     hot.sort_by_key(|(kind, _)| *kind);
@@ -867,18 +867,25 @@ mod tests {
             id: 7,
             title: "Take Me Home",
             bpm_x100: 12_800,
-            cues: vec![cue(1, 46, 21), cue(0, 46, 0), cue(6, 24, 18), cue(2, 165_046, 41), cue(0, 1000, 0), cue(3, 2000, 0)],
+            cues: vec![
+                cue(1, 46, 21), cue(0, 46, 0), cue(6, 24, 18), cue(2, 165_046, 41), cue(0, 1000, 0), cue(3, 2000, 0),
+                Cue { out_ms: 9000, ..cue(7, 8000, 0) },
+            ],
             ..TestTrack::default()
         }]);
         let rows = rows_to_dto(&library, &[0], 0);
         let json = serde_json::to_value(&rows[0]).unwrap();
         assert_eq!(json["memoryCues"], serde_json::json!([46, 1000]));
         // In slot order, letters from `Kind` and rekordbox's resolved colour;
-        // a hot cue with no colour carries none, so it is drawn in the default
-        // green rather than the palette's black at index 0.
+        // a hot cue with no colour carries none, so the frontend draws its
+        // slot's HOT CUE color default rather than the palette's black at
+        // index 0, and a hot loop says so, for the loop default (#442).
         assert_eq!(
             json["hotCues"],
-            serde_json::json!([["A", 46, "#3CEB50"], ["B", 165_046, "#E02823"], ["C", 2000, null], ["E", 24, "#10B176"]])
+            serde_json::json!([
+                ["A", 46, "#3CEB50", false], ["B", 165_046, "#E02823", false], ["C", 2000, null, false],
+                ["E", 24, "#10B176", false], ["F", 8000, null, true],
+            ])
         );
     }
 

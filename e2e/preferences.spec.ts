@@ -119,23 +119,43 @@ test("View › Color offers the three palettes and the two hot cue colours, and 
   await expect(again.getByRole("combobox", { name: "HOT CUE color" })).toHaveValue("cdj");
 });
 
-test("HOT CUE color CDJ draws every pad and badge in the one green", async ({ page }) => {
+test("HOT CUE color keeps a cue's own colour in every mode", async ({ page }) => {
   await open(page);
   await load(page);
   // The mock's fourth track has coloured hot cues: pad A carries its colour.
   const padA = player(page).locator('[aria-label="Hot cues"]').getByRole("button", { name: "Hot cue A", exact: true });
-  await expect(padA).toHaveAttribute("style", /--cue-colour/);
   const badgeA = page.getByTestId("player-overview").locator('[data-cue="A"]');
-  await expect(badgeA).toHaveAttribute("style", /--cue-colour/);
+  await expect(padA).toHaveAttribute("style", /--cue-colour/);
+  const padStyle = await padA.getAttribute("style");
+  const badgeStyle = await badgeA.getAttribute("style");
 
   const dialog = await prefs(page);
   await dialog.getByRole("tab", { name: "Color" }).click();
   await dialog.getByRole("combobox", { name: "HOT CUE color" }).selectOption("cdj");
   await page.keyboard.press("Escape");
 
-  // The colour is gone from the style, so the stylesheet's green shows.
-  await expect(padA).not.toHaveAttribute("style", /--cue-colour/);
-  await expect(badgeA).not.toHaveAttribute("style", /--cue-colour/);
+  // rekordbox only falls back to the table for a cue with no colour (#442).
+  await expect(padA).toHaveAttribute("style", padStyle ?? "");
+  await expect(badgeA).toHaveAttribute("style", badgeStyle ?? "");
+});
+
+test("HOT CUE color draws an uncoloured hot cue in its slot's default", async ({ page }) => {
+  await open(page, "?defaultCueColours");
+  await load(page);
+  const padA = player(page).locator('[aria-label="Hot cues"]').getByRole("button", { name: "Hot cue A", exact: true });
+  const badgeA = page.getByTestId("player-overview").locator('[data-cue="A"]');
+  // COLORFUL, rekordbox's default: A is index 43.
+  await expect(padA).toHaveAttribute("style", /--cue-colour: ?#FF376F/i);
+  await expect(badgeA).toHaveAttribute("style", /--cue-colour: ?#FF376F/i);
+
+  const dialog = await prefs(page);
+  await dialog.getByRole("tab", { name: "Color" }).click();
+  const select = dialog.getByRole("combobox", { name: "HOT CUE color" });
+  await select.selectOption("cold1");
+  await expect(padA).toHaveAttribute("style", /--cue-colour: ?#50A0FF/i);
+  await select.selectOption("cdj");
+  await expect(padA).toHaveAttribute("style", /--cue-colour: ?#28E214/i);
+  await expect(badgeA).toHaveAttribute("style", /--cue-colour: ?#28E214/i);
 });
 
 test("the waveform palette redraws the deck and the rows without a reload", async ({ page }) => {

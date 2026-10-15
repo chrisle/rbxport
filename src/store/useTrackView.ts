@@ -366,6 +366,6 @@ export function useTrackView(
 function sameRowCues(a: readonly RowCue[], b: readonly RowCue[]): boolean {
   return a.length === b.length && a.every((x, i) => {
     const y = b[i];
-    return y !== undefined && x[0] === y[0] && x[1] === y[1] && x[2] === y[2];
+    return y !== undefined && x[0] === y[0] && x[1] === y[1] && x[2] === y[2] && Boolean(x[3]) === Boolean(y[3]);
   });
 }

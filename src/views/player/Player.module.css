@@ -730,9 +730,8 @@
    draws the line at the beat, with E beside it. Adding a line at the hot cue
    turned those distinct saved positions into an apparent grid misalignment. */
 
-/* The badge: 11pt square, the letter inside. Its colour is the cue's own where
-   one was measured for its ColorTableIndex — set on the marker as --cue-colour
-   — and the default green otherwise. The overview hangs it from the top of the
+/* The badge: 11pt square, the letter inside. Its colour, set on the marker as
+   --cue-colour, is the cue's own or its slot's HOT CUE color default. The overview hangs it from the top of the
    strip with its left edge on the cue, so the marker overhangs the position
    rather than nudging it. */
 .hotCueBadge {

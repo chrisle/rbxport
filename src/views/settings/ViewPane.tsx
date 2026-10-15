@@ -66,9 +66,12 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           <Select
             label="HOT CUE color"
             value={view.hotCueColor}
+            // rekordbox's ViewHotCueColor choices, in its order.
             choices={[
-              { value: "colorful", label: "COLORFUL" },
               { value: "cdj", label: "CDJ" },
+              { value: "cold1", label: "COLD1" },
+              { value: "cold2", label: "COLD2" },
+              { value: "colorful", label: "COLORFUL" },
             ]}
             onChange={(hotCueColor) => set({ hotCueColor })}
           />

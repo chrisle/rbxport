@@ -145,8 +145,8 @@ describe("rowCuesOf", () => {
       hot("a", "A", 5_000, "#f00"),
     ];
     expect(rowCuesOf(coloured)).toEqual([
-      ["A", 5_000, "#f00"],
-      ["B", 60_000, "#00f"],
+      ["A", 5_000, "#f00", false],
+      ["B", 60_000, "#00f", false],
     ]);
   });
 
@@ -154,6 +154,11 @@ describe("rowCuesOf", () => {
     expect(rowCuesOf([memory("m", 1_000)])).toEqual([]);
     expect(rowCuesOf([hot("blank", "", 1_000)])).toEqual([]);
     expect(rowCuesOf([])).toEqual([]);
+  });
+
+  it("marks a hot loop, which an uncoloured badge draws in the loop default", () => {
+    const loop = { ...hot("l", "C", 4_000), outMs: 6_000 };
+    expect(rowCuesOf([loop])[0]?.[3]).toBe(true);
   });
 
   it("agrees with hotLetters, which is built from it", () => {
@@ -164,7 +169,7 @@ describe("rowCuesOf", () => {
     // The backend hands the list back in position order, so the first row
     // for a slot is also the earliest — the same one `hotCue` gives the pad.
     const sorted = [hot("early", "A", 2_000, "#f00"), hot("late", "A", 9_000, "#0f0")];
-    expect(rowCuesOf(sorted)).toEqual([["A", 2_000, "#f00"]]);
+    expect(rowCuesOf(sorted)).toEqual([["A", 2_000, "#f00", false]]);
     expect(rowCuesOf(sorted)[0]?.[1]).toBe(hotCue(sorted, "A")?.positionMs);
   });
 });

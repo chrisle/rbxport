@@ -151,6 +151,7 @@ function makeRows(count: number): RowDto[] {
     const rating = Math.floor(rnd() * 6);
     const dateAdded = `2026-0${1 + Math.floor(rnd() * 9)}-${String(day).padStart(2, "0")}`;
     const releaseDate = rnd() > 0.3 ? `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` : "";
+    const defaultCueColours = readFlagFromUrl("defaultCueColours");
     const cueSet = analysed ? (CUE_SETS[Math.floor(rnd() * CUE_SETS.length)] ?? []) : [];
     rows[i] = {
       id: String(100000 + i),
@@ -169,7 +170,10 @@ function makeRows(count: number): RowDto[] {
       dateAdded,
       releaseDate,
       memoryCues: analysed ? [Math.round(durationSec * 1000 * 0.02)] : [],
-      hotCues: cueSet.map(([letter, at, colour]) => [letter, Math.round(durationSec * 1000 * at), colour]),
+      // `?defaultCueColours`: hot cues with no colour of their own, as
+      // rekordbox leaves the ones it colours by HOT CUE color (#442).
+      hotCues: cueSet.map(([letter, at, colour]) =>
+        [letter, Math.round(durationSec * 1000 * at), defaultCueColours ? null : colour]),
       artworkHue: Math.floor(rnd() * 360),
       // The mock has no files to serve, so every row falls back to the tint.
       hasArtwork: false,
@@ -1526,7 +1530,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     row.hotCues = cuesOf(trackId)
       .filter((cue) => !cue.memory)
       .sort((a, b) => a.letter.localeCompare(b.letter))
-      .map((cue) => [cue.letter, cue.positionMs, cue.colour]);
+      .map((cue) => [cue.letter, cue.positionMs, cue.colour, cue.outMs > cue.positionMs]);
   };
   const findCue = (id: string): { track: string; cue: Cue } | null => {
     for (const [track, list] of cueStore) {

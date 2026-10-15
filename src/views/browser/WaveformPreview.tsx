@@ -13,6 +13,7 @@ import {
   type RenderedWaveform, type WavePalette,
 } from "@/canvas";
 import { useTranslation } from "@/i18n";
+import { hotCueColour } from "@/lib/hotCueColours";
 import { usePreferences } from "@/store/usePreferences";
 import { previewPositionMs, startPreview, stopPreview, usePreview } from "@/store/usePreview";
 import styles from "./TrackTable.module.css";
@@ -163,8 +164,10 @@ export const WaveformPreview = memo(function WaveformPreview({
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(entry.bitmap, 0, 0, canvas.width, canvas.height);
-      // CDJ: every badge the fallback green, whatever the cue was given.
-      const badges = hotCueColor === "cdj" ? hotCues.map(([letter, at]) => [letter, at, null] as const) : hotCues;
+      // A cue without a colour of its own takes its slot's HOT CUE color
+      // default, as rekordbox's row preview does.
+      const badges = hotCues.map(([letter, at, colour, loop]) =>
+        [letter, at, hotCueColour(colour, letter, loop === true, hotCueColor)] as const);
       drawPreviewMemoryCues(ctx, memoryCues ?? [], durationSec * 1000, canvas.width, dpr);
       drawPreviewCues(ctx, badges, durationSec * 1000, canvas.width, dpr);
     };
