@@ -96,11 +96,7 @@ fn start_on(interface: Option<String>) -> (Beacon, UdpSocket, Arc<Facts>) {
     // simulated selected/cached NetIF is distinct (no host alias required).
     // The pinned test needs the actually assigned address for its monitor;
     // it sends only the first fresh keepalive, then uses the status port.
-    let selected = if interface.is_some() {
-        Ipv4Addr::LOCALHOST
-    } else {
-        Ipv4Addr::new(127, 0, 0, 2)
-    };
+    let selected = if interface.is_some() { Ipv4Addr::LOCALHOST } else { Ipv4Addr::new(127,0,0,2) };
     let player = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     player
         .set_read_timeout(Some(Duration::from_secs(3)))
@@ -225,8 +221,7 @@ fn load_response_fields_do_not_establish_a_loaded_or_playing_track() {
     let (beacon, player, facts) = start_on(None);
     join(&beacon, &player);
     let status = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.status_port());
-    let captured =
-        hex("5173707431576d4a4f4c1a43444a2d33303030000000000000000000000000010003000403010000");
+    let captured = hex("5173707431576d4a4f4c1a43444a2d33303030000000000000000000000000010003000403010000");
     player.send_to(&captured, status).unwrap();
     let mut unknown = captured.clone();
     unknown[36..40].copy_from_slice(&[255, 255, 17, 42]);
@@ -245,9 +240,7 @@ fn load_response_fields_do_not_establish_a_loaded_or_playing_track() {
     assert!(!players[0].playing);
     assert!(facts.0.lock().unwrap().is_empty());
     player.send_to(&status_playing_ours(), status).unwrap();
-    let players = wait_for(&beacon, |players| {
-        players.iter().any(|p| p.loaded.is_some() && p.playing)
-    });
+    let players = wait_for(&beacon, |players| players.iter().any(|p| p.loaded.is_some() && p.playing));
     assert!(players.iter().any(|p| p.loaded.is_some() && p.playing));
     assert_eq!(facts.0.lock().unwrap().len(), 1);
     beacon.stop();
@@ -438,9 +431,14 @@ fn a_load_command_reaches_the_player_from_our_status_port() {
         rbl_prolink::status_device_name(&packet).unwrap(),
         rbl_prolink::REKORDBOX_NAME
     );
-    assert_eq!(packet[0x21], LINK_DEVICE_NUMBER, "sent as rekordbox");
     assert_eq!(
-        packet[0x28], LINK_DEVICE_NUMBER,
+        packet[0x21],
+        LINK_DEVICE_NUMBER,
+        "sent as rekordbox"
+    );
+    assert_eq!(
+        packet[0x28],
+        LINK_DEVICE_NUMBER,
         "the track's source device"
     );
     assert_eq!(packet[0x29], rbl_prolink::SLOT_REKORDBOX);
@@ -468,7 +466,7 @@ fn start_master() -> (Beacon, UdpSocket, UdpSocket) {
     let beacon = Beacon::start(
         BeaconConfig {
             interface: None,
-            address: Ipv4Addr::new(127, 0, 0, 2),
+            address: Ipv4Addr::new(127,0,0,2),
             netmask: Ipv4Addr::new(255, 0, 0, 0),
             broadcast: Ipv4Addr::LOCALHOST,
             mac: [0x00, 0xe0, 0x4c, 0xcf, 0x63, 0x2e],

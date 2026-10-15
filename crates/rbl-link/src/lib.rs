@@ -21,10 +21,10 @@
 //! against real players, not against this crate.
 
 pub mod beacon;
+mod interface_mode;
 pub mod blobs;
 pub mod catalog;
 pub mod files;
-mod interface_mode;
 pub mod join;
 pub mod watch;
 
@@ -36,9 +36,7 @@ use rbl_index::Library;
 
 pub use beacon::{LinkState, Player};
 pub use catalog::{IndexCatalog, KeyNotation, KeyOrder, Played, Source};
-pub use rbl_dbserver::catalog::{
-    ArtistRole, Edit, HotCueColour, PlayerCue, RootCategory, Sort, TrackColumn,
-};
+pub use rbl_dbserver::catalog::{ArtistRole, Edit, HotCueColour, PlayerCue, RootCategory, Sort, TrackColumn};
 pub use rbl_prolink::DeviceType;
 pub use watch::Watcher;
 
@@ -264,18 +262,14 @@ impl LinkExport {
         // A later bind failing stops what is already bound before the error
         // goes back, so the ports are free for the very next try rather than
         // once the dropped servers' threads get round to it (#348).
-        let database = match rbl_dbserver::net::Bound::start(
-            handler,
-            listen_on,
-            ports.query,
-            ports.database,
-        ) {
-            Ok(database) => database,
-            Err(e) => {
-                beacon.stop();
-                return Err(LinkError::Bind(explain(&e, "TCP", ports.query)));
-            }
-        };
+        let database =
+            match rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database) {
+                Ok(database) => database,
+                Err(e) => {
+                    beacon.stop();
+                    return Err(LinkError::Bind(explain(&e, "TCP", ports.query)));
+                }
+            };
         // The mount EXPORT reply must offer the export to the player's subnet,
         // which rekordbox names as its own `<ip>/<netmask>`; without it a CDJ
         // mounts nothing. Loopback tests have no meaningful subnet, so skip it.

@@ -19,14 +19,13 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use rbl_anlz::Anlz;
 use rbl_dbserver::catalog::{
-    Analysis as Wanted, ArtistRole, Catalog, Edit, HotCueBank, HotCueBankCue, MyTag, Query,
-    RootCategory, Row, Sort, TrackColumn, TrackDetails, TrackScope, UsbCue,
+    Analysis as Wanted, ArtistRole, Catalog, Edit, HotCueBank, HotCueBankCue, MyTag, Query, RootCategory, Row, Sort,
+    TrackColumn,
+    TrackDetails, TrackScope, UsbCue,
 };
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::keys;
-use rbl_index::{
-    key::camelot_rank, smart::Date, Library, SortColumn, TrackSource, ViewSpec, NO_ID,
-};
+use rbl_index::{Library, NO_ID, SortColumn, TrackSource, ViewSpec, key::camelot_rank, smart::Date};
 
 use crate::blobs::{self, Analysis, ExtendedCue};
 
@@ -87,25 +86,13 @@ pub trait Source: Send + Sync {
     fn matching_ids(&self, _seed: u32) -> Vec<u32> {
         Vec::new()
     }
-    fn artist_role_names(&self, _role: ArtistRole) -> Vec<(u32, String)> {
-        Vec::new()
-    }
-    fn artist_role_track_ids(&self, _role: ArtistRole, _artist: u32) -> Vec<u32> {
-        Vec::new()
-    }
-    fn hot_cue_banks(&self, _parent: Option<u32>) -> Vec<rbl_db::details::HotCueBank> {
-        Vec::new()
-    }
-    fn hot_cue_bank_cues(&self, _bank: u32) -> Vec<rbl_db::details::HotCueBankCue> {
-        Vec::new()
-    }
-    fn hot_cue_bank_track_ids(&self, _bank: u32) -> Vec<u32> {
-        Vec::new()
-    }
+    fn artist_role_names(&self, _role: ArtistRole) -> Vec<(u32, String)> { Vec::new() }
+    fn artist_role_track_ids(&self, _role: ArtistRole, _artist: u32) -> Vec<u32> { Vec::new() }
+    fn hot_cue_banks(&self, _parent: Option<u32>) -> Vec<rbl_db::details::HotCueBank> { Vec::new() }
+    fn hot_cue_bank_cues(&self, _bank: u32) -> Vec<rbl_db::details::HotCueBankCue> { Vec::new() }
+    fn hot_cue_bank_track_ids(&self, _bank: u32) -> Vec<u32> { Vec::new() }
     /// The live `djmdMyTag` rows, categories and tags.
-    fn my_tags(&self) -> Vec<rbl_db::export_info::MyTagRow> {
-        Vec::new()
-    }
+    fn my_tags(&self) -> Vec<rbl_db::export_info::MyTagRow> { Vec::new() }
     fn edit(&self, _edit: &Edit) -> bool {
         false
     }
@@ -469,14 +456,10 @@ impl IndexCatalog {
                 .collect(),
             Query::Genres(_) => Self::named(&library.genre, &library.genres, &library.genre_ids),
             Query::GenreArtists(genre) => Self::genre_artists(library, *genre),
-            Query::GenreArtistAlbums { genre, artist } => {
-                Self::genre_albums(library, *genre, *artist)
-            }
+            Query::GenreArtistAlbums { genre, artist } => Self::genre_albums(library, *genre, *artist),
             Query::Labels(_) => Self::named(&library.label, &library.labels, &library.label_ids),
             Query::LabelArtists(label) => Self::label_artists(library, *label),
-            Query::LabelArtistAlbums { label, artist } => {
-                Self::label_albums(library, *label, *artist)
-            }
+            Query::LabelArtistAlbums { label, artist } => Self::label_albums(library, *label, *artist),
             Query::ArtistRoleArtists(role) => self
                 .source
                 .artist_role_names(*role)
@@ -485,23 +468,14 @@ impl IndexCatalog {
                 .map(|(id, name)| Row::Named { id, name })
                 .collect(),
             Query::ArtistRoleAlbums { role, artist } => self.role_albums(library, *role, *artist),
-            Query::Artists(_) => {
-                Self::named(&library.artist, &library.artists, &library.artist_ids)
-            }
+            Query::Artists(_) => Self::named(&library.artist, &library.artists, &library.artist_ids),
             Query::Albums(_) => Self::named(&library.album, &library.albums, &library.album_ids),
             Query::ArtistAlbums(artist) => Self::artist_albums(library, *artist),
             Query::Folder(parent) => Self::folder(&library.playlists(), *parent),
             Query::Histories => self.histories(library),
             Query::Years => Self::date_parts(library, "", 0..4, true),
-            Query::Months(year) => {
-                Self::date_parts(library, &date_prefix(*year, None, None), 5..7, false)
-            }
-            Query::Days { year, month } => Self::date_parts(
-                library,
-                &date_prefix(*year, Some(*month), None),
-                8..10,
-                false,
-            ),
+            Query::Months(year) => Self::date_parts(library, &date_prefix(*year, None, None), 5..7, false),
+            Query::Days { year, month } => Self::date_parts(library, &date_prefix(*year, Some(*month), None), 8..10, false),
             Query::Tracks { scope, sort } => {
                 self.tracks(library, scope, *sort, self.source.key_order(), today)
             }
@@ -584,10 +558,7 @@ impl IndexCatalog {
 
     /// The rows of a scope, in the order the library holds them, each with
     /// the position a list gives it (0 where the list has none).
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one match arm per protocol track scope"
-    )]
+    #[allow(clippy::too_many_lines, reason = "one match arm per protocol track scope")]
     fn scope_rows(
         &self,
         library: &Library,
@@ -677,19 +648,11 @@ impl IndexCatalog {
                     })
                     .collect()
             }
-            TrackScope::ArtistRole {
-                role,
-                artist,
-                album,
-            } => {
+            TrackScope::ArtistRole { role, artist, album } => {
                 let album = album.map(|id| Self::dense_id(&library.album_ids, id));
-                self.source
-                    .artist_role_track_ids(*role, *artist)
-                    .into_iter()
+                self.source.artist_role_track_ids(*role, *artist).into_iter()
                     .filter_map(|id| library.row_of_id(u64::from(id)))
-                    .filter(|&row| {
-                        album.is_none_or(|id| library.album.get(row as usize) == Some(&id))
-                    })
+                    .filter(|&row| album.is_none_or(|id| library.album.get(row as usize) == Some(&id)))
                     .map(|row| (row, 0))
                     .collect()
             }
@@ -971,7 +934,12 @@ impl IndexCatalog {
         let mut children: Vec<usize> = (0..lists.len())
             .filter(|&i| lists.parent.get(i).copied() == Some(parent_index))
             .collect();
-        children.sort_by_key(|&i| (!lists.is_folder(i), lists.seq.get(i).copied().unwrap_or(0)));
+        children.sort_by_key(|&i| {
+            (
+                !lists.is_folder(i),
+                lists.seq.get(i).copied().unwrap_or(0),
+            )
+        });
         children
             .into_iter()
             .filter_map(|i| {
@@ -1156,11 +1124,7 @@ fn secondary_column(
             (text, seconds)
         }
         TrackColumn::Bpm => (
-            if preserve_cached_text {
-                format_bpm(bpm)
-            } else {
-                String::new()
-            },
+            if preserve_cached_text { format_bpm(bpm) } else { String::new() },
             bpm,
         ),
         TrackColumn::Label => details.map_or_else(
@@ -1199,11 +1163,7 @@ fn secondary_column(
         }
         TrackColumn::DjPlayCount => {
             let count = u32::from(library.play_count.get(at).copied().unwrap_or(0));
-            let text = if preserve_cached_text {
-                count.to_string()
-            } else {
-                String::new()
-            };
+            let text = if preserve_cached_text { count.to_string() } else { String::new() };
             (text, count)
         }
         TrackColumn::DateAdded => (library.date_added.get(at).to_owned(), 0),
@@ -1243,9 +1203,7 @@ fn player_key_id(name: &str) -> u32 {
     let normalized: String = name
         .chars()
         .map(|character| match character {
-            '\u{ff01}'..='\u{ff5e}' => {
-                char::from_u32(u32::from(character) - 0xfee0).unwrap_or(character)
-            }
+            '\u{ff01}'..='\u{ff5e}' => char::from_u32(u32::from(character) - 0xfee0).unwrap_or(character),
             _ => character,
         })
         .collect();
@@ -1331,10 +1289,7 @@ impl Catalog for IndexCatalog {
         let library = self.source.library()?;
         let row = Self::row_of(&library, id)?;
         let mut item = self.track_row(id, column)?;
-        library
-            .file_name
-            .get(row as usize)
-            .clone_into(&mut item.title);
+        library.file_name.get(row as usize).clone_into(&mut item.title);
         Some(item)
     }
 
@@ -1436,65 +1391,47 @@ impl Catalog for IndexCatalog {
     }
 
     fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<HotCueBank> {
-        self.source
-            .hot_cue_banks(parent)
-            .into_iter()
-            .map(|bank| HotCueBank {
-                id: bank.id,
-                name: bank.name,
-                folder: bank.folder,
-            })
-            .collect()
+        self.source.hot_cue_banks(parent).into_iter().map(|bank| HotCueBank {
+            id: bank.id,
+            name: bank.name,
+            folder: bank.folder,
+        }).collect()
     }
 
     fn hot_cue_bank_cues(&self, bank: u32) -> Vec<HotCueBankCue> {
-        self.source
-            .hot_cue_bank_cues(bank)
-            .into_iter()
-            .map(|cue| HotCueBankCue {
-                slot: cue.slot,
-                content: cue.content,
-                in_ms: cue.in_ms,
-                out_ms: cue.out_ms,
-                color: cue.color,
-                color_table_index: cue.color_table_index,
-                active_loop: cue.active_loop,
-                beat_loop_size: cue.beat_loop_size,
-                cue_microsec: cue.cue_microsec,
-            })
-            .collect()
+        self.source.hot_cue_bank_cues(bank).into_iter().map(|cue| HotCueBankCue {
+            slot: cue.slot,
+            content: cue.content,
+            in_ms: cue.in_ms,
+            out_ms: cue.out_ms,
+            color: cue.color,
+            color_table_index: cue.color_table_index,
+            active_loop: cue.active_loop,
+            beat_loop_size: cue.beat_loop_size,
+            cue_microsec: cue.cue_microsec,
+        }).collect()
     }
 
     fn hot_cue_bank_tracks(&self, bank: u32) -> Vec<TrackRow> {
-        self.source
-            .hot_cue_bank_track_ids(bank)
-            .into_iter()
+        self.source.hot_cue_bank_track_ids(bank).into_iter()
             .filter_map(|id| self.track_row(id, None))
             .collect()
     }
 
     fn usb_cues(&self, track: u32) -> Vec<UsbCue> {
-        let Some(library) = self.source.library() else {
-            return Vec::new();
-        };
-        let Some(row) = Self::row_of(&library, track) else {
-            return Vec::new();
-        };
-        library
-            .cues_of(row)
-            .into_iter()
-            .filter_map(|cue| {
-                let slot = cue.hot_letter().map_or(0, |letter| letter as u8 - b'A' + 1);
-                // The old USB cue record only has three hot-cue slots.  Later
-                // hot cues are carried by the extended cue protocol instead.
-                (slot <= 3).then_some(UsbCue {
-                    slot,
-                    in_ms: cue.position_ms,
-                    out_ms: (cue.out_ms > cue.position_ms).then_some(cue.out_ms),
-                    color_table_index: u32::from(cue.colour),
-                })
+        let Some(library) = self.source.library() else { return Vec::new() };
+        let Some(row) = Self::row_of(&library, track) else { return Vec::new() };
+        library.cues_of(row).into_iter().filter_map(|cue| {
+            let slot = cue.hot_letter().map_or(0, |letter| letter as u8 - b'A' + 1);
+            // The old USB cue record only has three hot-cue slots.  Later
+            // hot cues are carried by the extended cue protocol instead.
+            (slot <= 3).then_some(UsbCue {
+                slot,
+                in_ms: cue.position_ms,
+                out_ms: (cue.out_ms > cue.position_ms).then_some(cue.out_ms),
+                color_table_index: u32::from(cue.colour),
             })
-            .collect()
+        }).collect()
     }
 
     fn grid_offset(&self, track: u32) -> i16 {
@@ -1598,11 +1535,7 @@ impl Catalog for IndexCatalog {
             return HashSet::new();
         };
         (0..lib.bpm_x100.len())
-            .flat_map(|row| {
-                lib.my_tag_keys(row)
-                    .iter()
-                    .map(|&key| u32::from_ne_bytes(key.to_ne_bytes()))
-            })
+            .flat_map(|row| lib.my_tag_keys(row).iter().map(|&key| u32::from_ne_bytes(key.to_ne_bytes())))
             .collect()
     }
 
@@ -1640,11 +1573,11 @@ fn resolve_under(share: &std::path::Path, relative: &str) -> Option<PathBuf> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use rbl_index::Cue;
     use rbl_index::testing::{
         add_folder, add_history, add_playlist, add_smart_playlist_with_members, library_from,
         TestTrack,
     };
-    use rbl_index::Cue;
 
     struct Fixed(Arc<Library>);
 
@@ -1942,10 +1875,22 @@ mod tests {
             }),
             Played::default(),
         );
-        assert_eq!(alphanumeric.track_row(20, None).unwrap().key_name, "11B");
-        assert_eq!(alphanumeric.track_row(21, None).unwrap().key_name, "1B");
-        assert_eq!(alphanumeric.track_row(22, None).unwrap().key_name, "");
-        assert_eq!(alphanumeric.track_row(23, None).unwrap().key_name, "11B");
+        assert_eq!(
+            alphanumeric.track_row(20, None).unwrap().key_name,
+            "11B"
+        );
+        assert_eq!(
+            alphanumeric.track_row(21, None).unwrap().key_name,
+            "1B"
+        );
+        assert_eq!(
+            alphanumeric.track_row(22, None).unwrap().key_name,
+            ""
+        );
+        assert_eq!(
+            alphanumeric.track_row(23, None).unwrap().key_name,
+            "11B"
+        );
         assert_eq!(alphanumeric.track(20).unwrap().key_name, "11B");
     }
 
@@ -2436,7 +2381,10 @@ mod tests {
     fn the_history_menu_holds_only_this_link_sessions_history() {
         let source = Arc::new(Writable(Arc::new(library())));
         let played = Played::default();
-        let c = IndexCatalog::new(Arc::clone(&source) as Arc<dyn Source>, played.clone());
+        let c = IndexCatalog::new(
+            Arc::clone(&source) as Arc<dyn Source>,
+            played.clone(),
+        );
         // The library's own sessions are not offered; nothing is until a play.
         assert_eq!(history_menu(&c), [] as [String; 0]);
         assert!(!played.contains(11), "loading is not a history event");
@@ -2586,51 +2534,17 @@ mod tests {
     fn usb_cues_keep_only_the_legacy_hot_slots_and_memory_cues() {
         let lib = library();
         let row = lib.row_of_id(10).unwrap();
-        lib.set_cues_of(
-            row,
-            vec![
-                Cue {
-                    position_ms: 1_000,
-                    out_ms: 2_000,
-                    kind: 1,
-                    colour: 21,
-                    ..Cue::default()
-                },
-                Cue {
-                    position_ms: 3_000,
-                    out_ms: 0,
-                    kind: 0,
-                    colour: 0,
-                    ..Cue::default()
-                },
-                // D is represented only in the extended cue protocol.
-                Cue {
-                    position_ms: 4_000,
-                    out_ms: 0,
-                    kind: 5,
-                    colour: 35,
-                    ..Cue::default()
-                },
-            ],
-        );
+        lib.set_cues_of(row, vec![
+            Cue { position_ms: 1_000, out_ms: 2_000, kind: 1, colour: 21, ..Cue::default() },
+            Cue { position_ms: 3_000, out_ms: 0, kind: 0, colour: 0, ..Cue::default() },
+            // D is represented only in the extended cue protocol.
+            Cue { position_ms: 4_000, out_ms: 0, kind: 5, colour: 35, ..Cue::default() },
+        ]);
         let c = IndexCatalog::new(Arc::new(Fixed(Arc::new(lib))), Played::default());
-        assert_eq!(
-            c.usb_cues(10),
-            vec![
-                UsbCue {
-                    slot: 1,
-                    in_ms: 1_000,
-                    out_ms: Some(2_000),
-                    color_table_index: 21
-                },
-                UsbCue {
-                    slot: 0,
-                    in_ms: 3_000,
-                    out_ms: None,
-                    color_table_index: 0
-                },
-            ]
-        );
+        assert_eq!(c.usb_cues(10), vec![
+            UsbCue { slot: 1, in_ms: 1_000, out_ms: Some(2_000), color_table_index: 21 },
+            UsbCue { slot: 0, in_ms: 3_000, out_ms: None, color_table_index: 0 },
+        ]);
     }
 
     #[test]
@@ -2698,14 +2612,12 @@ mod tests {
                 None
             }
             fn my_tags(&self) -> Vec<rbl_db::export_info::MyTagRow> {
-                let row = |id: &str, seq, name: &str, attribute, parent: &str| {
-                    rbl_db::export_info::MyTagRow {
-                        id: id.into(),
-                        seq,
-                        name: name.into(),
-                        attribute,
-                        parent: parent.into(),
-                    }
+                let row = |id: &str, seq, name: &str, attribute, parent: &str| rbl_db::export_info::MyTagRow {
+                    id: id.into(),
+                    seq,
+                    name: name.into(),
+                    attribute,
+                    parent: parent.into(),
                 };
                 vec![
                     row("2", 2, "Traits", 1, "root"),
@@ -2728,35 +2640,20 @@ mod tests {
         let c = IndexCatalog::new(Arc::new(Tagged(Arc::new(lib))), Played::default());
         let tags = c.my_tags();
         assert_eq!(
-            tags.iter()
-                .map(|t| (t.id, t.parent, t.seq))
-                .collect::<Vec<_>>(),
-            [
-                (2, 0, 2),
-                (108_516_952, 2, 1),
-                (3_000_000_000, 2, 2),
-                (242_910_998, 2, 3)
-            ]
+            tags.iter().map(|t| (t.id, t.parent, t.seq)).collect::<Vec<_>>(),
+            [(2, 0, 2), (108_516_952, 2, 1), (3_000_000_000, 2, 2), (242_910_998, 2, 3)]
         );
         let mut on_ten = c.track_my_tags(10);
         on_ten.sort_unstable();
         assert_eq!(on_ten, [108_516_952, 3_000_000_000]);
         assert_eq!(c.track_my_tags(12), Vec::<u32>::new());
-        assert_eq!(
-            c.my_tags_in_use(),
-            HashSet::from([108_516_952, 3_000_000_000])
-        );
+        assert_eq!(c.my_tags_in_use(), HashSet::from([108_516_952, 3_000_000_000]));
 
         let mut filter = rbl_dbserver::filter::TrackFilter::default();
         filter.enabled = true;
         filter.set_my_tag_condition(2, 1, rbl_dbserver::filter::MY_TAG_AND);
         assert!(filter.tick_my_tag(2, 3_000_000_000, true));
-        let all = || {
-            c.list(&Query::Tracks {
-                scope: TrackScope::All,
-                sort: Sort::Default,
-            })
-        };
+        let all = || c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Default });
         let mut rows = all();
         c.filter_rows(&mut rows, &filter);
         assert_eq!(ids(&rows), [11, 10]);
