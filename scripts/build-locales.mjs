@@ -65,6 +65,21 @@ const overrides = {
     "{count} hours ago": "il y a {count} heures",
     "{count} day ago": "il y a {count} jour",
     "{count} days ago": "il y a {count} jours",
+    "{count} file {size} to the folder : ": "{count} fichier {size} vers le dossier : ",
+    "{count} files {size} to the folder : ": "{count} fichiers {size} vers le dossier : ",
+    "The device libraries disagree on the rating for track {}. Reconcile its ratings in rekordbox before importing.":
+      "Les bibliothèques de l’appareil ne concordent pas sur la note de la piste {}. Corrigez ses notes dans rekordbox avant l’importation.",
+    "Are you sure you want to remove the selected track(s) from the Tag List?\nTrack(s) will be removed from the Tag Lists of all synced devices.":
+      "Êtes-vous sûr de vouloir supprimer les pistes sélectionnées de la liste des balises ?\nLes pistes seront supprimées des listes de balises de tous les appareils synchronisés.",
+    "Are you sure you want to remove the selected track(s) from the playlist?\nTrack(s) will be removed from the playlists of all synced devices.":
+      "Êtes-vous sûr de vouloir supprimer les pistes sélectionnées de la liste de lecture ?\nLes pistes seront supprimées des listes de lecture de tous les appareils synchronisés.",
+    "copy": "copie",
+    "matched": "déjà associés",
+    "cancel": "annuler",
+    "replace": "remplacer",
+    "keep": "conserver",
+    // A mock device fixture path, shown as is in every language.
+    "/Users/dj/Music/PioneerDJ/Imported from Device": "/Users/dj/Music/PioneerDJ/Imported from Device",
   },
   ja: {
     "{count} minute ago": "{count} 分前",
@@ -186,7 +201,8 @@ async function uiStrings() {
     );
     const inUiCall = (node) => hasAncestor(node, (parent) => {
       if (ts.isNewExpression(parent) && parent.expression.getText(source) === "Error") return true;
-      if (!ts.isCallExpression(parent)) return false;
+      // import("…") ends in "t" but loads a module path, not UI text.
+      if (!ts.isCallExpression(parent) || parent.expression.kind === ts.SyntaxKind.ImportKeyword) return false;
       const name = parent.expression.getText(source);
       return /(?:confirm|set(?:\w*(?:Error|Message|Status))|t)$/.test(name);
     });
@@ -218,7 +234,13 @@ async function uiStrings() {
         ts.isStringLiteralLike(node.initializer)) add(node.initializer.text);
       if (ts.isStringLiteralLike(node) && !isIdentifier(node) && (
         hasAncestor(node, ts.isJsxExpression) || inUiVariable(node) || inUiCall(node)
-      )) add(node.text);
+      )) {
+        // A t("…") argument is looked up exactly, so keep its spacing: the
+        // device import sentence ends in "folder : " with a trailing space.
+        const isTArgument = ts.isCallExpression(node.parent) && node.parent.expression.getText(source) === "t";
+        if (isTArgument && /[A-Za-z\p{L}]/u.test(node.text)) found.add(node.text);
+        else add(node.text);
+      }
       ts.forEachChild(node, visit);
     };
     visit(source);
@@ -283,7 +305,7 @@ for (const [locale, filename] of Object.entries(locales)) {
   }
   let previous = {};
   try { previous = JSON.parse(await readFile(resolve(outputRoot, `${locale}.json`), "utf8")); } catch { /* first run */ }
-  const missing = [...ui].filter((key) => !available.get(key) && previous[key] === undefined);
+  const missing = [...ui].filter((key) => !available.get(key) && previous[key] === undefined && overrides[locale]?.[key] === undefined);
   const generated = translateMissing ? await machineTranslations(missing, locale) : new Map();
   if (missing.length && !translateMissing) {
     throw new Error(`${locale} is missing ${missing.length} UI translations; rerun with --translate-missing`);
