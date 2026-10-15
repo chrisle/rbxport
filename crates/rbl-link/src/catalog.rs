@@ -322,10 +322,11 @@ impl IndexCatalog {
             .and_then(|(row, _)| rbl_index::Row::try_from(row).ok())
     }
 
-    /// The artwork file of a row, read whole: for [`ArtworkSize::Medium`]
-    /// the `_m` file rekordbox keeps beside the one the library names, for
-    /// [`ArtworkSize::Small`] the `_s` one, else the named one (see
-    /// [`artwork_candidates`]).
+    /// The artwork of a row as rekordbox would send it: for
+    /// [`ArtworkSize::Medium`] the `_m` file it keeps beside the one the
+    /// library names, or a 240x240 image built from that one when `_m` is
+    /// missing; for [`ArtworkSize::Small`] the `_s` one, else the named one
+    /// (see [`read_artwork`]).
     fn artwork_at(
         &self,
         library: &Arc<Library>,
@@ -359,16 +360,7 @@ impl IndexCatalog {
         if relative.is_empty() {
             return None;
         }
-        let share = self.source.share_root();
-        let path = artwork_candidates(relative, size)
-            .iter()
-            .filter_map(|candidate| resolve_under(&share, candidate))
-            .find(|candidate| candidate.is_file())?;
-        let meta = std::fs::metadata(&path).ok()?;
-        if meta.len() > MAX_ARTWORK {
-            return None;
-        }
-        let bytes: Arc<[u8]> = std::fs::read(&path).ok()?.into();
+        let bytes: Arc<[u8]> = read_artwork(&self.source.share_root(), relative, size)?.into();
         let mut cache = self.browse.lock();
         while cache.artwork_bytes + bytes.len() > ARTWORK_CACHE_BYTES && !cache.artwork.is_empty() {
             let evicted = cache.artwork.remove(0);
@@ -1549,22 +1541,111 @@ impl Catalog for IndexCatalog {
     }
 }
 
-/// The files to try for artwork of `size`, first first: the sized file
-/// beside the one `ImagePath` names, then that one.
+/// The artwork rekordbox 7.2.19 sends for `relative` at `size`, in its
+/// order (`PSvDBMain::GetDBImgData_common` @`0x1018cbe44`, see #474):
 ///
-/// [OBS static] With `_m` missing, rekordbox 7.2.19 builds a 240px `_m` from
-/// the named file (`createMediumArtImage` @`0x1018cc000`, writing it beside
-/// the original) before it would fall back to `_s`, so a deck asking for the
-/// medium image gets roughly 240px either way. RBXport must not write to
-/// the library share, so the named file stands in for that generated image
-/// rather than the 80x80 `_s`. [UNKNOWN] whether scaling it to 240px in
-/// memory changes anything on a deck.
-fn artwork_candidates(relative: &str, size: ArtworkSize) -> Vec<String> {
-    let suffix = match size {
-        ArtworkSize::Medium => MEDIUM_ARTWORK_SUFFIX,
-        ArtworkSize::Small => SMALL_ARTWORK_SUFFIX,
+/// - Medium: the `_m` file if it exists. If it does not, rekordbox calls
+///   `createMediumArtImage` @`0x1018cc000`, which builds a 240x240 `_m`
+///   from the named file and writes it beside it, then serves that. Only
+///   if that fails (the named file is missing or does not decode) does it
+///   try `_s` (`0x1018cc010`), then the named file (`0x1018cc03c`).
+///   RBXport must not write to the library share, so it builds the same
+///   image in memory ([`medium_artwork`]) and never writes it.
+/// - Small: the `_s` file, else the named one.
+///
+/// The first file that exists is the one sent; one over [`MAX_ARTWORK`] is
+/// not sent at all.
+fn read_artwork(share: &std::path::Path, relative: &str, size: ArtworkSize) -> Option<Vec<u8>> {
+    let existing = |candidate: &str| resolve_under(share, candidate).filter(|path| path.is_file());
+    let read_bounded = |path: PathBuf| {
+        let meta = std::fs::metadata(&path).ok()?;
+        if meta.len() > MAX_ARTWORK {
+            return None;
+        }
+        std::fs::read(&path).ok()
     };
-    vec![sized_artwork(relative, suffix), relative.to_owned()]
+    let (suffix, fallbacks): (&str, &[&str]) = match size {
+        ArtworkSize::Medium => (MEDIUM_ARTWORK_SUFFIX, &[SMALL_ARTWORK_SUFFIX]),
+        ArtworkSize::Small => (SMALL_ARTWORK_SUFFIX, &[]),
+    };
+    if let Some(path) = existing(&sized_artwork(relative, suffix)) {
+        return read_bounded(path);
+    }
+    if size == ArtworkSize::Medium {
+        let built = existing(relative)
+            .filter(|path| std::fs::metadata(path).is_ok_and(|meta| meta.len() <= MAX_ARTWORK_SOURCE))
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|original| medium_artwork(&original));
+        if built.is_some() {
+            return built;
+        }
+    }
+    let path = fallbacks
+        .iter()
+        .map(|suffix| sized_artwork(relative, suffix))
+        .chain(std::iter::once(relative.to_owned()))
+        .find_map(|candidate| existing(&candidate))?;
+    read_bounded(path)
+}
+
+/// The largest original [`medium_artwork`] will decode. rekordbox reads the
+/// original whatever its size; this only keeps a corrupt or enormous file
+/// from costing more than a thumbnail is worth.
+const MAX_ARTWORK_SOURCE: u64 = 32 * 1024 * 1024;
+
+/// The side of the medium image rekordbox builds when `_m` is missing.
+const MEDIUM_ARTWORK_SIDE: u32 = 240;
+
+/// The 240x240 JPEG rekordbox 7.2.19 writes as `_m` from an original, built
+/// in memory. `createMediumArtImage` @`0x1008fd4e4` calls
+/// `CAnalyzerIF::writeFileImage` @`0x101623e30` with only the medium output
+/// on, which calls `write_image(image, path, 0xf0)` @`0x1016235e4`:
+///
+/// - `create_rescaled_image(image, 240, square = true, Colours::black)`
+///   @`0x1016233a4`. A square original is rescaled straight to 240x240,
+///   larger or smaller (so a 140x140 original gets a 240x240 `_m`, as
+///   observed in alphatheta-docs `platform/prodjlink/track-metadata.md`).
+///   Any other is first drawn centred (`RectanglePlacement` `0x24`, x and y
+///   centred, fit) on an opaque black square as wide as its longer side,
+///   so it is letterboxed, not cropped, then rescaled to 240x240 with
+///   `ResamplingQuality` 2 (high). The fill colour is the
+///   `juce::Colours` table entry at `0x1055527d0`, initialised to
+///   `0xff000000` at `0x10163474c`.
+/// - `rb::ImageHelper::ignoreAlpha`, then `juce::JPEGImageFormat` with its
+///   default quality, which JUCE's `juce_JPEGLoader.cpp` turns into 85
+///   (baseline). [ASSUME] the resampling kernel: Lanczos3 here; JUCE's
+///   high-quality rescale is its own filter, so pixels differ slightly
+///   while size, framing and colour match. [ASSUME] transparency is
+///   flattened onto black.
+///
+/// `None` when the original does not decode (rekordbox's `Image::isValid`
+/// check fails the same way and it falls back to `_s`).
+fn medium_artwork(original: &[u8]) -> Option<Vec<u8>> {
+    let decoded = image::load_from_memory(original).ok()?;
+    let (width, height) = (decoded.width(), decoded.height());
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let side = width.max(height);
+    let mut square = image::RgbaImage::from_pixel(side, side, image::Rgba([0, 0, 0, 255]));
+    image::imageops::overlay(
+        &mut square,
+        &decoded.to_rgba8(),
+        i64::from((side - width) / 2),
+        i64::from((side - height) / 2),
+    );
+    let medium = image::imageops::resize(
+        &square,
+        MEDIUM_ARTWORK_SIDE,
+        MEDIUM_ARTWORK_SIDE,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let rgb = image::DynamicImage::ImageRgba8(medium).to_rgb8();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85)
+        .encode_image(&rgb)
+        .ok()?;
+    Some(out)
 }
 
 /// The sized file beside the artwork `ImagePath` names: `suffix` before the
@@ -2641,29 +2722,112 @@ mod tests {
         // Asked twice, each size keeps its own cached file.
         assert_eq!(c.artwork(11, ArtworkSize::Small).unwrap(), b"a-s");
         assert_eq!(c.artwork(12, ArtworkSize::Small).unwrap(), b"b-s");
-        // No `_m`: the named file, which a deck asking for the medium image
-        // got before #462, rather than the 80x80 `_s`.
-        assert_eq!(c.artwork(12, ArtworkSize::Medium).unwrap(), b"b-full");
+        // No `_m`, and the named file does not decode, so rekordbox could not
+        // build one either: it falls back to `_s` (`0x1018cc010`).
+        assert_eq!(c.artwork(12, ArtworkSize::Medium).unwrap(), b"b-s");
         assert_eq!(c.artwork(10, ArtworkSize::Small), None, "track 10 has none");
+    }
+
+    fn write_share_file(share: &std::path::Path, relative: &str, bytes: &[u8]) {
+        let path = share.join(relative.trim_start_matches('/'));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn encoded(picture: &image::RgbImage, format: image::ImageFormat) -> Vec<u8> {
+        let mut out = std::io::Cursor::new(Vec::new());
+        picture.write_to(&mut out, format).unwrap();
+        out.into_inner()
+    }
+
+    const ART: &str = "/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg";
+
+    /// #474: with `_m` missing, a medium request gets the 240x240 JPEG
+    /// rekordbox's `createMediumArtImage` would have written, built in
+    /// memory, and nothing is written to the share.
+    #[test]
+    fn a_missing_medium_image_is_built_at_240_from_the_named_file() {
+        let share = tempfile::tempdir().unwrap();
+        // 300x150, red: letterboxed onto black, not cropped or stretched.
+        let wide = image::RgbImage::from_pixel(300, 150, image::Rgb([255, 0, 0]));
+        write_share_file(share.path(), ART, &encoded(&wide, image::ImageFormat::Jpeg));
+        write_share_file(share.path(), "PIONEER/Artwork/5ba/0a225-f6b2/artwork_s.jpg", b"small");
+        let before: Vec<_> = std::fs::read_dir(share.path().join("PIONEER/Artwork/5ba/0a225-f6b2"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+
+        let bytes = read_artwork(share.path(), ART, ArtworkSize::Medium).unwrap();
+        assert_eq!(image::guess_format(&bytes).unwrap(), image::ImageFormat::Jpeg);
+        let medium = image::load_from_memory(&bytes).unwrap().to_rgb8();
+        assert_eq!(medium.dimensions(), (240, 240));
+        // The 300x150 picture fills x 0..240 and y 60..180; above and below
+        // are black bars.
+        let near = |pixel: &image::Rgb<u8>, want: [u8; 3]| {
+            pixel.0.iter().zip(want).all(|(&got, want)| got.abs_diff(want) <= 24)
+        };
+        for (x, y) in [(120, 120), (5, 70), (234, 170)] {
+            assert!(near(medium.get_pixel(x, y), [255, 0, 0]), "picture at {x},{y}: {:?}", medium.get_pixel(x, y));
+        }
+        for (x, y) in [(120, 10), (5, 50), (234, 190), (120, 235)] {
+            assert!(near(medium.get_pixel(x, y), [0, 0, 0]), "bar at {x},{y}: {:?}", medium.get_pixel(x, y));
+        }
+
+        // A small request is untouched: `_s`.
+        assert_eq!(read_artwork(share.path(), ART, ArtworkSize::Small).unwrap(), b"small");
+        let after: Vec<_> = std::fs::read_dir(share.path().join("PIONEER/Artwork/5ba/0a225-f6b2"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(before, after, "nothing is written beside the artwork");
+    }
+
+    /// rekordbox rescales a square original to 240 either way: a 140x140
+    /// original has a 240x240 `_m` (alphatheta-docs
+    /// `platform/prodjlink/track-metadata.md`), and a large PNG comes back as
+    /// a 240x240 JPEG.
+    #[test]
+    fn a_square_original_is_rescaled_to_240_up_or_down() {
+        let share = tempfile::tempdir().unwrap();
+        for (side, format) in [(140, image::ImageFormat::Jpeg), (600, image::ImageFormat::Png)] {
+            let picture = image::RgbImage::from_pixel(side, side, image::Rgb([0, 128, 255]));
+            write_share_file(share.path(), ART, &encoded(&picture, format));
+            let bytes = read_artwork(share.path(), ART, ArtworkSize::Medium).unwrap();
+            assert_eq!(image::guess_format(&bytes).unwrap(), image::ImageFormat::Jpeg);
+            let medium = image::load_from_memory(&bytes).unwrap().to_rgb8();
+            assert_eq!(medium.dimensions(), (240, 240), "{side}px original");
+            let corner = medium.get_pixel(2, 2).0;
+            assert!(corner[2] > 200 && corner[0] < 40, "no bars on a square original: {corner:?}");
+        }
+    }
+
+    #[test]
+    fn an_existing_medium_file_is_sent_as_it_is() {
+        let share = tempfile::tempdir().unwrap();
+        let picture = image::RgbImage::from_pixel(300, 300, image::Rgb([9, 9, 9]));
+        write_share_file(share.path(), ART, &encoded(&picture, image::ImageFormat::Jpeg));
+        write_share_file(share.path(), "PIONEER/Artwork/5ba/0a225-f6b2/artwork_m.jpg", b"medium");
+        assert_eq!(read_artwork(share.path(), ART, ArtworkSize::Medium).unwrap(), b"medium");
+    }
+
+    /// When the medium image cannot be built, rekordbox's order is `_s`, then
+    /// the named file; a small request is `_s`, then the named file.
+    #[test]
+    fn without_a_medium_image_the_fallbacks_follow_rekordbox() {
+        let share = tempfile::tempdir().unwrap();
+        assert_eq!(read_artwork(share.path(), ART, ArtworkSize::Medium), None, "nothing at all");
+        write_share_file(share.path(), ART, b"not an image");
+        assert_eq!(read_artwork(share.path(), ART, ArtworkSize::Medium).unwrap(), b"not an image");
+        assert_eq!(read_artwork(share.path(), ART, ArtworkSize::Small).unwrap(), b"not an image");
+        write_share_file(share.path(), "PIONEER/Artwork/5ba/0a225-f6b2/artwork_s.jpg", b"small");
+        assert_eq!(read_artwork(share.path(), ART, ArtworkSize::Medium).unwrap(), b"small");
+        assert_eq!(read_artwork(share.path(), ART, ArtworkSize::Small).unwrap(), b"small");
     }
 
     #[test]
     fn artwork_is_the_sized_file_beside_the_one_the_library_names() {
-        assert_eq!(
-            artwork_candidates("/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg", ArtworkSize::Medium),
-            [
-                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_m.jpg",
-                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg",
-            ],
-            "with no _m, a medium request gets the named file (what it got before #462), not the 80x80 _s"
-        );
-        assert_eq!(
-            artwork_candidates("/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg", ArtworkSize::Small),
-            [
-                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_s.jpg",
-                "/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg",
-            ]
-        );
+        assert_eq!(sized_artwork(ART, "_m"), "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_m.jpg");
+        assert_eq!(sized_artwork(ART, "_s"), "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_s.jpg");
         assert_eq!(sized_artwork("art.v2.png", "_m"), "art.v2_m.png");
         assert_eq!(sized_artwork("/a.b/artwork", "_s"), "/a.b/artwork");
     }

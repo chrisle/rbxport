@@ -4094,6 +4094,7 @@ dependencies = [
  "alphatheta-connect",
  "core-foundation 0.10.1",
  "if-addrs",
+ "image",
  "parking_lot",
  "rbl-analysis",
  "rbl-anlz",

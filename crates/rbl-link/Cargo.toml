@@ -20,6 +20,9 @@ alphatheta-connect = { git = "https://github.com/chrisle/alphatheta-connect-rs",
 # 169.254.x.x IPv4 addresses on Windows, which is where a Pioneer USB LINK
 # adapter (XDJ-RX3) with no DHCP lease lives (#408).
 if-addrs = { version = "0.15", features = ["link-local"] }
+# The 240x240 medium artwork rekordbox builds when a track has no `_m`
+# file (#474); the same build rbl-db uses for the library's artwork sizes.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 parking_lot = "0.12"
 rbl-anlz = { path = "../rbl-anlz" }
 rbl-db = { path = "../rbl-db" }
