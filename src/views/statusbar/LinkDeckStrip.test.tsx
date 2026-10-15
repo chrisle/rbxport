@@ -206,6 +206,50 @@ describe("LinkDeckStrip", () => {
     expect(dropped).toEqual([3]);
   });
 
+  // #435: an XDJ-RX3 sits on the link as decks 9 and 10, both announced with
+  // device type 0x07. The backend reads that type as "player" (src-tauri
+  // link.rs `kind_name`); 1.6.0 read it as "device", which drew each deck as
+  // a mixer cell that never took a drop.
+  it("makes both decks of an XDJ-RX3 drop targets and reports which one took the drop", () => {
+    const dropped: number[] = [];
+    const rx3 = (number: number) => cdj({ number, name: "XDJ-RX3", address: "169.254.20.2" });
+    render({
+      peers: [peer({ number: 9, name: "XDJ-RX3", address: "169.254.20.2" })],
+      link: on([rx3(9), rx3(10)]),
+      onToggle: () => {},
+      dragging: true,
+      onDropToPlayer: (n) => dropped.push(n),
+    });
+
+    const decks = [...host.querySelectorAll("[data-drop-target]")];
+    expect(decks.map((el) => el.getAttribute("aria-label"))).toEqual(["Player 9", "Player 10"]);
+    for (const deck of decks) {
+      const over = new Event("dragover", { bubbles: true, cancelable: true });
+      Object.defineProperty(over, "dataTransfer", { value: { dropEffect: "none" } });
+      act(() => {
+        deck.dispatchEvent(over);
+      });
+      // A dragover left alone is the forbidden cursor the reporter saw.
+      expect(over.defaultPrevented).toBe(true);
+      act(() => {
+        deck.dispatchEvent(new Event("drop", { bubbles: true }));
+      });
+    }
+    expect(dropped).toEqual([9, 10]);
+  });
+
+  it("does not offer a device it cannot read as a player as a deck", () => {
+    render({
+      peers: [peer()],
+      link: on([cdj({ number: 9, name: "XDJ-RX3", kind: "device" })]),
+      onToggle: () => {},
+      dragging: true,
+      onDropToPlayer: () => {},
+    });
+    expect(host.querySelector("[data-drop-target]")).toBeNull();
+    expect(host.querySelector('[aria-label="Mixer 9"]')).not.toBeNull();
+  });
+
   it("does not make decks drop targets when nothing is being dragged", () => {
     render({ peers: [peer()], link: on([cdj({ number: 3 })]), onToggle: () => {}, onDropToPlayer: () => {} });
     expect(host.querySelector("[data-drop-target]")).toBeNull();

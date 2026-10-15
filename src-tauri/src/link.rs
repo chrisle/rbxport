@@ -756,6 +756,41 @@ mod rx3_interface_tests {
         assert_eq!(shown.iter().map(|player| player.number).collect::<Vec<_>>(), [1, 2, 33]);
         assert!(shown.iter().all(|player| player.mounted));
     }
+
+    /// #435: the LINK strip only makes a `player` a drop target. An XDJ-RX3
+    /// is decks 9 and 10, both type 0x07; 1.6.0 sent them as `device`, which
+    /// the strip drew as mixer cells that refused every drop.
+    #[test]
+    fn both_xdj_rx3_decks_reach_the_window_as_players() {
+        let address = Ipv4Addr::new(169, 254, 20, 2);
+        let deck = |number| Player {
+            number,
+            name: "XDJ-RX3".to_owned(),
+            address,
+            kind: DeviceType::from_u8(0x07),
+            loaded: None,
+            playing: false,
+            master: false,
+            sync: false,
+            cued: false,
+            bpm_x100: 0,
+            last_seen: Instant::now(),
+        };
+        let snapshot = Snapshot {
+            interface: Interface::loopback(),
+            database_port: 0,
+            players: vec![deck(9), deck(10)],
+            master: MasterState::default(),
+            link: LinkState::Up { number: 17 },
+            mounted: vec![address],
+        };
+
+        let shown = players(None, &snapshot);
+        assert_eq!(
+            shown.iter().map(|player| (player.number, player.kind.as_str(), player.mounted)).collect::<Vec<_>>(),
+            [(9, "player", true), (10, "player", true)],
+        );
+    }
 }
 
 /// The players with their loaded tracks named from the library.
