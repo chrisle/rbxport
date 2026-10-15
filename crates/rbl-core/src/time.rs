@@ -38,6 +38,16 @@ pub fn unix_millis() -> u64 {
     u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
 }
 
+/// Milliseconds since the epoch of a moment as the database stores it
+/// (`2026-10-12 23:18:03.154 +00:00`, or an older row's local offset).
+/// `None` for anything else, a value with no offset among them: what zone
+/// it was written in is not known.
+#[must_use]
+pub fn parse_millis(stamp: &str) -> Option<u64> {
+    let moment = chrono::DateTime::parse_from_str(stamp.trim(), "%Y-%m-%d %H:%M:%S%.f %:z").ok()?;
+    u64::try_from(moment.timestamp_millis()).ok()
+}
+
 /// Today's date where the machine is, `YYYY-MM-DD`.
 ///
 /// The one place rekordbox writes local time rather than UTC: the date an

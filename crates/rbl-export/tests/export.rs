@@ -548,7 +548,7 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
         SourceMyTag { id: 11, seq: 1, name: "Peak".into(), attribute: 0, parent: 1 },
         SourceMyTag { id: 12, seq: 2, name: "Warm-up".into(), attribute: 0, parent: 1 },
     ];
-    let playlists = vec![SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id: 0, name: "Set".into(), track_indices: vec![0, 1, 2] }];
+    let playlists = vec![SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id: 0, name: "Set".into(), track_indices: vec![0, 1, 2], entries_changed_ms: None }];
 
     let mut seen: Vec<(usize, usize)> = Vec::new();
     let mut files: Vec<(usize, usize)> = Vec::new();
@@ -660,7 +660,7 @@ fn a_track_that_cannot_be_read_is_left_out_and_the_rest_is_published() {
     let src = tempfile::tempdir().unwrap();
     let dest = common::stick();
     let mut tracks = vec![track(src.path(), 1, "First", "Artist"), track(src.path(), 2, "Second", "Artist")];
-    let playlists = vec![SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id: 1, name: "Set".into(), track_indices: vec![0, 1] }];
+    let playlists = vec![SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id: 1, name: "Set".into(), track_indices: vec![0, 1], entries_changed_ms: None }];
     export(dest.path(), &tracks, &playlists).unwrap();
     // The first track stages a replacement; reading the second fails.
     std::fs::write(&tracks[0].source_path, vec![9; 4096]).unwrap();

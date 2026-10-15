@@ -229,3 +229,146 @@ fn a_track_added_to_one_library_only_still_stops_the_sync() {
     let [legacy, one] = on_stick(dest.path(), "P");
     assert_eq!((legacy.len(), one.len()), (2, 3), "nothing was written");
 }
+
+/// The added track can be one this app exported for another playlist, Q,
+/// that the same sync no longer selects. P is rewritten from the library
+/// and Q is taken off, so nothing names the track; it stays on the stick
+/// anyway, as rekordbox leaves a track added on the stick once its entry is
+/// gone (step 4), and the #317 cleanup of this app's own deselected tracks
+/// leaves it alone at every later sync (#471).
+#[test]
+fn a_track_added_on_the_stick_stays_when_the_playlist_it_was_exported_for_is_deselected() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    let lib = library(src.path());
+    sync(dest.path(), &lib[..3], &[playlist(P, "P", &[0, 1]), playlist(Q, "Q", &[2])]).unwrap();
+    let techno = device_id(dest.path(), "Techno 1");
+    add_on_stick(dest.path(), &[Format::DeviceLibrary, Format::OneLibrary], "P", techno);
+
+    let selection = [lib[0].clone(), lib[1].clone(), lib[3].clone()];
+    for step in ["P changed, Q deselected", "again"] {
+        sync(dest.path(), &selection, &[playlist(P, "P", &[0, 1, 2])]).unwrap_or_else(|e| panic!("{step}: {e}"));
+        assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2", "House 3"]), "{step}");
+        let library = device_library::read(dest.path(), Format::OneLibrary).unwrap();
+        assert!(library.nodes.iter().all(|n| n.name != "Q"), "{step}: Q is taken off");
+        assert_eq!(device_id(dest.path(), "Techno 1"), techno, "{step}: Techno 1 keeps its id");
+        techno_still_on_stick(dest.path(), step);
+    }
+}
+
+/// A stick rekordbox synced, that this app has not (#471): no manifest, only
+/// rekordbox's sync record, whose `Timestamp` for a ticked playlist is when
+/// the library playlist's entries last changed. These are the #309 values:
+/// House 2 was added to `P309` at `23:06:11.399` and House 3 at
+/// `23:18:03.154` (`djmdSongPlaylist.created_at`), and rekordbox's record
+/// read `1791846371399` after the first sync and `1791847083155` after the
+/// one that followed House 3.
+mod rekordbox_made {
+    use super::*;
+
+    const HOUSE_2_ADDED: u64 = 1_791_846_371_399;
+    const HOUSE_3_ADDED: u64 = 1_791_847_083_154;
+    const RECORD_AFTER_HOUSE_3: u64 = 1_791_847_083_155;
+
+    fn changed_at(mut p: SourcePlaylist, at: Option<u64>) -> SourcePlaylist {
+        p.entries_changed_ms = at;
+        p
+    }
+
+    /// The stick as rekordbox leaves it after syncing `P` = `entries` and
+    /// exporting Techno 1 from its Devices tree: no manifest, and a record
+    /// from library `db_id` with `stamp` as `P`'s `Timestamp`.
+    fn rekordbox_stick(lib: &[SourceTrack], dest: &Path, entries: &[usize], db_id: u64, stamp: u64) -> u32 {
+        let mut selection: Vec<SourceTrack> = entries.iter().map(|i| lib[*i].clone()).collect();
+        selection.push(lib[2].clone());
+        sync(dest, &selection, &[playlist(P, "P", &(0..entries.len()).collect::<Vec<_>>())]).unwrap();
+        std::fs::remove_file(Manifest::path(dest)).unwrap();
+        let record = rbl_export::sync_record::read(dest).unwrap();
+        let source = rbl_export::SyncSource { db_id, tree: vec![rbl_export::sync_record::SyncNode { id: P, parent: 0, attribute: 0 }], automatic: true };
+        let bytes = rbl_export::sync_record::render_with_ids(&source, &[P], 0, &[(P, stamp)].into(), &record.device_ids);
+        for file in rbl_export::sync_record::FILES {
+            std::fs::write(dest.join(file), &bytes).unwrap();
+        }
+        assert_eq!(rbl_export::sync_record::read(dest).unwrap().timestamps.get(&P), Some(&stamp));
+        device_id(dest, "Techno 1")
+    }
+
+    #[test]
+    fn a_track_added_on_the_stick_stays_until_the_library_playlist_changes() {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let lib = library(src.path());
+        let techno = rekordbox_stick(&lib, dest.path(), &[0, 1], DB_ID, HOUSE_2_ADDED);
+        add_on_stick(dest.path(), &[Format::DeviceLibrary, Format::OneLibrary], "P", techno);
+
+        // Step 3: the library's P has not changed since rekordbox synced it.
+        // The first sync from here keeps the stick's, and so does the next,
+        // which goes by this app's own record.
+        for step in ["step 3", "step 3, again"] {
+            sync(dest.path(), &lib[..2], &[changed_at(playlist(P, "P", &[0, 1]), Some(HOUSE_2_ADDED))]).unwrap_or_else(|e| panic!("{step}: {e}"));
+            assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2", "Techno 1"]), "{step}");
+            assert_eq!(device_id(dest.path(), "Techno 1"), techno, "{step}: Techno 1 keeps its id");
+            techno_still_on_stick(dest.path(), step);
+        }
+        assert_eq!(rbl_export::sync_record::read(dest.path()).unwrap().timestamps.get(&P), Some(&HOUSE_2_ADDED), "rekordbox's time is kept");
+
+        // Step 4: House 3 added to the library's P.
+        let selection = [lib[0].clone(), lib[1].clone(), lib[3].clone()];
+        sync(dest.path(), &selection, &[changed_at(playlist(P, "P", &[0, 1, 2]), Some(HOUSE_3_ADDED))]).unwrap();
+        assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2", "House 3"]), "step 4");
+        techno_still_on_stick(dest.path(), "step 4");
+    }
+
+    /// The library had changed before the first sync from here: the stick's
+    /// P is the library's, as rekordbox's step 4 makes it.
+    #[test]
+    fn a_library_playlist_changed_since_rekordbox_synced_it_is_rewritten() {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let lib = library(src.path());
+        let techno = rekordbox_stick(&lib, dest.path(), &[0, 1], DB_ID, HOUSE_2_ADDED);
+        add_on_stick(dest.path(), &[Format::DeviceLibrary, Format::OneLibrary], "P", techno);
+        let selection = [lib[0].clone(), lib[1].clone(), lib[3].clone()];
+        sync(dest.path(), &selection, &[changed_at(playlist(P, "P", &[0, 1, 2]), Some(HOUSE_3_ADDED))]).unwrap();
+        assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2", "House 3"]));
+        techno_still_on_stick(dest.path(), "library changed");
+    }
+
+    /// rekordbox's record after the sync that followed House 3 is a
+    /// millisecond past House 3's `created_at`: the same change.
+    #[test]
+    fn the_millisecond_rekordbox_records_past_the_entry_is_the_same_change() {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let lib = library(src.path());
+        let techno = rekordbox_stick(&lib, dest.path(), &[0, 1, 3], DB_ID, RECORD_AFTER_HOUSE_3);
+        add_on_stick(dest.path(), &[Format::DeviceLibrary, Format::OneLibrary], "P", techno);
+        let selection = [lib[0].clone(), lib[1].clone(), lib[3].clone()];
+        sync(dest.path(), &selection, &[changed_at(playlist(P, "P", &[0, 1, 2]), Some(HOUSE_3_ADDED))]).unwrap();
+        assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2", "House 3", "Techno 1"]));
+    }
+
+    /// Without the library's time, or with a record another library wrote,
+    /// nothing tells an unchanged playlist: the sync writes it from the
+    /// library, as the first sync from here always did.
+    #[test]
+    fn without_a_time_to_compare_the_playlist_is_written_from_the_library() {
+        for (db_id, at) in [(DB_ID, None), (DB_ID + 1, Some(HOUSE_2_ADDED))] {
+            let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+            let lib = library(src.path());
+            let techno = rekordbox_stick(&lib, dest.path(), &[0, 1], db_id, HOUSE_2_ADDED);
+            add_on_stick(dest.path(), &[Format::DeviceLibrary, Format::OneLibrary], "P", techno);
+            sync(dest.path(), &lib[..2], &[changed_at(playlist(P, "P", &[0, 1]), at)]).unwrap();
+            assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2"]), "record from {db_id}, time {at:?}");
+            techno_still_on_stick(dest.path(), "written from the library");
+        }
+    }
+
+    /// An addition made in one of the stick's libraries alone is not one
+    /// rekordbox was seen to keep: written from the library.
+    #[test]
+    fn a_track_added_to_one_library_only_is_written_from_the_library() {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let lib = library(src.path());
+        let techno = rekordbox_stick(&lib, dest.path(), &[0, 1], DB_ID, HOUSE_2_ADDED);
+        add_on_stick(dest.path(), &[Format::OneLibrary], "P", techno);
+        sync(dest.path(), &lib[..2], &[changed_at(playlist(P, "P", &[0, 1]), Some(HOUSE_2_ADDED))]).unwrap();
+        assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2"]));
+    }
+}

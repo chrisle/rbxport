@@ -72,6 +72,53 @@ pub fn db_id(conn: &Connection) -> Result<u64> {
     Ok(id.and_then(|id| id.parse().ok()).unwrap_or(0))
 }
 
+/// When each of `ids`' entries last changed, as milliseconds since the
+/// epoch: the latest `djmdSongPlaylist.created_at` of its live entries,
+/// keyed by `djmdPlaylist.ID`.
+///
+/// That is the value rekordbox's sync record keeps as a playlist's
+/// `Timestamp` [OBS rekordbox 7.2.14 for Windows, #309: `1791846371399` was
+/// the second entry's `created_at`, `23:06:11.399`; after a third entry
+/// created at `23:18:03.154` the record read `1791847083155`]. A sync can
+/// set it against a stick rekordbox made to tell whether the library's
+/// playlist changed since.
+///
+/// A playlist with no entries, or with one whose time does not read, is
+/// left out: there is nothing to compare.
+pub fn playlist_entries_changed(conn: &Connection, ids: &[u64]) -> Result<HashMap<u64, u64>> {
+    let mut out: HashMap<u64, u64> = HashMap::new();
+    if !has_table(conn, "djmdSongPlaylist") {
+        return Ok(out);
+    }
+    let mut unreadable: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    let ids: Vec<String> = ids.iter().map(u64::to_string).collect();
+    for chunk in ids.chunks(900) {
+        let marks = vec!["?"; chunk.len()].join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT PlaylistID, created_at FROM djmdSongPlaylist
+             WHERE rb_local_deleted = 0 AND PlaylistID IN ({marks})"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        for row in rows {
+            let (playlist, created) = row?;
+            let Ok(playlist) = playlist.trim().parse::<u64>() else { continue };
+            match created.as_deref().and_then(rbl_core::time::parse_millis) {
+                Some(at) => {
+                    let latest = out.entry(playlist).or_insert(at);
+                    *latest = (*latest).max(at);
+                }
+                None => {
+                    unreadable.insert(playlist);
+                }
+            }
+        }
+    }
+    out.retain(|playlist, _| !unreadable.contains(playlist));
+    Ok(out)
+}
+
 /// What one exported track needs that the index does not hold.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrackExtras {
@@ -293,7 +340,30 @@ fn loop_end(start_ms: u32, stored_end: i64, beat_loop_size: u32, bpm_x100: u32) 
 mod tests {
     use rusqlite::Connection;
 
-    use super::{track_extras, AnalysisFacts};
+    use super::{playlist_entries_changed, track_extras, AnalysisFacts};
+
+    /// The times are #309's scratch library's: `P309`'s entries as
+    /// rekordbox wrote them, against the `Timestamp` its sync record kept.
+    #[test]
+    fn a_playlists_entries_changed_at_its_latest_live_entry() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE djmdSongPlaylist (PlaylistID TEXT, created_at TEXT, rb_local_deleted INTEGER);
+             INSERT INTO djmdSongPlaylist VALUES
+                ('3498738517', '2026-10-12 23:05:59.107 +00:00', 0),
+                ('3498738517', '2026-10-12 23:06:11.399 +00:00', 0),
+                ('3498738517', '2026-10-12 23:30:00.000 +00:00', 1),
+                ('7', '2026-10-12 23:06:11.399 +02:00', 0),
+                ('8', '2026-10-12 23:06:11', 0),
+                ('8', '2026-10-12 23:06:12.000 +00:00', 0);",
+        )
+        .unwrap();
+        let changed = playlist_entries_changed(&conn, &[3_498_738_517, 7, 8, 9]).unwrap();
+        assert_eq!(changed.get(&3_498_738_517), Some(&1_791_846_371_399), "the record's Timestamp; the deleted entry does not count");
+        assert_eq!(changed.get(&7), Some(&(1_791_846_371_399 - 2 * 3_600_000)), "an older row's local offset");
+        assert!(!changed.contains_key(&8), "a time with no offset is not guessed at");
+        assert!(!changed.contains_key(&9), "no entries");
+    }
 
     /// The export takes what analysis wrote from the row as it is now, not
     /// from an index read before the analysis (#309).

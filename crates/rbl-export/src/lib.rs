@@ -192,6 +192,12 @@ pub struct SourcePlaylist {
     pub folder: bool,
     /// Indices into the track slice.
     pub track_indices: Vec<usize>,
+    /// When the library playlist's entries last changed, in milliseconds
+    /// since the epoch (`rbl_db::export_info::playlist_entries_changed`):
+    /// the value rekordbox's sync record keeps as its `Timestamp`. On a
+    /// stick rekordbox synced, it tells whether the library's playlist
+    /// changed since (#471). `None` when not known.
+    pub entries_changed_ms: Option<u64>,
 }
 
 /// Where an export has got to, reported after each track.

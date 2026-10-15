@@ -52,9 +52,12 @@ pub fn prepare(
     let existing_sources = sources(root, before)?;
     identify_tracks(&mut tracks, before, previous, db_id, &existing_sources);
     identify_playlists(&mut playlists, previous, record.as_ref());
-    let additions = device_additions(before, previous, &keys, &playlists);
+    let (mut additions, dropped) = device_additions(before, previous, &keys, &playlists);
+    if previous.is_none() {
+        additions.extend(rekordbox_device_additions(before, record.as_ref(), &tracks, &playlists));
+    }
     let kept: BTreeSet<u32> = additions.values().flatten().flatten().copied().collect();
-    retain_device_only(root, &current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref(), keep_unlisted, &kept)?;
+    retain_device_only(root, &current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref(), keep_unlisted, &kept, &dropped)?;
     keep_device_additions(&tracks, &mut playlists, &additions)?;
     if keep_unlisted {
         keep_stick_order(&mut playlists, previous);
@@ -102,14 +105,20 @@ pub struct Prepared {
 /// removed or moved, a rename, an edit in one library alone, as a player
 /// makes) is left out, and the sync stops on it as before [UNKNOWN: what
 /// rekordbox does with those].
+///
+/// Also returns the device ids of the added entries a playlist rewritten from
+/// the library takes out. rekordbox leaves such a track on the stick, in no
+/// playlist; so does [`retain_device_only`], even when it is one an earlier
+/// export put there for a playlist this sync no longer selects (#471).
 fn device_additions(
     before: &Snapshot,
     previous: Option<&Manifest>,
     keys: &[String],
     playlists: &[SourcePlaylist],
-) -> BTreeMap<u32, Option<Vec<u32>>> {
+) -> (BTreeMap<u32, Option<Vec<u32>>>, BTreeSet<u32>) {
     let mut out = BTreeMap::new();
-    let Some((previous, baseline)) = previous.and_then(|m| m.baseline.as_ref().map(|b| (m, b))) else { return out };
+    let mut dropped = BTreeSet::new();
+    let Some((previous, baseline)) = previous.and_then(|m| m.baseline.as_ref().map(|b| (m, b))) else { return (out, dropped) };
     // A library track's device id, as the last sync recorded it: the track
     // it exported before one it only carried.
     let mut export_ids: BTreeMap<String, u32> = BTreeMap::new();
@@ -132,9 +141,73 @@ fn device_additions(
         }
         let library_now: Option<Vec<&String>> = p.track_indices.iter().map(|i| keys.get(*i)).collect();
         let unchanged = library_now.is_some_and(|now| now.len() == library_then.len() && now.iter().zip(&library_then).all(|(a, b)| *a == b));
+        if !unchanged {
+            dropped.extend(stick.iter().filter(|id| !written.contains(id)));
+        }
         out.insert(p.device_id, unchanged.then_some(stick));
     }
+    (out, dropped)
+}
+
+/// How far apart, in milliseconds, the `Timestamp` rekordbox's sync record
+/// keeps for a playlist and the library entries' latest change time
+/// (`SourcePlaylist::entries_changed_ms`) may be and still be the same
+/// change. rekordbox recorded `1791846371399` for an entry created at
+/// `.399` and `1791847083155` for one created at `.154` [OBS #309]; a later
+/// change to the library's playlist comes after the sync that wrote the
+/// record, which takes longer than this.
+const SAME_CHANGE_MS: u64 = 1_000;
+
+/// [`device_additions`] for a stick rekordbox synced and rbxport has not:
+/// with no record of its own, it goes by rekordbox's. Its sync record keeps,
+/// for each ticked playlist, the time the library playlist's entries last
+/// changed [OBS rekordbox 7.2.14, #309]. While the library's time is still
+/// that one, the playlist is written as the stick has it, entries added on
+/// the stick included, as rekordbox's own sync keeps them; once it has
+/// moved, from the library, as before.
+///
+/// As for a stick rbxport synced, only an addition counts: the stick's
+/// playlist must hold the library's entries now, in their order, and both
+/// of its libraries must agree on it. Anything else is written from the
+/// library, as a first sync from here always has [UNKNOWN: what rekordbox
+/// does with a removal, a reorder or an edit in one library].
+fn rekordbox_device_additions(
+    before: &Snapshot,
+    record: Option<&SyncRecord>,
+    tracks: &[SourceTrack],
+    playlists: &[SourcePlaylist],
+) -> BTreeMap<u32, Option<Vec<u32>>> {
+    let mut out = BTreeMap::new();
+    let Some(record) = record else { return out };
+    for p in playlists.iter().filter(|p| !p.folder && !p.device_only && p.device_id != 0 && p.id != 0 && p.id < DEVICE_PLAYLIST_ID_BASE) {
+        let (Some(recorded), Some(changed)) = (record.timestamps.get(&p.id), p.entries_changed_ms) else { continue };
+        if recorded.abs_diff(changed) > SAME_CHANGE_MS {
+            continue;
+        }
+        let Some(stick) = stick_now(before, p.device_id) else { continue };
+        // The library's entries as the stick numbers them; one the stick
+        // does not hold means the library's playlist has changed after all.
+        let Some(library) = p.track_indices.iter().map(|i| tracks.get(*i).and_then(|t| t.device.as_ref()).map(|d| d.id)).collect::<Option<Vec<u32>>>() else { continue };
+        if stick == library || !is_subsequence(&library, &stick) {
+            continue;
+        }
+        out.insert(p.device_id, Some(stick));
+    }
     out
+}
+
+/// The stick's playlist `id`, when every library the stick holds has it,
+/// as a playlist, with the same entries.
+fn stick_now(before: &Snapshot, id: u32) -> Option<Vec<u32>> {
+    let mut found: Option<Vec<u32>> = None;
+    for library in [&before.legacy, &before.one].into_iter().flatten() {
+        let now = library.playlists.iter().find(|p| p.id == id)?;
+        if now.folder || found.as_ref().is_some_and(|tracks| *tracks != now.tracks) {
+            return None;
+        }
+        found.get_or_insert_with(|| now.tracks.clone());
+    }
+    found
 }
 
 /// The stick's playlist `id` now and as the last sync left it, when every
@@ -322,7 +395,11 @@ fn identify_playlists(
 /// recorded as the library's, under the library id it was exported from.
 ///
 /// `kept` names the tracks of selected playlists written as the stick has
-/// them ([`device_additions`]), which are carried too.
+/// them ([`device_additions`]), which are carried too. `dropped` names the
+/// entries added on the stick that a playlist rewritten from the library
+/// takes out: those tracks stay on the stick as the stick's, as rekordbox
+/// leaves them, even one an earlier export put there for a playlist no
+/// longer selected, which the #317 cleanup would otherwise take off.
 #[allow(clippy::too_many_arguments, reason = "everything reconciliation already gathered, passed through")]
 fn retain_device_only(
     root: &Path,
@@ -335,6 +412,7 @@ fn retain_device_only(
     record: Option<&SyncRecord>,
     keep_unlisted: bool,
     kept: &BTreeSet<u32>,
+    dropped: &BTreeSet<u32>,
 ) -> Result<()> {
     // Device playlist id -> the library id it was exported from.
     let owned: BTreeMap<u32, u64> = previous.map_or_else(
@@ -374,6 +452,7 @@ fn retain_device_only(
         .copied()
         .chain(before.history.iter().flat_map(|h| &h.tracks).copied())
         .chain(kept.iter().copied())
+        .chain(dropped.iter().copied())
         .collect();
     // What an earlier export put there itself. A track it only carried
     // (`preserved`) is still another writer's: counting it as ours would keep
@@ -412,9 +491,10 @@ fn retain_device_only(
             .clone();
         // A track an earlier export put there that a device playlist or the
         // history still names: carried for now, but still ours to take off
-        // once nothing names it.
+        // once nothing names it. One the stick added to a playlist this sync
+        // rewrites is the stick's from now on.
         if let Some(device) = track.device.as_mut() {
-            device.exported = previously_owned.contains(&id);
+            device.exported = previously_owned.contains(&id) && !dropped.contains(&id);
         }
         positions.insert(id, tracks.len());
         tracks.push(track);
@@ -463,6 +543,7 @@ fn retain_device_only(
                     })
                 })
                 .collect::<Result<_>>()?,
+            entries_changed_ms: None,
         });
     }
     Ok(())
@@ -714,6 +795,7 @@ pub fn all(
                         })
                     })
                     .collect::<Result<_>>()?,
+                entries_changed_ms: None,
             })
         })
         .collect::<Result<_>>()?;

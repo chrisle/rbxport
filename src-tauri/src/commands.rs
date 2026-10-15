@@ -1664,13 +1664,17 @@ impl ExportSelection {
             .chain(loose_rows.iter())
             .map(|&row| library.ids.get(row as usize).copied().unwrap_or(0).to_string())
             .collect::<std::collections::BTreeSet<_>>().into_iter().collect();
-        let (my_tags, extras, db_id) = state
+        // When each plain playlist's entries last changed, which a stick
+        // rekordbox synced keeps in its record (#471).
+        let plain: Vec<u64> = named.iter().filter(|(_, _, source)| matches!(source, rbl_index::TrackSource::Playlist(_))).map(|(id, _, _)| *id).collect();
+        let (my_tags, extras, db_id, entries_changed) = state
             .read_db(|db| {
                 let conn = db.connection();
                 Ok((
                     rbl_db::export_info::my_tags(conn)?,
                     rbl_db::export_info::track_extras(conn, &ids)?,
                     rbl_db::export_info::db_id(conn)?,
+                    rbl_db::export_info::playlist_entries_changed(conn, &plain)?,
                 ))
             })
             .map_err(write_error)?;
@@ -1708,7 +1712,8 @@ impl ExportSelection {
                 };
                 track_indices.push(at);
             }
-            source_playlists.push(rbl_export::SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id, name, track_indices });
+            let entries_changed_ms = entries_changed.get(&id).copied();
+            source_playlists.push(rbl_export::SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id, name, track_indices, entries_changed_ms });
         }
         for row in loose_rows {
             if let std::collections::hash_map::Entry::Vacant(entry) = position.entry(row) {
@@ -1737,7 +1742,7 @@ impl ExportSelection {
         let mut folders = Vec::new();
         for id in ancestors {
             let Some(index) = tree_view.index_of(id) else { return Err(AppError::internal("Missing playlist ancestor")); };
-            folders.push(rbl_export::SourcePlaylist { device_id: 0, device_only: false, id, name: tree_view.name(index).to_owned(), parent_id: sync.tree.iter().find(|n| n.id == id).map_or(0, |n| n.parent), folder: true, track_indices: Vec::new() });
+            folders.push(rbl_export::SourcePlaylist { device_id: 0, device_only: false, id, name: tree_view.name(index).to_owned(), parent_id: sync.tree.iter().find(|n| n.id == id).map_or(0, |n| n.parent), folder: true, track_indices: Vec::new(), entries_changed_ms: None });
         }
         folders.append(&mut source_playlists);
         source_playlists = folders;
