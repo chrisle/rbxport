@@ -165,9 +165,11 @@ async function sourceStrings() {
   return found;
 }
 
+// `noun` holds a noun shown through t(noun), as the USB import kinds do: the
+// t() argument is a variable, so the literal in the table is what must be found.
 const uiProperties = new Set([
   "aria-label", "caption", "description", "emptyText", "heading", "label", "message",
-  "placeholder", "text", "title", "tooltip",
+  "noun", "placeholder", "text", "title", "tooltip",
 ]);
 
 const hiddenAttributes = new Set(["key", "className", "id", "role", "type", "htmlFor", "name", "autoComplete", "inputMode"]);
