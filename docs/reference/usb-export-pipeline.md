@@ -549,19 +549,44 @@ is reported as `ExportError::Cancelled`.
 - If neither database exists, reconcile does nothing (`merged_library` returns
   `None`).
 
-**A synced playlist edited on the stick.** rekordbox and rbxport differ
-here. This is recorded, not changed (#309):
+**A synced playlist edited on the stick.** On a stick rbxport synced
+before, a sync now does what rekordbox's does with a track added on the
+stick to a synced playlist (#429, after the research in #309):
 
-| A track was added on the stick to a synced playlist, then… | rekordbox 7.2.14 [OBS] | rbxport, stick with its manifest [OBS] | rbxport, stick without a manifest (as rekordbox leaves one) [OBS] |
+| A track was added on the stick to a synced playlist, then… | rekordbox 7.2.14 [OBS] | rbxport, stick with its manifest | rbxport, stick without a manifest (as rekordbox leaves one) [OBS #309] |
 | --- | --- | --- | --- |
-| …sync, library playlist unchanged | keeps the added entry; writes nothing to the databases | refuses the sync ("playlist … changed on the USB. Import or reconcile it before syncing."); writes nothing | takes the entry out; the track stays on the stick |
-| …sync, library playlist changed | rewrites the playlist from the library: the entry is gone, the track stays on the stick | refuses, as above | rewrites the playlist from the library, as rekordbox does |
+| …sync, library playlist unchanged | keeps the added entry; writes nothing to the databases | keeps the added entry, in both databases, and at every later sync while the library's playlist stays unchanged | takes the entry out; the track stays on the stick |
+| …sync, library playlist changed | rewrites the playlist from the library: the entry is gone, the track stays on the stick | rewrites the playlist from the library; the track stays on the stick, in no playlist | rewrites the playlist from the library, as rekordbox does |
 
-The rbxport columns come from fixture probes that were not committed; their
-output is in `rbxport-worktrees/parity/issue-309/`
-(`values-rbx-same-steps-309.txt`, `values-rbx-no-manifest-stick-309.txt`).
-They were recorded before the selective sync landed and have not been
-re-run against it.
+`reconcile::device_additions` makes the call. The manifest records each
+selected playlist's library entries, by track key
+(`ManifestPlaylist::library_entries`); a playlist whose library entries
+equal the recorded ones is unchanged. [ASSUME] That stands in for
+rekordbox's own test, which goes by the `Timestamp` its sync record keeps
+(the time the library playlist's entries last changed). A manifest from an
+older build has no such field; that build wrote every selected playlist as
+the library had it, so the stick's copy at that sync, mapped back to track
+keys, stands in. A playlist written as the stick has it, or rewritten over
+the stick's additions, is left out of the device-edit check
+(`Snapshot::check_changes_except`).
+
+The rule applies only to what was observed: the stick's playlist holds the
+library's entries in their order plus entries added on the stick, has the
+name and place the last sync left, and both databases on the stick agree on
+it. Anything else stays a device edit the sync refuses to overwrite, as
+before: an entry of the library's removed or moved on the stick, a rename,
+or an edit in one database alone, as a player makes [UNKNOWN: what
+rekordbox does with each of those; observing one needs the #309 setup with
+that edit in step 2].
+
+A stick without a manifest still takes the added entry out at the first
+sync from here: telling an unchanged library playlist there needs the
+library entries' change times to set against the sync record's
+`Timestamp`, which the export is not given.
+
+`crates/rbl-export/tests/device_playlist_edits.rs` runs the rekordbox steps
+on a temporary stick. The no-manifest column comes from the #309 fixture
+probes (`rbxport-worktrees/parity/issue-309/values-rbx-no-manifest-stick-309.txt`).
 
 rekordbox's side is in
 [usb-export-db.md](usb-export-db.md#what-a-later-sync-does-to-a-playlist-edited-on-the-device).
