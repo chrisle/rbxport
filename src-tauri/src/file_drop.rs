@@ -63,12 +63,29 @@ fn pasteboard_paths(board: &objc2_app_kit::NSPasteboard) -> Vec<String> {
 
 /// Refuse incomplete or unrelated pasteboard contents instead of importing a
 /// subset silently. Compare multisets because the DOM may reorder the files.
+///
+/// Names are compared in one Unicode normal form (NFC), because the page
+/// and the pasteboard spell an accented name differently. `WKWebView` builds
+/// each dropped `File` from the drag's `NSFilenamesPboardType` paths passed
+/// through `-[NSURL initFileURLWithPath:]` (`handleLegacyFilesPasteboard` in
+/// `WebKit`'s `WebViewImpl.mm`), which decomposes the name, so `File.name` is
+/// NFD ("E" + U+0301). The file URL read above keeps the name as it is on
+/// disk, which for a file saved by a browser or copied from Windows is NFC
+/// ("É"). [OBS macOS 26.6.2, issues #458/#459,
+/// `parity/issue-458/values-drop-name-vs-path.txt`] Compared byte for byte,
+/// every such file was refused. The paths themselves are returned as read:
+/// rekordbox 7.2.19 stores the same one (`juce::NSViewComponentPeer::
+/// getDroppedFiles` @0x1026fb2b8 takes `-[NSURL path]` of each file URL on
+/// the drag pasteboard) [OBS static].
 #[cfg(any(target_os = "macos", test))]
 fn validate_paths(names: &[String], paths: Vec<String>) -> Result<Vec<String>, String> {
-    let mut expected: Vec<&str> = names.iter().map(String::as_str).collect();
-    let mut actual: Vec<&str> = paths
+    use unicode_normalization::UnicodeNormalization;
+    let nfc = |name: &str| name.nfc().collect::<String>();
+    let mut expected: Vec<String> = names.iter().map(|name| nfc(name)).collect();
+    let mut actual: Vec<String> = paths
         .iter()
         .filter_map(|path| std::path::Path::new(path).file_name()?.to_str())
+        .map(nfc)
         .collect();
     expected.sort_unstable();
     actual.sort_unstable();
@@ -256,6 +273,33 @@ mod tests {
         let names = vec!["é #.mp3".into(), "b.mp3".into(), "b.mp3".into()];
         let paths = vec!["/one/b.mp3".into(), "/two/b.mp3".into(), "/é #.mp3".into()];
         assert_eq!(validate_paths(&names, paths.clone()), Ok(paths));
+    }
+
+    /// Issues #458 and #459: `WebKit` hands the page a decomposed `File.name`
+    /// while the pasteboard path keeps the precomposed name on disk. The
+    /// byte values are the ones observed on macOS 26.6.2
+    /// (`parity/issue-458/values-drop-name-vs-path.txt`).
+    #[test]
+    fn matches_a_decomposed_dom_name_to_a_precomposed_path() {
+        let cases = [
+            // "John Beltran - Éire.mp3": U+00C9 on disk, E + U+0301 from WebKit.
+            ("John Beltran - E\u{301}ire.mp3", "/Music/John Beltran - \u{c9}ire.mp3"),
+            // "ä ö ü.mp3"
+            ("a\u{308} o\u{308} u\u{308}.mp3", "/Music/\u{e4} \u{f6} \u{fc}.mp3"),
+            // And the other way round, should a drag source spell it so.
+            ("\u{e4} \u{f6} \u{fc}.mp3", "/Music/a\u{308} o\u{308} u\u{308}.mp3"),
+        ];
+        for (name, path) in cases {
+            // The path is the pasteboard's, untouched: it is what rekordbox stores.
+            assert_eq!(validate_paths(&[name.into()], vec![path.into()]), Ok(vec![path.to_owned()]), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_different_accent_is_still_a_different_file() {
+        let names = vec!["E\u{301}ire.mp3".into()];
+        assert!(validate_paths(&names, vec!["/Music/\u{c8}ire.mp3".into()]).is_err());
+        assert!(validate_paths(&names, vec!["/Music/Eire.mp3".into()]).is_err());
     }
 
     #[test]

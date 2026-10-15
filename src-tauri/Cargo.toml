@@ -53,6 +53,8 @@ tauri-plugin-updater = "2"
 base64 = "0.22"
 minisign-verify = "0.2"
 uuid = { version = "1", features = ["v4"] }
+# Matching a dropped `File.name` to its pasteboard path (file_drop.rs).
+unicode-normalization = "0.1"
 semver = "1"
 time = { version = "0.3", features = ["formatting"] }
 # Error and panic reporting only.  Keep optional telemetry features off.
