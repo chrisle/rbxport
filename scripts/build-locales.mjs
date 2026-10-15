@@ -78,8 +78,6 @@ const overrides = {
     "cancel": "annuler",
     "replace": "remplacer",
     "keep": "conserver",
-    // A mock device fixture path, shown as is in every language.
-    "/Users/dj/Music/PioneerDJ/Imported from Device": "/Users/dj/Music/PioneerDJ/Imported from Device",
   },
   ja: {
     "{count} minute ago": "{count} 分前",
@@ -117,6 +115,12 @@ async function sourceFiles(directory) {
   return nested.flat();
 }
 
+// Backend messages that begin in lowercase because "rekordbox" is a product
+// name. Add a message here when it is shown to the user and must be translated.
+const lowercaseRustStrings = new Set([
+  "rekordbox is running. Quit it before making changes.",
+]);
+
 async function rustErrorStrings() {
   const found = new Set();
   const walk = async (directory) => {
@@ -132,7 +136,7 @@ async function rustErrorStrings() {
         if (!/(?:AppError|Conflict|Err\(|error\(|updater_error)/.test(line)) continue;
         for (const match of line.matchAll(/"((?:\\.|[^"\\])*)"/g)) {
           const text = unescapeLang(match[1]);
-          if (/^[A-Z][^/]*[ .!?]$/.test(text)) found.add(text);
+          if (/^[A-Z][^/]*[ .!?]$/.test(text) || lowercaseRustStrings.has(text)) found.add(text);
         }
       }
     }
@@ -182,7 +186,8 @@ async function uiStrings() {
   const found = new Set();
   const add = (text) => {
     const cleaned = cleanUiText(text);
-    if (cleaned && /[A-Za-z\p{L}]/u.test(cleaned)) found.add(cleaned);
+    // A path (such as a mock device's destination folder) is shown as is, not translated.
+    if (cleaned && !cleaned.startsWith("/") && /[A-Za-z\p{L}]/u.test(cleaned)) found.add(cleaned);
   };
   for (const path of await sourceFiles(resolve(root, "src"))) {
     const source = ts.createSourceFile(
