@@ -87,6 +87,7 @@ pub(crate) enum LibraryEdit {
     /// A folder drop's Replace existing (#426): the replaced list and the
     /// playlist made in its place, undone and redone as one step.
     ReplacePlaylist(rbl_db::write::ListReplacement),
+    SortPlaylists(rbl_db::write::PlaylistSort),
     RemovePlaylistTracks(rbl_db::write::PlaylistTrackRemoval),
     Track(Vec<rbl_db::write::TrackEdit>),
     /// One My Tag set per track: the Info tab's toggles edit one track,
@@ -102,6 +103,7 @@ impl LibraryEdit {
             Self::Track(edits) => edits.is_empty() || edits.iter().all(rbl_db::write::TrackEdit::is_empty),
             Self::TrackTags(edits) => edits.iter().all(rbl_db::write::TrackTagEdit::is_empty),
             Self::RenamePlaylist(_) | Self::MovePlaylist(_) | Self::ReplacePlaylist(_) => false,
+            Self::SortPlaylists(edit) => edit.is_empty(),
         }
     }
 }

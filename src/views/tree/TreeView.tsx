@@ -9,7 +9,7 @@ import { SearchField } from "@/components/SearchField";
 import { TREE_SEARCH_OPTIONS } from "@/lib/search";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { TreeNode } from "@/ipc/types";
+import { TREE_ROOT, type TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
 import { DeviceIcon, EjectIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon, SmartListIcon } from "@/components/icons";
 import { ContextMenu } from "@/components/ContextMenu";
@@ -445,8 +445,12 @@ export interface TreeViewProps {
   onEditSmartPlaylist?: (node: TreeNode) => void;
   /** Add Artwork on a playlist or folder. */
   onAddArtwork?: (node: TreeNode) => void;
-  /** Sort Items: a folder's children put in name order. */
-  onSortItems?: (folder: TreeNode) => void;
+  /**
+   * Sort Items: a folder's, or the Playlists heading's, children put in name
+   * order. `searching` is true when it was asked for over the tree's search
+   * results, which rekordbox refuses.
+   */
+  onSortItems?: (folder: TreeNode, searching?: boolean) => void;
   /** Add To Shortcut: the rail takes the node as a button of its own. */
   onAddToShortcut?: (node: TreeNode) => void;
   /** The rail's shortcut buttons, what opens one, and what deletes one. */
@@ -782,6 +786,7 @@ export const TreeView = memo(function TreeView({
           rows={treeMenu(
             menu.node.kind === "collection" ? "collection" : menu.node.kind === "folder" ? "folder" : menu.node.kind === "smartPlaylist" ? "smartPlaylist" : "playlist",
             exportDevices,
+            childrenOf(nodes, menu.node.kind === "collection" ? TREE_ROOT : menu.node.id).length > 0,
           )}
           label={menu.node.kind === "folder" ? "Folder" : menu.node.kind === "collection" ? "Playlists" : "Playlist"}
           context={{ inPlaylist: true, hasFile: true, readOnly }}
@@ -816,7 +821,7 @@ export const TreeView = memo(function TreeView({
                 onAddToShortcut?.(menu.node);
                 break;
               case "sortItems":
-                onSortItems?.(menu.node);
+                onSortItems?.(menu.node, query.trim() !== "");
                 break;
               case "rename":
                 beginRename(menu.node);

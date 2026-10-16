@@ -1776,5 +1776,7 @@
   "Show the upper part of the artwork.": "顯示專輯封面上半部。",
   "Copied {count} music file to {folder}.": "已將 {count} 個音樂檔案複製到 {folder}。",
   "Copied {count} music files to {folder}.": "已將 {count} 個音樂檔案複製到 {folder}。",
-  "That folder could not be found.": "找不到該資料夾。"
+  "That folder could not be found.": "找不到該資料夾。",
+  "Sorted {name}.": "Sorted {name}.",
+  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching."
 }

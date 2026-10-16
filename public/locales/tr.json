@@ -1772,5 +1772,7 @@
   "Show the upper part of the artwork.": "Sanatın üst kısmını göster.",
   "Copied {count} music file to {folder}.": "{count} müzik dosyası {folder} klasörüne kopyalandı.",
   "Copied {count} music files to {folder}.": "{count} müzik dosyası {folder} klasörüne kopyalandı.",
-  "That folder could not be found.": "Bu klasör bulunamadı."
+  "That folder could not be found.": "Bu klasör bulunamadı.",
+  "Sorted {name}.": "Sorted {name}.",
+  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching."
 }

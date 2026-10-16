@@ -1770,5 +1770,7 @@
   "Show the upper part of the artwork.": "Bovenste deel van illustratie tonen",
   "Copied {count} music file to {folder}.": "{count} muziekbestand gekopieerd naar {folder}.",
   "Copied {count} music files to {folder}.": "{count} muziekbestanden gekopieerd naar {folder}.",
-  "That folder could not be found.": "Die map kon niet worden gevonden."
+  "That folder could not be found.": "Die map kon niet worden gevonden.",
+  "Sorted {name}.": "Sorted {name}.",
+  "Playlist cannot be edited or deleted while searching.": "De afspeellijst kan niet worden bewerkt of verwijderd tijdens het zoeken."
 }

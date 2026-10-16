@@ -2608,3 +2608,40 @@ fn the_information_panel_names_the_playlists_a_track_is_in() {
         .expect_err("an unknown track is refused");
     assert_eq!(refused.kind, ErrorKind::NotFound);
 }
+
+/// Sort Items (#443): one command puts a folder's children in rekordbox's
+/// name order and is one Undo step; a second sort of a sorted folder writes
+/// nothing and leaves the history alone.
+#[test]
+fn sort_items_orders_a_folder_as_one_undo_step() {
+    let s = shell();
+    run(commands::create_folder(s.handle(), s.state(), "Crate".into(), ROOT.into())).unwrap();
+    let folder = s.node("Crate");
+    for name in ["delta", "Bravo", "alpha", "Écho", "echo"] {
+        run(commands::create_playlist(s.handle(), s.state(), name.into(), folder.id.clone(), None)).unwrap();
+    }
+    let children = |s: &Shell| -> Vec<String> {
+        let tree = s.tree();
+        let at = tree.iter().position(|n| n.id == folder.id).unwrap();
+        tree[at + 1..].iter().take_while(|n| n.depth > folder.depth)
+            .filter(|n| n.depth == folder.depth + 1).map(|n| n.name.clone()).collect()
+    };
+    assert_eq!(children(&s), ["delta", "Bravo", "alpha", "Écho", "echo"]);
+
+    let sorted = run(commands::sort_playlist_items(s.handle(), s.state(), folder.id.clone(), Some("en".into()))).unwrap();
+    assert_eq!(sorted.undo_label.as_deref(), Some("Sort Items"));
+    assert_eq!(children(&s), ["alpha", "Bravo", "delta", "echo", "Écho"]);
+
+    // Already in order: nothing new to undo.
+    let again = run(commands::sort_playlist_items(s.handle(), s.state(), folder.id.clone(), Some("en".into()))).unwrap();
+    assert_eq!(again.undo_label.as_deref(), Some("Sort Items"));
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(children(&s), ["delta", "Bravo", "alpha", "Écho", "echo"], "one undo puts the whole order back");
+    assert_eq!(undone.undo_label, None, "the second sort recorded nothing");
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(children(&s), ["alpha", "Bravo", "delta", "echo", "Écho"]);
+
+    // A playlist is not a folder.
+    let alpha = s.node("alpha");
+    assert!(run(commands::sort_playlist_items(s.handle(), s.state(), alpha.id, None)).is_err());
+}

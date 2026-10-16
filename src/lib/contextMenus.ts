@@ -238,7 +238,16 @@ export const MISSING_TRACK_MENU: readonly MenuRow<TrackAction>[] = [
 export function treeMenu(
   kind: "playlist" | "smartPlaylist" | "folder" | "collection",
   devices: readonly MenuTarget[] = [],
+  hasChildren = true,
 ): readonly MenuRow<TreeAction>[] {
+  // Sort Items, on a folder and on the Playlists heading, only while there
+  // is something under it: rekordbox leaves the row out of an empty one's
+  // menu rather than greying it [OBS static, rekordbox 7.2.19 arm64
+  // `showTreeViewPopupMenu`: the item, id -0x67, is added @0x10011b404 only
+  // when `BrowseTreeViewItem::hasSubItem` @0x10011b3d0 is true, between
+  // Delete Folder (Delete All on the heading) and Add To Shortcut, on both
+  // menus].
+  const sortRows: MenuRow<TreeAction>[] = hasChildren ? [{ label: "Sort Items", action: "sortItems" }, SEPARATOR] : [];
   // `Export Playlist` and `Export Folder` list the connected drives and write
   // to the one chosen; there is no folder picker behind them [OBS rekordbox 7
   // on Windows, Winrig 2026-10-08, issue #142: the submenu held one row,
@@ -253,6 +262,7 @@ export function treeMenu(
       { label: "Create New Playlist", action: "createPlaylist" },
       { label: "Create New Intelligent Playlist", action: "createSmartPlaylist" },
       { label: "Create New Folder", action: "createFolder" },
+      ...(hasChildren ? [SEPARATOR, { label: "Sort Items", action: "sortItems" as const }] : []),
     ];
   }
   const folder = kind === "folder";
@@ -274,8 +284,7 @@ export function treeMenu(
       { label: "Rename Folder", action: "rename" },
       { label: "Delete Folder", action: "delete" },
       SEPARATOR,
-      { label: "Sort Items", action: "sortItems" },
-      SEPARATOR,
+      ...sortRows,
       { label: "Add To Shortcut", action: "addToShortcut" },
     ];
   }

@@ -1770,5 +1770,7 @@
   "Show the upper part of the artwork.": "Oberen Teil des Artworks anzeigen",
   "Copied {count} music file to {folder}.": "{count} Musikdatei nach {folder} kopiert.",
   "Copied {count} music files to {folder}.": "{count} Musikdateien nach {folder} kopiert.",
-  "That folder could not be found.": "Dieser Ordner konnte nicht gefunden werden."
+  "That folder could not be found.": "Dieser Ordner konnte nicht gefunden werden.",
+  "Sorted {name}.": "Sorted {name}.",
+  "Playlist cannot be edited or deleted while searching.": "Die Wiedergabeliste kann beim Suchen nicht bearbeitet oder gelöscht werden."
 }

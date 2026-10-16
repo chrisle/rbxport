@@ -27,6 +27,7 @@ import { droppedFilePaths, getBackend, subscribeNativeFileDrops } from "@/ipc/cl
 import type {
   Backend, DeckId, DeckTick, Device, ImportReport, LibraryProblem, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
 } from "@/ipc/types";
+import { TREE_ROOT } from "@/ipc/types";
 import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
 import { clearWaveformPreviewCache } from "@/views/browser/WaveformPreview";
 import { TreeView } from "@/views/tree/TreeView";
@@ -99,7 +100,7 @@ import { nativeMenuLabels } from "@/lib/nativeMenu";
 
 /** The commands the shell itself registers, and so the keys it runs. */
 const SHELL_COMMANDS: ReadonlySet<Action> = new Set<Action>([
-  "volumeUp", "volumeDown", "mute", "focusSearch", "clearSearch", "analyseSelection",
+  "volumeUp", "volumeDown", "mute", "focusSearch", "clearSearch", "analyseSelection", "sortItems",
 ]);
 
 /**
@@ -1638,23 +1639,41 @@ function AppBody() {
     [write],
   );
 
-  // Sort Items: the folder's children in name order, case and accents
-  // aside [ASSUME: whether rekordbox puts folders first is not captured],
-  // one move each, from the top.
+  // Sort Items on a folder or the Playlists heading: its children in name
+  // order, one level, folders and playlists together, by the ICU collation
+  // rekordbox uses for the UI's language — all decided and written by the
+  // backend as one Undo step [OBS static, rekordbox 7.2.19:
+  // `TreeViewer::treeMessageSortItem` @0x10156621c]. While the tree is
+  // searched rekordbox refuses it with its own message (the check at
+  // @0x101566324).
   const sortItems = useCallback(
-    (folder: TreeNode) => {
-      const children = childrenOf(tree, folder.id);
-      if (children.length < 2) return;
-      const sorted = [...children].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    (folder: TreeNode, searching = false) => {
+      if (searching) {
+        refuse(t("Playlist cannot be edited or deleted while searching."));
+        return;
+      }
+      const parent = folder.kind === "collection" ? TREE_ROOT : folder.id;
+      if (childrenOf(tree, parent).length < 2) return;
       write(async (backend) => {
-        for (const [index, node] of sorted.entries()) {
-          await backend.edits.movePlaylist(node.id, folder.id, index);
-        }
-        return `Sorted ${folder.name}.`;
+        const history = await backend.edits.sortItems(parent, viewPrefs.locale);
+        setEditHistory(history);
+        setLibraryEditHistory(history.undoLabel, history.redoLabel);
+        return t("Sorted {name}.", { name: folder.kind === "collection" ? t("Playlists") : folder.name });
       });
     },
-    [tree, write],
+    [tree, write, refuse, t, viewPrefs.locale],
   );
+  // Playlist › Sort Items (0x500d) from a key or the menu bar: the folder
+  // selected in the tree, as rekordbox's command acts on the tree's
+  // selection.
+  useCommands({
+    sortItems: () => {
+      const node = selectedNode;
+      if (node?.kind !== "folder" && node?.kind !== "collection") return false;
+      sortItems(node);
+      return true;
+    },
+  });
 
   // Add To Shortcut: the rail takes the playlist as a button of its own.
   // rekordbox 7.2.11 takes the same playlist twice; a second button that
