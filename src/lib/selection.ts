@@ -14,9 +14,10 @@ export interface SelectionState {
    * `lastRowSelected`, the row its list selected last. Left out, it is the
    * anchor. `null` with rows selected is rekordbox's state after ⌘-clicking
    * that row off: the keys then go from the topmost selected row
-   * (`CustomListBox::deselectRow` @0x100e7b38c resets it to the first row of
-   * the selection, or to none when nothing is left) [OBS static, rekordbox
-   * 7.2.19 macOS].
+   * (`CustomListBox::deselectRow` @0x100e7b360 resets it to the first row of
+   * the selection, or to none when nothing is left, with the store at
+   * 0x100e7b4e4) [OBS static, rekordbox 7.2.19 macOS]. Resolving that row
+   * needs the view's ids (`cursorIn`).
    */
   cursorIndex?: number | null;
 }
@@ -26,6 +27,31 @@ export const emptySelection: SelectionState = { ids: new Set(), anchorIndex: nul
 /** The row the cursor keys go from (see `SelectionState.cursorIndex`). */
 export function cursorOf(state: SelectionState): number | null {
   return state.cursorIndex === undefined ? state.anchorIndex : state.cursorIndex;
+}
+
+/**
+ * Whether the cursor is the topmost selected row, which only the view's ids
+ * can place: the cursor row was ⌘-clicked off and rows are still selected.
+ */
+export function cursorNeedsList(state: SelectionState): boolean {
+  return state.cursorIndex === null && state.ids.size > 0;
+}
+
+/** The index of the topmost row of `listed` (the view's ids) that is selected, or -1. */
+export function topSelected(state: SelectionState, listed: readonly string[]): number {
+  return listed.findIndex((id) => state.ids.has(id));
+}
+
+/**
+ * The row the cursor keys go from, given the view's ids: `cursorOf`, with a
+ * cursor ⌘-clicked off resolved to the topmost selected row as rekordbox's
+ * `deselectRow` does, or null when no row of the list is selected.
+ */
+export function cursorIn(state: SelectionState, listed: readonly string[]): number | null {
+  const at = cursorOf(state);
+  if (at !== null || state.cursorIndex !== null) return at;
+  const top = topSelected(state, listed);
+  return top < 0 ? null : top;
 }
 
 export type ClickModifier = "none" | "toggle" | "range";
@@ -111,7 +137,8 @@ export function applyClick(
       const next = new Set(state.ids);
       // rekordbox's cursor follows a row ⌘-clicked on; ⌘-clicking one off
       // leaves it, unless that row was the cursor (`flipRowSelection`
-      // @0x100e7bcb0, `deselectRow`) [OBS static, rekordbox 7.2.19 macOS].
+      // @0x100e7bcb0, `deselectRow` @0x100e7b360) [OBS static, rekordbox
+      // 7.2.19 macOS].
       if (next.has(clicked.id)) {
         next.delete(clicked.id);
         const cursor = cursorOf(state);
@@ -228,7 +255,7 @@ export function extendSelection(
     bottom = i;
   }
   if (top < 0) return null;
-  const at = cursorOf(state);
+  const at = cursorIn(state, listed);
   const cursor = at === null ? top : Math.max(0, Math.min(at, count - 1));
   const ids = new Set(state.ids);
   const select = (from: number, to: number) => {

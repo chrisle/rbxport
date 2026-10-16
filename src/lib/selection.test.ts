@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyClick, clickSettles, contextPress, cursorOf, cursorTarget, emptySelection, extendSelection, inListOrder, modifierFor, pressModifier, pressSelects, selectAll,
+  applyClick, clickSettles, contextPress, cursorIn, cursorNeedsList, cursorOf, cursorTarget, emptySelection, extendSelection, inListOrder, modifierFor, pressModifier, pressSelects, selectAll,
   selectedTracks, type ExtendMove, type SelectionState,
 } from "./selection";
 
@@ -222,6 +222,22 @@ describe("extendSelection", () => {
     s = press(s, "extendDown");
     expect(rows(s)).toEqual([2, 3, 5]);
     expect(cursorOf(s)).toBe(3);
+  });
+
+  it("puts the plain cursor keys on the top selected row after the cursor row is ⌘-clicked off", () => {
+    // rekordbox's `deselectRow` @0x100e7b360 stores the first selected row
+    // as `lastRowSelected` (0x100e7b4e4), so plain Down goes to the row after it.
+    const s = toggle(toggle(toggle(click(2), 5), 6), 6);
+    expect(cursorNeedsList(s)).toBe(true);
+    const at = cursorIn(s, listed);
+    expect(at).toBe(2);
+    expect(cursorTarget("moveDown", at, 0, 5, listed.length)).toBe(3);
+    expect(cursorTarget("moveUp", at, 0, 5, listed.length)).toBe(1);
+    // Nothing of the list left selected: the top visible row, as with none.
+    expect(cursorIn({ ids: new Set(["gone"]), anchorIndex: 6, cursorIndex: null }, listed)).toBeNull();
+    // Every row ⌘-clicked off: no row is selected, so no lookup is needed.
+    expect(cursorNeedsList(toggle(click(2), 2))).toBe(false);
+    expect(cursorNeedsList(click(2))).toBe(false);
   });
 
   it("⌘-clicking off a row that is not the cursor leaves the cursor where it was", () => {
