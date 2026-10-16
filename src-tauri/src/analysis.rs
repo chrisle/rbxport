@@ -356,6 +356,9 @@ fn analyse_file(
 ) -> AppResult<(rbl_analysis::Analysis, rbl_anlz::RekordboxWaves, f64)> {
     let mut stream = rbl_audio::MonoStream::open(path).map_err(|e| decode_error(&e))?;
     let mut creator = rbl_analysis::wave_creator::WaveCreator::new(stream.sample_rate());
+    if let Some(frames) = stream.expected_frames() {
+        creator.reserve(frames);
+    }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a positive number of seconds at an audio rate")]
     let cap = (head_secs.max(0.0) * f64::from(stream.sample_rate())) as usize;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a positive number of seconds at an audio rate")]
