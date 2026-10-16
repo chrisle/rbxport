@@ -358,6 +358,8 @@
   "Waveform color displayed on CDJ/XDJ": "顯示在CDJ/XDJ的波形顏色",
   "Type of the Overview Waveform displayed on CDJ/XDJ": "顯示在CDJ/XDJ的概要波形類型",
   "Keyboard": "鍵盤",
+  "Keyboard preset": "鍵盤預設",
+  "The menu uses this key here. Click to choose another.": "此處的選單使用此鍵。點擊以選擇另一個。",
   "Link": "LAN連接",
   "Analysis": "分析",
   "Advanced": "進階",

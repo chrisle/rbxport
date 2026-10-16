@@ -91,6 +91,7 @@ import {
 import {
   beatLoopLength, detectPlatform, dispatchBinding, hotCuePad, matchBinding, memoryCueNumber,
 } from "@/lib/shortcuts";
+import { keyMap } from "@/lib/keyPresets";
 import { WaveformDetail } from "./WaveformDetail";
 import { SimplePlayer } from "./SimplePlayer";
 import { JumpMenu } from "./JumpMenu";
@@ -1968,7 +1969,7 @@ export const Player = memo(function Player({
    * browser's cursor as readily as the track, so they wait until the deck has
    * been clicked, which is what turns the playhead red.
    */
-  const keyOverrides = preferences.keyboard.overrides;
+  const keyOverrides = keyMap(preferences.keyboard);
   const onDeckKey = useEventCallback((event: KeyboardEvent) => {
       const hit = dispatchBinding(event, platform, event.target as HTMLElement | null, keyOverrides);
       if (hit?.action === undefined) return;

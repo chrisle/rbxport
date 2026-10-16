@@ -47,6 +47,7 @@ import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
 import { createDragAutoscroll } from "@/lib/dragAutoscroll";
 import { setRowDragImage } from "./dragGhost";
+import { keyMap } from "@/lib/keyPresets";
 import { detectPlatform, dispatch, isTyping } from "@/lib/shortcuts";
 import { locateLoadedTrack, locateStep, needsCentering, registerLocateLoaded, restoredScrollTop, type SavedScroll } from "@/lib/locateLoaded";
 
@@ -996,6 +997,8 @@ export const TrackTable = memo(function TrackTable({
   const view = useTrackView(spec, libraryGeneration, pendingEdits, seed, extraColumns);
   const preferences = usePreferences();
   const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;
+  // The keys the Keyboard pane's preset and the person's own changes give.
+  const keyOverrides = keyMap(preferences.keyboard);
   const tip = useTooltip();
   // The Key cell's list, fetched the first time one opens so the table does
   // not ask for it at startup.
@@ -1335,7 +1338,7 @@ export const TrackTable = memo(function TrackTable({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      const action = dispatch(event, platform, target, preferences.keyboard.overrides);
+      const action = dispatch(event, platform, target, keyOverrides);
       // Command + L: whatever the open list holds, even nothing, since a
       // track it lacks is found in All Tracks.
       if (action === "locateLoaded") {
@@ -1395,7 +1398,7 @@ export const TrackTable = memo(function TrackTable({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, preferences.keyboard.overrides, answersLocate]);
+  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, keyOverrides, answersLocate]);
 
   const startDragOut = useCallback(
     (row: RowDto) => {
@@ -1720,7 +1723,7 @@ export const TrackTable = memo(function TrackTable({
     };
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (dispatch(event, platform, target, preferences.keyboard.overrides) !== "renumberTrackOrder") return;
+      if (dispatch(event, platform, target, keyOverrides) !== "renumberTrackOrder") return;
       if (subBrowser !== subBrowserEngaged || !onRenumber) return;
       event.preventDefault();
       if (!event.repeat) renumber();
@@ -1734,7 +1737,7 @@ export const TrackTable = memo(function TrackTable({
       }
       window.removeEventListener("keydown", onKey);
     };
-  }, [subBrowser, onRenumber, platform, preferences.keyboard.overrides, renumber]);
+  }, [subBrowser, onRenumber, platform, keyOverrides, renumber]);
 
   // Delete and ⌫ remove the whole selection the way this list's own menu
   // entry does, asking first as it does: from the collection, a playlist, a
@@ -1752,7 +1755,7 @@ export const TrackTable = memo(function TrackTable({
     if (target !== null && !inList && target !== document.body && target !== document.documentElement) return;
     if (isTyping(target) || target?.closest('[role="tree"], [role="dialog"], [role="menu"], button, [role="slider"], [role="spinbutton"]')) return;
     // A key the person bound to something else in the Keyboard pane is theirs.
-    if (dispatch(event, platform, target, preferences.keyboard.overrides) !== null) return;
+    if (dispatch(event, platform, target, keyOverrides) !== null) return;
     const action = deleteKeyAction(spec.source.kind);
     if (action === null || selection.ids.size === 0 || hasLooseId(selection.ids)) return;
     event.preventDefault();

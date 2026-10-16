@@ -359,6 +359,8 @@
   "Waveform color displayed on CDJ/XDJ": "Цвет формы волны, отображаемый на CDJ/XDJ",
   "Type of the Overview Waveform displayed on CDJ/XDJ": "Тип Обзора формы волны, отображаемый на CDJ/XDJ",
   "Keyboard": "Клавиатура",
+  "Keyboard preset": "Предустановка клавиатуры",
+  "The menu uses this key here. Click to choose another.": "Здесь меню использует эту клавишу. Нажмите, чтобы выбрать другой.",
   "Link": "Подключение LAN",
   "Analysis": "Анализ",
   "Advanced": "Дополнит.",

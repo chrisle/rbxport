@@ -351,6 +351,8 @@
   "Waveform color displayed on CDJ/XDJ": "Το χρώμα της κυματομορφής που εμφανίζεται στο CDJ/XDJ",
   "Type of the Overview Waveform displayed on CDJ/XDJ": "Ο τύπος Επισκόπησης κυματομορφής που εμφανίζεται στο CDJ/XDJ",
   "Keyboard": "Πληκτρολόγιο",
+  "Keyboard preset": "Προεπιλογή πληκτρολογίου",
+  "The menu uses this key here. Click to choose another.": "Το μενού χρησιμοποιεί αυτό το κλειδί εδώ. Κάντε κλικ για να επιλέξετε άλλο.",
   "Link": "Σύνδεση LAN",
   "Analysis": "Ανάλυση",
   "Advanced": "Προηγμένο",

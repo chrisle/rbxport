@@ -361,6 +361,8 @@
   "Waveform color displayed on CDJ/XDJ": "A CDJ/XDJ-n megjelenő hullámforma szín",
   "Type of the Overview Waveform displayed on CDJ/XDJ": "A CDJ/XDJ-n megjelenített Áttekintés hullámforma típusa",
   "Keyboard": "Billentyűzet",
+  "Keyboard preset": "Előre beállított billentyűzet",
+  "The menu uses this key here. Click to choose another.": "A menü ezt a billentyűt használja itt. Kattintson egy másik kiválasztásához.",
   "Link": "LAN csatlakozás",
   "Analysis": "Elemzés",
   "Advanced": "Részletes",

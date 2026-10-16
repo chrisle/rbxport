@@ -345,6 +345,8 @@
   "Waveform color displayed on CDJ/XDJ": "Barva tvaru vlny zobrazené na zařízení CDJ/XDJ",
   "Type of the Overview Waveform displayed on CDJ/XDJ": "Typ přehledového tvaru vlny zobrazené na zařízení CDJ/XDJ",
   "Keyboard": "Klávesy",
+  "Keyboard preset": "Přednastavená klávesnice",
+  "The menu uses this key here. Click to choose another.": "Menu zde používá tuto klávesu. Kliknutím vyberte jiný.",
   "Link": "Připojení LAN",
   "Analysis": "Analýza",
   "Advanced": "Pokročilé",

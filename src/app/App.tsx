@@ -34,6 +34,7 @@ import { StatusBar } from "@/views/statusbar/StatusBar";
 import { LinkDeckStrip } from "@/views/statusbar/LinkDeckStrip";
 import styles from "./App.module.css";
 import { locateLoadedTrack } from "@/lib/locateLoaded";
+import { keyMap } from "@/lib/keyPresets";
 import { detectPlatform, dispatch, isTyping, menuAccelerator } from "@/lib/shortcuts";
 import { hasEditHistory, runEditHistory, setLibraryEditHistory } from "@/lib/editHistory";
 import { transposeKey } from "@/lib/camelot";
@@ -2308,7 +2309,7 @@ function AppBody() {
 
   // The keyboard: the shell's own shortcuts, and the menu accelerators the
   // webview keeps from the native menu on Windows.
-  const keyOverrides = prefs.preferences.keyboard.overrides;
+  const keyOverrides = keyMap(prefs.preferences.keyboard);
   /** The level Mute took the master down from, while it is muted. */
   const mutedFrom = useRef<number | null>(null);
   useEffect(() => {

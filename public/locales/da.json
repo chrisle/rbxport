@@ -330,6 +330,8 @@
   "Waveform color displayed on CDJ/XDJ": "Bølgeformsfarve vist på CDJ/XDJ",
   "Type of the Overview Waveform displayed on CDJ/XDJ": "Type overbliksbølgeform vist på CDJ/XDJ",
   "Keyboard": "Tastatur",
+  "Keyboard preset": "Forudindstillet tastatur",
+  "The menu uses this key here. Click to choose another.": "Menuen bruger denne tast her. Klik for at vælge en anden.",
   "Link": "LAN-tilslutningen",
   "Analysis": "Analyse",
   "Advanced": "Avanceret",

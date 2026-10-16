@@ -18,6 +18,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DeckId, EqBand } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
+import { keyMap } from "@/lib/keyPresets";
 import { detectPlatform, dispatchBinding, eqKillBand } from "@/lib/shortcuts";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./MixerStrip.module.css";
@@ -90,7 +91,7 @@ const Channel = memo(function Channel({
 
   // The Keyboard pane's kill keys for this deck (unbound until assigned).
   const platform = useMemo(detectPlatform, []);
-  const overrides = usePreferencesContext().preferences.keyboard.overrides;
+  const overrides = keyMap(usePreferencesContext().preferences.keyboard);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const hit = dispatchBinding(event, platform, event.target as HTMLElement | null, overrides);

@@ -11,6 +11,7 @@
  * differently, or nothing at all must each come back as a working set.
  */
 import { ANALYSIS_SLOTS, SLOTS } from "./queue";
+import { KEY_PRESETS, type KeyPreset } from "./keyPresets";
 import type { KeyChord } from "./shortcuts";
 import { toCamelot, type TrafficLightReach } from "./camelot";
 import type {
@@ -294,8 +295,12 @@ export interface AdvancedPreferences {
   recordHistory: boolean;
 }
 
-/** Keyboard: the keys changed from the preset, by binding id (`shortcuts.ts`). */
+/**
+ * Keyboard: rekordbox's preset the keys start from (`keyPresets.ts`), and
+ * the keys changed from it, by binding id (`shortcuts.ts`).
+ */
 export interface KeyboardPreferences {
+  preset: KeyPreset;
   overrides: Record<string, KeyChord>;
 }
 
@@ -404,6 +409,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     recordHistory: true,
   },
   keyboard: {
+    preset: "export",
     overrides: {},
   },
 };
@@ -588,6 +594,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       updateFrequency: oneOf(advanced.updateFrequency, UPDATE_FREQUENCIES, d.advanced.updateFrequency),
     },
     keyboard: {
+      preset: oneOf(keyboard.preset, KEY_PRESETS, d.keyboard.preset),
       overrides: chords(keyboard.overrides),
     },
   };

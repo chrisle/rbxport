@@ -414,6 +414,8 @@
   "Waveform Current Position displayed on CDJ/XDJ": "CDJ/XDJで表示される拡大波形の現在再生位置",
   "Type of the Overview Waveform displayed on CDJ/XDJ": "CDJ/XDJで表示される全体波形の表示形式",
   "Keyboard": "キーボード",
+  "Keyboard preset": "キーボードプリセット",
+  "The menu uses this key here. Click to choose another.": "ここでメニューはこのキーを使用します。クリックして別のものを選択します。",
   "Link": "LAN接続",
   "Analysis": "解析",
   "DJ System": "DJ システム",

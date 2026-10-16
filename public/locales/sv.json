@@ -333,6 +333,8 @@
   "Waveform color displayed on CDJ/XDJ": "Vågformsfärg visad på CDJ/XDJ",
   "Type of the Overview Waveform displayed on CDJ/XDJ": "Typ av översiktsvågform visad på CDJ/XDJ",
   "Keyboard": "Tangentbord",
+  "Keyboard preset": "Tangentbordsförinställning",
+  "The menu uses this key here. Click to choose another.": "Menyn använder denna tangent här. Klicka för att välja en annan.",
   "Link": "LAN-anslutningen",
   "Analysis": "Analys",
   "Advanced": "Avancerad",

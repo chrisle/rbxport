@@ -347,6 +347,8 @@
   "Waveform color displayed on CDJ/XDJ": "CDJ/XDJ ekranında görünen dalga biçimi rengi",
   "Type of the Overview Waveform displayed on CDJ/XDJ": "CDJ/XDJ ekranında görünen Genel Görünüm Dalga Biçimi türü",
   "Keyboard": "Klavye",
+  "Keyboard preset": "Klavye ön ayarı",
+  "The menu uses this key here. Click to choose another.": "Menü burada bu tuşu kullanır. Başka bir tane seçmek için tıklayın.",
   "Link": "LAN bağlantısı",
   "Analysis": "Analiz",
   "Advanced": "Gelişmiş",

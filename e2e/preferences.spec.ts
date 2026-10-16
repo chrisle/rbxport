@@ -284,6 +284,16 @@ test("Keyboard lists rekordbox's ten groups, with the unbuilt rows greyed", asyn
   await expect(cue9.getByRole("button", { name: "Memory Cue 9 key" })).toHaveText("+");
   await dialog.getByRole("button", { name: "Reset to the preset" }).click();
   await expect(loopIn.getByRole("button", { name: "Loop In key" })).toHaveText("I");
+  // rekordbox's presets: Performance 1 plays Player A on Z and gives Time
+  // Mode no key; Export puts them back (#412).
+  const preset = dialog.getByRole("combobox", { name: "Keyboard preset" });
+  await expect(preset).toHaveValue("export");
+  await preset.selectOption("performance1");
+  await expect(playPause.getByRole("button", { name: "Play/Pause key" })).toHaveText("Z");
+  await expect(timeMode).toHaveText("Time Mode");
+  await expect(loopIn.getByRole("button", { name: "Loop In key" })).toHaveText("D");
+  await preset.selectOption("export");
+  await expect(playPause.getByRole("button", { name: "Play/Pause key" })).toHaveText("spacebar");
   // A row rekordbox lists unbound has no key.
   await expect(dialog.locator('[class*="keyRow"]', { hasText: "1/64 Beat Loop" }).first()).toHaveText("1/64 Beat Loop");
 
