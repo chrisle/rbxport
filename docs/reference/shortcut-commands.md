@@ -83,7 +83,7 @@ in the `b` scope. Keys are the Export preset's.
 | Analyze Track (`analyseSelection`) | shift + command + A (RBXport's own key; rekordbox's Export preset binds none) | 4000 | Track › Analyze Track | key; Track › Analyze Track (added in #431); list context menu | App, none |
 | Select All (`selectAll`) | command + A | none (list built-in) | no | key | TrackTable, `main`/`sub` |
 | Cursor Up, Down, Page Up, Page Down, to Top, to Bottom | cursor keys, page up/down, home, end, command + cursor up/down | none (list built-in) | no | key | TrackTable, `main`/`sub` |
-| Extend Selection Up/Down (`extendUp`, `extendDown`) | shift + cursor up/down | none | no | bound but not implemented: #514 | none |
+| Extend Selection Up/Down (`extendUp`, `extendDown`) | shift + cursor up/down | none (list built-in: `CustomListBox::keyPressed`, #514) | no | key | TrackTable, `main`/`sub` |
 | Load on Player 1 (`loadPlayer1`) | enter, shift + enter | none | no | key; double-click a row; drag to the deck | Player, `a` |
 | Locate track loaded on deck (`locateLoaded`) | command + L | b139 | no | key; Track › Locate track loaded on deck (#430) | TrackTable (main browser), none |
 | Renumber Track Order (`renumberTrackOrder`) | unbound | 500e | Playlist › Renumber Track Order | key once bound; column header menu | TrackTable, `main`/`sub` |

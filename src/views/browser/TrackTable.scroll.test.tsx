@@ -309,7 +309,9 @@ describe("the list's commands, from a key and from anywhere else (#431)", () => 
     await settle();
     const byKey = selectedIds();
     expect(byKey.length).toBeGreaterThan(1);
-    key({ key: "ArrowDown", code: "ArrowDown" });
+    // Home rather than Down: after Select All the cursor is on the last row,
+    // as rekordbox's is, so Down would scroll the list to its end.
+    key({ key: "Home", code: "Home" });
     await settle();
     expect(selectedIds()).toHaveLength(1);
     act(() => {
@@ -317,6 +319,38 @@ describe("the list's commands, from a key and from anywhere else (#431)", () => 
     });
     await settle();
     expect(selectedIds()).toEqual(byKey);
+  });
+
+  it("extends and shrinks the selection the same way for shift + cursor and its commands (#514)", async () => {
+    render({});
+    await settle();
+    await settle();
+    key({ key: "ArrowDown", code: "ArrowDown" });
+    await settle();
+    const first = selectedIds();
+    expect(first).toHaveLength(1);
+    expect(key({ key: "ArrowDown", code: "ArrowDown", shiftKey: true }).defaultPrevented).toBe(true);
+    await settle();
+    expect(key({ key: "ArrowDown", code: "ArrowDown", shiftKey: true }).defaultPrevented).toBe(true);
+    await settle();
+    const three = selectedIds();
+    expect(three).toHaveLength(3);
+    expect(three[0]).toBe(first[0]);
+    // Reversing shrinks back toward the row it started from.
+    expect(key({ key: "ArrowUp", code: "ArrowUp", shiftKey: true }).defaultPrevented).toBe(true);
+    await settle();
+    expect(selectedIds()).toEqual(three.slice(0, 2));
+    act(() => {
+      expect(runCommand("extendDown", { scope: "main" })).toBe(true);
+    });
+    await settle();
+    expect(selectedIds()).toEqual(three);
+    act(() => {
+      expect(runCommand("extendUp", { scope: "main" })).toBe(true);
+      expect(runCommand("extendUp", { scope: "main" })).toBe(true);
+    });
+    await settle();
+    expect(selectedIds()).toEqual(first);
   });
 
   it("answers only for the list it is, and not once the list has gone", async () => {

@@ -21,8 +21,8 @@ import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatShortDate } from "@/lib/format";
 import {
-  applyClick, clickSettles, cursorTarget, emptySelection, inListOrder, pressModifier, pressSelects, selectAll,
-  selectedTracks, type CursorMove, type SelectionState,
+  applyClick, clickSettles, cursorOf, cursorTarget, emptySelection, extendSelection, inListOrder, pressModifier, pressSelects, selectAll,
+  selectedTracks, type CursorMove, type ExtendMove, type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import {
@@ -56,7 +56,7 @@ import { locateLoadedTrack, locateStep, needsCentering, registerLocateLoaded, re
 const ROW_H = 25; // --s-row-height
 /** The list's commands its keyboard handler runs: selection and the cursor. */
 const LIST_COMMANDS: ReadonlySet<Action> = new Set<Action>([
-  "selectAll", "moveUp", "moveDown", "pageUp", "pageDown", "toTop", "toBottom",
+  "selectAll", "moveUp", "moveDown", "pageUp", "pageDown", "toTop", "toBottom", "extendUp", "extendDown",
 ]);
 /**
  * A removal the list asks for: resolves true once the tracks are gone, false
@@ -1289,7 +1289,7 @@ export const TrackTable = memo(function TrackTable({
         const id = ids[0];
         setSelection(
           id === undefined
-            ? (s) => ({ ...s, anchorIndex: index })
+            ? (s) => ({ ...s, anchorIndex: index, cursorIndex: index })
             : { ids: new Set([id]), anchorIndex: index },
         );
       });
@@ -1348,9 +1348,32 @@ export const TrackTable = memo(function TrackTable({
   const cursorCommand = (move: CursorMove) => () => {
     if (view.count === 0) return false;
     const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 0) / rowH) - 1);
-    moveCursor(cursorTarget(move, selection.anchorIndex, firstIndex, page, view.count));
+    moveCursor(cursorTarget(move, cursorOf(selection), firstIndex, page, view.count));
     return true;
   };
+  // Shift + cursor up/down (see `extendSelection`). The whole view's ids are
+  // asked for, since the selection is by id and may hold rows never fetched;
+  // the change is applied to the selection as it is when they arrive, so a
+  // held key's repeats each take a step. With nothing selected the key is a
+  // plain cursor move, as rekordbox's is.
+  const followCursor = useRef(false);
+  const extendCommand = (move: ExtendMove) => () => {
+    if (view.count === 0) return false;
+    if (selection.ids.size === 0) return cursorCommand(move === "extendUp" ? "moveUp" : "moveDown")();
+    void view.idsInRange(0, view.count).then((listed) => {
+      followCursor.current = true;
+      setSelection((s) => extendSelection(s, move, listed)?.selection ?? s);
+    });
+    return true;
+  };
+  // The extended row is scrolled into view, as rekordbox's
+  // `selectRowInternal` does for it.
+  useEffect(() => {
+    if (!followCursor.current) return;
+    followCursor.current = false;
+    const at = cursorOf(selection);
+    if (at !== null && at < view.count) virtualizer.scrollToIndex(at);
+  }, [selection, view.count, virtualizer]);
   useCommands({
     // The ids come from the backend, which resolves them for every row of
     // the view — including the ones that were never scrolled into range and
@@ -1368,6 +1391,8 @@ export const TrackTable = memo(function TrackTable({
     pageDown: cursorCommand("pageDown"),
     toTop: cursorCommand("toTop"),
     toBottom: cursorCommand("toBottom"),
+    extendUp: extendCommand("extendUp"),
+    extendDown: extendCommand("extendDown"),
   }, listScope);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
