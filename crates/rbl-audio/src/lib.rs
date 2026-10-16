@@ -545,6 +545,68 @@ mod tests {
         mp3
     }
 
+    /// Where an MP3's frame `index` starts, counting its Info frame as 0.
+    fn frame_at(bytes: &[u8], index: usize) -> usize {
+        let mut at = bytes.windows(2).position(|w| w == [0xFF, 0xFB]).unwrap();
+        for _ in 0..index {
+            at += 1044 + usize::from((bytes[at + 2] >> 1) & 1);
+        }
+        assert_eq!(&bytes[at..at + 2], &[0xFF, 0xFB]);
+        at
+    }
+
+    /// The MP3 with its fourth frame claiming 511 big values in its first
+    /// granule, more than a granule holds: symphonia refuses to decode it, as
+    /// it does the broken frames some files open with.
+    fn damaged_mp3(mp3: &Path) -> std::path::PathBuf {
+        let mut bytes = std::fs::read(mp3).unwrap();
+        let at = frame_at(&bytes, 3);
+        // Side information: main_data_begin (9 bits), private bits (3),
+        // scfsi (8), part2_3_length (12), then big_values (9).
+        bytes[at + 8] = 0xFF;
+        bytes[at + 9] |= 0x80;
+        let damaged = mp3.with_file_name("damaged.mp3");
+        std::fs::write(&damaged, bytes).unwrap();
+        damaged
+    }
+
+    /// The MP3 with its first audio frame in plain stereo, where the Info
+    /// frame and the rest are joint: rekordbox starts its map a frame after
+    /// that one, so its timeline begins a frame into symphonia's.
+    fn restarted_mp3(mp3: &Path) -> std::path::PathBuf {
+        let mut bytes = std::fs::read(mp3).unwrap();
+        let at = frame_at(&bytes, 1);
+        bytes[at + 3] &= 0x3F;
+        let restarted = mp3.with_file_name("restarted.mp3");
+        std::fs::write(&restarted, bytes).unwrap();
+        restarted
+    }
+
+    /// Everything `next_frames` hands out, the downmix and the stereo frames
+    /// as two runs, each chunk's two views checked to be as long.
+    fn frames_of(path: &Path) -> (Vec<f32>, Vec<[i16; 2]>) {
+        let mut stream = MonoStream::open(path).unwrap();
+        let (mut mono, mut stereo) = (Vec::new(), Vec::new());
+        while let Some((chunk, frames)) = stream.next_frames() {
+            assert_eq!(chunk.len(), frames.len(), "a chunk's downmix and stereo are the same frames");
+            mono.extend_from_slice(chunk);
+            stereo.extend_from_slice(frames);
+        }
+        (mono, stereo)
+    }
+
+    /// Each stereo frame is the one its downmix sample was made from: a frame
+    /// out of step on a 440 Hz tone is off by thousands of times more.
+    fn assert_in_step(mono: &[f32], stereo: &[[i16; 2]]) {
+        assert_eq!(mono.len(), stereo.len());
+        let worst = mono
+            .iter()
+            .zip(stereo)
+            .map(|(m, [l, r])| (m - (f32::from(*l) + f32::from(*r)) / 65_536.0).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(worst < 2.0 / 32_768.0, "{worst}");
+    }
+
     /// The file as symphonia decodes it, mono, with nothing moved.
     fn symphonia_mono(path: &Path) -> Vec<f32> {
         let file = std::fs::File::open(path).unwrap();
@@ -584,27 +646,45 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mp3 = lame_mp3(dir.path());
         let whole = decode_mono(&mp3, None).unwrap().samples;
-        // The fourth frame claims 511 big values in its first granule, more
-        // than a granule holds: symphonia refuses to decode it, as it does
-        // the broken frames some files open with.
-        let mut bytes = std::fs::read(&mp3).unwrap();
-        let mut at = bytes.windows(2).position(|w| w == [0xFF, 0xFB]).unwrap();
-        for _ in 0..3 {
-            at += 1044 + usize::from((bytes[at + 2] >> 1) & 1);
-        }
-        assert_eq!(&bytes[at..at + 2], &[0xFF, 0xFB]);
-        // Side information: main_data_begin (9 bits), private bits (3),
-        // scfsi (8), part2_3_length (12), then big_values (9).
-        bytes[at + 8] = 0xFF;
-        bytes[at + 9] |= 0x80;
-        let damaged = dir.path().join("damaged.mp3");
-        std::fs::write(&damaged, bytes).unwrap();
+        let damaged = damaged_mp3(&mp3);
         let audio = decode_mono(&damaged, None).unwrap().samples;
         assert_eq!(audio.len(), whole.len(), "a dropped packet moves everything after it");
         // What follows the damage is where it was.
         let tail = whole.len() - 22_050;
         let drift = audio[tail..].iter().zip(&whole[tail..]).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
         assert!(drift < 1e-6, "{drift}");
+    }
+
+    #[test]
+    fn an_mp3_s_stereo_frames_open_with_the_silence_rekordbox_plays() {
+        let dir = tempfile::tempdir().unwrap();
+        let mp3 = lame_mp3(dir.path());
+        let (mono, stereo) = frames_of(&mp3);
+        assert_eq!(mono, decode_mono(&mp3, None).unwrap().samples);
+        assert!(stereo[..1152].iter().all(|&frame| frame == [0, 0]));
+        assert_in_step(&mono, &stereo);
+    }
+
+    #[test]
+    fn an_mp3_s_stereo_frames_drop_what_rekordbox_does_not_play() {
+        let dir = tempfile::tempdir().unwrap();
+        let restarted = restarted_mp3(&lame_mp3(dir.path()));
+        assert_eq!(rbl_core::mpeg::rekordbox_lead_frames(&mut std::fs::File::open(&restarted).unwrap()), -1152);
+        let (mono, stereo) = frames_of(&restarted);
+        assert_eq!(mono.len(), symphonia_mono(&restarted).len() - 1152);
+        assert_in_step(&mono, &stereo);
+    }
+
+    #[test]
+    fn a_damaged_mp3_packet_is_silence_in_the_stereo_frames_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let mp3 = lame_mp3(dir.path());
+        let (mono, stereo) = frames_of(&damaged_mp3(&mp3));
+        assert_eq!(mono, decode_mono(&damaged_mp3(&mp3), None).unwrap().samples);
+        assert_eq!(stereo.len(), frames_of(&mp3).1.len(), "the damaged packet keeps its place");
+        // The Info frame's silence and two good frames, then the damaged one.
+        assert!(stereo[3 * 1152..4 * 1152].iter().all(|&frame| frame == [0, 0]));
+        assert_in_step(&mono, &stereo);
     }
 
     #[test]
