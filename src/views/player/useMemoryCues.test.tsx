@@ -62,6 +62,11 @@ function stubBackend(): Backend {
         sent.push(`add:${track}:${slot}:${positionMs}`);
         return Promise.resolve("new-cue");
       },
+      addLoop: (track: string, kind: CueKind, inMs: number, outMs: number, beats?: number) => {
+        const slot = typeof kind === "string" ? kind : kind.hot;
+        sent.push(`loop:${track}:${slot}:${inMs}-${outMs}:${beats ?? "-"}`);
+        return Promise.resolve("new-loop");
+      },
       deleteCue: (id: string) => {
         sent.push(`delete:${id}`);
         return Promise.resolve();
@@ -289,6 +294,75 @@ describe("storing a memory cue", () => {
     expect(sent).toEqual([]);
 
     mount({ trackId: null, cuePoint: 45 });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual([]);
+  });
+});
+
+describe("storing a loop as a memory loop (#411)", () => {
+  // [OBS] rekordbox 7.2.19 UiPlayer::eventMemoryCue @0x101b9d91c: with a loop
+  // playing, MEMORY stores the loop's in and out (and the Auto Beat Loop's
+  // length), not the cue point; the manual's "To save the loop" (7.2.18 p.163).
+  it("stores the auto beat loop playing, with its length, instead of the cue point", async () => {
+    mount({ cues: [], cuePoint: 12, playingLoop: () => ({ inSeconds: 30, outSeconds: 31.875 }), beatLoopBeats: () => 4 });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual(["loop:track-1:memory:30000-31875:4"]);
+  });
+
+  it("keeps a fraction of a beat as a fraction", async () => {
+    mount({ cues: [], playingLoop: () => ({ inSeconds: 40, outSeconds: 40.234 }), beatLoopBeats: () => 0.5 });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual(["loop:track-1:memory:40000-40234:0.5"]);
+  });
+
+  it("stores a manual or called loop as In and Out alone", async () => {
+    mount({ cues: [], playingLoop: () => ({ inSeconds: 10, outSeconds: 13.3 }), beatLoopBeats: () => null });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual(["loop:track-1:memory:10000-13300:-"]);
+  });
+
+  it("stores the cue point once the loop has been left", async () => {
+    mount({ cues: [], cuePoint: 12, playingLoop: () => null, beatLoopBeats: () => null });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual(["add:track-1:memory:12000"]);
+  });
+
+  it("refuses the same loop twice, but not a loop on a plain cue's point", async () => {
+    // CUES has a memory loop 60-64 s and a plain cue at 30 s.
+    mount({ playingLoop: () => ({ inSeconds: 60, outSeconds: 64 }) });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual([]);
+
+    mount({ playingLoop: () => ({ inSeconds: 30, outSeconds: 32 }) });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual(["loop:track-1:memory:30000-32000:-"]);
+  });
+
+  it("lets a plain cue sit on a memory loop's in point", async () => {
+    // [OBS] @0x101b9dd64: without a loop only a plain cue on the point stops it.
+    mount({ cuePoint: 60 });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual(["add:track-1:memory:60000"]);
+  });
+
+  it("refuses an eleventh, a loop counting like a cue", async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => cue(`m${i}`, (i + 1) * 10_000));
+    mount({ cues: ten, playingLoop: () => ({ inSeconds: 200, outSeconds: 202 }) });
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual([]);
+  });
+
+  it("writes nothing read-only", async () => {
+    mount({ readOnly: true, playingLoop: () => ({ inSeconds: 200, outSeconds: 202 }) });
     act(() => memory.store());
     await settle();
     expect(sent).toEqual([]);

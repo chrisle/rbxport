@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Cue } from "@/ipc/types";
 import {
-  MEMORY_TOLERANCE_MS, hotCue, hotLetters, memoryCueAt, memoryCueNumber, nextMemoryCue,
+  MEMORY_TOLERANCE_MS, hotCue, hotLetters, memoryCueAt, memoryCueNumber, memoryLoopAt, nextMemoryCue,
   previousMemoryCue, rowCuesOf,
 } from "./cues";
 
@@ -171,5 +171,17 @@ describe("rowCuesOf", () => {
     const sorted = [hot("early", "A", 2_000, "#f00"), hot("late", "A", 9_000, "#0f0")];
     expect(rowCuesOf(sorted)).toEqual([["A", 2_000, "#f00", false]]);
     expect(rowCuesOf(sorted)[0]?.[1]).toBe(hotCue(sorted, "A")?.positionMs);
+  });
+});
+
+describe("memoryLoopAt (#411)", () => {
+  const at = (positionMs: number, outMs: number, memory = true) =>
+    ({ id: `${positionMs}`, positionMs, outMs, letter: memory ? "" : "A", memory, colour: null }) satisfies Cue;
+  it("finds a memory loop by both ends, never a plain cue or a hot loop", () => {
+    const cues = [at(30_000, 0), at(60_000, 64_000), at(80_000, 84_000, false)];
+    expect(memoryLoopAt(cues, 60_010, 63_990)?.id).toBe("60000");
+    expect(memoryLoopAt(cues, 60_000, 62_000)).toBeNull();
+    expect(memoryLoopAt(cues, 30_000, 32_000)).toBeNull();
+    expect(memoryLoopAt(cues, 80_000, 84_000)).toBeNull();
   });
 });

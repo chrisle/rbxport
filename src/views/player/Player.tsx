@@ -1310,10 +1310,6 @@ export const Player = memo(function Player({
 
   const seek = seekInPhase;
   const positionSeconds = useCallback(() => positionRef.current, [positionRef]);
-  const memory = useMemoryCues({
-    trackId: playback.idle ? null : track?.id ?? null,
-    cues, positionSeconds, seek, setLoop: playback.setLoop, cuePoint, setCuePoint, readOnly, onError,
-  });
   // A called hot cue plays from its point, as rekordbox does from pause. It
   // goes through PLAY, so a synced deck starts on the master's beat too.
   const playFromCue = useEventCallback(() => {
@@ -1408,7 +1404,6 @@ export const Player = memo(function Player({
   // let a cached WebKit render show an enabled-action tooltip on a control
   // that the hook had already disabled.
   const hotCueEditReason = hot.canEdit ? undefined : READ_ONLY_REASON;
-  const memoryCueEditReason = memory.canEdit ? undefined : READ_ONLY_REASON;
   // The GRID EDIT cluster. The playhead it reads is the extrapolated one:
   // a beat is a few frames, and the frame loop's copy can be a frame behind.
   const positionMs = useCallback(() => positionNow() * 1000, [positionNow]);
@@ -1600,6 +1595,16 @@ export const Player = memo(function Player({
     hasLoop: playback.loop !== null,
   }), [loopMode, chooseLoopMode, loopBeats, resizeLoop, activeLoop, beatLoopOn, loopIn, playback.idle, playback.loop, grid.times.length,
     autoLoop, loopOfBeats, markLoopIn, loopOut]);
+  // MEMORY: the cue point, or the loop playing as a memory loop with the
+  // Auto Beat Loop's length when it is the one AU set (#411).
+  const beatLoopBeats = useEventCallback(() => (beatLoopOn ? loopBeats : null));
+  const memory = useMemoryCues({
+    trackId: playback.idle ? null : track?.id ?? null,
+    cues, positionSeconds, seek, setLoop: playback.setLoop, playingLoop, beatLoopBeats,
+    cuePoint, setCuePoint, readOnly, onError,
+  });
+  // Editability and its explanation come from the hook, as for the hot cues.
+  const memoryCueEditReason = memory.canEdit ? undefined : READ_ONLY_REASON;
   // A play is recorded after a minute of the track sounding, once per load,
   // when Preferences › Advanced › History says so and the library can be
   // written. rekordbox's own threshold is not recorded; a minute is what

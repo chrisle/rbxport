@@ -3,6 +3,7 @@
  *
  * rekordbox's own arrangement, from `german.lang` and the Export key map:
  * `Set Memory Cue` (`M`) stores the cue point the transport's CUE or IN set,
+ * or, while a loop plays, the loop itself as a memory loop,
  * `Call Previous Memory Cue` (`B`) and `Call Next Memory Cue` (`N`) move the
  * playhead to the memory cue either side of it, and `Delete Memory Cue` (`X`)
  * removes the one the playhead is standing on. The list beside the deck has
@@ -16,7 +17,7 @@
 import { useCallback } from "react";
 
 import type { Cue } from "@/ipc/types";
-import { memoryCueAt, memoryCueNumber, nextMemoryCue, previousMemoryCue } from "@/lib/cues";
+import { memoryCueAt, memoryCueNumber, memoryLoopAt, nextMemoryCue, previousMemoryCue } from "@/lib/cues";
 import { useCueWriter } from "./useCueWriter";
 
 export { READ_ONLY_REASON } from "./useCueWriter";
@@ -33,6 +34,16 @@ export interface MemoryCueDeck {
   seek: (seconds: number) => void;
   /** Sets the deck's loop, for a memory loop called: it plays as a loop. */
   setLoop?: ((inSeconds: number, outSeconds: number) => void) | undefined;
+  /**
+   * The loop the deck is playing, read at the moment MEMORY goes down, or
+   * `null` with none playing; what MEMORY stores in place of the cue point.
+   */
+  playingLoop?: (() => { inSeconds: number; outSeconds: number } | null) | undefined;
+  /**
+   * The Auto Beat Loop's length in beats while the loop playing is the one
+   * it set, else `null`: a memory loop saved from it records the length.
+   */
+  beatLoopBeats?: (() => number | null) | undefined;
   /** Where CUE returns to, in seconds; what MEMORY stores. */
   cuePoint: number;
   setCuePoint: (seconds: number) => void;
@@ -44,7 +55,7 @@ export interface MemoryCueDeck {
 export interface MemoryCueActions {
   /** Whether the controls do anything: a track is loaded and can be written. */
   canEdit: boolean;
-  /** `Set Memory Cue`: stores the cue point as a memory cue. */
+  /** `Set Memory Cue`: stores the cue point, or the loop playing, as a memory cue. */
   store: () => void;
   /** `Call Previous Memory Cue`. */
   callPrevious: () => void;
@@ -59,29 +70,49 @@ export interface MemoryCueActions {
 }
 
 export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
-  const { trackId, cues, positionSeconds, seek, setLoop, cuePoint, setCuePoint, readOnly, onError } = deck;
+  const {
+    trackId, cues, positionSeconds, seek, setLoop, playingLoop, beatLoopBeats, cuePoint, setCuePoint, readOnly, onError,
+  } = deck;
   const canEdit = trackId !== null && !readOnly;
   const write = useCueWriter(onError);
 
   /**
-   * MEMORY stores the cue point, never the playhead, playing or paused.
+   * MEMORY stores the cue point, never the playhead, playing or paused; with
+   * a loop playing it stores the loop, as a memory loop.
    * [OBS] rekordbox 7.2.19 `UiPlayer::eventMemoryCue` @0x101b9d91c reads
    * `DjEngineIF::getCueTime(channel, 0)` (the deck's current cue, the one CUE
-   * and IN set) and writes that with `setCueTime`; it does not read the play
-   * position or pause the deck. A DJ who wants the playhead stored presses
+   * and IN set; the loop's in and out while one plays, @0x100915cb8) and
+   * writes that with `setCueTime`; it does not read the play position, pause
+   * the deck or leave the loop. A DJ who wants the playhead stored presses
    * IN there first, which makes it the cue point (see `markLoopIn`).
+   * The manual says the same: during loop play, MEMORY saves the loop point
+   * (rekordbox 7.2.18, pp. 100 and 163).
    */
   const store = useCallback(() => {
     if (!canEdit || trackId === null) return;
+    // [OBS] Ten at most, memory cues and memory loops together (@0x101b9dde8).
+    if (cues.filter((c) => c.memory).length >= MEMORY_CUE_LIMIT) return;
+    const loop = playingLoop?.() ?? null;
+    if (loop && loop.outSeconds > loop.inSeconds) {
+      const inMs = Math.round(Math.max(loop.inSeconds, 0) * 1000);
+      const outMs = Math.round(loop.outSeconds * 1000);
+      // [OBS] While looping, only a memory loop with the same in and the same
+      // out stops it (@0x101b9dac0); a plain cue at the in point does not.
+      if (memoryLoopAt(cues, inMs, outMs) || outMs <= inMs) return;
+      // [OBS] The Auto Beat Loop's length goes with it (`isAutoBeatLooping`,
+      // `getAutoBeatLoop` @0x101b9dea0); any other loop is In and Out alone.
+      const beats = beatLoopBeats?.() ?? undefined;
+      write((edits) => edits.addLoop(trackId, "memory", inMs, outMs, beats));
+      return;
+    }
     const positionMs = Math.round(Math.max(cuePoint, 0) * 1000);
-    // [OBS] The same handler does nothing when a memory cue already sits on
-    // the cue point, or when the track already has ten (memory cues and
-    // memory loops together, @0x101b9dde8). rekordbox compares the exact
-    // point; within the list's tolerance is the nearest the rows here can
-    // tell apart.
-    if (memoryCueAt(cues, positionMs) || cues.filter((c) => c.memory).length >= MEMORY_CUE_LIMIT) return;
+    // [OBS] Without a loop, only a plain memory cue already on the cue point
+    // stops it (@0x101b9dd64 checks the entry is a cue, not a loop).
+    // rekordbox compares the exact point; within the list's tolerance is the
+    // nearest the rows here can tell apart.
+    if (memoryCueAt(cues.filter((c) => c.outMs <= c.positionMs), positionMs)) return;
     write((edits) => edits.addCue(trackId, "memory", positionMs));
-  }, [canEdit, trackId, cuePoint, cues, write]);
+  }, [canEdit, trackId, playingLoop, beatLoopBeats, cuePoint, cues, write]);
 
   /**
    * Calling a memory cue moves the playhead there and makes it the cue

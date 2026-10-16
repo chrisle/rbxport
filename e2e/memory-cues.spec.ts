@@ -256,3 +256,44 @@ test("memory loops and the Active Loop are listed with rekordbox's loop mark and
   await expect(overview.locator('[data-cue=""]')).toHaveCount(3);
   await expect(overview.locator('[class*="loopBand"]')).toHaveCount(2);
 });
+
+test("MEMORY during an Auto Beat Loop saves the loop, which a reload keeps and a call plays", async ({ page }) => {
+  // #411: rekordbox 7.2.18 manual p.163, "To save the loop": during loop play,
+  // MEMORY saves the loop point. rekordbox 7.2.19 UiPlayer::eventMemoryCue
+  // stores the loop's in and out and leaves the deck looping.
+  await load(page, "?writable=1");
+  const deck = player(page);
+  const list = page.getByRole("complementary", { name: "Cue list" });
+  const loopBands = page.getByTestId("player-overview").locator('[class*="loopBand"]');
+  await expect(memoryRows(page)).toHaveCount(1);
+  await expect(list.getByTestId("memory-cue-loop")).toHaveCount(0);
+
+  await deck.getByRole("button", { name: "Play", exact: true }).click();
+  await deck.getByRole("button", { name: "4 beat loop" }).click();
+  const exit = deck.getByRole("button", { name: "Exit loop" });
+  await expect(exit).toHaveAttribute("aria-pressed", "true");
+  await deck.getByRole("button", { name: "Set memory cue" }).click();
+
+  // A second MEMORY row, marked as a loop, and the deck still in its loop.
+  await expect(memoryRows(page)).toHaveCount(2);
+  await expect(list.getByTestId("memory-cue-loop")).toHaveCount(1);
+  await expect(exit).toHaveAttribute("aria-pressed", "true");
+  // The same loop again is not stored twice.
+  await page.keyboard.press("m");
+  await page.waitForTimeout(200);
+  await expect(memoryRows(page)).toHaveCount(2);
+
+  // Left, another track loaded, then this one again: the loop is still there.
+  await exit.click();
+  await deck.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.locator('[role="gridcell"][data-col="title"]').nth(4).dblclick();
+  await expect(list.getByTestId("memory-cue-loop")).toHaveCount(0);
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+  await expect(memoryRows(page)).toHaveCount(2);
+  await expect(list.getByTestId("memory-cue-loop")).toHaveCount(1);
+  await expect(loopBands).toHaveCount(1);
+
+  // Called from the list, it plays as the loop.
+  await list.locator('[role="button"][data-loop]').first().click();
+  await expect(page.getByTestId("player-overview").locator('[class*="loopBand"][data-active]')).toHaveCount(1);
+});

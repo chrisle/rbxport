@@ -1925,8 +1925,9 @@ export interface Edits {
   addCue(track: string, kind: CueKind, positionMs: number): Promise<string>;
   /**
    * Adds a loop: a cue with an out point. `beats` is the loop's length in
-   * beats when known; left out, In and Out are all that is recorded, which
-   * is what most of the library's loops do.
+   * beats when known — a whole number, or 1/2 to 1/64 for a short Auto Beat
+   * Loop; left out, In and Out are all that is recorded, which is what most
+   * of the library's loops do.
    */
   addLoop(track: string, kind: CueKind, inMs: number, outMs: number, beats?: number): Promise<string>;
   moveCue(cue: string, positionMs: number): Promise<void>;
