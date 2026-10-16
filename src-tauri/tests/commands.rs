@@ -582,6 +582,80 @@ fn a_deleted_playlist_tree_can_be_undone_and_redone() {
     assert!(!s.has_node("Friday"));
 }
 
+/// #426: a folder drop's Replace existing is one step of library history.
+/// One Undo takes the new playlist away and gives back the replaced folder
+/// with its nested lists, order and tracks; one Redo replaces it again. The
+/// history before it stays usable: Undo carries on to the older rename.
+#[test]
+fn a_folder_drop_replacement_is_one_undo_and_one_redo() {
+    let s = shell();
+    let tree_ids = |s: &Shell| s.tree().into_iter().map(|n| (n.id, n.depth)).collect::<Vec<_>>();
+    run(commands::create_folder(s.handle(), s.state(), "Warm Up".into(), ROOT.into())).unwrap();
+    let old = s.node("Warm Up");
+    run(commands::create_playlist(s.handle(), s.state(), "Early".into(), old.id.clone(), None)).unwrap();
+    let early = s.node("Early");
+    let tracks = vec![track_id(3), track_id(1)];
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), early.id.clone(), tracks.clone(), None)).unwrap();
+    run(commands::rename_playlist(s.handle(), s.state(), early.id.clone(), "Opening".into())).unwrap();
+    let before = tree_ids(&s);
+
+    let folder = s._dir.path().join("Warm Up");
+    std::fs::create_dir_all(&folder).unwrap();
+    write_wav(&folder.join("a.wav"), 1);
+    let path = folder.display().to_string();
+    let asked =
+        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), ROOT.into(), None, Some(0), None)).unwrap();
+    assert_eq!(asked.conflict.as_deref(), Some(old.id.as_str()));
+    let replaced = run(commands::import_folder_playlist(
+        s.handle(), s.state(), path, ROOT.into(), Some(old.id.clone()), asked.at, None,
+    ))
+    .unwrap();
+    let made = replaced.playlist.unwrap();
+    assert!(!s.has_node("Opening"));
+    let after = tree_ids(&s);
+    assert_eq!(after[after.iter().position(|(_, depth)| *depth == 1).unwrap()].0, made, "put first");
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(undone.redo_label.as_deref(), Some("Replace Playlist"));
+    assert_eq!(undone.undo_label.as_deref(), Some("Rename Playlist"), "older history is kept");
+    assert_eq!(tree_ids(&s), before, "the folder, its list and the order are back");
+    assert_eq!(ids(&s.playlist_rows(&early.id)), [tracks[0].as_str(), tracks[1].as_str()]);
+
+    let redone = run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(redone.undo_label.as_deref(), Some("Replace Playlist"));
+    assert_eq!(tree_ids(&s), after);
+    assert_eq!(s.playlist_rows(&made).len(), 1);
+
+    // Undo twice: the replacement, then the rename before it.
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(s.node("Early").id, early.id);
+}
+
+/// #426: Undo of a replacement refuses once the new playlist has changed,
+/// and the history keeps the entry rather than losing it.
+#[test]
+fn a_folder_drop_replacement_refuses_undo_after_its_playlist_changed() {
+    let s = shell();
+    let folder = s._dir.path().join("Playlist 0");
+    std::fs::create_dir_all(&folder).unwrap();
+    write_wav(&folder.join("a.wav"), 1);
+    let path = folder.display().to_string();
+    let replaced = run(commands::import_folder_playlist(
+        s.handle(), s.state(), path, ROOT.into(), Some(playlist_id(0)), None, None,
+    ))
+    .unwrap();
+    let made = replaced.playlist.unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), made.clone(), vec![track_id(4)], None)).unwrap();
+    let tree_ids = |s: &Shell| s.tree().into_iter().map(|n| (n.id, n.name, n.depth)).collect::<Vec<_>>();
+    let tree = tree_ids(&s);
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert!(error.message.contains("can no longer be undone"), "{}", error.message);
+    assert_eq!(tree_ids(&s), tree, "nothing written");
+    assert_eq!(s.playlist_rows(&made).len(), 2);
+}
+
 #[test]
 fn library_history_names_and_reverses_each_supported_edit() {
     let s = shell();

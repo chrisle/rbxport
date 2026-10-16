@@ -798,7 +798,9 @@ where
 fn touched_by(edit: &LibraryEdit) -> Touched {
     match edit {
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) |
-        LibraryEdit::MovePlaylist(_) | LibraryEdit::RemovePlaylistTracks(_) => Touched::Playlists,
+        LibraryEdit::MovePlaylist(_) | LibraryEdit::RemovePlaylistTracks(_) |
+        // The tracks a replacement imported stay in the collection.
+        LibraryEdit::ReplacePlaylist(_) => Touched::Playlists,
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
         LibraryEdit::Track(_) | LibraryEdit::TrackTags(_) => Touched::Tracks,
@@ -810,6 +812,7 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
         LibraryEdit::DeletePlaylist(value) => if undo { writer.restore_playlist(value) } else { writer.redo_playlist_deletion(value) }.map(|_| ()),
         LibraryEdit::RenamePlaylist(value) => if undo { writer.undo_rename(value) } else { writer.redo_rename(value) }.map(|_| ()),
         LibraryEdit::MovePlaylist(value) => if undo { writer.undo_move(value) } else { writer.redo_move(value) }.map(|_| ()),
+        LibraryEdit::ReplacePlaylist(value) => if undo { writer.undo_replacement(value) } else { writer.redo_replacement(value) }.map(|_| ()),
         LibraryEdit::RemovePlaylistTracks(value) => if undo { writer.undo_track_removal(value) } else { writer.redo_track_removal(value) }.map(|_| ()),
         LibraryEdit::Track(values) => {
             let ordered: Box<dyn Iterator<Item = _>> = if undo {
@@ -3355,7 +3358,9 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
         }
         let mut budget = rbl_db::import::WalkBudget::new(IMPORT_MAX_DEPTH, IMPORT_MAX_ENTRIES);
         let files = rbl_db::import::audio_files_in(&dir, &mut budget);
-        let outcome = writing
+        // Held from the write to the history entry, so no Undo runs between.
+        let _gate = writing.edit_gate.lock();
+        let mut outcome = writing
             .write(|writer| {
                 let clash = match (replace.as_deref(), copy.unwrap_or(false)) {
                     (Some(id), _) => rbl_db::write::FolderClash::Replace(id),
@@ -3378,6 +3383,7 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
             tracks: u32::try_from(r.tracks).unwrap_or(u32::MAX),
         });
         report.conflict = outcome.conflict;
+        let replacement = outcome.replacement.take();
         report.imported = u32::try_from(outcome.imported.len()).unwrap_or(u32::MAX);
         report.existing = u32::try_from(outcome.existing.len()).unwrap_or(u32::MAX);
         report.skipped = outcome.skipped;
@@ -3393,7 +3399,12 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
                     .unwrap_or_default(),
             })
             .collect();
-        if report.playlist.is_some() {
+        if let Some(replacement) = replacement {
+            // Replace existing is one step of history (#426): Undo takes the
+            // new playlist away and puts the replaced list back. The tracks
+            // it imported stay in the collection.
+            writing.edit_history.lock().record(LibraryEdit::ReplacePlaylist(replacement), "Replace Playlist");
+        } else if report.playlist.is_some() {
             // An edit outside the undo history starts a new branch.
             writing.edit_history.lock().clear_redo();
         }
@@ -3403,7 +3414,9 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
 
     // Both the tree and, usually, the collection changed.
     if report.playlist.is_some() {
-        reload(app, Arc::clone(&state)).await?;
+        let generation = reload(app.clone(), Arc::clone(&state)).await?;
+        let history = history_dto(generation, &state.edit_history.lock());
+        let _ = tauri::Emitter::emit(&app, "edit-history:changed", history);
     }
     Ok(report)
 }
