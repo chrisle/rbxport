@@ -1,8 +1,13 @@
 //! Blue previews from `BeatAnalyzer`'s separate loud/dots pass [OBS static,
-//! rekordbox 7.2.11.0342 arm64, `LoudViewMaker`]. Keep the peak events and 75 Hz
-//! block summaries until the final duration establishes the overview grid.
+//! rekordbox 7.2.11/7.2.19 arm64, `LoudViewMaker` with BPM bands]. Keep peak
+//! events and 75 Hz block summaries until duration establishes the overview grid.
 
 use super::Biquad;
+
+// Analyzer::setSample supplies BeatSensor bands 2/3 while BPM is enabled.
+// Those bands cross at 7900 Hz; LoudViewMaker's all-null fallback crosses at
+// 6000 Hz and produces different colors despite identical overview heights.
+const MID_HIGH_CROSSOVER: f64 = 7900.0;
 
 const HEIGHTS: [f32; 23] = [
     50790.4, 39321.6, 30801.92, 25886.72, 23265.28, 21299.2, 19398.4, 17367.04, 15892.48, 14909.44,
@@ -48,11 +53,14 @@ impl BlueOverview {
                 ],
                 vec![
                     filter(283.0, rate, q, 1),
-                    filter(6000.0, rate, q, 2),
+                    filter(MID_HIGH_CROSSOVER, rate, q, 2),
                     filter(283.0, rate, q, 1),
-                    filter(6000.0, rate, q, 2),
+                    filter(MID_HIGH_CROSSOVER, rate, q, 2),
                 ],
-                vec![filter(6000.0, rate, q, 1), filter(6000.0, rate, q, 1)],
+                vec![
+                    filter(MID_HIGH_CROSSOVER, rate, q, 1),
+                    filter(MID_HIGH_CROSSOVER, rate, q, 1),
+                ],
             ],
             peaks: std::array::from_fn(|_| Peaks::new()),
             dots: std::array::from_fn(|_| Peaks::new()),

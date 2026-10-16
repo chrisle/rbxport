@@ -136,12 +136,18 @@ height, on the same square law as `PWV5`'s against the loudest block.
 
 [OBS static] rekordbox **7.2.11.0342**, macOS arm64, `LoudViewMaker`:
 `create`, `analyzePeak`, `PeakDetect`, `PeakDetect900`, `analyzeLoudColor`,
-plus `CBeatAnalyzeLib::V_Devide`, `notifyDots` and `MstStoreLoudWave`.
+plus `Analyzer::setSample`, `peakss::BeatSensor::{create,put}`,
+`CBeatAnalyzeLib::V_Devide`, `notifyDots` and `MstStoreLoudWave`.
 This is a separate reference version from the RGB/3-band fixtures above.
 
 The integer stereo mean feeds a double-precision filter cascade, with
 single-precision output: a 150 Hz band-pass at Q=0.9 twice; alternating
-283 Hz high-pass and 6 kHz low-pass twice; and a 6 kHz high-pass twice.
+283 Hz high-pass and 7900 Hz low-pass twice; and a 7900 Hz high-pass twice.
+With BPM analysis enabled, `Analyzer::setSample` feeds the six-band
+`BeatSensor` and passes its bands 2/3 to `LoudViewMaker::analyzePeak`.
+The low band remains the overview generator's own 150 Hz filter. Its
+all-null fallback uses 6000 Hz instead; matching that fallback alone does
+not reproduce the usual BPM-enabled color codes.
 The block size is `floor(rate/75)` frames. Peak tracking keeps a rising peak
 for at least 320 ms, admits a new peak above 75% of it (66% for high), and
 after 1.714 seconds of decay applies 0.9938303 every approximately 11.61 ms.
@@ -158,7 +164,8 @@ and filtered samples are discarded block by block. The final block is held
 until EOF so flushing does not depend on the decoder's packet boundaries.
 
 [OBS native routine] `tests/blue_overview.rs` compares both payloads exactly
-against isolated native `LoudViewMaker` output for the six generated signals
+against isolated native `BeatSensor` → `LoudViewMaker` output from
+rekordbox **7.2.19.0342** on `chris-m2-mac` for the six generated signals,
 a 200-second repetition of `kick-hats`, and a fractional final block. These `.blue-preview` files
 are native-routine captures, **not complete files exported by rekordbox**.
 See [fixture provenance](../../tests/rekordbox_waveform/README.md).
@@ -168,10 +175,18 @@ The tests also exercise arbitrary packet boundaries and empty/short silence.
 comparison covered eight existing library rows (five distinct audio files).
 `PWV2` was exact throughout; `PWAV` height was 98.5–100% exact and
 99.75–100% within one. Its color codes were only 64.75–83.5% exact.
-[UNKNOWN] The original analyzer/version/input path behind those stored blue
-colors has not been established. This discrepancy is not accounted for by
-float rounding, and the native-routine fixtures do not establish parity for
-those historical color codes. RGB/3-band evidence above is separate.
+[OBS controlled, 2026-10-16] On the same decoded real-song PCM, the
+7.2.19 fallback reproduced 7.2.11 exactly but matched only 259/400 stored
+color codes. Feeding the native BPM sensor's mid/high bands instead
+matched **400/400 colors and 400/400 heights**. This isolates the color
+discrepancy to the omitted 7900 Hz BPM-band input path, rather than a
+change between those versions or the packed-byte writer.
+[OBS copied-reference comparison] Running the corrected Rust parity example
+on `chris-m2-mac` against copies of the five distinct files from that
+comparison matched **2000/2000 PWAV color codes** and all PWV2 bytes.
+PWAV height shares remained 98.5–100% exact / 99.75–100% within one.
+[UNKNOWN] Other analyzer modes and versions are not established by this
+experiment. RGB/3-band evidence above is separate.
 
 ## CDJ-3000 emulator check
 
