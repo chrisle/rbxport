@@ -482,6 +482,21 @@ function playerB(row: Omit<Binding, "id" | "group" | "deck">): Binding {
   return shifted;
 }
 
+/**
+ * rekordbox's command for a hot cue pad: Set A to C are `301e`-`3020` and
+ * Clear `3021`-`3023`; D is `3054` and `3055`; E to P run from `307f` (Set)
+ * and `308b` (Clear). Player B's are the same plus `0x100`.
+ */
+function hotCueCommand(kind: "hotCue" | "clearHotCue", letter: string, deck: "a" | "b"): string {
+  const index = letter.charCodeAt(0) - 65;
+  const set = kind === "hotCue";
+  let id: number;
+  if (index < 3) id = (set ? 0x301e : 0x3021) + index;
+  else if (index === 3) id = set ? 0x3054 : 0x3055;
+  else id = (set ? 0x307f : 0x308b) + index - 4;
+  return (id + (deck === "b" ? 0x100 : 0)).toString(16);
+}
+
 export const BINDINGS: readonly Binding[] = [
   { id: "focusSearch", group: "Browse", label: "Search", chord: { key: "f", metaKey: true }, action: "focusSearch", command: "7003" },
   { id: "clearSearch", group: "Browse", label: "Clear Search", chord: { key: "Escape" }, action: "clearSearch", pane: "Browse" },
@@ -520,8 +535,10 @@ export const BINDINGS: readonly Binding[] = [
       deck,
       pane: deck === "a" ? "Player A" : "Player B",
     }))),
-  // Hot cue pads D to H, and Player B's clears: this app's own and unbound,
-  // since the Export preset binds nothing to them. The person picks the keys.
+  // Hot cue pads D to H, and Player B's clears: unbound, since the Export
+  // preset binds nothing to them, but rekordbox's own commands [OBS static:
+  // `djplay::UiPlayer::getAllCommands` lists them in EXPORT mode, rekordbox
+  // 7.2.19], which the Performance presets do give keys.
   ...(["a", "b"] as const).flatMap((deck): Binding[] => {
     const group = deck === "a" ? "Player A" : "Player B";
     const own = (kind: "hotCue" | "clearHotCue", letter: string): Binding => ({
@@ -531,7 +548,7 @@ export const BINDINGS: readonly Binding[] = [
       chord: { key: "" },
       action: `${kind}${letter}` as Action,
       deck,
-      pane: group,
+      command: hotCueCommand(kind, letter, deck),
     });
     const letters = ["D", "E", "F", "G", "H"];
     return [

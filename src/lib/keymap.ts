@@ -14,6 +14,12 @@
  * Where a command sits in the pane when it is not a deck's — the master
  * volume and mute, Quit — is [ASSUME]: General.
  *
+ * The hot cue pads past C, and Player B's clears, are rows the preset
+ * leaves unbound: `djplay::UiPlayer::getAllCommands` lists them in EXPORT
+ * mode, after Set Hot Cue C and Clear Hot Cue C, with no key [OBS static,
+ * rekordbox 7.2.19; issue #412]. Only D to H are listed, the pads this app
+ * has; I to P wait for the rest of that tree.
+ *
  * What is *built* is `shortcuts.ts`'s business: a row here says what the
  * key is in rekordbox, and the pane greys the ones this app does not answer.
  */
@@ -69,9 +75,19 @@ export const KEYMAP: Readonly<Record<KeymapGroup, readonly KeymapRow[]>> = {
     { id: "301e", label: "Set Hot Cue A", key: "1" },
     { id: "301f", label: "Set Hot Cue B", key: "2" },
     { id: "3020", label: "Set Hot Cue C", key: "3" },
+    { id: "3054", label: "Set Hot Cue D", key: null },
+    { id: "307f", label: "Set Hot Cue E", key: null },
+    { id: "3080", label: "Set Hot Cue F", key: null },
+    { id: "3081", label: "Set Hot Cue G", key: null },
+    { id: "3082", label: "Set Hot Cue H", key: null },
     { id: "3021", label: "Clear Hot Cue A", key: "command + 1" },
     { id: "3022", label: "Clear Hot Cue B", key: "command + 2" },
     { id: "3023", label: "Clear Hot Cue C", key: "command + 3" },
+    { id: "3055", label: "Clear Hot Cue D", key: null },
+    { id: "308b", label: "Clear Hot Cue E", key: null },
+    { id: "308c", label: "Clear Hot Cue F", key: null },
+    { id: "308d", label: "Clear Hot Cue G", key: null },
+    { id: "308e", label: "Clear Hot Cue H", key: null },
     { id: "3039", label: "Call Next Memory Cue", key: "N" },
     { id: "303a", label: "Call Previous Memory Cue", key: "B" },
     { id: "303b", label: "Delete Memory Cue", key: "X" },
@@ -133,6 +149,19 @@ export const KEYMAP: Readonly<Record<KeymapGroup, readonly KeymapRow[]>> = {
     { id: "311e", label: "Set Hot Cue A", key: "shift + 1" },
     { id: "311f", label: "Set Hot Cue B", key: "shift + 2" },
     { id: "3120", label: "Set Hot Cue C", key: "shift + 3" },
+    { id: "3154", label: "Set Hot Cue D", key: null },
+    { id: "317f", label: "Set Hot Cue E", key: null },
+    { id: "3180", label: "Set Hot Cue F", key: null },
+    { id: "3181", label: "Set Hot Cue G", key: null },
+    { id: "3182", label: "Set Hot Cue H", key: null },
+    { id: "3121", label: "Clear Hot Cue A", key: null },
+    { id: "3122", label: "Clear Hot Cue B", key: null },
+    { id: "3123", label: "Clear Hot Cue C", key: null },
+    { id: "3155", label: "Clear Hot Cue D", key: null },
+    { id: "318b", label: "Clear Hot Cue E", key: null },
+    { id: "318c", label: "Clear Hot Cue F", key: null },
+    { id: "318d", label: "Clear Hot Cue G", key: null },
+    { id: "318e", label: "Clear Hot Cue H", key: null },
     { id: "3139", label: "Call Next Memory Cue", key: "shift + N" },
     { id: "313a", label: "Call Previous Memory Cue", key: "shift + B" },
     { id: "313b", label: "Delete Memory Cue", key: "shift + X" },
