@@ -756,6 +756,30 @@ where
     Ok(generation)
 }
 
+/// Ends the library history's redo branch after a write the history does
+/// not record (an import, a relocation), as [`edit`] does: a Redo replayed
+/// over that write would put back values it has since changed. `permanent`
+/// drops Undo as well, as [`permanent_edit`] does, for a write that removed
+/// or replaced rows an older entry may name (Replace existing).
+///
+/// Call it while holding the edit gate taken around the write, so no Undo
+/// can run between the write and this; then [`announce_history`].
+pub(crate) fn wrote_outside_history(state: &AppState, permanent: bool) {
+    let mut history = state.edit_history.lock();
+    if permanent {
+        history.clear();
+    } else {
+        history.clear_redo();
+    }
+}
+
+/// Tells the window what Undo and Redo offer now, after
+/// [`wrote_outside_history`].
+pub(crate) fn announce_history<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state: &AppState) {
+    let dto = history_dto(state.summary().3, &state.edit_history.lock());
+    let _ = tauri::Emitter::emit(app, "edit-history:changed", dto);
+}
+
 fn history_dto(generation: u32, history: &EditHistory) -> EditHistoryDto {
     EditHistoryDto {
         generation,
@@ -3264,7 +3288,8 @@ async fn import_files_then<R: tauri::Runtime>(
     let writing = Arc::clone(&state);
     let report = blocking("import_files", move || {
         let files = expand_import_paths(&paths);
-        writing
+        let _gate = writing.edit_gate.lock();
+        let report = writing
             .write(|writer| {
                 let mut imported = 0_u32;
                 let mut skipped = Vec::new();
@@ -3293,14 +3318,21 @@ async fn import_files_then<R: tauri::Runtime>(
                 }
                 Ok(ImportReportDto { imported, skipped, tracks, existing })
             })
-            .map_err(write_error)
+            .map_err(write_error)?;
+        if report.imported > 0 {
+            wrote_outside_history(&writing, false);
+        }
+        Ok(report)
     })
     .await?;
 
     // Only reload if anything landed; a batch that imported nothing has not
     // changed the library.
-    if report.imported > 0 && reload_after {
-        reload(app, state_for_edit).await?;
+    if report.imported > 0 {
+        if reload_after {
+            reload(app.clone(), Arc::clone(&state_for_edit)).await?;
+        }
+        announce_history(&app, &state_for_edit);
     }
     Ok(report)
 }
@@ -3355,6 +3387,7 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
         }
         let mut budget = rbl_db::import::WalkBudget::new(IMPORT_MAX_DEPTH, IMPORT_MAX_ENTRIES);
         let files = rbl_db::import::audio_files_in(&dir, &mut budget);
+        let _gate = writing.edit_gate.lock();
         let outcome = writing
             .write(|writer| {
                 let clash = match (replace.as_deref(), copy.unwrap_or(false)) {
@@ -3394,8 +3427,11 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
             })
             .collect();
         if report.playlist.is_some() {
-            // An edit outside the undo history starts a new branch.
-            writing.edit_history.lock().clear_redo();
+            // An edit outside the undo history starts a new branch. Replace
+            // existing has no undo yet (#426) and took rows away that an
+            // older entry may name, so it ends the history, as Remove from
+            // Collection does.
+            wrote_outside_history(&writing, report.replaced.is_some());
         }
         Ok(report)
     })
@@ -3403,7 +3439,8 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
 
     // Both the tree and, usually, the collection changed.
     if report.playlist.is_some() {
-        reload(app, Arc::clone(&state)).await?;
+        reload(app.clone(), Arc::clone(&state)).await?;
+        announce_history(&app, &state);
     }
     Ok(report)
 }
@@ -3960,6 +3997,7 @@ async fn import_collection<R: tauri::Runtime>(
         };
         // Looked for under the same edit gate as the import, so nothing can
         // make a same-named list between the question and the write.
+        let _gate = writing.edit_gate.lock();
         let outcome = writing
             .write(|writer| {
                 if !replace {
@@ -3989,6 +4027,11 @@ async fn import_collection<R: tauri::Runtime>(
         // A replaced playlist may have changed without a list or track being
         // made: that, too, needs a reload.
         let changed_playlists = report.playlist_tracks > 0 || report.playlists_replaced > 0;
+        if report.imported > 0 || report.playlists > 0 || changed_playlists {
+            // Replacing a same-named list rewrote its members, which an
+            // older Remove Tracks from Playlist may name, and has no undo.
+            wrote_outside_history(&writing, report.playlists_replaced > 0);
+        }
         Ok((XmlImportReportDto {
             imported: u32::try_from(report.imported).unwrap_or(u32::MAX),
             existing: u32::try_from(report.existing).unwrap_or(u32::MAX),
@@ -4001,7 +4044,8 @@ async fn import_collection<R: tauri::Runtime>(
     })
     .await?;
     if report.imported > 0 || report.playlists > 0 || changed_playlists {
-        reload(app, state_for_reload).await?;
+        reload(app.clone(), Arc::clone(&state_for_reload)).await?;
+        announce_history(&app, &state_for_reload);
     }
     Ok(report)
 }

@@ -2,7 +2,7 @@
 use std::{collections::{HashMap, HashSet}, path::{Path, PathBuf}, sync::Arc};
 use serde::Serialize;
 use tauri::{State, Manager};
-use crate::{commands::{blocking, reload, write_error}, dto::{DeviceLibraryTreeDto, DevicePlaylistNodeDto}, error::{AppError, AppResult, ErrorKind}, state::AppState};
+use crate::{commands::{announce_history, blocking, reload, write_error, wrote_outside_history}, dto::{DeviceLibraryTreeDto, DevicePlaylistNodeDto}, error::{AppError, AppResult, ErrorKind}, state::AppState};
 
 mod ratings;
 
@@ -70,7 +70,13 @@ pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Stat
     let result = blocking("import_usb", move || import(&worker, &editor, Path::new(&path), cues, history, settings, ratings)).await;
     match result {
         Ok(result) => {
-            if result.tracks > 0 || result.histories > 0 || result.ratings > 0 { reload(app.clone(), state).await?; }
+            if result.tracks > 0 || result.histories > 0 || result.ratings > 0 {
+                // Cues, histories and ratings written outside the library
+                // history: a Redo must not put back a rating this replaced.
+                wrote_outside_history(&state, false);
+                reload(app.clone(), Arc::clone(&state)).await?;
+                announce_history(&app, &state);
+            }
             for id in &result.changed {
                 let _ = tauri::Emitter::emit(&app, "grid:changed", id);
                 let _ = tauri::Emitter::emit(&app, "cues:changed", id);
@@ -79,7 +85,10 @@ pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Stat
         }
         Err(e) => {
             tracing::error!(path = %log_path, cues, history, settings, ratings, error = %e, "USB import failed");
-            let _ = reload(app, state).await;
+            // Part of it may have landed before the failure.
+            wrote_outside_history(&state, false);
+            let _ = reload(app.clone(), Arc::clone(&state)).await;
+            announce_history(&app, &state);
             Err(e)
         }
     }

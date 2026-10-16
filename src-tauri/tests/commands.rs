@@ -650,6 +650,98 @@ fn removing_from_collection_is_permanent_and_clears_history() {
     assert_eq!(error.kind, ErrorKind::NotFound);
 }
 
+/// #427: an import writes outside the library history, so like any other
+/// unrecorded edit it ends the redo branch: Redo after it would put back a
+/// value over what it wrote. Undo of the edits before it stays.
+#[test]
+fn an_import_ends_the_redo_branch_and_keeps_undo() {
+    let s = shell();
+    let track = track_id(7);
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 4)).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 5)).unwrap();
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert!(undone.can_redo);
+
+    let audio = write_wav(&s._dir.path().join("Issue 427.wav"), 1);
+    let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
+    assert_eq!(report.imported, 1);
+
+    let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::NotFound, "the import ended the redo branch");
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(run(details::track_details(s.state(), track)).unwrap().rating, 0);
+}
+
+/// #427: Replace existing on a folder drop has no undo yet (#426) and
+/// tombstones the replaced list with its members. An older Remove Tracks
+/// from Playlist on that list would put membership rows back into a deleted
+/// playlist, so the replacement ends the history, as Remove from Collection
+/// does.
+#[test]
+fn replacing_a_list_with_a_dropped_folder_ends_the_library_history() {
+    let s = shell();
+    let folder = s._dir.path().join("Issue 427");
+    std::fs::create_dir_all(&folder).unwrap();
+    write_wav(&folder.join("a.wav"), 1);
+    write_wav(&folder.join("b.wav"), 1);
+    let path = folder.display().to_string();
+    let first =
+        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None, None)).unwrap();
+    let playlist = first.playlist.unwrap();
+    let a = first.tracks.iter().find(|t| t.title == "a.wav").unwrap().id.clone();
+    let removed = run(commands::remove_tracks_from_playlist(s.handle(), s.state(), playlist.clone(), vec![a])).unwrap();
+    assert!(removed.can_undo);
+
+    // As a copy, beside it: nothing is taken away, so Undo stays.
+    run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None, Some(true))).unwrap();
+    let kept = s.node("Issue 427 (1)");
+    run(commands::delete_playlist(s.handle(), s.state(), kept.id)).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert!(s.has_node("Issue 427 (1)"), "Undo still reaches edits made before a copy");
+
+    let replaced = run(commands::import_folder_playlist(
+        s.handle(), s.state(), path, "root".into(), Some(playlist.clone()), None, None,
+    )).unwrap();
+    assert!(replaced.replaced.is_some());
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::NotFound, "nothing older than the replacement can be undone");
+    let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::NotFound);
+}
+
+/// #427: an XML import told to replace same-named lists rewrites their
+/// members with no undo, so it ends the history too.
+#[test]
+fn an_xml_import_that_replaces_a_list_ends_the_library_history() {
+    let s = shell();
+    let audio: Vec<PathBuf> =
+        ["One", "Two"].iter().map(|n| write_wav(&s._dir.path().join(format!("{n} 427.wav")), 1)).collect();
+    let location = |p: &Path| format!("file://localhost{}", p.to_string_lossy().replace(' ', "%20"));
+    let file = s._dir.path().join("collection-427.xml");
+    std::fs::write(&file, format!(
+        r#"<?xml version="1.0"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="2">
+        <TRACK TrackID="1" Name="One" Location="{}"/>
+        <TRACK TrackID="2" Name="Two" Location="{}"/>
+        </COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="1">
+        <NODE Name="Issue 427" Type="1" KeyType="0" Entries="2"><TRACK Key="1"/><TRACK Key="2"/></NODE>
+        </NODE></PLAYLISTS></DJ_PLAYLISTS>"#,
+        location(&audio[0]),
+        location(&audio[1]),
+    )).unwrap();
+    let path = file.display().to_string();
+    let first = run(commands::import_xml(s.handle(), s.state(), path.clone(), None)).unwrap();
+    assert_eq!(first.playlists, 1);
+    let list = s.node("Issue 427").id;
+    let one = first.tracks.iter().find(|t| t.title == "One").unwrap().id.clone();
+    let removed = run(commands::remove_tracks_from_playlist(s.handle(), s.state(), list, vec![one])).unwrap();
+    assert!(removed.can_undo);
+
+    let replaced = run(commands::import_xml(s.handle(), s.state(), path, Some(true))).unwrap();
+    assert!(replaced.same_named.is_empty());
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::NotFound, "nothing older than the replacement can be undone");
+}
+
 /// A multi-selection removed from the collection (#136) takes every selected
 /// track out of the collection and out of each playlist it was in, and leaves
 /// the rest alone. rekordbox's Delete key and Remove from Collection both pass

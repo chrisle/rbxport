@@ -45,7 +45,7 @@ use tauri::{Manager, State};
 
 use rbl_index::Library;
 
-use crate::commands::{blocking, permanent_edit, reload, write_error, MAX_ROWS};
+use crate::commands::{announce_history, blocking, permanent_edit, reload, write_error, wrote_outside_history, MAX_ROWS};
 use crate::dto::{MissingTrackDto, MissingTracksDto};
 use crate::error::AppResult;
 use crate::commands::Touched;
@@ -563,14 +563,17 @@ pub async fn auto_relocate<R: tauri::Runtime>(
         let relocated = if plan.moves.is_empty() {
             0
         } else {
-            writing
+            let _gate = writing.edit_gate.lock();
+            let relocated = writing
                 .write(|writer| {
                     for (id, path) in &plan.moves {
                         writer.relocate(id, path)?;
                     }
                     Ok(u32::try_from(plan.moves.len()).unwrap_or(u32::MAX))
                 })
-                .map_err(write_error)?
+                .map_err(write_error)?;
+            wrote_outside_history(&writing, false);
+            relocated
         };
         Ok(RelocateReportDto { relocated, unresolved, in_collection, in_collection_total })
     })
@@ -579,7 +582,8 @@ pub async fn auto_relocate<R: tauri::Runtime>(
     // Only reload if anything moved; a search that found nothing has not
     // changed the library.
     if report.relocated > 0 {
-        reload(app, state_for_reload).await?;
+        reload(app.clone(), Arc::clone(&state_for_reload)).await?;
+        announce_history(&app, &state_for_reload);
     }
     Ok(report)
 }
@@ -748,18 +752,22 @@ pub async fn relocate_by_location<R: tauri::Runtime>(
         if moves.is_empty() {
             return Ok(0);
         }
-        writing
+        let _gate = writing.edit_gate.lock();
+        let found = writing
             .write(|writer| {
                 for (id, path) in &moves {
                     writer.relocate(id, path)?;
                 }
                 Ok(u32::try_from(moves.len()).unwrap_or(u32::MAX))
             })
-            .map_err(write_error)
+            .map_err(write_error)?;
+        wrote_outside_history(&writing, false);
+        Ok(found)
     })
     .await?;
     if found > 0 {
-        reload(app, state_for_reload).await?;
+        reload(app.clone(), Arc::clone(&state_for_reload)).await?;
+        announce_history(&app, &state_for_reload);
     }
     Ok(found)
 }
