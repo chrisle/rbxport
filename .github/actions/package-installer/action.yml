@@ -54,6 +54,14 @@ runs:
           *) echo "::error::refusing unexpected bundle directory: $bundle_dir"; exit 1 ;;
         esac
 
+    # The AppImage's GTK AppRun hook decides whether the native menu bar is
+    # light or dark (#448). The CLI keeps whatever copy of the plugin it first
+    # downloaded on this host; put rbxport's pinned copy there instead.
+    - name: Pin the AppImage GTK plugin
+      if: runner.os == 'Linux'
+      shell: bash
+      run: node scripts/appimage-gtk-hook.mjs install
+
     - name: Build
       uses: tauri-apps/tauri-action@v0
       env:
@@ -144,3 +152,10 @@ runs:
           exit 1
         fi
         test "$(find out -type f | wc -l)" -gt 0
+
+    - name: Verify the AppImage GTK hook
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        SLUG: ${{ inputs.slug }}
+      run: node scripts/appimage-gtk-hook.mjs verify "out/rbxport-${RELEASE_VERSION}-${SLUG}.AppImage"

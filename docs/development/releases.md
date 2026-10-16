@@ -61,6 +61,20 @@ When `PACKAGING_NIX` is set, the publish job also writes `packaging/nix/pin.json
 That pin is the only way a Nix install updates: the built-in updater is
 unavailable under Nix (#177).
 
+## Linux AppImage GTK hook
+
+The AppImage's AppRun hook exports `GTK_THEME=Adwaita:light` or
+`Adwaita:dark`, and that alone decides whether the native menu bar is light or
+dark. The hook comes from linuxdeploy-plugin-gtk, which `@tauri-apps/cli` 2.11
+downloads once per host and then keeps. The Linux build therefore runs
+`node scripts/appimage-gtk-hook.mjs install` to put the pinned copy in
+`packaging/appimage/` there, then `verify` checks the built AppImage carries
+its hook (#448). That copy reads the desktop's color-scheme preference from the
+settings portal. Change the hook only in that file, and keep
+`scripts/appimage-gtk-hook.test.mjs` passing. CLI 2.12 and later embed their
+own copy and overwrite this one on every build, so `verify` fails after that
+upgrade: check the embedded hook's theme handling, then remove the pin.
+
 ## Microsoft Store
 
 The `store-submit` job runs after the release publication job succeeds. It
