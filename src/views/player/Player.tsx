@@ -1978,6 +1978,8 @@ export const Player = memo(function Player({
       if (hit.deck !== undefined && hit.deck !== deck) return;
       const action = hit.action;
       if (action === "jumpBack" || action === "jumpForward") {
+        // Before anything else, idle deck included: Performance 1 puts these
+        // on ctrl + R and ctrl + P on Windows, WebView2's reload and print.
         event.preventDefault();
         jump(action === "jumpForward" ? 1 : -1);
         return;

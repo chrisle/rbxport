@@ -26,10 +26,13 @@
  * [`KeyMappingFileManager::getCurrentKeyMappingFile` @0x101bcaae0].
  *
  * Keys are spelled as the pane prints them on macOS; `command` and `option`
- * are ctrl and alt on Windows [OBS: the reference's "ctrl/command" and
- * "alt/option"]. The one key on macOS's control key, Search for tracks in
- * Collections, is alt + F on Windows [OBS: the reference]; [UNKNOWN] the
- * Windows build was not available to read.
+ * are ctrl and alt on Windows. That holds [OBS] for the 220 entries the
+ * reference prints as "ctrl/command" and "alt/option"; for every other row it
+ * is [ASSUME] from JUCE's `ModifierKeys::commandModifier`, which is ctrl on
+ * Windows. The one key on macOS's control key, Search for tracks in
+ * Collections, is alt + F on Windows [OBS: the reference]. [UNKNOWN] the
+ * Windows binary as a whole: it was not available to read, so no Windows
+ * key here was read from rekordbox itself.
  */
 import { BINDINGS, sameChord, type Binding, type KeyChord, type KeyOverrides } from "./shortcuts";
 
