@@ -730,3 +730,64 @@ test("the tree will not be rearranged while rekordbox holds the library", async 
   // should not be offered in the first place.
   await expect(item(page, "Melodic Vox")).not.toHaveAttribute("draggable", "true");
 });
+
+// rekordbox's Renumber Track Order (#413): over a playlist sorted by another
+// column, the header menu writes the order on show as the playlist's own.
+test("Renumber Track Order writes the sorted order as the playlist's track numbers", async ({ page }) => {
+  await open(page);
+  await openPlaylist(page);
+  const before = await titles(page);
+  const header = page.getByRole("columnheader", { name: /Track Title/ });
+  const menu = page.getByRole("menu", { name: "Columns" });
+  const renumber = menu.getByRole("menuitem", { name: "Renumber Track Order" });
+
+  // In its own order there is nothing to renumber: rekordbox leaves it out.
+  await header.click({ button: "right" });
+  await expect(menu).toBeVisible();
+  await expect(renumber).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await header.click();
+  await expect(header).toHaveAttribute("data-sorted", "true");
+  const sorted = await titles(page);
+  expect(sorted.length).toBeGreaterThan(2);
+  // Otherwise the test would pass with nothing written.
+  expect(sorted).not.toEqual(before);
+
+  // Greyed while the search box holds text, as rekordbox greys it.
+  const search = page.getByRole("searchbox", { name: "Search within this track list", exact: true }).first();
+  await search.fill(sorted[0] ?? "");
+  await header.click({ button: "right" });
+  await expect(renumber).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await search.fill("");
+
+  await header.click({ button: "right" });
+  await renumber.click();
+  await expect(page.getByRole("contentinfo")).toContainText("Playlist reordered.");
+
+  // Back in track-number order, the rows are the order the title sort showed.
+  await page.getByRole("columnheader", { name: "#" }).click();
+  await expect.poll(() => titles(page)).toEqual(sorted);
+});
+
+test("Renumber Track Order answers the key the Keyboard pane gave it", async ({ page }) => {
+  // rekordbox binds no key to it; this is one a person picked.
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({
+    advanced: { protectLibrary: false },
+    keyboard: { overrides: { renumberTrackOrder: { key: "r", metaKey: true, altKey: true } } },
+  })));
+  await open(page);
+  await openPlaylist(page);
+  const header = page.getByRole("columnheader", { name: /Track Title/ });
+  await header.click();
+  await expect(header).toHaveAttribute("data-sorted", "true");
+  const sorted = await titles(page);
+
+  await page.getByRole("row").filter({ has: page.getByRole("gridcell") }).first().click();
+  await page.keyboard.press("ControlOrMeta+Alt+KeyR");
+  await expect(page.getByRole("contentinfo")).toContainText("Playlist reordered.");
+
+  await page.getByRole("columnheader", { name: "#" }).click();
+  await expect.poll(() => titles(page)).toEqual(sorted);
+});
