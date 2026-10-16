@@ -994,6 +994,8 @@ export interface Backend {
    * tree. A stick with neither answers with none.
    */
   deviceLibraries(path: string): Promise<DeviceLibrary[]>;
+  /** Maps collection track ids to rows already in one of a stick's libraries. */
+  devicePlaylistCollectionTracks(path: string, format: DeviceFormat, tracks: string[]): Promise<(string | null)[]>;
   /**
    * Changes one library's playlists on a stick, as rekordbox's Devices tree
    * does: that library only, never the other. Resolves to the playlist or

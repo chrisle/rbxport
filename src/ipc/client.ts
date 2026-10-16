@@ -588,6 +588,8 @@ async function realBackend(): Promise<Backend> {
     explorerRoots: () => invoke<ExplorerRoot[]>("explorer_roots"),
     explorerChildren: (path) => invoke<ExplorerChildren>("explorer_children", { path }),
     deviceLibraries: (path) => invoke<DeviceLibrary[]>("device_libraries", { path }),
+    devicePlaylistCollectionTracks: (path, format, tracks) =>
+      invoke<(string | null)[]>("device_playlist_collection_tracks", { path, format, tracks }),
     devicePlaylistEdit: (path, format, edit) =>
       invoke<DevicePlaylistEditResult>("device_playlist_edit", { path, format, edit }),
     devicePlaylistDuplicates: (path, format, playlist, tracks) =>

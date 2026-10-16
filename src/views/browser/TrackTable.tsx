@@ -761,6 +761,8 @@ const TrackRow = memo(function TrackRow({
 export interface TrackDrag {
   /** Every track travelling: the selection, or the one row grabbed outside it. */
   ids: readonly string[];
+  /** Where the row ids came from; device ids cannot be treated as collection ids. */
+  sourceKind: ViewSpec["source"]["kind"];
   /**
    * The one a deck takes: the topmost of them in the list, as rekordbox
    * loads the first of a dropped selection rather than the row the hand
@@ -1371,7 +1373,7 @@ export const TrackTable = memo(function TrackTable({
       // dragging an unselected row should move that row, not the selection
       // somewhere else on screen.
       if (!selection.ids.has(row.id)) {
-        onDragTracks?.({ ids: [row.id], row });
+        onDragTracks?.({ ids: [row.id], row, sourceKind: spec.source.kind });
         return;
       }
       // A playlist takes all of them; a deck takes the first in list order,
@@ -1387,9 +1389,9 @@ export const TrackTable = memo(function TrackTable({
           break;
         }
       }
-      onDragTracks?.({ ids: [...selection.ids], row: first });
+      onDragTracks?.({ ids: [...selection.ids], row: first, sourceKind: spec.source.kind });
     },
-    [selection.ids, onDragTracks, view],
+    [selection.ids, onDragTracks, spec.source.kind, view],
   );
 
   // The ids travelling with the hand, and where they would land. Held here

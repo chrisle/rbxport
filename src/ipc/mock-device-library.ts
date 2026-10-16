@@ -73,6 +73,7 @@ export interface MockImportEntry {
 
 export interface MockDeviceLibraries {
   libraries(path: string): DeviceLibrary[];
+  collectionTracks(path: string, format: DeviceFormat, ids: string[], exportedIds?: readonly string[]): (string | null)[];
   edit(path: string, format: DeviceFormat, edit: DevicePlaylistEdit): DevicePlaylistEditResult;
   /** The rows whose track `playlist` already holds, each once. */
   duplicates(path: string, format: DeviceFormat, playlist: string, tracks: string[]): string[];
@@ -156,8 +157,14 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
           count: node.folder ? library.nodes.filter((n) => n.parent === node.id).length : node.tracks.length,
         })),
       })),
+    collectionTracks: (path, _format, ids, exportedIds = []) => ids.map((id) => {
+      const track = TRACKS.find((candidate) => candidate.masterContentId === id)
+        ?? (exportedIds.includes(id) ? TRACKS.find((candidate) => candidate.id === 5) : undefined);
+      return track ? trackRow(path, track, 0).id : null;
+    }),
     duplicates: (path, format, playlist, rows) => {
       const node = libraryOf(path, format).nodes.find((n) => String(n.id) === playlist && !n.folder);
+      if (!node) throw new Error("That playlist is no longer on the device.");
       const held = new Set<number>();
       return rows.filter((row) => {
         const track = trackByRow(path, row);
