@@ -92,6 +92,9 @@ pub struct Updates {
     /// One download at a time: a second request while the first runs would
     /// fetch the installer twice and put it in place twice.
     busy: AtomicBool,
+    /// Why the last update, run after the app quit, did not install: what
+    /// the protected Windows helper left behind. The next check shows it once.
+    previous_failure: Mutex<Option<String>>,
 }
 
 impl Updates {
@@ -107,14 +110,33 @@ impl Updates {
     /// installer the quit already ran. The next check downloads afresh, which
     /// is the safe side: the signature was checked on the bytes that came
     /// down, not on a file that has sat in a cache since.
+    ///
+    /// What the protected Windows helper said about the last update is read
+    /// first: it goes to the log and to the next check (#457).
     pub fn clear_stale(app: &AppHandle) {
-        elevated_update::clear_shared_staging();
+        let outcome = elevated_update::take_outcome();
+        if let Some(failure) = previous_failure(&outcome) {
+            if let Some(updates) = app.try_state::<std::sync::Arc<Updates>>() {
+                *updates.previous_failure.lock() = Some(failure);
+            }
+        }
         if let Some(dir) = Self::staging_dir(app) {
             if elevated_update::shared_staging_dir().as_deref() != Some(dir.as_path()) {
                 let _ = std::fs::remove_dir_all(dir);
             }
         }
     }
+}
+
+/// Logs how the last protected update ended and returns the failure the next
+/// check should show, if it failed.
+fn previous_failure(outcome: &elevated_update::Outcome) -> Option<String> {
+    if let Some(version) = &outcome.installed {
+        tracing::info!(%version, "the protected update helper installed the update");
+    }
+    let reason = outcome.failure.as_ref()?;
+    tracing::warn!(error = %reason, "the last update could not be installed");
+    Some(format!("The last update could not be installed: {reason}"))
 }
 
 /// Whether the bundle this process runs from can be swapped on disk while
@@ -281,6 +303,9 @@ pub struct UpdateCheckDto {
     /// updates; the check did not ask the download server, and `version` is
     /// `None`.
     pub nix_install: bool,
+    /// Why the last update, installed after the app quit, failed, when it
+    /// did. Given once, by the first check after the launch that found it.
+    pub previous_failure: Option<String>,
 }
 
 /// A downloaded update, and whether it is already in the app's place.
@@ -366,6 +391,7 @@ pub async fn check_for_update(
             ready: None,
             store_install: false,
             nix_install: false,
+            previous_failure: updates.previous_failure.lock().take(),
         });
     };
 
@@ -400,6 +426,7 @@ pub async fn check_for_update(
         ready,
         store_install: false,
         nix_install: false,
+        previous_failure: updates.previous_failure.lock().take(),
     };
     *pending = Some(Pending { update, placement });
     Ok(dto)
@@ -416,6 +443,7 @@ fn store_check(current_version: String) -> UpdateCheckDto {
         ready: None,
         store_install: true,
         nix_install: false,
+        previous_failure: None,
     }
 }
 
@@ -430,6 +458,7 @@ fn nix_check(current_version: String) -> UpdateCheckDto {
         ready: None,
         store_install: false,
         nix_install: true,
+        previous_failure: None,
     }
 }
 
@@ -599,20 +628,56 @@ pub async fn restart_to_update(
             if let Some(pending) = updates.pending.lock().as_mut() {
                 pending.placement = None;
             }
-            match elevated_update::launch(&path, true) {
-                Ok(true) => std::process::exit(0),
-                Ok(false) => {}
-                Err(error) => tracing::warn!(%error, "the protected update task could not start"),
+            // The protected task (Windows): quit only once its helper has
+            // accepted the update. Starting the task proves nothing more, and
+            // quitting on that alone left the app gone and nothing installed
+            // whenever the helper refused (#457).
+            let launch_path = path.clone();
+            let handoff = tauri::async_runtime::spawn_blocking(move || elevated_update::launch(&launch_path, true))
+                .await
+                .map_err(|e| updater_error("The update could not be installed.", e))?;
+            match handoff {
+                elevated_update::Handoff::TakenOver => std::process::exit(0),
+                elevated_update::Handoff::NotShared => {}
+                elevated_update::Handoff::Unavailable(error) => {
+                    tracing::warn!(%error, "the protected update task could not start");
+                }
+                elevated_update::Handoff::Refused(reason) => {
+                    // These bytes failed the helper's checks; the ordinary
+                    // installer must not run them either.
+                    return Err(updater_error("The update could not be installed.", reason));
+                }
             }
             let bytes = std::fs::read(&path).map_err(|e| updater_error("The update could not be read back.", e))?;
             // On Windows this spawns the installer and ends the process; a
             // Linux package is installed in place and the process is still
             // here, so a restart runs it.
-            tauri::async_runtime::spawn_blocking(move || update.install(bytes))
+            let to_install = update.clone();
+            let outcome = tauri::async_runtime::spawn_blocking(move || to_install.install(bytes))
                 .await
                 .map_err(|e| updater_error("The update could not be installed.", e))?
-                .map_err(|e| updater_error("The update could not be installed.", e))?;
+                .map_err(|e| updater_error("The update could not be installed.", e));
+            if let Err(error) = outcome {
+                // Still downloaded: a refused password prompt (Linux) can be
+                // answered by pressing Restart Now again, without a second
+                // download. Windows keeps it out, so the quit does not ask for
+                // the same administrator consent that was just refused.
+                if !cfg!(windows) {
+                    keep_staged(&updates, &update.version, path);
+                }
+                return Err(error);
+            }
             app.restart()
+        }
+    }
+}
+
+/// Puts a staged installer back as the pending update's placement after an
+/// install that did not happen, unless a newer check replaced the update.
+fn keep_staged(updates: &Updates, version: &str, path: PathBuf) {
+    if let Some(pending) = updates.pending.lock().as_mut() {
+        if pending.update.version == version && pending.placement.is_none() {
+            pending.placement = Some(Placement::Staged(path));
         }
     }
 }
@@ -638,9 +703,15 @@ pub fn on_exit(app: &AppHandle) {
     };
     let Some((update, path)) = staged else { return };
     match elevated_update::launch(&path, false) {
-        Ok(true) => return,
-        Ok(false) => {}
-        Err(error) => tracing::warn!(%error, "the protected update task could not start at quit"),
+        elevated_update::Handoff::TakenOver => return,
+        elevated_update::Handoff::NotShared => {}
+        elevated_update::Handoff::Unavailable(error) => {
+            tracing::warn!(%error, "the protected update task could not start at quit");
+        }
+        elevated_update::Handoff::Refused(reason) => {
+            tracing::warn!(error = %reason, "the protected update helper refused the update at quit");
+            return;
+        }
     }
     match std::fs::read(&path) {
         Ok(bytes) => {
@@ -784,6 +855,31 @@ mod tests {
         assert!(log.contains("The update could not be installed."), "the message is missing: {log}");
         assert!(log.contains("Failed to move the new app into place"), "the plugin's reason is missing: {log}");
         assert!(log.contains("bundle="), "the bundle the updater took a route for is missing: {log}");
+    }
+
+    #[test]
+    fn the_helpers_reason_reaches_the_log_and_the_next_check() {
+        // #457: on Windows the protected helper's reason was written to
+        // last-error.txt and deleted unread at the next launch.
+        let failed = elevated_update::Outcome {
+            failure: Some("rbxport did not exit before the update timeout".to_owned()),
+            installed: None,
+        };
+        let mut shown = None;
+        let log = logged(|| shown = previous_failure(&failed));
+        assert_eq!(
+            shown.as_deref(),
+            Some("The last update could not be installed: rbxport did not exit before the update timeout")
+        );
+        assert!(log.contains("WARN"), "not a warning: {log}");
+        assert!(log.contains("rbxport did not exit before the update timeout"), "the reason is missing: {log}");
+
+        let installed = elevated_update::Outcome { failure: None, installed: Some("2.0.0".to_owned()) };
+        let mut shown = Some(String::new());
+        let log = logged(|| shown = previous_failure(&installed));
+        assert_eq!(shown, None);
+        assert!(log.contains("installed the update") && log.contains("2.0.0"), "{log}");
+        assert_eq!(previous_failure(&elevated_update::Outcome::default()), None);
     }
 
     #[test]

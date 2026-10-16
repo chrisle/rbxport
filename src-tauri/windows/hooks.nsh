@@ -23,5 +23,6 @@
     Pop $0
   ${EndIf}
   Delete /REBOOTOK "$INSTDIR\rbxport-updater.exe"
+  Delete /REBOOTOK "$INSTDIR\rbxport-updater.old.exe"
   Delete /REBOOTOK "$INSTDIR\rbxport-update-installer.exe"
 !macroend
