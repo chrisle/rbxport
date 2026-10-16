@@ -77,6 +77,14 @@ impl WaveCreator {
         }
     }
 
+    /// Room for a track of `frames` frames, so its values are not copied
+    /// each time they outgrow their buffers: twice the memory, at the peak.
+    pub fn reserve(&mut self, frames: u64) {
+        let ms = (frames as f64 * 1000.0 / self.rate).ceil() as usize;
+        self.per_ms.reserve(ms);
+        self.blue.reserve(frames as usize / self.blue.per_block + 1);
+    }
+
     /// Folds in the next frames, in order.
     pub fn push(&mut self, frames: &[[i16; 2]]) {
         if self.per_ms.len() == 0 && !frames.is_empty() {
@@ -265,6 +273,12 @@ impl PerMs {
         }
     }
 
+    fn reserve(&mut self, ms: usize) {
+        for values in self.all() {
+            hint_capacity(values, ms);
+        }
+    }
+
     /// Exactly the track's milliseconds: the last frame can fall short of
     /// opening the last one.
     fn resize(&mut self, ms: usize) {
@@ -288,6 +302,12 @@ impl PerMs {
         }
         colour_ms.add([filters.colour[0].run(x), filters.colour[1].run(x), filters.colour[2].run(x)]);
     }
+}
+
+/// Room for `total` values in all, where it can be had: the length is a
+/// container's claim, and one that is absurd leaves the growth to `push`.
+fn hint_capacity<T>(values: &mut Vec<T>, total: usize) {
+    let _ = values.try_reserve_exact(total.saturating_sub(values.len()));
 }
 
 fn raise(held: &mut i16, value: f64) {
@@ -360,6 +380,10 @@ impl BlueBlocks {
             self.open = (0.0, 0.0);
             self.fill = 0;
         }
+    }
+
+    fn reserve(&mut self, blocks: usize) {
+        hint_capacity(&mut self.blocks, blocks);
     }
 
     /// One byte a block: three whiteness bits over a 5-bit height against the
@@ -601,6 +625,20 @@ mod tests {
             creator.push(piece);
         }
         assert_eq!(creator.finish(), whole);
+    }
+
+    /// Room reserved for a length is only room: right, wrong or absurd, the
+    /// container's claim draws the same bytes.
+    #[test]
+    fn a_length_claimed_up_front_draws_what_no_claim_draws() {
+        let frames: Vec<[i16; 2]> = (0..44_100).map(|i| [(i % 2_000) as i16 * 10, -((i % 700) as i16) * 30]).collect();
+        let unclaimed = waves_of(&frames, 44_100);
+        for claim in [0, frames.len() as u64, 10 * frames.len() as u64, u64::MAX] {
+            let mut creator = WaveCreator::new(44_100);
+            creator.reserve(claim);
+            creator.push(&frames);
+            assert_eq!(creator.finish(), unclaimed, "claimed {claim} frames");
+        }
     }
 
     /// Every section has the length rekordbox gives it: 1,200 columns for the

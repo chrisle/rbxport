@@ -130,9 +130,22 @@ block: whiteness in the top three bits — the first `k` with
 `low/peak ≥ 0.875 − k/8`, 7 where none is or the block is silent — over the
 height, on the same square law as `PWV5`'s against the loudest block.
 
-## Memory
+## Cost
 
 `WaveCreator` is fed a packet at a time and keeps twelve 16-bit values a
 millisecond: about 9 MB for a six-minute track and 170 MB for a two-hour
 mix. Nothing is decided before the end, because the points divide a length
-only known then.
+only known then. `WaveCreator::reserve` takes the container's frame count
+first, so the values are not copied each time they outgrow their buffers,
+which at the peak held twice as much.
+
+[OBS] The app's analysis loop on an Apple M4, release build, the `Rbxport`
+preset, peak memory footprint from `/usr/bin/time -l`:
+
+| File | Without `WaveCreator` | With it |
+| --- | --- | --- |
+| 6-minute MP3 | 0.42 s, 145 MB | 1.1 s, 155 MB |
+| 2-hour MP3 | 7.9 s, 718 MB | 21 s, 925 MB |
+
+The filters cost about 6.5 s of one core per hour of audio, on the decoding
+thread.
