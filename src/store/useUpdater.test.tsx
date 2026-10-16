@@ -3,7 +3,7 @@
  *
  * The Update Manager's state machine against a stub backend: what a check
  * finds, that an update found is downloaded without asking, when the window
- * opens on its own (never, now that nothing waits on an answer), how a
+ * opens on its own (only to say why the last Restart Now did not install), how a
  * download reports, and what a restart that comes back means.
  */
 import { act } from "react";
@@ -261,6 +261,27 @@ describe("useUpdater", () => {
       check: AVAILABLE,
     });
     expect(updater.open).toBe(true);
+  });
+
+  it("an update that failed after the last Restart Now opens its reason instead of downloading again (#457)", async () => {
+    const reason = "The last update could not be installed: rbxport did not exit before the update timeout";
+    const failedLastTime: UpdateCheck = { ...AVAILABLE, previousFailure: reason };
+    check = () => Promise.resolve(failedLastTime);
+    const fetched = vi.fn(() => Promise.resolve(INSTALLED));
+    download = fetched;
+    await mount(true);
+    act(() => {
+      vi.advanceTimersByTime(15_000);
+    });
+    await settle();
+    expect(updater.state).toEqual({ phase: "failed", message: reason, check: failedLastTime });
+    expect(updater.open).toBe(true);
+    expect(fetched).not.toHaveBeenCalled();
+    // Try Again downloads it, as after any failed download.
+    act(() => updater.retry());
+    await settle();
+    expect(fetched).toHaveBeenCalledTimes(1);
+    expect(updater.state.phase).toBe("ready");
   });
 
   it("a check that cannot reach the server is a failure with nothing to download", async () => {

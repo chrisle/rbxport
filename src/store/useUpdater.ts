@@ -154,6 +154,12 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
           setState({ phase: "nix", currentVersion: found.currentVersion });
         } else if (found.version === null) {
           setState({ phase: "upToDate", currentVersion: found.currentVersion });
+        } else if (found.previousFailure) {
+          // The last Restart Now quit, and the install after it failed
+          // (#457). Say why rather than download and fail the same way
+          // again unseen; Try Again downloads it afresh.
+          setState({ phase: "failed", message: found.previousFailure, check: found });
+          setOpen(true);
         } else if (found.ready) {
           setState({ phase: "ready", check: found, ready: found.ready });
         } else {

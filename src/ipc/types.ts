@@ -1114,6 +1114,11 @@ export interface UpdateCheck {
    * server; `version` is null.
    */
   nixInstall: boolean;
+  /**
+   * Why the last update, installed after the app quit, did not install.
+   * Given once, by the first check after the launch that found it.
+   */
+  previousFailure?: string | null;
 }
 
 /** A downloaded update, and whether it is already in the app's place. */
