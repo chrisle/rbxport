@@ -1443,9 +1443,10 @@ the same size and the same nanosecond mtime (for example MP3Gain with
 stick copy that keeps its size within the same 2 s timestamp is not either. Analysis is rewritten only when the hash or directory
 changed, or the bytes on disk differ. The manifest also records expected
 analysis extensions and individual companion hashes. A deleted EXT can
-therefore be detected and repaired without treating it as a player cue edit.
-Changes to surviving musical sections still go through the snapshot conflict
-checks; missing companions must not bypass protection of device edits.
+therefore be detected and repaired. A player's edits to the cue lists or
+beat grid of an exported track are replaced by the library's: an export
+goes from the computer to the USB (#439, #522), and Import is how they come
+back.
 
 RBXport retains content it did not create: playlists on the device that are not
 in its previous manifest, their tracks, history tracks, and any track that

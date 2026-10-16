@@ -696,10 +696,12 @@ In loop order:
    none of its analysis companions did, the old waveforms and cues no longer
    match the audio. The track is exported without analysis and cues, and an
    `analysis-stale` warning asks for re-analysis.
-10. `snapshot::check_analysis`: for a carried track whose companions are not
-    trusted, if the stick's analysis changed since the last sync in its cue
-    or beat-grid sections, the run is refused ("USB cues or beat grids
-    changed since the last sync"). A missing companion file can be repaired.
+10. Cues and beat grids edited on a player since the last sync are not a
+    conflict: an export goes from the computer to the USB, so the library's
+    cue lists and grid replace them (#439, #522). Until #522 this step
+    refused the run part-way through the copies ("USB cues or beat grids
+    changed since the last sync"). Bringing player edits back is Import's
+    job. A missing companion file is repaired as before.
 11. Analysis is staged only if it is not reused and differs from what the
     stick holds. Companions that the library no longer has are queued for
     removal.
@@ -962,10 +964,10 @@ stays as it was:
 | "Full integrity check failed" | step 6 (Verify all files) |
 | "Source changed while it was being prepared", "Source changed during conversion" | `PreparationCache`, step 33 |
 | "Conversion would create duplicate audio path", "Analysis directory space exhausted" | per-track loop |
-| "USB cues or beat grids changed since the last sync" | `snapshot::check_analysis` |
 | "… longer than export.pdb can hold" | row-length checks |
 | "A track being removed is still referenced by USB history" | `Snapshot::check_retained_history` |
-| "My Tag '…' changed on the USB", "OneLibrary contains cue records…" | `Snapshot::check_changes` |
+| "My Tag '…' changed on the USB" | `Snapshot::check_changes` |
+| "OneLibrary contains cue records…" | `Snapshot::check_changes`: a cue row added or changed on the stick since the last sync, on a track this sync takes off the stick. Rows on tracks the sync keeps are replaced by the library's (#522). |
 | "The export did not verify, so the USB was left as it was" | `verify_staged_incremental` |
 | "Exported media changed during sync", "The device changed during sync. Close other writers and retry." | step 33 |
 
@@ -1060,7 +1062,7 @@ Before handing off, run the checks in [Testing](../development/testing.md#before
 | Space preview | `plan::from_baseline`, `estimate::estimate_inspected` | `estimate_sync`, `SyncEstimateDto`, `SyncManager.tsx` space bars |
 | Shared preparation or conversion caching | `cache.rs` | `EXPORT_CACHE` in `commands.rs`; `rbl_audio::compatibility` |
 | File names or layout | `layout`, `layouts`, `fat_safe`, `fat_file_name`, `dir_name`, `analysis_directory` | `staged_files`; `tests/export.rs`; [Audio naming](usb-export-db.md#audio-naming-and-conversion) |
-| Analysis written to the stick | The `exported_analysis` block; `incremental::analysis_recipe`, `load_analysis` | `rbl-anlz`; `snapshot::check_analysis`; `TRANSFORM_VERSION` |
+| Analysis written to the stick | The `exported_analysis` block; `incremental::analysis_recipe`, `load_analysis` | `rbl-anlz`; `TRANSFORM_VERSION`; `tests/player_cue_edits.rs` |
 | Cue export | `rbl_db::export_info` (cues), `rbl_anlz::cues::sections` | `rbl_onelibrary::build::Builder::replace_cues` / `preserve_cues` |
 | Artwork | `artwork_path`, `write_artwork` | `artwork_row`; `Builder::add_image` |
 | Format conversion | `rbl_audio::compatibility` | Conversion naming in the per-track loop; `cache.rs`; [user guide](../user/usb-export.md#maximum-cdj-compatibility) |

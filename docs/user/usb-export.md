@@ -33,9 +33,15 @@ This matches rekordbox, which brings device edits back into its collection
 only when you ask (**Update Collection** on the device, or the device-to-
 rekordbox arrow in its Sync Manager), not as part of a sync.
 
-A rating or cue changed on the device stops SYNC for that device until it is
-imported (for a rating: "changed on the USB. Import its changes before
-syncing."), so a sync overwrites neither the device edit nor your library.
+SYNC goes from your library to the device, so for the tracks it writes your
+library's cues and beat grids win: a cue or beat grid changed on a player is
+replaced by your library's. To keep a player's cues and grids, run **Import**
+before SYNC. A cue a player added to a track that SYNC takes off the device
+would just be lost, so that still stops SYNC until it is imported.
+
+A rating changed on the device stops SYNC for that device until it is
+imported ("changed on the USB. Import its changes before syncing."), so a
+sync overwrites neither the device edit nor your library.
 
 ### Track ratings
 
