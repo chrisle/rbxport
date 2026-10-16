@@ -198,7 +198,6 @@ export interface LibrarySummary {
   dbVersion: number | null;
 }
 
-/** What the app is costing, for the title bar's readout. */
 /** A log line's level, most severe first. */
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
 
@@ -221,6 +220,7 @@ export interface LogPage {
   oldest: number;
 }
 
+/** What the app is costing, for the title bar's readout. */
 export interface Diagnostics {
   audioLoad: number;
   audioXruns: number;

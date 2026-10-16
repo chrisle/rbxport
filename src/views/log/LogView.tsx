@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { LogLevel, LogLine } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
-import { LOG_LEVELS, appendLogLines, formatLogLine, visibleLogLines } from "@/lib/logLines";
+import { appendLogLines, formatLogLine, visibleLogLines } from "@/lib/logLines";
 import { startWindowDrag } from "@/lib/windowDrag";
 import { useShowWindowWhenReady } from "@/lib/windowReady";
 import styles from "./LogView.module.css";
@@ -10,13 +10,14 @@ import styles from "./LogView.module.css";
 /** How often the open window asks for lines logged since it last asked. */
 const POLL_MS = 1000;
 
-const LEVEL_LABELS: Record<LogLevel, string> = {
-  error: "Errors",
-  warn: "Warnings and errors",
-  info: "Info and above",
-  debug: "Debug and above",
-  trace: "Everything",
-};
+/** The level filter's choices, most severe first; the labels are found by the locale script. */
+const LEVEL_CHOICES: readonly { level: LogLevel; label: string }[] = [
+  { level: "error", label: "Errors" },
+  { level: "warn", label: "Warnings and errors" },
+  { level: "info", label: "Info and above" },
+  { level: "debug", label: "Debug and above" },
+  { level: "trace", label: "Everything" },
+];
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -104,7 +105,7 @@ export function LogView({ windowed = false, onClose }: { windowed?: boolean; onC
         <label className={styles.level}>
           <span>{t("Show")}</span>
           <select value={minimum} onChange={event => setMinimum(event.target.value as LogLevel)}>
-            {LOG_LEVELS.map(level => <option key={level} value={level}>{t(LEVEL_LABELS[level])}</option>)}
+            {LEVEL_CHOICES.map(({ level, label }) => <option key={level} value={level}>{t(label)}</option>)}
           </select>
         </label>
         <input className={styles.filter} type="search" aria-label={t("Filter the log")} placeholder={t("Filter")}

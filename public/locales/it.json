@@ -1734,5 +1734,10 @@
   "Show the log": "Show the log",
   "The log could not be saved.": "The log could not be saved.",
   "The log folder could not be opened.": "The log folder could not be opened.",
-  "{shown} of {total} lines": "{shown} of {total} lines"
+  "{shown} of {total} lines": "{shown} of {total} lines",
+  "Debug and above": "Debug and above",
+  "Errors": "Errors",
+  "Everything": "Everything",
+  "Info and above": "Info and above",
+  "Warnings and errors": "Warnings and errors"
 }
