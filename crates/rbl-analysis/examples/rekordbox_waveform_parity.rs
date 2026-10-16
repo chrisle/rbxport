@@ -60,10 +60,13 @@ fn waves_of(audio: &Path) -> Result<Waves, Box<dyn std::error::Error>> {
 }
 
 fn compare(ours: &Waves, dat: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let dat_file = rbl_anlz::Anlz::read(dat)?;
     let ext = rbl_anlz::Anlz::read(&rbl_anlz::sibling(dat, "EXT"))?;
     let two_ex = rbl_anlz::Anlz::read(&rbl_anlz::sibling(dat, "2EX"))?;
     let pwvc: Vec<u8> = ours.pwvc.iter().flat_map(|gain| gain.to_be_bytes()).collect();
     for (tag, mine, file) in [
+        (b"PWAV", &ours.pwav, &dat_file),
+        (b"PWV2", &ours.pwv2, &dat_file),
         (b"PWVC", &pwvc, &two_ex),
         (b"PWV6", &ours.pwv6, &two_ex),
         (b"PWV7", &ours.pwv7, &two_ex),
@@ -96,7 +99,7 @@ fn compare(ours: &Waves, dat: &Path) -> Result<(), Box<dyn std::error::Error>> {
 fn fields(tag: [u8; 4], bytes: &[u8]) -> Vec<Vec<u16>> {
     match &tag {
         b"PWVC" => vec![bytes.chunks(2).map(|w| u16::from_be_bytes([w[0], w[1]])).collect()],
-        b"PWV3" => vec![bytes.iter().map(|b| u16::from(b >> 5)).collect(), bytes.iter().map(|b| u16::from(b & 31)).collect()],
+        b"PWAV" | b"PWV3" => vec![bytes.iter().map(|b| u16::from(b >> 5)).collect(), bytes.iter().map(|b| u16::from(b & 31)).collect()],
         b"PWV5" => {
             let words: Vec<u16> = bytes.chunks(2).map(|w| u16::from_be_bytes([w[0], w[1]])).collect();
             [(13, 7), (10, 7), (7, 7), (2, 31)].iter().map(|&(shift, mask)| words.iter().map(|w| (w >> shift) & mask).collect()).collect()

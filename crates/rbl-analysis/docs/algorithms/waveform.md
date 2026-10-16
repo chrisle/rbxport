@@ -32,10 +32,10 @@ records the algorithms, measured errors, and remaining limitations.
 
 ## Packing and persistence
 
-The app writes `PWVC`, `PWV3`, `PWV4`, `PWV5`, `PWV6` and `PWV7` as rekordbox
+The app writes `PWAV`, `PWV2`, `PWVC`, `PWV3`, `PWV4`, `PWV5`, `PWV6` and `PWV7` as rekordbox
 computes them itself, from `src/wave_creator.rs`; see
-[rekordbox's colour and 3-band waveforms](rekordbox-waveforms.md). The columns
-here still give `PWAV` and `PWV2`, and the helpers for the other
+[rekordbox's blue, RGB and 3-band waveforms](rekordbox-waveforms.md). The columns
+here support older callers, and the helpers for the other
 representations remain for callers that have only columns.
 
 The crate has helpers for PWAV, PWV2, PWV3, PWV4, and PWV5 representations.

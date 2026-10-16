@@ -1,11 +1,13 @@
-# rekordbox's colour and 3-band waveforms
+# rekordbox's blue, RGB and 3-band waveforms
 
 [Analysis documentation](../README.md) · [Waveforms](waveform.md)
 
 `src/wave_creator.rs` computes the sections rekordbox computes itself for its
 RGB and 3Band waveforms — `PWVC`, `PWV6`, `PWV7`, `PWV4`, `PWV5` — and the
 blue detail `PWV3`, from the same audio and with the same arithmetic.
-`PWAV` and `PWV2` still come from [the detail columns](waveform.md).
+`blue_overview.rs` computes `PWAV` and `PWV2` from the separate
+`BeatAnalyzer::LoudViewMaker` pass; no saved waveform uses the legacy
+[detail-column approximation](waveform.md).
 
 ## Evidence
 
@@ -130,6 +132,74 @@ block: whiteness in the top three bits — the first `k` with
 `low/peak ≥ 0.875 − k/8`, 7 where none is or the block is silent — over the
 height, on the same square law as `PWV5`'s against the loudest block.
 
+## `PWAV` and `PWV2` — the blue overviews
+
+[OBS static] rekordbox **7.2.11.0342**, macOS arm64, `LoudViewMaker`:
+`create`, `analyzePeak`, `PeakDetect`, `PeakDetect900`, `analyzeLoudColor`,
+plus `CBeatAnalyzeLib::V_Devide`, `notifyDots` and `MstStoreLoudWave`.
+This is a separate reference version from the RGB/3-band fixtures above.
+
+The integer stereo mean feeds a double-precision filter cascade, with
+single-precision output: a 150 Hz band-pass at Q=0.9 twice; alternating
+283 Hz high-pass and 6 kHz low-pass twice; and a 6 kHz high-pass twice.
+The block size is `floor(rate/75)` frames. Peak tracking keeps a rising peak
+for at least 320 ms, admits a new peak above 75% of it (66% for high), and
+after 1.714 seconds of decay applies 0.9938303 every approximately 11.61 ms.
+The dots pass considers maxima over four samples, with a 327.68 floor.
+
+The 400-column overview combines block means of absolute raw amplitude
+with the low band's peak density. A native threshold table quantizes height
+to 2..25. Its six colors come from the three peak densities in dB, using
+low/2, mid/4 and high. The 100-column dots preview uses the low peak density
+and its own threshold table, with height 1..15 and no color bits.
+
+Only peak events and block summaries are retained until EOF; decoded PCM
+and filtered samples are discarded block by block. The final block is held
+until EOF so flushing does not depend on the decoder's packet boundaries.
+
+[OBS native routine] `tests/blue_overview.rs` compares both payloads exactly
+against isolated native `LoudViewMaker` output for the six generated signals
+a 200-second repetition of `kick-hats`, and a fractional final block. These `.blue-preview` files
+are native-routine captures, **not complete files exported by rekordbox**.
+See [fixture provenance](../../tests/rekordbox_waveform/README.md).
+The tests also exercise arbitrary packet boundaries and empty/short silence.
+
+[OBS read only] The extended `rekordbox_waveform_parity -- --library 8`
+comparison covered eight existing library rows (five distinct audio files).
+`PWV2` was exact throughout; `PWAV` height was 98.5–100% exact and
+99.75–100% within one. Its color codes were only 64.75–83.5% exact.
+[UNKNOWN] The original analyzer/version/input path behind those stored blue
+colors has not been established. This discrepancy is not accounted for by
+float rounding, and the native-routine fixtures do not establish parity for
+those historical color codes. RGB/3-band evidence above is separate.
+
+## CDJ-3000 emulator check
+
+[OBS emulator, 2026-10-16] AtEmu running CDJ-3000 firmware **3.20** loaded
+analysis written by this branch's desktop app from a disposable 30-second
+220 Hz tone/click fixture. The check invoked `analyse_track` on fixture track
+10000, then loaded it through LINK and selected **BLUE**, **RGB**, and
+**3BAND** from the player's SHORTCUT screen.
+
+All three displayed nonempty, distinct overview and detailed waveforms.
+For each mode, the player's network status reported PLAY and its on-screen
+playhead advanced during a three-second observation. SHA-256 checks confirmed
+that the DAT, EXT and 2EX files were unchanged after playback. Screenshots,
+the exact script, file payloads, hashes, and `result.json` are retained in the
+private companion repository under
+`verification/pr489-waveforms/20261016/`.
+
+The general private LINK suite was also attempted: source discovery passed,
+but browsing assumed TRACK was the first category while this PR's base
+presents ARTIST first. Its interaction client then attempted localhost,
+although the database server bound to the selected LAN interface. That run
+was **not a passing suite**. The focused check used the displayed TRACK row
+and the real app's analysis/save path instead.
+
+[UNKNOWN physical] This checks the stated rendering, load and transport flows
+in emulated CDJ-3000 firmware. It does not establish measured audio output,
+physical-player behavior, or other player models.
+
 ## Cost
 
 `WaveCreator` is fed a packet at a time and keeps twelve 16-bit values a
@@ -139,7 +209,7 @@ only known then. `WaveCreator::reserve` takes the container's frame count
 first, so the values are not copied each time they outgrow their buffers,
 which at the peak held twice as much.
 
-[OBS] The app's analysis loop on an Apple M4, release build, the `Rbxport`
+[OBS before the blue overview extension] The app's analysis loop on an Apple M4, release build, the `Rbxport`
 preset, peak memory footprint from `/usr/bin/time -l`:
 
 | File | Without `WaveCreator` | With it |
@@ -147,5 +217,6 @@ preset, peak memory footprint from `/usr/bin/time -l`:
 | 6-minute MP3 | 0.42 s, 145 MB | 1.1 s, 155 MB |
 | 2-hour MP3 | 7.9 s, 718 MB | 21 s, 925 MB |
 
-The filters cost about 6.5 s of one core per hour of audio, on the decoding
-thread.
+These measurements predate `blue_overview.rs`; its extra filters and block
+summaries add cost. They are historical measurements, not timings of the
+complete blue/RGB/3-band implementation.

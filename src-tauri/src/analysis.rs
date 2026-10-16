@@ -268,21 +268,13 @@ fn analyse_and_save(
         .iter()
         .map(|b| rbl_anlz::Beat { beat_number: b.beat_number, tempo_x100: b.tempo_x100, time_ms: b.time_ms })
         .collect();
-    let columns: Vec<rbl_anlz::BandColumn> = analysis
-        .waveform
-        .columns
-        .iter()
-        .map(|c| rbl_anlz::BandColumn { low: c.low, mid: c.mid, high: c.high, peak: c.peak })
-        .collect();
     // `PPTH` as rekordbox writes it in the share tree: `?/<file name>`. The
     // full path this wrote before is not what rekordbox derives for the
     // track (issue #323).
-    // The colour and 3-band waveforms are rekordbox's own; `PWAV` and `PWV2`
-    // still come from the columns.
+    // Every saved waveform uses the completed blue, RGB and 3-band pass.
     let files = rbl_anlz::author_with_rekordbox_waves(
         &rbl_anlz::share_tree_ppth(path),
         &beats,
-        &columns,
         &waves,
         rbl_anlz::Existing { dat: existing[0].as_ref(), ext: existing[1].as_ref(), two_ex: existing[2].as_ref() },
     );
@@ -424,6 +416,8 @@ fn analyse_file(
 /// The analyser's waveforms as the file author takes them: the same payloads.
 fn rekordbox_waves(waves: rbl_analysis::wave_creator::Waves) -> rbl_anlz::RekordboxWaves {
     rbl_anlz::RekordboxWaves {
+        pwav: waves.pwav,
+        pwv2: waves.pwv2,
         pwvc: waves.pwvc,
         pwv3: waves.pwv3,
         pwv4: waves.pwv4,
