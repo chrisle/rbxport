@@ -103,8 +103,10 @@ export function rowsFor(
 
 /**
  * The stored keys after one binding takes a chord: the binding gets it, a
- * preset key put back is forgotten rather than stored, and any other
- * binding that had the chord loses it, so a key does two things nowhere.
+ * preset key put back is forgotten rather than stored, and another binding
+ * whose own saved key was that chord loses it. A row that has the chord only
+ * from the preset is left unsaved: `keyMap` takes the key from it while the
+ * clash lasts, and gives it back its key in a preset where there is none.
  */
 export function assignChord(
   overrides: KeyOverrides, id: string, chord: KeyChord, preset: KeyPreset = "export",
@@ -112,11 +114,10 @@ export function assignChord(
   const next: Record<string, KeyChord> = { ...overrides };
   const target = BINDINGS.find((b) => b.id === id);
   if (!target) return overrides;
-  const keys = keyMap({ preset, overrides });
-  for (const binding of BINDINGS) {
-    if (binding.id === id || binding.action === undefined) continue;
-    const held = keys[binding.id] ?? binding.chord;
-    if (chord.key !== "" && sameChord(held, chord)) next[binding.id] = { key: "" };
+  if (chord.key !== "") {
+    for (const [other, held] of Object.entries(overrides)) {
+      if (other !== id && held.key !== "" && sameChord(held, chord)) next[other] = { key: "" };
+    }
   }
   const fallback = presetChord(target, preset).chord;
   if (fallback.key === chord.key && sameChord(fallback, chord)) delete next[id];

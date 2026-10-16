@@ -195,10 +195,30 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
     expect(keys.playPause).toEqual({ key: "" });
     // The pane's own edit: Play/Pause given back Z forgets the change.
     expect(assignChord({ playPause: { key: "p" } }, "playPause", { key: "z" }, "performance1")).toEqual({});
-    // A key another row has under the preset moves to the row that took it.
-    expect(assignChord({}, "loopIn", { key: "a" }, "performance1")).toEqual({ cue: { key: "" }, loopIn: { key: "a" } });
-    expect(dispatchBinding({ key: "a" }, MAC, null, keyMap({ preset: "performance1", overrides: { cue: { key: "" }, loopIn: { key: "a" } } })))
-      .toMatchObject({ action: "loopIn" });
+    // A key another row has under the preset moves to the row that took it,
+    // but only the edited row is saved: the clash is the preset's, not theirs.
+    expect(assignChord({}, "loopIn", { key: "a" }, "performance1")).toEqual({ loopIn: { key: "a" } });
+    const p1 = keyMap({ preset: "performance1", overrides: { loopIn: { key: "a" } } });
+    expect(dispatchBinding({ key: "a" }, MAC, null, p1)).toMatchObject({ action: "loopIn" });
+    expect(p1.cue).toEqual({ key: "" });
+    // A key the person saved on another row is theirs, so that row loses it.
+    expect(assignChord({ cue: { key: "x" } }, "loopIn", { key: "x" }, "performance1"))
+      .toEqual({ cue: { key: "" }, loopIn: { key: "x" } });
+  });
+
+  it("gives a row that lost its key to a clash its key back in a preset without the clash", () => {
+    // Performance 1: Loop In takes Cue's A. Export: Cue is back on C.
+    const overrides = assignChord({}, "loopIn", { key: "a" }, "performance1");
+    const exportKeys = keyMap({ preset: "export", overrides });
+    expect(exportKeys.cue ?? BINDINGS.find((b) => b.id === "cue")?.chord).toEqual({ key: "c" });
+    expect(dispatchBinding({ key: "c" }, MAC, null, exportKeys)).toMatchObject({ action: "cue" });
+    expect(dispatchBinding({ key: "a" }, MAC, null, exportKeys)).toMatchObject({ action: "loopIn" });
+    // Export: Play/Pause takes Cue's C. Performance 1: Cue is back on A.
+    const back = assignChord({}, "playPause", { key: "c" }, "export");
+    expect(back).toEqual({ playPause: { key: "c" } });
+    const p1Keys = keyMap({ preset: "performance1", overrides: back });
+    expect(p1Keys.cue).toEqual({ key: "a" });
+    expect(dispatchBinding({ key: "a" }, MAC, null, p1Keys)).toMatchObject({ action: "cue", deck: "a" });
   });
 });
 
