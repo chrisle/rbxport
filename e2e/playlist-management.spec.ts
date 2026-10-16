@@ -178,7 +178,9 @@ test("dragging a selection drops every row in it, not just the one under the han
   // A plain click on a selected row, released without a drag, does collapse
   // to it — the ordinary click still works.
   await rows(page).nth(2).locator('[data-col="title"]').click();
-  await expect(page.getByText("Selected: 1 Track")).toBeVisible();
+  await expect(rows(page).and(page.locator('[aria-selected="true"]'))).toHaveCount(1);
+  // One track is fewer than rekordbox counts, so the bar goes blank.
+  await expect(page.getByRole("contentinfo")).not.toContainText("Selected:");
 
   await made.click();
   await expect(page.getByTestId("browser-title")).toHaveText("New playlist (3 Tracks)");
@@ -811,9 +813,16 @@ test("the status bar tallies the open playlist as rekordbox does, and the collec
   await expect(shown).toBeVisible();
   const before = await shown.innerText();
 
-  // Picking tracks says what is picked instead; letting go brings the tally back.
+  // Picking tracks writes the bar instead, as rekordbox's
+  // `updateStatusBarWithSelectedTrackNum` does: one track is counted as none
+  // and clears it, two or more say so, and letting go leaves it blank.
   await rows(page).first().locator('[data-col="title"]').click();
-  await expect(bar.getByText("Selected: 1 Track")).toBeVisible();
+  await expect(bar.getByText(tally)).toHaveCount(0);
+  await expect(bar).not.toContainText("Selected:");
+  await rows(page).nth(1).locator('[data-col="title"]').click({ modifiers: ["Shift"] });
+  await expect(bar.getByText("Selected: 2 Tracks", { exact: true })).toBeVisible();
+  await rows(page).first().locator('[data-col="title"]').click({ modifiers: ["ControlOrMeta"] });
+  await expect(bar).not.toContainText("Selected:");
   await expect(bar.getByText(tally)).toHaveCount(0);
 
   // A new, empty playlist is `0 Tracks`, with no time or size.
@@ -823,7 +832,7 @@ test("the status bar tallies the open playlist as rekordbox does, and the collec
   await expect(title).toHaveText("New playlist (0 Tracks)");
   await expect(bar.getByText("0 Tracks", { exact: true })).toBeVisible();
 
-  // Back to the playlist: the same tally as before.
+  // Picking the playlist in the tree again brings its tally back.
   await item(page, "Eurodance").click();
   await expect(bar.getByText(before, { exact: true })).toBeVisible();
 });

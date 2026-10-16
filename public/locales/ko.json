@@ -399,7 +399,7 @@
   "Removed {count} track.": "{count} 트랙을 삭제했습니다.",
   "Removed {count} tracks.": "{count}개의 트랙을 제거했습니다.",
   "LINK could not be turned on.": "LINK를 켤 수 없습니다.",
-  "Selected: 1 Track": "선택됨: 트랙 1개",
+  "Selected": "선택",
   "rbxport": "rbxport",
   "Dual control": "이중 제어",
   "Link the waveform controls and beat jump across both decks.": "파형 컨트롤을 연결하고 두 데크에 걸쳐 비트 점프를 해보세요.",

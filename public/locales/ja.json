@@ -486,7 +486,7 @@
   "Removed {count} track.": "{count} 個のトラックを削除しました。",
   "Removed {count} tracks.": "{count} 個のトラックを削除しました。",
   "LINK could not be turned on.": "LINKをオンにできませんでした。",
-  "Selected: 1 Track": "選択済み: 1 トラック",
+  "Selected": "選択",
   "rbxport": "rbxport",
   "Dual control": "デュアルコントロール",
   "Link the waveform controls and beat jump across both decks.": "波形コントロールをリンクし、両方のデッキ間でビートジャンプを行います。",

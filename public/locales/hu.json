@@ -430,7 +430,7 @@
   "Removed {count} track.": "{count} szám eltávolítva.",
   "Removed {count} tracks.": "{count} szám eltávolítva.",
   "LINK could not be turned on.": "LINK nem kapcsolható be.",
-  "Selected: 1 Track": "Kiválasztva: 1 szám",
+  "Selected": "Kiválasztva",
   "rbxport": "rbxport",
   "Dual control": "Kettős vezérlés",
   "Link the waveform controls and beat jump across both decks.": "Kapcsolja össze a hullámforma-vezérlőket, és ugorjon át mindkét fedélzeten.",

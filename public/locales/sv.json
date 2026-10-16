@@ -402,7 +402,7 @@
   "Removed {count} track.": "Tog bort {count} spår.",
   "Removed {count} tracks.": "Tog bort {count} spår.",
   "LINK could not be turned on.": "LINK kunde inte aktiveras.",
-  "Selected: 1 Track": "Valt: 1 spår",
+  "Selected": "Valt",
   "rbxport": "rbxport",
   "Dual control": "Dubbel kontroll",
   "Link the waveform controls and beat jump across both decks.": "Länka vågformskontrollerna och beathopp över båda däcken.",

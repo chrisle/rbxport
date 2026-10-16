@@ -415,7 +415,7 @@
   "Removed {count} track.": "{count} parça kaldırıldı.",
   "Removed {count} tracks.": "{count} parça kaldırıldı.",
   "LINK could not be turned on.": "LINK açılamadı.",
-  "Selected: 1 Track": "Seçilen: 1 Parça",
+  "Selected": "Seçilen",
   "rbxport": "rbxport",
   "Dual control": "Çift kontrol",
   "Link the waveform controls and beat jump across both decks.": "Dalga formu kontrollerini bağlayın ve her iki deckte de atlamayı tamamlayın.",

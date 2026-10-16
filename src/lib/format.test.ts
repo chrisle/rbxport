@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatListTotals, formatShortDate, formatStatusSize, formatStatusTime } from "./format";
+import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatListTotals, formatShortDate, formatStatusSize, formatStatusTime, statusBarListText } from "./format";
 
 describe("formatDuration", () => {
   it("pads to two digits like rekordbox", () => {
@@ -104,5 +104,29 @@ describe("status-bar totals", () => {
     // A track with no length or size still counts; it adds nothing else.
     expect(formatListTotals({ tracks: 2, seconds: 0, bytes: 0 }, t)).toBe("2 Tracks, 0 minutes, 0 bytes");
     expect(formatListTotals({ tracks: 0, seconds: 0, bytes: 0 }, t)).toBe("0 Tracks");
+  });
+});
+
+describe("statusBarListText", () => {
+  const t = (text: string) => text;
+  const totals = { tracks: 3, seconds: 18 * 60 + 12, bytes: 161 * 1024 ** 2 };
+  it("shows the tally until tracks are picked in the list", () => {
+    expect(statusBarListText({ picked: false, selected: 0, totals }, t)).toBe("3 Tracks, 18 minutes, 161 MB");
+    // A selection carried over from another list is not a pick in this one.
+    expect(statusBarListText({ picked: false, selected: 4, totals }, t)).toBe("3 Tracks, 18 minutes, 161 MB");
+    // The collection and histories have no tally.
+    expect(statusBarListText({ picked: false, selected: 0, totals: undefined }, t)).toBe("");
+  });
+  it("counts fewer than two picked tracks as none, as rekordbox does", () => {
+    // rekordbox-track-selected-cleared.png: one row selected, blank bar.
+    expect(statusBarListText({ picked: true, selected: 1, totals }, t)).toBe("");
+    // Letting go does not bring the tally back.
+    expect(statusBarListText({ picked: true, selected: 0, totals }, t)).toBe("");
+    expect(statusBarListText({ picked: true, selected: 2, totals }, t)).toBe("Selected: 2 Tracks");
+    expect(statusBarListText({ picked: true, selected: 61, totals: undefined }, t)).toBe("Selected: 61 Tracks");
+  });
+  it("builds the words from the catalog", () => {
+    const de = (text: string) => ({ Selected: "Gewählt", Tracks: "Tracks" })[text] ?? text;
+    expect(statusBarListText({ picked: true, selected: 5, totals }, de)).toBe("Gewählt: 5 Tracks");
   });
 });

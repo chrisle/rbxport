@@ -83,7 +83,7 @@ import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
 import type { AnalysisResult, DeviceImportMissing, DevicePlaylistEdit, DevicePlaylistImportPlan, FilterValues, LinkPeerSeen, LinkStatus, ListTotals, RelocateSearch, SmartRule, TrackLookups, UnanalysedTracks } from "@/ipc/types";
-import { formatListTotals } from "@/lib/format";
+import { statusBarListText } from "@/lib/format";
 import { autoRelocated, missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
 import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
@@ -2883,13 +2883,13 @@ function AppBody() {
     [summary, loadError, missingLibrary, restored.count, restored.rows],
   );
 
-  // One place on the bar, as in rekordbox: picked tracks when there are
-  // some, else the open playlist's tally (`61 Tracks, 5 hours 2 minutes,
-  // 759.7 MB`), else nothing.
-  const showSelection = barShowsSelection && selectedCount > 0;
-  const selectionText =
-    showSelection && selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : showSelection ? "Selected: 1 Track"
-      : listTotals ? formatListTotals(listTotals, t, viewPrefs.locale) : "";
+  // One place on the bar, written by whichever changed last, as in
+  // rekordbox: the tracks picked in the open list, else its tally.
+  const selectionText = statusBarListText(
+    { picked: barShowsSelection, selected: selectedCount, totals: listTotals },
+    t,
+    viewPrefs.locale,
+  );
 
   const tip = useTooltip();
   const openViewSettings = useCallback(() => openPreferences("view"), [openPreferences]);

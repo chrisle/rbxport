@@ -437,7 +437,7 @@
   "Removed {count} track.": "Traccia {count} rimossa.",
   "Removed {count} tracks.": "{count} tracce rimosse.",
   "LINK could not be turned on.": "Impossibile attivare LINK.",
-  "Selected: 1 Track": "Selezionato: 1 traccia",
+  "Selected": "Scelti",
   "rbxport": "rbxport",
   "Dual control": "Doppio controllo",
   "Link the waveform controls and beat jump across both decks.": "Collega i controlli della forma d'onda e esegui il beat jump su entrambi i deck.",

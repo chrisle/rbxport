@@ -414,7 +414,7 @@
   "Removed {count} track.": "Byla odstraněna {count} stopa.",
   "Removed {count} tracks.": "Počet odstraněných skladeb: {count}.",
   "LINK could not be turned on.": "LINK nelze zapnout.",
-  "Selected: 1 Track": "Vybráno: 1 stopa",
+  "Selected": "Vybráno",
   "rbxport": "rbxport",
   "Dual control": "Dvojité ovládání",
   "Link the waveform controls and beat jump across both decks.": "Propojte ovládací prvky průběhu a skákejte přes oba balíčky.",

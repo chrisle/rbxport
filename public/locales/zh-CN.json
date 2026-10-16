@@ -457,7 +457,7 @@
   "Removed {count} track.": "已删除 {count} 首曲目。",
   "Removed {count} tracks.": "已删除 {count} 首曲目。",
   "LINK could not be turned on.": "LINK 无法打开。",
-  "Selected: 1 Track": "已选择： 1 首曲目",
+  "Selected": "已选择",
   "rbxport": "RBX端口",
   "Dual control": "双控",
   "Link the waveform controls and beat jump across both decks.": "链接两个面板上的波形控件和节拍跳跃。",

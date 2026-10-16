@@ -101,3 +101,30 @@ export function formatListTotals(totals: { tracks: number; seconds: number; byte
   if (totals.tracks <= 0) return `0 ${t("Tracks")}`;
   return `${totals.tracks} ${t("Tracks")}, ${formatStatusTime(totals.seconds, t)}, ${formatStatusSize(totals.bytes, t, locale)}`;
 }
+
+/**
+ * What the right of the status bar says about the open list. rekordbox has
+ * one label there, written by whichever changed last [OBS: rekordbox 7.2.19]:
+ *
+ * - picking the list in the tree writes its tally, or clears the label for
+ *   the collection and histories (`changedSelectedFolItem`), so `picked` is
+ *   false and `totals` is what `formatListTotals` says, or nothing;
+ * - picking tracks in it writes the selection
+ *   (`ListViewer::selectedRowsChanged` -> `updateStatusBarWithSelectedTrackNum`
+ *   at `0x10040c9b8`), which counts fewer than two rows as none
+ *   (`cmp w8, #0x2; b.lt` at `0x10040cab8`), and `setSelectedTracks` writes an
+ *   empty label for none (`cbz w1` at `0x1004ccaa0`). So one track selected,
+ *   or the selection let go, leaves the bar blank until the list is picked in
+ *   the tree again; two or more read `Selected: N Tracks`.
+ *
+ * rekordbox goes on with the selection's time and size
+ * (`common::selectedTracksInfo`); rbx does not sum the selection yet.
+ */
+export function statusBarListText(
+  state: { picked: boolean; selected: number; totals: { tracks: number; seconds: number; bytes: number } | undefined },
+  t: Translate,
+  locale = "en",
+): string {
+  if (state.picked) return state.selected >= 2 ? `${t("Selected")}: ${state.selected} ${t("Tracks")}` : "";
+  return state.totals ? formatListTotals(state.totals, t, locale) : "";
+}

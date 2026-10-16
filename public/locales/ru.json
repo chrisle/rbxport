@@ -427,7 +427,7 @@
   "Removed {count} track.": "Удален трек: {count}.",
   "Removed {count} tracks.": "Удалено треков: {count}.",
   "LINK could not be turned on.": "LINK не удалось включить.",
-  "Selected: 1 Track": "Выбрано: 1 трек",
+  "Selected": "Выбрано",
   "rbxport": "rbxport",
   "Dual control": "Двойное управление",
   "Link the waveform controls and beat jump across both decks.": "Соедините элементы управления формой волны и прыгайте по обеим декам.",

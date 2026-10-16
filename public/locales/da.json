@@ -398,7 +398,7 @@
   "Removed {count} track.": "Fjernede {count} spor.",
   "Removed {count} tracks.": "Fjernede {count} numre.",
   "LINK could not be turned on.": "LINK kunne ikke aktiveres.",
-  "Selected: 1 Track": "Valgt: 1 spor",
+  "Selected": "Valgt",
   "rbxport": "rbxport",
   "Dual control": "Dobbelt kontrol",
   "Link the waveform controls and beat jump across both decks.": "Forbind bølgeformskontrollerne og beat-hop på tværs af begge dæk.",
