@@ -1746,5 +1746,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "解析ロックを無効",
+  "Analysis Lock On": "解析ロックを有効",
+  "Export a playlist to a file (*.txt)": "テキストファイルとして書き出し(*.txt)",
+  "Export a playlist to a file for music apps (*.m3u8)": "音楽アプリケーション用に書き出し(*.m3u8)",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

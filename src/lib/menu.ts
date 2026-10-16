@@ -6,7 +6,7 @@
  * rather than in a listener. Import writes to the shared library, so it is
  * refused while rekordbox holds it, exactly as the other write paths are.
  */
-
+import { menuBarItem, type MenuBarItem } from "./menuBar";
 
 export type MenuAction =
   | "settings"
@@ -19,6 +19,9 @@ export type MenuAction =
   | "info"
   | "analyze-track"
   | "locate-loaded"
+  // A Track or Playlist menu item that runs a list's or the tree's command
+  // (`menuBar.ts`).
+  | "bar-command"
   | "sub"
   | "layout-one"
   | "layout-two"
@@ -78,7 +81,12 @@ export function resolveMenu(
   readOnly: boolean,
   /** Library Protection is on in Preferences: the refusal says so instead. */
   protectedLibrary = false,
-): { action: MenuAction } | { refused: string } | null {
+): { action: MenuAction; item?: MenuBarItem } | { refused: string } | null {
+  const bar = menuBarItem(id);
+  if (bar) {
+    if (bar.writes && readOnly) return { refused: refusal(protectedLibrary) };
+    return { action: "bar-command", item: bar };
+  }
   const command = menuCommand(id);
   if (!command) return null;
   if (command.writes && readOnly) {

@@ -51,6 +51,7 @@ import { keyMap } from "@/lib/keyPresets";
 import { detectPlatform, dispatch, isTyping, type Action } from "@/lib/shortcuts";
 import { runCommand, type CommandScope } from "@/lib/commands";
 import { useCommands } from "@/store/useCommands";
+import { publishListMenuState } from "@/lib/menuBar";
 import { locateLoadedTrack, locateStep, needsCentering, registerLocateLoaded, restoredScrollTop, type SavedScroll } from "@/lib/locateLoaded";
 
 const ROW_H = 25; // --s-row-height
@@ -1731,6 +1732,64 @@ export const TrackTable = memo(function TrackTable({
     [],
   );
 
+  // The track menu's commands (see `src/lib/commands.ts`): its entries and
+  // the native Track menu's items (`src/lib/menuBar.ts`) both run these, on
+  // the selection.
+  const selectedRows = useCallback((): RowDto[] => {
+    const found: RowDto[] = [];
+    if (selection.ids.size === 0) return found;
+    for (let i = 0; i < view.count && found.length < selection.ids.size; i++) {
+      const row = view.rowAt(i);
+      if (row !== undefined && selection.ids.has(row.id)) found.push(row);
+    }
+    return found;
+  }, [selection.ids, view]);
+  const onSelection = (run: ((ids: string[]) => unknown) | undefined) => () => {
+    if (!run || selection.ids.size === 0) return false;
+    run([...selection.ids]);
+    return true;
+  };
+  useCommands({
+    importToCollection: onSelection(onImportToCollection),
+    analysisLockOn: onSelection(onAnalysisLock && ((ids) => onAnalysisLock(ids, true))),
+    analysisLockOff: onSelection(onAnalysisLock && ((ids) => onAnalysisLock(ids, false))),
+    reloadTag: onSelection(onReloadTag),
+    removeFromCollection: onSelection(onRemoveFromCollection && ((ids) => void onRemoveFromCollection(ids))),
+    autoRelocate: onSelection(onAutoRelocate),
+    // Relocate goes through the tracks in the order the list shows them.
+    relocate: () => {
+      if (!onRelocate || selection.ids.size === 0) return false;
+      const chosen = selection.ids;
+      void view.idsInRange(0, view.count)
+        .then((listed) => onRelocate(inListOrder(chosen, listed)))
+        .catch(() => onRelocate([...chosen]));
+      return true;
+    },
+    // The one selected row (rekordbox's menu bar wants exactly one).
+    showInFinder: () => {
+      if (!onShowInFinder || selection.ids.size !== 1) return false;
+      const row = selectedRows()[0];
+      if (row === undefined) return false;
+      onShowInFinder(row);
+      return true;
+    },
+  }, listScope);
+  // What the native Track menu needs to grey its items, kept current.
+  useEffect(() => {
+    if (spec.source.kind === "device") {
+      publishListMenuState(listScope, { source: "device", selected: selection.ids.size, rows: [], loose: false });
+      return;
+    }
+    const rows = selectedRows().map((row) => ({ missing: row.missing === true }));
+    publishListMenuState(listScope, {
+      source: spec.source.kind,
+      selected: selection.ids.size,
+      rows,
+      loose: hasLooseId(selection.ids),
+    });
+  }, [listScope, spec.source.kind, selection.ids, view.token, selectedRows]);
+  useEffect(() => () => publishListMenuState(listScope, null), [listScope]);
+
   // Whether the Delete key speaks to this list: rekordbox's list hears it
   // only while it has the focus. The last press landed in this list, and
   // nowhere else since — not the tree, the other list, a deck, a waveform or
@@ -1998,6 +2057,8 @@ export const TrackTable = memo(function TrackTable({
   return (
     <div
       ref={rootRef}
+      data-browser-pane="list"
+      data-browser-side={listScope}
       className={styles.browser}
       style={{
         ["--cols" as string]: gridOf(columns),
@@ -2265,13 +2326,13 @@ export const TrackTable = memo(function TrackTable({
             }
             switch (action) {
               case "importToCollection":
-                onImportToCollection?.(ids);
+                runCommand("importToCollection", { scope: listScope });
                 break;
               case "analysisLock":
-                onAnalysisLock?.(ids, true);
+                runCommand("analysisLockOn", { scope: listScope });
                 break;
               case "analysisUnlock":
-                onAnalysisLock?.(ids, false);
+                runCommand("analysisLockOff", { scope: listScope });
                 break;
               case "addToTagList":
                 onAddToTagList?.(ids);
@@ -2280,7 +2341,7 @@ export const TrackTable = memo(function TrackTable({
                 void onRemoveFromTagList?.(ids);
                 break;
               case "reloadTag":
-                onReloadTag?.(ids);
+                runCommand("reloadTag", { scope: listScope });
                 break;
               case "analyse":
                 onAnalyse?.();
@@ -2304,18 +2365,14 @@ export const TrackTable = memo(function TrackTable({
                 onConvertMemoryCues?.(trackMenu.row);
                 break;
               case "removeFromCollection":
-                void onRemoveFromCollection?.(ids);
+                runCommand("removeFromCollection", { scope: listScope });
                 break;
               case "autoRelocate":
-                onAutoRelocate?.(ids);
+                runCommand("autoRelocate", { scope: listScope });
                 break;
-              case "relocate": {
-                const chosen = selection.ids;
-                void view.idsInRange(0, view.count)
-                  .then((listed) => onRelocate?.(inListOrder(chosen, listed)))
-                  .catch(() => onRelocate?.(ids));
+              case "relocate":
+                runCommand("relocate", { scope: listScope });
                 break;
-              }
               case "loadPlayer1":
                 onLoadTrack?.("a", trackMenu.row);
                 break;

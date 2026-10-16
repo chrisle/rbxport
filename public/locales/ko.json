@@ -1737,5 +1737,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "분석 잠금 오프",
+  "Analysis Lock On": "분석 잠금 온",
+  "Export a playlist to a file (*.txt)": "플레이리스트를 (*.txt) 파일로 내보내기",
+  "Export a playlist to a file for music apps (*.m3u8)": "플레이리스트를 음악 앱용 파일로 내보내기(*.m3u8)",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

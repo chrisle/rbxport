@@ -18,6 +18,26 @@ describe("menu", () => {
     expect(resolveMenu("analyze-track", true)).toEqual({ action: "analyze-track" });
   });
 
+  it("hands a Track or Playlist menu item to its shared command", () => {
+    expect(resolveMenu("relocate", false)).toEqual({
+      action: "bar-command",
+      item: { id: "relocate", action: "relocate", owner: "list", writes: true },
+    });
+    expect(resolveMenu("export-playlist-m3u8", true)).toMatchObject({
+      action: "bar-command",
+      item: { action: "exportPlaylistM3u8" },
+    });
+  });
+
+  it("refuses a Track or Playlist menu write on a protected library, as rekordbox does", () => {
+    expect(resolveMenu("delete-playlist", true, true)).toEqual({
+      refused: "Editing is locked by Library Protection. Turn it off in Preferences to edit.",
+    });
+    expect(resolveMenu("remove-from-collection", true)).toEqual({
+      refused: "Editing is locked while rekordbox is running. Quit rekordbox to enable editing.",
+    });
+  });
+
   it("runs an action that only reads", () => {
     expect(resolveMenu("settings", true)).toEqual({ action: "settings" });
   });

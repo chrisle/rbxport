@@ -22,6 +22,8 @@ import { SourceRail } from "./SourceRail";
 import { browseListVars } from "@/lib/preferences";
 import { usePreferences } from "@/store/usePreferences";
 import type { TreeExpansion } from "@/lib/session";
+import { useCommands } from "@/store/useCommands";
+import { publishTreeMenuState } from "@/lib/menuBar";
 
 /**
  * The name, while it is being typed over.
@@ -335,6 +337,8 @@ const TREE_ROW_H = 25;
 export interface TreeViewProps {
   nodes: readonly TreeNode[];
   selectedId: string | null;
+  /** The main browser's tree or the sub-browser's: whose commands it registers. */
+  side?: "main" | "sub";
   onSelect: (node: TreeNode) => void;
   /** Write a playlist or folder to the stick mounted at `path`. */
   onExport?: (node: TreeNode, path: string) => void;
@@ -407,7 +411,7 @@ export interface TreeViewProps {
 }
 
 export const TreeView = memo(function TreeView({
-  nodes, selectedId, onSelect, dragging, onDropTracks, onDropFiles, onExport, exportDevices, onExportFile,
+  nodes, selectedId, side = "main", onSelect, dragging, onDropTracks, onDropFiles, onExport, exportDevices, onExportFile,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
   initialExpansion, onExpansionChange,
@@ -423,6 +427,28 @@ export const TreeView = memo(function TreeView({
   const [scope, setScope] = useState<TreeSearchScope>("all");
   /** The tree menu: where it is, and which node it was opened on. */
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
+
+  // The Playlist menu's commands (see `src/lib/commands.ts`), on the selected
+  // node: the native menu's items run these, and the tree menu runs the same
+  // handlers on the node it was opened on.
+  const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedId) ?? null, [nodes, selectedId]);
+  const onSelected = (run: ((node: TreeNode) => void) | undefined) => () => {
+    if (!run || selectedNode === null) return false;
+    run(selectedNode);
+    return true;
+  };
+  useCommands({
+    createPlaylist: onSelected(onCreatePlaylist),
+    createIntelligentPlaylist: onSelected(onCreateSmartPlaylist),
+    createFolder: onSelected(onCreateFolder),
+    deletePlaylist: onSelected(onDeleteNode),
+    exportPlaylistTxt: onSelected(onExportFile && ((node) => onExportFile(node, "txt"))),
+    exportPlaylistM3u8: onSelected(onExportFile && ((node) => onExportFile(node, "m3u8"))),
+  }, side);
+  useEffect(() => {
+    publishTreeMenuState(side, { kind: selectedNode?.kind ?? null });
+  }, [side, selectedNode?.kind]);
+  useEffect(() => () => publishTreeMenuState(side, null), [side]);
   /** The row whose name is being typed over, if any. */
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const endRename = useCallback(() => setRenamingId(null), []);
@@ -592,7 +618,7 @@ export const TreeView = memo(function TreeView({
   }, [selectedId]);
 
   return (
-    <nav className={styles.tree} aria-label="Library">
+    <nav className={styles.tree} aria-label="Library" data-browser-pane="tree" data-browser-side={side}>
       <SourceRail
         selected={source}
         onSelect={jumpTo}

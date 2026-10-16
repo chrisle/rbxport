@@ -37,7 +37,9 @@ import styles from "./App.module.css";
 import { locateLoadedTrack } from "@/lib/locateLoaded";
 import { keyMap } from "@/lib/keyPresets";
 import { detectPlatform, dispatch, isTyping, menuAccelerator, type Action } from "@/lib/shortcuts";
-import { runCommand } from "@/lib/commands";
+import { hasCommand, runCommand } from "@/lib/commands";
+import { browserFocus, followBrowserFocus, onBrowserFocus } from "@/lib/browserFocus";
+import { menuBarEnabled, menuBarSide, menuBarState, onMenuBarState } from "@/lib/menuBar";
 import { hasEditHistory, runEditHistory, setLibraryEditHistory } from "@/lib/editHistory";
 import { transposeKey } from "@/lib/camelot";
 import { stepMasterGain, toggleMute } from "@/lib/volume";
@@ -2284,6 +2286,12 @@ function AppBody() {
       locateLoadedTrack();
       return;
     }
+    if (outcome.action === "bar-command" && outcome.item) {
+      // Track and Playlist menu items: the command the focused list or tree
+      // registered, which its context-menu entry runs too.
+      runCommand(outcome.item.action, { scope: menuBarSide(browserFocus()) });
+      return;
+    }
     if (outcome.action === "analyze-track") {
       // Track › Analyze Track: the same command as its key.
       runCommand("analyseSelection");
@@ -2316,6 +2324,43 @@ function AppBody() {
     openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider, openReport,
     editHistory, runLibraryHistory,
   ]);
+
+  // The Track and Playlist menus' greyed items, worked out from the focus
+  // and what the lists and trees report, and sent on whenever they change.
+  useEffect(() => {
+    const sent: Record<string, boolean> = {};
+    let queued = false;
+    const push = () => {
+      queued = false;
+      const enabled = menuBarEnabled({
+        focus: browserFocus(),
+        ...menuBarState(),
+        // Analyze Track is the shell's own command, not a list's.
+        has: (action, side) => action === "analyseSelection" ? hasCommand(action) : hasCommand(action, side),
+      });
+      const changed: Record<string, boolean> = {};
+      for (const [id, on] of Object.entries(enabled)) {
+        if (sent[id] !== on) changed[id] = on;
+      }
+      if (Object.keys(changed).length === 0) return;
+      Object.assign(sent, changed);
+      void getBackend().then((backend) => backend.setMenuEnabled(changed)).catch(() => undefined);
+    };
+    const schedule = () => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(push);
+    };
+    const stopFollowing = followBrowserFocus(window);
+    const stopFocus = onBrowserFocus(schedule);
+    const stopState = onMenuBarState(schedule);
+    schedule();
+    return () => {
+      stopFollowing();
+      stopFocus();
+      stopState();
+    };
+  }, []);
 
   // Native menu clicks.
   useEffect(() => {

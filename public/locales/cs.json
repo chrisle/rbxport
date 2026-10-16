@@ -1738,5 +1738,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "Zámek analýzy vyp",
+  "Analysis Lock On": "Zámek analýzy zap",
+  "Export a playlist to a file (*.txt)": "Exportovat seznam skladeb do souboru (*.txt)",
+  "Export a playlist to a file for music apps (*.m3u8)": "Exportovat seznam skladeb do souboru pro hudební aplikace (*.m3u8)",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

@@ -268,6 +268,7 @@ export const SubBrowser = memo(function SubBrowser({
       <TreeView
         nodes={nodes}
         selectedId={selectedId}
+        side="sub"
         onSelect={onSelect}
         {...tree}
       />

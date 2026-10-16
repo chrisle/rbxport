@@ -1735,5 +1735,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "Analyslås av",
+  "Analysis Lock On": "Analyslås på",
+  "Export a playlist to a file (*.txt)": "Exportera en spellista till en fil (*.txt)",
+  "Export a playlist to a file for music apps (*.m3u8)": "Exportera en spellista till en fil för musikappar (*.m3u8)",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

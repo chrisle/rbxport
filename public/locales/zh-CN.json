@@ -1742,5 +1742,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "分析锁定关闭",
+  "Analysis Lock On": "分析锁定打开",
+  "Export a playlist to a file (*.txt)": "将播放列表导出到文件(*.txt)",
+  "Export a playlist to a file for music apps (*.m3u8)": "将播放列表导出到文件用于音乐应用程序 (*.m3u8)",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

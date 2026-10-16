@@ -76,6 +76,13 @@ in the `b` scope. Keys are the Export preset's.
 
 ### Browser and shell
 
+The Track and Playlist menu items are greyed by `src/lib/menuBar.ts`, which
+follows rekordbox's `ListViewer::isActiveCommand` @0x1003dc540 and
+`TreeViewer::isActiveCommand` @0x10155c434: nothing is live until a track list
+or the tree has been clicked (`src/lib/browserFocus.ts`), the Track menu
+answers the clicked list only, and the Playlist menu the tree on that side.
+The shell keeps the states (`set_menu_enabled`).
+
 | Command | Key | rekordbox id | rekordbox menu bar | Entry points | Owner, scope |
 | --- | --- | --- | --- | --- | --- |
 | Search (`focusSearch`) | command + F | 7003 | no | key; clicking the search box | App, none |
@@ -86,7 +93,9 @@ in the `b` scope. Keys are the Export preset's.
 | Extend Selection Up/Down (`extendUp`, `extendDown`) | shift + cursor up/down | none (list built-in: `CustomListBox::keyPressed`, #514) | no | key | TrackTable, `main`/`sub` |
 | Load on Player 1 (`loadPlayer1`) | enter, shift + enter | none | no | key; double-click a row; drag to the deck | Player, `a` |
 | Locate track loaded on deck (`locateLoaded`) | command + L | b139 | no | key; Track › Locate track loaded on deck (#430) | TrackTable (main browser), none |
-| Renumber Track Order (`renumberTrackOrder`) | unbound | 500e | Playlist › Renumber Track Order | key once bound; column header menu | TrackTable, `main`/`sub` |
+| Renumber Track Order (`renumberTrackOrder`) | unbound | 500e | Playlist › Renumber Track Order | key once bound; column header menu; Playlist › Renumber Track Order (#513) | TrackTable, `main`/`sub` |
+| Import To Collection, Analysis Lock On/Off, Reload Tag, Remove from Collection, Show in Finder, Auto Relocate, Relocate (`importToCollection`, `analysisLockOn`, `analysisLockOff`, `reloadTag`, `removeFromCollection`, `showInFinder`, `autoRelocate`, `relocate`) | unbound, not in the Keyboard pane | 400f, 4012, 4013, 4003, 400b, 400d, 4014, 400e | Track › the same names | list context menu; Track menu (#513) | TrackTable, `main`/`sub` |
+| Create New Playlist / Intelligent Playlist / Folder, Delete Playlist, Export a playlist to a file (*.txt / *.m3u8) (`createPlaylist`, `createIntelligentPlaylist`, `createFolder`, `deletePlaylist`, `exportPlaylistTxt`, `exportPlaylistM3u8`) | unbound, not in the Keyboard pane | 500a-500c, 5004, 5005, 5006 | Playlist › the same names | Playlist menu (#513), on the selected node; the tree menu calls the same handlers on the node it opened on | TreeView, `main`/`sub` |
 | Volume, Volume Down (`volumeUp`, `volumeDown`) | command + F12, command + F11 | 3003, 3004 | no | key; the master knob sets the level directly | App, none |
 | Mute (`mute`) | command + F10 | 3005 | no | key | App, none |
 

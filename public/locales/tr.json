@@ -1738,5 +1738,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "Analiz Kilit Kapalı",
+  "Analysis Lock On": "Analiz Kilit Açık",
+  "Export a playlist to a file (*.txt)": "Bir çalma listesini bir dosyaya ver (*.txt)",
+  "Export a playlist to a file for music apps (*.m3u8)": "Müzik uygulamaları (*.m3u8) için bir çalma listesini bir dosyaya ver",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

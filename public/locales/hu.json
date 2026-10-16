@@ -1737,5 +1737,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "Elemzés zár Kikapcsolás",
+  "Analysis Lock On": "Elemzés zár Bekapcsolás",
+  "Export a playlist to a file (*.txt)": "Lejátszási sorrend exportálása fájlba (*.txt)",
+  "Export a playlist to a file for music apps (*.m3u8)": "Lejátszási sorrend exportálása zenei alkalmazások által használható fájlba (*.m3u8)",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

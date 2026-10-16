@@ -33,6 +33,24 @@ export type Action =
   // rewritten to the order the list shows. rekordbox's command 0x500e, which
   // no preset binds, so it waits for a key from the Keyboard pane.
   | "renumberTrackOrder"
+  // The Track and Playlist menus' other items (#513), each the command its
+  // context-menu entry runs: rekordbox's 400f, 4012, 4013, 4003, 400b, 400d,
+  // 4014, 400e, 500a-500c, 5004, 5005 and 5006. No preset binds them and the
+  // Keyboard pane does not list them yet.
+  | "importToCollection"
+  | "analysisLockOn"
+  | "analysisLockOff"
+  | "reloadTag"
+  | "removeFromCollection"
+  | "showInFinder"
+  | "autoRelocate"
+  | "relocate"
+  | "createPlaylist"
+  | "createIntelligentPlaylist"
+  | "createFolder"
+  | "deletePlaylist"
+  | "exportPlaylistTxt"
+  | "exportPlaylistM3u8"
   // The deck. Every key below is rekordbox's own, transcribed from the Export
   // preset in `KeyMappings/rekordbox_0000000000030.mappings` — the key map the
   // mode we clone ships with, not a guess at what feels natural. The same

@@ -1733,5 +1733,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "Analyse lås fra",
+  "Analysis Lock On": "Analyse lås til",
+  "Export a playlist to a file (*.txt)": "Eksporter en afspilningsliste til en fil (*.txt)",
+  "Export a playlist to a file for music apps (*.m3u8)": "Eksporter en afspilningsliste til en fil til musik-apps (*.m3u8)",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

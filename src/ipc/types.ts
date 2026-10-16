@@ -630,6 +630,9 @@ export interface Backend {
   /** Rebuilds the native application menu with the active UI translations. */
   setMenuLabels(labels: Readonly<Record<string, string>>): Promise<void>;
 
+  /** Greys or enables native menu items by id (the Track and Playlist menus). */
+  setMenuEnabled(items: Readonly<Record<string, boolean>>): Promise<void>;
+
   /**
    * AppleScript's requests to the window: each is run with `handle` and its
    * reply sent back, and the backend is told once they can be heard.

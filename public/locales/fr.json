@@ -1739,5 +1739,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "Verrouillage de l'analyse désactivé",
+  "Analysis Lock On": "Verrouillage de l'analyse activé",
+  "Export a playlist to a file (*.txt)": "Exporter une liste de lecture vers un fichier (*.txt)",
+  "Export a playlist to a file for music apps (*.m3u8)": "Exporter une liste de lecture vers un fichier pour des applications de musique (*.m3u8)",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

@@ -1739,5 +1739,11 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Analysis Lock Off": "Ξεκλείδωμα ανάλυσης",
+  "Analysis Lock On": "Κλείδωμα ανάλυσης",
+  "Export a playlist to a file (*.txt)": "Εξαγωγή λίστας αναπαραγωγής σε αρχείο (*.txt)",
+  "Export a playlist to a file for music apps (*.m3u8)": "Εξαγωγή λίστας αναπαραγωγής σε αρχείο για εφαρμογές μουσικής (*.m3u8)",
+  "[data-browser-pane]": "[data-browser-pane]",
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
 }

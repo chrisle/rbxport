@@ -2673,6 +2673,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       };
     },
     setMenuLabels: () => wait(undefined),
+    // Kept where a test can read which items the shell would grey.
+    setMenuEnabled: (items) => {
+      const w = window as unknown as { __menuEnabled?: Record<string, boolean> };
+      w.__menuEnabled = { ...w.__menuEnabled, ...items };
+      return wait(undefined);
+    },
 
     // No network in a browser, so LINK cannot turn on. Saying why is better
     // than a switch that silently does nothing.

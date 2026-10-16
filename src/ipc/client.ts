@@ -465,6 +465,7 @@ async function realBackend(): Promise<Backend> {
     reloadLibrary: () => invoke<number>("reload_library"),
     onMenu: (listener) => subscribe<string>("menu", listener),
     setMenuLabels: (labels) => invoke<void>("set_menu_labels", { labels }),
+    setMenuEnabled: (items) => invoke<void>("set_menu_enabled", { items }),
     serveScripts: (handle) => {
       // Ready only once the listener is in: a request sent before then would
       // reach nobody and wait out its timeout.
