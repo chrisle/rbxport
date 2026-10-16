@@ -398,8 +398,7 @@ pub struct PlaylistDeletion {
     pub membership_ids: Vec<String>,
 }
 
-/// What replacing a same-named list removed, so the caller can say so:
-/// Replace existing has no undo.
+/// What replacing a same-named list removed, so the caller can say so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ReplacedList {
     /// Playlists, folders and intelligent playlists soft-deleted: the
@@ -431,11 +430,30 @@ pub struct FolderPlaylist {
     /// What [`FolderClash::Replace`] removed: the replaced list, and every
     /// list and membership inside it.
     pub replaced: Option<ReplacedList>,
+    /// The exact rows [`FolderClash::Replace`] changed, to undo the whole
+    /// replacement in one step (#426). Set exactly when [`Self::replaced`] is.
+    pub replacement: Option<ListReplacement>,
     /// The place under the target the playlist was put, or would have been:
     /// the insert index rekordbox keeps for every folder of one drop. Pass it
     /// back as `at` for the drop's next folder. `None` when the folder held
     /// no audio, so nothing was looked at.
     pub at: Option<usize>,
+}
+
+/// One folder-drop Replace existing, as exact rows: the replaced list's
+/// tombstones, the playlist made in its place with its membership rows, and
+/// every live sibling's `Seq` before and after (the import may renumber the
+/// run). Undo puts the old rows and order back; Redo the new ones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListReplacement {
+    parent: String,
+    replaced: PlaylistDeletion,
+    playlist: String,
+    /// The new playlist's membership rows, in `TrackNo` order.
+    members: Vec<String>,
+    /// `parent`'s live children as `(ID, Seq)`, in tree order.
+    before: Vec<(String, Option<i64>)>,
+    after: Vec<(String, Option<i64>)>,
 }
 
 /// What [`Writer::import_folder_as_playlist`] does when the target already
@@ -1078,14 +1096,17 @@ impl Writer {
             Some(at) => at,
             None => siblings(&tx)?.len(),
         };
+        let mut displaced = None;
         if let Some(old) = &replacing {
             let place = siblings(&tx)?.iter().position(|(sibling, _)| sibling == old)
                 .ok_or_else(|| DbError::WriteRefused(format!("no playlist or folder {old}")))?;
+            let before = children_with_seq(&tx, parent)?;
             let (_, deletion) = tombstone_subtree(&tx, old, &stamp)?;
             outcome.replaced = Some(ReplacedList {
                 lists: deletion.playlist_ids.len(),
                 tracks: deletion.membership_ids.len(),
             });
+            displaced = Some((before, deletion));
             if place < at {
                 at -= 1;
             }
@@ -1160,11 +1181,13 @@ impl Writer {
         // `add_tracks` leaves it.
         let mut seen = std::collections::HashSet::new();
         let mut track_no = 0_i64;
+        let mut written = Vec::with_capacity(members.len());
         for (content, (row_id, row_uuid)) in members.iter().zip(rows) {
             if !seen.insert(content.as_str()) {
                 continue;
             }
             track_no += 1;
+            written.push(row_id.clone());
             usn = bump(usn)?;
             tx.execute(
                 "INSERT INTO djmdSongPlaylist
@@ -1175,10 +1198,113 @@ impl Writer {
                 params![row_id, id, content, track_no, row_uuid, usn, stamp],
             )?;
         }
+        if let Some((before, replaced)) = displaced {
+            outcome.replacement = Some(ListReplacement {
+                parent: parent.to_owned(),
+                replaced,
+                playlist: id.clone(),
+                members: written,
+                before,
+                after: children_with_seq(&tx, parent)?,
+            });
+        }
         set_counter(&tx, usn)?;
         tx.commit()?;
         outcome.playlist = Some(id);
         Ok(outcome)
+    }
+
+    /// Undoes a folder-drop Replace existing in one transaction: the playlist
+    /// it made and that playlist's memberships become tombstones again, the
+    /// replaced list comes back with exactly the rows its deletion
+    /// tombstoned, and every sibling gets back the `Seq` it had.
+    ///
+    /// Refuses, writing nothing, when the library is no longer as the
+    /// replacement left it: a sibling added, removed or reordered under the
+    /// parent, the new playlist's tracks changed, or a replaced row no longer
+    /// a tombstone.
+    pub fn undo_replacement(&mut self, edit: &ListReplacement) -> Result<Changed> {
+        self.set_replacement(edit, true)
+    }
+
+    /// Applies a replacement again after [`Writer::undo_replacement`], with
+    /// the same rows, under the same conditions.
+    pub fn redo_replacement(&mut self, edit: &ListReplacement) -> Result<Changed> {
+        self.set_replacement(edit, false)
+    }
+
+    fn set_replacement(&mut self, edit: &ListReplacement, undo: bool) -> Result<Changed> {
+        let refused = || DbError::WriteRefused(if undo {
+            "that replacement can no longer be undone".to_owned()
+        } else {
+            "that replacement can no longer be redone".to_owned()
+        });
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (expected, restored) = if undo { (&edit.after, &edit.before) } else { (&edit.before, &edit.after) };
+        if children_with_seq(&tx, &edit.parent)? != *expected {
+            return Err(refused());
+        }
+        // What is about to become a tombstone must hold nothing more than
+        // the history knows of, or a live row would be left under a deleted
+        // list.
+        if undo {
+            if live_members(&tx, &edit.playlist)? != edit.members {
+                return Err(refused());
+            }
+        } else if !live_subtree_is(&tx, &edit.replaced)? {
+            return Err(refused());
+        }
+
+        let mut rows = 0;
+        let mut usn = 0;
+        let mut flip = |table: &str, ids: &[String], deleted: bool| -> Result<()> {
+            for id in ids {
+                usn = next_usn(&tx)?;
+                let changed = tx.execute(
+                    &format!(
+                        "UPDATE {table} SET rb_local_deleted = ?1, rb_local_usn = ?2, updated_at = ?3
+                         WHERE ID = ?4 AND rb_local_deleted = ?5"
+                    ),
+                    params![i64::from(deleted), usn, stamp, id, i64::from(!deleted)],
+                )?;
+                if changed != 1 {
+                    return Err(refused());
+                }
+                rows += changed;
+            }
+            Ok(())
+        };
+        // Foreign-key order, as a deletion and its undo: memberships go
+        // before their list and come back after it.
+        let made = std::slice::from_ref(&edit.playlist);
+        if undo {
+            flip("djmdSongPlaylist", &edit.members, true)?;
+            flip("djmdPlaylist", made, true)?;
+            flip("djmdPlaylist", &edit.replaced.playlist_ids, false)?;
+            flip("djmdSongPlaylist", &edit.replaced.membership_ids, false)?;
+        } else {
+            flip("djmdSongPlaylist", &edit.replaced.membership_ids, true)?;
+            flip("djmdPlaylist", &edit.replaced.playlist_ids, true)?;
+            flip("djmdPlaylist", made, false)?;
+            flip("djmdSongPlaylist", &edit.members, false)?;
+        }
+        for (id, seq) in restored {
+            usn = next_usn(&tx)?;
+            rows += tx.execute(
+                "UPDATE djmdPlaylist SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3
+                 WHERE ID = ?4 AND ParentID = ?5 AND rb_local_deleted = 0 AND Seq IS NOT ?1",
+                params![seq, usn, stamp, id, edit.parent],
+            )?;
+        }
+        if children_with_seq(&tx, &edit.parent)? != *restored {
+            return Err(refused());
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
     }
 
     /// Makes a playlist hold exactly `contents`, in that order, the first of a
@@ -3890,6 +4016,59 @@ fn tombstone_subtree(tx: &Connection, id: &str, stamp: &str) -> Result<(Changed,
         playlist_ids: doomed,
         membership_ids,
     }))
+}
+
+/// `parent`'s live children as `(ID, Seq)`, in tree order.
+fn children_with_seq(conn: &Connection, parent: &str) -> Result<Vec<(String, Option<i64>)>> {
+    let mut stmt = conn.prepare(
+        "SELECT ID, Seq FROM djmdPlaylist
+         WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+    )?;
+    let found = stmt.query_map(params![parent], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(found)
+}
+
+/// A playlist's live membership rows, in `TrackNo` order.
+fn live_members(conn: &Connection, playlist: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT ID FROM djmdSongPlaylist
+         WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID",
+    )?;
+    let found = stmt.query_map(params![playlist], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(found)
+}
+
+/// Whether the live subtree under `deletion`'s root is exactly the lists and
+/// memberships it names: nothing added inside it, nothing taken away.
+fn live_subtree_is(conn: &Connection, deletion: &PlaylistDeletion) -> Result<bool> {
+    let Some(root) = deletion.playlist_ids.first() else {
+        return Ok(false);
+    };
+    if !node_exists(conn, root)? {
+        return Ok(false);
+    }
+    let mut lists = vec![root.clone()];
+    let mut frontier = vec![root.clone()];
+    let mut members = Vec::new();
+    while let Some(node) = frontier.pop() {
+        let mut stmt = conn.prepare(
+            "SELECT ID FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0",
+        )?;
+        let children: Vec<String> = stmt.query_map(params![node], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        lists.extend(children.iter().cloned());
+        frontier.extend(children);
+        members.extend(live_members(conn, &node)?);
+    }
+    let same = |found: &mut Vec<String>, known: &[String]| {
+        let mut known = known.to_vec();
+        found.sort_unstable();
+        known.sort_unstable();
+        *found == known
+    };
+    Ok(same(&mut lists, &deletion.playlist_ids) && same(&mut members, &deletion.membership_ids))
 }
 
 /// Whether a playlist or folder exists and is not deleted.

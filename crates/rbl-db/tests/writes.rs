@@ -3138,7 +3138,7 @@ fn a_replacement_that_fails_partway_leaves_the_old_list_and_library_as_they_were
 /// (#355 review): every live row the transaction writes or renumbers still
 /// gets its own `rb_local_usn`, past everything before it, the memberships in
 /// `TrackNo` order, and the registry counter ends on the highest. What the
-/// replacement removed is reported, since Replace existing has no undo.
+/// replacement removed is reported.
 #[test]
 fn a_folder_import_gives_every_row_its_own_increasing_usn() {
     let audio = tempfile::tempdir().unwrap();
@@ -3772,4 +3772,216 @@ fn files_named_with_accents_import_and_keep_their_exact_path() {
     let again = f.writer.import_files(&files).unwrap();
     assert!(again.iter().all(|o| matches!(o, ImportOutcome::Existing(_))), "{again:?}");
     assert_consistent(&f);
+}
+
+// ------------------------------------------- Replace existing undo (#426)
+
+/// Every live playlist row (id, `ParentID`, `Seq`, name, attribute) and
+/// membership row (id, playlist, track, `TrackNo`): what Undo of a
+/// replacement must put back exactly.
+type ListRow = (String, String, i64, String, i64);
+type MemberRow = (String, String, String, i64);
+
+fn tree_rows(f: &Fixture) -> (Vec<ListRow>, Vec<MemberRow>) {
+    let mut stmt = f
+        .conn()
+        .prepare(
+            "SELECT ID, ParentID, Seq, COALESCE(Name, ''), Attribute FROM djmdPlaylist
+             WHERE rb_local_deleted = 0 ORDER BY ID",
+        )
+        .unwrap();
+    let lists = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    drop(stmt);
+    let mut stmt = f
+        .conn()
+        .prepare(
+            "SELECT ID, PlaylistID, ContentID, TrackNo FROM djmdSongPlaylist
+             WHERE rb_local_deleted = 0 ORDER BY ID",
+        )
+        .unwrap();
+    let members = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    (lists, members)
+}
+
+fn wavs(dir: &std::path::Path, names: &[&str]) -> Vec<std::path::PathBuf> {
+    names
+        .iter()
+        .map(|name| {
+            let path = dir.join(name);
+            write_wav(&path, 1);
+            path
+        })
+        .collect()
+}
+
+/// A playlist replaced by a dropped folder, the new list put at the front so
+/// the whole sibling run is renumbered: one Undo gives back the old
+/// playlist's row, `Seq`, `ParentID` and every membership row by id, and
+/// takes the new playlist away; one Redo puts the replacement back by id.
+/// The tracks the drop imported stay in the collection.
+#[test]
+fn a_replaced_playlist_comes_back_exactly_on_undo_and_goes_again_on_redo() {
+    let audio = tempfile::tempdir().unwrap();
+    let files = wavs(audio.path(), &["x.wav", "y.wav"]);
+    let mut f = fixture();
+    let clash = playlist_id(1);
+    let name = f.one::<String>("SELECT Name FROM djmdPlaylist WHERE ID = ?1", &[&clash]);
+    let old_members = f.order(&clash);
+    assert!(!old_members.is_empty(), "the fixture's list has tracks to restore");
+    let before = tree_rows(&f);
+    let before_order = f.children(ROOT);
+
+    let outcome = f.writer.import_folder_as_playlist(&name, ROOT, &files, FolderClash::Replace(&clash), Some(0)).unwrap();
+    let made = outcome.playlist.clone().unwrap();
+    let replacement = outcome.replacement.clone().expect("a replacement carries its undo");
+    assert_eq!(f.children(ROOT)[0], made);
+    let after = tree_rows(&f);
+    let tracks = f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0");
+
+    f.writer.undo_replacement(&replacement).unwrap();
+    assert_eq!(tree_rows(&f), before, "rows, Seq, ParentID and memberships as they were");
+    assert_eq!(f.children(ROOT), before_order);
+    assert_eq!(f.order(&clash), old_members);
+    assert_eq!(f.one::<i64>("SELECT rb_local_deleted FROM djmdPlaylist WHERE ID = ?1", &[&made]), 1);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"), tracks, "imported tracks stay");
+
+    f.writer.redo_replacement(&replacement).unwrap();
+    assert_eq!(tree_rows(&f), after, "the same replacement, by id");
+    assert_eq!(member_files(&f, &made), ["x.wav", "y.wav"]);
+
+    f.writer.undo_replacement(&replacement).unwrap();
+    assert_eq!(tree_rows(&f), before, "and undone again");
+}
+
+/// A folder holding a folder, playlists and tracks, replaced: Undo restores
+/// the whole hierarchy with its order and memberships, Redo replaces it again.
+#[test]
+fn a_replaced_folder_comes_back_with_its_nested_lists_and_tracks() {
+    let audio = tempfile::tempdir().unwrap();
+    let files = wavs(audio.path(), &["n.wav"]);
+    let mut f = fixture();
+    let crate_folder = f.writer.create_folder("Crates", ROOT).unwrap();
+    let first = f.writer.create_playlist("First", &crate_folder).unwrap();
+    let old = f.writer.create_folder("Old", &crate_folder).unwrap();
+    f.writer.create_playlist("Last", &crate_folder).unwrap();
+    let deep = f.writer.create_folder("Deep", &old).unwrap();
+    let inner = f.writer.create_playlist("Inner", &deep).unwrap();
+    let side = f.writer.create_playlist("Side", &old).unwrap();
+    f.writer.add_tracks(&inner, &[track_id(2), track_id(0), track_id(1)]).unwrap();
+    f.writer.add_tracks(&side, &[track_id(3)]).unwrap();
+    // A membership already removed stays removed through undo and redo.
+    f.writer.remove_tracks(&inner, &[track_id(0)]).unwrap();
+    let before = tree_rows(&f);
+
+    let outcome =
+        f.writer.import_folder_as_playlist("Old", &crate_folder, &files, FolderClash::Replace(&old), Some(0)).unwrap();
+    assert_eq!(outcome.replaced, Some(rbl_db::write::ReplacedList { lists: 4, tracks: 3 }));
+    let replacement = outcome.replacement.clone().unwrap();
+    let made = outcome.playlist.unwrap();
+    assert_eq!(f.children(&crate_folder)[0], made);
+    let after = tree_rows(&f);
+
+    f.writer.undo_replacement(&replacement).unwrap();
+    assert_eq!(tree_rows(&f), before);
+    assert_eq!(f.children(&crate_folder)[..2], [first, old.clone()]);
+    assert_eq!(f.children(&old), [deep.clone(), side.clone()]);
+    assert_eq!(f.children(&deep), std::slice::from_ref(&inner));
+    assert_eq!(f.order(&inner), [track_id(2), track_id(1)]);
+    assert_eq!(f.order(&side), [track_id(3)]);
+
+    f.writer.redo_replacement(&replacement).unwrap();
+    assert_eq!(tree_rows(&f), after);
+    assert!(f.children(&old).is_empty());
+}
+
+/// Undo refuses, writing nothing, once the library is not as the
+/// replacement left it (as a deletion refuses once its rows have moved on);
+/// so does Redo once the restored list has changed.
+#[test]
+fn a_replacement_refuses_undo_and_redo_after_the_lists_changed() {
+    let audio = tempfile::tempdir().unwrap();
+    let files = wavs(audio.path(), &["r.wav"]);
+    let mut f = fixture();
+    let crate_folder = f.writer.create_folder("Crates", ROOT).unwrap();
+    let old = f.writer.create_folder("Old", &crate_folder).unwrap();
+    let inner = f.writer.create_playlist("Inner", &old).unwrap();
+    f.writer.add_tracks(&inner, &[track_id(0)]).unwrap();
+    let outcome =
+        f.writer.import_folder_as_playlist("Old", &crate_folder, &files, FolderClash::Replace(&old), None).unwrap();
+    let replacement = outcome.replacement.clone().unwrap();
+    let made = outcome.playlist.unwrap();
+    let refused = |result: Result<Changed, DbError>, what: &str| match result {
+        Err(DbError::WriteRefused(message)) => assert!(message.contains(what), "{message}"),
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+
+    // A track added to the new playlist.
+    f.writer.add_tracks(&made, &[track_id(5)]).unwrap();
+    let changed = tree_rows(&f);
+    refused(f.writer.undo_replacement(&replacement), "can no longer be undone");
+    assert_eq!(tree_rows(&f), changed, "nothing written");
+    f.writer.remove_tracks(&made, &[track_id(5)]).unwrap();
+
+    // A sibling added beside it.
+    let extra = f.writer.create_playlist("Extra", &crate_folder).unwrap();
+    let changed = tree_rows(&f);
+    refused(f.writer.undo_replacement(&replacement), "can no longer be undone");
+    assert_eq!(tree_rows(&f), changed, "nothing written");
+    f.writer.delete_playlist(&extra).unwrap();
+
+    // As it was again: Undo runs. Then a track added inside the restored
+    // folder stops Redo.
+    f.writer.undo_replacement(&replacement).unwrap();
+    f.writer.add_tracks(&inner, &[track_id(6)]).unwrap();
+    let changed = tree_rows(&f);
+    refused(f.writer.redo_replacement(&replacement), "can no longer be redone");
+    assert_eq!(tree_rows(&f), changed, "nothing written");
+}
+
+/// Undo of a replacement is one transaction: a failure after the new
+/// playlist's memberships were tombstoned leaves everything as it was, and
+/// the same Undo runs once the failure is gone.
+#[test]
+fn an_undo_of_a_replacement_that_fails_partway_writes_nothing() {
+    let audio = tempfile::tempdir().unwrap();
+    let files = wavs(audio.path(), &["z.wav"]);
+    let mut f = fixture();
+    let clash = playlist_id(0);
+    let name = f.one::<String>("SELECT Name FROM djmdPlaylist WHERE ID = ?1", &[&clash]);
+    let before = tree_rows(&f);
+    let outcome = f.writer.import_folder_as_playlist(&name, ROOT, &files, FolderClash::Replace(&clash), Some(0)).unwrap();
+    let replacement = outcome.replacement.clone().unwrap();
+    let after = tree_rows(&f);
+    f.conn()
+        .execute_batch(
+            "CREATE TRIGGER fail_list BEFORE UPDATE ON djmdPlaylist BEGIN SELECT RAISE(ABORT, 'injected failure'); END",
+        )
+        .unwrap();
+
+    assert!(f.writer.undo_replacement(&replacement).is_err());
+    assert_eq!(tree_rows(&f), after, "the memberships tombstoned first came back too");
+
+    f.conn().execute_batch("DROP TRIGGER fail_list").unwrap();
+    f.writer.undo_replacement(&replacement).unwrap();
+    assert_eq!(tree_rows(&f), before);
+}
+
+/// Only a replacement carries an undo: a plain or copied folder import does not.
+#[test]
+fn only_a_replacement_carries_an_undo() {
+    let audio = tempfile::tempdir().unwrap();
+    let files = wavs(audio.path(), &["p.wav"]);
+    let mut f = fixture();
+    let plain = f.writer.import_folder_as_playlist("Fresh", ROOT, &files, FolderClash::Ask, None).unwrap();
+    assert!(plain.playlist.is_some() && plain.replacement.is_none());
+    let copy = f.writer.import_folder_as_playlist("Fresh", ROOT, &files, FolderClash::Copy, None).unwrap();
+    assert!(copy.playlist.is_some() && copy.replacement.is_none());
 }
