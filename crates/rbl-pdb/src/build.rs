@@ -408,8 +408,8 @@ impl FileBuilder {
     /// header names as the table's empty candidate — and after all tables
     /// one zeroed empty-candidate page for every table that had rows. Every
     /// last data page points at its table's empty candidate. The header
-    /// carries the page count, `1` at `0x10`, and the sequence the pages
-    /// reached, as rekordbox's does.
+    /// carries the page count, `1` at `0x10`, and a sequence one past the
+    /// last page's; see [`committed_sequence`].
     pub fn finish(self) -> Vec<u8> {
         let page_size = self.page_size;
         let num_tables = self.tables.len();
@@ -504,7 +504,7 @@ impl FileBuilder {
         out[0x08..0x0c].copy_from_slice(&u32::try_from(num_tables).unwrap_or(0).to_le_bytes());
         out[0x0c..0x10].copy_from_slice(&next_index.to_le_bytes()); // next unused page
         out[0x10..0x14].copy_from_slice(&1_u32.to_le_bytes());
-        out[0x14..0x18].copy_from_slice(&sequence.to_le_bytes());
+        out[0x14..0x18].copy_from_slice(&committed_sequence(sequence).to_le_bytes());
         for (i, (page_type, first, last, candidate)) in entries.into_iter().enumerate() {
             let at = 28 + i * 16;
             out[at..at + 4].copy_from_slice(&page_type.to_le_bytes());
@@ -543,6 +543,23 @@ fn paginate(page_size: usize, rows: &[Vec<u8>]) -> Vec<Vec<&[u8]>> {
     pages
 }
 
+/// The header sequence (`0x14`) for a file whose newest page carries
+/// `last_page`: one more, so no page carries the header's.
+///
+/// The `DeviceSQL` engine treats the header's sequence as the transaction in
+/// progress. When it opens a file to write, which a player does to record
+/// history, it rolls back and rewrites every page stamped with that sequence
+/// (rekordbox 7.2.19 `TE_DPgm_CheckAndRecoverPage` @0x102f57e5c, the same
+/// test in XDJ-700 firmware 1.15 @0xa8e103f8). Every rekordbox export holds a
+/// header sequence above all of its pages: one above on a fresh export
+/// (21 over 20 in `export.pdb`, 6 over 5 in `exportExt.pdb` [OBS rekordbox
+/// exports on the Windows rig]), more after edits (16500 over 16491 [OBS a
+/// 1,564-track rekordbox stick]).
+#[must_use]
+pub fn committed_sequence(last_page: u32) -> u32 {
+    last_page.saturating_add(1)
+}
+
 /// Replaces every row of one table inside an existing file, leaving every
 /// other table's pages byte for byte as they were.
 ///
@@ -551,8 +568,9 @@ fn paginate(page_size: usize, rows: &[Vec<u8>]) -> Vec<Vec<&[u8]>> {
 /// fresh candidate is allocated at the file's next unused page, which is how
 /// [`FileBuilder`] lays a growing table out. Pages the rows no longer need
 /// are zeroed and left out of the chain. Each page written takes the next
-/// sequence number, and the header records the last one, the table's last
-/// page, its candidate and the next unused page.
+/// sequence number, and the header records one past the last
+/// ([`committed_sequence`]), the table's last page, its candidate and the
+/// next unused page.
 ///
 /// `None` when the file does not hold the table, its chain does not lead
 /// from the index page to the last page the header names, or the pages it
@@ -653,7 +671,7 @@ pub fn replace_table(file: &[u8], page_type: u32, rows: &[Vec<u8>]) -> Option<Ve
 
     let new_last = assigned.last().copied().unwrap_or(first);
     out.get_mut(0x0c..0x10)?.copy_from_slice(&next_unused.to_le_bytes());
-    out.get_mut(0x14..0x18)?.copy_from_slice(&sequence.to_le_bytes());
+    out.get_mut(0x14..0x18)?.copy_from_slice(&committed_sequence(sequence).to_le_bytes());
     out.get_mut(entry_at + 4..entry_at + 8)?.copy_from_slice(&candidate.to_le_bytes());
     out.get_mut(entry_at + 12..entry_at + 16)?.copy_from_slice(&new_last.to_le_bytes());
     // rekordbox's files stop at the last page with anything in it.
@@ -704,5 +722,11 @@ pub fn replace_single_page_table(file: &[u8], page_type: u32, rows: &[Vec<u8>]) 
     let page = builder.finish_with(sequence);
     let mut out = file.to_vec();
     out.get_mut(data_at..data_at + page_size)?.copy_from_slice(&page);
+    // A file written before the header sequence was kept above every
+    // page's may name this page's; move it past, as a write would.
+    let header = u32::from_le_bytes(out.get(0x14..0x18)?.try_into().ok()?);
+    if header <= sequence {
+        out.get_mut(0x14..0x18)?.copy_from_slice(&committed_sequence(sequence).to_le_bytes());
+    }
     Some(out)
 }
