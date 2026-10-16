@@ -36,8 +36,14 @@ rekordbox arrow in its Sync Manager), not as part of a sync.
 SYNC goes from your library to the device, so for the tracks it writes your
 library's cues and beat grids win: a cue or beat grid changed on a player is
 replaced by your library's. To keep a player's cues and grids, run **Import**
-before SYNC. A cue a player added to a track that SYNC takes off the device
-would just be lost, so that still stops SYNC until it is imported.
+before SYNC. If your library has no analysis for a track, SYNC keeps the
+device's waveforms and beat grid for it, edits included.
+
+A cue a player added to a track that SYNC would take off the device would
+just be lost, so SYNC stops before copying anything and names the track.
+Keep a playlist that holds the track in the sync, or delete the track from
+the device in rekordbox, then sync again. Importing the cue does not clear
+this stop.
 
 A rating changed on the device stops SYNC for that device until it is
 imported ("changed on the USB. Import its changes before syncing."), so a

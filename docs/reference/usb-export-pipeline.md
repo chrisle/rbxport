@@ -383,7 +383,11 @@ flowchart LR
   companions during the export, and only for tracks whose analysis must be
   written. A missing DAT keeps a usable existing USB analysis
   (`analysis-kept`) or exports the track without analysis
-  (`analysis-unavailable`).
+  (`analysis-unavailable`). "Usable" means every companion still parses; it
+  need not match the last sync's stamp, since a player's cue or grid edit
+  changes that and dropping the files would delete the stick's waveforms,
+  grid and cues with nothing to write instead (#522). Library cues still go
+  over the kept files.
 - `cues` is always `Some(extra.cues)`, read from `djmdCue` through
   `rbl_db::export_info::track_extras`. Library cues therefore always replace
   the cue lists in the exported analysis files.
@@ -478,7 +482,7 @@ is reported as `ExportError::Cancelled`.
 | 25 | Write staged `export.pdb`, then `exportExt.pdb`, then `exportLibrary.db` (`database`). | `build_pdb`, `ext_pdb::build`, `write_one_library` | See [DeviceSQL](usb-export-db.md#4-exportpdb--the-devicesql-database), [My Tags](usb-export-db.md#5-exportextpdb--my-tags), [OneLibrary](usb-export-db.md#6-exportlibrarydb--the-onelibrary-database). |
 | 26 | Stage MY SETTINGS from rekordbox's settings directory, only for files absent from the stick. | `MY_SETTINGS_FILES`, `rbl_core::paths::rekordbox_settings_dir` | See [My Settings preservation](usb-export-db.md#my-settings-preservation). |
 | 27 | Stage `playlists3.sync` and `playlists3Plus.sync`. | `sync_record::render_with_ids` | Only when `sync` is passed. First-tick timestamps are kept from the stick's previous record. |
-| 28 | Read the staged databases back and check them against the "before" snapshot. | `Snapshot::read_at(stage)`, `check_retained_history`, `check_changes` | Refuses if the run would drop history tracks, My Tag edits, or OneLibrary cue edits made on the stick. |
+| 28 | Read the staged databases back and check them against the "before" snapshot. | `Snapshot::read_at(stage)`, `check_retained_history`, `check_changes` | Refuses if the run would drop history tracks, My Tag edits, or OneLibrary cue rows a player added to a track the run removes (also checked before the per-track loop). |
 | 29 | Verify the staged generation (`verifying`). | `verification::verify_staged_incremental` | Both databases are present and agree, ids are unique, referenced files exist (stage, then staged moves, then the stick), changed analysis parses, the playlist tree is valid. Trusted reused outputs are not parsed again. On failure: "The export did not verify, so the USB was left as it was". |
 | 30 | Stage the Tauri layer's settings images. | `settings_files` | Only My Settings names and `DEVSETTING.DAT` are accepted. They overwrite step 26's copy of the same file. |
 | 31 | Write the manifest into the stage: generation (request, inputs, recipes, warnings), baseline = staged snapshot, structure digest. | `Manifest::save_at` | Output receipts and database signatures are filled in after publication (step 37). |
@@ -967,7 +971,7 @@ stays as it was:
 | "… longer than export.pdb can hold" | row-length checks |
 | "A track being removed is still referenced by USB history" | `Snapshot::check_retained_history` |
 | "My Tag '…' changed on the USB" | `Snapshot::check_changes` |
-| "OneLibrary contains cue records…" | `Snapshot::check_changes`: a cue row added or changed on the stick since the last sync, on a track this sync takes off the stick. Rows on tracks the sync keeps are replaced by the library's (#522). |
+| "'…' has cue points added or changed on a player, and this sync would take it off the USB" | `Snapshot::check_removed_cues`, before the per-track loop and again in `check_changes`: a cue row added or changed on the stick since the last sync, on a track this sync takes off the stick. Rows on tracks the sync keeps are replaced by the library's (#522). Import does not clear it (no import rewrites `manifest.baseline`); keeping the track in the sync or deleting it from the USB does. |
 | "The export did not verify, so the USB was left as it was" | `verify_staged_incremental` |
 | "Exported media changed during sync", "The device changed during sync. Close other writers and retry." | step 33 |
 
