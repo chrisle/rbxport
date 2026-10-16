@@ -1013,17 +1013,20 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       });
     },
     undoEdit: async () => {
-      const edit = editUndo.pop();
+      const edit = editUndo.at(-1);
       if (!edit) throw new Error("There is no library edit to undo.");
+      // A refused undo stays on the stack, as in the real backend.
       edit.undo();
+      editUndo.pop();
       editRedo.push(edit);
       await bump(false);
       return announceHistory();
     },
     redoEdit: async () => {
-      const edit = editRedo.pop();
+      const edit = editRedo.at(-1);
       if (!edit) throw new Error("There is no library edit to redo.");
       edit.redo();
+      editRedo.pop();
       editUndo.push(edit);
       await bump(false);
       return announceHistory();
@@ -2821,12 +2824,25 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (clash && clash.id !== replace && !copy) return wait({ ...report, folder: true, conflict: clash.id, at });
       let listName = name;
       let replaced: { lists: number; tracks: number } | null = null;
-      let replacing: { tree: TreeNode[]; membership: Map<string, string[]>; history: MockEdit[] } | null = null;
+      let replacing: {
+        nodes: TreeNode[]; members: Map<string, string[] | undefined>; before: string[];
+      } | null = null;
+      // A folder import is not in the history (the real backend only
+      // clears redo); the delete and move below record entries of their
+      // own, taken out again after.
+      const history = [...editUndo];
       if (clash && clash.id === replace) {
-        replacing = { tree: treeSnapshot(), membership: membershipSnapshot(), history: [...editUndo] };
         if (siblings.indexOf(clash) < at) at -= 1;
         const start = tree.findIndex((n) => n.id === clash.id);
         const doomed = tree.slice(start, start + subtreeLength(start));
+        replacing = {
+          nodes: doomed.map((n) => ({ ...n })),
+          members: new Map(doomed.map((n) => {
+            const held = membership.get(n.id);
+            return [n.id, held && [...held]];
+          })),
+          before: siblings.map((n) => n.id),
+        };
         replaced = {
           lists: doomed.length,
           tracks: doomed.reduce((sum, n) => sum + (membership.get(n.id)?.length ?? 0), 0),
@@ -2839,17 +2855,76 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       await edits.createPlaylist(listName, parent);
       const made = tree.find((n) => !before.has(n.id))?.id ?? null;
       if (made && childrenOf(parent).findIndex((n) => n.id === made) !== at) await edits.movePlaylist(made, parent, at);
+      editUndo.splice(0, editUndo.length, ...history);
       if (replacing) {
-        // One step of history, as the real backend records it (#426): the
-        // delete and move above leave entries of their own, folded into it.
-        editUndo.splice(0, editUndo.length, ...replacing.history);
-        const afterTree = treeSnapshot();
-        const afterMembership = membershipSnapshot();
-        await recordEdit({
-          label: "Replace Playlist",
-          undo: () => { restoreTree(replacing.tree); restoreMembership(replacing.membership); },
-          redo: () => { restoreTree(afterTree); restoreMembership(afterMembership); },
-        });
+        // One step of history, as the real backend records it (#426).
+        // Like the real backend, Undo and Redo touch only the replaced and
+        // made lists: siblings added or removed since (the drop's other
+        // folders, a playlist made later) stay, and each list goes back in
+        // its place among the siblings it had. They refuse once those lists
+        // hold something else.
+        const { nodes, members } = replacing;
+        const beforeIds = replacing.before.filter((id) => findNode(id)?.kind !== "history");
+        const madeNode = made ? findNode(made) : undefined;
+        if (made && madeNode) {
+          const madeCopy = { ...madeNode };
+          const madeMembers = [...membersOf(made)];
+          // The flat tree counts the Histories' year folders as top-level;
+          // they are not playlists, so they are left out.
+          const listsUnder = () => childrenOf(parent).filter((n) => n.kind !== "history").map((n) => n.id);
+          const afterIds = listsUnder();
+          const root = nodes[0]?.id ?? "";
+          const refuse = (undo: boolean) => new Error(
+            `that replacement can no longer be ${undo ? "undone" : "redone"}`);
+          const sameList = (a: readonly string[], b: readonly string[]) =>
+            a.length === b.length && a.every((value, i) => value === b[i]);
+          // `entering` (a node and what is under it) put back right after the
+          // nearest sibling before it in `recorded` still under `parent`, or
+          // else right before the nearest one after it, or else last.
+          const placeAmong = (entering: TreeNode[], recorded: readonly string[]) => {
+            const staying = listsUnder();
+            const place = recorded.indexOf(entering[0]?.id ?? "");
+            let index: number | undefined;
+            const earlier = recorded.slice(0, Math.max(place, 0)).reverse().find((id) => staying.includes(id));
+            const later = recorded.slice(place + 1).find((id) => staying.includes(id));
+            if (place >= 0 && earlier !== undefined) index = staying.indexOf(earlier) + 1;
+            else if (place >= 0 && later !== undefined) index = staying.indexOf(later);
+            const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
+            const shift = depth - (entering[0]?.depth ?? depth);
+            const copies = entering.map((n) => ({ ...n, depth: n.depth + shift }));
+            const [head, ...rest] = copies;
+            if (!head) return;
+            // Last goes before the Histories, as `insertUnder` puts it.
+            insertUnder(parent, head, index !== undefined && index < staying.length ? index : undefined);
+            tree.splice(tree.indexOf(head) + 1, 0, ...rest);
+          };
+          await recordEdit({
+            label: "Replace Playlist",
+            undo: () => {
+              if (!childrenOf(parent).some((n) => n.id === made) || findNode(root)
+                || !sameList(membersOf(made), madeMembers)) throw refuse(true);
+              tree.splice(tree.findIndex((n) => n.id === made), 1);
+              membership.delete(made);
+              placeAmong(nodes, beforeIds);
+              for (const [id, tracks] of members) {
+                if (tracks) membership.set(id, [...tracks]);
+                else membership.delete(id);
+              }
+            },
+            redo: () => {
+              const start = tree.findIndex((n) => n.id === root);
+              const live = start < 0 || !childrenOf(parent).some((n) => n.id === root)
+                ? [] : tree.slice(start, start + subtreeLength(start));
+              const unchanged = live.length === nodes.length
+                && live.every((n, i) => n.id === nodes[i]?.id && sameList(membersOf(n.id), members.get(n.id) ?? membersOf(n.id)));
+              if (!unchanged || findNode(made)) throw refuse(false);
+              tree.splice(start, live.length);
+              for (const n of live) membership.delete(n.id);
+              placeAmong([madeCopy], afterIds);
+              membership.set(made, [...madeMembers]);
+            },
+          });
+        }
       }
       return wait({ ...report, folder: true, playlist: made, at, renamed: listName === name ? null : listName, replaced });
     },

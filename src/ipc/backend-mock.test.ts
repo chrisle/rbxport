@@ -97,6 +97,48 @@ describe("mock edits", () => {
     expect(await backend.edits.undoEdit()).toMatchObject({ undoLabel: "Rename Playlist" });
   });
 
+  it("undoes a Replace existing around the drop's new folder and a later playlist, as the real backend does (#426)", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createPlaylist("Warm Up", TREE_ROOT);
+    const old = (await backend.playlistTree()).find((n) => n.name === "Warm Up")!;
+    await backend.edits.addTracksToPlaylist(old.id, ["100001", "100002"]);
+    await backend.edits.renamePlaylist(old.id, "Warm Up");
+    const topLevel = async () => (await backend.playlistTree())
+      .filter((n) => n.depth === 1 && n.kind !== "history").map((n) => n.id);
+    const before = await topLevel();
+
+    // One drop: the clash replaced at index 0, then a new folder at the
+    // drop's same index, then a playlist made later; none but the first is
+    // in the history.
+    const replaced = await backend.importFolderPlaylist("/music/Warm Up", TREE_ROOT, old.id, 0);
+    const fresh = await backend.importFolderPlaylist("/music/Brand New", TREE_ROOT, undefined, replaced.at);
+    await backend.edits.createPlaylist("Later", TREE_ROOT);
+    const later = (await backend.playlistTree()).find((n) => n.name === "Later")!;
+    const dropped = await topLevel();
+    expect(dropped.slice(0, 2)).toEqual([fresh.playlist, replaced.playlist]);
+
+    const undone = await backend.edits.undoEdit();
+    expect(undone).toMatchObject({ redoLabel: "Replace Playlist", undoLabel: "Rename Playlist" });
+    expect(await topLevel()).toEqual([fresh.playlist!, ...before, later.id]);
+    expect((await backend.playlistTree()).find((n) => n.id === old.id)?.childCount).toBe(2);
+
+    await backend.edits.redoEdit();
+    expect(await topLevel()).toEqual(dropped);
+  });
+
+  it("refuses to undo a Replace existing once its playlist changed, and keeps the entry (#426)", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createPlaylist("Warm Up", TREE_ROOT);
+    const old = (await backend.playlistTree()).find((n) => n.name === "Warm Up")!;
+    const replaced = await backend.importFolderPlaylist("/music/Warm Up", TREE_ROOT, old.id, null);
+    await backend.edits.addTracksToPlaylist(replaced.playlist!, ["100003"]);
+    const tree = (await backend.playlistTree()).map((n) => n.id);
+    await expect(backend.edits.undoEdit()).rejects.toThrow("can no longer be undone");
+    expect((await backend.playlistTree()).map((n) => n.id)).toEqual(tree);
+    // Kept on top, as the real backend keeps it: the next Undo refuses too.
+    await expect(backend.edits.undoEdit()).rejects.toThrow("can no longer be undone");
+  });
+
   it("clears library redo when a new edit branches from an undo", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.createPlaylist("Doomed", TREE_ROOT);
