@@ -1,4 +1,4 @@
-//! Native LoudViewMaker output for synthetic PCM, independent of our encoder.
+//! Native BPM-band → LoudViewMaker output, independent of our encoder.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::panic)]
 #[path = "rekordbox_waveform/signals.rs"]
 mod signals;
