@@ -21,7 +21,7 @@ import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatShortDate } from "@/lib/format";
 import {
-  applyClick, clickSettles, cursorOf, cursorTarget, emptySelection, extendSelection, inListOrder, pressModifier, pressSelects, selectAll,
+  applyClick, clickSettles, cursorIn, cursorNeedsList, cursorOf, cursorTarget, emptySelection, extendSelection, inListOrder, pressModifier, pressSelects, selectAll,
   selectedTracks, type CursorMove, type ExtendMove, type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
@@ -1345,24 +1345,59 @@ export const TrackTable = memo(function TrackTable({
   // browser's or the sub-browser's: the keys below run them, and so can
   // anything else that asks for the same list.
   const listScope: CommandScope = subBrowser ? "sub" : "main";
+  // The view's ids top to bottom, asked of the backend once per view: the
+  // token changes with any re-sort, search or library edit, so an answer
+  // held against it is the list as it stands. A held Shift + Down and the
+  // list-order report its selection changes trigger then share one fetch
+  // rather than each asking for every id on every repeat.
+  const listedCache = useRef<{ token: string; count: number; ids: Promise<string[]> } | null>(null);
+  const listedIds = useCallback((): Promise<string[]> => {
+    const held = listedCache.current;
+    if (held && held.token === view.token && held.count === view.count) return held.ids;
+    const entry = { token: view.token, count: view.count, ids: view.idsInRange(0, view.count) };
+    listedCache.current = entry;
+    entry.ids.catch(() => {
+      if (listedCache.current === entry) listedCache.current = null;
+    });
+    return entry.ids;
+  }, [view]);
   const cursorCommand = (move: CursorMove) => () => {
     if (view.count === 0) return false;
     const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 0) / rowH) - 1);
-    moveCursor(cursorTarget(move, cursorOf(selection), firstIndex, page, view.count));
+    const go = (at: number | null) => moveCursor(cursorTarget(move, at, firstIndex, page, view.count));
+    // With the cursor row ⌘-clicked off, the keys go from the topmost
+    // selected row (see `SelectionState.cursorIndex`), which takes the ids.
+    if (cursorNeedsList(selection) && move !== "toTop" && move !== "toBottom") {
+      const state = selection;
+      void listedIds().then((listed) => go(cursorIn(state, listed)));
+    } else {
+      go(cursorOf(selection));
+    }
     return true;
   };
   // Shift + cursor up/down (see `extendSelection`). The whole view's ids are
   // asked for, since the selection is by id and may hold rows never fetched;
   // the change is applied to the selection as it is when they arrive, so a
-  // held key's repeats each take a step. With nothing selected the key is a
-  // plain cursor move, as rekordbox's is.
+  // held key's repeats each take a step. With no row of this list selected
+  // (nothing at all, or only rows of the list shown before or hidden by a
+  // search) the key is a plain cursor move, as rekordbox's is.
   const followCursor = useRef(false);
   const extendCommand = (move: ExtendMove) => () => {
     if (view.count === 0) return false;
-    if (selection.ids.size === 0) return cursorCommand(move === "extendUp" ? "moveUp" : "moveDown")();
-    void view.idsInRange(0, view.count).then((listed) => {
-      followCursor.current = true;
-      setSelection((s) => extendSelection(s, move, listed)?.selection ?? s);
+    const plain = cursorCommand(move === "extendUp" ? "moveUp" : "moveDown");
+    if (selection.ids.size === 0) return plain();
+    const state = selection;
+    void listedIds().then((listed) => {
+      if (extendSelection(state, move, listed) === null) {
+        plain();
+        return;
+      }
+      setSelection((s) => {
+        const extended = extendSelection(s, move, listed);
+        if (!extended) return s;
+        followCursor.current = true;
+        return extended.selection;
+      });
     });
     return true;
   };
@@ -1871,7 +1906,7 @@ export const TrackTable = memo(function TrackTable({
     if (selection.ids.size < 2) return;
     const asked = { ids: selection.ids, token: view.token, order: null as string[] | null };
     listOrder.current = asked;
-    void view.idsInRange(0, view.count).then((listed) => {
+    void listedIds().then((listed) => {
       if (listOrder.current !== asked) return;
       asked.order = inListOrder(asked.ids, listed);
       report(asked.order);
@@ -1879,7 +1914,7 @@ export const TrackTable = memo(function TrackTable({
       // The order only decides which track's colour the information panel
       // shows; the selection already reported stands.
     });
-  }, [selection.ids, view, onSelectedTracks]);
+  }, [selection.ids, view, onSelectedTracks, listedIds]);
 
   // An arrow drawn to rekordbox's geometry rather than the text arrows that
   // stood in for it: those render in the body font and sit off the baseline.

@@ -353,6 +353,82 @@ describe("the list's commands, from a key and from anywhere else (#431)", () => 
     expect(selectedIds()).toEqual(first);
   });
 
+  const listRows = () => [...host.querySelectorAll('[role="row"][aria-selected]')];
+  const mouse = (row: Element | undefined, init: MouseEventInit = {}) => {
+    act(() => {
+      row?.firstElementChild?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, ...init }));
+    });
+  };
+
+  it("makes shift + cursor a plain cursor move when no row of the list is selected (#514)", async () => {
+    render({});
+    await settle();
+    await settle();
+    key({ key: "ArrowDown", code: "ArrowDown" });
+    await settle();
+    const picked = selectedIds();
+    expect(picked).toHaveLength(1);
+    // The row picked in All Tracks stays selected, but the playlist lacks it.
+    render({ spec: PLAYLIST });
+    await settle();
+    await settle();
+    expect(selectedIds()).toEqual([]);
+    expect(key({ key: "ArrowDown", code: "ArrowDown", shiftKey: true }).defaultPrevented).toBe(true);
+    await settle();
+    const moved = selectedIds();
+    expect(moved).toHaveLength(1);
+    expect(moved).not.toEqual(picked);
+    // The plain move is not an extension: a later Select All, whose cursor is
+    // the last row, must not scroll the list there.
+    const scroller = host.querySelector('[data-testid="track-scroll"]') as HTMLElement;
+    const top = scroller.scrollTop;
+    act(() => {
+      expect(runCommand("selectAll", { scope: "main" })).toBe(true);
+    });
+    await settle();
+    expect(selectedIds().length).toBeGreaterThan(1);
+    expect(scroller.scrollTop).toBe(top);
+  });
+
+  it("puts the cursor keys on the top selected row after the cursor row is ⌘-clicked off (#514)", async () => {
+    render({});
+    await settle();
+    await settle();
+    const before = listRows().map((row) => row.textContent);
+    mouse(listRows()[2]);
+    mouse(listRows()[5], { metaKey: true, ctrlKey: true });
+    mouse(listRows()[6], { metaKey: true, ctrlKey: true });
+    mouse(listRows()[6], { metaKey: true, ctrlKey: true });
+    await settle();
+    expect(selectedIds()).toEqual([before[2], before[5]]);
+    key({ key: "ArrowDown", code: "ArrowDown" });
+    await settle();
+    expect(selectedIds()).toEqual([before[3]]);
+  });
+
+  it("asks for the view's ids once for a run of shift + cursor presses (#514)", async () => {
+    const mock = createMockBackend({ trackCount: 400, latencyMs: 0, writable: true });
+    let asked = 0;
+    __setBackend({
+      ...mock,
+      viewIdsInRange: (viewId: number, from: number, to: number) => {
+        if (from === 0 && to >= 400) asked += 1;
+        return mock.viewIdsInRange(viewId, from, to);
+      },
+    });
+    render({});
+    await settle();
+    await settle();
+    key({ key: "ArrowDown", code: "ArrowDown" });
+    await settle();
+    for (let i = 0; i < 4; i++) {
+      key({ key: "ArrowDown", code: "ArrowDown", shiftKey: true });
+      await settle();
+    }
+    expect(selectedIds()).toHaveLength(5);
+    expect(asked).toBe(1);
+  });
+
   it("answers only for the list it is, and not once the list has gone", async () => {
     render({});
     await settle();
