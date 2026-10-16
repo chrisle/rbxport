@@ -258,13 +258,21 @@ impl Snapshot {
                 }
             }
         }
-        if !self.cues.is_empty()
-            && previous
-                .and_then(|m| m.baseline.as_ref())
-                .is_some_and(|b| b.cues != self.cues)
-            && self.cues != next.cues
-        {
-            return Err(ExportError::Conflict("OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.".into()));
+        // An export goes from the computer to the USB, so the library's cues
+        // win for every track it leaves on the stick: a cue row a player
+        // added or edited there is replaced on purpose (#439, #522). What
+        // must not go unnoticed is a player's row on a track this sync takes
+        // off the stick, which nothing replaces.
+        if let Some(baseline) = previous.and_then(|m| m.baseline.as_ref()) {
+            let kept: BTreeSet<u32> = next.one.iter().flat_map(|l| &l.tracks).map(|t| t.id).collect();
+            let lost = self.cues.iter().any(|row| {
+                !baseline.cues.contains(row)
+                    && !next.cues.contains(row)
+                    && !cue_content(row).is_some_and(|id| kept.contains(&id))
+            });
+            if lost {
+                return Err(ExportError::Conflict("OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.".into()));
+            }
         }
         Ok(())
     }
@@ -774,45 +782,14 @@ impl Library {
     }
 }
 
-pub fn check_analysis(
-    root: &Path,
-    old: &crate::ManifestTrack,
-    desired: &[(String, Vec<u8>)],
-) -> Result<()> {
-    if old.anlz_dir.is_empty() {
-        return Ok(());
-    }
-    let mut current = Vec::new();
-    for extension in ["DAT", "EXT", "2EX"] {
-        let path = root
-            .join(old.anlz_dir.trim_start_matches('/'))
-            .join(format!("ANLZ0000.{extension}"));
-        match std::fs::read(path) {
-            Ok(bytes) => current.push((extension.to_owned(), bytes)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-    }
-    // Missing files are repairable. Changed valid files may be player edits.
-    if !current.is_empty() && analysis_hash(&current) != old.analysis && current != desired {
-        // Only compare the musical edits; a path/header rewrite or corruption can be repaired.
-        let musical = |bytes: &[u8]| {
-            rbl_anlz::parse(bytes).ok().map(|a| a.sections.into_iter()
-                .filter(|s| s.is_cue_list() || s.as_beat_grid().is_some()).collect::<Vec<_>>())
-        };
-        for (extension, bytes) in &current {
-            if old.analysis_hashes.get(extension).is_some_and(|h| *h == crate::manifest::hash(bytes)) {
-                continue;
-            }
-            // Compare only surviving companions. A missing EXT is repairable,
-            // not evidence that the user deleted all of its cue points.
-            let target = desired.iter().find(|(e, _)| e == extension).map(|(_, b)| b.as_slice()).unwrap_or_default();
-            if musical(bytes).is_some() && musical(bytes) != musical(target) {
-                return Err(ExportError::Conflict("USB cues or beat grids changed since the last sync. Import the USB cues/grids before exporting.".into()));
-            }
-        }
-    }
-    Ok(())
+/// The `content_id` of one row of [`Snapshot::cues`]. Each row is the
+/// `{:?}|` of every column of `SELECT * FROM cue`, and `content_id` is the
+/// second column in both rekordbox's `exportLibrary.db` schema [OBS
+/// alphatheta-docs platform/rekordbox-onelibrary-reference.md] and this
+/// exporter's (`rbl_onelibrary::build`). `None` when the row does not have
+/// that shape.
+fn cue_content(row: &str) -> Option<u32> {
+    row.split('|').nth(1)?.strip_prefix("Integer(")?.strip_suffix(')')?.parse().ok()
 }
 pub fn analysis_hash(files: &[(String, Vec<u8>)]) -> u64 {
     files.iter().fold(0_u64, |h, (e, b)| {

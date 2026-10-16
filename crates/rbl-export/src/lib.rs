@@ -1541,9 +1541,12 @@ fn export_cancellable_inner(
             }).collect::<std::io::Result<Vec<_>>>()?)
         };
         let analysis = exported_analysis.as_deref().unwrap_or(&track.analysis);
-        if let Some(c) = carried.filter(|c| !c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/'))))) {
-            snapshot::check_analysis(destination, c, analysis)?;
-        }
+        // The stick's cues and beat grid may have been edited on a player
+        // since the last sync. An export goes from the computer to the USB,
+        // so the library's win and replace them; bringing a player's edits
+        // into the library is the import's job, chosen by the user (#439,
+        // #522). This used to stop the run here, part-way through copying,
+        // and asked for an import the user may not want.
         let mut analysis_hash: u64 = analysis_reused.map_or(0, |c| c.analysis);
         for (extension, bytes) in analysis.iter().filter(|_| analysis_reused.is_none()) {
             analysis_hash = analysis_hash.rotate_left(7)
