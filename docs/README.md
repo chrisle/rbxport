@@ -32,6 +32,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 - [USB export pipeline](reference/usb-export-pipeline.md): how an export and selective sync run from the Sync Manager to the stick, their safety checks and recovery, what has been validated, and where to change it.
 - [Library backups](reference/backups.md): how backups are created and restored, and why.
 - [Keyboard commands](reference/shortcut-commands.md): how a key, a menu item and a button run one shared command, and the audit of every bound action against rekordbox's menu bar.
+- [Library Undo coverage](reference/library-undo.md): which library actions Edit › Undo reverses, which are permanent or external, and the follow-up tickets.
 - [LINK behavior and hardware coverage](reference/link-testing.md): device dialects, behavior catalog, and physical checks.
 - [Analysis crate](../crates/rbl-analysis/README.md): algorithm reading path and evaluation tools.
 - [Waveform calibration](reference/waveform-analysis.md): measured overview behavior and its limits.
