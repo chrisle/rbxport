@@ -46,3 +46,26 @@ export function gainToKnob(gain: number): number {
 export function knobLabel(reading: number): string {
   return String(Math.round(Math.min(Math.max(reading, 0), KNOB_FULL)));
 }
+
+/**
+ * Volume / Volume Down (rekordbox's 3003 and 3004, command + F12 and F11):
+ * the master gain one knob reading up or down, from the reading the knob
+ * shows, kept within 0 and 11.
+ */
+export function stepMasterGain(gain: number, direction: 1 | -1): number {
+  const reading = Math.round(gainToKnob(gain));
+  const next = direction === 1 ? Math.min(reading + 1, KNOB_FULL) : Math.max(reading - 1, 0);
+  return knobToGain(next);
+}
+
+/**
+ * Mute (rekordbox's 3005, command + F10): the master goes to silence and
+ * remembers where it was, and a second Mute puts it back. `mutedFrom` is
+ * the level it was muted from, or null when it is not muted. A silent
+ * master that was not muted stays as it is.
+ */
+export function toggleMute(gain: number, mutedFrom: number | null): { gain: number; mutedFrom: number | null } {
+  if (mutedFrom !== null) return { gain: mutedFrom, mutedFrom: null };
+  if (gain > 0) return { gain: 0, mutedFrom: gain };
+  return { gain, mutedFrom: null };
+}

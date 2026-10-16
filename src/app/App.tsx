@@ -12,6 +12,7 @@ import { useShowWindowWhenReady } from "@/lib/windowReady";
 import { waveformKindOf } from "@/canvas";
 import { useAutoJoinLink } from "@/store/useAutoJoinLink";
 import { useEventCallback } from "@/store/useEventCallback";
+import { useCommands } from "@/store/useCommands";
 /**
  * Export-mode shell.
  *
@@ -35,10 +36,11 @@ import { LinkDeckStrip } from "@/views/statusbar/LinkDeckStrip";
 import styles from "./App.module.css";
 import { locateLoadedTrack } from "@/lib/locateLoaded";
 import { keyMap } from "@/lib/keyPresets";
-import { detectPlatform, dispatch, isTyping, menuAccelerator } from "@/lib/shortcuts";
+import { detectPlatform, dispatch, isTyping, menuAccelerator, type Action } from "@/lib/shortcuts";
+import { runCommand } from "@/lib/commands";
 import { hasEditHistory, runEditHistory, setLibraryEditHistory } from "@/lib/editHistory";
 import { transposeKey } from "@/lib/camelot";
-import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
+import { stepMasterGain, toggleMute } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, devicePath, renamedDevice } from "@/lib/devices";
@@ -89,6 +91,11 @@ import { autoRelocated, missingAmong, relocateSteps, relocateTracks } from "@/li
 import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
 import { nativeMenuLabels } from "@/lib/nativeMenu";
+
+/** The commands the shell itself registers, and so the keys it runs. */
+const SHELL_COMMANDS: ReadonlySet<Action> = new Set<Action>([
+  "volumeUp", "volumeDown", "mute", "focusSearch", "clearSearch", "analyseSelection",
+]);
 
 /**
  * The metadata fields a row already carries, so an edit to one can be shown
@@ -2312,6 +2319,48 @@ function AppBody() {
   const keyOverrides = keyMap(prefs.preferences.keyboard);
   /** The level Mute took the master down from, while it is muted. */
   const mutedFrom = useRef<number | null>(null);
+  // The shell's own commands (see `src/lib/commands.ts`): the keys below, the
+  // Track menu's Analyze Track and anything else that asks run these.
+  useCommands({
+    // A knob reading a step: rekordbox's command + F12 and F11.
+    volumeUp: () => {
+      const gain = stepMasterGain(master.level, 1);
+      if (gain > 0) mutedFrom.current = null;
+      master.setLevel(gain);
+      return true;
+    },
+    volumeDown: () => {
+      const gain = stepMasterGain(master.level, -1);
+      if (gain > 0) mutedFrom.current = null;
+      master.setLevel(gain);
+      return true;
+    },
+    // Mute remembers where the knob was, and a second press puts it back.
+    mute: ({ repeat }) => {
+      if (repeat) return true;
+      const next = toggleMute(master.level, mutedFrom.current);
+      const changed = next.gain !== master.level || next.mutedFrom !== mutedFrom.current;
+      mutedFrom.current = next.mutedFrom;
+      if (changed) master.setLevel(next.gain);
+      return true;
+    },
+    focusSearch: () => {
+      searchRef.current?.focus();
+      searchRef.current?.select();
+      return true;
+    },
+    // Escape in an empty box should blur rather than do nothing, so the next
+    // arrow key reaches the track list.
+    clearSearch: () => {
+      if (query === "") searchRef.current?.blur();
+      else setQuery("");
+      return true;
+    },
+    analyseSelection: () => {
+      analyseSelection();
+      return true;
+    },
+  });
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       // The native menu's accelerators, on the platforms where a keystroke
@@ -2325,60 +2374,20 @@ function AppBody() {
         return;
       }
       const action = dispatch(event, platform, event.target as HTMLElement | null, keyOverrides);
-      if (action === null) return;
-      // Only the actions handled here are swallowed; everything else falls
-      // through to the browser and the OS.
-      switch (action) {
-        case "volumeUp":
-        case "volumeDown": {
-          // A knob reading a step: rekordbox's command + F12 and F11.
-          event.preventDefault();
-          const reading = Math.round(gainToKnob(master.level));
-          const next = action === "volumeUp" ? Math.min(reading + 1, KNOB_FULL) : Math.max(reading - 1, 0);
-          if (next > 0) mutedFrom.current = null;
-          master.setLevel(knobToGain(next));
-          break;
-        }
-        case "mute":
-          // Mute remembers where the knob was, and a second press puts it back.
-          event.preventDefault();
-          if (event.repeat) break;
-          if (mutedFrom.current !== null) {
-            master.setLevel(mutedFrom.current);
-            mutedFrom.current = null;
-          } else if (master.level > 0) {
-            mutedFrom.current = master.level;
-            master.setLevel(0);
-          }
-          break;
-        case "focusSearch":
-          event.preventDefault();
-          searchRef.current?.focus();
-          searchRef.current?.select();
-          break;
-        case "clearSearch":
-          // Escape in an empty box should blur rather than do nothing, so the
-          // next arrow key reaches the track list.
-          if (query === "") {
-            searchRef.current?.blur();
-          } else {
-            setQuery("");
-          }
-          break;
-        case "analyseSelection":
-          event.preventDefault();
-          analyseSelection();
-          break;
-        default:
-          // Movement and selection live in the table; it listens for itself.
-          return;
-      }
+      // Only the shell's own commands are run and swallowed here; movement
+      // and selection live in the table and the deck keys in the decks, which
+      // listen for themselves, and everything else falls through to the
+      // browser and the OS.
+      if (action === null || !SHELL_COMMANDS.has(action)) return;
+      if (!runCommand(action, { repeat: event.repeat })) return;
+      // Escape keeps its default, so whatever else it closes still closes.
+      if (action !== "clearSearch") event.preventDefault();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [platform, query, runMenu, analyseSelection, keyOverrides, master]);
+  }, [platform, runMenu, keyOverrides]);
 
   // The Preferences window asking for what only this window holds.
   useEffect(() => {

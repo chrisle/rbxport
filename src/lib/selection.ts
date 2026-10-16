@@ -120,6 +120,40 @@ export function selectAll(state: SelectionState, ids: readonly string[]): Select
   return { ids: new Set(ids), anchorIndex: state.anchorIndex ?? (ids.length > 0 ? 0 : null) };
 }
 
+/** The track list's cursor commands: rekordbox's Browse keys. */
+export type CursorMove = "moveUp" | "moveDown" | "pageUp" | "pageDown" | "toTop" | "toBottom";
+
+/**
+ * The row a cursor command highlights, before it is kept within the list.
+ * The first move with nothing highlighted picks the top visible row
+ * (`firstVisible`, -1 when none is drawn); after that the cursor steps from
+ * the highlighted row, `page` rows at a time for Page Up and Page Down.
+ */
+export function cursorTarget(
+  move: CursorMove,
+  anchor: number | null,
+  firstVisible: number,
+  page: number,
+  count: number,
+): number {
+  const start = firstVisible < 0 ? 0 : firstVisible;
+  const cursor = anchor ?? start;
+  switch (move) {
+    case "moveDown":
+      return anchor === null ? start : cursor + 1;
+    case "moveUp":
+      return anchor === null ? start : cursor - 1;
+    case "pageDown":
+      return cursor + page;
+    case "pageUp":
+      return cursor - page;
+    case "toTop":
+      return 0;
+    case "toBottom":
+      return count - 1;
+  }
+}
+
 export function isSelected(state: SelectionState, id: string): boolean {
   return state.ids.has(id);
 }

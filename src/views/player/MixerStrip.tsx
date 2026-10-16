@@ -20,6 +20,8 @@ import type { DeckId, EqBand } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { keyMap } from "@/lib/keyPresets";
 import { detectPlatform, dispatchBinding, eqKillBand } from "@/lib/shortcuts";
+import { runCommand, type CommandInput } from "@/lib/commands";
+import { useCommands } from "@/store/useCommands";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./MixerStrip.module.css";
 
@@ -89,21 +91,25 @@ const Channel = memo(function Channel({
     [deck],
   );
 
-  // The Keyboard pane's kill keys for this deck (unbound until assigned).
+  // The kill buttons' commands for this deck (see `src/lib/commands.ts`):
+  // the Keyboard pane's kill keys run them (unbound until assigned), the
+  // buttons below call the same `toggle`, and a held key is one press.
+  const kill = (band: EqBand) => ({ repeat }: CommandInput) => {
+    if (!repeat) toggle(band);
+    return true;
+  };
+  useCommands({ eqKillLow: kill("low"), eqKillMid: kill("mid"), eqKillHigh: kill("high") }, deck);
   const platform = useMemo(detectPlatform, []);
   const overrides = keyMap(usePreferencesContext().preferences.keyboard);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const hit = dispatchBinding(event, platform, event.target as HTMLElement | null, overrides);
-      if (hit?.action === undefined || hit.deck !== deck) return;
-      const band = eqKillBand(hit.action);
-      if (band === null) return;
-      event.preventDefault();
-      if (!event.repeat) toggle(band);
+      if (hit?.action === undefined || hit.deck !== deck || eqKillBand(hit.action) === null) return;
+      if (runCommand(hit.action, { scope: deck, repeat: event.repeat })) event.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [deck, overrides, platform, toggle]);
+  }, [deck, overrides, platform]);
 
   const onKnobDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {

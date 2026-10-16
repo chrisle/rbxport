@@ -6,6 +6,7 @@
  * `src/lib/locateLoaded.ts` for the functions read).
  */
 import { locateLoadedTrack } from "@/lib/locateLoaded";
+import { hasCommand, runCommand } from "@/lib/commands";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -263,5 +264,69 @@ describe("Locate track loaded on deck (command + L)", () => {
     await settle();
     expect(shown).toBe(0);
     expect(selected()).toBe(0);
+  });
+});
+
+describe("the list's commands, from a key and from anywhere else (#431)", () => {
+  const key = (init: KeyboardEventInit) => {
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    return event;
+  };
+  const selectedIds = () =>
+    [...host.querySelectorAll('[role="row"][aria-selected="true"]')].map((row) => row.textContent);
+
+  it("moves the cursor the same way for Cursor Down and its command", async () => {
+    const rows: (RowDto | null)[] = [];
+    render({ onSelectedRow: (row) => rows.push(row) });
+    await settle();
+    await settle();
+    expect(key({ key: "ArrowDown", code: "ArrowDown" }).defaultPrevented).toBe(true);
+    await settle();
+    const byKey = rows.at(-1)?.id;
+    expect(key({ key: "ArrowDown", code: "ArrowDown" }).defaultPrevented).toBe(true);
+    await settle();
+    const secondByKey = rows.at(-1)?.id;
+    act(() => {
+      expect(runCommand("moveUp", { scope: "main" })).toBe(true);
+    });
+    await settle();
+    expect(rows.at(-1)?.id).toBe(byKey);
+    act(() => {
+      expect(runCommand("moveDown", { scope: "main" })).toBe(true);
+    });
+    await settle();
+    expect(rows.at(-1)?.id).toBe(secondByKey);
+  });
+
+  it("selects the whole list the same way for Select All and its command", async () => {
+    render({});
+    await settle();
+    await settle();
+    expect(key({ key: "a", code: "KeyA", ctrlKey: true }).defaultPrevented).toBe(true);
+    await settle();
+    const byKey = selectedIds();
+    expect(byKey.length).toBeGreaterThan(1);
+    key({ key: "ArrowDown", code: "ArrowDown" });
+    await settle();
+    expect(selectedIds()).toHaveLength(1);
+    act(() => {
+      expect(runCommand("selectAll", { scope: "main" })).toBe(true);
+    });
+    await settle();
+    expect(selectedIds()).toEqual(byKey);
+  });
+
+  it("answers only for the list it is, and not once the list has gone", async () => {
+    render({});
+    await settle();
+    expect(hasCommand("selectAll", "main")).toBe(true);
+    expect(hasCommand("selectAll", "sub")).toBe(false);
+    act(() => {
+      root.render(<></>);
+    });
+    expect(hasCommand("selectAll", "main")).toBe(false);
   });
 });

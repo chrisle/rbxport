@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyClick, clickSettles, contextPress, emptySelection, inListOrder, modifierFor, pressModifier, pressSelects, selectAll,
+  applyClick, clickSettles, contextPress, cursorTarget, emptySelection, inListOrder, modifierFor, pressModifier, pressSelects, selectAll,
   selectedTracks,
 } from "./selection";
 
@@ -121,5 +121,22 @@ describe("selection", () => {
     expect(inListOrder(ids, ["a", "b", "c", "d"])).toEqual(["b", "d", "gone"]);
     // A track listed twice (a playlist may hold one twice) is reported once.
     expect(inListOrder(new Set(["b"]), ["b", "a", "b"])).toEqual(["b"]);
+  });
+});
+
+describe("cursorTarget", () => {
+  it("starts from the top visible row when nothing is highlighted", () => {
+    expect(cursorTarget("moveDown", null, 7, 20, 400)).toBe(7);
+    expect(cursorTarget("moveUp", null, 7, 20, 400)).toBe(7);
+    expect(cursorTarget("moveDown", null, -1, 20, 400)).toBe(0);
+  });
+
+  it("steps from the highlighted row, a page at a time for Page Up and Down", () => {
+    expect(cursorTarget("moveDown", 10, 0, 20, 400)).toBe(11);
+    expect(cursorTarget("moveUp", 10, 0, 20, 400)).toBe(9);
+    expect(cursorTarget("pageDown", 10, 0, 20, 400)).toBe(30);
+    expect(cursorTarget("pageUp", 10, 0, 20, 400)).toBe(-10);
+    expect(cursorTarget("toTop", 10, 0, 20, 400)).toBe(0);
+    expect(cursorTarget("toBottom", 10, 0, 20, 400)).toBe(399);
   });
 });

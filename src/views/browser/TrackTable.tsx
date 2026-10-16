@@ -21,8 +21,8 @@ import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatShortDate } from "@/lib/format";
 import {
-  applyClick, clickSettles, emptySelection, inListOrder, pressModifier, pressSelects, selectAll, selectedTracks,
-  type SelectionState,
+  applyClick, clickSettles, cursorTarget, emptySelection, inListOrder, pressModifier, pressSelects, selectAll,
+  selectedTracks, type CursorMove, type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import {
@@ -48,10 +48,16 @@ import { ColumnMenu } from "./ColumnMenu";
 import { createDragAutoscroll } from "@/lib/dragAutoscroll";
 import { setRowDragImage } from "./dragGhost";
 import { keyMap } from "@/lib/keyPresets";
-import { detectPlatform, dispatch, isTyping } from "@/lib/shortcuts";
+import { detectPlatform, dispatch, isTyping, type Action } from "@/lib/shortcuts";
+import { runCommand, type CommandScope } from "@/lib/commands";
+import { useCommands } from "@/store/useCommands";
 import { locateLoadedTrack, locateStep, needsCentering, registerLocateLoaded, restoredScrollTop, type SavedScroll } from "@/lib/locateLoaded";
 
 const ROW_H = 25; // --s-row-height
+/** The list's commands its keyboard handler runs: selection and the cursor. */
+const LIST_COMMANDS: ReadonlySet<Action> = new Set<Action>([
+  "selectAll", "moveUp", "moveDown", "pageUp", "pageDown", "toTop", "toBottom",
+]);
 /**
  * A removal the list asks for: resolves true once the tracks are gone, false
  * when the person declined or the write was refused.
@@ -1335,6 +1341,34 @@ export const TrackTable = memo(function TrackTable({
     pendingLocate.current = null;
     if (showsCollection) void locateHere(id);
   }, [view.loading, view.sourceKey, showsCollection, locateHere]);
+  // This list's own commands (see `src/lib/commands.ts`), the main
+  // browser's or the sub-browser's: the keys below run them, and so can
+  // anything else that asks for the same list.
+  const listScope: CommandScope = subBrowser ? "sub" : "main";
+  const cursorCommand = (move: CursorMove) => () => {
+    if (view.count === 0) return false;
+    const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 0) / rowH) - 1);
+    moveCursor(cursorTarget(move, selection.anchorIndex, firstIndex, page, view.count));
+    return true;
+  };
+  useCommands({
+    // The ids come from the backend, which resolves them for every row of
+    // the view — including the ones that were never scrolled into range and
+    // so never fetched.
+    selectAll: () => {
+      if (view.count === 0) return false;
+      void view.idsInRange(0, view.count).then((ids) => {
+        setSelection((s) => selectAll(s, ids));
+      });
+      return true;
+    },
+    moveUp: cursorCommand("moveUp"),
+    moveDown: cursorCommand("moveDown"),
+    pageUp: cursorCommand("pageUp"),
+    pageDown: cursorCommand("pageDown"),
+    toTop: cursorCommand("toTop"),
+    toBottom: cursorCommand("toBottom"),
+  }, listScope);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -1346,59 +1380,20 @@ export const TrackTable = memo(function TrackTable({
         if (answersLocate) locateLoadedTrack();
         return;
       }
-      if (action === null || view.count === 0) return;
+      if (action === null || !LIST_COMMANDS.has(action)) return;
       // A focused knob or fader owns the up/down keys — turning one must not
       // also walk the track list. `dispatch` already yields the text fields.
       const role = target?.getAttribute?.("role");
       if (role === "slider" || role === "spinbutton") return;
-      // Ctrl/⌘+A selects the whole list. The ids come from the backend, which
-      // resolves them for every row of the view — including the ones that were
-      // never scrolled into range and so never fetched. preventDefault stops
-      // the webview's own "select all text" from highlighting the interface
-      // instead, which is what a plain Ctrl+A did before this.
-      if (action === "selectAll") {
-        event.preventDefault();
-        void view.idsInRange(0, view.count).then((ids) => {
-          setSelection((s) => selectAll(s, ids));
-        });
-        return;
-      }
-      // The first press with nothing highlighted picks the top visible row;
-      // after that the keys step from where the highlight is.
-      const start = firstIndex < 0 ? 0 : firstIndex;
-      const cursor = selection.anchorIndex ?? start;
-      const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 0) / rowH) - 1);
-      let to: number;
-      switch (action) {
-        case "moveDown":
-          to = selection.anchorIndex === null ? start : cursor + 1;
-          break;
-        case "moveUp":
-          to = selection.anchorIndex === null ? start : cursor - 1;
-          break;
-        case "pageDown":
-          to = cursor + page;
-          break;
-        case "pageUp":
-          to = cursor - page;
-          break;
-        case "toTop":
-          to = 0;
-          break;
-        case "toBottom":
-          to = view.count - 1;
-          break;
-        default:
-          return;
-      }
-      event.preventDefault();
-      moveCursor(to);
+      // preventDefault stops the webview's own "select all text" from
+      // highlighting the interface on Ctrl/⌘+A, and the arrows from scrolling.
+      if (runCommand(action, { scope: listScope, repeat: event.repeat })) event.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, keyOverrides, answersLocate]);
+  }, [platform, keyOverrides, answersLocate, listScope]);
 
   const startDragOut = useCallback(
     (row: RowDto) => {
@@ -1709,6 +1704,15 @@ export const TrackTable = memo(function TrackTable({
       if (ids.length > 0) onRenumber(ids);
     });
   });
+  // The command its key and anything else asking for this list's renumber
+  // run; one press is one renumber.
+  useCommands({
+    renumberTrackOrder: ({ repeat }) => {
+      if (!onRenumber) return false;
+      if (!repeat) renumber();
+      return true;
+    },
+  }, subBrowser ? "sub" : "main");
   // Its key, once the Keyboard pane gives it one. rekordbox hands the
   // command to the sub-browser's list while the sub-browser has the focus
   // and to the main list otherwise [OBS: `BrowseBasicView::performCommand`
@@ -1724,9 +1728,10 @@ export const TrackTable = memo(function TrackTable({
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (dispatch(event, platform, target, keyOverrides) !== "renumberTrackOrder") return;
-      if (subBrowser !== subBrowserEngaged || !onRenumber) return;
-      event.preventDefault();
-      if (!event.repeat) renumber();
+      if (subBrowser !== subBrowserEngaged) return;
+      if (runCommand("renumberTrackOrder", { scope: subBrowser ? "sub" : "main", repeat: event.repeat })) {
+        event.preventDefault();
+      }
     };
     if (subBrowser) window.addEventListener("mousedown", onDown, true);
     window.addEventListener("keydown", onKey);
@@ -1737,7 +1742,7 @@ export const TrackTable = memo(function TrackTable({
       }
       window.removeEventListener("keydown", onKey);
     };
-  }, [subBrowser, onRenumber, platform, keyOverrides, renumber]);
+  }, [subBrowser, platform, keyOverrides]);
 
   // Delete and ⌫ remove the whole selection the way this list's own menu
   // entry does, asking first as it does: from the collection, a playlist, a
