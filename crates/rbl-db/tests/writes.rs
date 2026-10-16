@@ -1647,6 +1647,41 @@ fn every_loop_length_the_library_uses_round_trips() {
 }
 
 #[test]
+fn an_auto_beat_loop_saved_as_a_memory_loop_is_a_kind_0_row_with_its_out_point() {
+    // #411: MEMORY during an Auto Beat Loop. rekordbox 7.2.19's
+    // UiPlayer::eventMemoryCue @0x101b9d91c stores the loop's in and out with
+    // the auto beat length as numerator/denominator (HotCueData +0x30/+0x32),
+    // and DjplayDB::setHotCueData writes it as a memory cue: Kind 0, Color
+    // 255 (no colour), an empty comment, not the active loop.
+    let mut f = fixture();
+    let id = f.writer.add_beat_loop(&track_id(0), 0, 30_000, 31_875, Some((4, 1))).unwrap();
+    let half = f.writer.add_beat_loop(&track_id(0), 0, 40_000, 40_234, Some((1, 2))).unwrap();
+    let row = |id: &str| -> (i64, i64, i64, i64, i64, i64, i64, String) {
+        f.conn()
+            .query_row(
+                "SELECT Kind, InMsec, OutMsec, Color, ColorTableIndex, ActiveLoop, BeatLoopSize, Comment
+                 FROM djmdCue WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
+            )
+            .unwrap()
+    };
+    assert_eq!(row(&id), (0, 30_000, 31_875, 255, 0, 0, 262_145, String::new()));
+    let (.., size, _) = row(&half);
+    assert_eq!((size >> 16, size & 0xFFFF), (1, 2), "half a beat is 1/2");
+}
+
+#[test]
+fn a_beat_loop_with_a_zero_length_half_is_refused() {
+    let mut f = fixture();
+    for size in [(0_u16, 1_u16), (1, 0)] {
+        let refused = f.writer.add_beat_loop(&track_id(0), 0, 1000, 2000, Some(size));
+        assert!(matches!(refused, Err(DbError::WriteRefused(_))), "{size:?}");
+    }
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue"), 0);
+}
+
+#[test]
 fn a_loop_with_no_stated_length_leaves_the_field_zero() {
     // Most of the library's loops do this: the length is implied by In and Out.
     let mut f = fixture();

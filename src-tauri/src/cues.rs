@@ -72,7 +72,9 @@ impl<'de> Deserialize<'de> for CueKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CueEdit {
     Add { track: String, kind: CueKind, position_ms: u32 },
-    AddLoop { track: String, kind: CueKind, in_ms: u32, out_ms: u32, beats: u16 },
+    /// `beat_loop` is the Auto Beat Loop length as numerator and
+    /// denominator, `(4, 1)` or `(1, 2)`; `None` when only In and Out are known.
+    AddLoop { track: String, kind: CueKind, in_ms: u32, out_ms: u32, beat_loop: Option<(u16, u16)> },
     Move { cue: String, position_ms: u32 },
     /// A hot cue to another pad slot, the cues between the two shifting over.
     Slot { cue: String, kind: CueKind },
@@ -99,9 +101,9 @@ pub fn apply(writer: &mut rbl_db::write::Writer, edit: CueEdit) -> AppResult<Cue
             let cue = writer.add_cue(&track, kind.number()?, position_ms).map_err(write_error)?;
             Ok(CueChange { track, cue })
         }
-        CueEdit::AddLoop { track, kind, in_ms, out_ms, beats } => {
+        CueEdit::AddLoop { track, kind, in_ms, out_ms, beat_loop } => {
             let cue = writer
-                .add_loop(&track, kind.number()?, in_ms, out_ms, beats)
+                .add_beat_loop(&track, kind.number()?, in_ms, out_ms, beat_loop)
                 .map_err(write_error)?;
             Ok(CueChange { track, cue })
         }
@@ -202,8 +204,9 @@ pub async fn add_cue<R: tauri::Runtime>(
 }
 
 /// Adds a loop: a cue with an out point. `beats` is the loop's length in
-/// beats when the caller knows it, and left out when In and Out are all
-/// there is — which is what most of the library's loops record.
+/// beats when the caller knows it — a whole number of beats, or one over a
+/// whole number for the Auto Beat Loop's 1/2 to 1/64 — and left out when In
+/// and Out are all there is, which is what most of the library's loops record.
 #[tauri::command]
 pub async fn add_loop<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -212,10 +215,30 @@ pub async fn add_loop<R: tauri::Runtime>(
     kind: CueKind,
     in_ms: u32,
     out_ms: u32,
-    beats: Option<u16>,
+    beats: Option<f64>,
 ) -> AppResult<String> {
-    let edit = CueEdit::AddLoop { track, kind, in_ms, out_ms, beats: beats.unwrap_or(0) };
+    let beat_loop = beats.map(beat_fraction).transpose()?;
+    let edit = CueEdit::AddLoop { track, kind, in_ms, out_ms, beat_loop };
     edit_cues(app, state, "add_loop", edit).await.map(|change| change.cue)
+}
+
+/// A beat loop length as rekordbox's `StAutoBeatLoop` holds it: 4 beats is
+/// `(4, 1)`, a quarter `(1, 4)`. [OBS static] rekordbox 7.2.19
+/// `UiPlayer::getAutoBeatInfo` @0x102259ecc reads a numerator of 1 over 2 to
+/// 64, or a whole number of beats over 1; nothing else is a length it sets.
+fn beat_fraction(beats: f64) -> AppResult<(u16, u16)> {
+    let whole = |value: f64| (value.fract() == 0.0 && (1.0..=f64::from(u16::MAX)).contains(&value)).then_some(value);
+    let refused = || AppError::new(ErrorKind::Malformed, format!("{beats} is not a beat loop length rekordbox has"));
+    if !beats.is_finite() || beats <= 0.0 {
+        return Err(refused());
+    }
+    if beats >= 1.0 {
+        // Checked as whole and in range just above, so the cast is exact.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        return whole(beats).map(|value| (value as u16, 1)).ok_or_else(refused);
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    whole(1.0 / beats).map(|value| (1, value as u16)).ok_or_else(refused)
 }
 
 #[tauri::command]
@@ -279,7 +302,7 @@ pub async fn convert_memory_cues_to_hot<R: tauri::Runtime>(
     let mut made = 0;
     for (kind, position_ms, out_ms) in plan {
         let edit = if out_ms > position_ms {
-            CueEdit::AddLoop { track: track.clone(), kind: CueKind::Hot(kind), in_ms: position_ms, out_ms, beats: 0 }
+            CueEdit::AddLoop { track: track.clone(), kind: CueKind::Hot(kind), in_ms: position_ms, out_ms, beat_loop: None }
         } else {
             CueEdit::Add { track: track.clone(), kind: CueKind::Hot(kind), position_ms }
         };
@@ -357,6 +380,49 @@ mod tests {
     }
 
     #[test]
+    fn a_beat_loop_length_is_rekordbox_s_numerator_over_denominator() {
+        assert_eq!(beat_fraction(4.0).unwrap(), (4, 1));
+        assert_eq!(beat_fraction(512.0).unwrap(), (512, 1));
+        assert_eq!(beat_fraction(1.0).unwrap(), (1, 1));
+        assert_eq!(beat_fraction(0.5).unwrap(), (1, 2));
+        assert_eq!(beat_fraction(1.0 / 64.0).unwrap(), (1, 64));
+        for odd in [0.0, -4.0, 1.5, 0.3, f64::NAN, f64::INFINITY, 70_000.0] {
+            assert_eq!(beat_fraction(odd).unwrap_err().kind, ErrorKind::Malformed, "{odd}");
+        }
+    }
+
+    #[test]
+    fn a_memory_loop_saved_from_an_auto_beat_loop_reloads_as_a_memory_loop() {
+        // #411: MEMORY during an Auto Beat Loop of half a beat, then the
+        // track's cues re-read as a reload would.
+        let mut f = open();
+        let track = track_id(1);
+        let change = apply(
+            &mut f.writer,
+            CueEdit::AddLoop {
+                track: track.clone(),
+                kind: CueKind::Memory,
+                in_ms: 20_000,
+                out_ms: 20_250,
+                beat_loop: Some((1, 2)),
+            },
+        )
+        .unwrap();
+        f.reload(&track);
+        let cues = f.cues(&track);
+        assert_eq!(cues.len(), 1);
+        assert!(cues[0].is_memory());
+        assert_eq!((cues[0].position_ms, cues[0].out_ms), (20_000, 20_250));
+        let size: i64 = f
+            .writer
+            .library()
+            .connection()
+            .query_row("SELECT BeatLoopSize FROM djmdCue WHERE ID = ?1", [&change.cue], |r| r.get(0))
+            .unwrap();
+        assert_eq!(size, (1 << 16) | 2);
+    }
+
+    #[test]
     fn a_letter_past_p_is_refused_as_malformed_not_written() {
         let mut f = open();
         let track = track_id(0);
@@ -418,7 +484,7 @@ mod tests {
                 kind: CueKind::Memory,
                 in_ms: 8_000,
                 out_ms: 12_000,
-                beats: 8,
+                beat_loop: Some((8, 1)),
             },
         )
         .unwrap();
@@ -475,7 +541,7 @@ mod tests {
         let track = track_id(1);
         let err = apply(
             &mut f.writer,
-            CueEdit::AddLoop { track: track.clone(), kind: CueKind::Memory, in_ms: 9_000, out_ms: 9_000, beats: 0 },
+            CueEdit::AddLoop { track: track.clone(), kind: CueKind::Memory, in_ms: 9_000, out_ms: 9_000, beat_loop: None },
         )
         .unwrap_err();
         assert_eq!(err.kind, ErrorKind::ReadOnly);

@@ -1979,19 +1979,41 @@ impl Writer {
         end_ms: u32,
         beats: u16,
     ) -> Result<String> {
+        self.add_beat_loop(content, kind, start_ms, end_ms, (beats != 0).then_some((beats, 1)))
+    }
+
+    /// Adds a loop whose length may be a fraction of a beat.
+    ///
+    /// `beat_loop` is the Auto Beat Loop length as rekordbox holds it, a
+    /// numerator and a denominator: 4 beats is `(4, 1)`, half a beat
+    /// `(1, 2)`. `BeatLoopSize` carries it as `(numerator << 16) |
+    /// denominator` [OBS static, rekordbox 7.2.19
+    /// `AppSyncDBController::addHCBLCueOption` @0x100a667f4 packs the cue's
+    /// two halves that way; every value in the reference library fits it].
+    /// `None` leaves the length implied by the In and Out points (0).
+    pub fn add_beat_loop(
+        &mut self,
+        content: &str,
+        kind: u8,
+        start_ms: u32,
+        end_ms: u32,
+        beat_loop: Option<(u16, u16)>,
+    ) -> Result<String> {
         if end_ms <= start_ms {
             return Err(DbError::WriteRefused(
                 "a loop has to end after it starts".to_owned(),
             ));
+        }
+        if beat_loop.is_some_and(|(numerator, denominator)| numerator == 0 || denominator == 0) {
+            return Err(DbError::WriteRefused("a beat loop needs a length".to_owned()));
         }
         let id = self.add_cue(content, kind, start_ms)?;
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
-        // The low half is always 1 across every value in the reference
-        // library; it reads as the denominator of a beats-per-loop fraction.
-        let size = if beats == 0 { 0_i64 } else { (i64::from(beats) << 16) | 1 };
+        let size = beat_loop
+            .map_or(0_i64, |(numerator, denominator)| (i64::from(numerator) << 16) | i64::from(denominator));
         tx.execute(
             "UPDATE djmdCue SET OutMsec = ?1, BeatLoopSize = ?2, rb_local_usn = ?3,
                 updated_at = ?4 WHERE ID = ?5",

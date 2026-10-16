@@ -1067,7 +1067,7 @@ fn a_cue_added_through_the_command_is_read_back_and_announced() {
         CueKind::Memory,
         40_000,
         44_000,
-        Some(8),
+        Some(8.0),
     ))
     .unwrap();
 
@@ -1177,7 +1177,7 @@ fn memory_cues_are_converted_into_the_free_hot_slots_in_position_order_and_each_
     // letters left: A, C and D, in order of position rather than of adding.
     run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Hot('B'), 1_000)).unwrap();
     run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 30_000)).unwrap();
-    run(cues::add_loop(s.handle(), s.state(), track.clone(), CueKind::Memory, 10_000, 14_000, Some(8))).unwrap();
+    run(cues::add_loop(s.handle(), s.state(), track.clone(), CueKind::Memory, 10_000, 14_000, Some(8.0))).unwrap();
     run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 50_000)).unwrap();
     assert_eq!(announced(4).len(), 4, "the four cues that set the track up");
 
