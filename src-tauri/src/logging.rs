@@ -17,10 +17,15 @@
 //! scan past an incomplete header while finding the next packet. Decode
 //! failures still reach us through `rbl_deck`.
 
+use std::collections::VecDeque;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock, PoisonError};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use tracing_subscriber::layer::SubscriberExt;
+use serde::Serialize;
+use tracing::field::{Field, Visit};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
@@ -72,6 +77,152 @@ fn filter() -> (EnvFilter, Option<String>) {
             }
         }
         Err(_) => (EnvFilter::new(filter_for(DEFAULT_LEVEL)), None),
+    }
+}
+
+/// How many of this process's lines the Log window can show; older ones
+/// are only in the file.
+pub const BUFFER_LINES: usize = 10_000;
+/// A line longer than this is cut short in the window (the file keeps it
+/// whole): LINK's trace lines can carry a packet dump each.
+const LINE_CHARS: usize = 4_096;
+
+/// One logged line, as the Log window shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogLine {
+    /// Counts up from 1 for every line this process logs.
+    pub seq: u64,
+    /// When, in milliseconds since the Unix epoch.
+    pub time_ms: u64,
+    /// `error`, `warn`, `info`, `debug` or `trace`.
+    pub level: &'static str,
+    /// The module that logged it, `rbl_link::peer` for example.
+    pub target: String,
+    /// The message, then its fields as `name=value`.
+    pub message: String,
+}
+
+/// The lines after a given one, and the oldest the buffer still holds.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogPage {
+    pub lines: Vec<LogLine>,
+    /// The `seq` of the oldest line still held, or the next one to come when
+    /// none is: lines before it have left the buffer.
+    pub oldest: u64,
+}
+
+/// The newest lines this process has logged.
+#[derive(Debug)]
+pub struct LogBuffer {
+    next: u64,
+    capacity: usize,
+    lines: VecDeque<LogLine>,
+}
+
+impl LogBuffer {
+    #[must_use]
+    pub const fn new(capacity: usize) -> Self {
+        Self { next: 1, capacity, lines: VecDeque::new() }
+    }
+
+    fn push(&mut self, time_ms: u64, level: &'static str, target: &str, mut message: String) {
+        if let Some((cut, _)) = message.char_indices().nth(LINE_CHARS) {
+            message.truncate(cut);
+            message.push('…');
+        }
+        let seq = self.next;
+        self.next += 1;
+        if self.lines.len() >= self.capacity {
+            self.lines.pop_front();
+        }
+        self.lines.push_back(LogLine { seq, time_ms, level, target: target.to_owned(), message });
+    }
+
+    /// Every line held whose `seq` is after `after`; 0 for all of them.
+    #[must_use]
+    pub fn after(&self, after: u64) -> LogPage {
+        let oldest = self.lines.front().map_or(self.next, |line| line.seq);
+        // `seq` rises by one per line, so the first wanted is an index.
+        let skip = usize::try_from(after.saturating_add(1).saturating_sub(oldest)).unwrap_or(usize::MAX);
+        LogPage { lines: self.lines.iter().skip(skip).cloned().collect(), oldest }
+    }
+}
+
+/// The process's buffer, which [`install`] fills.
+static BUFFER: Mutex<LogBuffer> = Mutex::new(LogBuffer::new(BUFFER_LINES));
+
+/// The lines this process has logged after `after`, for the Log window.
+pub fn lines_after(after: u64) -> LogPage {
+    BUFFER.lock().unwrap_or_else(PoisonError::into_inner).after(after)
+}
+
+/// Puts every event the filter lets through into a [`LogBuffer`].
+pub(crate) struct BufferLayer(pub(crate) &'static Mutex<LogBuffer>);
+
+impl<S: tracing::Subscriber> Layer<S> for BufferLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        let mut fields = Fields::default();
+        event.record(&mut fields);
+        let metadata = event.metadata();
+        let time_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+        // A poisoned lock still holds good lines; a log line is no reason to
+        // give up on the rest.
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).push(
+            time_ms,
+            level_name(*metadata.level()),
+            metadata.target(),
+            fields.finish(),
+        );
+    }
+}
+
+fn level_name(level: tracing::Level) -> &'static str {
+    match level {
+        tracing::Level::ERROR => "error",
+        tracing::Level::WARN => "warn",
+        tracing::Level::INFO => "info",
+        tracing::Level::DEBUG => "debug",
+        tracing::Level::TRACE => "trace",
+    }
+}
+
+/// An event's message and its other fields, written the way the file has
+/// them: the message, then ` name=value` for each field.
+#[derive(Default)]
+struct Fields {
+    message: String,
+    rest: String,
+}
+
+impl Fields {
+    fn finish(self) -> String {
+        if self.message.is_empty() {
+            self.rest.trim_start().to_owned()
+        } else {
+            self.message + &self.rest
+        }
+    }
+}
+
+impl Visit for Fields {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "message" {
+            self.message.push_str(value);
+        } else {
+            self.record_debug(field, &value);
+        }
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            let _ = write!(self.message, "{value:?}");
+        } else {
+            let _ = write!(self.rest, " {}={value:?}", field.name());
+        }
     }
 }
 
@@ -147,7 +298,12 @@ pub fn install() {
         }
     };
 
-    tracing_subscriber::registry().with(filter).with(stdout).with(file).init();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(stdout)
+        .with(file)
+        .with(BufferLayer(&BUFFER))
+        .init();
     tracing::debug!(dir = %dir.display(), "logging to stdout and a daily file");
     if let Some(complaint) = complaint {
         tracing::warn!("{complaint}");
@@ -172,6 +328,50 @@ mod tests {
         assert!(filter.contains("rbl_link=trace"));
         assert!(filter.contains("rbxport=trace"));
         assert!(filter_for("error").starts_with("error,"));
+    }
+
+    /// A buffer of its own, so lines other tests log do not land in it.
+    fn buffer() -> &'static Mutex<LogBuffer> {
+        Box::leak(Box::new(Mutex::new(LogBuffer::new(3))))
+    }
+
+    #[test]
+    fn the_buffer_keeps_what_was_logged_with_its_level_and_fields() {
+        let held = buffer();
+        let subscriber = tracing_subscriber::registry().with(BufferLayer(held));
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::warn!(port = 1234, "port in use");
+            tracing::error!(path = "a b", "copy failed");
+        });
+        let page = held.lock().expect("buffer").after(0);
+        assert_eq!(page.oldest, 1);
+        let lines: Vec<_> = page.lines.iter().map(|l| (l.seq, l.level, l.message.as_str())).collect();
+        assert_eq!(lines, [(1, "warn", "port in use port=1234"), (2, "error", "copy failed path=\"a b\"")]);
+        assert!(page.lines.iter().all(|l| l.target == module_path!() && l.time_ms > 0));
+    }
+
+    #[test]
+    fn the_buffer_drops_its_oldest_lines_and_pages_by_seq() {
+        let mut buffer = LogBuffer::new(3);
+        assert_eq!(buffer.after(0).oldest, 1, "an empty buffer points at the line to come");
+        for n in 1..=5 {
+            buffer.push(0, "info", "t", format!("line {n}"));
+        }
+        let all = buffer.after(0);
+        assert_eq!(all.oldest, 3);
+        assert_eq!(all.lines.iter().map(|l| l.seq).collect::<Vec<_>>(), [3, 4, 5]);
+        assert_eq!(buffer.after(4).lines.iter().map(|l| l.seq).collect::<Vec<_>>(), [5]);
+        assert_eq!(buffer.after(5).lines.len(), 0);
+        assert_eq!(buffer.after(99).lines.len(), 0);
+    }
+
+    #[test]
+    fn a_long_line_is_cut_short_on_a_character_boundary() {
+        let mut buffer = LogBuffer::new(1);
+        buffer.push(0, "trace", "t", "é".repeat(LINE_CHARS + 10));
+        let line = &buffer.after(0).lines[0].message;
+        assert_eq!(line.chars().count(), LINE_CHARS + 1);
+        assert!(line.ends_with('…'));
     }
 
     #[test]
