@@ -4662,7 +4662,6 @@ fn tombstone_subtree(tx: &Connection, id: &str, stamp: &str) -> Result<(Changed,
     }))
 }
 
-/// `parent`'s live children as `(ID, Seq)`, in tree order.
 /// `staying` with `entering` put back in its place in `recorded`: right after
 /// the nearest sibling before it there that is still in `staying`, or else
 /// right before the nearest one after it, or else at the end. Siblings not in
@@ -4687,6 +4686,7 @@ fn place_among(
     staying
 }
 
+/// `parent`'s live children as `(ID, Seq)`, in tree order.
 fn children_with_seq(conn: &Connection, parent: &str) -> Result<Vec<(String, Option<i64>)>> {
     let mut stmt = conn.prepare(
         "SELECT ID, Seq FROM djmdPlaylist
@@ -4739,7 +4739,6 @@ fn live_subtree_is(conn: &Connection, deletion: &PlaylistDeletion) -> Result<boo
     Ok(same(&mut lists, &deletion.playlist_ids) && same(&mut members, &deletion.membership_ids))
 }
 
-/// Whether a playlist or folder exists and is not deleted.
 /// Sort Items is a folder's, or the top of the tree's: a playlist has no
 /// children to put in order.
 fn refuse_unless_folder(conn: &Connection, id: &str) -> Result<()> {
@@ -4778,6 +4777,7 @@ fn write_child_order(conn: &Connection, parent: &str, order: &[String], stamp: &
     Ok(Changed { rows, usn })
 }
 
+/// Whether a playlist or folder exists and is not deleted.
 fn node_exists(conn: &Connection, id: &str) -> Result<bool> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
