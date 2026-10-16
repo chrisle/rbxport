@@ -1,9 +1,12 @@
 //! Safe OS ejection after all export handles have closed. Never force a busy volume.
 //!
 //! On Windows this is the request "Safely Remove Hardware" makes
-//! (`CM_Request_Device_Eject`), which needs no administrator rights. Opening
-//! the volume for read and write to lock it does need them, so a normal
-//! (not elevated) app got "Access is denied (os error 5)" that way.
+//! (`CM_Request_Device_Eject`), which asks every program holding a file on
+//! the stick to let go first. Locking the volume (`FSCTL_LOCK_VOLUME`)
+//! instead fails with "Access is denied (os error 5)" while any program,
+//! even Explorer or the search indexer, has a file open on it, elevated or
+//! not. The lock is only used for removable media with no device Windows
+//! offers for safe removal, such as a card in a built-in SD reader.
 use std::{io, path::Path};
 
 pub fn eject(path: &Path) -> io::Result<()> {
@@ -90,6 +93,55 @@ fn multi_strings(buffer: &[u16]) -> impl Iterator<Item = &[u16]> {
     buffer.split(|&unit| unit == 0).take_while(|item| !item.is_empty())
 }
 
+/// How a Windows eject is carried out.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Debug, PartialEq, Eq)]
+enum EjectTarget<N> {
+    /// Ask Plug and Play to remove this device node, as Safely Remove does.
+    Device(N),
+    /// No device is removable but the media is (a card in a built-in SD
+    /// reader): lock, dismount and eject the media, as Explorer's Eject does.
+    Media,
+    /// Neither, such as a disk inside the computer.
+    Refuse,
+}
+
+/// How many levels above the disk to look for a removable device. A stick's
+/// disk sits directly under its USB device; on a composite device (many card
+/// readers) it sits under an interface node (`USB\…&MI_nn`) whose own parent
+/// is the removable device. Going further would reach hubs and controllers,
+/// and a Thunderbolt USB controller is itself marked removable.
+#[cfg_attr(not(windows), allow(dead_code))]
+const MAX_ANCESTORS: usize = 2;
+
+/// Chooses what to eject for `disk`. `CM_DEVCAP_REMOVABLE` means removable
+/// from the immediate parent, so the nearest removable ancestor (within
+/// [`MAX_ANCESTORS`]) is the device Safely Remove would offer; then the disk
+/// itself; then the media when the disk reports removable media.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn eject_target<N: Copy>(
+    disk: N,
+    removable_media: bool,
+    mut parent: impl FnMut(N) -> Option<N>,
+    mut removable: impl FnMut(N) -> bool,
+) -> EjectTarget<N> {
+    let mut node = disk;
+    for _ in 0..MAX_ANCESTORS {
+        let Some(up) = parent(node) else { break };
+        if removable(up) {
+            return EjectTarget::Device(up);
+        }
+        node = up;
+    }
+    if removable(disk) {
+        EjectTarget::Device(disk)
+    } else if removable_media {
+        EjectTarget::Media
+    } else {
+        EjectTarget::Refuse
+    }
+}
+
 /// Why Windows refused to let the stick go, as `PNP_VETO_TYPE` reports it
 /// (cfg.h), with the process, service or device it names.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -159,6 +211,57 @@ mod tests {
         assert_eq!(items, ["\\\\?\\usbstor#disk#a", "\\\\?\\scsi#disk#b"]);
         assert_eq!(super::multi_strings(&[0, 0]).count(), 0);
         assert_eq!(super::multi_strings(&[]).count(), 0);
+    }
+
+    /// A device tree as (node, parent, removable) rows.
+    fn target(tree: &[(u32, Option<u32>, bool)], disk: u32, removable_media: bool) -> super::EjectTarget<u32> {
+        let row = |node: u32| tree.iter().find(|row| row.0 == node).copied();
+        super::eject_target(
+            disk,
+            removable_media,
+            |node| row(node).and_then(|row| row.1),
+            |node| row(node).is_some_and(|row| row.2),
+        )
+    }
+
+    #[test]
+    fn a_stick_ejects_its_usb_device() {
+        use super::EjectTarget::Device;
+        // Disk -> USB device (removable) -> root hub, as on chris-win11.
+        let tree = [(1, Some(2), false), (2, Some(3), true), (3, Some(4), false), (4, None, true)];
+        assert_eq!(target(&tree, 1, false), Device(2));
+        assert_eq!(target(&tree, 1, true), Device(2));
+    }
+
+    #[test]
+    fn a_composite_reader_ejects_the_device_above_its_interface() {
+        use super::EjectTarget::Device;
+        // Disk -> USB\…&MI_00 interface (not removable) -> composite device (removable).
+        let tree = [(1, Some(2), false), (2, Some(3), false), (3, Some(4), true), (4, None, false)];
+        assert_eq!(target(&tree, 1, false), Device(3));
+    }
+
+    #[test]
+    fn the_walk_never_reaches_a_removable_controller() {
+        use super::EjectTarget::{Device, Media, Refuse};
+        // Disk -> device -> root hub -> Thunderbolt xHCI (removable, cap 0x84 on chris-win11).
+        let tree = [(1, Some(2), false), (2, Some(3), false), (3, Some(4), false), (4, None, true)];
+        assert_eq!(target(&tree, 1, false), Refuse);
+        assert_eq!(target(&tree, 1, true), Media);
+        // A removable disk under a fixed parent goes itself.
+        let tree = [(1, Some(2), true), (2, Some(3), false), (3, None, false)];
+        assert_eq!(target(&tree, 1, false), Device(1));
+    }
+
+    #[test]
+    fn an_internal_disk_is_refused_and_a_built_in_card_reader_ejects_the_media() {
+        use super::EjectTarget::{Media, Refuse};
+        // Disk -> NVMe/SD host controller -> root port, none removable.
+        let tree = [(1, Some(2), false), (2, Some(3), false), (3, None, false)];
+        assert_eq!(target(&tree, 1, false), Refuse);
+        assert_eq!(target(&tree, 1, true), Media);
+        // A disk with no parent at all.
+        assert_eq!(target(&[(1, None, false)], 1, false), Refuse);
     }
 
     #[test]

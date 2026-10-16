@@ -6,6 +6,11 @@
 //! every program holding a file on the stick to let go, flushes and
 //! dismounts the file system, and refuses (a veto) while anything is still
 //! open, so a busy stick is never forced.
+//!
+//! Removable media with no removable device above it (a card in a built-in
+//! SD reader) is ejected the way Explorer's Eject does: lock, dismount and
+//! eject the media. The lock fails while any program has a file open, so
+//! that path never forces a busy card either.
 #![allow(
     unsafe_code,
     reason = "Plug and Play and volume queries are Win32 FFI; every handle is owned and closed"
@@ -23,18 +28,26 @@ use windows_sys::Win32::{
         DeviceAndDriverInstallation::{
             CM_Get_DevNode_Registry_PropertyW, CM_Get_Device_Interface_ListW,
             CM_Get_Device_Interface_List_SizeW, CM_Get_Device_Interface_PropertyW, CM_Get_Parent,
-            CM_Locate_DevNodeW, CM_Request_Device_EjectW, PNP_VetoTypeUnknown, CM_DEVCAP_REMOVABLE,
-            CM_DRP_CAPABILITIES, CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_LOCATE_DEVNODE_NORMAL,
-            CONFIGRET, CR_BUFFER_SMALL, CR_SUCCESS, PNP_VETO_TYPE,
+            CM_Locate_DevNodeW, CM_Request_Device_EjectW, PNP_VetoOutstandingOpen,
+            PNP_VetoTypeUnknown, CM_DEVCAP_REMOVABLE, CM_DRP_CAPABILITIES,
+            CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_LOCATE_DEVNODE_NORMAL, CONFIGRET,
+            CR_BUFFER_SMALL, CR_SUCCESS, PNP_VETO_TYPE,
         },
         Properties::{DEVPKEY_Device_InstanceId, DEVPROPTYPE},
     },
-    Foundation::{INVALID_HANDLE_VALUE, MAX_PATH},
+    Foundation::{
+        ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE, MAX_PATH,
+    },
     Storage::FileSystem::{
-        CreateFileW, FILE_DEVICE_DISK, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateFileW, GetDriveTypeW, FILE_DEVICE_DISK, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_EXISTING,
     },
     System::{
-        Ioctl::{GUID_DEVINTERFACE_DISK, IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER},
+        Ioctl::{
+            FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, GUID_DEVINTERFACE_DISK,
+            IOCTL_STORAGE_EJECT_MEDIA, IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER,
+        },
+        WindowsProgramming::DRIVE_REMOVABLE,
         IO::DeviceIoControl,
     },
 };
@@ -47,10 +60,20 @@ const RETRY_DELAY: Duration = Duration::from_millis(500);
 pub(super) fn platform_eject(path: &Path) -> io::Result<()> {
     let letter = super::drive_letter(path)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Expected a USB drive root."))?;
-    let volume = device_number(&wide(&format!("\\\\.\\{letter}:")))?;
+    let volume_path = wide(&format!("\\\\.\\{letter}:"));
+    let volume = device_number(&volume_path)?;
     let disk = disk_node(volume.DeviceNumber)?;
-    let target = removable_ancestor(disk)?;
-    request_eject(target)
+    // SAFETY: NUL-terminated drive root such as `E:\`.
+    let removable_media =
+        unsafe { GetDriveTypeW(wide(&format!("{letter}:\\")).as_ptr()) } == DRIVE_REMOVABLE;
+    match super::eject_target(disk, removable_media, parent, is_removable) {
+        super::EjectTarget::Device(node) => request_eject(node),
+        super::EjectTarget::Media => eject_media(&volume_path),
+        super::EjectTarget::Refuse => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Windows does not offer this drive for safe removal, so it cannot be ejected here.",
+        )),
+    }
 }
 
 /// A NUL-terminated UTF-16 copy of `text`.
@@ -224,23 +247,75 @@ fn is_removable(node: u32) -> bool {
     code == CR_SUCCESS && capabilities & CM_DEVCAP_REMOVABLE != 0
 }
 
-/// What to eject for a disk: its parent (the USB device for a stick, so the
-/// whole stick goes, as with "Safely Remove Hardware"), or the disk itself
-/// when only the disk is removable. A disk with neither, such as one inside
-/// the computer, is refused rather than ejecting its controller.
-fn removable_ancestor(disk: u32) -> io::Result<u32> {
-    let mut parent = 0;
-    // SAFETY: Valid out pointer and a device node from CM_Locate_DevNodeW.
-    if unsafe { CM_Get_Parent(&raw mut parent, disk, 0) } == CR_SUCCESS && is_removable(parent) {
-        return Ok(parent);
+/// The parent device node, or `None` at the top of the tree.
+fn parent(node: u32) -> Option<u32> {
+    let mut up = 0;
+    // SAFETY: Valid out pointer and a device node from Plug and Play.
+    (unsafe { CM_Get_Parent(&raw mut up, node, 0) } == CR_SUCCESS).then_some(up)
+}
+
+/// Locks, dismounts and ejects removable media. The lock is refused while any
+/// program has a file open on the volume, which is reported as "in use"
+/// (after a short retry, as with a veto) and leaves the card mounted.
+fn eject_media(volume: &[u16]) -> io::Result<()> {
+    // SAFETY: NUL-terminated name and null optional pointers; synchronous handle.
+    let raw = unsafe {
+        CreateFileW(
+            volume.as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
     }
-    if is_removable(disk) {
-        return Ok(disk);
+    // SAFETY: CreateFileW returned a new, valid handle owned by this function.
+    let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+    let control = |code: u32| -> io::Result<()> {
+        let mut returned = 0;
+        // SAFETY: Live volume handle; these control codes use no input or output buffer.
+        let ok = unsafe {
+            DeviceIoControl(
+                handle.as_raw_handle(),
+                code,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                &raw mut returned,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    };
+    let denied = |result: &io::Result<()>| {
+        matches!(result, Err(error)
+            if error.raw_os_error().and_then(|code| u32::try_from(code).ok()) == Some(ERROR_ACCESS_DENIED))
+    };
+    let mut locked = control(FSCTL_LOCK_VOLUME);
+    for _ in 1..ATTEMPTS {
+        if !denied(&locked) {
+            break;
+        }
+        std::thread::sleep(RETRY_DELAY);
+        locked = control(FSCTL_LOCK_VOLUME);
     }
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "Windows does not offer this drive for safe removal, so it cannot be ejected here.",
-    ))
+    if denied(&locked) {
+        tracing::info!("Windows refused to lock the card's volume; a file is open on it");
+        return Err(io::Error::other(super::veto_message(PNP_VetoOutstandingOpen, "")));
+    }
+    locked?;
+    // Dropping the handle after this unlocks the (now dismounted) volume.
+    control(FSCTL_DISMOUNT_VOLUME)?;
+    control(IOCTL_STORAGE_EJECT_MEDIA)
 }
 
 /// Asks Windows to prepare `node` for removal, repeating a veto briefly.
