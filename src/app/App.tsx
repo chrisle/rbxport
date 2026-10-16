@@ -33,6 +33,7 @@ import { ConnectedTopBar } from "@/views/topbar/TopBar";
 import { StatusBar } from "@/views/statusbar/StatusBar";
 import { LinkDeckStrip } from "@/views/statusbar/LinkDeckStrip";
 import styles from "./App.module.css";
+import { locateLoadedTrack } from "@/lib/locateLoaded";
 import { detectPlatform, dispatch, isTyping, menuAccelerator } from "@/lib/shortcuts";
 import { hasEditHistory, runEditHistory, setLibraryEditHistory } from "@/lib/editHistory";
 import { transposeKey } from "@/lib/camelot";
@@ -2253,6 +2254,10 @@ function AppBody() {
     }
     if (outcome.action === "info") {
       setInfoOpen((open) => !open);
+      return;
+    }
+    if (outcome.action === "locate-loaded") {
+      locateLoadedTrack();
       return;
     }
     if (outcome.action === "sub") {

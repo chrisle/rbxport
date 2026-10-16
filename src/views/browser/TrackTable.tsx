@@ -48,7 +48,7 @@ import { ColumnMenu } from "./ColumnMenu";
 import { createDragAutoscroll } from "@/lib/dragAutoscroll";
 import { setRowDragImage } from "./dragGhost";
 import { detectPlatform, dispatch, isTyping } from "@/lib/shortcuts";
-import { locateStep, needsCentering, restoredScrollTop, type SavedScroll } from "@/lib/locateLoaded";
+import { locateLoadedTrack, locateStep, needsCentering, registerLocateLoaded, restoredScrollTop, type SavedScroll } from "@/lib/locateLoaded";
 
 const ROW_H = 25; // --s-row-height
 /**
@@ -1292,6 +1292,14 @@ export const TrackTable = memo(function TrackTable({
       onShowCollection();
     });
   }, [deckTrackIds, locateHere, showsCollection, onShowCollection]);
+  // The shared command: Command + L and Track › Locate track loaded on deck
+  // both reach this through `locateLoadedTrack`. Only the table that is given
+  // the decks (the main browser) answers it.
+  const answersLocate = deckTrackIds !== NO_DECKS;
+  useEffect(() => {
+    if (!answersLocate) return;
+    return registerLocateLoaded(locateLoaded);
+  }, [answersLocate, locateLoaded]);
   // All Tracks has opened for a track the list before it lacked.
   useEffect(() => {
     if (view.loading) return;
@@ -1308,7 +1316,7 @@ export const TrackTable = memo(function TrackTable({
       // track it lacks is found in All Tracks.
       if (action === "locateLoaded") {
         event.preventDefault();
-        locateLoaded();
+        if (answersLocate) locateLoadedTrack();
         return;
       }
       if (action === null || view.count === 0) return;
@@ -1363,7 +1371,7 @@ export const TrackTable = memo(function TrackTable({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, preferences.keyboard.overrides, locateLoaded]);
+  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, preferences.keyboard.overrides, answersLocate]);
 
   const startDragOut = useCallback(
     (row: RowDto) => {

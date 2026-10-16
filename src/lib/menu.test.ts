@@ -8,6 +8,11 @@ describe("menu", () => {
     expect(resolveMenu("quit", false)).toBeNull();
   });
 
+  it("locates the loaded track from the Track menu, whatever the library state", () => {
+    expect(menuCommand("locate-loaded")?.writes).toBe(false);
+    expect(resolveMenu("locate-loaded", true)).toEqual({ action: "locate-loaded" });
+  });
+
   it("runs an action that only reads", () => {
     expect(resolveMenu("settings", true)).toEqual({ action: "settings" });
   });

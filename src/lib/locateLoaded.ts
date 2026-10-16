@@ -25,6 +25,31 @@
 
 import { isLooseId } from "./explorer";
 
+type LocateHandler = () => void;
+let locateHandler: LocateHandler | null = null;
+
+/**
+ * Registers what Locate track loaded on deck does: the browser that can
+ * answer it (the main track table) claims the command while it is mounted.
+ * Returns the function that releases it.
+ */
+export function registerLocateLoaded(handler: LocateHandler): () => void {
+  locateHandler = handler;
+  return () => {
+    if (locateHandler === handler) locateHandler = null;
+  };
+}
+
+/**
+ * Track › Locate track loaded on deck: the one entry point Command + L and
+ * the Track menu item both call. Resolves false when no browser is mounted.
+ */
+export function locateLoadedTrack(): boolean {
+  if (!locateHandler) return false;
+  locateHandler();
+  return true;
+}
+
 /** rekordbox's decks: the cursor runs over four whether or not all are shown. */
 export const LOCATE_DECKS = 4;
 

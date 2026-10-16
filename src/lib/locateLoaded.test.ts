@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { isCollectionTrack, locateStep, needsCentering, restoredScrollTop } from "./locateLoaded";
+import { locateLoadedTrack, registerLocateLoaded, isCollectionTrack, locateStep, needsCentering, restoredScrollTop } from "./locateLoaded";
 
 /**
  * Pinned to rekordbox 7.2.19 (macOS arm64), `BrowseBasicView::
@@ -76,5 +76,18 @@ describe("restoredScrollTop", () => {
     expect(restoredScrollTop(saved, "title:desc", 600)).toBe(0);
     expect(restoredScrollTop(saved, "title:asc", 500)).toBe(0);
     expect(restoredScrollTop(undefined, "title:asc", 600)).toBe(0);
+  });
+});
+
+describe("the shared locate command", () => {
+  it("runs the registered handler for the key and the menu alike", () => {
+    expect(locateLoadedTrack()).toBe(false);
+    const handler = vi.fn();
+    const release = registerLocateLoaded(handler);
+    expect(locateLoadedTrack()).toBe(true);
+    expect(locateLoadedTrack()).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(2);
+    release();
+    expect(locateLoadedTrack()).toBe(false);
   });
 });

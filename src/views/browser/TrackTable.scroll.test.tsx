@@ -5,6 +5,7 @@
  * track a deck holds, as rekordbox 7.2.19 does (#338; see
  * `src/lib/locateLoaded.ts` for the functions read).
  */
+import { locateLoadedTrack } from "@/lib/locateLoaded";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -182,6 +183,20 @@ describe("Locate track loaded on deck (command + L)", () => {
     // Scrolled to the row (where in the view is the virtualizer's
     // `align: "center"`, which jsdom's zero-sized boxes cannot show).
     expect(scroller.scrollTop).toBeGreaterThan(24 + 300 * ROW_H - 600);
+    expect(selected()).toBe(1);
+  });
+
+  it("does the same when the Track menu runs the shared command", async () => {
+    const rows: (RowDto | null)[] = [];
+    render({ deckTrackIds: ["100300", null], onSelectedRow: (row) => rows.push(row) });
+    await settle();
+    await settle();
+    act(() => {
+      expect(locateLoadedTrack()).toBe(true);
+    });
+    await settle();
+    await settle();
+    expect(rows.at(-1)?.id).toBe("100300");
     expect(selected()).toBe(1);
   });
 

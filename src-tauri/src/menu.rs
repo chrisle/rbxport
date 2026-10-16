@@ -19,7 +19,9 @@ use std::{
     sync::{OnceLock, RwLock},
 };
 
-use tauri::menu::{AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{
+    AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
+};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 type Labels = HashMap<String, String>;
@@ -134,8 +136,8 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
     // rekordbox's own wording and place: File › Display All Missing Files,
     // between Import and the library items, opens the Missing File Manager
     // [OBS rekordbox 7.2.14, issue #201].
-    let missing =
-        MenuItemBuilder::with_id("missing", label(labels, "Display All Missing Files")).build(app)?;
+    let missing = MenuItemBuilder::with_id("missing", label(labels, "Display All Missing Files"))
+        .build(app)?;
     // rekordbox's own two, worded as its File menu words them.
     let import_xml = MenuItemBuilder::with_id("import-xml", label(labels, "Import rekordbox xml…"))
         .build(app)?;
@@ -248,6 +250,8 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
         )
         .build()?;
 
+    let track = track_menu(app, labels)?;
+
     // History follows frontend focus (text field or active deck). Clipboard
     // items stay predefined so macOS forwards them to the webview's fields.
     let edit = SubmenuBuilder::with_id(app, "edit", label(labels, "Edit"))
@@ -280,7 +284,22 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
     let help = SubmenuBuilder::new(app, label(labels, "Help"))
         .item(&MenuItemBuilder::with_id("report-bug", label(labels, "Report bug…")).build(app)?)
         .build()?;
-    Menu::with_items(app, &[&application, &file, &edit, &view, &help])
+    Menu::with_items(app, &[&application, &file, &edit, &track, &view, &help])
+}
+
+/// rekordbox's Track menu, which carries Locate track loaded on deck on
+/// command + L (b139). The frontend runs the same command the key does.
+fn track_menu<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::Result<Submenu<R>> {
+    SubmenuBuilder::new(app, label(labels, "Track"))
+        .item(
+            &MenuItemBuilder::with_id(
+                "locate-loaded",
+                label(labels, "Locate track loaded on deck"),
+            )
+            .accelerator("CmdOrCtrl+L")
+            .build(app)?,
+        )
+        .build()
 }
 
 /// Rebuilds the native menu from the same translated labels as the web UI.
