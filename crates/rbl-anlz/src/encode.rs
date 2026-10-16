@@ -448,10 +448,13 @@ pub fn author_with_overview(
     }
 }
 
-/// rekordbox's own colour and 3-band waveforms, each section's payload as
+/// Blue, RGB and 3-band waveforms, each section's payload as
 /// rekordbox writes it: what `rbl_analysis::wave_creator` computes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RekordboxWaves {
+    /// Blue overview and tiny overview, already packed for the DAT file.
+    pub pwav: Vec<u8>,
+    pub pwv2: Vec<u8>,
     /// The per-band gain `PWV6` and `PWV7` are drawn at, low, mid and high.
     pub pwvc: [u16; 3],
     pub pwv3: Vec<u8>,
@@ -461,23 +464,26 @@ pub struct RekordboxWaves {
     pub pwv7: Vec<u8>,
 }
 
-/// Authors analysis whose colour and 3-band waveforms are rekordbox's own,
-/// in the same layout as [`author`]. `PWAV` and `PWV2` still come from the
-/// columns. `PWVC` is written after `PWV6`, where rekordbox writes it, in
+/// Authors analysis with the computed blue, RGB and 3-band payloads,
+/// in the same layout as [`author`]. `PWVC` is written after `PWV6`, in
 /// place of any carried one: it is the gain these `PWV6` and `PWV7` were
 /// drawn at, and a stale one beside them draws them at another.
 #[must_use]
 pub fn author_with_rekordbox_waves(
-    ppth: &str, beats: &[Beat], columns: &[BandColumn], waves: &RekordboxWaves, existing: Existing<'_>,
+    ppth: &str, beats: &[Beat], waves: &RekordboxWaves, existing: Existing<'_>,
 ) -> AnalysisFiles {
     AnalysisFiles {
-        dat: dat_of(ppth, beats, columns, existing.dat),
+        dat: dat_with_previews(ppth, beats, &waves.pwav, &waves.pwv2, existing.dat),
         ext: ext_of(ppth, &waves.pwv3, &waves.pwv5, &waves.pwv4, existing.ext),
         two_ex: two_ex_of(ppth, &waves.pwv7, &waves.pwv6, Some(waves.pwvc), existing.two_ex),
     }
 }
 
 fn dat_of(ppth: &str, beats: &[Beat], columns: &[BandColumn], existing: Option<&Anlz>) -> Vec<u8> {
+    dat_with_previews(ppth, beats, &pwav(columns), &pwv2(columns), existing)
+}
+
+fn dat_with_previews(ppth: &str, beats: &[Beat], pwav: &[u8], pwv2: &[u8], existing: Option<&Anlz>) -> Vec<u8> {
     let mut builder = AnlzBuilder::new();
     header_of(&mut builder, existing);
     builder.path(ppth);
@@ -492,8 +498,8 @@ fn dat_of(ppth: &str, beats: &[Beat], columns: &[BandColumn], existing: Option<&
         None => { builder.vbr_table_zero(); }
     }
     builder.beat_grid(beats);
-    builder.waveform_preview(b"PWAV", &pwav(columns));
-    builder.waveform_preview(b"PWV2", &pwv2(columns));
+    builder.waveform_preview(b"PWAV", pwav);
+    builder.waveform_preview(b"PWV2", pwv2);
     cue_lists_of(&mut builder, existing, false);
     carry(&mut builder, existing, &[]);
     builder.finish()
@@ -906,6 +912,8 @@ mod tests {
         let beats = beat_grid_of([(1, 12_800, 0), (2, 12_800, 469)]);
         let columns = ramp(600);
         let waves = RekordboxWaves {
+            pwav: vec![0x52; 400],
+            pwv2: vec![9; 100],
             pwvc: [123, 456, 289],
             pwv3: vec![7; 600],
             pwv4: vec![8; 1_200 * 6],
@@ -917,7 +925,7 @@ mod tests {
         previous.sections.push(Section::new(b"PWVC", vec![0; 2], vec![0, 80, 0, 80, 0, 80]));
         previous.sections.push(Section::new(b"PVDI", vec![0; 8], vec![1]));
         let files = author_with_rekordbox_waves(
-            "?/track.mp3", &beats, &columns, &waves, Existing { two_ex: Some(&previous), ..Existing::default() },
+            "?/track.mp3", &beats, &waves, Existing { two_ex: Some(&previous), ..Existing::default() },
         );
 
         assert_eq!(tags(&files.two_ex), ["PPTH", "PWV7", "PWV6", "PWVC", "PVDI"]);
@@ -929,7 +937,8 @@ mod tests {
         assert_eq!(ext.waveform(b"PWV3").unwrap(), (1, &waves.pwv3[..]));
         assert_eq!(ext.waveform(b"PWV4").unwrap(), (6, &waves.pwv4[..]));
         assert_eq!(ext.waveform(b"PWV5").unwrap(), (2, &waves.pwv5[..]));
-        assert_eq!(crate::parse(&files.dat).unwrap().waveform(b"PWAV").unwrap().1, pwav(&columns));
+        assert_eq!(crate::parse(&files.dat).unwrap().waveform(b"PWAV").unwrap().1, waves.pwav);
+        assert_eq!(crate::parse(&files.dat).unwrap().waveform(b"PWV2").unwrap().1, waves.pwv2);
     }
 
     /// The tags of a file, in order.

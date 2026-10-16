@@ -15,7 +15,7 @@ stage behavior. Commands run from the repository root unless stated otherwise.
 | [Phrase boundaries](algorithms/phrase.md) | `downbeat.rs`, `phrase.rs`, `vocal.rs` | Internal boundaries and unimplemented label/vocal interfaces. |
 | [Key](algorithms/key.md) | `key.rs` | Spectral extraction, profiles, rule ordering, and key naming. |
 | [Waveforms](algorithms/waveform.md) | `waveform.rs` | Detail columns, independent overview, and encoding ownership. |
-| [rekordbox's waveforms](algorithms/rekordbox-waveforms.md) | `wave_creator.rs` | `PWVC`, `PWV6`, `PWV7`, `PWV4`, `PWV5` and `PWV3` as rekordbox computes them. |
+| [rekordbox's waveforms](algorithms/rekordbox-waveforms.md) | `wave_creator.rs` | Blue (`PWAV`, `PWV2`, `PWV3`), RGB and 3-band computation with native references. |
 
 ## Validation
 

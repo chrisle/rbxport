@@ -2,11 +2,13 @@
 //! `analyzer::WaveCreator` and `BeatAnalyzer` compute them [static reading of
 //! rekordbox 7.2.18 and 7.2.19]: the 3-band overview (`PWV6`), the 3-band
 //! detail (`PWV7`), their per-band gain (`PWVC`), the colour preview
-//! (`PWV4`), the colour detail (`PWV5`) and the blue detail (`PWV3`).
+//! (`PWV4`), the colour detail (`PWV5`), the blue detail (`PWV3`) and
+//! the blue overviews (`PWAV`, `PWV2`; `BeatAnalyzer` 7.2.11.0342).
 //!
 //! Fed 16-bit stereo frames on rekordbox's timeline, in order and in pieces,
 //! so a long file is never held whole: what it keeps is a handful of 16-bit
-//! values a millisecond, about 9 MB for a six-minute track. The formulas are
+//! values a millisecond, plus blue-preview peak events and block summaries.
+//! The per-millisecond values use about 9 MB for a six-minute track. The formulas are
 //! in `docs/algorithms/rekordbox-waveforms.md`; `tests/rekordbox_waveform.rs`
 //! holds the result against rekordbox's own files for generated signals.
 
@@ -16,6 +18,9 @@
 )]
 
 use std::f64::consts::PI;
+
+#[path = "blue_overview.rs"]
+mod blue_overview;
 
 /// Columns in the overview (`PWV6`) and the colour preview (`PWV4`).
 pub const OVERVIEW_COLUMNS: usize = 1200;
@@ -46,6 +51,10 @@ pub struct Waves {
     pub pwv5: Vec<u8>,
     /// 150 points a second of one byte.
     pub pwv3: Vec<u8>,
+    /// Blue overview: 400 packed whiteness/height bytes.
+    pub pwav: Vec<u8>,
+    /// Tiny blue overview: 100 height bytes.
+    pub pwv2: Vec<u8>,
 }
 
 /// The waveforms of audio that arrives in pieces.
@@ -60,6 +69,7 @@ pub struct WaveCreator {
     next: usize,
     colour_ms: ColourMs,
     blue: BlueBlocks,
+    blue_overview: blue_overview::BlueOverview,
 }
 
 impl WaveCreator {
@@ -74,6 +84,7 @@ impl WaveCreator {
             next: (rate / 1000.0).ceil() as usize,
             colour_ms: ColourMs::default(),
             blue: BlueBlocks::new(rate),
+            blue_overview: blue_overview::BlueOverview::new(sample_rate),
         }
     }
 
@@ -99,6 +110,7 @@ impl WaveCreator {
             }
             self.per_ms.take(self.at, to_mono(*frame), &mut self.filters, &mut self.colour_ms);
             self.blue.push(*frame);
+            self.blue_overview.push(*frame);
             self.frames += 1;
         }
     }
@@ -113,7 +125,10 @@ impl WaveCreator {
         let detail_points = ((self.frames as f64) * DETAIL_PER_SECOND / self.rate).ceil() as usize;
         let points = grid(ms, detail_points);
         let pwvc = gains.coefficients();
+        let (blue_preview, tiny_preview) = self.blue_overview.finish();
         Waves {
+            pwav: blue_preview,
+            pwv2: tiny_preview,
             pwvc,
             pwv6: overview(&gains),
             pwv7: detail(&self.per_ms, &points, pwvc),

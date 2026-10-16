@@ -118,27 +118,24 @@ fn main() {
                 time_ms: b.time_ms,
             })
             .collect();
-        let columns: Vec<rbl_anlz::BandColumn> = analysis
-            .waveform
-            .columns
-            .iter()
-            .map(|c| rbl_anlz::BandColumn {
-                low: c.low,
-                mid: c.mid,
-                high: c.high,
-                peak: c.peak,
-            })
-            .collect();
-        let files = rbl_anlz::author_with_overview(
+        let mut stream = rbl_audio::MonoStream::open(&wav).expect("open waveform stream");
+        let mut creator = rbl_analysis::wave_creator::WaveCreator::new(stream.sample_rate());
+        while let Some((_, frames)) = stream.next_frames() { creator.push(frames); }
+        let waves = creator.finish();
+        let files = rbl_anlz::author_with_rekordbox_waves(
             path,
             &beats,
-            &columns,
-            analysis.waveform.overview.as_slice().try_into().ok(),
-            rbl_anlz::Existing {
-                dat: None,
-                ext: None,
-                two_ex: None,
+            &rbl_anlz::RekordboxWaves {
+                pwav: waves.pwav,
+                pwv2: waves.pwv2,
+                pwvc: waves.pwvc,
+                pwv3: waves.pwv3,
+                pwv4: waves.pwv4,
+                pwv5: waves.pwv5,
+                pwv6: waves.pwv6,
+                pwv7: waves.pwv7,
             },
+            rbl_anlz::Existing::default(),
         );
 
         let relative = format!("/PIONEER/USBANLZ/P{:03}/{:08X}/ANLZ0000.DAT", i, 10_000 + i);

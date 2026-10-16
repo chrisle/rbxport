@@ -1,0 +1,2 @@
+# Native waveform payloads must not undergo text or line-ending conversion.
+*.blue-preview binary
