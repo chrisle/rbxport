@@ -1685,5 +1685,7 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 歷史記錄仍會引用已刪除的曲目。首先匯入並清除 rekordbox 中的歷史記錄。",
   "rekordbox is running. Quit it before analysing.": "rekordbox 正在執行。請先結束再進行分析。",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox 正在執行。請先結束再編輯樂句。",
-  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox 變更了裝置的曲目識別碼。請先核對此裝置，再重複使用其先前的選擇。"
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox 變更了裝置的曲目識別碼。請先核對此裝置，再重複使用其先前的選擇。",
+  "Analyses the track as one steady BPM with a single, constant beat grid.": "將曲目分析為單一穩定的 BPM，並產生唯一的固定節拍格線。",
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "允許速度變化並產生可變節拍格線，適用於電子音樂。"
 }

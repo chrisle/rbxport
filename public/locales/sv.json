@@ -1678,5 +1678,7 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Ett spår som tas bort refereras fortfarande av USB-historiken. Importera och rensa historiken i rekordbox först.",
   "rekordbox is running. Quit it before analysing.": "rekordbox körs. Avsluta det innan du analyserar.",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox körs. Avsluta det innan du redigerar fraser.",
-  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox har ändrat enhetens spåridentiteter. Stäm av enheten innan du återanvänder dess tidigare urval."
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox har ändrat enhetens spåridentiteter. Stäm av enheten innan du återanvänder dess tidigare urval.",
+  "Analyses the track as one steady BPM with a single, constant beat grid.": "Analyserar spåret som ett jämnt BPM med ett enda konstant beatgrid.",
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Tillåter tempoändringar och skapar ett variabelt beatgrid. Avsett för elektronisk musik."
 }

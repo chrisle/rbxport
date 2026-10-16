@@ -52,3 +52,20 @@ it("follows the switch when it is turned off again", async () => {
 it("follows the switch at the launch Auto Analysis prompt", async () => {
   expect(await pressOk({ auto: true, initialFirstBeatCue: true })).toMatchObject({ firstBeatCue: true, bpmGrid: true });
 });
+
+it("explains the chosen analysis mode (#125)", async () => {
+  await act(async () => {
+    root.render(<AnalysisDialog count={1} initialMode="rekordbox" initialBpmRange="70-180" initialFirstBeatCue={false}
+      onConfirm={() => {}} onCancel={() => {}} />);
+    await Promise.resolve();
+  });
+  expect(host.textContent).toContain("one steady BPM with a single, constant beat grid");
+  const select = host.querySelector("select") as HTMLSelectElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(select, "rbxport");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
+  expect(host.textContent).toContain("variable beat grid");
+  expect(host.textContent).not.toContain("one steady BPM");
+});

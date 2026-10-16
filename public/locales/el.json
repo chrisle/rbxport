@@ -1682,5 +1682,7 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Ένα κομμάτι που αφαιρείται εξακολουθεί να αναφέρεται από το ιστορικό USB. Εισαγάγετε και διαγράψτε πρώτα αυτό το ιστορικό στο rekordbox.",
   "rekordbox is running. Quit it before analysing.": "Το rekordbox εκτελείται. Κλείστε το πριν την ανάλυση.",
   "rekordbox is running. Quit it before editing phrases.": "Το rekordbox εκτελείται. Κλείστε το πριν επεξεργαστείτε φράσεις.",
-  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "Το rekordbox άλλαξε τις ταυτότητες των κομματιών της συσκευής. Συγχρονίστε αυτή τη συσκευή πριν επαναχρησιμοποιήσετε την προηγούμενη επιλογή της."
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "Το rekordbox άλλαξε τις ταυτότητες των κομματιών της συσκευής. Συγχρονίστε αυτή τη συσκευή πριν επαναχρησιμοποιήσετε την προηγούμενη επιλογή της.",
+  "Analyses the track as one steady BPM with a single, constant beat grid.": "Αναλύει το κομμάτι ως ένα σταθερό BPM με ένα ενιαίο, σταθερό πλέγμα beat.",
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Επιτρέπει αλλαγές τέμπο και δημιουργεί μεταβλητό πλέγμα beat. Προορίζεται για ηλεκτρονική μουσική."
 }

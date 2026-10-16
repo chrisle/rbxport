@@ -1680,5 +1680,7 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "제거되는 트랙은 여전히 USB 기록에서 참조됩니다. 먼저 rekordbox에서 해당 기록을 가져오고 삭제하십시오.",
   "rekordbox is running. Quit it before analysing.": "rekordbox가 실행 중입니다. 분석하기 전에 종료하세요.",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox가 실행 중입니다. 프레이즈를 편집하기 전에 종료하세요.",
-  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox가 장치의 트랙 ID를 변경했습니다. 이전 선택을 다시 사용하기 전에 이 장치를 조정하세요."
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox가 장치의 트랙 ID를 변경했습니다. 이전 선택을 다시 사용하기 전에 이 장치를 조정하세요.",
+  "Analyses the track as one steady BPM with a single, constant beat grid.": "트랙을 하나의 일정한 BPM으로 분석하며, 단일한 고정 비트 그리드를 만듭니다.",
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "템포 변화를 허용하고 가변 비트 그리드를 만듭니다. 전자 음악용입니다."
 }

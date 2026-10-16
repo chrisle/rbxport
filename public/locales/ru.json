@@ -1685,5 +1685,7 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Удаляемая дорожка по-прежнему упоминается в истории USB. Сначала импортируйте и очистите эту историю в rekordbox.",
   "rekordbox is running. Quit it before analysing.": "rekordbox запущен. Закройте его, прежде чем выполнять анализ.",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox запущен. Закройте его, прежде чем редактировать фразы.",
-  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox изменил идентификаторы треков устройства. Сверьте это устройство, прежде чем повторно использовать его предыдущий выбор."
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox изменил идентификаторы треков устройства. Сверьте это устройство, прежде чем повторно использовать его предыдущий выбор.",
+  "Analyses the track as one steady BPM with a single, constant beat grid.": "Анализирует трек как единый постоянный BPM с одной неизменной сеткой битов.",
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Допускает смену темпа и создаёт переменную сетку битов. Предназначено для электронной музыки."
 }

@@ -78,6 +78,11 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
                 <option value="rbxport">{t("RBXport (Electronic Music)")}</option>
               </select>
             </label>
+            <p className={styles.modeBlurb}>
+              {settings.mode === "rbxport"
+                ? t("Allows tempo changes and builds a variable beat grid. Intended for electronic music.")
+                : t("Analyses the track as one steady BPM with a single, constant beat grid.")}
+            </p>
             <label className={styles.field}>
               <span>{t("BPM Range")}</span>
               <select value={`${settings.minBpm}-${settings.maxBpm}`}

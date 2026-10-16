@@ -1689,5 +1689,7 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "削除されたトラックは、USB 履歴によって引き続き参照されます。まずその履歴を rekordbox にインポートしてクリアします。",
   "rekordbox is running. Quit it before analysing.": "rekordbox が起動しています。解析する前に終了してください。",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox が起動しています。フレーズを編集する前に終了してください。",
-  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox がデバイスのトラック ID を変更しました。以前の選択を再利用する前に、このデバイスを再照合してください。"
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox がデバイスのトラック ID を変更しました。以前の選択を再利用する前に、このデバイスを再照合してください。",
+  "Analyses the track as one steady BPM with a single, constant beat grid.": "トラックを1つの一定のBPMとして解析し、1本の固定ビートグリッドを作成します。",
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "テンポの変化を許容し、可変ビートグリッドを作成します。電子音楽向けです。"
 }

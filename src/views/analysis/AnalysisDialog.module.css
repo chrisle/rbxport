@@ -33,6 +33,7 @@
 .gridOptions:disabled { opacity: .45; }
 .field { display: grid; grid-template-columns: 108px minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 8px; }
 .field span { text-align: right; }
+.modeBlurb { margin: 6px 0 0 120px; font-size: 0.9em; line-height: 1.4; opacity: 0.75; }
 .field select {
   width: 100%;
   height: 28px;
@@ -61,5 +62,6 @@
 @media (max-width: 480px) {
   .options { padding: 4px 0; }
   .gridOptions { margin-left: 16px; }
+  .modeBlurb { margin-left: 98px; }
   .field { grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
 }

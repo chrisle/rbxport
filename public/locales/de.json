@@ -1679,5 +1679,7 @@
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Auf einen Titel, der entfernt wird, wird weiterhin im USB-Verlauf verwiesen. Importieren und löschen Sie diesen Verlauf zunächst in rekordbox.",
   "rekordbox is running. Quit it before analysing.": "rekordbox läuft. Beenden Sie es, bevor Sie analysieren.",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox läuft. Beenden Sie es, bevor Sie Phrasen bearbeiten.",
-  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox hat die Titelkennungen des Geräts geändert. Gleichen Sie dieses Gerät ab, bevor Sie seine vorherige Auswahl erneut verwenden."
+  "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox hat die Titelkennungen des Geräts geändert. Gleichen Sie dieses Gerät ab, bevor Sie seine vorherige Auswahl erneut verwenden.",
+  "Analyses the track as one steady BPM with a single, constant beat grid.": "Analysiert den Titel als ein gleichmäßiges BPM mit einem einzigen, konstanten Beatgrid.",
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Erlaubt Tempowechsel und erstellt ein variables Beatgrid. Gedacht für elektronische Musik."
 }
