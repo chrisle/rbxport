@@ -4128,6 +4128,8 @@ name = "rbl-index"
 version = "1.9.0"
 dependencies = [
  "crc32fast",
+ "icu_collator",
+ "icu_locale_core",
  "memchr",
  "parking_lot",
  "rbl-core",

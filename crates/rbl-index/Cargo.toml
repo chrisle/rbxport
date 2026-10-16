@@ -16,6 +16,9 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 memchr = "2"
+# Sort Items orders a folder by name with an ICU collator, as rekordbox does.
+icu_collator = "2"
+icu_locale_core = "2"
 crc32fast = "1"
 parking_lot = "0.12"
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
