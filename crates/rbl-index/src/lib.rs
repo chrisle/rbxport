@@ -36,7 +36,7 @@ pub use load::{
     reload_playlists, reload_tag_list, LoadStats,
 };
 pub use smart::SmartRule;
-pub use view::{RelatedCriterion, SearchField, SortColumn, TrackSource, View, ViewSpec};
+pub use view::{ListTotals, RelatedCriterion, SearchField, SortColumn, TrackSource, View, ViewSpec};
 pub use xml_export::export_xml;
 
 use parking_lot::RwLock;

@@ -2,8 +2,8 @@
 //! otherwise show up as a panic in front of the user.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use rbl_index::testing::{add_playlist, library_from, TestTrack};
-use rbl_index::{SortColumn, TrackSource, ViewSpec};
+use rbl_index::testing::{add_history, add_playlist, add_smart_playlist, library_from, TestTrack};
+use rbl_index::{ListTotals, SortColumn, TrackSource, ViewSpec};
 
 fn track(id: u64, title: &'static str, artist: &'static str, bpm: u32) -> TestTrack {
     TestTrack {
@@ -432,4 +432,68 @@ fn date_created_sorts_as_the_date_reads() {
         .collect();
     let lib = library_from(&tracks);
     assert_eq!(ordered(&lib, SortColumn::DateCreated, false, |row| dates[row]), ["", "2023-01-30", "2024-02-15", "2024-11-02"]);
+}
+
+fn playlist_spec(source: TrackSource, query: &str) -> ViewSpec {
+    ViewSpec { source, sort: SortColumn::TrackNo, descending: false, query: query.to_owned(), filter: Default::default() }
+}
+
+/// rekordbox's status bar tallies an open playlist by adding each row's
+/// stored length and size; a row with neither still counts as a track
+/// (`browse::ListViewer::updateStatusBarWithListTrackNum`, rekordbox 7.2.19).
+#[test]
+fn a_playlist_totals_every_row_including_ones_with_no_length_or_size() {
+    let tracks = vec![
+        TestTrack { id: 1, title: "A", length_sec: 330, file_size: 12_000_000, ..TestTrack::default() },
+        // Never analysed, no duration or size read: still one of the tracks.
+        TestTrack { id: 2, title: "B", length_sec: 0, file_size: 0, ..TestTrack::default() },
+        TestTrack { id: 3, title: "C", length_sec: 3600, file_size: 150_000_000, ..TestTrack::default() },
+    ];
+    let mut lib = library_from(&tracks);
+    // The same track twice is two entries in rekordbox, and both count.
+    let pl = add_playlist(&mut lib, "Set", &[0, 1, 2, 0]);
+    let view = lib.open_view(&playlist_spec(TrackSource::Playlist(pl), ""));
+    assert_eq!(view.totals(), Some(ListTotals { tracks: 4, seconds: 330 + 3600 + 330, bytes: 174_000_000 }));
+}
+
+#[test]
+fn an_empty_playlist_totals_zero_tracks() {
+    let mut lib = library_from(&sample());
+    let pl = add_playlist(&mut lib, "Empty", &[]);
+    let view = lib.open_view(&playlist_spec(TrackSource::Playlist(pl), ""));
+    assert_eq!(view.totals(), Some(ListTotals::default()));
+}
+
+/// The tally is the playlist's: rekordbox takes it when the playlist is
+/// picked, and a search does not retake it.
+#[test]
+fn searching_a_playlist_keeps_the_whole_playlists_totals() {
+    let mut lib = library_from(&sample());
+    let pl = add_playlist(&mut lib, "Set", &[0, 1, 3]);
+    let whole = lib.open_view(&playlist_spec(TrackSource::Playlist(pl), "")).totals();
+    let searched = lib.open_view(&playlist_spec(TrackSource::Playlist(pl), "artbat"));
+    assert_eq!(searched.len(), 2);
+    assert_eq!(searched.totals(), whole);
+    assert_eq!(lib.refine(&searched, "zebra").totals(), whole);
+    assert_eq!(whole.map(|t| (t.tracks, t.seconds)), Some((3, 201 + 202 + 204)));
+}
+
+#[test]
+fn an_intelligent_playlist_totals_the_tracks_its_rule_admits() {
+    let mut lib = library_from(&sample());
+    let rule = r#"<NODE Id="1" LogicalOperator="1" AutomaticUpdate="0"><CONDITION PropertyName="artist" Operator="1" ValueUnit="" ValueLeft="ARTBAT" ValueRight=""/></NODE>"#;
+    let index = add_smart_playlist(&mut lib, "Artbat", rule);
+    let view = lib.open_view(&playlist_spec(TrackSource::SmartPlaylist(index), ""));
+    assert_eq!(view.len(), 2);
+    assert_eq!(view.totals().map(|t| (t.tracks, t.seconds)), Some((2, 201 + 204)));
+}
+
+/// rekordbox clears the bar for the collection and for a history rather
+/// than tallying them.
+#[test]
+fn the_collection_and_a_history_have_no_totals() {
+    let mut lib = library_from(&sample());
+    let history = add_history(&mut lib, "2026-10-16", &[0, 1]);
+    assert_eq!(lib.open_view(&playlist_spec(TrackSource::Collection, "")).totals(), None);
+    assert_eq!(lib.open_view(&playlist_spec(TrackSource::History(history), "")).totals(), None);
 }

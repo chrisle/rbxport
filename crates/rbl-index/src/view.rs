@@ -239,6 +239,29 @@ pub struct View {
     /// this into the row's current visible position: DJs use it to see where
     /// a track sits in the set.
     playlist_track_nos: Option<Vec<u32>>,
+    /// The open playlist's tally for the status bar, before any search or
+    /// filter narrowed it; `None` for every list rekordbox does not tally.
+    totals: Option<ListTotals>,
+}
+
+/// rekordbox's status-bar tally of an open playlist:
+/// `61 Tracks, 5 hours 2 minutes, 759.7 MB`.
+///
+/// [OBS: rekordbox 7.2.19 macOS, `browse::ListViewer::updateStatusBarWithListTrackNum`
+/// at `0x1004110d4`] Every row of the list counts, a repeated track once per
+/// entry, and each row adds its stored length and file size as they are: a
+/// track with no length adds nothing to the time but is still one of the
+/// tracks. Only a playlist (list type 2, intelligent ones included) is
+/// tallied; the collection and a history clear the bar instead.
+///
+/// [OBS: the same function's callers] The tally is taken when a playlist is
+/// picked in the tree, not on each search keystroke, so it is the
+/// playlist's, not the search's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ListTotals {
+    pub tracks: u32,
+    pub seconds: u64,
+    pub bytes: u64,
 }
 
 impl View {
@@ -266,6 +289,12 @@ impl View {
             .and_then(|numbers| numbers.get(position).copied())
             .unwrap_or_else(|| u32::try_from(position.saturating_add(1)).unwrap_or(u32::MAX))
     }
+
+    /// The status-bar tally of the playlist this view opened, if it is one.
+    #[must_use]
+    pub fn totals(&self) -> Option<ListTotals> {
+        self.totals
+    }
 }
 
 impl Library {
@@ -279,7 +308,10 @@ impl Library {
         // Keep the playlist's stored position coupled to its row while the
         // view is filtered and sorted. A map by row would lose duplicate
         // playlist entries, which rekordbox permits.
-        let mut rows: Vec<(Row, u32)> = self.source_rows(&spec.source).into_iter().enumerate()
+        let source_rows = self.source_rows(&spec.source);
+        let totals = matches!(&spec.source, TrackSource::Playlist(_) | TrackSource::SmartPlaylist(_))
+            .then(|| self.totals_of(&source_rows));
+        let mut rows: Vec<(Row, u32)> = source_rows.into_iter().enumerate()
             .map(|(position, row)| (row, u32::try_from(position.saturating_add(1)).unwrap_or(u32::MAX)))
             .collect();
 
@@ -312,7 +344,21 @@ impl Library {
             }
         }
         let (rows, numbers): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
-        View { rows, playlist_track_nos: playlist_numbers.then_some(numbers) }
+        View { rows, playlist_track_nos: playlist_numbers.then_some(numbers), totals }
+    }
+
+    /// Sums rows the way rekordbox's status bar does; see [`ListTotals`].
+    #[must_use]
+    pub fn totals_of(&self, rows: &[Row]) -> ListTotals {
+        let mut totals = ListTotals {
+            tracks: u32::try_from(rows.len()).unwrap_or(u32::MAX),
+            ..ListTotals::default()
+        };
+        for &row in rows {
+            totals.seconds += u64::from(self.length_sec.get(row as usize).copied().unwrap_or(0));
+            totals.bytes += self.file_size.get(row as usize).copied().unwrap_or(0);
+        }
+        totals
     }
 
     /// Narrows an existing view. Typing another character only has to filter the
@@ -322,7 +368,11 @@ impl Library {
         if folded.is_empty() {
             // perf-ok: clearing the query copies at most 40k u32 (~160 KB, tens
             // of microseconds) and only on the keystroke that empties the box.
-            return View { rows: previous.rows.clone(), playlist_track_nos: previous.playlist_track_nos.clone() };
+            return View {
+                rows: previous.rows.clone(),
+                playlist_track_nos: previous.playlist_track_nos.clone(),
+                totals: previous.totals,
+            };
         }
         let matched: Vec<_> = previous.rows.iter().copied().enumerate()
             .filter(|&(_, row)| self.row_matches(row, &folded))
@@ -330,7 +380,7 @@ impl Library {
         let playlist_track_nos = previous.playlist_track_nos.as_ref().map(|numbers| {
             matched.iter().filter_map(|&(position, _)| numbers.get(position).copied()).collect()
         });
-        View { rows: matched.into_iter().map(|(_, row)| row).collect(), playlist_track_nos }
+        View { rows: matched.into_iter().map(|(_, row)| row).collect(), playlist_track_nos, totals: previous.totals }
     }
 
     pub(crate) fn row_matches(&self, row: Row, folded_query: &str) -> bool {
