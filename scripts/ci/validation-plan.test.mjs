@@ -34,6 +34,13 @@ test("the library's Windows file-index code runs the Windows-native Rust lane", 
   assert.deepEqual(enabled("crates/rbl-db/Cargo.toml"), ["rust", "windows_rust"]);
 });
 
+test("USB eject's Windows code runs the Windows-native Rust lane", () => {
+  assert.deepEqual(enabled("crates/rbl-devices/src/eject.rs"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("crates/rbl-devices/src/eject/windows.rs"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("crates/rbl-devices/Cargo.toml"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("crates/rbl-devices/src/lib.rs"), ["rust"]);
+});
+
 test("backup changes also run the Windows-native Rust lane", () => {
   assert.deepEqual(enabled("src-tauri/src/backups.rs"), ["rust", "windows_rust"]);
   assert.deepEqual(enabled("crates/rbl-backup/src/restore.rs"), ["rust", "windows_rust"]);
