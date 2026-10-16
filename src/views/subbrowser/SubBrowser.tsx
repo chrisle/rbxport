@@ -307,6 +307,8 @@ export const SubBrowser = memo(function SubBrowser({
             ? reorderPlaylist
             : undefined
         }
+        onRenumber={selected?.kind === "playlist" ? reorderPlaylist : undefined}
+        subBrowser
         onSelectedTracks={onSelectedTracks}
         onAnalyse={analyseSelection}
       />

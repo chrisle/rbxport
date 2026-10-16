@@ -288,6 +288,7 @@
   "Undo track load": "Отмена загрузки дорожки",
   "Locate track loaded on deck": "Поиск последней загруженной дорожки",
   "Display in bold": "Выделение жирным шрифтом",
+  "Renumber Track Order": "Перенумеровать порядок дорожек",
   "Display All Missing Files": "Управление отсутствующими дорожками",
   "Undo": "отменить",
   "Redo": "повторить",

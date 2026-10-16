@@ -3175,6 +3175,8 @@ function AppBody() {
           // The sub-browser's list is left out on purpose: it has a source and
           // a sort of its own, which this gate does not describe.
           onReorder={canReorder ? reorderPlaylistTracks : undefined}
+          // An intelligent playlist's order is its rule's, not a track number.
+          onRenumber={selectedNode?.kind === "playlist" ? reorderPlaylistTracks : undefined}
           onEditField={editTrackField}
           onEditBlocked={readOnly ? explainEditLock : undefined}
           libraryGeneration={libraryGeneration}

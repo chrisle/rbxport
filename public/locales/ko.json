@@ -275,6 +275,7 @@
   "Undo track load": "트랙 로드 실행 취소",
   "Locate track loaded on deck": "마지막 로드된 트랙 찾기",
   "Display in bold": "굵게 표시",
+  "Renumber Track Order": "트랙순 다시 번호 매기기",
   "Display All Missing Files": "분실 트랙 관리하기",
   "Undo": "취소하기",
   "Redo": "반복하기",

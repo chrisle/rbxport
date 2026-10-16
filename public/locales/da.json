@@ -264,6 +264,7 @@
   "Undo track load": "Fortryd indlæsning af nummer",
   "Locate track loaded on deck": "Find sidst indlæste nummer",
   "Display in bold": "Vis med fed skrift",
+  "Renumber Track Order": "Gennummerer sporrækkefølge",
   "Display All Missing Files": "Håndter manglende numre",
   "Undo": "fortryd",
   "Redo": "gør om",

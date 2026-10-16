@@ -64,5 +64,12 @@ describe("the Export key map", () => {
     expect(browse.find((r) => r.label === "Search for tracks in the track list")?.built).toBe(true);
     expect(browse.find((r) => r.label === "Select All")).toMatchObject({ key: "command + A", built: true });
     expect(rowsFor("Help", false)).toEqual([]);
+    // Playlist holds rekordbox's Renumber Track Order: live, unbound, and
+    // assignable, as rekordbox lists it.
+    expect(rowsFor("Playlist", true)).toEqual([
+      { id: "500e", label: "Renumber Track Order", key: null, built: true, bindingId: "renumberTrackOrder", changed: false },
+    ]);
+    expect(rowsFor("Playlist", false, { renumberTrackOrder: { key: "r", metaKey: true, altKey: true } })[0])
+      .toMatchObject({ key: "alt + ctrl + R", changed: true });
   });
 });

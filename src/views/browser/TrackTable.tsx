@@ -830,6 +830,18 @@ export interface TrackTableProps {
    */
   onReorder?: ((order: readonly string[]) => void) | undefined;
   /**
+   * Playlist > Renumber Track Order: write the order the list shows, sorted
+   * by whatever column, as the playlist's own.
+   *
+   * Absent unless the list is an ordinary playlist that can be written.
+   * rekordbox's `ListViewer::renumberOrderId` hands its database the rows
+   * on show, then any the list does not show, in their old order; the
+   * backend's reorder keeps the rest the same way.
+   */
+  onRenumber?: ((order: readonly string[]) => void) | undefined;
+  /** This list is the sub-browser's, which keys reach only while it has the focus. */
+  subBrowser?: boolean;
+  /**
    * Write a metadata field typed over in the list.
    *
    * Absent where the library cannot be written, which is what leaves the
@@ -947,6 +959,12 @@ const TRAFFIC_SOURCES: readonly { id: TrafficLightSource; label: string; short: 
  * a second copy on screen is keyed by its slot too: two siblings with one key
  * leave a stale row behind when the list changes.
  */
+/**
+ * Whether the sub-browser holds the focus: the last press landed in it.
+ * One flag for the window, since only one sub-browser is ever open.
+ */
+let subBrowserEngaged = false;
+
 function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: Set<string>): string {
   if (!row) return `slot-${String(slot)}`;
   if (!keyed.has(row.id)) {
@@ -959,7 +977,7 @@ function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: 
 export const TrackTable = memo(function TrackTable({
   deckTrackIds = NO_DECKS, onShowCollection, spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onRenumber, subBrowser = false, onEditField, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, pendingRows = 0, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
   onRemoveFromCollection, onAutoRelocate, onRelocate, onConvertMemoryCues, readOnly = false,
@@ -1644,6 +1662,50 @@ export const TrackTable = memo(function TrackTable({
     };
   }, []);
 
+  // Playlist > Renumber Track Order: the ids in the order on show, every
+  // row of the view and not only those fetched. rekordbox refuses it as it
+  // refuses any edit while the library is protected.
+  const renumber = useEventCallback(() => {
+    if (!onRenumber) return;
+    if (readOnly) {
+      onEditBlocked?.();
+      return;
+    }
+    if (view.count === 0) return;
+    void view.idsInRange(0, view.count).then((ids) => {
+      if (ids.length > 0) onRenumber(ids);
+    });
+  });
+  // Its key, once the Keyboard pane gives it one. rekordbox hands the
+  // command to the sub-browser's list while the sub-browser has the focus
+  // and to the main list otherwise [OBS: `BrowseBasicView::performCommand`
+  // @0x1003186f8, rekordbox 7.2.19 macOS]; the focus here is where the last
+  // press landed, the sub-browser's tree included.
+  useEffect(() => {
+    const onDown = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target === null || target.closest('[role="menu"], [role="dialog"]')) return;
+      const pane = rootRef.current?.parentElement ?? rootRef.current;
+      subBrowserEngaged = pane?.contains(target) === true;
+    };
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (dispatch(event, platform, target, preferences.keyboard.overrides) !== "renumberTrackOrder") return;
+      if (subBrowser !== subBrowserEngaged || !onRenumber) return;
+      event.preventDefault();
+      if (!event.repeat) renumber();
+    };
+    if (subBrowser) window.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      if (subBrowser) {
+        window.removeEventListener("mousedown", onDown, true);
+        subBrowserEngaged = false;
+      }
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [subBrowser, onRenumber, platform, preferences.keyboard.overrides, renumber]);
+
   // Delete and ⌫ remove the whole selection the way this list's own menu
   // entry does, asking first as it does: from the collection, a playlist, a
   // history or the Tag List. rekordbox's list does the same with either key
@@ -2179,6 +2241,7 @@ export const TrackTable = memo(function TrackTable({
           onToggle={onColumnToggle}
           onAutoSize={onColumnAutoSize}
           onAutoSizeAll={onColumnAutoSizeAll}
+          renumber={onRenumber && spec.sort !== "trackNo" ? { disabled: query !== "", onRenumber: renumber } : undefined}
           onClose={() => setMenu(null)}
         />
       ) : null}

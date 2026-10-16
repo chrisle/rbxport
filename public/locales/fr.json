@@ -296,6 +296,7 @@
   "Undo track load": "Annuler le chargement du morceau",
   "Locate track loaded on deck": "Localiser le dernier morceau chargé",
   "Display in bold": "Afficher en gras",
+  "Renumber Track Order": "Renuméroter les morceaux",
   "Display All Missing Files": "Afficher tous les fichiers manquants",
   "Undo": "annuler",
   "Redo": "rétablir",

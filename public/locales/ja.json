@@ -325,6 +325,7 @@
   "Undo track load": "ロードを元に戻す",
   "Locate track loaded on deck": "デッキにロードされている楽曲にフォーカスを移動",
   "Display in bold": "太字で表示する",
+  "Renumber Track Order": "曲順をリナンバする",
   "Display All Missing Files": "見つからないファイルをすべて表示",
   "Undo": "元に戻す",
   "Redo": "やり直す",

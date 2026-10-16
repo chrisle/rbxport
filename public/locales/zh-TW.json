@@ -286,6 +286,7 @@
   "Undo track load": "復原音軌載入",
   "Locate track loaded on deck": "找到最後載入的音軌",
   "Display in bold": "以粗體顯示",
+  "Renumber Track Order": "重新排列音軌順序",
   "Display All Missing Files": "顯示所有的遺失檔案",
   "Undo": "復原",
   "Redo": "取消復原",

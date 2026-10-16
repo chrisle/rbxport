@@ -185,7 +185,12 @@ export const KEYMAP: Readonly<Record<KeymapGroup, readonly KeymapRow[]>> = {
     { id: "b139", label: "Locate track loaded on deck", key: "command + L" },
     { id: "b138", label: "Display in bold", key: "command + B" },
   ],
+  // `Renumber Track Order` is command 0x500e, filed under "Playlist" and
+  // bound by no preset [OBS: `MainComponent::getCommandInfo` @0x10096b078,
+  // rekordbox 7.2.19 macOS, sets the info with no `addDefaultKeypress`]; the
+  // reporter's Italian capture in #407 shows it there with an empty key.
   "Playlist": [
+    { id: "500e", label: "Renumber Track Order", key: null },
   ],
   "Help": [
   ],

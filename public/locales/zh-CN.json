@@ -307,6 +307,7 @@
   "Undo track load": "撤消曲目加载",
   "Locate track loaded on deck": "找到上次加载的曲目",
   "Display in bold": "以粗体显示",
+  "Renumber Track Order": "重新编号曲目顺序",
   "Display All Missing Files": "显示所有的缺少曲目",
   "Undo": "撤消",
   "Redo": "恢复",

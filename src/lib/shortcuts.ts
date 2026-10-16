@@ -29,6 +29,10 @@ export type Action =
   // Track > Locate track loaded on deck (command + L): scrolls the list to
   // the track a deck holds and highlights it.
   | "locateLoaded"
+  // Playlist > Renumber Track Order: the open playlist's track numbers are
+  // rewritten to the order the list shows. rekordbox's command 0x500e, which
+  // no preset binds, so it waits for a key from the Keyboard pane.
+  | "renumberTrackOrder"
   // The deck. Every key below is rekordbox's own, transcribed from the Export
   // preset in `KeyMappings/rekordbox_0000000000030.mappings` — the key map the
   // mode we clone ships with, not a guess at what feels natural. The same
@@ -388,7 +392,7 @@ export function dispatchBinding(
 export interface Binding {
   /** Stable, for the person's own key to be stored against. */
   id: string;
-  group: "Browse" | "Player A" | "Player B" | "General" | "Menu";
+  group: "Browse" | "Player A" | "Player B" | "General" | "Playlist" | "Menu";
   /** rekordbox's description of the command. */
   label: string;
   chord: KeyChord;
@@ -496,6 +500,7 @@ export const BINDINGS: readonly Binding[] = [
   { id: "loadPlayer1", group: "Browse", label: "Load on Player 1", chord: { key: "Enter" }, action: "loadPlayer1", pane: "Browse" },
   { id: "loadPlayer1.shift", group: "Browse", label: "Load on Player 1", chord: { key: "Enter", shiftKey: true }, action: "loadPlayer1", alias: true },
   { id: "locateLoaded", group: "Browse", label: "Locate track loaded on deck", chord: { key: "l", metaKey: true }, action: "locateLoaded", command: "b139" },
+  { id: "renumberTrackOrder", group: "Playlist", label: "Renumber Track Order", chord: { key: "" }, action: "renumberTrackOrder", command: "500e" },
   ...PLAYER_A.map((row): Binding => ({ ...row, id: row.action ?? row.label, group: "Player A", deck: "a" })),
   // The preset gives Player B no clears for its pads, no `Adjust
   // BPM/BeatGrid`, and the metronome's sound is the engine's: none of those

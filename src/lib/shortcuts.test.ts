@@ -403,3 +403,25 @@ describe("Locate track loaded on deck (#338)", () => {
     expect(actionFor({ key: "l" }, MAC)).toBe("callMemoryCue9");
   });
 });
+
+describe("Renumber Track Order (#413)", () => {
+  const binding = BINDINGS.find((b) => b.action === "renumberTrackOrder");
+
+  it("is rekordbox's Playlist command 0x500e, which no preset binds", () => {
+    expect(binding).toMatchObject({ group: "Playlist", label: "Renumber Track Order", command: "500e" });
+    expect(binding?.chord.key).toBe("");
+    // Unbound, it answers no key at all.
+    for (const chord of [{ key: "r" }, { key: "r", metaKey: true }, { key: "Enter" }]) {
+      expect(actionFor(chord, MAC)).not.toBe("renumberTrackOrder");
+      expect(actionFor(chord, WIN)).not.toBe("renumberTrackOrder");
+    }
+  });
+
+  it("answers the key the Keyboard pane gives it, on either platform", () => {
+    const overrides = { renumberTrackOrder: { key: "r", metaKey: true, altKey: true } };
+    expect(actionFor({ key: "r", metaKey: true, altKey: true }, MAC, overrides)).toBe("renumberTrackOrder");
+    expect(actionFor({ key: "r", ctrlKey: true, altKey: true }, WIN, overrides)).toBe("renumberTrackOrder");
+    // Not while typing into a field.
+    expect(dispatch({ key: "r", metaKey: true, altKey: true }, MAC, { tagName: "INPUT" }, overrides)).toBeNull();
+  });
+});
