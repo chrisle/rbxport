@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import type { Backend, RowCue, RowDto, ViewSpec } from "@/ipc/types";
+import type { Backend, ListTotals, RowCue, RowDto, ViewSpec } from "@/ipc/types";
 import { rowCuesOf } from "@/lib/cues";
 import { RowCache, PAGE_SIZE, type CacheToken } from "@/lib/rowCache";
 import { planFetches } from "@/lib/virtual";
@@ -19,6 +19,11 @@ export interface TrackView {
   loading: boolean;
   /** Identity of the source (not its sort or query); a new one is a different list. */
   sourceKey: string;
+  /**
+   * The open playlist's status-bar tally; undefined for other lists, and
+   * while a different list is still opening.
+   */
+  totals: ListTotals | undefined;
   error: string | null;
   /**
    * Row at an absolute index, or undefined while its page is in flight.
@@ -75,6 +80,7 @@ export function useTrackView(
     gen: 0,
     specKey: "",
     sourceKey: "",
+    totals: undefined as ListTotals | undefined,
     error: null as string | null,
   });
   const cache = useRef(new RowCache<RowDto>(PAGE_SIZE));
@@ -143,13 +149,14 @@ export function useTrackView(
           gen: handle.gen,
           specKey,
           sourceKey,
+          totals: handle.totals,
           error: null,
         });
       } catch (e) {
         if (cancelled) return;
         // Mark the failure as belonging to this spec, or it reads as still
         // loading and retries forever.
-        setState((s) => ({ ...s, specKey, sourceKey, error: e instanceof Error ? e.message : String(e) }));
+        setState((s) => ({ ...s, specKey, sourceKey, totals: undefined, error: e instanceof Error ? e.message : String(e) }));
       }
     };
 
@@ -352,13 +359,14 @@ export function useTrackView(
       // a keystroke — keeps its rows and count on screen meanwhile.
       loading: state.sourceKey !== sourceKey,
       sourceKey,
+      totals: state.sourceKey === sourceKey ? state.totals : undefined,
       error: state.error,
       rowAt: rows ? (index: number) => rows[index] : rowAt,
       fresh: rows ? () => false : fresh,
       ensureRange,
       idsInRange,
     }),
-    [rows, seedCount, state.count, state.sourceKey, state.error, token, sourceKey, rowAt, fresh, ensureRange, idsInRange],
+    [rows, seedCount, state.count, state.sourceKey, state.totals, state.error, token, sourceKey, rowAt, fresh, ensureRange, idsInRange],
   );
 }
 

@@ -77,12 +77,14 @@ function row(i: number): RowDto {
 /** A backend that refuses everything until the library is released. */
 function makeBackend(): Backend {
   return {
-    openView: (_spec: ViewSpec) => {
+    openView: (opened: ViewSpec) => {
       opens += 1;
       // Every open is a new view with a new generation, as the backend
-      // answers one after an edit.
+      // answers one after an edit. A playlist comes with its tally.
+      const totals = opened.source.kind === "playlist"
+        ? { totals: { tracks: 500, seconds: 500 * 300, bytes: 500 * 10_000_000 } } : {};
       return ready
-        ? Promise.resolve({ viewId: opens, len: 500, gen: opens })
+        ? Promise.resolve({ viewId: opens, len: 500, gen: opens, ...totals })
         : Promise.reject(new Error("The library has not finished loading yet."));
     },
     fetchRows: (_viewId: number, offset: number, len: number) => {
@@ -122,6 +124,7 @@ const settle = async () => {
 
 let latest: {
   count: number;
+  totals: { tracks: number; seconds: number; bytes: number } | undefined;
   error: string | null;
   loading: boolean;
   rowAt: (i: number) => RowDto | undefined;
@@ -445,5 +448,41 @@ describe("useTrackView, when a player or the menu tags a track", () => {
     await tagListChanged();
 
     expect(opens).toBe(before + 1);
+  });
+});
+
+describe("useTrackView, for the status bar's playlist tally", () => {
+  const PLAYLIST: ViewSpec = { ...SPEC, source: { kind: "playlist", id: "7" } };
+
+  it("carries the tally the backend sends with a playlist, and none for the collection", async () => {
+    ready = true;
+    act(() => root.render(<Probe />));
+    await settle();
+    expect(latest.totals).toBeUndefined();
+    spec = PLAYLIST;
+    act(() => root.render(<Probe />));
+    await settle();
+    expect(latest.totals).toEqual({ tracks: 500, seconds: 150_000, bytes: 5_000_000_000 });
+  });
+
+  it("keeps the playlist's tally through a search keystroke", async () => {
+    ready = true;
+    spec = PLAYLIST;
+    act(() => root.render(<Probe />));
+    await settle();
+    spec = { ...PLAYLIST, query: "a" };
+    act(() => root.render(<Probe />));
+    // Still the playlist while the narrowed view opens.
+    expect(latest.totals?.tracks).toBe(500);
+  });
+
+  it("drops the tally the moment another list is picked", async () => {
+    ready = true;
+    spec = PLAYLIST;
+    act(() => root.render(<Probe />));
+    await settle();
+    spec = SPEC;
+    act(() => root.render(<Probe />));
+    expect(latest.totals).toBeUndefined();
   });
 });

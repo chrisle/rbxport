@@ -28,7 +28,7 @@ export interface StatusBarProps {
    * player used to print its own across the pad row and the tree beneath it.
    */
   error?: string | null;
-  /** e.g. "Selected: 4 Tracks, 18 minutes, 58.4 MB"; empty when nothing is selected. */
+  /** "Selected: 4 Tracks", or the open playlist's "61 Tracks, 5 hours 2 minutes, 759.7 MB"; empty otherwise. */
   selection?: string;
   readOnly?: boolean;
   /** Library Protection in Preferences is why, rather than rekordbox running. */

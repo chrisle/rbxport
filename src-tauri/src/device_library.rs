@@ -789,7 +789,7 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
         handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, t)));
         let view = DeviceView::open(rows, &parsed, field);
         let (view_id, len, generation) = handle.open_device_view(view);
-        Ok(ViewHandleDto { view_id, len, gen: generation })
+        Ok(ViewHandleDto { view_id, len, gen: generation, totals: None })
     })
     .await
 }

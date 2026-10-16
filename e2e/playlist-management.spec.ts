@@ -791,3 +791,39 @@ test("Renumber Track Order answers the key the Keyboard pane gave it", async ({ 
   await page.getByRole("columnheader", { name: "#" }).click();
   await expect.poll(() => titles(page)).toEqual(sorted);
 });
+
+test("the status bar tallies the open playlist as rekordbox does, and the collection not at all", async ({ page }) => {
+  await open(page);
+  const bar = page.getByRole("contentinfo");
+  const title = page.getByTestId("browser-title");
+  // rekordbox clears the bar for the collection (`isCollectionList`).
+  await collection(page).click();
+  await expect(title).toContainText("(2000 Tracks)");
+  await expect(bar).not.toContainText(/\d+ Tracks, /);
+
+  await item(page, "Eurodance").click();
+  await expect(title).toContainText("Eurodance (");
+  const count = Number(/\((\d+) Tracks\)/.exec(await title.innerText())?.[1]);
+  // `61 Tracks, 5 hours 2 minutes, 759.7 MB`: every track, whole minutes,
+  // binary megabytes with at most one decimal.
+  const tally = new RegExp(`^${count} Tracks, (\\d+ hours )?\\d+ minutes, [\\d,]+(\\.\\d)? (MB|GB)$`);
+  const shown = bar.getByText(tally);
+  await expect(shown).toBeVisible();
+  const before = await shown.innerText();
+
+  // Picking tracks says what is picked instead; letting go brings the tally back.
+  await rows(page).first().locator('[data-col="title"]').click();
+  await expect(bar.getByText("Selected: 1 Track")).toBeVisible();
+  await expect(bar.getByText(tally)).toHaveCount(0);
+
+  // A new, empty playlist is `0 Tracks`, with no time or size.
+  await chooseFromTreeMenu(page, item(page, "Hardstyle"), "Create New Playlist");
+  const made = item(page, "New playlist");
+  await made.click();
+  await expect(title).toHaveText("New playlist (0 Tracks)");
+  await expect(bar.getByText("0 Tracks", { exact: true })).toBeVisible();
+
+  // Back to the playlist: the same tally as before.
+  await item(page, "Eurodance").click();
+  await expect(bar.getByText(before, { exact: true })).toBeVisible();
+});

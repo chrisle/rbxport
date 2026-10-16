@@ -1684,5 +1684,11 @@
   "rekordbox is running. Quit it before editing phrases.": "rekordbox je spuštěný. Před úpravou frází jej ukončete.",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox změnil identity skladeb v zařízení. Před opětovným použitím předchozího výběru zařízení sesouhlaste.",
   "Analyses the track as one steady BPM with a single, constant beat grid.": "Analyzuje skladbu jako jedno stabilní BPM s jednou konstantní rytmickou mřížkou.",
-  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Umožňuje změny tempa a vytváří proměnnou rytmickou mřížku. Určeno pro elektronickou hudbu."
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Umožňuje změny tempa a vytváří proměnnou rytmickou mřížku. Určeno pro elektronickou hudbu.",
+  "minutes": "minuty",
+  "hours": "hodiny",
+  "byte": "byte",
+  "KB": "KB",
+  "MB": "MB",
+  "GB": "GB"
 }

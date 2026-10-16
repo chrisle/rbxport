@@ -154,6 +154,24 @@ pub struct ViewHandleDto {
     pub view_id: u32,
     pub len: u32,
     pub gen: u32,
+    /// The open playlist's status-bar tally; absent for any other list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub totals: Option<ListTotalsDto>,
+}
+
+/// `61 Tracks, 5 hours 2 minutes, 759.7 MB`, as numbers.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListTotalsDto {
+    pub tracks: u32,
+    pub seconds: u64,
+    pub bytes: u64,
+}
+
+impl From<rbl_index::ListTotals> for ListTotalsDto {
+    fn from(totals: rbl_index::ListTotals) -> Self {
+        Self { tracks: totals.tracks, seconds: totals.seconds, bytes: totals.bytes }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -1684,5 +1684,11 @@
   "rekordbox is running. Quit it before editing phrases.": "rekordbox çalışıyor. Cümleleri düzenlemeden önce kapatın.",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox cihazdaki parça kimliklerini değiştirdi. Önceki seçimini yeniden kullanmadan önce bu cihazı uzlaştırın.",
   "Analyses the track as one steady BPM with a single, constant beat grid.": "Parçayı tek bir sabit BPM ve tek, sabit bir beat ızgarası olarak analiz eder.",
-  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Tempo değişikliklerine izin verir ve değişken bir beat ızgarası oluşturur. Elektronik müzik için tasarlanmıştır."
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Tempo değişikliklerine izin verir ve değişken bir beat ızgarası oluşturur. Elektronik müzik için tasarlanmıştır.",
+  "minutes": "dakikalar",
+  "hours": "saatler",
+  "byte": "bayt",
+  "KB": "KB",
+  "MB": "MB",
+  "GB": "GB"
 }

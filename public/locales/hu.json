@@ -1683,5 +1683,11 @@
   "rekordbox is running. Quit it before editing phrases.": "A rekordbox fut. Lépjen ki belőle a frázisok szerkesztése előtt.",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "A rekordbox megváltoztatta az eszköz számazonosítóit. Egyeztesse az eszközt, mielőtt újra felhasználja a korábbi kijelölését.",
   "Analyses the track as one steady BPM with a single, constant beat grid.": "A számot egyetlen állandó BPM-ként elemzi, egyetlen, állandó ütemrácssal.",
-  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Engedi a tempóváltásokat, és változó ütemrácsot készít. Elektronikus zenéhez ajánlott."
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Engedi a tempóváltásokat, és változó ütemrácsot készít. Elektronikus zenéhez ajánlott.",
+  "minutes": "percek",
+  "hours": "órák",
+  "byte": "bájt",
+  "KB": "KB",
+  "MB": "MB",
+  "GB": "GB"
 }

@@ -1681,5 +1681,12 @@
   "rekordbox is running. Quit it before editing phrases.": "rekordbox is actief. Sluit het af voordat u frases bewerkt.",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox heeft de tracknummers van het apparaat gewijzigd. Stem dit apparaat af voordat u de vorige selectie opnieuw gebruikt.",
   "Analyses the track as one steady BPM with a single, constant beat grid.": "Analyseert de track als één stabiele BPM met één constant beatgrid.",
-  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Staat tempowijzigingen toe en maakt een variabel beatgrid. Bedoeld voor elektronische muziek."
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Staat tempowijzigingen toe en maakt een variabel beatgrid. Bedoeld voor elektronische muziek.",
+  "minutes": "minuten",
+  "hours": "uren",
+  "byte": "byte",
+  "bytes": "bytes",
+  "KB": "KB",
+  "MB": "MB",
+  "GB": "GB"
 }

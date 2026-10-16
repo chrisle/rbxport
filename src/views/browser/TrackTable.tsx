@@ -15,7 +15,7 @@ import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import type { DeckId, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/types";
+import type { DeckId, ListTotals, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/types";
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
@@ -779,7 +779,13 @@ export interface TrackTableProps {
   onShowCollection?: () => void;
   spec: ViewSpec;
   onSortChange: (column: SortColumn) => void;
-  onSelectionChange?: (count: number) => void;
+  /**
+   * `picked`: the tracks were picked in this list since it was opened, so the
+   * status bar says what is selected rather than the list's tally.
+   */
+  onSelectionChange?: (count: number, picked: boolean) => void;
+  /** The open playlist's tally for the status bar; undefined for other lists. */
+  onTotalsChange?: (totals: ListTotals | undefined) => void;
   title: string;
   /** The live search text. Rust does the filtering; this is only the box. */
   query: string;
@@ -975,7 +981,7 @@ function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: 
 }
 
 export const TrackTable = memo(function TrackTable({
-  deckTrackIds = NO_DECKS, onShowCollection, spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
+  deckTrackIds = NO_DECKS, onShowCollection, spec, onSortChange, onSelectionChange, onTotalsChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onRenumber, subBrowser = false, onEditField, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, pendingRows = 0, onSelectedTracks, onAnalyse,
@@ -1604,9 +1610,25 @@ export const TrackTable = memo(function TrackTable({
     },
   );
 
+  // rekordbox's bar has one label, written by whichever changed last:
+  // picking a list puts up its tally (`changedSelectedFolItem`), picking
+  // tracks the selection (`selectedRowsChanged`). A selection carried over
+  // from the list before is not a pick in this one.
+  const counted = useRef<{ ids: ReadonlySet<string>; source: string } | null>(null);
+  const pickedIn = useRef<string | null>(null);
   useEffect(() => {
-    onSelectionChange?.(selection.ids.size);
-  }, [selection.ids, onSelectionChange]);
+    const was = counted.current;
+    if (was !== null && was.source !== view.sourceKey) pickedIn.current = null;
+    else if (was !== null && was.ids !== selection.ids) pickedIn.current = view.sourceKey;
+    counted.current = { ids: selection.ids, source: view.sourceKey };
+    onSelectionChange?.(selection.ids.size, pickedIn.current === view.sourceKey);
+  }, [selection.ids, view.sourceKey, onSelectionChange]);
+
+  useEffect(() => {
+    onTotalsChange?.(view.totals);
+  }, [view.totals, onTotalsChange]);
+  // A list that is no longer shown has nothing to tally.
+  useEffect(() => () => onTotalsChange?.(undefined), [onTotalsChange]);
 
   const reportedRow = useRef<string | null>(null);
   useEffect(() => {

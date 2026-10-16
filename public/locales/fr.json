@@ -1685,5 +1685,11 @@
   "rekordbox is running. Quit it before editing phrases.": "rekordbox est en cours d’exécution. Quittez-le avant de modifier les phrases.",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox a modifié les identifiants des pistes de l’appareil. Réconciliez cet appareil avant de réutiliser sa sélection précédente.",
   "Analyses the track as one steady BPM with a single, constant beat grid.": "Analyse le morceau comme un BPM unique et stable avec une seule grille de temps constante.",
-  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Autorise les changements de tempo et crée une grille de temps variable. Conçu pour la musique électronique."
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Autorise les changements de tempo et crée une grille de temps variable. Conçu pour la musique électronique.",
+  "minutes": "minutes",
+  "hours": "heures",
+  "byte": "octet",
+  "KB": "Ko",
+  "MB": "Mo",
+  "GB": "Go"
 }

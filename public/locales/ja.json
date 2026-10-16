@@ -1692,5 +1692,11 @@
   "rekordbox is running. Quit it before editing phrases.": "rekordbox が起動しています。フレーズを編集する前に終了してください。",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox がデバイスのトラック ID を変更しました。以前の選択を再利用する前に、このデバイスを再照合してください。",
   "Analyses the track as one steady BPM with a single, constant beat grid.": "トラックを1つの一定のBPMとして解析し、1本の固定ビートグリッドを作成します。",
-  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "テンポの変化を許容し、可変ビートグリッドを作成します。電子音楽向けです。"
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "テンポの変化を許容し、可変ビートグリッドを作成します。電子音楽向けです。",
+  "minutes": "分",
+  "hours": "時間",
+  "byte": "バイト",
+  "KB": "KB",
+  "MB": "MB",
+  "GB": "GB"
 }

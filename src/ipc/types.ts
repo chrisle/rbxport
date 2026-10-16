@@ -118,6 +118,18 @@ export interface ViewHandle {
   len: number;
   /** Bumped whenever the underlying library changes; stale pages are dropped. */
   gen: number;
+  /**
+   * The open playlist's status-bar tally, before any search or filter;
+   * absent for every other list, which rekordbox does not tally.
+   */
+  totals?: ListTotals;
+}
+
+/** `61 Tracks, 5 hours 2 minutes, 759.7 MB`, as numbers. */
+export interface ListTotals {
+  tracks: number;
+  seconds: number;
+  bytes: number;
 }
 
 export interface TreeNode {

@@ -1679,5 +1679,11 @@
   "rekordbox is running. Quit it before editing phrases.": "rekordbox kører. Luk det, før du redigerer fraser.",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox har ændret enhedens nummeridentiteter. Afstem denne enhed, før du genbruger dens tidligere udvalg.",
   "Analyses the track as one steady BPM with a single, constant beat grid.": "Analyserer sporet som ét stabilt BPM med ét konstant beatgitter.",
-  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Tillader tempoændringer og opbygger et variabelt beatgitter. Beregnet til elektronisk musik."
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Tillader tempoændringer og opbygger et variabelt beatgitter. Beregnet til elektronisk musik.",
+  "minutes": "minutter",
+  "hours": "timer",
+  "byte": "byte",
+  "KB": "KB",
+  "MB": "MB",
+  "GB": "GB"
 }

@@ -1688,5 +1688,11 @@
   "rekordbox is running. Quit it before editing phrases.": "rekordbox 正在运行。请先退出再编辑乐句。",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "rekordbox 更改了设备的曲目标识。请先核对此设备，再重复使用其之前的选择。",
   "Analyses the track as one steady BPM with a single, constant beat grid.": "将曲目分析为单一稳定的 BPM，并生成唯一的恒定节拍网格。",
-  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "允许速度变化并生成可变节拍网格，适用于电子音乐。"
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "允许速度变化并生成可变节拍网格，适用于电子音乐。",
+  "minutes": "分",
+  "hours": "时",
+  "byte": "字节",
+  "KB": "KB",
+  "MB": "MB",
+  "GB": "GB"
 }

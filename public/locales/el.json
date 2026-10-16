@@ -1685,5 +1685,11 @@
   "rekordbox is running. Quit it before editing phrases.": "Το rekordbox εκτελείται. Κλείστε το πριν επεξεργαστείτε φράσεις.",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.": "Το rekordbox άλλαξε τις ταυτότητες των κομματιών της συσκευής. Συγχρονίστε αυτή τη συσκευή πριν επαναχρησιμοποιήσετε την προηγούμενη επιλογή της.",
   "Analyses the track as one steady BPM with a single, constant beat grid.": "Αναλύει το κομμάτι ως ένα σταθερό BPM με ένα ενιαίο, σταθερό πλέγμα beat.",
-  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Επιτρέπει αλλαγές τέμπο και δημιουργεί μεταβλητό πλέγμα beat. Προορίζεται για ηλεκτρονική μουσική."
+  "Allows tempo changes and builds a variable beat grid. Intended for electronic music.": "Επιτρέπει αλλαγές τέμπο και δημιουργεί μεταβλητό πλέγμα beat. Προορίζεται για ηλεκτρονική μουσική.",
+  "minutes": "λεπτά",
+  "hours": "ώρες",
+  "byte": "byte",
+  "KB": "KB",
+  "MB": "MB",
+  "GB": "GB"
 }

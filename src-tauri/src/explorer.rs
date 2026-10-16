@@ -99,7 +99,7 @@ pub async fn open_folder(
         let mut view = library.open_folder_scoped(files, &parsed, field);
         view.truncated = truncated;
         let (view_id, len, generation) = handle.open_folder_view(view);
-        Ok(ViewHandleDto { view_id, len, gen: generation })
+        Ok(ViewHandleDto { view_id, len, gen: generation, totals: None })
     })
     .await
 }

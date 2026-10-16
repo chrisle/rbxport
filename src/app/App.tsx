@@ -82,7 +82,8 @@ import type { LibraryQuestion } from "@/views/library/NewLibraryDialog";
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { AnalysisResult, DeviceImportMissing, DevicePlaylistEdit, DevicePlaylistImportPlan, FilterValues, LinkPeerSeen, LinkStatus, RelocateSearch, SmartRule, TrackLookups, UnanalysedTracks } from "@/ipc/types";
+import type { AnalysisResult, DeviceImportMissing, DevicePlaylistEdit, DevicePlaylistImportPlan, FilterValues, LinkPeerSeen, LinkStatus, ListTotals, RelocateSearch, SmartRule, TrackLookups, UnanalysedTracks } from "@/ipc/types";
+import { formatListTotals } from "@/lib/format";
 import { autoRelocated, missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
 import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
@@ -231,6 +232,13 @@ function AppBody() {
   // in, and the collection has no more meaningful default.
   const [sortState, setSortState] = useState<SortState>(restored.sort);
   const [selectedCount, setSelectedCount] = useState(0);
+  const [listTotals, setListTotals] = useState<ListTotals | undefined>(undefined);
+  // Whether the tracks were picked in the list now open; see `TrackTable`.
+  const [barShowsSelection, setBarShowsSelection] = useState(false);
+  const changeSelectedCount = useCallback((count: number, picked: boolean) => {
+    setSelectedCount(count);
+    setBarShowsSelection(picked);
+  }, []);
   // The rows behind the selection, so they can be queued for analysis.
   const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
   // The row the player is showing. Set by the browser as the selection moves,
@@ -2875,8 +2883,13 @@ function AppBody() {
     [summary, loadError, missingLibrary, restored.count, restored.rows],
   );
 
+  // One place on the bar, as in rekordbox: picked tracks when there are
+  // some, else the open playlist's tally (`61 Tracks, 5 hours 2 minutes,
+  // 759.7 MB`), else nothing.
+  const showSelection = barShowsSelection && selectedCount > 0;
   const selectionText =
-    selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";
+    showSelection && selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : showSelection ? "Selected: 1 Track"
+      : listTotals ? formatListTotals(listTotals, t, viewPrefs.locale) : "";
 
   const tip = useTooltip();
   const openViewSettings = useCallback(() => openPreferences("view"), [openPreferences]);
@@ -3140,7 +3153,8 @@ function AppBody() {
           deckTrackIds={deckTrackIds}
           onShowCollection={showCollection}
           onSortChange={handleSort}
-          onSelectionChange={setSelectedCount}
+          onSelectionChange={changeSelectedCount}
+          onTotalsChange={setListTotals}
           onSelectedTracks={reportMainSelection}
           onAnalyse={analyseSelection}
           onShowInformation={showInformation}

@@ -1868,7 +1868,20 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         ...(spec.source.kind === "playlist" ? { trackNos: Uint32Array.from(sorted.map(({ trackNo }) => trackNo)) } : {}),
         gen: 1,
       });
-      return wait<ViewHandle>({ viewId, len: sorted.length, gen: 1 });
+      // The whole playlist, as the backend tallies it: a search narrows the
+      // rows, not the status bar's total.
+      const totals = spec.source.kind === "playlist"
+        ? candidatesFor({ ...spec, query: "" }).reduce((sum, i) => {
+          const row = all[i];
+          const size = row?.extra?.size;
+          return {
+            tracks: sum.tracks + 1,
+            seconds: sum.seconds + (row?.durationSec ?? 0),
+            bytes: sum.bytes + (typeof size === "number" ? size : 0),
+          };
+        }, { tracks: 0, seconds: 0, bytes: 0 })
+        : undefined;
+      return wait<ViewHandle>({ viewId, len: sorted.length, gen: 1, ...(totals ? { totals } : {}) });
     },
 
     fetchRows: (viewId, offset, len, extraColumns = []) => {
