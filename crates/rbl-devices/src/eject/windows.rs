@@ -26,12 +26,12 @@ use std::{
 use windows_sys::Win32::{
     Devices::{
         DeviceAndDriverInstallation::{
-            CM_Get_DevNode_Registry_PropertyW, CM_Get_Device_Interface_ListW,
+            CM_Get_DevNode_Registry_PropertyW, CM_Get_Device_IDW, CM_Get_Device_Interface_ListW,
             CM_Get_Device_Interface_List_SizeW, CM_Get_Device_Interface_PropertyW, CM_Get_Parent,
-            CM_Locate_DevNodeW, CM_Request_Device_EjectW, PNP_VetoOutstandingOpen,
-            PNP_VetoTypeUnknown, CM_DEVCAP_REMOVABLE, CM_DRP_CAPABILITIES,
-            CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_LOCATE_DEVNODE_NORMAL, CONFIGRET,
-            CR_BUFFER_SMALL, CR_SUCCESS, PNP_VETO_TYPE,
+            CM_Locate_DevNodeW, CM_Request_Device_EjectW, PNP_VetoInsufficientRights,
+            PNP_VetoOutstandingOpen, PNP_VetoTypeUnknown, CM_DEVCAP_REMOVABLE, CM_DRP_CAPABILITIES,
+            CM_DRP_COMPATIBLEIDS, CM_DRP_SERVICE, CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
+            CM_LOCATE_DEVNODE_NORMAL, CONFIGRET, CR_BUFFER_SMALL, CR_SUCCESS, PNP_VETO_TYPE,
         },
         Properties::{DEVPKEY_Device_InstanceId, DEVPROPTYPE},
     },
@@ -66,7 +66,7 @@ pub(super) fn platform_eject(path: &Path) -> io::Result<()> {
     // SAFETY: NUL-terminated drive root such as `E:\`.
     let removable_media =
         unsafe { GetDriveTypeW(wide(&format!("{letter}:\\")).as_ptr()) } == DRIVE_REMOVABLE;
-    match super::eject_target(disk, removable_media, parent, is_removable) {
+    match super::eject_target(disk, removable_media, parent, describe) {
         super::EjectTarget::Device(node) => request_eject(node),
         super::EjectTarget::Media => eject_media(&volume_path),
         super::EjectTarget::Refuse => Err(io::Error::new(
@@ -228,6 +228,78 @@ fn instance_id(interface: &[u16]) -> io::Result<Vec<u16>> {
     Ok(buffer)
 }
 
+/// What the eject choice needs to know about `node`. A property Windows
+/// does not return reads as absent (not removable, not an interface, not a
+/// hub), so a failed query never widens what can be ejected: an unreadable
+/// node is neither ejected nor walked through.
+fn describe(node: u32) -> super::DeviceNode {
+    let id = device_id(node).unwrap_or_default();
+    let compatible = registry_property(node, CM_DRP_COMPATIBLEIDS).unwrap_or_default();
+    let service = registry_property(node, CM_DRP_SERVICE).unwrap_or_default();
+    let service =
+        String::from_utf16_lossy(super::multi_strings(&service).next().unwrap_or_default());
+    let compatible: Vec<String> = super::multi_strings(&compatible)
+        .map(String::from_utf16_lossy)
+        .collect();
+    super::DeviceNode {
+        removable: is_removable(node),
+        interface: super::is_interface_id(&id),
+        hub: super::is_hub(&id, compatible.iter().map(String::as_str), &service),
+    }
+}
+
+/// The device instance id of `node`, such as `USB\VID_0781&PID_55BB\…`.
+fn device_id(node: u32) -> Option<String> {
+    // A device instance id is at most 200 characters (MAX_DEVICE_ID_LEN).
+    let mut buffer = [0u16; 256];
+    // SAFETY: Valid device node; the length passed is one unit short of the
+    // buffer, so the id stays NUL-terminated.
+    let code = unsafe { CM_Get_Device_IDW(node, buffer.as_mut_ptr(), 255, 0) };
+    if code != CR_SUCCESS {
+        return None;
+    }
+    let end = buffer
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(buffer.len());
+    Some(String::from_utf16_lossy(&buffer[..end]))
+}
+
+/// A string or multi-string registry property of `node`, with two spare NULs
+/// at the end so it always parses as a terminated multi-string.
+fn registry_property(node: u32, property: u32) -> Option<Vec<u16>> {
+    let mut size = 0u32;
+    // SAFETY: Size query: null buffer with a zero size; the type out pointer is optional.
+    let code = unsafe {
+        CM_Get_DevNode_Registry_PropertyW(
+            node,
+            property,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &raw mut size,
+            0,
+        )
+    };
+    if code != CR_BUFFER_SMALL || size == 0 {
+        return None;
+    }
+    let units = (size as usize).div_ceil(2);
+    let mut buffer = vec![0u16; units + 2];
+    let mut size = u32::try_from(units * 2).ok()?;
+    // SAFETY: The buffer holds at least `size` bytes; the type out pointer is optional.
+    let code = unsafe {
+        CM_Get_DevNode_Registry_PropertyW(
+            node,
+            property,
+            std::ptr::null_mut(),
+            buffer.as_mut_ptr().cast(),
+            &raw mut size,
+            0,
+        )
+    };
+    (code == CR_SUCCESS).then_some(buffer)
+}
+
 /// Whether Plug and Play calls the device removable (`CM_DEVCAP_REMOVABLE`),
 /// which is what puts a device in "Safely Remove Hardware".
 fn is_removable(node: u32) -> bool {
@@ -271,7 +343,21 @@ fn eject_media(volume: &[u16]) -> io::Result<()> {
         )
     };
     if raw == INVALID_HANDLE_VALUE {
-        return Err(io::Error::last_os_error());
+        let error = io::Error::last_os_error();
+        // Open files do not block this open (the share mode allows them), so
+        // a refusal is down to rights or a removable-storage policy.
+        if error
+            .raw_os_error()
+            .and_then(|code| u32::try_from(code).ok())
+            == Some(ERROR_ACCESS_DENIED)
+        {
+            tracing::info!("Windows refused to open the card's volume for eject");
+            return Err(io::Error::other(super::veto_message(
+                PNP_VetoInsufficientRights,
+                "",
+            )));
+        }
+        return Err(error);
     }
     // SAFETY: CreateFileW returned a new, valid handle owned by this function.
     let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
@@ -310,7 +396,10 @@ fn eject_media(volume: &[u16]) -> io::Result<()> {
     }
     if denied(&locked) {
         tracing::info!("Windows refused to lock the card's volume; a file is open on it");
-        return Err(io::Error::other(super::veto_message(PNP_VetoOutstandingOpen, "")));
+        return Err(io::Error::other(super::veto_message(
+            PNP_VetoOutstandingOpen,
+            "",
+        )));
     }
     locked?;
     // Dropping the handle after this unlocks the (now dismounted) volume.

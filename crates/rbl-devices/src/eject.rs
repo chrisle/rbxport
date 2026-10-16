@@ -106,34 +106,82 @@ enum EjectTarget<N> {
     Refuse,
 }
 
-/// How many levels above the disk to look for a removable device. A stick's
-/// disk sits directly under its USB device; on a composite device (many card
-/// readers) it sits under an interface node (`USB\…&MI_nn`) whose own parent
-/// is the removable device. Going further would reach hubs and controllers,
-/// and a Thunderbolt USB controller is itself marked removable.
+/// What the eject choice needs to know about one Plug and Play device node.
 #[cfg_attr(not(windows), allow(dead_code))]
-const MAX_ANCESTORS: usize = 2;
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DeviceNode {
+    /// `CM_DEVCAP_REMOVABLE`: removable from its immediate parent, which is
+    /// what puts a device in "Safely Remove Hardware".
+    removable: bool,
+    /// A USB interface of a composite device (`USB\VID_…&PID_…&MI_nn\…`).
+    interface: bool,
+    /// A USB hub, root or external. Ejecting one takes down every device
+    /// plugged into it (a dock's keyboard, network, audio interface).
+    hub: bool,
+}
 
-/// Chooses what to eject for `disk`. `CM_DEVCAP_REMOVABLE` means removable
-/// from the immediate parent, so the nearest removable ancestor (within
-/// [`MAX_ANCESTORS`]) is the device Safely Remove would offer; then the disk
-/// itself; then the media when the disk reports removable media.
+/// Whether a device instance id names a USB interface node
+/// (`USB\VID_05AC&PID_8600&MI_00\6&…` on chris-win11).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_interface_id(instance_id: &str) -> bool {
+    let mut parts = instance_id.split('\\');
+    parts.next().is_some_and(|bus| bus.eq_ignore_ascii_case("USB"))
+        && parts
+            .next()
+            .is_some_and(|id| id.to_ascii_uppercase().contains("&MI_"))
+}
+
+/// Whether a device is a USB hub: a root hub (`USB\ROOT_HUB…`), a device
+/// with the hub class among its compatible ids (`USB\Class_09…`), or one run
+/// by a hub driver (`usbhub`, `USBHUB3`).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_hub<'a>(
+    instance_id: &str,
+    mut compatible_ids: impl Iterator<Item = &'a str>,
+    service: &str,
+) -> bool {
+    let starts = |text: &str, prefix: &str| {
+        text.get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+    };
+    starts(instance_id, "USB\\ROOT_HUB")
+        || compatible_ids.any(|id| starts(id, "USB\\Class_09"))
+        || service.eq_ignore_ascii_case("usbhub")
+        || service.eq_ignore_ascii_case("usbhub3")
+}
+
+/// Chooses what to eject for `disk`, the device Safely Remove would offer.
+/// `CM_DEVCAP_REMOVABLE` means removable from the immediate parent, so that
+/// is the disk's parent for a stick. On a composite device (many card
+/// readers) the parent is an interface node and the removable device is the
+/// one above it, so the walk goes up a second level only through an
+/// interface node. Anything further, or a non-interface node in between,
+/// reaches hubs and controllers: an external hub (a dock's SD slot sits
+/// under one) and a Thunderbolt USB controller can both be removable. A hub
+/// is never chosen. Failing that, the disk itself; then the media when the
+/// disk reports removable media, as Explorer's Eject does.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn eject_target<N: Copy>(
     disk: N,
     removable_media: bool,
     mut parent: impl FnMut(N) -> Option<N>,
-    mut removable: impl FnMut(N) -> bool,
+    mut describe: impl FnMut(N) -> DeviceNode,
 ) -> EjectTarget<N> {
-    let mut node = disk;
-    for _ in 0..MAX_ANCESTORS {
-        let Some(up) = parent(node) else { break };
-        if removable(up) {
+    let ejectable = |node: DeviceNode| node.removable && !node.hub;
+    if let Some(up) = parent(disk) {
+        let first = describe(up);
+        if ejectable(first) {
             return EjectTarget::Device(up);
         }
-        node = up;
+        if first.interface && !first.hub {
+            if let Some(device) = parent(up) {
+                if ejectable(describe(device)) {
+                    return EjectTarget::Device(device);
+                }
+            }
+        }
     }
-    if removable(disk) {
+    if ejectable(describe(disk)) {
         EjectTarget::Device(disk)
     } else if removable_media {
         EjectTarget::Media
@@ -213,22 +261,29 @@ mod tests {
         assert_eq!(super::multi_strings(&[]).count(), 0);
     }
 
-    /// A device tree as (node, parent, removable) rows.
-    fn target(tree: &[(u32, Option<u32>, bool)], disk: u32, removable_media: bool) -> super::EjectTarget<u32> {
+    /// A device tree as (node, parent, kind) rows: kind is the node's
+    /// `DeviceNode`.
+    fn target(tree: &[(u32, Option<u32>, super::DeviceNode)], disk: u32, removable_media: bool) -> super::EjectTarget<u32> {
         let row = |node: u32| tree.iter().find(|row| row.0 == node).copied();
         super::eject_target(
             disk,
             removable_media,
             |node| row(node).and_then(|row| row.1),
-            |node| row(node).is_some_and(|row| row.2),
+            |node| row(node).map(|row| row.2).unwrap_or_default(),
         )
     }
+
+    const FIXED: super::DeviceNode = super::DeviceNode { removable: false, interface: false, hub: false };
+    const REMOVABLE: super::DeviceNode = super::DeviceNode { removable: true, interface: false, hub: false };
+    const INTERFACE: super::DeviceNode = super::DeviceNode { removable: false, interface: true, hub: false };
+    const HUB: super::DeviceNode = super::DeviceNode { removable: false, interface: false, hub: true };
+    const REMOVABLE_HUB: super::DeviceNode = super::DeviceNode { removable: true, interface: false, hub: true };
 
     #[test]
     fn a_stick_ejects_its_usb_device() {
         use super::EjectTarget::Device;
         // Disk -> USB device (removable) -> root hub, as on chris-win11.
-        let tree = [(1, Some(2), false), (2, Some(3), true), (3, Some(4), false), (4, None, true)];
+        let tree = [(1, Some(2), FIXED), (2, Some(3), REMOVABLE), (3, Some(4), HUB), (4, None, REMOVABLE)];
         assert_eq!(target(&tree, 1, false), Device(2));
         assert_eq!(target(&tree, 1, true), Device(2));
     }
@@ -236,20 +291,44 @@ mod tests {
     #[test]
     fn a_composite_reader_ejects_the_device_above_its_interface() {
         use super::EjectTarget::Device;
-        // Disk -> USB\…&MI_00 interface (not removable) -> composite device (removable).
-        let tree = [(1, Some(2), false), (2, Some(3), false), (3, Some(4), true), (4, None, false)];
+        // Disk -> USB\VID_…&PID_…&MI_00 interface (not removable) -> composite device (removable).
+        let tree = [(1, Some(2), FIXED), (2, Some(3), INTERFACE), (3, Some(4), REMOVABLE), (4, None, HUB)];
         assert_eq!(target(&tree, 1, false), Device(3));
+        assert_eq!(target(&tree, 1, true), Device(3));
+    }
+
+    #[test]
+    fn a_reader_in_a_dock_never_ejects_the_dock_hub() {
+        use super::EjectTarget::{Media, Refuse};
+        // Dock SD slot: disk -> reader USB device (not removable) -> external hub (removable).
+        let tree = [(1, Some(2), FIXED), (2, Some(3), FIXED), (3, Some(4), REMOVABLE_HUB), (4, None, HUB)];
+        assert_eq!(target(&tree, 1, true), Media);
+        assert_eq!(target(&tree, 1, false), Refuse);
+        // The same with the hub not flagged as one: still not reached, since
+        // the level in between is not an interface node.
+        let tree = [(1, Some(2), FIXED), (2, Some(3), FIXED), (3, Some(4), REMOVABLE), (4, None, HUB)];
+        assert_eq!(target(&tree, 1, true), Media);
+        assert_eq!(target(&tree, 1, false), Refuse);
+        // A removable hub is never chosen, even above an interface node or
+        // directly above the disk.
+        let tree = [(1, Some(2), FIXED), (2, Some(3), INTERFACE), (3, None, REMOVABLE_HUB)];
+        assert_eq!(target(&tree, 1, true), Media);
+        let tree = [(1, Some(2), FIXED), (2, None, REMOVABLE_HUB)];
+        assert_eq!(target(&tree, 1, false), Refuse);
     }
 
     #[test]
     fn the_walk_never_reaches_a_removable_controller() {
         use super::EjectTarget::{Device, Media, Refuse};
         // Disk -> device -> root hub -> Thunderbolt xHCI (removable, cap 0x84 on chris-win11).
-        let tree = [(1, Some(2), false), (2, Some(3), false), (3, Some(4), false), (4, None, true)];
+        let tree = [(1, Some(2), FIXED), (2, Some(3), FIXED), (3, Some(4), HUB), (4, None, REMOVABLE)];
         assert_eq!(target(&tree, 1, false), Refuse);
         assert_eq!(target(&tree, 1, true), Media);
+        // Through an interface node the walk still stops at the device above it.
+        let tree = [(1, Some(2), FIXED), (2, Some(3), INTERFACE), (3, Some(4), FIXED), (4, None, REMOVABLE)];
+        assert_eq!(target(&tree, 1, true), Media);
         // A removable disk under a fixed parent goes itself.
-        let tree = [(1, Some(2), true), (2, Some(3), false), (3, None, false)];
+        let tree = [(1, Some(2), REMOVABLE), (2, Some(3), FIXED), (3, None, FIXED)];
         assert_eq!(target(&tree, 1, false), Device(1));
     }
 
@@ -257,11 +336,39 @@ mod tests {
     fn an_internal_disk_is_refused_and_a_built_in_card_reader_ejects_the_media() {
         use super::EjectTarget::{Media, Refuse};
         // Disk -> NVMe/SD host controller -> root port, none removable.
-        let tree = [(1, Some(2), false), (2, Some(3), false), (3, None, false)];
+        let tree = [(1, Some(2), FIXED), (2, Some(3), FIXED), (3, None, FIXED)];
         assert_eq!(target(&tree, 1, false), Refuse);
         assert_eq!(target(&tree, 1, true), Media);
         // A disk with no parent at all.
-        assert_eq!(target(&[(1, None, false)], 1, false), Refuse);
+        assert_eq!(target(&[(1, None, FIXED)], 1, false), Refuse);
+    }
+
+    #[test]
+    fn interface_and_hub_nodes_are_told_apart_by_their_ids() {
+        // Instance ids as listed on chris-win11 (values-windows-usb-nodes.txt).
+        assert!(super::is_interface_id("USB\\VID_05AC&PID_8600&MI_00\\6&C3BB1E1&0&0000"));
+        assert!(super::is_interface_id("usb\\vid_05ac&pid_8600&mi_03\\6&c3bb1e1&0&0003"));
+        assert!(!super::is_interface_id("USB\\VID_05AC&PID_8600\\5&1F3E3F24&0&3"));
+        assert!(!super::is_interface_id("USB\\VID_0781&PID_55BB\\MSFT30323233363654343031313833"));
+        assert!(!super::is_interface_id("USBSTOR\\DISK&VEN_X&MI_00\\1"));
+        assert!(!super::is_interface_id("SCSI\\DISK&VEN_SANDISK\\7&1"));
+        assert!(!super::is_interface_id(""));
+
+        let none = std::iter::empty::<&str>;
+        assert!(super::is_hub("USB\\ROOT_HUB30\\7&27C23B87&0&0", none(), "USBHUB3"));
+        assert!(super::is_hub("USB\\ROOT_HUB\\4&1", none(), ""));
+        assert!(super::is_hub(
+            "USB\\VID_05E3&PID_0610\\6&1",
+            ["USB\\USB20_HUB", "USB\\Class_09&SubClass_00", "USB\\Class_09"].into_iter(),
+            "",
+        ));
+        assert!(super::is_hub("USB\\VID_2109&PID_0817\\6&2", none(), "usbhub"));
+        assert!(!super::is_hub(
+            "USB\\VID_0781&PID_55BB\\MSFT3032",
+            ["USB\\Class_08&SubClass_06&Prot_62", "USB\\Class_08"].into_iter(),
+            "UASPStor",
+        ));
+        assert!(!super::is_hub("USB\\VID_05AC&PID_8600\\5&1", ["USB\\Class_0E"].into_iter(), "usbccgp"));
     }
 
     #[test]
