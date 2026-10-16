@@ -443,7 +443,8 @@ pub struct FolderPlaylist {
 /// One folder-drop Replace existing, as exact rows: the replaced list's
 /// tombstones, the playlist made in its place with its membership rows, and
 /// every live sibling's `Seq` before and after (the import may renumber the
-/// run). Undo puts the old rows and order back; Redo the new ones.
+/// run). Undo puts the old rows back in their place among the siblings still
+/// there; Redo the new ones.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListReplacement {
     parent: String,
@@ -1215,20 +1216,25 @@ impl Writer {
     }
 
     /// Undoes a folder-drop Replace existing in one transaction: the playlist
-    /// it made and that playlist's memberships become tombstones again, the
-    /// replaced list comes back with exactly the rows its deletion
-    /// tombstoned, and every sibling gets back the `Seq` it had.
+    /// it made and that playlist's memberships become tombstones again, and
+    /// the replaced list comes back with exactly the rows its deletion
+    /// tombstoned, in its old place among the siblings it had.
     ///
-    /// Refuses, writing nothing, when the library is no longer as the
-    /// replacement left it: a sibling added, removed or reordered under the
-    /// parent, the new playlist's tracks changed, or a replaced row no longer
-    /// a tombstone.
+    /// Siblings added or removed under the parent since then (the drop's
+    /// other folders, a playlist made later) stay as they are, in their
+    /// current order. When the parent holds exactly the siblings it had, each
+    /// gets back the `Seq` it had.
+    ///
+    /// Refuses, writing nothing, only when the rows themselves changed: the
+    /// new playlist moved, deleted or given other tracks, or a replaced row
+    /// no longer a tombstone.
     pub fn undo_replacement(&mut self, edit: &ListReplacement) -> Result<Changed> {
         self.set_replacement(edit, true)
     }
 
     /// Applies a replacement again after [`Writer::undo_replacement`], with
-    /// the same rows, under the same conditions.
+    /// the same rows, under the same conditions: the new playlist goes back
+    /// in its place among the siblings it had after the replacement.
     pub fn redo_replacement(&mut self, edit: &ListReplacement) -> Result<Changed> {
         self.set_replacement(edit, false)
     }
@@ -1239,12 +1245,22 @@ impl Writer {
         } else {
             "that replacement can no longer be redone".to_owned()
         });
+        let root = edit.replaced.playlist_ids.first().ok_or_else(refused)?;
         self.prepare()?;
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (expected, restored) = if undo { (&edit.after, &edit.before) } else { (&edit.before, &edit.after) };
-        if children_with_seq(&tx, &edit.parent)? != *expected {
+        // What leaves the parent's run and what comes back into it, and the
+        // run that recorded where the returning one belongs.
+        let (leaving, entering, recorded) = if undo {
+            (&edit.playlist, root, &edit.before)
+        } else {
+            (root, &edit.playlist, &edit.after)
+        };
+        let current = children_with_seq(&tx, &edit.parent)?;
+        if !current.iter().any(|(id, _)| id == leaving)
+            || current.iter().any(|(id, _)| id == entering)
+        {
             return Err(refused());
         }
         // What is about to become a tombstone must hold nothing more than
@@ -1257,6 +1273,21 @@ impl Writer {
         } else if !live_subtree_is(&tx, &edit.replaced)? {
             return Err(refused());
         }
+        let staying: Vec<String> = current.iter()
+            .filter(|(id, _)| id != leaving)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let order = place_among(staying, entering, recorded);
+        // The recorded `Seq`s, gaps and all, when the run is back to the
+        // recorded one; otherwise each row's index in the new order.
+        let target: Vec<(String, Option<i64>)> =
+            if order.iter().eq(recorded.iter().map(|(id, _)| id)) {
+                recorded.clone()
+            } else {
+                order.into_iter().enumerate()
+                    .map(|(seq, id)| (id, Some(i64::try_from(seq).unwrap_or(i64::MAX))))
+                    .collect()
+            };
 
         let mut rows = 0;
         let mut usn = 0;
@@ -1291,15 +1322,21 @@ impl Writer {
             flip("djmdPlaylist", made, false)?;
             flip("djmdSongPlaylist", &edit.members, false)?;
         }
-        for (id, seq) in restored {
+        // Only rows whose `Seq` moves are written.
+        let live: std::collections::HashMap<String, Option<i64>> =
+            children_with_seq(&tx, &edit.parent)?.into_iter().collect();
+        for (id, seq) in &target {
+            if live.get(id) == Some(seq) {
+                continue;
+            }
             usn = next_usn(&tx)?;
             rows += tx.execute(
                 "UPDATE djmdPlaylist SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3
-                 WHERE ID = ?4 AND ParentID = ?5 AND rb_local_deleted = 0 AND Seq IS NOT ?1",
+                 WHERE ID = ?4 AND ParentID = ?5 AND rb_local_deleted = 0",
                 params![seq, usn, stamp, id, edit.parent],
             )?;
         }
-        if children_with_seq(&tx, &edit.parent)? != *restored {
+        if children_with_seq(&tx, &edit.parent)? != target {
             return Err(refused());
         }
         set_counter(&tx, usn)?;
@@ -4019,6 +4056,30 @@ fn tombstone_subtree(tx: &Connection, id: &str, stamp: &str) -> Result<(Changed,
 }
 
 /// `parent`'s live children as `(ID, Seq)`, in tree order.
+/// `staying` with `entering` put back in its place in `recorded`: right after
+/// the nearest sibling before it there that is still in `staying`, or else
+/// right before the nearest one after it, or else at the end. Siblings not in
+/// `recorded` keep their order around it.
+fn place_among(
+    mut staying: Vec<String>,
+    entering: &str,
+    recorded: &[(String, Option<i64>)],
+) -> Vec<String> {
+    let place = recorded.iter().position(|(id, _)| id == entering);
+    let index = place.and_then(|place| {
+        let after_earlier = recorded[..place].iter().rev()
+            .find_map(|(id, _)| staying.iter().position(|s| s == id))
+            .map(|i| i + 1);
+        after_earlier.or_else(|| {
+            recorded[place + 1..].iter()
+                .find_map(|(id, _)| staying.iter().position(|s| s == id))
+        })
+    });
+    let index = index.unwrap_or(staying.len());
+    staying.insert(index, entering.to_owned());
+    staying
+}
+
 fn children_with_seq(conn: &Connection, parent: &str) -> Result<Vec<(String, Option<i64>)>> {
     let mut stmt = conn.prepare(
         "SELECT ID, Seq FROM djmdPlaylist

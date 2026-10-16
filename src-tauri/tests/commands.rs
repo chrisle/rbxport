@@ -632,6 +632,58 @@ fn a_folder_drop_replacement_is_one_undo_and_one_redo() {
     assert_eq!(s.node("Early").id, early.id);
 }
 
+/// #426 review: a drop that replaces one folder and imports a new one under
+/// the same parent, then a playlist made there later: neither is in the
+/// history, yet Undo of the replacement runs, keeps both, and the older
+/// history stays reachable behind it.
+#[test]
+fn a_folder_drop_replacement_undoes_after_newer_siblings() {
+    let s = shell();
+    run(commands::create_playlist(s.handle(), s.state(), "Warm Up".into(), ROOT.into(), None)).unwrap();
+    let old = s.node("Warm Up");
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), old.id.clone(), vec![track_id(2)], None)).unwrap();
+    run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed".into())).unwrap();
+
+    let dropped = |name: &str| {
+        let folder = s._dir.path().join("drop").join(name);
+        std::fs::create_dir_all(&folder).unwrap();
+        write_wav(&folder.join(format!("{name}.wav")), 1);
+        folder.display().to_string()
+    };
+    let replace = dropped("Warm Up");
+    let fresh = dropped("Brand New");
+    let asked =
+        run(commands::import_folder_playlist(s.handle(), s.state(), replace.clone(), ROOT.into(), None, Some(0), None)).unwrap();
+    let replaced = run(commands::import_folder_playlist(
+        s.handle(), s.state(), replace, ROOT.into(), Some(old.id.clone()), asked.at, None,
+    ))
+    .unwrap();
+    let made = replaced.playlist.unwrap();
+    let new_folder =
+        run(commands::import_folder_playlist(s.handle(), s.state(), fresh, ROOT.into(), None, replaced.at, None)).unwrap();
+    let new_list = new_folder.playlist.unwrap();
+    run(commands::create_playlist(s.handle(), s.state(), "Later".into(), ROOT.into(), None)).unwrap();
+    let later = s.node("Later");
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(undone.redo_label.as_deref(), Some("Replace Playlist"));
+    assert_eq!(undone.undo_label.as_deref(), Some("Rename Playlist"), "older history is reachable");
+    assert_eq!(s.node("Warm Up").id, old.id);
+    assert_eq!(ids(&s.playlist_rows(&old.id)), [track_id(2).as_str()]);
+    assert!(!s.tree().iter().any(|n| n.id == made));
+    assert!(s.tree().iter().any(|n| n.id == new_list), "the drop's new folder stays");
+    assert!(s.tree().iter().any(|n| n.id == later.id), "the later playlist stays");
+
+    let redone = run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(redone.undo_label.as_deref(), Some("Replace Playlist"));
+    assert!(s.tree().iter().any(|n| n.id == made));
+    assert!(!s.tree().iter().any(|n| n.id == old.id));
+
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the rename before it undone too");
+}
+
 /// #426: Undo of a replacement refuses once the new playlist has changed,
 /// and the history keeps the entry rather than losing it.
 #[test]

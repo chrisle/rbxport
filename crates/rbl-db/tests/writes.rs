@@ -3902,9 +3902,10 @@ fn a_replaced_folder_comes_back_with_its_nested_lists_and_tracks() {
     assert!(f.children(&old).is_empty());
 }
 
-/// Undo refuses, writing nothing, once the library is not as the
-/// replacement left it (as a deletion refuses once its rows have moved on);
-/// so does Redo once the restored list has changed.
+/// Undo refuses, writing nothing, once the rows it would take away hold
+/// something the history does not know of (the new playlist has other tracks
+/// or was moved); so does Redo once the restored list has changed. A sibling
+/// added beside it is not such a change.
 #[test]
 fn a_replacement_refuses_undo_and_redo_after_the_lists_changed() {
     let audio = tempfile::tempdir().unwrap();
@@ -3930,12 +3931,12 @@ fn a_replacement_refuses_undo_and_redo_after_the_lists_changed() {
     assert_eq!(tree_rows(&f), changed, "nothing written");
     f.writer.remove_tracks(&made, &[track_id(5)]).unwrap();
 
-    // A sibling added beside it.
-    let extra = f.writer.create_playlist("Extra", &crate_folder).unwrap();
+    // The new playlist moved out of the folder.
+    f.writer.move_to(&made, ROOT, None).unwrap();
     let changed = tree_rows(&f);
     refused(f.writer.undo_replacement(&replacement), "can no longer be undone");
     assert_eq!(tree_rows(&f), changed, "nothing written");
-    f.writer.delete_playlist(&extra).unwrap();
+    f.writer.move_to(&made, &crate_folder, Some(0)).unwrap();
 
     // As it was again: Undo runs. Then a track added inside the restored
     // folder stops Redo.
@@ -3984,4 +3985,75 @@ fn only_a_replacement_carries_an_undo() {
     assert!(plain.playlist.is_some() && plain.replacement.is_none());
     let copy = f.writer.import_folder_as_playlist("Fresh", ROOT, &files, FolderClash::Copy, None).unwrap();
     assert!(copy.playlist.is_some() && copy.replacement.is_none());
+}
+
+/// #426 review: one drop that replaces one folder and imports a new one under
+/// the same parent, at the drop's insert index. The new folder's import is
+/// not in the history, yet Undo of the replacement still runs: the old list
+/// comes back where it was among its old siblings, the new folder's playlist
+/// stays, and Redo replaces it again around that playlist.
+#[test]
+fn a_replacement_undoes_after_a_new_folder_of_the_same_drop() {
+    let audio = tempfile::tempdir().unwrap();
+    let a = wavs(audio.path(), &["a.wav"]);
+    let b = wavs(audio.path(), &["b.wav"]);
+    let mut f = fixture();
+    let clash = playlist_id(1);
+    let name = f.one::<String>("SELECT Name FROM djmdPlaylist WHERE ID = ?1", &[&clash]);
+    let old_members = f.order(&clash);
+    let before_order = f.children(ROOT);
+
+    let first = f.writer.import_folder_as_playlist(&name, ROOT, &a, FolderClash::Replace(&clash), Some(0)).unwrap();
+    let replacement = first.replacement.clone().unwrap();
+    let made = first.playlist.clone().unwrap();
+    let second = f.writer.import_folder_as_playlist("Brand New Folder", ROOT, &b, FolderClash::Ask, first.at).unwrap();
+    let fresh = second.playlist.clone().unwrap();
+    let fresh_members = f.order(&fresh);
+    let dropped = f.children(ROOT);
+    assert_eq!(dropped[..2], [fresh.clone(), made.clone()], "both at the drop's index");
+
+    f.writer.undo_replacement(&replacement).unwrap();
+    let mut expected = before_order.clone();
+    expected.insert(0, fresh.clone());
+    assert_eq!(f.children(ROOT), expected, "the old list in its old place, the new folder kept");
+    assert_eq!(f.order(&clash), old_members);
+    assert_eq!(f.order(&fresh), fresh_members);
+    assert_eq!(f.one::<i64>("SELECT rb_local_deleted FROM djmdPlaylist WHERE ID = ?1", &[&made]), 1);
+    assert_consistent(&f);
+
+    f.writer.redo_replacement(&replacement).unwrap();
+    assert_eq!(f.children(ROOT), dropped, "the replacement back beside the new folder");
+    assert_eq!(member_files(&f, &made), ["a.wav"]);
+    assert_consistent(&f);
+}
+
+/// #426 review: a playlist made later under the same parent, and a sibling
+/// deleted, do not stop Undo or Redo; newer siblings keep their order.
+#[test]
+fn a_replacement_undoes_after_siblings_were_added_and_removed() {
+    let audio = tempfile::tempdir().unwrap();
+    let files = wavs(audio.path(), &["c.wav"]);
+    let mut f = fixture();
+    let crate_folder = f.writer.create_folder("Crates", ROOT).unwrap();
+    let one = f.writer.create_playlist("One", &crate_folder).unwrap();
+    let old = f.writer.create_playlist("Old", &crate_folder).unwrap();
+    let three = f.writer.create_playlist("Three", &crate_folder).unwrap();
+    f.writer.add_tracks(&old, &[track_id(0), track_id(2)]).unwrap();
+
+    let outcome =
+        f.writer.import_folder_as_playlist("Old", &crate_folder, &files, FolderClash::Replace(&old), None).unwrap();
+    let replacement = outcome.replacement.clone().unwrap();
+    let made = outcome.playlist.unwrap();
+    assert_eq!(f.children(&crate_folder), [one.clone(), three.clone(), made.clone()]);
+    let later = f.writer.create_playlist("Later", &crate_folder).unwrap();
+    f.writer.delete_playlist(&one).unwrap();
+
+    f.writer.undo_replacement(&replacement).unwrap();
+    assert_eq!(f.children(&crate_folder), [old.clone(), three.clone(), later.clone()]);
+    assert_eq!(f.order(&old), [track_id(0), track_id(2)]);
+    assert_consistent(&f);
+
+    f.writer.redo_replacement(&replacement).unwrap();
+    assert_eq!(f.children(&crate_folder), [three, made, later]);
+    assert_consistent(&f);
 }
