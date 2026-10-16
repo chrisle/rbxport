@@ -547,6 +547,29 @@ pub struct PlaylistMove {
     after_index: usize,
 }
 
+/// One Sort Items: a folder's children in the order they had and the order
+/// the sort gave them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaylistSort {
+    parent: String,
+    before: Vec<String>,
+    after: Vec<String>,
+}
+
+impl PlaylistSort {
+    /// The sort found the folder already in order and wrote nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.before == self.after
+    }
+
+    /// The children's ids in the order the sort gave them.
+    #[must_use]
+    pub fn order(&self) -> &[String] {
+        &self.after
+    }
+}
+
 /// One playlist or folder rename.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaylistRename {
@@ -855,6 +878,95 @@ impl Writer {
 
     pub fn redo_move(&mut self, edit: &PlaylistMove) -> Result<Changed> {
         self.move_to(&edit.id, &edit.after_parent, Some(edit.after_index))
+    }
+
+    /// Sort Items: puts the direct children of a folder, or of the top of
+    /// the tree (`ROOT`), in the order `compare` gives their names, and keeps
+    /// both orders for undo.
+    ///
+    /// rekordbox sorts one level, playlists and folders together, and
+    /// writes the whole new order in one go [OBS static, rekordbox 7.2.19
+    /// macOS arm64: `browse::TreeViewer::treeMessageSortItem` @0x10156621c
+    /// sorts the folder item's sub-items with `PlaylistItemSorter`, which
+    /// compares names only, then hands every child's id in the new order to
+    /// `renumberListOrder`]. The comparison is the caller's, so the
+    /// collation stays with the index (`rbl_index::collate`). Names that
+    /// compare equal keep the order they had [ASSUME: rekordbox's
+    /// `std::sort` leaves them in no particular order].
+    ///
+    /// All of it is one transaction: a failure part way leaves the old order.
+    /// A folder already in order is not written, and its edit is empty.
+    pub fn sort_children_with_undo(
+        &mut self,
+        parent: &str,
+        mut compare: impl FnMut(&str, &str) -> std::cmp::Ordering,
+    ) -> Result<(Changed, PlaylistSort)> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        refuse_unless_folder(&tx, parent)?;
+        let mut stmt = tx.prepare(
+            "SELECT ID, COALESCE(Name, '') FROM djmdPlaylist
+             WHERE ParentID = ?1 AND rb_local_deleted = 0
+             ORDER BY Seq, ID",
+        )?;
+        let children: Vec<(String, String)> = stmt
+            .query_map(params![parent], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        let before: Vec<String> = children.iter().map(|(id, _)| id.clone()).collect();
+        let mut sorted = children;
+        // Stable: equal names keep their places.
+        sorted.sort_by(|(_, a), (_, b)| compare(a, b));
+        let after: Vec<String> = sorted.into_iter().map(|(id, _)| id).collect();
+        let edit = PlaylistSort { parent: parent.to_owned(), before, after };
+        if edit.is_empty() {
+            return Ok((Changed { rows: 0, usn: 0 }, edit));
+        }
+        let changed = write_child_order(&tx, parent, &edit.after, &stamp)?;
+        tx.commit()?;
+        Ok((changed, edit))
+    }
+
+    /// Puts a sorted folder back in the order it had.
+    pub fn undo_sort(&mut self, edit: &PlaylistSort) -> Result<Changed> {
+        self.set_child_order(&edit.parent, &edit.before)
+    }
+
+    /// Sorts the folder again, to the order the sort gave it.
+    pub fn redo_sort(&mut self, edit: &PlaylistSort) -> Result<Changed> {
+        self.set_child_order(&edit.parent, &edit.after)
+    }
+
+    /// Writes `order` as the order of `parent`'s children. Refused, with
+    /// nothing written, unless `order` is exactly the children `parent` has
+    /// now: a playlist made, moved or deleted since would otherwise be lost
+    /// from the tree or given a place it no longer has.
+    fn set_child_order(&mut self, parent: &str, order: &[String]) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        refuse_unless_folder(&tx, parent)?;
+        let mut stmt = tx.prepare(
+            "SELECT ID FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0",
+        )?;
+        let mut live: Vec<String> = stmt
+            .query_map(params![parent], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        let mut wanted = order.to_vec();
+        live.sort();
+        wanted.sort();
+        if live != wanted {
+            return Err(DbError::WriteRefused(
+                "the folder's playlists have changed since it was sorted".to_owned(),
+            ));
+        }
+        let changed = write_child_order(&tx, parent, order, &stamp)?;
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// The live children of `parent`, in tree order.
@@ -4628,6 +4740,44 @@ fn live_subtree_is(conn: &Connection, deletion: &PlaylistDeletion) -> Result<boo
 }
 
 /// Whether a playlist or folder exists and is not deleted.
+/// Sort Items is a folder's, or the top of the tree's: a playlist has no
+/// children to put in order.
+fn refuse_unless_folder(conn: &Connection, id: &str) -> Result<()> {
+    if id == ROOT {
+        return Ok(());
+    }
+    let attribute: Option<i64> = conn
+        .query_row(
+            "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match attribute {
+        Some(ATTRIBUTE_FOLDER) => Ok(()),
+        Some(_) => Err(DbError::WriteRefused(format!("{id} is not a folder"))),
+        None => Err(DbError::WriteRefused(format!("no playlist or folder {id}"))),
+    }
+}
+
+/// Gives `parent`'s children `order`, `Seq` counted from 0 as
+/// [`Writer::move_to`] counts it, each row with a fresh USN.
+fn write_child_order(conn: &Connection, parent: &str, order: &[String], stamp: &str) -> Result<Changed> {
+    let mut rows = 0;
+    let mut usn = 0;
+    for (seq, node) in order.iter().enumerate() {
+        usn = next_usn(conn)?;
+        let seq = i64::try_from(seq).unwrap_or(i64::MAX);
+        rows += conn.execute(
+            "UPDATE djmdPlaylist SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3
+             WHERE ID = ?4 AND ParentID = ?5 AND rb_local_deleted = 0",
+            params![seq, usn, stamp, node, parent],
+        )?;
+    }
+    set_counter(conn, usn)?;
+    Ok(Changed { rows, usn })
+}
+
 fn node_exists(conn: &Connection, id: &str) -> Result<bool> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
