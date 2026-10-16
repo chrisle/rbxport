@@ -105,7 +105,7 @@ it("offers the four same-name folder choices, Import as a copy first and chosen 
   expect(select.value).toBe("copy");
   expect(host.textContent).toContain(
     "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. " +
-      "This cannot be undone.",
+      "Edit > Undo puts it back.",
   );
 
   act(() => {

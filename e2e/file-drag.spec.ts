@@ -190,6 +190,33 @@ test("Ask me asks about a same-named folder, and an answer for the rest of the d
   await expect(page.getByRole("treeitem").filter({ hasText: "Set B" })).toHaveCount(1);
 });
 
+test("Replace existing is one Undo that brings the replaced folder back, and one Redo (#426)", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences",
+    JSON.stringify({ advanced: { protectLibrary: false, folderDropClash: "replace" } })));
+  await page.goto("/?writable=1");
+  const root = page.getByRole("treeitem").filter({ hasText: /^Playlists/ }).first();
+  const current = page.getByRole("treeitem").filter({ hasText: "CURRENT" });
+  await expect(current).toHaveAttribute("data-kind", "folder");
+  await expect(page.getByRole("treeitem").filter({ hasText: "Melodic Vox" })).toHaveCount(1);
+
+  const drop = await folderDrop(page, ["/Music/CURRENT"]);
+  await root.dispatchEvent("drop", { dataTransfer: drop });
+  await expect(page.getByRole("contentinfo")).toContainText("Replaced the old CURRENT.");
+  await expect(current).toHaveAttribute("data-kind", "playlist");
+  await expect(page.getByRole("treeitem").filter({ hasText: "Melodic Vox" })).toHaveCount(0);
+
+  const menu = (id: string) => page.evaluate((item) => (window as unknown as { __menu?: (id: string) => void }).__menu?.(item), id);
+  await menu("undo");
+  await expect(page.getByRole("contentinfo")).toContainText("Edit undone.");
+  await expect(current).toHaveAttribute("data-kind", "folder");
+  await expect(page.getByRole("treeitem").filter({ hasText: "Melodic Vox" })).toHaveCount(1);
+
+  await menu("redo");
+  await expect(page.getByRole("contentinfo")).toContainText("Edit redone.");
+  await expect(current).toHaveAttribute("data-kind", "playlist");
+  await expect(page.getByRole("treeitem").filter({ hasText: "Melodic Vox" })).toHaveCount(0);
+});
+
 test("a folder dropped on a playlist folder lands inside it; loose files are ignored", async ({ page }) => {
   await page.goto("/?writable=1");
   const folder = page.locator('[role="treeitem"][data-kind="folder"]').first();

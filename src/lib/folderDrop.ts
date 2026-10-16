@@ -46,7 +46,8 @@ export interface FolderClashPolicy {
  * `clash.mode` says what happens. `copy` (the default) keeps the old list and
  * imports the folder beside it under the next free name, which the summary
  * reports; `replace` replaces the old list, and the summary says how many
- * lists and track entries that removed, since it has no undo; `keep` leaves
+ * lists and track entries that removed (each replacement is one Edit > Undo
+ * step, #426); `keep` leaves
  * it and skips the folder; only `ask` asks, and an answer given for the rest
  * of the drop is not asked again.
  *

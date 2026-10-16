@@ -1075,7 +1075,7 @@
   "replace": "交換する",
   "keep": "保つ",
   "Ask me": "確認する",
-  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "「既存のものを置き換える」を選ぶと、その名前のリストが確認なしで削除されます。フォルダーの場合は、その中のすべてのリストも削除されます。元に戻すことはできません。",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.": "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.",
   "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.": "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.",
   "Unlock anyway": "Unlock anyway",
   "Record play history": "再生履歴を記録する",

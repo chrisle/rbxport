@@ -76,6 +76,27 @@ describe("mock edits", () => {
     expect((await backend.playlistTree()).some((n) => n.id === playlist.id)).toBe(false);
   });
 
+  it("undoes and redoes a folder drop's Replace existing as one step (#426)", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createFolder("Warm Up", TREE_ROOT);
+    const old = (await backend.playlistTree()).find((n) => n.name === "Warm Up")!;
+    await backend.edits.createPlaylist("Early", old.id);
+    const early = (await backend.playlistTree()).find((n) => n.name === "Early")!;
+    await backend.edits.renamePlaylist(early.id, "Opening");
+    const before = (await backend.playlistTree()).map((n) => n.id);
+
+    const replaced = await backend.importFolderPlaylist("/music/Warm Up", TREE_ROOT, old.id, null);
+    expect(replaced.replaced).toEqual({ lists: 2, tracks: 0 });
+    const undone = await backend.edits.undoEdit();
+    expect(undone).toMatchObject({ redoLabel: "Replace Playlist", undoLabel: "Rename Playlist" });
+    expect((await backend.playlistTree()).map((n) => n.id)).toEqual(before);
+
+    const redone = await backend.edits.redoEdit();
+    expect(redone).toMatchObject({ undoLabel: "Replace Playlist", canRedo: false });
+    expect((await backend.playlistTree()).some((n) => n.id === old.id)).toBe(false);
+    expect(await backend.edits.undoEdit()).toMatchObject({ undoLabel: "Rename Playlist" });
+  });
+
   it("clears library redo when a new edit branches from an undo", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.createPlaylist("Doomed", TREE_ROOT);

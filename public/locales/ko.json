@@ -1042,7 +1042,7 @@
   "replace": "교체하다",
   "keep": "유지하다",
   "Ask me": "나에게 묻기",
-  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "기존 항목 바꾸기는 묻지 않고 해당 이름의 목록을 삭제하며, 폴더인 경우 그 안의 모든 목록도 삭제합니다. 이 작업은 실행 취소할 수 없습니다.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.": "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.",
   "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.": "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.",
   "Unlock anyway": "Unlock anyway",
   "Record play history": "플레이 이력 기록",

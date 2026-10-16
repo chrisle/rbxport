@@ -1059,7 +1059,7 @@
   "replace": "替換",
   "keep": "保留",
   "Ask me": "詢問我",
-  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "「取代現有清單」會直接刪除同名清單；若它是資料夾，其中的所有清單也會一併刪除，不會詢問。此動作無法復原。",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.": "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.",
   "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.": "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.",
   "Unlock anyway": "Unlock anyway",
   "Record play history": "记录播放历史",

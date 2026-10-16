@@ -1057,7 +1057,7 @@
   "replace": "αντικαταστήστε",
   "keep": "κρατήστε",
   "Ask me": "Να ερωτώμαι",
-  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Η Αντικατάσταση της υπάρχουσας διαγράφει χωρίς ερώτηση τη λίστα με αυτό το όνομα και, αν είναι φάκελος, κάθε λίστα μέσα της. Δεν μπορεί να αναιρεθεί.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.": "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.",
   "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.": "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.",
   "Unlock anyway": "Unlock anyway",
   "Record play history": "Εγγραφή ιστορικού αναπαραγωγής",

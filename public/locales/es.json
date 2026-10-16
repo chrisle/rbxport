@@ -1059,7 +1059,7 @@
   "replace": "reemplazar",
   "keep": "mantener",
   "Ask me": "Preguntarme",
-  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. This cannot be undone.": "Reemplazar la existente elimina sin preguntar la lista con ese nombre y, si es una carpeta, todas las listas que contiene. No se puede deshacer.",
+  "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.": "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. Edit > Undo puts it back.",
   "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.": "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.",
   "Unlock anyway": "Unlock anyway",
   "Record play history": "Grabar historial de reproducción",

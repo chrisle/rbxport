@@ -2821,7 +2821,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (clash && clash.id !== replace && !copy) return wait({ ...report, folder: true, conflict: clash.id, at });
       let listName = name;
       let replaced: { lists: number; tracks: number } | null = null;
+      let replacing: { tree: TreeNode[]; membership: Map<string, string[]>; history: MockEdit[] } | null = null;
       if (clash && clash.id === replace) {
+        replacing = { tree: treeSnapshot(), membership: membershipSnapshot(), history: [...editUndo] };
         if (siblings.indexOf(clash) < at) at -= 1;
         const start = tree.findIndex((n) => n.id === clash.id);
         const doomed = tree.slice(start, start + subtreeLength(start));
@@ -2837,6 +2839,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       await edits.createPlaylist(listName, parent);
       const made = tree.find((n) => !before.has(n.id))?.id ?? null;
       if (made && childrenOf(parent).findIndex((n) => n.id === made) !== at) await edits.movePlaylist(made, parent, at);
+      if (replacing) {
+        // One step of history, as the real backend records it (#426): the
+        // delete and move above leave entries of their own, folded into it.
+        editUndo.splice(0, editUndo.length, ...replacing.history);
+        const afterTree = treeSnapshot();
+        const afterMembership = membershipSnapshot();
+        await recordEdit({
+          label: "Replace Playlist",
+          undo: () => { restoreTree(replacing.tree); restoreMembership(replacing.membership); },
+          redo: () => { restoreTree(afterTree); restoreMembership(afterMembership); },
+        });
+      }
       return wait({ ...report, folder: true, playlist: made, at, renamed: listName === name ? null : listName, replaced });
     },
     exportLoopWav: () => wait(null),
