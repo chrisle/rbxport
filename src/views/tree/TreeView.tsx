@@ -451,6 +451,12 @@ export interface TreeViewProps {
    * results, which rekordbox refuses.
    */
   onSortItems?: (folder: TreeNode, searching?: boolean) => void;
+  /**
+   * Whether the tree's search field holds a query, each time that changes:
+   * Sort Items started from a key or the menu bar refuses over a searched
+   * tree as the menu's does.
+   */
+  onSearchingChange?: (searching: boolean) => void;
   /** Add To Shortcut: the rail takes the node as a button of its own. */
   onAddToShortcut?: (node: TreeNode) => void;
   /** The rail's shortcut buttons, what opens one, and what deletes one. */
@@ -479,7 +485,7 @@ export const TreeView = memo(function TreeView({
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
   initialExpansion, onExpansionChange,
-  onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems,
+  onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems, onSearchingChange,
   railShortcuts, onOpenShortcut, onDeleteShortcut,
   onEjectDevice, ejectingDeviceId, deviceBusy = false,
   onDeviceCreate, onDeviceRename, onDeviceDelete, onDeviceImport,
@@ -489,6 +495,8 @@ export const TreeView = memo(function TreeView({
   const listVars = browseListVars(view, TREE_ROW_H);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<TreeSearchScope>("all");
+  const searched = query.trim() !== "";
+  useEffect(() => onSearchingChange?.(searched), [searched, onSearchingChange]);
   /** The tree menu: where it is, and which node it was opened on. */
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
 
@@ -821,7 +829,7 @@ export const TreeView = memo(function TreeView({
                 onAddToShortcut?.(menu.node);
                 break;
               case "sortItems":
-                onSortItems?.(menu.node, query.trim() !== "");
+                onSortItems?.(menu.node, searched);
                 break;
               case "rename":
                 beginRename(menu.node);

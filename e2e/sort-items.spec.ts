@@ -55,3 +55,27 @@ test("the Playlists heading offers Sort Items, and an empty folder does not", as
   await expect(menu.getByRole("menuitem", { name: "Delete Folder", exact: true })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "Sort Items", exact: true })).toHaveCount(0);
 });
+
+test("Sort Items from a key refuses over a searched tree, as the menu's does", async ({ page }) => {
+  // Bind the unbound command (0x500d) to a key, as the Keyboard pane would.
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({
+    keyboard: { preset: "export", overrides: { sortItems: { key: "y", shiftKey: true, altKey: true } } },
+  })));
+  await open(page);
+  const order = ["Melodic Vox", "Hardstyle", "Drum and Bass", "Fresh 128s"];
+  expect(await between(page, "CURRENT", "USB")).toEqual(order);
+
+  const search = page.getByRole("searchbox", { name: "Search library tree" });
+  await search.fill("CURRENT");
+  await item(page, "CURRENT").click();
+  await page.keyboard.press("Shift+Alt+KeyY");
+  await expect(page.getByRole("contentinfo")).toContainText("Playlist cannot be edited or deleted while searching.");
+
+  // CURRENT stays selected; a second click on it would start a rename.
+  await search.fill("");
+  await search.blur();
+  expect(await between(page, "CURRENT", "USB")).toEqual(order);
+  await page.keyboard.press("Shift+Alt+KeyY");
+  await expect(page.getByRole("contentinfo")).toContainText("Sorted CURRENT.");
+  await expect.poll(() => between(page, "CURRENT", "USB")).toEqual(["Drum and Bass", "Fresh 128s", "Hardstyle", "Melodic Vox"]);
+});
