@@ -69,6 +69,12 @@ export function planValidation(paths, { all = false } = {}) {
       continue;
     }
 
+    // The AppImage's GTK hook is tested by scripts/appimage-gtk-hook.test.mjs.
+    if (path.startsWith("packaging/appimage/")) {
+      enable(plan, "scripts");
+      continue;
+    }
+
     if (/^(Cargo\.toml|Cargo\.lock|rust-toolchain(?:\.toml)?|\.cargo\/)/.test(path)) {
       enable(plan, "rust");
       continue;

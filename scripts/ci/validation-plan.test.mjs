@@ -85,6 +85,10 @@ test("packaging action changes defer expensive runtime checks to deploy", () => 
   assert.deepEqual(enabled(".github/actions/package-installer/action.yml"), ["scripts"]);
 });
 
+test("the AppImage GTK plugin runs the Node script suite that tests its hook", () => {
+  assert.deepEqual(enabled("packaging/appimage/linuxdeploy-plugin-gtk.sh"), ["scripts"]);
+});
+
 test("a lane workflow change exercises only that lane on the PR", () => {
   assert.deepEqual(enabled(".github/workflows/validate-windows.yml"), [
     "scripts",
