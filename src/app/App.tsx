@@ -45,6 +45,7 @@ import { transposeKey } from "@/lib/camelot";
 import { stepMasterGain, toggleMute } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
+import { prepareDevicePlaylistDrop } from "@/lib/devicePlaylistDrop";
 import { deviceId, devicePath, renamedDevice } from "@/lib/devices";
 import { DEVICE_ASKS, deviceNodeId, deviceParentFor, devicePlaylistsOf, isDeviceLibraryKind, parseDeviceNodeId } from "@/lib/deviceLibrary";
 import { useDeviceLibraries } from "@/store/useDeviceLibraries";
@@ -2621,6 +2622,37 @@ function AppBody() {
     },
     [deviceLibraries, deviceBusy, report, refuse, t],
   );
+  const addDraggedToDevice = useCallback((node: TreeNode) => {
+    const drag = draggedTracks;
+    setDraggedTracks(null);
+    const ref = parseDeviceNodeId(node.id);
+    if (!drag || drag.sourceKind === "device" || node.kind !== "devicePlaylist" || !ref) return;
+    if (deviceBusy) {
+      refuse(t("Wait for the device to finish before changing its playlists."));
+      return;
+    }
+    setSyncing(true);
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        const edit = await prepareDevicePlaylistDrop(
+          backend, ref.path, ref.format, ref.id, drag.ids, stickDefaults, compatibilityFormat,
+          askDuplicates, node.name,
+        );
+        if (edit === null) return;
+        if (edit.tracks.length === 0) return;
+        const result = await deviceLibraries.edit(ref.path, ref.format, edit);
+        if (result.changed > 0) report(t("Added to {name}.", { name: node.name }));
+        // Export Track can add loose files before the playlist edit. Re-read
+        // both the volume list and the playlist tree after the full operation.
+        setDevices(await backend.listDevices());
+      } catch (error) {
+        refuse(error instanceof Error ? t(error.message) : t("The device library could not be changed."));
+      } finally {
+        setSyncing(false);
+      }
+    })();
+  }, [draggedTracks, deviceBusy, stickDefaults, compatibilityFormat, askDuplicates, deviceLibraries, report, refuse, t]);
   const createOnDevice = useCallback(
     (parent: TreeNode, folder: boolean) => {
       const at = deviceParentFor(parent);
@@ -3192,6 +3224,8 @@ function AppBody() {
           selectedId={selectedNode?.id ?? null}
           onSelect={setSelectedNode}
           dragging={draggedTracks !== null}
+          canDropToDevicePlaylists={draggedTracks?.sourceKind !== "device"}
+          onDropDeviceTracks={addDraggedToDevice}
           onDropTracks={addDraggedTo}
           draggingToDevice={draggedTracks !== null && !hasLooseId(draggedTracks.ids)}
           onDropTracksOnDevice={exportDraggedTo}

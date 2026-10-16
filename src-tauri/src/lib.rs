@@ -711,6 +711,7 @@ pub fn run() {
             explorer::explorer_children,
             device_library::device_libraries,
             device_library::device_playlist_edit,
+            device_library::device_playlist_collection_tracks,
             device_library::device_playlist_duplicates,
             device_library::device_playlist_import,
             device_library::device_playlist_import_plan,

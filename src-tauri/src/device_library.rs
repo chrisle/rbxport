@@ -258,6 +258,38 @@ pub async fn device_playlist_edit(path: String, format: String, edit: DeviceEdit
     blocking("device_playlist_edit", move || apply_edit(&path, &format, edit, rbl_db::is_rekordbox_app_running())).await
 }
 
+/// Maps collection ids to their rows in one device library. Missing rows are
+/// `None`; callers can export those tracks before asking for the mapping again.
+#[tauri::command]
+pub async fn device_playlist_collection_tracks(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    format: String,
+    tracks: Vec<String>,
+) -> AppResult<Vec<Option<String>>> {
+    let state = Arc::clone(&state);
+    blocking("device_playlist_collection_tracks", move || {
+        let mount = connected(&path)?;
+        let format = format_from(&format)?;
+        let library = device::read(&mount, format).map_err(|e| device_error(&e))?;
+        let db_id = state
+            .read_db(|db| rbl_db::export_info::db_id(db.connection()))
+            .map_err(crate::commands::write_error)?;
+        Ok(collection_track_rows(&library, db_id, &tracks))
+    })
+    .await
+}
+
+fn collection_track_rows(library: &device::Library, db_id: u64, tracks: &[String]) -> Vec<Option<String>> {
+    let mut rows = std::collections::HashMap::new();
+    for track in &library.tracks {
+        if track.master_db_id == db_id && track.master_content_id != 0 {
+            rows.entry(track.master_content_id).or_insert_with(|| track.id.to_string());
+        }
+    }
+    tracks.iter().map(|id| id.parse::<u64>().ok().and_then(|id| rows.get(&id).cloned())).collect()
+}
+
 /// The rows of `tracks` whose track `playlist` already holds, each once, so
 /// the interface can ask rekordbox's Add or Skip question before adding.
 /// Only reads the stick.
@@ -270,8 +302,12 @@ fn duplicates_of(path: &str, format: &str, playlist: &str, rows: &[String]) -> A
     let mount = connected(path)?;
     let format = format_from(format)?;
     let library = device::read(&mount, format).map_err(|e| device_error(&e))?;
+    let playlist_id = id_from(playlist)?;
+    if library.node(playlist_id).is_none_or(|node| node.folder) {
+        return Err(AppError::new(ErrorKind::NotFound, "That playlist is no longer on the device."));
+    }
     let ids = track_ids_in(&library, &mount, rows)?;
-    let held: std::collections::BTreeSet<u32> = library.held(id_from(playlist)?, &ids).into_iter().collect();
+    let held: std::collections::BTreeSet<u32> = library.held(playlist_id, &ids).into_iter().collect();
     let mut named = std::collections::BTreeSet::new();
     Ok(rows.iter().zip(&ids).filter(|(_, id)| held.contains(id) && named.insert(**id)).map(|(row, _)| row.clone()).collect())
 }
@@ -929,6 +965,20 @@ mod tests {
     }
 
     #[test]
+    fn collection_track_ids_map_only_to_rows_owned_by_this_library() {
+        let (_src, dest) = stick();
+        let mut library = device::read(dest.path(), Format::OneLibrary).unwrap();
+        library.tracks[0].master_db_id = 77;
+        library.tracks[0].master_content_id = 101;
+        library.tracks[1].master_db_id = 77;
+        library.tracks[1].master_content_id = 102;
+
+        assert_eq!(collection_track_rows(&library, 77, &["102".into(), "999".into(), "not-an-id".into()]),
+            [Some(library.tracks[1].id.to_string()), None, None]);
+        assert_eq!(collection_track_rows(&library, 78, &["101".into()]), [None]);
+    }
+
+    #[test]
     fn an_edit_from_the_interface_changes_the_library_it_names() {
         let (_src, dest) = stick();
         let path = dest.path().to_str().unwrap();
@@ -979,6 +1029,7 @@ mod tests {
         let edit: DeviceEditDto = serde_json::from_str(r#"{"kind":"add","playlist":"1","tracks":[],"duplicates":true}"#).unwrap();
         assert!(matches!(edit, DeviceEditDto::Add { duplicates: true, .. }));
         assert!(duplicates_of(path, "deviceLibrary", "1", &["file:/elsewhere/x.mp3".into()]).is_err());
+        assert!(duplicates_of(path, "deviceLibrary", "999", &[]).is_err(), "a missing target is refused before an export starts");
     }
 
     #[test]
