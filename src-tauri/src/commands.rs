@@ -291,9 +291,8 @@ pub async fn open_view(state: State<'_, Arc<AppState>>, spec: ViewSpecDto) -> Ap
     // on the async thread.
     let handle = Arc::clone(&state);
     blocking("open_view", move || {
-        let (view_id, len, generation) = handle.open_view_scoped(&parsed, spec.search_field)?;
-        let totals = handle.view(view_id)?.totals().map(crate::dto::ListTotalsDto::from);
-        Ok(ViewHandleDto { view_id, len, gen: generation, totals })
+        let (view_id, len, generation, totals) = handle.open_view_scoped(&parsed, spec.search_field)?;
+        Ok(ViewHandleDto { view_id, len, gen: generation, totals: totals.map(crate::dto::ListTotalsDto::from) })
     })
     .await
 }

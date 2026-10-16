@@ -543,19 +543,28 @@ impl AppState {
 
     /// Opens a view and returns `(view_id, len, generation)`.
     pub fn open_view(&self, spec: &ViewSpec) -> AppResult<(u32, u32, u32)> {
-        self.open_view_scoped(spec, rbl_index::SearchField::All)
+        let (id, len, generation, _) = self.open_view_scoped(spec, rbl_index::SearchField::All)?;
+        Ok((id, len, generation))
     }
 
-    pub fn open_view_scoped(&self, spec: &ViewSpec, field: rbl_index::SearchField) -> AppResult<(u32, u32, u32)> {
+    /// Opens a view and returns `(view_id, len, generation, totals)`. The
+    /// totals are read before the view is registered, so a burst of other
+    /// opens that evicts it cannot turn this open into an error.
+    pub fn open_view_scoped(
+        &self,
+        spec: &ViewSpec,
+        field: rbl_index::SearchField,
+    ) -> AppResult<(u32, u32, u32, Option<rbl_index::ListTotals>)> {
         let library = self.library()?;
         let view = library.open_view_scoped(spec, field);
         let len = u32::try_from(view.len()).unwrap_or(u32::MAX);
+        let totals = view.totals();
 
         let mut inner = self.inner.write();
         let tag_list = matches!(spec.source, TrackSource::TagList);
         let id = inner.register(Registered::Library(OpenView { view: Arc::new(view), tag_list }));
         let generation = inner.generation;
-        Ok((id, len, generation))
+        Ok((id, len, generation, totals))
     }
 
     /// Opens the Explorer's view of one folder; the same handle shape.
