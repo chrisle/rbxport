@@ -72,6 +72,23 @@
   .error { animation: none; }
 }
 
+/* The status and error messages open the Log window, where they stay. */
+.messageLink {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  white-space: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.messageLink:hover { text-decoration: underline; }
+.messageLink:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+
 .selection { margin-left: auto; }
 .actions {
   display: flex;

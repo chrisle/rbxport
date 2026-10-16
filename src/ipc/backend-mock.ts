@@ -17,7 +17,7 @@ import type {
   DatabaseDrive, EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SelectionDetails, SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, RelocateSearch, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
-  DeckId, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
+  DeckId, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind, LogLine, LogLevel,
 } from "./types";
 import { TREE_ROOT } from "./types";
 import { applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
@@ -397,6 +397,14 @@ export interface MockOptions {
 export function createMockBackend(options: MockOptions = {}): Backend {
   const trackCount = options.trackCount ?? readCountFromUrl() ?? 2000;
   const latency = options.latencyMs ?? readLatencyFromUrl() ?? 0;
+  // What the Log window reads in a browser: a start-up line, then whatever
+  // the status bar said.
+  const mockLog: LogLine[] = [];
+  let mockLogNext = 1;
+  const mockLogLine = (level: LogLevel, target: string, message: string) => {
+    mockLog.push({ seq: mockLogNext++, timeMs: Date.now(), level, target, message });
+  };
+  mockLogLine("debug", "rbxport_lib::logging", "logging to the browser preview");
   const playlistFixture = options.playlistFixture ?? readPlaylistFixtureFromUrl();
   const all = makeRows(trackCount);
   const missingEvery = options.missingEvery ?? readMissingFromUrl();
@@ -2555,6 +2563,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // costs nothing, so every figure the platform will not give is null.
     appVersion: () => wait("0.4.0"),
     openLog: () => wait(undefined),
+    // The browser preview's own log: what the app said since the page loaded.
+    openLogWindow: () => wait(false),
+    logLines: (after) => {
+      const oldest = mockLog[0]?.seq ?? mockLogNext;
+      return wait({ lines: mockLog.filter(line => line.seq > after).map(line => ({ ...line })), oldest });
+    },
+    openLogFolder: () => Promise.reject(new Error("Opening the log folder requires the desktop app.")),
+    saveLogText: () => wait(null),
+    logStatusMessage: (failed, text) => {
+      mockLogLine(failed ? "warn" : "info", "rbxport::status", text);
+      return wait(undefined);
+    },
     appDiagnostics: () =>
       wait({ audioLoad: 0, audioXruns: 0, cpu: 0, memoryMb: 0, threads: null, openFiles: null, gpu: null }),
     // A browser has no Finder to open. Refusing is the truth; succeeding

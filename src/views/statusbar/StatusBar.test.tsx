@@ -39,6 +39,25 @@ it("opens the application log when the name and version are right-clicked", () =
   expect(onOpenLog).toHaveBeenCalledOnce();
 });
 
+it("opens the Log window when the status or error message is clicked", () => {
+  const onShowLog = vi.fn();
+  act(() => root.render(<StatusBar activity="Copied 3 tracks." error="The playlist could not be renamed." onShowLog={onShowLog} />));
+
+  const error = host.querySelector<HTMLButtonElement>("[role=alert] button");
+  expect(error?.textContent).toBe("The playlist could not be renamed.");
+  act(() => error?.click());
+  const activity = [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Copied 3 tracks.");
+  act(() => activity?.click());
+
+  expect(onShowLog).toHaveBeenCalledTimes(2);
+});
+
+it("leaves the messages as plain text without a Log window to open", () => {
+  act(() => root.render(<StatusBar activity="Copied 3 tracks." error="Failed." />));
+  expect(host.querySelector("[role=alert] button")).toBeNull();
+  expect(host.querySelectorAll("button")).toHaveLength(0);
+});
+
 it("names read-only as a library state", () => {
   act(() => root.render(<StatusBar readOnly />));
 

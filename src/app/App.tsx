@@ -107,6 +107,7 @@ const NewLibraryDialog = lazy(() => import("@/views/library/NewLibraryDialog").t
 const DevicePanel = lazy(() => import("@/views/devices/DevicePanel").then(m => ({ default: m.DevicePanel })));
 const InfoPanel = lazy(() => import("@/views/info/InfoPanel").then(m => ({ default: m.InfoPanel })));
 const ReportBug = lazy(() => import("@/views/report/ReportBug").then(m => ({ default: m.ReportBug })));
+const LogView = lazy(() => import("@/views/log/LogView").then(m => ({ default: m.LogView })));
 const UpdateManager = lazy(() => import("@/views/update/UpdateManager").then(m => ({ default: m.UpdateManager })));
 const Preferences = lazy(() => import("@/views/settings/Preferences").then(m => ({ default: m.Preferences })));
 const SyncManager = lazy(() => import("@/views/sync/SyncManager").then(m => ({ default: m.SyncManager })));
@@ -450,6 +451,13 @@ function AppBody() {
   const [reportOpen, setReportOpen] = useState(false);
   const openReport = useCallback(() => {
     void getBackend().then(backend => backend.openReportWindow()).then(opened => { if (!opened) setReportOpen(true); });
+  }, []);
+  // The Log window, the same way again: clicking the status bar's message
+  // opens it, or brings the open one to the front.
+  const [logOpen, setLogOpen] = useState(false);
+  const openLogWindow = useCallback(() => {
+    void getBackend().then(backend => backend.openLogWindow()).then(opened => { if (!opened) setLogOpen(true); })
+      .catch(() => setLogOpen(true));
   }, []);
   const openSupport = useCallback(() => {
     void getBackend().then(backend => backend.openUrl("https://www.paypal.com/donate/?hosted_button_id=H6GGU8PHP8CJE")).catch(() => {});
@@ -2944,6 +2952,19 @@ function AppBody() {
     removeTracksFromPlaylist, removeTracksFromHistory, reorderPlaylist, importDroppedFilesTo,
     analyseTracks, refuse, reportSubSelection,
   ]);
+  // What the status bar says, and the error in red over it. Each goes in the
+  // log as it appears, so the Log window still has it once the bar moves on;
+  // a running job's changing progress text is left out.
+  const statusActivity = note !== null && !note.failed ? note.text : "";
+  const statusError = playerError ?? loadError ?? [...exportJobs.values()].find(job => job.state === "failed")?.title
+    ?? (note?.failed === true ? note.text : null);
+  const loggedActivity = note?.busy === true ? "" : statusActivity;
+  useEffect(() => {
+    if (statusError) void getBackend().then(backend => backend.logStatusMessage(true, statusError)).catch(() => {});
+  }, [statusError]);
+  useEffect(() => {
+    if (loggedActivity) void getBackend().then(backend => backend.logStatusMessage(false, loggedActivity)).catch(() => {});
+  }, [loggedActivity]);
   return (
     <PreferencesProvider value={prefs}>
     <MasterOutputConnection mode={viewPrefs.vuMeter} />
@@ -3337,6 +3358,7 @@ function AppBody() {
         />
       ) : null}
       {reportOpen ? <ReportBug onClose={() => setReportOpen(false)} /> : null}
+      {logOpen ? <LogView onClose={() => setLogOpen(false)} /> : null}
       {smartEditor ? (
         <SmartPlaylistEditor
           title={smartEditor.mode === "create" ? "Create New Intelligent Playlist" : "Edit the Intelligent Playlist"}
@@ -3375,6 +3397,7 @@ function AppBody() {
         onReportBug={openReport}
         onSupport={SHOW_MAIN_SUPPORT ? openSupport : undefined}
         onOpenLog={openLog}
+        onShowLog={openLogWindow}
         updateNotice={updateNotice ? (
           <UpdateReadyNotice
             state={updateNotice}
@@ -3391,15 +3414,11 @@ function AppBody() {
           total: analysis.total,
           waiting: analysis.waiting,
         } : undefined}
-        activity={
-          note !== null && !note.failed
-                ? note.text
-                : (summary ? "" : "Loading the library…")
-        }
+        activity={statusActivity || (summary ? "" : "Loading the library…")}
         // Everything that went wrong, in one place and in red: the deck's
         // refusals, a library that would not open, and a write the library
         // turned down.
-        error={playerError ?? loadError ?? [...exportJobs.values()].find(job => job.state === "failed")?.title ?? (note?.failed === true ? note.text : null)}
+        error={statusError}
         onOpenProtection={!playerError && !loadError && note?.failed && note.text === refusal(true) && advancedPrefs.protectLibrary
           ? () => openPreferences("libraryProtection") : undefined}
         onCancelAnalysis={analysis.running ? analysis.cancel : undefined}

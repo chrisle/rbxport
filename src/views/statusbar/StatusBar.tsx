@@ -40,6 +40,8 @@ export interface StatusBarProps {
   onSupport?: (() => void) | undefined;
   /** Opens the current application log with the OS default handler. */
   onOpenLog?: (() => void) | undefined;
+  /** Opens the Log window; the status and error messages are its way in. */
+  onShowLog?: (() => void) | undefined;
   /** Present only while analysis is running, so it can be stopped. */
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
@@ -69,6 +71,7 @@ export function StatusBar({
   onReportBug,
   onSupport,
   onOpenLog,
+  onShowLog,
   onCancelAnalysis,
   analysisFailures = 0,
   analysisFailed = [],
@@ -144,7 +147,9 @@ export function StatusBar({
       })}
       {error === null || error === "" ? null : (
         <span className={styles.error} role="alert">
-          {error}
+          {onShowLog ? (
+            <button type="button" className={styles.messageLink} title={t("Show the log")} onClick={onShowLog}>{error}</button>
+          ) : error}
           {onOpenProtection ? (
             <button type="button" className={styles.warningAction} onClick={onOpenProtection}>
               Open Preferences
@@ -171,7 +176,9 @@ export function StatusBar({
             max={100} value={analysisPercent} />
           <span className={styles.backupPercent}>({analysisPercent}%)</span>
         </>}
-      </span> : <span className={styles.activity}>{activity}</span>}
+      </span> : <span className={styles.activity}>{onShowLog && activity ? (
+        <button type="button" className={styles.messageLink} title={t("Show the log")} onClick={onShowLog}>{activity}</button>
+      ) : activity}</span>}
       {analysisFailures > 0 ? (
         <span
           className={styles.failures}

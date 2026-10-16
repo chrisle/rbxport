@@ -199,6 +199,28 @@ export interface LibrarySummary {
 }
 
 /** What the app is costing, for the title bar's readout. */
+/** A log line's level, most severe first. */
+export type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
+
+/** One line this process logged, for the Log window. */
+export interface LogLine {
+  /** Counts up from 1 for every line the process logs. */
+  seq: number;
+  /** Milliseconds since the Unix epoch. */
+  timeMs: number;
+  level: LogLevel;
+  /** The module that logged it. */
+  target: string;
+  /** The message, then its fields as `name=value`. */
+  message: string;
+}
+
+/** The lines after a given one, and the `seq` of the oldest still held. */
+export interface LogPage {
+  lines: LogLine[];
+  oldest: number;
+}
+
 export interface Diagnostics {
   audioLoad: number;
   audioXruns: number;
@@ -800,6 +822,19 @@ export interface Backend {
   appVersion(): Promise<string>;
   /** Opens the current application log with the OS default handler. */
   openLog(): Promise<void>;
+  /**
+   * Opens the Log window, or brings the open one to the front. False where
+   * there are no windows — a browser — and the shell draws the log over itself.
+   */
+  openLogWindow(): Promise<boolean>;
+  /** The lines this process has logged after line `after`; 0 for all held. */
+  logLines(after: number): Promise<LogPage>;
+  /** Opens the folder the daily log files are in. */
+  openLogFolder(): Promise<void>;
+  /** Asks where with the save dialog and writes `text` there; null when cancelled. */
+  saveLogText(text: string): Promise<string | null>;
+  /** Puts a status-bar message in the log, so it can be read after it is gone. */
+  logStatusMessage(failed: boolean, text: string): Promise<void>;
 
   /** Shows a track's file in the Finder. */
   revealTrack(trackId: string): Promise<void>;

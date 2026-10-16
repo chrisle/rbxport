@@ -13,6 +13,14 @@ The app writes stdout and a daily file under the OS data directory plus
 on macOS and `%APPDATA%\rbxport\logs` on Windows. The newest five daily
 files are retained. See `src-tauri/src/logging.rs` for filter and retention logic.
 
+The same lines, the newest 10,000 since the app started, are kept in memory
+for the Log window (`src-tauri/src/log_window.rs`, `src/views/log/`). Clicking
+the status bar's message or error opens it, or brings the open one forward;
+the messages the status bar shows are logged under `rbxport::status` (errors
+at `warn`, the rest at `info`). The window filters by level and text, copies
+or saves the lines it shows, and opens the log folder. Right-clicking the
+app name in the status bar still opens the current log file itself.
+
 | Variable | Effect |
 | --- | --- |
 | `LOG_LEVEL` | App-crate level: error, warn, info, debug (default), or trace. |

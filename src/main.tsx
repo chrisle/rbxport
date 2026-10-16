@@ -23,12 +23,13 @@ const root = createRoot(el, {
   },
 });
 
-// The same bundle serves the Preferences and Sync Manager windows: the
-// shell opens them at `#preferences/<pane>` and `#sync`, and that is all
-// each draws.
+// The same bundle serves the Preferences, Sync Manager, Report bug and Log
+// windows: the shell opens them at `#preferences/<pane>`, `#sync`, `#report`
+// and `#log`, and that is all each draws.
 const report = window.location.hash.startsWith("#report");
 const preferences = window.location.hash.startsWith("#preferences");
 const sync = window.location.hash.startsWith("#sync");
+const log = window.location.hash.startsWith("#log");
 
 function mount(view: ReactNode) {
   root.render(
@@ -49,6 +50,7 @@ function secondaryWindow(): Promise<ReactNode> | null {
   if (preferences) return import("./views/settings/PreferencesWindow").then(({ PreferencesWindow }) => <PreferencesWindow />);
   if (sync) return import("./views/sync/SyncWindow").then(({ SyncWindow }) => <SyncWindow />);
   if (report) return import("./views/report/ReportBug").then(({ ReportWindow }) => <ReportWindow />);
+  if (log) return import("./views/log/LogView").then(({ LogWindow }) => <LogWindow />);
   return null;
 }
 
@@ -56,5 +58,5 @@ function secondaryWindow(): Promise<ReactNode> | null {
 // production bundle can share code back into this module, so a top-level await
 // on that dynamic import would leave both sides waiting and the window blank.
 const view = secondaryWindow();
-const browse = preferences || sync ? Promise.resolve() : syncRekordboxBrowseAtStartup().catch(() => {});
+const browse = preferences || sync || log ? Promise.resolve() : syncRekordboxBrowseAtStartup().catch(() => {});
 void Promise.all([view, browse]).then(([secondary]) => mount(secondary ?? <App />));
