@@ -1895,6 +1895,14 @@ export interface Edits {
    * the node has been lifted out of wherever it was. Omitted, it is appended.
    */
   movePlaylist(id: string, parent: string, index?: number): Promise<EditHistoryState>;
+  /**
+   * Sort Items: the children of `folder` (`TREE_ROOT` for the Playlists
+   * heading) put in name order, one level, playlists and folders together,
+   * by the ICU collation rekordbox uses for `language` (a BCP 47 tag, the
+   * UI's language). One Undo step; a folder already in order is not written
+   * and records nothing.
+   */
+  sortItems(folder: string, language?: string): Promise<EditHistoryState>;
   deletePlaylist(id: string): Promise<EditHistoryState>;
   undoEdit(): Promise<EditHistoryState>;
   redoEdit(): Promise<EditHistoryState>;

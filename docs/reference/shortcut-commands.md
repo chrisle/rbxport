@@ -11,7 +11,7 @@ behavior could only be reached by pressing their key.
 | --- | --- |
 | The key map, as rows | `src/lib/shortcuts.ts` (`BINDINGS`), `src/lib/keyPresets.ts` |
 | The command registry | `src/lib/commands.ts`, `src/store/useCommands.ts` |
-| Shell commands (search, master volume, Analyze Track) | `src/app/App.tsx` |
+| Shell commands (search, master volume, Analyze Track, Sort Items) | `src/app/App.tsx` |
 | Track list commands (selection, cursor, Renumber Track Order) | `src/views/browser/TrackTable.tsx` |
 | Locate track loaded on deck | `src/lib/locateLoaded.ts`, `src/views/browser/TrackTable.tsx` |
 | Deck commands | `src/views/player/Player.tsx` |
@@ -86,6 +86,7 @@ in the `b` scope. Keys are the Export preset's.
 | Extend Selection Up/Down (`extendUp`, `extendDown`) | shift + cursor up/down | none (list built-in: `CustomListBox::keyPressed`, #514) | no | key | TrackTable, `main`/`sub` |
 | Load on Player 1 (`loadPlayer1`) | enter, shift + enter | none | no | key; double-click a row; drag to the deck | Player, `a` |
 | Locate track loaded on deck (`locateLoaded`) | command + L | b139 | no | key; Track › Locate track loaded on deck (#430) | TrackTable (main browser), none |
+| Sort Items (`sortItems`) | unbound | 500d | Playlist › Sort Items | key once bound; tree context menu on a folder or the Playlists heading (#443) | App (the folder selected in the tree), none |
 | Renumber Track Order (`renumberTrackOrder`) | unbound | 500e | Playlist › Renumber Track Order | key once bound; column header menu | TrackTable, `main`/`sub` |
 | Volume, Volume Down (`volumeUp`, `volumeDown`) | command + F12, command + F11 | 3003, 3004 | no | key; the master knob sets the level directly | App, none |
 | Mute (`mute`) | command + F10 | 3005 | no | key | App, none |

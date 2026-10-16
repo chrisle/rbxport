@@ -14,6 +14,7 @@
 
 pub mod cache;
 mod category;
+pub mod collate;
 pub mod device;
 pub mod file_time;
 mod filter;

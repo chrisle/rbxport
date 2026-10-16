@@ -798,7 +798,7 @@ where
 fn touched_by(edit: &LibraryEdit) -> Touched {
     match edit {
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) |
-        LibraryEdit::MovePlaylist(_) | LibraryEdit::RemovePlaylistTracks(_) => Touched::Playlists,
+        LibraryEdit::MovePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_) => Touched::Playlists,
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
         LibraryEdit::Track(_) | LibraryEdit::TrackTags(_) => Touched::Tracks,
@@ -810,6 +810,7 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
         LibraryEdit::DeletePlaylist(value) => if undo { writer.restore_playlist(value) } else { writer.redo_playlist_deletion(value) }.map(|_| ()),
         LibraryEdit::RenamePlaylist(value) => if undo { writer.undo_rename(value) } else { writer.redo_rename(value) }.map(|_| ()),
         LibraryEdit::MovePlaylist(value) => if undo { writer.undo_move(value) } else { writer.redo_move(value) }.map(|_| ()),
+        LibraryEdit::SortPlaylists(value) => if undo { writer.undo_sort(value) } else { writer.redo_sort(value) }.map(|_| ()),
         LibraryEdit::RemovePlaylistTracks(value) => if undo { writer.undo_track_removal(value) } else { writer.redo_track_removal(value) }.map(|_| ()),
         LibraryEdit::Track(values) => {
             let ordered: Box<dyn Iterator<Item = _>> = if undo {
@@ -3588,6 +3589,23 @@ pub async fn move_playlist<R: tauri::Runtime>(
 ) -> AppResult<EditHistoryDto> {
     recorded_edit(app, state, "move_playlist", Touched::Playlists, "Move Playlist", move |w| {
         w.move_with_undo(&id, &parent, index).map(|(_, edit)| LibraryEdit::MovePlaylist(edit))
+    }).await
+}
+
+/// Sort Items on a folder, or on the Playlists heading (`folder` is
+/// `"root"`): its children in name order, by the collator rekordbox uses for
+/// `language` (the app's UI language), as one Undo step.
+#[tauri::command]
+pub async fn sort_playlist_items<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    folder: String,
+    language: Option<String>,
+) -> AppResult<EditHistoryDto> {
+    recorded_edit(app, state, "sort_playlist_items", Touched::Playlists, "Sort Items", move |w| {
+        let collator = rbl_index::collate::NameCollator::new(language.as_deref());
+        w.sort_children_with_undo(&folder, |a, b| collator.compare(a, b))
+            .map(|(_, edit)| LibraryEdit::SortPlaylists(edit))
     }).await
 }
 

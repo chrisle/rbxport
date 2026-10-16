@@ -1746,5 +1746,7 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Playlist cannot be edited or deleted while searching.": "プレイリストの検索中には、編集・削除できません。",
+  "Sorted {name}.": "Sorted {name}."
 }

@@ -634,6 +634,7 @@ pub fn run() {
             commands::create_folder,
             commands::rename_playlist,
             commands::move_playlist,
+            commands::sort_playlist_items,
             commands::delete_playlist,
             commands::undo_edit,
             commands::redo_edit,

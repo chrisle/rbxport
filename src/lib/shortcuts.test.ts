@@ -431,3 +431,22 @@ describe("Renumber Track Order (#413)", () => {
     expect(dispatch({ key: "r", metaKey: true, altKey: true }, MAC, { tagName: "INPUT" }, overrides)).toBeNull();
   });
 });
+
+describe("Sort Items (#443)", () => {
+  const binding = BINDINGS.find((b) => b.action === "sortItems");
+
+  it("is rekordbox's Playlist command 0x500d, which no preset binds", () => {
+    expect(binding).toMatchObject({ group: "Playlist", label: "Sort Items", command: "500d" });
+    expect(binding?.chord.key).toBe("");
+    for (const chord of [{ key: "s" }, { key: "s", metaKey: true }]) {
+      expect(actionFor(chord, MAC)).not.toBe("sortItems");
+      expect(actionFor(chord, WIN)).not.toBe("sortItems");
+    }
+  });
+
+  it("answers the key the Keyboard pane gives it", () => {
+    const overrides = { sortItems: { key: "s", metaKey: true, altKey: true } };
+    expect(actionFor({ key: "s", metaKey: true, altKey: true }, MAC, overrides)).toBe("sortItems");
+    expect(actionFor({ key: "s", ctrlKey: true, altKey: true }, WIN, overrides)).toBe("sortItems");
+  });
+});

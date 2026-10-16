@@ -1736,5 +1736,7 @@
   "Errors": "Errors",
   "Everything": "Everything",
   "Info and above": "Info and above",
-  "Warnings and errors": "Warnings and errors"
+  "Warnings and errors": "Warnings and errors",
+  "Playlist cannot be edited or deleted while searching.": "Die Wiedergabeliste kann beim Suchen nicht bearbeitet oder gelöscht werden.",
+  "Sorted {name}.": "Sorted {name}."
 }

@@ -105,12 +105,33 @@ describe("trackMenuFor", () => {
 });
 
 describe("treeMenu", () => {
-  it("offers root creation actions on the Playlists collection", () => {
+  it("offers root creation actions on the Playlists collection, and Sort Items while it holds anything", () => {
+    // #443: rekordbox's Playlists heading has Sort Items too, once there is
+    // something under it (showTreeViewPopupMenu @0x10011b3cc).
     expect(entriesOf(treeMenu("collection")).map((e) => e.label)).toEqual([
       "Create New Playlist",
       "Create New Intelligent Playlist",
       "Create New Folder",
+      "Sort Items",
     ]);
+    expect(entriesOf(treeMenu("collection", [], false)).map((e) => e.label)).toEqual([
+      "Create New Playlist",
+      "Create New Intelligent Playlist",
+      "Create New Folder",
+    ]);
+    expect(treeMenu("collection", [], false).at(-1)).not.toBe(SEPARATOR);
+  });
+
+  it("leaves Sort Items out of an empty folder's menu rather than greying it", () => {
+    const empty = treeMenu("folder", [], false);
+    expect(entriesOf(empty).map((e) => e.label)).not.toContain("Sort Items");
+    // Its separator goes with it: Delete Folder and Add To Shortcut keep one
+    // separator between them, not two.
+    const at = empty.findIndex((row) => row !== SEPARATOR && row.label === "Delete Folder");
+    expect(empty.slice(at + 1, at + 3)).toEqual([SEPARATOR, { label: "Add To Shortcut", action: "addToShortcut" }]);
+    const full = entriesOf(treeMenu("folder")).find((e) => e.label === "Sort Items");
+    expect(full?.action).toBe("sortItems");
+    expect(enabled(full ?? { label: "", action: null }, OPEN)).toBe(true);
   });
 
   it("is rekordbox's own list over a playlist, in its own order, less the cloud", () => {

@@ -11,6 +11,37 @@ import { createMockBackend } from "./backend-mock";
 import { TREE_ROOT } from "./types";
 
 describe("mock edits", () => {
+  it("sorts a folder's children by name as one Undo step, as sort_playlist_items does", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createFolder("Crate", TREE_ROOT);
+    const folder = (await backend.playlistTree()).find((n) => n.name === "Crate")!;
+    await backend.edits.createFolder("Bravo", folder.id);
+    const bravo = (await backend.playlistTree()).find((n) => n.name === "Bravo")!;
+    await backend.edits.createPlaylist("zulu", bravo.id);
+    for (const name of ["delta", "élan", "alpha", "elan"]) await backend.edits.createPlaylist(name, folder.id);
+    const children = async () => {
+      const tree = await backend.playlistTree();
+      const at = tree.findIndex((n) => n.id === folder.id);
+      const out: string[] = [];
+      for (let i = at + 1; i < tree.length && (tree[i]?.depth ?? 0) > folder.depth; i += 1) {
+        if (tree[i]?.depth === folder.depth + 1) out.push(tree[i]!.name);
+      }
+      return out;
+    };
+    expect(await children()).toEqual(["Bravo", "delta", "élan", "alpha", "elan"]);
+    const history = await backend.edits.sortItems(folder.id, "en");
+    expect(history.undoLabel).toBe("Sort Items");
+    expect(await children()).toEqual(["alpha", "Bravo", "delta", "elan", "élan"]);
+    // The folder keeps what is inside it.
+    const tree = await backend.playlistTree();
+    expect(tree[tree.findIndex((n) => n.name === "Bravo") + 1]?.name).toBe("zulu");
+    // Sorted already: nothing recorded.
+    expect((await backend.edits.sortItems(folder.id, "en")).undoLabel).toBe("Sort Items");
+    await backend.edits.undoEdit();
+    expect(await children()).toEqual(["Bravo", "delta", "élan", "alpha", "elan"]);
+    await expect(backend.edits.sortItems(tree.find((n) => n.name === "alpha")!.id)).rejects.toThrow();
+  });
+
   it("bumps the generation on every edit, as a real write does", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     const first = await backend.edits.createPlaylist("A", TREE_ROOT);

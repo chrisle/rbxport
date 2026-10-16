@@ -218,7 +218,10 @@ export const KEYMAP: Readonly<Record<KeymapGroup, readonly KeymapRow[]>> = {
   // bound by no preset [OBS: `MainComponent::getCommandInfo` @0x10096b078,
   // rekordbox 7.2.19 macOS, sets the info with no `addDefaultKeypress`]; the
   // reporter's Italian capture in #407 shows it there with an empty key.
+  // `Sort Items` is 0x500d, just above it and unbound the same way
+  // (`getCommandInfo` @0x10096b01c).
   "Playlist": [
+    { id: "500d", label: "Sort Items", key: null },
     { id: "500e", label: "Renumber Track Order", key: null },
   ],
   "Help": [

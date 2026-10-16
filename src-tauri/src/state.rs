@@ -62,6 +62,7 @@ pub(crate) enum LibraryEdit {
     DeletePlaylist(rbl_db::write::PlaylistDeletion),
     RenamePlaylist(rbl_db::write::PlaylistRename),
     MovePlaylist(rbl_db::write::PlaylistMove),
+    SortPlaylists(rbl_db::write::PlaylistSort),
     RemovePlaylistTracks(rbl_db::write::PlaylistTrackRemoval),
     Track(Vec<rbl_db::write::TrackEdit>),
     TrackTags(rbl_db::write::TrackTagEdit),
@@ -74,6 +75,7 @@ impl LibraryEdit {
             Self::RemovePlaylistTracks(edit) => edit.is_empty(),
             Self::Track(edits) => edits.is_empty() || edits.iter().all(rbl_db::write::TrackEdit::is_empty),
             Self::TrackTags(edit) => edit.is_empty(),
+            Self::SortPlaylists(edit) => edit.is_empty(),
             Self::RenamePlaylist(_) | Self::MovePlaylist(_) => false,
         }
     }

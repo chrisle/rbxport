@@ -995,6 +995,24 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         redo: () => restoreTree(afterTree),
       });
     },
+    sortItems: async (folder, language) => {
+      // The Playlists heading's run, or a folder's, one level down.
+      const at = folder === TREE_ROOT ? tree.findIndex((n) => n.kind === "collection") : tree.findIndex((n) => n.id === folder);
+      const head = tree[at];
+      if (!head || (folder !== TREE_ROOT && head.kind !== "folder")) throw new Error(`${folder} is not a folder`);
+      const blocks: TreeNode[][] = [];
+      const end = at + subtreeLength(at);
+      for (let i = at + 1; i < end; i += subtreeLength(i)) blocks.push(tree.slice(i, i + subtreeLength(i)));
+      // The backend uses ICU4X; the webview's Intl.Collator is ICU too, with
+      // the same defaults (tertiary, not numeric). The sort is stable.
+      const collator = new Intl.Collator(language);
+      const sorted = [...blocks].sort((a, b) => collator.compare(a[0]?.name ?? "", b[0]?.name ?? ""));
+      if (sorted.every((block, i) => block === blocks[i])) return historyState();
+      const before = treeSnapshot();
+      tree.splice(at + 1, end - at - 1, ...sorted.flat());
+      const afterTree = treeSnapshot();
+      return recordEdit({ label: "Sort Items", undo: () => restoreTree(before), redo: () => restoreTree(afterTree) });
+    },
     deletePlaylist: async (id) => {
       const beforeTree = treeSnapshot();
       const beforeMembership = membershipSnapshot();
