@@ -136,8 +136,8 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
     // rekordbox's own wording and place: File › Display All Missing Files,
     // between Import and the library items, opens the Missing File Manager
     // [OBS rekordbox 7.2.14, issue #201].
-    let missing = MenuItemBuilder::with_id("missing", label(labels, "Display All Missing Files"))
-        .build(app)?;
+    let missing =
+        MenuItemBuilder::with_id("missing", label(labels, "Display All Missing Files")).build(app)?;
     // rekordbox's own two, worded as its File menu words them.
     let import_xml = MenuItemBuilder::with_id("import-xml", label(labels, "Import rekordbox xml…"))
         .build(app)?;
