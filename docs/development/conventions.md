@@ -28,6 +28,7 @@ configuration or formatting gate in the documented validation commands.
 - Sorting, filtering, and searching the library belong in `rbl-index`. Render fetched row windows rather than transforming the collection in React.
 - Use events and observers for updates. ESLint forbids `setInterval` polling and deep-cloning row arrays.
 - Follow React hook dependency rules. A leading underscore marks an argument or variable deliberately unused by a required signature.
+- A keyboard action is a command. Register what it does with `useCommands` (`src/lib/commands.ts`) in the component that owns its state, and have the key handler, menu item and any other entry point call `runCommand`; a key handler only decides whether a press is the command. See [Keyboard commands](../reference/shortcut-commands.md).
 - Use `console.warn` or `console.error` for meaningful diagnostics; frontend linting rejects ordinary console output outside test exceptions.
 
 ## User-facing strings and generated files
