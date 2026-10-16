@@ -1685,5 +1685,16 @@
   "byte": "byte",
   "KB": "KB",
   "MB": "MB",
-  "GB": "GB"
+  "GB": "GB",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}: »{title}« er ændret på USB-drevet. Importér ændringerne, før du synkroniserer.",
+  "{label}: device-only track '{title}' would be lost": "{label}: nummeret »{title}«, som kun findes på enheden, ville gå tabt",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}: playlisten »{name}« er ændret på USB-drevet. Importér eller afstem den, før du synkroniserer.",
+  "Device-only playlist '{name}' would be lost": "Playlisten »{name}«, som kun findes på enheden, ville gå tabt",
+  "My Tag '{name}' changed on the USB": "My Tag »{name}« er ændret på USB-drevet",
+  "My Tags changed on USB track {id}": "My Tags er ændret på USB-nummer {id}",
+  "OneLibrary integrity check failed: {integrity}": "Integritetskontrol af OneLibrary mislykkedes: {integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "OneLibrary-skemaet {version} understøttes ikke; enheden blev ikke ændret.",
+  "Missing {label} output": "Output for {label} mangler",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "{label} indeholder sletninger foretaget på enheden. Afstem dem, før du synkroniserer.",
+  "Cannot read Device Library: {e}": "Device Library kan ikke læses: {e}"
 }

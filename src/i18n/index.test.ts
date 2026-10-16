@@ -18,6 +18,13 @@ describe("localization", () => {
     expect(translate("rbxport-only wording", de)).toBe("rbxport-only wording");
   });
 
+  it("translates backend messages that carry a track or playlist name", () => {
+    expect(translate("OneLibrary: 'Intro Mix' changed on the USB. Import its changes before syncing.", de))
+      .toBe("OneLibrary: „Intro Mix“ wurde auf dem USB-Stick geändert. Importieren Sie die Änderungen vor dem Synchronisieren.");
+    expect(translate("Device-only playlist 'Warmup' would be lost", de))
+      .toBe("Die nur auf dem Gerät vorhandene Wiedergabeliste „Warmup“ ginge verloren");
+  });
+
   it("translates runtime messages while preserving their inserted details", () => {
     const catalog = { "Writing to {device}…": "Schreibe auf {device}…" };
     expect(translate("Writing to USB A…", catalog)).toBe("Schreibe auf USB A…");

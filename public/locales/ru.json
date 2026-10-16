@@ -1694,5 +1694,16 @@
   "byte": "байт",
   "KB": "КБ",
   "MB": "МБ",
-  "GB": "ГБ"
+  "GB": "ГБ",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}: «{title}» изменён на USB. Импортируйте изменения перед синхронизацией.",
+  "{label}: device-only track '{title}' would be lost": "{label}: трек «{title}», который есть только на устройстве, будет потерян",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}: плейлист «{name}» изменён на USB. Импортируйте или согласуйте его перед синхронизацией.",
+  "Device-only playlist '{name}' would be lost": "Плейлист «{name}», который есть только на устройстве, будет потерян",
+  "My Tag '{name}' changed on the USB": "My Tag «{name}» изменён на USB",
+  "My Tags changed on USB track {id}": "My Tags изменены для USB-трека {id}",
+  "OneLibrary integrity check failed: {integrity}": "Проверка целостности OneLibrary не пройдена: {integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "Неподдерживаемая схема OneLibrary {version}; устройство не изменено.",
+  "Missing {label} output": "Отсутствует вывод {label}",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "{label} содержит удаления, сделанные на устройстве. Согласуйте их перед синхронизацией.",
+  "Cannot read Device Library: {e}": "Не удаётся прочитать Device Library: {e}"
 }

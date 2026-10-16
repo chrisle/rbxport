@@ -1689,5 +1689,16 @@
   "byte": "bájt",
   "KB": "KB",
   "MB": "MB",
-  "GB": "GB"
+  "GB": "GB",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}: a(z) „{title}” megváltozott az USB-n. Szinkronizálás előtt importálja a módosításait.",
+  "{label}: device-only track '{title}' would be lost": "{label}: a csak az eszközön lévő „{title}” szám elveszne",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}: a(z) „{name}” lejátszólista megváltozott az USB-n. Szinkronizálás előtt importálja vagy egyeztesse.",
+  "Device-only playlist '{name}' would be lost": "A csak az eszközön lévő „{name}” lejátszólista elveszne",
+  "My Tag '{name}' changed on the USB": "A(z) „{name}” My Tag megváltozott az USB-n",
+  "My Tags changed on USB track {id}": "A My Tagek megváltoztak a(z) {id} azonosítójú USB-s számon",
+  "OneLibrary integrity check failed: {integrity}": "A OneLibrary sértetlenségi ellenőrzése sikertelen: {integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "Nem támogatott OneLibrary-séma: {version}; az eszköz nem módosult.",
+  "Missing {label} output": "Hiányzik a(z) {label} kimenete",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "A(z) {label} az eszközön végzett törléseket tartalmaz. Szinkronizálás előtt egyeztesse őket.",
+  "Cannot read Device Library: {e}": "A Device Library nem olvasható: {e}"
 }

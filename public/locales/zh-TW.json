@@ -1682,7 +1682,7 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.",
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "此 USB 屬於不同的或較舊的未經驗證的主庫。在更改其所有權之前，將其內容匯入 rekordbox。",
-  "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary 包含此匯出將取代的提示記錄。首先导入 rekordbox 中的提示。",
+  "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary 包含此匯出將取代的提示記錄。請先在 rekordbox 中匯入提示。",
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 歷史記錄仍會引用已刪除的曲目。首先匯入並清除 rekordbox 中的歷史記錄。",
   "rekordbox is running. Quit it before analysing.": "rekordbox 正在執行。請先結束再進行分析。",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox 正在執行。請先結束再編輯樂句。",
@@ -1694,5 +1694,16 @@
   "byte": "位元組",
   "KB": "KB",
   "MB": "MB",
-  "GB": "GB"
+  "GB": "GB",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}：「{title}」在 USB 上已變更。同步前請先匯入其變更。",
+  "{label}: device-only track '{title}' would be lost": "{label}：僅存在於裝置上的曲目「{title}」將會遺失",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}：播放清單「{name}」在 USB 上已變更。同步前請先匯入或協調該播放清單。",
+  "Device-only playlist '{name}' would be lost": "僅存在於裝置上的播放清單「{name}」將會遺失",
+  "My Tag '{name}' changed on the USB": "My Tag「{name}」在 USB 上已變更",
+  "My Tags changed on USB track {id}": "USB 曲目 {id} 的 My Tags 已變更",
+  "OneLibrary integrity check failed: {integrity}": "OneLibrary 完整性檢查失敗：{integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "不支援的 OneLibrary 結構 {version}；裝置未被變更。",
+  "Missing {label} output": "缺少 {label} 輸出",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "{label} 包含在裝置上進行的刪除。同步前請先協調這些刪除。",
+  "Cannot read Device Library: {e}": "無法讀取 Device Library：{e}"
 }

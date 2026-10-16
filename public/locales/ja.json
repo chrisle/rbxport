@@ -1698,5 +1698,16 @@
   "byte": "バイト",
   "KB": "KB",
   "MB": "MB",
-  "GB": "GB"
+  "GB": "GB",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}：「{title}」が USB 上で変更されました。同期する前に変更内容を読み込んでください。",
+  "{label}: device-only track '{title}' would be lost": "{label}：デバイスにしかないトラック「{title}」が失われます",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}：プレイリスト「{name}」が USB 上で変更されました。同期する前に読み込むか調整してください。",
+  "Device-only playlist '{name}' would be lost": "デバイスにしかないプレイリスト「{name}」が失われます",
+  "My Tag '{name}' changed on the USB": "My Tag「{name}」が USB 上で変更されました",
+  "My Tags changed on USB track {id}": "USB のトラック {id} の My Tags が変更されました",
+  "OneLibrary integrity check failed: {integrity}": "OneLibrary の整合性チェックに失敗しました：{integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "サポートされていない OneLibrary スキーマ {version} です。デバイスは変更されていません。",
+  "Missing {label} output": "{label} の出力がありません",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "{label} にデバイス側で行われた削除が含まれています。同期する前に調整してください。",
+  "Cannot read Device Library: {e}": "Device Library を読み取れません：{e}"
 }

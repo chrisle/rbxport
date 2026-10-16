@@ -1694,5 +1694,16 @@
   "byte": "字节",
   "KB": "KB",
   "MB": "MB",
-  "GB": "GB"
+  "GB": "GB",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}：“{title}”在 USB 上已更改。同步前请先导入其更改。",
+  "{label}: device-only track '{title}' would be lost": "{label}：仅存在于设备上的曲目“{title}”将会丢失",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}：播放列表“{name}”在 USB 上已更改。同步前请先导入或协调该播放列表。",
+  "Device-only playlist '{name}' would be lost": "仅存在于设备上的播放列表“{name}”将会丢失",
+  "My Tag '{name}' changed on the USB": "My Tag“{name}”在 USB 上已更改",
+  "My Tags changed on USB track {id}": "USB 曲目 {id} 的 My Tags 已更改",
+  "OneLibrary integrity check failed: {integrity}": "OneLibrary 完整性检查失败：{integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "不支持的 OneLibrary 架构 {version}；设备未被更改。",
+  "Missing {label} output": "缺少 {label} 输出",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "{label} 包含在设备上进行的删除。同步前请先协调这些删除。",
+  "Cannot read Device Library: {e}": "无法读取 Device Library：{e}"
 }

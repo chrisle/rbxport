@@ -1691,5 +1691,16 @@
   "byte": "octet",
   "KB": "Ko",
   "MB": "Mo",
-  "GB": "Go"
+  "GB": "Go",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label} : « {title} » a été modifié sur la clé USB. Importez ses modifications avant de synchroniser.",
+  "{label}: device-only track '{title}' would be lost": "{label} : la piste « {title} », présente uniquement sur l’appareil, serait perdue",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label} : la liste de lecture « {name} » a été modifiée sur la clé USB. Importez-la ou réconciliez-la avant de synchroniser.",
+  "Device-only playlist '{name}' would be lost": "La liste de lecture « {name} », présente uniquement sur l’appareil, serait perdue",
+  "My Tag '{name}' changed on the USB": "Le My Tag « {name} » a été modifié sur la clé USB",
+  "My Tags changed on USB track {id}": "Les My Tags ont été modifiés sur la piste USB {id}",
+  "OneLibrary integrity check failed: {integrity}": "Échec de la vérification d’intégrité de OneLibrary : {integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "Schéma OneLibrary {version} non pris en charge ; l’appareil n’a pas été modifié.",
+  "Missing {label} output": "Sortie {label} manquante",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "{label} contient des suppressions effectuées sur l’appareil. Réconciliez-les avant de synchroniser.",
+  "Cannot read Device Library: {e}": "Impossible de lire la Device Library : {e}"
 }

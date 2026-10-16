@@ -1690,5 +1690,16 @@
   "byte": "byte",
   "KB": "KB",
   "MB": "MB",
-  "GB": "GB"
+  "GB": "GB",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}: „{title}“ se na USB změnila. Před synchronizací naimportujte její změny.",
+  "{label}: device-only track '{title}' would be lost": "{label}: skladba „{title}“, která je jen na zařízení, by se ztratila",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}: seznam skladeb „{name}“ se na USB změnil. Před synchronizací jej naimportujte nebo sjednoťte.",
+  "Device-only playlist '{name}' would be lost": "Seznam skladeb „{name}“, který je jen na zařízení, by se ztratil",
+  "My Tag '{name}' changed on the USB": "My Tag „{name}“ se na USB změnil",
+  "My Tags changed on USB track {id}": "My Tags se změnily u USB skladby {id}",
+  "OneLibrary integrity check failed: {integrity}": "Kontrola integrity OneLibrary selhala: {integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "Nepodporované schéma OneLibrary {version}; zařízení zůstalo beze změny.",
+  "Missing {label} output": "Chybí výstup {label}",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "{label} obsahuje smazání provedená na zařízení. Před synchronizací je sjednoťte.",
+  "Cannot read Device Library: {e}": "Device Library nelze přečíst: {e}"
 }

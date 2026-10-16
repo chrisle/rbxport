@@ -1689,5 +1689,16 @@
   "byte": "바이트",
   "KB": "KB",
   "MB": "MB",
-  "GB": "GB"
+  "GB": "GB",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}: ‘{title}’이(가) USB에서 변경되었습니다. 동기화하기 전에 변경 내용을 가져오세요.",
+  "{label}: device-only track '{title}' would be lost": "{label}: 장치에만 있는 트랙 ‘{title}’을(를) 잃게 됩니다",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}: 재생목록 ‘{name}’이(가) USB에서 변경되었습니다. 동기화하기 전에 가져오거나 조정하세요.",
+  "Device-only playlist '{name}' would be lost": "장치에만 있는 재생목록 ‘{name}’을(를) 잃게 됩니다",
+  "My Tag '{name}' changed on the USB": "My Tag ‘{name}’이(가) USB에서 변경되었습니다",
+  "My Tags changed on USB track {id}": "USB 트랙 {id}의 My Tags가 변경되었습니다",
+  "OneLibrary integrity check failed: {integrity}": "OneLibrary 무결성 검사 실패: {integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "지원되지 않는 OneLibrary 스키마 {version}. 장치는 변경되지 않았습니다.",
+  "Missing {label} output": "{label} 출력이 없습니다",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "{label}에 장치에서 수행한 삭제가 있습니다. 동기화하기 전에 조정하세요.",
+  "Cannot read Device Library: {e}": "Device Library를 읽을 수 없습니다: {e}"
 }

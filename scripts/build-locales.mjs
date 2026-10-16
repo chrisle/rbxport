@@ -122,6 +122,19 @@ const lowercaseRustStrings = new Set([
   "rekordbox is running. Quit it before analysing.",
   "rekordbox is running. Quit it before editing phrases.",
   "rekordbox changed the device track identities. Reconcile this device before reusing its previous selection.",
+  // Messages built with format! from names or values; the key is the format
+  // string with its arguments named, which the catalog matches as a template.
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.",
+  "{label}: device-only track '{title}' would be lost",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.",
+  "Device-only playlist '{name}' would be lost",
+  "My Tag '{name}' changed on the USB",
+  "My Tags changed on USB track {id}",
+  "OneLibrary integrity check failed: {integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.",
+  "Missing {label} output",
+  "{label} contains device-side deletions. Reconcile them before syncing.",
+  "Cannot read Device Library: {e}",
 ]);
 
 async function rustErrorStrings() {

@@ -1691,5 +1691,16 @@
   "byte": "byte",
   "KB": "KB",
   "MB": "MB",
-  "GB": "GB"
+  "GB": "GB",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}: το «{title}» άλλαξε στο USB. Εισαγάγετε τις αλλαγές του πριν από τον συγχρονισμό.",
+  "{label}: device-only track '{title}' would be lost": "{label}: το κομμάτι «{title}», που υπάρχει μόνο στη συσκευή, θα χανόταν",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}: η λίστα αναπαραγωγής «{name}» άλλαξε στο USB. Εισαγάγετέ την ή συμφιλιώστε την πριν από τον συγχρονισμό.",
+  "Device-only playlist '{name}' would be lost": "Η λίστα αναπαραγωγής «{name}», που υπάρχει μόνο στη συσκευή, θα χανόταν",
+  "My Tag '{name}' changed on the USB": "Το My Tag «{name}» άλλαξε στο USB",
+  "My Tags changed on USB track {id}": "Τα My Tags άλλαξαν στο κομμάτι USB {id}",
+  "OneLibrary integrity check failed: {integrity}": "Ο έλεγχος ακεραιότητας του OneLibrary απέτυχε: {integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "Μη υποστηριζόμενο σχήμα OneLibrary {version}· η συσκευή δεν τροποποιήθηκε.",
+  "Missing {label} output": "Λείπει η έξοδος {label}",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "Το {label} περιέχει διαγραφές που έγιναν στη συσκευή. Συμφιλιώστε τες πριν από τον συγχρονισμό.",
+  "Cannot read Device Library: {e}": "Δεν είναι δυνατή η ανάγνωση της Device Library: {e}"
 }

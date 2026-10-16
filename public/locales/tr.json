@@ -1690,5 +1690,16 @@
   "byte": "bayt",
   "KB": "KB",
   "MB": "MB",
-  "GB": "GB"
+  "GB": "GB",
+  "{label}: '{title}' changed on the USB. Import its changes before syncing.": "{label}: ‘{title}’ USB’de değişti. Eşitlemeden önce değişikliklerini içe aktarın.",
+  "{label}: device-only track '{title}' would be lost": "{label}: yalnızca cihazda bulunan ‘{title}’ parçası kaybolacak",
+  "{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.": "{label}: ‘{name}’ çalma listesi USB’de değişti. Eşitlemeden önce içe aktarın veya uzlaştırın.",
+  "Device-only playlist '{name}' would be lost": "Yalnızca cihazda bulunan ‘{name}’ çalma listesi kaybolacak",
+  "My Tag '{name}' changed on the USB": "‘{name}’ My Tag’i USB’de değişti",
+  "My Tags changed on USB track {id}": "My Tag’ler {id} numaralı USB parçasında değişti",
+  "OneLibrary integrity check failed: {integrity}": "OneLibrary bütünlük denetimi başarısız oldu: {integrity}",
+  "Unsupported OneLibrary schema {version}; the device was left unchanged.": "Desteklenmeyen OneLibrary şeması {version}; cihaz değiştirilmedi.",
+  "Missing {label} output": "{label} çıktısı eksik",
+  "{label} contains device-side deletions. Reconcile them before syncing.": "{label}, cihaz tarafında yapılmış silmeler içeriyor. Eşitlemeden önce bunları uzlaştırın.",
+  "Cannot read Device Library: {e}": "Device Library okunamıyor: {e}"
 }

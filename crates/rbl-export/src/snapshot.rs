@@ -243,8 +243,8 @@ impl Snapshot {
                     && !next.my_tags.contains(tag)
                 {
                     return Err(ExportError::Conflict(format!(
-                        "My Tag '{}' changed on the USB",
-                        tag.name
+                        "My Tag '{name}' changed on the USB",
+                        name = tag.name
                     )));
                 }
             }
@@ -534,7 +534,7 @@ fn read_one_into(out: &mut Snapshot, path: &Path) -> Result<()> {
         .map_err(sql)?;
     if integrity != "ok" {
         return Err(ExportError::Conflict(format!(
-            "OneLibrary integrity check failed: {integrity}"
+            "OneLibrary integrity check failed: {integrity}",
         )));
     }
     let version: String = conn
@@ -717,14 +717,14 @@ fn check_database_changes(
         });
         if original.is_some() && !unchanged && next != Some(track) {
             return Err(ExportError::Conflict(format!(
-                "{label}: '{}' changed on the USB. Import its changes before syncing.",
-                track.title
+                "{label}: '{title}' changed on the USB. Import its changes before syncing.",
+                title = track.title
             )));
         }
         if original.is_none() && next.is_none() {
             return Err(ExportError::Conflict(format!(
-                "{label}: device-only track '{}' would be lost",
-                track.title
+                "{label}: device-only track '{title}' would be lost",
+                title = track.title
             )));
         }
     }
@@ -740,12 +740,12 @@ fn check_database_changes(
                 && a.tracks == b.tracks
         };
         if original.is_some_and(|b| !same(b, playlist)) && !next.is_some_and(|n| same(n, playlist)) && !device_additions.contains(&playlist.id) {
-            return Err(ExportError::Conflict(format!("{label}: playlist '{}' changed on the USB. Import or reconcile it before syncing.", playlist.name)));
+            return Err(ExportError::Conflict(format!("{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.", name = playlist.name)));
         }
         if original.is_none() && next.is_none() {
             return Err(ExportError::Conflict(format!(
-                "Device-only playlist '{}' would be lost",
-                playlist.name
+                "Device-only playlist '{name}' would be lost",
+                name = playlist.name
             )));
         }
     }
