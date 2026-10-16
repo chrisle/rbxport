@@ -20,11 +20,13 @@ use std::{
 };
 
 use tauri::menu::{
-    AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
+    AboutMetadata, Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem, Submenu, SubmenuBuilder,
 };
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 type Labels = HashMap<String, String>;
+/// Menu item ids and whether each is live.
+type Enabled = HashMap<String, bool>;
 
 fn saved_labels() -> &'static RwLock<Labels> {
     static LABELS: OnceLock<RwLock<Labels>> = OnceLock::new();
@@ -251,6 +253,7 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
         .build()?;
 
     let track = track_menu(app, labels)?;
+    let playlist = playlist_menu(app, labels)?;
 
     // History follows frontend focus (text field or active deck). Clipboard
     // items stay predefined so macOS forwards them to the webview's fields.
@@ -284,28 +287,195 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
     let help = SubmenuBuilder::new(app, label(labels, "Help"))
         .item(&MenuItemBuilder::with_id("report-bug", label(labels, "Report bug…")).build(app)?)
         .build()?;
-    Menu::with_items(app, &[&application, &file, &edit, &track, &view, &help])
+    Menu::with_items(
+        app,
+        &[&application, &file, &edit, &track, &playlist, &view, &help],
+    )
 }
 
-/// rekordbox's Track menu: Analyze Track (4000, which rekordbox's menu bar
-/// lists without a key) and Locate track loaded on deck on command + L
-/// (b139). The frontend runs the same command the key does.
+/// A row of the Track or Playlist menu: an item the frontend runs and greys
+/// (see [`set_menu_enabled`]), a separator, or a submenu of more rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Row {
+    /// An item: its id, which is also what the click sends, and its label key.
+    Item(&'static str, &'static str),
+    Separator,
+    /// A submenu: its id, its label key and its rows.
+    Sub(&'static str, &'static str, &'static [Row]),
+}
+
+/// rekordbox's Track menu, in its order and with its separators, holding
+/// only what rbxport has [OBS static: `MainComponent::getMenuForIndex`
+/// @0x100964638, rekordbox 7.2.19 macOS; OBS: the Windows menu bar, issue
+/// #513]. Left out: Add To Playlist and Export Track (lists of playlists and
+/// sticks, not yet here), Cloud Library Sync and Show in Spotify.
+///
+/// The items carry no key: rekordbox's Export key map binds none of them
+/// (`Analyze Track`'s shift + command + A is the browser's own key, kept
+/// out of the menu so that a Windows accelerator never fires twice).
+const TRACK_MENU: &[Row] = &[
+    Row::Item("import-to-collection", "Import To Collection"),
+    Row::Item("analyze-track", "Analyze Track"),
+    // `addSubMenu` with the two command items under it; the items show the
+    // commands' own names, 0x4012 and 0x4013.
+    Row::Sub(
+        "analysis-lock",
+        "Analysis Lock",
+        &[
+            Row::Item("analysis-lock-on", "Analysis Lock On"),
+            Row::Item("analysis-lock-off", "Analysis Lock Off"),
+        ],
+    ),
+    Row::Separator,
+    Row::Item("reload-tag", "Reload Tag"),
+    Row::Separator,
+    Row::Item("remove-from-collection", "Remove from Collection"),
+    Row::Separator,
+    Row::Item("show-in-finder", "Show in Finder"),
+    Row::Item("auto-relocate", "Auto Relocate"),
+    Row::Item("relocate", "Relocate"),
+];
+
+/// rekordbox's Playlist menu, in its order, holding only what rbxport has
+/// [OBS static: `getMenuForIndex` @0x100966490-@0x100966988, rekordbox
+/// 7.2.19 macOS; OBS: the Windows menu bar, issue #513]. Left out: Batch
+/// Auto Upload setting, Import Playlist, Copy to Playlists category, Playlist
+/// display setting and the sharing items.
+const PLAYLIST_MENU: &[Row] = &[
+    Row::Item("create-playlist", "Create New Playlist"),
+    Row::Item(
+        "create-intelligent-playlist",
+        "Create New Intelligent Playlist",
+    ),
+    Row::Item("create-folder", "Create New Folder"),
+    Row::Separator,
+    Row::Item("delete-playlist", "Delete Playlist"),
+    Row::Separator,
+    // Sort Items (0x500d) goes here, before Renumber Track Order (#443).
+    Row::Item("renumber-track-order", "Renumber Track Order"),
+    // Titled with the String rekordbox builds at 0x101b99558; the items show
+    // the commands' own names, 0x5005 and 0x5006.
+    Row::Sub(
+        "export-playlist-file",
+        "Export a playlist to a file",
+        &[
+            Row::Item("export-playlist-txt", "Export a playlist to a file (*.txt)"),
+            Row::Item(
+                "export-playlist-m3u8",
+                "Export a playlist to a file for music apps (*.m3u8)",
+            ),
+        ],
+    ),
+];
+
+/// Which of the rows above are greyed. Nothing is live until the frontend
+/// says so: rekordbox greys them all until a track list or the tree has the
+/// keyboard focus [OBS: a fresh rekordbox, issue #513].
+fn saved_enabled() -> &'static RwLock<Enabled> {
+    static ENABLED: OnceLock<RwLock<Enabled>> = OnceLock::new();
+    ENABLED.get_or_init(|| RwLock::new(Enabled::new()))
+}
+
+fn is_enabled(id: &str) -> bool {
+    saved_enabled()
+        .read()
+        .ok()
+        .and_then(|enabled| enabled.get(id).copied())
+        .unwrap_or(false)
+}
+
+fn add_rows<'a, R: Runtime>(
+    app: &'a AppHandle<R>,
+    labels: &Labels,
+    mut menu: SubmenuBuilder<'a, R, AppHandle<R>>,
+    rows: &[Row],
+) -> tauri::Result<SubmenuBuilder<'a, R, AppHandle<R>>> {
+    for row in rows {
+        menu = match *row {
+            Row::Separator => menu.separator(),
+            Row::Item(id, key) => menu.item(
+                &MenuItemBuilder::with_id(id, label(labels, key))
+                    .enabled(is_enabled(id))
+                    .build(app)?,
+            ),
+            Row::Sub(id, key, items) => {
+                let sub =
+                    SubmenuBuilder::with_id(app, id, label(labels, key)).enabled(is_enabled(id));
+                menu.item(&add_rows(app, labels, sub, items)?.build()?)
+            }
+        };
+    }
+    Ok(menu)
+}
+
+/// The Track menu, and after it Locate track loaded on deck on command + L
+/// (b139), which rekordbox keeps out of its menu bar. The frontend runs the
+/// same command each item's key or context-menu entry runs.
 fn track_menu<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::Result<Submenu<R>> {
-    SubmenuBuilder::new(app, label(labels, "Track"))
-        .item(
-            &MenuItemBuilder::with_id("analyze-track", label(labels, "Analyze Track"))
-                .build(app)?,
+    add_rows(
+        app,
+        labels,
+        SubmenuBuilder::new(app, label(labels, "Track")),
+        TRACK_MENU,
+    )?
+    .separator()
+    .item(
+        &MenuItemBuilder::with_id(
+            "locate-loaded",
+            label(labels, "Locate track loaded on deck"),
         )
-        .separator()
-        .item(
-            &MenuItemBuilder::with_id(
-                "locate-loaded",
-                label(labels, "Locate track loaded on deck"),
-            )
-            .accelerator("CmdOrCtrl+L")
-            .build(app)?,
-        )
-        .build()
+        .accelerator("CmdOrCtrl+L")
+        .build(app)?,
+    )
+    .build()
+}
+
+fn playlist_menu<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::Result<Submenu<R>> {
+    add_rows(
+        app,
+        labels,
+        SubmenuBuilder::new(app, label(labels, "Playlist")),
+        PLAYLIST_MENU,
+    )?
+    .build()
+}
+
+/// Greys or enables Track and Playlist menu items by id, as the selection and
+/// the focus change; the frontend works out which (`src/lib/menuBar.ts`).
+/// Kept across [`set_menu_labels`] rebuilds.
+#[tauri::command]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Tauri's AppHandle extractor is injected by value"
+)]
+pub fn set_menu_enabled<R: Runtime>(app: AppHandle<R>, items: Enabled) -> Result<(), String> {
+    if let Ok(mut saved) = saved_enabled().write() {
+        saved.extend(items.iter().map(|(id, on)| (id.clone(), *on)));
+    }
+    let Some(menu) = app.menu() else {
+        return Ok(());
+    };
+    apply_enabled(menu.items().map_err(|error| error.to_string())?, &items)
+}
+
+fn apply_enabled<R: Runtime>(kinds: Vec<MenuItemKind<R>>, items: &Enabled) -> Result<(), String> {
+    for kind in kinds {
+        match kind {
+            MenuItemKind::MenuItem(item) => {
+                if let Some(on) = items.get(&item.id().0) {
+                    item.set_enabled(*on).map_err(|error| error.to_string())?;
+                }
+            }
+            MenuItemKind::Submenu(sub) => {
+                if let Some(on) = items.get(&sub.id().0) {
+                    sub.set_enabled(*on).map_err(|error| error.to_string())?;
+                }
+                apply_enabled(sub.items().map_err(|error| error.to_string())?, items)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Rebuilds the native menu from the same translated labels as the web UI.
@@ -336,4 +506,66 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         return;
     }
     let _ = app.emit(EVENT, id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Row, PLAYLIST_MENU, TRACK_MENU};
+
+    fn ids(rows: &[Row]) -> Vec<&'static str> {
+        rows.iter()
+            .flat_map(|row| match *row {
+                Row::Item(id, _) => vec![id],
+                Row::Separator => vec!["-"],
+                Row::Sub(id, _, items) => {
+                    let mut all = vec![id];
+                    all.extend(ids(items));
+                    all
+                }
+            })
+            .collect()
+    }
+
+    // rekordbox 7.2.19's order (getMenuForIndex @0x100964638), less what
+    // rbxport does not have.
+    #[test]
+    fn track_menu_keeps_rekordbox_order() {
+        assert_eq!(
+            ids(TRACK_MENU),
+            [
+                "import-to-collection",
+                "analyze-track",
+                "analysis-lock",
+                "analysis-lock-on",
+                "analysis-lock-off",
+                "-",
+                "reload-tag",
+                "-",
+                "remove-from-collection",
+                "-",
+                "show-in-finder",
+                "auto-relocate",
+                "relocate",
+            ]
+        );
+    }
+
+    #[test]
+    fn playlist_menu_keeps_rekordbox_order() {
+        assert_eq!(
+            ids(PLAYLIST_MENU),
+            [
+                "create-playlist",
+                "create-intelligent-playlist",
+                "create-folder",
+                "-",
+                "delete-playlist",
+                "-",
+                "renumber-track-order",
+                "export-playlist-file",
+                "export-playlist-txt",
+                "export-playlist-m3u8",
+            ]
+        );
+    }
 }
