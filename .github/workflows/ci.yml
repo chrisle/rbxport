@@ -88,6 +88,9 @@ jobs:
     runs-on: [self-hosted, linux, x64]
     outputs:
       source_ref: ${{ steps.commit.outputs.source_ref }}
+    env:
+      # Keep equal to validate-rust.yml so both jobs restore the same cache.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
         with:

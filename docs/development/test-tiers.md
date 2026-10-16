@@ -73,5 +73,10 @@ These are agreed but not implemented. Each is its own change.
 4. **One compile for Clippy, its autofix and the tests.** Today the autofix
    job, the Clippy step and the test step each build the workspace cold on
    separate ephemeral runners.
-5. **Clippy and tests as parallel jobs**, and a smaller CI build profile
-   (`CARGO_PROFILE_DEV_DEBUG=0`) with `cargo test` skipping examples.
+5. **Clippy and tests as parallel jobs.**
+6. **A compile cache that survives the ephemeral runners** (`sccache` with a
+   size cap), once the shared `rust-cache` key has been measured.
+
+CI builds without debug info (`CARGO_PROFILE_DEV_DEBUG=0`), and `cargo test`
+skips examples because Clippy already checks them. Both exist to keep six
+concurrent jobs inside one runner disk.
