@@ -1122,6 +1122,10 @@ fn export_cancellable_inner(
     if ids.iter().collect::<BTreeSet<_>>().len() != ids.len() || playlists.iter().any(|p| p.track_indices.iter().any(|i| *i >= tracks.len()) || (p.folder && !p.track_indices.is_empty())) {
         return Err(ExportError::Conflict("Duplicate tracks or invalid playlist membership".into()));
     }
+    // Before anything is copied: a player's cue on a track this sync takes
+    // off the stick stops it, and should at once rather than after every
+    // copy. The same check runs again on what was written.
+    before.check_removed_cues(previous.as_ref(), &ids.iter().copied().collect(), &[])?;
     // Entries are taken out as they are matched; whatever is left at the end
     // is what the selection no longer holds.
     let mut stale: BTreeMap<String, &ManifestTrack> = previous
@@ -1489,15 +1493,32 @@ fn export_cancellable_inner(
             let loaded = incremental::load_analysis(track);
             let missing = track.analysis_source.as_ref().is_some_and(|p| !p.is_file());
             if missing || loaded.is_err() {
-                let retained = carried.filter(|c| (unchanged || retained_audio || in_place || adopted || moved.is_some())
-                    && !c.anlz_dir.is_empty() && c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/')))));
+                let retained = carried.filter(|c| (unchanged || retained_audio || in_place || adopted || moved.is_some()) && !c.anlz_dir.is_empty());
+                let (kept, is_kept) = match retained {
+                    Some(c) => {
+                        let fallback = SourceTrack { analysis_source: Some(under(destination, &format!("{}/ANLZ0000.DAT", c.anlz_dir))), ..Default::default() };
+                        if c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/')))) {
+                            (incremental::load_analysis(&fallback)?, true)
+                        } else {
+                            // Changed since the last sync, most likely by a
+                            // player's cue or grid edit. The library has no
+                            // analysis to replace it with, so dropping it
+                            // would delete the track's waveforms, beat grid
+                            // and cues from the stick for nothing (#522).
+                            // Keep it whenever it still reads as analysis;
+                            // the library's cues, if any, still go over it
+                            // below.
+                            let kept = incremental::load_analysis(&fallback).unwrap_or_default();
+                            let is_kept = !kept.is_empty();
+                            (kept, is_kept)
+                        }
+                    }
+                    None => (Vec::new(), false),
+                };
                 let detail = loaded.as_ref().err().map(ToString::to_string);
                 report.warnings.push(ExportWarning { track_id: track.id, title: track.title.clone(),
-                    reason: if retained.is_some() { "analysis-kept" } else { "analysis-unavailable" }.into(), detail });
-                if let Some(c) = retained {
-                    let fallback = SourceTrack { analysis_source: Some(under(destination, &format!("{}/ANLZ0000.DAT", c.anlz_dir))), ..Default::default() };
-                    incremental::load_analysis(&fallback)?
-                } else { Vec::new() }
+                    reason: if is_kept { "analysis-kept" } else { "analysis-unavailable" }.into(), detail });
+                kept
             } else { loaded? }
         };
         let track = &hydrated;

@@ -1691,7 +1691,6 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.",
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Αυτό το USB ανήκει σε διαφορετική ή παλαιότερη μη επαληθευμένη κύρια βιβλιοθήκη. Εισαγάγετε τα περιεχόμενά του στο rekordbox πριν αλλάξετε την ιδιοκτησία του.",
-  "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "Η OneLibrary περιέχει εγγραφές υπόδειξης που θα αντικαταστήσει αυτή η εξαγωγή. Εισαγάγετε πρώτα τα συνθήματα στο rekordbox.",
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Ένα κομμάτι που αφαιρείται εξακολουθεί να αναφέρεται από το ιστορικό USB. Εισαγάγετε και διαγράψτε πρώτα αυτό το ιστορικό στο rekordbox.",
   "rekordbox is running. Quit it before analysing.": "Το rekordbox εκτελείται. Κλείστε το πριν την ανάλυση.",
   "rekordbox is running. Quit it before editing phrases.": "Το rekordbox εκτελείται. Κλείστε το πριν επεξεργαστείτε φράσεις.",
@@ -1745,5 +1744,6 @@
   "Export a playlist to a file (*.txt)": "Εξαγωγή λίστας αναπαραγωγής σε αρχείο (*.txt)",
   "Export a playlist to a file for music apps (*.m3u8)": "Εξαγωγή λίστας αναπαραγωγής σε αρχείο για εφαρμογές μουσικής (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
-  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
 }

@@ -1689,7 +1689,6 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.",
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "이 USB는 다른 또는 이전의 확인되지 않은 마스터 라이브러리에 속합니다. 소유권을 변경하기 전에 rekordbox에 해당 콘텐츠를 가져오십시오.",
-  "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary에는 이 내보내기가 대체할 큐 레코드가 포함되어 있습니다. 먼저 rekordbox에 큐를 가져오십시오.",
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "제거되는 트랙은 여전히 USB 기록에서 참조됩니다. 먼저 rekordbox에서 해당 기록을 가져오고 삭제하십시오.",
   "rekordbox is running. Quit it before analysing.": "rekordbox가 실행 중입니다. 분석하기 전에 종료하세요.",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox가 실행 중입니다. 프레이즈를 편집하기 전에 종료하세요.",
@@ -1743,5 +1742,6 @@
   "Export a playlist to a file (*.txt)": "플레이리스트를 (*.txt) 파일로 내보내기",
   "Export a playlist to a file for music apps (*.m3u8)": "플레이리스트를 음악 앱용 파일로 내보내기(*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
-  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
 }

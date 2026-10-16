@@ -206,6 +206,154 @@ fn a_sync_still_refuses_to_drop_cue_rows_a_player_added_to_a_track_it_removes() 
 
     let result = sync(usb.path(), &tracks[..1], &[playlist(10, &[0])]);
 
-    assert!(matches!(&result, Err(rbl_export::ExportError::Conflict(m)) if m.contains("cue records")), "{result:?}");
+    assert!(matches!(&result, Err(rbl_export::ExportError::Conflict(m)) if m.contains("'Track 2'")), "{result:?}");
     assert_eq!(rbl_export::snapshot::Snapshot::read(usb.path()).unwrap(), before);
+}
+
+/// [`track`], with its analysis in library files (as rekordbox keeps it under
+/// `share/PIONEER/USBANLZ`) rather than in memory, so a test can take them
+/// away.
+fn track_with_files(root: &Path, id: u64, cues: Option<Vec<ExportCue>>) -> SourceTrack {
+    let mut t = track(root, id);
+    let base = root.join(format!("anlz-{id}/ANLZ0000.DAT"));
+    std::fs::create_dir_all(base.parent().unwrap()).unwrap();
+    for (extension, bytes) in std::mem::take(&mut t.analysis) {
+        std::fs::write(base.with_extension(&extension), bytes).unwrap();
+    }
+    t.analysis_source = Some(base);
+    t.cues = cues;
+    t
+}
+
+/// Deletes the library's analysis files of `t`, as a moved or wiped
+/// `USBANLZ` folder (or a track never analysed on this computer) leaves it.
+fn lose_library_analysis(t: &SourceTrack) {
+    let base = t.analysis_source.as_ref().unwrap();
+    for extension in ["DAT", "EXT", "2EX"] {
+        let _ = std::fs::remove_file(base.with_extension(extension));
+    }
+}
+
+fn warning(report: &rbl_export::ExportReport, track_id: u64) -> Option<String> {
+    report.warnings.iter().find(|w| w.track_id == track_id).map(|w| w.reason.clone())
+}
+
+/// The library has no analysis for a track: the stick's stays, as it did
+/// before #522.
+#[test]
+fn a_sync_keeps_the_sticks_analysis_when_the_library_has_none() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track_with_files(src.path(), 1, Some(library_cues()));
+    sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+    lose_library_analysis(&t);
+
+    let report = sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+
+    assert_eq!(warning(&report, 1).as_deref(), Some("analysis-kept"));
+    assert_eq!(Anlz::read(&stick_anlz(usb.path(), 0, "DAT")).unwrap().beat_grid().unwrap(), library_grid());
+    assert!(has_cues(&stick_anlz(usb.path(), 0, "EXT"), &library_cues()));
+    assert!(verify(usb.path()).unwrap().is_ok());
+}
+
+/// The reviewer's data-loss case on PR 523: a player edit makes the stick's
+/// analysis "untrusted" (its stamp no longer matches the last sync's), and
+/// with no library analysis to write instead, the sync used to delete the
+/// stick's waveforms, beat grid and cues. It keeps them, with the library's
+/// cues over the player's, as for any exported track.
+#[test]
+fn a_sync_keeps_a_player_edited_analysis_when_the_library_has_none() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track_with_files(src.path(), 1, Some(library_cues()));
+    sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+    let dat = stick_anlz(usb.path(), 0, "DAT");
+    let ext = stick_anlz(usb.path(), 0, "EXT");
+    let shifted = [Beat { beat_number: 1, tempo_x100: 12600, time_ms: 25 }];
+    edit_on_player(&dat, Some(&player_cues()), Some(&shifted));
+    edit_on_player(&ext, Some(&player_cues()), None);
+    lose_library_analysis(&t);
+
+    let report = sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+
+    assert_eq!(warning(&report, 1).as_deref(), Some("analysis-kept"));
+    assert!(dat.is_file() && ext.is_file(), "the stick's analysis must not be deleted");
+    // The library has no grid to export, so the stick's (the player's) stays.
+    assert_eq!(Anlz::read(&dat).unwrap().beat_grid().unwrap(), shifted);
+    // It does have cues, and on export the library's win.
+    assert!(has_cues(&dat, &library_cues()));
+    assert!(has_cues(&ext, &library_cues()));
+    assert!(verify(usb.path()).unwrap().is_ok());
+}
+
+/// No library analysis and no library cues: the player's cues are all there
+/// is, and the sync leaves them.
+#[test]
+fn a_sync_keeps_player_cues_when_the_library_has_no_analysis_or_cues() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track_with_files(src.path(), 1, None);
+    sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+    let ext = stick_anlz(usb.path(), 0, "EXT");
+    edit_on_player(&ext, Some(&player_cues()), None);
+    lose_library_analysis(&t);
+
+    sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+
+    assert!(stick_anlz(usb.path(), 0, "DAT").is_file());
+    assert_eq!(cue_times(&Anlz::read(&ext).unwrap()), [7000]);
+    assert!(verify(usb.path()).unwrap().is_ok());
+}
+
+/// A stick analysis file that no longer parses is not kept: there is
+/// nothing in it to save, and the databases must not name it.
+#[test]
+fn a_sync_drops_an_unreadable_stick_analysis_when_the_library_has_none() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track_with_files(src.path(), 1, Some(library_cues()));
+    sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+    std::fs::write(stick_anlz(usb.path(), 0, "DAT"), b"not an analysis file").unwrap();
+    lose_library_analysis(&t);
+
+    let report = sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+
+    assert_eq!(warning(&report, 1).as_deref(), Some("analysis-unavailable"));
+    assert!(verify(usb.path()).unwrap().is_ok());
+}
+
+/// The refusal for a player's cue row on a track the sync removes names the
+/// track, comes before any copy, and clears once the user does what it asks.
+#[test]
+fn the_removed_track_cue_refusal_names_the_track_and_can_be_cleared() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let tracks = [track(src.path(), 1), track(src.path(), 2), track(src.path(), 3)];
+    sync(usb.path(), &tracks[..2], &[playlist(10, &[0, 1])]).unwrap();
+    let manifest = Manifest::load(usb.path()).unwrap();
+    let removed = manifest.tracks.iter().find(|t| t.library_id == 2).unwrap().export_id;
+    edit(usb.path(), &format!("INSERT INTO cue(content_id,kind,inUsec,cueComment) VALUES({removed},2,7000000,'set on the CDJ')"));
+
+    // Track 3 is new, so a late refusal would have copied it first.
+    let mut stages = Vec::new();
+    let result = export_full(usb.path(), &[tracks[0].clone(), tracks[2].clone()], &[playlist(10, &[0, 1])], &[], None,
+        Some(&SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false }),
+        &mut |p| stages.push(p.stage));
+    let Err(rbl_export::ExportError::Conflict(message)) = result else { panic!("{result:?}") };
+    assert!(message.contains("'Track 2'"), "{message}");
+    assert!(message.contains("Keep a playlist that holds it in the sync"), "{message}");
+    assert!(!stages.contains(&"copying"), "refused only after copying: {stages:?}");
+
+    // Way out 1: keep it in the sync. The library's cues then replace the row.
+    sync(usb.path(), &tracks, &[playlist(10, &[0, 1, 2])]).unwrap();
+
+    // Way out 2: delete it from the USB (in rekordbox, which takes its cue
+    // rows with it), then sync without it.
+    let manifest = Manifest::load(usb.path()).unwrap();
+    let removed = manifest.tracks.iter().find(|t| t.library_id == 2).unwrap().export_id;
+    edit(usb.path(), &format!("INSERT INTO cue(content_id,kind,inUsec,cueComment) VALUES({removed},2,8000000,'again')"));
+    assert!(sync(usb.path(), &[tracks[0].clone(), tracks[2].clone()], &[playlist(10, &[0, 1])]).is_err());
+    edit(usb.path(), &format!("DELETE FROM cue WHERE content_id={removed}"));
+    sync(usb.path(), &[tracks[0].clone(), tracks[2].clone()], &[playlist(10, &[0, 1])]).unwrap();
+    assert!(verify(usb.path()).unwrap().is_ok());
 }

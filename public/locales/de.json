@@ -1688,7 +1688,6 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.",
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Dieser USB-Stick gehört zu einer anderen oder älteren, nicht verifizierten Master-Bibliothek. Importieren Sie den Inhalt in rekordbox, bevor Sie den Besitzer ändern.",
-  "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary enthält Cue-Datensätze, die dieser Export ersetzen würde. Importieren Sie zuerst die Cues in rekordbox.",
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Auf einen Titel, der entfernt wird, wird weiterhin im USB-Verlauf verwiesen. Importieren und löschen Sie diesen Verlauf zunächst in rekordbox.",
   "rekordbox is running. Quit it before analysing.": "rekordbox läuft. Beenden Sie es, bevor Sie analysieren.",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox läuft. Beenden Sie es, bevor Sie Phrasen bearbeiten.",
@@ -1742,5 +1741,6 @@
   "Export a playlist to a file (*.txt)": "Eine Wiedergabeliste in eine Datei (*.txt) exportieren",
   "Export a playlist to a file for music apps (*.m3u8)": "Eine Wiedergabeliste in eine Datei für Musik-Apps (*.m3u8) exportieren",
   "[data-browser-pane]": "[data-browser-pane]",
-  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
 }

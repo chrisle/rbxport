@@ -1694,7 +1694,6 @@
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again.",
   "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.": "The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "此 USB 屬於不同的或較舊的未經驗證的主庫。在更改其所有權之前，將其內容匯入 rekordbox。",
-  "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary 包含此匯出將取代的提示記錄。請先在 rekordbox 中匯入提示。",
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 歷史記錄仍會引用已刪除的曲目。首先匯入並清除 rekordbox 中的歷史記錄。",
   "rekordbox is running. Quit it before analysing.": "rekordbox 正在執行。請先結束再進行分析。",
   "rekordbox is running. Quit it before editing phrases.": "rekordbox 正在執行。請先結束再編輯樂句。",
@@ -1748,5 +1747,6 @@
   "Export a playlist to a file (*.txt)": "匯出播放清單至檔案 (*.txt)",
   "Export a playlist to a file for music apps (*.m3u8)": "匯出播放清單至音樂應用程式的檔案 (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
-  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]"
+  "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
 }

@@ -258,23 +258,34 @@ impl Snapshot {
                 }
             }
         }
-        // An export goes from the computer to the USB, so the library's cues
-        // win for every track it leaves on the stick: a cue row a player
-        // added or edited there is replaced on purpose (#439, #522). What
-        // must not go unnoticed is a player's row on a track this sync takes
-        // off the stick, which nothing replaces.
-        if let Some(baseline) = previous.and_then(|m| m.baseline.as_ref()) {
-            let kept: BTreeSet<u32> = next.one.iter().flat_map(|l| &l.tracks).map(|t| t.id).collect();
-            let lost = self.cues.iter().any(|row| {
-                !baseline.cues.contains(row)
-                    && !next.cues.contains(row)
-                    && !cue_content(row).is_some_and(|id| kept.contains(&id))
-            });
-            if lost {
-                return Err(ExportError::Conflict("OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.".into()));
-            }
-        }
-        Ok(())
+        let kept: BTreeSet<u32> = next.one.iter().flat_map(|l| &l.tracks).map(|t| t.id).collect();
+        self.check_removed_cues(previous, &kept, &next.cues)
+    }
+
+    /// Stops a sync that would take a track off the stick while it holds a
+    /// cue row a player added or changed since the last sync.
+    ///
+    /// An export goes from the computer to the USB, so the library's cues
+    /// win for every track it leaves on the stick: a cue row a player added
+    /// or edited there is replaced on purpose (#439, #522). A track the sync
+    /// takes off the stick is different: nothing replaces its row, so the
+    /// cue would be gone from both sides. `kept` holds the stick content ids
+    /// the sync leaves on the USB; `written` the cue rows it writes (empty
+    /// before anything is written). The way out has to work without this
+    /// record changing: neither rbx's import nor rekordbox's touches it, so
+    /// the message names the track and asks to keep it or delete it on
+    /// purpose.
+    pub fn check_removed_cues(&self, previous: Option<&Manifest>, kept: &BTreeSet<u32>, written: &[String]) -> Result<()> {
+        let Some(baseline) = previous.and_then(|m| m.baseline.as_ref()) else { return Ok(()) };
+        // A row of an unknown shape cannot be placed on a kept track, so it
+        // counts as lost.
+        let lost = self.cues.iter().filter(|row| !baseline.cues.contains(row) && !written.contains(row))
+            .map(|row| cue_content(row))
+            .find(|id| !id.is_some_and(|id| kept.contains(&id)));
+        let Some(id) = lost else { return Ok(()) };
+        let title = id.and_then(|id| self.one.iter().flat_map(|l| &l.tracks).find(|t| t.id == id))
+            .map_or_else(|| format!("USB track {}", id.unwrap_or_default()), |t| t.title.clone());
+        Err(ExportError::Conflict(format!("'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.")))
     }
     pub fn check_retained_history(&self, next: &Self) -> Result<()> {
         let tracks = next.one.as_ref().map(|l| &l.tracks);
