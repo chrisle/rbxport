@@ -287,10 +287,16 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
     Menu::with_items(app, &[&application, &file, &edit, &track, &view, &help])
 }
 
-/// rekordbox's Track menu, which carries Locate track loaded on deck on
-/// command + L (b139). The frontend runs the same command the key does.
+/// rekordbox's Track menu: Analyze Track (4000, which rekordbox's menu bar
+/// lists without a key) and Locate track loaded on deck on command + L
+/// (b139). The frontend runs the same command the key does.
 fn track_menu<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::Result<Submenu<R>> {
     SubmenuBuilder::new(app, label(labels, "Track"))
+        .item(
+            &MenuItemBuilder::with_id("analyze-track", label(labels, "Analyze Track"))
+                .build(app)?,
+        )
+        .separator()
         .item(
             &MenuItemBuilder::with_id(
                 "locate-loaded",

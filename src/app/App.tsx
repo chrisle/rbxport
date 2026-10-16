@@ -2276,6 +2276,11 @@ function AppBody() {
       locateLoadedTrack();
       return;
     }
+    if (outcome.action === "analyze-track") {
+      // Track › Analyze Track: the same command as its key.
+      runCommand("analyseSelection");
+      return;
+    }
     if (outcome.action === "sub") {
       setSubOpen((open) => !open);
       return;

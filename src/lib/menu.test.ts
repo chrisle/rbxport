@@ -13,6 +13,11 @@ describe("menu", () => {
     expect(resolveMenu("locate-loaded", true)).toEqual({ action: "locate-loaded" });
   });
 
+  it("leaves Track › Analyze Track to the command, which refuses a read-only library itself", () => {
+    expect(menuCommand("analyze-track")?.writes).toBe(false);
+    expect(resolveMenu("analyze-track", true)).toEqual({ action: "analyze-track" });
+  });
+
   it("runs an action that only reads", () => {
     expect(resolveMenu("settings", true)).toEqual({ action: "settings" });
   });

@@ -76,6 +76,26 @@ test("a macOS Control-click menu analyses the whole selection (#135)", async ({ 
   await expect(rows.and(page.locator("[data-selected]"))).toHaveCount(3);
 });
 
+// rekordbox 7.2.19's menu bar lists Analyze Track (4000) in its Track menu
+// [OBS static: MainComponent::getMenuForIndex]; the item and the key run one
+// command, so they open the same dialog for the same selection (#431).
+test("Track › Analyze Track does what its key does", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await page.waitForFunction(() => "__menu" in window);
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  await rows.nth(2).click();
+  await rows.nth(4).click({ modifiers: ["Shift"] });
+  const dialog = page.getByRole("dialog", { name: "Analysis Setting" });
+  await page.keyboard.press("Shift+ControlOrMeta+A");
+  await expect(dialog).toContainText("3 tracks selected");
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("analyze-track"));
+  await expect(dialog).toContainText("3 tracks selected");
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(rows.and(page.locator("[data-selected]"))).toHaveCount(3);
+});
+
 // rekordbox 7.2.14, Auto Analysis on, unanalysed tracks in Collection: at
 // launch it shows Analysis Setting with "Auto Analysis is starting." and
 // OK/Cancel, BPM / Grid ticked and greyed, and no selection count (#207).
