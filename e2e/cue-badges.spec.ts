@@ -76,18 +76,21 @@ test("each hot cue on the detail is its lettered square in its colour, centred o
   const top = await token(page, "--s-cue-badge-top");
   const letterColour = await tokenColour(page, "--c-cue-hot-text");
   const fontSize = await token(page, "--f-size-xs");
+  const waveTop = await token(page, "--s-wave-inset-top");
 
   for (const letter of ["A", "B", "C", "D"]) {
     // Calling the cue brings it under the playhead, inside the window.
     await pad(page, letter).click();
     const m = await detailMarker(page, letter);
     expect(m.letter, letter).toBe(letter);
-    // 11pt square, no rounding, 15pt under the band's top, centred on the cue.
+    // 11pt square, no rounding, in the cue lane at the band's top, centred on the cue.
     expect(m.badge.width, letter).toBeCloseTo(size, 1);
     expect(m.badge.height, letter).toBeCloseTo(size, 1);
     expect(m.badge.radius, letter).toBe("0px");
     expect(m.badge.top, letter).toBeCloseTo(top, 1);
     expect(m.badge.centre, letter).toBeCloseTo(m.x, 1);
+    // Clear of the waveform, which starts under the beat heads (#393).
+    expect(m.badge.top + m.badge.height, letter).toBeLessThanOrEqual(waveTop);
     // The letter: the measured face and colour, bold.
     expect(m.badge.colour, letter).toBe(letterColour);
     expect(Number.parseFloat(m.badge.fontSize), letter).toBeCloseTo(fontSize, 1);
@@ -170,8 +173,8 @@ test("a memory cue beside a hot cue is the red triangle over the badge, with no 
       layer: getComputedStyle(el).zIndex,
     };
   });
-  // On the hot cue, a 16x11pt red triangle pointing down from 8.25pt under
-  // the band's top.
+  // On the hot cue, a 16x11pt red triangle pointing down from the top of the
+  // cue lane.
   expect(memory.x).toBeCloseTo(hot.x, 1);
   expect(memory.head.centre).toBeCloseTo(memory.x, 1);
   expect(memory.head.width).toBeCloseTo(await token(page, "--s-cue-marker-w"), 1);
@@ -201,9 +204,11 @@ test("the beat grid's heads start where they were measured, with the line under 
   });
   const headTop = await token(page, "--s-beat-marker-top");
   const headH = await token(page, "--s-beat-head-h");
-  // The head is 26pt under the band's top; the line begins a point below it.
+  // The head starts on the row after the cue lane (#393); the line begins a
+  // point below it, and no cue badge reaches down to it.
   expect(grid.lineTop + grid.headTop).toBeCloseTo(headTop, 1);
   expect(grid.headH).toBeCloseTo(headH, 1);
   expect(grid.lineTop).toBeCloseTo(headTop + headH + 1, 1);
+  expect((await token(page, "--s-cue-badge-top")) + (await token(page, "--s-cue-badge"))).toBeLessThanOrEqual(headTop);
   expect(grid.lineBottom).toBeCloseTo((await token(page, "--s-beat-marker-bottom")) + headH + 1, 1);
 });
