@@ -13,10 +13,11 @@
       let
         pkgs = import nixpkgs { inherit system; };
         bin = pkgs.callPackage ./packaging/nix/bin.nix { };
+        source = pkgs.callPackage ./packaging/nix/source.nix { };
       in
       {
         packages = {
-          inherit bin;
+          inherit bin source;
           default = bin;
         };
 
