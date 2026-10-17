@@ -41,6 +41,7 @@ import {
   detailSpan,
   dragSeconds,
   JUMP_SIZE_ID,
+  jumpSeconds,
   jumpSizeById,
   jumpStepSeconds,
   zoomBy,
@@ -88,7 +89,7 @@ import { loadDeckQuantize, saveDeckQuantize } from "@/lib/deckQuantize";
 import {
   beatNudgeFor, beatWait, inPhaseAt, MAX_TEMPO, MIN_TEMPO, syncTo, tempoFor, type Deck as SyncDeck,
 } from "@/lib/sync";
-import { detectPlatform, dispatchBinding, matchBinding, type Action } from "@/lib/shortcuts";
+import { detectPlatform, dispatchBinding, FIXED_JUMPS, matchBinding, type Action } from "@/lib/shortcuts";
 import { runCommand, type CommandHandler, type CommandHandlers, type CommandInput } from "@/lib/commands";
 import { useCommands } from "@/store/useCommands";
 import { keyMap } from "@/lib/keyPresets";
@@ -1261,14 +1262,27 @@ export const Player = memo(function Player({
   });
   const seekInPhase = useCallback((at: number) => playback.seek(inPhase(at)), [playback, inPhase]);
 
-  /** Moves by the chosen size: a number of beats, or the fine nudge. */
-  const jump = useCallback(
-    (direction: number) => {
-      const step = jumpStepSeconds(jumpSizeById(jumpSizeId), bpmX100);
+  /** Moves the head by a step, forward or back, keeping a locked deck in phase. */
+  const jumpBy = useCallback(
+    (step: number, direction: number) => {
       if (step === 0) return;
       seekInPhase(playback.positionRef.current + step * direction);
     },
-    [jumpSizeId, bpmX100, playback, seekInPhase],
+    [playback, seekInPhase],
+  );
+  /** Moves by the chosen size: a number of beats, or the fine nudge. */
+  const jump = useCallback(
+    (direction: number) => jumpBy(jumpStepSeconds(jumpSizeById(jumpSizeId), bpmX100), direction),
+    [jumpSizeId, bpmX100, jumpBy],
+  );
+  /**
+   * Moves by a fixed number of beats whatever the menu says: PERFORMANCE
+   * mode's `Forward 4 beats`, `Backward 8 bars` and the rest. Nothing to
+   * move by without a tempo, as with the menu's sizes.
+   */
+  const jumpBeats = useCallback(
+    (beats: number, direction: number) => jumpBy(jumpSeconds(beats, bpmX100), direction),
+    [bpmX100, jumpBy],
   );
 
 
@@ -2066,6 +2080,11 @@ export const Player = memo(function Player({
     shiftGridRight: live(() => gridEditor.shift(1)),
     shiftGridToCenter: once(gridEditor.align),
   };
+  // A fixed-distance jump moves by its own beats, the menu's size aside; a
+  // held key repeats it, as the menu-driven jumps repeat.
+  for (const { action, beats, direction } of FIXED_JUMPS) {
+    deckCommands[action] = live(() => jumpBeats(beats, direction));
+  }
   // A beat loop sets the length and starts the loop, as the pad does.
   for (const beats of BEAT_LOOP_BEATS) {
     deckCommands[`beatLoop${beats}` as Action] = once(() => {

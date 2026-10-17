@@ -141,7 +141,27 @@ export type Action =
   // this app's own and start unbound; the Keyboard pane assigns them.
   | "eqKillLow"
   | "eqKillMid"
-  | "eqKillHigh";
+  | "eqKillHigh"
+  // PERFORMANCE mode's fixed-distance beat jumps: Forward and Backward by
+  // 1/2, 1, 2, 4, 8 and 16 beats and 8 bars, one command each, moving by
+  // that much whatever the jump menu says. The menu-driven `jumpBack` and
+  // `jumpForward` are rekordbox's 3008/3009 and are not these. See
+  // `FIXED_JUMPS` for the ids and their evidence. No preset this app knows
+  // binds them, so they start unbound; the Keyboard pane assigns them.
+  | "jumpForwardHalfBeat"
+  | "jumpForward1Beat"
+  | "jumpForward2Beats"
+  | "jumpForward4Beats"
+  | "jumpForward8Beats"
+  | "jumpForward16Beats"
+  | "jumpForward8Bars"
+  | "jumpBackwardHalfBeat"
+  | "jumpBackward1Beat"
+  | "jumpBackward2Beats"
+  | "jumpBackward4Beats"
+  | "jumpBackward8Beats"
+  | "jumpBackward16Beats"
+  | "jumpBackward8Bars";
 
 /** The mixer band an EQ kill action toggles, or `null` for any other action. */
 export function eqKillBand(action: Action): "low" | "mid" | "high" | null {
@@ -151,6 +171,71 @@ export function eqKillBand(action: Action): "low" | "mid" | "high" | null {
     case "eqKillHigh": return "high";
     default: return null;
   }
+}
+
+/** One of PERFORMANCE mode's fixed-distance beat jumps. */
+export interface FixedJump {
+  action: Action;
+  /** rekordbox's description of the command, as its mapping file spells it. */
+  label: string;
+  /** How far it moves: 8 bars is 32 beats, 1/2 beat is 0.5. */
+  beats: number;
+  /** Forward is 1, Backward -1. */
+  direction: 1 | -1;
+  /** rekordbox's command id for Deck 1; Deck 2's is the same with `31` for `30`. */
+  command: string;
+}
+
+/**
+ * PERFORMANCE mode's fixed-distance beat jumps, in rekordbox's order: the
+ * seven Forward commands then the seven Backward ones, 1/2 beat to 8 bars.
+ *
+ * [OBS] `KeyMappings/rekordbox_0000000000000.mappings` (Performance 1,
+ * edited by its owner: `basedOnDefaults="0"`, so the keys in it are theirs
+ * and are not transcribed here) names six of the fourteen for Deck 1, and
+ * their Deck 2 twins: `Forward 4 beats` 309a/319a, `Forward 16 beats`
+ * 309c/319c, `Forward 8 bars` 309d/319d, `Backward 4 beats` 30a1/31a1,
+ * `Backward 16 beats` 30a3/31a3 and `Backward 8 bars` 30a4/31a4. The labels
+ * are the file's spelling.
+ *
+ * [ASSUME] the other eight: the six observed ids leave exactly the gaps a
+ * contiguous run fills, Forward 3097-309d and Backward 309e-30a4, in the
+ * order the beat loops' ids run (1/2, 1, 2, 4, 8, 16 beats, then 8 bars),
+ * so `Forward 1/2 beat` is 3097, `Forward 1 beat` 3098, `Forward 2 beats`
+ * 3099, `Forward 8 beats` 309b, `Backward 1/2 beat` 309e, `Backward 1 beat`
+ * 309f, `Backward 2 beats` 30a0 and `Backward 8 beats` 30a2. 30a5 is `Auto
+ * Beat Loop ON/OFF` [OBS: the same file], so the Backward run ends at 30a4.
+ * None of the eight has been read from rekordbox itself.
+ *
+ * [UNKNOWN] what key, if any, rekordbox's Performance 1 and 2 presets give
+ * any of these: this app's `PERFORMANCE_KEYMAP` lists them with none.
+ */
+const FIXED_JUMP_SIZES = [
+  ["HalfBeat", "1/2 beat", 0.5],
+  ["1Beat", "1 beat", 1],
+  ["2Beats", "2 beats", 2],
+  ["4Beats", "4 beats", 4],
+  ["8Beats", "8 beats", 8],
+  ["16Beats", "16 beats", 16],
+  ["8Bars", "8 bars", 32],
+] as const;
+
+export const FIXED_JUMPS: readonly FixedJump[] = (["Forward", "Backward"] as const).flatMap((way) =>
+  FIXED_JUMP_SIZES.map(([suffix, size, beats], index): FixedJump => ({
+    action: `jump${way}${suffix}` as Action,
+    label: `${way} ${size}`,
+    beats,
+    direction: way === "Forward" ? 1 : -1,
+    command: (0x3097 + (way === "Forward" ? 0 : FIXED_JUMP_SIZES.length) + index).toString(16),
+  })));
+
+/**
+ * The beats a fixed-distance jump action moves by, and which way, or
+ * `null` for any other action, the menu-driven jumps included.
+ */
+export function fixedJump(action: Action): { beats: number; direction: 1 | -1 } | null {
+  const jump = FIXED_JUMPS.find((row) => row.action === action);
+  return jump ? { beats: jump.beats, direction: jump.direction } : null;
 }
 
 /**
@@ -575,6 +660,18 @@ export const BINDINGS: readonly Binding[] = [
       ...letters.map((letter) => own("clearHotCue", letter)),
     ];
   }),
+  // PERFORMANCE mode's fixed-distance beat jumps, for each deck: rekordbox's
+  // own commands (see `FIXED_JUMPS`), unbound until the Keyboard pane gives
+  // one a key.
+  ...(["a", "b"] as const).flatMap((deck): Binding[] => FIXED_JUMPS.map((jump): Binding => ({
+    id: `${deck === "a" ? "" : "b."}${jump.action}`,
+    group: deck === "a" ? "Player A" : "Player B",
+    label: jump.label,
+    chord: { key: "" },
+    action: jump.action,
+    deck,
+    command: deck === "a" ? jump.command : jump.command.replace(/^30/, "31"),
+  }))),
   { id: "volumeUp", group: "General", label: "Volume", chord: { key: "F12", metaKey: true }, action: "volumeUp", command: "3003" },
   { id: "volumeDown", group: "General", label: "Volume Down", chord: { key: "F11", metaKey: true }, action: "volumeDown", command: "3004" },
   { id: "mute", group: "General", label: "Mute", chord: { key: "F10", metaKey: true }, action: "mute", command: "3005" },

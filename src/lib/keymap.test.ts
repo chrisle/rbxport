@@ -40,6 +40,26 @@ describe("the Export key map", () => {
     }
   });
 
+  it("lists PERFORMANCE mode's fixed beat jumps under each deck, unbound, by rekordbox's ids", () => {
+    const fixed = (group: "Player A" | "Player B") =>
+      KEYMAP[group].filter((r) => /^(Forward|Backward) /.test(r.label));
+    expect(fixed("Player A").map((r) => `${r.id} ${r.label}`)).toEqual([
+      "3097 Forward 1/2 beat", "3098 Forward 1 beat", "3099 Forward 2 beats", "309a Forward 4 beats",
+      "309b Forward 8 beats", "309c Forward 16 beats", "309d Forward 8 bars",
+      "309e Backward 1/2 beat", "309f Backward 1 beat", "30a0 Backward 2 beats", "30a1 Backward 4 beats",
+      "30a2 Backward 8 beats", "30a3 Backward 16 beats", "30a4 Backward 8 bars",
+    ]);
+    expect(fixed("Player B").map((r) => r.id)).toEqual(fixed("Player A").map((r) => r.id.replace(/^30/, "31")));
+    for (const row of [...fixed("Player A"), ...fixed("Player B")]) expect(row.key, row.label).toBeNull();
+    // The pane draws them live and assignable, for the deck each is filed under.
+    expect(rowsFor("Player A", true).find((r) => r.id === "309a"))
+      .toMatchObject({ label: "Forward 4 beats", key: null, built: true, bindingId: "jumpForward4Beats", changed: false });
+    expect(rowsFor("Player B", true).find((r) => r.id === "31a4"))
+      .toMatchObject({ label: "Backward 8 bars", key: null, built: true, bindingId: "b.jumpBackward8Bars" });
+    expect(rowsFor("Player A", true, { jumpForward4Beats: { key: "ArrowRight", metaKey: true, altKey: true } })
+      .find((r) => r.id === "309a")).toMatchObject({ key: "option + command + cursor right", changed: true });
+  });
+
   it("prints command and option as ctrl and alt on Windows", () => {
     expect(keyForPlatform("shift + command + F", true)).toBe("shift + command + F");
     expect(keyForPlatform("shift + command + F", false)).toBe("shift + ctrl + F");

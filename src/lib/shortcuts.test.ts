@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  actionFor, beatLoopLength, BINDINGS, chordFromEvent, describeChord, dispatch, hotCuePad, isTyping,
-  detectPlatform, eqKillBand, matchBinding, memoryCueNumber, menuAccelerator, sameChord, type Platform,
+  actionFor, beatLoopLength, BINDINGS, chordFromEvent, describeChord, dispatch, FIXED_JUMPS, fixedJump, hotCuePad,
+  isTyping, detectPlatform, eqKillBand, matchBinding, memoryCueNumber, menuAccelerator, sameChord, type Platform,
 } from "./shortcuts";
 
 const MAC: Platform = { mac: true };
@@ -429,5 +429,82 @@ describe("Renumber Track Order (#413)", () => {
     expect(actionFor({ key: "r", ctrlKey: true, altKey: true }, WIN, overrides)).toBe("renumberTrackOrder");
     // Not while typing into a field.
     expect(dispatch({ key: "r", metaKey: true, altKey: true }, MAC, { tagName: "INPUT" }, overrides)).toBeNull();
+  });
+});
+
+describe("PERFORMANCE mode's fixed-distance beat jumps", () => {
+  const LABELS = [
+    "Forward 1/2 beat", "Forward 1 beat", "Forward 2 beats", "Forward 4 beats", "Forward 8 beats",
+    "Forward 16 beats", "Forward 8 bars", "Backward 1/2 beat", "Backward 1 beat", "Backward 2 beats",
+    "Backward 4 beats", "Backward 8 beats", "Backward 16 beats", "Backward 8 bars",
+  ];
+
+  it("names the beats and the direction an action moves by", () => {
+    expect(fixedJump("jumpForwardHalfBeat")).toEqual({ beats: 0.5, direction: 1 });
+    expect(fixedJump("jumpForward1Beat")).toEqual({ beats: 1, direction: 1 });
+    expect(fixedJump("jumpForward4Beats")).toEqual({ beats: 4, direction: 1 });
+    // 8 bars is 32 beats, as the jump menu's 8Bars is.
+    expect(fixedJump("jumpForward8Bars")).toEqual({ beats: 32, direction: 1 });
+    expect(fixedJump("jumpBackwardHalfBeat")).toEqual({ beats: 0.5, direction: -1 });
+    expect(fixedJump("jumpBackward16Beats")).toEqual({ beats: 16, direction: -1 });
+    expect(fixedJump("jumpBackward8Bars")).toEqual({ beats: 32, direction: -1 });
+    // The menu-driven jumps are not fixed ones.
+    expect(fixedJump("jumpForward")).toBeNull();
+    expect(fixedJump("jumpBack")).toBeNull();
+    expect(fixedJump("cue")).toBeNull();
+    expect(FIXED_JUMPS.map((jump) => jump.label)).toEqual(LABELS);
+  });
+
+  it("lists all fourteen under each deck, in the file's wording, unbound", () => {
+    for (const deck of ["a", "b"] as const) {
+      const rows = BINDINGS.filter((b) => b.deck === deck && fixedJump(b.action ?? "cue") !== null);
+      expect(rows.map((b) => b.label)).toEqual(LABELS);
+      expect(rows.map((b) => b.group)).toEqual(LABELS.map(() => deck === "a" ? "Player A" : "Player B"));
+      for (const row of rows) expect(row.chord.key, row.label).toBe("");
+    }
+    expect(new Set(BINDINGS.map((b) => b.id)).size).toBe(BINDINGS.length);
+    // Nothing fires until the Keyboard pane gives one a key: the arrows are
+    // still the menu-driven jumps, and command + arrow still the beatgrid.
+    expect(actionFor({ key: "ArrowRight" }, MAC)).toBe("jumpForward");
+    expect(actionFor({ key: "ArrowRight", metaKey: true }, MAC)).toBe("shiftGridRight");
+    expect(actionFor({ key: "ArrowRight", altKey: true }, MAC)).toBeNull();
+    expect(BINDINGS.some((b) => fixedJump(b.action ?? "cue") !== null && b.chord.key !== "")).toBe(false);
+  });
+
+  it("carries rekordbox's command ids: six read from the mapping file, the rest in the same run", () => {
+    const command = (id: string) => BINDINGS.find((b) => b.id === id)?.command;
+    // [OBS] rekordbox_0000000000000.mappings: 309a, 309c, 309d, 30a1, 30a3, 30a4 and their 31xx twins.
+    expect(command("jumpForward4Beats")).toBe("309a");
+    expect(command("jumpForward16Beats")).toBe("309c");
+    expect(command("jumpForward8Bars")).toBe("309d");
+    expect(command("jumpBackward4Beats")).toBe("30a1");
+    expect(command("jumpBackward16Beats")).toBe("30a3");
+    expect(command("jumpBackward8Bars")).toBe("30a4");
+    expect(command("b.jumpForward4Beats")).toBe("319a");
+    expect(command("b.jumpBackward8Bars")).toBe("31a4");
+    // [ASSUME] the gaps: 1/2, 1, 2 and 8 beats fill the run 3097-309d and 309e-30a4.
+    expect(command("jumpForwardHalfBeat")).toBe("3097");
+    expect(command("jumpForward8Beats")).toBe("309b");
+    expect(command("jumpBackwardHalfBeat")).toBe("309e");
+    expect(command("jumpBackward8Beats")).toBe("30a2");
+    expect(command("b.jumpBackward1Beat")).toBe("319f");
+  });
+
+  it("answer the key the person gives them, for the deck it is filed under, on either platform", () => {
+    const overrides = {
+      jumpForward4Beats: { key: "ArrowRight", metaKey: true, altKey: true },
+      "b.jumpBackward8Bars": { key: "ArrowLeft", shiftKey: true, altKey: true },
+    };
+    expect(matchBinding({ key: "ArrowRight", metaKey: true, altKey: true }, MAC, overrides))
+      .toMatchObject({ action: "jumpForward4Beats", deck: "a" });
+    expect(matchBinding({ key: "ArrowRight", ctrlKey: true, altKey: true }, WIN, overrides))
+      .toMatchObject({ action: "jumpForward4Beats", deck: "a" });
+    expect(matchBinding({ key: "ArrowLeft", shiftKey: true, altKey: true }, MAC, overrides))
+      .toMatchObject({ action: "jumpBackward8Bars", deck: "b" });
+    // Plain cursor right is still the menu's jump, for Player A.
+    expect(matchBinding({ key: "ArrowRight" }, MAC, overrides)).toMatchObject({ action: "jumpForward", deck: "a" });
+    expect(matchBinding({ key: "ArrowRight", metaKey: true, altKey: true }, MAC)).toBeNull();
+    // Not while typing into a field.
+    expect(dispatch({ key: "ArrowRight", metaKey: true, altKey: true }, MAC, { tagName: "INPUT" }, overrides)).toBeNull();
   });
 });
