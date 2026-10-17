@@ -1358,6 +1358,7 @@
   "--sub-tree-w": "--sub-træ-w",
   "Resize the sub-browser": "Ændr størrelsen på underbrowseren",
   "Resize the sub-browser's tree": "Tilpas størrelsen på underbrowserens træ",
+  "Resize {column}": "Ændr størrelse på {column}",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "fedt32",

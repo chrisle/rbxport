@@ -450,7 +450,7 @@ export function MissingFileManager({ readOnly, search, searching = now, onWrote,
                     className={styles.grip}
                     role="separator"
                     aria-orientation="vertical"
-                    aria-label={`Resize ${column.label}`}
+                    aria-label={t("Resize {column}", { column: column.label })}
                     onPointerDown={(event) => resizeColumn(index, event)}
                     onClick={(event) => event.stopPropagation()}
                   />

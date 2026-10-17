@@ -1361,6 +1361,7 @@
   "--sub-tree-w": "--sub-boom-w",
   "Resize the sub-browser": "Wijzig het formaat van de subbrowser",
   "Resize the sub-browser's tree": "Wijzig het formaat van de boomstructuur van de subbrowser",
+  "Resize {column}": "Formaat wijzigen {column}",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "dik32",

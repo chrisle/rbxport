@@ -1367,6 +1367,7 @@
   "--sub-tree-w": "--sub-árvore-w",
   "Resize the sub-browser": "Redimensionar o subnavegador",
   "Resize the sub-browser's tree": "Redimensionar a árvore do subnavegador",
+  "Resize {column}": "Redimensionar {column}",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "gordo32",

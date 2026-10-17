@@ -1365,6 +1365,7 @@
   "--sub-tree-w": "--υπο-δέντρο-w",
   "Resize the sub-browser": "Αλλαγή μεγέθους του δευτερεύοντος προγράμματος περιήγησης",
   "Resize the sub-browser's tree": "Αλλάξτε το μέγεθος του δέντρου του δευτερεύοντος προγράμματος περιήγησης",
+  "Resize {column}": "Αλλαγή μεγέθους {column}",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "λίπος32",

@@ -1368,6 +1368,7 @@
   "--sub-tree-w": "--sub-tree-w",
   "Resize the sub-browser": "Изменить размер суббраузера",
   "Resize the sub-browser's tree": "Изменение размера дерева суббраузера",
+  "Resize {column}": "Изменить размер {column}",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "жир32",

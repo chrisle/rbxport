@@ -1353,6 +1353,7 @@
   "--sub-tree-w": "--하위 트리-w",
   "Resize the sub-browser": "하위 브라우저 크기 조정",
   "Resize the sub-browser's tree": "하위 브라우저의 트리 크기 조정",
+  "Resize {column}": "{column} 크기 조정",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "지방32",

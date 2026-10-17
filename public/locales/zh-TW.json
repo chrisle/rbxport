@@ -1367,6 +1367,7 @@
   "--sub-tree-w": "--子樹-w",
   "Resize the sub-browser": "調整子瀏覽器的大小",
   "Resize the sub-browser's tree": "調整子瀏覽器樹的大小",
+  "Resize {column}": "調整{column}的大小",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "脂肪32",
