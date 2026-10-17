@@ -89,9 +89,15 @@ pub struct TrackFilter {
 impl Default for TrackFilter {
     fn default() -> Self {
         let conditions = [
-            (6, 6, vec![12000, 12000]),
-            (7, 0, vec![0, 0]),
-            (12, 17, vec![1]),
+            // XDJ-XZ 1.26 initializes the Track Filter to BPM 130.0 at
+            // +/-6%, Camelot key 8B (wire id 16), rating 3, and no colour
+            // [OBS static: InitDeviceFilterInfo @0x002135e0]. The BPM and
+            // key setters encode these as inclusive ranges / compatible
+            // key ids; keep the returned defaults consistent with those
+            // values even while the conditions are disabled.
+            (6, 6, vec![12220, 13780]),
+            (7, 0, vec![3, 0]),
+            (12, 17, vec![16, 15, 14, 18]),
             (15, 17, vec![0]),
         ]
         .into_iter()
@@ -294,6 +300,32 @@ mod tests {
         assert!(!filter.update(6, &[1, 6, 2, 0, 1]));
         assert!(!filter.update(99, &set(1, 17, &[1])));
         assert_eq!(filter.encode(), before);
+    }
+
+    #[test]
+    fn default_property_records_match_xdj_xz_filter_initialization() {
+        let encoded = TrackFilter::default().encode();
+        let mut expected = Vec::new();
+        let mut record = |property: u16, operator: u8, values: &[u32]| {
+            let payload_len = 20 + values.len() * 4;
+            expected.extend_from_slice(&u32::try_from(payload_len + 8).unwrap_or(0).to_le_bytes());
+            expected.extend_from_slice(&1_u32.to_le_bytes());
+            expected.extend_from_slice(b"FCND");
+            expected.extend_from_slice(&20_u32.to_be_bytes());
+            expected.extend_from_slice(&u32::try_from(payload_len).unwrap_or(0).to_be_bytes());
+            expected.extend_from_slice(&0_u16.to_be_bytes());
+            expected.extend_from_slice(&property.to_be_bytes());
+            expected.extend_from_slice(&[0, operator]);
+            expected.extend_from_slice(&u16::try_from(values.len()).unwrap_or(0).to_be_bytes());
+            for value in values {
+                expected.extend_from_slice(&value.to_be_bytes());
+            }
+        };
+        record(6, 6, &[12_220, 13_780]);
+        record(7, 0, &[3, 0]);
+        record(12, 17, &[16, 15, 14, 18]);
+        record(15, 17, &[0]);
+        assert_eq!(encoded, expected);
     }
     #[test]
     fn rating_operators_and_colour_ids_match_the_server_comparisons() {

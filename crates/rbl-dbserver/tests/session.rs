@@ -1472,6 +1472,15 @@ fn filter_properties_use_the_expected_reply_and_do_not_clobber_browsing() {
     assert_eq!(reply[0].kind, 0x4004);
     assert_eq!(reply[0].arguments[1], Argument::Number(0));
     assert_eq!(reply[0].arguments[4], Argument::Number(4));
+    let Argument::Blob(defaults) = &reply[0].arguments[3] else {
+        panic!("filter property response must carry its FCND records");
+    };
+    assert_eq!(defaults.len(), 148);
+    // XDJ-XZ 1.26 initializes BPM 130 at +/-6%, key 16 and rating 3.
+    assert!(defaults.windows(4).any(|bytes| bytes == 12_220_u32.to_be_bytes()));
+    assert!(defaults.windows(4).any(|bytes| bytes == 13_780_u32.to_be_bytes()));
+    assert!(defaults.windows(4).any(|bytes| bytes == 16_u32.to_be_bytes()));
+    assert!(defaults.windows(4).any(|bytes| bytes == 3_u32.to_be_bytes()));
     let page = s.handle(&numbers(kind::RENDER, 4, &[CTX, 0, 1]));
     assert_eq!(page[1].arguments[1], Argument::Number(TRACK));
     // Select a BPM range excluding the fixture, then toggle filtering.
@@ -1494,6 +1503,35 @@ fn filter_properties_use_the_expected_reply_and_do_not_clobber_browsing() {
     assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
     s.handle(&numbers(0x3007, 7, &[CTX, 0]));
     assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 1);
+}
+
+#[test]
+fn four_key_filter_values_are_accepted_and_applied_to_browsed_tracks() {
+    let mut s = session();
+    let set_key = |values: &[u32]| {
+        let mut bytes = vec![1, 17, u8::try_from(values.len()).unwrap_or(0), 0];
+        for value in values {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        Message::new(
+            0x8110,
+            kind::FILTER_SET,
+            vec![
+                Argument::Number(CTX),
+                Argument::Number(12),
+                Argument::Number(0),
+                Argument::Number(u32::try_from(bytes.len()).unwrap_or(0)),
+                Argument::Blob(bytes),
+            ],
+        )
+    };
+
+    assert_eq!(s.handle(&set_key(&[19, 20, 17, 21]))[0].arguments[1], Argument::Number(0));
+    s.handle(&numbers(kind::FILTER_SWITCH, 0x8111, &[CTX, 1]));
+    assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 1);
+
+    assert_eq!(s.handle(&set_key(&[1, 2, 3, 4]))[0].arguments[1], Argument::Number(0));
+    assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
 }
 
 #[test]
