@@ -137,7 +137,8 @@ jobs:
             grep '^e2e/' "$changed" | grep -vqE '\.spec\.[cm]?[jt]s$'; then
             E2E_PORT="$port" pnpm e2e
           else
-            E2E_PORT="$port" pnpm exec playwright test \
+            pnpm build:mock
+            E2E_PREVIEW_DIR=dist-mock E2E_PORT="$port" pnpm exec playwright test \
               --only-changed "$BASE_REF" --pass-with-no-tests
           fi
 

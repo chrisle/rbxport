@@ -1,4 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// Manual probe: prints the exported fixture values for inspection; file sizes fit in i64.
+#![allow(clippy::print_stdout, clippy::cast_possible_wrap)]
 
 use std::{path::PathBuf, sync::Arc};
 use rbl_db::{fixture::{self, Shape}, Library as Db, OpenMode};
