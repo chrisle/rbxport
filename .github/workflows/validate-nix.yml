@@ -1,0 +1,32 @@
+name: Validate Nix source
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  source-smoke:
+    name: Nix source smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build and run the source package
+        # A hash mismatch means packaging/nix/pin.json is stale; refresh it
+        # with packaging/nix/update-source-hashes.sh.
+        uses: ./.github/actions/nix-smoke
+        with:
+          package: source
