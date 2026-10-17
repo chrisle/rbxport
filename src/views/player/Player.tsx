@@ -1534,14 +1534,34 @@ export const Player = memo(function Player({
     setBeatLoop({ inSeconds: range[0] / 1000, outSeconds: range[1] / 1000 });
     playback.setLoop(range[0] / 1000, range[1] / 1000);
   }, [playback, grid, loopSnap]);
+  /**
+   * The length field. Lit, it exits its beat loop. Unlit with a memory, hot
+   * or manual loop playing, it does not exit that loop: the loop becomes a
+   * beat loop of the field's length from its own in point, the field lights,
+   * and a head past the new out point goes back to the in point. [OBS]
+   * rekordbox 7, Winrig (#537): a hot loop of 8 beats launched with the
+   * field at an unlit 4, then the field clicked, plays 4 beats from the hot
+   * loop's in point with the field lit; a second click exits.
+   */
   const autoLoop = useCallback(() => {
     if (playback.idle) return;
-    if (activeLoop) {
+    const loop = playback.loop;
+    if (beatLoopOn) {
       playback.setLoopActive(false);
       return;
     }
-    loopOfBeats(loopBeats);
-  }, [playback, activeLoop, loopOfBeats, loopBeats]);
+    if (!loop?.active) {
+      loopOfBeats(loopBeats);
+      return;
+    }
+    // Rounded, so a loop from an on-beat IN finds its beat on the grid.
+    const range = beatLoopRange(grid, null, Math.round(loop.inSeconds * 1000), loopBeats);
+    if (!range) return;
+    const [from, to] = [range[0] / 1000, range[1] / 1000];
+    setBeatLoop({ inSeconds: from, outSeconds: to });
+    playback.setLoop(from, to);
+    if (playback.positionNow() >= to) playback.seek(from);
+  }, [playback, beatLoopOn, loopOfBeats, loopBeats, grid]);
   /** The head in seconds, on the loop snap grid when Q is on. */
   const loopPoint = useCallback(() => {
     const ms = playback.positionNow() * 1000;
@@ -2841,8 +2861,8 @@ export const Player = memo(function Player({
                   className={styles.pageNumber}
                   data-on={beatLoopOn || undefined}
                   aria-pressed={beatLoopOn}
-                  aria-label={activeLoop ? "Exit loop" : `${loopBeats} beat loop`}
-                  title={tip(activeLoop ? "Exit the loop" : `${loopBeatsLabel(loopBeats)} Beat Loop`)}
+                  aria-label={beatLoopOn ? "Exit loop" : `${loopBeats} beat loop`}
+                  title={tip(beatLoopOn ? "Exit the loop" : `${loopBeatsLabel(loopBeats)} Beat Loop`)}
                   disabled={playback.idle || grid.times.length < 2}
                   onClick={autoLoop}
                 >

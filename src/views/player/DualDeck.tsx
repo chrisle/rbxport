@@ -167,7 +167,10 @@ export interface DualLoop {
   idle: boolean;
   /** A loop range exists, playing or not. */
   hasLoop: boolean;
-  /** The length field: start a beat loop, or exit the one that plays. */
+  /**
+   * The length field: start a beat loop, exit the one it lit, or turn a
+   * memory, hot or manual loop that plays into a beat loop of its length.
+   */
   onToggle: () => void;
   onIn: () => void;
   onOut: () => void;
@@ -241,7 +244,9 @@ export const DualControls = memo(function DualControls({
 
       {/* The beat loop length — "Switch the page of beat length" in
           german.lang. The field starts a loop of that length, or exits the
-          loop that plays; a step changes the length of a playing loop. */}
+          beat loop it lit; a memory, hot or manual loop that plays becomes
+          a loop of that length from its in point. A step changes the length
+          of a playing loop. */}
       <div className={styles.loopLength} role="group" aria-label="Beat loop length">
         <button type="button" className={styles.step} aria-label="Shorter loop" disabled={loop.beats <= LOOP_BEATS_MIN} onClick={loop.onShorter}>‹</button>
         <button
@@ -249,8 +254,8 @@ export const DualControls = memo(function DualControls({
           className={styles.loopField}
           data-on={loop.beatLoopOn || undefined}
           aria-pressed={loop.beatLoopOn}
-          aria-label={loop.active ? "Exit loop" : `${loop.beats} beat loop`}
-          title={tip(loop.active ? "Exit the loop" : `${loopBeatsLabel(loop.beats)} Beat Loop`)}
+          aria-label={loop.beatLoopOn ? "Exit loop" : `${loop.beats} beat loop`}
+          title={tip(loop.beatLoopOn ? "Exit the loop" : `${loopBeatsLabel(loop.beats)} Beat Loop`)}
           disabled={!loop.canLoop}
           onClick={loop.onToggle}
         >
