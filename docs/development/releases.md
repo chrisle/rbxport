@@ -101,3 +101,14 @@ published version and downloads before reporting completion.
 Production frontend builds obfuscate app JavaScript and omit source maps.
 Development builds remain readable. Obfuscation provides no protection for
 secrets; keep credentials out of the frontend.
+
+## Linux AppImage blank window
+
+The AppImage bundles the build host's `libwayland-client`. On rolling-release
+distributions the host's Mesa needs its own copy, and WebKitGTK shows a blank
+window with `Could not create default EGL display: EGL_BAD_PARAMETER` (#337).
+`src-tauri/src/appimage_wayland.rs` re-executes the app once with the host's
+`libwayland-client` in `LD_PRELOAD` on any AppImage launch (Wayland, KDE and
+Xorg/i3 all reported, #337) and sets `DESKTOPINTEGRATION=1` (a reporter found
+mouse and focus broken without it), keeping any value the user already set.
+Set `RBXPORT_WAYLAND_PRELOAD=1` to skip it.

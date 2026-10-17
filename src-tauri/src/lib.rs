@@ -5,6 +5,7 @@
 //! them against a mock app and a fixture library, the way the webview does
 //! against the real one.
 
+pub mod appimage_wayland;
 mod windowfit;
 mod file_drop;
 mod file_drag;
