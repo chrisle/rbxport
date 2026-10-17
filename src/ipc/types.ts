@@ -850,9 +850,16 @@ export interface Backend {
   /**
    * A page of the Missing File Manager's list, `limit` tracks from `offset`.
    * `rescan` checks every track's file again; otherwise the page comes from
-   * the last check.
+   * the last check. `keepOrder` makes such a check keep the list's sorted
+   * order, as rekordbox's list keeps it after a relocate or delete.
    */
-  missingTracks(offset: number, limit: number, rescan: boolean): Promise<MissingTracks>;
+  missingTracks(offset: number, limit: number, rescan: boolean, keepOrder?: boolean): Promise<MissingTracks>;
+  /**
+   * A click on a Missing File Manager column heading: the list, as it
+   * stands, sorted by that column, forwards or backwards, rekordbox's way
+   * (`relocate::sorted_rows`).
+   */
+  sortMissingTracks(column: MissingColumn, forwards: boolean): Promise<void>;
   /**
    * The Missing File Manager's Delete: the missing tracks named, or every
    * missing track when `tracks` is null, leave the collection and every
@@ -1851,6 +1858,9 @@ export interface UnanalysedTracks {
   /** The row the next page starts from; null once the library is done. */
   next: number | null;
 }
+
+/** A Missing File Manager column, by its heading. */
+export type MissingColumn = "title" | "artist" | "album" | "location";
 
 export interface MissingTracks {
   /** Every missing track, not just the ones in this page. */

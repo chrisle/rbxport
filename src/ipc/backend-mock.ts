@@ -408,6 +408,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   mockLogLine("debug", "rbxport_lib::logging", "logging to the browser preview");
   const playlistFixture = options.playlistFixture ?? readPlaylistFixtureFromUrl();
   const all = makeRows(trackCount);
+  /** The Missing File Manager's order once a heading sorted it, by id. */
+  let missingOrder: string[] | null = null;
+  /** The missing rows in the manager's order; any not in it go last. */
+  const missingListed = () => {
+    const gone = all.filter((row) => row.missing === true);
+    if (missingOrder === null) return gone;
+    const at = new Map(missingOrder.map((id, index) => [id, index]));
+    return gone
+      .map((row, index) => ({ row, index }))
+      .sort((a, b) => (at.get(a.row.id) ?? Infinity) - (at.get(b.row.id) ?? Infinity) || a.index - b.index)
+      .map(({ row }) => row);
+  };
   const missingEvery = options.missingEvery ?? readMissingFromUrl();
   if (missingEvery !== null) {
     for (let i = 1; i < all.length; i += missingEvery) {
@@ -2954,9 +2966,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     exportPlaylistFile: () => wait(null),
     exportXml: () => wait(null),
 
-    // The tracks `?missing=N` took the files of, in collection order.
-    missingTracks: (offset, limit) => {
-      const gone = all.filter((row) => row.missing === true);
+    // The tracks `?missing=N` took the files of, in collection order until
+    // a heading sorts them; a check after a change keeps that order.
+    missingTracks: (offset, limit, rescan, keepOrder) => {
+      if (rescan && !keepOrder) missingOrder = null;
+      const gone = missingListed();
       return wait({
         total: gone.length,
         tracks: gone.slice(offset, offset + limit).map((row) => ({
@@ -2967,6 +2981,30 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           path: String(row.extra?.location ?? ""),
         })),
       });
+    },
+    sortMissingTracks: (column, forwards) => {
+      // `relocate::sorted_rows`, over the list as it stands: ICU's en-US
+      // order, then the row's place, reversed forwards (rekordbox's
+      // `compareEnd` answers -1).
+      const collator = new Intl.Collator("en-US");
+      const text = (a: string, b: string) => collator.compare(a, b);
+      const disc = (row: RowDto) => Number(row.extra?.discNo ?? 0);
+      const track = (row: RowDto) => Number(row.extra?.trackNumber ?? 0);
+      const album = (a: RowDto, b: RowDto) => text(a.album, b.album) || disc(a) - disc(b) || track(a) - track(b);
+      const keys = (a: RowDto, b: RowDto) => {
+        switch (column) {
+          case "title": return text(a.title, b.title);
+          case "artist": return text(a.artist, b.artist) || album(a, b);
+          case "album": return album(a, b);
+          case "location": return text(String(a.extra?.location ?? ""), String(b.extra?.location ?? ""));
+        }
+      };
+      const placed = missingListed().map((row, at) => ({ row, at }));
+      placed.sort((a, b) => forwards
+        ? Math.sign(keys(a.row, b.row)) || b.at - a.at
+        : Math.sign(keys(b.row, a.row)) || a.at - b.at);
+      missingOrder = placed.map(({ row }) => row.id);
+      return wait(undefined);
     },
     removeMissingTracks: async (tracks) => {
       const gone = all.filter((row) => row.missing === true && (tracks === null || tracks.includes(row.id)));

@@ -4,7 +4,10 @@
    44px (25pt) pitch, black and (25,25,25) by turns, selected rows in the
    browser's selection blue; "N Track" right-aligned over the buttons; Auto
    Relocate, Relocate and Delete on the left at 190x50px (109x29pt) and OK on
-   the right. */
+   the right.
+   Resizable from every edge and corner between 400x300 and 1024x768, the
+   title row included (issue #541); the columns keep their widths and the
+   list scrolls sideways. */
 .dialog {
   position: fixed;
   inset: 0;
@@ -13,8 +16,11 @@
   flex-direction: column;
   width: 608px;
   height: 560px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 32px);
+  min-width: 400px;
+  min-height: 300px;
+  max-width: min(1024px, 100vw);
+  max-height: min(768px, 100vh);
+  overflow: hidden;
   box-sizing: border-box;
   padding: 0 14px 14px;
   border: 1px solid var(--c-context-menu-border);
@@ -41,11 +47,35 @@
 .header,
 .row {
   display: grid;
-  grid-template-columns: 120px 120px 120px minmax(0, 1fr);
   height: var(--s-menu-row-h);
   line-height: var(--s-menu-row-h);
 }
-.header { background: var(--c-missing-manager); color: var(--c-text-dim); border-bottom: 1px solid var(--c-raised); }
+/* Inside the list, so it scrolls sideways with the rows. [OBS rekordbox
+   7.2.14, issue #541] #191919 under #969696 headings; the sorted one in the
+   selection blue with sortUp.svg / sortDown.svg 10px from its right edge
+   (`MissingFileTableLookAndFeel::drawTableHeaderColumn` @0x1012a4bfc). */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-width: 100%;
+  background: var(--c-missing-manager);
+  color: var(--c-missing-manager-heading);
+  border-bottom: 1px solid var(--c-raised);
+}
+.heading { position: relative; display: flex; align-items: center; cursor: default; }
+.heading[data-sorted] { color: var(--c-accent); }
+.label { flex: 1; min-width: 0; overflow: hidden; }
+.sortArrow { flex: none; width: 9px; height: 9px; margin: 0 5px 0 4px; }
+/* A column's resize handle: the last few pixels of its heading. */
+.grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+}
 .cell {
   overflow: hidden;
   padding: 0 5px;
@@ -53,11 +83,11 @@
   border-right: 1px solid var(--c-raised);
 }
 .list { position: relative; flex: 1; min-height: 0; overflow: auto; background: var(--c-black); }
-.rows { position: relative; }
+.rows { position: relative; min-width: 100%; }
 .row {
   position: absolute;
   left: 0;
-  right: 0;
+  min-width: 100%;
   background: var(--c-black);
   cursor: default;
 }
@@ -81,3 +111,16 @@
 .buttons button:disabled { opacity: .4; }
 .buttons button:hover:not(:disabled) { border-color: var(--c-accent); }
 .dialog :focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+/* The window's resize handles, along each edge and at each corner. */
+.edge { position: absolute; z-index: 2; }
+.edge[data-edge="n"], .edge[data-edge="s"] { left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.edge[data-edge="e"], .edge[data-edge="w"] { top: 8px; bottom: 8px; width: 5px; cursor: ew-resize; }
+.edge[data-edge="n"] { top: 0; }
+.edge[data-edge="s"] { bottom: 0; }
+.edge[data-edge="e"] { right: 0; }
+.edge[data-edge="w"] { left: 0; }
+.edge[data-edge="ne"], .edge[data-edge="nw"], .edge[data-edge="se"], .edge[data-edge="sw"] { width: 8px; height: 8px; }
+.edge[data-edge="ne"] { top: 0; right: 0; cursor: nesw-resize; }
+.edge[data-edge="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
+.edge[data-edge="nw"] { top: 0; left: 0; cursor: nwse-resize; }
+.edge[data-edge="se"] { bottom: 0; right: 0; cursor: nwse-resize; }
