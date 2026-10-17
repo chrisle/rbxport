@@ -2342,6 +2342,16 @@ fn a_my_tag_panel_tick_tags_the_whole_selection_as_one_step() {
     let lookups = run(details::track_lookups(s.state())).unwrap();
     let category = lookups.my_tag_categories.iter().find(|c| c.id == MY_TAG_CATEGORY).unwrap();
     assert_eq!(category.tags.last().map(|t| t.id.as_str()), Some(made.id.as_str()));
+    // The Track Filter's tag columns hear of it at once, before any rename.
+    let filter_tags = || -> Vec<String> {
+        run(commands::filter_values(s.state(), collection_spec()))
+            .unwrap()
+            .tags
+            .into_iter()
+            .flat_map(|c| c.tags)
+            .collect()
+    };
+    assert!(filter_tags().iter().any(|t| t == "My Comment"), "{:?}", filter_tags());
     run(details::rename_my_tag(s.handle(), s.state(), made.id.clone(), "Opener".to_owned())).unwrap();
     let lookups = run(details::track_lookups(s.state())).unwrap();
     let category = lookups.my_tag_categories.iter().find(|c| c.id == MY_TAG_CATEGORY).unwrap();
