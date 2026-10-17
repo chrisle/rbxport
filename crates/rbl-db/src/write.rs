@@ -3010,7 +3010,12 @@ impl Writer {
         if attribute != 0 {
             return Err(DbError::WriteRefused("a My Tag category cannot be deleted".to_owned()));
         }
-        let mut usn = next_usn(&tx)?;
+        // One update number stamps the whole delete (the tag, the
+        // renumbered siblings and the memberships), as `set_my_tags` does:
+        // the counter is only written at commit and neither table is in
+        // `USN_TABLES`, so asking again in this transaction would return
+        // the same number anyway.
+        let usn = next_usn(&tx)?;
         let mut rows = tx.execute(
             "UPDATE djmdMyTag SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
              WHERE ID = ?3 AND rb_local_deleted = 0",
@@ -3029,14 +3034,11 @@ impl Writer {
             .filter(|((_, seq), want)| seq != want)
             .map(|((sibling, _), want)| (sibling, want))
             .collect();
-        if !moved.is_empty() {
-            usn = next_usn(&tx)?;
-            for (sibling, seq) in moved {
-                rows += tx.execute(
-                    "UPDATE djmdMyTag SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3 WHERE ID = ?4",
-                    params![seq, usn, stamp, sibling],
-                )?;
-            }
+        for (sibling, seq) in moved {
+            rows += tx.execute(
+                "UPDATE djmdMyTag SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3 WHERE ID = ?4",
+                params![seq, usn, stamp, sibling],
+            )?;
         }
 
         let mut statement = tx.prepare(
@@ -3047,7 +3049,6 @@ impl Writer {
             .collect::<rusqlite::Result<_>>()?;
         drop(statement);
         for membership in memberships {
-            usn = next_usn(&tx)?;
             rows += tx.execute(
                 "UPDATE djmdSongMyTag SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
                  WHERE ID = ?3 AND rb_local_deleted = 0",
