@@ -1,0 +1,64 @@
+{
+  "app": "Pioneer remotebox for XDJ-R1",
+  "historical_app_store_id": 574384353,
+  "date": "2026-10-15",
+  "official_identity_source": "https://www.pioneerdj.com/-/media/pioneerdj/downloads/firmwares/systems/xdj-r1/xdj-r1-firmware-change-history-ver113-en.pdf",
+  "artifact_obtained": false,
+  "static_client_analysis_performed": false,
+  "unknowns_resolved_by_this_search": [],
+  "archive_inventory_scan": {
+    "endpoint": "https://archive.org/advancedsearch.php",
+    "query": "(title:ipa OR title:(ios collection) OR title:(ios archive)) AND mediatype:software",
+    "sort": "downloads desc",
+    "requested_rows": 200,
+    "items_checked": 200,
+    "file_entries_checked": 96204,
+    "filename_pattern": "remote.?box|574384353|pioneer",
+    "matching_entries": 6,
+    "relevant_matches": 0,
+    "errors": [],
+    "boundary": "Filename inventories only; not recursive content inspection of every bundled ZIP/RAR. This does not prove no copy exists."
+  },
+  "other_checks": [
+    {
+      "source": "Apple lookup API",
+      "countries": [
+        "us",
+        "gb",
+        "jp"
+      ],
+      "resultCount": 0,
+      "boundary": "No current listing returned; not an account purchase-history download attempt."
+    },
+    {
+      "source": "iOSGods public search API",
+      "query": "remotebox",
+      "total": 0
+    },
+    {
+      "source": "SourceForge iPhone remotebox catalogue page",
+      "url": "https://sourceforge.net/app/remotebox/iphone/",
+      "result": "Description page, no IPA payload link identified."
+    },
+    {
+      "source": "appdb",
+      "result": "HTML shell retrieved; JavaScript asset request403 and attempted API request405. Catalogue availability not established."
+    },
+    {
+      "source": "Softonic and iPhone APKPure",
+      "result": "Requests blocked412/403; not evidence of absence."
+    },
+    {
+      "source": "Local conventional iTunes/iMazing app archive directories",
+      "result": "Checked three conventional directories; none existed."
+    }
+  ],
+  "next_required_artifact": "A remotebox IPA or extracted app bundle. Inspect its Info.plist, executable architectures, signatures and encryption load commands before drawing app-code conclusions.",
+  "files": {
+    "apple-gb-lookup.json": "7f5ce663b726607eae2fde2a6dc438052ac0d1681e636de7cc3377c0bb77e047",
+    "apple-jp-lookup.json": "7f5ce663b726607eae2fde2a6dc438052ac0d1681e636de7cc3377c0bb77e047",
+    "apple-us-lookup.json": "b6d593e13e855645b7a145813398fd9617f6384557b0daaf7598240da282f925",
+    "archive-inventories.json": "713577fb4350b47d5627d70d789d97a6677fb77c7151485c2fd32e010dd36fa4",
+    "iosgods-search.json": "d86dd79f9d7311eb4cbc512b0a1c530aba5bb6a837435a7af98ce130371c4681"
+  }
+}

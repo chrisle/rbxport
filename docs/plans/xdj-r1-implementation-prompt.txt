@@ -1,0 +1,36 @@
+Implement XDJ-R1 USB export support in RBXport on chris-m2-mac. Do the implementation, not just a plan. Use a new worktree and leave the original checkout and unrelated work intact.
+
+First update the evidence repository:
+- Locate ~/code/alphatheta-docs, read its AGENTS.md, and inspect its status and branch.
+- Fetch origin and pull main with --ff-only. Do not reset, discard, or automatically stash unrelated changes. If local changes prevent a safe pull, use an isolated checkout of origin/main for reference instead.
+- Verify that the fetched main contains documentation commit 60278d505f3a432e93cdc55522cdf146c27ad7ba or a descendant.
+- Read platform/rekordbox-xdj-r1-dbh.md, platform/rekordbox-xdj-r1-cbm-layout.md, platform/rekordbox-xdj-r1-native-reader.md, and their linked evidence bundles, especially writer-byte-map.json, collation-constants.json and analysis-audit.json.
+
+Then prepare RBXport:
+- Locate ~/code/rbxport and read its AGENTS.md and applicable instructions. Inspect status and existing worktrees before changing anything.
+- Fetch origin and create a NEW worktree/branch named codex/xdj-r1-sync from origin/dev. Verify that origin/dev exists. If that branch/worktree name already exists, preserve it and select a fresh codex/ name. Prefer the app's managed worktree tools when available; otherwise use git worktree. Do all implementation in the new worktree, not the original checkout.
+- Read docs/reference/usb-export-pipeline.md and usb-export-db.md, then inspect the actual preference, IPC, export, reconciliation, manifest, protection and publication code. Follow the current architecture rather than assuming file names or APIs have stayed unchanged.
+
+Product behavior:
+1. Add a persisted GLOBAL Preferences > USB Export option, "XDJ-R1 support", OFF BY DEFAULT. Missing values in old settings must resolve to false. A brief translated description should explain that enabling it creates an additional legacy XDJ-R1 database on USB exports. This is a global preference, not a separate per-drive opt-in. Make it discoverable from Sync Manager using the existing preferences/navigation pattern.
+2. OFF must preserve normal export behavior. ON must add all six Cbm DBH files to the same USB while continuing to create the classic Device Library and OneLibrary using shared prepared audio. Device Library Plus and OneLibrary are the same format, not two outputs.
+3. Apply the preference consistently to Sync Manager manual/automatic sync and every USB export entry point. Capture it in each job's immutable options. Include it in incremental-change detection so enabling it builds R1 even when tracks/playlists are otherwise unchanged. Do not let preference changes mid-job produce a mixed generation.
+
+Implement the actual Cbm codec and integrate it into export:
+- Emit CbmDB.DBH, CbmTT.DBH, CbmAR.DBH, CbmAB.DBH, CbmBP.DBH and CbmPL.DBH under PIONEER/DBH. Follow the documented header, record, TOC, directory, text, collation, category, ID, timing and block rules. Use the Cbm format, not the MEP-4000 format. Keep format code in Tauri-independent Rust crates.
+- Enforce bounds and validated offsets, preserve the following zero sentinel, and return contextual errors rather than panicking. Use stock zero values for unresolved fresh-output fields; never invent meanings. Track observable reference quirks explicitly. Reproducing text quirks must never permit memory unsafety or an internally inconsistent export; cover necessary safe deviations with tests and documentation.
+- Reuse and verify the existing audio-path hash/shard layout for R1 base DAT lookup. Handle hash collisions and PPTH matching, and support the documented R1 analysis, memory/hot cues and Hot Cue Auto Load behavior. Use actual exported audio properties and paths. Add the documented artwork outputs without claiming unverified remote-client selection behavior.
+- Include R1 outputs/assets in staging, space estimates, progress, cancellation, verification, publication journal, recovery, and manifest ownership/profile tracking. Maintain a coherent library set across failures. Do not copy stock rekordbox's unsafe delete-before-replacement/empty-export behavior. Do not add raw FAT writes: the mapped writer uses synthetic positions and zero for the optional cached first sector.
+- Detect existing R1 libraries and pending edits before destructive changes. Preserve unknown bytes when reading existing records. Initial support is export; full device-edit import is separate. Do not silently overwrite pending/foreign edits or delete audio still referenced by a protected library. Turning the preference off must not silently delete an unowned Cbm library or advertise stale output as current. Extend existing library-protection/recovery behavior for these cases.
+
+Safety and evidence:
+- Never write an installed rekordbox library or a real user's USB during development/tests. Use RB_LITE_TEST=1, rbl_db::fixture::build, and disposable temporary export directories.
+- Views call backend only through src/ipc; all visible strings use the existing translation system. Keep sorting/filtering/index logic out of React views.
+- Preserve [OBS], [ASSUME] and [UNKNOWN] boundaries. Remotebox is unavailable and is NOT a prerequisite for initial implementation. Controlled stock fixtures and physical R1 testing remain separate validation requirements. Do not fabricate fixtures or claim physical compatibility. The guarded native timing clamp near 100 minutes needs an explicit boundary test and accurate documentation, not an unsupported universal file-rejection claim.
+
+Validation and delivery:
+- Add meaningful codec and independent parser/structural checks; test exact offsets and references, grouping/sorting/text boundaries, bounds, collisions, empty/excluded selections, preference persistence/defaults, toggling ON with unchanged input, simultaneous database coexistence, incremental add/update/remove, pending-edit protection, and failure/cancellation recovery. Verify OFF does not regress normal exports. Clearly label generated fixtures versus stock captures.
+- Run focused checks first, then the applicable substantial-change checks from AGENTS.md: cargo clippy --workspace --all-targets -- -D warnings; RB_LITE_TEST=1 cargo test --workspace; pnpm lint; pnpm build; pnpm test; pnpm budget; pnpm e2e. Run token/icon generators if their sources change. Distinguish existing failures from introduced ones.
+- Finish the implementation and feasible automated validation without stopping at a proposal or waiting for unavailable hardware. Record unresolved hardware/reference checks as limitations, not as completed tests.
+- Commit the completed implementation on the worktree branch with a Conventional Commit and a short explanatory body. Do not merge into dev/main, push the implementation, or release unless separately instructed.
+- Report the worktree path, branch and commit, files/behavior changed, tests and results, remaining evidence gaps, and steps for physical R1 acceptance. Leave a concise implementation/handoff note in the worktree.

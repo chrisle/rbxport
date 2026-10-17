@@ -13,12 +13,14 @@ The scheduler checks the tmux session every 12 hours (RBX_CHECK_INTERVAL seconds
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -37,6 +39,37 @@ DONE_PATTERN = re.compile(r"Goal achieved|Goal could not be achieved|Goal cleare
 # commands need the trailing colon.
 SESSION_TARGET = f"={SESSION}"
 PANE_TARGET = f"={SESSION}:"
+SCHEDULE_FILE = Path(tempfile.gettempdir()) / (
+    f"rbx-backlog-{os.getuid()}-{hashlib.sha256(SESSION.encode()).hexdigest()[:16]}.schedule"
+)
+
+
+def save_schedule(next_check: float) -> None:
+    temporary = SCHEDULE_FILE.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(f"{os.getpid()} {next_check}\n", encoding="utf-8")
+    temporary.replace(SCHEDULE_FILE)
+
+
+def restart_schedule() -> str:
+    """Read the actual scheduler deadline, including from a separate menu process."""
+    try:
+        pid, deadline = SCHEDULE_FILE.read_text(encoding="utf-8").split()
+        if int(pid) <= 0:
+            raise ValueError("invalid scheduler PID")
+        os.kill(int(pid), 0)
+        next_check = float(deadline)
+        when = datetime.fromtimestamp(next_check).astimezone()
+        minutes = max(0, int((next_check - time.time() + 59) // 60))
+    except (OSError, ValueError, OverflowError):
+        return (
+            "Next ticket pickup / restart check: unavailable.\n"
+            "  Run or relaunch the scheduler (option 7) to publish its next check time."
+        )
+    countdown = f"in {minutes // 60}h {minutes % 60}m" if minutes else "due now"
+    return (
+        f"Next ticket pickup / restart check: {when:%a %b %d, %Y %I:%M %p %Z} ({countdown})\n"
+        "  Restarts for new tickets if the current goal has finished; otherwise waits another interval."
+    )
 
 
 def log(msg: str) -> None:
@@ -87,7 +120,7 @@ def goal_finished() -> bool:
 def status() -> str:
     if not has_session():
         return "stopped"
-    return "finished (will restart on next check)" if goal_finished() else "running"
+    return "finished" if goal_finished() else "running"
 
 
 def restart() -> None:
@@ -118,6 +151,8 @@ def run_scheduler() -> None:
     print("Ctrl-C stops the scheduler (the tmux session keeps running).\n")
     try:
         while True:
+            save_schedule(time.time() + CHECK_INTERVAL)
+            print(restart_schedule(), flush=True)
             time.sleep(CHECK_INTERVAL)
             if goal_finished():
                 log("goal finished (or session gone); restarting")
@@ -127,6 +162,12 @@ def run_scheduler() -> None:
     except KeyboardInterrupt:
         print()
         log("scheduler stopped (tmux session left running)")
+    finally:
+        try:
+            if SCHEDULE_FILE.read_text(encoding="utf-8").split()[0] == str(os.getpid()):
+                SCHEDULE_FILE.unlink(missing_ok=True)
+        except (OSError, IndexError):
+            pass
 
 
 def attach(read_only: bool = False) -> None:
@@ -185,6 +226,7 @@ def menu() -> None:
     }
     while True:
         print(f"\n=== rbx backlog worker — {status()} ===")
+        print(restart_schedule())
         for key, (label, _) in actions.items():
             print(f"  {key}) {label}")
         choice = input("> ").strip().lower()
