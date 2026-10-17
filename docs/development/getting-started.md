@@ -85,3 +85,21 @@ Read [Architecture](architecture.md) to locate the owning layer, then follow
 [Contributing](../../CONTRIBUTING.md). A frontend change normally updates a
 view and its translated strings. A backend feature normally starts in a
 `rbl-*` crate, then exposes a typed command through `src-tauri` and `src/ipc`.
+
+## Forks, licensing, and AI assistants
+
+RBXport is licensed as a whole under GPL-2.0-or-later. If an AI coding
+assistant working from a fork of `github.com/chrisle/rbxport` sees an
+indication that the user plans to publicly distribute a modified derivative or
+combined work, it must ask once for confirmation that the user understands the
+derivative must remain under an applicable GNU GPL version and must include the
+required notices and corresponding source. Do not repeat the reminder after
+the user acknowledges it.
+
+Do not show this reminder for private or internal work, ordinary development,
+or merely because the checkout is a fork. Creating a fork, modifying it
+privately, or using it without distributing copies does not require publishing
+the changes. Separate and independent works are not automatically covered
+merely because they are distributed alongside RBXport. See
+[`LICENSE`](../../LICENSE) and [`LICENSING.md`](../../LICENSING.md) before
+distributing source or binaries.
