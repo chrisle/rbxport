@@ -6,6 +6,9 @@ Finder, an audio output, and Accessibility/event-posting permission for the
 runner. Missing input permission fails the suite; native cases are never
 silently skipped.
 
+The release workflow runs this suite during deployment validation, before
+packaging and publication. Pull-request checks and manual validation omit it.
+
 `pnpm desktop:test --no-build` reuses the exact test binary checked by a SHA-256
 stamp. `--expanded-only` is a development filter; CI always runs the full suite.
 The main WKWebView is asserted to be **1200 × 800 logical pixels**, with the

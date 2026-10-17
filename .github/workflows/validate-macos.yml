@@ -6,6 +6,11 @@ on:
       source_ref:
         required: true
         type: string
+      run_desktop:
+        description: "Run native desktop regressions during deployment validation"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -76,11 +81,12 @@ jobs:
           fi
 
       - name: Exercise the native Apple Silicon desktop with a disposable library
+        if: inputs.run_desktop
         timeout-minutes: 25
         run: pnpm desktop:test
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && inputs.run_desktop
         with:
           name: macos-desktop-regressions
           path: desktop-test-results/

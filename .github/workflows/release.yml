@@ -150,6 +150,7 @@ jobs:
       source_ref: ${{ needs.prepare.outputs.source_ref }}
       skip_tests: ${{ needs.prepare.outputs.skip_tests == 'true' }}
       full: true
+      validate_desktop: true
 
   record:
     name: Record and tag version number

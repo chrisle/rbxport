@@ -26,7 +26,10 @@ workspace test gates before deployment.
 - `validate-linux.yml` proves the Tauri shell opens a native Linux window.
 - `validate-macos.yml` proves the Intel build launches through Rosetta and runs
   31 real Apple Silicon desktop scenarios, including native Finder drag/drop,
-  against a disposable SQLCipher fixture (`pnpm desktop:test`).
+  against a disposable SQLCipher fixture (`pnpm desktop:test`). The desktop
+  scenarios run only when the release workflow explicitly enables
+  `validate_desktop`, before packaging and publication; PR checks and manual
+  validation do not run them.
 - `validate-frontend.yml` independently selects lint, build, unit, browser, and
   bundle-budget checks.
 - `validate-scripts.yml` runs the dependency-free Node script tests.

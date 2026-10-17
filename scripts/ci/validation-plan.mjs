@@ -45,16 +45,6 @@ export function planValidation(paths, { all = false } = {}) {
     const path = rawPath.replace(/^\.\//, "").trim();
     if (!path) continue;
 
-    if (path.startsWith("scripts/desktop/")) {
-      enable(plan, "macos_intel");
-      continue;
-    }
-    // Main feature controls and their native invocation/storage paths cross the
-    // actual WKWebView boundary, even on a focused pull-request run.
-    if (/^(src\/(ipc|app|views|store)\/|src-tauri\/(src\/(lib|commands|player|preview|analysis|preferences|sync_window|backups|file_drop|cues|test_port)\.rs$|capabilities\/)|crates\/rbl-(db|export)\/(src\/|examples\/(e2e_fixture|desktop_verify)\.rs$))/.test(path)) {
-      enable(plan, "macos_intel");
-    }
-
     // PR checks stay intentionally focused; deploy runs the entire graph.
     // A lane's own workflow change exercises that lane, while orchestration
     // and packaging changes rely on actionlint here and the full deploy gate.

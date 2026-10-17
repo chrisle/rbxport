@@ -43,6 +43,11 @@ on:
         required: false
         default: true
         type: boolean
+      validate_desktop:
+        description: "Run native desktop regressions (deployment only)"
+        required: false
+        default: false
+        type: boolean
       validate_scripts:
         required: false
         default: true
@@ -144,6 +149,7 @@ jobs:
     uses: ./.github/workflows/validate-macos.yml
     with:
       source_ref: ${{ inputs.source_ref }}
+      run_desktop: ${{ inputs.validate_desktop }}
 
   validated:
     name: Validation complete
