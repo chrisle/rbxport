@@ -12,38 +12,54 @@ test("documentation-only changes require no expensive validation lane", () => {
   assert.deepEqual(enabled("README.md", "docs/testing.md", ".github/workflows/README.md"), []);
 });
 
-test("a Rust library change stays in the focused Rust lane", () => {
-  assert.deepEqual(enabled("crates/rbl-db/src/export.rs"), ["rust"]);
+test("a Rust library change runs Rust and the Nix source smoke", () => {
+  assert.deepEqual(enabled("crates/rbl-db/src/export.rs"), ["rust", "nix_source"]);
 });
 
-test("desktop shell changes use focused Rust checks before deploy", () => {
-  assert.deepEqual(enabled("src-tauri/src/lib.rs"), ["rust"]);
+test("desktop shell changes run Rust and the Nix source smoke", () => {
+  assert.deepEqual(enabled("src-tauri/src/lib.rs"), ["rust", "nix_source"]);
 });
 
 test("Windows installer resources add the Windows-native check", () => {
-  assert.deepEqual(enabled("src-tauri/windows/install-update-task.ps1"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("src-tauri/windows/install-update-task.ps1"), [
+    "rust",
+    "windows_rust",
+    "nix_source",
+  ]);
 });
 
 test("Windows-only desktop Rust adds the Windows-native check", () => {
-  assert.deepEqual(enabled("src-tauri/src/file_drop.rs"), ["rust", "windows_rust"]);
-  assert.deepEqual(enabled("src-tauri/Cargo.toml"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("src-tauri/src/file_drop.rs"), ["rust", "windows_rust", "nix_source"]);
+  assert.deepEqual(enabled("src-tauri/Cargo.toml"), ["rust", "windows_rust", "nix_source"]);
 });
 
 test("the library's Windows file-index code runs the Windows-native Rust lane", () => {
-  assert.deepEqual(enabled("crates/rbl-db/src/file_id.rs"), ["rust", "windows_rust"]);
-  assert.deepEqual(enabled("crates/rbl-db/Cargo.toml"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("crates/rbl-db/src/file_id.rs"), ["rust", "windows_rust", "nix_source"]);
+  assert.deepEqual(enabled("crates/rbl-db/Cargo.toml"), ["rust", "windows_rust", "nix_source"]);
 });
 
 test("USB eject's Windows code runs the Windows-native Rust lane", () => {
-  assert.deepEqual(enabled("crates/rbl-devices/src/eject.rs"), ["rust", "windows_rust"]);
-  assert.deepEqual(enabled("crates/rbl-devices/src/eject/windows.rs"), ["rust", "windows_rust"]);
-  assert.deepEqual(enabled("crates/rbl-devices/Cargo.toml"), ["rust", "windows_rust"]);
-  assert.deepEqual(enabled("crates/rbl-devices/src/lib.rs"), ["rust"]);
+  assert.deepEqual(enabled("crates/rbl-devices/src/eject.rs"), [
+    "rust",
+    "windows_rust",
+    "nix_source",
+  ]);
+  assert.deepEqual(enabled("crates/rbl-devices/src/eject/windows.rs"), [
+    "rust",
+    "windows_rust",
+    "nix_source",
+  ]);
+  assert.deepEqual(enabled("crates/rbl-devices/Cargo.toml"), ["rust", "windows_rust", "nix_source"]);
+  assert.deepEqual(enabled("crates/rbl-devices/src/lib.rs"), ["rust", "nix_source"]);
 });
 
 test("backup changes also run the Windows-native Rust lane", () => {
-  assert.deepEqual(enabled("src-tauri/src/backups.rs"), ["rust", "windows_rust"]);
-  assert.deepEqual(enabled("crates/rbl-backup/src/restore.rs"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("src-tauri/src/backups.rs"), ["rust", "windows_rust", "nix_source"]);
+  assert.deepEqual(enabled("crates/rbl-backup/src/restore.rs"), [
+    "rust",
+    "windows_rust",
+    "nix_source",
+  ]);
 });
 
 test("frontend test-only changes skip browser and bundle checks", () => {
@@ -51,6 +67,7 @@ test("frontend test-only changes skip browser and bundle checks", () => {
     "frontend_lint",
     "frontend_typecheck",
     "frontend_unit",
+    "nix_source",
   ]);
 });
 
@@ -59,6 +76,7 @@ test("frontend source changes use the fast frontend checks", () => {
     "frontend_lint",
     "frontend_typecheck",
     "frontend_unit",
+    "nix_source",
   ]);
 });
 
@@ -77,6 +95,7 @@ test("file-drop bridge changes add the Windows-native check", () => {
     "frontend_typecheck",
     "frontend_unit",
     "windows_file_drop",
+    "nix_source",
   ]);
 });
 
@@ -94,6 +113,24 @@ test("packaging action changes defer expensive runtime checks to deploy", () => 
 
 test("the AppImage GTK plugin runs the Node script suite that tests its hook", () => {
   assert.deepEqual(enabled("packaging/appimage/linuxdeploy-plugin-gtk.sh"), ["scripts"]);
+});
+
+test("Nix packaging and dependency changes run the source build lane", () => {
+  assert.deepEqual(enabled("flake.nix"), ["nix_source"]);
+  assert.deepEqual(enabled("flake.lock"), ["nix_source"]);
+  assert.deepEqual(enabled("packaging/nix/pin.json"), ["nix_source"]);
+  assert.deepEqual(enabled("packaging/nix/source.nix"), ["nix_source"]);
+  assert.deepEqual(enabled("Cargo.lock"), ["rust", "nix_source"]);
+  assert.deepEqual(enabled("pnpm-lock.yaml"), [
+    "frontend_lint",
+    "frontend_typecheck",
+    "frontend_build",
+    "frontend_unit",
+    "scripts",
+    "nix_source",
+  ]);
+  assert.deepEqual(enabled(".github/workflows/validate-nix.yml"), ["scripts", "nix_source"]);
+  assert.deepEqual(enabled(".github/actions/nix-smoke/action.yml"), ["scripts", "nix_source"]);
 });
 
 test("a lane workflow change exercises only that lane on the PR", () => {

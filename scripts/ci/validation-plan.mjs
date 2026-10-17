@@ -15,6 +15,7 @@ export const validationKeys = [
   "windows_file_drop",
   "linux_window",
   "macos_intel",
+  "nix_source",
 ];
 
 function emptyPlan() {
@@ -56,6 +57,13 @@ export function planValidation(paths, { all = false } = {}) {
       }
       if (path.endsWith("validate-linux.yml")) enable(plan, "linux_window");
       if (path.endsWith("validate-macos.yml")) enable(plan, "macos_intel");
+      if (
+        path.endsWith("validate-nix.yml") ||
+        path.endsWith("nix.yml") ||
+        path.endsWith("nix-update.yml")
+      ) {
+        enable(plan, "nix_source");
+      }
       if (path.endsWith("validate-frontend.yml")) enableFrontend(plan);
       if (path.endsWith("validation.yml") || path.endsWith("ci.yml")) {
         enableFrontend(plan);
@@ -66,6 +74,7 @@ export function planValidation(paths, { all = false } = {}) {
 
     if (/^\.github\/actions\//.test(path)) {
       enable(plan, "scripts");
+      if (path.startsWith(".github/actions/nix-smoke/")) enable(plan, "nix_source");
       continue;
     }
 
@@ -75,33 +84,39 @@ export function planValidation(paths, { all = false } = {}) {
       continue;
     }
 
+    // The Nix source package depends on the flake and its pinned hashes.
+    if (path === "flake.nix" || path === "flake.lock" || path.startsWith("packaging/nix/")) {
+      enable(plan, "nix_source");
+      continue;
+    }
+
     if (/^(Cargo\.toml|Cargo\.lock|rust-toolchain(?:\.toml)?|\.cargo\/)/.test(path)) {
-      enable(plan, "rust");
+      enable(plan, "rust", "nix_source");
       continue;
     }
 
     // Backups flush and rename files, which Windows handles differently.
     if (/^(src-tauri\/src\/backup|crates\/rbl-backup\/|crates\/rbl-core\/src\/durable\.rs$)/.test(path)) {
-      enable(plan, "rust", "windows_rust");
+      enable(plan, "rust", "windows_rust", "nix_source");
       continue;
     }
 
     // rb_file_id is the NTFS file index on Windows, read through a cfg(windows)
     // Win32 call; the crate manifest holds that dependency.
     if (path === "crates/rbl-db/src/file_id.rs" || path === "crates/rbl-db/Cargo.toml") {
-      enable(plan, "rust", "windows_rust");
+      enable(plan, "rust", "windows_rust", "nix_source");
       continue;
     }
 
     // USB eject on Windows is cfg(windows) Plug and Play and volume FFI in
     // rbl-devices; the manifest holds its windows-sys features.
     if (/^crates\/rbl-devices\/(src\/eject(?:\.rs$|\/)|Cargo\.toml$)/.test(path)) {
-      enable(plan, "rust", "windows_rust");
+      enable(plan, "rust", "windows_rust", "nix_source");
       continue;
     }
 
     if (path.startsWith("src-tauri/")) {
-      enable(plan, "rust");
+      enable(plan, "rust", "nix_source");
       // Installer hooks and scripts only ever run on Windows. The file-drop
       // bridge has a cfg(windows) WebView2 half and the manifest holds the
       // cfg(windows) dependencies; the Linux lane compiles neither.
@@ -116,14 +131,14 @@ export function planValidation(paths, { all = false } = {}) {
     }
 
     if (path.endsWith(".rs") || path.endsWith(".toml") || /^(crates|iTunes)\//.test(path)) {
-      enable(plan, "rust");
+      enable(plan, "rust", "nix_source");
       continue;
     }
 
     if (/^(package\.json|pnpm-lock\.yaml|eslint\.config\.[cm]?[jt]s|vitest\.config\.[cm]?[jt]s|vite\.config\.[cm]?[jt]s|tsconfig(?:\.[^.]+)?\.json)$/.test(path)) {
       enableFrontend(plan);
       enable(plan, "frontend_build");
-      enable(plan, "scripts");
+      enable(plan, "scripts", "nix_source");
       continue;
     }
 
@@ -133,7 +148,7 @@ export function planValidation(paths, { all = false } = {}) {
     }
 
     if (path.startsWith("src/")) {
-      enable(plan, "frontend_lint", "frontend_typecheck", "frontend_unit");
+      enable(plan, "frontend_lint", "frontend_typecheck", "frontend_unit", "nix_source");
       if (/^src\/ipc\/file-drop(?:\.|\/)/.test(path)) enable(plan, "windows_file_drop");
       continue;
     }
@@ -144,7 +159,7 @@ export function planValidation(paths, { all = false } = {}) {
     }
 
     if (/^(public\/|index\.html$)/.test(path)) {
-      enable(plan, "frontend_build");
+      enable(plan, "frontend_build", "nix_source");
       continue;
     }
 
