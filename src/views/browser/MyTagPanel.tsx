@@ -34,7 +34,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ContextMenu } from "@/components/ContextMenu";
-import { TickIcon } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
 import type { Backend, TrackLookups } from "@/ipc/types";
 import { isLooseId } from "@/lib/explorer";
@@ -194,7 +193,7 @@ export function MyTagPanel({ className, selection, readOnly, libraryGeneration, 
                     disabled={!tickable}
                     onClick={(event) => { event.stopPropagation(); tick(tag.id, !on); }}
                   >
-                    {on ? <TickIcon className={styles.tick} /> : null}
+                    {on ? <MyTagTick /> : null}
                   </button>
                   <Name
                     value={tag.name}
@@ -265,6 +264,20 @@ function Name({ value, editing, onDone, onCancel }: {
         onDone(event.currentTarget.value);
       }}
     />
+  );
+}
+
+/**
+ * The tick of a ticked box: `skins/checkbox_on.svg`'s path (a 10px box), framed
+ * so it lands where drawTickBox puts `checkbox_mark.png`'s tick once it is
+ * stretched from 16px to 14px: svg unit u sits at 1.225u - 0.125px in the
+ * 12px face, so the face shows units 0.102..9.898.
+ */
+function MyTagTick() {
+  return (
+    <svg className={styles.tick} viewBox="0.102 0.102 9.796 9.796" aria-hidden focusable="false">
+      <path d="M2 6.051V4.722l2.038 1.78L8 2.001v1.57L4.041 7.998z" fill="currentColor" />
+    </svg>
   );
 }
 
