@@ -111,6 +111,41 @@ test("the AppImage GTK plugin runs the Node script suite that tests its hook", (
   assert.deepEqual(enabled("packaging/appimage/linuxdeploy-plugin-gtk.sh"), ["scripts"]);
 });
 
+test("Nix packaging changes run the source build lane", () => {
+  assert.deepEqual(enabled("flake.nix"), ["nix_source"]);
+  assert.deepEqual(enabled("flake.lock"), ["nix_source"]);
+  assert.deepEqual(enabled("packaging/nix/pin.json"), ["nix_source"]);
+  assert.deepEqual(enabled("packaging/nix/source.nix"), ["nix_source"]);
+  assert.deepEqual(enabled(".github/workflows/validate-nix.yml"), ["scripts", "nix_source"]);
+  assert.deepEqual(enabled(".github/workflows/nix.yml"), ["scripts", "nix_source"]);
+  assert.deepEqual(enabled(".github/workflows/nix-update.yml"), ["scripts", "nix_source"]);
+  assert.deepEqual(enabled(".github/actions/nix-smoke/action.yml"), ["scripts", "nix_source"]);
+});
+
+test("source and dependency changes leave the source smoke to release", () => {
+  assert.deepEqual(enabled("Cargo.lock"), ["rust"]);
+  assert.deepEqual(enabled("pnpm-lock.yaml"), [
+    "frontend_lint",
+    "frontend_typecheck",
+    "frontend_build",
+    "frontend_unit",
+    "scripts",
+  ]);
+  assert.deepEqual(enabled("package.json"), [
+    "frontend_lint",
+    "frontend_typecheck",
+    "frontend_build",
+    "frontend_unit",
+    "scripts",
+  ]);
+  assert.deepEqual(enabled("src/lib/cues.ts"), [
+    "frontend_lint",
+    "frontend_typecheck",
+    "frontend_unit",
+  ]);
+  assert.deepEqual(enabled("public/icon.png"), ["frontend_build"]);
+});
+
 test("a lane workflow change exercises only that lane on the PR", () => {
   assert.deepEqual(enabled(".github/workflows/validate-windows.yml"), [
     "scripts",

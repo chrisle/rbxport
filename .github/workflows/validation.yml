@@ -48,6 +48,10 @@ on:
         required: false
         default: false
         type: boolean
+      validate_nix:
+        required: false
+        default: true
+        type: boolean
       validate_scripts:
         required: false
         default: true
@@ -151,9 +155,27 @@ jobs:
       source_ref: ${{ inputs.source_ref }}
       run_desktop: ${{ inputs.validate_desktop }}
 
+  # Runs after every non-packaging lane, so a packaging-only failure is the
+  # last thing that can block validation rather than a duplicate of the Rust or
+  # frontend build.
+  nix-source:
+    name: Nix source smoke
+    needs: [rust, windows, linux-window, scripts, frontend, macos-intel]
+    if: >-
+      !cancelled() && !inputs.skip_tests && inputs.validate_nix &&
+      needs.rust.result != 'failure' &&
+      needs.windows.result != 'failure' &&
+      needs.linux-window.result != 'failure' &&
+      needs.scripts.result != 'failure' &&
+      needs.frontend.result != 'failure' &&
+      needs.macos-intel.result != 'failure'
+    uses: ./.github/workflows/validate-nix.yml
+    with:
+      source_ref: ${{ inputs.source_ref }}
+
   validated:
     name: Validation complete
-    needs: [rust, windows, linux-window, scripts, frontend, macos-intel]
+    needs: [rust, windows, linux-window, scripts, frontend, macos-intel, nix-source]
     if: >-
       always() && (inputs.skip_tests ||
       ((!inputs.validate_rust || needs.rust.result == 'success') &&
@@ -165,6 +187,7 @@ jobs:
       inputs.validate_frontend_build ||
       inputs.validate_frontend_unit || inputs.validate_frontend_e2e ||
       inputs.validate_frontend_budget) || needs.frontend.result == 'success') &&
+      (!inputs.validate_nix || needs.nix-source.result == 'success') &&
       (!inputs.validate_macos || needs.macos-intel.result == 'success')))
     runs-on: [self-hosted, linux, x64]
     steps:

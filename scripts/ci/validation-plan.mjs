@@ -15,6 +15,7 @@ export const validationKeys = [
   "windows_file_drop",
   "linux_window",
   "macos_intel",
+  "nix_source",
 ];
 
 function emptyPlan() {
@@ -56,6 +57,13 @@ export function planValidation(paths, { all = false } = {}) {
       }
       if (path.endsWith("validate-linux.yml")) enable(plan, "linux_window");
       if (path.endsWith("validate-macos.yml")) enable(plan, "macos_intel");
+      if (
+        path.endsWith("validate-nix.yml") ||
+        path.endsWith("nix.yml") ||
+        path.endsWith("nix-update.yml")
+      ) {
+        enable(plan, "nix_source");
+      }
       if (path.endsWith("validate-frontend.yml")) enableFrontend(plan);
       if (path.endsWith("validation.yml") || path.endsWith("ci.yml")) {
         enableFrontend(plan);
@@ -66,12 +74,19 @@ export function planValidation(paths, { all = false } = {}) {
 
     if (/^\.github\/actions\//.test(path)) {
       enable(plan, "scripts");
+      if (path.startsWith(".github/actions/nix-smoke/")) enable(plan, "nix_source");
       continue;
     }
 
     // The AppImage's GTK hook is tested by scripts/appimage-gtk-hook.test.mjs.
     if (path.startsWith("packaging/appimage/")) {
       enable(plan, "scripts");
+      continue;
+    }
+
+    // The Nix source package depends on the flake and its pinned hashes.
+    if (path === "flake.nix" || path === "flake.lock" || path.startsWith("packaging/nix/")) {
+      enable(plan, "nix_source");
       continue;
     }
 

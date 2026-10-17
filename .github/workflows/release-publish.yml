@@ -230,9 +230,8 @@ jobs:
         run: node scripts/support-sync.mjs --release
 
       # Point the Nix package at the AppImage just published, when this
-      # repository ships it, so `github:chrisle/rbxport/dev` always carries the
-      # newest seed and first launch self-updates from there. Main and tags lag
-      # one seed by design.
+      # repository ships it. The source hashes in the same file are maintained
+      # by nix-update.yml and preserved here.
       - name: Seed the Nix package
         if: ${{ hashFiles('packaging/nix/pin.json') != '' }}
         run: |
@@ -243,12 +242,18 @@ jobs:
           hash="sha256-$(openssl dgst -sha256 -binary "$file" | base64 -w0)"
           git fetch origin dev
           git checkout dev
-          mkdir -p packaging/nix
-          printf '{\n  "version": "%s",\n  "hash": "%s"\n}\n' "$version" "$hash" \
-            > packaging/nix/pin.json
+          test -f packaging/nix/pin.json
+          node -e '
+            const fs = require("fs");
+            const file = "packaging/nix/pin.json";
+            const pin = JSON.parse(fs.readFileSync(file, "utf8"));
+            pin.version = process.argv[1];
+            pin.hash = process.argv[2];
+            fs.writeFileSync(file, JSON.stringify(pin, null, 2) + "\n");
+          ' "$version" "$hash"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for attempt in 1 2 3 4 5; do
+          for _ in 1 2 3 4 5; do
             git add packaging/nix/pin.json
             git commit -m "chore(nix): seed ${version}" \
               -m "Point packaging/nix/pin.json at the published ${version} AppImage."

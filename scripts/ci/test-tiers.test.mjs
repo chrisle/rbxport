@@ -23,6 +23,7 @@ const reachedBy = {
   windows_file_drop: "src/ipc/file-drop.ts",
   linux_window: ".github/workflows/validate-linux.yml",
   macos_intel: ".github/workflows/validate-macos.yml",
+  nix_source: "flake.nix",
 };
 
 test("every validation lane has a path that selects it on a pull request", () => {

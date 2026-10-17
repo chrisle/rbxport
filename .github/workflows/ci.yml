@@ -46,6 +46,7 @@ jobs:
       windows_file_drop: ${{ steps.paths.outputs.windows_file_drop }}
       linux_window: ${{ steps.paths.outputs.linux_window }}
       macos_intel: ${{ steps.paths.outputs.macos_intel }}
+      nix_source: ${{ steps.paths.outputs.nix_source }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -202,6 +203,7 @@ jobs:
       validate_windows_file_drop: ${{ needs.changes.outputs.windows_file_drop == 'true' }}
       validate_linux: ${{ needs.changes.outputs.linux_window == 'true' }}
       validate_macos: ${{ needs.changes.outputs.macos_intel == 'true' }}
+      validate_nix: ${{ needs.changes.outputs.nix_source == 'true' }}
       validate_scripts: ${{ needs.changes.outputs.scripts == 'true' }}
       validate_frontend_lint: ${{ needs.changes.outputs.frontend_lint == 'true' }}
       validate_frontend_typecheck: ${{ needs.changes.outputs.frontend_typecheck == 'true' }}

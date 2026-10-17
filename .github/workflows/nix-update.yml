@@ -1,8 +1,12 @@
-name: Nix flake update
+name: Nix packaging update
 
-# Monthly: refresh flake.lock, confirm the current seed still runs, and push
-# the lock to dev. Kept apart from nix.yml because it needs a write token and
-# nix.yml is a reusable workflow called with a read-only one.
+# Keeps packaging/nix/pin.json's source-build hashes and flake.lock current.
+# Kept apart from nix.yml because it needs a write token and nix.yml is a
+# reusable workflow called with a read-only one.
+#
+# Dependencies are updated by hand in this repository, so both the source
+# hashes and the flake inputs are refreshed on the same monthly schedule. The
+# job skips itself when the packaging is absent.
 on:
   workflow_dispatch:
   schedule:
@@ -16,7 +20,7 @@ env:
 
 jobs:
   update:
-    name: Refresh flake.lock
+    name: Refresh Nix packaging
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -27,33 +31,52 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - uses: cachix/install-nix-action@v31
+      - name: Check for the Nix packaging
+        id: nix
+        run: |
+          set -euo pipefail
+          if [ -f packaging/nix/pin.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Nix
+        if: steps.nix.outputs.present == 'true'
+        uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
       - name: Update flake.lock
+        if: steps.nix.outputs.present == 'true'
         run: nix flake update
 
-      - name: Smoke-test the packaged AppImage
+      - name: Update source hashes
+        if: steps.nix.outputs.present == 'true'
+        run: bash packaging/nix/update-source-hashes.sh
+
+      - name: Smoke-test the bin package
+        if: steps.nix.outputs.present == 'true'
         uses: ./.github/actions/nix-smoke
 
-      - name: Push the refreshed lock
+      - name: Push the refresh
+        if: steps.nix.outputs.present == 'true'
         run: |
           set -euo pipefail
-          if git diff --quiet -- flake.lock; then
-            echo "flake.lock is already current"
+          if git diff --quiet -- flake.lock packaging/nix/pin.json; then
+            echo "Nix packaging is already current"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for attempt in 1 2 3 4 5; do
-            git add flake.lock
-            git commit -m "chore(nix): update flake.lock" \
-              -m "Monthly nix flake update, validated by the bin smoke test."
+          for _ in 1 2 3 4 5; do
+            git add flake.lock packaging/nix/pin.json
+            git commit -m "chore(nix): refresh packaging" \
+              -m "Update flake.lock and the source-build hashes from the current lockfiles."
             if git push origin HEAD:dev; then exit 0; fi
             git fetch origin dev
             git rebase origin/dev
           done
-          echo "::error::could not push the refreshed flake.lock"
+          echo "::error::could not push the refreshed Nix packaging"
           exit 1

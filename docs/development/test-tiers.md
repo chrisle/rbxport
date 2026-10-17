@@ -45,6 +45,7 @@ only when a changed path selects it; the release tier runs all of them.
 | `windows_file_drop` | Dropping files from Explorer on Windows |
 | `linux_window` | The app window on Linux |
 | `macos_intel` | The Intel macOS build |
+| `nix_source` | The source-built Nix package on Linux |
 
 ## Rules
 
