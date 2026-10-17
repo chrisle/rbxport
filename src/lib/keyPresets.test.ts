@@ -29,15 +29,27 @@ describe("rekordbox's Performance presets (#412)", () => {
   });
 
   it("holds every command either preset gives a key, as rekordbox 7.2.19 adds them", () => {
-    expect(PERFORMANCE_KEYMAP).toHaveLength(163);
-    expect(new Set(PERFORMANCE_KEYMAP.map((row) => row.id)).size).toBe(163);
+    expect(PERFORMANCE_KEYMAP).toHaveLength(191);
+    expect(new Set(PERFORMANCE_KEYMAP.map((row) => row.id)).size).toBe(191);
     const groups = new Map<string, number>();
     for (const row of PERFORMANCE_KEYMAP) groups.set(row.group, (groups.get(row.group) ?? 0) + 1);
     expect(Object.fromEntries(groups)).toEqual({
-      "Deck 1": 58, "All Decks": 3, "Deck 2": 56, "General": 3, "View": 2, "Track": 1, "Playlist": 1,
+      "Deck 1": 72, "All Decks": 3, "Deck 2": 70, "General": 3, "View": 2, "Track": 1, "Playlist": 1,
       "Browse": 14, "Sampler": 23, "Recordings": 1, "File": 1,
     });
-    for (const row of PERFORMANCE_KEYMAP) expect(row.p1.length + row.p2.length, row.name).toBeGreaterThan(0);
+    // Every row has a key in one preset or the other, but the fixed-distance
+    // beat jumps: what the presets give those is [UNKNOWN], so they are
+    // listed with none rather than a guess.
+    const fixedJumps = PERFORMANCE_KEYMAP.filter((row) => /^(Forward|Backward) /.test(row.name));
+    expect(fixedJumps).toHaveLength(28);
+    for (const row of fixedJumps) expect([row.p1, row.p2], row.name).toEqual([[], []]);
+    expect(fixedJumps.map((row) => `${row.id} ${row.group}`)).toContain("309a Deck 1");
+    expect(fixedJumps.map((row) => `${row.id} ${row.group}`)).toContain("31a4 Deck 2");
+    expect(performanceKeys("performance1", "309a")).toEqual([]);
+    for (const row of PERFORMANCE_KEYMAP) {
+      if (fixedJumps.includes(row)) continue;
+      expect(row.p1.length + row.p2.length, row.name).toBeGreaterThan(0);
+    }
   });
 
   it("pins the keys observed in rekordbox for the deck, browser and the rest", () => {

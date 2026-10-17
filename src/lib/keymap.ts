@@ -20,6 +20,14 @@
  * rekordbox 7.2.19; issue #412]. Only D to H are listed, the pads this app
  * has; I to P wait for the rest of that tree.
  *
+ * The fixed-distance beat jumps (`Forward 4 beats`, `Backward 8 bars` and
+ * the rest, 3097-30a4 and 3197-31a4) are PERFORMANCE mode's commands, read
+ * from a Performance 1 mapping file [OBS, and [ASSUME] for eight of the ids:
+ * see `FIXED_JUMPS` in `shortcuts.ts`]. The Export preset binds none of
+ * them, so they are here unbound; [UNKNOWN] whether EXPORT mode's own pane
+ * lists them at all, and where in its order. They sit after the menu-driven
+ * Jump Forward and Jump Reverse, the commands they are the fixed form of.
+ *
  * What is *built* is `shortcuts.ts`'s business: a row here says what the
  * key is in rekordbox, and the pane greys the ones this app does not answer.
  */
@@ -93,6 +101,20 @@ export const KEYMAP: Readonly<Record<KeymapGroup, readonly KeymapRow[]>> = {
     { id: "303b", label: "Delete Memory Cue", key: "X" },
     { id: "3008", label: "Jump Forward", key: "cursor right" },
     { id: "3009", label: "Jump Reverse", key: "cursor left" },
+    { id: "3097", label: "Forward 1/2 beat", key: null },
+    { id: "3098", label: "Forward 1 beat", key: null },
+    { id: "3099", label: "Forward 2 beats", key: null },
+    { id: "309a", label: "Forward 4 beats", key: null },
+    { id: "309b", label: "Forward 8 beats", key: null },
+    { id: "309c", label: "Forward 16 beats", key: null },
+    { id: "309d", label: "Forward 8 bars", key: null },
+    { id: "309e", label: "Backward 1/2 beat", key: null },
+    { id: "309f", label: "Backward 1 beat", key: null },
+    { id: "30a0", label: "Backward 2 beats", key: null },
+    { id: "30a1", label: "Backward 4 beats", key: null },
+    { id: "30a2", label: "Backward 8 beats", key: null },
+    { id: "30a3", label: "Backward 16 beats", key: null },
+    { id: "30a4", label: "Backward 8 bars", key: null },
     { id: "303c", label: "Loop/Cue", key: "command + C" },
     { id: "303e", label: "Adjust BPM/BeatGrid", key: "command + G" },
     { id: "3025", label: "Memory Cue 1", key: "A" },
@@ -167,6 +189,20 @@ export const KEYMAP: Readonly<Record<KeymapGroup, readonly KeymapRow[]>> = {
     { id: "313b", label: "Delete Memory Cue", key: "shift + X" },
     { id: "3108", label: "Jump Forward", key: "shift + cursor right" },
     { id: "3109", label: "Jump Reverse", key: "shift + cursor left" },
+    { id: "3197", label: "Forward 1/2 beat", key: null },
+    { id: "3198", label: "Forward 1 beat", key: null },
+    { id: "3199", label: "Forward 2 beats", key: null },
+    { id: "319a", label: "Forward 4 beats", key: null },
+    { id: "319b", label: "Forward 8 beats", key: null },
+    { id: "319c", label: "Forward 16 beats", key: null },
+    { id: "319d", label: "Forward 8 bars", key: null },
+    { id: "319e", label: "Backward 1/2 beat", key: null },
+    { id: "319f", label: "Backward 1 beat", key: null },
+    { id: "31a0", label: "Backward 2 beats", key: null },
+    { id: "31a1", label: "Backward 4 beats", key: null },
+    { id: "31a2", label: "Backward 8 beats", key: null },
+    { id: "31a3", label: "Backward 16 beats", key: null },
+    { id: "31a4", label: "Backward 8 bars", key: null },
     { id: "3125", label: "Memory Cue 1", key: "shift + A" },
     { id: "3126", label: "Memory Cue 2", key: "shift + S" },
     { id: "3127", label: "Memory Cue 3", key: "shift + D" },

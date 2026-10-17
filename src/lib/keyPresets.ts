@@ -33,6 +33,15 @@
  * Collections, is alt + F on Windows [OBS: the reference]. [UNKNOWN] the
  * Windows binary as a whole: it was not available to read, so no Windows
  * key here was read from rekordbox itself.
+ *
+ * The fixed-distance beat jumps (`Forward 1/2 beat` to `Backward 8 bars`,
+ * 3097-30a4 and 3197-31a4) are the one exception to "every command either
+ * preset gives a key": they are listed with no key in either preset, since
+ * [UNKNOWN] what rekordbox's defaults for them are. The emulator run above
+ * did not record them; a person's edited Performance 1 file names six of
+ * them [OBS: see `FIXED_JUMPS` in `shortcuts.ts`] but with that person's
+ * keys, which are not the preset's. The rows are here so the pane and
+ * `presetChord` treat them as rekordbox's, not this app's own.
  */
 import { BINDINGS, sameChord, type Binding, type KeyChord, type KeyOverrides } from "./shortcuts";
 
@@ -115,6 +124,20 @@ export const PERFORMANCE_KEYMAP: readonly PerformanceKeyRow[] = [
   { id: "30ac", group: "Deck 1", name: "Halve the BPM value", p1: [], p2: ["option + cursor down"] },
   { id: "30ad", group: "Deck 1", name: "Double the BPM value", p1: [], p2: ["option + cursor up"] },
   { id: "30af", group: "Deck 1", name: "Show GRID Panel", p1: ["option + G"], p2: ["option + spacebar"] },
+  { id: "3097", group: "Deck 1", name: "Forward 1/2 beat", p1: [], p2: [] },
+  { id: "3098", group: "Deck 1", name: "Forward 1 beat", p1: [], p2: [] },
+  { id: "3099", group: "Deck 1", name: "Forward 2 beats", p1: [], p2: [] },
+  { id: "309a", group: "Deck 1", name: "Forward 4 beats", p1: [], p2: [] },
+  { id: "309b", group: "Deck 1", name: "Forward 8 beats", p1: [], p2: [] },
+  { id: "309c", group: "Deck 1", name: "Forward 16 beats", p1: [], p2: [] },
+  { id: "309d", group: "Deck 1", name: "Forward 8 bars", p1: [], p2: [] },
+  { id: "309e", group: "Deck 1", name: "Backward 1/2 beat", p1: [], p2: [] },
+  { id: "309f", group: "Deck 1", name: "Backward 1 beat", p1: [], p2: [] },
+  { id: "30a0", group: "Deck 1", name: "Backward 2 beats", p1: [], p2: [] },
+  { id: "30a1", group: "Deck 1", name: "Backward 4 beats", p1: [], p2: [] },
+  { id: "30a2", group: "Deck 1", name: "Backward 8 beats", p1: [], p2: [] },
+  { id: "30a3", group: "Deck 1", name: "Backward 16 beats", p1: [], p2: [] },
+  { id: "30a4", group: "Deck 1", name: "Backward 8 bars", p1: [], p2: [] },
   { id: "3000", group: "All Decks", name: "Zoom In", p1: ["=", "shift + -"], p2: ["shift + -"] },
   { id: "3001", group: "All Decks", name: "Zoom Out", p1: ["-"], p2: ["-"] },
   { id: "3002", group: "All Decks", name: "Reset Zoom", p1: ["shift + ="], p2: [] },
@@ -174,6 +197,20 @@ export const PERFORMANCE_KEYMAP: readonly PerformanceKeyRow[] = [
   { id: "3146", group: "Deck 2", name: "Expand beat intervals", p1: ["option + I"], p2: [] },
   { id: "3147", group: "Deck 2", name: "Shrink beat intervals", p1: ["option + U"], p2: [] },
   { id: "31af", group: "Deck 2", name: "Show GRID Panel", p1: ["option + ;"], p2: [] },
+  { id: "3197", group: "Deck 2", name: "Forward 1/2 beat", p1: [], p2: [] },
+  { id: "3198", group: "Deck 2", name: "Forward 1 beat", p1: [], p2: [] },
+  { id: "3199", group: "Deck 2", name: "Forward 2 beats", p1: [], p2: [] },
+  { id: "319a", group: "Deck 2", name: "Forward 4 beats", p1: [], p2: [] },
+  { id: "319b", group: "Deck 2", name: "Forward 8 beats", p1: [], p2: [] },
+  { id: "319c", group: "Deck 2", name: "Forward 16 beats", p1: [], p2: [] },
+  { id: "319d", group: "Deck 2", name: "Forward 8 bars", p1: [], p2: [] },
+  { id: "319e", group: "Deck 2", name: "Backward 1/2 beat", p1: [], p2: [] },
+  { id: "319f", group: "Deck 2", name: "Backward 1 beat", p1: [], p2: [] },
+  { id: "31a0", group: "Deck 2", name: "Backward 2 beats", p1: [], p2: [] },
+  { id: "31a1", group: "Deck 2", name: "Backward 4 beats", p1: [], p2: [] },
+  { id: "31a2", group: "Deck 2", name: "Backward 8 beats", p1: [], p2: [] },
+  { id: "31a3", group: "Deck 2", name: "Backward 16 beats", p1: [], p2: [] },
+  { id: "31a4", group: "Deck 2", name: "Backward 8 bars", p1: [], p2: [] },
   { id: "31b2", group: "Deck 2", name: "Switch to [ABS]", p1: [], p2: ["F6"] },
   { id: "31b3", group: "Deck 2", name: "Switch to [REL]", p1: [], p2: ["F7"] },
   { id: "31b4", group: "Deck 2", name: "Switch to [INT]", p1: [], p2: ["F8"] },
