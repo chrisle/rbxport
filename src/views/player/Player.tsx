@@ -83,6 +83,7 @@ import { TempoToggle } from "./TempoToggle";
 import { TempoSlider } from "./TempoSlider";
 import type { HotCueColor } from "@/lib/preferences";
 import { hotCueColour } from "@/lib/hotCueColours";
+import { memoryCueMarkerColour } from "@/lib/memoryCueColours";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
 import { loadDeckQuantize, saveDeckQuantize } from "@/lib/deckQuantize";
 import {
@@ -277,8 +278,8 @@ export interface PlayerProps {
  *
  * A hot cue always gets one: its own, or the default View › Color › HOT CUE
  * color gives its slot when it has none (`hotCueColour`), as rekordbox draws
- * an uncoloured cue. A memory cue only gets its own; without one the
- * stylesheet's fallback draws it. An empty pad gets none.
+ * an uncoloured cue. A memory cue gets its marker colour on the waveforms
+ * (`memoryCueMarkerColour`), red when it has none. An empty pad gets none.
  */
 export function cueStyle(
   left: string | undefined,
@@ -289,8 +290,8 @@ export function cueStyle(
   if (left !== undefined) style.left = left;
   if (cue && !cue.memory && cue.letter !== "") {
     style["--cue-colour"] = hotCueColour(cue.colour, cue.letter, cue.outMs > cue.positionMs, hotCueColor);
-  } else if (cue?.colour) {
-    style["--cue-colour"] = cue.colour;
+  } else if (cue?.memory) {
+    style["--cue-colour"] = memoryCueMarkerColour(cue.colour);
   }
   return style;
 }
@@ -303,7 +304,8 @@ export function cueStyle(
  * draws no line through the waveform at all — four hot cues, four badges, and
  * the waveform under them unbroken.
  *
- * A memory cue is a small red head at its position. The capture has one beside
+ * A memory cue is a small head at its position, in its own colour, red for
+ * none (`memoryCueColours.ts`). The capture has one beside
  * each badge, which looked at first like part of the hot cue marker; the live
  * `djmdCue` says otherwise — the measured track carries a `Kind` 0 cue at the
  * same `InMsec` as each of its four hot cues, so the red belongs to those.

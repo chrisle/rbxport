@@ -1,12 +1,9 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
-import styles from "./CueColorMenu.module.css";
+import { MEMORY_CUE_COLOURS } from "@/lib/memoryCueColours";
 
-const MEMORY = [
-  ["Pink", "#E778F1"], ["Red", "#E33122"], ["Orange", "#EBA44A"], ["Yellow", "#F4E458"],
-  ["Green", "#66DD42"], ["Aqua", "#56BDF3"], ["Blue", "#204FEF"], ["Purple", "#8B1EEF"],
-] as const;
+import styles from "./CueColorMenu.module.css";
 
 // Rekordbox's compact 4 × 4 hot-cue picker, in its displayed order. Values
 // are ColorTableIndex entries from the desktop palette.
@@ -71,7 +68,7 @@ export function CueColorMenu({ x, y, memory, onChoose, onComment, onClose }: {
       {memory ? (
         <>
           {commentButton}
-          {MEMORY.map(([name, color], index) => (
+          {MEMORY_CUE_COLOURS.map(([name, color], index) => (
             <button key={name} role="menuitem" className={styles.memory} onClick={() => choose(index)}>
               <span className={styles.dot} style={{background: color}} />{name}
             </button>

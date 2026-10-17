@@ -66,3 +66,24 @@ describe("stored loop bands", () => {
     expect(bands().map((b) => [pct(b.style.left), pct(b.style.width)])).toEqual([[50, 50]]);
   });
 });
+
+describe("memory cue colours (#533)", () => {
+  // rekordbox draws a memory cue on both deck waveforms in its own colour,
+  // and an uncoloured one exactly as a red one (`memoryCueColours.ts`).
+  const markerColours = () => [...host.querySelectorAll<HTMLElement>('[data-cue=""]')]
+    .map((marker) => marker.style.getPropertyValue("--cue-colour"));
+
+  it("gives each memory marker its own colour, and red without one", () => {
+    for (const band of ["overview", "detail"] as const) {
+      act(() => root.render(
+        <CueMarkers band={band} totalMs={100_000} cues={[
+          cue({ id: "1", memory: true, positionMs: 10_000, colour: "#204FEF" }),
+          cue({ id: "2", memory: true, positionMs: 20_000, colour: null }),
+          cue({ id: "3", memory: true, positionMs: 30_000, colour: "#E33122" }),
+          cue({ id: "4", memory: true, positionMs: 40_000, colour: "#E778F1" }),
+        ]} />,
+      ));
+      expect(markerColours()).toEqual(["#204FEF", "#EA3323", "#EA3323", "#E778F1"]);
+    }
+  });
+});
