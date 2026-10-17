@@ -69,7 +69,6 @@ import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { importLoose, isLooseId } from "@/lib/explorer";
 import { childrenOf, containerOf, parentFor, withSources } from "@/lib/tree";
-import { JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
 import { Player } from "@/views/player/Player";
@@ -410,13 +409,20 @@ function AppBody() {
     setDualBars(bars);
     setWaveformZoom({ a: bars, b: bars });
   }, []);
-  const [dualJump, setDualJump] = useState(JUMP_SIZE_ID);
-  const linked = dual
-    ? {
-        jumpSize: dualJump,
-        onJumpSize: setDualJump,
-      }
-    : {};
+  // Remembered across runs the same way: each deck's beat-jump size, and the
+  // linked one, seeded from deck A as the linked zoom is.
+  const [jumpSize, setJumpSize] = useState(restored.jumpSize);
+  const setJumpA = useCallback((id: string) => {
+    setJumpSize((size) => size.a === id ? size : { ...size, a: id });
+  }, []);
+  const setJumpB = useCallback((id: string) => {
+    setJumpSize((size) => size.b === id ? size : { ...size, b: id });
+  }, []);
+  const [dualJump, setDualJump] = useState(restored.jumpSize.a);
+  const setLinkedJump = useCallback((id: string) => {
+    setDualJump(id);
+    setJumpSize({ a: id, b: id });
+  }, []);
   const [query, setQuery] = useState("");
   const [searchField, setSearchField] = useState<TrackSearchField>("all");
   // The tree's width, dragged by the splitter. Held here because the grid that
@@ -2934,9 +2940,10 @@ function AppBody() {
       subTreeWidth,
       trafficLight,
       waveformZoom,
+      jumpSize,
       dualControl: dual,
     });
-  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom, dual]);
+  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom, jumpSize, dual]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
@@ -3100,7 +3107,8 @@ function AppBody() {
             publishZoom={deckCount(layout) > 1 ? publishZoom.a : undefined}
             bars={deckCount(layout) > 1 && dual ? dualBars : waveformZoom.a}
             onBars={deckCount(layout) > 1 && dual ? setLinkedZoom : setZoomA}
-            {...(deckCount(layout) > 1 ? linked : {})}
+            jumpSize={deckCount(layout) > 1 && dual ? dualJump : jumpSize.a}
+            onJumpSize={deckCount(layout) > 1 && dual ? setLinkedJump : setJumpA}
             publishSync={publishSync.a}
             {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
             isMaster={syncMaster === "a"}
@@ -3135,7 +3143,8 @@ function AppBody() {
               publishZoom={publishZoom.b}
               bars={dual ? dualBars : waveformZoom.b}
               onBars={dual ? setLinkedZoom : setZoomB}
-              {...linked}
+              jumpSize={dual ? dualJump : jumpSize.b}
+              onJumpSize={dual ? setLinkedJump : setJumpB}
               publishSync={publishSync.b}
               peerSync={peerSync.b}
               isMaster={syncMaster === "b"}

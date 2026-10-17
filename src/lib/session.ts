@@ -17,7 +17,7 @@
  * value can be anything at all; none of those may produce a broken window.
  */
 import { asLayout, type PlayerLayout } from "./layout";
-import { DETAIL_BARS, ZOOM_STEPS } from "./player";
+import { DETAIL_BARS, JUMP_SIZE_ID, JUMP_SIZES, ZOOM_STEPS } from "./player";
 import type { RowDto, SortColumn, TreeNode } from "@/ipc/types";
 import { DEFAULT_SORT, type SortState } from "./viewSpec";
 
@@ -68,6 +68,8 @@ export interface Session {
   trafficLight: TrafficLightSource;
   /** Bars visible across each deck's detail waveform. */
   waveformZoom: { a: number; b: number };
+  /** The beat-jump size each deck's menu had picked, by its id in JUMP_SIZES. */
+  jumpSize: { a: string; b: string };
   /** Whether DUAL CONTROL, which links both decks' zoom and beat jump, was on. */
   dualControl: boolean;
 }
@@ -111,6 +113,7 @@ export const DEFAULT_SESSION: Session = {
   subTreeWidth: DEFAULT_SUB_TREE_WIDTH,
   trafficLight: "master",
   waveformZoom: { a: DETAIL_BARS, b: DETAIL_BARS },
+  jumpSize: { a: JUMP_SIZE_ID, b: JUMP_SIZE_ID },
   dualControl: false,
 };
 
@@ -148,6 +151,13 @@ function zoomOrDefault(value: unknown): number {
   return typeof value === "number" && ZOOM_STEPS.includes(value as (typeof ZOOM_STEPS)[number])
     ? value
     : DETAIL_BARS;
+}
+
+/** A jump size is one the menu offers; a renamed or hand-edited id is the default. */
+function jumpSizeOrDefault(value: unknown): string {
+  return typeof value === "string" && JUMP_SIZES.some((size) => size.id === value)
+    ? value
+    : JUMP_SIZE_ID;
 }
 
 /** Keeps only entries that are objects carrying a string id. */
@@ -209,6 +219,13 @@ export function sanitiseSession(value: unknown): Session {
             b: zoomOrDefault((raw.waveformZoom as { b?: unknown }).b),
           }
         : { a: DETAIL_BARS, b: DETAIL_BARS },
+    jumpSize:
+      typeof raw.jumpSize === "object" && raw.jumpSize !== null
+        ? {
+            a: jumpSizeOrDefault((raw.jumpSize as { a?: unknown }).a),
+            b: jumpSizeOrDefault((raw.jumpSize as { b?: unknown }).b),
+          }
+        : { a: JUMP_SIZE_ID, b: JUMP_SIZE_ID },
     dualControl: raw.dualControl === true,
   };
 }
