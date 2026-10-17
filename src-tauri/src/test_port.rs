@@ -39,6 +39,16 @@ use tauri::{AppHandle, Manager};
 /// Names the port. Honoured by a debug build only.
 pub const PORT_ENV: &str = "RBXPORT_TEST_PORT";
 
+/// One isolated `WebKit` store shared by all windows of a desktop test run.
+/// UUID stores require macOS 14+. Ordinary and release launches ignore this.
+#[cfg(target_os = "macos")]
+pub fn data_store() -> Option<[u8; 16]> {
+    port()?;
+    if !rbl_db::test_mode() { return None; }
+    let id = std::env::var("RBXPORT_TEST_DATA_STORE").ok()?;
+    Some(*uuid::Uuid::parse_str(&id).ok()?.as_bytes())
+}
+
 /// How long one evaluation may take before the request is answered with an
 /// error. Long enough for a library to load behind an awaited promise.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -108,6 +118,8 @@ struct Request {
     #[serde(default)]
     windows: bool,
     #[serde(default)]
+    layout: bool,
+    #[serde(default)]
     menu: Option<String>,
 }
 
@@ -142,6 +154,13 @@ fn session(app: &AppHandle, stream: TcpStream) {
 }
 
 fn handle(app: &AppHandle, request: Request) -> Outcome {
+    if request.layout {
+        let window = app.get_webview_window(crate::MAIN_WINDOW)
+            .ok_or_else(|| "no main window for desktop test layout".to_owned())?;
+        window.set_size(tauri::LogicalSize::new(1200.0, 800.0)).map_err(|e| e.to_string())?;
+        window.set_position(tauri::LogicalPosition::new(500.0, 50.0)).map_err(|e| e.to_string())?;
+        return Ok(json!({ "width": 1200, "height": 800, "x": 500, "y": 50 }));
+    }
     if request.windows {
         let mut labels: Vec<String> = app.webview_windows().into_keys().collect();
         labels.sort();

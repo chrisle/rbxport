@@ -12,12 +12,23 @@ test("documentation-only changes require no expensive validation lane", () => {
   assert.deepEqual(enabled("README.md", "docs/testing.md", ".github/workflows/README.md"), []);
 });
 
-test("a Rust library change stays in the focused Rust lane", () => {
-  assert.deepEqual(enabled("crates/rbl-db/src/export.rs"), ["rust"]);
+test("a database library change also exercises desktop workflows", () => {
+  assert.deepEqual(enabled("crates/rbl-db/src/export.rs"), ["rust", "macos_intel"]);
 });
 
-test("desktop shell changes use focused Rust checks before deploy", () => {
-  assert.deepEqual(enabled("src-tauri/src/lib.rs"), ["rust"]);
+test("desktop shell changes also exercise native workflows", () => {
+  assert.deepEqual(enabled("src-tauri/src/lib.rs"), ["rust", "macos_intel"]);
+});
+
+test("cue changes require real macOS desktop validation in addition to their unit checks", () => {
+  assert.deepEqual(enabled("src-tauri/src/cues.rs"), ["rust", "macos_intel"]);
+  assert.deepEqual(enabled("crates/rbl-db/src/locate.rs"), ["rust", "macos_intel"]);
+  assert.ok(enabled("src/views/player/useCueWriter.ts").includes("macos_intel"));
+  assert.ok(enabled("src/ipc/client.ts").includes("macos_intel"));
+  assert.deepEqual(enabled("scripts/desktop/run.mjs"), ["macos_intel"]);
+  assert.ok(enabled("src/app/App.tsx").includes("macos_intel"));
+  assert.ok(enabled("src/views/settings/BackupsPane.tsx").includes("macos_intel"));
+  assert.ok(enabled("crates/rbl-export/src/lib.rs").includes("macos_intel"));
 });
 
 test("Windows installer resources add the Windows-native check", () => {
@@ -25,12 +36,12 @@ test("Windows installer resources add the Windows-native check", () => {
 });
 
 test("Windows-only desktop Rust adds the Windows-native check", () => {
-  assert.deepEqual(enabled("src-tauri/src/file_drop.rs"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("src-tauri/src/file_drop.rs"), ["rust", "windows_rust", "macos_intel"]);
   assert.deepEqual(enabled("src-tauri/Cargo.toml"), ["rust", "windows_rust"]);
 });
 
 test("the library's Windows file-index code runs the Windows-native Rust lane", () => {
-  assert.deepEqual(enabled("crates/rbl-db/src/file_id.rs"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("crates/rbl-db/src/file_id.rs"), ["rust", "windows_rust", "macos_intel"]);
   assert.deepEqual(enabled("crates/rbl-db/Cargo.toml"), ["rust", "windows_rust"]);
 });
 
@@ -42,7 +53,7 @@ test("USB eject's Windows code runs the Windows-native Rust lane", () => {
 });
 
 test("backup changes also run the Windows-native Rust lane", () => {
-  assert.deepEqual(enabled("src-tauri/src/backups.rs"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("src-tauri/src/backups.rs"), ["rust", "windows_rust", "macos_intel"]);
   assert.deepEqual(enabled("crates/rbl-backup/src/restore.rs"), ["rust", "windows_rust"]);
 });
 
@@ -59,6 +70,7 @@ test("frontend source changes use the fast frontend checks", () => {
     "frontend_lint",
     "frontend_typecheck",
     "frontend_unit",
+    "macos_intel",
   ]);
 });
 
@@ -77,6 +89,7 @@ test("file-drop bridge changes add the Windows-native check", () => {
     "frontend_typecheck",
     "frontend_unit",
     "windows_file_drop",
+    "macos_intel",
   ]);
 });
 

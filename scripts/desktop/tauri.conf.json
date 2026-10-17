@@ -1,0 +1,21 @@
+{
+  "identifier": "com.rbxport.desktop-tests",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "RBXport desktop tests",
+        "width": 1200,
+        "height": 800,
+        "visible": false,
+        "incognito": true,
+        "dragDropEnabled": false,
+        "x": 500,
+        "y": 50,
+        "resizable": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ]
+  }
+}

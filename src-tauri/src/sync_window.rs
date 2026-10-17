@@ -40,6 +40,11 @@ pub async fn open_sync_window(app: tauri::AppHandle) -> AppResult<()> {
         // Top frame only: on Windows wry runs it in every frame (see `report.rs`).
         .initialization_script("if (window === window.top && !location.hash) location.hash = '#sync';")
         .title("Sync Manager");
+    #[cfg(target_os = "macos")]
+    let builder = match crate::test_port::data_store() {
+        Some(store) => builder.data_store_identifier(store),
+        None => builder,
+    };
     // The same debugging port as the main window's, when one was asked for;
     // a no-op off Windows (see `crate::browser_args`).
     let builder = match crate::browser_args() {

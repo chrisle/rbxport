@@ -392,6 +392,14 @@ pub fn run() {
     let _sentry = sentry::install();
 
     let mut context = tauri::generate_context!();
+    #[cfg(target_os = "macos")]
+    if crate::test_port::data_store().is_some() {
+        for window in &mut context.config_mut().app.windows {
+            // The installed runtime's From<WindowConfig> does not forward
+            // data_store_identifier. Build explicitly below with the setter.
+            window.create = false;
+        }
+    }
     if let Some(args) = browser_args() {
         tracing::debug!(port = %std::env::var(DEVTOOLS_PORT_ENV).unwrap_or_default(), "webview remote debugging on");
         for window in &mut context.config_mut().app.windows {
@@ -437,6 +445,13 @@ pub fn run() {
                 Err(e) => tracing::warn!(error = %e, "could not read the webview's version"),
             }
             screen_cache::initialize(app.handle());
+            #[cfg(target_os = "macos")]
+            if let Some(store) = crate::test_port::data_store() {
+                let config = app.config().app.windows.iter().find(|window| window.label == MAIN_WINDOW)
+                    .ok_or_else(|| std::io::Error::other("desktop test main window config is missing"))?;
+                tauri::WebviewWindowBuilder::from_config(app, config)?
+                    .incognito(false).data_store_identifier(store).build()?;
+            }
             // Listens only in a debug build asked to (`RBXPORT_TEST_PORT`).
             crate::test_port::start(app.handle());
             // AppleScript: the bridge to the window, and on macOS the

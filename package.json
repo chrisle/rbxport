@@ -24,7 +24,8 @@
     "e2e": "pnpm build:mock && cross-env E2E_PREVIEW_DIR=dist-mock playwright test",
     "budget": "node scripts/check-perf-budgets.mjs && tsx scripts/check-bundle-size.ts",
     "locales": "node scripts/build-locales.mjs",
-    "tests:private": "node scripts/tests-private.mjs"
+    "tests:private": "node scripts/tests-private.mjs",
+    "desktop:test": "node scripts/desktop/run.mjs"
   },
   "dependencies": {
     "@sentry/react": "^11.0.0",

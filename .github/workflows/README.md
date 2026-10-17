@@ -24,7 +24,9 @@ workspace test gates before deployment.
 - `validate-rust.yml` runs current-toolchain tests and the MSRV check.
 - `validate-windows.yml` checks Windows-native compilation and file paths.
 - `validate-linux.yml` proves the Tauri shell opens a native Linux window.
-- `validate-macos.yml` proves the Intel build launches through Rosetta.
+- `validate-macos.yml` proves the Intel build launches through Rosetta and runs
+  31 real Apple Silicon desktop scenarios, including native Finder drag/drop,
+  against a disposable SQLCipher fixture (`pnpm desktop:test`).
 - `validate-frontend.yml` independently selects lint, build, unit, browser, and
   bundle-budget checks.
 - `validate-scripts.yml` runs the dependency-free Node script tests.

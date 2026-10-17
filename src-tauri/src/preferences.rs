@@ -52,6 +52,11 @@ pub async fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<
             "if (window === window.top && !location.hash) location.hash = '#preferences/{pane}';"
         ))
         .title("Preferences");
+    #[cfg(target_os = "macos")]
+    let builder = match crate::test_port::data_store() {
+        Some(store) => builder.data_store_identifier(store),
+        None => builder,
+    };
     // The same debugging port as the main window's, when one was asked for;
     // both webviews share one browser process, but the arguments are the
     // window's to declare (see `crate::browser_args`). A no-op off Windows.

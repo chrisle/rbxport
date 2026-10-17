@@ -269,6 +269,13 @@ pub struct Sources {
     pub overridden: bool,
 }
 
+fn desktop_fixture_path(master_db: &Path, root: &Path) -> bool {
+    let (Ok(root), Ok(database), Ok(temporary)) = (
+        root.canonicalize(), master_db.canonicalize(), std::env::temp_dir().canonicalize(),
+    ) else { return false };
+    root != temporary && root.starts_with(temporary) && database == root.join("master.db")
+}
+
 impl Sources {
     /// This machine's files.
     pub fn installed() -> Result<Self> {
@@ -413,7 +420,18 @@ pub fn locate_with(sources: &Sources) -> Result<Located> {
                 options.display()
             )));
         }
-        let location = crate::detect_from(options)?;
+        let mut location = crate::detect_from(options)?;
+        // Keep test mode enabled while allowing only the explicitly named,
+        // encrypted temporary desktop fixture to be edited in a debug build.
+        if cfg!(debug_assertions)
+            && crate::test_mode()
+            && location.passphrase == crate::fixture::FIXTURE_PASSPHRASE
+            && std::env::var_os("RBXPORT_TEST_FIXTURE").is_some_and(|root| {
+                desktop_fixture_path(&location.master_db, Path::new(&root))
+            })
+        {
+            location.is_real_install = false;
+        }
         return Ok(if location.master_db.is_file() {
             Located::Found { location }
         } else {
@@ -502,6 +520,32 @@ fn may_write_installed_settings() -> Result<()> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    #[test]
+    fn desktop_fixture_requires_the_exact_database_beneath_a_temporary_root() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("master.db");
+        std::fs::write(&database, b"fixture").unwrap();
+        assert!(super::desktop_fixture_path(&database, root.path()));
+        assert!(!super::desktop_fixture_path(&database, &std::env::temp_dir()));
+        assert!(!super::desktop_fixture_path(&database, &root.path().join("missing")));
+        let other = tempfile::tempdir().unwrap();
+        let unrelated = other.path().join("master.db");
+        std::fs::write(&unrelated, b"unrelated").unwrap();
+        assert!(!super::desktop_fixture_path(&unrelated, root.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_fixture_cannot_follow_a_database_symlink_out_of_its_root() {
+        let root = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let unrelated = other.path().join("master.db");
+        std::fs::write(&unrelated, b"unrelated").unwrap();
+        let database = root.path().join("master.db");
+        std::os::unix::fs::symlink(&unrelated, &database).unwrap();
+        assert!(!super::desktop_fixture_path(&database, root.path()));
+    }
+
     use super::*;
     use crate::fixture::FIXTURE_PASSPHRASE;
 

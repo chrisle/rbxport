@@ -57,3 +57,5 @@ e2e/**/__screenshots__/**/*-actual.png
 test-results/
 playwright-report/
 __pycache__/
+
+desktop-test-results/

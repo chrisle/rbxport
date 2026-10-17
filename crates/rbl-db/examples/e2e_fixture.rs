@@ -27,6 +27,35 @@ const ARTWORK: &[u8] = include_bytes!("e2e_fixture_artwork.jpg");
 
 fn main() {
     let mut args = std::env::args().skip(1);
+    if let Some(root) = std::env::var_os("RBXPORT_DESKTOP_SNAPSHOT") {
+        let root = Path::new(&root);
+        let db = rbl_db::Library::open(rbl_db::LibraryLocation {
+            master_db: root.join("master.db"), share_root: root.join("share"),
+            passphrase: FIXTURE_PASSPHRASE.into(), is_real_install: false,
+        }, rbl_db::OpenMode::ReadOnly).expect("read desktop fixture");
+        let mut query = db.connection().prepare(
+            "SELECT ContentID, Kind, InMsec FROM djmdCue WHERE rb_local_deleted = 0 ORDER BY ContentID, Kind, InMsec"
+        ).expect("cue query");
+        let cues: Vec<serde_json::Value> = query.query_map([], |row| Ok(serde_json::json!({
+            "track": row.get::<_, String>(0)?, "kind": row.get::<_, i64>(1)?, "positionMs": row.get::<_, i64>(2)?,
+        }))).expect("read cues").collect::<Result<_, _>>().expect("decode cues");
+        let mut query = db.connection().prepare(
+            "SELECT ID, Title, FolderPath, Rating, BPM, AnalysisDataPath FROM djmdContent WHERE rb_local_deleted = 0 ORDER BY ID"
+        ).expect("track query");
+        let tracks: Vec<serde_json::Value> = query.query_map([], |row| Ok(serde_json::json!({
+            "id": row.get::<_, String>(0)?, "title": row.get::<_, Option<String>>(1)?,
+            "path": row.get::<_, Option<String>>(2)?, "rating": row.get::<_, Option<i64>>(3)?,
+            "bpm": row.get::<_, Option<i64>>(4)?, "analysis": row.get::<_, Option<String>>(5)?,
+        }))).expect("read tracks").collect::<Result<_, _>>().expect("decode tracks");
+        let mut query = db.connection().prepare(
+            "SELECT ID, Name FROM djmdPlaylist WHERE rb_local_deleted = 0 ORDER BY ID"
+        ).expect("playlist query");
+        let playlists: Vec<serde_json::Value> = query.query_map([], |row| Ok(serde_json::json!({
+            "id": row.get::<_, String>(0)?, "name": row.get::<_, String>(1)?,
+        }))).expect("read playlists").collect::<Result<_, _>>().expect("decode playlists");
+        println!("{}", serde_json::json!({ "cues": cues, "tracks": tracks, "playlists": playlists }));
+        return;
+    }
     let (Some(out), Some(seen_as)) = (args.next(), args.next()) else {
         eprintln!("usage: e2e_fixture <out-dir> <dir-as-seen-on-the-target>");
         std::process::exit(2);

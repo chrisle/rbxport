@@ -19,6 +19,11 @@ pub async fn open_report_window(app: tauri::AppHandle) -> AppResult<()> {
         // failed with 600010.
         .initialization_script("if (window === window.top && !location.hash) location.hash = '#report';")
         .title("Report bug");
+    #[cfg(target_os = "macos")]
+    let builder = match crate::test_port::data_store() {
+        Some(store) => builder.data_store_identifier(store),
+        None => builder,
+    };
     let builder = match crate::browser_args() {
         Some(args) => builder.additional_browser_args(&args),
         None => builder,
