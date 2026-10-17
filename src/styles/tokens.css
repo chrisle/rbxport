@@ -89,6 +89,16 @@
   --c-mytag-text-off: #7F7F7F; /* measured, rekordbox-05 (no track selected): a tag's name, greyed with its tick box */
   --c-mytag-check: #282828; /* measured, rekordbox-08: a tick box with a track selected, (40,40,40) across its 12px face */
   --c-mytag-check-off: #1E1E1E; /* measured, rekordbox-05: a tick box with no track selected */
+  --c-mytag-check-edge: #050505; /* measured, rekordbox-08: the 1px ring round the enabled face, its corners left black */
+  --c-mytag-check-off-edge: #010101; /* measured, rekordbox-05: the same ring round a greyed face */
+  --c-mytag-check-on: #1473EB; /* skins/checkbox_mark.png, the face ColourThemeLookAndFeel::drawTickBox (@0x1000842b8, rekordbox 7.2.19) draws for a ticked box */
+  --c-mytag-check-on-edge: #040B13; /* the same png's anti-aliased edge once drawTickBox stretches it from 16px to the 14px drawToggleButton (@0x10008462c) asks for: a 1px ring at about an eighth of the face */
+  --c-mytag-tick: #FFFFFF; /* skins/checkbox_on.svg's tick, rgb(255,255,255), the tick of checkbox_mark.png */
+  --c-mytag-check-on-off: #144480; /* a ticked box greyed: drawTickBox draws both pngs at 50% opacity (checkbox_common #282828, then checkbox_mark) */
+  --c-mytag-tick-off: #8A8A8A; /* the white tick of the same greyed box, at 50% over it */
+  --c-mytag-edit-text: #969696; /* a name being renamed: BaseLookAndFeel's Label::textWhenEditingColourId, Colour(150,150,150) (ctor @0x101b5f80c, static init @0x101b672d0) */
+  --c-mytag-edit-select: #7D7D7D; /* the selection in that box: MyTagItemComponent's ctor sets TextEditor::highlightColourId to Colour(125,125,125) (@0x10066c18c) */
+  --c-mytag-edit-select-text: #191919; /* the selected text: highlightedTextColourId from the default look's colour 0x1000900, Colour(25,25,25) (@0x10066c1a4, @0x101b5f660) */
   --c-mytag-add: #969696; /* skins/brws_tree_addIcon.svg circle rgb(150,150,150), and measured so on the rig; its plus is the svg's rgb(25,25,25) */
   --c-filter-strip: #282828; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the MASTER PLAYER strip behind the arrows, x 920..1634 */
   --c-filter-chip: #040404; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a My Tag chip's ground */

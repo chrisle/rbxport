@@ -61,6 +61,8 @@ test("a tick tags every selected track, and shows only what they all share", asy
   await expect(synth).toHaveAttribute("aria-checked", "false");
   await synth.click();
   await expect(synth).toHaveAttribute("aria-checked", "true");
+  // rekordbox's skins/checkbox_mark.png face, as ColourThemeLookAndFeel::drawTickBox draws it.
+  await expect(synth).toHaveCSS("background-color", "rgb(20, 115, 235)");
 
   // A second track without it: the two do not share it, so it is unticked.
   await titleCell(page, 2).click({ modifiers: ["Shift"] });
@@ -86,6 +88,12 @@ test("Adding My Tag makes My Comment, opens it for a name, and Delete takes it a
   const name = components.getByRole("textbox", { name: "Name" });
   await expect(name).toBeFocused();
   await expect(name).toHaveValue("My Comment");
+  // The colours MyTagItemComponent gives its Label's editor: grey text on
+  // black, no outline (rekordbox 7.2.19, static).
+  await expect(name).toHaveCSS("color", "rgb(150, 150, 150)");
+  await expect(name).toHaveCSS("background-color", "rgb(0, 0, 0)");
+  await expect(name).toHaveCSS("border-top-width", "0px");
+  await expect(name).toHaveCSS("outline-style", "none");
   await name.fill("Strings");
   await name.press("Enter");
   await expect(components.getByRole("listitem")).toHaveText(["Components", "Synth", "Vocal", "Strings"]);
@@ -130,6 +138,8 @@ test("a category is renamed by clicking its name, and has no menu", async ({ pag
   await expect(page.getByRole("menu", { name: "My Tag" })).toHaveCount(0);
   await heading.click();
   const name = panel(page).getByRole("textbox", { name: "Name" });
+  // A category's name is edited over its own #191919 band.
+  await expect(name).toHaveCSS("background-color", "rgb(25, 25, 25)");
   await name.fill("When");
   await name.press("Enter");
   await expect(panel(page).getByRole("group", { name: "When" })).toBeVisible();
