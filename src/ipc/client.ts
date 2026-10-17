@@ -680,12 +680,17 @@ async function realBackend(): Promise<Backend> {
       addArtwork: (tracks, image) => invoke<EditHistoryState>("add_artwork", { tracks, image }),
       addPlaylistArtwork: (playlist, image) => invoke<number>("add_playlist_artwork", { playlist, image }),
       setMyTags: (track, tags) => invoke<EditHistoryState>("set_my_tags", { track, tags }),
+      putMyTag: (tracks, tag, on) => invoke<EditHistoryState>("put_my_tag", { tracks, tag, on }),
+      createMyTag: (category) => invoke<{ id: string; name: string }>("create_my_tag", { category }),
+      renameMyTag: (id, name) => invoke<number>("rename_my_tag", { id, name }),
+      deleteMyTag: (id) => invoke<number>("delete_my_tag", { id }),
       clearArtwork: (tracks) => invoke<EditHistoryState>("clear_artwork", { tracks }),
     },
     filterValues: (spec) => invoke<FilterValues>("filter_values", { spec }),
     trackDetails: (trackId) => invoke<TrackDetails>("track_details", { track: trackId }),
     selectionDetails: (trackIds) => invoke<SelectionDetails>("selection_details", { tracks: trackIds }),
     trackLookups: () => invoke<TrackLookups>("track_lookups"),
+    selectionMyTags: (trackIds) => invoke<string[]>("selection_my_tags", { tracks: trackIds }),
   };
 }
 

@@ -24,6 +24,7 @@ import { TREE_ROOT } from "./types";
 import { applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
 import { toCamelot } from "@/lib/camelot";
 import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
+import { MY_TAG_LIMIT, newMyTagName } from "@/lib/myTags";
 import { referenceDeviceSettings } from "./mock-device-settings";
 import { createMockDeviceLibraries, type MockImportEntry } from "./mock-device-library";
 
@@ -616,6 +617,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return wait(generation);
   };
 
+  // The library's My Tags. Edited in place by Adding My Tag, a rename and a
+  // delete, as the real backend's table is.
+  const myTagCategories: { id: string; name: string; tags: { id: string; name: string }[] }[] = [
+    { id: "3", name: "Situation", tags: [{ id: "t-peak", name: "Peak" }, { id: "t-warm", name: "Warm-up" }] },
+    { id: "2", name: "Components", tags: [{ id: "t-synth", name: "Synth" }, { id: "t-vocal", name: "Vocal" }] },
+  ];
+  let nextMyTag = 0;
+
   const recordEdit = async (edit: MockEdit): Promise<EditHistoryState> => {
     await bump(false);
     editUndo.push(edit);
@@ -1173,6 +1182,49 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const apply = (value: readonly string[]) => { if (detail) detail.myTags = [...value]; };
       apply(tags);
       return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(tags) });
+    },
+    putMyTag: (tracks, tag, on) =>
+      recordTrackEdits(tracks, (track) => {
+        const row = all.find((r) => r.id === track);
+        const detail = row ? detailsOf(row) : undefined;
+        const before = [...(detail?.myTags ?? [])];
+        const after = on
+          ? (before.includes(tag) ? before : [...before, tag])
+          : before.filter((t) => t !== tag);
+        const apply = (value: readonly string[]) => { if (detail) detail.myTags = [...value]; };
+        apply(after);
+        return { undo: () => apply(before), redo: () => apply(after) };
+      }),
+    createMyTag: async (category) => {
+      const into = myTagCategories.find((c) => c.id === category);
+      if (!into) throw new Error(`no My Tag category ${category}`);
+      if (into.tags.length >= MY_TAG_LIMIT) throw new Error(`a My Tag category holds at most ${MY_TAG_LIMIT} tags`);
+      const made = { id: `t-new-${(nextMyTag += 1)}`, name: newMyTagName(into.tags.map((t) => t.name)) };
+      into.tags.push(made);
+      await bump();
+      return { ...made };
+    },
+    renameMyTag: (id, name) => {
+      if (name === "") return Promise.reject(new Error("a My Tag needs a name"));
+      const category = myTagCategories.find((c) => c.id === id);
+      const owner = myTagCategories.find((c) => c.tags.some((t) => t.id === id));
+      const item = category ?? owner?.tags.find((t) => t.id === id);
+      if (!item) return Promise.reject(new Error(`no My Tag ${id}`));
+      const siblings: { id: string; name: string }[] = category ? myTagCategories : owner?.tags ?? [];
+      if (siblings.some((s) => s.id !== id && s.name === name)) {
+        return Promise.reject(new Error("An item with the same name already exists!"));
+      }
+      item.name = name;
+      return bump();
+    },
+    deleteMyTag: (id) => {
+      const owner = myTagCategories.find((c) => c.tags.some((t) => t.id === id));
+      if (!owner) return Promise.reject(new Error(`no My Tag ${id}`));
+      owner.tags = owner.tags.filter((t) => t.id !== id);
+      for (const detail of details.values()) detail.myTags = detail.myTags.filter((t) => t !== id);
+      // As the real backend: the history goes, since an older tick names it.
+      editUndo.length = 0;
+      return bump();
     },
     addPlaylistArtwork: () => bump(),
     addArtwork: (tracks) => recordTrackEdits(tracks, (track) => setHasArtwork(track, true)),
@@ -3376,11 +3428,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       wait({
         keys: [...KEYS],
         genres: GENRES.filter((g) => g !== ""),
-        myTagCategories: [
-          { name: "Situation", tags: [{ id: "t-peak", name: "Peak" }, { id: "t-warm", name: "Warm-up" }] },
-          { name: "Components", tags: [{ id: "t-synth", name: "Synth" }, { id: "t-vocal", name: "Vocal" }] },
-        ],
+        myTagCategories: myTagCategories.map((c) => ({ ...c, tags: c.tags.map((t) => ({ ...t })) })),
       }),
+    selectionMyTags: (trackIds) => {
+      if (!ready) return notReady();
+      const rows = trackIds.flatMap((id) => all.filter((r) => r.id === id));
+      const [head, ...rest] = rows.map(detailsOf);
+      if (!head) return wait([]);
+      return wait(head.myTags.filter((tag) => rest.every((d) => d.myTags.includes(tag))));
+    },
   };
 }
 

@@ -1101,6 +1101,12 @@ export interface Backend {
 
   /** What the Info tab's Key and Genre dropdowns offer: what the library holds. */
   trackLookups(): Promise<TrackLookups>;
+
+  /**
+   * The My Tags every one of `trackIds` has: what the My Tag panel ticks.
+   * rekordbox ticks a tag only when all the selected tracks carry it.
+   */
+  selectionMyTags(trackIds: readonly string[]): Promise<string[]>;
 }
 
 /** Which deck. Two, named rather than indexed, as the mixer is. */
@@ -1961,6 +1967,24 @@ export interface Edits {
   setTrackField(tracks: readonly string[], field: TrackField, value: string, options?: { writeKeyTag?: boolean }): Promise<EditHistoryState>;
   /** Sets the My Tags on a track to exactly these ids. */
   setMyTags(track: string, tags: string[]): Promise<EditHistoryState>;
+  /**
+   * A tick in the My Tag panel: `tag` goes on every one of `tracks` (`on`)
+   * or comes off them, as one step of history.
+   */
+  putMyTag(tracks: readonly string[], tag: string, on: boolean): Promise<EditHistoryState>;
+  /**
+   * Adding My Tag: a new tag at the end of a category, named "My Comment"
+   * or the first "My Comment (n)" the category lacks. Refused once the
+   * category holds 50, where rekordbox greys its `+`.
+   */
+  createMyTag(category: string): Promise<{ id: string; name: string }>;
+  /**
+   * Renames a My Tag or a category. Refused with "An item with the same
+   * name already exists!" when another under the same parent has it.
+   */
+  renameMyTag(id: string, name: string): Promise<number>;
+  /** Deletes a My Tag and takes it off every track. Not undoable; categories are refused. */
+  deleteMyTag(id: string): Promise<number>;
   /** Add Artwork: the image is filed in the share tree and the track points at it. */
   addArtwork(tracks: readonly string[], image: string): Promise<EditHistoryState>;
   /** Add Artwork on a playlist or folder, from the tree menu. */
@@ -2152,7 +2176,7 @@ export interface TrackLookups {
   keys: string[];
   genres: string[];
   /** The library's My Tags by category, with the ids the toggles set. */
-  myTagCategories: { name: string; tags: { id: string; name: string }[] }[];
+  myTagCategories: { id: string; name: string; tags: { id: string; name: string }[] }[];
 }
 
 /** The fields the backend will write. Everything else on the Info tab is shown read-only. */

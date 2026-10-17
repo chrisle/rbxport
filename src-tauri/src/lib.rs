@@ -719,6 +719,11 @@ pub fn run() {
             details::add_artwork,
             details::add_playlist_artwork,
             details::set_my_tags,
+            details::selection_my_tags,
+            details::put_my_tag,
+            details::create_my_tag,
+            details::rename_my_tag,
+            details::delete_my_tag,
             details::clear_artwork,
             // AppleScript's way into the window: it says it is listening,
             // answers what a script asked of it, and mirrors the
