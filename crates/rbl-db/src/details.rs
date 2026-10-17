@@ -519,6 +519,27 @@ fn my_tags_of(conn: &Connection, id: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The My Tags every one of `ids` carries: the ticks the My Tag panel
+/// shows for a selection. rekordbox keeps a tag ticked only when all the
+/// selected tracks have it (`AppSyncDBController::getMyTagOnTrack` and
+/// `getMyTagOnTrackFromCache` narrow the first track's tags with
+/// `Array::removeValuesNotIn` for each next one; 7.2.19 arm64 @0x100a62b08,
+/// static analysis). None for no tracks.
+#[must_use]
+pub fn shared_my_tags(conn: &Connection, ids: &[String]) -> Vec<String> {
+    let mut tracks = ids.iter();
+    let Some(first) = tracks.next() else { return Vec::new() };
+    let mut shared = my_tags_of(conn, first);
+    for id in tracks {
+        if shared.is_empty() {
+            break;
+        }
+        let these = my_tags_of(conn, id);
+        shared.retain(|tag| these.contains(tag));
+    }
+    shared
+}
+
 /// The browser's My Tag column uses names, not opaque tag ids.
 pub fn my_tag_names(conn: &Connection, id: &str) -> Vec<String> {
     let Ok(mut stmt) = conn.prepare(

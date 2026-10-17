@@ -147,6 +147,53 @@ pub const ANALYSED_FULL: i64 = 105;
 /// Attempts before giving up on finding an unused id.
 const ID_ATTEMPTS: usize = 64;
 
+/// The most tags one My Tag category holds: rekordbox greys a category's
+/// `+` at this many (`BrowseMyTagView`'s constructor stores 50 at +0x100,
+/// which `MyTagItemComponent::isActiveButton` compares the category's count
+/// against; 7.2.19 arm64 @0x10066d5dc, static analysis).
+pub const MY_TAG_LIMIT: usize = 50;
+
+/// What rekordbox's My Tag panel says when a rename would give two rows
+/// under one parent the same name (the `Localize.cpp` string its
+/// `didChangeLabelText` shows, under the title "Cannot rename").
+pub const MY_TAG_NAME_TAKEN: &str = "An item with the same name already exists!";
+
+/// The name rekordbox's Adding My Tag gives a new tag: "My Comment", or
+/// "My Comment (n)" with the smallest n from 1 that no tag in the category
+/// is already called, compared exactly (`BrowseMyTagView::
+/// createNewItemName` @0x10066e770, 7.2.19 static analysis: the base
+/// literal and the wide format " (%d)" at 0x103770760).
+#[must_use]
+pub fn new_my_tag_name(existing: &[String]) -> String {
+    const BASE: &str = "My Comment";
+    let mut name = BASE.to_owned();
+    let mut n = 0_u32;
+    while existing.contains(&name) {
+        n += 1;
+        name = format!("{BASE} ({n})");
+    }
+    name
+}
+
+/// A tag Adding My Tag made: its id, and the name it was given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewMyTag {
+    pub id: String,
+    pub name: String,
+}
+
+/// The names of the live tags in a My Tag category, in their order.
+fn my_tag_names_under(conn: &Connection, category: &str) -> Result<Vec<String>> {
+    let mut statement = conn.prepare(
+        "SELECT COALESCE(Name, '') FROM djmdMyTag
+         WHERE ParentID = ?1 AND Attribute = 0 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+    )?;
+    let names = statement
+        .query_map(params![category], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(names)
+}
+
 /// Columns [`Writer::touch`] will set. A column name is interpolated into SQL,
 /// so the set of legal names is spelled out rather than trusted.
 const WRITABLE_COLUMNS: &[&str] = &[
@@ -2799,6 +2846,240 @@ impl Writer {
         let tags: Vec<String> = statement.query_map(params![content], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         Ok(tags)
+    }
+
+    /// Puts one My Tag on a track or takes it off, leaving its others as
+    /// they are: a tick in the My Tag panel, which rekordbox applies to each
+    /// selected track (`BrowseMyTagView::onCheckButton` calls
+    /// `putMyTagOnTrack` or `removeMyTagFromTrack` with the selection,
+    /// 7.2.19 static analysis). A track that already has it, or lacks it,
+    /// is left alone and its edit comes back empty.
+    pub fn put_my_tag_with_undo(
+        &mut self,
+        content: &str,
+        tag: &str,
+        on: bool,
+    ) -> Result<(Changed, TrackTagEdit)> {
+        let before = self.track_tags(content)?;
+        let has = before.iter().any(|t| t == tag);
+        if has == on {
+            let edit = TrackTagEdit { content: content.to_owned(), before: before.clone(), after: before };
+            return Ok((Changed { rows: 0, usn: 0 }, edit));
+        }
+        let next: Vec<String> = if on {
+            before.iter().cloned().chain(std::iter::once(tag.to_owned())).collect()
+        } else {
+            before.iter().filter(|t| *t != tag).cloned().collect()
+        };
+        let changed = self.set_my_tags(content, &next)?;
+        let after = self.track_tags(content)?;
+        Ok((changed, TrackTagEdit { content: content.to_owned(), before, after }))
+    }
+
+    /// Adding My Tag: a new tag at the end of `category`, named as
+    /// rekordbox names one, and its id and name returned.
+    ///
+    /// The row is rekordbox's `AppSyncDBController::addNewMyTag` (7.2.19
+    /// arm64 @0x100a60e0c, static analysis): a random 32-bit id that is not
+    /// 0 to 4 (the categories' ids) nor `0xFFFFFFFF`, a new UUID, `Seq` one
+    /// past the category's highest (1 in an empty one), `Attribute` 0 and the
+    /// category's id as `ParentID`. A library rekordbox 7 made holds its
+    /// default tags in exactly that shape [OBS]. rekordbox does not look for
+    /// a clash before inserting; this does, since the id is the key.
+    ///
+    /// The `+` is greyed once a category holds [`MY_TAG_LIMIT`] tags
+    /// (`MyTagItemComponent::isActiveButton` @0x10066c940 against the 50 the
+    /// view's constructor sets), so a write past that is refused here too.
+    pub fn create_my_tag(&mut self, category: &str) -> Result<NewMyTag> {
+        self.prepare()?;
+        let conn = self.library.connection();
+        let is_category: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM djmdMyTag
+             WHERE ID = ?1 AND Attribute = 1 AND ParentID = 'root' AND rb_local_deleted = 0",
+            params![category],
+            |r| r.get(0),
+        )?;
+        if is_category == 0 {
+            return Err(DbError::WriteRefused(format!("no My Tag category {category}")));
+        }
+        let names = my_tag_names_under(conn, category)?;
+        if names.len() >= MY_TAG_LIMIT {
+            return Err(DbError::WriteRefused(format!(
+                "a My Tag category holds at most {MY_TAG_LIMIT} tags"
+            )));
+        }
+        let name = new_my_tag_name(&names);
+        let id = self.unused_my_tag_id()?;
+        let uuid = self.rng.uuid4();
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let seq: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(Seq), 0) + 1 FROM djmdMyTag
+             WHERE ParentID = ?1 AND rb_local_deleted = 0",
+            params![category],
+            |r| r.get(0),
+        )?;
+        let usn = next_usn(&tx)?;
+        tx.execute(
+            "INSERT INTO djmdMyTag
+                (ID, Seq, Name, Attribute, ParentID, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+            params![id, seq, name, category, uuid, usn, stamp],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(NewMyTag { id, name })
+    }
+
+    /// Renames a My Tag or a category.
+    ///
+    /// rekordbox writes the new name over the old one and nothing else
+    /// (`AppSyncDBController::modifyMyTagName` @0x100a62234). Its panel
+    /// writes nothing for an empty name, and refuses a name another row
+    /// under the same parent already has, matched exactly, with "An item
+    /// with the same name already exists!" (`BrowseMyTagView::
+    /// didChangeLabelText` @0x10066cce0, `isExistSameNameTag` @0x10066e98c).
+    pub fn rename_my_tag(&mut self, id: &str, name: &str) -> Result<Changed> {
+        self.prepare()?;
+        if name.is_empty() {
+            return Err(DbError::WriteRefused("a My Tag needs a name".to_owned()));
+        }
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let row: Option<(String, String)> = tx.query_row(
+            "SELECT COALESCE(ParentID, ''), COALESCE(Name, '') FROM djmdMyTag
+             WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).optional()?;
+        let Some((parent, current)) = row else {
+            return Err(DbError::WriteRefused(format!("no My Tag {id}")));
+        };
+        if current == name {
+            return Ok(Changed { rows: 0, usn: 0 });
+        }
+        let clash: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM djmdMyTag
+             WHERE ParentID = ?1 AND ID <> ?2 AND Name = ?3 AND rb_local_deleted = 0",
+            params![parent, id, name],
+            |r| r.get(0),
+        )?;
+        if clash > 0 {
+            return Err(DbError::WriteRefused(MY_TAG_NAME_TAKEN.to_owned()));
+        }
+        let usn = next_usn(&tx)?;
+        let rows = tx.execute(
+            "UPDATE djmdMyTag SET Name = ?1, rb_local_usn = ?2, updated_at = ?3
+             WHERE ID = ?4 AND rb_local_deleted = 0",
+            params![name, usn, stamp, id],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// Deletes a My Tag: its row, every track's membership of it, and the
+    /// gap it leaves in its category's `Seq`.
+    ///
+    /// rekordbox's `AppSyncDBController::deleteMyTag` @0x100a615c8 refuses a
+    /// category, marks the tag deleted (`DeleteEntity` takes the row to its
+    /// delete status rather than removing it), renumbers what is left under
+    /// the category to `Seq` 1..N, touching only the rows whose number
+    /// changes, under one update number (`SongListRepositoryBase::
+    /// updateRenumberSeq` @0x10022e0b0), then drops the tag's
+    /// `djmdSongMyTag` rows. Those are marked deleted here, as every other
+    /// row this writer removes is.
+    pub fn delete_my_tag(&mut self, id: &str) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let row: Option<(i64, String)> = tx.query_row(
+            "SELECT COALESCE(Attribute, 0), COALESCE(ParentID, '') FROM djmdMyTag
+             WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).optional()?;
+        let Some((attribute, parent)) = row else {
+            return Err(DbError::WriteRefused(format!("no My Tag {id}")));
+        };
+        if attribute != 0 {
+            return Err(DbError::WriteRefused("a My Tag category cannot be deleted".to_owned()));
+        }
+        let mut usn = next_usn(&tx)?;
+        let mut rows = tx.execute(
+            "UPDATE djmdMyTag SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
+             WHERE ID = ?3 AND rb_local_deleted = 0",
+            params![usn, stamp, id],
+        )?;
+
+        let mut statement = tx.prepare(
+            "SELECT ID, COALESCE(Seq, 0) FROM djmdMyTag
+             WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+        )?;
+        let siblings: Vec<(String, i64)> = statement
+            .query_map(params![parent], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(statement);
+        let moved: Vec<(&String, i64)> = siblings.iter().zip(1_i64..)
+            .filter(|((_, seq), want)| seq != want)
+            .map(|((sibling, _), want)| (sibling, want))
+            .collect();
+        if !moved.is_empty() {
+            usn = next_usn(&tx)?;
+            for (sibling, seq) in moved {
+                rows += tx.execute(
+                    "UPDATE djmdMyTag SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3 WHERE ID = ?4",
+                    params![seq, usn, stamp, sibling],
+                )?;
+            }
+        }
+
+        let mut statement = tx.prepare(
+            "SELECT ID FROM djmdSongMyTag WHERE MyTagID = ?1 AND rb_local_deleted = 0",
+        )?;
+        let memberships: Vec<String> = statement
+            .query_map(params![id], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(statement);
+        for membership in memberships {
+            usn = next_usn(&tx)?;
+            rows += tx.execute(
+                "UPDATE djmdSongMyTag SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
+                 WHERE ID = ?3 AND rb_local_deleted = 0",
+                params![usn, stamp, membership],
+            )?;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// A My Tag id rekordbox could have chosen and the table does not hold,
+    /// deleted rows included since they keep their key.
+    fn unused_my_tag_id(&mut self) -> Result<String> {
+        for _ in 0..ID_ATTEMPTS {
+            let value = (self.rng.next_u64() >> 32) as u32;
+            if value < 5 || value == u32::MAX {
+                continue;
+            }
+            let candidate = value.to_string();
+            let taken: i64 = self.library.connection().query_row(
+                "SELECT COUNT(*) FROM djmdMyTag WHERE ID = ?1",
+                params![candidate],
+                |r| r.get(0),
+            )?;
+            if taken == 0 {
+                return Ok(candidate);
+            }
+        }
+        Err(DbError::WriteRefused(format!(
+            "could not find an unused id for djmdMyTag in {ID_ATTEMPTS} attempts"
+        )))
     }
 
     /// Persist an edited grid's tempo and invalidate cached analysis consumers.

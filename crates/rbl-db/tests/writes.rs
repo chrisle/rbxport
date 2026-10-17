@@ -2477,6 +2477,181 @@ fn my_tags_are_set_as_a_whole_and_read_back_on_the_details() {
 }
 
 #[test]
+fn a_new_my_tag_is_named_as_rekordbox_names_one() {
+    use rbl_db::write::new_my_tag_name;
+    let names = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+    assert_eq!(new_my_tag_name(&[]), "My Comment");
+    assert_eq!(new_my_tag_name(&names(&["Peak"])), "My Comment");
+    assert_eq!(new_my_tag_name(&names(&["My Comment"])), "My Comment (1)");
+    // The scan starts over after each bump, so the order does not matter.
+    assert_eq!(new_my_tag_name(&names(&["My Comment (1)", "My Comment"])), "My Comment (2)");
+    assert_eq!(new_my_tag_name(&names(&["My Comment", "My Comment (2)"])), "My Comment (1)");
+    // Compared exactly, as juce::String::compare does.
+    assert_eq!(new_my_tag_name(&names(&["my comment"])), "My Comment");
+}
+
+#[test]
+fn adding_my_tag_writes_the_row_rekordbox_writes() {
+    use rbl_db::fixture::{MY_TAG_CATEGORY, MY_TAG_WARM_UP};
+    let mut f = fixture();
+    let before_usn: i64 = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+    let made = f.writer.create_my_tag(MY_TAG_CATEGORY).unwrap();
+    assert_eq!(made.name, "My Comment");
+    let id: u64 = made.id.parse().expect("a decimal id");
+    assert!((5..u64::from(u32::MAX)).contains(&id), "a 32-bit id past the categories' 1 to 4");
+
+    let (seq, name, attribute, parent, uuid, usn, local_usn, created, updated): (
+        i64, String, i64, String, String, Option<i64>, i64, String, String,
+    ) = f.conn().query_row(
+        "SELECT Seq, Name, Attribute, ParentID, UUID, usn, rb_local_usn, created_at, updated_at
+         FROM djmdMyTag WHERE ID = ?1",
+        params![made.id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)),
+    ).unwrap();
+    assert_eq!(seq, 3, "after Peak (1) and Warm-up (2)");
+    assert_eq!(name, "My Comment");
+    assert_eq!(attribute, 0);
+    assert_eq!(parent, MY_TAG_CATEGORY);
+    assert_eq!(uuid.len(), 36);
+    assert_eq!(uuid.as_bytes()[14], b'4', "a version 4 UUID");
+    assert_eq!(usn, None);
+    assert!(local_usn > before_usn);
+    assert_eq!(created, updated);
+    let counter: i64 = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+    assert_eq!(counter, local_usn);
+
+    // The next one in the same category takes the next free name and Seq.
+    let second = f.writer.create_my_tag(MY_TAG_CATEGORY).unwrap();
+    assert_eq!(second.name, "My Comment (1)");
+    let seq: i64 = f.one("SELECT Seq FROM djmdMyTag WHERE ID = ?1", &[&second.id]);
+    assert_eq!(seq, 4);
+
+    // Only under a live category.
+    assert!(matches!(f.writer.create_my_tag(MY_TAG_WARM_UP), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.create_my_tag("no-such-category"), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
+fn a_my_tag_category_takes_at_most_fifty_tags() {
+    use rbl_db::fixture::MY_TAG_CATEGORY;
+    use rbl_db::write::MY_TAG_LIMIT;
+    let mut f = fixture();
+    // The fixture's category already holds two.
+    for _ in 2..MY_TAG_LIMIT {
+        f.writer.create_my_tag(MY_TAG_CATEGORY).unwrap();
+    }
+    assert_eq!(
+        f.one::<i64>("SELECT COUNT(*) FROM djmdMyTag WHERE ParentID = ?1 AND rb_local_deleted = 0", &[&MY_TAG_CATEGORY]),
+        50
+    );
+    assert!(matches!(f.writer.create_my_tag(MY_TAG_CATEGORY), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
+fn renaming_a_my_tag_refuses_a_name_its_category_already_has() {
+    use rbl_db::fixture::{MY_TAG_CATEGORY, MY_TAG_PEAK, MY_TAG_WARM_UP};
+    use rbl_db::write::MY_TAG_NAME_TAKEN;
+    let mut f = fixture();
+    let changed = f.writer.rename_my_tag(MY_TAG_PEAK, "Peak Time").unwrap();
+    assert_eq!(changed.rows, 1);
+    let name: String = f.one("SELECT Name FROM djmdMyTag WHERE ID = ?1", &[&MY_TAG_PEAK]);
+    assert_eq!(name, "Peak Time");
+    let local: i64 = f.one("SELECT rb_local_usn FROM djmdMyTag WHERE ID = ?1", &[&MY_TAG_PEAK]);
+    assert_eq!(local, changed.usn);
+
+    match f.writer.rename_my_tag(MY_TAG_WARM_UP, "Peak Time") {
+        Err(DbError::WriteRefused(message)) => assert_eq!(message, MY_TAG_NAME_TAKEN),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    // Exact match only, and its own name again is no change at all.
+    f.writer.rename_my_tag(MY_TAG_WARM_UP, "peak time").unwrap();
+    assert_eq!(f.writer.rename_my_tag(MY_TAG_WARM_UP, "peak time").unwrap().rows, 0);
+    // A category renames too; an empty name or an unknown id does not.
+    f.writer.rename_my_tag(MY_TAG_CATEGORY, "When").unwrap();
+    let category: String = f.one("SELECT Name FROM djmdMyTag WHERE ID = ?1", &[&MY_TAG_CATEGORY]);
+    assert_eq!(category, "When");
+    assert!(matches!(f.writer.rename_my_tag(MY_TAG_PEAK, ""), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.rename_my_tag("no-such-tag", "X"), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
+fn deleting_a_my_tag_marks_it_and_its_tracks_deleted_and_closes_the_gap() {
+    use rbl_db::fixture::{MY_TAG_CATEGORY, MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let mut f = fixture();
+    let third = f.writer.create_my_tag(MY_TAG_CATEGORY).unwrap();
+    f.writer.set_my_tags(&track_id(1), &[MY_TAG_PEAK.to_owned(), MY_TAG_WARM_UP.to_owned()]).unwrap();
+    f.writer.set_my_tags(&track_id(2), &[MY_TAG_PEAK.to_owned()]).unwrap();
+    let third_usn: i64 = f.one("SELECT rb_local_usn FROM djmdMyTag WHERE ID = ?1", &[&third.id]);
+
+    let changed = f.writer.delete_my_tag(MY_TAG_PEAK).unwrap();
+    // The tag, the two siblings renumbered, the two memberships.
+    assert_eq!(changed.rows, 5);
+    assert_eq!(f.one::<i64>("SELECT rb_local_deleted FROM djmdMyTag WHERE ID = ?1", &[&MY_TAG_PEAK]), 1);
+    assert_eq!(
+        f.count("SELECT COUNT(*) FROM djmdSongMyTag WHERE MyTagID = '700002' AND rb_local_deleted = 0"),
+        0
+    );
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongMyTag WHERE MyTagID = '700002' AND rb_local_deleted = 1"), 2);
+    let seqs: Vec<(String, i64, i64)> = {
+        let mut s = f.conn().prepare(
+            "SELECT ID, Seq, rb_local_usn FROM djmdMyTag WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq",
+        ).unwrap();
+        s.query_map(params![MY_TAG_CATEGORY], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(Result::unwrap).collect()
+    };
+    assert_eq!(seqs.iter().map(|(id, seq, _)| (id.as_str(), *seq)).collect::<Vec<_>>(), vec![(MY_TAG_WARM_UP, 1), (third.id.as_str(), 2)]);
+    // Both moved rows share one update number, past the third tag's own.
+    assert_eq!(seqs[0].2, seqs[1].2);
+    assert!(seqs[0].2 > third_usn);
+    // Warm-up stays on track 1.
+    let read = rbl_db::details::track_details(f.conn(), &track_id(1)).unwrap().unwrap();
+    assert_eq!(read.my_tags, vec![MY_TAG_WARM_UP.to_owned()]);
+
+    assert!(matches!(f.writer.delete_my_tag(MY_TAG_CATEGORY), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.delete_my_tag(MY_TAG_PEAK), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
+fn a_my_tag_tick_puts_one_tag_on_or_off_and_keeps_the_rest() {
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let mut f = fixture();
+    let id = track_id(4);
+    f.writer.set_my_tags(&id, &[MY_TAG_WARM_UP.to_owned()]).unwrap();
+    let (_, edit) = f.writer.put_my_tag_with_undo(&id, MY_TAG_PEAK, true).unwrap();
+    assert!(!edit.is_empty());
+    let read = rbl_db::details::track_details(f.conn(), &id).unwrap().unwrap();
+    let mut tags = read.my_tags.clone();
+    tags.sort();
+    assert_eq!(tags, vec![MY_TAG_PEAK.to_owned(), MY_TAG_WARM_UP.to_owned()]);
+    // Already on: nothing written.
+    let (changed, again) = f.writer.put_my_tag_with_undo(&id, MY_TAG_PEAK, true).unwrap();
+    assert_eq!(changed.rows, 0);
+    assert!(again.is_empty());
+    // Undo goes back to the set before.
+    f.writer.undo_tag_edit(&edit).unwrap();
+    let read = rbl_db::details::track_details(f.conn(), &id).unwrap().unwrap();
+    assert_eq!(read.my_tags, vec![MY_TAG_WARM_UP.to_owned()]);
+    f.writer.put_my_tag_with_undo(&id, MY_TAG_WARM_UP, false).unwrap();
+    let read = rbl_db::details::track_details(f.conn(), &id).unwrap().unwrap();
+    assert!(read.my_tags.is_empty());
+}
+
+#[test]
+fn a_selection_shows_the_my_tags_all_its_tracks_share() {
+    use rbl_db::details::shared_my_tags;
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let mut f = fixture();
+    f.writer.set_my_tags(&track_id(1), &[MY_TAG_PEAK.to_owned(), MY_TAG_WARM_UP.to_owned()]).unwrap();
+    f.writer.set_my_tags(&track_id(2), &[MY_TAG_PEAK.to_owned()]).unwrap();
+    let ids = |list: &[usize]| list.iter().map(|&i| track_id(i)).collect::<Vec<_>>();
+    let mut one = shared_my_tags(f.conn(), &ids(&[1]));
+    one.sort();
+    assert_eq!(one, vec![MY_TAG_PEAK.to_owned(), MY_TAG_WARM_UP.to_owned()]);
+    assert_eq!(shared_my_tags(f.conn(), &ids(&[1, 2])), vec![MY_TAG_PEAK.to_owned()]);
+    assert!(shared_my_tags(f.conn(), &ids(&[1, 2, 3])).is_empty());
+    assert!(shared_my_tags(f.conn(), &[]).is_empty());
+}
+
+#[test]
 fn the_tag_list_takes_tracks_on_the_end_and_closes_up_when_one_comes_off() {
     let mut f = fixture();
     let changed = f.writer.tag_list_add(&[track_id(3), track_id(1), track_id(3)]).unwrap();
