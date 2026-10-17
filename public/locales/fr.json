@@ -1746,5 +1746,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Exporter une liste de lecture vers un fichier pour des applications de musique (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "Un item avec le même nom existe déjà",
+  "Create a new My Tag.": "Créer un nouveau Mon signet.",
+  "My Tag added.": "Mon tag ajouté.",
+  "My Tag created.": "Mon tag créé.",
+  "My Tag deleted.": "Mon tag supprimé.",
+  "My Tag removed.": "Mon tag supprimé.",
+  "My Tag renamed.": "Mon tag renommé.",
+  "Name": "Nom",
+  "The new My Tag was not made.": "Le nouveau My Tag n'a pas été créé.",
+  "a My Tag needs a name": "Mon signet a besoin d'un nom",
+  "delete": "supprimer"
 }

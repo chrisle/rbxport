@@ -1745,5 +1745,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Exportovat seznam skladeb do souboru pro hudební aplikace (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "Již existuje položka se stejným názvem",
+  "Create a new My Tag.": "Vytvořit nový Můj tag.",
+  "My Tag added.": "Můj štítek přidán.",
+  "My Tag created.": "Můj štítek byl vytvořen.",
+  "My Tag deleted.": "Můj štítek byl smazán.",
+  "My Tag removed.": "Můj štítek byl odstraněn.",
+  "My Tag renamed.": "Můj štítek byl přejmenován.",
+  "Name": "Název",
+  "The new My Tag was not made.": "Nový Můj štítek nebyl vytvořen.",
+  "a My Tag needs a name": "Můj tag potřebuje název",
+  "delete": "smazat"
 }

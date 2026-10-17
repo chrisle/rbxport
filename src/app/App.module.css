@@ -190,6 +190,21 @@
     min(var(--s-info-w), 33%);
 }
 
+/* The My Tag window in the information window's place, at its own fixed
+   width: rekordbox does not let it be dragged wider [OBS 7.2.14, #539]. */
+.body[data-mytag] {
+  grid-template-columns:
+    var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr
+    var(--s-mytag-w);
+}
+
+.body[data-sub][data-mytag] {
+  grid-template-columns:
+    var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr
+    auto
+    var(--s-mytag-w);
+}
+
 .body {
   display: grid;
   /* --tree-w is set by the splitter drag; the token is the starting width. */

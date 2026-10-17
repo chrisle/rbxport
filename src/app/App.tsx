@@ -65,6 +65,7 @@ import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout
 import { FIELD_LABEL } from "@/views/info/fieldLabel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { RightRail } from "@/views/browser/RightRail";
+import { MyTagPanel } from "@/views/browser/MyTagPanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { importLoose, isLooseId } from "@/lib/explorer";
@@ -203,6 +204,9 @@ function AppBody() {
   // Closed by default, which is what browseSetting.xml records for the user's
   // own rekordbox (`ListInfo open="0"`).
   const [infoOpen, setInfoOpen] = useState(restored.infoOpen);
+  // The My Tag window takes the information window's place: opening one
+  // closes the other, as rekordbox's icon column does [OBS 7.2.14, #539].
+  const [myTagOpen, setMyTagOpen] = useState(restored.myTagOpen);
   // Closed unless it was open at exit; browseSetting.xml records
   // `SubBrowse open="0"` for a first run.
   const [subOpen, setSubOpen] = useState(restored.subOpen);
@@ -2280,6 +2284,7 @@ function AppBody() {
     }
     if (outcome.action === "info") {
       setInfoOpen((open) => !open);
+      setMyTagOpen(false);
       return;
     }
     if (outcome.action === "locate-loaded") {
@@ -2922,6 +2927,7 @@ function AppBody() {
       treeExpansion,
       sort: sortState,
       infoOpen,
+      myTagOpen,
       subOpen,
       filterOpen,
       // Only once the real library is up: storing the seed back over itself
@@ -2936,7 +2942,7 @@ function AppBody() {
       waveformZoom,
       dualControl: dual,
     });
-  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom, dual]);
+  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, myTagOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom, dual]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
@@ -2966,7 +2972,7 @@ function AppBody() {
   const masterA = useCallback(() => setSyncMaster("a"), [setSyncMaster]);
   const masterB = useCallback(() => setSyncMaster("b"), [setSyncMaster]);
   const exportDeckTrack = useCallback((device: string, id: string) => exportTrackTo(device, [id]), [exportTrackTo]);
-  const showInformation = useCallback((row: RowDto) => { setPlayerTrack(row); setInfoOpen(true); }, []);
+  const showInformation = useCallback((row: RowDto) => { setPlayerTrack(row); setInfoOpen(true); setMyTagOpen(false); }, []);
   const toggleFilter = useCallback(() => setFilterOpen(was => !was), []);
   const filterBar = useMemo(() => <TrackFilter state={filterState} onChange={setFilterState}
     values={filterValues} masterBpmX100={masterBpmX100} />, [filterState, filterValues, masterBpmX100]);
@@ -3165,7 +3171,8 @@ function AppBody() {
         className={styles.body}
         ref={bodyRef}
         style={{ ["--tree-w" as string]: `${treeWidth}px` }}
-        data-info={infoOpen ? "" : undefined}
+        data-info={infoOpen || myTagOpen ? "" : undefined}
+        data-mytag={myTagOpen ? "" : undefined}
         data-sub={subOpen ? "" : undefined}
       >
         <TreeView
@@ -3332,10 +3339,20 @@ function AppBody() {
             onEdit={runEdit}
           /></Suspense>
         ) : null}
+        {myTagOpen ? (
+          <MyTagPanel
+            selection={infoSelection}
+            readOnly={readOnly}
+            libraryGeneration={libraryGeneration}
+            onEdit={runEdit}
+          />
+        ) : null}
         <RightRail
           className={styles.rightRail}
+          myTagOpen={myTagOpen}
+          onToggleMyTag={() => { setMyTagOpen((open) => !open); setInfoOpen(false); }}
           infoOpen={infoOpen}
-          onToggleInfo={() => setInfoOpen((open) => !open)}
+          onToggleInfo={() => { setInfoOpen((open) => !open); setMyTagOpen(false); }}
           subOpen={subOpen}
           onToggleSub={() => setSubOpen((open) => !open)}
         />

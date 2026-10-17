@@ -83,6 +83,13 @@
   --c-filter-label: #969696; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the BPM / KEY / RATING / COLOR / tag headings, MASTER PLAYER, OR and RST */
   --c-filter-text: #FFFFFF; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): list rows (123, Abm, Pink) and the toggle glyph */
   --c-filter-accent: #3571E3; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the picked row, the tick boxes and AND; the same value the pads' AU / Q use */
+  --c-mytag-heading: #191919; /* measured, rekordbox 7.2.14 for Windows (Winrig chris-win11 2026-10-17, issue #539, rekordbox-08): a My Tag category's row, (25,25,25) under 'Lexicon Tags' and each 'Empty Category' */
+  --c-mytag-heading-text: #969696; /* measured, same capture: the category name, (150,150,150) at its stems */
+  --c-mytag-text: #FFFFFF; /* measured, same capture: a tag's name with a track selected */
+  --c-mytag-text-off: #7F7F7F; /* measured, rekordbox-05 (no track selected): a tag's name, greyed with its tick box */
+  --c-mytag-check: #282828; /* measured, rekordbox-08: a tick box with a track selected, (40,40,40) across its 12px face */
+  --c-mytag-check-off: #1E1E1E; /* measured, rekordbox-05: a tick box with no track selected */
+  --c-mytag-add: #969696; /* skins/brws_tree_addIcon.svg circle rgb(150,150,150), and measured so on the rig; its plus is the svg's rgb(25,25,25) */
   --c-filter-strip: #282828; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the MASTER PLAYER strip behind the arrows, x 920..1634 */
   --c-filter-chip: #040404; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a My Tag chip's ground */
   --c-filter-chip-text: #4F4F4F; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a My Tag chip's text */
@@ -206,6 +213,14 @@
   --s-right-rail-w: 24px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.10.38 PM: the icon column x 3662..3709 between the list's scrollbar column and the window edge, 48px; 9.09.26 PM measured 56 because the sub-browser's 4pt right margin (x 3654..3661) was counted into it. The boxes sit at x 3668..3703 in every capture */
   --s-tree-rail-w: 57px; /* browseSetting.xml TreeShortcut w=57 */
   --s-info-w: 557px; /* browseSetting.xml BrowseLayout ListInfo w=557 */
+  --s-mytag-w: 322px; /* measured, rekordbox 7.2.14 for Windows at 100% (Winrig chris-win11 2026-10-17, issue #539, rekordbox-08): the My Tag window x 1565..1886, from its 1px black edge to the icon column */
+  --s-mytag-row-h: 24px; /* measured, same capture: category and tag rows on a 24px pitch (y 344, 368, 392, ...) */
+  --s-mytag-check: 12px; /* measured, same capture: the tick box's solid face x 1574..1585 inside the 16px ToggleButton BrowseMyTagView sets at (6, 4) [static 7.2.19 MyTagItemComponent::resized @0x10066d4d4] */
+  --s-mytag-check-x: 8px; /* measured: the face starts 8px into the row */
+  --s-mytag-name-x: 27px; /* static, MyTagItemComponent::resized: a tag's Label at x 27; measured ink from x 1593 */
+  --s-mytag-heading-x: 7px; /* static, same: a category's Label at x 7; measured ink from x 1574 */
+  --s-mytag-add: 11px; /* skins/brws_tree_addIcon.svg 11x11, centred in the 14px button resized() sets 20px in from the row's right */
+  --s-mytag-add-right: 20px; /* static, same: the add button at width - 20 (the width less 13 for the scrollbar), its glyph 2px in; measured glyph x 1856..1866, 20px short of the window's right edge at 1887 */
   --s-sub-browse-w: 878px; /* capture 2026-09-09 9.09.26 PM at 2x: the sub-browser runs x 1898..3653 of a 1798pt window, 1756px, rail to list edge. browseSetting.xml recorded SubBrowse w=1107 for a different window; the capture is what rekordbox drew */
   --s-player-h: 279px; /* measured from a 2x capture of rekordbox 7.2.11 running; player spans y 56..335pt */
   --s-player-gutter-h: 4px; /* user adjustment: increase the black gap below the player by 1px from the measured 3px */

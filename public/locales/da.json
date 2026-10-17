@@ -1740,5 +1740,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Eksporter en afspilningsliste til en fil til musik-apps (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "En post med det samme navn eksisterer allerede",
+  "Create a new My Tag.": "Opret et nyt Mit mærke.",
+  "My Tag added.": "Mit tag tilføjet.",
+  "My Tag created.": "Mit tag oprettet.",
+  "My Tag deleted.": "Mit tag slettet.",
+  "My Tag removed.": "Mit tag fjernet.",
+  "My Tag renamed.": "Mit tag omdøbt.",
+  "Name": "Navn",
+  "The new My Tag was not made.": "Det nye My Tag blev ikke lavet.",
+  "a My Tag needs a name": "Mit mærke skal have et navn",
+  "delete": "slette"
 }

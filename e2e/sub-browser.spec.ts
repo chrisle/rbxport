@@ -34,13 +34,14 @@ test("the icon column is the measured width and the sub-browser's box lights whe
   const rail = page.getByRole("toolbar", { name: "Browser panels" });
   const railBox = await rail.boundingBox();
   expect(railBox?.width).toBeCloseTo(await token(page, "--s-right-rail-w"), 0);
-  // Two boxes, Information above Sub-Browser: the capture's other three (My
-  // Tag, Related Tracks, Track Suggestion) are left out by request.
+  // Three boxes, My Tag, Information and Sub-Browser: the capture's other
+  // two (Related Tracks, Track Suggestion) are left out by request.
   const buttons = rail.getByRole("button");
-  await expect(buttons).toHaveCount(2);
-  await expect(buttons.nth(0)).toHaveAccessibleName("Information");
-  await expect(buttons.nth(1)).toHaveAccessibleName("Sub-Browser Window");
-  const box = await buttons.nth(1).boundingBox();
+  await expect(buttons).toHaveCount(3);
+  await expect(buttons.nth(0)).toHaveAccessibleName("My Tag");
+  await expect(buttons.nth(1)).toHaveAccessibleName("Information");
+  await expect(buttons.nth(2)).toHaveAccessibleName("Sub-Browser Window");
+  const box = await buttons.nth(2).boundingBox();
   expect(box?.width).toBeCloseTo(await token(page, "--s-right-rail-button"), 0);
 
   await expect(subToggle(page)).toHaveAttribute("aria-pressed", "false");

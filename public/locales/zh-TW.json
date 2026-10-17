@@ -1749,5 +1749,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "匯出播放清單至音樂應用程式的檔案 (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "同名項目已經存在",
+  "Create a new My Tag.": "建立新的我的標籤。",
+  "My Tag added.": "我的標籤已新增。",
+  "My Tag created.": "我的標籤已建立。",
+  "My Tag deleted.": "我的標籤已刪除。",
+  "My Tag removed.": "我的標籤已刪除。",
+  "My Tag renamed.": "我的標籤已重新命名。",
+  "Name": "名稱",
+  "The new My Tag was not made.": "新的“我的標籤”尚未製作。",
+  "a My Tag needs a name": "我的標籤需要一個名稱",
+  "delete": "刪除"
 }

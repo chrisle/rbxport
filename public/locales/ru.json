@@ -1749,5 +1749,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Экспорт списка воспроизведения в файл для музыкальных приложений (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "Уже существует параметр с одинаковым именем",
+  "Create a new My Tag.": "Создать новый Свой тег",
+  "My Tag added.": "Мой тег добавлен.",
+  "My Tag created.": "Мой тег создан.",
+  "My Tag deleted.": "Мой тег удален.",
+  "My Tag removed.": "Мой тег удален.",
+  "My Tag renamed.": "Мой тег переименован.",
+  "Name": "Имя",
+  "The new My Tag was not made.": "Новый Мой тег не был создан.",
+  "a My Tag needs a name": "Моему тегу нужно имя",
+  "delete": "удалить"
 }

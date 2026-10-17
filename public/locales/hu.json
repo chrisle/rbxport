@@ -1744,5 +1744,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Lejátszási sorrend exportálása zenei alkalmazások által használható fájlba (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "A rendszer már tartalmaz egy azonos nevű fájlt",
+  "Create a new My Tag.": "Új Saját címke létrehozása.",
+  "My Tag added.": "Saját címkém hozzáadva.",
+  "My Tag created.": "Saját címkém létrehozva.",
+  "My Tag deleted.": "Saját címkém törölve.",
+  "My Tag removed.": "Saját címkém eltávolítva.",
+  "My Tag renamed.": "Címkém átnevezve.",
+  "Name": "Név",
+  "The new My Tag was not made.": "Az új My Tag nem készült el.",
+  "a My Tag needs a name": "a Saját címkének név kell",
+  "delete": "törölni"
 }

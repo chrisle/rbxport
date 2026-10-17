@@ -1748,5 +1748,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Exporte una lista de reproducción para un archivo de aplicación musical (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "Ya existe un elemento con el mismo nombre",
+  "Create a new My Tag.": "Crear una nueva Mi etiqueta.",
+  "My Tag added.": "Mi etiqueta agregada.",
+  "My Tag created.": "Mi etiqueta creada.",
+  "My Tag deleted.": "Mi etiqueta eliminada.",
+  "My Tag removed.": "Mi etiqueta eliminada.",
+  "My Tag renamed.": "Mi etiqueta cambió de nombre.",
+  "Name": "Nombre",
+  "The new My Tag was not made.": "El nuevo My Tag no fue realizado.",
+  "a My Tag needs a name": "Mi etiqueta necesita un nombre",
+  "delete": "eliminar"
 }

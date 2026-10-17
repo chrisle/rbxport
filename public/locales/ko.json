@@ -1744,5 +1744,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "플레이리스트를 음악 앱용 파일로 내보내기(*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "동일한 이름을 가진 항목이 이미 존재합니다",
+  "Create a new My Tag.": "내 태그 새로 만들기.",
+  "My Tag added.": "내 태그가 추가되었습니다.",
+  "My Tag created.": "내 태그가 생성되었습니다.",
+  "My Tag deleted.": "내 태그가 삭제되었습니다.",
+  "My Tag removed.": "내 태그가 제거되었습니다.",
+  "My Tag renamed.": "내 태그의 이름이 변경되었습니다.",
+  "Name": "이름",
+  "The new My Tag was not made.": "새로운 마이태그가 생성되지 않았습니다.",
+  "a My Tag needs a name": "내 태그에는 이름이 필요합니다",
+  "delete": "삭제"
 }

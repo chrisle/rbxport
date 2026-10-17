@@ -1746,5 +1746,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Esportazione di una playlist in un file per app musicali (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "Esiste già una voce di quel nome",
+  "Create a new My Tag.": "Crea nuovo Tag personale.",
+  "My Tag added.": "Il mio tag è stato aggiunto.",
+  "My Tag created.": "Il mio tag è stato creato.",
+  "My Tag deleted.": "Il mio tag è stato eliminato.",
+  "My Tag removed.": "Il mio tag è stato rimosso.",
+  "My Tag renamed.": "Il mio tag è stato rinominato.",
+  "Name": "Nome",
+  "The new My Tag was not made.": "Il nuovo My Tag non è stato creato.",
+  "a My Tag needs a name": "il Tag personale necessita di un nome",
+  "delete": "eliminare"
 }

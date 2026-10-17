@@ -1745,5 +1745,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Müzik uygulamaları (*.m3u8) için bir çalma listesini bir dosyaya ver",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "Aynı ada sahip bir öğe zaten var",
+  "Create a new My Tag.": "Yeni Etiketim oluşturun.",
+  "My Tag added.": "Etiketim eklendi.",
+  "My Tag created.": "Etiketim oluşturuldu.",
+  "My Tag deleted.": "Etiketim silindi.",
+  "My Tag removed.": "Etiketim kaldırıldı.",
+  "My Tag renamed.": "Etiketim yeniden adlandırıldı.",
+  "Name": "Ad",
+  "The new My Tag was not made.": "Yeni Etiketim yapılmadı.",
+  "a My Tag needs a name": "Etiketimin bir ada ihtiyacı var",
+  "delete": "sil"
 }

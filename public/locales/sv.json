@@ -1742,5 +1742,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Exportera en spellista till en fil för musikappar (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "En post med samma namn finns redan",
+  "Create a new My Tag.": "Skapa en ny Min tagg.",
+  "My Tag added.": "Min tagg tillagd.",
+  "My Tag created.": "Min Tag skapad.",
+  "My Tag deleted.": "My Tag raderad.",
+  "My Tag removed.": "Min Tag borttagen.",
+  "My Tag renamed.": "Min tagg har bytt namn.",
+  "Name": "Namn",
+  "The new My Tag was not made.": "Den nya My Tag gjordes inte.",
+  "a My Tag needs a name": "Min tagg behöver ett namn",
+  "delete": "radera"
 }

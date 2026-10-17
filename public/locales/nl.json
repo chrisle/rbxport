@@ -1743,5 +1743,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Een afspeellijst exporteren naar een bestand voor muziekapplicaties (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "Er bestaat al iets met dezelfde naam",
+  "Create a new My Tag.": "Nieuwe Mijn tag maken",
+  "My Tag added.": "Mijn tag toegevoegd.",
+  "My Tag created.": "Mijn tag is gemaakt.",
+  "My Tag deleted.": "Mijn tag verwijderd.",
+  "My Tag removed.": "Mijn tag verwijderd.",
+  "My Tag renamed.": "Mijn tag is hernoemd.",
+  "Name": "Naam",
+  "The new My Tag was not made.": "De nieuwe My Tag is niet gemaakt.",
+  "a My Tag needs a name": "Mijn tag heeft een naam nodig",
+  "delete": "verwijderen"
 }

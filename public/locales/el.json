@@ -1746,5 +1746,16 @@
   "Export a playlist to a file for music apps (*.m3u8)": "Εξαγωγή λίστας αναπαραγωγής σε αρχείο για εφαρμογές μουσικής (*.m3u8)",
   "[data-browser-pane]": "[data-browser-pane]",
   "input, textarea, select, [contenteditable=\"true\"]": "input, textarea, select, [contenteditable=\"true\"]",
-  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again."
+  "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.": "'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.",
+  "An item with the same name already exists!": "Υπάρχει ήδη ένα στοιχείο με το ίδιο όνομα",
+  "Create a new My Tag.": "Δημιουργία μιας νέας Ετικέτα μου.",
+  "My Tag added.": "Η ετικέτα μου προστέθηκε.",
+  "My Tag created.": "Η ετικέτα μου δημιουργήθηκε.",
+  "My Tag deleted.": "Η ετικέτα μου διαγράφηκε.",
+  "My Tag removed.": "Η ετικέτα μου καταργήθηκε.",
+  "My Tag renamed.": "Η ετικέτα μου μετονομάστηκε.",
+  "Name": "Όνομα",
+  "The new My Tag was not made.": "Το νέο My Tag δεν φτιάχτηκε.",
+  "a My Tag needs a name": "Η ετικέτα μου χρειάζεται όνομα",
+  "delete": "διαγραφή"
 }
