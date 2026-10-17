@@ -83,7 +83,9 @@ fn scan(library: &Library) -> Vec<u32> {
 ///
 /// The list can run to tens of thousands of tracks, more than one response
 /// may carry, so it is paged out from here; it belongs to the library it was
-/// taken of and is thrown away once that is reloaded.
+/// taken of and is thrown away once that is reloaded. `rows` is in the
+/// order the manager shows them: the index's, until a column heading sorts
+/// it ([`sort_missing_tracks`]).
 pub struct MissingScan {
     library: Arc<Library>,
     rows: Arc<Vec<u32>>,
@@ -91,16 +93,42 @@ pub struct MissingScan {
 
 /// The missing rows of `library`: a fresh scan when asked for or when the
 /// last one was of another library, the last one otherwise.
-fn missing_rows(state: &AppState, library: &Arc<Library>, rescan: bool) -> Arc<Vec<u32>> {
+///
+/// With `keep_order` a fresh scan keeps the last one's order: the tracks
+/// still missing stay where they were, as rekordbox's list only loses the
+/// rows a relocate or delete took away (`MissingFileTable::relocateSelectedFiles`
+/// @0x1012a62dc removes them from its array and leaves the rest), and any
+/// track newly missing goes at the end [ASSUME: rekordbox's open list never
+/// gains one].
+fn missing_rows(state: &AppState, library: &Arc<Library>, rescan: bool, keep_order: bool) -> Arc<Vec<u32>> {
     let mut held = state.missing_scan.lock();
     if !rescan {
         if let Some(scan) = held.as_ref().filter(|scan| Arc::ptr_eq(&scan.library, library)) {
             return Arc::clone(&scan.rows);
         }
     }
-    let rows = Arc::new(scan(library));
+    let mut rows = scan(library);
+    if keep_order {
+        if let Some(last) = held.as_ref() {
+            keep_order_of(last, library, &mut rows);
+        }
+    }
+    let rows = Arc::new(rows);
     *held = Some(MissingScan { library: Arc::clone(library), rows: Arc::clone(&rows) });
     rows
+}
+
+/// Puts `rows`, of `library`, in the order `last` had the same tracks in,
+/// by track id since a reload can renumber rows. Tracks `last` did not list
+/// follow, in index order.
+fn keep_order_of(last: &MissingScan, library: &Library, rows: &mut [u32]) {
+    let at: HashMap<u64, usize> = last
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(at, &row)| last.library.ids.get(row as usize).map(|&id| (id, at)))
+        .collect();
+    rows.sort_by_key(|&row| library.ids.get(row as usize).and_then(|id| at.get(id)).copied().unwrap_or(usize::MAX));
 }
 
 fn missing_dto(library: &Library, row: u32) -> MissingTrackDto {
@@ -117,19 +145,22 @@ fn missing_dto(library: &Library, row: u32) -> MissingTrackDto {
 /// A page of the Missing File Manager's list.
 ///
 /// `rescan` checks every track's file again, as opening the manager does;
-/// otherwise the page comes from the last scan.
+/// otherwise the page comes from the last scan. `keep_order` makes such a
+/// check keep the list's sorted order, for the check after a change made
+/// from the manager.
 #[tauri::command]
 pub async fn missing_tracks(
     state: State<'_, Arc<AppState>>,
     offset: u32,
     limit: u32,
     rescan: bool,
+    keep_order: Option<bool>,
 ) -> AppResult<MissingTracksDto> {
     let library = state.library()?;
     let state = Arc::clone(&state);
     let wanted = limit.min(MAX_ROWS) as usize;
     blocking("missing_tracks", move || {
-        let rows = missing_rows(&state, &library, rescan);
+        let rows = missing_rows(&state, &library, rescan, keep_order.unwrap_or(false));
         let tracks = rows
             .iter()
             .skip(offset as usize)
@@ -141,11 +172,114 @@ pub async fn missing_tracks(
     .await
 }
 
+/// A Missing File Manager column, by its heading.
+///
+/// [OBS rekordbox 7.2.19 static] `MissingFileTable`'s ctor (@0x1012a5404)
+/// adds four columns, ids 1 to 4, all sortable (flags 0x1f).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MissingColumn {
+    Title,
+    Artist,
+    Album,
+    Location,
+}
+
+/// The collator rekordbox sorts the list with.
+///
+/// [OBS rekordbox 7.2.19 static] `ListSorter::setLocale` (@0x1012a9930),
+/// called with two empty strings from `MissingFileTable::sortOrderChanged`,
+/// takes `icu::Collator::createInstance(Locale("en_US"))`: ICU's defaults,
+/// tertiary strength, no numeric ordering. English has no tailoring, so
+/// this is the CLDR root order.
+fn collator() -> icu_collator::CollatorBorrowed<'static> {
+    #[expect(clippy::expect_used, reason = "compiled data for a built-in locale cannot be missing")]
+    icu_collator::CollatorBorrowed::try_new(
+        icu_locale_core::locale!("en-US").into(),
+        icu_collator::options::CollatorOptions::default(),
+    )
+    .expect("the en-US collator is compiled in")
+}
+
+/// `rows` sorted the way a click on `column`'s heading sorts rekordbox's
+/// Missing File Manager.
+///
+/// [OBS rekordbox 7.2.19 static] `MissingFileTable::sortOrderChanged`
+/// (@0x1012a7c3c) builds a `ListSorter` (@0x1012a94c4) and stable-sorts the
+/// list **as it stands** (`OwnedArray::sort(sorter, true)`), so each sort
+/// starts from the last. The sorter compares through a chain that stops at
+/// the first non-zero answer:
+///
+/// | Column | Chain |
+/// |---|---|
+/// | Track Title | title |
+/// | artist | artist, album, disc number, track number |
+/// | album | album, disc number, track number |
+/// | location | path |
+///
+/// Text goes through [`collator`]; the disc (`u16`) and track numbers are
+/// subtracted. The chain ends in `compareEnd` (@0x1012a9618), which answers
+/// -1, not 0, and the answer is multiplied by +1 forwards and -1 backwards
+/// (`[sorter+0xa8]`, `mul` @0x1012aadf0). So rows equal on every key compare
+/// as "the later is less" forwards, and libc++'s stable sort then reverses
+/// them; backwards they compare "not less" and keep their order. That is
+/// what this does, with each row's place as the last key.
+fn sorted_rows(library: &Library, rows: &[u32], column: MissingColumn, forwards: bool) -> Vec<u32> {
+    let collator = collator();
+    let text = |a: &str, b: &str| collator.compare(a, b);
+    let disc = |row: u32| library.disc_no.get(row as usize).copied().unwrap_or(0);
+    let track = |row: u32| library.track_number.get(row as usize).copied().unwrap_or(0);
+    let album = |a: u32, b: u32| {
+        text(library.album_name(a), library.album_name(b))
+            .then_with(|| disc(a).cmp(&disc(b)))
+            .then_with(|| track(a).cmp(&track(b)))
+    };
+    let keys = |a: u32, b: u32| match column {
+        MissingColumn::Title => text(library.title.get(a as usize), library.title.get(b as usize)),
+        MissingColumn::Artist => text(library.artist_name(a), library.artist_name(b)).then_with(|| album(a, b)),
+        MissingColumn::Album => album(a, b),
+        MissingColumn::Location => text(library.folder_path.get(a as usize), library.folder_path.get(b as usize)),
+    };
+    let mut placed: Vec<(usize, u32)> = rows.iter().copied().enumerate().collect();
+    placed.sort_by(|&(at_a, a), &(at_b, b)| {
+        if forwards {
+            keys(a, b).then(at_b.cmp(&at_a))
+        } else {
+            keys(b, a).then(at_a.cmp(&at_b))
+        }
+    });
+    placed.into_iter().map(|(_, row)| row).collect()
+}
+
+/// A click on a Missing File Manager column heading: the list, as it
+/// stands, sorted by that column, forwards or backwards. See [`sorted_rows`].
+#[tauri::command]
+pub async fn sort_missing_tracks(
+    state: State<'_, Arc<AppState>>,
+    column: MissingColumn,
+    forwards: bool,
+) -> AppResult<()> {
+    let library = state.library()?;
+    let state = Arc::clone(&state);
+    blocking("sort_missing_tracks", move || {
+        let rows = missing_rows(&state, &library, false, false);
+        let sorted = Arc::new(sorted_rows(&library, &rows, column, forwards));
+        let mut held = state.missing_scan.lock();
+        // Only over the list it sorted: a rescan in the meantime wins.
+        if held.as_ref().is_some_and(|scan| Arc::ptr_eq(&scan.rows, &rows)) {
+            *held = Some(MissingScan { library: Arc::clone(&library), rows: sorted });
+        }
+        Ok(())
+    })
+    .await
+}
+
 /// The rows an action over missing files applies to: the ones named that are
-/// still missing, or with none named every missing track, checked afresh.
+/// still missing, or with none named every missing track, checked afresh and
+/// in the list's order.
 fn chosen(state: &AppState, library: &Arc<Library>, tracks: Option<&[String]>) -> Vec<u32> {
     match tracks {
-        None => missing_rows(state, library, true).as_ref().clone(),
+        None => missing_rows(state, library, true, true).as_ref().clone(),
         Some(ids) => ids
             .iter()
             .filter_map(|id| library.row_of(id))
@@ -967,6 +1101,94 @@ mod tests {
         assert_eq!(titles, ["Gone", "Also gone"]);
         assert_eq!(listed[1].album, "Lost");
         assert_eq!(listed[1].path, also);
+    }
+
+    fn titles_of(library: &Library, rows: &[u32]) -> Vec<String> {
+        rows.iter().map(|&row| library.title.get(row as usize).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_heading_sorts_the_list_as_rekordboxs_list_sorter_does() {
+        use rbl_index::testing::{library_from, TestTrack};
+        let library = library_from(&[
+            TestTrack { id: 1, title: "b", artist: "Zed", album: "One", disc_no: 1, track_number: 2, path: "/m/c.mp3", ..TestTrack::default() },
+            TestTrack { id: 2, title: "B", artist: "Zed", album: "One", disc_no: 1, track_number: 1, path: "/m/B.mp3", ..TestTrack::default() },
+            TestTrack { id: 3, title: "a", artist: "ann", album: "Two", path: "/m/a.mp3", ..TestTrack::default() },
+            TestTrack { id: 4, title: "b", artist: "Zed", album: "One", disc_no: 0, track_number: 9, path: "/m/b.mp3", ..TestTrack::default() },
+            TestTrack { id: 5, title: "Ä", artist: "Ann", album: "", path: "/m/A.mp3", ..TestTrack::default() },
+        ]);
+        let rows: Vec<u32> = (0..5).collect();
+        // ICU's en_US order: accents and case only break ties, lower case
+        // first. The two "b" rows tie on every key: forwards they come out
+        // reversed (compareEnd answers -1), backwards in the order they had.
+        let forwards = sorted_rows(&library, &rows, MissingColumn::Title, true);
+        assert_eq!(titles_of(&library, &forwards), ["a", "Ä", "b", "b", "B"]);
+        assert_eq!(forwards[2..4], [3, 0]);
+        let backwards = sorted_rows(&library, &rows, MissingColumn::Title, false);
+        assert_eq!(titles_of(&library, &backwards), ["B", "b", "b", "Ä", "a"]);
+        assert_eq!(backwards[1..3], [0, 3]);
+        // Each sort starts from the list as it stands.
+        let again = sorted_rows(&library, &forwards, MissingColumn::Title, true);
+        assert_eq!(again[2..4], [0, 3]);
+
+        // artist, then album, then disc and track number, as numbers.
+        let by_artist = sorted_rows(&library, &rows, MissingColumn::Artist, true);
+        assert_eq!(by_artist, [2, 4, 3, 1, 0]);
+        // album, then disc and track number.
+        let by_album = sorted_rows(&library, &rows, MissingColumn::Album, true);
+        assert_eq!(by_album, [4, 3, 1, 0, 2]);
+        let by_path = sorted_rows(&library, &rows, MissingColumn::Location, true);
+        assert_eq!(by_path, [2, 4, 3, 1, 0]);
+    }
+
+    #[test]
+    fn album_forwards_then_backwards_leaves_rekordboxs_observed_tail() {
+        // [OBS rekordbox 7.2.14, chris-win11, issue #541,
+        // parity/issue-541/rekordbox-mfm-03-album-2.png] The list opened
+        // with these album-less tracks first, in this order; "album" clicked
+        // twice (forwards, then backwards) ended the list with them reversed.
+        use rbl_index::testing::{library_from, TestTrack};
+        let opened = ["It Feels So Good", "Castles In The Sky", "Castles In The Sky (Extended)", "Bring Me Back to Life",
+            "Around the World", "YES BITCH SAMBA", "Language (Same)", "174 to 128 - Switch"];
+        let mut tracks: Vec<TestTrack> = opened
+            .iter()
+            .enumerate()
+            .map(|(at, &title)| TestTrack { id: u64::try_from(at).unwrap() + 1, title, ..TestTrack::default() })
+            .collect();
+        tracks.insert(0, TestTrack { id: 100, title: "Go Back", album: "Go Back", ..TestTrack::default() });
+        tracks.insert(5, TestTrack { id: 101, title: "BATTERY OPERATED", album: "BATTERY OPERATED", ..TestTrack::default() });
+        let library = library_from(&tracks);
+        let rows: Vec<u32> = (0..u32::try_from(tracks.len()).unwrap()).collect();
+        let forwards = sorted_rows(&library, &rows, MissingColumn::Album, true);
+        let backwards = sorted_rows(&library, &forwards, MissingColumn::Album, false);
+        let tail: Vec<String> = titles_of(&library, &backwards).into_iter().skip(2).collect();
+        let reversed: Vec<&str> = opened.iter().rev().copied().collect();
+        assert_eq!(tail, reversed);
+        assert_eq!(titles_of(&library, &backwards)[..2], ["Go Back", "BATTERY OPERATED"]);
+    }
+
+    #[test]
+    fn a_rescan_after_a_change_keeps_the_sorted_order() {
+        use rbl_index::testing::{library_from, TestTrack};
+        let dir = tempfile::tempdir().unwrap();
+        let gone = |name: &str| -> &'static str {
+            Box::leak(dir.path().join(name).to_string_lossy().into_owned().into_boxed_str())
+        };
+        let before = Arc::new(library_from(&[
+            TestTrack { id: 10, title: "c", path: gone("c.mp3"), ..TestTrack::default() },
+            TestTrack { id: 11, title: "a", path: gone("a.mp3"), ..TestTrack::default() },
+            TestTrack { id: 12, title: "b", path: gone("b.mp3"), ..TestTrack::default() },
+        ]));
+        let last = MissingScan { library: Arc::clone(&before), rows: Arc::new(vec![1, 2, 0]) };
+        // Reloaded without "a", with a new missing track and rows renumbered.
+        let after = library_from(&[
+            TestTrack { id: 13, title: "new", path: gone("new.mp3"), ..TestTrack::default() },
+            TestTrack { id: 10, title: "c", path: gone("c.mp3"), ..TestTrack::default() },
+            TestTrack { id: 12, title: "b", path: gone("b.mp3"), ..TestTrack::default() },
+        ]);
+        let mut rows = scan(&after);
+        keep_order_of(&last, &after, &mut rows);
+        assert_eq!(titles_of(&after, &rows), ["b", "c", "new"]);
     }
 
     #[test]
