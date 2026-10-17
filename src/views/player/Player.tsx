@@ -2937,19 +2937,27 @@ export const Player = memo(function Player({
           /* Eight slots, always: an empty one is a slot you can fill, and
              hiding it makes the list read as a shorter track. A row rather
              than a button, as the memory list's are, because the ✕ inside a
-             set row is one: the row calls the cue, the ✕ clears it. */
+             set row is one: the row calls the cue, the ✕ clears it. An empty
+             row is the empty pad: rekordbox 7.2.19's
+             `djplay::HotCueComp::mouseDown` @0x100689788 posts the same
+             unshifted hot cue key press for a row whether or not its slot is
+             set (`isValid` @0x1006898e4 gates only the right-click colour
+             menu), so a click on an empty row sets that hot cue, as the pad
+             would (#532). With the library read-only it stays dead. */
           <div className={styles.cueList}>
             {PADS.map((letter) => {
               const cue = hot.at(letter);
               const movable = cue !== null && hot.canEdit && cue.id !== "";
+              const live = cue !== null || hot.canEdit;
               return (
                 <div
                   key={letter}
                   role="button"
-                  tabIndex={cue ? 0 : -1}
+                  tabIndex={live ? 0 : -1}
                   className={styles.cueRow}
                   aria-label={`Hot cue ${letter}`}
-                  aria-disabled={cue ? undefined : true}
+                  aria-disabled={live ? undefined : true}
+                  title={cue ? undefined : tip(hotCueEditReason ?? `Set Hot Cue ${letter}`)}
                   data-empty={cue ? undefined : ""}
                   data-dragging={dragSlot === letter ? "" : undefined}
                   data-drop={dragSlot !== null && dropSlot === letter && dragSlot !== letter ? "" : undefined}
@@ -2972,7 +2980,7 @@ export const Player = memo(function Player({
                     setDragSlot(null);
                     setDropSlot(null);
                   } : undefined}
-                  onClick={cue ? () => hot.press(letter) : undefined}
+                  onClick={live ? () => hot.press(letter) : undefined}
                   onContextMenu={cue ? (event) => {
                     event.preventDefault(); event.stopPropagation();
                     setCueColorMenu({x: event.clientX, y: event.clientY, cue});
