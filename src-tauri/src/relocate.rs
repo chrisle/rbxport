@@ -47,7 +47,7 @@ use rbl_index::Library;
 
 use crate::commands::{blocking, permanent_edit, reload, write_error, MAX_ROWS};
 use crate::dto::{MissingTrackDto, MissingTracksDto};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::commands::Touched;
 use crate::state::AppState;
 
@@ -192,13 +192,12 @@ pub enum MissingColumn {
 /// takes `icu::Collator::createInstance(Locale("en_US"))`: ICU's defaults,
 /// tertiary strength, no numeric ordering. English has no tailoring, so
 /// this is the CLDR root order.
-fn collator() -> icu_collator::CollatorBorrowed<'static> {
-    #[expect(clippy::expect_used, reason = "compiled data for a built-in locale cannot be missing")]
+fn collator() -> AppResult<icu_collator::CollatorBorrowed<'static>> {
     icu_collator::CollatorBorrowed::try_new(
         icu_locale_core::locale!("en-US").into(),
         icu_collator::options::CollatorOptions::default(),
     )
-    .expect("the en-US collator is compiled in")
+    .map_err(|error| AppError::internal(format!("the en-US collator for the Missing File Manager sort: {error}")))
 }
 
 /// `rows` sorted the way a click on `column`'s heading sorts rekordbox's
@@ -224,8 +223,8 @@ fn collator() -> icu_collator::CollatorBorrowed<'static> {
 /// as "the later is less" forwards, and libc++'s stable sort then reverses
 /// them; backwards they compare "not less" and keep their order. That is
 /// what this does, with each row's place as the last key.
-fn sorted_rows(library: &Library, rows: &[u32], column: MissingColumn, forwards: bool) -> Vec<u32> {
-    let collator = collator();
+fn sorted_rows(library: &Library, rows: &[u32], column: MissingColumn, forwards: bool) -> AppResult<Vec<u32>> {
+    let collator = collator()?;
     let text = |a: &str, b: &str| collator.compare(a, b);
     let disc = |row: u32| library.disc_no.get(row as usize).copied().unwrap_or(0);
     let track = |row: u32| library.track_number.get(row as usize).copied().unwrap_or(0);
@@ -248,7 +247,7 @@ fn sorted_rows(library: &Library, rows: &[u32], column: MissingColumn, forwards:
             keys(b, a).then(at_a.cmp(&at_b))
         }
     });
-    placed.into_iter().map(|(_, row)| row).collect()
+    Ok(placed.into_iter().map(|(_, row)| row).collect())
 }
 
 /// A click on a Missing File Manager column heading: the list, as it
@@ -263,7 +262,7 @@ pub async fn sort_missing_tracks(
     let state = Arc::clone(&state);
     blocking("sort_missing_tracks", move || {
         let rows = missing_rows(&state, &library, false, false);
-        let sorted = Arc::new(sorted_rows(&library, &rows, column, forwards));
+        let sorted = Arc::new(sorted_rows(&library, &rows, column, forwards)?);
         let mut held = state.missing_scan.lock();
         // Only over the list it sorted: a rescan in the meantime wins.
         if held.as_ref().is_some_and(|scan| Arc::ptr_eq(&scan.rows, &rows)) {
@@ -1121,23 +1120,23 @@ mod tests {
         // ICU's en_US order: accents and case only break ties, lower case
         // first. The two "b" rows tie on every key: forwards they come out
         // reversed (compareEnd answers -1), backwards in the order they had.
-        let forwards = sorted_rows(&library, &rows, MissingColumn::Title, true);
+        let forwards = sorted_rows(&library, &rows, MissingColumn::Title, true).unwrap();
         assert_eq!(titles_of(&library, &forwards), ["a", "Ä", "b", "b", "B"]);
         assert_eq!(forwards[2..4], [3, 0]);
-        let backwards = sorted_rows(&library, &rows, MissingColumn::Title, false);
+        let backwards = sorted_rows(&library, &rows, MissingColumn::Title, false).unwrap();
         assert_eq!(titles_of(&library, &backwards), ["B", "b", "b", "Ä", "a"]);
         assert_eq!(backwards[1..3], [0, 3]);
         // Each sort starts from the list as it stands.
-        let again = sorted_rows(&library, &forwards, MissingColumn::Title, true);
+        let again = sorted_rows(&library, &forwards, MissingColumn::Title, true).unwrap();
         assert_eq!(again[2..4], [0, 3]);
 
         // artist, then album, then disc and track number, as numbers.
-        let by_artist = sorted_rows(&library, &rows, MissingColumn::Artist, true);
+        let by_artist = sorted_rows(&library, &rows, MissingColumn::Artist, true).unwrap();
         assert_eq!(by_artist, [2, 4, 3, 1, 0]);
         // album, then disc and track number.
-        let by_album = sorted_rows(&library, &rows, MissingColumn::Album, true);
+        let by_album = sorted_rows(&library, &rows, MissingColumn::Album, true).unwrap();
         assert_eq!(by_album, [4, 3, 1, 0, 2]);
-        let by_path = sorted_rows(&library, &rows, MissingColumn::Location, true);
+        let by_path = sorted_rows(&library, &rows, MissingColumn::Location, true).unwrap();
         assert_eq!(by_path, [2, 4, 3, 1, 0]);
     }
 
@@ -1159,8 +1158,8 @@ mod tests {
         tracks.insert(5, TestTrack { id: 101, title: "BATTERY OPERATED", album: "BATTERY OPERATED", ..TestTrack::default() });
         let library = library_from(&tracks);
         let rows: Vec<u32> = (0..u32::try_from(tracks.len()).unwrap()).collect();
-        let forwards = sorted_rows(&library, &rows, MissingColumn::Album, true);
-        let backwards = sorted_rows(&library, &forwards, MissingColumn::Album, false);
+        let forwards = sorted_rows(&library, &rows, MissingColumn::Album, true).unwrap();
+        let backwards = sorted_rows(&library, &forwards, MissingColumn::Album, false).unwrap();
         let tail: Vec<String> = titles_of(&library, &backwards).into_iter().skip(2).collect();
         let reversed: Vec<&str> = opened.iter().rev().copied().collect();
         assert_eq!(tail, reversed);
