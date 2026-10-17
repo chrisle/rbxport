@@ -20,6 +20,7 @@ describe("sanitiseSession", () => {
       treeExpansion: { collapsed: ["folder-1"], expanded: ["dir:0:/Music"] },
       sort: { column: "bpm", descending: true },
       infoOpen: true,
+      myTagOpen: false,
       subOpen: false,
       filterOpen: true,
       tree: [{ id: "pl-7", name: "Set", kind: "playlist", depth: 1 }],

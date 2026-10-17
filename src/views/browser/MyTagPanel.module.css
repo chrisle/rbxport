@@ -1,0 +1,120 @@
+/* rekordbox's My Tag configuration window. Every measure is a --*-mytag-*
+   token, from the rig capture and BrowseMyTagView's own layout code. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* The window's own 1px black edge, then its rows. */
+  padding-left: 1px;
+  background: var(--c-black);
+  font-family: var(--f-ui);
+  font-size: var(--f-size-info);
+  user-select: none;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.heading,
+.tag {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: var(--s-mytag-row-h);
+  white-space: nowrap;
+}
+
+.heading {
+  padding-left: var(--s-mytag-heading-x);
+  background: var(--c-mytag-heading);
+  color: var(--c-mytag-heading-text);
+}
+
+.tag {
+  padding-left: var(--s-mytag-name-x);
+  color: var(--c-mytag-text-off);
+}
+.panel[data-enabled] .tag {
+  color: var(--c-mytag-text);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Clear of the add button, which sits over the row's right end. */
+  padding-right: calc(var(--s-mytag-add-right) + 4px);
+}
+
+.edit {
+  width: calc(100% - var(--s-mytag-add-right) - 4px);
+  height: calc(var(--s-mytag-row-h) - 2px);
+  padding: 0 1px;
+  border: 1px solid var(--c-accent);
+  background: var(--c-black);
+  color: var(--c-mytag-text);
+  font: inherit;
+  outline: none;
+}
+
+.check {
+  position: absolute;
+  left: var(--s-mytag-check-x);
+  top: calc((var(--s-mytag-row-h) - var(--s-mytag-check)) / 2);
+  width: var(--s-mytag-check);
+  height: var(--s-mytag-check);
+  padding: 0;
+  border: 0;
+  /* The face's anti-aliased edge: one pixel at an eighth of its colour. */
+  box-shadow: 0 0 0 1px rgb(40 40 40 / 12.5%);
+  background: var(--c-mytag-check);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.check:disabled {
+  background: var(--c-mytag-check-off);
+}
+.check[data-checked] {
+  background: var(--c-filter-accent);
+  box-shadow: none;
+}
+.tick {
+  width: 9px;
+  height: 6px;
+  color: var(--c-filter-text);
+}
+
+.add {
+  position: absolute;
+  /* The glyph itself: rekordbox draws the 11px svg 2px in and 1px down in
+     its 14px button, which puts it 5px under the row's top and its right
+     edge 20px from the window's [OBS rig x 1856..1866, y +5..+15]. */
+  right: var(--s-mytag-add-right);
+  top: 5px;
+  width: var(--s-mytag-add);
+  height: var(--s-mytag-add);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-mytag-add);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+/* Greyed at fifty tags, as rekordbox fades the svg to 30%. */
+.add:disabled {
+  opacity: 0.3;
+}
+.addIcon {
+  width: var(--s-mytag-add);
+  height: var(--s-mytag-add);
+}
+.addPlus {
+  fill: var(--c-mytag-heading);
+}

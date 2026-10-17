@@ -42,6 +42,8 @@ export interface Session {
   treeExpansion: TreeExpansion;
   sort: SortState;
   infoOpen: boolean;
+  /** The My Tag window, which shares the information window's place. */
+  myTagOpen: boolean;
   subOpen: boolean;
   /** Whether the track filter bar was showing. Its picks are not kept: a
    * library that opens already narrowed reads as a broken one. */
@@ -101,6 +103,7 @@ export const DEFAULT_SESSION: Session = {
   treeExpansion: { collapsed: [], expanded: [] },
   sort: DEFAULT_SORT,
   infoOpen: false,
+  myTagOpen: false,
   subOpen: false,
   filterOpen: false,
   tree: [],
@@ -188,6 +191,8 @@ export function sanitiseSession(value: unknown): Session {
     treeExpansion: treeExpansionOrDefault(raw.treeExpansion),
     sort: sortOrDefault(raw.sort),
     infoOpen: raw.infoOpen === true,
+    // One of the two at most: they share a place.
+    myTagOpen: raw.myTagOpen === true && raw.infoOpen !== true,
     subOpen: raw.subOpen === true,
     filterOpen: raw.filterOpen === true,
     tree: records<TreeNode>(raw.tree, SEEDED_NODES),

@@ -264,6 +264,13 @@ export const MagnifierPlusIcon = (props: IconProps) => (
   </svg>
 );
 
+/** rekordbox's `skins/mytag_off.svg` glyph, the tag of the My Tag box. */
+export const MyTagIcon = (props: IconProps) => (
+  <svg viewBox="0 0 18 18" aria-hidden focusable="false" {...props}>
+    <path fillRule="evenodd" d="M13.6 4.4 8.7 4 2 10.7 7.4 16l6.7-6.7zM11 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" fill="currentColor"/>
+  </svg>
+);
+
 export const NoteIcon = (props: IconProps) => (
   <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
     <path d="M9 0v8.2a2.3 2.3 0 1 1-1.4-2.1V2.2L4 3.2v6.2a2.3 2.3 0 1 1-1.4-2.1V1.6z" fill="currentColor"/>

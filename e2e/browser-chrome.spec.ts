@@ -45,15 +45,16 @@ test.beforeEach(async ({ page }) => {
 
 const rail = (page: Page) => page.getByRole("toolbar", { name: "Browser panels" });
 
-test("the icon column holds Information and Sub-Browser only, centred in the measured width", async ({ page }) => {
+test("the icon column holds My Tag, Information and Sub-Browser only, centred in the measured width", async ({ page }) => {
   const buttons = rail(page).getByRole("button");
-  await expect(buttons).toHaveCount(2);
-  await expect(buttons.nth(0)).toHaveAccessibleName("Information");
-  await expect(buttons.nth(1)).toHaveAccessibleName("Sub-Browser Window");
+  await expect(buttons).toHaveCount(3);
+  await expect(buttons.nth(0)).toHaveAccessibleName("My Tag");
+  await expect(buttons.nth(1)).toHaveAccessibleName("Information");
+  await expect(buttons.nth(2)).toHaveAccessibleName("Sub-Browser Window");
 
   const column = await rail(page).boundingBox();
-  const info = await buttons.nth(0).boundingBox();
-  const sub = await buttons.nth(1).boundingBox();
+  const info = await buttons.nth(1).boundingBox();
+  const sub = await buttons.nth(2).boundingBox();
   const width = await token(page, "--s-right-rail-w");
   const box = await token(page, "--s-right-rail-button");
   const inset = await token(page, "--s-right-rail-inset");
@@ -67,14 +68,15 @@ test("the icon column holds Information and Sub-Browser only, centred in the mea
   expect((sub?.y ?? 0) - (info?.y ?? 0)).toBeCloseTo(await token(page, "--s-right-rail-pitch"), 0);
 });
 
-test("Information and Sub-Browser sit centred as a group, not pinned where rekordbox draws them", async ({ page }) => {
-  // 2026-09-20: rekordbox pins these under three boxes this app leaves out
+test("My Tag, Information and Sub-Browser sit centred as a group, not pinned where rekordbox draws them", async ({ page }) => {
+  // 2026-09-20: rekordbox pins these around two boxes this app leaves out
   // (TODO.md, "Deliberate divergences"), which read as a gap rather than a
-  // reason without them there — so the remaining two are centred instead.
+  // reason without them there — so the remaining ones are centred instead.
+  // My Tag came back with its window (#539).
   const column = await rail(page).boundingBox();
-  const info = await rail(page).getByRole("button", { name: "Information" }).boundingBox();
+  const myTag = await rail(page).getByRole("button", { name: "My Tag" }).boundingBox();
   const sub = await rail(page).getByRole("button", { name: "Sub-Browser Window" }).boundingBox();
-  const groupTop = info?.y ?? 0;
+  const groupTop = myTag?.y ?? 0;
   const groupBottom = (sub?.y ?? 0) + (sub?.height ?? 0);
   const groupMid = (groupTop + groupBottom) / 2;
   const columnMid = (column?.y ?? 0) + (column?.height ?? 0) / 2;
