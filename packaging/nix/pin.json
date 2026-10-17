@@ -1,4 +1,10 @@
 {
   "version": "1.9.0",
-  "hash": "sha256-bLtkKIwaIFg3bcpwMlMI3Zc/7j00tY8ggYi5YQ1Di6M="
+  "hash": "sha256-bLtkKIwaIFg3bcpwMlMI3Zc/7j00tY8ggYi5YQ1Di6M=",
+  "source": {
+    "pnpmDepsHash": "sha256-D9yTAZ/D4+oZfRtPhk9NvNFweU1o7qe6z7HJkNjmP2w=",
+    "cargoOutputHashes": {
+      "alphatheta-connect-0.25.3": "sha256-Rwgo3c1eoqF5d4X/gsR5/0zSB0NicbIRuZMKf8meA+g="
+    }
+  }
 }
