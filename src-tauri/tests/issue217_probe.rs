@@ -8,6 +8,7 @@ use rbxport_lib::{commands, state::AppState};
 use tauri::Manager;
 
 #[test]
+#[ignore = "manual probe; needs ISSUE217_OUT"]
 fn export_issue217_controlled_mp3_fixtures() {
     let root = PathBuf::from(std::env::var("ISSUE217_OUT").expect("ISSUE217_OUT"));
     let library_dir = root.join("fixture-library");
