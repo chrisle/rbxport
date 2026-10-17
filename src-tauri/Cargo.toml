@@ -55,6 +55,10 @@ minisign-verify = "0.2"
 uuid = { version = "1", features = ["v4"] }
 # Matching a dropped `File.name` to its pasteboard path (file_drop.rs).
 unicode-normalization = "0.1"
+# The Missing File Manager's column sort: rekordbox compares with an ICU
+# collator for en_US (`ListSorter::setLocale`), which this is.
+icu_collator = "2"
+icu_locale_core = "2"
 semver = "1"
 time = { version = "0.3", features = ["formatting"] }
 # Error and panic reporting only.  Keep optional telemetry features off.
