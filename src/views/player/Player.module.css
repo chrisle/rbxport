@@ -695,9 +695,12 @@
 }
 .hotCue { z-index: 3; }
 
-/* In the overview a memory cue is a small red head at its position, widest at
+/* In the overview a memory cue is a small head at its position, widest at
    the top and tapering to a point, and no line at all: measured beside each
-   hot cue badge, with the waveform under it unbroken. */
+   hot cue badge, with the waveform under it unbroken. Both heads take the
+   cue's own colour, set on the marker as --cue-colour, and red without one:
+   rekordbox picks the row of its memoryCueImageDown sprite by djmdCue.Color
+   (memoryCueColours.ts). */
 .cueHead {
   position: absolute;
   top: 0;
@@ -705,7 +708,7 @@
   translate: -50% 0;
   width: var(--s-cue-head-w);
   height: var(--s-cue-head-h);
-  background: var(--c-cue-head);
+  background: var(--cue-colour, var(--c-cue-head));
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
@@ -721,7 +724,7 @@
   translate: -50% 0;
   width: var(--s-cue-marker-w);
   height: var(--s-cue-marker-h);
-  background: var(--c-cue-head);
+  background: var(--cue-colour, var(--c-cue-head));
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
