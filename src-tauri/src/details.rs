@@ -331,9 +331,10 @@ pub async fn create_my_tag<R: tauri::Runtime>(
 ) -> AppResult<NewMyTagDto> {
     let made = Arc::new(parking_lot::Mutex::new(None::<rbl_db::write::NewMyTag>));
     let slot = Arc::clone(&made);
-    // A new tag is on no track yet, so only the tree's cheap re-read is
-    // needed for the window to hear of it and ask for the lists again.
-    edit(app, state, "create_my_tag", Touched::Playlists, move |w| {
+    // A new tag is on no track yet, but the index's tag list (which the
+    // Track Filter's tag columns read) is loaded with the tracks, so they
+    // are read again; the user may keep "My Comment" without renaming it.
+    edit(app, state, "create_my_tag", Touched::Tracks, move |w| {
         *slot.lock() = Some(w.create_my_tag(&category)?);
         Ok(())
     })
