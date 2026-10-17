@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { Backend, ListTotals, RowCue, RowDto, ViewSpec } from "@/ipc/types";
 import { rowCuesOf } from "@/lib/cues";
+import { rowMemoryCueColours } from "@/lib/memoryCueColours";
 import { RowCache, PAGE_SIZE, type CacheToken } from "@/lib/rowCache";
 import { planFetches } from "@/lib/virtual";
 
@@ -224,12 +225,19 @@ export function useTrackView(
         void backend.trackCues(trackId).then((cues) => {
           if (!live) return;
           const hotCues = rowCuesOf(cues);
-          const memoryCues = cues.filter(cue => cue.memory).map(cue => cue.positionMs);
+          const memory = cues.filter(cue => cue.memory);
+          const memoryCues = memory.map(cue => cue.positionMs);
+          // A memory cue recoloured is a row to repaint too (#533).
+          const memoryCueColours = rowMemoryCueColours(memory.map(cue => cue.colour));
           const changed = cache.current.patch(
             (row) => row.id === trackId && (!sameRowCues(row.hotCues, hotCues)
               || (row.memoryCues?.length ?? 0) !== memoryCues.length
-              || memoryCues.some((position, i) => row.memoryCues?.[i] !== position)),
-            (row) => ({ ...row, hotCues, memoryCues }),
+              || memoryCues.some((position, i) => row.memoryCues?.[i] !== position)
+              || (row.memoryCueColours ?? []).join() !== (memoryCueColours ?? []).join()),
+            (row) => {
+              const { memoryCueColours: _old, ...rest } = row;
+              return memoryCueColours ? { ...rest, hotCues, memoryCues, memoryCueColours } : { ...rest, hotCues, memoryCues };
+            },
           );
           if (changed) setPagesLoaded((n) => n + 1);
         }).catch(() => {

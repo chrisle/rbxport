@@ -969,7 +969,7 @@ mod tests {
 
     #[test]
     fn a_memory_cue_near_the_first_beat_counts_and_hot_cues_do_not() {
-        let cue = |kind: u8, position_ms: u32, out_ms: u32| rbl_index::Cue { id: 1, position_ms, out_ms, kind, colour: 0 };
+        let cue = |kind: u8, position_ms: u32, out_ms: u32| rbl_index::Cue { id: 1, position_ms, out_ms, kind, colour: 0, memory_colour: None };
         assert!(needs_first_beat_cue(&[], 120));
         assert!(!needs_first_beat_cue(&[cue(0, 120, 0)], 120));
         assert!(!needs_first_beat_cue(&[cue(0, 125, 0)], 120), "within the tolerance");

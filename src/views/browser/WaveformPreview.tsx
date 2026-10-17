@@ -133,6 +133,8 @@ export interface WaveformPreviewProps {
    */
   hotCues: readonly RowCue[];
   memoryCues?: readonly number[] | undefined;
+  /** Each memory cue's `djmdCue.Color`, in `memoryCues` order; 255 for none. */
+  memoryCueColours?: readonly number[] | undefined;
   durationSec: number;
   /** Separates cold-start placeholder media from the live library rendering. */
   startupCache?: boolean;
@@ -144,6 +146,7 @@ export const WaveformPreview = memo(function WaveformPreview({
   height,
   hotCues,
   memoryCues,
+  memoryCueColours,
   durationSec,
   startupCache = false,
 }: WaveformPreviewProps) {
@@ -168,7 +171,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       // default, as rekordbox's row preview does.
       const badges = hotCues.map(([letter, at, colour, loop]) =>
         [letter, at, hotCueColour(colour, letter, loop === true, hotCueColor)] as const);
-      drawPreviewMemoryCues(ctx, memoryCues ?? [], durationSec * 1000, canvas.width, dpr);
+      drawPreviewMemoryCues(ctx, memoryCues ?? [], durationSec * 1000, canvas.width, dpr, memoryCueColours);
       drawPreviewCues(ctx, badges, durationSec * 1000, canvas.width, dpr);
     };
 
@@ -190,7 +193,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [trackId, width, height, hotCues, memoryCues, durationSec, palette, hotCueColor, startupCache]);
+  }, [trackId, width, height, hotCues, memoryCues, memoryCueColours, durationSec, palette, hotCueColor, startupCache]);
 
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   return (

@@ -8,6 +8,7 @@
 
 /** A rendered preview, cached as a bitmap so scrolling is a `drawImage`. */
 import theme from "@/styles/theme";
+import { memoryCueListColour, memoryCueMarkerColour } from "@/lib/memoryCueColours";
 
 export interface RenderedWaveform {
   bitmap: ImageBitmap | HTMLCanvasElement;
@@ -709,16 +710,22 @@ export function previewClickMs(
   return fraction * durationMs;
 }
 
-/** Memory cues use centered red downward triangles, below hot-cue badges. */
+/**
+ * Memory cues use centered downward triangles, below hot-cue badges, each in
+ * its own colour (`colours`, `djmdCue.Color` in `positions` order) and red
+ * without one, as `BrowseHelper::getCueImageForPreview` draws them.
+ */
 export function drawPreviewMemoryCues(
   ctx: CanvasRenderingContext2D, positions: readonly number[], durationMs: number, width: number, dpr: number,
+  colours: readonly number[] = [],
 ): void {
   if (durationMs <= 0 || width <= 0 || positions.length === 0) return;
   const half = 3 * dpr;
   const height = 4 * dpr;
-  ctx.fillStyle = theme.color.cueHead.value;
-  for (const position of positions) {
+  for (const [index, position] of positions.entries()) {
     if (position < 0 || position > durationMs || !Number.isFinite(position)) continue;
+    const own = memoryCueListColour(colours[index]);
+    ctx.fillStyle = own ? memoryCueMarkerColour(own) : theme.color.cueHead.value;
     const x = Math.round(position / durationMs * width);
     ctx.beginPath();
     ctx.moveTo(x - half, 0);

@@ -257,6 +257,34 @@ test("memory loops and the Active Loop are listed with rekordbox's loop mark and
   await expect(overview.locator('[class*="loopBand"]')).toHaveCount(2);
 });
 
+test("a memory cue's marker on the waveform takes its colour, and red without one (#533)", async ({ page }) => {
+  // rekordbox picks a memory cue's marker from its memoryCueImageDown sprite
+  // by djmdCue.Color, and the red row for none (WidgetLoudView::drawTextures).
+  await load(page, "?writable=1");
+  const head = page.getByTestId("player-overview").locator('[data-cue=""] i');
+  await expect(head).toHaveCount(1);
+  await expect(head).toHaveCSS("background-color", "rgb(234, 51, 35)");
+
+  const row = page.getByRole("complementary", { name: "Cue list" }).locator('[class*="cueRow"]').first();
+  await row.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Memory cue color" });
+  await menu.getByRole("menuitem", { name: "Blue" }).click();
+  await expect(head).toHaveCSS("background-color", "rgb(32, 79, 239)");
+  // The row's preview draws it in the same colour
+  // (BrowseHelper::getCueImageForPreview).
+  const canvas = page.locator('[role="gridcell"][data-col="preview"]').nth(3).locator("canvas");
+  const previewPixel = () => canvas.evaluate((c: HTMLCanvasElement) => {
+    const pixel = c.getContext("2d")?.getImageData(Math.round(c.width * 0.02), 1, 1, 1).data;
+    return pixel ? Array.from(pixel).slice(0, 3) : [];
+  });
+  await expect.poll(previewPixel).toEqual([32, 79, 239]);
+
+  await row.click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "No Color" }).click();
+  await expect(head).toHaveCSS("background-color", "rgb(234, 51, 35)");
+  await expect.poll(previewPixel).toEqual([234, 51, 35]);
+});
+
 test("MEMORY during an Auto Beat Loop saves the loop, which a reload keeps and a call plays", async ({ page }) => {
   // #411: rekordbox 7.2.18 manual p.163, "To save the loop": during loop play,
   // MEMORY saves the loop point. rekordbox 7.2.19 UiPlayer::eventMemoryCue

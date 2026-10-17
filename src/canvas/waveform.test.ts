@@ -450,6 +450,19 @@ describe("preview memory cues", () => {
     expect(points).toEqual([[44,0],[56,0],[50,8]]);
     expect(fills).toBe(1);
   });
+
+  it("draws each in its own colour, and red for none (#533)", () => {
+    const styles: string[] = [];
+    const ctx = {
+      set fillStyle(value: string) { styles.push(value); }, get fillStyle() { return styles.at(-1) ?? ""; },
+      beginPath() {}, closePath() {}, moveTo() {}, lineTo() {},
+      fill() {},
+    };
+    // Blue, none, Red, Pink, and a position with no colour sent at all.
+    drawPreviewMemoryCues(ctx as unknown as CanvasRenderingContext2D, [100, 200, 300, 400, 500], 1000, 200, 1,
+      [6, 255, 1, 0]);
+    expect(styles).toEqual(["#204FEF", "#EA3323", "#EA3323", "#E778F1", "#EA3323"]);
+  });
 });
 
 describe("a click on a row preview", () => {

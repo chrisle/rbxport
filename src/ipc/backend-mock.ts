@@ -11,6 +11,7 @@
  */
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
 import theme from "@/styles/theme";
+import { rowMemoryCueColours } from "@/lib/memoryCueColours";
 
 import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
@@ -1537,7 +1538,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const syncRow = (trackId: string) => {
     const row = all[Number.parseInt(trackId, 10) - 100000];
     if (!row) return;
-    row.memoryCues = cuesOf(trackId).filter(cue => cue.memory).map(cue => cue.positionMs);
+    const memory = cuesOf(trackId).filter(cue => cue.memory);
+    row.memoryCues = memory.map(cue => cue.positionMs);
+    // As the backend: each memory cue's `Color`, 255 for none, and nothing
+    // when none has one.
+    const colours = rowMemoryCueColours(memory.map((cue) => cue.colour));
+    if (colours) row.memoryCueColours = colours;
+    else delete row.memoryCueColours;
     row.hotCues = cuesOf(trackId)
       .filter((cue) => !cue.memory)
       .sort((a, b) => a.letter.localeCompare(b.letter))

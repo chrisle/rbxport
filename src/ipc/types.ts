@@ -34,6 +34,11 @@ export interface RowDto {
   hotCues: RowCue[];
   /** Memory-cue and memory-loop start positions, in milliseconds. */
   memoryCues?: number[];
+  /**
+   * Each memory cue's own colour, in `memoryCues` order: `djmdCue.Color` 0-7,
+   * 255 for none. Absent when none has one.
+   */
+  memoryCueColours?: number[];
   artworkHue: number;
   /** Whether the backend can serve artwork for this track. */
   hasArtwork: boolean;

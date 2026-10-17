@@ -287,7 +287,9 @@ pub fn cue_comments(
 }
 
 /// The `Color` value of each live memory cue. Rekordbox stores 0..7 for the
-/// named palette and 255 for no colour. Kind 4, the memory loop set as the
+/// named palette and 255 or -1 for no colour (rekordbox 7.2.14 writes -1 on a
+/// memory cue it creates [OBS chris-win11 test library, issue #533]); both
+/// read as 255 here. Kind 4, the memory loop set as the
 /// Active Loop, is a memory cue too.
 pub fn memory_cue_colours(
     conn: &Connection,

@@ -821,6 +821,22 @@ fn hot_cues_in_slot_order(library: &Library, row: rbl_index::Row) -> Vec<RowCueD
     hot.into_iter().map(|(_, dto)| dto).collect()
 }
 
+/// A row's memory cue colours for its preview, in `memory_cues` order: each
+/// `djmdCue.Color`, 255 for none, and nothing at all when none has one.
+///
+/// [OBS] static, rekordbox 7.2.19: `BrowseHelper::getCueImageForPreview`
+/// @`0x101fc96c4` draws a memory cue on a row's preview with the image for
+/// its `Color` (`skins/p2254_mempink.png` … `p2261_mempurple.png`), and the
+/// red one for none; seen on chris-win11 (issue #533).
+fn memory_cue_colours(library: &Library, row: rbl_index::Row) -> Vec<u8> {
+    let cues = library.cues_of(row);
+    let memory = cues.iter().filter(|cue| cue.is_memory());
+    if memory.clone().all(|cue| cue.memory_colour.is_none()) {
+        return Vec::new();
+    }
+    memory.map(|cue| cue.memory_colour.unwrap_or(u8::MAX)).collect()
+}
+
 /// Builds the wire rows for a window. `position` is the row's 1-based place in
 /// the view, which is what the `#` column shows.
 pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: usize) -> Vec<RowDto> {
@@ -846,6 +862,7 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
                 release_date: library.release_date.get(index).to_owned(),
                 hot_cues: hot_cues_in_slot_order(library, row),
                 memory_cues: library.cues_of(row).iter().filter(|cue| cue.is_memory()).map(|cue| cue.position_ms).collect(),
+                memory_cue_colours: memory_cue_colours(library, row),
                 // Stable per track so the placeholder tint does not flicker on scroll.
                 has_artwork: !library.artwork_path.get(index).is_empty(),
                 artwork_hue: u16::try_from(
@@ -873,6 +890,26 @@ mod tests {
         Cue { position_ms, kind, colour, ..Cue::default() }
     }
 
+    /// rekordbox draws a row's memory cues in their own colours, red for
+    /// none (`BrowseHelper::getCueImageForPreview`, issue #533); the row
+    /// carries `djmdCue.Color` beside each position, 255 for none.
+    #[test]
+    fn a_row_carries_its_memory_cue_colours_when_any_has_one() {
+        let library = library_from(&[TestTrack {
+            id: 7,
+            cues: vec![
+                Cue { memory_colour: Some(6), ..cue(0, 25_804, 0) },
+                cue(1, 30_000, 21),
+                Cue { memory_colour: None, ..cue(0, 60_023, 0) },
+                Cue { memory_colour: Some(0), out_ms: 99_000, ..cue(4, 93_773, 0) },
+            ],
+            ..TestTrack::default()
+        }]);
+        let json = serde_json::to_value(&rows_to_dto(&library, &[0], 0)[0]).unwrap();
+        assert_eq!(json["memoryCues"], serde_json::json!([25_804, 60_023, 93_773]));
+        assert_eq!(json["memoryCueColours"], serde_json::json!([6, 255, 0]));
+    }
+
     #[test]
     fn a_row_carries_hot_badges_and_memory_positions_separately() {
         let library = library_from(&[TestTrack {
@@ -888,6 +925,8 @@ mod tests {
         let rows = rows_to_dto(&library, &[0], 0);
         let json = serde_json::to_value(&rows[0]).unwrap();
         assert_eq!(json["memoryCues"], serde_json::json!([46, 1000]));
+        // No memory cue has a colour of its own, so the row says nothing.
+        assert!(json.get("memoryCueColours").is_none());
         // In slot order, letters from `Kind` and rekordbox's resolved colour;
         // a hot cue with no colour carries none, so the frontend draws its
         // slot's HOT CUE color default rather than the palette's black at
