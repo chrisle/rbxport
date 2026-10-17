@@ -24,16 +24,16 @@ fn sample() -> Vec<TestTrack> {
         TestTrack {
             id: 1, title: "Zebra", artist: "ARTBAT", bpm_x100: 12800, rating: 4, comment: "hi",
             cues: vec![
-                Cue { id: 12, position_ms: 165_046, out_ms: 0, kind: 2, colour: 21 },
-                Cue { id: 11, position_ms: 46, out_ms: 0, kind: 1, colour: 46 },
-                Cue { id: 10, position_ms: 46, out_ms: 8_046, kind: 0, colour: 0 },
+                Cue { id: 12, position_ms: 165_046, out_ms: 0, kind: 2, colour: 21, memory_colour: None },
+                Cue { id: 11, position_ms: 46, out_ms: 0, kind: 1, colour: 46, memory_colour: None },
+                Cue { id: 10, position_ms: 46, out_ms: 8_046, kind: 0, colour: 0, memory_colour: Some(6) },
             ],
             ..TestTrack::default()
         },
         TestTrack { id: 2, title: "apple", artist: "Meduza", bpm_x100: 13000, ..TestTrack::default() },
         TestTrack {
             id: 3, title: "Ébano", artist: "Tujamo", bpm_x100: 12400, rating: 2,
-            cues: vec![Cue { id: 30, position_ms: 24, out_ms: 0, kind: 6, colour: 18 }],
+            cues: vec![Cue { id: 30, position_ms: 24, out_ms: 0, kind: 6, colour: 18, memory_colour: None }],
             ..TestTrack::default()
         },
     ]
@@ -89,9 +89,9 @@ fn a_snapshot_keeps_every_track_s_cues_with_their_colours() {
     assert_eq!(
         restored.cues_of(0),
         &[
-            Cue { id: 10, position_ms: 46, out_ms: 8_046, kind: 0, colour: 0 },
-            Cue { id: 11, position_ms: 46, out_ms: 0, kind: 1, colour: 46 },
-            Cue { id: 12, position_ms: 165_046, out_ms: 0, kind: 2, colour: 21 },
+            Cue { id: 10, position_ms: 46, out_ms: 8_046, kind: 0, colour: 0, memory_colour: Some(6) },
+            Cue { id: 11, position_ms: 46, out_ms: 0, kind: 1, colour: 46, memory_colour: None },
+            Cue { id: 12, position_ms: 165_046, out_ms: 0, kind: 2, colour: 21, memory_colour: None },
         ]
     );
     assert!(restored.cues_of(1).is_empty());

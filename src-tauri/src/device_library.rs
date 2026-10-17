@@ -865,6 +865,7 @@ fn row_dto(row: &DeviceRow) -> RowDto {
         release_date: String::new(),
         hot_cues: Vec::new(),
         memory_cues: Vec::new(),
+        memory_cue_colours: Vec::new(),
         artwork_hue: 0,
         has_artwork: row.has_artwork,
         file_name: row.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),

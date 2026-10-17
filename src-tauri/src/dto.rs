@@ -33,6 +33,11 @@ pub struct RowDto {
     pub hot_cues: Vec<RowCueDto>,
     /// Saved memory-cue positions in milliseconds, including memory-loop starts.
     pub memory_cues: Vec<u32>,
+    /// Each memory cue's own colour, in `memory_cues` order: `djmdCue.Color`
+    /// 0 to 7, or 255 for none. Left out when none has a colour, which is
+    /// nearly every row, so a page costs nothing it did not before.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub memory_cue_colours: Vec<u8>,
     /// Deterministic tint, drawn when a track has no artwork — a little under
     /// half the reference library.
     pub artwork_hue: u16,

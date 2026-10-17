@@ -704,6 +704,7 @@ const TrackRow = memo(function TrackRow({
                   height={PREVIEW_BAND_H}
                   hotCues={previewCues ? row.hotCues : NO_CUES}
                   memoryCues={previewCues ? row.memoryCues : undefined}
+                  memoryCueColours={previewCues ? row.memoryCueColours : undefined}
                   durationSec={row.durationSec}
                   startupCache={startupCache}
                 />

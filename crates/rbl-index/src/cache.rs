@@ -57,7 +57,9 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// is gone, and stores each such track's path columns so a start served from
 /// the snapshot looks for the file again (issue #340): format 14 kept the
 /// gone `OrgFolderPath`, and nothing in the snapshot could tell it had gone.
-pub const FORMAT: u32 = 15;
+/// 16 stores each memory cue's own colour (`djmdCue.Color`), which the
+/// browser's row preview draws (issue #533).
+pub const FORMAT: u32 = 16;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -295,6 +297,9 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
     for cue in cues {
         w.0.push(cue.colour);
     }
+    for cue in cues {
+        w.0.push(cue.memory_colour.unwrap_or(u8::MAX));
+    }
     w.u32s(index);
     drop(table);
     // Format 9 stores derived columns so a warm launch does not sort the
@@ -515,6 +520,9 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     }
     for cue in &mut cues {
         cue.colour = *r.take(1)?.first()?;
+    }
+    for cue in &mut cues {
+        cue.memory_colour = r.take(1)?.first().copied().filter(|value| *value <= 7);
     }
     let cue_index = r.u32s()?;
 

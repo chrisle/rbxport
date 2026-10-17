@@ -285,6 +285,11 @@ pub struct Cue {
     /// paints is the complete `rbl_anlz::cue_colour_drawn` desktop palette;
     /// this field stores the raw number so export retains the device colour.
     pub colour: u8,
+    /// A memory cue's own colour, `djmdCue.Color` 0 to 7 (Pink, Red, Orange,
+    /// Yellow, Green, Aqua, Blue, Purple), or `None`: rekordbox 7.2.14 writes
+    /// -1 on a memory cue it creates and older rows carry 255 [OBS chris-win11
+    /// test library, issue #533], and a hot cue's colour is [`Cue::colour`].
+    pub memory_colour: Option<u8>,
 }
 
 /// Every cue, grouped by track and ordered by position within each.

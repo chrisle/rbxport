@@ -3020,7 +3020,9 @@ pub async fn preview_state(
 /// A hot cue's colour is what rekordbox paints for its `ColorTableIndex`,
 /// from the complete `rbl_anlz::DRAWN_CUE_COLOURS` table extracted from
 /// rekordbox. An invalid index is reported without a colour. A memory cue
-/// never carries one.
+/// carries its MEMORY list colour for `djmdCue.Color` 0-7, and none for
+/// anything else; the frontend draws its waveform marker from it
+/// (`memoryCueColours.ts`).
 #[tauri::command]
 pub async fn track_cues(
     state: State<'_, Arc<AppState>>,

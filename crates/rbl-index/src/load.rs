@@ -434,7 +434,7 @@ fn read_cues(
     // A plain cue scan also decrypts cues for hundreds of thousands of deleted
     // tracks. CROSS JOIN keeps SQLite from reversing this join order.
     let mut stmt = conn.prepare(
-        "SELECT q.ContentID, q.ID, q.Kind, q.InMsec, q.OutMsec, q.ColorTableIndex
+        "SELECT q.ContentID, q.ID, q.Kind, q.InMsec, q.OutMsec, q.ColorTableIndex, COALESCE(q.Color, -1)
          FROM djmdContent c CROSS JOIN djmdCue q ON q.ContentID = c.ID
          WHERE c.rb_local_deleted = 0 AND q.rb_local_deleted = 0",
     )?;
@@ -457,7 +457,7 @@ fn read_cues(
 }
 
 /// The columns a cue is read from, after whatever names its track.
-const CUE_COLUMNS: &str = "ID, Kind, InMsec, OutMsec, ColorTableIndex";
+const CUE_COLUMNS: &str = "ID, Kind, InMsec, OutMsec, ColorTableIndex, COALESCE(Color, -1)";
 
 /// One cue from a row whose [`CUE_COLUMNS`] start at `first`.
 fn read_cue(r: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Cue> {
@@ -473,13 +473,20 @@ fn read_cue(r: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Cue> {
     let out_ms = u32::try_from(num(r, first + 3)?.max(0)).unwrap_or(0);
     // NULL and 0 both mean "no colour chosen"; the writer stores 0 too.
     let colour = u8::try_from(num(r, first + 4)?).unwrap_or(0);
-    Ok(Cue {
+    // A memory cue's eight-colour `Color`; anything outside 0-7 is none.
+    let memory_colour = u8::try_from(num(r, first + 5)?).ok().filter(|value| *value <= 7);
+    let mut cue = Cue {
         id,
         position_ms,
         out_ms,
         kind,
         colour,
-    })
+        memory_colour: None,
+    };
+    if cue.is_memory() {
+        cue.memory_colour = memory_colour;
+    }
+    Ok(cue)
 }
 
 /// Re-reads one track's cues after an edit, leaving everything else in place.
@@ -1015,6 +1022,40 @@ mod refresh_tests {
             .unwrap();
         let (deleted, _) = load(&db).unwrap();
         assert_eq!(deleted.cues.read().parts().0.len(), live_cues - 1);
+    }
+
+    /// A memory cue's colour is `djmdCue.Color`. The values are the ones
+    /// rekordbox 7.2.14 wrote on chris-win11's test library for memory cues
+    /// coloured Blue, Green and Pink and one left uncoloured (issue #533):
+    /// 6, 4, 0 and -1. NULL and 255 are none too, and a hot cue's `Color` is
+    /// not a memory colour. Both the full load and a one-track reload read it.
+    #[test]
+    fn a_memory_cue_reads_its_own_colour_and_a_hot_cue_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let location =
+            rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = Db::open(location, rbl_db::OpenMode::ReadWrite).unwrap();
+        let id = rbl_db::fixture::track_id(1);
+        db.connection().execute("DELETE FROM djmdCue WHERE ContentID = ?1", [&id]).unwrap();
+        for (cue, kind, at, colour) in [
+            ("901", 0, 25_804, Some(6)), ("902", 0, 60_023, Some(4)), ("903", 4, 93_773, Some(0)),
+            ("904", 0, 127_992, Some(-1)), ("905", 0, 130_000, None), ("906", 0, 140_000, Some(255)),
+            ("907", 1, 150_000, Some(3)),
+        ] {
+            db.connection().execute(
+                "INSERT INTO djmdCue (ID, ContentID, Kind, InMsec, Color, rb_local_deleted, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, '2026-10-17', '2026-10-17')",
+                rusqlite::params![cue, &id, kind, at, colour],
+            ).unwrap();
+        }
+        let (library, _) = load(&db).unwrap();
+        let row = library.row_of(&id).unwrap();
+        let colours = |library: &Library| -> Vec<Option<u8>> {
+            library.cues_of(row).iter().map(|cue| cue.memory_colour).collect()
+        };
+        let want = vec![Some(6), Some(4), Some(0), None, None, None, None];
+        assert_eq!(colours(&library), want);
+        reload_cues_of(&db, &library, &id).unwrap();
+        assert_eq!(colours(&library), want);
     }
 
     #[test]

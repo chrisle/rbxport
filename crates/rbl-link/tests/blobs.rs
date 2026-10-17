@@ -128,7 +128,7 @@ fn an_index_cue_becomes_an_extended_cue_by_its_hot_letter() {
         position_ms: 100,
         out_ms: 0,
         kind: 5,
-        colour: 0,
+        colour: 0,        memory_colour: None,
     };
     assert_eq!(ExtendedCue::from(&hot_d).hot_slot, 4, "kind 5 is D");
     let memory = Cue {
@@ -136,7 +136,7 @@ fn an_index_cue_becomes_an_extended_cue_by_its_hot_letter() {
         position_ms: 200,
         out_ms: 900,
         kind: 0,
-        colour: 0,
+        colour: 0,        memory_colour: None,
     };
     let e = ExtendedCue::from(&memory);
     assert_eq!((e.hot_slot, e.out_ms), (0, 900));
@@ -174,6 +174,7 @@ fn a_hot_cue_carries_its_own_colour() {
             out_ms: 0,
             kind,
             colour,
+            memory_colour: None,
         })
     };
     for (kind, colour, expected) in [
@@ -202,6 +203,7 @@ fn a_memory_cue_carries_no_colour() {
         out_ms: 0,
         kind: 0,
         colour: 42,
+        memory_colour: None,
     });
     let (blob, _) = blobs::extended_cues_blob(&[memory]);
     assert_eq!(colour_of(&blob), [0; 4]);

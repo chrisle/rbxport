@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn memory_cues_take_the_free_hot_slots_in_order_of_position() {
-        let cue = |id: u32, kind: u8, position_ms: u32, out_ms: u32| Cue { id, position_ms, out_ms, kind, colour: 0 };
+        let cue = |id: u32, kind: u8, position_ms: u32, out_ms: u32| Cue { id, position_ms, out_ms, kind, colour: 0, memory_colour: None };
         // B is taken; a loop and two plain memory cues, out of order.
         let cues = vec![cue(1, 2, 5_000, 0), cue(2, 0, 30_000, 0), cue(3, 0, 10_000, 14_000), cue(4, 0, 1_000, 0)];
         assert_eq!(conversion_plan(&cues), vec![('A', 1_000, 0), ('C', 10_000, 14_000), ('D', 30_000, 0)]);
