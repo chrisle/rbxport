@@ -229,12 +229,12 @@ jobs:
           RBX_DISCORD_BOT_TOKEN: ${{ secrets.RBX_DISCORD_BOT_TOKEN }}
         run: node scripts/support-sync.mjs --release
 
-      # Opt-in (PACKAGING_NIX): point the Nix package at the AppImage just
-      # published, so `github:chrisle/rbxport/dev` always carries the newest
-      # seed and first launch self-updates from there. Main and tags lag one
-      # seed by design.
+      # Point the Nix package at the AppImage just published, when this
+      # repository ships it, so `github:chrisle/rbxport/dev` always carries the
+      # newest seed and first launch self-updates from there. Main and tags lag
+      # one seed by design.
       - name: Seed the Nix package
-        if: vars.PACKAGING_NIX == 'true'
+        if: ${{ hashFiles('packaging/nix/pin.json') != '' }}
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"

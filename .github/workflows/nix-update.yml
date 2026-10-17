@@ -17,7 +17,6 @@ env:
 jobs:
   update:
     name: Refresh flake.lock
-    if: vars.PACKAGING_NIX == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

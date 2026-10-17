@@ -1,10 +1,8 @@
 name: Nix packaging
 
-# Builds the Nix `bin` package and smoke-tests the AppImage it ships. Every
-# job is gated on the PACKAGING_NIX repository variable, so forks and
-# repositories that do not opt in never run Nix, and the jobs only ever use
+# Builds the Nix `bin` package and smoke-tests the AppImage it ships, on
 # GitHub-hosted runners. build-installer calls this with a read-only token, so
-# no job here may ask for more; the monthly flake.lock push lives in
+# no job here may ask for more; the monthly packaging updates live in
 # nix-update.yml.
 on:
   workflow_dispatch:
@@ -33,7 +31,6 @@ env:
 jobs:
   smoke:
     name: AppImage smoke test
-    if: vars.PACKAGING_NIX == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +60,7 @@ jobs:
           appimage=""
           if [ -d fresh ]; then
             appimage="$(find fresh -name '*.AppImage' -print -quit)"
+            [ -z "$appimage" ] || appimage="$(realpath "$appimage")"
           fi
           echo "appimage=$appimage" >> "$GITHUB_OUTPUT"
 

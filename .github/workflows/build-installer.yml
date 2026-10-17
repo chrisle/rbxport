@@ -102,9 +102,8 @@ jobs:
         if: always()
         uses: ./.github/actions/cleanup-signing
 
-  # Opt-in (PACKAGING_NIX): prove the freshly built AppImage that the Nix `bin`
-  # package ships runs before a release can publish. Only for the Linux build;
-  # the job inside nix.yml is gated on the repository variable.
+  # Prove the freshly built AppImage that the Nix `bin` package ships runs
+  # before a release can publish. Only for the Linux build.
   nix-smoke:
     name: Nix AppImage smoke test
     needs: build
