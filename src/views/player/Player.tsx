@@ -1431,10 +1431,13 @@ export const Player = memo(function Player({
   // The hot cue list's drag: the slot being dragged, and the one it is over.
   const [dragSlot, setDragSlot] = useState<string | null>(null);
   const [dropSlot, setDropSlot] = useState<string | null>(null);
+  // The Auto Beat Loop's length while it is the loop playing (#411); read at
+  // press time, so `beatLoopOn` and `loopBeats`, declared below, are set by then.
+  const beatLoopBeats = useEventCallback(() => (beatLoopOn ? loopBeats : null));
   const hot = useHotCues({
     trackId: playback.idle ? null : track?.id ?? null,
     cues, positionSeconds, seek, play: playFromCue, playing: deckPlaying, jumpAt, setLoop: playback.setLoop,
-    activeLoop: playingLoop, exitLoop: leaveLoop,
+    activeLoop: playingLoop, beatLoopBeats, exitLoop: leaveLoop,
     quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
   });
   // The hooks own editability, so the disabled state and its explanation
@@ -1635,7 +1638,6 @@ export const Player = memo(function Player({
     autoLoop, loopOfBeats, markLoopIn, loopOut]);
   // MEMORY: the cue point, or the loop playing as a memory loop with the
   // Auto Beat Loop's length when it is the one AU set (#411).
-  const beatLoopBeats = useEventCallback(() => (beatLoopOn ? loopBeats : null));
   const memory = useMemoryCues({
     trackId: playback.idle ? null : track?.id ?? null,
     cues, positionSeconds, seek, setLoop: playback.setLoop, playingLoop, beatLoopBeats,

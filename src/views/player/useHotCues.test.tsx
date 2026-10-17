@@ -406,3 +406,52 @@ describe("dragging a cue to another slot", () => {
     expect(sent).toEqual([]);
   });
 });
+
+describe("pressing an empty pad with a loop playing (#554)", () => {
+  // [UNKNOWN] rekordbox's stored row for a hot loop was not observed on the
+  // rig; these values pin the memory-loop shape (InMsec, OutMsec) that
+  // rekordbox 7.2.19 `eventMemoryCue` stores, in a hot slot.
+  it("stores the loop as a hot loop in that slot, not a plain cue", async () => {
+    const loops: string[] = [];
+    __setBackend({
+      edits: {
+        addCue: (...a: unknown[]) => { sent.push(`add:${String(a[2])}`); return Promise.resolve("c"); },
+        addLoop: (track: string, kind: CueKind, inMs: number, outMs: number, beats?: number) => {
+          const slot = typeof kind === "string" ? kind : kind.hot;
+          loops.push(`loop:${track}:${slot}:${inMs}-${outMs}:${beats ?? "-"}`);
+          return Promise.resolve("l");
+        },
+      },
+    } as unknown as Backend);
+    mount({ positionSeconds: () => 1.7, activeLoop: () => ({ inSeconds: 1.0, outSeconds: 3.0 }) });
+    act(() => pads.press("C"));
+    await settle();
+    expect(loops).toEqual(["loop:track-1:C:1000-3000:-"]);
+    expect(sent).toEqual([]);
+  });
+
+  it("carries the Auto Beat Loop length", async () => {
+    const loops: string[] = [];
+    __setBackend({
+      edits: {
+        addLoop: (_t: string, _k: CueKind, inMs: number, outMs: number, beats?: number) => {
+          loops.push(`${inMs}-${outMs}:${beats}`);
+          return Promise.resolve("l");
+        },
+      },
+    } as unknown as Backend);
+    mount({
+      activeLoop: () => ({ inSeconds: 2, outSeconds: 4 }), beatLoopBeats: () => 4,
+    });
+    act(() => pads.press("A"));
+    await settle();
+    expect(loops).toEqual(["2000-4000:4"]);
+  });
+
+  it("sets a plain cue when no loop is playing", async () => {
+    mount({ positionSeconds: () => 1, activeLoop: () => null });
+    act(() => pads.press("A"));
+    await settle();
+    expect(sent).toEqual(["add:track-1:A:1000"]);
+  });
+});

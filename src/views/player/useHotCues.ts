@@ -90,6 +90,11 @@ export interface HotCueDeck {
   setLoop?: ((inSeconds: number, outSeconds: number) => void) | undefined;
   /** The deck's loop while it plays, or `null` with none or out of it. */
   activeLoop?: (() => DeckLoopRange | null) | undefined;
+  /**
+   * The Auto Beat Loop's length in beats when the playing loop is the one AU
+   * set, or `null`: it is stored with a hot loop as with a memory loop.
+   */
+  beatLoopBeats?: (() => number | null) | undefined;
   /** Leaves the playing loop, keeping it for RELOOP. */
   exitLoop?: (() => void) | undefined;
   /**
@@ -124,7 +129,7 @@ export interface HotCueActions {
 
 export function useHotCues(deck: HotCueDeck): HotCueActions {
   const {
-    trackId, cues, positionSeconds, seek, play, playing, jumpAt, setLoop, activeLoop, exitLoop, quantiseTo, readOnly, onError,
+    trackId, cues, positionSeconds, seek, play, playing, jumpAt, setLoop, activeLoop, beatLoopBeats, exitLoop, quantiseTo, readOnly, onError,
   } = deck;
   const canEdit = trackId !== null && !readOnly;
   const write = useCueWriter(onError);
@@ -166,11 +171,28 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
         return;
       }
       if (!canEdit || trackId === null) return;
+      // With a loop playing, an empty pad stores the loop as a hot loop
+      // (orange), not the playhead as a plain cue (#554). Same as MEMORY, which
+      // stores the loop while one plays [OBS static: rekordbox 7.2.19
+      // `UiPlayer::eventMemoryCue` @0x101b9d91c reads the engine's current
+      // cue time, the loop's in and out while one plays; the hot cue pad's
+      // own handler was not disassembled]. [ASSUME] the pad does the same,
+      // per the manual's loop-to-hot-cue behaviour and user reports.
+      const loop = activeLoop?.() ?? null;
+      if (loop && loop.outSeconds > loop.inSeconds) {
+        const inMs = Math.round(Math.max(loop.inSeconds, 0) * 1000);
+        const outMs = Math.round(loop.outSeconds * 1000);
+        if (outMs > inMs) {
+          const beats = beatLoopBeats?.() ?? undefined;
+          write((edits) => edits.addLoop(trackId, { hot: letter }, inMs, outMs, beats));
+          return;
+        }
+      }
       const at = Math.max(positionSeconds(), 0) * 1000;
       const positionMs = Math.round(quantiseTo ? nearestBeatMs(quantiseTo, at) : at);
       write((edits) => edits.addCue(trackId, { hot: letter }, positionMs));
     },
-    [cues, seek, play, playing, jumpAt, setLoop, activeLoop, exitLoop, canEdit, trackId, positionSeconds, quantiseTo, write],
+    [cues, seek, play, playing, jumpAt, setLoop, activeLoop, beatLoopBeats, exitLoop, canEdit, trackId, positionSeconds, quantiseTo, write],
   );
 
   const clear = useCallback(
