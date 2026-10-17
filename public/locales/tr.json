@@ -1364,6 +1364,7 @@
   "--sub-tree-w": "--alt-ağaç-w",
   "Resize the sub-browser": "Alt tarayıcıyı yeniden boyutlandırın",
   "Resize the sub-browser's tree": "Alt tarayıcının ağacını yeniden boyutlandırın",
+  "Resize {column}": "{column} yeniden boyutlandır",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "şişman32",

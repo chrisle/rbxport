@@ -1372,6 +1372,7 @@
   "--sub-tree-w": "--サブツリー-w",
   "Resize the sub-browser": "サブブラウザのサイズを変更する",
   "Resize the sub-browser's tree": "サブブラウザのツリーのサイズを変更する",
+  "Resize {column}": "{column}のサイズを変更",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "脂肪32",

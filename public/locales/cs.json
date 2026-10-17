@@ -1363,6 +1363,7 @@
   "--sub-tree-w": "--sub-tree-w",
   "Resize the sub-browser": "Změňte velikost dílčího prohlížeče",
   "Resize the sub-browser's tree": "Změňte velikost stromu podprohlížeče",
+  "Resize {column}": "Změnit velikost {column}",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "tuk32",

@@ -1363,6 +1363,7 @@
   "--sub-tree-w": "--al-fa-w",
   "Resize the sub-browser": "Méretezze át az alböngészőt",
   "Resize the sub-browser's tree": "Méretezze át az alböngésző fáját",
+  "Resize {column}": "{column} átméretezése",
   "Format USB": "Format USB",
   "Format": "Format",
   "fat32": "kövér32",
