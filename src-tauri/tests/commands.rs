@@ -2316,6 +2316,45 @@ fn an_intelligent_playlist_is_written_in_rekordboxs_smartlist_format() {
 }
 
 #[test]
+fn a_my_tag_panel_tick_tags_the_whole_selection_as_one_step() {
+    use rbl_db::fixture::{MY_TAG_CATEGORY, MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let s = shell();
+    let tracks = vec![track_id(1), track_id(2)];
+    run(details::set_my_tags(s.handle(), s.state(), track_id(1), vec![MY_TAG_WARM_UP.to_owned()])).unwrap();
+    assert!(run(details::selection_my_tags(s.state(), tracks.clone())).unwrap().is_empty());
+
+    let ticked = run(details::put_my_tag(s.handle(), s.state(), tracks.clone(), MY_TAG_PEAK.to_owned(), true)).unwrap();
+    assert!(ticked.can_undo);
+    assert_eq!(run(details::selection_my_tags(s.state(), tracks.clone())).unwrap(), vec![MY_TAG_PEAK.to_owned()]);
+
+    // One undo takes it off both, and leaves track 1's Warm-up alone.
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert!(run(details::selection_my_tags(s.state(), tracks.clone())).unwrap().is_empty());
+    assert_eq!(
+        run(details::selection_my_tags(s.state(), vec![track_id(1)])).unwrap(),
+        vec![MY_TAG_WARM_UP.to_owned()]
+    );
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+
+    // A new tag shows in the lookups under its category, by id.
+    let made = run(details::create_my_tag(s.handle(), s.state(), MY_TAG_CATEGORY.to_owned())).unwrap();
+    assert_eq!(made.name, "My Comment");
+    let lookups = run(details::track_lookups(s.state())).unwrap();
+    let category = lookups.my_tag_categories.iter().find(|c| c.id == MY_TAG_CATEGORY).unwrap();
+    assert_eq!(category.tags.last().map(|t| t.id.as_str()), Some(made.id.as_str()));
+    run(details::rename_my_tag(s.handle(), s.state(), made.id.clone(), "Opener".to_owned())).unwrap();
+    let lookups = run(details::track_lookups(s.state())).unwrap();
+    let category = lookups.my_tag_categories.iter().find(|c| c.id == MY_TAG_CATEGORY).unwrap();
+    assert_eq!(category.tags.last().map(|t| t.name.as_str()), Some("Opener"));
+
+    // Deleting a tag takes it off the tracks and leaves nothing to undo
+    // that could name it.
+    run(details::delete_my_tag(s.handle(), s.state(), MY_TAG_PEAK.to_owned())).unwrap();
+    assert!(run(details::selection_my_tags(s.state(), tracks)).unwrap().is_empty());
+    assert!(run(commands::undo_edit(s.handle(), s.state())).is_err());
+}
+
+#[test]
 fn an_intelligent_playlist_on_a_my_tag_holds_the_tracks_carrying_it() {
     // Issue #84: a rule on a My Tag opened empty and read back with no
     // property, which the editor drew as "Album artist".

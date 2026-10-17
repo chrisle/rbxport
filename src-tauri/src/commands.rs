@@ -825,11 +825,17 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
             }
             Ok(())
         }
-        LibraryEdit::TrackTags(value) => if undo {
-            writer.undo_tag_edit(value)
-        } else {
-            writer.redo_tag_edit(value)
-        }.map(|_| ()),
+        LibraryEdit::TrackTags(values) => {
+            let ordered: Box<dyn Iterator<Item = _>> = if undo {
+                Box::new(values.iter().rev())
+            } else {
+                Box::new(values.iter())
+            };
+            for value in ordered {
+                if undo { writer.undo_tag_edit(value)?; } else { writer.redo_tag_edit(value)?; }
+            }
+            Ok(())
+        }
     }
 }
 

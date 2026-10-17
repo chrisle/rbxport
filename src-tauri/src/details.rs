@@ -72,6 +72,8 @@ pub struct MyTagDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MyTagCategoryDto {
+    /// `djmdMyTag.ID`: 1 to 4 in a library rekordbox made.
+    pub id: String,
     pub name: String,
     pub tags: Vec<MyTagDto>,
 }
@@ -221,7 +223,7 @@ pub async fn track_lookups(state: State<'_, Arc<AppState>>) -> AppResult<TrackLo
         let mut my_tag_categories: Vec<(String, MyTagCategoryDto)> = rows
             .iter()
             .filter(|t| t.attribute == 1)
-            .map(|t| (t.id.clone(), MyTagCategoryDto { name: t.name.clone(), tags: Vec::new() }))
+            .map(|t| (t.id.clone(), MyTagCategoryDto { id: t.id.clone(), name: t.name.clone(), tags: Vec::new() }))
             .collect();
         for tag in rows.iter().filter(|t| t.attribute == 0) {
             if let Some((_, category)) = my_tag_categories.iter_mut().find(|(id, _)| *id == tag.parent) {
@@ -254,8 +256,118 @@ pub async fn set_my_tags<R: tauri::Runtime>(
     tags: Vec<String>,
 ) -> AppResult<crate::dto::EditHistoryDto> {
     recorded_edit(app, state, "set_my_tags", Touched::Tracks, "Track Edit", move |w| {
-        w.set_my_tags_with_undo(&track, &tags).map(|(_, edit)| LibraryEdit::TrackTags(edit))
+        w.set_my_tags_with_undo(&track, &tags).map(|(_, edit)| LibraryEdit::TrackTags(vec![edit]))
     }).await
+}
+
+/// The My Tags every one of `tracks` has: the ticks of the My Tag panel.
+#[tauri::command]
+pub async fn selection_my_tags(
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+) -> AppResult<Vec<String>> {
+    let state = Arc::clone(&state);
+    blocking("selection_my_tags", move || {
+        state
+            .read_db(|db| Ok(rbl_db::details::shared_my_tags(db.connection(), &tracks)))
+            .map_err(write_error)
+    })
+    .await
+}
+
+/// A tick in the My Tag panel: `tag` goes on each of `tracks`, or comes
+/// off, as one step of history. Every track or none, as [`each_track`].
+#[tauri::command]
+pub async fn put_my_tag<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+    tag: String,
+    on: bool,
+) -> AppResult<crate::dto::EditHistoryDto> {
+    recorded_edit(app, state, "put_my_tag", Touched::Tracks, "Track Edit", move |w| {
+        let mut edits: Vec<rbl_db::write::TrackTagEdit> = Vec::with_capacity(tracks.len());
+        for track in &tracks {
+            let step = match w.has_track(track) {
+                Ok(false) => continue,
+                Ok(true) => w.put_my_tag_with_undo(track, &tag, on),
+                Err(error) => Err(error),
+            };
+            match step {
+                Ok((_, edit)) => {
+                    if !edit.is_empty() {
+                        edits.push(edit);
+                    }
+                }
+                Err(error) => {
+                    for applied in edits.iter().rev() {
+                        if let Err(undo) = w.undo_tag_edit(applied) {
+                            tracing::error!(%undo, "a My Tag edit could not be put back after a failure");
+                        }
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        Ok(LibraryEdit::TrackTags(edits))
+    }).await
+}
+
+/// The tag Adding My Tag made.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewMyTagDto {
+    pub id: String,
+    pub name: String,
+}
+
+/// Adding My Tag: a new tag at the end of `category`, named "My Comment"
+/// or the first "My Comment (n)" the category does not have yet.
+#[tauri::command]
+pub async fn create_my_tag<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    category: String,
+) -> AppResult<NewMyTagDto> {
+    let made = Arc::new(parking_lot::Mutex::new(None::<rbl_db::write::NewMyTag>));
+    let slot = Arc::clone(&made);
+    // A new tag is on no track yet, so only the tree's cheap re-read is
+    // needed for the window to hear of it and ask for the lists again.
+    edit(app, state, "create_my_tag", Touched::Playlists, move |w| {
+        *slot.lock() = Some(w.create_my_tag(&category)?);
+        Ok(())
+    })
+    .await?;
+    let Some(made) = made.lock().take() else {
+        return Err(AppError::new(ErrorKind::Malformed, "The new My Tag was not made."));
+    };
+    Ok(NewMyTagDto { id: made.id, name: made.name })
+}
+
+/// Renames a My Tag or a category. The My Tag column shows names, so the
+/// track list is read again.
+#[tauri::command]
+pub async fn rename_my_tag<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    name: String,
+) -> AppResult<u32> {
+    edit(app, state, "rename_my_tag", Touched::Tracks, move |w| w.rename_my_tag(&id, &name).map(|_| ())).await
+}
+
+/// Deletes a My Tag and takes it off every track. Not undoable, and the
+/// history before it goes: an older tick could name the tag it removes.
+#[tauri::command]
+pub async fn delete_my_tag<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> AppResult<u32> {
+    crate::commands::permanent_edit(app, state, "delete_my_tag", Touched::Tracks, move |w| {
+        w.delete_my_tag(&id).map(|_| ())
+    })
+    .await
 }
 
 /// Add Artwork: the image at `image` is filed in the share tree and each of

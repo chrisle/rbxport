@@ -175,8 +175,8 @@ describe("what the dialog opens on", () => {
 
 describe("a My Tag condition", () => {
   const myTags = [
-    { name: "Subgenre", tags: [{ id: "101", name: "Deep" }, { id: "102", name: "Tech" }] },
-    { name: "Situation", tags: [{ id: "201", name: "Peak" }] },
+    { id: "1", name: "Subgenre", tags: [{ id: "101", name: "Deep" }, { id: "102", name: "Tech" }] },
+    { id: "3", name: "Situation", tags: [{ id: "201", name: "Peak" }] },
   ];
 
   it("opens on the tag a saved rule names, with the two operators rekordbox answers", () => {
