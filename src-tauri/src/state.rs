@@ -65,8 +65,10 @@ pub struct AppState {
 /// default `true`), so nothing is kept past quitting.
 #[derive(Default)]
 struct PlayedMarks {
-    /// The tracks players added to history over LINK, shared with the
-    /// running link session so they outlive LINK going off and on.
+    /// The tracks players added to history over LINK, mirrored from each
+    /// link session so the colouring outlives LINK going off and on. What
+    /// players are told was played is that session's own set, which starts
+    /// empty at every LINK start.
     link: rbl_link::Played,
     /// The tracks the deck here recorded a play of: what PERFORMANCE mode
     /// marks when it adds a track to history
@@ -215,7 +217,7 @@ impl AppState {
         }
     }
 
-    /// The played marks a LINK session adds to, shared with it.
+    /// The colouring marks a LINK session copies its played marks into.
     pub fn link_played(&self) -> rbl_link::Played {
         self.played.link.clone()
     }
