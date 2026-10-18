@@ -1085,15 +1085,19 @@ export interface Backend {
    * stick playlist's tracks in its order. `missing` says what happens to a
    * track the collection does not have: `copy` copies its file to
    * `PioneerDJ/Imported from Device` in the Music folder and imports it
-   * (never over an existing file), `matched` leaves it out, `cancel`
-   * imports nothing. Writes the user's library; the stick is only read.
+   * (never over an existing file), with the stick's BPM, key, analysis
+   * files and cues, `matched` leaves it out, `cancel` imports nothing.
+   * `destination` is the folder picked with Change… for the copies, an
+   * existing folder; null or absent for `PioneerDJ/Imported from Device`.
+   * Writes the user's library; the stick is only read.
    */
-  devicePlaylistImport(path: string, format: DeviceFormat, id: string, missing: DeviceImportMissing): Promise<DevicePlaylistImportResult>;
+  devicePlaylistImport(path: string, format: DeviceFormat, id: string, missing: DeviceImportMissing, destination?: string | null): Promise<DevicePlaylistImportResult>;
   /**
    * What Import Playlist would copy for one of a stick's playlists, for the
-   * question rekordbox asks first. Only reads.
+   * question rekordbox asks first, copying to `destination` (see
+   * `devicePlaylistImport`). Only reads.
    */
-  devicePlaylistImportPlan(path: string, format: DeviceFormat, id: string): Promise<DevicePlaylistImportPlan>;
+  devicePlaylistImportPlan(path: string, format: DeviceFormat, id: string, destination?: string | null): Promise<DevicePlaylistImportPlan>;
 
   /**
    * One track's full record: what the information panel's Summary and Info
@@ -1431,6 +1435,10 @@ export interface DevicePlaylistImportResult {
   missing: number;
   /** Files copied to the computer and added to the collection. */
   copied: number;
+  /** Of those, the tracks given the stick's BPM, key, analysis files and cues. */
+  analysed: number;
+  /** Of those, the tracks the stick's analysis could not be given to. */
+  analysisFailed: number;
   /** Nothing was imported because a track was missing and the choice was to cancel. */
   cancelled: boolean;
 }

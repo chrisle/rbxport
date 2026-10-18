@@ -1770,5 +1770,8 @@
   "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.",
   "--s-row-height": "--s-row-height",
   "Show the entire artwork.": "Εμφάνιση ολόκληρων των γραφικών.",
-  "Show the upper part of the artwork.": "Εμφάνιση του πάνω τμήματος των γραφικών."
+  "Show the upper part of the artwork.": "Εμφάνιση του πάνω τμήματος των γραφικών.",
+  "Copied {count} music file to {folder}.": "Αντιγράφηκε {count} αρχείο μουσικής στο {folder}.",
+  "Copied {count} music files to {folder}.": "Αντιγράφηκαν {count} αρχεία μουσικής στο {folder}.",
+  "That folder could not be found.": "Δεν ήταν δυνατή η εύρεση αυτού του φακέλου."
 }

@@ -66,3 +66,26 @@ it("answers OK with a copy and Cancel or Escape with none", () => {
   act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
   expect(onAnswer.mock.calls).toEqual([[true], [false], [false]]);
 });
+
+it("offers rekordbox's Change… only when another folder can be picked", () => {
+  const onChange = vi.fn();
+  act(() => root.render(<DeviceImportCopyDialog plan={PLAN} onAnswer={() => {}} />));
+  expect(button("Change…")).toBeUndefined();
+  act(() => root.render(<DeviceImportCopyDialog plan={PLAN} onAnswer={() => {}} onChange={onChange} />));
+  act(() => button("Change…")?.click());
+  expect(onChange).toHaveBeenCalledTimes(1);
+});
+
+it("greys out OK and marks the free space when the files do not fit, as rekordbox does", () => {
+  const onAnswer = vi.fn();
+  const full = { ...PLAN, destination: "/Volumes/Small", freeBytes: 1024 ** 2 };
+  act(() => root.render(<DeviceImportCopyDialog plan={full} onAnswer={onAnswer} onChange={() => {}} />));
+  expect(button("OK")?.disabled).toBe(true);
+  expect(host.querySelector("[data-short]")?.textContent).toContain("Free space of /Volumes/Small is 1.0 MB");
+  act(() => button("OK")?.click());
+  expect(onAnswer).not.toHaveBeenCalled();
+  // A folder with room again: OK is back.
+  act(() => root.render(<DeviceImportCopyDialog plan={PLAN} onAnswer={onAnswer} onChange={() => {}} />));
+  expect(button("OK")?.disabled).toBe(false);
+  expect(host.querySelector("[data-short]")).toBeNull();
+});

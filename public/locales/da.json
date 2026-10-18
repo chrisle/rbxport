@@ -1764,5 +1764,8 @@
   "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.",
   "--s-row-height": "--s-row-height",
   "Show the entire artwork.": "Vis hele illustrationen.",
-  "Show the upper part of the artwork.": "Vis den øverste del af illustrationen."
+  "Show the upper part of the artwork.": "Vis den øverste del af illustrationen.",
+  "Copied {count} music file to {folder}.": "Kopierede {count} musikfil til {folder}.",
+  "Copied {count} music files to {folder}.": "Kopierede {count} musikfiler til {folder}.",
+  "That folder could not be found.": "Den mappe kunne ikke findes."
 }

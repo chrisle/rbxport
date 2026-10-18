@@ -141,3 +141,33 @@ test("Ask each import does not ask when every track is in the collection", async
   await expect(page.getByRole("contentinfo")).toContainText("Imported Melodic Vox.");
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
 });
+
+test("Change… in the question picks another folder for the copies, as rekordbox's does", async ({ page }) => {
+  // #568: the copies always went to PioneerDJ/Imported from Device. rekordbox's
+  // question has Change… (a folder chooser); a folder whose drive is too
+  // small turns the free space red and greys out OK.
+  await page.addInitScript(() => {
+    const w = window as unknown as { __mockPickedFolder?: string; __mockPickedFreeBytes?: number };
+    w.__mockPickedFolder = "/Volumes/Small";
+    w.__mockPickedFreeBytes = 1024 ** 2;
+  });
+  await openStick(page, "ask");
+  await importPlaylist(page, "NP3-TEST-MP3");
+  const question = page.getByRole("alertdialog", { name: "Import Playlist from Device" });
+  await expect(question.getByRole("button", { name: "OK" })).toBeEnabled();
+  await question.getByRole("button", { name: "Change…" }).click();
+  await expect(question).toContainText("Free space of /Volumes/Small is 1.0 MB");
+  await expect(question.getByRole("button", { name: "OK" })).toBeDisabled();
+
+  await page.evaluate(() => {
+    const w = window as unknown as { __mockPickedFolder?: string; __mockPickedFreeBytes?: number };
+    w.__mockPickedFolder = "/Volumes/Archive/From USB";
+    w.__mockPickedFreeBytes = 64 * 1024 ** 3;
+  });
+  await question.getByRole("button", { name: "Change…" }).click();
+  await expect(question).toContainText("Free space of /Volumes/Archive/From USB is 64.0 GB");
+  await question.getByRole("button", { name: "OK" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Copied 1 music file to /Volumes/Archive/From USB.");
+  expect(await page.evaluate(() => (window as unknown as { __deviceImportDestination?: string | null }).__deviceImportDestination))
+    .toBe("/Volumes/Archive/From USB");
+});

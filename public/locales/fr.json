@@ -1770,5 +1770,8 @@
   "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.",
   "--s-row-height": "--s-row-height",
   "Show the entire artwork.": "Afficher l'intégralité de l'illustration.",
-  "Show the upper part of the artwork.": "Afficher la partie supérieure de l'illustration."
+  "Show the upper part of the artwork.": "Afficher la partie supérieure de l'illustration.",
+  "Copied {count} music file to {folder}.": "{count} fichier musical copié dans {folder}.",
+  "Copied {count} music files to {folder}.": "{count} fichiers musicaux copiés dans {folder}.",
+  "That folder could not be found.": "Ce dossier est introuvable."
 }

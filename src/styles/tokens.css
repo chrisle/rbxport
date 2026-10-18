@@ -31,6 +31,7 @@
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
   --c-meter-track: #323232; /* capture of rekordbox's top bar: the unlit part of both meters */
   --c-error: #E23B2E; /* UNMEASURED — failures in the status bar; the same red the meter's clip band uses, so the app has one alarm colour */
+  --c-device-copy-short: #C00000; /* rekordbox 7.2.19 static: importFromDeviceCopySettingWindow colours its free space 0xFFC00000 when the files do not fit (@0x1001d7558) */
   --c-on-error: #FFFFFF; /* UNMEASURED — text on a filled alarm band, where the red is the background rather than the ink */
   --c-sync-pending: #5BC8FF; /* UNMEASURED — a lighter blue than --c-accent, so the space a sync would add reads apart from what the stick already holds */
   --c-meter-green: #2FBF4E; /* UNMEASURED — the capture's meters are silent, so a level meter's own convention: green below -6 dB */

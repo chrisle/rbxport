@@ -1768,5 +1768,8 @@
   "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.",
   "--s-row-height": "--s-row-height",
   "Show the entire artwork.": "Megjeleníti a teljes grafikát.",
-  "Show the upper part of the artwork.": "Megjeleníti a grafika felső részét."
+  "Show the upper part of the artwork.": "Megjeleníti a grafika felső részét.",
+  "Copied {count} music file to {folder}.": "{count} zenefájl átmásolva ide: {folder}.",
+  "Copied {count} music files to {folder}.": "{count} zenefájl átmásolva ide: {folder}.",
+  "That folder could not be found.": "A mappa nem található."
 }

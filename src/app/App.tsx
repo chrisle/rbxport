@@ -90,7 +90,7 @@ import type { LibraryQuestion } from "@/views/library/NewLibraryDialog";
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { AnalysisResult, DeviceImportMissing, DevicePlaylistEdit, DevicePlaylistImportPlan, FilterValues, LinkPeerSeen, LinkStatus, ListTotals, RelocateSearch, SmartRule, TrackLookups, UnanalysedTracks } from "@/ipc/types";
+import type { AnalysisResult, DeviceFormat, DeviceImportMissing, DevicePlaylistEdit, DevicePlaylistImportPlan, FilterValues, LinkPeerSeen, LinkStatus, ListTotals, RelocateSearch, SmartRule, TrackLookups, UnanalysedTracks } from "@/ipc/types";
 import { statusBarListText } from "@/lib/format";
 import { autoRelocated, missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
 import { useTooltip } from "@/store/usePreferences";
@@ -2707,7 +2707,17 @@ function AppBody() {
   // `importFromDeviceReportWindow` @0x10018b1ec] and its older device
   // import's refusal when no track is in the collection
   // (`importDevicePlaylistLegacy` @0x1016689bc).
-  const [copyPrompt, setCopyPrompt] = useState<{ plan: DevicePlaylistImportPlan; settle: (copy: boolean) => void } | null>(null);
+  // Change… in the question picks another folder for the copies, as
+  // rekordbox's does [static, 7.2.19 `importFromDeviceCopySettingWindow::
+  // buttonClicked` @0x1001d802c]: the plan is asked again for that folder's
+  // free space, and OK copies there.
+  const [copyPrompt, setCopyPrompt] = useState<{
+    plan: DevicePlaylistImportPlan;
+    /** The folder picked with Change…, or null for the default. */
+    chosen: string | null;
+    ref: { path: string; format: DeviceFormat; id: string };
+    settle: (destination: string | null | false) => void;
+  } | null>(null);
   const importFromDevice = useCallback(
     (node: TreeNode) => {
       const ref = parseDeviceNodeId(node.id);
@@ -2717,15 +2727,18 @@ function AppBody() {
         try {
           const preference = advancedPrefs.deviceImportMissing;
           const missing: DeviceImportMissing = preference === "ask" ? "copy" : preference;
+          let destination: string | null = null;
           if (preference === "ask") {
             const plan = await backend.devicePlaylistImportPlan(ref.path, ref.format, ref.id);
             if (plan.files > 0) {
-              const copy = await new Promise<boolean>((settle) => setCopyPrompt({ plan, settle }));
+              const answer = await new Promise<string | null | false>((settle) =>
+                setCopyPrompt({ plan, chosen: null, ref: { path: ref.path, format: ref.format, id: ref.id }, settle }));
               setCopyPrompt(null);
-              if (!copy) return;
+              if (answer === false) return;
+              destination = answer;
             }
           }
-          const result = await backend.devicePlaylistImport(ref.path, ref.format, ref.id, missing);
+          const result = await backend.devicePlaylistImport(ref.path, ref.format, ref.id, missing, destination);
           if (result.cancelled) {
             refuse(`${t("Cannot import the playlist:")} ${result.name} ${result.missing === 1
               ? t("{count} track is not in the collection.", { count: result.missing })
@@ -2741,7 +2754,11 @@ function AppBody() {
               ? `${t("Playlist name was changed because there was a playlist with the same name in your collection.")} "${result.name}"`
               : t("Imported {name}.", { name: result.name }),
           ];
-          if (result.copied > 0) {
+          if (result.copied > 0 && destination !== null) {
+            said.push(result.copied === 1
+              ? t("Copied {count} music file to {folder}.", { count: result.copied, folder: destination })
+              : t("Copied {count} music files to {folder}.", { count: result.copied, folder: destination }));
+          } else if (result.copied > 0) {
             said.push(result.copied === 1
               ? t("Copied {count} music file to PioneerDJ/Imported from Device.", { count: result.copied })
               : t("Copied {count} music files to PioneerDJ/Imported from Device.", { count: result.copied }));
@@ -3430,7 +3447,26 @@ function AppBody() {
           total={duplicatePrompt.total} onAnswer={duplicatePrompt.settle} />
       ) : null}
       {folderClashPrompt ? <FolderClashDialog name={folderClashPrompt.name} onAnswer={folderClashPrompt.settle} /> : null}
-      {copyPrompt ? <DeviceImportCopyDialog plan={copyPrompt.plan} onAnswer={copyPrompt.settle} /> : null}
+      {copyPrompt ? (
+        <DeviceImportCopyDialog
+          plan={copyPrompt.plan}
+          onAnswer={(copy) => copyPrompt.settle(copy ? copyPrompt.chosen : false)}
+          onChange={() => {
+            void (async () => {
+              const backend = await getBackend();
+              const picked = await backend.pickFolder(t("Music file copy destination:"));
+              if (!picked) return;
+              try {
+                const { path, format, id } = copyPrompt.ref;
+                const plan = await backend.devicePlaylistImportPlan(path, format, id, picked);
+                setCopyPrompt((open) => (open === null ? open : { ...open, plan, chosen: picked }));
+              } catch (e) {
+                refuse(e instanceof Error ? t(e.message) : t("That folder could not be found."));
+              }
+            })();
+          }}
+        />
+      ) : null}
       {missingLibrary !== null ? (
         <NewLibraryDialog key={missingLibrary.kind} problem={missingLibrary}
           onCreate={async () => {

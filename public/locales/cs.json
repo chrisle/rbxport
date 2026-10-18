@@ -1769,5 +1769,8 @@
   "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.",
   "--s-row-height": "--s-row-height",
   "Show the entire artwork.": "Zobrazit celý obrázek.",
-  "Show the upper part of the artwork.": "Zobrazit horní část obrázku."
+  "Show the upper part of the artwork.": "Zobrazit horní část obrázku.",
+  "Copied {count} music file to {folder}.": "Zkopírován {count} hudební soubor do {folder}.",
+  "Copied {count} music files to {folder}.": "Zkopírováno {count} hudebních souborů do {folder}.",
+  "That folder could not be found.": "Tato složka nebyla nalezena."
 }

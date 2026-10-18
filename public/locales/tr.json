@@ -1769,5 +1769,8 @@
   "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.",
   "--s-row-height": "--s-row-height",
   "Show the entire artwork.": "Sanatın tamamını göster.",
-  "Show the upper part of the artwork.": "Sanatın üst kısmını göster."
+  "Show the upper part of the artwork.": "Sanatın üst kısmını göster.",
+  "Copied {count} music file to {folder}.": "{count} müzik dosyası {folder} klasörüne kopyalandı.",
+  "Copied {count} music files to {folder}.": "{count} müzik dosyası {folder} klasörüne kopyalandı.",
+  "That folder could not be found.": "Bu klasör bulunamadı."
 }

@@ -3210,7 +3210,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     // No dialogs in a browser: the folder is a fixed one, so the search
     // folders list can be driven end to end.
-    pickFolder: () => wait("/Users/mock/Music/Moved"),
+    pickFolder: () => wait((typeof window !== "undefined"
+      ? (window as unknown as { __mockPickedFolder?: string }).__mockPickedFolder
+      : undefined) ?? "/Users/mock/Music/Moved"),
     pickImage: () => wait("/Users/mock/Pictures/cover.jpg"),
     // No windows in a browser: the shell draws the Preferences over itself,
     // and its resets are its own to do.
@@ -3377,8 +3379,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // there, with the stick's entries in its order. An entry whose track
     // the collection lacks is copied in as a new track (one per stick
     // file), left out, or stops the import, as `missing` says.
-    devicePlaylistImport: (path, format, id, missing) => {
+    devicePlaylistImport: (path, format, id, missing, destination) => {
       if (!ready) return notReady();
+      // Where the copies would go, for the spec of rekordbox's Change….
+      if (typeof window !== "undefined") {
+        (window as unknown as { __deviceImportDestination?: string | null }).__deviceImportDestination = destination ?? null;
+      }
       let source: { name: string; entries: MockImportEntry[] };
       try {
         source = stickLibraries.playlist(path, format, id);
@@ -3387,7 +3393,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }
       const held = (entry: MockImportEntry) => entry.master !== null && all.some((r) => r.id === entry.master);
       const lacking = source.entries.filter((entry) => !held(entry)).length;
-      const none = (cancelled: boolean) => wait({ id: null, name: source.name, renamed: false, tracks: 0, missing: lacking, copied: 0, cancelled });
+      const none = (cancelled: boolean) => wait({ id: null, name: source.name, renamed: false, tracks: 0, missing: lacking, copied: 0, analysed: 0, analysisFailed: 0, cancelled });
       if (lacking > 0 && missing === "cancel") return none(true);
       const copiedFrom = new Map<string, string>();
       const contents: string[] = [];
@@ -3414,10 +3420,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       membership.set(made, contents);
       insertUnder(TREE_ROOT, { id: made, name, kind: "playlist", depth: 1, childCount: contents.length });
       return bump().then(() => ({
-        id: made, name, renamed: name !== source.name, tracks: contents.length, missing: lacking, copied: copiedFrom.size, cancelled: false,
+        // The copies keep the stick row's BPM, key and cues, as the real
+        // backend gives them the stick's analysis.
+        id: made, name, renamed: name !== source.name, tracks: contents.length, missing: lacking, copied: copiedFrom.size,
+        analysed: copiedFrom.size, analysisFailed: 0, cancelled: false,
       }));
     },
-    devicePlaylistImportPlan: (path, format, id) => {
+    devicePlaylistImportPlan: (path, format, id, destination) => {
       let source: { name: string; entries: MockImportEntry[] };
       try {
         source = stickLibraries.playlist(path, format, id);
@@ -3428,7 +3437,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const files = new Set(lacking.map((entry) => entry.row.id)).size;
       return wait({
         name: source.name, listed: source.entries.length, missing: lacking.length, files,
-        bytes: files * 9_437_184, destination: "/Users/dj/Music/PioneerDJ/Imported from Device", freeBytes: 128 * 1024 ** 3,
+        bytes: files * 9_437_184, destination: destination ?? "/Users/dj/Music/PioneerDJ/Imported from Device",
+        // A spec can make a picked folder's drive too small, for the OK
+        // rekordbox greys out when the files do not fit.
+        freeBytes: (destination && typeof window !== "undefined"
+          ? (window as unknown as { __mockPickedFreeBytes?: number }).__mockPickedFreeBytes
+          : undefined) ?? 128 * 1024 ** 3,
       });
     },
     explorerRoots: () => wait(EXPLORER_ROOTS.map((root) => ({ ...root }))),

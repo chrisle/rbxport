@@ -34,3 +34,5 @@
 .button:hover:not(:disabled) { border-color: var(--c-accent); }
 .primary { border-color: var(--c-accent); }
 .remember { display: flex; align-items: center; gap: 8px; margin: -6px 0 18px; }
+/* rekordbox's free space when the files do not fit (0xFFC00000). */
+.short { color: var(--c-device-copy-short); }

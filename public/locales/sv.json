@@ -1766,5 +1766,8 @@
   "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Stäng av för att behålla tonarter från Mixed In Key eller annan källa. RBXport skriver inte över dem.",
   "--s-row-height": "--s-row-height",
   "Show the entire artwork.": "Visa hela konstverket.",
-  "Show the upper part of the artwork.": "Visa den övre delen av konstverket."
+  "Show the upper part of the artwork.": "Visa den övre delen av konstverket.",
+  "Copied {count} music file to {folder}.": "Kopierade {count} musikfil till {folder}.",
+  "Copied {count} music files to {folder}.": "Kopierade {count} musikfiler till {folder}.",
+  "That folder could not be found.": "Den mappen kunde inte hittas."
 }
