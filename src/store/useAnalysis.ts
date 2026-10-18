@@ -56,7 +56,7 @@ export function useAnalysis(
 ): Analysis {
   const stored = usePreferences();
   const storedPreferences = stored.analysis;
-  const { mode, concurrentTracks, firstBeatCue, bpmRange, writeKeyTag } = preferences ?? storedPreferences;
+  const { mode, concurrentTracks, firstBeatCue, bpmRange, writeKeyTag, detectKey } = preferences ?? storedPreferences;
   // "Write the value to the ID3 tag" is read when a track's analysis is
   // sent, not when it was queued: rekordbox reads `writeKeyInTag` as each
   // analysis completes. The key display format decides the notation.
@@ -114,8 +114,8 @@ export function useAnalysis(
 
   // The preferred settings, for a track queued without the dialog.
   const preferred = useCallback(
-    (): NonNullable<QueueItem["analysis"]> => ({ mode, bpmGrid: true, key: true, highPrecision: true, ...bpmRangeLimits(bpmRange), firstBeatCue }),
-    [mode, firstBeatCue, bpmRange],
+    (): NonNullable<QueueItem["analysis"]> => ({ mode, bpmGrid: true, key: detectKey, highPrecision: true, ...bpmRangeLimits(bpmRange), firstBeatCue }),
+    [mode, firstBeatCue, bpmRange, detectKey],
   );
   const add = useCallback((items: readonly QueueItem[], settings?: QueueItem["analysis"]) => {
     // Capture settings at enqueue time, including automatic imports. Later

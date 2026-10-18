@@ -37,6 +37,17 @@ The app's local analysis lock and the library analysis-lock flag both prevent
 analysis. Locks are checked before decoding and before writing. A refused
 track contributes to the queue's failure count without stopping other tracks.
 
+## Keep keys from another program
+
+Preferences > Analysis > **Key Analysis** > **Analyze key** is on by default.
+Turn it off to keep keys that come from another source, such as Mixed In Key,
+so RBXport never overwrites them:
+
+- Automatic analysis and queued analysis skip the key and leave each track's
+  existing key as it is.
+- The Analysis Setting window starts with KEY unticked, whatever it was last
+  confirmed with. Tick it to analyse the key for that batch only.
+
 ## Write the key into the audio file
 
 Preferences > Analysis > **Key Analysis** > **Write the value to the ID3 tag**

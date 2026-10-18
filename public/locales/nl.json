@@ -1761,5 +1761,7 @@
   "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
   "Playback time setting": "Instelling afspeeltijd",
   "The length of time before a track is added to Histories": "De tijdsduur voordat een muziekstuk wordt toegevoegd aan Histories",
-  "seconds": "seconden"
+  "seconds": "seconden",
+  "Analyze key": "Analyze key",
+  "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them."
 }
