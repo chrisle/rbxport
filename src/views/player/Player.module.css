@@ -491,6 +491,11 @@
    the 49pt left dark: giving the waveform the whole band drew it half again as
    tall as rekordbox does and flattened every quiet passage into a slab. */
 .overviewStack {
+  /* The playhead's box: it spans the band, not just the waveform (#570).
+     Clipped, so a head at 100% does not land in the panel beside the deck,
+     as the overview alone used to clip it. */
+  position: relative;
+  overflow: hidden;
   flex: 1;
   min-width: 0;
   display: grid;
@@ -666,6 +671,16 @@
 /* Red while the deck has the keyboard, so it is obvious which of the two
    things the arrow keys are about to move. */
 .player[data-armed] .playhead { background: var(--c-playhead-armed); }
+
+/* The overview's head runs the band's full height, from its top through the
+   position bar to its bottom, two device pixels wide (the frame loop writes
+   the width; 1px is what it is before the first frame). rekordbox 7.2.14 at
+   150% draws it from 19pt above its waveform's peaks to 7pt under the
+   position bar, 48pt in all against this band's 49 (#393's capture, measured
+   for #570); 7.2.19 draws it as two one-pixel lines whatever the waveform's
+   colour (WidgetLoudView::drawTextures @0x100fd17dc). Over the waveform and
+   a loop band, under the cue markers, which rekordbox draws after it. */
+.overviewStack > .playhead { z-index: 1; }
 
 /* Cues sit over the waveform, the grid and the bar count — a marker behind a
    downbeat line is a marker nobody can find. A hot cue sits over a memory cue:
