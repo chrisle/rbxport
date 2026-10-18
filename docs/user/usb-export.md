@@ -148,14 +148,21 @@ When importing a playlist from a device**:
   fails, the copies it made are removed again. Importing the same playlist
   again uses the earlier copies instead of copying the files a second time.
 - **Ask each import**: rekordbox's question, with how many files would be
-  copied, their size and where they go. OK copies, Cancel imports nothing.
+  copied, their size and where they go. **Change…** picks another folder
+  for the copies, as in rekordbox; OK is unavailable while that folder's
+  drive has too little free space. OK copies, Cancel imports nothing.
 - **Import only already-matched tracks**: the track is left out and the note
   says how many were. If none of the tracks are in the collection, nothing
   is imported.
 - **Cancel when any track is missing**: nothing is imported, and the note
   says how many tracks are missing.
 
-A copied track is imported from its file's tags. The stick is only read.
+A copied track comes in with what the stick knows of it, as in rekordbox:
+its BPM and key, its waveforms and beat grid (the stick's analysis files,
+copied into your library), and its hot cues, memory cues and loops. Its
+other details come from the file's tags. A track the stick never analysed
+takes the stick's BPM and key only. Tracks already in your collection are
+left as they are. The stick is only read.
 
 ## Music already on the device
 
