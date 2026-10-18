@@ -108,6 +108,8 @@ pub trait Source: Send + Sync {
     fn remove_from_history(&self, _history: u32, _track: u32) -> bool {
         false
     }
+    /// The [`Played`] set changed, so the window can colour the rows again.
+    fn played_changed(&self) {}
 }
 
 /// Artwork larger than this is not sent: the protocol carries it whole in
@@ -165,7 +167,18 @@ struct Parsed {
 
 /// The tracks players have added to this link session's history with the
 /// `0x3001` command. The catalog greys their rows the way rekordbox greys
-/// what is in its link history. Cloned handles share one set.
+/// what is in its link history, and the window colours them as rekordbox's
+/// track list does. Cloned handles share one set, so the app can keep it
+/// across LINK going off and on.
+///
+/// rekordbox 7.2.19 keeps the same mark as bit `0x10` of a track's cached
+/// row (`rekordboxDBController::updatePlayedStatus` @`0x1017f429c`): set by
+/// a player's history add and cleared by its history remove
+/// (`DatabaseMediator::notifyDBUpdatedHistory` @`0x101e4c664`, kinds 1 and
+/// 2), cleared for a deleted link history's tracks
+/// (`DatabaseMediator::deleteLinkHistory` @`0x101e5947c`) and all at once by
+/// Preferences' RESET (`ViewBrowsePlayedColorComponent::buttonClicked`
+/// @`0x101a79a7c` -> `clearAllLinkPlayedStatus`) [OBS static].
 #[derive(Clone, Default)]
 pub struct Played(Arc<Mutex<HashSet<u32>>>);
 
@@ -174,8 +187,26 @@ impl Played {
         self.0.lock().insert(track);
     }
 
+    /// Takes the mark off; whether there was one.
+    pub fn unmark(&self, track: u32) -> bool {
+        self.0.lock().remove(&track)
+    }
+
+    /// Takes every mark off; whether there were any.
+    pub fn clear(&self) -> bool {
+        let mut set = self.0.lock();
+        let had = !set.is_empty();
+        set.clear();
+        had
+    }
+
     pub fn contains(&self, track: u32) -> bool {
         self.0.lock().contains(&track)
+    }
+
+    /// The marked tracks, in no particular order.
+    pub fn ids(&self) -> Vec<u32> {
+        self.0.lock().iter().copied().collect()
     }
 }
 
@@ -248,7 +279,10 @@ impl IndexCatalog {
                 let added = self.source.add_to_history(session, track);
                 if added {
                     history.last = track;
-                    self.played.mark(track);
+                    if !self.played.contains(track) {
+                        self.played.mark(track);
+                        self.source.played_changed();
+                    }
                 }
                 added
             }
@@ -258,6 +292,13 @@ impl IndexCatalog {
                 };
                 if !self.source.remove_from_history(session, track) {
                     return false;
+                }
+                // rekordbox clears the track's played mark with it, though
+                // an earlier session may also hold the track [OBS static,
+                // `notifyDBUpdatedHistory` kind 2 -> `updatePlayedStatus(id,
+                // false, true)` @`0x101e4c898`].
+                if self.played.unmark(track) {
+                    self.source.played_changed();
                 }
                 // What is now last, which a repeat of it may not follow.
                 history.last = self
@@ -279,9 +320,27 @@ impl IndexCatalog {
             // session stays in the library: rekordbox 7.2.11's master.db
             // controller refuses `deleteLinkHistory`, and the per-session
             // path it takes on a player's delete only clears played marks.
+            // The deleted session's tracks lose their played marks
+            // (`deleteLinkHistory` -> `clearPlayedStatus(tracks, true)`).
             Edit::HistoryDelete { history: named } => {
                 if named == u32::MAX || history.session == Some(named) {
+                    let tracks = history.session_in(&library).map_or_else(Vec::new, |session| {
+                        let histories = library.histories();
+                        histories
+                            .index_of(u64::from(session))
+                            .and_then(|index| histories.members.get(index))
+                            .map_or_else(Vec::new, |rows| {
+                                rows.iter().filter_map(|&row| Self::track_id(&library, row)).collect()
+                            })
+                    });
                     *history = LinkHistory::default();
+                    let mut changed = false;
+                    for track in tracks {
+                        changed |= self.played.unmark(track);
+                    }
+                    if changed {
+                        self.source.played_changed();
+                    }
                 }
                 true
             }
@@ -2425,7 +2484,7 @@ mod tests {
     }
 
     /// A library that takes the history writes a player's plays make.
-    struct Writable(Arc<Library>);
+    struct Writable(Arc<Library>, std::sync::atomic::AtomicUsize);
 
     impl Source for Writable {
         fn library(&self) -> Option<Arc<Library>> {
@@ -2469,6 +2528,9 @@ mod tests {
             self.0.set_histories(lists);
             true
         }
+        fn played_changed(&self) {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     fn history_menu(c: &IndexCatalog) -> Vec<String> {
@@ -2483,7 +2545,7 @@ mod tests {
 
     #[test]
     fn the_history_menu_holds_only_this_link_sessions_history() {
-        let source = Arc::new(Writable(Arc::new(library())));
+        let source = Arc::new(Writable(Arc::new(library()), std::sync::atomic::AtomicUsize::new(0)));
         let played = Played::default();
         let c = IndexCatalog::new(
             Arc::clone(&source) as Arc<dyn Source>,
@@ -2541,6 +2603,48 @@ mod tests {
         // A delete naming some other history leaves this one.
         assert!(c.edit(&Edit::HistoryDelete { history: session }));
         assert_eq!(c.list(&Query::Histories).len(), 1);
+    }
+
+    /// Issue 540: the marks the window colours played rows by follow the
+    /// player's history edits as rekordbox 7.2.19's link played bit does —
+    /// set by an add, cleared by a remove and by a delete of the session.
+    #[test]
+    fn played_marks_follow_a_players_history_adds_removes_and_delete() {
+        use std::sync::atomic::Ordering;
+        let source = Arc::new(Writable(Arc::new(library()), std::sync::atomic::AtomicUsize::new(0)));
+        let played = Played::default();
+        let c = IndexCatalog::new(Arc::clone(&source) as Arc<dyn Source>, played.clone());
+        let changes = || source.1.load(Ordering::Relaxed);
+
+        assert!(c.edit(&Edit::HistoryAdd { track: 11 }));
+        assert!(c.edit(&Edit::HistoryAdd { track: 10 }));
+        let mut marked = played.ids();
+        marked.sort_unstable();
+        assert_eq!(marked, [10, 11]);
+        assert_eq!(changes(), 2);
+        // A track already marked changes nothing the window shows.
+        assert!(c.edit(&Edit::HistoryAdd { track: 11 }));
+        assert_eq!(changes(), 2);
+
+        assert!(c.edit(&Edit::HistoryRemove { track: 11 }));
+        assert!(!played.contains(11), "a player's remove clears the mark");
+        assert!(played.contains(10));
+        assert_eq!(changes(), 3);
+        // A refused remove leaves the marks alone.
+        assert!(!c.edit(&Edit::HistoryRemove { track: 999 }));
+        assert_eq!(changes(), 3);
+
+        assert!(c.edit(&Edit::HistoryAdd { track: 12 }));
+        assert!(c.edit(&Edit::HistoryDelete { history: u32::MAX }));
+        assert_eq!(played.ids(), [] as [u32; 0], "the deleted session's tracks lose their marks");
+        assert_eq!(changes(), 5);
+
+        // A delete naming another history leaves this session's marks.
+        assert!(c.edit(&Edit::HistoryAdd { track: 10 }));
+        assert!(c.edit(&Edit::HistoryDelete { history: 1 }));
+        assert!(played.contains(10));
+        assert!(played.clear());
+        assert!(!played.clear(), "nothing left to clear");
     }
 
     #[test]
