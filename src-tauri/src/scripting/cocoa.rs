@@ -64,6 +64,10 @@ pub fn install(app: &AppHandle) {
         RbxAddCommand::class(),
         RbxRemoveCommand::class(),
         RbxExportCommand::class(),
+        RbxMyTagCatalogCommand::class(),
+        RbxReadMyTagsCommand::class(),
+        RbxAddMyTagsCommand::class(),
+        RbxRemoveMyTagsCommand::class(),
     );
     extend_application();
 }
@@ -1425,6 +1429,91 @@ fn export(command: &NSScriptCommand) {
     ask_window_for("export", args, EXPORT_TIMEOUT, |_, answer| {
         answer.as_str().map_or(ScriptValue::Missing, |said| ScriptValue::Text(said.to_owned()))
     });
+}
+
+// --------------------------------------------------------- My Tag automation
+
+define_class!(
+    // SAFETY: NSScriptCommand is designed for subclassing; no additional ivars.
+    #[unsafe(super(NSScriptCommand, NSObject))]
+    #[name = "RbxMyTagCatalogCommand"]
+    struct RbxMyTagCatalogCommand;
+
+    impl RbxMyTagCatalogCommand {
+        #[unsafe(method_id(performDefaultImplementation))]
+        fn perform(&self) -> Option<Retained<AnyObject>> {
+            once(self, |_| defer(async { super::my_tags::catalog(state()?).await }));
+            None
+        }
+    }
+);
+
+define_class!(
+    // SAFETY: NSScriptCommand is designed for subclassing; no additional ivars.
+    #[unsafe(super(NSScriptCommand, NSObject))]
+    #[name = "RbxReadMyTagsCommand"]
+    struct RbxReadMyTagsCommand;
+
+    impl RbxReadMyTagsCommand {
+        #[unsafe(method_id(performDefaultImplementation))]
+        fn perform(&self) -> Option<Retained<AnyObject>> {
+            once(self, |command| {
+                let objects = direct(command);
+                let [object] = objects.as_slice() else {
+                    return fail(&ScriptError::wrong_type("Read My Tags from exactly one track at a time."));
+                };
+                let Some(track) = object.downcast_ref::<RbxTrack>() else {
+                    return fail(&ScriptError::no_such_object("Say which track to read."));
+                };
+                let track = track.ivars().id.to_string();
+                defer(async move { super::my_tags::assigned(state()?, track).await });
+            });
+            None
+        }
+    }
+);
+
+define_class!(
+    // SAFETY: NSScriptCommand is designed for subclassing; no additional ivars.
+    #[unsafe(super(NSScriptCommand, NSObject))]
+    #[name = "RbxAddMyTagsCommand"]
+    struct RbxAddMyTagsCommand;
+
+    impl RbxAddMyTagsCommand {
+        #[unsafe(method_id(performDefaultImplementation))]
+        fn perform(&self) -> Option<Retained<AnyObject>> {
+            once(self, |command| change_my_tags(command, "to", rbl_db::write::MyTagOperation::Add));
+            None
+        }
+    }
+);
+
+define_class!(
+    // SAFETY: NSScriptCommand is designed for subclassing; no additional ivars.
+    #[unsafe(super(NSScriptCommand, NSObject))]
+    #[name = "RbxRemoveMyTagsCommand"]
+    struct RbxRemoveMyTagsCommand;
+
+    impl RbxRemoveMyTagsCommand {
+        #[unsafe(method_id(performDefaultImplementation))]
+        fn perform(&self) -> Option<Retained<AnyObject>> {
+            once(self, |command| change_my_tags(command, "from", rbl_db::write::MyTagOperation::Remove));
+            None
+        }
+    }
+);
+
+fn change_my_tags(command: &NSScriptCommand, key: &str, operation: rbl_db::write::MyTagOperation) {
+    let tags = match super::my_tags::tag_ids(from_objc(command.directParameter().as_deref())) {
+        Ok(tags) => tags,
+        Err(error) => return fail(&error),
+    };
+    let Some(track) = argument(command, key).and_then(|value| {
+        value.downcast_ref::<RbxTrack>().map(|track| track.ivars().id.to_string())
+    }) else {
+        return fail(&ScriptError::no_such_object("Say which track to update."));
+    };
+    defer(async move { super::my_tags::update(app()?.clone(), track, tags, operation).await });
 }
 
 // ------------------------------------------------------- the application

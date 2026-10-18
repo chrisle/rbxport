@@ -565,6 +565,14 @@ pub struct TrackEdit {
     after: Value,
 }
 
+/// How a caller changes a track's My Tag membership.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MyTagOperation {
+    Replace,
+    Add,
+    Remove,
+}
+
 /// The My Tag set before and after one information-panel edit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackTagEdit {
@@ -2836,10 +2844,25 @@ impl Writer {
     /// [DOC; the reference library held none to transcribe]. A tag id the
     /// library does not hold is refused before anything is written.
     pub fn set_my_tags(&mut self, content: &str, tags: &[String]) -> Result<Changed> {
+        self.update_my_tags_with_undo(content, tags, MyTagOperation::Replace).map(|(changed, _)| changed)
+    }
+
+    /// Membership reads, validation and writes share one immediate transaction.
+    /// Add/remove preserve unrelated assignments, including changes made since
+    /// a companion last read the collection. Duplicate inputs are harmless.
+    pub fn update_my_tags_with_undo(
+        &mut self,
+        content: &str,
+        tags: &[String],
+        operation: MyTagOperation,
+    ) -> Result<(Changed, TrackTagEdit)> {
         self.prepare()?;
+        let mut tags = tags.to_vec();
+        tags.sort();
+        tags.dedup();
         let stamp = time::now();
         let mut ids: Vec<(String, String)> = Vec::with_capacity(tags.len());
-        for _ in tags {
+        for _ in &tags {
             ids.push((self.rng.uuid4(), self.rng.uuid4()));
         }
         let tx = self.library.connection_mut()
@@ -2847,7 +2870,7 @@ impl Writer {
         if !content_exists(&tx, content)? {
             return Err(DbError::WriteRefused(format!("no track {content}")));
         }
-        for tag in tags {
+        for tag in &tags {
             let known: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM djmdMyTag WHERE ID = ?1 AND Attribute = 0 AND rb_local_deleted = 0",
                 params![tag],
@@ -2858,15 +2881,22 @@ impl Writer {
             }
         }
         let mut stmt = tx.prepare(
-            "SELECT MyTagID FROM djmdSongMyTag WHERE ContentID = ?1 AND rb_local_deleted = 0",
+            "SELECT MyTagID FROM djmdSongMyTag WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY MyTagID",
         )?;
         let current: Vec<String> = stmt
             .query_map(params![content], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
+        let mut after = match operation {
+            MyTagOperation::Replace => tags.clone(),
+            MyTagOperation::Add => current.iter().chain(&tags).cloned().collect(),
+            MyTagOperation::Remove => current.iter().filter(|tag| !tags.contains(tag)).cloned().collect(),
+        };
+        after.sort();
+        after.dedup();
         let mut rows = 0;
         let mut usn = next_usn(&tx)?;
-        for gone in current.iter().filter(|t| !tags.contains(t)) {
+        for gone in current.iter().filter(|t| !after.contains(t)) {
             usn = next_usn(&tx)?;
             rows += tx.execute(
                 "UPDATE djmdSongMyTag SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
@@ -2875,7 +2905,7 @@ impl Writer {
             )?;
         }
         for (tag, (id, uuid)) in tags.iter().zip(&ids) {
-            if current.contains(tag) {
+            if current.contains(tag) || !after.contains(tag) {
                 continue;
             }
             let track_no: i64 = tx.query_row(
@@ -2893,9 +2923,11 @@ impl Writer {
                 params![id, tag, content, track_no, uuid, usn, stamp],
             )?;
         }
-        set_counter(&tx, usn)?;
+        if rows > 0 {
+            set_counter(&tx, usn)?;
+        }
         tx.commit()?;
-        Ok(Changed { rows, usn })
+        Ok((Changed { rows, usn }, TrackTagEdit { content: content.to_owned(), before: current, after }))
     }
 
     pub fn set_my_tags_with_undo(
@@ -2903,10 +2935,7 @@ impl Writer {
         content: &str,
         tags: &[String],
     ) -> Result<(Changed, TrackTagEdit)> {
-        let before = self.track_tags(content)?;
-        let changed = self.set_my_tags(content, tags)?;
-        let after = self.track_tags(content)?;
-        Ok((changed, TrackTagEdit { content: content.to_owned(), before, after }))
+        self.update_my_tags_with_undo(content, tags, MyTagOperation::Replace)
     }
 
     pub fn undo_tag_edit(&mut self, edit: &TrackTagEdit) -> Result<Changed> {

@@ -2675,6 +2675,81 @@ fn a_selection_shows_the_my_tags_all_its_tracks_share() {
 }
 
 #[test]
+fn my_tag_deltas_preserve_other_assignments_and_are_retry_safe() {
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    use rbl_db::write::MyTagOperation::{Add, Remove};
+    let mut f = fixture();
+    let id = track_id(2);
+    let warm = MY_TAG_WARM_UP.to_owned();
+    let peak = MY_TAG_PEAK.to_owned();
+    f.writer.set_my_tags(&id, std::slice::from_ref(&warm)).unwrap();
+    let row_before: Vec<rusqlite::types::Value> = {
+        let mut statement = f.conn().prepare("SELECT * FROM djmdContent WHERE ID = ?1").unwrap();
+        let columns = statement.column_count();
+        statement.query_row([&id], |row| (0..columns).map(|column| row.get(column)).collect()).unwrap()
+    };
+    let (changed, edit) = f.writer.update_my_tags_with_undo(&id, &[peak.clone(), peak.clone()], Add).unwrap();
+    assert_eq!(changed.rows, 1);
+    assert!(!edit.is_empty());
+    let tags = |f: &Fixture| rbl_db::details::track_details(f.conn(), &id).unwrap().unwrap().my_tags;
+    assert_eq!(tags(&f), vec![peak.clone(), warm.clone()]);
+    let counter: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    let (changed, retry) = f.writer.update_my_tags_with_undo(&id, std::slice::from_ref(&peak), Add).unwrap();
+    assert_eq!(changed.rows, 0);
+    assert!(retry.is_empty());
+    assert_eq!(counter, f.one::<i64>("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]));
+    f.writer.undo_tag_edit(&edit).unwrap();
+    assert_eq!(tags(&f), vec![warm.clone()]);
+    f.writer.redo_tag_edit(&edit).unwrap();
+    assert_eq!(tags(&f), vec![peak.clone(), warm.clone()]);
+    let (changed, removed) = f.writer.update_my_tags_with_undo(&id, std::slice::from_ref(&peak), Remove).unwrap();
+    assert_eq!(changed.rows, 1);
+    assert_eq!(tags(&f), vec![warm.clone()]);
+    assert!(f.writer.update_my_tags_with_undo(&id, &[peak.clone(), peak], Remove).unwrap().1.is_empty());
+    assert!(f.writer.update_my_tags_with_undo(&id, &[], Add).unwrap().1.is_empty());
+    assert!(f.writer.update_my_tags_with_undo(&id, &[], Remove).unwrap().1.is_empty());
+    f.writer.undo_tag_edit(&removed).unwrap();
+    let mut statement = f.conn().prepare("SELECT * FROM djmdContent WHERE ID = ?1").unwrap();
+    let columns = statement.column_count();
+    let row_after: Vec<rusqlite::types::Value> = statement.query_row([&id], |row| (0..columns).map(|column| row.get(column)).collect()).unwrap();
+    assert_eq!(row_before, row_after, "tag editing must not alter any track metadata column");
+}
+
+#[test]
+fn my_tag_deltas_validate_every_id_before_writing() {
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    use rbl_db::write::MyTagOperation::{Add, Remove};
+    let mut f = fixture();
+    let id = track_id(2);
+    f.writer.set_my_tags(&id, &[MY_TAG_WARM_UP.to_owned()]).unwrap();
+    for operation in [Add, Remove] {
+        assert!(f.writer.update_my_tags_with_undo(&id, &[MY_TAG_PEAK.to_owned(), "unknown".into()], operation).is_err());
+        assert!(f.writer.update_my_tags_with_undo("missing", &[], operation).is_err());
+        let read = rbl_db::details::track_details(f.conn(), &id).unwrap().unwrap();
+        assert_eq!(read.my_tags, vec![MY_TAG_WARM_UP.to_owned()]);
+    }
+    let category: String = f.one("SELECT ID FROM djmdMyTag WHERE Attribute = 1 LIMIT 1", &[]);
+    assert!(f.writer.update_my_tags_with_undo(&id, &[category], Add).is_err());
+    f.conn().execute("UPDATE djmdMyTag SET rb_local_deleted = 1 WHERE ID = ?1", [MY_TAG_PEAK]).unwrap();
+    assert!(f.writer.update_my_tags_with_undo(&id, &[MY_TAG_PEAK.to_owned()], Add).is_err());
+}
+
+#[test]
+fn my_tag_delta_rolls_back_when_a_later_insert_fails() {
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    use rbl_db::write::MyTagOperation::Add;
+    let mut f = fixture();
+    let id = track_id(2);
+    f.conn().execute_batch(&format!(
+        "CREATE TRIGGER fail_second_tag BEFORE INSERT ON djmdSongMyTag WHEN NEW.MyTagID = '{MY_TAG_WARM_UP}' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;"
+    )).unwrap();
+    let counter: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    assert!(f.writer.update_my_tags_with_undo(&id, &[MY_TAG_PEAK.to_owned(), MY_TAG_WARM_UP.to_owned()], Add).is_err());
+    assert!(rbl_db::details::track_details(f.conn(), &id).unwrap().unwrap().my_tags.is_empty());
+    assert_eq!(counter, f.one::<i64>("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]));
+}
+
+#[test]
 fn the_tag_list_takes_tracks_on_the_end_and_closes_up_when_one_comes_off() {
     let mut f = fixture();
     let changed = f.writer.tag_list_add(&[track_id(3), track_id(1), track_id(3)]).unwrap();
