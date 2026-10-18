@@ -576,6 +576,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const listeners = new Set<(generation: number) => void>();
   const historyListeners = new Set<(history: EditHistoryState) => void>();
   const tagListListeners = new Set<() => void>();
+  // Played marks (#540): the deck's recorded plays, and `?played=` as the
+  // tracks a player added to history over LINK, shown while LINK is on.
+  const deckPlayed = new Set<string>();
+  const linkPlayed = new Set<string>(readPlayedFromUrl());
+  const playedListeners = new Set<() => void>();
+  const playedChanged = () => {
+    for (const listener of playedListeners) listener();
+  };
 
   const historyState = (): EditHistoryState => ({
     generation,
@@ -1109,7 +1117,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(after) });
     },
     // The mock keeps no history sessions of its own to add to or take from.
-    recordPlay: () => wait(generation),
+    recordPlay: (track) => {
+      if (!deckPlayed.has(track)) {
+        deckPlayed.add(track);
+        playedChanged();
+      }
+      return wait(generation);
+    },
     removeFromHistory: (history, tracks) => {
       membership.set(history, membersOf(history).filter((t) => !tracks.includes(t)));
       return bump();
@@ -2784,6 +2798,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(mockLinkStatus());
     },
     onLinkStatus: () => () => undefined,
+    playedTracks: () => wait([...new Set([...deckPlayed, ...(linkMode === "on" ? linkPlayed : [])])].sort()),
+    resetPlayedTracks: () => {
+      const had = deckPlayed.size + linkPlayed.size > 0;
+      deckPlayed.clear();
+      linkPlayed.clear();
+      if (had) playedChanged();
+      return wait(undefined);
+    },
+    onPlayedChanged: (listener) => {
+      playedListeners.add(listener);
+      return () => playedListeners.delete(listener);
+    },
 
     // Analysis is real work in the app; here it just answers, so the queue's
     // sequencing and progress can be driven end to end without audio.
@@ -3458,6 +3484,13 @@ function readPlaylistFixtureFromUrl(): PlaylistFixture {
  * browser has no way to be on. `detected` hears two players and a mixer with
  * LINK off, `on` serves them, `blocked` reports the ports held.
  */
+/** `?played=1,2` marks those tracks as added to history by a player over LINK. */
+function readPlayedFromUrl(): string[] {
+  if (typeof location === "undefined") return [];
+  const raw = new URLSearchParams(location.search).get("played");
+  return raw ? raw.split(",").filter((id) => id !== "") : [];
+}
+
 function readLinkFromUrl(): "detected" | "on" | "blocked" | null {
   if (typeof location === "undefined") return null;
   const raw = new URLSearchParams(location.search).get("link");

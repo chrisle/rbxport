@@ -43,6 +43,7 @@ import { TickIcon } from "@/components/icons";
 import type { TrafficLightSource } from "@/lib/session";
 import type { ListPosition } from "@/lib/continuousPlay";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
+import { usePlayedTracks } from "@/store/usePlayedTracks";
 import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
 import { createDragAutoscroll } from "@/lib/dragAutoscroll";
@@ -416,13 +417,15 @@ const EditableCell = memo(function EditableCell({
 });
 
 const TrackRow = memo(function TrackRow({
-  row, top, selected, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
+  row, top, selected, played, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
   onComment, onEditField, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
   reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache,
 }: {
   row: RowDto | undefined;
   top: number;
   selected: boolean;
+  /** Played (#540): the row's text is drawn in rekordbox's played green. */
+  played: boolean;
   index: number;
   columns: readonly ColumnSpec[];
   /** Preferences: `Ebm` or `2A`. */
@@ -523,6 +526,7 @@ const TrackRow = memo(function TrackRow({
     <div
       className={styles.row}
       data-selected={selected || undefined}
+      data-played={played || undefined}
       data-even={index % 2 === 1 || undefined}
       style={{ transform: `translate3d(0, ${top}px, 0)` }}
       onMouseDown={(e) => {
@@ -1003,6 +1007,7 @@ export const TrackTable = memo(function TrackTable({
 }: TrackTableProps) {
   const extraColumns = useMemo(() => EXTRA_COLUMNS.filter((key) => columns.some((column) => column.key === key)), [columns]);
   const view = useTrackView(spec, libraryGeneration, pendingEdits, seed, extraColumns);
+  const played = usePlayedTracks();
   const preferences = usePreferences();
   const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;
   // The keys the Keyboard pane's preset and the person's own changes give.
@@ -2267,6 +2272,7 @@ export const TrackTable = memo(function TrackTable({
                 trafficReach={preferences.view.trafficLight}
                 top={item.start - COL_HEADER_H}
                 selected={row ? selection.ids.has(row.id) : false}
+                played={row ? played.has(row.id) : false}
                 onSelect={handleSelect}
                 onOpen={handleOpen}
                 onMenu={openTrackMenu}

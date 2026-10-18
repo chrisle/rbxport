@@ -12,6 +12,7 @@
   --c-field-placeholder: #4B4B4B; /* measured: search placeholder text and magnifier glyph */
   --c-text: #E6E6E6;
   --c-text-dim: #9A9A9A;
+  --c-played: #69B900; /* rekordbox 7.2.19 static: a played track's text in the track list, theme colour 0x30000e1 in the dark theme and the selected-row constant alike (ListViewer::findTextColour @0x1003efb70; the theme table from __GLOBAL__sub_I_ColorTheme.cpp, issue #540) */
   --c-icon-off: #A0A0A0; /* skins/*_off.svg fill rgb(160,160,160) */
   --c-icon-on: #F0F0F0; /* skins/*_on.svg fill rgb(240,240,240) */
   --c-missing: #FF9600; /* measured: the orange [!] rekordbox 7.2.14 draws in the Attribute column for a track whose file is missing (Winrig chris-win11 2026-10-08, issue #201) */
