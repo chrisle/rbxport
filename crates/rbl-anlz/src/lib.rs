@@ -562,6 +562,28 @@ impl Anlz {
         self.sections.iter().find_map(Section::as_path)
     }
 
+    /// The file with its `PPTH` naming `path` and every other section
+    /// byte-for-byte as it was; a file without one gains it first.
+    ///
+    /// What rekordbox does to a stick's analysis files when Import Playlist
+    /// copies a track to the computer: the stick's `PPTH` is the full
+    /// `/Contents/…` path, and the copies in the share tree are given the
+    /// new file's [static, rekordbox 7.2.19 macOS arm64:
+    /// `importFromDeviceThread::import_device_analysis` @0x1001db460 copies
+    /// the `.DAT`, `.EXT` and `.2EX`, then
+    /// `CAnalyzerIF::initPathAndDeviceCue` sets their path].
+    #[must_use]
+    pub fn with_path(&self, path: &str) -> Vec<u8> {
+        let replacement = write::path_section(path);
+        let mut sections = self.sections.clone();
+        if let Some(at) = sections.iter().position(|s| s.tag == FourCc::new(b"PPTH")) {
+            sections[at] = replacement;
+        } else {
+            sections.insert(0, replacement);
+        }
+        write::render(&self.header_extra, &sections)
+    }
+
     /// Waveform payload and its stride for a given tag.
     pub fn waveform(&self, tag: &[u8; 4]) -> Option<(u32, &[u8])> {
         let section = self.section(tag)?;
@@ -738,5 +760,38 @@ mod grid_offset_tests {
             assert_eq!(parsed.with_grid_offset(0).unwrap(), before);
         }
         assert!(Anlz::default().with_grid_offset(1).is_none());
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn a_new_path_replaces_the_old_and_leaves_every_other_section_as_it_was() {
+        let mut stick = write::AnlzBuilder::new();
+        stick
+            .path("/Contents/Artist/Album/track.mp3")
+            .beat_grid(&[Beat { beat_number: 1, tempo_x100: 12800, time_ms: 250 }])
+            .waveform_preview(b"PWAV", &[1, 2, 3])
+            .cue_lists(true);
+        let original = parse(&stick.finish()).unwrap();
+        let moved = parse(&original.with_path("?/track.mp3")).unwrap();
+        assert_eq!(moved.path().as_deref(), Some("?/track.mp3"));
+        assert_eq!(moved.sections.len(), original.sections.len());
+        assert_eq!(moved.sections[1..], original.sections[1..]);
+        assert_eq!(moved.header_extra, original.header_extra);
+        // Back again gives the stick's own bytes.
+        assert_eq!(moved.with_path("/Contents/Artist/Album/track.mp3"), original.to_bytes());
+    }
+
+    #[test]
+    fn a_file_without_a_path_gains_one_first() {
+        let mut bare = write::AnlzBuilder::new();
+        bare.beat_grid(&[Beat { beat_number: 1, tempo_x100: 12000, time_ms: 0 }]);
+        let named = parse(&parse(&bare.finish()).unwrap().with_path("?/a.wav")).unwrap();
+        assert_eq!(named.sections[0].as_path().as_deref(), Some("?/a.wav"));
+        assert!(named.beat_grid().is_some());
     }
 }

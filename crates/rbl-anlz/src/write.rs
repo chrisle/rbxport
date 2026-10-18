@@ -109,13 +109,7 @@ impl AnlzBuilder {
 
     /// `PPTH` — the path of the audio, UTF-16BE with a NUL terminator.
     pub fn path(&mut self, path: &str) -> &mut Self {
-        let mut text: Vec<u8> = Vec::new();
-        for unit in path.encode_utf16() {
-            text.extend_from_slice(&unit.to_be_bytes());
-        }
-        text.extend_from_slice(&[0, 0]);
-        let header = be32(u32::try_from(text.len()).unwrap_or(0)).to_vec();
-        self.sections.push(Section::new(b"PPTH", header, text));
+        self.sections.push(path_section(path));
         self
     }
 
@@ -233,4 +227,16 @@ impl AnlzBuilder {
     pub fn finish(&self) -> Vec<u8> {
         render(&self.header_extra, &self.sections)
     }
+}
+
+/// A `PPTH` section naming `path`: UTF-16BE with a NUL terminator, its
+/// length in the tag header.
+pub(crate) fn path_section(path: &str) -> Section {
+    let mut text: Vec<u8> = Vec::new();
+    for unit in path.encode_utf16() {
+        text.extend_from_slice(&unit.to_be_bytes());
+    }
+    text.extend_from_slice(&[0, 0]);
+    let header = be32(u32::try_from(text.len()).unwrap_or(0)).to_vec();
+    Section::new(b"PPTH", header, text)
 }
