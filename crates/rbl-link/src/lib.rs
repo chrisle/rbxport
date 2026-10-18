@@ -219,17 +219,18 @@ impl LinkExport {
 
     /// Starts Link Export and optionally observes generic unsupported database
     /// requests without making the protocol layer depend on telemetry.
-    /// `played` holds the tracks players add to history; the caller keeps a
-    /// handle, so the marks outlive this session as rekordbox's do.
+    /// Players are told only this session's played tracks; every mark it
+    /// sets or clears is copied into `colour`, which the caller keeps so the
+    /// window's colouring outlives the session as rekordbox's does.
     pub fn start_with_unsupported_command_reporter(
         source: Arc<dyn Source>,
         interface: Interface,
         ports: Ports,
         unsupported_command_reporter: Option<UnsupportedCommandReporter>,
-        played: Played,
+        colour: Played,
     ) -> Result<Self, LinkError> {
         let library = source.library().ok_or(LinkError::NoLibrary)?;
-        let catalog = Arc::new(IndexCatalog::new(Arc::clone(&source), played));
+        let catalog = Arc::new(IndexCatalog::new(Arc::clone(&source), Played::default()).with_colour(colour));
 
         // Bound first, as rekordbox binds its link stack at launch; but the
         // beacon's join decides when they serve. Its device number, `0`

@@ -165,13 +165,15 @@ struct Parsed {
     two_ex: Option<Anlz>,
 }
 
-/// The tracks players have added to this link session's history with the
-/// `0x3001` command. The catalog greys their rows the way rekordbox greys
-/// what is in its link history, and the window colours them as rekordbox's
-/// track list does. Cloned handles share one set, so the app can keep it
-/// across LINK going off and on.
+/// A set of tracks players have added to history with the `0x3001`
+/// command. The catalog keeps two: one for this link session, which decides
+/// the rows a player greys as played (tracks played during the current link
+/// session, `alphatheta-docs/platform/link-export-server-standalone.md`),
+/// and one the app hands it for the window to colour rows by as rekordbox's
+/// track list does, which outlives LINK going off and on. Cloned handles
+/// share one set.
 ///
-/// rekordbox 7.2.19 keeps the same mark as bit `0x10` of a track's cached
+/// rekordbox 7.2.19 keeps the window's mark as bit `0x10` of a track's cached
 /// row (`rekordboxDBController::updatePlayedStatus` @`0x1017f429c`): set by
 /// a player's history add and cleared by its history remove
 /// (`DatabaseMediator::notifyDBUpdatedHistory` @`0x101e4c664`, kinds 1 and
@@ -232,7 +234,11 @@ impl LinkHistory {
 /// The library as a player browses it.
 pub struct IndexCatalog {
     source: Arc<dyn Source>,
+    /// What players are told was played: this link session's marks only.
     played: Played,
+    /// The app's marks the window colours by, mirroring `played`'s edits
+    /// but kept across sessions (#540).
+    colour: Played,
     /// Most recently used last.
     analysis: Mutex<Vec<Arc<Parsed>>>,
     /// Menus and their visible rows are shared between every player session.
@@ -247,10 +253,34 @@ impl IndexCatalog {
         Self {
             source,
             played,
+            colour: Played::default(),
             analysis: Mutex::new(Vec::with_capacity(ANALYSIS_CACHE)),
             browse: Mutex::new(BrowseCache::default()),
             link_history: Mutex::new(LinkHistory::default()),
         }
+    }
+
+    /// Copies every played mark this session sets or clears into `colour`,
+    /// the app's lasting set the window colours rows by. Players still see
+    /// only this session's marks.
+    #[must_use]
+    pub fn with_colour(mut self, colour: Played) -> Self {
+        self.colour = colour;
+        self
+    }
+
+    /// Sets a track's played mark; whether the window's colouring changed.
+    fn mark_played(&self, track: u32) -> bool {
+        self.played.mark(track);
+        let new = !self.colour.contains(track);
+        self.colour.mark(track);
+        new
+    }
+
+    /// Clears a track's played mark; whether the window's colouring changed.
+    fn unmark_played(&self, track: u32) -> bool {
+        self.played.unmark(track);
+        self.colour.unmark(track)
     }
 
     /// A player's history edits, as `PSvDBMain::OnHistoryCmd` makes them.
@@ -279,8 +309,7 @@ impl IndexCatalog {
                 let added = self.source.add_to_history(session, track);
                 if added {
                     history.last = track;
-                    if !self.played.contains(track) {
-                        self.played.mark(track);
+                    if self.mark_played(track) {
                         self.source.played_changed();
                     }
                 }
@@ -297,7 +326,7 @@ impl IndexCatalog {
                 // an earlier session may also hold the track [OBS static,
                 // `notifyDBUpdatedHistory` kind 2 -> `updatePlayedStatus(id,
                 // false, true)` @`0x101e4c898`].
-                if self.played.unmark(track) {
+                if self.unmark_played(track) {
                     self.source.played_changed();
                 }
                 // What is now last, which a repeat of it may not follow.
@@ -336,7 +365,7 @@ impl IndexCatalog {
                     *history = LinkHistory::default();
                     let mut changed = false;
                     for track in tracks {
-                        changed |= self.played.unmark(track);
+                        changed |= self.unmark_played(track);
                     }
                     if changed {
                         self.source.played_changed();
@@ -2645,6 +2674,38 @@ mod tests {
         assert!(played.contains(10));
         assert!(played.clear());
         assert!(!played.clear(), "nothing left to clear");
+    }
+
+    /// Issue 540 review: players grey only what was played during the
+    /// current link session (`link-export-server-standalone.md`), while the
+    /// app's colouring set keeps the marks of earlier sessions.
+    #[test]
+    fn players_see_this_sessions_plays_while_the_window_keeps_earlier_ones() {
+        use rbl_dbserver::catalog::Catalog as _;
+        let library = Arc::new(library());
+        let colour = Played::default();
+        let session = |colour: &Played| {
+            let source = Arc::new(Writable(Arc::clone(&library), std::sync::atomic::AtomicUsize::new(0)));
+            IndexCatalog::new(source as Arc<dyn Source>, Played::default()).with_colour(colour.clone())
+        };
+
+        let first = session(&colour);
+        assert!(first.edit(&Edit::HistoryAdd { track: 11 }));
+        assert!(first.played(11));
+        assert!(colour.contains(11), "the window colours it");
+        drop(first);
+
+        // LINK off and on: a fresh session.
+        let second = session(&colour);
+        assert!(!second.played(11), "an earlier session's play is not greyed on the players");
+        assert!(colour.contains(11), "but the window still colours it");
+        assert!(second.edit(&Edit::HistoryAdd { track: 10 }));
+        assert!(second.played(10));
+        // A remove clears both, as rekordbox's bit 0x10 is cleared.
+        assert!(second.edit(&Edit::HistoryRemove { track: 10 }));
+        assert!(!second.played(10));
+        assert!(!colour.contains(10));
+        assert!(colour.contains(11));
     }
 
     #[test]

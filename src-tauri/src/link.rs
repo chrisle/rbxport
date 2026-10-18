@@ -949,7 +949,7 @@ mod grid_offset_tests {
             rbl_prolink::DeviceSettings::default(),
             rbl_link::KeyOrder::Musical,
         );
-        let catalog = rbl_link::IndexCatalog::new(Arc::new(source), state.link_played());
+        let catalog = rbl_link::IndexCatalog::new(Arc::new(source), rbl_link::Played::default()).with_colour(state.link_played());
         // The fixture's own histories are not the menu.
         assert!(!state.library().unwrap().histories().is_empty());
         assert_eq!(catalog.list(&Query::Histories), [] as [rbl_dbserver::catalog::Row; 0]);
