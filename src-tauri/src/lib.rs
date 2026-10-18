@@ -684,6 +684,8 @@ pub fn run() {
             commands::open_url,
             commands::reset_play_count,
             commands::record_play,
+            commands::played_tracks,
+            commands::reset_played_tracks,
             commands::remove_from_history,
             commands::remove_from_collection,
             commands::reorder_playlist,

@@ -4223,7 +4223,33 @@ pub async fn record_play<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     track: String,
 ) -> AppResult<u32> {
-    edit(app, state, "record_play", Touched::Histories(vec![track.clone()]), move |w| w.record_play(&track).map(|_| ())).await
+    let marked = Arc::clone(&state);
+    let emitter = app.clone();
+    let id = track.clone();
+    let generation = edit(app, state, "record_play", Touched::Histories(vec![track.clone()]), move |w| w.record_play(&track).map(|_| ())).await?;
+    // The track list colours it from now on, as PERFORMANCE mode colours a
+    // track it adds to history (#540).
+    if marked.mark_deck_played(&id) {
+        let _ = tauri::Emitter::emit(&emitter, crate::link::PLAYED_CHANGED, ());
+    }
+    Ok(generation)
+}
+
+/// The tracks the track list colours as played, by id (#540).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
+pub fn played_tracks(state: State<'_, Arc<AppState>>) -> Vec<String> {
+    state.played_tracks()
+}
+
+/// Preferences › View › Browse › Coloring of played tracks › RESET: no row
+/// is coloured as played any more (#540).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor and AppHandle are injected by value")]
+pub fn reset_played_tracks<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: State<'_, Arc<AppState>>) {
+    if state.reset_played() {
+        let _ = tauri::Emitter::emit(&app, crate::link::PLAYED_CHANGED, ());
+    }
 }
 
 /// Remove from History: the tracks' plays leave the session.

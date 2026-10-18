@@ -157,6 +157,9 @@ pub fn interfaces() -> Vec<InterfaceDto> {
     rbl_link::interfaces().iter().map(InterfaceDto::from).collect()
 }
 
+/// Tells the window which rows to colour as played has changed (#540).
+pub const PLAYED_CHANGED: &str = "played:changed";
+
 /// Tells the window the library changed: an event name and its payload,
 /// the generation for `library:changed`, the track's id for `cues:changed`.
 pub type LibraryEvents = Arc<dyn Fn(&'static str, serde_json::Value) + Send + Sync>;
@@ -268,6 +271,10 @@ impl Source for StateSource {
 
     fn remove_from_history(&self, history: u32, track: u32) -> bool {
         self.history_write(Vec::new(), |writer| writer.remove_from_history(&history.to_string(), &[track.to_string()])).is_some()
+    }
+
+    fn played_changed(&self) {
+        (self.1)(PLAYED_CHANGED, serde_json::Value::Null);
     }
 
     fn library(&self) -> Option<Arc<rbl_index::Library>> {
@@ -502,6 +509,7 @@ impl Session {
             chosen,
             Ports::REKORDBOX,
             Some(unsupported_command_reporter),
+            state.link_played(),
         )
         .map_err(|e| e.to_string())?;
         let rx3_activation = match rx3 {
@@ -941,7 +949,7 @@ mod grid_offset_tests {
             rbl_prolink::DeviceSettings::default(),
             rbl_link::KeyOrder::Musical,
         );
-        let catalog = rbl_link::IndexCatalog::new(Arc::new(source), rbl_link::Played::default());
+        let catalog = rbl_link::IndexCatalog::new(Arc::new(source), state.link_played());
         // The fixture's own histories are not the menu.
         assert!(!state.library().unwrap().histories().is_empty());
         assert_eq!(catalog.list(&Query::Histories), [] as [rbl_dbserver::catalog::Row; 0]);
@@ -957,7 +965,14 @@ mod grid_offset_tests {
         let tracks = catalog.list(&Query::Tracks { scope: TrackScope::History(*session), sort: Sort::Default });
         assert_eq!(tracks, vec![Row::Track { id: track, position: 1 }]);
         assert_eq!(state.library().unwrap().play_count[row], before + 1);
-        assert_eq!(notifications.lock().unwrap().last(), Some(&("library:changed", state.summary().3.into())));
+        // The window hears of the history, then of the played mark (#540).
+        let heard = notifications.lock().unwrap().clone();
+        assert_eq!(heard[heard.len() - 2..], [
+            ("library:changed", state.summary().3.into()),
+            (PLAYED_CHANGED, serde_json::Value::Null),
+        ]);
+        assert!(state.link_played().contains(track));
+        assert_eq!(state.played_tracks(), [] as [String; 0], "LINK is off in this test, so nothing is coloured");
 
         // Persisted: a fresh read of the database has the session and the play.
         let reopened = state.open_read_only().unwrap();

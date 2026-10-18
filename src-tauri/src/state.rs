@@ -53,6 +53,26 @@ pub struct AppState {
     /// The waveform of each track an analysis is still drawing, by id: what
     /// it has decoded so far, laid out over the whole track.
     drawing: parking_lot::Mutex<HashMap<String, Arc<rbl_analysis::waveform::Waveform>>>,
+    /// The tracks the track list colours as played (#540).
+    played: PlayedMarks,
+}
+
+/// What rekordbox 7.2.19 colours green in its track list, held for the life
+/// of the app as its cached rows hold it (bits `0x08` and `0x10` that
+/// `rekordboxDBController::updatePlayedStatus` @`0x1017f429c` sets)
+/// [OBS static]. rekordbox's "Reset color when exiting" boxes are ticked by
+/// default (`SettingIF::getCurrentPlayedOption` / `getCurrentLinkPlayedOption`
+/// default `true`), so nothing is kept past quitting.
+#[derive(Default)]
+struct PlayedMarks {
+    /// The tracks players added to history over LINK, shared with the
+    /// running link session so they outlive LINK going off and on.
+    link: rbl_link::Played,
+    /// The tracks the deck here recorded a play of: what PERFORMANCE mode
+    /// marks when it adds a track to history
+    /// (`DatabaseMediator::addTrackToPlayHistory` -> `updatePlayedStatus(id,
+    /// true, false)` @`0x100c55e14`).
+    deck: parking_lot::Mutex<std::collections::HashSet<String>>,
 }
 
 /// One reversible library operation. Grid edits keep their own history because
@@ -191,7 +211,39 @@ impl AppState {
             device_assets: RwLock::new(HashMap::new()),
             fresh_analysis: parking_lot::Mutex::new(HashMap::new()),
             drawing: parking_lot::Mutex::new(HashMap::new()),
+            played: PlayedMarks::default(),
         }
+    }
+
+    /// The played marks a LINK session adds to, shared with it.
+    pub fn link_played(&self) -> rbl_link::Played {
+        self.played.link.clone()
+    }
+
+    /// Marks a track the deck recorded a play of; whether it was new.
+    pub fn mark_deck_played(&self, track: &str) -> bool {
+        self.played.deck.lock().insert(track.to_owned())
+    }
+
+    /// The tracks to colour as played, by id. rekordbox draws a link mark
+    /// only while LINK is on (`ListViewer::paintTextColumn` @`0x1003f1f48`
+    /// reads it behind `ProDJLink`'s flag at `+0x38`, which the LINK-on path
+    /// sets and the link-off paths clear in `UiProDJLink::handleSwitchEvent`)
+    /// [OBS static]; the marks themselves stay.
+    pub fn played_tracks(&self) -> Vec<String> {
+        let link = if self.link_running() { self.played.link.ids() } else { Vec::new() };
+        let mut ids: std::collections::BTreeSet<String> = self.played.deck.lock().iter().cloned().collect();
+        ids.extend(link.into_iter().map(|id| id.to_string()));
+        ids.into_iter().collect()
+    }
+
+    /// Preferences' RESET: every mark goes. Whether there were any.
+    pub fn reset_played(&self) -> bool {
+        let link = self.played.link.clear();
+        let mut deck = self.played.deck.lock();
+        let had = link || !deck.is_empty();
+        deck.clear();
+        had
     }
 
     /// Stable local recovery directory, independent of the backup destination.
@@ -360,6 +412,11 @@ impl AppState {
             library.row_of(track).is_some_and(|row| library.analysis_path.get(row as usize).is_empty())
         });
         let mut inner = self.inner.write();
+        // Another library's ids name other tracks: its rows start unmarked,
+        // as rekordbox's do when it opens another master database.
+        if inner.location.as_ref().is_some_and(|old| old.master_db != location.master_db) {
+            self.reset_played();
+        }
         inner.library = Some(Arc::new(library));
         inner.library_problem = None;
         inner.location = Some(location);
@@ -1063,5 +1120,50 @@ mod edit_refresh_tests {
             refresh_after_edit(&state, db, Touched::Metadata(vec![track.clone()]))
         }).is_err());
         assert_eq!(state.summary().3, generation);
+    }
+}
+
+#[cfg(test)]
+mod played_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    /// Issue 540: the deck's plays are coloured at once; a player's are
+    /// kept but drawn only while LINK is on, as rekordbox 7.2.19 draws its
+    /// link played bit; RESET and another library clear both.
+    #[test]
+    fn played_tracks_show_deck_plays_and_hold_link_plays_until_link_is_on() {
+        let state = AppState::with_backups(tempfile::tempdir().unwrap().path().join("backups"));
+        assert_eq!(state.played_tracks(), [] as [String; 0]);
+        assert!(state.mark_deck_played("12"));
+        assert!(!state.mark_deck_played("12"), "already marked");
+        state.link_played().mark(34);
+        assert!(!state.link_running());
+        assert_eq!(state.played_tracks(), ["12"], "a player's play waits for LINK");
+        assert!(state.link_played().contains(34), "but is kept");
+
+        assert!(state.reset_played());
+        assert_eq!(state.played_tracks(), [] as [String; 0]);
+        assert!(!state.link_played().contains(34));
+        assert!(!state.reset_played(), "nothing left to reset");
+    }
+
+    #[test]
+    fn another_library_starts_with_nothing_played() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        let one = rbl_db::fixture::build(&dir.path().join("one"), rbl_db::fixture::Shape::default()).unwrap();
+        let two = rbl_db::fixture::build(&dir.path().join("two"), rbl_db::fixture::Shape::default()).unwrap();
+        let load = |location: &rbl_db::LibraryLocation| {
+            let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+            rbl_index::load(&db).unwrap().0
+        };
+        state.set_library(load(&one), true, None, 0, one.clone());
+        assert!(state.mark_deck_played("1"));
+        // The same library read again after an edit keeps its marks.
+        state.set_library(load(&one), true, None, 0, one);
+        assert_eq!(state.played_tracks(), ["1"]);
+        state.set_library(load(&two), true, None, 0, two);
+        assert_eq!(state.played_tracks(), [] as [String; 0]);
     }
 }
