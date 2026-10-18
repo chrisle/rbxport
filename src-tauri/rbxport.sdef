@@ -116,6 +116,9 @@
       </property>
       <!-- An object named as a command's direct parameter is its receiver,
            and Cocoa refuses a command its receiver's class does not list. -->
+      <responds-to command="read my tags">
+        <cocoa method="scriptReadMyTags:"/>
+      </responds-to>
       <responds-to command="load">
         <cocoa method="scriptLoad:"/>
       </responds-to>

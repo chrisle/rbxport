@@ -512,6 +512,12 @@ define_class!(
             track_specifier(self.mtm(), self.ivars().id, self.ivars().playlist)
         }
 
+        #[unsafe(method_id(scriptReadMyTags:))]
+        fn script_read_my_tags(&self, command: &NSScriptCommand) -> Option<Retained<AnyObject>> {
+            once(command, read_my_tags);
+            None
+        }
+
         #[unsafe(method_id(scriptLoad:))]
         fn script_load(&self, command: &NSScriptCommand) -> Option<Retained<AnyObject>> {
             once(command, load);
@@ -1457,17 +1463,7 @@ define_class!(
     impl RbxReadMyTagsCommand {
         #[unsafe(method_id(performDefaultImplementation))]
         fn perform(&self) -> Option<Retained<AnyObject>> {
-            once(self, |command| {
-                let objects = direct(command);
-                let [object] = objects.as_slice() else {
-                    return fail(&ScriptError::wrong_type("Read My Tags from exactly one track at a time."));
-                };
-                let Some(track) = object.downcast_ref::<RbxTrack>() else {
-                    return fail(&ScriptError::no_such_object("Say which track to read."));
-                };
-                let track = track.ivars().id.to_string();
-                defer(async move { super::my_tags::assigned(state()?, track).await });
-            });
+            once(self, read_my_tags);
             None
         }
     }
@@ -1502,6 +1498,18 @@ define_class!(
         }
     }
 );
+
+fn read_my_tags(command: &NSScriptCommand) {
+    let objects = direct(command);
+    let [object] = objects.as_slice() else {
+        return fail(&ScriptError::wrong_type("Read My Tags from exactly one track at a time."));
+    };
+    let Some(track) = object.downcast_ref::<RbxTrack>() else {
+        return fail(&ScriptError::no_such_object("Say which track to read."));
+    };
+    let track = track.ivars().id.to_string();
+    defer(async move { super::my_tags::assigned(state()?, track).await });
+}
 
 fn change_my_tags(command: &NSScriptCommand, key: &str, operation: rbl_db::write::MyTagOperation) {
     let tags = match super::my_tags::tag_ids(from_objc(command.directParameter().as_deref())) {
