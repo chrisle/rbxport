@@ -10,6 +10,47 @@ import { describe, expect, it } from "vitest";
 import { createMockBackend } from "./backend-mock";
 import { TREE_ROOT } from "./types";
 
+describe("related playlists", () => {
+  it("lists edited playlists a track belongs to, alongside the seeded ones", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const track = "100000";
+    const before = new Set((await backend.playlistTree()).map((node) => node.id));
+    await backend.edits.createPlaylist("Alpha", TREE_ROOT);
+    await backend.edits.createPlaylist("Beta", TREE_ROOT);
+    const [alpha = "", beta = ""] = (await backend.playlistTree())
+      .filter((node) => !before.has(node.id)).map((node) => node.id);
+    await backend.edits.addTracksToPlaylist(alpha, [track], false);
+    await backend.edits.addTracksToPlaylist(beta, [track], true);
+    expect((await backend.trackPlaylists(track)).map((p) => p.name))
+      .toEqual(expect.arrayContaining(["Alpha", "Beta"]));
+  });
+
+  it("leaves a playlist out once the track has been taken off it", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const track = "100000";
+    const id = (await backend.playlistTree()).filter((node) => node.kind === "playlist")[0]?.id ?? "";
+    await backend.edits.addTracksToPlaylist(id, [track], false);
+    await backend.edits.removeTracksFromPlaylist(id, [track]);
+    expect((await backend.trackPlaylists(track)).map((p) => p.id)).not.toContain(id);
+  });
+
+  it("spells the folders above a playlist as its path, ordered path then name", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const track = "100000";
+    await backend.edits.createPlaylist("Alpha", TREE_ROOT);
+    await backend.edits.createFolder("Gigs", TREE_ROOT);
+    const gigs = (await backend.playlistTree()).find((node) => node.name === "Gigs");
+    await backend.edits.createPlaylist("Friday", gigs?.id ?? TREE_ROOT);
+    const friday = (await backend.playlistTree()).find((node) => node.name === "Friday")?.id ?? "";
+    await backend.edits.addTracksToPlaylist(friday, [track], false);
+    const got = await backend.trackPlaylists(track);
+    expect(got).toEqual(expect.arrayContaining([{ id: friday, name: "Friday", path: "Gigs" }]));
+    // The real command sorts by path, then name, and the tree repeats that.
+    const names = got.map((p) => p.name);
+    expect(names.indexOf("Alpha")).toBeLessThan(names.indexOf("Friday"));
+  });
+});
+
 describe("mock edits", () => {
   it("bumps the generation on every edit, as a real write does", async () => {
     const backend = createMockBackend({ trackCount: 20 });

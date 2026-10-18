@@ -575,6 +575,38 @@ impl Library {
         self.row_by_id().get(&id).copied()
     }
 
+    /// The playlist indices that contain a track, ordinary and intelligent.
+    ///
+    /// Folders are excluded: they hold playlists, not tracks. Intelligent
+    /// playlists are tested one row at a time, so a track that matches their
+    /// rule counts; the cost of a call is one pass over the playlists'
+    /// member lists and one evaluation of each rule's conditions, never
+    /// one whole-library evaluation per intelligent playlist.
+    pub fn playlists_containing(&self, row: Row) -> Vec<usize> {
+        let playlists = self.playlists();
+        let today = crate::smart::Date::today();
+        let mut out = Vec::new();
+        for index in 0..playlists.len() {
+            if playlists.is_folder(index) {
+                continue;
+            }
+            let contains = if playlists.is_smart(index) {
+                playlists
+                    .smart_rule(index)
+                    .is_some_and(|rule| rule.admits(self, row, &today))
+            } else {
+                playlists
+                    .members
+                    .get(index)
+                    .is_some_and(|members| members.contains(&row))
+            };
+            if contains {
+                out.push(index);
+            }
+        }
+        out
+    }
+
     /// A track's cues, ordered by position.
     ///
     /// A copy, because the table is behind a lock and a track's cues are a

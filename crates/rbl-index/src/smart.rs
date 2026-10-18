@@ -369,6 +369,16 @@ impl SmartRule {
         count(&self.root)
     }
 
+    /// Whether the rule admits one track, evaluated on its own.
+    ///
+    /// `Library::playlists_containing` asks this of each intelligent
+    /// playlist, which costs the rule's conditions against one row instead
+    /// of evaluating the rule over the whole library per call.
+    #[must_use]
+    pub fn admits(&self, library: &Library, row: Row, today: &Date) -> bool {
+        CompiledGroup::from(&self.root, library, today).matches(library, row)
+    }
+
     /// The rows of the library the rule admits, in collection order.
     #[must_use]
     pub fn evaluate(&self, library: &Library) -> Vec<Row> {

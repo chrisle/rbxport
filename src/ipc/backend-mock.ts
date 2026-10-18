@@ -3449,6 +3449,49 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // A copy: the panel must not be able to edit the backend's own record.
       return wait({ ...detailsOf(row) });
     },
+    trackPlaylists: (trackId) => {
+      if (!ready) return notReady();
+      // Folder names above a playlist, as the real command's `path` holds
+      // them: ancestors walked back up the flat tree, joined and not named.
+      const pathOf = (id: string): string => {
+        let at = tree.findIndex((node) => node.id === id);
+        if (at < 0) return "";
+        let depth = tree[at]?.depth ?? 0;
+        const parents: string[] = [];
+        while (depth > 1) {
+          let holder = -1;
+          for (let i = at - 1; i >= 0; i -= 1) {
+            if ((tree[i]?.depth ?? 0) < depth) { holder = i; break; }
+          }
+          const parent = holder < 0 ? undefined : tree[holder];
+          if (parent?.kind !== "folder") break;
+          parents.push(parent.name);
+          at = holder;
+          depth = parent.depth;
+        }
+        return parents.reverse().join(" / ");
+      };
+      const seen = new Set<string>();
+      const result: { id: string; name: string; path: string }[] = [];
+      const add = (id: string) => {
+        if (seen.has(id)) return;
+        const node = tree.find((n) => n.id === id);
+        if (!node || (node.kind !== "playlist" && node.kind !== "smartPlaylist")) return;
+        seen.add(id);
+        result.push({ id, name: node.name, path: pathOf(id) });
+      };
+      for (const [id, members] of membership) {
+        if (members.includes(trackId)) add(id);
+      }
+      for (const node of tree) {
+        if (node.kind !== "playlist" && node.kind !== "smartPlaylist") continue;
+        if (membership.has(node.id)) continue;
+        const seeded = seededMembers(node.id).map((i) => all[i]?.id ?? "");
+        if (seeded.includes(trackId)) add(node.id);
+      }
+      // The real command's order the row repeats: path first, name second.
+      return wait(result.sort((a, b) => a.path.localeCompare(b.path) || a.name.localeCompare(b.name)));
+    },
     selectionDetails: (trackIds) => {
       if (!ready) return notReady();
       const rows = trackIds.flatMap((id) => all.filter((r) => r.id === id));

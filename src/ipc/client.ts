@@ -15,7 +15,7 @@ import type {
   DatabaseDrive, EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
   LinkStatus, MissingExportFile, MissingTrack, MissingTracks, PreviewState, UnanalysedTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
   TreeNode, ViewHandle,
-  SelectionDetails, TrackDetails, TrackLookups,
+  SelectionDetails, TrackDetails, TrackLookups, RelatedPlaylist,
 } from "./types";
 import { tauriInvoke } from "./invoke";
 
@@ -692,6 +692,7 @@ async function realBackend(): Promise<Backend> {
     },
     filterValues: (spec) => invoke<FilterValues>("filter_values", { spec }),
     trackDetails: (trackId) => invoke<TrackDetails>("track_details", { track: trackId }),
+    trackPlaylists: (trackId) => invoke<RelatedPlaylist[]>("track_playlists", { track: trackId }),
     selectionDetails: (trackIds) => invoke<SelectionDetails>("selection_details", { tracks: trackIds }),
     trackLookups: () => invoke<TrackLookups>("track_lookups"),
     selectionMyTags: (trackIds) => invoke<string[]>("selection_my_tags", { tracks: trackIds }),

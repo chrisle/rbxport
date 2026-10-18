@@ -2520,3 +2520,36 @@ fn a_folder_dropped_on_the_playlists_root_becomes_a_playlist() {
     assert!(!loose.folder);
     assert_eq!(loose.playlist, None);
 }
+
+/// Track › the information panel's "Playlists" row: every playlist (and
+/// intelligent playlist) a track is in, with the folders above each spelled
+/// out as a path, ordered by path then name. A track in no playlist lists
+/// none, and an unknown track is refused.
+#[test]
+fn the_information_panel_names_the_playlists_a_track_is_in() {
+    let s = shell();
+    run(commands::create_folder(s.handle(), s.state(), "Shows".into(), ROOT.into())).unwrap();
+    let shows = s.node("Shows");
+    run(commands::create_playlist(s.handle(), s.state(), "Friday".into(), shows.id.clone(), None)).unwrap();
+    run(commands::create_playlist(s.handle(), s.state(), "Bright".into(), ROOT.into(), None)).unwrap();
+    // The fixture's "Playlist 0" takes tracks 0 to 4, so track 3 is in it
+    // before anything is written here: three lists, two without a path.
+    let friday = s.node("Friday");
+    let bright = s.node("Bright");
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), friday.id.clone(), vec![track_id(3)], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), bright.id.clone(), vec![track_id(3)], None)).unwrap();
+
+    let got = run(details::track_playlists(s.state(), track_id(3))).unwrap();
+    assert_eq!(
+        got.iter()
+            .map(|list| (list.path.as_str(), list.name.as_str()))
+            .collect::<Vec<_>>(),
+        [("", "Bright"), ("", "Playlist 0"), ("Shows", "Friday")],
+    );
+    assert_eq!(got[2].id, friday.id, "the id is the playlist node's, so a name can open it");
+
+    assert!(run(details::track_playlists(s.state(), track_id(20))).unwrap().is_empty());
+    let refused = run(details::track_playlists(s.state(), "no such track".into()))
+        .expect_err("an unknown track is refused");
+    assert_eq!(refused.kind, ErrorKind::NotFound);
+}

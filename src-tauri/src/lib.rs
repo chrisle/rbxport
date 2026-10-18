@@ -718,6 +718,7 @@ pub fn run() {
             // lists its dropdowns offer, and the fields it may write.
             details::track_details,
             details::selection_details,
+            details::track_playlists,
             details::track_lookups,
             details::set_track_field,
             details::add_artwork,

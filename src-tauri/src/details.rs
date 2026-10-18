@@ -158,6 +158,57 @@ fn details_dto(d: rbl_db::details::TrackDetails, has_artwork: bool) -> TrackDeta
     }
 }
 
+/// The playlists that hold a track, for the information panel's
+/// "Playlists" row. Smart playlists are tested one track at a time, so a
+/// track that their rule admits is listed too. Ordered by path, then name.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedPlaylistDto {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+}
+
+#[tauri::command]
+pub async fn track_playlists(
+    state: State<'_, Arc<AppState>>,
+    track: String,
+) -> AppResult<Vec<RelatedPlaylistDto>> {
+    let state = Arc::clone(&state);
+    blocking("track_playlists", move || {
+        let library = state.library()?;
+        let row = library
+            .row_of(&track)
+            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "That track is no longer in the library.").with_detail(format!("track {track}")))?;
+        let indices = library.playlists_containing(row);
+        let playlists = library.playlists();
+        let mut out: Vec<RelatedPlaylistDto> = indices
+            // An index the id column no longer reaches is no playlist: a
+            // stale row lists nothing rather than a playlist "0".
+            .into_iter()
+            .filter_map(|index| {
+                let id = playlists.ids.get(index).copied()?;
+                let name = playlists.name(index).to_owned();
+                let mut parts = Vec::new();
+                let mut parent = playlists.parent.get(index).copied().unwrap_or(rbl_index::NO_ID);
+                while parent != rbl_index::NO_ID {
+                    let parent_index = parent as usize;
+                    if parent_index >= playlists.len() {
+                        break;
+                    }
+                    parts.push(playlists.name(parent_index).to_owned());
+                    parent = playlists.parent.get(parent_index).copied().unwrap_or(rbl_index::NO_ID);
+                }
+                parts.reverse();
+                Some(RelatedPlaylistDto { id: id.to_string(), name, path: parts.join(" / ") })
+            })
+            .collect();
+        out.sort_by(|a, b| a.path.cmp(&b.path).then(a.name.cmp(&b.name)));
+        Ok(out)
+    })
+    .await
+}
+
 /// Several tracks as the information panel shows them: the first one's
 /// record, how many there are, and which fields differ between them.
 #[derive(Debug, Clone, Serialize)]

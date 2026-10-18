@@ -44,7 +44,7 @@ import {
 } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
 import { FIELD_LABEL } from "./fieldLabel";
-import type { Backend, RowDto, SelectionDetails, TrackDetails, TrackField, TrackLookups } from "@/ipc/types";
+import type { Backend, RelatedPlaylist, RowDto, SelectionDetails, TrackDetails, TrackField, TrackLookups } from "@/ipc/types";
 import { RatingStar } from "@/components/RatingStar";
 import { useTranslation } from "@/i18n";
 import styles from "./InfoPanel.module.css";
@@ -71,6 +71,8 @@ export interface InfoPanelProps {
   onComment: (ids: readonly string[], comment: string) => void;
   /** Runs one write and reports its outcome, refusals included. */
   onEdit: (what: string, edit: (b: Backend) => Promise<unknown>) => Promise<void>;
+  /** Opens a playlist in the library tree when one of its names is clicked. */
+  onOpenPlaylist?: (id: string) => void;
 }
 
 /** Why a read-only field is read-only, shown in its tooltip. */
@@ -89,11 +91,30 @@ const LOCKED: Record<string, string> = {
 const READ_ONLY_REASON = "The library is read-only. Check Library Protection in Preferences, and quit rekordbox to edit";
 
 export function InfoPanel({
-  track, selection, readOnly, libraryGeneration, onRate, onComment, onEdit,
+  track, selection, readOnly, libraryGeneration, onRate, onComment, onEdit, onOpenPlaylist,
 }: InfoPanelProps) {
   const [tab, setTab] = useState<InfoTab>("summary");
   const [details, setDetails] = useState<TrackDetails | null>(null);
   const [lookups, setLookups] = useState<TrackLookups | null>(null);
+  const [relatedPlaylists, setRelatedPlaylists] = useState<RelatedPlaylist[]>([]);
+  useEffect(() => {
+    if (!track || selection.length > 1) {
+      setRelatedPlaylists([]);
+      return;
+    }
+    let live = true;
+    void getBackend()
+      .then((b) => b.trackPlaylists(track.id))
+      .then((list) => { if (live) setRelatedPlaylists(list); })
+      .catch((e) => {
+        if (!live) return;
+        setRelatedPlaylists([]);
+        const message = e instanceof Error ? e.message : "Could not read the track's playlists";
+        // A read failure is not silent: it says so where every error goes.
+        void getBackend().then((b) => b.logStatusMessage(true, message)).catch(() => {});
+      });
+    return () => { live = false; };
+  }, [track, selection.length, libraryGeneration]);
 
   const multiple = selection.length > 1;
   // rekordbox greys Summary for several tracks and moves to Info, and stays
@@ -236,7 +257,7 @@ export function InfoPanel({
         <p className={styles.empty}>Select a track.</p>
       ) : tab === "summary" ? (
         <div role="tabpanel" id="info-panel-summary" aria-labelledby="info-tab-summary" className={styles.summary}>
-          <Summary track={track} details={record} />
+          <Summary track={track} details={record} playlists={relatedPlaylists} onOpenPlaylist={onOpenPlaylist} />
         </div>
       ) : tab === "info" ? (
         <div role="tabpanel" id="info-panel-info" aria-labelledby="info-tab-info" className={styles.info}>
@@ -274,10 +295,12 @@ const TAB_LABEL: Record<InfoTab, string> = { summary: "Summary", info: "Info", a
 // ------------------------------------------------------------------ Summary
 
 const Summary = memo(function Summary({
-  track, details,
+  track, details, playlists, onOpenPlaylist,
 }: {
   track: RowDto;
   details: TrackDetails | null;
+  playlists: RelatedPlaylist[];
+  onOpenPlaylist?: ((id: string) => void) | undefined;
 }) {
   const title = details?.title ?? track.title;
   const artist = details?.artist ?? track.artist;
@@ -315,6 +338,26 @@ const Summary = memo(function Summary({
             <dd className={styles.value} title={tip(fact.value)}>{fact.value}</dd>
           </div>
         ))}
+        {playlists.length > 0 ? (
+          <div className={styles.fact}>
+            <dt className={styles.label}>Playlists</dt>
+            <dd className={styles.value}>
+              {playlists.map((p, i) => (
+                <span key={p.id}>
+                  {i > 0 ? ", " : null}
+                  <button
+                    type="button"
+                    className={styles.playlistLink}
+                    onClick={() => onOpenPlaylist?.(p.id)}
+                    title={p.path || p.name}
+                  >
+                    {p.name}
+                  </button>
+                </span>
+              ))}
+            </dd>
+          </div>
+        ) : null}
       </dl>
     </>
   );

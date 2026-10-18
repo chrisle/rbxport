@@ -174,6 +174,16 @@
 }
 .fact .label { line-height: normal; }
 
+.playlistLink {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--c-info-value);
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
 .value {
   margin: 0;
   height: 100%;
