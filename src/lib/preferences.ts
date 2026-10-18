@@ -291,9 +291,19 @@ export interface AdvancedPreferences {
   checkUpdates: boolean;
   /** How often that automatic check runs: every start, once a day, once a week. */
   updateFrequency: UpdateFrequency;
-  /** A track played for a minute goes on today's history and its count goes up. */
+  /** A track played for `playbackTime` seconds goes on today's history and its count goes up. */
   recordHistory: boolean;
+  /**
+   * Browse › Playback time setting: how many seconds of a track playing on
+   * the deck before it is added to history and coloured as played (#540).
+   * rekordbox 7.2.19 keeps 1–60, 60 by default (`SettingIF::getCurrentPlayedTime`
+   * @0x1015d43f8, `setPlayedTime` @0x1015d448c) [OBS static].
+   */
+  playbackTime: number;
 }
+
+/** Browse › Playback time setting's range in seconds, and its default. */
+export const PLAYBACK_TIME = { min: 1, max: 60, default: 60 } as const;
 
 /**
  * Keyboard: rekordbox's preset the keys start from (`keyPresets.ts`), and
@@ -407,6 +417,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     checkUpdates: true,
     updateFrequency: "start",
     recordHistory: true,
+    playbackTime: PLAYBACK_TIME.default,
   },
   keyboard: {
     preset: "export",
@@ -580,6 +591,11 @@ export function sanitisePreferences(value: unknown): Preferences {
         strings(advanced.relocateFolders).length > 0 || d.advanced.relocateUserFolders,
       ),
       recordHistory: bool(advanced.recordHistory, d.advanced.recordHistory),
+      // Out of range is the default, as rekordbox reads a stored value.
+      playbackTime: typeof advanced.playbackTime === "number" && Number.isInteger(advanced.playbackTime) &&
+        advanced.playbackTime >= PLAYBACK_TIME.min && advanced.playbackTime <= PLAYBACK_TIME.max
+        ? advanced.playbackTime
+        : d.advanced.playbackTime,
       // A stored object predates this switch when the key is absent. Preserve
       // that user's writable library; only a truly empty store gets defaults.
       protectLibrary: bool(advanced.protectLibrary, hasStoredSection ? false : d.advanced.protectLibrary),

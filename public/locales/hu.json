@@ -1755,5 +1755,11 @@
   "Name": "Név",
   "The new My Tag was not made.": "Az új My Tag nem készült el.",
   "a My Tag needs a name": "a Saját címkének név kell",
-  "delete": "törölni"
+  "delete": "törölni",
+  "(Length of time before played tracks are displayed in color)": "(Length of time before played tracks are displayed in color)",
+  "Coloring of played tracks": "Lejátszott felvételek színe",
+  "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
+  "Playback time setting": "Playback time setting",
+  "The length of time before a track is added to Histories": "The length of time before a track is added to Histories",
+  "seconds": "másodpercek"
 }

@@ -1755,5 +1755,11 @@
   "Name": "이름",
   "The new My Tag was not made.": "새로운 마이태그가 생성되지 않았습니다.",
   "a My Tag needs a name": "내 태그에는 이름이 필요합니다",
-  "delete": "삭제"
+  "delete": "삭제",
+  "(Length of time before played tracks are displayed in color)": "(Length of time before played tracks are displayed in color)",
+  "Coloring of played tracks": "재생된 트랙의 색 지정",
+  "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
+  "Playback time setting": "Playback time setting",
+  "The length of time before a track is added to Histories": "The length of time before a track is added to Histories",
+  "seconds": "초"
 }

@@ -1754,5 +1754,11 @@
   "Name": "Name",
   "The new My Tag was not made.": "Der neue My Tag wurde nicht erstellt.",
   "a My Tag needs a name": "ein My Tag braucht einen Namen",
-  "delete": "löschen"
+  "delete": "löschen",
+  "(Length of time before played tracks are displayed in color)": "(Zeitdauer, bevor wiedergegebene Tracks farbig angezeigt werden)",
+  "Coloring of played tracks": "Farbige Darstellung der gespielten Tracks",
+  "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
+  "Playback time setting": "Wiedergabezeit-Einstellung",
+  "The length of time before a track is added to Histories": "Die Zeitdauer, bevor ein Track zu Histories hinzugefügt wird",
+  "seconds": "Sekunden"
 }

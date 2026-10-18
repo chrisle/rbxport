@@ -256,3 +256,16 @@ describe("browseListVars", () => {
     expect(vars["--browse-weight"]).toBe(400);
   });
 });
+
+// Issue 540: rekordbox 7.2.19 keeps the Playback time setting in 1–60
+// seconds, 60 by default, and reads anything else as the default
+// (`SettingIF::getCurrentPlayedTime` @0x1015d43f8).
+it("keeps the Playback time setting in rekordbox's 1 to 60 seconds, 60 by default", () => {
+  expect(DEFAULT_PREFERENCES.advanced.playbackTime).toBe(60);
+  expect(sanitisePreferences({}).advanced.playbackTime).toBe(60);
+  expect(sanitisePreferences({ advanced: { playbackTime: 1 } }).advanced.playbackTime).toBe(1);
+  expect(sanitisePreferences({ advanced: { playbackTime: 30 } }).advanced.playbackTime).toBe(30);
+  for (const stored of [0, 61, 12.5, "30", null]) {
+    expect(sanitisePreferences({ advanced: { playbackTime: stored } }).advanced.playbackTime).toBe(60);
+  }
+});

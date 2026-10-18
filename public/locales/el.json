@@ -1757,5 +1757,11 @@
   "Name": "Όνομα",
   "The new My Tag was not made.": "Το νέο My Tag δεν φτιάχτηκε.",
   "a My Tag needs a name": "Η ετικέτα μου χρειάζεται όνομα",
-  "delete": "διαγραφή"
+  "delete": "διαγραφή",
+  "(Length of time before played tracks are displayed in color)": "(Length of time before played tracks are displayed in color)",
+  "Coloring of played tracks": "Χρωματισμός των κομματιών που έχουν αναπαραχθεί",
+  "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
+  "Playback time setting": "Playback time setting",
+  "The length of time before a track is added to Histories": "The length of time before a track is added to Histories",
+  "seconds": "δευτερόλεπτα"
 }

@@ -1760,5 +1760,11 @@
   "Name": "名称",
   "The new My Tag was not made.": "新的“我的标签”尚未制作。",
   "a My Tag needs a name": "我的标签需要一个名称",
-  "delete": "删除"
+  "delete": "删除",
+  "(Length of time before played tracks are displayed in color)": "（播放的曲目以彩色显示之前的时间长度）",
+  "Coloring of played tracks": "播放曲目的颜色",
+  "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
+  "Playback time setting": "回放时间设定",
+  "The length of time before a track is added to Histories": "将曲目添加到Histories之前的时间长度",
+  "seconds": "秒"
 }

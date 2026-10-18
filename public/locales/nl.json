@@ -1754,5 +1754,11 @@
   "Name": "Naam",
   "The new My Tag was not made.": "De nieuwe My Tag is niet gemaakt.",
   "a My Tag needs a name": "Mijn tag heeft een naam nodig",
-  "delete": "verwijderen"
+  "delete": "verwijderen",
+  "(Length of time before played tracks are displayed in color)": "(Tijdsduur voordat muziekstukken in kleur worden weergegeven)",
+  "Coloring of played tracks": "Kleuring van afgespeelde nummers",
+  "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
+  "Playback time setting": "Instelling afspeeltijd",
+  "The length of time before a track is added to Histories": "De tijdsduur voordat een muziekstuk wordt toegevoegd aan Histories",
+  "seconds": "seconden"
 }
