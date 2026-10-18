@@ -1128,14 +1128,17 @@ export const Player = memo(function Player({
     const x = (headPercent() / 100) * detail.width;
     if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
     if (barsLabel.current) barsLabel.current.style.transform = `translateX(${x}px)`;
-    // The overview head is two device pixels wide and slides by whole device
-    // pixels, as rekordbox draws it (#570): two CSS pixels at 1x, one at 2x.
+    // The deck overview's head is two device pixels wide and slides by whole
+    // device pixels, as rekordbox draws it (#570): two CSS pixels at 1x, one
+    // at 2x. The simple player shares this ref but keeps its own 1pt head from
+    // its stylesheet, measured from its own capture, so it is left alone.
     const ratio = globalThis.devicePixelRatio;
-    if (overviewHead.current) overviewHead.current.style.width = `${overviewHeadWidth(ratio)}px`;
+    if (overviewHead.current && !simple) overviewHead.current.style.width = `${overviewHeadWidth(ratio)}px`;
     const apply = (seconds: number) => {
       const at = total > 0 ? Math.min(seconds / total, 1) : 0;
       if (overviewHead.current) {
-        overviewHead.current.style.transform = `translateX(${snapOffset(Math.max(0, at) * overview.width, ratio)}px)`;
+        const ox = Math.max(0, at) * overview.width;
+        overviewHead.current.style.transform = `translateX(${simple ? ox : snapOffset(ox, ratio)}px)`;
       }
       if (scrubFill.current) scrubFill.current.style.transform = `scaleX(${Math.max(0, at)})`;
       // The detail head does not move at all: the layer under it does, by a
