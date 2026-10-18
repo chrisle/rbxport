@@ -303,6 +303,21 @@ pub struct AnalysisRegistration<'a> {
     pub analysis_data_path: &'a str,
 }
 
+/// What a device knows of a track Import Playlist copied from it, for
+/// [`Writer::import_device_analysis`].
+#[derive(Debug, Clone, Copy)]
+pub struct DeviceAnalysis<'a> {
+    /// BPM x100 from the device's row; 0 for none.
+    pub bpm_x100: u32,
+    /// The key by rekordbox's name, or `None`.
+    pub key: Option<&'a str>,
+    /// The `.DAT`'s path relative to the share root, the files already
+    /// there; `None` when the device had no analysis files.
+    pub analysis_data_path: Option<&'a str>,
+    /// The device's cues.
+    pub cues: &'a [rbl_anlz::CueEntry],
+}
+
 /// [`Writer::analysis_data_path_for`] over any connection to the library,
 /// so a caller that only needs the path reads it without opening the
 /// library for writing: each such open derives the key again (about 155 ms
@@ -3242,6 +3257,66 @@ impl Writer {
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Gives a track Import Playlist just added from a copy of a device's
+    /// file what the device knows of it, as rekordbox does for each track
+    /// it copies [static, rekordbox 7.2.19 macOS arm64,
+    /// `importFromDeviceThread::run` @0x1001d9618: `addTrackFromDevice`
+    /// adds the track from the device's row, then
+    /// `getDeviceContentCueInfo`, `import_device_analysis` (@0x1001db460,
+    /// the analysis files) and the analyse status]: its BPM and key, its
+    /// analysis files, already in place at `analysis_data_path`, and its
+    /// cues. One transaction.
+    ///
+    /// A BPM of 0 or a key no `djmdKey` row is named after leaves the
+    /// track's own. With an analysis path the track is marked analysed
+    /// ([`ANALYSED_FULL`]) and its `AnalysisUpdated` counted on; without
+    /// one, neither changes. A cue the library cannot hold (a hot cue past
+    /// H, a loop that ends before it starts) is left out.
+    pub fn import_device_analysis(&mut self, content: &str, analysis: &DeviceAnalysis<'_>) -> Result<Changed> {
+        self.prepare()?;
+        let cues: Vec<&rbl_anlz::CueEntry> = analysis
+            .cues
+            .iter()
+            .filter(|c| c.hot_cue <= 16 && matches!(c.kind, 1 | 2) && (c.kind != 2 || c.loop_time_ms > c.time_ms))
+            .collect();
+        let ids: Vec<_> = cues.iter().map(|_| self.unused_id_below("djmdCue", MAX_CUE_ID)).collect::<Result<_>>()?;
+        let uuids: Vec<_> = cues.iter().map(|_| self.rng.uuid4()).collect();
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let owner: String = tx
+            .query_row("SELECT UUID FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [content], |r| r.get(0))
+            .map_err(|_| DbError::WriteRefused(format!("{content} is not a live track")))?;
+        let key_id = match analysis.key {
+            Some(name) if !name.is_empty() => key_id_for(&tx, name).ok(),
+            _ => None,
+        };
+        let stamp = time::now();
+        let usn = next_usn(&tx)?;
+        let rows = tx.execute(
+            "UPDATE djmdContent
+             SET BPM = CASE WHEN ?2 > 0 THEN ?2 ELSE BPM END,
+                 KeyID = COALESCE(?3, KeyID),
+                 AnalysisDataPath = COALESCE(?4, AnalysisDataPath),
+                 Analysed = CASE WHEN ?4 IS NULL THEN Analysed ELSE ?5 END,
+                 AnalysisUpdated = CASE WHEN ?4 IS NULL THEN AnalysisUpdated
+                                        ELSE CAST(COALESCE(AnalysisUpdated, '0') AS INTEGER) + 1 END,
+                 rb_local_usn = ?6, updated_at = ?7
+             WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![content, i64::from(analysis.bpm_x100), key_id, analysis.analysis_data_path, ANALYSED_FULL, usn, stamp],
+        )?;
+        for ((cue, id), uuid) in cues.iter().zip(ids).zip(uuids) {
+            let kind = if cue.hot_cue >= 4 { cue.hot_cue + 1 } else { cue.hot_cue };
+            let end = (cue.kind == 2).then_some(i64::from(cue.loop_time_ms));
+            tx.execute(
+                "INSERT INTO djmdCue (ID, ContentID, InMsec, InFrame, InMpegFrame, InMpegAbs, OutMsec, Kind, Color, ColorTableIndex, ActiveLoop, Comment, ContentUUID, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced, rb_local_usn, created_at, updated_at)
+                 VALUES (?1,?2,?3,0,0,0,?4,?5,?6,?7,0,?8,?9,?10,0,0,0,0,?11,?12,?12)",
+                params![id, content, cue.time_ms, end, kind, if kind == 0 { 255 } else { -1 }, cue.color_code.unwrap_or(cue.color_id), cue.comment.as_deref().unwrap_or(""), owner, uuid, usn, stamp],
+            )?;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
     }
 
     /// Imports a USB session once, preserving order and repeated plays.
