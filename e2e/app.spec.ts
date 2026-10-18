@@ -1953,6 +1953,32 @@ test("the playhead is moved by a transform, not by laying the strip out again", 
   await expect(fill).toHaveCSS("transform", "matrix(0, 0, 0, 1, 0, 0)");
 });
 
+test("the overview playhead runs the whole band two device pixels wide, as rekordbox's does (#570)", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  // Not just the waveform: from the band's top, through the position bar,
+  // to its bottom. rekordbox 7.2.14 draws it that way, and over an RGB
+  // waveform's red bars the part outside the music is what stays visible.
+  const head = page.getByTestId("player-head");
+  const ovw = await page.getByTestId("player-overview").boundingBox();
+  const band = await head.evaluate((el) => {
+    const r = el.parentElement!.getBoundingClientRect();
+    return { y: r.y, height: r.height };
+  });
+  const box = await head.boundingBox();
+  expect(box?.y).toBeCloseTo(band.y, 0);
+  expect(box?.height).toBeCloseTo(band.height, 0);
+  expect(box?.height ?? 0).toBeGreaterThan(ovw?.height ?? 0);
+  const scrub = await page.locator('[class*="scrubFill"]').boundingBox();
+  expect((box?.y ?? 0) + (box?.height ?? 0)).toBeGreaterThan((scrub?.y ?? 0) + (scrub?.height ?? 0));
+
+  // Two device pixels: rekordbox 7.2.19 draws two one-pixel lines side by side.
+  const ratio = await page.evaluate(() => globalThis.devicePixelRatio);
+  expect((box?.width ?? 0) * ratio).toBeCloseTo(2, 1);
+});
+
 test("the detail playhead is pinned to the middle, whatever the track does", async ({ page }) => {
   // The window moves under the head rather than the head across the window,
   // which is what a CDJ shows and what makes the head mean "here".

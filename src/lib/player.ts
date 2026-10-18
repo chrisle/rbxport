@@ -820,6 +820,27 @@ export function snapOffset(offset: number, ratio: number): number {
 }
 
 /**
+ * How many device pixels wide rekordbox draws the overview's playhead.
+ *
+ * rekordbox 7.2.19 (macOS arm64) draws it in `WidgetLoudView::drawTextures`
+ * as two one-pixel lines, at the head's place and one device pixel to its
+ * right (`drawVerticalLine` @0x100fd17dc / @0x100fd182c after
+ * `fadd s0, s10, #1.0`), whatever the waveform's colour type (#570).
+ */
+export const OVERVIEW_HEAD_DEVICE_PX = 2;
+
+/**
+ * The overview playhead's width in CSS pixels for a device pixel ratio: two
+ * device pixels, so two CSS pixels at 1x, one at 2x and 1.33 at 1.5x. A 1px
+ * line at 1x was one column the width of each waveform bar, and an RGB
+ * waveform's red bars swallowed the red head (#570).
+ */
+export function overviewHeadWidth(ratio: number): number {
+  const scale = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  return OVERVIEW_HEAD_DEVICE_PX / scale;
+}
+
+/**
  * Whether the playhead has run far enough that the layer must be redrawn.
  *
  * The layer reaches half its width either side of the anchor, and the strip

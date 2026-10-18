@@ -42,7 +42,7 @@
   --c-eject: #CDCDCD; /* sampled from a capture of the sleeve hovered: the eject glyph is a flat (205,205,205) */
   --c-eject-scrim: #000000; /* INFERRED — the sampled sleeve is uniform there, so the darkening cannot be separated from the artwork; without it the glyph is unreadable over bright art */
   --c-zoom-scrim: rgb(0 0 0 / 80%); /* INFERRED — the zoom cluster sits over the detail waveform, so it needs a ground the waveform still reads through; 55% left the rings competing with a bright transient behind them */
-  --c-playhead-armed: #EA3323; /* UNMEASURED — the armed playhead's red, described rather than sampled; the value is the cue head's */
+  --c-playhead-armed: #FF0000; /* rekordbox 7.2.19 static: the paused head's red is juce::Colour(0xff, 0x00, 0x00) on the overview (WidgetLoudView::drawTextures @0x100fd1700) and the detail (WidgetWaveView::drawCurrentCursorGL @0x10211f1a8); #393's capture of 7.2.14 sampled the detail's as flat (255,0,0). Was #EA3323, the cue head's red, unmeasured (#570) */
   --c-cue-head: #EA3323; /* docs/screenshots at 2x: the 3x6px head at a cue, left of the hot cue badge sharing its position */
   --c-downbeat: #FFFFFF; /* measured from docs/screenshots; the detail band runs y 358..650: every fourth marker's line, white where the others are grey */
   --c-phrase-intro: #B83F1D; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: INTRO */

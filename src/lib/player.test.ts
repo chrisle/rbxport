@@ -51,6 +51,8 @@ import {
   NO_BEATS,
   scrollOffset,
   snapOffset,
+  OVERVIEW_HEAD_DEVICE_PX,
+  overviewHeadWidth,
   pressCue,
   releaseCue,
   parseBeatGrid,
@@ -500,6 +502,21 @@ describe("scrollOffset", () => {
   it("stays at rest rather than dividing by zero", () => {
     expect(scrollOffset(0.5, 0.2, 0, 800)).toBe(0);
     expect(scrollOffset(0.5, 0.2, 0.1, 0)).toBe(0);
+  });
+});
+
+describe("overviewHeadWidth", () => {
+  it("is two device pixels, as rekordbox draws the overview head (#570)", () => {
+    expect(OVERVIEW_HEAD_DEVICE_PX).toBe(2);
+    expect(overviewHeadWidth(1)).toBe(2);
+    expect(overviewHeadWidth(2)).toBe(1);
+    expect(overviewHeadWidth(1.5) * 1.5).toBeCloseTo(2, 9);
+  });
+
+  it("treats a missing or nonsense ratio as 1x", () => {
+    expect(overviewHeadWidth(Number.NaN)).toBe(2);
+    expect(overviewHeadWidth(0)).toBe(2);
+    expect(overviewHeadWidth(-2)).toBe(2);
   });
 });
 

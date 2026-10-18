@@ -50,6 +50,7 @@ import {
   OVERDRAW,
   scrollOffset,
   snapOffset,
+  overviewHeadWidth,
   pressCue,
   releaseCue,
   beatCountText,
@@ -1127,10 +1128,14 @@ export const Player = memo(function Player({
     const x = (headPercent() / 100) * detail.width;
     if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
     if (barsLabel.current) barsLabel.current.style.transform = `translateX(${x}px)`;
+    // The overview head is two device pixels wide and slides by whole device
+    // pixels, as rekordbox draws it (#570): two CSS pixels at 1x, one at 2x.
+    const ratio = globalThis.devicePixelRatio;
+    if (overviewHead.current) overviewHead.current.style.width = `${overviewHeadWidth(ratio)}px`;
     const apply = (seconds: number) => {
       const at = total > 0 ? Math.min(seconds / total, 1) : 0;
       if (overviewHead.current) {
-        overviewHead.current.style.transform = `translateX(${Math.max(0, at) * overview.width}px)`;
+        overviewHead.current.style.transform = `translateX(${snapOffset(Math.max(0, at) * overview.width, ratio)}px)`;
       }
       if (scrubFill.current) scrubFill.current.style.transform = `scaleX(${Math.max(0, at)})`;
       // The detail head does not move at all: the layer under it does, by a
@@ -2359,17 +2364,21 @@ export const Player = memo(function Player({
               ) : null}
               <CueMarkers cues={cues} totalMs={total * 1000} loop={playback.loop} />
               <OverviewTempoMarkers grid={grid} totalMs={total * 1000} />
-              <span
-                ref={overviewHead}
-                className={styles.playhead}
-                data-testid="player-head"
-                aria-hidden
-              />
             </div>
             {/* How far through the track the head is, under the overview. */}
             <div className={styles.scrub} aria-hidden>
               <div ref={scrubFill} className={styles.scrubFill} />
             </div>
+            {/* The head spans the whole band, not just the waveform: from
+                the band's top, through the position bar, to its bottom, as
+                rekordbox's does (#570). Over a red RGB waveform the part
+                above and below the music is what keeps it findable. */}
+            <span
+              ref={overviewHead}
+              className={styles.playhead}
+              data-testid="player-head"
+              aria-hidden
+            />
           </div>
   );
 
