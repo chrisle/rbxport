@@ -673,6 +673,16 @@ export interface Backend {
   takeLinkMasterTempo(): Promise<LinkStatus>;
   /** Called as LINK turns on or off and as the players change. */
   onLinkStatus(listener: (status: LinkStatus) => void): () => void;
+  /**
+   * The tracks the track list colours as played, by id: those the deck
+   * recorded a play of, and while LINK is on those a player added to its
+   * history (#540).
+   */
+  playedTracks(): Promise<string[]>;
+  /** Coloring of played tracks › RESET: nothing is coloured as played. */
+  resetPlayedTracks(): Promise<void>;
+  /** Called as the played tracks change; LINK turning on or off is `onLinkStatus`. */
+  onPlayedChanged(listener: () => void): () => void;
 
   /**
    * The decks.

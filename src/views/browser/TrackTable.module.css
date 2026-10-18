@@ -309,6 +309,17 @@
 .cell[data-lit],
 .row[data-selected] .cell[data-lit] { background: var(--c-traffic-light); color: var(--c-black); }
 
+/* A played track (#540): its text columns in rekordbox 7.2.19's played
+   green, selected or not. `ListViewer::findTextColour` @0x1003efb70 answers
+   theme colour 0x30000e1 for an unselected played row and #69B900 for a
+   selected one; the dark theme's 0x30000e1 is #69B900 too
+   (`__GLOBAL__sub_I_ColorTheme.cpp`, `__GLOBAL__sub_I_ListViewer.cpp`)
+   [OBS static]. The rating, colour and attribute columns are drawn by their
+   own painters and keep their colours; a lit Traffic Light key keeps its
+   black. */
+.row[data-played] .cell { color: var(--c-played); }
+.row[data-played] .cell[data-lit] { color: var(--c-black); }
+
 .row[data-selected] .cell,
 .row[data-selected] .attr,
 .row[data-selected] .artwork,
