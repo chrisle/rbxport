@@ -282,19 +282,19 @@
     <command name="read my tags" code="RbxpMtRd" description="Returns the existing My Tag IDs assigned to one track.">
       <cocoa class="RbxReadMyTagsCommand"/>
       <direct-parameter type="track"/>
-      <result type="text" list="yes"/>
+      <result><type type="text" list="yes"/></result>
     </command>
 
     <command name="add my tags" code="RbxpMtAd" description="Adds existing tag IDs to one track, preserving other assignments. Returns true if changed, false if already assigned.">
       <cocoa class="RbxAddMyTagsCommand"/>
-      <direct-parameter type="text" list="yes"/>
+      <direct-parameter><type type="text" list="yes"/></direct-parameter>
       <parameter name="to" code="To  " type="track"><cocoa key="to"/></parameter>
       <result type="boolean"/>
     </command>
 
     <command name="remove my tags" code="RbxpMtRm" description="Removes only the specified existing tag IDs from one track. Returns true if changed, false if already absent.">
       <cocoa class="RbxRemoveMyTagsCommand"/>
-      <direct-parameter type="text" list="yes"/>
+      <direct-parameter><type type="text" list="yes"/></direct-parameter>
       <parameter name="from" code="From" type="track"><cocoa key="from"/></parameter>
       <result type="boolean"/>
     </command>
