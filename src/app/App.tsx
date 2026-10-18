@@ -3400,6 +3400,7 @@ function AppBody() {
         <AnalysisDialog count={analysisSelection.length} initialMode={analysisPrefs.mode}
           initialBpmRange={analysisPrefs.bpmRange}
           initialFirstBeatCue={analysisPrefs.firstBeatCue}
+          initialKey={analysisPrefs.detectKey}
           onCancel={() => setAnalysisSelection(null)}
           onConfirm={settings => {
             if (readOnly) { refuse(ANALYSIS_REFUSED); return; }
@@ -3411,6 +3412,7 @@ function AppBody() {
         <AnalysisDialog auto count={autoAnalysis.tracks.length} initialMode={analysisPrefs.mode}
           initialBpmRange={analysisPrefs.bpmRange}
           initialFirstBeatCue={analysisPrefs.firstBeatCue}
+          initialKey={analysisPrefs.detectKey}
           onCancel={() => setAutoAnalysis(null)}
           onConfirm={settings => void startAutoAnalysis(autoAnalysis, settings)} />
       ) : null}

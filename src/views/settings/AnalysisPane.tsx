@@ -52,6 +52,11 @@ export function AnalysisPane(_: { tab: AnalysisTab }) {
     {/* rekordbox's Preferences > Analysis > Key Analysis, off by default. */}
     <Section title={t("Key Analysis")}>
       <div className={styles.analysisSwitch}>
+        <Toggle label={t("Analyze key")} checked={preferences.analysis.detectKey}
+          onChange={(detectKey) => update("analysis", { detectKey })} />
+        <p>{t("Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.")}</p>
+      </div>
+      <div className={styles.analysisSwitch}>
         <Toggle label={t("Write the value to the ID3 tag")} checked={preferences.analysis.writeKeyTag}
           onChange={(writeKeyTag) => update("analysis", { writeKeyTag })} />
         <p>{t("Store the detected key in the ID3 tag.")}</p>

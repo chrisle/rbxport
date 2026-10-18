@@ -27,12 +27,15 @@ function mount(preferences: Preferences) {
   });
 }
 
-function writeSwitch(): HTMLInputElement {
+function keySwitch(label: string): HTMLInputElement {
   const section = host.querySelector<HTMLElement>('section[aria-label="Key Analysis"]');
-  const input = section?.querySelector<HTMLInputElement>('input[role="switch"]');
-  if (!input) throw new Error("no Key Analysis switch");
+  const row = [...(section?.querySelectorAll("label") ?? [])].find(element => element.textContent === label);
+  const input = row?.querySelector<HTMLInputElement>('input[role="switch"]');
+  if (!input) throw new Error(`no Key Analysis switch "${label}"`);
   return input;
 }
+
+const writeSwitch = () => keySwitch("Write the value to the ID3 tag");
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -61,4 +64,19 @@ it("offers Write the value to the ID3 tag under Key Analysis, off by default", (
 it("shows the saved choice", () => {
   mount({ ...DEFAULT_PREFERENCES, analysis: { ...DEFAULT_PREFERENCES.analysis, writeKeyTag: true } });
   expect(writeSwitch().checked).toBe(true);
+});
+
+it("offers Analyze key under Key Analysis, on by default, with the Mixed In Key reason", () => {
+  mount(DEFAULT_PREFERENCES);
+  const input = keySwitch("Analyze key");
+  expect(input.checked).toBe(true);
+  expect(host.textContent).toContain("Mixed In Key");
+
+  act(() => input.click());
+  expect(update).toHaveBeenCalledWith("analysis", { detectKey: false });
+});
+
+it("shows Analyze key off when saved off", () => {
+  mount({ ...DEFAULT_PREFERENCES, analysis: { ...DEFAULT_PREFERENCES.analysis, detectKey: false } });
+  expect(keySwitch("Analyze key").checked).toBe(false);
 });

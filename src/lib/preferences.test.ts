@@ -73,6 +73,12 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({ analysis: { writeKeyTag: true } }).analysis.writeKeyTag).toBe(true);
   });
 
+  it("analyses the key unless Analyze key is switched off", () => {
+    expect(DEFAULT_PREFERENCES.analysis.detectKey).toBe(true);
+    expect(sanitisePreferences({ analysis: { detectKey: "no" } }).analysis.detectKey).toBe(true);
+    expect(sanitisePreferences({ analysis: { detectKey: false } }).analysis.detectKey).toBe(false);
+  });
+
   it("offers rekordbox's ten BPM ranges with 70-180 the default", () => {
     expect(BPM_RANGES).toEqual(["70-180", "48-95", "58-115", "68-135", "78-155", "88-175", "98-195", "108-215", "118-235", "128-255"]);
     expect(DEFAULT_PREFERENCES.analysis.bpmRange).toBe("70-180");

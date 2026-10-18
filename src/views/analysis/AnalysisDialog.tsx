@@ -16,7 +16,7 @@ export type AnalysisChoice = AnalysisSettings & { mode: AnalysisMode };
  * BPM / Grid ticked and greyed, since every track it covers has never been
  * analysed [OBS: rekordbox 7.2.14, chris-win11].
  */
-export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRange, initialFirstBeatCue, onConfirm, onCancel }: {
+export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRange, initialFirstBeatCue, initialKey = true, onConfirm, onCancel }: {
   count: number;
   /** The launch prompt for never-analysed Collection tracks. */
   auto?: boolean;
@@ -25,6 +25,12 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
   initialBpmRange: BpmRange;
   /** The Preferences switch, which this window has no box for. */
   initialFirstBeatCue: boolean;
+  /**
+   * The Preferences "Analyze key" switch. Off starts KEY unticked whatever was
+   * last confirmed, so keys from Mixed In Key are not overwritten by accident;
+   * the box can still be ticked for this batch.
+   */
+  initialKey?: boolean;
   onConfirm: (settings: AnalysisChoice) => void;
   onCancel: () => void;
 }) {
@@ -34,6 +40,7 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
   const [settings, setSettings] = useState<AnalysisChoice>(() => ({
     mode: initialMode, bpmGrid: true, key: true, highPrecision: true,
     ...(auto ? {} : lastAnalysisChoice()),
+    ...(initialKey ? {} : { key: false }),
     ...bpmRangeLimits(initialBpmRange),
     firstBeatCue: initialFirstBeatCue,
   }));

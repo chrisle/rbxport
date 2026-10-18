@@ -202,6 +202,12 @@ export interface AnalysisPreferences {
    * default, as it is in rekordbox.
    */
   writeKeyTag: boolean;
+  /**
+   * Key Analysis > "Analyze key": off keeps the keys a track already has, such
+   * as ones from Mixed In Key, for automatic analysis and as the default of
+   * the Analysis Setting window's KEY box. On by default.
+   */
+  detectKey: boolean;
 }
 
 /**
@@ -385,6 +391,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     firstBeatCue: false,
     bpmRange: "70-180",
     writeKeyTag: false,
+    detectKey: true,
   },
   djSystem: {
     waveformColor: "3band",
@@ -564,6 +571,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       firstBeatCue: bool(analysis.firstBeatCue, d.analysis.firstBeatCue),
       bpmRange: oneOf(analysis.bpmRange, BPM_RANGES, d.analysis.bpmRange),
       writeKeyTag: bool(analysis.writeKeyTag, d.analysis.writeKeyTag),
+      detectKey: bool(analysis.detectKey, d.analysis.detectKey),
     },
     djSystem: {
       waveformColor: oneOf(dj.waveformColor, WAVEFORM_COLORS, d.djSystem.waveformColor),
