@@ -421,8 +421,9 @@ function AppBody() {
   }, []);
   // RST: both decks back to the default zoom, linked or not (#602).
   const resetZoom = useCallback(() => setLinkedZoom(DETAIL_BARS), [setLinkedZoom]);
-  // Remembered across runs the same way: each deck's beat-jump size, and the
-  // linked one, seeded from deck A as the linked zoom is.
+  // Remembered across runs the same way: each deck's beat-jump size. Linked,
+  // both decks read deck A's and a pick is written to both, so what is shown
+  // is always what is stored and comes back the same after a restart.
   const [jumpSize, setJumpSize] = useState(restored.jumpSize);
   const setJumpA = useCallback((id: string) => {
     setJumpSize((size) => size.a === id ? size : { ...size, a: id });
@@ -430,9 +431,7 @@ function AppBody() {
   const setJumpB = useCallback((id: string) => {
     setJumpSize((size) => size.b === id ? size : { ...size, b: id });
   }, []);
-  const [dualJump, setDualJump] = useState(restored.jumpSize.a);
   const setLinkedJump = useCallback((id: string) => {
-    setDualJump(id);
     setJumpSize({ a: id, b: id });
   }, []);
   const [query, setQuery] = useState("");
@@ -3201,7 +3200,7 @@ function AppBody() {
             onWheelZoom={deckCount(layout) > 1 ? zoomBoth : undefined}
             bars={deckCount(layout) > 1 && dual ? dualBars : waveformZoom.a}
             onBars={deckCount(layout) > 1 && dual ? setLinkedZoom : setZoomA}
-            jumpSize={deckCount(layout) > 1 && dual ? dualJump : jumpSize.a}
+            jumpSize={jumpSize.a}
             onJumpSize={deckCount(layout) > 1 && dual ? setLinkedJump : setJumpA}
             publishSync={publishSync.a}
             {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
@@ -3239,7 +3238,7 @@ function AppBody() {
               onWheelZoom={zoomBoth}
               bars={dual ? dualBars : waveformZoom.b}
               onBars={dual ? setLinkedZoom : setZoomB}
-              jumpSize={dual ? dualJump : jumpSize.b}
+              jumpSize={dual ? jumpSize.a : jumpSize.b}
               onJumpSize={dual ? setLinkedJump : setJumpB}
               publishSync={publishSync.b}
               peerSync={peerSync.b}
