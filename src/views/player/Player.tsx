@@ -581,9 +581,6 @@ const PADS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
 /** The beat loops the key map has a command for: `beatLoop1` to `beatLoop32`. */
 const BEAT_LOOP_BEATS = [1, 2, 4, 8, 16, 32] as const;
 
-/** Seconds of a track sounding before its play goes on the history. */
-const PLAY_RECORD_SECONDS = 60;
-
 /**
  * The key that sets each pad, for its tooltip: the Export preset binds `1`,
  * `2` and `3` to `Set Hot Cue A` to `C` and nothing to the rest.
@@ -1610,13 +1607,15 @@ export const Player = memo(function Player({
   });
   // Editability and its explanation come from the hook, as for the hot cues.
   const memoryCueEditReason = memory.canEdit ? undefined : READ_ONLY_REASON;
-  // A play is recorded after a minute of the track sounding, once per load,
-  // when Preferences › Advanced › History says so and the library can be
-  // written. rekordbox's own threshold is not recorded; a minute is what
-  // tells a track played from one auditioned [ASSUME].
+  // A play is recorded after Preferences › Advanced › Browse › Playback time
+  // setting's seconds of the track sounding, once per load, when Advanced ›
+  // History says so and the library can be written: rekordbox's PERFORMANCE
+  // mode timer (`PlayHistoryManager::startCountDown` @0x101b9c58c starts
+  // `getCurrentPlayedTime() * 1000` ms; 60 s by default) [OBS static, #540].
   const playedSeconds = useRef(0);
   const recordedFor = useRef<string | null>(null);
   const recordHistory = advancedPrefs.recordHistory;
+  const playbackTime = advancedPrefs.playbackTime;
   useEffect(() => {
     playedSeconds.current = 0;
     recordedFor.current = null;
@@ -1626,14 +1625,14 @@ export const Player = memo(function Player({
     const id = track.id;
     const timer = globalThis.setInterval(() => {
       playedSeconds.current += 1;
-      if (playedSeconds.current < PLAY_RECORD_SECONDS || recordedFor.current === id) return;
+      if (playedSeconds.current < playbackTime || recordedFor.current === id) return;
       recordedFor.current = id;
       void getBackend()
         .then((backend) => backend.edits.recordPlay(id))
         .catch((e: unknown) => onError?.(e instanceof Error ? e.message : "The play could not be recorded."));
     }, 1000);
     return () => globalThis.clearInterval(timer);
-  }, [playback.playing, track, recordHistory, readOnly, onError]);
+  }, [playback.playing, track, recordHistory, playbackTime, readOnly, onError]);
 
   /** A list row: a cue is a jump, a memory loop is the loop itself. */
   const callCue = useCallback(

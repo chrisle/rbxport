@@ -1760,5 +1760,11 @@
   "Name": "Имя",
   "The new My Tag was not made.": "Новый Мой тег не был создан.",
   "a My Tag needs a name": "Моему тегу нужно имя",
-  "delete": "удалить"
+  "delete": "удалить",
+  "(Length of time before played tracks are displayed in color)": "(Length of time before played tracks are displayed in color)",
+  "Coloring of played tracks": "Выделение цветом воспроизводимых дорожек",
+  "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
+  "Playback time setting": "Playback time setting",
+  "The length of time before a track is added to Histories": "The length of time before a track is added to Histories",
+  "seconds": "секунды"
 }

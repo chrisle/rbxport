@@ -1764,5 +1764,11 @@
   "Name": "名前",
   "The new My Tag was not made.": "新しいマイタグは作成されませんでした。",
   "a My Tag needs a name": "マイタグには名前が必要です",
-  "delete": "削除する"
+  "delete": "削除する",
+  "(Length of time before played tracks are displayed in color)": "(再生済み楽曲をカラー表示にする時間)",
+  "Coloring of played tracks": "再生済み楽曲のカラー表示",
+  "Do you want to reset all coloring of played tracks?": "すべての再生済み楽曲のカラー表示をリセットしますか？",
+  "Playback time setting": "再生時間設定",
+  "The length of time before a track is added to Histories": "演奏履歴に追加する時間",
+  "seconds": "秒"
 }

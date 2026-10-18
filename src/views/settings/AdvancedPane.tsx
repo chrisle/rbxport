@@ -4,7 +4,7 @@
  *
  * Database holds the library's own facts and rekordbox's Database management
  * (the one place rekordbox chooses which library it works on). Browse holds
- * Library Protection and Edit Library. Others holds BEAT/BPM SYNC, the
+ * Library Protection, Edit Library and the Playback time setting. Others holds BEAT/BPM SYNC, the
  * quantize beat value and play history.
  *
  * Not here: Auto Relocate Search Folders and Duplicates (hidden; Auto
@@ -20,10 +20,10 @@ import { useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { DatabaseDrive, LibrarySummary } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
-import { QUANTIZE_BEATS } from "@/lib/preferences";
+import { PLAYBACK_TIME, QUANTIZE_BEATS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
-import { Button, Note, Radios, Section, Select, Sub, Toggle } from "./controls";
+import { Button, Note, Radios, Section, Select, Slider, Sub, Toggle } from "./controls";
 
 export type AdvancedTab = "database" | "browse" | "others";
 
@@ -85,6 +85,21 @@ export function AdvancedPane({ tab, summary }: {
             checked={advanced.doubleClickToEdit}
             onChange={(doubleClickToEdit) => set({ doubleClickToEdit })}
           />
+        </Section>
+        {/* rekordbox 7.2.19's DetailPlaybackTime: a 1–60 slider with the
+            value in seconds beside it, under these two lines. PERFORMANCE
+            mode there; here, the deck's plays (#540). */}
+        <Section title="Playback time setting">
+          <Note>{t("The length of time before a track is added to Histories")}</Note>
+          <Note>{t("(Length of time before played tracks are displayed in color)")}</Note>
+          <Slider
+            label="Playback time setting"
+            value={advanced.playbackTime}
+            range={{ min: PLAYBACK_TIME.min, max: PLAYBACK_TIME.max, step: 1 }}
+            ends={[String(PLAYBACK_TIME.min), String(PLAYBACK_TIME.max)]}
+            onChange={(playbackTime) => set({ playbackTime })}
+          />
+          <Sub>{`${advanced.playbackTime} ${t("seconds")}`}</Sub>
         </Section>
         <Section title="Playlists">
           <Sub>When a track is already in the playlist</Sub>

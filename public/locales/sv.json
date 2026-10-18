@@ -1753,5 +1753,11 @@
   "Name": "Namn",
   "The new My Tag was not made.": "Den nya My Tag gjordes inte.",
   "a My Tag needs a name": "Min tagg behöver ett namn",
-  "delete": "radera"
+  "delete": "radera",
+  "(Length of time before played tracks are displayed in color)": "(Length of time before played tracks are displayed in color)",
+  "Coloring of played tracks": "Färg på spelade spår",
+  "Do you want to reset all coloring of played tracks?": "Do you want to reset all coloring of played tracks?",
+  "Playback time setting": "Playback time setting",
+  "The length of time before a track is added to Histories": "The length of time before a track is added to Histories",
+  "seconds": "sekunder"
 }

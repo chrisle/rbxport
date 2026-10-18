@@ -5,8 +5,9 @@
  * Color's Appearance is drawn greyed on Dark: the light theme is not built,
  * and a radio that cannot be chosen still says the choice exists.
  */
+import { getBackend } from "@/ipc/client";
 import { BROWSE_SCALE_STEPS } from "@/lib/preferences";
-import { LANGUAGE_CHOICES } from "@/i18n";
+import { LANGUAGE_CHOICES, useTranslation } from "@/i18n";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import {
@@ -27,7 +28,16 @@ export interface ViewPaneProps {
   onResetLayout: () => void;
 }
 
+/** Coloring of played tracks › RESET, once the question is answered OK. */
+async function resetPlayedTracks(t: (text: string) => string): Promise<void> {
+  const backend = await getBackend();
+  if (await backend.confirm(t("Do you want to reset all coloring of played tracks?"), { yes: t("OK"), no: t("Cancel") })) {
+    await backend.resetPlayedTracks();
+  }
+}
+
 export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) {
+  const t = useTranslation();
   const { preferences, update } = usePreferencesContext();
   const view = preferences.view;
   const set = (patch: Partial<typeof view>) => update("view", patch);
@@ -182,6 +192,16 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           steps={BROWSE_SCALE_STEPS}
           onChange={(browseLineSpace) => set({ browseLineSpace })}
         />
+        <Separator />
+        {/* rekordbox 7.2.19's ViewBrowsePlayedColorComponent: RESET asks,
+            then takes the played colour off every track
+            (`buttonClicked` @0x101a79a7c). Its "Reset color when exiting"
+            box is not here: it is ticked by default, which is what this
+            does, keeping nothing past quitting (#540). */}
+        <Sub>Coloring of played tracks</Sub>
+        <div className={styles.actions}>
+          <Button onClick={() => { void resetPlayedTracks(t); }}>RESET</Button>
+        </div>
       </Section>
       <Section title="RBXport VU Meter">
         <Radios label="RBXport VU Meter" value={view.vuMeter}
