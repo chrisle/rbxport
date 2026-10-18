@@ -1979,6 +1979,24 @@ test("the overview playhead runs the whole band two device pixels wide, as rekor
   expect((box?.width ?? 0) * ratio).toBeCloseTo(2, 1);
 });
 
+test("the simple player's head keeps its own 1pt line, not the deck overview's two device pixels (#570)", async ({ page }) => {
+  // The simple player shares the deck's head ref, but its head is the 1pt
+  // line measured off the SIMPLE PLAYER capture; #570 only widens the deck's.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+  await expect(page.getByTestId("player-head")).toBeAttached();
+
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "SIMPLE PLAYER" }).click();
+  const head = page.getByTestId("simple-player-head");
+  await expect(head).toBeAttached();
+  // One CSS pixel at any ratio (Chromium runs at 1x, where the deck's head
+  // would be two), and no inline width written over the stylesheet's.
+  await expect(head).toHaveCSS("width", "1px");
+  expect(await head.evaluate((el) => el.style.width)).toBe("");
+});
+
 test("the detail playhead is pinned to the middle, whatever the track does", async ({ page }) => {
   // The window moves under the head rather than the head across the window,
   // which is what a CDJ shows and what makes the head mean "here".
