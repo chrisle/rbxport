@@ -1137,6 +1137,13 @@ specified below. Exported file type always describes the destination audio.
 | ISRC | String slot 0 | `isrc` |
 | Final filename extension | u16 `0x5a` | `fileType` |
 
+A track the stick keeps is read back from `exportLibrary.db` before the
+rewrite. A negative `analysedBits` there, as on users' sticks (-23 in #545
+and #583), is read as its low byte (`0xE9`) rather than stopping the
+sync; the byte is the same one `export.pdb` holds at `0x56`. Whether
+rekordbox writes such values signed, and what it writes them back as, is
+[UNKNOWN].
+
 | OneLibrary cue column | Value |
 |---|---|
 | `content_id` | Exported content ID |
