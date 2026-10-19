@@ -159,7 +159,7 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
         MenuItemBuilder::with_id("updates", label(labels, "Check for Updates…")).build(app)?;
 
     // The application menu, whose first item macOS names after the app.
-    let application = SubmenuBuilder::new(app, "rbxport")
+    let mut application = SubmenuBuilder::new(app, "rbxport")
         .item(&PredefinedMenuItem::about(
             app,
             Some(&label(labels, "About rbxport")),
@@ -168,16 +168,23 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
         .item(&updates)
         .separator()
         .item(&settings)
-        .separator()
-        .item(&PredefinedMenuItem::hide(
-            app,
-            Some(&label(labels, "Hide rbxport")),
-        )?)
-        .item(&PredefinedMenuItem::hide_others(
-            app,
-            Some(&label(labels, "Hide Others")),
-        )?)
-        .separator()
+        .separator();
+    // Hide / Hide Others are a macOS convention. On Windows and Linux Hide
+    // vanishes the window with no taskbar or tray entry to bring it back
+    // (#595), so those platforms minimize instead and omit the items.
+    if cfg!(target_os = "macos") {
+        application = application
+            .item(&PredefinedMenuItem::hide(
+                app,
+                Some(&label(labels, "Hide rbxport")),
+            )?)
+            .item(&PredefinedMenuItem::hide_others(
+                app,
+                Some(&label(labels, "Hide Others")),
+            )?)
+            .separator();
+    }
+    let application = application
         .item(&PredefinedMenuItem::quit(
             app,
             Some(&label(labels, "Quit rbxport")),
