@@ -43,6 +43,28 @@ const KNOB_TRAVEL = 120;
  */
 const DETENT = 3;
 
+/**
+ * Puts a deck's channel back to flat in the engine: unity trim, no band
+ * killed.
+ *
+ * The strip holds what it draws, and the engine outlives it, so the two only
+ * agree if the strip says so whenever it comes or goes. rekordbox 7.2.19 does
+ * the same on a layout change: `djplay::PlayCuePanel::notifyChangeLayoutExport`
+ * @0x100012b40 calls `reset3BandEQ` @0x100012900, which sets all three bands
+ * of both channels back to centre in the engine and redraws the buttons from
+ * it (#602). Leaving a kill behind played the band cut after a trip through
+ * 1 PLAYER, under a strip that drew it unlit.
+ */
+function flatten(deck: DeckId) {
+  void (async () => {
+    const backend = await getBackend();
+    await Promise.all([
+      backend.setChannelTrim(deck, 1),
+      ...BANDS.map((band) => backend.setChannelKill(deck, band.id, false)),
+    ]);
+  })().catch(() => {});
+}
+
 /** Trim as a dB reading, which is what the strip prints above the knob. */
 function trimLabel(trim: number): string {
   if (trim <= 0) return "-∞dB";
@@ -61,6 +83,13 @@ const Channel = memo(function Channel({
   const [trim, setTrim] = useState(1);
   const [killed, setKilled] = useState<ReadonlySet<EqBand>>(() => new Set());
   const drag = useRef<{ y: number; from: number } | null>(null);
+
+  // The strip starts flat, so the engine has to as well; and it is left flat,
+  // because the layouts without a strip have nothing to show a kill with.
+  useEffect(() => {
+    flatten(deck);
+    return () => flatten(deck);
+  }, [deck]);
 
   const send = useCallback(
     (next: number) => {
@@ -213,6 +242,15 @@ export function MixerStrip({ crossfade = 0.5, onCrossfade }: MixerStripProps) {
     })().catch(() => {});
     onCrossfade?.(at);
   }, [at, onCrossfade]);
+
+  // Gone with the strip, for the same reason the channels flatten: a fader
+  // left at B would keep deck A silent in a layout with no fader to move.
+  useEffect(() => () => {
+    void (async () => {
+      const backend = await getBackend();
+      await backend.setCrossfade(0.5);
+    })().catch(() => {});
+  }, []);
 
   const move = useCallback((clientY: number) => {
     const box = track.current?.getBoundingClientRect();
