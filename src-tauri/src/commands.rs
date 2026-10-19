@@ -2152,14 +2152,15 @@ fn write_export_registered<R: tauri::Runtime>(
 /// words, "Not enough space available on the device" (its export's message
 /// for running out of room, rekordbox 7.2.19
 /// `browse::BrowseBasicView::dbMessageExportError`), rather than as the
-/// operating system's error (#591).
+/// operating system's error (#591). The OS error follows in brackets, as the
+/// Sync Manager shows the message and its detail on one line.
 fn sync_error(e: &rbl_export::ExportError) -> AppError {
     match e {
         rbl_export::ExportError::Cancelled => AppError::new(ErrorKind::Cancelled, e.to_string()),
         rbl_export::ExportError::Io(io) if io.kind() == std::io::ErrorKind::StorageFull => AppError::new(
             ErrorKind::ReadOnly,
-            "Not enough space available on the device.",
-        ).with_detail(io.to_string()),
+            "Not enough space available on the device",
+        ).with_detail(format!("({io})")),
         _ => AppError::new(ErrorKind::Internal, e.to_string()),
     }
 }
@@ -4486,8 +4487,8 @@ mod tests {
     fn a_full_stick_fails_the_sync_in_rekordboxs_words() {
         let full = rbl_export::ExportError::Io(std::io::Error::new(std::io::ErrorKind::StorageFull, "There is not enough space on the disk. (os error 112)"));
         let error = super::sync_error(&full);
-        assert_eq!(error.message, "Not enough space available on the device.");
-        assert_eq!(error.full_message(), "Not enough space available on the device. There is not enough space on the disk. (os error 112)");
+        assert_eq!(error.message, "Not enough space available on the device");
+        assert_eq!(error.full_message(), "Not enough space available on the device (There is not enough space on the disk. (os error 112))");
         assert_eq!(super::sync_error(&rbl_export::ExportError::Cancelled).kind, crate::error::ErrorKind::Cancelled);
         let other = super::sync_error(&rbl_export::ExportError::Io(std::io::Error::other("bad sector")));
         assert_eq!((other.kind, other.message.as_str()), (crate::error::ErrorKind::Internal, "bad sector"));
