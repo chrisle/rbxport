@@ -65,21 +65,26 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
     let mut artwork_sources = std::collections::HashSet::new();
     let root = crate::export_root(destination);
     let root_name = root.file_name().map_or_else(|| "PIONEER".to_owned(), |n| n.to_string_lossy().into_owned());
-    // The folders a new track's files go in. On FAT32 and exFAT a folder
-    // takes a cluster of its own, which on a large stick is 128 KiB each.
-    let mut folders = std::collections::BTreeSet::new();
+    // The folders the sync writes into. On FAT32 and exFAT a folder takes a
+    // cluster of its own, which on a large stick is 128 KiB each.
+    let mut folders: std::collections::BTreeSet<std::path::PathBuf> = ["rekordbox", "rbxport"].iter().map(|f| Path::new("/").join(&root_name).join(f)).collect();
+    folders.insert(Path::new("/").join(&root_name));
+    // The files it writes, each of which macOS gives an AppleDouble
+    // companion on FAT32 and exFAT: first the ones every sync writes, its
+    // `DATABASE_FILES` and its lock.
+    let mut new_files = DATABASE_FILES + 1;
+    let mut new_artwork = 0_u64;
     for track in &tracks {
         let key = crate::track_key(track.id, &track.source_path.to_string_lossy());
         let old = recorded.get(&key).copied();
         if old.is_none() && estimate.actions.get(&key).is_some_and(|a| matches!(a, crate::estimate::AudioAction::Copy | crate::estimate::AudioAction::Convert)) {
             let audio = crate::layout(track, 0).audio;
             let album = Path::new(&audio).parent().map(Path::to_path_buf).unwrap_or_default();
-            folders.extend(album.parent().map(Path::to_path_buf));
-            folders.insert(album);
+            folders.extend(album.ancestors().filter(|f| f.parent().is_some()).map(Path::to_path_buf));
+            new_files += 1;
             if track.analysis_source.is_some() || !track.analysis.is_empty() {
                 let analysis = std::path::PathBuf::from(crate::analysis_directory(&audio, &root_name));
-                folders.extend(analysis.parent().map(Path::to_path_buf));
-                folders.insert(analysis);
+                folders.extend(analysis.ancestors().filter(|f| f.parent().is_some()).map(Path::to_path_buf));
             }
         }
         let unchanged = old.is_some_and(|c| {
@@ -89,9 +94,12 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
         if !unchanged {
             if let Some(base) = &track.analysis_source {
                 for ext in ["DAT", "EXT", "2EX"] {
-                    asset_bytes += std::fs::metadata(base.with_extension(ext)).map_or(0, |m| on_disk(m.len() + 256));
+                    if let Ok(m) = std::fs::metadata(base.with_extension(ext)) { asset_bytes += on_disk(m.len() + 256); new_files += 1; }
                 }
-            } else { asset_bytes += track.analysis.iter().map(|(_, b)| on_disk(b.len() as u64 + 256)).sum::<u64>(); }
+            } else {
+                asset_bytes += track.analysis.iter().map(|(_, b)| on_disk(b.len() as u64 + 256)).sum::<u64>();
+                new_files += track.analysis.len() as u64;
+            }
         }
         if let Some(image) = &track.artwork {
             if !artwork_sources.insert(image.clone()) { continue; }
@@ -100,23 +108,45 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
                     && old.is_some_and(|c| !c.artwork.is_empty() && trusted.contains(c.artwork.trim_start_matches('/')))
             });
             if !source_unchanged {
+                new_artwork += 1;
                 for (_, medium) in crate::artwork_names(1) {
-                    asset_bytes += std::fs::metadata(crate::artwork_source(image, medium)).map_or(0, |m| on_disk(m.len()));
+                    if let Ok(m) = std::fs::metadata(crate::artwork_source(image, medium)) { asset_bytes += on_disk(m.len()); new_files += 1; }
                 }
             }
         }
     }
-    asset_bytes += unit * folders.iter().filter(|folder| !crate::under(destination, &folder.to_string_lossy()).is_dir()).count() as u64;
+    if new_artwork > 0 {
+        // Numbered from 1, a folder per `ARTWORK_PER_FOLDER` images.
+        let artwork = Path::new("/").join(&root_name).join("Artwork");
+        folders.extend((1..=new_artwork.div_ceil(u64::from(crate::ARTWORK_PER_FOLDER))).map(|n| artwork.join(format!("{n:05}"))));
+        folders.insert(artwork);
+    }
+    // Folders new to the stick stay; every folder written into is made again
+    // inside the publication's staging folder first, and both are there at
+    // once until it is published.
+    let new_folders = folders.iter().filter(|folder| !crate::under(destination, &folder.to_string_lossy()).is_dir()).count() as u64;
+    let staging_folders = folders.len() as u64 + 2;
+    asset_bytes += unit * new_folders;
+    // macOS writes an AppleDouble `._` companion beside each file and folder
+    // it creates on FAT32 and exFAT, a cluster each (#591).
+    let companions = if appledouble(destination) { unit } else { 0 };
+    asset_bytes += companions * (new_files + new_folders);
     let old_database_bytes: u64 = ["rekordbox/export.pdb", "rekordbox/exportExt.pdb", "rekordbox/exportLibrary.db", "rbxport/manifest.json"].iter()
         .map(|p| std::fs::metadata(root.join(p)).map_or(0, |m| on_disk(m.len()))).sum();
     let entry_count: usize = playlists.iter().map(|p| p.track_indices.len()).sum();
-    let database_bytes = old_database_bytes.max(256 * 1024 + tracks.len() as u64 * 4096 + entry_count as u64 * 32 + playlists.len() as u64 * 1024);
+    // Each of the files takes at least a cluster, and part of one more at its end.
+    let database_bytes = old_database_bytes.max(256 * 1024 + tracks.len() as u64 * 4096 + entry_count as u64 * 32 + playlists.len() as u64 * 1024)
+        .saturating_add(DATABASE_FILES * unit);
     let old_replacements: u64 = previous.into_iter().flat_map(|m| &m.tracks).filter(|c| {
         selected.contains(&c.key()) && estimate.actions.get(&c.key()).is_some_and(|action| matches!(action, crate::estimate::AudioAction::Copy | crate::estimate::AudioAction::Convert))
     }).map(|c| std::fs::metadata(crate::under(destination, &c.audio)).map_or(0, |m| on_disk(m.len()))).sum();
     let staged = estimate.copy_allocated.saturating_add(asset_bytes).saturating_add(database_bytes);
     let reclaimed = estimate.free_allocated.saturating_add(old_database_bytes).saturating_add(old_replacements);
-    let peak_bytes = staged.saturating_add(64 * 1024).saturating_add(estimate.uncertain_adoption_bytes);
+    // The staging folders, the publication's journal and lock files, and a
+    // second copy of the databases: each is written through a temporary file
+    // or journal, which is there beside it until it is renamed into place.
+    let staging = (unit + companions).saturating_mul(staging_folders).saturating_add((64 * 1024).max(16 * unit)).saturating_add(database_bytes);
+    let peak_bytes = staged.saturating_add(staging).saturating_add(estimate.uncertain_adoption_bytes);
     let net = i128::from(staged) - i128::from(reclaimed);
     let kept_existing = tracks.iter().filter(|t| t.source_unavailable).count();
     let uncertain_revisions = tracks.iter().any(|t| {
@@ -128,6 +158,11 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
     Ok(SyncPlan { tracks, playlists, approximate: true, estimate, database_bytes, asset_bytes, peak_bytes,
         net_additional_bytes: i64::try_from(net).unwrap_or(if net < 0 { i64::MIN } else { i64::MAX }), unknown_size, kept_existing, device_additions })
 }
+
+/// The files a sync writes whatever it copies: the three databases, the two
+/// playlist sync records, the four player settings files and rbxport's
+/// manifest.
+const DATABASE_FILES: u64 = 10;
 
 /// The space a file of `bytes` takes on a filesystem that stores files in
 /// `unit`-byte clusters. An empty file takes none.
@@ -148,6 +183,22 @@ pub fn allocation_unit(destination: &Path) -> u64 {
         .filter(|unit| unit.is_power_of_two() && *unit <= 32 << 20)
         .map_or(4096, |unit| unit.max(4096))
 }
+
+/// Whether macOS keeps an `AppleDouble` `._` companion for each file and folder
+/// written to `destination`: it does on FAT32 and exFAT, which cannot hold
+/// extended attributes, and every file an app writes carries one
+/// (`com.apple.provenance`) [OBS macOS 26, #591].
+#[cfg(target_os = "macos")]
+#[allow(clippy::cast_sign_loss, reason = "a C name's bytes, whichever sign c_char has")]
+fn appledouble(destination: &Path) -> bool {
+    rustix::fs::statfs(destination).is_ok_and(|stat| {
+        let name: Vec<u8> = stat.f_fstypename.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+        matches!(name.as_slice(), b"msdos" | b"exfat")
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn appledouble(_: &Path) -> bool { false }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -204,20 +255,25 @@ mod tests {
         assert_eq!(large.estimate.copy_allocated, (23 + 39) * UNIT);
         assert_eq!(small.estimate.copy_allocated, (733 + 1221) * 4096);
         // Analysis: DAT, EXT and 2EX (each 256 bytes longer once written for
-        // the stick's path) are 1 + 1 + 2 clusters a track. Folders: the
-        // artist's and the album's under Contents, and each track's analysis
-        // folder with the shard folder above it.
+        // the stick's path) are 1 + 1 + 2 clusters a track. Folders: PIONEER
+        // with its rekordbox, rbxport and USBANLZ; Contents with the artist's
+        // and the album's; each track's analysis folder and the shard folder
+        // above it.
         let shards = tracks.iter().map(|t| {
             let audio = crate::layout(t, 0).audio;
             Path::new(&crate::analysis_directory(&audio, "PIONEER")).parent().unwrap().to_path_buf()
         }).collect::<std::collections::BTreeSet<_>>().len() as u64;
-        let folders = 2 + 2 + shards;
+        let folders = 4 + 3 + shards + 2;
         assert_eq!(large.asset_bytes, (2 * (1 + 1 + 2) + folders) * UNIT);
         assert_eq!(small.asset_bytes, 2 * (1 + 5 + 37) * 4096 + folders * 4096);
-        assert_eq!(large.database_bytes, small.database_bytes);
+        // The databases' estimate, plus a cluster for each of their 10 files.
+        assert_eq!(large.database_bytes - small.database_bytes, DATABASE_FILES * (UNIT - 4096));
         let staged = (23 + 39 + 8 + folders) * UNIT + large.database_bytes;
-        assert_eq!(large.peak_bytes, staged + 64 * 1024);
         assert_eq!(large.net_additional_bytes, i64::try_from(staged).unwrap());
+        // While staging: every folder again inside the staging folder, which
+        // with the journal is two more; 16 clusters for the journal's files;
+        // the databases' temporary copies.
+        assert_eq!(large.peak_bytes, staged + (folders + 2) * UNIT + 16 * UNIT + large.database_bytes);
         assert!(large.peak_bytes > small.peak_bytes);
     }
 }
