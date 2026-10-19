@@ -308,14 +308,21 @@ export const DualControls = memo(function DualControls({
  * between. The capture draws one for both decks, floating over the two
  * detail waveforms where they meet, so it belongs to the shell rather than to
  * either deck; pressing it zooms both.
+ *
+ * RST is "Reset the zoom ratio" (rekordbox 7.2.18 manual p.75), and it resets
+ * both: `djplay::WaveViewArea::buttonClicked` @0x100c95708 calls
+ * `PlayerWaveView::zoomReset` @0x100c91390 on deck A's view and on deck B's.
  */
-export function DualZoom({ onZoom }: { onZoom: (by: number) => void }) {
+export function DualZoom({ onZoom, onReset }: { onZoom: (by: number) => void; onReset: () => void }) {
+  const tip = useTooltip();
   return (
     <div className={styles.zoom} role="group" aria-label="Waveform zoom">
       <button type="button" className={styles.zoomButton} aria-label="Zoom in" onClick={() => onZoom(-1)}>
         <MagnifierPlusIcon className={styles.zoomGlyph} />
       </button>
-      <span className={styles.zoomReset} aria-hidden>RST</span>
+      <button type="button" className={styles.zoomReset} aria-label="Reset zoom" title={tip("Reset the zoom ratio")} onClick={onReset}>
+        RST
+      </button>
       <button type="button" className={styles.zoomButton} aria-label="Zoom out" onClick={() => onZoom(1)}>
         <MagnifierMinusIcon className={styles.zoomGlyph} />
       </button>

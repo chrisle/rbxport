@@ -70,7 +70,7 @@ import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { hasLooseId, importLoose, isLooseId } from "@/lib/explorer";
 import { childrenOf, containerOf, parentFor, withSources } from "@/lib/tree";
-import { JUMP_SIZE_ID } from "@/lib/player";
+import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
 import { Player } from "@/views/player/Player";
@@ -380,8 +380,10 @@ function AppBody() {
   /**
    * The zoom cluster the two-deck layout shares, registered the same way:
    * one + RST − over the line where the two details meet, and a press
-   * zooms both decks. DUAL CONTROL off, each deck still keeps its own zoom
-   * for the wheel; the cluster is simply pressed on both.
+   * zooms both decks. The wheel over either detail is the same press, as
+   * rekordbox's is (#602). DUAL CONTROL off, each deck still holds its own
+   * zoom, and a step moves each from where it is; RST brings both back to
+   * the default.
    */
   const zoomA = useRef<(by: number) => void>(() => {});
   const zoomB = useRef<(by: number) => void>(() => {});
@@ -414,6 +416,8 @@ function AppBody() {
     setDualBars(bars);
     setWaveformZoom({ a: bars, b: bars });
   }, []);
+  // RST: both decks back to the default zoom, linked or not (#602).
+  const resetZoom = useCallback(() => setLinkedZoom(DETAIL_BARS), [setLinkedZoom]);
   const [dualJump, setDualJump] = useState(JUMP_SIZE_ID);
   const linked = dual
     ? {
@@ -3116,6 +3120,7 @@ function AppBody() {
             transportSlot={deckCount(layout) > 1 ? transportA : null}
             dual={deckCount(layout) > 1}
             publishZoom={deckCount(layout) > 1 ? publishZoom.a : undefined}
+            onWheelZoom={deckCount(layout) > 1 ? zoomBoth : undefined}
             bars={deckCount(layout) > 1 && dual ? dualBars : waveformZoom.a}
             onBars={deckCount(layout) > 1 && dual ? setLinkedZoom : setZoomA}
             {...(deckCount(layout) > 1 ? linked : {})}
@@ -3151,6 +3156,7 @@ function AppBody() {
               flipped
               dual
               publishZoom={publishZoom.b}
+              onWheelZoom={zoomBoth}
               bars={dual ? dualBars : waveformZoom.b}
               onBars={dual ? setLinkedZoom : setZoomB}
               {...linked}
@@ -3172,7 +3178,7 @@ function AppBody() {
               After the decks, so it paints over both. */}
           {deckCount(layout) > 1 ? (
             <div className={styles.zoomSlot}>
-              <DualZoom onZoom={zoomBoth} />
+              <DualZoom onZoom={zoomBoth} onReset={resetZoom} />
             </div>
           ) : null}
           <div className={styles.playerGutter} aria-hidden />
