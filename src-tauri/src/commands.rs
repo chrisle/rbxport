@@ -2148,6 +2148,22 @@ fn write_export_registered<R: tauri::Runtime>(
     result
 }
 
+/// What a failed sync says. A stick that filled up says so in rekordbox's
+/// words, "Not enough space available on the device" (its export's message
+/// for running out of room, rekordbox 7.2.19
+/// `browse::BrowseBasicView::dbMessageExportError`), rather than as the
+/// operating system's error (#591).
+fn sync_error(e: &rbl_export::ExportError) -> AppError {
+    match e {
+        rbl_export::ExportError::Cancelled => AppError::new(ErrorKind::Cancelled, e.to_string()),
+        rbl_export::ExportError::Io(io) if io.kind() == std::io::ErrorKind::StorageFull => AppError::new(
+            ErrorKind::ReadOnly,
+            "Not enough space available on the device.",
+        ).with_detail(io.to_string()),
+        _ => AppError::new(ErrorKind::Internal, e.to_string()),
+    }
+}
+
 #[allow(clippy::too_many_arguments, reason = "export options and independent progress/cancellation callbacks")]
 fn write_export_with_phase(
     destination: &std::path::Path,
@@ -2205,7 +2221,7 @@ fn write_export_with_phase(
         progress,
         cancelled,
     )
-    .map_err(|e| AppError::new(if matches!(e, rbl_export::ExportError::Cancelled) { ErrorKind::Cancelled } else { ErrorKind::Internal }, e.to_string()))?;
+    .map_err(|e| sync_error(&e))?;
     if !report.verified { return Err(AppError::internal("The exported generation was not verified.")); }
     phase("finalizing");
 
@@ -4463,6 +4479,19 @@ pub async fn filter_values(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::{expand_import_paths, read_analysis};
+
+    /// A stick that fills up mid-sync says so as rekordbox does, keeping the
+    /// operating system's error as the detail (#591).
+    #[test]
+    fn a_full_stick_fails_the_sync_in_rekordboxs_words() {
+        let full = rbl_export::ExportError::Io(std::io::Error::new(std::io::ErrorKind::StorageFull, "There is not enough space on the disk. (os error 112)"));
+        let error = super::sync_error(&full);
+        assert_eq!(error.message, "Not enough space available on the device.");
+        assert_eq!(error.full_message(), "Not enough space available on the device. There is not enough space on the disk. (os error 112)");
+        assert_eq!(super::sync_error(&rbl_export::ExportError::Cancelled).kind, crate::error::ErrorKind::Cancelled);
+        let other = super::sync_error(&rbl_export::ExportError::Io(std::io::Error::other("bad sector")));
+        assert_eq!((other.kind, other.message.as_str()), (crate::error::ErrorKind::Internal, "bad sector"));
+    }
 
     /// A track whose analysis folder is gone from disk is exported without
     /// analysis; it does not stop the export of everything else.
