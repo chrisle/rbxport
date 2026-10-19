@@ -36,5 +36,10 @@ rbl-onelibrary = { path = "../rbl-onelibrary" }
 
 # `statfs`, for the type of a mounted test volume (`tests/removable_media.rs`).
 # Already in the lock through rbl-core.
+# `statfs` names the filesystem, which says whether macOS keeps AppleDouble
+# companions on it (plan.rs). Already in the lock through rbl-core.
+[target.'cfg(target_os = "macos")'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 rustix = { version = "1", features = ["fs"] }

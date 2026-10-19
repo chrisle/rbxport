@@ -424,3 +424,85 @@ fn a_sync_writes_every_stick_at_once() {
         assert!(leftovers(&volume.mount).is_empty(), "{name}: {:?}", leftovers(&volume.mount));
     }
 }
+
+/// A blank exFAT image with 128 KiB clusters, as Windows formats a stick
+/// over 32 GB, mounted at a fresh folder; `None` where the tools cannot
+/// make one. Detached on drop through [`Volume`].
+fn large_cluster_exfat() -> Option<Volume> {
+    let dir = tempfile::tempdir().ok()?;
+    let image = dir.path().join("stick.dmg");
+    let mount = dir.path().join("mnt");
+    let run = |command: &mut Command| command.output().ok().filter(|o| o.status.success());
+    run(Command::new("hdiutil").args(["create", "-quiet", "-size", "512m", "-layout", "NONE", "-type", "UDIF", "-o"]).arg(&image))?;
+    let attached = run(Command::new("hdiutil").args(["attach", "-nomount"]).arg(&image))?;
+    let device = String::from_utf8_lossy(&attached.stdout).split_whitespace().next()?.to_owned();
+    let formatted = run(Command::new("newfs_exfat").args(["-b", "131072", "-v", "RBXTEST", &device]));
+    std::fs::create_dir_all(&mount).ok()?;
+    let mounted = formatted.and_then(|_| run(Command::new("diskutil").args(["mount", "-mountPoint"]).arg(&mount).arg(&device)));
+    if mounted.is_none() {
+        let _ = Command::new("hdiutil").args(["detach", "-quiet", "-force", &device]).status();
+        return None;
+    }
+    Some(Volume { label: "exFAT, 128 KiB clusters".into(), mount, root: None, image: Some(dir) })
+}
+
+/// The space a sync says it needs covers what it really takes at its fullest
+/// on a stick with large clusters, AppleDouble companions included, so a
+/// sync the check lets start does not run out of room part way (#591).
+/// [OBS 2026-10-19, macOS 26] 120 tracks: estimated peak 727,131,648 B,
+/// sampled 725,483,520 B; 4 KiB rounding had said 457,576,388 B.
+#[test]
+fn the_space_check_covers_a_large_cluster_stick() {
+    let Some(volume) = large_cluster_exfat() else {
+        eprintln!("skipping: could not make a 128 KiB-cluster exFAT image here");
+        return;
+    };
+    assert_eq!(rbl_export::plan::allocation_unit(&volume.mount), 128 * 1024);
+    let source = tempfile::tempdir().unwrap();
+    let art = source.path().join("art.jpg");
+    std::fs::write(&art, vec![0xff_u8; 30_000]).unwrap();
+    let tracks: Vec<SourceTrack> = (1..=40_u64)
+        .map(|id| {
+            let path = source.path().join(format!("track-{id}.mp3"));
+            std::fs::write(&path, vec![id as u8; 500_000 + (id as usize * 7_919_191) % 6_000_000]).unwrap();
+            let anlz = |n: usize| rbl_anlz::AnlzBuilder::new().path("/x.mp3").waveform_preview(b"PWAV", &vec![7_u8; n]).finish();
+            SourceTrack {
+                id, source_path: path, title: format!("Track {id}"), artist: format!("Artist {}", id % 7),
+                album: format!("Album {}", id % 13), duration_sec: 120, sample_rate: 44_100,
+                analysis: vec![("DAT".into(), anlz(2_000)), ("EXT".into(), anlz(40_000)), ("2EX".into(), anlz(200_000))],
+                artwork: (id % 3 == 0).then(|| art.clone()),
+                ..Default::default()
+            }
+        })
+        .collect();
+    let set = [playlist(10, "Set", (0..tracks.len()).collect())];
+    let tree = set.iter().map(|p| SyncNode { id: p.id, parent: 0, attribute: 0 }).collect();
+    let sync = SyncSource { db_id: 123, tree, automatic: false };
+    let options = ExportOptions { sync: Some(&sync), ..Default::default() };
+    let plan = rbl_export::plan::preview(&volume.mount, &tracks, &set, &[], &options).unwrap();
+    assert!(!plan.unknown_size);
+
+    let free = || fs2::available_space(&volume.mount).unwrap();
+    let before = free();
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let fullest = std::thread::scope(|scope| {
+        let sampler = scope.spawn(|| {
+            let mut least = u64::MAX;
+            while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                least = least.min(free());
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            least
+        });
+        let report = export_with_options(&volume.mount, &tracks, &set, &[], &options, &mut |_| {}).unwrap();
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(report.failed.is_empty(), "{report:?}");
+        before - sampler.join().unwrap().min(free())
+    });
+    let used = before - free();
+    assert!(plan.peak_bytes >= fullest, "estimated peak {} < used at the fullest {fullest}", plan.peak_bytes);
+    // And not so far over that it turns away a sync that fits.
+    assert!(plan.peak_bytes <= fullest + fullest / 20, "estimated peak {} far over {fullest}", plan.peak_bytes);
+    let net = u64::try_from(plan.net_additional_bytes).unwrap();
+    assert!(net.abs_diff(used) <= used / 100, "estimated {net}, used {used}");
+}
