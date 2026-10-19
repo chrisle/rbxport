@@ -4,7 +4,8 @@ use crate::Section;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExportCue {
-    /// Master database kind: memory=0, A-C=1-3, D-P=5-17.
+    /// Master database kind: memory=0, A-C=1-3, D-P=5-17, and 4 for the
+    /// memory loop set as the track's Active Loop.
     pub kind: u8,
     pub time_ms: u32,
     pub loop_time_ms: Option<u32>,
@@ -17,12 +18,20 @@ pub struct ExportCue {
 }
 
 impl ExportCue {
+    /// The ANLZ hot-cue slot: 0 for a memory cue, 1-16 for A-P.
     pub fn slot(&self) -> u32 {
-        u32::from(if self.kind >= 5 {
-            self.kind - 1
-        } else {
-            self.kind
+        u32::from(match self.kind {
+            4 => 0,
+            kind if kind >= 5 => kind - 1,
+            kind => kind,
         })
+    }
+
+    /// A memory cue or loop, the Active Loop (Kind 4) included: rekordbox
+    /// 7.2.19's `DatabaseMediator::getExportCue` @0x1009bc884 files kinds
+    /// 0 and 4 in the memory list [OBS static].
+    pub fn is_memory(&self) -> bool {
+        matches!(self.kind, 0 | 4)
     }
 }
 
@@ -46,7 +55,7 @@ pub fn sections(cues: &[ExportCue], extended: bool) -> Vec<Section> {
                 .iter()
                 .copied()
                 .filter(|c| {
-                    (c.kind != 0) == hot
+                    c.is_memory() != hot
                         && (modern
                             || if extended {
                                 hot && c.slot() > 3
@@ -289,5 +298,43 @@ mod tests {
             (2, 2000, 4000)
         );
         assert_eq!(&ext[3].payload[36..40], &[0, 4, 0, 1]);
+    }
+
+    /// The Active Loop is desktop Kind 4 (#577). rekordbox 7.2.19's
+    /// `getExportCue` @0x1009bc884 files it with the memory cues, hot slot 0,
+    /// and sets the PCPT word at 0x10 to 4; PCP2 has no such word, and the
+    /// entry is a loop there as in PCPT [OBS static].
+    #[test]
+    fn an_active_loop_is_exported_as_a_memory_loop_marked_active() {
+        let cues = vec![
+            ExportCue { kind: 1, time_ms: 500, ..Default::default() },
+            ExportCue {
+                kind: 4,
+                time_ms: 2000,
+                loop_time_ms: Some(4000),
+                active_loop: true,
+                color_id: 3,
+                ..Default::default()
+            },
+            ExportCue { kind: 5, time_ms: 9000, ..Default::default() },
+        ];
+        assert_eq!(cues[1].slot(), 0);
+        let dat = sections(&cues, false);
+        // PCPT entries are 56 bytes: one hot cue (A), one memory loop.
+        assert_eq!(dat[0].payload.len(), 56, "not a hot cue, not slot D");
+        assert_eq!(&dat[0].payload[12..16], &1_u32.to_be_bytes());
+        assert_eq!(dat[1].payload.len(), 56);
+        let memory = &dat[1].payload;
+        assert_eq!(&memory[12..16], &0_u32.to_be_bytes(), "hot slot 0");
+        assert_eq!(&memory[16..20], &4_u32.to_be_bytes(), "active");
+        assert_eq!(memory[28], 2, "a loop");
+        assert_eq!(&memory[32..40], &[0, 0, 7, 208, 0, 0, 15, 160], "2000 to 4000 ms");
+        let ext = sections(&cues, true);
+        let extended_hot = ext[2].as_cue_entries().unwrap();
+        assert_eq!(extended_hot.iter().map(|c| c.hot_cue).collect::<Vec<_>>(), [1, 4]);
+        let extended_memory = ext[3].as_cue_entries().unwrap();
+        assert_eq!(extended_memory.len(), 1);
+        assert_eq!((extended_memory[0].hot_cue, extended_memory[0].kind), (0, 2));
+        assert_eq!(extended_memory[0].color_id, 3, "a memory cue's colour");
     }
 }

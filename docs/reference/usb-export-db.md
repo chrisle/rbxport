@@ -1140,10 +1140,10 @@ specified below. Exported file type always describes the destination audio.
 | OneLibrary cue column | Value |
 |---|---|
 | `content_id` | Exported content ID |
-| `kind` | Source kind, including the gap at 4 |
+| `kind` | Source kind; 4 is the Active Loop [ASSUME: rekordbox's own OneLibrary reader, `DevSqliteDBController::set_cueInfo` @0x1006f8c38, keeps kind 4 and does not read `isActiveLoop`] |
 | `colorTableIndex` | Source extended color code |
 | `cueComment` | Source comment |
-| `isActiveLoop` | Boolean source active-loop state |
+| `isActiveLoop` | Boolean source active-loop state: source `Kind` 4, or `ActiveLoop != 0` |
 | `beatLoopNumerator`, `beatLoopDenominator` | High/low 16 bits of source BeatLoopSize |
 | `inUsec`, `outUsec` | Start/end milliseconds × 1,000; absent end is −1 |
 | `in150FramePerSec`, `out150FramePerSec` | Integer floor(milliseconds × 150 / 1,000); absent end is −1 |
@@ -1296,9 +1296,13 @@ both extended lists. Entries within each list preserve descending source
 Source `OutMsec` below zero or outside u32 means no loop. `BeatLoopSize`
 contains the numerator in its high 16 bits and denominator in its low 16.
 For memory cues, source `Color` is a u8 except 255; invalid/255 becomes 0.
-Source `ColorTableIndex` supplies the extended color code. `ActiveLoop != 0`
-sets the active flag. Source cue kinds map to slots by subtracting one for
-kinds 5–17; memory and A–C keep their kind as the slot number.
+Source `ColorTableIndex` supplies the extended color code. Source `Kind` 4
+is the memory loop set as the track's Active Loop: it goes in the memory list
+with slot 0 and the active flag, as rekordbox 7.2.19's
+`DatabaseMediator::getExportCue` (@0x1009bc884) files it, and takes the
+memory `Color`. `ActiveLoop != 0` also sets the active flag. Other source cue
+kinds map to slots by subtracting one for kinds 5–17; memory and A–C keep
+their kind as the slot number.
 
 #### Unknown cue color codes
 

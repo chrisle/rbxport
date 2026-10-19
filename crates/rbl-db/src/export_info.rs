@@ -264,11 +264,15 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
             out.entry(id).or_default().analysis = Some(facts);
         }
         if has_table(conn, "djmdCue") {
+            // Kind 4 is the memory loop set as the track's Active Loop. It
+            // goes out in the memory list, flagged active, as rekordbox
+            // 7.2.19's `DatabaseMediator::getExportCue` @0x1009bc884 sends
+            // it: hot slot 0, the PCPT word at 0x10 set to 4 [OBS static].
             let mut stmt = conn.prepare(&format!(
                 "SELECT q.ContentID, q.Kind, q.InMsec, q.OutMsec, q.Color, q.ColorTableIndex,
                         q.Comment, q.ActiveLoop, q.BeatLoopSize, c.BPM
                  FROM djmdCue q JOIN djmdContent c ON c.ID = q.ContentID
-                 WHERE q.rb_local_deleted=0 AND q.Kind IN (0,1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17)
+                 WHERE q.rb_local_deleted=0 AND q.Kind IN (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17)
                  AND q.ContentID IN ({marks}) ORDER BY q.rowid DESC"
             ))?;
             let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
@@ -284,14 +288,14 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
                         kind,
                         time_ms,
                         loop_time_ms: loop_end(time_ms, end, beats, bpm_x100),
-                        color_id: if kind == 0 {
+                        color_id: if kind == 0 || kind == 4 {
                             u8::try_from(color).ok().filter(|c| *c != 255).unwrap_or(0)
                         } else {
                             0
                         },
                         color_code: r.get::<_, Option<u8>>(5)?.unwrap_or(0),
                         comment: r.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                        active_loop: r.get::<_, Option<i64>>(7)?.unwrap_or(0) != 0,
+                        active_loop: kind == 4 || r.get::<_, Option<i64>>(7)?.unwrap_or(0) != 0,
                         loop_numerator: u16::try_from(beats >> 16).unwrap_or(0),
                         loop_denominator: u16::try_from(beats & 0xffff).unwrap_or(0),
                     },
@@ -441,6 +445,46 @@ mod tests {
             "a BPM stored as text, a key row that is gone"
         );
         assert!(!extras.contains_key("4"), "no row, no facts");
+    }
+
+    /// rekordbox marks the Active Loop by `Kind` 4 and leaves `ActiveLoop`
+    /// at 0 (#345, #577). It used to be filtered out of the export, so the
+    /// stick lost the loop altogether; it goes out as a memory loop flagged
+    /// active, with its memory colour.
+    #[test]
+    fn a_kind_four_active_loop_is_exported_as_an_active_memory_loop() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE djmdContent (
+                ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
+                TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM INTEGER,
+                AnalysisDataPath TEXT, Length INTEGER, KeyID TEXT, ImagePath TEXT
+             );
+             CREATE TABLE djmdCue (
+                ContentID TEXT, Kind INTEGER, InMsec INTEGER, OutMsec INTEGER,
+                Color INTEGER, ColorTableIndex INTEGER, Comment TEXT, ActiveLoop INTEGER,
+                BeatLoopSize INTEGER, rb_local_deleted INTEGER
+             );
+             INSERT INTO djmdContent (ID, BPM) VALUES ('7', 12800);
+             INSERT INTO djmdCue VALUES
+                ('7', 4, 300000, 301875, 2, 0, 'Safety', 0, 262145, 0),
+                ('7', 0, 60000, 61875, 255, 0, '', 0, 262145, 0),
+                ('7', 5, 90000, -1, -1, 21, '', 0, 0, 0);",
+        )
+        .unwrap();
+
+        let extras = track_extras(&conn, &["7".to_owned()]).unwrap();
+        let cues = &extras.get("7").unwrap().cues;
+        assert_eq!(cues.len(), 3, "the Active Loop is not dropped");
+        let active: Vec<_> = cues.iter().filter(|cue| cue.active_loop).collect();
+        assert_eq!(active.len(), 1);
+        assert_eq!(
+            (active[0].kind, active[0].time_ms, active[0].loop_time_ms, active[0].color_id),
+            (4, 300_000, Some(301_875), 2)
+        );
+        let sections = rbl_anlz::cues::sections(cues, false);
+        assert_eq!(sections[1].payload.len(), 2 * 56, "both memory loops in the memory list");
     }
 
     #[test]
