@@ -85,6 +85,13 @@ rating import reads the old values as the same stars.
   the stick's own playlists are kept. A playlist still in your library is
   updated to what it holds now; one deleted from your library stays as the
   stick has it.
+- Dragging does the same as those menus, as in rekordbox: drop tracks on a
+  stick's row under **Devices** (or on its Device Library, OneLibrary or All
+  Tracks) to export just those tracks, as **Export Track** does, and drop a
+  playlist or folder on the stick's row to export it, as **Export Playlist**
+  and **Export Folder** do. The tree shows one section at a time, so open the
+  Sub-Browser to have your playlists beside the stick. Tracks dropped on one
+  of the stick's own playlists are not exported there.
 - Sync Manager makes each ticked stick hold exactly the ticked playlists: a
   playlist from your library that is no longer ticked, or that was deleted
   from your library, is taken off the stick.

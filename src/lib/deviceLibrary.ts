@@ -152,3 +152,31 @@ export function deviceParentFor(node: TreeNode): string | null {
   if (node.kind === "deviceFolder") return ref.id;
   return null;
 }
+
+/**
+ * The stick a drag dropped on `node` exports to, by mount path, or `null`
+ * where the Devices tree takes no such drop.
+ *
+ * rekordbox exports what is dragged onto a stick in its Devices tree
+ * ("Drag tracks from [Collection] to [the device] in [Devices]" and "Drag a
+ * playlist to [Devices]", rekordbox 7.2.18 manual p. 108). Which rows take
+ * which drag is its own [static, rekordbox 7.2.19.0342 macOS arm64]:
+ *
+ * - Tracks: `BrowseTreeViewItem::getDragSourceActionFromList` @0x1002a2f4c
+ *   sends a track list dropped on the stick's own row (`isDeviceName`), a
+ *   library heading (`isDeviceLibraryName`) or its All Tracks
+ *   (`isDeviceAllTracks`) to `getListActionAtDevAllTracks` @0x1002a3614,
+ *   which exports tracks dragged from the collection's lists (action
+ *   0x4003). A drop on one of the stick's playlists or folders adds to that
+ *   playlist there (`getListActionAtDevPlaylistList` @0x1002a3854), which
+ *   this export does not do, so those rows take no tracks here.
+ * - Playlists and folders: `getTreeActionAtDevNameRoot` @0x1002a28dc takes
+ *   them on the stick's own row only (action 0x4005, exported by
+ *   `TreeViewer::treeMessageExportListByDragAndDrop` @0x10156b024).
+ */
+export function deviceDropPath(node: TreeNode, carrying: "tracks" | "playlist"): string | null {
+  if (node.kind === "device") return devicePath(node.id);
+  if (carrying === "playlist") return null;
+  if (node.kind !== "deviceLibrary" && node.kind !== "deviceAllTracks") return null;
+  return parseDeviceNodeId(node.id)?.path ?? null;
+}

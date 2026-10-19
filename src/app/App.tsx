@@ -68,7 +68,7 @@ import { RightRail } from "@/views/browser/RightRail";
 import { MyTagPanel } from "@/views/browser/MyTagPanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
-import { importLoose, isLooseId } from "@/lib/explorer";
+import { hasLooseId, importLoose, isLooseId } from "@/lib/explorer";
 import { childrenOf, containerOf, parentFor, withSources } from "@/lib/tree";
 import { JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
@@ -2035,6 +2035,17 @@ function AppBody() {
     [devices, report, refuse, stickDefaults, compatibilityFormat, t],
   );
 
+  // Tracks dropped on a stick in the Devices tree: Export Track to it, as
+  // rekordbox exports what is dragged there (manual 7.2.18 p. 108).
+  const exportDraggedTo = useCallback(
+    (path: string) => {
+      const ids = draggedTracks?.ids;
+      setDraggedTracks(null);
+      if (ids && !hasLooseId(ids)) exportTrackTo(path, ids);
+    },
+    [draggedTracks, exportTrackTo],
+  );
+
   // Export Loop As WAV: where to, then the loop's stretch of the track.
   const exportLoop = useCallback(
     (trackId: string, title: string, inMs: number, outMs: number) => {
@@ -3181,6 +3192,8 @@ function AppBody() {
           onSelect={setSelectedNode}
           dragging={draggedTracks !== null}
           onDropTracks={addDraggedTo}
+          draggingToDevice={draggedTracks !== null && !hasLooseId(draggedTracks.ids)}
+          onDropTracksOnDevice={exportDraggedTo}
           onDropFiles={readOnly ? undefined : importDroppedFilesTo}
           onExport={exportPlaylist}
           exportDevices={menuDevices}
