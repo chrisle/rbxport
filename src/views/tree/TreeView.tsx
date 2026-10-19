@@ -721,9 +721,12 @@ export const TreeView = memo(function TreeView({
             onEjectDevice={onEjectDevice}
             ejecting={node.id === ejectingDeviceId}
             deviceBusy={deviceBusy}
-            tracksToDevice={Boolean(dragging) && draggingToDevice && onDropTracksOnDevice ? deviceDropPath(node, "tracks") : null}
+            // Not while a stick is being synced, exported or ejected, as its
+            // Eject and its menu are greyed then: a second write would race
+            // the one running.
+            tracksToDevice={!deviceBusy && Boolean(dragging) && draggingToDevice && onDropTracksOnDevice ? deviceDropPath(node, "tracks") : null}
             onDropTracksOnDevice={onDropTracksOnDevice}
-            playlistToDevice={onExport ? deviceDropPath(node, "playlist") : null}
+            playlistToDevice={!deviceBusy && onExport ? deviceDropPath(node, "playlist") : null}
             onDropNodeOnDevice={exportDropped}
           />
         ))}
