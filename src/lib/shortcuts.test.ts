@@ -50,9 +50,9 @@ describe("actionFor", () => {
     expect(actionFor({ key: "ArrowUp", ctrlKey: true }, WIN)).toBe("toTop");
   });
 
-  it("loads Player 1 on plain Enter, but leaves modified Enter alone", () => {
+  it("loads Player 1 on plain Enter and Player 2 on Shift+Enter, but leaves other modified Enter alone", () => {
     expect(actionFor({ key: "Enter" }, MAC)).toBe("loadPlayer1");
-    expect(actionFor({ key: "Enter", shiftKey: true }, MAC)).toBe("loadPlayer1");
+    expect(actionFor({ key: "Enter", shiftKey: true }, MAC)).toBe("loadPlayer2");
     expect(actionFor({ key: "Enter", metaKey: true }, MAC)).toBeNull();
     expect(actionFor({ key: "Enter", ctrlKey: true }, WIN)).toBeNull();
   });

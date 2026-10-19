@@ -26,6 +26,9 @@ export type Action =
   // Enter loads the highlighted track onto Player 1 (deck A), wherever the
   // focus is in the browser — the keyboard counterpart of double-clicking it.
   | "loadPlayer1"
+  // Shift+Enter is the same, but onto Player 2 (deck B) — only meaningful in
+  // two-player mode, where a second deck exists to load it onto.
+  | "loadPlayer2"
   // Track > Locate track loaded on deck (command + L): scrolls the list to
   // the track a deck holds and highlights it.
   | "locateLoaded"
@@ -531,7 +534,7 @@ export const BINDINGS: readonly Binding[] = [
   { id: "toBottom.arrow", group: "Browse", label: "Cursor to Bottom", chord: { key: "ArrowDown", metaKey: true }, action: "toBottom", alias: true },
   { id: "analyseSelection", group: "Browse", label: "Analyze Track", chord: { key: "a", metaKey: true, shiftKey: true }, action: "analyseSelection", pane: "Browse" },
   { id: "loadPlayer1", group: "Browse", label: "Load on Player 1", chord: { key: "Enter" }, action: "loadPlayer1", pane: "Browse" },
-  { id: "loadPlayer1.shift", group: "Browse", label: "Load on Player 1", chord: { key: "Enter", shiftKey: true }, action: "loadPlayer1", alias: true },
+  { id: "loadPlayer2", group: "Browse", label: "Load on Player 2", chord: { key: "Enter", shiftKey: true }, action: "loadPlayer2", pane: "Browse" },
   { id: "locateLoaded", group: "Browse", label: "Locate track loaded on deck", chord: { key: "l", metaKey: true }, action: "locateLoaded", command: "b139" },
   { id: "renumberTrackOrder", group: "Playlist", label: "Renumber Track Order", chord: { key: "" }, action: "renumberTrackOrder", command: "500e" },
   ...PLAYER_A.map((row): Binding => ({ ...row, id: row.action ?? row.label, group: "Player A", deck: "a" })),

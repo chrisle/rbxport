@@ -158,6 +158,7 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
       expect(matchBinding({ key: "a", metaKey: true }, MAC, keys)?.action, preset).toBe("selectAll");
       expect(matchBinding({ key: "ArrowDown" }, MAC, keys)?.action, preset).toBe("moveDown");
       expect(matchBinding({ key: "Enter" }, MAC, keys)?.action, preset).toBe("loadPlayer1");
+      expect(matchBinding({ key: "Enter", shiftKey: true }, MAC, keys)?.action, preset).toBe("loadPlayer2");
       for (const binding of BINDINGS) {
         if (binding.command === undefined || binding.action === undefined) {
           expect(presetChord(binding, preset).chord, `${preset} ${binding.id}`).toEqual(binding.chord);

@@ -2022,6 +2022,13 @@ export const Player = memo(function Player({
       onLoadSelected();
       return true;
     },
+    // Shift+Enter is the same, onto Player 2 — only exists as a deck in
+    // two-player mode, so there's nothing to guard beyond the deck check.
+    loadPlayer2: () => {
+      if (deck !== "b" || !onLoadSelected || selectedTrackId === null) return false;
+      onLoadSelected();
+      return true;
+    },
     // The engine's click, not the deck's: the next of the three sounds.
     metronomeSound: () => {
       const sound = preferences.audio.metronomeSound;
