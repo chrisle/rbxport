@@ -3145,6 +3145,7 @@ function AppBody() {
               dragging={draggedTracks !== null}
               onDropTrack={loadDroppedInto.b}
               onLoadSelected={loadSelectedInto.b}
+              selectedTrackId={selectedRow?.id ?? null}
               transportSlot={transportB}
               flipped
               dual
