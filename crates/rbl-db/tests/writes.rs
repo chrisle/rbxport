@@ -1206,7 +1206,9 @@ fn a_cue_is_written_in_the_shape_the_reference_library_shows() {
     assert_eq!(kind, 1, "hot cue A");
     assert_eq!(in_ms, 45_000);
     assert_eq!(color, -1, "hot cues carry -1");
-    assert_eq!(index, 21, "the default colour rekordbox writes");
+    // rekordbox's deck stores 0, "no colour", and draws the slot's HOT CUE
+    // color default; 21 drew every cue RBXport set green (issue #593).
+    assert_eq!(index, 0, "no colour of its own, as rekordbox's deck writes");
     assert_eq!(loop_size, None, "not a loop");
     assert_eq!(active, 0);
     assert_eq!(out_ms, None);
@@ -1385,7 +1387,28 @@ fn cue_colours_use_the_field_rekordbox_assigns_to_each_kind() {
     f.writer.set_cue_colour(&memory, None).unwrap();
     f.writer.set_cue_colour(&hot, None).unwrap();
     assert_eq!(columns(&f.writer, &memory), (255, 0));
-    assert_eq!(columns(&f.writer, &hot), (-1, 21));
+    // Reset is `changePadColour(0)` in rekordbox: back to the slot default.
+    assert_eq!(columns(&f.writer, &hot), (-1, 0));
+}
+
+#[test]
+fn hot_cues_and_hot_loops_are_added_without_a_colour_of_their_own() {
+    // Issue #593: every slot, and a hot loop, starts with ColorTableIndex 0
+    // so the HOT CUE color table picks its colour, as on rekordbox's deck.
+    let mut f = fixture();
+    let cues: Vec<String> = [1_u8, 2, 3, 5, 6, 17]
+        .iter()
+        .enumerate()
+        .map(|(n, kind)| f.writer.add_cue(&track_id(0), *kind, 1_000 * (n as u32 + 1)).unwrap())
+        .collect();
+    let looped = f.writer.add_loop(&track_id(0), 9, 20_000, 22_000, 4).unwrap();
+    for id in cues.iter().chain([&looped]) {
+        let (color, index): (i64, i64) = f.conn().query_row(
+            "SELECT Color, ColorTableIndex FROM djmdCue WHERE ID = ?1", params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!((color, index), (-1, 0), "cue {id}");
+    }
 }
 
 #[test]
@@ -3734,7 +3757,7 @@ fn a_players_hot_cue_replaces_the_one_in_its_slot_only() {
     f.writer.save_player_cue(&track, &d).unwrap();
     assert_eq!(
         live_cues(&f, &track),
-        vec![(1, 1_000, -1, -1, 21, String::new(), None), (5, 4_000, -1, -1, 5, String::new(), None)]
+        vec![(1, 1_000, -1, -1, 0, String::new(), None), (5, 4_000, -1, -1, 5, String::new(), None)]
     );
     let deleted: i64 = f.one("SELECT rb_local_deleted FROM djmdCue WHERE ID = ?1", &[&old]);
     assert_eq!(deleted, 1, "soft-deleted, as rekordbox's own deletes are");
