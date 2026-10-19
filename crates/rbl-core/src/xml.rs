@@ -58,10 +58,18 @@ pub fn tags(xml: &str) -> Vec<Tag> {
         let mut closed = false;
         loop {
             rest = rest.trim_start();
-            if let Some(after) = rest.strip_prefix("/>") {
-                closed = true;
+            if let Some(after) = rest.strip_prefix('/') {
+                // `/>` closes the element, and so does `/ >`. Any other `/` is
+                // skipped, so every pass of this loop consumes input: stopping
+                // on it would scan a document cut off after a `/` forever.
+                let after = after.trim_start();
+                if let Some(after) = after.strip_prefix('>') {
+                    closed = true;
+                    rest = after;
+                    break;
+                }
                 rest = after;
-                break;
+                continue;
             }
             if let Some(after) = rest.strip_prefix('>') {
                 rest = after;
@@ -177,6 +185,67 @@ mod tests {
         assert_eq!(attribute(attributes, "name"), "Tom's \"Song\"");
         assert_eq!(attribute(attributes, "Location"), "file://localhost/Music/a%20b.mp3");
         assert_eq!(attribute(attributes, "Missing"), "");
+    }
+
+    /// `tags` on its own thread, so a scan that never ends fails the test
+    /// instead of hanging the suite.
+    fn tags_in_time(xml: &'static str) -> Vec<Tag> {
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || done.send(tags(xml)));
+        finished.recv_timeout(std::time::Duration::from_secs(5)).expect("the scan did not end")
+    }
+
+    fn open(name: &str, attributes: &[(&str, &str)], closed: bool) -> Tag {
+        let attributes = attributes.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
+        Tag::Open { name: name.to_owned(), attributes, closed }
+    }
+
+    /// A document cut off after a tag's `/`, as a truncated copy of a
+    /// rekordbox collection can be, ends the scan with what was read.
+    #[test]
+    fn a_tag_cut_off_after_its_slash_ends_the_scan() {
+        assert_eq!(tags_in_time("<a /"), [open("a", &[], false)]);
+        assert_eq!(tags_in_time("<a/b"), [open("a", &[], false)]);
+        assert_eq!(
+            tags_in_time(r#"<TEMPO Inizio="0.025" Bpm="128.00" Metro="4/4" Battito="1" /"#),
+            [open("TEMPO", &[("Inizio", "0.025"), ("Bpm", "128.00"), ("Metro", "4/4"), ("Battito", "1")], false)]
+        );
+    }
+
+    /// A space between an empty element's `/` and `>` still closes it, and
+    /// the element after it is read as its own.
+    #[test]
+    fn a_slash_spaced_from_its_bracket_closes_the_element() {
+        assert_eq!(
+            tags_in_time(r#"<VALUE name="a" val="b"/ ><NEXT x="2"/>"#),
+            [open("VALUE", &[("name", "a"), ("val", "b")], true), open("NEXT", &[("x", "2")], true)]
+        );
+        assert_eq!(tags_in_time(r#"<VALUE name="a"/ >"#), [open("VALUE", &[("name", "a")], true)]);
+    }
+
+    /// Every document of up to five characters drawn from the ones the
+    /// scanner branches on ends its scan. The shortest that stalled it were
+    /// three characters long, such as `<a/`.
+    #[test]
+    fn every_short_document_ends_its_scan() {
+        const LONGEST: u32 = 5;
+        const ALPHABET: [char; 11] = ['<', '>', '/', '=', '"', '\'', '?', '!', '-', ' ', 'a'];
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut doc = String::new();
+            for len in 0..=LONGEST {
+                for mut code in 0..ALPHABET.len().pow(len) {
+                    doc.clear();
+                    for _ in 0..len {
+                        doc.push(ALPHABET[code % ALPHABET.len()]);
+                        code /= ALPHABET.len();
+                    }
+                    std::hint::black_box(tags(&doc));
+                }
+            }
+            done.send(())
+        });
+        finished.recv_timeout(std::time::Duration::from_secs(60)).expect("a scan did not end");
     }
 
     #[test]
