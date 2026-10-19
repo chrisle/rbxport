@@ -48,17 +48,40 @@ pub fn preview(destination: &Path, tracks: &[SourceTrack], playlists: &[SourcePl
 }
 
 pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Option<&Manifest>, tracks: &[SourceTrack], playlists: &[SourcePlaylist], options: &ExportOptions<'_>, record: Option<&crate::sync_record::SyncRecord>) -> Result<SyncPlan> {
+    from_baseline_in(destination, before, previous, tracks, playlists, options, record, allocation_unit(destination))
+}
+
+/// [`from_baseline`] for a stick that stores files in `unit`-byte clusters.
+#[allow(clippy::too_many_arguments, reason = "from_baseline's inputs and the allocation unit it measured")]
+fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Manifest>, tracks: &[SourceTrack], playlists: &[SourcePlaylist], options: &ExportOptions<'_>, record: Option<&crate::sync_record::SyncRecord>, unit: u64) -> Result<SyncPlan> {
+    let on_disk = |bytes: u64| allocation(bytes, unit);
     let db_id = options.sync.map_or(0, |s| s.db_id);
     let crate::reconcile::Prepared { tracks, playlists, device_additions } = crate::reconcile::prepare(destination, before, previous, tracks, playlists, db_id, options.keep_unlisted, record)?;
-    let estimate = crate::estimate::estimate_inspected(destination, db_id, &tracks, false, options.compatibility, Some(before), options.cache);
+    let estimate = crate::estimate::estimate_inspected(destination, db_id, &tracks, false, options.compatibility, Some(before), options.cache, unit);
     let trusted = incremental::trusted_paths(destination, previous)?;
     let recorded: std::collections::HashMap<_, _> = previous.into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();
     let selected: std::collections::HashSet<_> = tracks.iter().map(|t| crate::track_key(t.id, &t.source_path.to_string_lossy())).collect();
     let mut asset_bytes = 0_u64;
     let mut artwork_sources = std::collections::HashSet::new();
+    let root = crate::export_root(destination);
+    let root_name = root.file_name().map_or_else(|| "PIONEER".to_owned(), |n| n.to_string_lossy().into_owned());
+    // The folders a new track's files go in. On FAT32 and exFAT a folder
+    // takes a cluster of its own, which on a large stick is 128 KiB each.
+    let mut folders = std::collections::BTreeSet::new();
     for track in &tracks {
         let key = crate::track_key(track.id, &track.source_path.to_string_lossy());
         let old = recorded.get(&key).copied();
+        if old.is_none() && estimate.actions.get(&key).is_some_and(|a| matches!(a, crate::estimate::AudioAction::Copy | crate::estimate::AudioAction::Convert)) {
+            let audio = crate::layout(track, 0).audio;
+            let album = Path::new(&audio).parent().map(Path::to_path_buf).unwrap_or_default();
+            folders.extend(album.parent().map(Path::to_path_buf));
+            folders.insert(album);
+            if track.analysis_source.is_some() || !track.analysis.is_empty() {
+                let analysis = std::path::PathBuf::from(crate::analysis_directory(&audio, &root_name));
+                folders.extend(analysis.parent().map(Path::to_path_buf));
+                folders.insert(analysis);
+            }
+        }
         let unchanged = old.is_some_and(|c| {
             incremental::analysis_recipe(track, &c.audio).is_ok_and(|r| previous.and_then(|m| m.generation.as_ref()).is_some_and(|g| g.analysis_recipes.get(&key) == Some(&r)))
                 && c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/'))))
@@ -66,9 +89,9 @@ pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Opt
         if !unchanged {
             if let Some(base) = &track.analysis_source {
                 for ext in ["DAT", "EXT", "2EX"] {
-                    asset_bytes += std::fs::metadata(base.with_extension(ext)).map_or(0, |m| allocation(m.len() + 256));
+                    asset_bytes += std::fs::metadata(base.with_extension(ext)).map_or(0, |m| on_disk(m.len() + 256));
                 }
-            } else { asset_bytes += track.analysis.iter().map(|(_, b)| allocation(b.len() as u64 + 256)).sum::<u64>(); }
+            } else { asset_bytes += track.analysis.iter().map(|(_, b)| on_disk(b.len() as u64 + 256)).sum::<u64>(); }
         }
         if let Some(image) = &track.artwork {
             if !artwork_sources.insert(image.clone()) { continue; }
@@ -78,21 +101,21 @@ pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Opt
             });
             if !source_unchanged {
                 for (_, medium) in crate::artwork_names(1) {
-                    asset_bytes += std::fs::metadata(crate::artwork_source(image, medium)).map_or(0, |m| allocation(m.len()));
+                    asset_bytes += std::fs::metadata(crate::artwork_source(image, medium)).map_or(0, |m| on_disk(m.len()));
                 }
             }
         }
     }
-    let root = crate::export_root(destination);
+    asset_bytes += unit * folders.iter().filter(|folder| !crate::under(destination, &folder.to_string_lossy()).is_dir()).count() as u64;
     let old_database_bytes: u64 = ["rekordbox/export.pdb", "rekordbox/exportExt.pdb", "rekordbox/exportLibrary.db", "rbxport/manifest.json"].iter()
-        .map(|p| std::fs::metadata(root.join(p)).map_or(0, |m| allocation(m.len()))).sum();
+        .map(|p| std::fs::metadata(root.join(p)).map_or(0, |m| on_disk(m.len()))).sum();
     let entry_count: usize = playlists.iter().map(|p| p.track_indices.len()).sum();
     let database_bytes = old_database_bytes.max(256 * 1024 + tracks.len() as u64 * 4096 + entry_count as u64 * 32 + playlists.len() as u64 * 1024);
     let old_replacements: u64 = previous.into_iter().flat_map(|m| &m.tracks).filter(|c| {
         selected.contains(&c.key()) && estimate.actions.get(&c.key()).is_some_and(|action| matches!(action, crate::estimate::AudioAction::Copy | crate::estimate::AudioAction::Convert))
-    }).map(|c| std::fs::metadata(crate::under(destination, &c.audio)).map_or(0, |m| allocation(m.len()))).sum();
-    let staged = estimate.copy_bytes.saturating_add(asset_bytes).saturating_add(database_bytes);
-    let reclaimed = estimate.free_bytes.saturating_add(old_database_bytes).saturating_add(old_replacements);
+    }).map(|c| std::fs::metadata(crate::under(destination, &c.audio)).map_or(0, |m| on_disk(m.len()))).sum();
+    let staged = estimate.copy_allocated.saturating_add(asset_bytes).saturating_add(database_bytes);
+    let reclaimed = estimate.free_allocated.saturating_add(old_database_bytes).saturating_add(old_replacements);
     let peak_bytes = staged.saturating_add(64 * 1024).saturating_add(estimate.uncertain_adoption_bytes);
     let net = i128::from(staged) - i128::from(reclaimed);
     let kept_existing = tracks.iter().filter(|t| t.source_unavailable).count();
@@ -106,4 +129,95 @@ pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Opt
         net_additional_bytes: i64::try_from(net).unwrap_or(if net < 0 { i64::MIN } else { i64::MAX }), unknown_size, kept_existing, device_additions })
 }
 
-fn allocation(bytes: u64) -> u64 { bytes.div_ceil(4096).saturating_mul(4096) }
+/// The space a file of `bytes` takes on a filesystem that stores files in
+/// `unit`-byte clusters. An empty file takes none.
+pub(crate) fn allocation(bytes: u64, unit: u64) -> u64 { bytes.div_ceil(unit.max(1)).saturating_mul(unit.max(1)) }
+
+/// The allocation unit (cluster) of the filesystem `destination` is on, at
+/// least 4 KiB, which is what the estimate assumed before it asked.
+///
+/// A stick formatted with a large cluster stores every file in whole
+/// clusters: exFAT on a stick over 32 GB uses 128 KiB by default, so each of
+/// a track's three analysis files and its artwork takes 128 KiB however small
+/// it is. A rekordbox export on a 62 GB FAT32 stick (64 KiB clusters) takes
+/// 41.2 GB on disk for 40.5 GB of files [OBS #591, TRIODE2]. Counting 4 KiB
+/// let a sync start that could not finish (#591).
+pub fn allocation_unit(destination: &Path) -> u64 {
+    // exFAT's largest cluster is 32 MiB; anything larger is not a cluster.
+    fs2::allocation_granularity(destination).ok()
+        .filter(|unit| unit.is_power_of_two() && *unit <= 32 << 20)
+        .map_or(4096, |unit| unit.max(4096))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_takes_whole_clusters() {
+        assert_eq!(allocation(0, 131_072), 0);
+        assert_eq!(allocation(1, 131_072), 131_072);
+        assert_eq!(allocation(131_072, 131_072), 131_072);
+        assert_eq!(allocation(131_073, 131_072), 262_144);
+        assert_eq!(allocation(5000, 4096), 8192);
+    }
+
+    #[test]
+    fn the_unit_is_the_filesystems_and_at_least_4_kib() {
+        let dir = tempfile::tempdir().unwrap();
+        let unit = allocation_unit(dir.path());
+        assert!(unit >= 4096 && unit.is_power_of_two(), "{unit}");
+        assert_eq!(allocation_unit(&dir.path().join("not there")), 4096);
+    }
+
+    fn track(root: &Path, id: u64, audio: usize) -> SourceTrack {
+        let source = root.join(format!("track-{id}.mp3"));
+        std::fs::write(&source, vec![1_u8; audio]).unwrap();
+        let base = root.join(format!("analysis-{id}/ANLZ0000.DAT"));
+        std::fs::create_dir_all(base.parent().unwrap()).unwrap();
+        std::fs::write(&base, vec![2_u8; 3000]).unwrap();
+        std::fs::write(base.with_extension("EXT"), vec![3_u8; 20_000]).unwrap();
+        std::fs::write(base.with_extension("2EX"), vec![4_u8; 150_000]).unwrap();
+        SourceTrack { id, source_path: source, title: format!("Track {id}"), artist: "Artist".into(), album: "Album".into(),
+            duration_sec: 120, sample_rate: 44_100, analysis_source: Some(base), ..Default::default() }
+    }
+
+    /// What a fresh sync of two tracks takes on an exFAT stick with 128 KiB
+    /// clusters, worked out by hand from the cluster rule: the stick holds the
+    /// whole of every cluster a file starts.
+    #[test]
+    fn a_large_cluster_stick_counts_every_file_in_whole_clusters() {
+        const UNIT: u64 = 128 * 1024;
+        let source = tempfile::tempdir().unwrap();
+        let usb = tempfile::tempdir().unwrap();
+        let tracks = vec![track(source.path(), 1, 3_000_000), track(source.path(), 2, 5_000_001)];
+        let playlists = vec![SourcePlaylist { id: 10, name: "Playlist".into(), track_indices: vec![0, 1], ..Default::default() }];
+        let sync = crate::SyncSource { db_id: 123, ..Default::default() };
+        let options = ExportOptions { sync: Some(&sync), ..Default::default() };
+        let before = Snapshot::read(usb.path()).unwrap();
+        let at = |unit| from_baseline_in(usb.path(), &before, None, &tracks, &playlists, &options, None, unit).unwrap();
+        let (small, large) = (at(4096), at(UNIT));
+
+        // Audio: 3,000,000 B is 23 clusters, 5,000,001 B is 39.
+        assert_eq!(large.estimate.copy_bytes, 8_000_001);
+        assert_eq!(large.estimate.copy_allocated, (23 + 39) * UNIT);
+        assert_eq!(small.estimate.copy_allocated, (733 + 1221) * 4096);
+        // Analysis: DAT, EXT and 2EX (each 256 bytes longer once written for
+        // the stick's path) are 1 + 1 + 2 clusters a track. Folders: the
+        // artist's and the album's under Contents, and each track's analysis
+        // folder with the shard folder above it.
+        let shards = tracks.iter().map(|t| {
+            let audio = crate::layout(t, 0).audio;
+            Path::new(&crate::analysis_directory(&audio, "PIONEER")).parent().unwrap().to_path_buf()
+        }).collect::<std::collections::BTreeSet<_>>().len() as u64;
+        let folders = 2 + 2 + shards;
+        assert_eq!(large.asset_bytes, (2 * (1 + 1 + 2) + folders) * UNIT);
+        assert_eq!(small.asset_bytes, 2 * (1 + 5 + 37) * 4096 + folders * 4096);
+        assert_eq!(large.database_bytes, small.database_bytes);
+        let staged = (23 + 39 + 8 + folders) * UNIT + large.database_bytes;
+        assert_eq!(large.peak_bytes, staged + 64 * 1024);
+        assert_eq!(large.net_additional_bytes, i64::try_from(staged).unwrap());
+        assert!(large.peak_bytes > small.peak_bytes);
+    }
+}
