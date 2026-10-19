@@ -2358,6 +2358,63 @@ impl Writer {
         Ok(Changed { rows, usn })
     }
 
+    /// Sets or clears a memory loop as its track's Active Loop, the loop a
+    /// player engages by itself when playback reaches it.
+    ///
+    /// rekordbox keeps the mark in the cue's `Kind`: `MstSetActiveLoop`
+    /// writes `CUEKIND_ACTIVELOOP`, 4, into the loop and puts the track's
+    /// previous Active Loop back to 0, and `MstResetActiveLoop` writes 0
+    /// [OBS static, rekordbox 7.2.19 arm64: `_MAS_MODULE6_MSTSETACTIVELOOP`
+    /// @0x1018fb030 reads `_MAS_MODULE1_CUEKIND_ACTIVELOOP`; issue #345's
+    /// reporter saw Kind 4 with `ActiveLoop` left 0 in master.db]. The
+    /// `ActiveLoop` column is left as it is. Only a memory loop (Kind 0 or
+    /// 4 with an out point after its in point) can be one: the MEMORY
+    /// panel's loop button, the only control for it, is shown on loops
+    /// alone (`MemoryCueComp::addCue` @0x1006864e8). Setting the loop that
+    /// is already the Active Loop, or clearing one that is not, changes
+    /// nothing and writes no row.
+    pub fn set_active_loop(&mut self, cue: &str, on: bool) -> Result<Changed> {
+        const ACTIVE: i64 = 4;
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (content, kind, in_ms, out_ms): (Option<String>, i64, Option<i64>, Option<i64>) = tx
+            .query_row(
+                "SELECT ContentID, Kind, InMsec, OutMsec FROM djmdCue WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![cue],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .map_err(|_| DbError::WriteRefused(format!("no cue {cue}")))?;
+        if kind != 0 && kind != ACTIVE {
+            return Err(DbError::WriteRefused("only a memory loop can be the Active Loop".to_owned()));
+        }
+        if out_ms.unwrap_or(-1) <= in_ms.unwrap_or(0) {
+            return Err(DbError::WriteRefused("only a memory loop can be the Active Loop".to_owned()));
+        }
+        if (kind == ACTIVE) == on {
+            return Ok(Changed { rows: 0, usn: 0 });
+        }
+        let usn = next_usn(&tx)?;
+        let mut rows = 0;
+        if on {
+            // One Active Loop a track: the one it had goes back to a plain
+            // memory loop in the same transaction.
+            rows += tx.execute(
+                "UPDATE djmdCue SET Kind = 0, rb_local_usn = ?1, updated_at = ?2
+                 WHERE ContentID IS ?3 AND Kind = 4 AND ID <> ?4 AND rb_local_deleted = 0",
+                params![usn, stamp, content, cue],
+            )?;
+        }
+        rows += tx.execute(
+            "UPDATE djmdCue SET Kind = ?1, rb_local_usn = ?2, updated_at = ?3 WHERE ID = ?4",
+            params![if on { ACTIVE } else { 0 }, usn, stamp, cue],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
     /// Saves a cue a player made over the link, as rekordbox 7.2.19 does in
     /// `UiProDJLink::ReceiveSetCueEvent` (@`0x1015fc31c`) [OBS static]: a
     /// hot cue first takes whatever is in its slot off the track (the

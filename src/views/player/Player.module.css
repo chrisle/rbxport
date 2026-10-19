@@ -1191,6 +1191,21 @@ button.pageNumber:disabled { color: var(--c-icon-off); }
 /* A row holding a saved loop carries rekordbox's orange loop mark before
    the ✕, at the skin's own 10x6. */
 .cueLoopIcon { width: 10px; height: 6px; flex: none; color: var(--c-cue-loop-icon); }
+/* The loop mark is rekordbox's Active Loop toggle (#577): a bare button
+   around the icon, so the row keeps the capture's layout. */
+.cueLoopButton {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  padding: 2px;
+  margin: -2px;
+  color: inherit;
+  cursor: default;
+}
+.cueLoopButton:focus-visible { outline: 1px solid var(--c-accent); outline-offset: 0; }
 .cueDelete { color: var(--c-cue-delete); flex: none; }
 /* The memory list's ✕ is a button of its own; the hot-cue list's is still a
    glyph. Same glyph, same place, and disabled it dims like the pad row's. */

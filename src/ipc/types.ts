@@ -2027,6 +2027,12 @@ export interface Edits {
   setCueColour(cue: string, colour: number | null): Promise<void>;
   /** Names a cue; an empty name leaves it unnamed. */
   setCueComment(cue: string, comment: string): Promise<void>;
+  /**
+   * Sets a memory loop as its track's Active Loop (`djmdCue.Kind` 4), the
+   * loop a CDJ engages by itself, or clears it; setting one clears the
+   * track's previous Active Loop. rekordbox's MEMORY row loop button.
+   */
+  setActiveLoop(cue: string, on: boolean): Promise<void>;
   deleteCue(cue: string): Promise<void>;
   /**
    * Convert Memory Cues to Hot Cues: each memory cue, by position, into the

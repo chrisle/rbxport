@@ -3808,6 +3808,54 @@ fn an_active_loop_takes_a_memory_cue_colour() {
     assert_eq!(colours.get(&id), Some(&5));
 }
 
+/// The MEMORY panel's loop button (#577): rekordbox's `MstSetActiveLoop`
+/// makes the loop `Kind` 4 and puts the track's previous Active Loop back
+/// to 0; `MstResetActiveLoop` writes 0. `ActiveLoop` is not the mark.
+#[test]
+fn a_memory_loop_becomes_the_tracks_one_active_loop() {
+    let mut f = fixture();
+    let track = track_id(0);
+    let other = track_id(1);
+    let first = f.writer.save_player_cue(&track, &player_cue(0, 5_000, Some(6_875))).unwrap();
+    let second = f.writer.save_player_cue(&track, &player_cue(0, 20_000, Some(21_875))).unwrap();
+    let elsewhere = f.writer.save_player_cue(&other, &player_cue(4, 1_000, Some(2_000))).unwrap();
+    let state = |f: &Fixture, id: &str| -> (i64, i64) {
+        f.conn()
+            .query_row("SELECT Kind, COALESCE(ActiveLoop, 0) FROM djmdCue WHERE ID = ?1", [id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap()
+    };
+
+    let set = f.writer.set_active_loop(&first, true).unwrap();
+    assert_eq!(set.rows, 1);
+    assert_eq!(state(&f, &first), (4, 0), "Kind 4, ActiveLoop left at 0");
+    let usn: i64 = f.one("SELECT rb_local_usn FROM djmdCue WHERE ID = ?1", &[&first]);
+    assert_eq!(usn, set.usn);
+
+    let moved = f.writer.set_active_loop(&second, true).unwrap();
+    assert_eq!(moved.rows, 2, "the old Active Loop is reset in the same write");
+    assert_eq!((state(&f, &first), state(&f, &second)), ((0, 0), (4, 0)));
+    assert_eq!(state(&f, &elsewhere), (4, 0), "another track keeps its own");
+
+    assert_eq!(f.writer.set_active_loop(&second, true).unwrap().rows, 0, "already set: nothing written");
+    assert_eq!(f.writer.set_active_loop(&first, false).unwrap().rows, 0, "not set: nothing written");
+    assert_eq!(f.writer.set_active_loop(&second, false).unwrap().rows, 1);
+    assert_eq!(state(&f, &second), (0, 0));
+}
+
+#[test]
+fn only_a_memory_loop_can_be_the_active_loop() {
+    let mut f = fixture();
+    let track = track_id(0);
+    let point = f.writer.save_player_cue(&track, &player_cue(0, 5_000, None)).unwrap();
+    let hot_loop = f.writer.save_player_cue(&track, &player_cue(1, 8_000, Some(9_000))).unwrap();
+    for cue in [point.as_str(), hot_loop.as_str(), "no-such-cue"] {
+        assert!(matches!(f.writer.set_active_loop(cue, true), Err(DbError::WriteRefused(_))), "{cue}");
+    }
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue WHERE Kind = 4"), 0);
+}
+
 // ------------------------------------- the information panel, several tracks
 
 /// `(rb_local_usn, updated_at)` of a track.

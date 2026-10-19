@@ -80,6 +80,8 @@ pub enum CueEdit {
     Slot { cue: String, kind: CueKind },
     Colour { cue: String, colour: Option<u8> },
     Comment { cue: String, comment: String },
+    /// A memory loop set as, or cleared from being, its track's Active Loop.
+    ActiveLoop { cue: String, on: bool },
     Delete { cue: String },
 }
 
@@ -137,6 +139,13 @@ pub fn apply(writer: &mut rbl_db::write::Writer, edit: CueEdit) -> AppResult<Cue
             if changed.rows == 0 {
                 return Err(AppError::new(ErrorKind::NotFound, format!("no cue {cue}")));
             }
+            Ok(CueChange { track, cue })
+        }
+        CueEdit::ActiveLoop { cue, on } => {
+            let track = owner_of(writer, &cue)?;
+            // No rows is an Active Loop already set, or one not set being
+            // cleared: the cue is there, so that is not a missing cue.
+            writer.set_active_loop(&cue, on).map_err(write_error)?;
             Ok(CueChange { track, cue })
         }
         CueEdit::Delete { cue } => {
@@ -271,6 +280,16 @@ pub async fn set_cue_comment<R: tauri::Runtime>(
     app: tauri::AppHandle<R>, state: State<'_, Arc<AppState>>, cue: String, comment: String,
 ) -> AppResult<()> {
     edit_cues(app, state, "set_cue_comment", CueEdit::Comment { cue, comment }).await.map(|_| ())
+}
+
+/// Sets a memory loop as its track's Active Loop, or clears it: the MEMORY
+/// panel's loop button, as rekordbox's is. Setting one clears the track's
+/// previous Active Loop.
+#[tauri::command]
+pub async fn set_active_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>, state: State<'_, Arc<AppState>>, cue: String, on: bool,
+) -> AppResult<()> {
+    edit_cues(app, state, "set_active_loop", CueEdit::ActiveLoop { cue, on }).await.map(|_| ())
 }
 
 #[tauri::command]
@@ -420,6 +439,47 @@ mod tests {
             .query_row("SELECT BeatLoopSize FROM djmdCue WHERE ID = ?1", [&change.cue], |r| r.get(0))
             .unwrap();
         assert_eq!(size, (1 << 16) | 2);
+    }
+
+    #[test]
+    fn the_memory_loop_button_moves_the_active_loop_and_the_index_follows() {
+        // #577: rekordbox's MEMORY row loop button turns a memory loop into
+        // the track's Active Loop (Kind 4), the previous one back to 0.
+        let mut f = open();
+        let track = track_id(1);
+        let add = |f: &mut Fixture, in_ms| {
+            apply(
+                &mut f.writer,
+                CueEdit::AddLoop { track: track.clone(), kind: CueKind::Memory, in_ms, out_ms: in_ms + 1_875, beat_loop: Some((4, 1)) },
+            )
+            .unwrap()
+            .cue
+        };
+        let first = add(&mut f, 10_000);
+        let second = add(&mut f, 40_000);
+        let active = |f: &Fixture| -> Vec<u32> {
+            f.cues(&track).iter().filter(|c| c.is_active_loop()).map(|c| c.position_ms).collect()
+        };
+
+        let change = apply(&mut f.writer, CueEdit::ActiveLoop { cue: first.clone(), on: true }).unwrap();
+        assert_eq!(change.track, track);
+        f.reload(&track);
+        assert_eq!(active(&f), [10_000]);
+        assert!(f.cues(&track).iter().all(Cue::is_memory), "still both memory loops");
+
+        apply(&mut f.writer, CueEdit::ActiveLoop { cue: second.clone(), on: true }).unwrap();
+        f.reload(&track);
+        assert_eq!(active(&f), [40_000]);
+
+        // Clearing the one that is not set is not an error: the button and
+        // the database already agree.
+        apply(&mut f.writer, CueEdit::ActiveLoop { cue: first, on: false }).unwrap();
+        apply(&mut f.writer, CueEdit::ActiveLoop { cue: second, on: false }).unwrap();
+        f.reload(&track);
+        assert_eq!(active(&f), [] as [u32; 0]);
+
+        let missing = apply(&mut f.writer, CueEdit::ActiveLoop { cue: "424242".into(), on: true }).unwrap_err();
+        assert_eq!(missing.kind, ErrorKind::NotFound);
     }
 
     #[test]
