@@ -652,6 +652,18 @@ fn read_sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTr
     Ok(out)
 }
 
+/// A track's `analysedBits` as the unsigned flags byte this crate writes.
+///
+/// `export.pdb` keeps the same flags in one byte at row offset `0x56` [OBS:
+/// docs/reference/usb-export-db.md, a rekordbox 7 stick]. Users' sticks hold
+/// negative values here [OBS: #545, #583 "Integer -23 out of range at index
+/// 23", index 23 being this column], taken to be that byte stored signed,
+/// -23 for `0xE9` [ASSUME]. Reading it as `u32` stopped the whole sync
+/// before it changed anything, so keep the byte instead.
+fn analysed_bits(value: i64) -> u32 {
+    u32::try_from(value).unwrap_or_else(|_| u32::from(value.to_le_bytes()[0]))
+}
+
 /// `OneLibrary`'s share of [`sources`]: every track it has metadata for.
 fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack>) -> Result<()> {
     let db = rbl_onelibrary::ExportLibrary::open_read_only(&dir.join("exportLibrary.db"))
@@ -664,7 +676,7 @@ fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack
                 SourceTrack {
                     metadata: rbl_core::ExportMetadata {
                         track_number: r.get(19)?, disc_number: r.get(20)?, bit_depth: r.get(21)?,
-                        play_count: r.get(22)?, analysed: r.get(23)?, hot_cue_auto_load: r.get(24)?,
+                        play_count: r.get(22)?, analysed: analysed_bits(r.get(23)?), hot_cue_auto_load: r.get(24)?,
                         date_created: r.get(25)?, isrc: r.get(26)?,
                     },
                     title: r.get(1)?,

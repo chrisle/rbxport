@@ -217,3 +217,48 @@ fn a_disagreement_the_sync_would_carry_names_what_differs() {
          or delete it from the USB in rekordbox, then sync again."
     );
 }
+
+// A stick whose `exportLibrary.db` holds a negative `analysedBits` (#545,
+// #583). The sync read the column as unsigned and stopped with
+// "could not write exportLibrary.db: Integer -23 out of range at index 23"
+// before changing anything. `export.pdb` keeps the same flags in the byte at
+// row offset 0x56 [OBS: docs/reference/usb-export-db.md, a rekordbox 7
+// stick], taken to be -23 as that byte, 0xE9, stored signed [ASSUME].
+
+fn set_analysed_bits(dest: &Path, device_id: u32, bits: i64) {
+    let one = rbl_onelibrary::playlists::open_read_write(&dest.join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    assert_eq!(one.execute("UPDATE content SET analysedBits = ?2 WHERE content_id = ?1", rusqlite::params![device_id, bits]).unwrap(), 1);
+}
+
+fn analysed_bits(dest: &Path, device_id: u32) -> i64 {
+    let one = rbl_onelibrary::ExportLibrary::open_read_only(&dest.join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    one.connection().query_row("SELECT analysedBits FROM content WHERE content_id = ?1", [device_id], |r| r.get(0)).unwrap()
+}
+
+#[test]
+fn a_negative_analysed_bits_on_a_track_the_stick_keeps_does_not_stop_the_sync() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    let (tracks, _) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
+    let kept = device_id(dest.path(), 3);
+    set_analysed_bits(dest.path(), kept, -23);
+    // Overwrite the playlist with two of the tracks: the stick keeps track 3
+    // as it has it, so the sync reads its row back.
+    let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
+    let report = sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap();
+    assert_eq!(report.tracks, 3, "the stick still holds track 3");
+    let kept = device_id(dest.path(), 3);
+    // The flags keep their low byte, 0xE9, with the "analysing" bit 64
+    // cleared as every exported row has it.
+    assert_eq!(analysed_bits(dest.path(), kept), 0xE9 & !64);
+    assert!(rbl_export::verify_databases(dest.path()).unwrap().errors.is_empty());
+    sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap();
+}
+
+#[test]
+fn a_negative_analysed_bits_on_a_track_the_sync_rewrites_does_not_stop_it() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    let (tracks, playlists) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
+    set_analysed_bits(dest.path(), device_id(dest.path(), 2), -23);
+    let report = sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
+    assert_eq!(report.tracks, 3);
+}
