@@ -1763,5 +1763,8 @@
   "The length of time before a track is added to Histories": "The length of time before a track is added to Histories",
   "seconds": "sekunder",
   "Analyze key": "Analysera tonart",
-  "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Stäng av för att behålla tonarter från Mixed In Key eller annan källa. RBXport skriver inte över dem."
+  "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Stäng av för att behålla tonarter från Mixed In Key eller annan källa. RBXport skriver inte över dem.",
+  "--s-row-height": "--s-row-height",
+  "Show the entire artwork.": "Visa hela konstverket.",
+  "Show the upper part of the artwork.": "Visa den övre delen av konstverket."
 }

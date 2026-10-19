@@ -351,6 +351,7 @@
   --s-filter-dot: 8px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a colour dot, 16px across at 2x */
   --s-filter-toggle: 18px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the header's filter button x 3122..3158, y 760..796 */
   --s-filter-toggle-glyph: 11px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the glyph inside it, x 3129..3151 */
+  --s-artwork-mode-gap: 20px; /* rekordbox 7.2.18 manual p.81 (browser panel, item 6), rendered at 8x: the two artwork buttons' glyphs start 115px apart at 3px per skin unit, a 38-unit pitch for 18-unit buttons; the filter pair beside them has the same pitch. [ASSUME] the manual's screenshot is at rekordbox's 1x layout */
   --s-filter-scrollbar-w: 6px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the list scrollbar column x 1190..1202, with a 4pt thumb */
   --s-device-strip-h: 33px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the tab strip band y 376..408.5pt, tabs 20pt tall 5pt below its top */
   --s-device-tab-w: 128px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): one tab x 402..529.5pt; six on a 132pt pitch, 14pt in from the panel's left edge */

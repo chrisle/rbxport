@@ -54,6 +54,7 @@ import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import {
   DEFAULT_SUB_TREE_WIDTH, DEFAULT_SUB_WIDTH, loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS,
   type TrafficLightSource,
+  type ArtworkMode,
 } from "@/lib/session";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { AppCost } from "@/views/topbar/AppCost";
@@ -554,6 +555,8 @@ function AppBody() {
    */
   const [trafficLight, setTrafficLight] = useState<TrafficLightSource>(restored.trafficLight);
   const activeTrafficLight = trafficLight === "b" && deckCount(layout) < 2 ? "a" : trafficLight;
+  /** The track list's artwork display pattern, the two buttons beside MASTER. */
+  const [artworkMode, setArtworkMode] = useState<ArtworkMode>(restored.artworkMode);
   const trafficDeck: DeckId = deckCount(layout) < 2 ? "a" : activeTrafficLight === "master" ? syncMaster : activeTrafficLight;
   /*
    * A new track on the master deck, or none, hands MASTER to the other deck
@@ -2979,10 +2982,11 @@ function AppBody() {
       subWidth,
       subTreeWidth,
       trafficLight,
+      artworkMode,
       waveformZoom,
       dualControl: dual,
     });
-  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, myTagOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom, dual]);
+  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, myTagOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, artworkMode, waveformZoom, dual]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
@@ -3316,6 +3320,8 @@ function AppBody() {
           trafficLight={activeTrafficLight}
           onTrafficLight={setTrafficLight}
           trafficKey={trafficKey}
+          artworkMode={artworkMode}
+          onArtworkMode={setArtworkMode}
           onFocusedRow={openInDeckA}
           onSelectedRow={setSelectedRow}
           onDragTracks={setDraggedTracks}

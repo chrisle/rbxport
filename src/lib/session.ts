@@ -68,6 +68,13 @@ export interface Session {
   subTreeWidth: number;
   /** Which deck the browser's Traffic Light reads: the MASTER menu above the list. */
   trafficLight: TrafficLightSource;
+  /**
+   * The browser's artwork display pattern: the two buttons beside the MASTER
+   * menu. rekordbox keeps it in its browse settings as `ArtworkStatus-TrackList`
+   * (`<STATUS mode="0|1">`, 0 the upper part and the default), saved on every
+   * click, so it survives a restart there as it does here.
+   */
+  artworkMode: ArtworkMode;
   /** Bars visible across each deck's detail waveform. */
   waveformZoom: { a: number; b: number };
   /** Whether DUAL CONTROL, which links both decks' zoom and beat jump, was on. */
@@ -92,6 +99,13 @@ export type TrafficLightSource = "master" | "a" | "b";
 
 const TRAFFIC_LIGHT_SOURCES: readonly TrafficLightSource[] = ["master", "a", "b"];
 
+/**
+ * rekordbox's `ArtworkStatus::ArtworkMode`: "partial" (mode 0) shows the upper
+ * part of each row's artwork, "full" (mode 1) the whole of it, in rows twice
+ * as tall with the Artwork column as wide as a row is tall.
+ */
+export type ArtworkMode = "partial" | "full";
+
 export const DEFAULT_TREE_WIDTH = 305;
 /** Measured from the 2026-09-09 capture: --s-sub-browse-w and --s-sub-tree-w. */
 export const DEFAULT_SUB_WIDTH = 878;
@@ -113,6 +127,7 @@ export const DEFAULT_SESSION: Session = {
   subWidth: DEFAULT_SUB_WIDTH,
   subTreeWidth: DEFAULT_SUB_TREE_WIDTH,
   trafficLight: "master",
+  artworkMode: "partial",
   waveformZoom: { a: DETAIL_BARS, b: DETAIL_BARS },
   dualControl: false,
 };
@@ -207,6 +222,7 @@ export function sanitiseSession(value: unknown): Session {
     trafficLight: TRAFFIC_LIGHT_SOURCES.includes(raw.trafficLight as TrafficLightSource)
       ? (raw.trafficLight as TrafficLightSource)
       : "master",
+    artworkMode: raw.artworkMode === "full" ? "full" : "partial",
     waveformZoom:
       typeof raw.waveformZoom === "object" && raw.waveformZoom !== null
         ? {

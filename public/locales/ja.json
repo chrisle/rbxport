@@ -1774,5 +1774,8 @@
   "The length of time before a track is added to Histories": "演奏履歴に追加する時間",
   "seconds": "秒",
   "Analyze key": "Analyze key",
-  "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them."
+  "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.",
+  "--s-row-height": "--s-row-height",
+  "Show the entire artwork.": "アートワーク全体を表示",
+  "Show the upper part of the artwork.": "アートワークの上部を表示"
 }

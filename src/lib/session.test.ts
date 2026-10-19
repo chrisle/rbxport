@@ -30,10 +30,20 @@ describe("sanitiseSession", () => {
       subWidth: 700,
       subTreeWidth: 240,
       trafficLight: "b",
+      artworkMode: "full",
       waveformZoom: { a: 4, b: 32 },
       dualControl: true,
     };
     expect(sanitiseSession(session)).toEqual(session);
+  });
+
+  it("opens on the upper part of the artwork unless the whole was chosen", () => {
+    // rekordbox's ArtworkStatus starts at mode 0, "Show the upper part of the
+    // artwork.", until the other button is clicked and saved.
+    expect(DEFAULT_SESSION.artworkMode).toBe("partial");
+    expect(sanitiseSession({}).artworkMode).toBe("partial");
+    expect(sanitiseSession({ artworkMode: "whole" }).artworkMode).toBe("partial");
+    expect(sanitiseSession({ artworkMode: "full" }).artworkMode).toBe("full");
   });
 
   it("gives a session from before the sub-browser had widths the measured ones", () => {

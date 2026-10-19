@@ -125,6 +125,16 @@
   height: var(--s-filter-toggle-glyph);
   color: var(--c-filter-text);
 }
+/* The artwork display pattern: rekordbox's two buttons beside the MASTER
+   menu, the same outlined squares as the filter's (its skins draw all three
+   in one 18-unit frame), blue around whichever is chosen. */
+.artworkModes {
+  display: flex;
+  align-items: center;
+  gap: var(--s-artwork-mode-gap);
+  flex: none;
+}
+.artworkModes > .filterToggle { margin-right: 0; }
 /* The capture draws it black with no border of its own, sitting in the
    header row rather than boxed like the tree's own search. */
 .search { flex: 0 1 var(--s-search-w); border: none; }

@@ -20,6 +20,36 @@ export const ArtworkImportIcon = (props: IconProps) => (
   </svg>
 );
 
+/**
+ * rekordbox 7's `skins/artworkPart_on.svg` glyph, rects verbatim and framed to
+ * its 10-unit clip: four rows, the browser button for "Show the upper part of
+ * the artwork.". The outlined square around it is the button's own border.
+ */
+export const ArtworkPartIcon = (props: IconProps) => (
+  <svg viewBox="4 4 10 10" aria-hidden focusable="false" {...props}>
+    <g fill="currentColor">
+      <rect x="4" y="4" width="2.0339" height="1.62796"/> <rect x="4" y="6.79053" width="2.0339" height="1.62796"/>
+      <rect x="4" y="9.5813" width="2.0339" height="1.62796"/> <rect x="4" y="12.3721" width="2.0339" height="1.62796"/>
+      <rect x="6.88135" y="4" width="7.11864" height="1.62796"/> <rect x="6.88135" y="6.79077" width="7.11864" height="1.62796"/>
+      <rect x="6.88135" y="9.5813" width="7.11864" height="1.62796"/> <rect x="6.88135" y="12.3721" width="7.11864" height="1.62796"/>
+    </g>
+  </svg>
+);
+
+/**
+ * rekordbox 7's `skins/artworkAll_on.svg` glyph, rects verbatim: three taller
+ * rows, the browser button for "Show the entire artwork.".
+ */
+export const ArtworkAllIcon = (props: IconProps) => (
+  <svg viewBox="4 4 10 10" aria-hidden focusable="false" {...props}>
+    <g fill="currentColor">
+      <rect x="4" y="4" width="1.99997" height="2.22219"/> <rect x="4" y="7.88867" width="1.99997" height="2.22219"/>
+      <rect x="4" y="11.7778" width="1.99997" height="2.22219"/> <rect x="7" y="4" width="6.99991" height="2.22219"/>
+      <rect x="7" y="7.88867" width="6.99991" height="2.22219"/> <rect x="7" y="11.7778" width="6.99991" height="2.22219"/>
+    </g>
+  </svg>
+);
+
 export const ClearCircleIcon = (props: IconProps) => (
   <svg viewBox="0 0 11 11" aria-hidden focusable="false" {...props}>
     <path fillRule="evenodd" fill="currentColor" d="M5.5 0a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Zm2.83 3.38-.71-.71L5.5 4.79 3.38 2.67l-.71.71L4.79 5.5 2.67 7.62l.71.71L5.5 6.21l2.12 2.12.71-.71L6.21 5.5Z"/>

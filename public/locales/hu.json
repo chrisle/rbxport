@@ -1765,5 +1765,8 @@
   "The length of time before a track is added to Histories": "The length of time before a track is added to Histories",
   "seconds": "másodpercek",
   "Analyze key": "Analyze key",
-  "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them."
+  "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.",
+  "--s-row-height": "--s-row-height",
+  "Show the entire artwork.": "Megjeleníti a teljes grafikát.",
+  "Show the upper part of the artwork.": "Megjeleníti a grafika felső részét."
 }

@@ -1769,5 +1769,8 @@
   "The length of time before a track is added to Histories": "El tiempo que transcurre antes de que una pista se añada a Histories",
   "seconds": "segundos",
   "Analyze key": "Analyze key",
-  "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them."
+  "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.": "Turn off to keep keys from Mixed In Key or another source. RBXport will not overwrite them.",
+  "--s-row-height": "--s-row-height",
+  "Show the entire artwork.": "Mostrar todo el arte.",
+  "Show the upper part of the artwork.": "Mostrar parte superior del arte."
 }
