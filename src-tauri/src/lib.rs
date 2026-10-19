@@ -698,6 +698,7 @@ pub fn run() {
             cues::move_hot_cue,
             cues::set_cue_colour,
             cues::set_cue_comment,
+            cues::set_active_loop,
             cues::delete_cue,
             cues::convert_memory_cues_to_hot,
             commands::filter_values,

@@ -3057,14 +3057,31 @@ export const Player = memo(function Player({
                     orange, and red for the Active Loop (`Kind` 4):
                     `MemoryCueComp::addCue` shows the button when the out
                     point is set and toggles it on for kind 4 [OBS static,
-                    rekordbox 7 @0x1006864e8]. Shown, not a control: setting
-                    the Active Loop is a write rbx does not make yet. */}
+                    rekordbox 7 @0x1006864e8]. It is a toggle, tooltip "Set
+                    Active Loop" (`lookAndFeelChanged` @0x100685d14):
+                    `buttonClicked` @0x100685f80 asks to set it when off and
+                    to reset it when on (#577). */}
                 {cue.outMs > cue.positionMs ? (
-                  <CueLoopIcon
-                    className={styles.cueLoopIcon}
-                    data-testid="memory-cue-loop"
-                    data-active={cue.activeLoop ? "" : undefined}
-                  />
+                  <button
+                    type="button"
+                    className={styles.cueLoopButton}
+                    aria-label="Set Active Loop"
+                    aria-pressed={cue.activeLoop === true}
+                    title={tip(memoryCueEditReason ?? "Set Active Loop")}
+                    disabled={!memory.canEdit || cue.id === ""}
+                    onClick={(event) => {
+                      // The row underneath calls the cue; the toggle is not
+                      // also a jump.
+                      event.stopPropagation();
+                      writeCue((edits) => edits.setActiveLoop(cue.id, cue.activeLoop !== true));
+                    }}
+                  >
+                    <CueLoopIcon
+                      className={styles.cueLoopIcon}
+                      data-testid="memory-cue-loop"
+                      data-active={cue.activeLoop ? "" : undefined}
+                    />
+                  </button>
                 ) : null}
                 <CueName cue={cue} renaming={renamingCue} setRenaming={setRenamingCue}
                   canEdit={!readOnly} onSave={(text) => writeCue((edits) => edits.setCueComment(cue.id, text))} />

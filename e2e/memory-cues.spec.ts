@@ -257,6 +257,38 @@ test("memory loops and the Active Loop are listed with rekordbox's loop mark and
   await expect(overview.locator('[class*="loopBand"]')).toHaveCount(2);
 });
 
+test("the loop mark sets the track's one Active Loop and clears it (#577)", async ({ page }) => {
+  // rekordbox's MEMORY row loop button, tooltip "Set Active Loop": a click
+  // sets that loop as the Active Loop (red), and the old one goes orange;
+  // a click on the red one clears it. The row is not also called.
+  await enableTooltips(page);
+  await load(page, "?memoryLoops=1&writable=1");
+  const list = page.getByRole("complementary", { name: "Cue list" });
+  const toggles = list.getByRole("button", { name: "Set Active Loop", exact: true });
+  const marks = list.getByTestId("memory-cue-loop");
+  await expect(toggles).toHaveCount(2);
+  await expect(toggles.nth(0)).toHaveAttribute("title", "Set Active Loop");
+  await expect(toggles.nth(0)).toHaveAttribute("aria-pressed", "false");
+  await expect(toggles.nth(1)).toHaveAttribute("aria-pressed", "true");
+
+  await toggles.nth(0).click();
+  await expect(toggles.nth(0)).toHaveAttribute("aria-pressed", "true");
+  await expect(toggles.nth(1)).toHaveAttribute("aria-pressed", "false");
+  await expect(marks.nth(0)).toHaveCSS("color", "rgb(230, 55, 55)");
+  await expect(marks.nth(1)).toHaveCSS("color", "rgb(255, 130, 5)");
+
+  await toggles.nth(0).click();
+  await expect(toggles.nth(0)).toHaveAttribute("aria-pressed", "false");
+  await expect(list.locator("[data-active]")).toHaveCount(0);
+});
+
+test("the Active Loop toggle is disabled while the library is read-only (#577)", async ({ page }) => {
+  await load(page, "?memoryLoops=1");
+  const toggles = page.getByRole("complementary", { name: "Cue list" }).getByRole("button", { name: "Set Active Loop", exact: true });
+  await expect(toggles).toHaveCount(2);
+  await expect(toggles.nth(0)).toBeDisabled();
+});
+
 test("a memory cue's marker on the waveform takes its colour, and red without one (#533)", async ({ page }) => {
   // rekordbox picks a memory cue's marker from its memoryCueImageDown sprite
   // by djmdCue.Color, and the red row for none (WidgetLoudView::drawTextures).

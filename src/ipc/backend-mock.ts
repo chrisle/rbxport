@@ -1345,6 +1345,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }
       return refuse(`no cue ${cueId}`);
     },
+    setActiveLoop: (cueId, on) => {
+      for (const [trackId, list] of cueStore) {
+        const cue = list.find((item) => item.id === cueId);
+        if (!cue) continue;
+        if (!cue.memory || cue.outMs <= cue.positionMs) return refuse("only a memory loop can be the Active Loop");
+        // One Active Loop a track, as rekordbox's `MstSetActiveLoop` keeps.
+        if (on) for (const other of list) other.activeLoop = false;
+        cue.activeLoop = on;
+        return cuesChanged(trackId, undefined);
+      }
+      return refuse(`no cue ${cueId}`);
+    },
     convertMemoryCuesToHot: (track) => {
       const cues = cuesOf(track);
       const taken = new Set(cues.map((c) => c.letter));

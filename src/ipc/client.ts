@@ -669,6 +669,7 @@ async function realBackend(): Promise<Backend> {
       moveHotCue: (cue, letter) => invoke<void>("move_hot_cue", { cue, kind: { hot: letter } }),
       setCueColour: (cue, colour) => invoke<void>("set_cue_colour", { cue, colour }),
       setCueComment: (cue, comment) => invoke<void>("set_cue_comment", { cue, comment }),
+      setActiveLoop: (cue, on) => invoke<void>("set_active_loop", { cue, on }),
       deleteCue: (cue) => invoke<void>("delete_cue", { cue }),
       gridEdit: (track, edit, options) =>
         invoke<GridState>("grid_edit", {
