@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DeviceLibrary, TreeNode } from "@/ipc/types";
 import {
-  deviceNodeId, deviceParentFor, devicePlaylistsOf, deviceSource, isDeviceLibraryKind, parseDeviceNodeId,
+  deviceDropPath, deviceNodeId, deviceParentFor, devicePlaylistsOf, deviceSource, isDeviceLibraryKind, parseDeviceNodeId,
   withDeviceLibraries,
 } from "./deviceLibrary";
 import { nodesForSource, sourceOf } from "./tree";
@@ -87,5 +87,36 @@ describe("a stick's own libraries in the tree", () => {
     expect(deviceParentFor(nodes.find((n) => n.name === "Folder A") as TreeNode)).toBe("1");
     expect(deviceParentFor(nodes.find((n) => n.name === "Inside A") as TreeNode)).toBeNull();
     expect(deviceParentFor(stick)).toBeNull();
+  });
+});
+
+describe("what a drag onto the Devices tree exports to", () => {
+  const tree = withDeviceLibraries([stick], new Map([["D:\\", libraries]]));
+  const kind = (k: TreeNode["kind"]) => tree.filter((n) => n.kind === k);
+
+  it("sends tracks to the stick from its own row, a library heading and All Tracks", () => {
+    expect(deviceDropPath(stick, "tracks")).toBe("D:\\");
+    for (const node of [...kind("deviceLibrary"), ...kind("deviceAllTracks")]) {
+      expect(deviceDropPath(node, "tracks")).toBe("D:\\");
+    }
+  });
+
+  it("takes no tracks on the stick's Playlists heading, folders or playlists", () => {
+    for (const node of [...kind("devicePlaylists"), ...kind("deviceFolder"), ...kind("devicePlaylist")]) {
+      expect(deviceDropPath(node, "tracks")).toBeNull();
+    }
+  });
+
+  it("takes a playlist or folder on the stick's own row only", () => {
+    expect(deviceDropPath(stick, "playlist")).toBe("D:\\");
+    for (const node of tree.filter((n) => n.kind !== "device")) {
+      expect(deviceDropPath(node, "playlist")).toBeNull();
+    }
+  });
+
+  it("is nothing outside the Devices tree", () => {
+    const list: TreeNode = { id: "12", name: "House", kind: "playlist", depth: 1 };
+    expect(deviceDropPath(list, "tracks")).toBeNull();
+    expect(deviceDropPath(list, "playlist")).toBeNull();
   });
 });

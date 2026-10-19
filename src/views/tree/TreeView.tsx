@@ -24,6 +24,13 @@ import { usePreferences } from "@/store/usePreferences";
 import type { TreeExpansion } from "@/lib/session";
 import { useCommands } from "@/store/useCommands";
 import { publishTreeMenuState } from "@/lib/menuBar";
+import { deviceDropPath } from "@/lib/deviceLibrary";
+
+/**
+ * The drag type a playlist or folder carries its id in while it is picked up,
+ * so a stick in either browser's tree can tell it from tracks and take it.
+ */
+const TREE_NODE_DRAG = "application/x-rbx-tree-node";
 
 /**
  * The name, while it is being typed over.
@@ -75,7 +82,7 @@ const Row = memo(function Row({
   node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onDropFiles, onMenu, count,
   renaming, onRename, onRenameEnd, onRenameStart, doubleClickToEdit,
   movable, moveEdge, onMoveStart, onMoveOver, onMoveDrop, onMoveEnd,
-  onEjectDevice, ejecting, deviceBusy,
+  onEjectDevice, ejecting, deviceBusy, tracksToDevice, onDropTracksOnDevice, playlistToDevice, onDropNodeOnDevice,
 }: {
   node: TreeNode;
   selected: boolean;
@@ -116,6 +123,12 @@ const Row = memo(function Row({
   onEjectDevice: ((node: TreeNode) => void) | undefined;
   ejecting: boolean;
   deviceBusy: boolean;
+  /** The stick the tracks in hand would be exported to if dropped here. */
+  tracksToDevice: string | null;
+  onDropTracksOnDevice: ((path: string) => void) | undefined;
+  /** The stick a playlist or folder dropped here would be exported to. */
+  playlistToDevice: string | null;
+  onDropNodeOnDevice: ((nodeId: string, path: string) => void) | undefined;
 }) {
   // A history node is a session, or the year or month one is filed under —
   // one kind, told apart by whether anything sits beneath it. A month whose
@@ -148,9 +161,21 @@ const Row = memo(function Row({
   const fileDroppable = Boolean(onDropFiles)
     && (node.kind === "playlist" || node.kind === "folder" || node.id === "playlists");
   useEffect(() => {
-    if (!droppable && !fileDroppable) setOver(false);
-  }, [droppable, fileDroppable]);
+    if (!droppable && !fileDroppable && tracksToDevice === null && playlistToDevice === null) setOver(false);
+  }, [droppable, fileDroppable, tracksToDevice, playlistToDevice]);
+  /** A playlist or folder from either tree is in hand, and this stick takes it. */
+  const takesNode = (e: React.DragEvent<HTMLDivElement>) =>
+    playlistToDevice !== null && e.dataTransfer.types.includes(TREE_NODE_DRAG);
   const takeDrag = (e: React.DragEvent<HTMLDivElement>) => {
+    // A stick exports what is dropped on it, as rekordbox's Devices tree
+    // does; checked first, since a playlist picked up in this same tree is
+    // also a move in hand, and a stick is no place in the playlists.
+    if (takesNode(e) || tracksToDevice !== null) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      setOver(true);
+      return;
+    }
     // A node being moved takes precedence: the same row is both a place to
     // put tracks and a place in the tree, and only one of those is in hand.
     if (onMoveOver) {
@@ -204,8 +229,10 @@ const Row = memo(function Row({
         if (!movable) return;
         // Stops the drag being read as a track drag by the rows' own handlers.
         e.stopPropagation();
-        e.dataTransfer.effectAllowed = "move";
+        // Moved within the playlists, or copied onto a stick as an export.
+        e.dataTransfer.effectAllowed = "copyMove";
         e.dataTransfer.setData("text/plain", node.id);
+        e.dataTransfer.setData(TREE_NODE_DRAG, node.id);
         onMoveStart?.(node);
       }}
       onDragEnd={() => onMoveEnd?.()}
@@ -221,6 +248,19 @@ const Row = memo(function Row({
       }}
       onDrop={(e) => {
         setOver(false);
+        if (takesNode(e) && playlistToDevice !== null) {
+          e.preventDefault();
+          const id = e.dataTransfer.getData(TREE_NODE_DRAG);
+          // Not a move: the node stays where it is in the playlists.
+          onMoveEnd?.();
+          if (id !== "") onDropNodeOnDevice?.(id, playlistToDevice);
+          return;
+        }
+        if (tracksToDevice !== null) {
+          e.preventDefault();
+          onDropTracksOnDevice?.(tracksToDevice);
+          return;
+        }
         if (onMoveDrop) {
           e.preventDefault();
           onMoveDrop();
@@ -243,8 +283,8 @@ const Row = memo(function Row({
         e.preventDefault();
         onMenu(node, { x: e.clientX, y: e.clientY });
       }}
-      data-droppable={(droppable || fileDroppable) || undefined}
-      data-over={((droppable || fileDroppable) && over) || undefined}
+      data-droppable={(droppable || fileDroppable || tracksToDevice !== null) || undefined}
+      data-over={((droppable || fileDroppable || tracksToDevice !== null || playlistToDevice !== null) && over) || undefined}
       role="treeitem"
       aria-selected={selected}
       aria-expanded={branch ? open : undefined}
@@ -367,6 +407,14 @@ export interface TreeViewProps {
   /** Drop the dragged tracks onto a playlist. */
   onDropTracks?: (playlistId: string) => void;
   /**
+   * The tracks in hand are the collection's, so a stick in the Devices tree
+   * can take them; files the library does not hold, and a stick's own
+   * tracks, are not.
+   */
+  draggingToDevice?: boolean;
+  /** Export the dragged tracks to the stick mounted at `path`. */
+  onDropTracksOnDevice?: (path: string) => void;
+  /**
    * Files dragged in from outside the app (Finder, Explorer), dropped onto a
    * playlist, or onto the Playlists root (`"playlists"`) or a playlist folder.
    */
@@ -412,6 +460,7 @@ export interface TreeViewProps {
 
 export const TreeView = memo(function TreeView({
   nodes, selectedId, side = "main", onSelect, dragging, onDropTracks, onDropFiles, onExport, exportDevices, onExportFile,
+  draggingToDevice = false, onDropTracksOnDevice,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
   initialExpansion, onExpansionChange,
@@ -516,6 +565,15 @@ export const TreeView = memo(function TreeView({
     if (at < 0) return;
     onMoveNode(node, parent, target.edge === "below" ? at + 1 : at);
   }, [moving, moveTo, endMove, onMoveNode, nodes]);
+
+  // A playlist or folder dropped on a stick: Export Playlist / Export Folder
+  // to it. Found by id in this tree's nodes, which hold the playlists
+  // whichever tree it was picked up in.
+  const exportDropped = useCallback((nodeId: string, path: string) => {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node || (node.kind !== "playlist" && node.kind !== "smartPlaylist" && node.kind !== "folder")) return;
+    onExport?.(node, path);
+  }, [nodes, onExport]);
   // Which nodes are closed. Seeded from the tree the backend sent — it marks
   // what should open, and 187 history sessions filed by year and month would
   // otherwise arrive on top of the playlists — and the user's own toggles take
@@ -663,6 +721,10 @@ export const TreeView = memo(function TreeView({
             onEjectDevice={onEjectDevice}
             ejecting={node.id === ejectingDeviceId}
             deviceBusy={deviceBusy}
+            tracksToDevice={Boolean(dragging) && draggingToDevice && onDropTracksOnDevice ? deviceDropPath(node, "tracks") : null}
+            onDropTracksOnDevice={onDropTracksOnDevice}
+            playlistToDevice={onExport ? deviceDropPath(node, "playlist") : null}
+            onDropNodeOnDevice={exportDropped}
           />
         ))}
         {visible.length === 0 ? (
