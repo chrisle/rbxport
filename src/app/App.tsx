@@ -66,7 +66,7 @@ import { FIELD_LABEL } from "@/views/info/fieldLabel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { RightRail } from "@/views/browser/RightRail";
 import { MyTagPanel } from "@/views/browser/MyTagPanel";
-import { useColumns, type ColumnContext } from "@/store/useColumns";
+import { columnContextFor, useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { hasLooseId, importLoose, isLooseId } from "@/lib/explorer";
 import { childrenOf, containerOf, parentFor, withSources } from "@/lib/tree";
@@ -436,14 +436,7 @@ function AppBody() {
   const clock = useClock();
   // The table's layout follows the kind of thing being browsed, as
   // browseSetting.xml does, rather than each individual playlist.
-  const columnContext: ColumnContext =
-    selectedNode?.kind === "playlist" || selectedNode?.kind === "smartPlaylist" || selectedNode?.kind === "devicePlaylist"
-      ? "playlist"
-      : selectedNode?.kind === "history"
-        ? "history"
-        : selectedNode?.kind === "directory" || selectedNode?.kind === "explorer"
-          ? "folder"
-          : "collection";
+  const columnContext: ColumnContext = columnContextFor(selectedNode?.kind);
   const cols = useColumns(columnContext);
   // The Preferences window, and the pane it opens on: the missing-file
   // manager lives under Advanced, so the File menu opens it there. In the

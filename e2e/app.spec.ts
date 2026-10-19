@@ -1532,6 +1532,12 @@ test("each kind of table remembers its own columns", async ({ page }) => {
   // Back to a playlist and the change is still there.
   await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
+
+  // A playlist folder is a playlist-type list too and shares the same layout
+  // (TableHeader-PlaylistTracks), not the collection's (#596).
+  await page.getByRole("treeitem").filter({ hasText: "CURRENT" }).first().click();
+  await expect(page.getByTestId("browser-title")).toContainText("CURRENT (");
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
 });
 
 test("analysing a selection reports progress and can be stopped", async ({ page }) => {

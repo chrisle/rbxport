@@ -22,6 +22,7 @@ import {
   type ColumnSpec,
   type Layout,
 } from "@/lib/columns";
+import type { TreeNode } from "@/ipc/types";
 
 /**
  * Which table a layout belongs to.
@@ -34,6 +35,34 @@ import {
 /// The sub-browser keeps its own set: it is usually left narrow, and sharing
 /// the main table's widths would make it unusable.
 export type ColumnContext = "collection" | "playlist" | "history" | "subBrowser" | "folder";
+
+/**
+ * The layout a tree node's table uses.
+ *
+ * rekordbox names the layout from the list's type and never from the list
+ * itself: `browse::BrowseHeaderManager::getXmlKeyName` (rekordbox 7.2, macOS)
+ * picks `TableHeader-PlaylistTracks` for every list of the playlist type that
+ * is not an intelligent one, a playlist folder included. So a folder of
+ * playlists shows, and changes, the same columns as the playlists in it
+ * (#596), rather than the collection's.
+ */
+export function columnContextFor(kind: TreeNode["kind"] | undefined): ColumnContext {
+  switch (kind) {
+    case "playlist":
+    case "smartPlaylist":
+    case "folder":
+    case "devicePlaylist":
+    case "deviceFolder":
+      return "playlist";
+    case "history":
+      return "history";
+    case "directory":
+    case "explorer":
+      return "folder";
+    default:
+      return "collection";
+  }
+}
 
 /** What each context opens with. Only the Explorer's differs from the rest. */
 function defaultFor(context: ColumnContext): () => Layout {
