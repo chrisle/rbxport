@@ -380,6 +380,27 @@ test("right-clicking a set pad opens the cue colour menu and recolours it (#272)
   await expect(menu).toBeHidden();
 });
 
+test("a hot cue set or reset here takes its slot's HOT CUE color default, not green (#593)", async ({ page }) => {
+  // rekordbox's deck stores a new hot cue, and one whose colour is Reset,
+  // with ColorTableIndex 0; COLORFUL (the default) then draws slot E in
+  // index 19, #30D26E, where index 21 drew every such cue #3CEB50.
+  await load(page, "?writable=1");
+  await playAWhile(page);
+  await pad(page, "E").click();
+  await expect(pad(page, "E")).toHaveAttribute("aria-pressed", "true");
+  await expect(pad(page, "E")).toHaveAttribute("style", /--cue-colour: ?#30D26E/i);
+  await expect(overviewBadge(page, "E")).toHaveAttribute("style", /--cue-colour: ?#30D26E/i);
+
+  // Its own colour wins, and Reset gives the slot default back.
+  await pad(page, "E").click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Hot cue color" });
+  await menu.getByRole("button", { name: "Color 6" }).click();
+  await expect(pad(page, "E")).toHaveAttribute("style", /--cue-colour: ?#508CFF/i);
+  await pad(page, "E").click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "Reset" }).click();
+  await expect(pad(page, "E")).toHaveAttribute("style", /--cue-colour: ?#30D26E/i);
+});
+
 test("pointing at a set pad shows its ✕, which clears the hot cue (#341)", async ({ page }) => {
   // rekordbox 7.2.18 manual p.76: "To delete a Hot Cue, point on it with the
   // mouse cursor, and then click [X]." `HotCuePad::mouseEnter` shows it over a
