@@ -24,10 +24,16 @@ pub struct Estimate {
     /// Source bytes of the tracks that would be copied: new ones, and ones
     /// whose source changed since they were written.
     pub copy_bytes: u64,
+    /// What those copies take on the stick: each file rounded up to the
+    /// stick's allocation unit, as its filesystem stores it (#591).
+    pub copy_allocated: u64,
     /// Bytes of the tracks the stick already holds and the sync leaves alone.
     pub reuse_bytes: u64,
     /// Bytes of audio on the stick that the sync would remove.
     pub free_bytes: u64,
+    /// What removing that audio gives back: each file rounded up to the
+    /// stick's allocation unit.
+    pub free_allocated: u64,
     pub tracks_new: usize,
     pub tracks_changed: usize,
     pub tracks_kept: usize,
@@ -74,12 +80,18 @@ pub fn estimate(
     delete_unlisted_music: bool,
     compatibility: Option<CompatibilityFormat>,
 ) -> Estimate {
-    estimate_inspected(destination, db_id, tracks, delete_unlisted_music, compatibility, None, None)
+    let unit = crate::plan::allocation_unit(destination);
+    estimate_inspected(destination, db_id, tracks, delete_unlisted_music, compatibility, None, None, unit)
 }
 
+/// [`estimate`], given the stick's snapshot and the preparation cache when the
+/// caller has them, and the stick's allocation unit
+/// ([`crate::plan::allocation_unit`]).
+#[allow(clippy::too_many_arguments, reason = "the inputs a plan already holds, passed through rather than read again")]
 pub(crate) fn estimate_inspected(
     destination: &Path, db_id: u64, tracks: &[SourceTrack], delete_unlisted_music: bool,
     compatibility: Option<CompatibilityFormat>, snapshot: Option<&Snapshot>, cache: Option<&crate::cache::PreparationCache>,
+    unit: u64,
 ) -> Estimate {
     let previous = Manifest::load(destination).filter(|m| m.db_id == db_id);
     let previous_place = previous_in_place(destination, previous.as_ref());
@@ -148,7 +160,7 @@ pub(crate) fn estimate_inspected(
         } else {
             result.tracks_new += 1;
         }
-        result.copy_bytes += conversion.map_or(size, |target| {
+        let copied = conversion.map_or(size, |target| {
             if let Some(size) = cache.and_then(|cache| cache.converted_size(&track.source_path, target)) { return size; }
             let duration = cache.and_then(|cache| cache.properties(&track.source_path).ok())
                 .and_then(|p| p.frames.zip(p.sample_rate.filter(|rate| *rate > 0)))
@@ -158,6 +170,8 @@ pub(crate) fn estimate_inspected(
                 rbl_audio::compatibility::Format::Mp3 => duration.saturating_add(1).saturating_mul(40_000).saturating_add(8192),
             }
         });
+        result.copy_bytes += copied;
+        result.copy_allocated += crate::plan::allocation(copied, unit);
         result.actions.insert(key, if conversion.is_some() { AudioAction::Convert } else { AudioAction::Copy });
         result.approximate |= conversion.is_some();
     }
@@ -172,6 +186,7 @@ pub(crate) fn estimate_inspected(
             result.tracks_removed += 1;
             let on_disk = std::fs::metadata(under(destination, &entry.audio)).map_or(entry.size, |m| m.len());
             result.free_bytes += on_disk;
+            result.free_allocated += crate::plan::allocation(on_disk, unit);
         }
     }
     result
