@@ -351,11 +351,19 @@
 .zoomButton:hover { color: var(--c-icon-on); }
 .zoomGlyph { width: 14px; height: 14px; display: block; }
 .zoomReset {
+  /* A button drawn as the bare word the capture has: no box of its own. */
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: inherit;
   font-size: var(--f-size-dual-button);
   font-weight: 700;
   color: var(--c-text);
   line-height: 1;
+  cursor: default;
+  pointer-events: auto;
 }
+.zoomReset:hover { color: var(--c-icon-on); }
 
 /* A playing loop, or an IN that waits for its OUT: the pad blue. */
 .loopField[data-on],

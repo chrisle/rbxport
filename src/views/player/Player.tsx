@@ -195,6 +195,17 @@ export interface PlayerProps {
    */
   publishZoom?: ((zoom: (by: number) => void) => void) | undefined;
   /**
+   * The pair's zoom, for the wheel over this deck's detail waveform.
+   *
+   * rekordbox 7.2.19's `djplay::PlayerWaveView::mouseWheelMove` @0x100c93584
+   * hands a wheel step to `WaveViewArea::triggerZoomInOut` @0x100c936e0, the
+   * same call the + and − buttons make, and that steps both decks. A wheel
+   * that zoomed one deck alone let the two drift apart, so the cluster then
+   * zoomed one closer than the other (#602). Left out, the wheel zooms this
+   * deck, which is all a deck on its own has.
+   */
+  onWheelZoom?: ((by: number) => void) | undefined;
+  /**
    * The waveform zoom and the beat-jump size, when something outside is
    * driving them.
    *
@@ -853,7 +864,7 @@ export const Player = memo(function Player({
   track, onEject, onError, onAnalyse, onDropTrack, onLoadSelected, onSkipTrack, selectedTrackId = null,
   onExportTrack, devices = [], onExportLoop,
   dragging = false, deck = "a",
-  simple = false, transportSlot, flipped = false, dual = false, publishZoom,
+  simple = false, transportSlot, flipped = false, dual = false, publishZoom, onWheelZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
   publishSync, peerSync, isMaster = false, onMaster, synced = false, onSyncToggle,
   leaderBpmX100 = null, onPlayingBpm, onKeyShift, onGridNudge, publishGridFollow, readOnly = false,
@@ -1197,8 +1208,10 @@ export const Player = memo(function Player({
     // Line and page modes (mice on some platforms) report lines, not pixels.
     const px = event.deltaY * (event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 400 : 1);
     const direction = wheelGate.current(px, event.timeStamp, isWheelNotch({ deltaMode: event.deltaMode, ctrlKey: event.ctrlKey, wheelDeltaY: (event.nativeEvent as { wheelDeltaY?: number }).wheelDeltaY }));
-    if (direction !== 0) setBars((current) => zoomBy(current, direction));
-  }, [setBars]);
+    if (direction === 0) return;
+    if (onWheelZoom) onWheelZoom(direction);
+    else setBars((current) => zoomBy(current, direction));
+  }, [setBars, onWheelZoom]);
 
   const zoom = useCallback((by: number) => {
     setBars((current) => {
