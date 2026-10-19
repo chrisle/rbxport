@@ -26,8 +26,13 @@
 //! reference library's 1,040,598 cues settled all three:
 //!
 //! - **`ColorTableIndex` is not a per-slot palette.** Index 21 dominates every
-//!   hot-cue kind alike — 169,389 of kind 1, 171,149 of kind 2 — so it is the
-//!   default colour, not a slot's own. Memory cues carry 0 or NULL.
+//!   hot-cue kind alike — 169,389 of kind 1, 171,149 of kind 2. That is the
+//!   colour a CDJ's cue gets when it is saved over LINK
+//!   (`PSvDBMain::SavUsbCue` calls `hotCueDefaultColorIndex`, 21 for a cue
+//!   and 36 for a loop), not what rekordbox's own deck writes: a hot cue set
+//!   or reset there stores 0, "no colour", and is drawn in the HOT CUE color
+//!   table's default for its slot (issue #593; see [`Writer::add_cue`]).
+//!   Memory cues carry 0 or NULL.
 //! - **`Color`** is 255 on memory cues and -1 on hot ones.
 //! - **`BeatLoopSize`** is NULL or 0 on every one of the 1,040,176 cues that
 //!   is not a loop; only the 422 loops set it.
@@ -2065,8 +2070,20 @@ impl Writer {
     /// A to D, 6-9 for E to H, and 10-17 for I to P. Kind 4, the active memory
     /// loop, is refused: a plain cue cannot be one.
     ///
-    /// Every column is set to what the reference library shows for a plain,
-    /// default-coloured cue — see the module docs. Loops are refused.
+    /// Every column is set to what the reference library shows for a plain
+    /// cue — see the module docs. Loops are refused.
+    ///
+    /// A hot cue gets `ColorTableIndex` 0, no colour of its own, as one set
+    /// on rekordbox's deck does, so it is drawn in the View › Color › HOT
+    /// CUE color default for its slot (COLORFUL: A pink-red, B light blue, C
+    /// green, ...) rather than always green [OBS static, rekordbox 7.2.19
+    /// arm64: `UiPlayer::resetHotCueList` @0x101ba0bcc fills an empty slot's
+    /// `HotCueData` with colour byte `+0x34` = 0; `UiPlayer::onHotCueChanged`
+    /// sets a cue on that slot without touching it and passes it to
+    /// `DjplayDB::setHotCueData` @0x1001ff7f8, which copies `+0x34` into
+    /// `analyzer::Cue+0x4c`, the field `AppSyncDBController::set_cueInfo`
+    /// maps to `ColorTableIndex`]. Only a CDJ's cue saved over LINK gets an
+    /// explicit 21 ([`Writer::save_player_cue`]).
     pub fn add_cue(&mut self, content: &str, kind: u8, position_ms: u32) -> Result<String> {
         if kind == 4 || kind > 17 {
             return Err(DbError::WriteRefused(format!(
@@ -2117,9 +2134,9 @@ impl Writer {
                 i64::from(kind),
                 // 255 on a memory cue, -1 on a hot one.
                 if memory { 255 } else { -1 },
-                // 0 is "no colour"; 21 is the default rekordbox writes when
-                // the user has not chosen one.
-                if memory { 0 } else { 21 },
+                // 0 is "no colour" on both kinds: a hot cue takes its
+                // slot's default from the HOT CUE color table.
+                0,
                 content_uuid,
                 uuid,
                 usn,
@@ -2132,7 +2149,12 @@ impl Writer {
     }
 
     /// Changes a cue's colour. Memory cues use rekordbox's eight-value
-    /// `Color` field (255 means no colour); hot cues use `ColorTableIndex`.
+    /// `Color` field (255 means no colour); hot cues use `ColorTableIndex`,
+    /// where `None` — the colour menu's Reset — writes 0 and returns the cue
+    /// to its slot's default [OBS static, rekordbox 7.2.19 arm64:
+    /// `HotCueComp::changeCueColorMenu` @0x1006898f4 answers Reset with
+    /// `changePadColour(0)` @0x10068a268, which calls
+    /// `DatabaseIF::modifyCueColorTblIdx` with 0].
     pub fn set_cue_colour(&mut self, cue: &str, colour: Option<u8>) -> Result<Changed> {
         self.prepare()?;
         let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -2151,7 +2173,7 @@ impl Writer {
             let value = colour.map_or(255, i64::from);
             tx.execute("UPDATE djmdCue SET Color=?2, rb_local_usn=?3, updated_at=?4 WHERE ID=?1 AND rb_local_deleted=0", params![cue, value, usn, stamp])?
         } else {
-            let value = colour.map_or(21, i64::from);
+            let value = colour.map_or(0, i64::from);
             tx.execute("UPDATE djmdCue SET ColorTableIndex=?2, rb_local_usn=?3, updated_at=?4 WHERE ID=?1 AND rb_local_deleted=0", params![cue, value, usn, stamp])?
         };
         set_counter(&tx, usn)?;

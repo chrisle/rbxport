@@ -162,7 +162,8 @@ fn a_library_built_without_cues_takes_its_first_track_s_cues() {
 fn a_track_s_cues_come_back_in_position_order_with_their_colour_index() {
     let mut f = open();
     let track = track_id(0);
-    f.writer.add_cue(&track, 2, 90_000).unwrap(); // hot cue B, later
+    let b = f.writer.add_cue(&track, 2, 90_000).unwrap(); // hot cue B, later
+    f.writer.set_cue_colour(&b, Some(46)).unwrap();
     f.writer.add_cue(&track, 1, 46).unwrap(); // hot cue A, first
     f.writer.add_cue(&track, 0, 46).unwrap(); // memory cue beside it
     f.writer.add_cue(&track_id(2), 6, 24).unwrap(); // hot cue E on another track
@@ -171,13 +172,14 @@ fn a_track_s_cues_come_back_in_position_order_with_their_colour_index() {
 
     let shape: Vec<(u32, Option<char>, u8)> =
         f.cues(&track).iter().map(|c| (c.position_ms, c.hot_letter(), c.colour)).collect();
-    // The writer stores rekordbox's default index 21 on a hot cue and 0 on a
-    // memory cue; the loader must hand both back untouched.
-    assert_eq!(shape, vec![(46, None, 0), (46, Some('A'), 21), (90_000, Some('B'), 21)]);
+    // The writer stores 0, no colour, on a new cue of either kind, as
+    // rekordbox's deck does, and B's chosen index; the loader must hand
+    // them back untouched.
+    assert_eq!(shape, vec![(46, None, 0), (46, Some('A'), 0), (90_000, Some('B'), 46)]);
 
     assert!(f.cues(&track_id(1)).is_empty());
     let other = f.cues(&track_id(2));
-    assert_eq!((other.len(), other[0].hot_letter(), other[0].colour), (1, Some('E'), 21));
+    assert_eq!((other.len(), other[0].hot_letter(), other[0].colour), (1, Some('E'), 0));
 }
 
 #[test]
