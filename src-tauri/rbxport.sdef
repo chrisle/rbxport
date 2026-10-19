@@ -274,6 +274,11 @@
       </parameter>
       <result type="text"/>
     </command>
+    <command name="remove collection tracks" code="RbxpRmCt" description="Removes checked track IDs and playlist memberships from this library. JSON request includes library_id and tracks with id/path. Files stay untouched; library protection applies. This clears undo history.">
+      <cocoa class="RbxRemoveCollectionCommand"/>
+      <direct-parameter type="text"/>
+      <result type="boolean"/>
+    </command>
     <command name="my tag catalog" code="RbxpMtCt" description="Returns a versioned JSON catalog of existing My Tags, categories, library identity and capabilities. IDs are text and scoped to this library.">
       <cocoa class="RbxMyTagCatalogCommand"/>
       <result type="text"/>

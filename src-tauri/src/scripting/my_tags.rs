@@ -22,7 +22,7 @@ pub fn catalog_json(library_id: u64, rows: &[rbl_db::export_info::MyTagRow]) -> 
     json!({
         "schema_version": 1,
         "library_id": (library_id != 0).then(|| library_id.to_string()),
-        "capabilities": ["my_tags.read", "my_tags.add", "my_tags.remove"],
+        "capabilities": ["my_tags.read", "my_tags.add", "my_tags.remove", "collection.remove_checked"],
         "categories": categories,
         "tags": tags,
     }).to_string()

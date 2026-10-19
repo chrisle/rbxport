@@ -65,6 +65,7 @@ pub fn install(app: &AppHandle) {
         RbxRemoveCommand::class(),
         RbxExportCommand::class(),
         RbxMyTagCatalogCommand::class(),
+        RbxRemoveCollectionCommand::class(),
         RbxReadMyTagsCommand::class(),
         RbxAddMyTagsCommand::class(),
         RbxRemoveMyTagsCommand::class(),
@@ -1436,6 +1437,25 @@ fn export(command: &NSScriptCommand) {
         answer.as_str().map_or(ScriptValue::Missing, |said| ScriptValue::Text(said.to_owned()))
     });
 }
+
+define_class!(
+    // SAFETY: NSScriptCommand is designed for subclassing; no additional ivars.
+    #[unsafe(super(NSScriptCommand, NSObject))]
+    #[name = "RbxRemoveCollectionCommand"]
+    struct RbxRemoveCollectionCommand;
+    impl RbxRemoveCollectionCommand {
+        #[unsafe(method_id(performDefaultImplementation))]
+        fn perform(&self) -> Option<Retained<AnyObject>> {
+            once(self, |command| {
+                let ScriptValue::Text(request) = from_objc(command.directParameter().as_deref()) else {
+                    return fail(&ScriptError::wrong_type("Supply a checked removal request as JSON text."));
+                };
+                defer(async move { super::collection::remove(app()?.clone(), &request).await });
+            });
+            None
+        }
+    }
+);
 
 // --------------------------------------------------------- My Tag automation
 

@@ -3754,12 +3754,42 @@ impl Writer {
     /// affected playlist closes its gaps once, and the USN is counted up from
     /// one read. A track that is not live is skipped, as it is there.
     pub fn delete_tracks(&mut self, contents: &[String]) -> Result<Changed> {
+        self.delete_tracks_expected(contents, None)
+    }
+
+    /// Companion removal verifies library identity and exact paths inside the
+    /// deletion transaction. Retrying already tombstoned tracks is safe.
+    pub fn delete_tracks_checked(&mut self, library_id: &str, tracks: &[(String, String)]) -> Result<Changed> {
+        let ids: Vec<_> = tracks.iter().map(|(id, _)| id.clone()).collect();
+        self.delete_tracks_expected(&ids, Some((library_id, tracks)))
+    }
+
+    fn delete_tracks_expected(&mut self, contents: &[String], expected: Option<(&str, &[(String, String)])>) -> Result<Changed> {
         use std::collections::BTreeSet;
 
         self.prepare()?;
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        if let Some((library_id, tracks)) = expected {
+            let current = crate::export_info::db_id(&tx)?;
+            if current == 0 || current.to_string() != library_id || tracks.is_empty() || tracks.len() > 200 {
+                return Err(DbError::WriteRefused("Library changed or invalid removal batch.".into()));
+            }
+            let selected: BTreeSet<_> = contents.iter().collect();
+            for (id, path) in tracks {
+                let stored: Option<String> = tx.query_row("SELECT FolderPath FROM djmdContent WHERE ID=?1", [id], |r| r.get(0)).optional()?;
+                if path.is_empty() || stored.as_ref() != Some(path) {
+                    return Err(DbError::WriteRefused("Track location changed. Preview deletion again.".into()));
+                }
+                let mut stmt = tx.prepare("SELECT ID FROM djmdContent WHERE FolderPath=?1 AND rb_local_deleted=0")?;
+                let references = stmt.query_map([path], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                if references.iter().any(|id| !selected.contains(id)) {
+                    return Err(DbError::WriteRefused("Another collection track references this file. Include all references or keep the file.".into()));
+                }
+            }
+        }
 
         let mut memberships: Vec<String> = Vec::new();
         let mut playlists: BTreeSet<String> = BTreeSet::new();

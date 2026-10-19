@@ -26,6 +26,7 @@
 
 pub mod model;
 mod my_tags;
+mod collection;
 
 #[cfg(target_os = "macos")]
 mod cocoa;

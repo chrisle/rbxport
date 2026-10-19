@@ -139,3 +139,18 @@ The macOS integration is in `src-tauri/src/scripting/`. Scripted library edits
 must preserve the same guards and refresh behavior as UI edits. Use disposable
 libraries for writable automation tests; see [Conventions](../development/conventions.md)
 and [Testing](../development/testing.md).
+
+### Checked collection removal (companion extension)
+
+Our branch also exposes `remove collection tracks` with a JSON text argument:
+`{"library_id":"123","tracks":[{"id":"456","path":"/Users/dj/Music/track.wav"}]}`.
+It returns true on success. Supply 1–200 entries. Library identity, stored file
+paths and other live references to the same paths are checked inside the write
+transaction. A changed identity/path or an unselected reference refuses the
+whole batch. Retries may include already tombstoned tracks with the same path.
+
+This uses Remove from Collection's existing writer and refresh path: collection
+and playlist memberships are soft-deleted, audio is untouched, and undo history
+is cleared. Library Protection and the running-Rekordbox guard still apply.
+The catalog advertises `collection.remove_checked`. Companions must separately
+coordinate and journal file removal and any other library, such as Lexicon.

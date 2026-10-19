@@ -4378,3 +4378,21 @@ fn a_replacement_undoes_after_siblings_were_added_and_removed() {
     assert_eq!(f.children(&crate_folder), [three, made, later]);
     assert_consistent(&f);
 }
+
+#[test]
+fn checked_collection_removal_rejects_stale_identity_paths_and_shared_files() {
+    let mut f = fixture();
+    let id = track_id(0);
+    let library_id = rbl_db::export_info::db_id(f.conn()).unwrap().to_string();
+    let path: String = f.conn().query_row("SELECT FolderPath FROM djmdContent WHERE ID=?1", [&id], |r| r.get(0)).unwrap();
+    assert!(f.writer.delete_tracks_checked("wrong", &[(id.clone(), path.clone())]).is_err());
+    assert!(f.writer.delete_tracks_checked(&library_id, &[(id.clone(), "/changed".into())]).is_err());
+    f.conn().execute("UPDATE djmdContent SET FolderPath=?1 WHERE ID=?2", params![path, track_id(1)]).unwrap();
+    assert!(f.writer.delete_tracks_checked(&library_id, &[(id.clone(), path.clone())]).is_err());
+    assert_eq!(f.conn().query_row("SELECT rb_local_deleted FROM djmdContent WHERE ID=?1", [&id], |r| r.get::<_, i32>(0)).unwrap(), 0);
+    let tracks = vec![(id.clone(), path.clone()), (track_id(1), path)];
+    f.writer.delete_tracks_checked(&library_id, &tracks).unwrap();
+    assert_eq!(f.conn().query_row("SELECT COUNT(*) FROM djmdSongPlaylist WHERE ContentID=?1 AND rb_local_deleted=0", [&id], |r| r.get::<_, i32>(0)).unwrap(), 0);
+    f.writer.delete_tracks_checked(&library_id, &tracks).unwrap();
+    assert_eq!(f.conn().query_row("SELECT rb_local_deleted FROM djmdContent WHERE ID=?1", [&id], |r| r.get::<_, i32>(0)).unwrap(), 1);
+}
