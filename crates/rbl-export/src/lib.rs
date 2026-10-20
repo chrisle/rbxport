@@ -353,11 +353,13 @@ struct Interns<'a> {
     keys: &'a mut Intern,
 }
 
-/// Interns names into ids starting at 1, preserving first-seen order.
+/// Interns names into ids starting at 1, preserving first-seen order. A
+/// name can [`keep`](Intern::keep) an id it had before; new names then take
+/// ids above the highest in use.
 #[derive(Default)]
 struct Intern {
     ids: BTreeMap<String, u32>,
-    order: Vec<String>,
+    names: BTreeMap<u32, String>,
 }
 
 impl Intern {
@@ -368,17 +370,24 @@ impl Intern {
         if let Some(&id) = self.ids.get(name) {
             return id;
         }
-        let id = u32::try_from(self.order.len()).unwrap_or(0) + 1;
+        let id = self.names.last_key_value().map_or(0, |(id, _)| *id) + 1;
         self.ids.insert(name.to_owned(), id);
-        self.order.push(name.to_owned());
+        self.names.insert(id, name.to_owned());
         id
     }
 
+    /// Gives `name` the id `id`, unless either is already taken or empty.
+    fn keep(&mut self, name: &str, id: u32) {
+        if name.is_empty() || id == 0 || self.ids.contains_key(name) || self.names.contains_key(&id) {
+            return;
+        }
+        self.ids.insert(name.to_owned(), id);
+        self.names.insert(id, name.to_owned());
+    }
+
+    /// Every id and its name, in id order.
     fn entries(&self) -> impl Iterator<Item = (u32, &str)> {
-        self.order
-            .iter()
-            .enumerate()
-            .map(|(i, name)| (u32::try_from(i).unwrap_or(0) + 1, name.as_str()))
+        self.names.iter().map(|(id, name)| (*id, name.as_str()))
     }
 }
 
@@ -1148,6 +1157,15 @@ fn export_cancellable_inner(
     // Artwork by where it comes from: two tracks of one album share one
     // image, and the stick carries it once.
     let mut artwork = Intern::default();
+    // A cover keeps the id it had on the stick. Numbered afresh, one new
+    // cover early in the selection moved every later one to another file,
+    // and a sync of a few tracks rewrote the whole library's artwork (#626).
+    for track in tracks {
+        let key = track_key(track.id, &track.source_path.to_string_lossy());
+        if let (Some(image), Some(entry)) = (&track.artwork, stale.get(&key)) {
+            artwork.keep(&image.to_string_lossy(), artwork_id_from_path(&entry.artwork));
+        }
+    }
 
     let mut track_rows: Vec<Vec<u8>> = Vec::with_capacity(tracks.len());
     let mut one_library_tracks: Vec<OneLibraryTrack> = Vec::with_capacity(tracks.len());

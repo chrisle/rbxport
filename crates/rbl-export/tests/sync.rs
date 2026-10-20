@@ -527,3 +527,34 @@ fn an_older_record_without_the_copy_stamp_is_checked_by_hash_once() {
     assert_eq!(std::fs::read(&copy).unwrap()[0], 1, "the source's bytes are back");
     assert!(Manifest::load(dest.path()).unwrap().tracks[0].copy_stamp.is_some());
 }
+
+/// A track with its own cover: an `artwork.jpg` whose bytes are its id.
+fn with_artwork(dir: &std::path::Path, mut track: SourceTrack) -> SourceTrack {
+    let folder = dir.join(format!("art-{}", track.id));
+    std::fs::create_dir_all(&folder).unwrap();
+    let image = folder.join("artwork.jpg");
+    std::fs::write(&image, vec![track.id as u8; 512]).unwrap();
+    track.artwork = Some(image);
+    track
+}
+
+/// #626: adding a track whose cover comes first must not renumber every
+/// other cover on the stick. When it did, a sync of a few new tracks
+/// rewrote and republished the artwork of the whole library.
+#[test]
+fn a_new_cover_does_not_rewrite_the_covers_already_on_the_stick() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = common::stick();
+    let old: Vec<SourceTrack> = (1..=3)
+        .map(|id| with_artwork(src.path(), track(src.path(), id, &format!("Old {id}"), "A")))
+        .collect();
+    let first = export(dest.path(), &old, &one_list(&old)).unwrap();
+    assert_eq!(first.artwork_files, 12, "four files per cover");
+
+    // The new track comes first in the selection, as one added to the top
+    // of a playlist does.
+    let mut tracks = vec![with_artwork(src.path(), track(src.path(), 9, "New", "B"))];
+    tracks.extend(old);
+    let second = export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
+    assert_eq!(second.artwork_files, 4, "only the new cover is written");
+}
