@@ -558,3 +558,24 @@ fn a_new_cover_does_not_rewrite_the_covers_already_on_the_stick() {
     let second = export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
     assert_eq!(second.artwork_files, 4, "only the new cover is written");
 }
+
+/// A removed track's cover frees its id, and the next new cover takes it:
+/// nothing deletes artwork files, so ids that only grew left a stick that
+/// filled with covers no track shows.
+#[test]
+fn a_new_cover_takes_the_id_a_removed_cover_left() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = common::stick();
+    let old: Vec<SourceTrack> = (1..=3)
+        .map(|id| with_artwork(src.path(), track(src.path(), id, &format!("Old {id}"), "A")))
+        .collect();
+    export(dest.path(), &old, &one_list(&old)).unwrap();
+
+    let mut tracks = vec![with_artwork(src.path(), track(src.path(), 9, "New", "B"))];
+    tracks.extend(old.into_iter().filter(|t| t.id != 2));
+    let second = export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
+    assert_eq!(second.artwork_files, 4, "only the new cover is written");
+    let folder = dest.path().join("PIONEER/Artwork/00001");
+    assert!(folder.join("a2.jpg").is_file());
+    assert!(!folder.join("a4.jpg").exists(), "the new cover reuses id 2");
+}

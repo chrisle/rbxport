@@ -355,11 +355,14 @@ struct Interns<'a> {
 
 /// Interns names into ids starting at 1, preserving first-seen order. A
 /// name can [`keep`](Intern::keep) an id it had before; new names then take
-/// ids above the highest in use.
+/// the lowest free ids, so a slot a removed name left is used again.
 #[derive(Default)]
 struct Intern {
     ids: BTreeMap<String, u32>,
     names: BTreeMap<u32, String>,
+    /// Every id up to here is taken: ids are only ever added, so the search
+    /// for a free one never has to look back.
+    taken_through: u32,
 }
 
 impl Intern {
@@ -370,7 +373,11 @@ impl Intern {
         if let Some(&id) = self.ids.get(name) {
             return id;
         }
-        let id = self.names.last_key_value().map_or(0, |(id, _)| *id) + 1;
+        let mut id = self.taken_through + 1;
+        while self.names.contains_key(&id) {
+            id += 1;
+        }
+        self.taken_through = id;
         self.ids.insert(name.to_owned(), id);
         self.names.insert(id, name.to_owned());
         id
@@ -1162,7 +1169,9 @@ fn export_cancellable_inner(
     // and a sync of a few tracks rewrote the whole library's artwork (#626).
     for track in tracks {
         let key = track_key(track.id, &track.source_path.to_string_lossy());
-        if let (Some(image), Some(entry)) = (&track.artwork, stale.get(&key)) {
+        // Only an image the loop below will write, or its id stays held by a
+        // cover the stick no longer gets.
+        if let (Some(image), Some(entry)) = (track.artwork.as_deref().filter(|p| p.is_file()), stale.get(&key)) {
             artwork.keep(&image.to_string_lossy(), artwork_id_from_path(&entry.artwork));
         }
     }
@@ -2867,5 +2876,16 @@ mod tests {
         assert_eq!(intern.id(""), 0);
         let names: Vec<&str> = intern.entries().map(|(_, n)| n).collect();
         assert_eq!(names, vec!["ARTBAT", "Meduza"]);
+    }
+
+    #[test]
+    fn new_names_fill_the_ids_kept_names_left_free() {
+        let mut intern = Intern::default();
+        intern.keep("one", 1);
+        intern.keep("three", 3);
+        intern.keep("huge", u32::MAX);
+        assert_eq!(intern.id("two"), 2);
+        assert_eq!(intern.id("four"), 4);
+        assert_eq!(intern.id("one"), 1);
     }
 }

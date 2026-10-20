@@ -116,7 +116,9 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
         }
     }
     if new_artwork > 0 {
-        // Numbered from 1, a folder per `ARTWORK_PER_FOLDER` images.
+        // An estimate: counts folders as if new covers were numbered from 1,
+        // a folder per `ARTWORK_PER_FOLDER` images. Kept covers hold their
+        // ids and new ones fill the gaps, so the real folders can differ.
         let artwork = Path::new("/").join(&root_name).join("Artwork");
         folders.extend((1..=new_artwork.div_ceil(u64::from(crate::ARTWORK_PER_FOLDER))).map(|n| artwork.join(format!("{n:05}"))));
         folders.insert(artwork);
