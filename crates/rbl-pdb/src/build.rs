@@ -275,6 +275,13 @@ impl PageBuilder {
 
         // Row index, backwards from the end, sixteen rows per group.
         let groups = num_rows.div_ceil(16);
+        // The index's lowest byte is the last row's offset, in the last group.
+        // A heap reaching it would lose its end to the index, as #632's did.
+        let index_start = match num_rows.checked_sub(1) {
+            Some(last) => self.page_size.saturating_sub((groups - 1) * ROW_GROUP_LEN + 6 + 2 * (last % 16)),
+            None => self.page_size,
+        };
+        debug_assert!(PAGE_HEADER_LEN + self.heap.len() <= index_start, "a row overlaps the page's row index");
         for group in 0..groups {
             let base = self.page_size - group * ROW_GROUP_LEN;
             let in_group = if group < groups - 1 { 16 } else { num_rows - group * 16 };
@@ -530,13 +537,13 @@ impl FileBuilder {
 const NO_PAGE: u32 = 0x03ff_ffff;
 
 /// Splits rows into pages the way [`FileBuilder::add_table`] does: a page
-/// rolls over when its free space is less than the next row plus eight bytes.
+/// rolls over when the next row no longer [`fits`](PageBuilder::fits).
 fn paginate(page_size: usize, rows: &[Vec<u8>]) -> Vec<Vec<&[u8]>> {
     let mut pages: Vec<Vec<&[u8]>> = Vec::new();
     let mut current: Vec<&[u8]> = Vec::new();
     let mut scratch = PageBuilder::new(page_size, 0, 0, 0);
     for row in rows {
-        if scratch.free_space() < row.len() + 8 && !current.is_empty() {
+        if !scratch.fits(row.len()) && !current.is_empty() {
             pages.push(std::mem::take(&mut current));
             scratch = PageBuilder::new(page_size, 0, 0, 0);
         }
@@ -720,7 +727,7 @@ pub fn replace_single_page_table(file: &[u8], page_type: u32, rows: &[Vec<u8>]) 
     let sequence = u32::from_le_bytes(old.get(0x10..0x14)?.try_into().ok()?);
     let mut builder = PageBuilder::new(page_size, data_index, page_type, next);
     for row in rows {
-        if builder.free_space() < row.len() + 8 {
+        if !builder.fits(row.len()) {
             return None;
         }
         builder.push_row(row);

@@ -214,6 +214,24 @@ fn live_rows(bytes: &[u8], kind: PageType, lens: &[usize]) -> Vec<Vec<u8>> {
     pdb.rows(table).iter().zip(lens).map(|(row, len)| bytes[row.offset..row.offset + len].to_vec()).collect()
 }
 
+/// Seventeen rows whose last one opens a second row group. Sixteen rows end
+/// the heap at 3969 bytes, one past a multiple of four; the seventeenth
+/// starts three padding bytes later and, at 43 bytes, passed the old room
+/// check while reaching the second group's first offset.
+fn rows_reaching_a_new_row_group() -> Vec<Vec<u8>> {
+    let mut rows: Vec<Vec<u8>> = (0..15_u8).map(|i| vec![i + 1; 248]).collect();
+    rows.push(vec![0x10; 249]);
+    rows.push(vec![0xaa; 43]);
+    rows
+}
+
+/// A file holding a one-page album table of a single short row.
+fn one_album_file() -> Vec<u8> {
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table(3, &[vec![0x01; 8]]);
+    file.finish()
+}
+
 /// The seventeenth row of a page opens a second row group, whose first
 /// offset sits six bytes before the first group. The room check counted the
 /// heap before the row's four-byte alignment and only the groups already
@@ -222,16 +240,35 @@ fn live_rows(bytes: &[u8], kind: PageType, lens: &[usize]) -> Vec<Vec<u8>> {
 /// last letter off an album name and the export failed verification.
 #[test]
 fn a_row_that_opens_a_new_row_group_leaves_room_for_it() {
-    // Sixteen rows end the heap at 3969 bytes, one past a multiple of four.
-    // The seventeenth starts three padding bytes later and, at 43 bytes,
-    // passed the check while reaching the second group's first offset.
-    let mut rows: Vec<Vec<u8>> = (0..15_u8).map(|i| vec![i + 1; 248]).collect();
-    rows.push(vec![0x10; 249]);
-    rows.push(vec![0xaa; 43]);
+    let rows = rows_reaching_a_new_row_group();
     let mut file = FileBuilder::new(PAGE);
     file.add_table(3, &rows);
     let bytes = file.finish();
 
     let lens: Vec<usize> = rows.iter().map(Vec::len).collect();
     assert_eq!(live_rows(&bytes, PageType::Albums, &lens), rows);
+}
+
+/// Replacing a table in place lays its pages out by the same room check.
+#[test]
+fn a_replaced_table_leaves_room_for_a_new_row_group() {
+    let rows = rows_reaching_a_new_row_group();
+    let bytes = rbl_pdb::build::replace_table(&one_album_file(), 3, &rows).unwrap();
+
+    let lens: Vec<usize> = rows.iter().map(Vec::len).collect();
+    assert_eq!(live_rows(&bytes, PageType::Albums, &lens), rows);
+}
+
+/// A one-page table refuses rows that would reach its row index, rather
+/// than writing the page with its last row cut short.
+#[test]
+fn a_single_page_replacement_refuses_a_row_reaching_the_index() {
+    let rows = rows_reaching_a_new_row_group();
+    let file = one_album_file();
+    assert!(rbl_pdb::build::replace_single_page_table(&file, 3, &rows).is_none());
+
+    let fitting = &rows[..16];
+    let bytes = rbl_pdb::build::replace_single_page_table(&file, 3, fitting).unwrap();
+    let lens: Vec<usize> = fitting.iter().map(Vec::len).collect();
+    assert_eq!(live_rows(&bytes, PageType::Albums, &lens), fitting);
 }
