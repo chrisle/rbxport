@@ -326,9 +326,16 @@ all 1563 tracks agree between the two databases; `0x04` there equals
 `0x18` (#342). It leaves `0x04` at 0, as it leaves `contentLink` empty in
 `exportLibrary.db`: what rekordbox derives the value from is [UNKNOWN].
 
-String slots: 0 ISRC, 7 hot-cue auto-load, 10 date added, 11 release date, 12 mix name, 14
-analyze path, 15 analyze date, 16 comment, 17 title, 19 filename, 20 file
+String slots: 0 ISRC, 7 hot-cue auto-load, 10 date created, 11 release date, 12 mix name, 14
+analyze path, 15 date added, 16 comment, 17 title, 19 filename, 20 file
 path. **Unused slots must point at a real empty string, not at 0**.
+
+Slot 15 is what a player shows and sorts as DATE ADDED: rekordbox's
+`StockDate`. Slot 10 holds `DateCreated`, the file's creation date
+[OBS rekordbox 7 export, XDJ-1000: a track with DateCreated 2025-08-07 and
+StockDate 2025-08-12 shows 2025-08-12 under DATE ADDED; with slot 15 empty
+the column shows only its icon and the list is not sorted by date]. Older
+references name slot 15 the analyze date.
 
 Slot 7 contains `"ON"` when the source track enables hot-cue auto-load,
 otherwise an empty string. This must agree with OneLibrary's

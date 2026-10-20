@@ -474,7 +474,7 @@ impl Pdb<'_> {
     /// Fixed fields occupy 0x00..0x5e; the 21 string offsets follow at 0x5e.
     pub fn track_rows(&self, table: &TableRef) -> Vec<TrackRow> {
         // Slot numbers from the spec's `ofs_strings` index.
-        const DATE_ADDED: usize = 10;
+        const DATE_ADDED: usize = rows::slot::DATE_ADDED;
         const RELEASE_DATE: usize = 11;
         const ANALYZE_PATH: usize = 14;
         const COMMENT: usize = 16;

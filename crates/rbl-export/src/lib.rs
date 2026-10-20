@@ -1774,6 +1774,7 @@ fn export_cancellable_inner(
             analyze_path,
             comment: track.comment.clone(),
             date_added: track.date_added.clone(),
+            date_created: track.metadata.date_created.clone(),
             release_date: track.release_date.clone(),
             ..TrackInput::default()
         }));

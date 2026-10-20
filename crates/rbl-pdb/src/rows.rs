@@ -16,11 +16,18 @@ pub const TRACK_STRINGS: usize = 21;
 pub mod slot {
     pub const ISRC: usize = 0;
     pub const HOT_CUE_AUTO_LOAD: usize = 7;
-    pub const DATE_ADDED: usize = 10;
+    /// The file's creation date (rekordbox's `DateCreated`).
+    pub const DATE_CREATED: usize = 10;
     pub const RELEASE_DATE: usize = 11;
     pub const MIX_NAME: usize = 12;
     pub const ANALYZE_PATH: usize = 14;
-    pub const ANALYZE_DATE: usize = 15;
+    /// The date the track was added to the collection (rekordbox's
+    /// `StockDate`, "Date Added"). Players sort and show DATE ADDED from
+    /// this slot, not slot 10 [OBS XDJ-1000 with a rekordbox 7 export: a
+    /// track with `DateCreated` 2025-08-07 and `StockDate` 2025-08-12 shows
+    /// 2025-08-12; with this slot empty the column shows only its icon and
+    /// the list is not sorted by date].
+    pub const DATE_ADDED: usize = 15;
     pub const COMMENT: usize = 16;
     pub const TITLE: usize = 17;
     pub const FILENAME: usize = 19;
@@ -63,7 +70,10 @@ pub struct TrackInput {
     /// Media-relative, e.g. `/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT`.
     pub analyze_path: String,
     pub comment: String,
+    /// Collection date: what a player shows as DATE ADDED.
     pub date_added: String,
+    /// The file's creation date.
+    pub date_created: String,
     pub release_date: String,
     pub mix_name: String,
     pub isrc: String,
@@ -112,11 +122,11 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     };
     set(&mut strings, slot::ISRC, &input.isrc);
     set(&mut strings, slot::HOT_CUE_AUTO_LOAD, if input.hot_cue_auto_load { "ON" } else { "" });
-    set(&mut strings, slot::DATE_ADDED, &input.date_added);
+    set(&mut strings, slot::DATE_CREATED, &input.date_created);
     set(&mut strings, slot::RELEASE_DATE, &input.release_date);
     set(&mut strings, slot::MIX_NAME, &input.mix_name);
     set(&mut strings, slot::ANALYZE_PATH, &input.analyze_path);
-    set(&mut strings, slot::ANALYZE_DATE, "");
+    set(&mut strings, slot::DATE_ADDED, &input.date_added);
     set(&mut strings, slot::COMMENT, &input.comment);
     set(&mut strings, slot::TITLE, &input.title);
     set(&mut strings, slot::FILENAME, &input.filename);
