@@ -981,3 +981,43 @@ fn changed_device_settings_give_the_menu_rows_rekordbox_wrote_for_them() {
         "0b000c0001000000",
     ]));
 }
+
+/// export.pdb and exportLibrary.db must describe the same menu, or an
+/// export.pdb-only player and a OneLibrary one show different orders:
+/// gapped positions, a newly shown slot at 0 and a hidden slot that kept its
+/// position get rekordbox's numbering, and a menu item exportLibrary.db does
+/// not know gets no row.
+#[test]
+fn menu_rows_number_and_filter_the_slots_as_export_library_db_does() {
+    use rbl_onelibrary::build::reference::MENU_ITEMS;
+    use rbl_onelibrary::settings::{renumbered, MenuSlot, StickSettings};
+    let mut settings = StickSettings::default();
+    for slots in [&mut settings.categories, &mut settings.sorts] {
+        for slot in slots.iter_mut().filter(|s| s.visible) {
+            slot.seq *= 3;
+        }
+        let hidden = slots.iter().position(|s| !s.visible).unwrap();
+        slots[hidden].visible = true;
+        slots[hidden].seq = 0;
+        let shown = slots.iter().position(|s| s.visible && s.seq > 3).unwrap();
+        slots[shown].visible = false;
+        slots.push(MenuSlot { id: 90, menu_item: 999, name: "NEW".into(), seq: 2, visible: true });
+    }
+    let expected = |slots: &[MenuSlot]| {
+        let mut rows: Vec<(u16, bool, u16)> = renumbered(slots)
+            .iter()
+            .filter(|s| MENU_ITEMS.iter().any(|(id, _, _)| *id == s.menu_item))
+            .map(|s| (s.menu_item as u16, s.visible, s.seq as u16))
+            .collect();
+        rows.sort_unstable();
+        rows
+    };
+    let u2 = |row: &[u8], at: usize| u16::from_le_bytes([row[at], row[at + 1]]);
+    let (categories, sorts) = rbl_export::menu_rows(&settings);
+    let mut got: Vec<(u16, bool, u16)> = categories.iter().map(|r| (u2(r, 0), r[5] & 1 == 0, u2(r, 6))).collect();
+    got.sort_unstable();
+    assert_eq!(got, expected(&settings.categories));
+    let mut got: Vec<(u16, bool, u16)> = sorts.iter().map(|r| (u2(r, 0), r[4] & 1 == 0, u16::from(r[5]))).collect();
+    got.sort_unstable();
+    assert_eq!(got, expected(&settings.sorts));
+}

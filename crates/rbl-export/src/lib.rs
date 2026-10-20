@@ -2065,12 +2065,16 @@ struct PdbTables<'a> {
 /// hidden rows by id, then the shown ones by position [OBS 7.2.11 reference
 /// rows]. A player that reads only `export.pdb`, such as the XDJ-1000, takes
 /// its Category, Sort and Column settings from these rows, not from
-/// `exportLibrary.db` (#619). The defaults give rekordbox's reference bytes.
+/// `exportLibrary.db` (#619). The slots are numbered and filtered as
+/// `exportLibrary.db` gets them, so both describe the same menu. The
+/// defaults give rekordbox's reference bytes.
 #[must_use]
 pub fn menu_rows(settings: &rbl_onelibrary::settings::StickSettings) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-    use rbl_onelibrary::settings::MenuSlot;
+    use rbl_onelibrary::build::reference::MENU_ITEMS;
+    use rbl_onelibrary::settings::{renumbered, MenuSlot};
     let ordered = |slots: &[MenuSlot]| {
-        let mut slots: Vec<MenuSlot> = slots.to_vec();
+        let known = |s: &MenuSlot| MENU_ITEMS.iter().any(|(id, _, _)| *id == s.menu_item);
+        let mut slots: Vec<MenuSlot> = renumbered(slots).into_iter().filter(known).collect();
         slots.sort_by_key(|s| (s.visible, if s.visible { s.seq } else { s.id }));
         slots
     };
