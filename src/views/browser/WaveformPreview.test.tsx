@@ -221,9 +221,11 @@ describe("the row preview's shape", () => {
     vi.resetModules();
     vi.doMock("@/canvas", async (importOriginal) => ({
       ...(await importOriginal<typeof import("@/canvas")>()),
-      renderPreview: (...args: unknown[]) => {
-        drawnHalf.push(args[5] as boolean);
-        return Promise.resolve(null);
+      // A real rendering, so the first shape is cached: a cache key that left
+      // the shape out would hand the second setting the first one's bitmap.
+      renderPreview: (...[, width, height, , , half]: Parameters<typeof import("@/canvas").renderPreview>) => {
+        drawnHalf.push(half ?? true);
+        return Promise.resolve({ bitmap: document.createElement("canvas"), width, height });
       },
     }));
     const { __setBackend } = await import("@/ipc/client");
@@ -244,7 +246,7 @@ describe("the row preview's shape", () => {
           </PreferencesProvider>,
         ),
       );
-      void act(() => vi.advanceTimersByTime(200));
+      await act(() => vi.advanceTimersByTimeAsync(200));
       await settle();
     }
     // The same row, drawn again when the setting changes.
