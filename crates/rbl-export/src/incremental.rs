@@ -5,6 +5,12 @@ use crate::{Manifest, ManifestTrack, SourceTrack, SourcePlaylist, SourceMyTag, E
 
 pub const TRANSFORM_VERSION: u32 = 1;
 
+/// What `export.pdb`'s rows hold. Part of the request, so a stick written
+/// with an older layout is rebuilt on its next sync even when nothing else
+/// changed, while its analysis files are still reused. 2: the date added in
+/// track string slot 15 (#637).
+const PDB_LAYOUT: u32 = 2;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Metrics {
     pub audio_bytes_read: u64,
@@ -136,7 +142,7 @@ pub fn request(tracks: &[SourceTrack], playlists: &[SourcePlaylist], tags: &[Sou
     // SyncSource and StickSettings have complete, deterministic Debug forms;
     // the transform/schema version controls changes to this representation.
     digest(&(tracks, playlists, tags, options.compatibility, options.keep_unlisted,
-        format!("{:?}", options.sync), format!("{:?}", options.defaults), TRANSFORM_VERSION))
+        format!("{:?}", options.sync), format!("{:?}", options.defaults), TRANSFORM_VERSION, PDB_LAYOUT))
 }
 
 pub fn inputs(tracks: &[SourceTrack]) -> std::io::Result<BTreeMap<String, Option<FileRevision>>> {

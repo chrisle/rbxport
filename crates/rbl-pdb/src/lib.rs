@@ -376,7 +376,9 @@ pub struct TrackRow {
     pub file_path: String,
     pub filename: String,
     pub analyze_path: String,
+    /// Slot 15, or slot 10 on a stick an older rbxport wrote.
     pub date_added: String,
+    pub date_created: String,
     pub release_date: String,
     pub comment: String,
 }
@@ -475,6 +477,7 @@ impl Pdb<'_> {
     pub fn track_rows(&self, table: &TableRef) -> Vec<TrackRow> {
         // Slot numbers from the spec's `ofs_strings` index.
         const DATE_ADDED: usize = rows::slot::DATE_ADDED;
+        const DATE_CREATED: usize = rows::slot::DATE_CREATED;
         const RELEASE_DATE: usize = 11;
         const ANALYZE_PATH: usize = 14;
         const COMMENT: usize = 16;
@@ -509,7 +512,10 @@ impl Pdb<'_> {
                     duration_sec: self.u2_at(row, 0x54),
                     color_id: self.u1_at(row, 0x58),
                     rating: self.u1_at(row, 0x59),
-                    date_added: text(DATE_ADDED),
+                    // rbxport before #637 wrote the date added to slot 10 and
+                    // left slot 15 empty; rekordbox always fills slot 15.
+                    date_added: Some(text(DATE_ADDED)).filter(|d| !d.is_empty()).unwrap_or_else(|| text(DATE_CREATED)),
+                    date_created: text(DATE_CREATED),
                     release_date: text(RELEASE_DATE),
                     analyze_path: text(ANALYZE_PATH),
                     comment: text(COMMENT),

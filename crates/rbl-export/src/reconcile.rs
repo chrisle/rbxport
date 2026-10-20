@@ -741,7 +741,7 @@ fn sources_from_legacy(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTr
         .unwrap_or_default()
     {
         out.entry(t.id).or_insert(SourceTrack {
-            metadata: rbl_core::ExportMetadata { track_number: t.track_number, play_count: u32::from(t.play_count), bit_depth: t.sample_depth, disc_number: t.disc_number, hot_cue_auto_load: t.hot_cue_auto_load, ..Default::default() },
+            metadata: rbl_core::ExportMetadata { track_number: t.track_number, play_count: u32::from(t.play_count), bit_depth: t.sample_depth, disc_number: t.disc_number, hot_cue_auto_load: t.hot_cue_auto_load, date_created: t.date_created, ..Default::default() },
             title: t.title,
             artist: artists.get(&t.artist_id).cloned().unwrap_or_default(),
             album: albums.get(&t.album_id).cloned().unwrap_or_default(),

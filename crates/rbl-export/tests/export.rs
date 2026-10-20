@@ -1021,3 +1021,21 @@ fn menu_rows_number_and_filter_the_slots_as_export_library_db_does() {
     got.sort_unstable();
     assert_eq!(got, expected(&settings.sorts));
 }
+
+/// #637: a player shows DATE ADDED from string slot 15, and rekordbox keeps
+/// the file's creation date in slot 10.
+#[test]
+fn an_export_writes_the_date_added_and_the_date_created_where_rekordbox_does() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = common::stick();
+    let mut t = track(src.path(), 1, "Rise Up", "TRIODE");
+    t.date_added = "2025-08-12".into();
+    t.metadata.date_created = "2025-08-07".into();
+    export(dest.path(), &[t], &[]).unwrap();
+
+    let bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let table = pdb.table(rbl_pdb::PageType::Tracks).unwrap();
+    let row = &pdb.track_rows(table)[0];
+    assert_eq!((row.date_added.as_str(), row.date_created.as_str()), ("2025-08-12", "2025-08-07"));
+}

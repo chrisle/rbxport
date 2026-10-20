@@ -496,3 +496,18 @@ fn the_date_added_goes_where_a_player_reads_it() {
     assert_eq!(text(slot::DATE_CREATED), "2025-08-07");
     assert_eq!((slot::DATE_CREATED, slot::DATE_ADDED), (10, 15));
 }
+
+/// A stick an older rbxport wrote has the date added in slot 10 and slot 15
+/// empty. Reading it keeps the date rather than losing it (#637).
+#[test]
+fn a_date_added_in_the_old_slot_still_reads_back() {
+    use rbl_pdb::rows::{track_row, TrackInput};
+    let row = track_row(&TrackInput { id: 1, title: "Old".into(), date_created: "2024-01-10".into(), ..Default::default() });
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table(0, &[row]);
+    let bytes = file.finish();
+    let pdb = Pdb::parse(&bytes).unwrap();
+    let track = &pdb.track_rows(pdb.table(PageType::Tracks).unwrap())[0];
+    assert_eq!(track.date_added, "2024-01-10");
+    assert_eq!(track.date_created, "2024-01-10");
+}
