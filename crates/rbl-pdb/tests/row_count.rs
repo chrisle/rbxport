@@ -206,3 +206,32 @@ fn a_deleted_row_keeps_its_index_entry_and_is_skipped() {
     let indices: Vec<u32> = entries.iter().map(|e| e.entry_index).collect();
     assert_eq!(indices, vec![1, 2, 3, 4, 6, 7, 8, 9]);
 }
+
+/// Every live row of a table, read back as it was written.
+fn live_rows(bytes: &[u8], kind: PageType, lens: &[usize]) -> Vec<Vec<u8>> {
+    let pdb = Pdb::parse(bytes).unwrap();
+    let table = pdb.table(kind).unwrap();
+    pdb.rows(table).iter().zip(lens).map(|(row, len)| bytes[row.offset..row.offset + len].to_vec()).collect()
+}
+
+/// The seventeenth row of a page opens a second row group, whose first
+/// offset sits six bytes before the first group. The room check counted the
+/// heap before the row's four-byte alignment and only the groups already
+/// there, so a row padded by three bytes could end on that offset, and the
+/// page's index was written over its last byte. On a stick this cut the
+/// last letter off an album name and the export failed verification.
+#[test]
+fn a_row_that_opens_a_new_row_group_leaves_room_for_it() {
+    // Sixteen rows end the heap at 3969 bytes, one past a multiple of four.
+    // The seventeenth starts three padding bytes later and, at 43 bytes,
+    // passed the check while reaching the second group's first offset.
+    let mut rows: Vec<Vec<u8>> = (0..15_u8).map(|i| vec![i + 1; 248]).collect();
+    rows.push(vec![0x10; 249]);
+    rows.push(vec![0xaa; 43]);
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table(3, &rows);
+    let bytes = file.finish();
+
+    let lens: Vec<usize> = rows.iter().map(Vec::len).collect();
+    assert_eq!(live_rows(&bytes, PageType::Albums, &lens), rows);
+}

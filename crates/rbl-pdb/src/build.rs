@@ -183,12 +183,18 @@ impl PageBuilder {
     }
 
     /// Bytes still available for rows, accounting for the index this page needs.
+    ///
+    /// The heap is counted as the next row will find it, after its four-byte
+    /// alignment. A row that opens a new row group reaches toward that
+    /// group's first offset, six bytes in front of the groups already
+    /// counted; the eight spare bytes callers ask for keep it clear of that
+    /// offset only when the padding is counted here (#632).
     pub fn free_space(&self) -> usize {
         let groups = self.row_offsets.len().div_ceil(16).max(1);
         let index = groups * ROW_GROUP_LEN;
         self.page_size
             .saturating_sub(PAGE_HEADER_LEN)
-            .saturating_sub(self.heap.len())
+            .saturating_sub(self.heap.len().div_ceil(4) * 4)
             .saturating_sub(index)
     }
 
