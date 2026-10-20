@@ -743,6 +743,7 @@ export async function renderPreview(
   height: number,
   dpr: number,
   palette: WavePalette = "3band",
+  half = true,
 ): Promise<RenderedWaveform | null> {
   const w = Math.max(1, Math.round(width * dpr));
   const h = Math.max(1, Math.round(height * dpr));
@@ -751,8 +752,9 @@ export async function renderPreview(
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  // The row preview: half height from the baseline, bands stacked.
-  drawWave(ctx, data, w, h, palette, false, true);
+  // The row preview: by default half height from the baseline, bands
+  // stacked; centred when Full/Preview Waveform is set to Full.
+  drawWave(ctx, data, w, h, palette, false, half);
 
   // An ImageBitmap blits faster than a canvas element; fall back where the
   // browser lacks it rather than failing to draw at all.
