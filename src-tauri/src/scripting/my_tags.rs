@@ -22,7 +22,7 @@ pub fn catalog_json(library_id: u64, rows: &[rbl_db::export_info::MyTagRow]) -> 
     json!({
         "schema_version": 1,
         "library_id": (library_id != 0).then(|| library_id.to_string()),
-        "capabilities": ["my_tags.read", "my_tags.add", "my_tags.remove", "collection.remove_checked"],
+        "capabilities": ["my_tags.read", "my_tags.add", "my_tags.remove", "collection.remove_checked", "waveform.overview.read"],
         "categories": categories,
         "tags": tags,
     }).to_string()
@@ -72,7 +72,7 @@ pub async fn update<R: Runtime>(
         bridge.refuse_if_protected().map_err(|error| rbl_db::DbError::WriteRefused(error.message))?;
         let (_, edit) = writer.update_my_tags_with_undo(&track, &tags, operation)?;
         result.store(!edit.is_empty(), Ordering::SeqCst);
-        Ok(LibraryEdit::TrackTags(edit))
+        Ok(LibraryEdit::TrackTags(vec![edit]))
     }).await?;
     Ok(ScriptValue::Bool(changed.load(Ordering::SeqCst)))
 }
@@ -91,6 +91,10 @@ mod tests {
             row("3", "deep", "1", 0), row("4", "deep", "2", 0)];
         let catalog: serde_json::Value = serde_json::from_str(&catalog_json(42, &rows)).unwrap();
         assert_eq!(catalog["library_id"], "42");
+        assert_eq!(catalog["schema_version"], 1);
+        for capability in ["my_tags.read", "my_tags.add", "my_tags.remove", "collection.remove_checked", "waveform.overview.read"] {
+            assert!(catalog["capabilities"].as_array().unwrap().contains(&json!(capability)));
+        }
         assert_eq!(catalog["tags"][0]["id"], "3");
         assert_eq!(catalog["tags"][1]["category_id"], "2");
         assert_eq!(catalog["categories"].as_array().unwrap().len(), 2);

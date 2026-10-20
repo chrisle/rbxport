@@ -27,6 +27,7 @@
 pub mod model;
 mod my_tags;
 mod collection;
+mod waveform;
 
 #[cfg(target_os = "macos")]
 mod cocoa;

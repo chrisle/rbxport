@@ -154,3 +154,22 @@ and playlist memberships are soft-deleted, audio is untouched, and undo history
 is cleared. Library Protection and the running-Rekordbox guard still apply.
 The catalog advertises `collection.remove_checked`. Companions must separately
 coordinate and journal file removal and any other library, such as Lexicon.
+
+### Read an existing waveform overview
+
+Companions can request the stored three-band overview without starting analysis:
+
+```applescript
+tell application "rbxport"
+    set overview to read waveform overview "{\"library_id\":\"42\",\"track_id\":\"10000\"}"
+end tell
+```
+
+Use the current `library_id` from `my tag catalog` and a collection track ID;
+the example IDs are placeholders. Detect `waveform.overview.read` in the catalog
+before calling. The version 1 JSON response echoes both IDs, sets `kind` to
+`"bands"`, and contains a `data` byte array of low/mid/high triples (at most
+1,200 columns / 3,600 bytes). An empty array means no overview is available,
+including a track no longer in the index. A mismatched library identity is an
+error. No audio or analysis files are written. See the
+[companion waveform reference](../development/companion-waveform.md).

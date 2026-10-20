@@ -65,6 +65,7 @@ pub fn install(app: &AppHandle) {
         RbxRemoveCommand::class(),
         RbxExportCommand::class(),
         RbxMyTagCatalogCommand::class(),
+        RbxWaveformCommand::class(),
         RbxRemoveCollectionCommand::class(),
         RbxReadMyTagsCommand::class(),
         RbxAddMyTagsCommand::class(),
@@ -1750,3 +1751,22 @@ extern "C-unwind" fn app_set_link_export(_: &AnyObject, _: Sel, value: *mut AnyO
 extern "C-unwind" fn app_rekordbox_running(_: &AnyObject, _: Sel) -> *mut AnyObject {
     returned(Some(any(NSNumber::numberWithBool(rbl_db::is_rekordbox_running()))))
 }
+
+define_class!(
+    // SAFETY: NSScriptCommand supports subclassing; no additional ivars.
+    #[unsafe(super(NSScriptCommand, NSObject))]
+    #[name = "RbxWaveformCommand"]
+    struct RbxWaveformCommand;
+    impl RbxWaveformCommand {
+        #[unsafe(method_id(performDefaultImplementation))]
+        fn perform(&self) -> Option<Retained<AnyObject>> {
+            once(self, |command| {
+                let ScriptValue::Text(request) = from_objc(command.directParameter().as_deref()) else {
+                    return fail(&ScriptError::wrong_type("Supply a waveform request as JSON text."));
+                };
+                defer(async move { super::waveform::overview(state()?, request).await });
+            });
+            None
+        }
+    }
+);
