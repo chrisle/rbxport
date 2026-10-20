@@ -383,9 +383,26 @@ was the cause; both now match rekordbox].
 
 The exact rows are embedded in Appendix A.
 
-`columns`, `history_playlists` and `history_entries` are written as captured
-rekordbox bytes rather than re-encoded, to stop drift;
-the column names are UTF-16 wrapped in `0xfffa`/`0xfffb` markers.
+`columns` is written as captured rekordbox bytes rather than re-encoded, to
+stop drift; the column names are UTF-16 wrapped in `0xfffa`/`0xfffb` markers.
+
+### Browse categories and sorts (types 17 and 18)
+
+These two tables hold the device panel's Category, Sort and Column tabs. A
+player that reads only `export.pdb`, such as the XDJ-1000, takes its browse
+menu from them, not from `exportLibrary.db` (#619). Appendix A has the rows at
+rekordbox's defaults. An export and a device-panel save encode the stick's own
+settings (`rbl_export::menu_rows`): the hidden rows by id, then the shown rows
+by position.
+
+| Table | Row (8 bytes) |
+|---|---|
+| `categories` (17) | `u16` menu item, `u16` `category_id`, a byte fixed per menu item (99 for most), flags (bit 0 hidden), `u16` position among the shown rows (0 when hidden) |
+| `sorts` (18) | `u16` menu item, `u16` `sort_id`, flags (bit 0 off, bit 1 the column beside the track name), `u8` position among the active rows (0 when off), `u16` 0 |
+
+The per-item byte and the upper category flag bits (MATCHING carries bit 1)
+did not change when a category was shown [OBS rekordbox 7, #619], so they are
+taken from the reference rows.
 
 ### `property` row (type 19)
 

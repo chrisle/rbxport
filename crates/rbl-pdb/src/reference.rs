@@ -1,12 +1,17 @@
-//! Rows rekordbox writes into every export whatever the library holds.
+//! Rows rekordbox writes into an export at its default device settings.
 //!
 //! Read out of two rekordbox 7.2.11 exports on 2026-09-17, one of an empty
 //! device library and one of a 61-track playlist [OBS]: the rows of these
 //! three tables were the same bytes in both. They are the browse column
-//! names (`columns`, page type 16) and the two tables behind the History
-//! menu (types 17 and 18), and a player expects them to be there. Kept as
-//! rekordbox's bytes rather than re-encoded from names, so nothing here can
-//! drift from what the reference stick carried.
+//! names (`columns`, page type 16) and the browse category and sort
+//! settings (types 17 and 18), and a player expects them to be there. Kept
+//! as rekordbox's bytes rather than re-encoded from names, so nothing here
+//! can drift from what the reference stick carried.
+//!
+//! The columns are the same on every stick. The category and sort rows are
+//! the device panel's Category, Sort and Column tabs at their defaults; an
+//! export encodes the stick's own settings with [`crate::rows::category_row`]
+//! and [`crate::rows::sort_row`], which take the per-item bytes from here.
 
 /// `columns`, page type 16: 27 rows, one per browse column, UTF-16 names
 /// wrapped in the `0xfffa`/`0xfffb` markers rekordbox uses for them.
@@ -40,8 +45,8 @@ pub const COLUMNS: &[&[u8]] = &[
     &[0x1b, 0x00, 0xaa, 0x00, 0x90, 0x18, 0x00, 0x00, 0xfa, 0xff, 0x4d, 0x00, 0x41, 0x00, 0x54, 0x00, 0x43, 0x00, 0x48, 0x00, 0x49, 0x00, 0x4e, 0x00, 0x47, 0x00, 0xfb, 0xff],
 ];
 
-/// `history_playlists`, page type 17: 22 rows.
-pub const HISTORY_PLAYLISTS: &[&[u8]] = &[
+/// `categories`, page type 17: 22 rows, one per browse category.
+pub const CATEGORIES: &[&[u8]] = &[
     &[0x01, 0x00, 0x01, 0x00, 0x63, 0x01, 0x00, 0x00],
     &[0x05, 0x00, 0x06, 0x00, 0x05, 0x01, 0x00, 0x00],
     &[0x06, 0x00, 0x07, 0x00, 0x63, 0x01, 0x00, 0x00],
@@ -66,8 +71,8 @@ pub const HISTORY_PLAYLISTS: &[&[u8]] = &[
     &[0x16, 0x00, 0x1b, 0x00, 0x63, 0x00, 0x0a, 0x00],
 ];
 
-/// `history_entries`, page type 18: 17 rows.
-pub const HISTORY_ENTRIES: &[&[u8]] = &[
+/// `sorts`, page type 18: 17 rows, one per sort option.
+pub const SORTS: &[&[u8]] = &[
     &[0x01, 0x00, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00],
     &[0x15, 0x00, 0x07, 0x00, 0x03, 0x00, 0x00, 0x00],
     &[0x0e, 0x00, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00],

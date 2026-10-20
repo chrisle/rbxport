@@ -1858,6 +1858,7 @@ fn export_cancellable_inner(
         colors: settings.as_ref().or(defaults).map_or(&[], |s| &s.colors),
         device_name: settings.as_ref().or(defaults).map_or("", |s| s.device_name.as_str()),
         background: before.legacy_background,
+        menus: settings.as_ref().or(defaults),
     });
     report.pdb_bytes = pdb.len();
     let staged_db = publication.stage().join(root_name).join("rekordbox");
@@ -2055,12 +2056,44 @@ struct PdbTables<'a> {
     device_name: &'a str,
     /// "Background Color : Device Library", carried from the stick.
     background: u8,
+    /// The stick's browse categories and sorts; `None` writes the defaults.
+    menus: Option<&'a rbl_onelibrary::settings::StickSettings>,
+}
+
+/// The `categories` (type 17) and `sorts` (type 18) rows of `export.pdb`
+/// for a stick's device settings, in the order rekordbox writes them: the
+/// hidden rows by id, then the shown ones by position [OBS 7.2.11 reference
+/// rows]. A player that reads only `export.pdb`, such as the XDJ-1000, takes
+/// its Category, Sort and Column settings from these rows, not from
+/// `exportLibrary.db` (#619). The defaults give rekordbox's reference bytes.
+#[must_use]
+pub fn menu_rows(settings: &rbl_onelibrary::settings::StickSettings) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    use rbl_onelibrary::settings::MenuSlot;
+    let ordered = |slots: &[MenuSlot]| {
+        let mut slots: Vec<MenuSlot> = slots.to_vec();
+        slots.sort_by_key(|s| (s.visible, if s.visible { s.seq } else { s.id }));
+        slots
+    };
+    let id = |value: i64| u16::try_from(value).unwrap_or(0);
+    let categories = ordered(&settings.categories)
+        .iter()
+        .map(|s| rbl_pdb::rows::category_row(id(s.menu_item), id(s.id), s.visible, id(s.seq)))
+        .collect();
+    let sorts = ordered(&settings.sorts)
+        .iter()
+        .map(|s| {
+            let seq = u8::try_from(s.seq).unwrap_or(0);
+            rbl_pdb::rows::sort_row(id(s.menu_item), id(s.id), s.visible, seq, settings.sub_column == Some(s.menu_item))
+        })
+        .collect();
+    (categories, sorts)
 }
 
 /// Builds `export.pdb` with the twenty tables rekordbox writes, in its
 /// order: the eight the library fills, the eight colours, the artwork
 /// (type 13) among six that are always empty (types 9 to 15), the browse column
-/// names and the History menu's two tables (`rbl_pdb::reference`), and the
+/// names (`rbl_pdb::reference`), the browse categories and sorts
+/// ([`menu_rows`]), and the
 /// one `property` row: device name, track count, the export's date and the
 /// Device Library background colour [OBS 7.2.14]. A player looks the table
 /// list up by type, so the empty ones have to be there.
@@ -2112,8 +2145,9 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
     }
     let constant = |rows: &[&[u8]]| rows.iter().map(|row| row.to_vec()).collect::<Vec<_>>();
     file.add_table(16, &constant(reference::COLUMNS));
-    file.add_table(17, &constant(reference::HISTORY_PLAYLISTS));
-    file.add_table(18, &constant(reference::HISTORY_ENTRIES));
+    let (categories, sorts) = menu_rows(&tables.menus.cloned().unwrap_or_default());
+    file.add_table(17, &categories);
+    file.add_table(18, &sorts);
     // The local day, as rekordbox dates the export where the machine is.
     let property = rbl_pdb::rows::PdbProperty {
         device_name: tables.device_name.to_owned(),
@@ -2187,6 +2221,7 @@ pub fn create_library_with_root(
         colors: defaults.map_or(&[], |s| &s.colors),
         device_name: defaults.map_or("", |s| s.device_name.as_str()),
         background: 0,
+        menus: defaults,
     });
     rbl_core::durable::write(&db_dir.join("export.pdb"), &pdb)?;
     // The library's tags go on even a stick with no tracks [OBS 7.2.11:

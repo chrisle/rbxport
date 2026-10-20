@@ -236,6 +236,53 @@ pub fn color_row(id: u16, name: &str) -> Vec<u8> {
     row
 }
 
+/// `categories` (type 17), one browse category: the menu item, the row's
+/// `category.category_id`, a byte fixed per menu item, flags (bit 0 hidden),
+/// then the position among the shown categories, 0 for a hidden one.
+///
+/// ```text
+///   01 00  01 00  63  01  00 00   GENRE, hidden
+///   05 00  06 00  05  00  0b 00   BPM, shown eleventh
+/// ```
+///
+/// rekordbox wrote the same per-item byte and upper flag bits whether the
+/// category was shown or not [OBS rekordbox 7 export with BPM shown, #619],
+/// so they come from [`crate::reference::CATEGORIES`]; an item missing there
+/// gets 99, the value rekordbox gives most items.
+pub fn category_row(menu_item: u16, id: u16, visible: bool, seq: u16) -> Vec<u8> {
+    let reference = crate::reference::CATEGORIES.iter().find(|row| row.get(..2) == Some(&menu_item.to_le_bytes()[..]));
+    let fixed = reference.and_then(|row| row.get(4)).copied().unwrap_or(0x63);
+    let flags = reference.and_then(|row| row.get(5)).copied().unwrap_or(0) & !1;
+    let mut row = vec![0_u8; 8];
+    put_u2(&mut row, 0, menu_item);
+    put_u2(&mut row, 2, id);
+    row[4] = fixed;
+    row[5] = flags | u8::from(!visible);
+    put_u2(&mut row, 6, if visible { seq } else { 0 });
+    row
+}
+
+/// `sorts` (type 18), one sort option: the menu item, the row's
+/// `sort.sort_id`, flags (bit 0 off, bit 1 the column shown beside the track
+/// name), the position among the active options (0 when off), then a zero
+/// word.
+///
+/// ```text
+///   15 00  07 00  03  00  00 00   COMMENTS, off, the right column
+///   05 00  04 00  02  01  00 00   BPM, first, the right column
+/// ```
+///
+/// [OBS 7.2.11 reference rows; rekordbox 7 export with the Sort and Column
+/// tabs changed, #619]
+pub fn sort_row(menu_item: u16, id: u16, visible: bool, seq: u8, sub_column: bool) -> Vec<u8> {
+    let mut row = vec![0_u8; 8];
+    put_u2(&mut row, 0, menu_item);
+    put_u2(&mut row, 2, id);
+    row[4] = u8::from(!visible) | u8::from(sub_column) << 1;
+    row[5] = if visible { seq } else { 0 };
+    row
+}
+
 /// The `dbVersion` rekordbox writes in both `property` tables [OBS 7.2.11,
 /// 7.2.14].
 pub const PROPERTY_DB_VERSION: &str = "1000";

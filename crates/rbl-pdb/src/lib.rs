@@ -42,8 +42,10 @@ pub enum PageType {
     PlaylistEntries,
     Artwork,
     Columns,
-    HistoryPlaylists,
-    HistoryEntries,
+    /// Type 17: the browse categories a player shows. See [`rows::category_row`].
+    Categories,
+    /// Type 18: the sort options a player offers. See [`rows::sort_row`].
+    Sorts,
     /// Type 19: the device name, track count, date and Device Library
     /// background colour. See [`rows::PdbProperty`].
     Property,
@@ -64,8 +66,8 @@ impl PageType {
             8 => Self::PlaylistEntries,
             13 => Self::Artwork,
             16 => Self::Columns,
-            17 => Self::HistoryPlaylists,
-            18 => Self::HistoryEntries,
+            17 => Self::Categories,
+            18 => Self::Sorts,
             19 => Self::Property,
             other => Self::Other(other),
         }
@@ -84,8 +86,8 @@ impl PageType {
             Self::PlaylistEntries => "playlist_entries".into(),
             Self::Artwork => "artwork".into(),
             Self::Columns => "columns".into(),
-            Self::HistoryPlaylists => "history_playlists".into(),
-            Self::HistoryEntries => "history_entries".into(),
+            Self::Categories => "categories".into(),
+            Self::Sorts => "sorts".into(),
             Self::Property => "property".into(),
             Self::Other(v) => format!("unknown_{v}"),
         }

@@ -305,6 +305,18 @@ fn a_sync_keeps_the_settings_the_stick_already_carries() {
     export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
     let after = StickSettings::read(&db).unwrap();
     assert_eq!(after, settings);
+
+    // export.pdb carries the categories, sorts and column too: a player that
+    // reads only it showed the defaults until #619.
+    let bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let rows = |kind| {
+        let table = pdb.table(kind).unwrap();
+        pdb.rows(table).iter().map(|row| bytes[row.offset..row.offset + 8].to_vec()).collect::<Vec<_>>()
+    };
+    let (categories, sorts) = rbl_export::menu_rows(&settings);
+    assert_eq!(rows(rbl_pdb::PageType::Categories), categories);
+    assert_eq!(rows(rbl_pdb::PageType::Sorts), sorts);
 }
 
 #[test]

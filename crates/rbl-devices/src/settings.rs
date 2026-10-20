@@ -403,19 +403,24 @@ fn write_changes_recovered(
 ///
 /// The colour comments and the device name live in both databases.
 /// rekordbox renames a colour comment in `export.pdb` too, and a player reads
-/// its names from there [OBS 7.2.11]. The `property` row carries the device
+/// its names from there [OBS 7.2.11]. A player that reads only `export.pdb`
+/// takes its browse categories, sorts and right column from there too
+/// (#619). The `property` row carries the device
 /// name beside the Device Library background colour [OBS 7.2.14]. A table
 /// that cannot be replaced is left as it was.
 fn updated_pdb(bytes: &[u8], library: Option<&StickSettings>, background: Option<u8>) -> Vec<u8> {
     let mut next = bytes.to_vec();
     if let Some(library) = library {
-        let rows: Vec<Vec<u8>> = library
+        let colors: Vec<Vec<u8>> = library
             .colors
             .iter()
             .map(|c| rbl_pdb::rows::color_row(u16::try_from(c.id).unwrap_or(0), &c.name))
             .collect();
-        if let Some(replaced) = rbl_pdb::build::replace_single_page_table(&next, 6, &rows) {
-            next = replaced;
+        let (categories, sorts) = rbl_export::menu_rows(library);
+        for (page_type, rows) in [(6, colors), (17, categories), (18, sorts)] {
+            if let Some(replaced) = rbl_pdb::build::replace_single_page_table(&next, page_type, &rows) {
+                next = replaced;
+            }
         }
     }
     let property = rbl_pdb::Pdb::parse(&next).ok().and_then(|pdb| pdb.property());
@@ -600,6 +605,33 @@ mod tests {
         write_changes(stick.path(), &back, &blue).unwrap();
         assert_eq!(read(stick.path()).device_library_background, Some(7));
         assert_eq!(std::fs::read(&library_path).unwrap(), library_before);
+    }
+
+    #[test]
+    fn a_menu_change_is_written_into_export_pdb_too() {
+        let stick = tempfile::tempdir().unwrap();
+        assert!(rbl_export::create_library(stick.path(), None, &[], None).unwrap());
+        let current = read(stick.path());
+
+        // BPM shown as a category and chosen as the column beside the title.
+        let mut next = current.clone();
+        let library = next.library.as_mut().unwrap();
+        let bpm = library.categories.iter_mut().find(|c| c.menu_item == 5).unwrap();
+        bpm.visible = true;
+        bpm.seq = 11;
+        library.sub_column = Some(5);
+        write_changes(stick.path(), &current, &next).unwrap();
+
+        let bytes = std::fs::read(stick.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+        let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+        let rows = |kind| {
+            let table = pdb.table(kind).unwrap();
+            pdb.rows(table).iter().map(|row| bytes[row.offset..row.offset + 8].to_vec()).collect::<Vec<_>>()
+        };
+        let (categories, sorts) = rbl_export::menu_rows(next.library.as_ref().unwrap());
+        assert_eq!(rows(rbl_pdb::PageType::Categories), categories);
+        assert_eq!(rows(rbl_pdb::PageType::Sorts), sorts);
+        assert!(categories.contains(&vec![0x05, 0x00, 0x06, 0x00, 0x05, 0x00, 0x0b, 0x00]));
     }
 
     #[test]
