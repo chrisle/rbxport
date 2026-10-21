@@ -631,7 +631,13 @@ mod tests {
         let (categories, sorts) = rbl_export::menu_rows(next.library.as_ref().unwrap());
         assert_eq!(rows(rbl_pdb::PageType::Categories), categories);
         assert_eq!(rows(rbl_pdb::PageType::Sorts), sorts);
-        assert!(categories.contains(&vec![0x05, 0x00, 0x06, 0x00, 0x05, 0x00, 0x0b, 0x00]));
+        // The bytes themselves, not only menu_rows' output: BPM shown eleventh,
+        // BPM the right column, and COMMENTS no longer the right column.
+        let categories_written = rows(rbl_pdb::PageType::Categories);
+        let sorts_written = rows(rbl_pdb::PageType::Sorts);
+        assert!(categories_written.contains(&vec![0x05, 0x00, 0x06, 0x00, 0x05, 0x00, 0x0b, 0x00]));
+        assert!(sorts_written.contains(&vec![0x05, 0x00, 0x04, 0x00, 0x02, 0x05, 0x00, 0x00]));
+        assert!(sorts_written.contains(&vec![0x15, 0x00, 0x07, 0x00, 0x01, 0x00, 0x00, 0x00]));
     }
 
     #[test]

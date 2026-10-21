@@ -317,6 +317,12 @@ fn a_sync_keeps_the_settings_the_stick_already_carries() {
     let (categories, sorts) = rbl_export::menu_rows(&settings);
     assert_eq!(rows(rbl_pdb::PageType::Categories), categories);
     assert_eq!(rows(rbl_pdb::PageType::Sorts), sorts);
+    // And the bytes themselves: GENRE shown eleventh, KEY the right column,
+    // COMMENTS no longer the right column.
+    assert!(rows(rbl_pdb::PageType::Categories).contains(&vec![0x01, 0x00, 0x01, 0x00, 0x63, 0x00, 0x0b, 0x00]));
+    let sorts_written = rows(rbl_pdb::PageType::Sorts);
+    assert!(sorts_written.contains(&vec![0x0b, 0x00, 0x0c, 0x00, 0x02, 0x07, 0x00, 0x00]));
+    assert!(sorts_written.contains(&vec![0x15, 0x00, 0x07, 0x00, 0x01, 0x00, 0x00, 0x00]));
 }
 
 #[test]

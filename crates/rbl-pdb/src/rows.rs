@@ -245,10 +245,11 @@ pub fn color_row(id: u16, name: &str) -> Vec<u8> {
 ///   05 00  06 00  05  00  0b 00   BPM, shown eleventh
 /// ```
 ///
-/// rekordbox wrote the same per-item byte and upper flag bits whether the
-/// category was shown or not [OBS rekordbox 7 export with BPM shown, #619],
-/// so they come from [`crate::reference::CATEGORIES`]; an item missing there
-/// gets 99, the value rekordbox gives most items.
+/// What the per-item byte and the upper flag bits mean is [UNKNOWN].
+/// rekordbox wrote the same values whether the category was shown or not
+/// [OBS rekordbox 7 export with BPM shown, #619], so they come from
+/// [`crate::reference::CATEGORIES`]; an item missing there gets 99, the value
+/// rekordbox gives most items.
 pub fn category_row(menu_item: u16, id: u16, visible: bool, seq: u16) -> Vec<u8> {
     let reference = crate::reference::CATEGORIES.iter().find(|row| row.get(..2) == Some(&menu_item.to_le_bytes()[..]));
     let fixed = reference.and_then(|row| row.get(4)).copied().unwrap_or(0x63);

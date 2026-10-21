@@ -400,9 +400,9 @@ by position.
 | `categories` (17) | `u16` menu item, `u16` `category_id`, a byte fixed per menu item (99 for most), flags (bit 0 hidden), `u16` position among the shown rows (0 when hidden) |
 | `sorts` (18) | `u16` menu item, `u16` `sort_id`, flags (bit 0 off, bit 1 the column beside the track name), `u8` position among the active rows (0 when off), `u16` 0 |
 
-The per-item byte and the upper category flag bits (MATCHING carries bit 1)
-did not change when a category was shown [OBS rekordbox 7, #619], so they are
-taken from the reference rows.
+What the per-item byte and the upper category flag bits (MATCHING carries
+bit 1) mean is [UNKNOWN]. They did not change when a category was shown
+[OBS rekordbox 7, #619], so they are taken from the reference rows.
 
 ### `property` row (type 19)
 
