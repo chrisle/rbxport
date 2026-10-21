@@ -1,4 +1,4 @@
-name: Validate Nix source
+name: Validate Nix packages
 
 on:
   workflow_call:
@@ -12,21 +12,40 @@ permissions:
 
 jobs:
   source-smoke:
-    name: Nix source smoke
-    runs-on: ubuntu-latest
+    name: Nix ${{ matrix.package }} smoke
+    runs-on: [self-hosted, linux, x64]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        package: [bin, source]
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref }}
 
+      - name: Find an existing Nix installation
+        id: nix
+        shell: bash
+        run: |
+          for directory in "$HOME/.nix-profile/bin" /nix/var/nix/profiles/default/bin; do
+            if [ -x "$directory/nix" ]; then
+              echo "$directory" >> "$GITHUB_PATH"
+              echo "present=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "present=false" >> "$GITHUB_OUTPUT"
+
       - uses: cachix/install-nix-action@v31
+        if: steps.nix.outputs.present != 'true'
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Build and run the source package
+      - name: Build and run the package
         # A hash mismatch means packaging/nix/pin.json is stale; refresh it
         # with packaging/nix/update-source-hashes.sh.
         uses: ./.github/actions/nix-smoke
         with:
-          package: source
+          package: ${{ matrix.package }}
