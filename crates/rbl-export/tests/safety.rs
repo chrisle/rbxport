@@ -21,7 +21,7 @@ fn stopping_export_preserves_the_published_usb_library() {
         let calls = std::cell::Cell::new(0);
         let result = rbl_export::export_cancellable(
             usb.path(), &tracks, &[playlist(10, &[0, 1])], &[],
-            &rbl_export::ExportOptions { sync: Some(&SyncSource { db_id: 123, tree: vec![], automatic: false }), ..Default::default() }, &mut |_| {}, &|| {
+            &rbl_export::ExportOptions { sync: Some(&SyncSource { db_id: 123, tree: vec![], automatic: false, cloud_db_id: 0 }), ..Default::default() }, &mut |_| {}, &|| {
                 calls.set(calls.get() + 1);
                 calls.get() >= stop_at
             },
@@ -79,6 +79,7 @@ fn sync(
                 })
                 .collect(),
             automatic: false,
+            cloud_db_id: 0,
         }),
         &mut |_| {},
     )
@@ -437,7 +438,7 @@ fn keep_unlisted_adds_to_the_stick_without_taking_anything_off() {
     edit(usb.path(), "INSERT INTO playlist VALUES(99,1,'On the deck',NULL,0,0); INSERT INTO playlist_content VALUES(99,1,1)");
     let before = Manifest::load(usb.path()).unwrap();
 
-    let add = SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 30, parent: 0, attribute: 0 }], automatic: false };
+    let add = SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 30, parent: 0, attribute: 0 }], automatic: false, cloud_db_id: 0 };
     rbl_export::export_cancellable(
         usb.path(), &tracks[2..], &[playlist(30, &[0])], &[],
         &rbl_export::ExportOptions { sync: Some(&add), keep_unlisted: true, ..Default::default() },

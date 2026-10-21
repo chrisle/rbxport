@@ -59,6 +59,7 @@ fn sync(root: &Path, tracks: &[SourceTrack], playlists: &[SourcePlaylist]) -> rb
             db_id: 123,
             tree: playlists.iter().map(|p| rbl_export::SyncNode { id: p.id, parent: p.parent_id, attribute: 0 }).collect(),
             automatic: false,
+            cloud_db_id: 0,
         }),
         &mut |_| {},
     )
@@ -337,7 +338,7 @@ fn the_removed_track_cue_refusal_names_the_track_and_can_be_cleared() {
     // Track 3 is new, so a late refusal would have copied it first.
     let mut stages = Vec::new();
     let result = export_full(usb.path(), &[tracks[0].clone(), tracks[2].clone()], &[playlist(10, &[0, 1])], &[], None,
-        Some(&SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false }),
+        Some(&SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false, cloud_db_id: 0 }),
         &mut |p| stages.push(p.stage));
     let Err(rbl_export::ExportError::Conflict(message)) = result else { panic!("{result:?}") };
     assert!(message.contains("'Track 2'"), "{message}");

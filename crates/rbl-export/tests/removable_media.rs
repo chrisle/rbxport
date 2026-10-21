@@ -140,7 +140,7 @@ impl Volume {
         cache: Option<&PreparationCache>,
     ) -> ExportReport {
         let tree = playlists.iter().map(|p| SyncNode { id: p.id, parent: 0, attribute: 0 }).collect();
-        let sync = SyncSource { db_id: 123, tree, automatic: false };
+        let sync = SyncSource { db_id: 123, tree, automatic: false, cloud_db_id: 0 };
         let options = ExportOptions { sync: Some(&sync), root: self.root, cache, ..Default::default() };
         export_with_options(destination, tracks, playlists, &[], &options, &mut |_| {})
             .unwrap_or_else(|e| panic!("{}: {e}", self.label))
@@ -477,7 +477,7 @@ fn the_space_check_covers_a_large_cluster_stick() {
         .collect();
     let set = [playlist(10, "Set", (0..tracks.len()).collect())];
     let tree = set.iter().map(|p| SyncNode { id: p.id, parent: 0, attribute: 0 }).collect();
-    let sync = SyncSource { db_id: 123, tree, automatic: false };
+    let sync = SyncSource { db_id: 123, tree, automatic: false, cloud_db_id: 0 };
     let options = ExportOptions { sync: Some(&sync), ..Default::default() };
     let plan = rbl_export::plan::preview(&volume.mount, &tracks, &set, &[], &options).unwrap();
     assert!(!plan.unknown_size);
@@ -534,7 +534,7 @@ fn an_hfs_plus_stick_takes_a_sync_and_its_resyncs_under_the_hidden_root() {
     let added = SourcePlaylist { id: 11, name: "Warm-up".into(), track_indices: vec![2], ..Default::default() };
     let node = |id| SyncNode { id, parent: 0, attribute: 0 };
     let sync = |tracks: &[SourceTrack], playlists: &[SourcePlaylist], tree: Vec<SyncNode>| {
-        let source = SyncSource { db_id: 123, tree, automatic: false };
+        let source = SyncSource { db_id: 123, tree, automatic: false, cloud_db_id: 0 };
         let options = ExportOptions { sync: Some(&source), root: Some(ExportRoot::Hidden), ..Default::default() };
         export_with_options(root, tracks, playlists, &[], &options, &mut |_| {}).unwrap()
     };
@@ -578,7 +578,7 @@ fn a_read_only_hfs_plus_stick_is_refused_up_front_with_the_reason() {
         .unwrap();
     assert!(attached.success());
 
-    let source = SyncSource { db_id: 123, tree: vec![SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false };
+    let source = SyncSource { db_id: 123, tree: vec![SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false, cloud_db_id: 0 };
     let options = ExportOptions { sync: Some(&source), root: volume.root, ..Default::default() };
     let lists = [playlist(10, "Set", vec![0])];
     let error = export_with_options(&volume.mount, &tracks[..1], &lists, &[], &options, &mut |_| {}).unwrap_err();

@@ -1767,6 +1767,8 @@ fn export_cancellable_inner(
             master_db_id: u32::try_from(master_db_id).unwrap_or(0),
             master_content_id: u32::try_from(library_id).unwrap_or(0),
             play_count: u16::try_from(track.metadata.play_count).unwrap_or(u16::MAX),
+            // The same contentLink exportLibrary.db gets (#640).
+            content_link: track.metadata.content_link,
             isrc: track.metadata.isrc.clone(),
             title: track.title.clone(),
             filename: place.file_name,
@@ -2267,13 +2269,26 @@ pub fn create_library_with_root(
 }
 
 /// The number `exportExt.pdb` and `exportLibrary.db`'s `property` row both
-/// carry as the tags' master database id. rekordbox wrote 1744129535 for
-/// this library, whose `DBID` is 1912725212, on every export; how it gets
-/// from one to the other is [UNKNOWN] (not the DBID, nor CRC32/FNV/Adler/
-/// MD5/SHA of the DBID or the device id). The two files only have to
-/// agree with each other, so the library's own id stands in.
+/// carry as the tags' master database id: the library's cloud database id
+/// when it has one, otherwise its `DBID` plus one, as rekordbox 7 writes it.
+///
+/// [OBS static, rekordbox 7.2.19 arm64]
+/// `DatabaseMediator::syncMyTagLocal` (`0x100c529c4`) takes `DBID + 1`
+/// (`DatabaseMediator+0x528`, set from `mstGetDBID` by `initMasterDB`),
+/// replaces it with `AppSyncDBController::getCloudDBID` when that is not 0,
+/// and hands it to the device controller. `DatabaseMediator::syncMyTag`
+/// (`0x100c520ec`) then reads the stick's value back: 0, `DBID + 1` or the
+/// cloud id are its own; `DBID` itself is what rekordbox 6 wrote and gets
+/// "You have to resync My Tag after starting rekordbox 6." (`0x100c52130`),
+/// which is what RBX's `DBID` produced (#640). The reference stick's
+/// 1744129535 against `DBID` 1912725212 fits a cloud id; that library's
+/// `djmdCloudProperty` was not read [UNKNOWN].
 fn my_tag_master_db_id(sync: Option<&SyncSource>) -> u32 {
-    sync.map_or(0, |s| u32::try_from(s.db_id & 0xffff_ffff).unwrap_or(0))
+    sync.map_or(0, |s| match (s.cloud_db_id, s.db_id & 0xffff_ffff) {
+        (0, 0) => 0,
+        (0, db_id) => u32::try_from(db_id).unwrap_or(0).wrapping_add(1),
+        (cloud, _) => cloud,
+    })
 }
 
 /// The subset of a track `exportLibrary.db` needs.
@@ -2800,6 +2815,18 @@ fn staged_files(root: &Path, named: &[&str]) -> std::io::Result<Vec<PathBuf>> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    /// rekordbox 7's `syncMyTag` takes `DBID + 1` and the cloud id as its
+    /// own and `DBID` as rekordbox 6's (#640).
+    #[test]
+    fn the_my_tag_master_id_is_rekordbox_7s() {
+        let sync = |db_id, cloud_db_id| SyncSource { db_id, cloud_db_id, ..Default::default() };
+        assert_eq!(my_tag_master_db_id(Some(&sync(6_230_574, 0))), 6_230_575, "not DBID, rekordbox 6's");
+        assert_eq!(my_tag_master_db_id(Some(&sync(6_230_574, 3_942_139_879))), 3_942_139_879);
+        assert_eq!(my_tag_master_db_id(Some(&sync(u64::from(u32::MAX), 0))), 0, "a 32-bit add, as rekordbox's");
+        assert_eq!(my_tag_master_db_id(Some(&sync(0, 0))), 0);
+        assert_eq!(my_tag_master_db_id(None), 0);
+    }
 
     #[test]
     fn analysis_paths_match_independent_rekordbox_exports() {

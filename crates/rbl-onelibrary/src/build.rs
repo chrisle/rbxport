@@ -359,9 +359,13 @@ impl Builder {
             ],
         )?;
         self.conn.execute(
-            "UPDATE content SET discNo=?2,bitDepth=?3,djPlayCount=?4,analysedBits=?5,isHotCueAutoLoadOn=?6,dateCreated=?7,isrc=?8,fileType=?9 WHERE content_id=?1",
+            "UPDATE content SET discNo=?2,bitDepth=?3,djPlayCount=?4,analysedBits=?5,isHotCueAutoLoadOn=?6,dateCreated=?7,isrc=?8,fileType=?9,contentLink=?10 WHERE content_id=?1",
             params![track.content_id,track.metadata.disc_number,track.metadata.bit_depth,track.metadata.play_count,
-                track.metadata.analysed & !64,track.metadata.hot_cue_auto_load,track.metadata.date_created,track.metadata.isrc,track.file_type],
+                track.metadata.analysed & !64,track.metadata.hot_cue_auto_load,track.metadata.date_created,track.metadata.isrc,track.file_type,
+                // rekordbox reads the analysis flags here as whether the
+                // stick's analysis is its own version's (#640); an unknown
+                // link stays empty, as it always was.
+                (track.metadata.content_link != 0).then_some(track.metadata.content_link)],
         )?;
         self.tracks += 1;
         Ok(())

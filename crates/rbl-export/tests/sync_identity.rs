@@ -42,6 +42,7 @@ fn selection() -> (Vec<SourcePlaylist>, SyncSource) {
             })
             .collect(),
         automatic: false,
+        cloud_db_id: 0,
     };
     (playlists, sync)
 }

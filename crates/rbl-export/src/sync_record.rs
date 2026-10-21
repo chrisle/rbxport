@@ -46,6 +46,9 @@ pub struct SyncSource {
     /// Whether the stick is to be synced again on its own when it is
     /// plugged in: `AutomaticSync`.
     pub automatic: bool,
+    /// The library's Cloud Library Sync id (`rbl_db::export_info::cloud_db_id`),
+    /// 0 when it has none: the stick's My Tag master id when set.
+    pub cloud_db_id: u32,
 }
 
 /// One playlist or folder of the library's tree.
@@ -247,6 +250,7 @@ mod tests {
             db_id: 1_912_725_212,
             tree: vec![SyncNode { id: 4_290_236_987, parent: 0, attribute: 0 }],
             automatic: true,
+            cloud_db_id: 0,
         };
         let bytes = render(&source, &[4_290_236_987], 1_789_685_972_345, &BTreeMap::new());
         assert_eq!(String::from_utf8(bytes.clone()).unwrap(), REFERENCE);
@@ -278,6 +282,7 @@ mod tests {
                 SyncNode { id: 0x40, parent: 0, attribute: 4 },
             ],
             automatic: true,
+            cloud_db_id: 0,
         };
         let record = parse(&render(&source, &[0x30, 0x40], 1, &BTreeMap::new())).unwrap();
         assert_eq!((record.db_id, record.automatic, record.ticked), (9, true, vec![0x30, 0x40]));
@@ -295,6 +300,7 @@ mod tests {
                 SyncNode { id: 0x50, parent: 0, attribute: 0 }, // not ticked
             ],
             automatic: false,
+            cloud_db_id: 0,
         };
         let text = String::from_utf8(render(&source, &[0x30, 0x40, 0x99], 5, &BTreeMap::new())).unwrap();
         let nodes: Vec<&str> = text.lines().filter(|l| l.contains("<NODE")).collect();

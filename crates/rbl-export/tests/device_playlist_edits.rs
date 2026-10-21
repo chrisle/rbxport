@@ -283,7 +283,7 @@ mod rekordbox_made {
         sync(dest, &selection, &[playlist(P, "P", &(0..entries.len()).collect::<Vec<_>>())]).unwrap();
         std::fs::remove_file(Manifest::path(dest)).unwrap();
         let record = rbl_export::sync_record::read(dest).unwrap();
-        let source = rbl_export::SyncSource { db_id, tree: vec![rbl_export::sync_record::SyncNode { id: P, parent: 0, attribute: 0 }], automatic: true };
+        let source = rbl_export::SyncSource { db_id, tree: vec![rbl_export::sync_record::SyncNode { id: P, parent: 0, attribute: 0 }], automatic: true, cloud_db_id: 0 };
         let bytes = rbl_export::sync_record::render_with_ids(&source, &[P], 0, &[(P, stamp)].into(), &record.device_ids);
         for file in rbl_export::sync_record::FILES {
             std::fs::write(dest.join(file), &bytes).unwrap();

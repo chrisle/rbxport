@@ -1701,13 +1701,13 @@ impl ExportSelection {
         // When each plain playlist's entries last changed, which a stick
         // rekordbox synced keeps in its record (#471).
         let plain: Vec<u64> = named.iter().filter(|(_, _, source)| matches!(source, rbl_index::TrackSource::Playlist(_))).map(|(id, _, _)| *id).collect();
-        let (my_tags, extras, db_id, entries_changed) = state
+        let (my_tags, extras, (db_id, cloud_db_id), entries_changed) = state
             .read_db(|db| {
                 let conn = db.connection();
                 Ok((
                     rbl_db::export_info::my_tags(conn)?,
                     rbl_db::export_info::track_extras(conn, &ids)?,
-                    rbl_db::export_info::db_id(conn)?,
+                    (rbl_db::export_info::db_id(conn)?, rbl_db::export_info::cloud_db_id(conn)?),
                     rbl_db::export_info::playlist_entries_changed(conn, &plain)?,
                 ))
             })
@@ -1729,7 +1729,7 @@ impl ExportSelection {
                 })
                 .collect()
         };
-        let sync = rbl_export::SyncSource { db_id, tree, automatic };
+        let sync = rbl_export::SyncSource { db_id, tree, automatic, cloud_db_id };
         let my_tags: Vec<rbl_export::SourceMyTag> = my_tags.iter().map(source_my_tag).collect();
 
         let mut tracks: Vec<rbl_export::SourceTrack> = Vec::new();

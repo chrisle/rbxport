@@ -172,7 +172,7 @@ fn a_path_a_stick_cannot_name_is_copied_as_rekordbox_does() {
 /// and device playlists reconciled into the selection.
 fn sync(root: &Path, tracks: &[SourceTrack], playlists: &[SourcePlaylist]) -> rbl_export::Result<rbl_export::ExportReport> {
     let tree = playlists.iter().map(|p| SyncNode { id: p.id, parent: p.parent_id, attribute: u8::from(p.folder) }).collect();
-    export_full(root, tracks, playlists, &[], None, Some(&SyncSource { db_id: 123, tree, automatic: false }), &mut |_| {})
+    export_full(root, tracks, playlists, &[], None, Some(&SyncSource { db_id: 123, tree, automatic: false, cloud_db_id: 0 }), &mut |_| {})
 }
 
 fn listed(id: u64, tracks: &[SourceTrack]) -> Vec<SourcePlaylist> {

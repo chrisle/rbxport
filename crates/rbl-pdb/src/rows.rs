@@ -63,6 +63,11 @@ pub struct TrackInput {
     /// `exportLibrary.db`'s `content.masterContentId`: the track's id in that
     /// library. Written at `0x14`; see [`track_row`].
     pub master_content_id: u32,
+    /// `exportLibrary.db`'s `content.contentLink`, written at `0x04`, which
+    /// rekordbox fills with the same value [OBS: a rekordbox 7 stick,
+    /// `0xc0700` in both on all but one of 1563 tracks]. See
+    /// `rbl_core::device_content_link`.
+    pub content_link: u32,
     pub title: String,
     pub filename: String,
     /// Media-relative, e.g. `/Contents/Artist/Album/Track.mp3`.
@@ -141,7 +146,7 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     // CDJ-3000 firmware browse/load tests (../rbxport-private/docs/audits/usb-track-records.md).
     put_u2(&mut row, 0x00, 0x24); // track record with 16-bit string offsets
     put_u2(&mut row, 0x02, 0); // index_shift: the row's slot, see `set_index_shift`
-    put_u4(&mut row, 0x04, 0); // bitmask
+    put_u4(&mut row, 0x04, input.content_link); // CONTENTLINK, see `TrackInput::content_link`
     put_u4(&mut row, 0x08, input.sample_rate);
     put_u4(&mut row, 0x0c, 0); // composer_id
     put_u4(&mut row, 0x10, input.file_size);

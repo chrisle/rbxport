@@ -355,14 +355,14 @@ pub async fn ensure_device_library(
         // The library's tags go on the blank stick, as rekordbox puts them
         // there the moment a drive is connected. A library not loaded yet
         // gives none, and the stick gets its tags on its first export.
-        let (my_tags, db_id) = state
+        let (my_tags, db_id, cloud_db_id) = state
             .read_db(|db| {
                 let conn = db.connection();
-                Ok((rbl_db::export_info::my_tags(conn)?, rbl_db::export_info::db_id(conn)?))
+                Ok((rbl_db::export_info::my_tags(conn)?, rbl_db::export_info::db_id(conn)?, rbl_db::export_info::cloud_db_id(conn)?))
             })
             .unwrap_or_default();
         let my_tags: Vec<rbl_export::SourceMyTag> = my_tags.iter().map(crate::commands::source_my_tag).collect();
-        let sync = rbl_export::SyncSource { db_id, tree: Vec::new(), automatic: false };
+        let sync = rbl_export::SyncSource { db_id, tree: Vec::new(), automatic: false, cloud_db_id };
         let preferred_root = rbl_devices::list()
             .into_iter()
             .find(|device| device.mount_point == mount)

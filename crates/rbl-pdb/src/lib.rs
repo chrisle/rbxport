@@ -369,6 +369,9 @@ pub struct TrackRow {
     /// left them blank.
     pub master_content_id: u32,
     pub master_db_id: u32,
+    /// `CONTENTLINK` (0x04), the same value as `exportLibrary.db`'s
+    /// `content.contentLink` [OBS #640: `0xc0700` on a rekordbox 7 stick].
+    pub content_link: u32,
     pub track_number: u32,
     pub play_count: u16,
     pub title: String,
@@ -497,6 +500,7 @@ impl Pdb<'_> {
                     file_size: self.u4_at(row, 0x10),
                     master_content_id: self.u4_at(row, 0x14),
                     master_db_id: self.u4_at(row, 0x18),
+                    content_link: self.u4_at(row, 0x04),
                     artwork_id: self.u4_at(row, 0x1c),
                     key_id: self.u4_at(row, 0x20),
                     label_id: self.u4_at(row, 0x28),

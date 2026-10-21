@@ -33,7 +33,7 @@ fn tracks(src: &Path) -> Vec<SourceTrack> {
 
 fn sync(root: &Path, tracks: &[SourceTrack]) -> rbl_export::Result<rbl_export::ExportReport> {
     let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: (0..tracks.len()).collect(), ..Default::default() }];
-    let source = SyncSource { db_id: 123, tree: vec![SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false };
+    let source = SyncSource { db_id: 123, tree: vec![SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false, cloud_db_id: 0 };
     export_full(root, tracks, &playlists, &[], None, Some(&source), &mut |_| {})
 }
 

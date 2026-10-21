@@ -775,7 +775,7 @@ fn exports_cues_metadata_and_all_companions_and_repairs_a_missing_ext() {
     t.id = 11;
     t.metadata = rbl_core::ExportMetadata {
         track_number: 7, disc_number: 2, bit_depth: 24, play_count: 42,
-        analysed: 105, hot_cue_auto_load: true, ..Default::default()
+        analysed: 105, hot_cue_auto_load: true, content_link: rbl_core::device_content_link(0x002c_060e), ..Default::default()
     };
     t.cues = Some(vec![
         ExportCue { kind: 1, time_ms: 1000, color_code: 46, comment: "Drop".into(), ..Default::default() },
@@ -805,6 +805,12 @@ fn exports_cues_metadata_and_all_companions_and_repairs_a_missing_ext() {
     let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
     let row = pdb.rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap())[0];
     assert_eq!(pdb.string_ref(row, 0x5e + 7 * 2), "ON");
+    // Both databases carry the contentLink a rekordbox 7 stick does, whose
+    // analysis bits tell rekordbox the analysis is not an older version's
+    // (#640).
+    let link: i64 = db.connection().query_row("SELECT contentLink FROM content", [], |r| r.get(0)).unwrap();
+    assert_eq!(link, 0x000c_0700);
+    assert_eq!(pdb.u4_at(row, 0x04), 0x000c_0700);
     let count:i64 = db.connection().query_row("SELECT count(*) FROM cue",[],|r|r.get(0)).unwrap();
     assert_eq!(count,3);
     drop(db);
@@ -1038,4 +1044,22 @@ fn an_export_writes_the_date_added_and_the_date_created_where_rekordbox_does() {
     let table = pdb.table(rbl_pdb::PageType::Tracks).unwrap();
     let row = &pdb.track_rows(table)[0];
     assert_eq!((row.date_added.as_str(), row.date_created.as_str()), ("2025-08-12", "2025-08-07"));
+}
+
+/// The tags' master id both files carry is rekordbox 7's, `DBID + 1`, not
+/// the `DBID` rekordbox 6 wrote, which made rekordbox 7 ask for a My Tag
+/// resync "after starting rekordbox 6" (#640).
+#[test]
+fn the_my_tag_master_id_is_not_rekordbox_6s() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = common::stick();
+    let sync = rbl_export::SyncSource { db_id: 6_230_574, ..Default::default() };
+    rbl_export::export_full(dest.path(), &[track(src.path(), 1, "One", "A")], &[], &[], None, Some(&sync), &mut |_| {}).unwrap();
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(&dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    let property: i64 = db.connection().query_row("SELECT myTagMasterDBID FROM property", [], |r| r.get(0)).unwrap();
+    assert_eq!(property, 6_230_575);
+    let bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/exportExt.pdb")).unwrap();
+    let ext = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let master = ext.rows(ext.table(rbl_pdb::PageType::PlaylistTree).expect("type 7, the master row"))[0];
+    assert_eq!(ext.u4_at(master, 0x18), 6_230_575);
 }

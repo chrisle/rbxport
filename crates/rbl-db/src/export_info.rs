@@ -72,6 +72,34 @@ pub fn db_id(conn: &Connection) -> Result<u64> {
     Ok(id.and_then(|id| id.parse().ok()).unwrap_or(0))
 }
 
+/// What rekordbox 7 calls the library's cloud database id: the `ID` of the
+/// live `djmdCloudProperty` row whose `Reserved1` is `SyncService`, or 0 when
+/// there is none.
+///
+/// [OBS static, rekordbox 7.2.19 arm64] `AppSyncDBController::getCloudDBID`
+/// (`0x100a4a040`) returns the id of the property
+/// `CloudPropertyRepository::SelectSyncServiceProperty` selects
+/// (`CloudPropertyDao::SelectBy(IDENTIFIER_SYNC_SERVICE)`), and 0 when there
+/// is none and it is not asked to create one. `CloudProperty::NewData`
+/// (`0x10132a464`) keeps the id at `+0x8` and `NewSyncServiceData` puts the
+/// identifier in `Reserved1` (`+0x18`). This machine's 7.2.19 library holds
+/// `3942139879 | SyncService | Dropbox` there. That the repository skips
+/// deleted rows is [ASSUME], as rekordbox's other repositories do.
+pub fn cloud_db_id(conn: &Connection) -> Result<u32> {
+    if !has_table(conn, "djmdCloudProperty") {
+        return Ok(0);
+    }
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT ID FROM djmdCloudProperty WHERE Reserved1 = 'SyncService' AND COALESCE(rb_local_deleted, 0) = 0 LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(id.and_then(|id| id.parse().ok()).unwrap_or(0))
+}
+
 /// When each of `ids`' entries last changed, as milliseconds since the
 /// epoch, keyed by `djmdPlaylist.ID`: the latest of its live entries'
 /// `created_at` and of every entry's `updated_at`, live or removed.
@@ -201,7 +229,7 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
         let marks = vec!["?"; chunk.len()].join(",");
         let params = rusqlite::params_from_iter(chunk.iter());
         let mut stmt = conn.prepare(&format!(
-            "SELECT ID, rb_LocalFolderPath, OrgFolderPath, TrackNo, DiscNo, BitDepth, DJPlayCount, Analysed, HotCueAutoLoad, DateCreated, ISRC FROM djmdContent WHERE ID IN ({marks})"
+            "SELECT ID, rb_LocalFolderPath, OrgFolderPath, TrackNo, DiscNo, BitDepth, DJPlayCount, Analysed, HotCueAutoLoad, DateCreated, ISRC, ContentLink FROM djmdContent WHERE ID IN ({marks})"
         ))?;
         let rows = stmt.query_map(params, |r| {
             Ok((
@@ -217,6 +245,11 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
                     hot_cue_auto_load: r.get::<_, Option<String>>(8)?.is_some_and(|v| v == "on"),
                     date_created: r.get::<_, Option<String>>(9)?.unwrap_or_default(),
                     isrc: r.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                    // A NULL link exports as rekordbox exports an
+                    // in-memory 0 (#640).
+                    content_link: rbl_core::device_content_link(
+                        u32::try_from(whole(r.get_ref(11)?) & 0xffff_ffff).unwrap_or(0),
+                    ),
                 },
             ))
         })?;
@@ -361,7 +394,7 @@ fn loop_end(start_ms: u32, stored_end: i64, beat_loop_size: u32, bpm_x100: u32) 
 mod tests {
     use rusqlite::Connection;
 
-    use super::{playlist_entries_changed, track_extras, AnalysisFacts};
+    use super::{cloud_db_id, playlist_entries_changed, track_extras, AnalysisFacts};
 
     /// The times are #309's scratch library's: `P309`'s entries as
     /// rekordbox left them after three syncs (`updated_at` equal to
@@ -402,15 +435,15 @@ mod tests {
             "CREATE TABLE djmdContent (
                 ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
                 TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
-                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM,
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, ContentLink INTEGER, BPM,
                 AnalysisDataPath TEXT, Length INTEGER, KeyID TEXT, ImagePath TEXT
              );
              CREATE TABLE djmdKey (ID TEXT PRIMARY KEY, ScaleName TEXT);
              INSERT INTO djmdKey VALUES ('7', 'F#m');
-             INSERT INTO djmdContent (ID, BPM, AnalysisDataPath, Length, KeyID, ImagePath, Analysed)
-                VALUES ('1', 12800, '/PIONEER/USBANLZ/P001/0001/ANLZ0000.DAT', 301, '7', '/PIONEER/Artwork/a.jpg', 105),
-                       ('2', NULL, NULL, NULL, NULL, NULL, 0),
-                       ('3', '12450', '', 200, 'gone', '', 0);",
+             INSERT INTO djmdContent (ID, BPM, AnalysisDataPath, Length, KeyID, ImagePath, Analysed, ContentLink)
+                VALUES ('1', 12800, '/PIONEER/USBANLZ/P001/0001/ANLZ0000.DAT', 301, '7', '/PIONEER/Artwork/a.jpg', 105, 2885134),
+                       ('2', NULL, NULL, NULL, NULL, NULL, 0, NULL),
+                       ('3', '12450', '', 200, 'gone', '', 0, '787982');",
         )
         .unwrap();
 
@@ -446,6 +479,32 @@ mod tests {
             "a BPM stored as text, a key row that is gone"
         );
         assert!(!extras.contains_key("4"), "no row, no facts");
+        // The stick's contentLink, as rekordbox 7.2.19 exports these
+        // library values (0x2c060e and 0xc060e, rows of this machine's
+        // library) and a NULL (#640).
+        assert_eq!(extras["1"].metadata.content_link, 0x000c_0700);
+        assert_eq!(extras["2"].metadata.content_link, 0x100);
+        assert_eq!(extras["3"].metadata.content_link, 0x000c_0700, "a link stored as text");
+    }
+
+    /// The tags' master id is the Cloud Library Sync property's id when the
+    /// library has one, and otherwise its `DBID` plus one; `DBID` itself is
+    /// what rekordbox 6 wrote (#640).
+    #[test]
+    fn the_my_tag_master_id_follows_rekordbox_7() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE djmdProperty (DBID TEXT); INSERT INTO djmdProperty VALUES ('6230574');").unwrap();
+        assert_eq!(cloud_db_id(&conn).unwrap(), 0, "no djmdCloudProperty table");
+        conn.execute_batch(
+            "CREATE TABLE djmdCloudProperty (ID TEXT PRIMARY KEY, Reserved1 TEXT, Reserved2 TEXT, rb_local_deleted INTEGER DEFAULT 0);
+             INSERT INTO djmdCloudProperty (ID, Reserved1) VALUES ('264913098', 'CDPFilterVersion');",
+        )
+        .unwrap();
+        assert_eq!(cloud_db_id(&conn).unwrap(), 0, "a cloud property, but not the sync service");
+        conn.execute_batch("INSERT INTO djmdCloudProperty (ID, Reserved1, Reserved2, rb_local_deleted) VALUES ('1', 'SyncService', 'Dropbox', 1);").unwrap();
+        assert_eq!(cloud_db_id(&conn).unwrap(), 0, "a deleted row");
+        conn.execute_batch("INSERT INTO djmdCloudProperty (ID, Reserved1, Reserved2) VALUES ('3942139879', 'SyncService', 'Dropbox');").unwrap();
+        assert_eq!(cloud_db_id(&conn).unwrap(), 3_942_139_879);
     }
 
     /// rekordbox marks the Active Loop by `Kind` 4 and leaves `ActiveLoop`
@@ -459,7 +518,7 @@ mod tests {
             "CREATE TABLE djmdContent (
                 ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
                 TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
-                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM INTEGER,
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, ContentLink INTEGER, BPM INTEGER,
                 AnalysisDataPath TEXT, Length INTEGER, KeyID TEXT, ImagePath TEXT
              );
              CREATE TABLE djmdCue (
@@ -543,7 +602,7 @@ mod tests {
             "CREATE TABLE djmdContent (
                 ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
                 TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
-                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM INTEGER,
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, ContentLink INTEGER, BPM INTEGER,
                 AnalysisDataPath TEXT, Length INTEGER, KeyID TEXT, ImagePath TEXT
              );
              CREATE TABLE djmdCue (
