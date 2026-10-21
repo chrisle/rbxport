@@ -209,3 +209,48 @@ jobs:
       validate_frontend_unit: ${{ needs.changes.outputs.frontend_unit == 'true' }}
       validate_frontend_e2e: ${{ needs.changes.outputs.frontend_e2e == 'true' }}
       validate_frontend_budget: ${{ needs.changes.outputs.frontend_budget == 'true' }}
+
+  merge:
+    name: Merge validated PR into dev
+    needs: [changes, autofix, validate]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.base.ref == 'dev' &&
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64]
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          VALIDATED_HEAD: ${{ needs.autofix.outputs.source_ref }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const event = context.payload.pull_request;
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: event.number });
+            if (pr.state !== 'open' || pr.draft || pr.base.ref !== 'dev' ||
+                pr.head.repo?.full_name !== `${owner}/${repo}` ||
+                !process.env.VALIDATED_HEAD || pr.head.sha !== process.env.VALIDATED_HEAD) {
+              core.notice('PR changed since validation; leaving it open.');
+              return;
+            }
+            const { data: base } = await github.rest.repos.getBranch({ owner, repo, branch: 'dev' });
+            if (base.commit.sha !== event.base.sha) {
+              core.notice('dev advanced since validation; rebase the PR and rerun checks.');
+              return;
+            }
+            const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
+              owner, repo, basehead: `${base.commit.sha}...${pr.head.sha}`
+            });
+            if (comparison.status !== 'ahead') {
+              core.notice('PR needs a rebase onto dev and fresh checks.');
+              return;
+            }
+            // A non-forced ref update atomically refuses a concurrent divergent
+            // dev push. Preserve the exact tested commits and linear history.
+            await github.rest.git.updateRef({
+              owner, repo, ref: 'heads/dev', sha: pr.head.sha, force: false
+            });
