@@ -323,8 +323,15 @@ DBID go at `0x14` and `0x18`, the same two numbers as `exportLibrary.db`'s
 all 1563 tracks agree between the two databases; `0x04` there equals
 `content.contentLink`, `0xc0700` on all but one track, and the byte at
 `0x56` equals `content.analysedBits`, 41]. The writer fills `0x14` and
-`0x18` (#342). It leaves `0x04` at 0, as it leaves `contentLink` empty in
-`exportLibrary.db`: what rekordbox derives the value from is [UNKNOWN].
+`0x18` (#342), and `0x04` with the same value as `contentLink` (#640):
+the library row's `ContentLink & 0xc1600 | 0x100`, as rekordbox 7.2.19's
+`DatabaseMediator::export_track_data_to_db` (`0x1009b84dc`) computes it.
+Those bits are what rekordbox reads as current analysis:
+`RowDataTrack::isAnalyzedOldVer` (`0x10008a5b0`) wants `0x200`, `0x400`,
+`0x40000` and `0x80000` (`0xc0000` is the 3-band waveform, which
+`clear3BandAnalyzed` clears) and `Analysed & 0x20`. A zero link made
+rekordbox say "Some tracks in the device were analyzed by an older version
+of rekordbox." A track kept from the stick keeps the stick's value.
 
 String slots: 0 ISRC, 7 hot-cue auto-load, 10 date created, 11 release date, 12 mix name, 14
 analyze path, 15 date added, 16 comment, 17 title, 19 filename, 20 file
@@ -1035,7 +1042,8 @@ the pad recalls the saved cue.
 
 ## 13. Still unknown
 
-- The derivation of `myTagMasterDBID` (rekordbox wrote `1744129535`), and a
+- Whether the reference library's `myTagMasterDBID` (`1744129535`) is its
+  cloud database id, as the static derivation (#640) predicts, and a
   hardware check that a player lists My Tags from rbxport's `exportExt.pdb`
   type-4 rows (which match a rekordbox 7 export's byte for byte).
 - `PWV4` header bytes 1–2, the third header word of `PWV3`/`PWV5`, and the
@@ -1156,6 +1164,7 @@ specified below. Exported file type always describes the destination audio.
 | BitDepth | u16 `0x52` | `bitDepth` |
 | DJPlayCount | u16 `0x4e` (clamped to 65,535) | `djPlayCount` |
 | Analysed | No corresponding mapping here | `analysedBits = Analysed & ~64` |
+| ContentLink | u32 `0x04` | `contentLink`, both `ContentLink & 0xc1600 \| 0x100` |
 | HotCueAutoLoad equals lowercase `on` | Slot 7 `ON`, otherwise empty | `isHotCueAutoLoadOn` 1 or 0 |
 | DateCreated | Separate date-added slot is retained | `dateCreated` |
 | ISRC | String slot 0 | `isrc` |
@@ -1184,8 +1193,14 @@ rekordbox writes such values signed, and what it writes them back as, is
 
 Leave the uncharacterized type-5 table empty.
 
-Use the library `DBID`, and the same number must appear in
-`exportLibrary.db`'s `property.myTagMasterDBID`.
+Use the library's cloud database id when it has one (the `ID` of its live
+`djmdCloudProperty` row whose `Reserved1` is `SyncService`), otherwise its
+`DBID` plus one (a 32-bit add), and put the same number in
+`exportLibrary.db`'s `property.myTagMasterDBID`. That is what rekordbox
+7.2.19's `DatabaseMediator::syncMyTagLocal` (`0x100c529c4`) writes. Its
+`syncMyTag` (`0x100c520ec`) takes a stick holding the plain `DBID` as one
+rekordbox 6 tagged and says "You have to resync My Tag after starting
+rekordbox 6." (#640; static analysis of the arm64 build).
 
 #### OneLibrary publication
 
