@@ -357,6 +357,41 @@ fn a_copied_track_takes_the_devices_bpm_key_analysis_and_cues() {
     assert_eq!(stored, vec![(1000, None, 1), (2000, Some(4000), 0)], "the hot cue past H and the backwards loop are left out");
 }
 
+/// #617: a memory cue copied from a device keeps its colour. rekordbox reads
+/// a `PCP2` memory entry's colour row 1-8 as `Color` 0-7 and anything else
+/// as none (`CMusicAnalyzeFile::get_pmai_ext_specified_memcue_ext`
+/// @0x100f23590, rekordbox 7.2.19 arm64); RBX dropped it and kept 255.
+#[test]
+fn a_copied_memory_cue_keeps_its_colour() {
+    let mut f = fixture_with(Shape::default());
+    let audio = tempfile::tempdir().unwrap();
+    let copy = audio.path().join("Coloured.wav");
+    write_wav(&copy, 1);
+    let made = f.writer.import_device_playlist_entries("Coloured", &[DeviceEntry::File(copy)]).unwrap();
+    let (content, _) = made.added[0].clone();
+    let coloured = |time_ms: u32, color_id: u8| rbl_anlz::CueEntry { color_id, ..cue(0, 1, time_ms, 0) };
+    let mut hot = cue(1, 1, 6000, 0);
+    hot.color_code = Some(42);
+    let cues = [coloured(1000, 1), coloured(2000, 3), coloured(3000, 8), coloured(4000, 0), coloured(5000, 9), hot];
+    f.writer
+        .import_device_analysis(
+            &content,
+            &rbl_db::write::DeviceAnalysis { bpm_x100: 12_800, key: None, analysis_data_path: None, cues: &cues },
+        )
+        .unwrap();
+    let mut stmt = f
+        .conn()
+        .prepare("SELECT InMsec, Color, ColorTableIndex FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY InMsec")
+        .unwrap();
+    let stored: Vec<(i64, i64, i64)> =
+        stmt.query_map(params![content], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(Result::unwrap).collect();
+    assert_eq!(
+        stored,
+        vec![(1000, 0, 0), (2000, 2, 0), (3000, 7, 0), (4000, 255, 0), (5000, 255, 0), (6000, -1, 42)],
+        "Pink, Orange and Purple kept; rows 0 and 9 are none; the hot cue keeps its code"
+    );
+}
+
 #[test]
 fn a_copied_track_without_analysis_files_keeps_its_own_path_and_flag() {
     let mut f = fixture_with(Shape::default());

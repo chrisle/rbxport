@@ -3361,9 +3361,9 @@ impl Writer {
         let usn = next_usn(&tx)?;
         tx.execute("UPDATE djmdCue SET rb_local_deleted=1, rb_local_usn=?2, updated_at=?3 WHERE ContentID=?1 AND rb_local_deleted=0", params![content, usn, stamp])?;
         for ((cue, id), uuid) in cues.iter().zip(ids).zip(uuids) {
-            let kind = if cue.hot_cue >= 4 { cue.hot_cue + 1 } else { cue.hot_cue };
             let end = (cue.kind == 2).then_some(i64::from(cue.loop_time_ms));
-            tx.execute("INSERT INTO djmdCue (ID, ContentID, InMsec, InFrame, InMpegFrame, InMpegAbs, OutMsec, Kind, Color, ColorTableIndex, ActiveLoop, Comment, ContentUUID, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced, rb_local_usn, created_at, updated_at) VALUES (?1,?2,?3,0,0,0,?4,?5,?6,?7,0,?8,?9,?10,0,0,0,0,?11,?12,?12)", params![id, content, cue.time_ms, end, kind, if kind == 0 {255} else {-1}, cue.color_code.unwrap_or(cue.color_id), cue.comment.as_deref().unwrap_or(""), owner, uuid, usn, stamp])?;
+            // A memory cue's colour row goes back into `Color` (#617).
+            tx.execute("INSERT INTO djmdCue (ID, ContentID, InMsec, InFrame, InMpegFrame, InMpegAbs, OutMsec, Kind, Color, ColorTableIndex, ActiveLoop, Comment, ContentUUID, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced, rb_local_usn, created_at, updated_at) VALUES (?1,?2,?3,0,0,0,?4,?5,?6,?7,0,?8,?9,?10,0,0,0,0,?11,?12,?12)", params![id, content, cue.time_ms, end, cue.library_kind(), cue.library_color(), cue.library_color_table_index(), cue.comment.as_deref().unwrap_or(""), owner, uuid, usn, stamp])?;
         }
         tx.execute("UPDATE djmdContent SET BPM=CASE WHEN ?2>0 THEN ?2 ELSE BPM END, AnalysisUpdated=CAST(COALESCE(AnalysisUpdated, '0') AS INTEGER)+1, rb_local_usn=?3, updated_at=?4 WHERE ID=?1", params![content, bpm, usn, stamp])?;
         set_counter(&tx, usn)?;
@@ -3418,12 +3418,13 @@ impl Writer {
             params![content, i64::from(analysis.bpm_x100), key_id, analysis.analysis_data_path, ANALYSED_FULL, usn, stamp],
         )?;
         for ((cue, id), uuid) in cues.iter().zip(ids).zip(uuids) {
-            let kind = if cue.hot_cue >= 4 { cue.hot_cue + 1 } else { cue.hot_cue };
             let end = (cue.kind == 2).then_some(i64::from(cue.loop_time_ms));
+            // A memory cue keeps the stick's colour in `Color`, as
+            // `get_pmai_ext_specified_memcue_ext` reads it (#617).
             tx.execute(
                 "INSERT INTO djmdCue (ID, ContentID, InMsec, InFrame, InMpegFrame, InMpegAbs, OutMsec, Kind, Color, ColorTableIndex, ActiveLoop, Comment, ContentUUID, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced, rb_local_usn, created_at, updated_at)
                  VALUES (?1,?2,?3,0,0,0,?4,?5,?6,?7,0,?8,?9,?10,0,0,0,0,?11,?12,?12)",
-                params![id, content, cue.time_ms, end, kind, if kind == 0 { 255 } else { -1 }, cue.color_code.unwrap_or(cue.color_id), cue.comment.as_deref().unwrap_or(""), owner, uuid, usn, stamp],
+                params![id, content, cue.time_ms, end, cue.library_kind(), cue.library_color(), cue.library_color_table_index(), cue.comment.as_deref().unwrap_or(""), owner, uuid, usn, stamp],
             )?;
         }
         set_counter(&tx, usn)?;

@@ -211,6 +211,33 @@ pub struct CueEntry {
     pub rgb: Option<[u8; 3]>,
 }
 
+impl CueEntry {
+    /// The `djmdCue.Kind` this entry is stored as: 0 a memory cue, 1-3 hot
+    /// cues A-C, 5-17 D-P (Kind 4 is the Active Loop, not a slot).
+    pub fn library_kind(&self) -> u32 {
+        if self.hot_cue >= 4 { self.hot_cue + 1 } else { self.hot_cue }
+    }
+
+    /// The `djmdCue.Color` this entry is stored with: a memory cue's colour
+    /// row read back as rekordbox does ([`cues::memory_colour_of_row`]), 255
+    /// for a memory cue without one, and -1 on a hot cue, as RBX writes both.
+    pub fn library_color(&self) -> i64 {
+        if self.hot_cue == 0 {
+            cues::memory_colour_of_row(self.color_id).map_or(255, i64::from)
+        } else {
+            -1
+        }
+    }
+
+    /// The `djmdCue.ColorTableIndex` this entry is stored with: its colour
+    /// code. A hot cue whose entry ends before the code falls back to the
+    /// colour row; a memory cue's colour is [`Self::library_color`], so it
+    /// takes 0, as a memory cue RBX adds does.
+    pub fn library_color_table_index(&self) -> u8 {
+        self.color_code.unwrap_or(if self.hot_cue == 0 { 0 } else { self.color_id })
+    }
+}
+
 /// Magic, the two lengths, the hot cue, the kind, the two times, the colour
 /// row and its eleven trailing bytes: an entry cannot be shorter than this.
 const CUE_ENTRY_MIN: usize = 40;
