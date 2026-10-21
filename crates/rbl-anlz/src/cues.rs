@@ -9,6 +9,8 @@ pub struct ExportCue {
     pub kind: u8,
     pub time_ms: u32,
     pub loop_time_ms: Option<u32>,
+    /// A memory cue's colour row, 1 (Pink) to 8 (Purple) or 0 for none: its
+    /// `djmdCue.Color` through [`memory_colour_row`]. 0 on a hot cue.
     pub color_id: u8,
     pub color_code: u8,
     pub comment: String,
@@ -33,6 +35,27 @@ impl ExportCue {
     pub fn is_memory(&self) -> bool {
         matches!(self.kind, 0 | 4)
     }
+}
+
+/// The colour row a device is sent for a memory cue's `djmdCue.Color`: the
+/// eight colours, 0 (Pink) to 7 (Purple), are rows 1 to 8, and anything else
+/// (255, or the -1 rekordbox writes for No Color) is 0, no colour.
+///
+/// [OBS static, rekordbox 7.2.19 arm64] `PCP2`'s byte at `0x1c`
+/// (`DatabaseMediator::convert_cue_to_extPointdata` @0x1009bd51c: `Color + 1`
+/// when `Color <= 7`, else 0) and the LINK extended cue entry's byte at `0x3a`
+/// (`PSvDBMain::GetUsbCueExtSharedContent` @0x1018c9c98, the same test).
+pub fn memory_colour_row(color: i64) -> u8 {
+    u8::try_from(color).ok().filter(|c| *c <= 7).map_or(0, |c| c + 1)
+}
+
+/// The `djmdCue.Color` a device's memory colour row stands for, or `None`
+/// for none: [`memory_colour_row`] the other way. [OBS static, rekordbox
+/// 7.2.19 arm64] `CMusicAnalyzeFile::get_pmai_ext_specified_memcue_ext`
+/// @0x100f23590 reads `row - 1` for a row below 9 and 0xff (none) otherwise,
+/// so row 0 is none too.
+pub fn memory_colour_of_row(row: u8) -> Option<u8> {
+    (1..=8).contains(&row).then(|| row - 1)
 }
 
 fn put32(b: &mut [u8], at: usize, n: u32) {
@@ -336,5 +359,22 @@ mod tests {
         assert_eq!(extended_memory.len(), 1);
         assert_eq!((extended_memory[0].hot_cue, extended_memory[0].kind), (0, 2));
         assert_eq!(extended_memory[0].color_id, 3, "a memory cue's colour");
+    }
+
+    /// #617: `djmdCue.Color` 0 (Pink) to 7 (Purple) goes to a device as rows
+    /// 1 to 8, none as 0, and a device's row comes back as the same Color.
+    #[test]
+    fn a_memory_cue_colour_is_one_row_up_on_a_device_and_back() {
+        let rows: Vec<u8> = (0..=7).map(memory_colour_row).collect();
+        assert_eq!(rows, [1, 2, 3, 4, 5, 6, 7, 8]);
+        for none in [255, -1, 8, 64, i64::from(u16::MAX)] {
+            assert_eq!(memory_colour_row(none), 0, "{none} is no colour");
+        }
+        let back: Vec<Option<u8>> = (0..=9).map(memory_colour_of_row).collect();
+        assert_eq!(
+            back,
+            [None, Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), Some(6), Some(7), None]
+        );
+        assert_eq!(memory_colour_of_row(255), None);
     }
 }
