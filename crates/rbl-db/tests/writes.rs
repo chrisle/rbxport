@@ -2978,6 +2978,21 @@ fn usb_cues_replace_old_cues_and_preserve_loop_details() {
     assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&track]), 12800);
 }
 
+/// #617: a memory cue imported from a stick takes its colour row back as
+/// `Color`, one down (Pink is row 1), as rekordbox 7.2.19 reads it
+/// (`get_pmai_ext_specified_memcue_ext` @0x100f23590); row 0 is none.
+#[test]
+fn usb_cues_keep_a_memory_cues_colour() {
+    let mut f = fixture();
+    let track = track_id(0).to_string();
+    let memory = |time_ms: u32, color_id: u8| rbl_anlz::CueEntry { hot_cue: 0, kind: 1, time_ms, loop_time_ms: 0, color_id, comment: None, color_code: Some(0), rgb: None };
+    let cues = [memory(1000, 6), memory(2000, 0), rbl_anlz::CueEntry { color_code: None, ..memory(3000, 2) }];
+    f.writer.import_usb_cues(&track, &cues, 12800).unwrap();
+    let mut q = f.conn().prepare("SELECT InMsec, Kind, Color, ColorTableIndex FROM djmdCue WHERE rb_local_deleted=0 ORDER BY InMsec").unwrap();
+    let rows: Vec<(i64, i64, i64, i64)> = q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(Result::unwrap).collect();
+    assert_eq!(rows, [(1000, 0, 5, 0), (2000, 0, 255, 0), (3000, 0, 1, 0)], "Aqua, none, Red; never a ColorTableIndex");
+}
+
 #[test]
 fn usb_history_is_repeat_safe_and_appends_new_plays() {
     let mut f = fixture();

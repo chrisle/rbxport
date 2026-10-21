@@ -269,17 +269,22 @@ fn retain_live(state: &AppState, tracks: &mut HashMap<u32, (String, String)>) ->
 /// would write for `entries`. Compared as a set: the order rows were
 /// inserted in carries no meaning.
 fn database_cues_match(state: &AppState, id: &str, entries: &[rbl_anlz::CueEntry]) -> AppResult<bool> {
-    type Row = (i64, Option<i64>, i64, i64, String);
+    // A memory cue's colour is its `Color`, 0-7; any other value is none,
+    // as rekordbox reads it, so 255 and -1 compare as one.
+    type Row = (i64, Option<i64>, i64, Option<i64>, i64, String);
     let mut wanted: Vec<Row> = entries.iter().map(|cue| {
-        let kind = if cue.hot_cue >= 4 { cue.hot_cue + 1 } else { cue.hot_cue };
         let end = (cue.kind == 2).then_some(i64::from(cue.loop_time_ms));
-        (i64::from(cue.time_ms), end, i64::from(kind), i64::from(cue.color_code.unwrap_or(cue.color_id)), cue.comment.clone().unwrap_or_default())
+        let memory = Some(cue.library_color()).filter(|c| (0..=7).contains(c) && cue.hot_cue == 0);
+        (i64::from(cue.time_ms), end, i64::from(cue.library_kind()), memory, i64::from(cue.library_color_table_index()), cue.comment.clone().unwrap_or_default())
     }).collect();
     let mut stored: Vec<Row> = state.read_db(|db| {
         let mut q = db.connection().prepare(
-            "SELECT COALESCE(InMsec,0), OutMsec, COALESCE(Kind,0), COALESCE(ColorTableIndex,0), COALESCE(Comment,'') FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0",
+            "SELECT COALESCE(InMsec,0), OutMsec, COALESCE(Kind,0),
+                    CASE WHEN Kind IN (0,4) AND Color BETWEEN 0 AND 7 THEN Color END,
+                    COALESCE(ColorTableIndex,0), COALESCE(Comment,'')
+             FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0",
         )?;
-        let rows = q.query_map([id], |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.filter(|end| *end >= 0), r.get(2)?, r.get(3)?, r.get(4)?)))?
+        let rows = q.query_map([id], |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.filter(|end| *end >= 0), r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
             .collect::<Result<Vec<Row>, _>>()?;
         Ok(rows)
     }).map_err(write_error)?;
@@ -475,11 +480,22 @@ mod tests {
         cues[1].comment = "Break".into();
         write_stick(&usb.join(anlz), &cues);
         import_then_unchanged("hot cue A renamed");
-        // A memory cue's colour row lives only in the analysis files (the
-        // row keeps `Color` 255), so only the file comparison can see it.
+        // A memory cue's colour row is stored one down in `Color`, as
+        // rekordbox reads it back (#617): row 3 is Orange, 2.
+        let memory_colour = |state: &AppState| state.read_db(|db| Ok(db.connection().query_row(
+            "SELECT Color FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0 AND InMsec=1000", [&id], |r| r.get::<_, i64>(0))?)).unwrap();
+        assert_eq!(memory_colour(&state), 255, "no colour row, no colour");
         cues[0].color_id = 3;
         write_stick(&usb.join(anlz), &cues);
         import_then_unchanged("memory cue colour row changed");
+        assert_eq!(memory_colour(&state), 2, "colour row 3 is Orange");
+        // The library's colour alone differing is a change too: the stick's
+        // is written back.
+        let memory: String = state.read_db(|db| Ok(db.connection().query_row(
+            "SELECT ID FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0 AND InMsec=1000", [&id], |r| r.get(0))?)).unwrap();
+        state.write(|w| w.set_cue_colour(&memory, Some(6))).unwrap();
+        import_then_unchanged("memory cue recoloured in the library");
+        assert_eq!(memory_colour(&state), 2);
         assert!(rows(&state).contains(&(2000, None, 1, 46, Some("Break".into()))));
         assert!(rows(&state).contains(&(3500, None, 6, 1, Some(String::new()))));
 
