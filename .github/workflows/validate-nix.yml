@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  source-smoke:
+  package-smoke:
     name: Nix ${{ matrix.package }} smoke
     runs-on: [self-hosted, linux, x64]
     strategy:
