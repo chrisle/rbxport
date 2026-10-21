@@ -101,6 +101,8 @@ pub struct ExtendedCue {
     pub comment: String,
     /// `djmdCue.ColorTableIndex`; 0 for none.
     pub colour: u8,
+    /// A memory cue's `djmdCue.Color`, 0 (Pink) to 7 (Purple), or `None`.
+    pub memory_colour: Option<u8>,
 }
 
 impl From<&Cue> for ExtendedCue {
@@ -116,6 +118,7 @@ impl From<&Cue> for ExtendedCue {
             },
             comment: String::new(),
             colour: cue.colour,
+            memory_colour: if hot_slot == 0 { cue.memory_colour } else { None },
         }
     }
 }
@@ -201,6 +204,12 @@ fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16
     e[0x20..0x22].copy_from_slice(&link(previous));
     e[0x22..0x24].copy_from_slice(&link(next));
     e[0x34] = EXTENDED_CUE_UNKNOWN;
+    // A memory cue's colour row, one up from its `Color`, 0 for none; a hot
+    // cue's colour comes after the comment. [OBS static, rekordbox 7.2.19
+    // arm64] `PSvDBMain::GetUsbCueExtSharedContent` @0x1018c9c98 writes
+    // `Color + 1` here for a Color below 8 and 0 otherwise (#617), and
+    // `parse_extended_cue` reads a player's back from the same byte.
+    e[0x3a] = cue.memory_colour.map_or(0, |c| rbl_anlz::cues::memory_colour_row(i64::from(c)));
     e[0x48..0x4a].copy_from_slice(
         &u16::try_from(comment.len())
             .unwrap_or(u16::MAX)

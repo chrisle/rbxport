@@ -288,8 +288,9 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
                         kind,
                         time_ms,
                         loop_time_ms: loop_end(time_ms, end, beats, bpm_x100),
+                        // One row up from `Color`, 0 for none (#617).
                         color_id: if kind == 0 || kind == 4 {
-                            u8::try_from(color).ok().filter(|c| *c != 255).unwrap_or(0)
+                            rbl_anlz::cues::memory_colour_row(color)
                         } else {
                             0
                         },
@@ -481,10 +482,58 @@ mod tests {
         assert_eq!(active.len(), 1);
         assert_eq!(
             (active[0].kind, active[0].time_ms, active[0].loop_time_ms, active[0].color_id),
-            (4, 300_000, Some(301_875), 2)
+            (4, 300_000, Some(301_875), 3),
+            "Color 2 (Orange) is colour row 3"
         );
         let sections = rbl_anlz::cues::sections(cues, false);
         assert_eq!(sections[1].payload.len(), 2 * 56, "both memory loops in the memory list");
+    }
+
+    /// #617: a memory cue goes to the stick one colour row up from its
+    /// `Color`, as rekordbox 7.2.19's `convert_cue_to_extPointdata`
+    /// @0x1009bd51c writes it: Pink (0) is row 1, Purple (7) row 8, and
+    /// none, 255 or rekordbox's -1, row 0. Pink went out as none and every
+    /// other colour as the one before it.
+    #[test]
+    fn a_memory_cue_goes_to_the_stick_one_colour_row_up() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE djmdContent (
+                ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
+                TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM INTEGER,
+                AnalysisDataPath TEXT, Length INTEGER, KeyID TEXT, ImagePath TEXT
+             );
+             CREATE TABLE djmdCue (
+                ContentID TEXT, Kind INTEGER, InMsec INTEGER, OutMsec INTEGER,
+                Color INTEGER, ColorTableIndex INTEGER, Comment TEXT, ActiveLoop INTEGER,
+                BeatLoopSize INTEGER, rb_local_deleted INTEGER
+             );
+             INSERT INTO djmdContent (ID, BPM) VALUES ('7', 12800);
+             INSERT INTO djmdCue VALUES
+                ('7', 0, 1000, -1, 0, 0, '', 0, 0, 0),
+                ('7', 0, 2000, -1, 1, 0, '', 0, 0, 0),
+                ('7', 0, 3000, -1, 6, 0, '', 0, 0, 0),
+                ('7', 0, 4000, -1, 7, 0, '', 0, 0, 0),
+                ('7', 0, 5000, -1, 255, 0, '', 0, 0, 0),
+                ('7', 0, 6000, -1, -1, 0, '', 0, 0, 0),
+                ('7', 1, 7000, -1, -1, 21, '', 0, 0, 0);",
+        )
+        .unwrap();
+
+        let extras = track_extras(&conn, &["7".to_owned()]).unwrap();
+        let mut rows: Vec<(u32, u8)> =
+            extras["7"].cues.iter().map(|cue| (cue.time_ms, cue.color_id)).collect();
+        rows.sort_unstable();
+        assert_eq!(
+            rows,
+            [(1000, 1), (2000, 2), (3000, 7), (4000, 8), (5000, 0), (6000, 0), (7000, 0)]
+        );
+        let ext = rbl_anlz::cues::sections(&extras["7"].cues, true);
+        let memory = ext[3].as_cue_entries().unwrap();
+        let mut written: Vec<u8> = memory.iter().map(|cue| cue.color_id).collect();
+        written.sort_unstable();
+        assert_eq!(written, [0, 0, 1, 2, 7, 8], "PCP2's byte at 0x1c");
     }
 
     #[test]
