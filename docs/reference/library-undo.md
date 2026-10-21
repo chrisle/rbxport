@@ -5,7 +5,8 @@
 Which user-visible actions that change the library, its playlists, a device
 library or user files can be undone, and why the rest cannot. Audited for
 #427 on 2026-10-16 against `dev` at `4a42662a`. Update the table when an
-action is added or starts recording history.
+action is added or starts recording history. Folder replacement coverage was
+updated during integration on 2026-10-21 to retain #426 support already in `dev`.
 
 Evidence markers follow the project convention: `[OBS]` is something read in
 the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
@@ -27,7 +28,7 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   Writers that call `AppState::write` directly (imports, relocation, cues,
   analysis, LINK) record nothing. Since #427 the imports and relocations
   among them call `wrote_outside_history`, which clears Redo, or both stacks
-  for a replace, then send `edit-history:changed` [OBS code].
+  for an XML/iTunes replace, then send `edit-history:changed` [OBS code].
 - **Payloads are exact.** Entries keep row ids and before/after column values
   (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`,
   `PlaylistTrackRemoval`, `TrackEdit`, `TrackTagEdit` in
@@ -115,8 +116,8 @@ holds their ids.
 | Action | Entry point | Writes | Status | Evidence | Destructive |
 | --- | --- | --- | --- | --- | --- |
 | Import files or folders, drop onto the collection | `import_files`, `import_files_slice` | new tracks | Not recorded; ends the redo branch. Reversing it is Remove from Collection, which is Permanent | `an_import_ends_the_redo_branch_and_keeps_undo` | No |
-| Folder drop onto the tree, new or "Import as copy" | `import_folder_playlist` | new tracks, playlist, memberships | Not recorded; ends the redo branch | `replacing_a_list_with_a_dropped_folder_ends_the_library_history` (copy part) | No |
-| Folder drop, "Replace existing" | same, `replace` | tombstones the replaced subtree, then imports | Permanent for now: clears history (Undo of older entries could resurrect rows into a deleted list) | same test | Yes. #426 |
+| Folder drop onto the tree, new or "Import as copy" | `import_folder_playlist` | new tracks, playlist, memberships | Not recorded; ends the redo branch | code (`import_folder_playlist`) | No |
+| Folder drop, "Replace existing" | same, `replace` | tombstones the replaced subtree, then imports | Undo: one replacement entry restores the old subtree and memberships | `a_folder_drop_replacement_is_one_undo_and_one_redo` | No while the entry lives |
 | Import XML / iTunes | `import_xml`, `import_itunes`, `import_itunes_selected` | tracks, rating, comment, cues, playlists | Not recorded; ends the redo branch | `an_xml_import_that_would_replace_lists_writes_nothing_until_told_to` | No |
 | Import XML / iTunes, replace same-named lists | same, `replace` | rewrites members of existing lists (`set_tracks`) | Permanent for now: clears history | `an_xml_import_that_replaces_a_list_ends_the_library_history` | Yes. #501 |
 | Import a device playlist into the library | `device_library::device_playlist_import` | tracks, playlist | Not recorded; ends the redo branch (`edit`) | code | No |
@@ -146,5 +147,5 @@ These are the only new product decisions the audit found. Each is filed with
 2. Whether Undo of a key edit that also wrote the file tag should rewrite the
    tag, only say it did not, or not be offered (#507).
 
-The other gaps (#426, #499 to #505, #508) extend the existing contract and
+The other gaps (#499 to #505, #508) extend the existing contract and
 need no new policy.

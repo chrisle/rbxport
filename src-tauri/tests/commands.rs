@@ -798,43 +798,6 @@ fn an_import_ends_the_redo_branch_and_keeps_undo() {
     assert_eq!(run(details::track_details(s.state(), track)).unwrap().rating, 0);
 }
 
-/// #427: Replace existing on a folder drop has no undo yet (#426) and
-/// tombstones the replaced list with its members. An older Remove Tracks
-/// from Playlist on that list would put membership rows back into a deleted
-/// playlist, so the replacement ends the history, as Remove from Collection
-/// does.
-#[test]
-fn replacing_a_list_with_a_dropped_folder_ends_the_library_history() {
-    let s = shell();
-    let folder = s._dir.path().join("Issue 427");
-    std::fs::create_dir_all(&folder).unwrap();
-    write_wav(&folder.join("a.wav"), 1);
-    write_wav(&folder.join("b.wav"), 1);
-    let path = folder.display().to_string();
-    let first =
-        run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None, None)).unwrap();
-    let playlist = first.playlist.unwrap();
-    let a = first.tracks.iter().find(|t| t.title == "a.wav").unwrap().id.clone();
-    let removed = run(commands::remove_tracks_from_playlist(s.handle(), s.state(), playlist.clone(), vec![a])).unwrap();
-    assert!(removed.can_undo);
-
-    // As a copy, beside it: nothing is taken away, so Undo stays.
-    run(commands::import_folder_playlist(s.handle(), s.state(), path.clone(), "root".into(), None, None, Some(true))).unwrap();
-    let kept = s.node("Issue 427 (1)");
-    run(commands::delete_playlist(s.handle(), s.state(), kept.id)).unwrap();
-    run(commands::undo_edit(s.handle(), s.state())).unwrap();
-    assert!(s.has_node("Issue 427 (1)"), "Undo still reaches edits made before a copy");
-
-    let replaced = run(commands::import_folder_playlist(
-        s.handle(), s.state(), path, "root".into(), Some(playlist.clone()), None, None,
-    )).unwrap();
-    assert!(replaced.replaced.is_some());
-    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::NotFound, "nothing older than the replacement can be undone");
-    let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::NotFound);
-}
-
 /// #427: an XML import told to replace same-named lists rewrites their
 /// members with no undo, so it ends the history too.
 #[test]
