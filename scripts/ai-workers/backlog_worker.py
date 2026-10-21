@@ -12,6 +12,8 @@ alias for compatibility with older launchd or shell invocations.
 from __future__ import annotations
 
 import argparse
+import json
+import uuid
 import os
 import re
 import shlex
@@ -25,6 +27,10 @@ from pathlib import Path
 SESSION = os.environ.get("RBX_SESSION", "rbx backlog worker")
 WATCHER_SESSION = os.environ.get("RBX_WATCHER_SESSION", f"{SESSION} watcher")
 WATCH_INTERVAL = float(os.environ.get("RBX_WATCH_INTERVAL", "5"))
+IDLE_GRACE = float(os.environ.get("RBX_IDLE_GRACE", "60"))
+BACKOFF_INITIAL = float(os.environ.get("RBX_BACKOFF_INITIAL", "60"))
+BACKOFF_MAX = float(os.environ.get("RBX_BACKOFF_MAX", "1800"))
+BACKOFF_RESET_AFTER = float(os.environ.get("RBX_BACKOFF_RESET_AFTER", "600"))
 REPO_DIR = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = Path(__file__).resolve()
 GOAL = (
@@ -63,6 +69,7 @@ def has_watcher() -> bool:
 
 def start_worker() -> None:
     log(f'starting worker tmux session "{SESSION}"')
+    session_id = str(uuid.uuid4())
     tmux(
         "new-session",
         "-d",
@@ -70,10 +77,12 @@ def start_worker() -> None:
         SESSION,
         "-c",
         str(REPO_DIR),
-        f"cy {shlex.quote(GOAL)}",
+        f"cy --session-id {session_id} {shlex.quote(GOAL)}",
         check=True,
     )
 
+    target = tmux("display-message", "-p", "-t", PANE_TARGET, "#{session_id}", check=True).stdout.strip()
+    tmux("set-option", "-t", target, "@rbx_session_id", session_id, check=True)
 
 def start_watcher() -> None:
     log(f'starting watcher tmux session "{WATCHER_SESSION}"')
@@ -119,7 +128,7 @@ def stop_all() -> None:
 
 
 def pane_text() -> str:
-    return tmux("capture-pane", "-t", PANE_TARGET, "-p", "-S", "-").stdout
+    return tmux("capture-pane", "-t", PANE_TARGET, "-p").stdout
 
 
 def worker_finished() -> bool:
@@ -134,7 +143,33 @@ def worker_finished() -> bool:
     fields = panes.stdout.split(maxsplit=1)
     if fields and fields[0] == "1":
         return True
-    return bool(DONE_PATTERN.search(pane_text()))
+    # Use the exact worker transcript rather than the newest file: agents and
+    # other interactive sessions can write to the same project directory.
+    target = tmux("display-message", "-p", "-t", PANE_TARGET, "#{session_id}").stdout.strip()
+    session_id = tmux("show-option", "-t", target, "-v", "@rbx_session_id").stdout.strip()
+    if re.fullmatch(r"[0-9a-f-]{36}", session_id):
+        project = re.sub(r"[^a-zA-Z0-9]", "-", str(REPO_DIR))
+        transcript = Path.home() / ".claude" / "projects" / project / f"{session_id}.jsonl"
+        try:
+            # Ignore bookkeeping, but any new request or assistant activity
+            # invalidates a previous completed turn. Partial trailing JSON is
+            # treated as active until the writer finishes it.
+            last = None
+            for line in transcript.read_text().splitlines():
+                event = json.loads(line)
+                if event.get("type") in {"user", "assistant", "api-request", "system"}:
+                    last = event
+            if last and last.get("type") == "system" and last.get("subtype") == "turn_duration":
+                return True
+        except (OSError, ValueError):
+            return False
+        return False
+    # Compatibility with workers launched before session IDs were recorded.
+    text = pane_text()
+    return bool(DONE_PATTERN.search(text) or (
+        re.search(r"(?:Cooked|Worked|Baked|Brewed|Churned|Cogitated|Crunched|Sautéed|Simmered).*?done \d", text)
+        and "❯" in text
+    ))
 
 
 def service_status() -> str:
@@ -152,20 +187,44 @@ def restart_worker() -> None:
 
 def run_watcher() -> None:
     """Continuously monitor the worker and restart it as soon as it finishes."""
-    if WATCH_INTERVAL <= 0:
-        raise ValueError("RBX_WATCH_INTERVAL must be greater than zero")
+    if min(WATCH_INTERVAL, IDLE_GRACE, BACKOFF_INITIAL, BACKOFF_RESET_AFTER) <= 0 or BACKOFF_MAX < BACKOFF_INITIAL:
+        raise ValueError("watch/grace/backoff intervals must be positive; maximum must be >= initial")
 
     if has_worker():
         log(f'adopting worker session "{SESSION}"')
     else:
         start_worker()
-    log(f"watching worker output every {WATCH_INTERVAL:g}s")
-
+    log(f"watching every {WATCH_INTERVAL:g}s; idle grace {IDLE_GRACE:g}s; restart backoff {BACKOFF_INITIAL:g}-{BACKOFF_MAX:g}s")
+    started = time.monotonic()
+    idle_since = None
+    last_text = None
+    delay = BACKOFF_INITIAL
     try:
         while True:
+            now = time.monotonic()
+            text = pane_text() if has_worker() else ""
             if worker_finished():
-                log("worker goal finished (or session exited); restarting")
-                restart_worker()
+                if idle_since is None or text != last_text:
+                    idle_since = now
+                if now - idle_since >= IDLE_GRACE:
+                    if idle_since - started >= BACKOFF_RESET_AFTER:
+                        delay = BACKOFF_INITIAL
+                    log(f"worker completed or exited; retrying in {delay:g}s")
+                    # Recheck throughout backoff: a manually resumed worker
+                    # must not be killed when the retry deadline arrives.
+                    deadline = now + delay
+                    while time.monotonic() < deadline:
+                        time.sleep(min(WATCH_INTERVAL, max(0, deadline - time.monotonic())))
+                        if not worker_finished() or (has_worker() and pane_text() != text):
+                            break
+                    else:
+                        restart_worker()
+                        started = time.monotonic()
+                        delay = min(BACKOFF_MAX, delay * 2)
+                    idle_since = None
+            else:
+                idle_since = None
+            last_text = text
             time.sleep(WATCH_INTERVAL)
     except KeyboardInterrupt:
         print()
