@@ -45,7 +45,7 @@ test("Summary shows the record the row does not carry", async ({ page }) => {
   // pinned by its units rather than by one track's numbers.
   const labels = panel.locator("dl").last().locator("dt");
   await expect(labels).toHaveText([
-    "Time", "File Type", "Size", "Date Created", "Sample Rate", "Bitrate", "DJ Play Count", "Location",
+    "Time", "File Type", "Size", "Date Created", "Sample Rate", "Bitrate", "DJ Play Count", "Location", "Playlists",
   ]);
   await expect(panel.getByText(/^(MP3|WAV) File$/)).toBeVisible();
   await expect(panel.getByText("44100 Hz")).toBeVisible();
