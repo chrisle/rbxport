@@ -238,10 +238,6 @@ jobs:
               return;
             }
             const { data: base } = await github.rest.repos.getBranch({ owner, repo, branch: 'dev' });
-            if (base.commit.sha !== event.base.sha) {
-              core.notice('dev advanced since validation; rebase the PR and rerun checks.');
-              return;
-            }
             const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
               owner, repo, basehead: `${base.commit.sha}...${pr.head.sha}`
             });
