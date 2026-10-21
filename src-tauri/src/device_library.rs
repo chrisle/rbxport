@@ -1168,6 +1168,12 @@ mod tests {
         assert!(readable_libraries(dest.path()).is_empty());
         let blank = tempfile::tempdir().unwrap();
         assert!(readable_libraries(blank.path()).is_empty());
+        // Libraries under both PIONEER and .PIONEER: which is the stick's is
+        // not this tree's to guess, so neither is listed (and the log says why).
+        let (_src, dest) = stick();
+        std::fs::create_dir_all(dest.path().join(".PIONEER/rekordbox")).unwrap();
+        std::fs::copy(dest.path().join("PIONEER/rekordbox/export.pdb"), dest.path().join(".PIONEER/rekordbox/export.pdb")).unwrap();
+        assert!(readable_libraries(dest.path()).is_empty());
     }
 
     #[test]
