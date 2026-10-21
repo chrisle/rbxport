@@ -9,6 +9,21 @@ there is no aarch64 Linux build to seed from.
 nix run github:chrisle/rbxport
 ```
 
+## Run a source build
+
+The default package wraps the pinned AppImage. The flake also exposes a
+`source` package that builds rbxport from the checkout Nix is given, rather
+than running the pinned AppImage:
+
+```sh
+nix run .#source
+```
+
+From GitHub, use `nix run github:chrisle/rbxport#source`. The build takes longer
+because Nix compiles the Rust workspace and builds the frontend with pnpm. Like
+the AppImage package, the source build is managed by Nix and does not use the
+built-in updater.
+
 ## Install
 
 ```sh
