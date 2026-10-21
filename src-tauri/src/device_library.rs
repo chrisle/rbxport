@@ -218,15 +218,34 @@ fn id_from(text: &str) -> AppResult<u32> {
 pub async fn device_libraries(path: String) -> AppResult<Vec<DeviceLibraryDto>> {
     blocking("device_libraries", move || {
         let mount = connected(&path)?;
-        device::formats(&mount)
-            .into_iter()
-            .map(|format| {
-                let library = device::read(&mount, format).map_err(|e| device_error(&e))?;
-                Ok(library_dto(&library))
-            })
-            .collect()
+        Ok(readable_libraries(&mount))
     })
     .await
+}
+
+/// Each library on the stick that can be read, Device Library first.
+///
+/// The two are separate databases and rekordbox lists each under the stick
+/// on its own, so one that cannot be read (a damaged or half-written
+/// `exportLibrary.db`, say) leaves the other in the tree rather than taking
+/// the whole stick's tree with it (#631). Why it could not be read goes to
+/// the log: the interface shows the stick with nothing under it, as it
+/// shows a folder it may not open, and says nothing more.
+fn readable_libraries(mount: &Path) -> Vec<DeviceLibraryDto> {
+    if let Err(error) = rbl_export::export_root_name(mount) {
+        tracing::warn!(device = %mount.display(), %error, "the device's libraries cannot be listed");
+        return Vec::new();
+    }
+    device::formats(mount)
+        .into_iter()
+        .filter_map(|format| match device::read(mount, format) {
+            Ok(library) => Some(library_dto(&library)),
+            Err(error) => {
+                tracing::warn!(device = %mount.display(), library = format_name(format), %error, "a library on the device cannot be read; it is left out of the tree");
+                None
+            }
+        })
+        .collect()
 }
 
 fn library_dto(library: &device::Library) -> DeviceLibraryDto {
@@ -779,8 +798,12 @@ impl StickTracks {
         let library = device::read(mount, format).map_err(|e| device_error(&e))?;
         let mut masters_by_path = std::collections::HashMap::new();
         if format == Format::DeviceLibrary && device::formats(mount).contains(&Format::OneLibrary) {
-            let one = device::read(mount, Format::OneLibrary).map_err(|e| device_error(&e))?;
-            masters_by_path = one.tracks.iter().map(|t| (t.path.clone(), (t.master_db_id, t.master_content_id))).collect();
+            // Only a help for older rows: a OneLibrary that cannot be read
+            // leaves the Device Library's own rows to say what they can (#631).
+            match device::read(mount, Format::OneLibrary) {
+                Ok(one) => masters_by_path = one.tracks.iter().map(|t| (t.path.clone(), (t.master_db_id, t.master_content_id))).collect(),
+                Err(error) => tracing::warn!(device = %mount.display(), %error, "the device's OneLibrary cannot be read; Device Library tracks are matched by their own rows"),
+            }
         }
         Ok(Self { mount: mount.to_path_buf(), library, masters_by_path })
     }
@@ -1112,6 +1135,48 @@ mod tests {
         let tree: Vec<(&str, u32, u32, bool)> = found[0].nodes.iter().map(|n| (n.name.as_str(), n.depth, n.count, n.folder)).collect();
         assert_eq!(tree, [("Sets", 0, 1, true), ("Friday", 1, 2, false), ("Warm Up", 0, 1, false)]);
         assert_eq!(found[0].tracks, 3);
+    }
+
+    /// Overwrites one of the stick's databases with bytes neither reader
+    /// takes, as a damaged or half-written file would be.
+    fn damage(mount: &Path, format: Format) {
+        std::fs::write(mount.join("PIONEER/rekordbox").join(format.file_name()), b"not a database").unwrap();
+    }
+
+    #[test]
+    fn a_library_that_cannot_be_read_leaves_the_other_in_the_tree() {
+        // #631: one unreadable library emptied the whole stick in the tree.
+        let (_src, dest) = stick();
+        damage(dest.path(), Format::OneLibrary);
+        let found = readable_libraries(dest.path());
+        assert_eq!(found.iter().map(|l| l.format).collect::<Vec<_>>(), ["deviceLibrary"]);
+        let tree: Vec<&str> = found[0].nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(tree, ["Sets", "Friday", "Warm Up"]);
+
+        let (_src, dest) = stick();
+        damage(dest.path(), Format::DeviceLibrary);
+        let found = readable_libraries(dest.path());
+        assert_eq!(found.iter().map(|l| l.format).collect::<Vec<_>>(), ["oneLibrary"]);
+        assert_eq!(found[0].tracks, 3);
+    }
+
+    #[test]
+    fn a_stick_whose_libraries_cannot_be_read_lists_none() {
+        let (_src, dest) = stick();
+        damage(dest.path(), Format::DeviceLibrary);
+        damage(dest.path(), Format::OneLibrary);
+        assert!(readable_libraries(dest.path()).is_empty());
+        let blank = tempfile::tempdir().unwrap();
+        assert!(readable_libraries(blank.path()).is_empty());
+    }
+
+    #[test]
+    fn a_device_library_playlist_is_read_for_import_when_the_onelibrary_cannot_be() {
+        let (_src, dest) = stick();
+        damage(dest.path(), Format::OneLibrary);
+        let stick = StickTracks::read(dest.path(), Format::DeviceLibrary).unwrap();
+        assert_eq!(stick.library.tracks.len(), 3);
+        assert!(stick.masters_by_path.is_empty());
     }
 
     #[test]
