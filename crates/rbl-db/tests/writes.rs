@@ -3803,6 +3803,64 @@ fn an_imported_files_key_tag_points_the_track_at_a_key_row() {
     assert_eq!(key_of(&f, &c).as_deref(), Some("Fm"));
 }
 
+/// Every column Reload Tag writes, as stored: the reference columns as
+/// their interned ids, not their names.
+type ReloadRow = (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<i64>, Option<i64>);
+
+fn reload_row(f: &Fixture, id: &str) -> ReloadRow {
+    f.conn()
+        .query_row(
+            "SELECT Title, Commnt, ArtistID, AlbumID, GenreID, LabelID, KeyID, ReleaseYear, TrackNo FROM djmdContent WHERE ID = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)),
+        )
+        .unwrap()
+}
+
+#[test]
+fn reload_tag_records_each_column_it_changed_with_its_exact_ids() {
+    use lofty::prelude::ItemKey;
+
+    // #503: Undo puts back the stored values, ids included; Redo the file's.
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("reload-503.mp3");
+    tagged_mp3(&path, &[(ItemKey::TrackTitle, "Imported"), (ItemKey::TrackArtist, "Old Artist"), (ItemKey::Genre, "House")]);
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+    f.writer.set_field(&id, rbl_db::write::TrackField::Title, "Edited by hand").unwrap();
+    f.writer.set_rating(&id, 3).unwrap();
+    let before = reload_row(&f, &id);
+
+    tagged_mp3(&path, &[
+        (ItemKey::TrackTitle, "From the file"), (ItemKey::TrackArtist, "New Artist"), (ItemKey::Genre, "House"),
+        (ItemKey::AlbumTitle, "An Album"), (ItemKey::Label, "A Label"), (ItemKey::InitialKey, "Fm"),
+        (ItemKey::Comment, "tagged"), (ItemKey::RecordingDate, "2024"), (ItemKey::TrackNumber, "9"),
+    ]);
+    let (_, edits) = f.writer.reload_tags_with_undo(&id).unwrap();
+    let after = reload_row(&f, &id);
+    assert_eq!(after.0, "From the file");
+    assert_ne!(after.2, before.2, "the artist id moved to the new artist's row");
+    assert_eq!(after.4, before.4, "the genre the file repeats keeps its row");
+    // Title, comment, artist, album, label, key, year, track number: the
+    // genre the file repeats is not an edit.
+    assert_eq!(edits.len(), 8, "{edits:?}");
+    assert!(edits.iter().all(|e| !e.is_empty()));
+
+    for edit in edits.iter().rev() {
+        f.writer.undo_track_edit(edit).unwrap();
+    }
+    assert_eq!(reload_row(&f, &id), before, "Undo puts back every stored value, the ids included");
+    assert_eq!(f.one::<i64>("SELECT Rating FROM djmdContent WHERE ID = ?1", &[&id]), 3, "a field Reload Tag does not write is untouched");
+    for edit in &edits {
+        f.writer.redo_track_edit(edit).unwrap();
+    }
+    assert_eq!(reload_row(&f, &id), after, "Redo writes the file's values again");
+
+    // Nothing in the file differs from the row: nothing to undo.
+    let (_, none) = f.writer.reload_tags_with_undo(&id).unwrap();
+    assert!(none.is_empty(), "{none:?}");
+}
+
 #[test]
 fn a_wavs_id3_chunk_gives_an_imported_track_no_key() {
     use lofty::config::WriteOptions;
