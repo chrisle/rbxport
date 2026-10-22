@@ -578,6 +578,47 @@ pub struct PlaylistRename {
     after: String,
 }
 
+/// One playlist, folder or intelligent playlist made (#500): its row, the
+/// values it was made with, and its parent's live children as `(ID, Seq)`
+/// before and after, so Undo can give the run back its old numbering and
+/// Redo can put the row back in the place it had.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaylistCreation {
+    id: String,
+    parent: String,
+    attribute: i64,
+    name: String,
+    smart_list: Option<String>,
+    before: Vec<(String, Option<i64>)>,
+    after: Vec<(String, Option<i64>)>,
+}
+
+impl PlaylistCreation {
+    /// The row made.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+/// One value of one playlist's row changed (#500): an intelligent
+/// playlist's `SmartList`, or a playlist's or folder's `ImagePath`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaylistEdit {
+    id: String,
+    column: &'static str,
+    before: Value,
+    after: Value,
+}
+
+impl PlaylistEdit {
+    /// The edit wrote the value the row already held.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.before == self.after
+    }
+}
+
 /// The exact membership rows removed by one playlist edit, plus the complete
 /// order needed to put them back in their original places.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -872,6 +913,243 @@ impl Writer {
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(id)
+    }
+
+    /// Creates a playlist (`ATTRIBUTE_PLAYLIST`) or folder
+    /// (`ATTRIBUTE_FOLDER`) under `parent`, at `index` among its children
+    /// when one is given (appended otherwise), and keeps what Undo needs
+    /// (#500). An intelligent playlist is
+    /// [`Self::create_smart_playlist_with_undo`].
+    pub fn create_with_undo(
+        &mut self,
+        name: &str,
+        parent: &str,
+        attribute: i64,
+        index: Option<usize>,
+    ) -> Result<(String, PlaylistCreation)> {
+        if attribute != ATTRIBUTE_PLAYLIST && attribute != ATTRIBUTE_FOLDER {
+            return Err(DbError::WriteRefused(format!("attribute {attribute} is not a playlist or folder")));
+        }
+        let before = children_with_seq(self.library.connection(), parent)?;
+        let id = self.create_node(name, parent, attribute)?;
+        if index.is_some() {
+            self.move_to(&id, parent, index)?;
+        }
+        self.creation(id, parent, before)
+    }
+
+    /// [`Self::create_smart_playlist`], keeping what Undo needs (#500).
+    pub fn create_smart_playlist_with_undo(
+        &mut self,
+        name: &str,
+        parent: &str,
+        smart_list: impl FnOnce(&str) -> String,
+    ) -> Result<(String, PlaylistCreation)> {
+        let before = children_with_seq(self.library.connection(), parent)?;
+        let id = self.create_smart_playlist(name, parent, smart_list)?;
+        self.creation(id, parent, before)
+    }
+
+    fn creation(
+        &self,
+        id: String,
+        parent: &str,
+        before: Vec<(String, Option<i64>)>,
+    ) -> Result<(String, PlaylistCreation)> {
+        let conn = self.library.connection();
+        let (attribute, name, smart_list) = conn.query_row(
+            "SELECT Attribute, COALESCE(Name, ''), SmartList FROM djmdPlaylist WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let after = children_with_seq(conn, parent)?;
+        let creation = PlaylistCreation {
+            id: id.clone(),
+            parent: parent.to_owned(),
+            attribute,
+            name,
+            smart_list,
+            before,
+            after,
+        };
+        Ok((id, creation))
+    }
+
+    /// Undoes a creation: the row made becomes a tombstone again, and its
+    /// parent's other children get back the `Seq` they had when they are
+    /// still exactly the ones they were.
+    ///
+    /// Refused as a [`DbError::Conflict`], writing nothing, unless the row is
+    /// still as it was made: there, under the same parent, with the same
+    /// name, rule and no artwork, and holding no tracks and no playlists.
+    /// Undo of a creation never takes anything added to it since (#500,
+    /// following #506): those stay, and so does the playlist.
+    pub fn undo_creation(&mut self, edit: &PlaylistCreation) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(reason) = creation_conflict(&tx, edit)? {
+            return Err(DbError::Conflict(reason));
+        }
+        let mut usn = next_usn(&tx)?;
+        let mut rows = tx.execute(
+            "UPDATE djmdPlaylist SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
+             WHERE ID = ?3 AND rb_local_deleted = 0",
+            params![usn, stamp, edit.id],
+        )?;
+        // A creation at an index renumbered the whole run; with the run as
+        // it was, so are its numbers.
+        let staying = children_with_seq(&tx, &edit.parent)?;
+        if staying.iter().map(|(id, _)| id).eq(edit.before.iter().map(|(id, _)| id)) {
+            for ((id, seq), (_, was)) in staying.iter().zip(&edit.before) {
+                if seq == was {
+                    continue;
+                }
+                usn = next_usn(&tx)?;
+                rows += tx.execute(
+                    "UPDATE djmdPlaylist SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3
+                     WHERE ID = ?4 AND rb_local_deleted = 0",
+                    params![was, usn, stamp, id],
+                )?;
+            }
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// Makes the same row again after [`Self::undo_creation`], in its place
+    /// among the parent's children: with exactly the children it had, every
+    /// one gets back the `Seq` it had after the creation; otherwise it goes
+    /// after the nearest sibling it followed that is still there.
+    ///
+    /// Refused as a [`DbError::Conflict`] when the row is live again or gone,
+    /// or the folder it was made in is no longer there.
+    pub fn redo_creation(&mut self, edit: &PlaylistCreation) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(reason) = recreation_conflict(&tx, edit)? {
+            return Err(DbError::Conflict(reason));
+        }
+        let current = children_with_seq(&tx, &edit.parent)?;
+        let order = place_among(current.into_iter().map(|(id, _)| id).collect(), &edit.id, &edit.after);
+        let target: Vec<(String, Option<i64>)> = if order.iter().eq(edit.after.iter().map(|(id, _)| id)) {
+            edit.after.clone()
+        } else {
+            order.into_iter().enumerate()
+                .map(|(seq, id)| (id, Some(i64::try_from(seq).unwrap_or(i64::MAX))))
+                .collect()
+        };
+        let mut usn = next_usn(&tx)?;
+        let mut rows = tx.execute(
+            "UPDATE djmdPlaylist SET rb_local_deleted = 0, rb_local_usn = ?1, updated_at = ?2
+             WHERE ID = ?3 AND rb_local_deleted = 1",
+            params![usn, stamp, edit.id],
+        )?;
+        let live: std::collections::HashMap<String, Option<i64>> =
+            children_with_seq(&tx, &edit.parent)?.into_iter().collect();
+        for (id, seq) in &target {
+            if live.get(id) == Some(seq) {
+                continue;
+            }
+            usn = next_usn(&tx)?;
+            rows += tx.execute(
+                "UPDATE djmdPlaylist SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3
+                 WHERE ID = ?4 AND ParentID = ?5 AND rb_local_deleted = 0",
+                params![seq, usn, stamp, id, edit.parent],
+            )?;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// Whether Undo (`undo`) or Redo of `edit` would be refused, and why,
+    /// without writing: what [`Self::undo_creation`] and
+    /// [`Self::redo_creation`] check in their own transaction.
+    pub fn creation_conflict(&self, edit: &PlaylistCreation, undo: bool) -> Result<Option<String>> {
+        let conn = self.library.connection();
+        if undo { creation_conflict(conn, edit) } else { recreation_conflict(conn, edit) }
+    }
+
+    /// [`Self::set_smart_list`], keeping the rule it replaced for Undo
+    /// (#500).
+    pub fn set_smart_list_with_undo(&mut self, id: &str, smart_list: &str) -> Result<(Changed, PlaylistEdit)> {
+        self.playlist_edit(id, "SmartList", |writer| writer.set_smart_list(id, smart_list))
+    }
+
+    /// [`Self::set_playlist_artwork`], keeping the image reference it
+    /// replaced for Undo (#500). The copied image file stays on Undo, as a
+    /// track's artwork Undo leaves it.
+    pub fn set_playlist_artwork_with_undo(
+        &mut self,
+        playlist: &str,
+        image: Option<&Path>,
+    ) -> Result<(Changed, PlaylistEdit)> {
+        self.playlist_edit(playlist, "ImagePath", |writer| writer.set_playlist_artwork(playlist, image))
+    }
+
+    fn playlist_edit(
+        &mut self,
+        id: &str,
+        column: &'static str,
+        write: impl FnOnce(&mut Self) -> Result<Changed>,
+    ) -> Result<(Changed, PlaylistEdit)> {
+        let before = self.playlist_value(id, column)?;
+        let changed = write(self)?;
+        let after = self.playlist_value(id, column)?;
+        Ok((changed, PlaylistEdit { id: id.to_owned(), column, before, after }))
+    }
+
+    fn playlist_value(&self, id: &str, column: &'static str) -> Result<Value> {
+        if !WRITABLE_COLUMNS.contains(&column) {
+            return Err(DbError::WriteRefused(format!("{column} is not writable")));
+        }
+        self.library.connection().query_row(
+            &format!("SELECT `{column}` FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0"),
+            params![id],
+            |row| row.get(0),
+        ).optional()?
+            .ok_or_else(|| DbError::WriteRefused(format!("no playlist or folder {id}")))
+    }
+
+    /// Puts back the value a playlist had before `edit`. Refused with
+    /// [`DbError::Conflict`], writing nothing, unless the playlist still
+    /// holds the value the edit left (see [`Self::check_playlist_edit`]).
+    pub fn undo_playlist_edit(&mut self, edit: &PlaylistEdit) -> Result<Changed> {
+        self.check_playlist_edit(edit, true)?;
+        self.touch_playlist(&edit.id, edit.column, &edit.before)
+    }
+
+    /// Writes `edit`'s value again after it was undone.
+    pub fn redo_playlist_edit(&mut self, edit: &PlaylistEdit) -> Result<Changed> {
+        self.check_playlist_edit(edit, false)?;
+        self.touch_playlist(&edit.id, edit.column, &edit.after)
+    }
+
+    /// Whether the playlist holds what Undo (`undo`, the edit's `after`) or
+    /// Redo (its `before`) expects, compared by SQL `IS`; anything else was
+    /// written since outside the history and is kept, as a
+    /// [`DbError::Conflict`] (#506).
+    pub fn check_playlist_edit(&self, edit: &PlaylistEdit, undo: bool) -> Result<()> {
+        if !WRITABLE_COLUMNS.contains(&edit.column) {
+            return Err(DbError::WriteRefused(format!("{} is not writable", edit.column)));
+        }
+        let expected = if undo { &edit.after } else { &edit.before };
+        let same: Option<bool> = self.library.connection().query_row(
+            &format!("SELECT (`{}` IS ?2) FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0", edit.column),
+            params![edit.id, expected],
+            |row| row.get(0),
+        ).optional()?;
+        let what = if edit.column == "SmartList" { "rule" } else { "artwork" };
+        match same {
+            Some(true) => Ok(()),
+            Some(false) => Err(DbError::Conflict(format!("the playlist's {what} has changed since"))),
+            None => Err(DbError::Conflict("the playlist is no longer there".to_owned())),
+        }
     }
 
     /// Renames a playlist or folder.
@@ -4951,6 +5229,63 @@ fn place_among(
     let index = index.unwrap_or(staying.len());
     staying.insert(index, entering.to_owned());
     staying
+}
+
+/// Why Undo of `edit` must not tombstone its row, if it must not: the row
+/// is gone or no longer as it was made, or something has been put in it
+/// since. `None` when Undo may run.
+fn creation_conflict(conn: &Connection, edit: &PlaylistCreation) -> Result<Option<String>> {
+    let row: Option<(String, String, Option<String>, Option<String>)> = conn.query_row(
+        "SELECT ParentID, COALESCE(Name, ''), SmartList, ImagePath
+         FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+        params![edit.id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    ).optional()?;
+    let Some((parent, name, smart_list, image)) = row else {
+        return Ok(Some("the playlist is no longer there".to_owned()));
+    };
+    let children: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0",
+        params![edit.id],
+        |r| r.get(0),
+    )?;
+    let reason = if children > 0 {
+        Some("playlists have been added to the folder since")
+    } else if !live_members(conn, &edit.id)?.is_empty() {
+        Some("tracks have been added to the playlist since")
+    } else if parent != edit.parent {
+        Some("the playlist has been moved since")
+    } else if name != edit.name {
+        Some("the playlist has been renamed since")
+    } else if smart_list != edit.smart_list {
+        Some("the playlist's rule has changed since")
+    } else if image.is_some_and(|path| !path.is_empty()) {
+        Some("the playlist's artwork has changed since")
+    } else {
+        None
+    };
+    Ok(reason.map(str::to_owned))
+}
+
+/// Why Redo of `edit` must not bring its row back, if it must not.
+fn recreation_conflict(conn: &Connection, edit: &PlaylistCreation) -> Result<Option<String>> {
+    let row: Option<(String, i64, i64)> = conn.query_row(
+        "SELECT ParentID, Attribute, rb_local_deleted FROM djmdPlaylist WHERE ID = ?1",
+        params![edit.id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).optional()?;
+    let reason = match row {
+        None => Some("the playlist is no longer there"),
+        Some((_, _, 0)) => Some("the playlist is already there"),
+        Some((parent, attribute, _)) if parent != edit.parent || attribute != edit.attribute => {
+            Some("the playlist has changed since")
+        }
+        Some(_) if edit.parent != ROOT && !node_exists(conn, &edit.parent)? => {
+            Some("the folder it was made in is no longer there")
+        }
+        Some(_) => None,
+    };
+    Ok(reason.map(str::to_owned))
 }
 
 /// `parent`'s live children as `(ID, Seq)`, in tree order.

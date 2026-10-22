@@ -350,6 +350,111 @@ fn a_playlist_deletion_can_be_undone_and_redone_exactly() {
     assert!(f.order(&list).is_empty());
 }
 
+/// `parent`'s live children as `(ID, Seq)`, in tree order.
+fn seq_run(f: &Fixture, parent: &str) -> Vec<(String, Option<i64>)> {
+    let mut stmt = f
+        .conn()
+        .prepare("SELECT ID, Seq FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID")
+        .unwrap();
+    stmt.query_map(params![parent], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+}
+
+fn conflict<T: std::fmt::Debug>(result: Result<T, DbError>, reason: &str) {
+    match result {
+        Err(DbError::Conflict(message)) => assert_eq!(message, reason),
+        other => panic!("expected a conflict ({reason}), got {other:?}"),
+    }
+}
+
+/// #500: a playlist made at a place renumbers its siblings; Undo tombstones
+/// the same row and gives every sibling the `Seq` it had, Redo brings the
+/// same row back with the run as the creation left it.
+#[test]
+fn a_creation_is_undone_and_redone_with_the_exact_sibling_numbering() {
+    let mut f = fixture();
+    // A gap in the run, as rekordbox leaves after a delete.
+    let gap = f.children(ROOT)[1].clone();
+    f.conn().execute("UPDATE djmdPlaylist SET Seq = Seq + 5 WHERE ID = ?1", params![gap]).unwrap();
+    let before = seq_run(&f, ROOT);
+    let rows = f.count("SELECT COUNT(*) FROM djmdPlaylist");
+
+    let (id, made) = f.writer.create_with_undo("Opening", ROOT, ATTRIBUTE_PLAYLIST, Some(1)).unwrap();
+    assert_eq!(made.id(), id);
+    let after = seq_run(&f, ROOT);
+    assert_eq!(after[1].0, id);
+    assert_ne!(after.iter().filter(|(i, _)| *i != id).cloned().collect::<Vec<_>>(), before, "renumbered");
+
+    f.writer.undo_creation(&made).unwrap();
+    assert_eq!(seq_run(&f, ROOT), before, "every sibling's Seq as it was");
+    assert_eq!(f.one::<i64>("SELECT rb_local_deleted FROM djmdPlaylist WHERE ID = ?1", &[&id]), 1, "a tombstone");
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdPlaylist"), rows + 1, "never DELETE");
+
+    f.writer.redo_creation(&made).unwrap();
+    assert_eq!(seq_run(&f, ROOT), after, "the same row in the same place");
+    conflict(f.writer.redo_creation(&made), "the playlist is already there");
+}
+
+/// #500: Undo of a creation refuses, writing nothing, when the row has had
+/// tracks or playlists put in it, or was renamed, moved or deleted since.
+#[test]
+fn undo_of_a_creation_refuses_when_the_new_row_changed_since() {
+    let mut f = fixture();
+    let (playlist, made_playlist) = f.writer.create_with_undo("Friday", ROOT, ATTRIBUTE_PLAYLIST, None).unwrap();
+    let (folder, made_folder) = f.writer.create_with_undo("Crates", ROOT, ATTRIBUTE_FOLDER, None).unwrap();
+
+    f.writer.add_tracks(&playlist, &[track_id(1)]).unwrap();
+    conflict(f.writer.undo_creation(&made_playlist), "tracks have been added to the playlist since");
+    assert_eq!(f.order(&playlist), [track_id(1)], "kept");
+    f.writer.remove_tracks(&playlist, &[track_id(1)]).unwrap();
+
+    f.writer.rename(&playlist, "Saturday").unwrap();
+    conflict(f.writer.undo_creation(&made_playlist), "the playlist has been renamed since");
+    f.writer.rename(&playlist, "Friday").unwrap();
+
+    f.writer.move_to(&playlist, &folder, None).unwrap();
+    conflict(f.writer.undo_creation(&made_folder), "playlists have been added to the folder since");
+    conflict(f.writer.undo_creation(&made_playlist), "the playlist has been moved since");
+    f.writer.move_to(&playlist, ROOT, None).unwrap();
+
+    // As made again: both undo.
+    f.writer.undo_creation(&made_playlist).unwrap();
+    f.writer.undo_creation(&made_folder).unwrap();
+    conflict(f.writer.undo_creation(&made_folder), "the playlist is no longer there");
+    assert!(!f.children(ROOT).contains(&playlist));
+}
+
+/// #500: an intelligent playlist's creation keeps its rule; Undo refuses a
+/// rule changed since, and Redo brings the row back with the rule it had.
+#[test]
+fn an_intelligent_playlist_creation_and_rule_edit_undo_exactly() {
+    let mut f = fixture();
+    let (id, made) = f.writer.create_smart_playlist_with_undo("Smart", ROOT, |id| format!("<NODE Id=\"{id}\"/>")).unwrap();
+    let first = format!("<NODE Id=\"{id}\"/>");
+    let (_, edit) = f.writer.set_smart_list_with_undo(&id, "<NODE Id=\"2\"/>").unwrap();
+    conflict(f.writer.undo_creation(&made), "the playlist's rule has changed since");
+
+    f.writer.undo_playlist_edit(&edit).unwrap();
+    assert_eq!(f.one::<String>("SELECT SmartList FROM djmdPlaylist WHERE ID = ?1", &[&id]), first);
+    conflict(f.writer.undo_playlist_edit(&edit), "the playlist's rule has changed since");
+    f.writer.undo_creation(&made).unwrap();
+    f.writer.redo_creation(&made).unwrap();
+    assert_eq!(f.one::<String>("SELECT SmartList FROM djmdPlaylist WHERE ID = ?1", &[&id]), first);
+    f.writer.redo_playlist_edit(&edit).unwrap();
+    assert_eq!(f.one::<String>("SELECT SmartList FROM djmdPlaylist WHERE ID = ?1", &[&id]), "<NODE Id=\"2\"/>");
+
+    // Playlist artwork: the reference goes back, the file stays.
+    let image = f._dir.path().join("cover-500.png");
+    std::fs::write(&image, b"\x89PNG not really").unwrap();
+    let list = playlist_id(1);
+    let before: Option<String> = f.one("SELECT ImagePath FROM djmdPlaylist WHERE ID = ?1", &[&list]);
+    let (_, artwork) = f.writer.set_playlist_artwork_with_undo(&list, Some(&image)).unwrap();
+    let after: String = f.one("SELECT ImagePath FROM djmdPlaylist WHERE ID = ?1", &[&list]);
+    f.writer.undo_playlist_edit(&artwork).unwrap();
+    assert_eq!(f.one::<Option<String>>("SELECT ImagePath FROM djmdPlaylist WHERE ID = ?1", &[&list]), before);
+    f.writer.redo_playlist_edit(&artwork).unwrap();
+    assert_eq!(f.one::<String>("SELECT ImagePath FROM djmdPlaylist WHERE ID = ?1", &[&list]), after);
+}
+
 #[test]
 fn a_delete_is_always_soft() {
     // rekordbox's sync relies on the tombstone; a real DELETE loses it.
