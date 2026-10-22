@@ -30,6 +30,32 @@ Status is computed from work facts, then written to one canonical `status:*`
 label and one Discord workflow tag. `needs-review` is a separate triage flag.
 It does not mean the fix reached `dev`.
 
+Under the [review and execution policy](development/product-decisions.md#review-and-execution-policy),
+routine investigation, fixes, verification, documentation, and execution of
+recorded decisions are accepted by default across the backlog. Do not route
+technical uncertainty or unfinished work back to the maintainer using
+`needs-review`. Reserve `needs-product-decision` for an exact, genuinely
+unresolved product choice, preserving existing holds and scoped restrictions.
+
+USB database errors bypass product review and go directly to investigation,
+fixing, and validation under the [standing product decision](development/product-decisions.md#usb-database-errors).
+Do not add `needs-review` for an unknown cause, unsupported schema, missing
+diagnostics, or incomplete reproduction. This does not bypass explicit holds,
+ownership, library safety, or normal PR review. A genuine new product choice
+uses `needs-product-decision` for that choice alone.
+
+[Drag-and-drop failures](development/product-decisions.md#drag-and-drop-failures)
+also go directly to investigation, fixing, and validation without `needs-review`.
+Missing reproduction details or an uncertain transfer path do not require
+product approval. Proposals for new capabilities still follow the recorded
+product scope; preserve unrelated concerns in reports with multiple symptoms.
+
+[Startup, file-access, platform, preference, and saved-setting work](development/product-decisions.md#startup-file-access-platform-behavior-preferences-and-saved-settings)
+also bypasses `needs-review`. Investigate failures and establish Rekordbox
+behavior for settings directly. Apply existing product-scope and platform-support
+decisions; this routing does not grant new capabilities or unsupported-platform
+support, release explicit holds, or bypass normal PR review.
+
 | Status | Required evidence | Discord tag |
 | --- | --- | --- |
 | Intake / triage | No verified active work or fix PR | No workflow tag |
