@@ -262,3 +262,154 @@ fn a_negative_analysed_bits_on_a_track_the_sync_rewrites_does_not_stop_it() {
     let report = sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
     assert_eq!(report.tracks, 3);
 }
+
+// A stick rekordbox exported from another library, holding a file at the
+// path a selected track lays out to (#599). The sync renamed the stick's own
+// track to make room and left its analysis where the old path hashes, so the
+// staged export failed to verify with "Analysis path is not discoverable by
+// the CDJ" and "Analysis audio path mismatch" for the same folder, and the
+// stick could not be synced at all. rekordbox never replaces a file at a
+// track's device path: `DatabaseMediator::calc_device_file_path` (7.2.19
+// arm64 @0x1009b6e0c) numbers the new track's file instead [OBS static].
+
+#[test]
+fn a_stick_track_on_the_path_a_selected_track_takes_keeps_its_place() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    exported_elsewhere(src.path(), dest.path(), 2, DB_ID);
+    let before = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
+    let theirs = before.tracks.iter().find(|t| t.title == "Track 1").unwrap().clone();
+    let their_audio = std::fs::read(dest.path().join(theirs.path.trim_start_matches('/'))).unwrap();
+    let their_analysis = std::fs::read(dest.path().join(theirs.analysis_path.trim_start_matches('/'))).unwrap();
+
+    // Another library's track with the same artist and file name, so it lays
+    // out on the stick track's path, but other audio.
+    let other = tempfile::tempdir().unwrap();
+    let mine = track(other.path(), 1, 0);
+    std::fs::write(&mine.source_path, vec![77_u8; 3000]).unwrap();
+    let playlists = vec![SourcePlaylist { id: 20, name: "Mine".into(), track_indices: vec![0], ..Default::default() }];
+    sync_to(dest.path(), &[mine], &playlists, DB_ID + 1).unwrap();
+
+    let after = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
+    assert_eq!(after.tracks.len(), 3, "the stick keeps both of its tracks and gains the selected one");
+    let kept = after.tracks.iter().find(|t| t.title == "Track 1" && t.path == theirs.path).expect("the stick's track keeps its path");
+    assert_eq!(kept.analysis_path, theirs.analysis_path, "and its analysis");
+    assert_eq!(std::fs::read(dest.path().join(theirs.path.trim_start_matches('/'))).unwrap(), their_audio);
+    assert_eq!(std::fs::read(dest.path().join(theirs.analysis_path.trim_start_matches('/'))).unwrap(), their_analysis);
+    let added = after.tracks.iter().find(|t| t.title == "Track 1" && t.path != theirs.path).expect("the selected track is added beside it");
+    assert_eq!(std::fs::read(dest.path().join(added.path.trim_start_matches('/'))).unwrap(), vec![77_u8; 3000]);
+    assert_ne!(added.analysis_path, theirs.analysis_path);
+    let report = rbl_export::verify(dest.path()).unwrap();
+    assert!(report.is_ok(), "{report:?}");
+}
+
+// A stick where rekordbox put two tracks in one analysis directory, the
+// second as `ANLZ0001` (#599, #616). The sync wrote the second track's
+// analysis over the first's `ANLZ0000` and pointed the second at it, so the
+// staged export failed to verify with "Analysis audio path mismatch" and the
+// stick could not be synced. A player tells the two apart by `PPTH`
+// [OBS static: XDJ-R1 native reader, alphatheta-docs
+// `platform/rekordbox-xdj-r1-native-reader.md`, `ANLZ0000`..`ANLZ0010`].
+
+fn named(dir: &Path, id: u64, name: &str) -> SourceTrack {
+    SourceTrack { source_path: { let p = dir.join(name); std::fs::write(&p, vec![id as u8; 2048]).unwrap(); p }, ..track(dir, id, 0) }
+}
+
+fn replace_bytes(bytes: &mut [u8], from: &[u8], to: &[u8]) -> usize {
+    assert_eq!(from.len(), to.len());
+    let mut count = 0;
+    let mut at = 0;
+    while at + from.len() <= bytes.len() {
+        if &bytes[at..at + from.len()] == from {
+            bytes[at..at + from.len()].copy_from_slice(to);
+            count += 1;
+            at += from.len();
+        } else {
+            at += 1;
+        }
+    }
+    count
+}
+
+/// Tracks 1 and 2 exported for `DB_ID`, then made into the stick rekordbox
+/// leaves when their paths collide: `c10013.mp3` and `c16700.mp3` under
+/// `/Contents/TRIODE/UnknownAlbum/` both hash to `P009/0000DCB1`, and track
+/// 2's analysis is `ANLZ0001` there, its `PPTH` naming its own path. Both
+/// databases are edited in place, as rekordbox has them; the record is
+/// removed.
+fn collision_stick(src: &Path, dest: &Path) -> (Vec<SourceTrack>, Vec<SourcePlaylist>) {
+    // Exported as c55555 (same length), so the export does not number it.
+    let tracks = vec![named(src, 1, "c10013.mp3"), named(src, 2, "c55555.mp3")];
+    let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
+    sync_to(dest, &tracks, &playlists, DB_ID).unwrap();
+    std::fs::remove_file(rbl_export::Manifest::path(dest)).unwrap();
+    let library = device_library::read(dest, Format::DeviceLibrary).unwrap();
+    let first = library.tracks.iter().find(|t| t.title == "Track 1").unwrap();
+    let second = library.tracks.iter().find(|t| t.title == "Track 2").unwrap();
+    assert_eq!(first.analysis_path, "/PIONEER/USBANLZ/P009/0000DCB1/ANLZ0000.DAT");
+    let path = second.path.replace("c55555", "c16700");
+    let analysis = first.analysis_path.replace("ANLZ0000", "ANLZ0001");
+    std::fs::rename(dest.join(second.path.trim_start_matches('/')), dest.join(path.trim_start_matches('/'))).unwrap();
+    let old = dest.join(second.analysis_path.trim_start_matches('/'));
+    let mut parsed = rbl_anlz::parse(&std::fs::read(&old).unwrap()).unwrap();
+    parsed.sections.retain(|s| s.tag != rbl_core::FourCc::new(b"PPTH"));
+    parsed.sections.splice(0..0, rbl_anlz::parse(&rbl_anlz::AnlzBuilder::new().path(&path).finish()).unwrap().sections);
+    std::fs::write(dest.join(analysis.trim_start_matches('/')), parsed.to_bytes()).unwrap();
+    std::fs::remove_file(&old).unwrap();
+    std::fs::remove_dir(old.parent().unwrap()).unwrap();
+    let pdb = dest.join("PIONEER/rekordbox/export.pdb");
+    let mut bytes = std::fs::read(&pdb).unwrap();
+    assert!(replace_bytes(&mut bytes, b"c55555", b"c16700") >= 1);
+    assert_eq!(replace_bytes(&mut bytes, second.analysis_path.as_bytes(), analysis.as_bytes()), 1);
+    std::fs::write(&pdb, bytes).unwrap();
+    let one = rbl_onelibrary::playlists::open_read_write(&dest.join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    assert_eq!(one.execute("UPDATE content SET path = ?1, fileName = 'c16700.mp3', analysisDataFilePath = ?2 WHERE title = 'Track 2'", rusqlite::params![path, analysis]).unwrap(), 1);
+    (tracks, playlists)
+}
+
+fn analysis_of(dest: &Path) -> Vec<(String, String, String, Vec<u8>)> {
+    let mut out: Vec<_> = device_library::read(dest, Format::DeviceLibrary).unwrap().tracks.into_iter()
+        .map(|t| { let bytes = std::fs::read(dest.join(t.analysis_path.trim_start_matches('/'))).unwrap(); (t.title, t.path, t.analysis_path, bytes) })
+        .collect();
+    out.sort();
+    out
+}
+
+#[test]
+fn a_stick_track_in_rekordboxs_second_analysis_slot_keeps_it() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    collision_stick(src.path(), dest.path());
+    let before = analysis_of(dest.path());
+    assert_eq!(before[1].2, "/PIONEER/USBANLZ/P009/0000DCB1/ANLZ0001.DAT");
+
+    // Another library's track: both of the stick's are carried.
+    let other = tempfile::tempdir().unwrap();
+    let mine = vec![named(other.path(), 9, "mine.mp3")];
+    let playlists = vec![SourcePlaylist { id: 20, name: "Mine".into(), track_indices: vec![0], ..Default::default() }];
+    sync_to(dest.path(), &mine, &playlists, DB_ID + 1).unwrap();
+    let after = analysis_of(dest.path());
+    assert_eq!(after.len(), 3);
+    assert_eq!(after[..2], before[..], "both keep their paths, slots and analysis bytes");
+    assert!(rbl_export::verify(dest.path()).unwrap().is_ok());
+
+    // And the next sync, from the record this one left, with Verify all
+    // files, which checks every analysis file the record names.
+    let source = sync(DB_ID + 1);
+    rbl_export::export_with_options(dest.path(), &mine, &playlists, &[],
+        &rbl_export::ExportOptions { verify_all: true, sync: Some(&source), ..Default::default() }, &mut |_| {}).unwrap();
+    assert_eq!(analysis_of(dest.path())[..2], before[..]);
+}
+
+#[test]
+fn a_selected_track_beside_one_in_rekordboxs_second_slot_syncs() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    let (tracks, _) = collision_stick(src.path(), dest.path());
+    let before = analysis_of(dest.path());
+    // Track 1, in `ANLZ0000`, is this library's and selected; track 2 is not.
+    let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0], ..Default::default() }];
+    sync_to(dest.path(), &tracks[..1], &playlists, DB_ID).unwrap();
+    let after = analysis_of(dest.path());
+    assert_eq!(after.len(), 2);
+    assert_eq!(after[1], before[1], "the stick's track keeps its slot and analysis");
+    assert_ne!(after[0].2, after[1].2);
+    assert!(rbl_export::verify(dest.path()).unwrap().is_ok());
+}

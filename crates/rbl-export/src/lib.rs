@@ -409,7 +409,23 @@ struct Layout {
     audio: String,
     /// The analysis directory, relative to the stick root.
     anlz_dir: String,
+    /// The analysis files' name in that directory, without extension.
+    anlz_name: String,
     file_name: String,
+}
+
+/// The analysis name every track this export places gets.
+const ANLZ_NAME: &str = "ANLZ0000";
+
+/// Whether `name` is an analysis name a stick's track can have: rekordbox
+/// puts a second track whose path hashes to a directory already in use in
+/// `ANLZ0001`, and so on, and a player tries `ANLZ0000` to `ANLZ0010` in
+/// that directory and takes the one whose `PPTH` names the track [OBS
+/// static: XDJ-R1 native reader, alphatheta-docs
+/// `platform/rekordbox-xdj-r1-native-reader.md`; a rekordbox stick in #616
+/// held `ANLZ0001` beside `ANLZ0000` in four directories] (#599).
+pub(crate) fn anlz_slot(name: &str) -> bool {
+    name.strip_prefix("ANLZ").is_some_and(|n| n.len() == 4 && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// CDJ-3000 firmware 3.20, `sub_12f3f28`: UTF-16 path hash and shard.
@@ -435,6 +451,7 @@ fn layout(track: &SourceTrack, export_id: u32) -> Layout {
         // The two levels are how rekordbox spreads analysis across the tree
         // rather than putting a quarter of a million files in one directory.
         anlz_dir: format!("/PIONEER/USBANLZ/P{:03}/{export_id:08X}", export_id / 1000),
+        anlz_name: ANLZ_NAME.to_owned(),
         file_name,
     }
 }
@@ -619,15 +636,31 @@ fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Ma
     let recorded: BTreeMap<_, _> = previous.into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();
     // Library files on the stick keep their names, and nothing copied may land
     // on one: not this run's, nor one an earlier run pointed at and left.
+    // Nor on a file the stick keeps as it has it: that track's rows, and the
+    // analysis whose PPTH names its path, stay as they are, so a selected
+    // track laid out on the same path is the one numbered. rekordbox never
+    // replaces a file already at a track's device path either:
+    // `DatabaseMediator::calc_device_file_path` (7.2.19 arm64 @0x1009b6e0c)
+    // tries `<name>-1.<ext>`, `<name>-2.<ext>`, … until one is free
+    // (@0x1009b6eb0..0x1009b70cc; see `device_import`) (#599).
     let mut used: BTreeSet<String> = in_place.iter().flatten().map(|path| path_key(path))
         .chain(previous_in_place.iter().cloned())
+        .chain(tracks.iter().filter_map(|t| t.device.as_ref().filter(|d| d.preserve)).map(|d| path_key(&d.audio)))
         .collect();
     tracks.iter().zip(ids).zip(in_place).map(|((track, id), in_place)| {
         let mut place = layout(track, *id);
         if let Some(device) = track.device.as_ref().filter(|d| d.preserve) {
             place.audio.clone_from(&device.audio);
             place.file_name = Path::new(&place.audio).file_name().unwrap_or_default().to_string_lossy().into_owned();
-            place.anlz_dir.clone_from(&device.analysis_dir);
+            place.anlz_dir = device.analysis_dir.replacen("/PIONEER/", &format!("/{root}/"), 1);
+            // In the slot rekordbox gave it, not over the track in `ANLZ0000`.
+            if let Some(name) = track.analysis_source.as_deref().and_then(Path::file_stem).and_then(|n| n.to_str()).filter(|n| anlz_slot(n)) {
+                name.clone_into(&mut place.anlz_name);
+            }
+            // Kept where the stick has it, never renamed: renaming the
+            // audio alone left its analysis under the old path's directory,
+            // which a player no longer finds.
+            return place;
         } else if let Some(audio) = in_place {
             place.audio.clone_from(audio);
             audio.rsplit('/').next().unwrap_or_default().clone_into(&mut place.file_name);
@@ -1607,10 +1640,10 @@ fn export_cancellable_inner(
             .is_some_and(|c| c.anlz_dir == place.anlz_dir && c.analysis == analysis_hash)
             && analysis
                 .iter()
-                .all(|(extension, bytes)| std::fs::read(anlz_dir.join(format!("ANLZ0000.{extension}"))).is_ok_and(|b| b == *bytes));
+                .all(|(extension, bytes)| std::fs::read(anlz_dir.join(format!("{}.{extension}", place.anlz_name))).is_ok_and(|b| b == *bytes));
         for extension in ["DAT", "EXT", "2EX"] {
-            if !track.analysis.iter().any(|(e, _)| e == extension) && anlz_dir.join(format!("ANLZ0000.{extension}")).exists() {
-                deletions.push(PathBuf::from(format!("{}/ANLZ0000.{extension}", place.anlz_dir.trim_start_matches('/'))));
+            if !track.analysis.iter().any(|(e, _)| e == extension) && anlz_dir.join(format!("{}.{extension}", place.anlz_name)).exists() {
+                deletions.push(PathBuf::from(format!("{}/{}.{extension}", place.anlz_dir.trim_start_matches('/'), place.anlz_name)));
             }
         }
         if !track.analysis.is_empty() && !analysis_current {
@@ -1618,14 +1651,14 @@ fn export_cancellable_inner(
             let failed = context(format!("Could not write the analysis of '{}'", track.title));
             std::fs::create_dir_all(&anlz_dir).map_err(&failed)?;
             for (extension, bytes) in analysis {
-                std::fs::write(anlz_dir.join(format!("ANLZ0000.{extension}")), bytes).map_err(&failed)?;
+                std::fs::write(anlz_dir.join(format!("{}.{extension}", place.anlz_name)), bytes).map_err(&failed)?;
                 report.analysis_files += 1;
             }
         }
         // The path the databases carry, whether or not the file was written
         // this run.
         let analyze_path = if track.analysis.iter().any(|(e, _)| e.eq_ignore_ascii_case("DAT")) {
-            format!("{}/ANLZ0000.DAT", place.anlz_dir)
+            format!("{}/{}.DAT", place.anlz_dir, place.anlz_name)
         } else {
             String::new()
         };
@@ -1678,14 +1711,19 @@ fn export_cancellable_inner(
         } else {
             copy_stamp(&under(publication.stage(), &place.audio))?
         };
+        // The record names a track's analysis by its directory, as
+        // `ANLZ0000` there. A stick's track in another slot is rekordbox's
+        // to keep, so the record names none for it rather than the files
+        // of the track in `ANLZ0000`; its analysis is read back each sync.
+        let in_slot = place.anlz_name != ANLZ_NAME;
         recorded.push(ManifestTrack {
-            analysis_hashes: analysis_reused.map_or_else(|| analysis.iter().map(|(e, b)| (e.clone(), manifest::hash(b))).collect(), |c| c.analysis_hashes.clone()),
-            analysis_extensions: analysis.iter().map(|(e, _)| e.clone()).collect(),
+            analysis_hashes: if in_slot { BTreeMap::new() } else { analysis_reused.map_or_else(|| analysis.iter().map(|(e, b)| (e.clone(), manifest::hash(b))).collect(), |c| c.analysis_hashes.clone()) },
+            analysis_extensions: if in_slot { Vec::new() } else { analysis.iter().map(|(e, _)| e.clone()).collect() },
             export_id,
             library_id: track.id,
             source: if track.source_unavailable { carried.map_or(source.clone(), |c| c.source.clone()) } else { source },
             audio: place.audio.clone(),
-            anlz_dir: if track.analysis.is_empty() { String::new() } else { place.anlz_dir.clone() },
+            anlz_dir: if track.analysis.is_empty() || in_slot { String::new() } else { place.anlz_dir.clone() },
             size: if track.source_unavailable { carried.map_or(size, |old| old.size) } else { size },
             modified: if track.source_unavailable { carried.map_or(modified, |old| old.modified) } else { modified },
             analysis: analysis_hash,
