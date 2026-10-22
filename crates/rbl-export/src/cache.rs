@@ -58,6 +58,8 @@ mod tests {
     fn pruning_bounds_completed_files_and_removes_interrupted_conversion() {
         let dir = tempfile::tempdir().unwrap();
         let cache = PreparationCache::new(dir.path().join("cache"));
+        cache.gates.lock().unwrap().insert("old-source".into(), Arc::new(Mutex::new(())));
+        cache.hashes.lock().unwrap().insert("old-source".into(), 42);
         std::fs::create_dir_all(&cache.root).unwrap();
         let interrupted = cache.root.join("conversion-interrupted");
         std::fs::create_dir(&interrupted).unwrap();
@@ -67,6 +69,8 @@ mod tests {
             std::fs::write(cache.root.join(format!("{key}.wav")), vec![1; 64]).unwrap();
         }
         cache.prune(64).unwrap();
+        assert!(cache.gates.lock().unwrap().is_empty());
+        assert!(cache.hashes.lock().unwrap().is_empty());
         assert!(!interrupted.exists());
         let retained_bytes: u64 = std::fs::read_dir(&cache.root).unwrap()
             .map(|entry| entry.unwrap().metadata().unwrap().len()).sum();
@@ -288,6 +292,11 @@ impl PreparationCache {
     /// Evict only known completed entries before attaching active consumers.
     pub fn prune(&self, budget: u64) -> std::io::Result<()> {
         let _consumer = self.consumers.lock().map_err(|e| std::io::Error::other(e.to_string()))?;
+        // Export-boundary pruning also discards per-source bookkeeping. The
+        // process-wide cache must not retain keys from every prior export.
+        self.gates.lock().map_err(|e| std::io::Error::other(e.to_string()))?.clear();
+        self.probes.lock().map_err(|e| std::io::Error::other(e.to_string()))?.clear();
+        self.hashes.lock().map_err(|e| std::io::Error::other(e.to_string()))?.clear();
         self.prune_inner(budget)
     }
 
