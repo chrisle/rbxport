@@ -410,13 +410,48 @@
   visibility: hidden;
 }
 .artworkImage[data-state="shown"] { visibility: visible; }
+/* A square cell, the whole artwork's, takes the whole image scaled to fit
+   it: rekordbox's `QuickPreview::paint` draws with a stretch-to-fit placement
+   when the cell is as wide as it is tall, and fills the width from the top
+   otherwise [OBS static, rekordbox 7.2.19 @0x100167060]. */
+.browser[data-artwork="full"] .artworkImage { object-fit: fill; }
+
+/* The whole artwork's Summary column (`ListViewer::paintHybridColumn`): two
+   lines from x 5, the second a size smaller, with the row's spare height
+   shared equally above, between and below them. The second line's BPM is
+   six half-ems of its font wide and the key 43, each 6 from its neighbour,
+   ending 5 from the edge [OBS static, rekordbox 7.2.19]. */
+.summary {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  padding: 0 5px;
+  line-height: normal;
+}
+.summaryTitle,
+.summaryText {
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+.summaryTitle { line-height: 1; }
+.summaryLine {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(3 * (var(--f-size-ui) - 2px)) 43px;
+  grid-template-columns: minmax(0, 1fr) calc(6 * round(down, calc((var(--f-size-ui) - 2px) / 2), 1px)) 43px;
+  column-gap: 6px;
+  font-size: calc(var(--f-size-ui) - 2px);
+  line-height: 1;
+}
 /* Nothing at all while it decodes — not a record that is about to be covered
    by the sleeve anyway. The record comes back only once the image has given
    up. */
 .artwork:has(.artworkImage[data-state="pending"]) > .record { visibility: hidden; }
 
-/* The waveform sits on a measured band 5pt down the row, not centred in it:
-   rekordbox leaves more room below the baseline than above the badges. */
+/* The waveform sits on a band a fifth of the row's height down and as far
+   up from the bottom, as rekordbox's `PreviewComponent::resized` insets it:
+   5pt and 15 high in a 25pt row, twice both in the whole artwork's. The
+   list sets `--s-preview-band-top` from the row height. */
 .preview {
   padding: var(--s-preview-band-top) 3px 0;
   position: relative;

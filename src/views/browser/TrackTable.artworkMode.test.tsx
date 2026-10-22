@@ -18,9 +18,11 @@ import { __setBackend } from "@/ipc/client";
 import { createMockBackend } from "@/ipc/backend-mock";
 import { PreferencesProvider } from "@/store/usePreferences";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
-import { defaultLayout, resolve } from "@/lib/columns";
+import { defaultLayout, fullArtworkLayout, resolve, type ColumnSpec } from "@/lib/columns";
 import type { ArtworkMode } from "@/lib/session";
-import { columnsForArtworkMode, rowHeightForArtworkMode, TrackTable } from "./TrackTable";
+import {
+  columnsForArtworkMode, fullArtworkWidth, previewBand, rowHeightForArtworkMode, TrackTable,
+} from "./TrackTable";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -39,17 +41,28 @@ const settle = async () => {
   });
 };
 
-function render(props: { artworkMode?: ArtworkMode; onArtworkMode?: (mode: ArtworkMode) => void }) {
+function render(props: {
+  artworkMode?: ArtworkMode;
+  onArtworkMode?: (mode: ArtworkMode) => void;
+  columns?: readonly ColumnSpec[];
+  keyDisplay?: typeof DEFAULT_PREFERENCES.view.keyDisplay;
+}) {
   act(() => {
     root.render(
-      <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update: noop, reset: noop }}>
+      <PreferencesProvider value={{
+        preferences: props.keyDisplay
+          ? { ...DEFAULT_PREFERENCES, view: { ...DEFAULT_PREFERENCES.view, keyDisplay: props.keyDisplay } }
+          : DEFAULT_PREFERENCES,
+        update: noop,
+        reset: noop,
+      }}>
         <TrackTable
           spec={COLLECTION}
           onSortChange={noop}
           title="Collection"
           query=""
           onQueryChange={noop}
-          columns={columns}
+          columns={props.columns ?? columns}
           onColumnMove={noop}
           onColumnResize={noop}
           onColumnToggle={noop}
@@ -170,5 +183,82 @@ describe("artwork display pattern", () => {
     const full = Number.parseInt(rowHeight(), 10);
     expect(scroller.scrollTop).toBe(5 * full);
     expect(scroller.scrollLeft).toBe(0);
+  });
+});
+
+describe("the whole artwork's list (#575)", () => {
+  // rekordbox 7.2.19, static: the whole artwork's own header layout puts
+  // Summary (id 63) after the Artwork (id 61, no heading), and the Preview
+  // waveform is inset a fifth of the row's height above and below.
+  const fullColumns = resolve(fullArtworkLayout(defaultLayout(), true), "full");
+  const cell = (key: string) => host.querySelector<HTMLElement>(`[role="row"][aria-selected] [data-col="${key}"]`);
+
+  it("holds the Artwork width between rekordbox's minimum and maximum", () => {
+    expect(fullArtworkWidth(50)).toBe(50);
+    expect(fullArtworkWidth(20)).toBe(25);
+    expect(fullArtworkWidth(100)).toBe(85);
+  });
+
+  it("insets the waveform by a fifth of the row above and below", () => {
+    expect(previewBand(25)).toEqual({ top: 5, height: 15 });
+    expect(previewBand(50)).toEqual({ top: 10, height: 30 });
+    expect(previewBand(33)).toEqual({ top: 6, height: 21 });
+  });
+
+  it("draws Summary's two lines, a blank Artwork heading and a centred waveform band", async () => {
+    render({ artworkMode: "full", onArtworkMode: noop, columns: fullColumns });
+    await settle();
+    await settle();
+    const summary = cell("summary");
+    expect(summary).not.toBeNull();
+    const [first, second] = [...(summary?.children ?? [])] as HTMLElement[];
+    // The deterministic collection fixture's first row pins the values, not
+    // only the shape of the Summary renderer.
+    expect(first?.textContent).toBe("Something In The Air (Radio Edit)");
+    expect([...(second?.children ?? [])].map((part) => part.textContent)).toEqual([
+      "The Temper Trap", "122.00", "Dbm",
+    ]);
+    // An unanalysed row leaves both unavailable values empty.
+    const missing = [...host.querySelectorAll<HTMLElement>('[data-col="summary"]')]
+      .find((entry) => entry.firstElementChild?.textContent === "Your Eyes (Extended Remix)");
+    expect(missing).toBeDefined();
+    expect([...(missing?.children.item(1)?.children ?? [])].map((part) => part.textContent)).toEqual([
+      "Tujamo", "", "",
+    ]);
+    expect(cell("title")).toBeNull();
+    const headings = [...host.querySelectorAll('[role="columnheader"]')].map((heading) => heading.textContent);
+    expect(headings.slice(0, 4)).toEqual(["#", "Preview", "", "Summary"]);
+    expect(host.querySelector('[aria-label="Resize Artwork"]')).toBeNull();
+    expect(browser().style.getPropertyValue("--s-preview-band-top")).toBe("10px");
+    expect(browser().dataset.artwork).toBe("full");
+  });
+
+  it("formats Summary's key with the selected key display", async () => {
+    render({ artworkMode: "full", onArtworkMode: noop, columns: fullColumns, keyDisplay: "alphanumeric" });
+    await settle();
+    await settle();
+    const summary = cell("summary");
+    const line = summary?.children.item(1);
+    expect(line?.children.item(2)?.textContent).toBe("12A");
+  });
+
+  it("offers Summary rather than Artwork in the whole artwork's column menu", async () => {
+    render({ artworkMode: "full", onArtworkMode: noop, columns: fullColumns });
+    await settle();
+    const heading = [...host.querySelectorAll<HTMLElement>('[role="columnheader"]')][3];
+    act(() => {
+      heading?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    const items = [...document.querySelectorAll('[role="menuitemcheckbox"]')].map((item) => item.textContent);
+    expect(items.some((text) => text?.endsWith("Summary"))).toBe(true);
+    expect(items.some((text) => text?.endsWith("Artwork"))).toBe(false);
+  });
+
+  it("keeps the upper part's Artwork edge fixed too", async () => {
+    render({ onArtworkMode: noop });
+    await settle();
+    expect(host.querySelector('[aria-label="Resize Artwork"]')).toBeNull();
+    expect(browser().style.getPropertyValue("--s-preview-band-top")).toBe("5px");
+    expect(browser().dataset.artwork).toBeUndefined();
   });
 });

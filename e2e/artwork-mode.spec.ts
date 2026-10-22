@@ -43,3 +43,69 @@ test("the whole-artwork button doubles the rows, squares the Artwork cell, and i
   // The stored layout's Artwork width comes back with the upper part.
   expect((await firstRowBoxes(page)).cell.width).toBeCloseTo(before.cell.width, 0);
 });
+
+test("each mode keeps its own columns, the whole artwork's opening with Summary (#575)", async ({ page }) => {
+  // rekordbox 7.2.19 keeps a `-FullArtwork` header layout per table, whose
+  // default puts Summary after the Artwork and hides Track Title, Artist,
+  // BPM and Key [OBS static, kSmallArtworkHeaderDefault].
+  await page.goto("/");
+  const main = page.locator('[data-browser-pane="list"][data-browser-side="main"]');
+  // A heading's accessible name ends with its resize grip's ("Resize ...").
+  const heading = (name: string) => main.getByRole("columnheader", { name: new RegExp(`^${name}( Resize|$)`) });
+  await expect(heading("Track Title")).toBeVisible();
+  await expect(heading("Summary")).toHaveCount(0);
+
+  await page.getByTestId("artwork-mode-full").click();
+  await expect(heading("Summary")).toBeVisible();
+  await expect(heading("Track Title")).toHaveCount(0);
+  const summary = main.locator('[role="row"][aria-selected] [data-col="summary"]').first();
+  await expect(summary).toBeVisible();
+  // Two lines, the second a size smaller.
+  const [title, line] = await summary.locator(":scope > span").evaluateAll((spans) =>
+    spans.map((span) => Number.parseFloat(getComputedStyle(span).fontSize)));
+  expect(line).toBeCloseTo((title ?? 0) - 2, 1);
+  // At the default 128px Summary width the long title clips within its cell
+  // instead of increasing the column width or spilling into the next cell.
+  const clipping = await summary.evaluate((cell) => {
+    const title = cell.firstElementChild as HTMLElement;
+    const cellBox = cell.getBoundingClientRect();
+    const titleBox = title.getBoundingClientRect();
+    const style = getComputedStyle(title);
+    return {
+      cellWidth: cellBox.width,
+      titleRight: titleBox.right,
+      cellRight: cellBox.right,
+      scrollWidth: title.scrollWidth,
+      clientWidth: title.clientWidth,
+      overflowX: style.overflowX,
+      textOverflow: style.textOverflow,
+      whiteSpace: style.whiteSpace,
+    };
+  });
+  expect(clipping.cellWidth).toBeCloseTo(128, 0);
+  expect(clipping.scrollWidth).toBeGreaterThan(clipping.clientWidth);
+  expect(clipping.titleRight).toBeLessThanOrEqual(clipping.cellRight);
+  expect(clipping.overflowX).toBe("hidden");
+  expect(clipping.textOverflow).toBe("clip");
+  expect(clipping.whiteSpace).toBe("nowrap");
+
+  await page.getByTestId("artwork-mode-partial").click();
+  await expect(heading("Track Title")).toBeVisible();
+  await expect(heading("Summary")).toHaveCount(0);
+});
+
+test("the sub-browser has its own pair of artwork buttons (#575)", async ({ page }) => {
+  // `SubTrackListHeader` makes both buttons and places them before its
+  // search box; its mode is its own [OBS static, rekordbox 7.2.19].
+  await page.goto("/");
+  await page.getByRole("button", { name: "Sub-Browser Window" }).click();
+  const panel = page.getByRole("region", { name: "Sub-Browser" });
+  const subFull = panel.getByTestId("artwork-mode-full");
+  await expect(subFull).toHaveAttribute("aria-pressed", "false");
+  await subFull.click();
+  await expect(subFull).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.getByRole("columnheader", { name: /^Summary( Resize|$)/ })).toBeVisible();
+  // The main browser's stays where it was.
+  const mainFull = page.locator('[data-browser-pane="list"][data-browser-side="main"]').getByTestId("artwork-mode-full");
+  await expect(mainFull).toHaveAttribute("aria-pressed", "false");
+});
