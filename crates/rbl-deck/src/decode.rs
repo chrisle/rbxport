@@ -93,9 +93,9 @@ pub struct Streamer {
 impl Streamer {
     /// Opens a file and prepares it to be played at `device_rate`.
     pub fn open(path: &Path, device_rate: u32) -> Result<Self> {
-        let file = std::fs::File::open(path)?;
+        let (source, aifc) = rbl_audio::aifc::open(path)?;
         let stream = MediaSourceStream::new(
-            Box::new(file),
+            source,
             symphonia::core::io::MediaSourceStreamOptions::default(),
         );
 
@@ -111,7 +111,7 @@ impl Streamer {
                 &FormatOptions::default(),
                 &MetadataOptions::default(),
             )
-            .map_err(|e| DeckError::Decode(e.to_string()))?;
+            .map_err(|e| DeckError::Decode(aifc.describe(e)))?;
         let format = probed.format;
 
         let track = format
@@ -618,6 +618,42 @@ mod tests {
             samples.push(-value);
         }
         write_wav(path, rate, 2, &samples);
+    }
+
+    #[test]
+    fn an_aifc_labelled_in24_plays() {
+        // #527: QuickTime and Core Audio label 24-bit big-endian PCM `in24`,
+        // which symphonia 0.5 refuses on its own.
+        let frames = 2_205_u32;
+        let mut comm = Vec::new();
+        comm.extend_from_slice(&2_u16.to_be_bytes());
+        comm.extend_from_slice(&frames.to_be_bytes());
+        comm.extend_from_slice(&24_u16.to_be_bytes());
+        comm.extend_from_slice(&[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]);
+        comm.extend_from_slice(b"in24");
+        comm.extend_from_slice(&[0, 0]);
+        let data: Vec<u8> = (0..frames * 2).flat_map(|i| (i32::try_from(i).unwrap() << 8).to_be_bytes()[1..].to_vec()).collect();
+        let mut body = b"AIFC".to_vec();
+        body.extend_from_slice(b"COMM");
+        body.extend_from_slice(&u32::try_from(comm.len()).unwrap().to_be_bytes());
+        body.extend_from_slice(&comm);
+        body.extend_from_slice(b"SSND");
+        body.extend_from_slice(&u32::try_from(data.len() + 8).unwrap().to_be_bytes());
+        body.extend_from_slice(&[0; 8]);
+        body.extend_from_slice(&data);
+        let mut file = b"FORM".to_vec();
+        file.extend_from_slice(&u32::try_from(body.len()).unwrap().to_be_bytes());
+        file.extend_from_slice(&body);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("issue-527-in24.aif");
+        std::fs::write(&path, file).unwrap();
+
+        // Before #527 this was "unsupported feature: aifc: Compression type
+        // not implemented".
+        let mut streamer = Streamer::open(&path, 44_100).unwrap();
+        let played = drain(&mut streamer);
+        assert!(played.len().abs_diff(frames as usize * 2) <= 2, "{} samples", played.len());
+        assert!(played.iter().any(|s| *s != 0.0));
     }
 
     #[test]

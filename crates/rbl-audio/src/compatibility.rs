@@ -51,16 +51,14 @@ impl Format {
 fn error(e: impl std::fmt::Display) -> AudioError {
     AudioError::Unsupported(e.to_string())
 }
-fn open(path: &Path) -> Result<Box<dyn symphonia::core::formats::FormatReader>> {
-    let stream = MediaSourceStream::new(
-        Box::new(File::open(path)?),
-        MediaSourceStreamOptions::default(),
-    );
+fn open(path: &Path) -> Result<(Box<dyn symphonia::core::formats::FormatReader>, crate::aifc::Aifc)> {
+    let (source, aifc) = crate::aifc::open(path)?;
+    let stream = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
         hint.with_extension(ext);
     }
-    Ok(symphonia::default::get_probe()
+    let format = symphonia::default::get_probe()
         .format(
             &hint,
             stream,
@@ -70,8 +68,9 @@ fn open(path: &Path) -> Result<Box<dyn symphonia::core::formats::FormatReader>> 
             },
             &MetadataOptions::default(),
         )
-        .map_err(error)?
-        .format)
+        .map_err(|e| error(aifc.describe(e)))?
+        .format;
+    Ok((format, aifc))
 }
 
 /// Conservative common denominator for USB-capable CDJs: MPEG-1 MP3 or
@@ -91,7 +90,7 @@ pub struct AudioProperties {
 }
 
 pub fn inspect(path: &Path) -> Result<AudioProperties> {
-    let format = open(path)?;
+    let (format, aifc) = open(path)?;
     let track = format.default_track().ok_or(AudioError::NoTrack)?;
     let p = &track.codec_params;
     let ext = path
@@ -102,7 +101,11 @@ pub fn inspect(path: &Path) -> Result<AudioProperties> {
     let codec_ok = match ext.as_str() {
         "mp3" => p.codec == CODEC_TYPE_MP3,
         "wav" => p.codec == CODEC_TYPE_PCM_S16LE || p.codec == CODEC_TYPE_PCM_S24LE,
-        "aif" | "aiff" => p.codec == CODEC_TYPE_PCM_S16BE || p.codec == CODEC_TYPE_PCM_S24BE,
+        // A player reads the compression type itself, so an alias symphonia
+        // is shown past (`in24` for `NONE`) is converted, not copied.
+        "aif" | "aiff" => {
+            !aifc.aliased && (p.codec == CODEC_TYPE_PCM_S16BE || p.codec == CODEC_TYPE_PCM_S24BE)
+        }
         _ => false,
     };
     Ok(AudioProperties { compatible: codec_ok
@@ -272,7 +275,7 @@ pub fn convert(source: &Path, destination: &Path, target: Format) -> Result<u64>
 /// Progress is decoded milliseconds; false cancels between audio packets.
 #[allow(clippy::too_many_lines, reason = "linear streaming decode and resample loop")]
 pub fn convert_observed(source: &Path, destination: &Path, target: Format, progress: &mut dyn FnMut(u64, Option<u64>) -> bool) -> Result<u64> {
-    let mut format = open(source)?;
+    let (mut format, _) = open(source)?;
     let track = format.default_track().ok_or(AudioError::NoTrack)?;
     let track_id = track.id;
     let params = &track.codec_params;

@@ -12,6 +12,7 @@
     reason = "sample counts and durations convert between usize and f64 throughout decoding"
 )]
 
+pub mod aifc;
 pub mod compatibility;
 
 use std::path::Path;
@@ -124,8 +125,8 @@ fn rekordbox_lead(path: &Path, codec: symphonia::core::codecs::CodecType) -> i64
 impl MonoStream {
     /// Opens a file and its first audio track.
     pub fn open(path: &Path) -> Result<Self> {
-        let file = std::fs::File::open(path)?;
-        let stream = MediaSourceStream::new(Box::new(file), symphonia::core::io::MediaSourceStreamOptions::default());
+        let (source, aifc) = aifc::open(path)?;
+        let stream = MediaSourceStream::new(source, symphonia::core::io::MediaSourceStreamOptions::default());
 
         let mut hint = Hint::new();
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
@@ -134,7 +135,7 @@ impl MonoStream {
 
         let probed = symphonia::default::get_probe()
             .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
-            .map_err(|e| AudioError::Unsupported(e.to_string()))?;
+            .map_err(|e| AudioError::Unsupported(aifc.describe(e)))?;
         let format = probed.format;
 
         let track = format
