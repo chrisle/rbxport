@@ -6048,7 +6048,7 @@ fn relocation_conflict_in(conn: &Connection, edit: &TrackRelocation, undo: bool)
         for holder in holders {
             let holder = holder?;
             if !edit.links.iter().any(|other| other.content == holder) {
-                return Ok(Some("another track in the collection uses that file now".to_owned()));
+                return Ok(Some("another track in the collection uses that file".to_owned()));
             }
         }
     }

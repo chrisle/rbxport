@@ -1434,7 +1434,7 @@ fn undo_and_redo_of_a_relocation_refuse_a_file_another_track_took_since() {
     f.conn()
         .execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = ?2", params![old.0, track_id(5)])
         .unwrap();
-    assert!(matches!(f.writer.undo_relocation(&run), Err(DbError::Conflict(reason)) if reason == "another track in the collection uses that file now"));
+    assert!(matches!(f.writer.undo_relocation(&run), Err(DbError::Conflict(reason)) if reason == "another track in the collection uses that file"));
     f.conn()
         .execute("UPDATE djmdContent SET FolderPath = '/fixture/audio/track005.mp3' WHERE ID = ?1", params![track_id(5)])
         .unwrap();
