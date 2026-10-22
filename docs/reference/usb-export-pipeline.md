@@ -321,8 +321,18 @@ shared cache is pruned.
   `export_progress()`. Repeated events of the same stage and unit within
   100 ms are dropped; a new stage, unit, or terminal state is sent at once.
   `canCancel` is computed from the stage.
+- While it writes, it holds `rbl_devices::awake::KeepAwake`: an IOKit
+  `PreventUserIdleDisplaySleep` assertion on macOS (the one rekordbox holds
+  while it is in front) and system and display power requests on Windows,
+  so idle sleep cannot cut the stick off part-way through a long sync
+  (#661, #662). Sleep the user asks for is not blocked; Linux asks nothing.
 - On success it updates the job with `upToDate`, counters, and
   `warningsCount`.
+- `sync_error` words a failed write the stick itself reported (EIO on macOS
+  and Linux, a CRC, I/O device or hardware error on Windows, or the
+  export's `DeviceGone`) as "An error occurred while exporting: the USB
+  drive could not read or write its data…", telling the user to check the
+  drive before syncing to it again. The OS error stays as the detail.
 - Errors pass through `disconnected_during_export`. If the export failed and
   the mount path is no longer a directory, the error becomes "The USB was
   disconnected during the sync. Plug it back in and sync again; the sync

@@ -2384,8 +2384,54 @@ fn sync_error(e: &rbl_export::ExportError) -> AppError {
             ErrorKind::ReadOnly,
             "Not enough space available on the device",
         ).with_detail(format!("({io})")),
+        rbl_export::ExportError::Io(io) if media_failed(io) => AppError::new(ErrorKind::Internal, MEDIA_FAILED)
+            .with_detail(format!("({io})")),
+        // The export's own name for a read or write the stick failed (EIO,
+        // ENXIO, ENODEV). A stick that is gone afterwards is reported as
+        // unplugged by `disconnected_during_export`; one still mounted failed.
+        rbl_export::ExportError::DeviceGone => AppError::new(ErrorKind::Internal, MEDIA_FAILED)
+            .with_detail(format!("({e})")),
         _ => AppError::new(ErrorKind::Internal, e.to_string()),
     }
+}
+
+/// What a sync says when the stick itself failed a read or write while it
+/// stayed connected (#661). rekordbox says only "An error occurred while
+/// exporting." (rekordbox 7.2.19, `BrowseBasicView::dbMessageExportError`);
+/// the operating system's "Input/output error (os error 5)" follows as the
+/// detail. Syncing again writes to the same failing drive, so the message
+/// says to stop and check it first.
+const MEDIA_FAILED: &str = "An error occurred while exporting: the USB drive could not read or write its data. \
+    The drive may be failing, or it lost power for a moment. Copy anything you need off it and check it with \
+    Disk Utility First Aid (Mac) or Error checking (Windows) before syncing to it again.";
+
+/// Whether the operating system reported that the drive failed a read or
+/// write: EIO on macOS and Linux, and on Windows a CRC (data) error, an I/O
+/// device error, or a hardware error. Context added on the way up
+/// (`Could not write …: …`) and `tempfile`'s path wrapper keep the
+/// operating system's own text but drop its code, so that text is checked
+/// too.
+fn media_failed(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    // EIO, the same number on macOS and Linux.
+    const CODES: &[i32] = &[5];
+    #[cfg(windows)]
+    // ERROR_CRC, ERROR_DEVICE_HARDWARE_ERROR, ERROR_IO_DEVICE.
+    const CODES: &[i32] = &[23, 483, 1117];
+    #[cfg(not(any(unix, windows)))]
+    const CODES: &[i32] = &[];
+    if error.raw_os_error().is_some_and(|code| CODES.contains(&code)) {
+        return true;
+    }
+    let mut source: Option<&(dyn std::error::Error + 'static)> = error.get_ref().map(|inner| inner as _);
+    while let Some(inner) = source {
+        if inner.downcast_ref::<std::io::Error>().and_then(std::io::Error::raw_os_error).is_some_and(|code| CODES.contains(&code)) {
+            return true;
+        }
+        source = inner.source();
+    }
+    let text = error.to_string();
+    CODES.iter().any(|code| text.contains(&format!("(os error {code})")))
 }
 
 #[allow(clippy::too_many_arguments, reason = "export options and independent progress/cancellation callbacks")]
@@ -4929,6 +4975,47 @@ mod tests {
         assert_eq!(super::sync_error(&rbl_export::ExportError::Cancelled).kind, crate::error::ErrorKind::Cancelled);
         let other = super::sync_error(&rbl_export::ExportError::Io(std::io::Error::other("bad sector")));
         assert_eq!((other.kind, other.message.as_str()), (crate::error::ErrorKind::Internal, "bad sector"));
+    }
+
+    /// A stick that fails a write while still mounted says the drive failed
+    /// and to check it before syncing again, not only the OS error, which
+    /// stays as the detail (#661). The staging error is the one the reporter
+    /// saw: `tempfile` and the export's context each re-wrap it, dropping
+    /// the code but keeping the OS text.
+    #[cfg(unix)]
+    #[test]
+    fn a_drive_that_fails_a_write_says_to_check_it_before_syncing_again() {
+        let eio = std::io::Error::from_raw_os_error(5);
+        let staging = std::io::Error::new(eio.kind(), format!(
+            "Could not create a staging folder in /Volumes/MUSIC USB: {eio} at path \"/Volumes/MUSIC USB/.rbxport-staging-Qx6Fvi\""
+        ));
+        let error = super::sync_error(&rbl_export::ExportError::Io(staging));
+        assert_eq!(error.message, super::MEDIA_FAILED);
+        assert!(error.message.starts_with("An error occurred while exporting"));
+        assert!(error.full_message().ends_with("(Could not create a staging folder in /Volumes/MUSIC USB: Input/output error (os error 5) at path \"/Volumes/MUSIC USB/.rbxport-staging-Qx6Fvi\")"));
+        // The code itself, and the code behind a wrapper that keeps it.
+        assert_eq!(super::sync_error(&rbl_export::ExportError::Io(std::io::Error::from_raw_os_error(5))).message, super::MEDIA_FAILED);
+        let wrapped = std::io::Error::other(std::io::Error::from_raw_os_error(5));
+        assert!(super::media_failed(&wrapped));
+        // A write the export reports as the device going away, with the stick
+        // still mounted, is the same failure.
+        assert_eq!(super::sync_error(&rbl_export::ExportError::DeviceGone).message, super::MEDIA_FAILED);
+        // Other failures keep their own words.
+        assert!(!super::media_failed(&std::io::Error::from_raw_os_error(30)));
+        assert!(!super::media_failed(&std::io::Error::other("Read-only file system (os error 50)")));
+        assert!(!super::media_failed(&std::io::Error::other("bad sector")));
+        let read_only = super::sync_error(&rbl_export::ExportError::Io(std::io::Error::from_raw_os_error(30)));
+        assert_eq!(read_only.message, "Read-only file system (os error 30)");
+    }
+
+    /// Windows reports a failing stick as a CRC (data) error or an I/O
+    /// device error, never as code 5, which is "Access is denied" there.
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_that_fails_a_write_on_windows_says_to_check_it() {
+        assert!(super::media_failed(&std::io::Error::from_raw_os_error(23)));
+        assert!(super::media_failed(&std::io::Error::from_raw_os_error(1117)));
+        assert!(!super::media_failed(&std::io::Error::from_raw_os_error(5)));
     }
 
     /// A track whose analysis folder is gone from disk is exported without
