@@ -308,5 +308,11 @@
       <parameter name="from" code="From" type="track"><cocoa key="from"/></parameter>
       <result type="boolean"/>
     </command>
+
+    <command name="reorder my tags" code="RbxpMtOr" description="Puts existing My Tags in the order given: either every category, or every tag of one category, each ID exactly once. Never creates, deletes, renames or moves a tag to another category, and leaves track assignments alone. Returns true if the order changed, false if it was already so.">
+      <cocoa class="RbxReorderMyTagsCommand"/>
+      <direct-parameter><type type="text" list="yes"/></direct-parameter>
+      <result type="boolean"/>
+    </command>
   </suite>
 </dictionary>

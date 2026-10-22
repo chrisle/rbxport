@@ -15,14 +15,20 @@ use crate::state::{AppState, LibraryEdit};
 /// A versioned JSON catalog keeps category identity intact even when names
 /// overlap. IDs belong to this library; a missing DBID is not a global ID.
 pub fn catalog_json(library_id: u64, rows: &[rbl_db::export_info::MyTagRow]) -> String {
-    let categories: Vec<_> = rows.iter().filter(|row| row.attribute == 1)
+    let categories: Vec<_> = rows.iter().filter(|row| row.attribute == 1).collect();
+    // Tags grouped by their category's place, each category's in `Seq`
+    // order (the rows come in `Seq` order and the sort is stable), as
+    // rekordbox lists them; tags of no live category last.
+    let mut tags: Vec<_> = rows.iter().filter(|row| row.attribute == 0).collect();
+    tags.sort_by_key(|tag| categories.iter().position(|category| category.id == tag.parent).unwrap_or(usize::MAX));
+    let categories: Vec<_> = categories.into_iter()
         .map(|row| json!({ "id": row.id, "name": row.name })).collect();
-    let tags: Vec<_> = rows.iter().filter(|row| row.attribute == 0)
+    let tags: Vec<_> = tags.into_iter()
         .map(|row| json!({ "id": row.id, "name": row.name, "category_id": row.parent })).collect();
     json!({
         "schema_version": 1,
         "library_id": (library_id != 0).then(|| library_id.to_string()),
-        "capabilities": ["my_tags.read", "my_tags.add", "my_tags.remove", "collection.remove_checked", "waveform.overview.read"],
+        "capabilities": ["my_tags.read", "my_tags.add", "my_tags.remove", "my_tags.reorder", "collection.remove_checked", "waveform.overview.read"],
         "categories": categories,
         "tags": tags,
     }).to_string()
@@ -77,6 +83,22 @@ pub async fn update<R: Runtime>(
     Ok(ScriptValue::Bool(changed.load(Ordering::SeqCst)))
 }
 
+/// Puts every category, or every tag of one category, in the order of
+/// `order`. Guarded, recorded and refreshed as [`update`] is.
+pub async fn reorder<R: Runtime>(app: AppHandle<R>, order: Vec<String>) -> Result<ScriptValue, ScriptError> {
+    let bridge = Arc::clone(app.state::<Arc<Bridge>>().inner());
+    bridge.refuse_if_protected()?;
+    let changed = Arc::new(AtomicBool::new(false));
+    let result = Arc::clone(&changed);
+    recorded_edit(app.clone(), app.state(), "script_reorder_my_tags", Touched::Tracks, "Reorder My Tags", move |writer| {
+        bridge.refuse_if_protected().map_err(|error| rbl_db::DbError::WriteRefused(error.message))?;
+        let (_, edit) = writer.reorder_my_tags_with_undo(&order)?;
+        result.store(!edit.is_empty(), Ordering::SeqCst);
+        Ok(LibraryEdit::MyTagOrder(edit))
+    }).await?;
+    Ok(ScriptValue::Bool(changed.load(Ordering::SeqCst)))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -92,11 +114,20 @@ mod tests {
         let catalog: serde_json::Value = serde_json::from_str(&catalog_json(42, &rows)).unwrap();
         assert_eq!(catalog["library_id"], "42");
         assert_eq!(catalog["schema_version"], 1);
-        for capability in ["my_tags.read", "my_tags.add", "my_tags.remove", "collection.remove_checked", "waveform.overview.read"] {
+        for capability in ["my_tags.read", "my_tags.add", "my_tags.remove", "my_tags.reorder", "collection.remove_checked", "waveform.overview.read"] {
             assert!(catalog["capabilities"].as_array().unwrap().contains(&json!(capability)));
         }
         assert_eq!(catalog["tags"][0]["id"], "3");
         assert_eq!(catalog["tags"][1]["category_id"], "2");
+        // Tags follow their category's place, each category's in Seq order.
+        let seq_row = |id: &str, parent: &str, attribute, seq| rbl_db::export_info::MyTagRow {
+            id: id.into(), name: id.into(), parent: parent.into(), attribute, seq,
+        };
+        let rows = vec![seq_row("B", "root", 1, 1), seq_row("A", "root", 1, 2),
+            seq_row("a1", "A", 0, 1), seq_row("b1", "B", 0, 1), seq_row("b2", "B", 0, 2), seq_row("x", "gone", 0, 1)];
+        let catalog: serde_json::Value = serde_json::from_str(&catalog_json(1, &rows)).unwrap();
+        let order: Vec<_> = catalog["tags"].as_array().unwrap().iter().map(|tag| tag["id"].as_str().unwrap()).collect();
+        assert_eq!(order, ["b1", "b2", "a1", "x"]);
         assert_eq!(catalog["categories"].as_array().unwrap().len(), 2);
         let missing: serde_json::Value = serde_json::from_str(&catalog_json(0, &[])).unwrap();
         assert!(missing["library_id"].is_null());
@@ -147,5 +178,64 @@ mod tests {
         assert_eq!(read(), ScriptValue::List(vec![ScriptValue::Text(MY_TAG_PEAK.into())]));
         assert_eq!(run(MyTagOperation::Remove).unwrap(), ScriptValue::Bool(true));
         assert_eq!(run(MyTagOperation::Remove).unwrap(), ScriptValue::Bool(false));
+    }
+
+    #[test]
+    fn script_reorder_honors_protection_refresh_undo_and_refuses_bad_orders() {
+        use rbl_db::{fixture::{self, Shape, MY_TAG_CATEGORY, MY_TAG_PEAK, MY_TAG_WARM_UP}, Library, OpenMode};
+        use tauri::Listener;
+        let dir = tempfile::tempdir().unwrap();
+        let location = fixture::build(dir.path(), Shape::default()).unwrap();
+        let db = Library::open(location.clone(), OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        let app = tauri::test::mock_app();
+        app.manage(Arc::clone(&state));
+        let bridge = Arc::new(Bridge::default());
+        app.manage(Arc::clone(&bridge));
+        let refreshed = Arc::new(AtomicBool::new(false));
+        let seen = Arc::clone(&refreshed);
+        app.listen("library:changed", move |_| { seen.store(true, Ordering::SeqCst); });
+        let run = |order: &[&str]| tauri::async_runtime::block_on(reorder(
+            app.handle().clone(), order.iter().map(|&id| id.to_owned()).collect(),
+        ));
+        // The order the index holds, as the panel and filters show it.
+        let shown = || state.library().unwrap().my_tags().iter()
+            .find(|category| category.name == "Situation").unwrap().tags.clone();
+        let catalog = || {
+            let text = match tauri::async_runtime::block_on(catalog(Arc::clone(&state))).unwrap() {
+                ScriptValue::Text(text) => text,
+                other => panic!("catalog is text, not {other:?}"),
+            };
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            value["tags"].as_array().unwrap().iter().map(|tag| tag["id"].as_str().unwrap().to_owned()).collect::<Vec<_>>()
+        };
+        let swapped = [MY_TAG_WARM_UP, MY_TAG_PEAK];
+
+        assert!(run(&swapped).is_err(), "unknown protection must refuse");
+        *bridge.preferences.write() = Some(json!({"advanced": {"protectLibrary": true}}));
+        assert_eq!(run(&swapped).unwrap_err().code, ScriptError::NOT_MODIFIABLE);
+        assert_eq!(shown(), ["Peak", "Warm-up"]);
+        *bridge.preferences.write() = Some(json!({"advanced": {"protectLibrary": false}}));
+        for bad in [&[][..], &[MY_TAG_WARM_UP][..], &[MY_TAG_WARM_UP, MY_TAG_PEAK, MY_TAG_CATEGORY][..],
+            &[MY_TAG_WARM_UP, "unknown"][..]] {
+            assert!(run(bad).is_err(), "{bad:?} must be refused");
+        }
+        assert!(!refreshed.load(Ordering::SeqCst));
+        assert_eq!(shown(), ["Peak", "Warm-up"]);
+
+        assert_eq!(run(&swapped).unwrap(), ScriptValue::Bool(true));
+        assert!(refreshed.load(Ordering::SeqCst));
+        assert_eq!(shown(), ["Warm-up", "Peak"]);
+        assert_eq!(catalog(), [MY_TAG_WARM_UP, MY_TAG_PEAK]);
+        assert_eq!(run(&swapped).unwrap(), ScriptValue::Bool(false));
+        assert_eq!(run(&[MY_TAG_CATEGORY]).unwrap(), ScriptValue::Bool(false));
+
+        tauri::async_runtime::block_on(crate::commands::undo_edit(app.handle().clone(), app.state())).unwrap();
+        assert_eq!(shown(), ["Peak", "Warm-up"]);
+        assert_eq!(catalog(), [MY_TAG_PEAK, MY_TAG_WARM_UP]);
+        tauri::async_runtime::block_on(crate::commands::redo_edit(app.handle().clone(), app.state())).unwrap();
+        assert_eq!(shown(), ["Warm-up", "Peak"]);
     }
 }

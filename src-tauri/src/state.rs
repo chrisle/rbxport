@@ -117,6 +117,8 @@ pub(crate) enum LibraryEdit {
     /// One My Tag set per track: the Info tab's toggles edit one track,
     /// a tick in the My Tag panel every selected track.
     TrackTags(Vec<rbl_db::write::TrackTagEdit>),
+    /// The categories, or one category's tags, put in a new order (#584).
+    MyTagOrder(rbl_db::write::MyTagOrder),
     /// One cue or loop command on one track (#504): an add, move, slot,
     /// colour, comment, Active Loop or delete, or a whole Convert Memory
     /// Cues to Hot Cues.
@@ -147,6 +149,7 @@ impl LibraryEdit {
                 edits.is_empty() || edits.iter().all(rbl_db::write::TrackEdit::is_empty)
             }
             Self::TrackTags(edits) => edits.iter().all(rbl_db::write::TrackTagEdit::is_empty),
+            Self::MyTagOrder(edit) => edit.is_empty(),
             Self::RenamePlaylist(_) | Self::MovePlaylist(_) | Self::ReplacePlaylist(_) | Self::CreatePlaylist(_) => false,
             Self::SortPlaylists(edit) => edit.is_empty(),
             Self::Cues(edit) => edit.is_empty(),

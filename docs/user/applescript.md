@@ -94,17 +94,32 @@ tell application "rbxport"
 end tell
 ```
 
+To change the order My Tags are listed in, name every category, or every tag
+of one category, in the new order:
+
+```applescript
+tell application "rbxport"
+    -- Every tag of category "10", first to last.
+    set didChange to reorder my tags {"89", "67", "71"}
+    -- Every category, first to last. Their tags keep their own order.
+    set didChange to reorder my tags {"11", "10", "12", "13"}
+end tell
+```
+
 `my tag catalog` returns this shape (example IDs and names):
 
 ```json
 {
   "schema_version": 1,
   "library_id": "123456789",
-  "capabilities": ["my_tags.read", "my_tags.add", "my_tags.remove"],
+  "capabilities": ["my_tags.read", "my_tags.add", "my_tags.remove", "my_tags.reorder"],
   "categories": [{"id": "10", "name": "Texture"}],
   "tags": [{"id": "67", "name": "grinding", "category_id": "10"}]
 }
 ```
+
+Categories are listed in their order. Tags are listed category by category, in
+the categories' order, and in each category's own order.
 
 An unavailable library identity is `null`, never a shared sentinel ID. A
 companion should verify the identity before reusing saved mappings and require
@@ -119,6 +134,18 @@ all supplied IDs and updates **one track atomically** using the current database
 membership, preserving other assignments. Multiple commands are not one
 transaction. Unknown, deleted, or category IDs are refused, even on removal.
 
+`reorder my tags` orders one list at a time, as rekordbox's My Tag panel
+does: the categories, or the tags inside one category. The list must name
+every live entry of that one list exactly once, and nothing else. Unknown,
+deleted or repeated IDs, a missing ID, an ID from another category, or a mix of
+categories and tags are refused with nothing written. Reordering never creates,
+deletes, renames or moves a tag to another category, and never changes which
+tracks carry a tag. It returns `true` when the order changed and `false` when
+the library already had it. The stored order is renumbered from 1 in the order
+given, as rekordbox renumbers it after a drag. Undo puts back the exact earlier
+order and is refused if a tag has been added, removed or moved in that list
+since.
+
 Changes use the same library writer, undo history, index refresh, and events as
 UI edits. Library Protection is checked again when the queued edit runs; the
 writer retains its Rekordbox-running and recovery guards. Native My Tags are
@@ -128,7 +155,8 @@ conventions apply: malformed ID lists are `-1703`, unresolved track objects are
 `-1728`, and writer refusals (including unknown tag IDs) are `-10003` with a
 reason. Read/database failures are errors rather than empty successful results.
 
-Creation, renaming, merging, and deletion of taxonomy entries are not exposed.
+Creation, renaming, merging, deletion, and moving tags between categories are
+not exposed.
 Create the initial vocabulary in the library first, then map companion labels
 to its IDs. Model results, evidence, drafts, and publication/ownership history
 belong in the companion. These operations do not provide Lexicon synchronization.

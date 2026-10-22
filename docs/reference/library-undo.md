@@ -19,6 +19,8 @@ Relocate, Relocate by location and Auto Relocate were added for #502 on
 2026-10-22.
 Remove from Tag List, Clear Tag List and Remove from History became one Undo
 step each for #508 on 2026-10-22.
+AppleScript My Tag reordering was added to the history for #584 on
+2026-10-22.
 
 Evidence markers follow the project convention: `[OBS]` is something read in
 the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
@@ -55,7 +57,7 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`,
   `PlaylistTrackRemoval`, `PlaylistTrackAddition`, `PlaylistReorder`,
   `PlaylistCreation`, `PlaylistEdit`, `MembershipReplacement`, `TrackEdit`,
-  `TrackTagEdit`, `CueRevision`, `TrackRelocation`, `ListRemoval` in
+  `TrackTagEdit`, `MyTagOrder`, `CueRevision`, `TrackRelocation`, `ListRemoval` in
   `crates/rbl-db/src/write.rs`; `KeyTagWrite` in `src-tauri/src/key_tag.rs`). A multi-track edit is one entry with one
   step per track, undone last first [OBS code].
 - **Conflict check (#506).** Before Undo or Redo writes, the rows it would
@@ -67,7 +69,7 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   order (an addition with their `TrackNo`); a Tag List or history removal
   by the list's live rows and their `TrackNo` (and, for a history, that the
   session is not deleted); a reorder by those members and
-  their `TrackNo`; deletion, Sort Items and folder-drop replacement by the rows they
+  their `TrackNo`; a My Tag order by its list's ids and `Seq`; deletion, Sort Items and folder-drop replacement by the rows they
   name. An entry of several tracks is checked whole before any is written.
   When something outside the history changed one since (a player over LINK,
   a USB import, rekordbox while RBXport stayed open), nothing is written,
@@ -267,6 +269,7 @@ holds their ids.
 | Key with "Write the value to the ID3 tag" | same, `write_key_tag` | also the audio file's key tag | Undo, one entry: the library's key and each written file's previous key tag; refused if either changed since; a file that cannot be written back changes nothing | `undo_and_redo_of_a_key_edit_restore_the_files_tag_with_the_library`, `undo_of_a_key_written_into_a_file_without_one_takes_the_key_out_again`, `undo_of_a_key_edit_is_refused_when_the_files_tag_changed_since`, `a_failed_tag_write_undoes_nothing_and_keeps_the_entry` (`src-tauri/tests/commands.rs`) | No while the entry lives (#507) |
 | BPM in the info panel | `set_track_field` `bpm` → `grid::set_tempo` | `.DAT/.EXT` grid, `BPM` | One "Set Tempo" entry in the track's grid history, as the grid editor's own; earlier grid entries stay; ends the library redo branch | `a_typed_bpm_is_one_grid_undo_step_and_keeps_the_earlier_ones` (`grid.rs` unit) | No (#505) |
 | My Tags | `details::set_my_tags` | `djmdSongMyTag` | Undo | code (`LibraryEdit::TrackTags`) [ASSUME: no command-level test] | No |
+| My Tag order (AppleScript `reorder my tags`) | `scripting::my_tags::reorder` → `Writer::reorder_my_tags_with_undo` | `djmdMyTag.Seq` of the categories or of one category's tags | Undo, one "Reorder My Tags" entry; refused if that list's ids or `Seq` changed since | `a_my_tag_reorder_undoes_and_redoes_exactly_and_refuses_a_changed_run` (`crates/rbl-db/tests/writes.rs`), `script_reorder_honors_protection_refresh_undo_and_refuses_bad_orders` (`scripting/my_tags.rs` unit) | No (#584) |
 | Add / Delete Artwork (tracks) | `details::add_artwork`, `clear_artwork` | `ImagePath`; image copied into the share | Undo (path only; the copied file stays) | code [ASSUME: no command-level Undo test] | No |
 | Reset DJ Play Count | `reset_play_count` | `DJPlayCount` | Undo | code [ASSUME: no command-level Undo test] | No |
 | Reload Tag | `reload_tags` | Title, Comment, Artist, Album, Genre, Label, Key, Year, Track No. from the file | Not recorded | code | Yes: manual edits lost. #503 |

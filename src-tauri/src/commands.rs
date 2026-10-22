@@ -858,7 +858,9 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
         LibraryEdit::ReplacePlaylist(_) | LibraryEdit::ReplacePlaylistContents(_) => Touched::Playlists,
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
-        LibraryEdit::Track(_) | LibraryEdit::KeyEdit { .. } | LibraryEdit::TrackTags(_) | LibraryEdit::Relocate(_) => Touched::Tracks,
+        // The index's My Tag list (filters, panel) is read in a full load.
+        LibraryEdit::Track(_) | LibraryEdit::KeyEdit { .. } | LibraryEdit::TrackTags(_) | LibraryEdit::Relocate(_)
+        | LibraryEdit::MyTagOrder(_) => Touched::Tracks,
         LibraryEdit::Cues(revision) => Touched::Cues(revision.content().to_owned()),
         LibraryEdit::ListRemoval(removal) => match removal.list() {
             rbl_db::write::RemovalList::TagList => Touched::TagList,
@@ -886,6 +888,8 @@ fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool)
         | LibraryEdit::AddPlaylistTracks { .. } | LibraryEdit::ReorderPlaylist(_)
         // Checked in the one transaction that writes it (#508).
         | LibraryEdit::ListRemoval(_)
+        // Checked in the transaction that writes it.
+        | LibraryEdit::MyTagOrder(_)
         // Every playlist of a replacement is checked in the one transaction
         // that writes them.
         | LibraryEdit::ReplacePlaylistContents(_) => Ok(()),
@@ -966,6 +970,7 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
             }
             Ok(())
         }
+        LibraryEdit::MyTagOrder(value) => if undo { writer.undo_my_tag_order(value) } else { writer.redo_my_tag_order(value) }.map(|_| ()),
         LibraryEdit::Cues(value) => if undo { writer.undo_cue_revision(value) } else { writer.redo_cue_revision(value) }.map(|_| ()),
         LibraryEdit::CreatePlaylist(value) => if undo { writer.undo_creation(value) } else { writer.redo_creation(value) }.map(|_| ()),
         LibraryEdit::PlaylistEdit(value) => if undo { writer.undo_playlist_edit(value) } else { writer.redo_playlist_edit(value) }.map(|_| ()),

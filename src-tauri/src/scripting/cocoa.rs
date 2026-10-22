@@ -70,6 +70,7 @@ pub fn install(app: &AppHandle) {
         RbxReadMyTagsCommand::class(),
         RbxAddMyTagsCommand::class(),
         RbxRemoveMyTagsCommand::class(),
+        RbxReorderMyTagsCommand::class(),
     );
     extend_application();
 }
@@ -1519,6 +1520,26 @@ define_class!(
         #[unsafe(method_id(performDefaultImplementation))]
         fn perform(&self) -> Option<Retained<AnyObject>> {
             once(self, |command| change_my_tags(command, "from", rbl_db::write::MyTagOperation::Remove));
+            None
+        }
+    }
+);
+
+define_class!(
+    // SAFETY: NSScriptCommand is designed for subclassing; no additional ivars.
+    #[unsafe(super(NSScriptCommand, NSObject))]
+    #[name = "RbxReorderMyTagsCommand"]
+    struct RbxReorderMyTagsCommand;
+
+    impl RbxReorderMyTagsCommand {
+        #[unsafe(method_id(performDefaultImplementation))]
+        fn perform(&self) -> Option<Retained<AnyObject>> {
+            once(self, |command| {
+                match super::my_tags::tag_ids(from_objc(command.directParameter().as_deref())) {
+                    Ok(order) => defer(async move { super::my_tags::reorder(app()?.clone(), order).await }),
+                    Err(error) => fail(&error),
+                }
+            });
             None
         }
     }
