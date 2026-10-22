@@ -27,6 +27,22 @@ The first-beat cue is written to the library after the analysis files are
 published. If that write is refused, the new grid stays and the track is
 reported as failed with a message saying the cue was not added.
 
+## See BPM changes in Export mode
+
+RBXport already displays tempo changes from a track's variable beat grid.
+Choose **1 PLAYER** from the layout menu and load the track. In
+**Settings > View > Layout > Waveform**, enable **Show BPM changes** to see BPM-change
+labels and tempo ramps on the player waveforms. This setting is on by default.
+
+Open the player's **GRID** tab to see the grid BPM at the playhead. Play or
+seek through the track to inspect the tempo in each section. The browser's
+track-list BPM remains a single track value; it is not the section readout.
+
+The grid must contain tempo changes. If it does not, use **Analyze Track**,
+enable **BPM / Grid**, and select **RBXport** analysis mode to generate a
+variable grid. Re-analysis replaces the existing grid, so it is not necessary
+when a suitable variable grid already exists.
+
 ## Preservation and locks
 
 Key-only analysis changes key metadata without regenerating files, moving
