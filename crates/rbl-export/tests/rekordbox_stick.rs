@@ -366,6 +366,20 @@ fn collision_stick(src: &Path, dest: &Path) -> (Vec<SourceTrack>, Vec<SourcePlay
     (tracks, playlists)
 }
 
+/// Every file under `dir`, relative to it, sorted.
+fn files_under(dir: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() { walk(root, &path, out); } else { out.push(path.strip_prefix(root).unwrap().to_string_lossy().into_owned()); }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out.sort();
+    out
+}
+
 fn analysis_of(dest: &Path) -> Vec<(String, String, String, Vec<u8>)> {
     let mut out: Vec<_> = device_library::read(dest, Format::DeviceLibrary).unwrap().tracks.into_iter()
         .map(|t| { let bytes = std::fs::read(dest.join(t.analysis_path.trim_start_matches('/'))).unwrap(); (t.title, t.path, t.analysis_path, bytes) })
@@ -404,12 +418,18 @@ fn a_selected_track_beside_one_in_rekordboxs_second_slot_syncs() {
     let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let (tracks, _) = collision_stick(src.path(), dest.path());
     let before = analysis_of(dest.path());
+    let files_before = files_under(&dest.path().join("Contents"));
+    let analysis_before = files_under(&dest.path().join("PIONEER/USBANLZ"));
     // Track 1, in `ANLZ0000`, is this library's and selected; track 2 is not.
     let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0], ..Default::default() }];
     sync_to(dest.path(), &tracks[..1], &playlists, DB_ID).unwrap();
     let after = analysis_of(dest.path());
     assert_eq!(after.len(), 2);
     assert_eq!(after[1], before[1], "the stick's track keeps its slot and analysis");
-    assert_ne!(after[0].2, after[1].2);
+    // The carried track holds `ANLZ0001`, not the whole directory: track 1
+    // keeps its path and `ANLZ0000`, and is not copied again beside it.
+    assert_eq!(after[0], before[0], "the selected track keeps its path and ANLZ0000");
+    assert_eq!(files_under(&dest.path().join("Contents")), files_before, "no second copy, nothing orphaned");
+    assert_eq!(files_under(&dest.path().join("PIONEER/USBANLZ")), analysis_before);
     assert!(rbl_export::verify(dest.path()).unwrap().is_ok());
 }

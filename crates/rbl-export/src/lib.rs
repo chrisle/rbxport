@@ -428,6 +428,12 @@ pub(crate) fn anlz_slot(name: &str) -> bool {
     name.strip_prefix("ANLZ").is_some_and(|n| n.len() == 4 && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// One analysis file set on the stick, `ANLZ` name included, compared as
+/// the stick's file system compares paths.
+fn analysis_slot_key(dir: &str, name: &str) -> String {
+    path_key(&format!("{dir}/{name}"))
+}
+
 /// CDJ-3000 firmware 3.20, `sub_12f3f28`: UTF-16 path hash and shard.
 /// Matches all 61 independently exported rekordbox reference tracks.
 fn analysis_directory(audio: &str, root: &str) -> String {
@@ -1238,8 +1244,13 @@ fn export_cancellable_inner(
     // before this export: the databases keep naming it, as they did.
     let mut absent_audio: BTreeSet<String> = BTreeSet::new();
     let mut written_audio_paths = BTreeSet::new();
-    let mut written_analysis_paths: BTreeSet<String> = tracks.iter()
-        .filter_map(|t| t.device.as_ref().filter(|d| d.preserve).map(|d| path_key(&d.analysis_dir)))
+    // A carried track holds its directory's slot, not the whole directory: a
+    // carried track in rekordbox's `ANLZ0001` leaves `ANLZ0000` there to the
+    // selected track whose path hashes to it, which keeps its path and
+    // analysis rather than being copied again under a new name (#599).
+    let mut written_analysis_paths: BTreeSet<String> = tracks.iter().zip(&layouts)
+        .filter(|(t, _)| t.device.as_ref().is_some_and(|d| d.preserve))
+        .map(|(_, place)| analysis_slot_key(&place.anlz_dir, &place.anlz_name))
         .collect();
     for (index, track) in tracks.iter().enumerate() {
         // Reported before the track is dealt with, so a skip reports too:
@@ -1323,7 +1334,7 @@ fn export_cancellable_inner(
             let ext = original.extension().map_or(String::new(), |e| format!(".{}", e.to_string_lossy()));
             let parent = original.parent().unwrap_or(Path::new("/Contents"));
             let mut suffix = 0_u32;
-            while !written_analysis_paths.insert(path_key(&place.anlz_dir)) {
+            while !written_analysis_paths.insert(analysis_slot_key(&place.anlz_dir, &place.anlz_name)) {
                 suffix += 1;
                 if suffix > 200_003 { return Err(ExportError::Conflict("Analysis directory space exhausted".into())); }
                 place.file_name = format!("{stem}-{export_id}-{suffix}{ext}");
