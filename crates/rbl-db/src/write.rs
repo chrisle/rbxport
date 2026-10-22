@@ -655,6 +655,60 @@ impl PlaylistTrackRemoval {
     }
 }
 
+/// The list a [`ListRemoval`] took rows off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemovalList {
+    /// The Tag List (`djmdSongTagList`).
+    TagList,
+    /// One history session (`djmdSongHistory` rows of this `HistoryID`).
+    History(String),
+}
+
+/// The exact rows one Remove from Tag List, Clear Tag List or Remove from
+/// History soft-deleted (#508), and the list's live rows with their
+/// `TrackNo` before and after it. Undo brings exactly `removed` back and
+/// gives every row the number it had; Redo takes them off again. Track
+/// rows, `DJPlayCount` among them, are never touched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListRemoval {
+    list: RemovalList,
+    removed: Vec<String>,
+    before: Vec<(String, i64)>,
+    after: Vec<(String, i64)>,
+}
+
+impl ListRemoval {
+    fn between(list: RemovalList, before: Vec<(String, i64)>, after: Vec<(String, i64)>) -> Self {
+        let left: std::collections::HashSet<&String> = after.iter().map(|(id, _)| id).collect();
+        let removed = before.iter().filter(|(id, _)| !left.contains(id)).map(|(id, _)| id.clone()).collect();
+        Self { list, removed, before, after }
+    }
+
+    /// Nothing was taken off: no selected track was on the list.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.removed.is_empty()
+    }
+
+    #[must_use]
+    pub fn list(&self) -> &RemovalList {
+        &self.list
+    }
+
+    /// The rows taken off, in the order the list held them.
+    #[must_use]
+    pub fn removed(&self) -> &[String] {
+        &self.removed
+    }
+
+    fn changed_since(&self) -> &'static str {
+        match self.list {
+            RemovalList::TagList => "the Tag List has changed since",
+            RemovalList::History(_) => "the history has changed since",
+        }
+    }
+}
+
 /// The exact membership rows one Add Tracks to Playlist created (#499), and
 /// the playlist's live memberships, with their `TrackNo`, in order before
 /// and after it. Undo
@@ -2604,10 +2658,18 @@ impl Writer {
     /// Soft-deleted, as every other membership row is [ASSUME: no capture
     /// of rekordbox taking one off].
     pub fn tag_list_remove(&mut self, contents: &[String]) -> Result<Changed> {
+        self.tag_list_remove_with_undo(contents).map(|(changed, _)| changed)
+    }
+
+    /// [`Writer::tag_list_remove`], keeping the rows it took off and the
+    /// list's rows with their `TrackNo` before and after, read in the same
+    /// transaction, so the removal can be undone (#508).
+    pub fn tag_list_remove_with_undo(&mut self, contents: &[String]) -> Result<(Changed, ListRemoval)> {
         self.prepare()?;
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let before = numbered_rows(&tx, &RemovalList::TagList)?;
         let mut rows = 0;
         for content in contents {
             rows += tx.execute(
@@ -2631,22 +2693,109 @@ impl Writer {
                 )?;
             }
         }
+        let removal = ListRemoval::between(RemovalList::TagList, before, numbered_rows(&tx, &RemovalList::TagList)?);
         tx.commit()?;
-        Ok(Changed { rows, usn: 0 })
+        Ok((Changed { rows, usn: 0 }, removal))
     }
 
     /// Empties the Tag List.
     pub fn tag_list_clear(&mut self) -> Result<Changed> {
+        self.tag_list_clear_with_undo().map(|(changed, _)| changed)
+    }
+
+    /// [`Writer::tag_list_clear`], keeping every row it took off and their
+    /// `TrackNo`, so the clear can be undone (#508).
+    pub fn tag_list_clear_with_undo(&mut self) -> Result<(Changed, ListRemoval)> {
         self.prepare()?;
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let before = numbered_rows(&tx, &RemovalList::TagList)?;
         let rows = tx.execute(
             "UPDATE djmdSongTagList SET rb_local_deleted = 1, updated_at = ?1 WHERE rb_local_deleted = 0",
             params![stamp],
         )?;
+        let removal = ListRemoval::between(RemovalList::TagList, before, numbered_rows(&tx, &RemovalList::TagList)?);
         tx.commit()?;
-        Ok(Changed { rows, usn: 0 })
+        Ok((Changed { rows, usn: 0 }, removal))
+    }
+
+    /// Puts back the rows a Tag List or history removal took off, at the
+    /// numbers every row of the list had before it (#508).
+    pub fn undo_list_removal(&mut self, edit: &ListRemoval) -> Result<Changed> {
+        self.set_list_removal(edit, false)
+    }
+
+    /// Takes the same rows off again and gives the rest the numbers the
+    /// removal left them (#508).
+    pub fn redo_list_removal(&mut self, edit: &ListRemoval) -> Result<Changed> {
+        self.set_list_removal(edit, true)
+    }
+
+    fn set_list_removal(&mut self, edit: &ListRemoval, deleted: bool) -> Result<Changed> {
+        if edit.is_empty() {
+            return Err(DbError::WriteRefused("empty list-removal history".to_owned()));
+        }
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(reason) = list_removal_conflict(&tx, edit, deleted)? {
+            return Err(DbError::Conflict(reason));
+        }
+        let (table, result) = match &edit.list {
+            RemovalList::TagList => ("djmdSongTagList", if deleted { &edit.after } else { &edit.before }),
+            RemovalList::History(_) => ("djmdSongHistory", if deleted { &edit.after } else { &edit.before }),
+        };
+        // The Tag List's rows carry no update number, as rekordbox writes
+        // them; a history's rows take one each, as the removal gave them.
+        let counted = matches!(edit.list, RemovalList::History(_));
+        let mut usn = if counted { next_usn(&tx)? - 1 } else { 0 };
+        let mut rows = 0;
+        for id in &edit.removed {
+            let flipped = if counted {
+                usn += 1;
+                tx.execute(
+                    &format!("UPDATE {table} SET rb_local_deleted = ?1, rb_local_usn = ?2, updated_at = ?3
+                              WHERE ID = ?4 AND rb_local_deleted = ?5"),
+                    params![i64::from(deleted), usn, stamp, id, i64::from(!deleted)],
+                )?
+            } else {
+                tx.execute(
+                    &format!("UPDATE {table} SET rb_local_deleted = ?1, updated_at = ?2
+                              WHERE ID = ?3 AND rb_local_deleted = ?4"),
+                    params![i64::from(deleted), stamp, id, i64::from(!deleted)],
+                )?
+            };
+            rows += flipped;
+        }
+        // Only rows whose number moves are written, as the removal did.
+        for (id, track_no) in result {
+            let moved = if counted {
+                tx.execute(
+                    &format!("UPDATE {table} SET TrackNo = ?1, rb_local_usn = ?2, updated_at = ?3
+                              WHERE ID = ?4 AND TrackNo != ?1"),
+                    params![track_no, usn + 1, stamp, id],
+                )?
+            } else {
+                tx.execute(
+                    &format!("UPDATE {table} SET TrackNo = ?1, updated_at = ?2 WHERE ID = ?3 AND TrackNo != ?1"),
+                    params![track_no, stamp, id],
+                )?
+            };
+            if counted && moved > 0 {
+                usn += 1;
+            }
+        }
+        // A row gone for good since: the dropped transaction writes nothing.
+        if rows != edit.removed.len() || numbered_rows(&tx, &edit.list)? != *result {
+            return Err(DbError::Conflict(edit.changed_since().to_owned()));
+        }
+        if counted {
+            set_counter(&tx, usn)?;
+        }
+        tx.commit()?;
+        Ok(Changed { rows, usn })
     }
 
     /// Reorders a playlist to exactly this sequence of tracks.
@@ -4459,10 +4608,20 @@ impl Writer {
     /// Remove from History: the tracks' plays leave the session, which closes
     /// its gaps as a playlist does.
     pub fn remove_from_history(&mut self, history: &str, contents: &[String]) -> Result<Changed> {
+        self.remove_from_history_with_undo(history, contents).map(|(changed, _)| changed)
+    }
+
+    /// [`Writer::remove_from_history`], keeping the plays it took off and
+    /// the session's plays with their `TrackNo` before and after, read in
+    /// the same transaction, so the removal can be undone (#508). No
+    /// track's `DJPlayCount` changes, now or on Undo or Redo.
+    pub fn remove_from_history_with_undo(&mut self, history: &str, contents: &[String]) -> Result<(Changed, ListRemoval)> {
         self.prepare()?;
         let stamp = time::now();
+        let list = RemovalList::History(history.to_owned());
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let before = numbered_rows(&tx, &list)?;
         let mut rows = 0;
         let mut usn = 0;
         for content in contents {
@@ -4477,8 +4636,9 @@ impl Writer {
             usn = renumber_history(&tx, history, &stamp)?;
         }
         set_counter(&tx, usn)?;
+        let after = numbered_rows(&tx, &list)?;
         tx.commit()?;
-        Ok(Changed { rows, usn })
+        Ok((Changed { rows, usn }, ListRemoval::between(list, before, after)))
     }
 
     /// Add Artwork and Delete Artwork on the information panel.
@@ -5734,6 +5894,49 @@ fn numbered_members(conn: &Connection, playlist: &str) -> Result<Vec<(String, i6
     let found = stmt.query_map(params![playlist], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     Ok(found)
+}
+
+/// The live rows of the Tag List or of one history session, with their
+/// `TrackNo`, in order (#508).
+fn numbered_rows(conn: &Connection, list: &RemovalList) -> Result<Vec<(String, i64)>> {
+    let found = match list {
+        RemovalList::TagList => conn
+            .prepare("SELECT ID, TrackNo FROM djmdSongTagList WHERE rb_local_deleted = 0 ORDER BY TrackNo, ID")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?,
+        RemovalList::History(history) => conn
+            .prepare(
+                "SELECT ID, TrackNo FROM djmdSongHistory
+                 WHERE HistoryID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID",
+            )?
+            .query_map(params![history], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?,
+    };
+    Ok(found)
+}
+
+/// Why Undo (`deleted` false) or Redo (`deleted` true) of `edit` cannot run
+/// now, or `None` (#506): the list must hold exactly the rows, at exactly
+/// the numbers, the history left in it — what the removal left for Undo,
+/// what it started from for Redo. A track tagged, played, taken off or
+/// moved there since would otherwise be lost from the order or numbered
+/// twice; a history deleted since is not brought back with its plays.
+fn list_removal_conflict(conn: &Connection, edit: &ListRemoval, deleted: bool) -> Result<Option<String>> {
+    if let RemovalList::History(history) = &edit.list {
+        let live: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM djmdHistory WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![history],
+            |r| r.get(0),
+        )?;
+        if live == 0 {
+            return Ok(Some("the history has been deleted since".to_owned()));
+        }
+    }
+    let expected = if deleted { &edit.before } else { &edit.after };
+    if numbered_rows(conn, &edit.list)? != *expected {
+        return Ok(Some(edit.changed_since().to_owned()));
+    }
+    Ok(None)
 }
 
 /// Whether the live subtree under `deletion`'s root is exactly the lists and

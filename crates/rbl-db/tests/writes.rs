@@ -3138,6 +3138,177 @@ fn the_tag_list_takes_tracks_on_the_end_and_closes_up_when_one_comes_off() {
     assert!(matches!(f.writer.tag_list_add(&["no-such-track".to_owned()]), Err(DbError::WriteRefused(_))));
 }
 
+/// Every row of the Tag List (live or not) as `(ID, ContentID, TrackNo,
+/// deleted)`, by `ID`: Undo must bring back these rows themselves.
+fn tag_list_rows(f: &Fixture) -> Vec<(String, String, i64, i64)> {
+    let mut stmt = f
+        .conn()
+        .prepare("SELECT ID, ContentID, TrackNo, rb_local_deleted FROM djmdSongTagList ORDER BY ID")
+        .unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|r| r.unwrap()).collect()
+}
+
+/// The live Tag List as `(ID, ContentID)` in `TrackNo` order, with the numbers.
+fn tag_list_order(f: &Fixture) -> Vec<(String, String, i64)> {
+    let mut stmt = f
+        .conn()
+        .prepare("SELECT ID, ContentID, TrackNo FROM djmdSongTagList WHERE rb_local_deleted = 0 ORDER BY TrackNo, ID")
+        .unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|r| r.unwrap()).collect()
+}
+
+fn counter(f: &Fixture) -> i64 {
+    f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[])
+}
+
+#[test]
+fn a_tag_list_removal_undoes_to_the_same_rows_in_their_order_and_redoes() {
+    let mut f = fixture();
+    f.writer.tag_list_add(&[track_id(3), track_id(1), track_id(4), track_id(2)]).unwrap();
+    let before_rows = tag_list_rows(&f);
+    let before = tag_list_order(&f);
+    let usn = counter(&f);
+
+    // Two of the selection are on the list, one is not: one removal.
+    let (changed, removal) = f.writer.tag_list_remove_with_undo(&[track_id(1), track_id(2), track_id(9)]).unwrap();
+    assert_eq!(changed.rows, 2);
+    let gone: Vec<String> = before.iter().filter(|(_, c, _)| *c == track_id(1) || *c == track_id(2)).map(|(id, _, _)| id.clone()).collect();
+    assert_eq!(removal.removed(), gone.as_slice(), "the exact rows, in list order");
+    let after = tag_list_order(&f);
+    assert_eq!(after.iter().map(|(_, c, n)| (c.clone(), *n)).collect::<Vec<_>>(), vec![(track_id(3), 1), (track_id(4), 2)]);
+
+    f.writer.undo_list_removal(&removal).unwrap();
+    assert_eq!(tag_list_order(&f), before, "the same rows back, at the numbers they had");
+    assert_eq!(tag_list_rows(&f).iter().map(|r| (&r.0, &r.1, r.2, r.3)).collect::<Vec<_>>(),
+        before_rows.iter().map(|r| (&r.0, &r.1, r.2, r.3)).collect::<Vec<_>>(), "no row made or lost");
+
+    f.writer.redo_list_removal(&removal).unwrap();
+    assert_eq!(tag_list_order(&f), after);
+    assert_eq!(tag_list_rows(&f).len(), before_rows.len(), "Redo soft-deletes the same rows again");
+    assert_eq!(counter(&f), usn, "the Tag List never moves the update counter");
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongTagList WHERE usn IS NOT NULL OR rb_local_usn IS NOT NULL"), 0);
+
+    // Nothing selected on the list is nothing to undo.
+    let (_, none) = f.writer.tag_list_remove_with_undo(&[track_id(9)]).unwrap();
+    assert!(none.is_empty());
+}
+
+#[test]
+fn a_tag_list_clear_undoes_whole_and_redoes() {
+    let mut f = fixture();
+    f.writer.tag_list_add(&[track_id(5), track_id(2), track_id(7)]).unwrap();
+    f.writer.tag_list_remove(&[track_id(2)]).unwrap();
+    f.writer.tag_list_add(&[track_id(2)]).unwrap();
+    let before = tag_list_order(&f);
+    assert_eq!(before.len(), 3);
+
+    let (changed, clear) = f.writer.tag_list_clear_with_undo().unwrap();
+    assert_eq!(changed.rows, 3);
+    assert_eq!(clear.removed().len(), 3);
+    assert!(tag_list_order(&f).is_empty());
+
+    f.writer.undo_list_removal(&clear).unwrap();
+    assert_eq!(tag_list_order(&f), before, "the earlier removed copy of track 2 stays removed");
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongTagList WHERE rb_local_deleted = 1"), 1);
+    f.writer.redo_list_removal(&clear).unwrap();
+    assert!(tag_list_order(&f).is_empty());
+}
+
+#[test]
+fn undo_of_a_tag_list_removal_refuses_a_list_changed_since_and_writes_nothing() {
+    let mut f = fixture();
+    f.writer.tag_list_add(&[track_id(1), track_id(2), track_id(3)]).unwrap();
+    let (_, removal) = f.writer.tag_list_remove_with_undo(&[track_id(2)]).unwrap();
+
+    // A player tags a track over LINK, outside the history.
+    f.writer.tag_list_add(&[track_id(6)]).unwrap();
+    let newer = tag_list_rows(&f);
+    let error = f.writer.undo_list_removal(&removal).unwrap_err();
+    assert!(matches!(&error, DbError::Conflict(reason) if reason == "the Tag List has changed since"), "{error:?}");
+    assert_eq!(tag_list_rows(&f), newer, "nothing written; the newer tag stays");
+
+    // The same for a Redo after the list was changed back by hand.
+    let mut g = fixture();
+    g.writer.tag_list_add(&[track_id(1), track_id(2)]).unwrap();
+    let (_, clear) = g.writer.tag_list_clear_with_undo().unwrap();
+    g.writer.undo_list_removal(&clear).unwrap();
+    g.writer.tag_list_remove(&[track_id(1)]).unwrap();
+    let newer = tag_list_rows(&g);
+    assert!(matches!(g.writer.redo_list_removal(&clear), Err(DbError::Conflict(_))));
+    assert_eq!(tag_list_rows(&g), newer);
+}
+
+/// A history session's plays, `(ID, ContentID, TrackNo)` in order.
+fn plays(f: &Fixture, history: &str) -> Vec<(String, String, i64)> {
+    let mut stmt = f
+        .conn()
+        .prepare("SELECT ID, ContentID, TrackNo FROM djmdSongHistory WHERE HistoryID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID")
+        .unwrap();
+    stmt.query_map([history], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|r| r.unwrap()).collect()
+}
+
+fn play_counts(f: &Fixture) -> Vec<(String, Option<i64>)> {
+    let mut stmt = f.conn().prepare("SELECT ID, DJPlayCount FROM djmdContent ORDER BY ID").unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+}
+
+#[test]
+fn a_history_removal_undoes_to_the_same_plays_in_order_and_leaves_play_counts() {
+    let mut f = fixture();
+    let session = fixture::history_id(0);
+    // Track 1 played twice in the session: both plays leave, both come back.
+    f.writer.add_to_history(&session, &track_id(1)).unwrap();
+    let before = plays(&f, &session);
+    assert_eq!(before.iter().filter(|(_, c, _)| *c == track_id(1)).count(), 2);
+    let counts = play_counts(&f);
+
+    let (changed, removal) = f.writer.remove_from_history_with_undo(&session, &[track_id(1), track_id(3)]).unwrap();
+    assert_eq!(changed.rows, 3);
+    assert_eq!(removal.removed().len(), 3);
+    let after = plays(&f, &session);
+    assert_eq!(after.iter().map(|(_, c, n)| (c.clone(), *n)).collect::<Vec<_>>(),
+        vec![(track_id(0), 1), (track_id(2), 2), (track_id(4), 3)]);
+    assert_eq!(play_counts(&f), counts, "Remove from History leaves DJ Play Count");
+
+    let usn = counter(&f);
+    f.writer.undo_list_removal(&removal).unwrap();
+    assert_eq!(plays(&f, &session), before, "the same plays, at the numbers they had");
+    assert_eq!(play_counts(&f), counts, "Undo leaves DJ Play Count");
+    let highest: i64 = f.one("SELECT MAX(rb_local_usn) FROM djmdSongHistory", &[]);
+    assert!(counter(&f) > usn && counter(&f) >= highest, "restored rows take update numbers the counter covers");
+
+    f.writer.redo_list_removal(&removal).unwrap();
+    assert_eq!(plays(&f, &session), after);
+    assert_eq!(play_counts(&f), counts, "Redo leaves DJ Play Count");
+    let highest: i64 = f.one("SELECT MAX(rb_local_usn) FROM djmdSongHistory", &[]);
+    assert!(counter(&f) >= highest);
+    // The other session is untouched throughout.
+    assert_eq!(plays(&f, &fixture::history_id(1)).len(), 5);
+}
+
+#[test]
+fn undo_of_a_history_removal_refuses_a_session_changed_or_deleted_since() {
+    let mut f = fixture();
+    let session = fixture::history_id(0);
+    let (_, removal) = f.writer.remove_from_history_with_undo(&session, &[track_id(2)]).unwrap();
+    // A player adds a play to the session over LINK.
+    f.writer.add_to_history(&session, &track_id(9)).unwrap();
+    let newer = plays(&f, &session);
+    let counts = play_counts(&f);
+    let error = f.writer.undo_list_removal(&removal).unwrap_err();
+    assert!(matches!(&error, DbError::Conflict(reason) if reason == "the history has changed since"), "{error:?}");
+    assert_eq!(plays(&f, &session), newer);
+    assert_eq!(play_counts(&f), counts);
+
+    // A session rekordbox deleted is not brought back through its plays.
+    let mut g = fixture();
+    let (_, removal) = g.writer.remove_from_history_with_undo(&session, &[track_id(2)]).unwrap();
+    g.conn().execute("UPDATE djmdHistory SET rb_local_deleted = 1 WHERE ID = ?1", [&session]).unwrap();
+    let error = g.writer.undo_list_removal(&removal).unwrap_err();
+    assert!(matches!(&error, DbError::Conflict(reason) if reason == "the history has been deleted since"), "{error:?}");
+    assert_eq!(plays(&g, &session).len(), 4);
+}
+
 #[test]
 fn reload_tag_reads_the_file_again_over_the_row() {
     use lofty::config::WriteOptions;
