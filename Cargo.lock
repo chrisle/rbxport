@@ -4224,6 +4224,7 @@ dependencies = [
  "icu_collator",
  "icu_locale_core",
  "libc",
+ "lofty",
  "midir",
  "minisign-verify",
  "objc2",
