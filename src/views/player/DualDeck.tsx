@@ -36,9 +36,12 @@ export interface DualHeadProps {
   bpmX100: number;
   baseBpmX100: number;
   onBpmChange: (bpm: number) => void;
-  /** BEAT SYNC: pull this deck to the master. Disabled while this deck is it. */
+  /**
+   * BEAT SYNC: pull this deck to the master. The master's own can be lit as
+   * well, as in rekordbox, so it follows when the other deck takes MASTER.
+   */
   onBeatSync: () => void;
-  /** BEAT SYNC is lit: the deck is following the master's tempo. */
+  /** BEAT SYNC is lit. */
   synced: boolean;
   isMaster: boolean;
   onMaster: (() => void) | undefined;
@@ -102,7 +105,7 @@ export const DualHead = memo(function DualHead({
           aria-label="Beat sync"
           aria-pressed={synced}
           data-on={synced ? "" : undefined}
-          disabled={!track || isMaster}
+          disabled={!track}
           title={tip(
             isMaster
               ? "This deck is the master; sync the other one to it."
