@@ -159,7 +159,7 @@ fn undo_is_refused_once_the_folder_holds_something_else() {
     let extra = f.writer.create_playlist("added later", &home).unwrap();
     let now = f.children(&home);
 
-    assert!(matches!(f.writer.undo_sort(&edit), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.undo_sort(&edit), Err(DbError::Conflict(_))));
     assert_eq!(f.children(&home), now, "nothing was written");
     assert!(now.contains(&extra));
 }

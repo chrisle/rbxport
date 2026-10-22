@@ -4256,21 +4256,21 @@ fn a_replacement_refuses_undo_and_redo_after_the_lists_changed() {
     let replacement = outcome.replacement.clone().unwrap();
     let made = outcome.playlist.unwrap();
     let refused = |result: Result<Changed, DbError>, what: &str| match result {
-        Err(DbError::WriteRefused(message)) => assert!(message.contains(what), "{message}"),
-        other => panic!("expected a refusal, got {other:?}"),
+        Err(DbError::Conflict(message)) => assert!(message.contains(what), "{message}"),
+        other => panic!("expected a conflict, got {other:?}"),
     };
 
     // A track added to the new playlist.
     f.writer.add_tracks(&made, &[track_id(5)]).unwrap();
     let changed = tree_rows(&f);
-    refused(f.writer.undo_replacement(&replacement), "can no longer be undone");
+    refused(f.writer.undo_replacement(&replacement), "changed since");
     assert_eq!(tree_rows(&f), changed, "nothing written");
     f.writer.remove_tracks(&made, &[track_id(5)]).unwrap();
 
     // The new playlist moved out of the folder.
     f.writer.move_to(&made, ROOT, None).unwrap();
     let changed = tree_rows(&f);
-    refused(f.writer.undo_replacement(&replacement), "can no longer be undone");
+    refused(f.writer.undo_replacement(&replacement), "changed since");
     assert_eq!(tree_rows(&f), changed, "nothing written");
     f.writer.move_to(&made, &crate_folder, Some(0)).unwrap();
 
@@ -4279,7 +4279,7 @@ fn a_replacement_refuses_undo_and_redo_after_the_lists_changed() {
     f.writer.undo_replacement(&replacement).unwrap();
     f.writer.add_tracks(&inner, &[track_id(6)]).unwrap();
     let changed = tree_rows(&f);
-    refused(f.writer.redo_replacement(&replacement), "can no longer be redone");
+    refused(f.writer.redo_replacement(&replacement), "changed since");
     assert_eq!(tree_rows(&f), changed, "nothing written");
 }
 
@@ -4410,4 +4410,99 @@ fn checked_collection_removal_rejects_stale_identity_paths_and_shared_files() {
     assert_eq!(f.conn().query_row("SELECT COUNT(*) FROM djmdSongPlaylist WHERE ContentID=?1 AND rb_local_deleted=0", [&id], |r| r.get::<_, i32>(0)).unwrap(), 0);
     f.writer.delete_tracks_checked(&library_id, &tracks).unwrap();
     assert_eq!(f.conn().query_row("SELECT rb_local_deleted FROM djmdContent WHERE ID=?1", [&id], |r| r.get::<_, i32>(0)).unwrap(), 1);
+}
+
+// ------------------------------------------------------- history conflicts
+
+/// The `Rating` a track has now.
+fn rating(f: &Fixture, track: &str) -> i64 {
+    f.one("SELECT Rating FROM djmdContent WHERE ID = ?1", &[&track])
+}
+
+/// #506: Undo of a track edit puts the old value back only over the value
+/// the edit left. A rating written since by something the history does not
+/// record (a player over LINK, a USB import, rekordbox) is kept, and the
+/// Undo is a conflict that wrote nothing.
+#[test]
+fn undo_and_redo_of_a_track_edit_refuse_a_value_changed_since() {
+    let mut f = fixture();
+    let t = track_id(0);
+    f.writer.set_rating(&t, 1).unwrap();
+    let (_, edit) = f.writer.set_rating_with_undo(&t, 4).unwrap();
+
+    // A player sets 5 over LINK.
+    f.writer.set_rating(&t, 5).unwrap();
+    let usn: i64 = f.one("SELECT rb_local_usn FROM djmdContent WHERE ID = ?1", &[&t]);
+    match f.writer.undo_track_edit(&edit) {
+        Err(DbError::Conflict(reason)) => assert_eq!(reason, "the track has changed since"),
+        other => panic!("expected a conflict, got {other:?}"),
+    }
+    assert_eq!(rating(&f, &t), 5, "the newer rating is kept");
+    let after: i64 = f.one("SELECT rb_local_usn FROM djmdContent WHERE ID = ?1", &[&t]);
+    assert_eq!(after, usn, "nothing written");
+
+    // Back to what the edit left: Undo runs. Then a change before Redo
+    // stops Redo the same way.
+    f.writer.set_rating(&t, 4).unwrap();
+    f.writer.undo_track_edit(&edit).unwrap();
+    assert_eq!(rating(&f, &t), 1);
+    f.writer.set_rating(&t, 2).unwrap();
+    assert!(matches!(f.writer.redo_track_edit(&edit), Err(DbError::Conflict(_))));
+    assert_eq!(rating(&f, &t), 2);
+    f.writer.set_rating(&t, 1).unwrap();
+    f.writer.redo_track_edit(&edit).unwrap();
+    assert_eq!(rating(&f, &t), 4);
+}
+
+/// #506: a text field compares as stored, NULL included: Undo of a comment
+/// set on a track that had none runs while the comment is the one written.
+#[test]
+fn a_track_edit_over_an_empty_value_undoes_while_unchanged() {
+    let mut f = fixture();
+    let t = track_id(1);
+    let (_, edit) = f.writer.set_field_with_undo(&t, TrackField::Title, "Changed").unwrap();
+    f.writer.check_track_edit(&edit, true).unwrap();
+    assert!(matches!(f.writer.check_track_edit(&edit, false), Err(DbError::Conflict(_))));
+    f.writer.undo_track_edit(&edit).unwrap();
+    f.writer.check_track_edit(&edit, false).unwrap();
+}
+
+/// #506: Undo and Redo of a rename or a move refuse once the playlist was
+/// renamed or moved since, writing nothing.
+#[test]
+fn undo_of_a_rename_or_move_refuses_a_playlist_changed_since() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Friday", ROOT).unwrap();
+    let (_, rename) = f.writer.rename_with_undo(&list, "Saturday").unwrap();
+    f.writer.rename(&list, "Sunday").unwrap();
+    assert!(matches!(f.writer.undo_rename(&rename), Err(DbError::Conflict(_))));
+    let name: String = f.one("SELECT Name FROM djmdPlaylist WHERE ID = ?1", &[&list]);
+    assert_eq!(name, "Sunday");
+
+    let folder = f.writer.create_folder("Sets", ROOT).unwrap();
+    let (_, moved) = f.writer.move_with_undo(&list, &folder, None).unwrap();
+    f.writer.move_to(&list, ROOT, None).unwrap();
+    let tree = f.children(ROOT);
+    assert!(matches!(f.writer.undo_move(&moved), Err(DbError::Conflict(_))));
+    assert_eq!(f.children(ROOT), tree, "nothing written");
+    f.writer.move_to(&list, &folder, None).unwrap();
+    f.writer.undo_move(&moved).unwrap();
+    assert!(!f.children(&folder).contains(&list));
+}
+
+/// #506: Undo of a track removal refuses once the playlist's tracks changed
+/// since: a track added there would be left out of the order put back.
+#[test]
+fn undo_of_a_track_removal_refuses_a_playlist_changed_since() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0), track_id(1), track_id(2)]).unwrap();
+    let (_, removal) = f.writer.remove_tracks_with_undo(&list, &[track_id(1)]).unwrap();
+    f.writer.add_tracks(&list, &[track_id(3)]).unwrap();
+    let numbers = f.track_numbers(&list);
+    assert!(matches!(f.writer.undo_track_removal(&removal), Err(DbError::Conflict(_))));
+    assert_eq!(f.track_numbers(&list), numbers, "nothing written");
+    f.writer.remove_tracks(&list, &[track_id(3)]).unwrap();
+    f.writer.undo_track_removal(&removal).unwrap();
+    assert_eq!(f.track_numbers(&list), [1, 2, 3]);
 }

@@ -793,12 +793,30 @@ impl Writer {
         Ok((changed, PlaylistRename { id: id.to_owned(), before, after: name.to_owned() }))
     }
 
+    /// Gives a playlist back its old name, refused as a
+    /// [`DbError::Conflict`] unless it still has the name the rename gave.
     pub fn undo_rename(&mut self, edit: &PlaylistRename) -> Result<Changed> {
+        self.check_rename(edit, true)?;
         self.rename(&edit.id, &edit.before)
     }
 
     pub fn redo_rename(&mut self, edit: &PlaylistRename) -> Result<Changed> {
+        self.check_rename(edit, false)?;
         self.rename(&edit.id, &edit.after)
+    }
+
+    fn check_rename(&self, edit: &PlaylistRename, undo: bool) -> Result<()> {
+        let expected = if undo { &edit.after } else { &edit.before };
+        let name: Option<Option<String>> = self.library.connection().query_row(
+            "SELECT Name FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![edit.id],
+            |row| row.get(0),
+        ).optional()?;
+        match name {
+            None => Err(DbError::Conflict("the playlist is no longer there".to_owned())),
+            Some(name) if name.as_deref().unwrap_or("") == expected => Ok(()),
+            Some(_) => Err(DbError::Conflict("the playlist has been renamed since".to_owned())),
+        }
     }
 
     /// Moves a playlist or folder under a new parent.
@@ -872,12 +890,37 @@ impl Writer {
         }))
     }
 
+    /// Moves a playlist back where it was, refused as a
+    /// [`DbError::Conflict`] unless it is still where the move put it: a
+    /// move rewrites the order of its siblings, so one moved, made or
+    /// deleted there since would be put out of the place it has now.
     pub fn undo_move(&mut self, edit: &PlaylistMove) -> Result<Changed> {
+        self.check_move(edit, true)?;
         self.move_to(&edit.id, &edit.before_parent, Some(edit.before_index))
     }
 
     pub fn redo_move(&mut self, edit: &PlaylistMove) -> Result<Changed> {
+        self.check_move(edit, false)?;
         self.move_to(&edit.id, &edit.after_parent, Some(edit.after_index))
+    }
+
+    fn check_move(&self, edit: &PlaylistMove, undo: bool) -> Result<()> {
+        let expected = if undo {
+            (edit.after_parent.as_str(), edit.after_index)
+        } else {
+            (edit.before_parent.as_str(), edit.before_index)
+        };
+        if !node_exists(self.library.connection(), &edit.id)? {
+            return Err(DbError::Conflict("the playlist is no longer there".to_owned()));
+        }
+        let (parent, index) = self.playlist_position(&edit.id)?;
+        if parent != expected.0 {
+            Err(DbError::Conflict("the playlist has been moved since".to_owned()))
+        } else if index != expected.1 {
+            Err(DbError::Conflict("the playlists beside it have changed since".to_owned()))
+        } else {
+            Ok(())
+        }
     }
 
     /// Sort Items: puts the direct children of a folder, or of the top of
@@ -960,7 +1003,7 @@ impl Writer {
         live.sort();
         wanted.sort();
         if live != wanted {
-            return Err(DbError::WriteRefused(
+            return Err(DbError::Conflict(
                 "the folder's playlists have changed since it was sorted".to_owned(),
             ));
         }
@@ -1052,7 +1095,7 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
+                    return Err(DbError::Conflict("the playlist has changed since".to_owned()));
                 }
                 rows += changed;
             }
@@ -1064,7 +1107,7 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
+                    return Err(DbError::Conflict("the playlist has changed since".to_owned()));
                 }
                 rows += changed;
             }
@@ -1077,7 +1120,7 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
+                    return Err(DbError::Conflict("the playlist has changed since".to_owned()));
                 }
                 rows += changed;
             }
@@ -1089,7 +1132,7 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
+                    return Err(DbError::Conflict("the playlist has changed since".to_owned()));
                 }
                 rows += changed;
             }
@@ -1427,11 +1470,7 @@ impl Writer {
     }
 
     fn set_replacement(&mut self, edit: &ListReplacement, undo: bool) -> Result<Changed> {
-        let refused = || DbError::WriteRefused(if undo {
-            "that replacement can no longer be undone".to_owned()
-        } else {
-            "that replacement can no longer be redone".to_owned()
-        });
+        let refused = || DbError::Conflict("the playlists have changed since".to_owned());
         let root = edit.replaced.playlist_ids.first().ok_or_else(refused)?;
         self.prepare()?;
         let stamp = time::now();
@@ -1805,6 +1844,18 @@ impl Writer {
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // The playlist must hold exactly what the history left in it, in
+        // that order: all of `order` after a Redo, all but `removed` after
+        // the removal. A track added, removed or moved there since would
+        // otherwise be lost from the order or numbered twice (#506).
+        let expected: Vec<&String> = if deleted {
+            edit.order.iter().collect()
+        } else {
+            edit.order.iter().filter(|id| !edit.removed.contains(id)).collect()
+        };
+        if !live_members(&tx, &edit.playlist)?.iter().eq(expected) {
+            return Err(DbError::Conflict("the playlist's tracks have changed since".to_owned()));
+        }
         let mut rows = 0;
         let mut usn = 0;
         for membership in &edit.removed {
@@ -2932,12 +2983,45 @@ impl Writer {
         content_exists(self.library.connection(), content)
     }
 
+    /// Puts back the value a track had before `edit`. Refused with
+    /// [`DbError::Conflict`], writing nothing, unless the track still holds
+    /// the value the edit left: see [`Self::check_track_edit`].
     pub fn undo_track_edit(&mut self, edit: &TrackEdit) -> Result<Changed> {
+        self.check_track_edit(edit, true)?;
         self.touch_content(&edit.content, edit.column, &edit.before)
     }
 
+    /// Writes `edit`'s value again after it was undone, under the same
+    /// condition as [`Self::undo_track_edit`] the other way round.
     pub fn redo_track_edit(&mut self, edit: &TrackEdit) -> Result<Changed> {
+        self.check_track_edit(edit, false)?;
         self.touch_content(&edit.content, edit.column, &edit.after)
+    }
+
+    /// Whether Undo (`undo`) or Redo of `edit` would overwrite only the
+    /// value the history knows the track holds: the edit's `after` for Undo,
+    /// its `before` for Redo. Anything else was written since by something
+    /// the history does not record (a player over LINK, a USB import,
+    /// rekordbox), and putting the old value back would lose it without a
+    /// word, so it is a [`DbError::Conflict`] instead (#506).
+    ///
+    /// Compared by `IS` in SQL, as the column's affinity compares: NULL
+    /// equals NULL, and 4 equals 4.0 in a numeric column.
+    pub fn check_track_edit(&self, edit: &TrackEdit, undo: bool) -> Result<()> {
+        if !WRITABLE_COLUMNS.contains(&edit.column) {
+            return Err(DbError::WriteRefused(format!("{} is not writable", edit.column)));
+        }
+        let expected = if undo { &edit.after } else { &edit.before };
+        let same: Option<bool> = self.library.connection().query_row(
+            &format!("SELECT (`{}` IS ?2) FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0", edit.column),
+            params![edit.content, expected],
+            |row| row.get(0),
+        ).optional()?;
+        match same {
+            Some(true) => Ok(()),
+            Some(false) => Err(DbError::Conflict("the track has changed since".to_owned())),
+            None => Err(DbError::Conflict("the track is no longer in the collection".to_owned())),
+        }
     }
 
     fn track_edit(
@@ -3065,12 +3149,34 @@ impl Writer {
         self.update_my_tags_with_undo(content, tags, MyTagOperation::Replace)
     }
 
+    /// Puts back a track's My Tags as they were before `edit`, refused as a
+    /// [`DbError::Conflict`] unless they are still the set it left.
     pub fn undo_tag_edit(&mut self, edit: &TrackTagEdit) -> Result<Changed> {
+        self.check_tag_edit(edit, true)?;
         self.set_my_tags(&edit.content, &edit.before)
     }
 
     pub fn redo_tag_edit(&mut self, edit: &TrackTagEdit) -> Result<Changed> {
+        self.check_tag_edit(edit, false)?;
         self.set_my_tags(&edit.content, &edit.after)
+    }
+
+    /// Whether the track still has exactly the My Tags Undo (`undo`) or
+    /// Redo of `edit` expects, as [`Self::check_track_edit`] does for a
+    /// column.
+    pub fn check_tag_edit(&self, edit: &TrackTagEdit, undo: bool) -> Result<()> {
+        if !content_exists(self.library.connection(), &edit.content)? {
+            return Err(DbError::Conflict("the track is no longer in the collection".to_owned()));
+        }
+        let mut expected = if undo { edit.after.clone() } else { edit.before.clone() };
+        let mut current = self.track_tags(&edit.content)?;
+        expected.sort();
+        current.sort();
+        if current == expected {
+            Ok(())
+        } else {
+            Err(DbError::Conflict("the track's My Tags have changed since".to_owned()))
+        }
     }
 
     fn track_tags(&self, content: &str) -> Result<Vec<String>> {
