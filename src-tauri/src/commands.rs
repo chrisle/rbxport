@@ -2843,6 +2843,20 @@ pub async fn deck_move(
     Ok(())
 }
 
+/// Count grid beats from the engine head when the command arrives.
+#[tauri::command]
+pub async fn deck_move_grid(
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    grid_times_ms: Vec<f64>,
+    beats: f64,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.move_grid_beats(crate::player::deck_of(&deck), &grid_times_ms, beats);
+    }
+    Ok(())
+}
+
 /// Sets a deck's loop between two points and turns it on; a head already
 /// past the out point goes back to the in point.
 #[tauri::command]
@@ -2855,6 +2869,29 @@ pub async fn deck_set_loop<R: tauri::Runtime>(
 ) -> AppResult<()> {
     if let Some(engine) = player.opened() {
         engine.set_loop_ms(crate::player::deck_of(&deck), in_ms, out_ms);
+        crate::player::start_ticker(&app);
+    }
+    Ok(())
+}
+
+/// Move a playing loop and the audio head together, with the head offset
+/// measured against the engine's position when this command arrives.
+#[allow(clippy::too_many_arguments, reason = "Tauri command arguments mirror the typed IPC contract")]
+#[tauri::command]
+pub async fn deck_move_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    in_ms: f64,
+    out_ms: f64,
+    head_by_ms: f64,
+    grid_times_ms: Vec<f64>,
+    beats: f64,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.move_loop_ms(
+            crate::player::deck_of(&deck), in_ms, out_ms, head_by_ms, &grid_times_ms, beats,
+        );
         crate::player::start_ticker(&app);
     }
     Ok(())

@@ -711,12 +711,17 @@ export interface Backend {
   deckSeek(deck: DeckId, positionMs: number): Promise<void>;
   /** Moves the playhead by `byMs` from where the engine has it now. */
   deckMove(deck: DeckId, byMs: number): Promise<void>;
+  /** Count grid beats from the engine's head when the command arrives. */
+  deckMoveGrid(deck: DeckId, gridTimesMs: number[], beats: number): Promise<void>;
   /**
    * Sets a loop between two points and turns it on. A head already past
    * the out point goes back to the in point. The deck rounds at the out
    * point itself, on the frame, with nothing faded at the seam.
    */
   deckSetLoop(deck: DeckId, inMs: number, outMs: number): Promise<void>;
+  /** Move loop bounds and the engine head together by grid-derived distances. */
+  deckMoveLoop(deck: DeckId, inMs: number, outMs: number, headByMs: number,
+    gridTimesMs: number[], beats: number): Promise<void>;
   /** RELOOP (on): back in from the in point. EXIT (off): out, the range kept. */
   deckLoopActive(deck: DeckId, on: boolean): Promise<void>;
   deckClearLoop(deck: DeckId): Promise<void>;
