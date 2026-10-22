@@ -6138,12 +6138,14 @@ fn my_tag_run_of(conn: &Connection, id: &str) -> Result<String> {
 }
 
 /// Every live sibling in one My Tag run, with its `Seq` as stored, in the
-/// order rekordbox reads them.
+/// order rekordbox reads them. A NULL `Attribute` counts as a tag, as in
+/// [`my_tag_run_of`].
 fn my_tag_run(conn: &Connection, parent: &str) -> Result<Vec<(String, Option<i64>)>> {
     let attribute = i64::from(parent == ROOT);
     let mut statement = conn.prepare(
         "SELECT ID, Seq FROM djmdMyTag
-         WHERE ParentID = ?1 AND Attribute = ?2 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+         WHERE ParentID = ?1 AND COALESCE(Attribute, 0) = ?2 AND rb_local_deleted = 0
+         ORDER BY Seq, ID",
     )?;
     let run = statement
         .query_map(params![parent, attribute], |r| Ok((r.get(0)?, r.get(1)?)))?
