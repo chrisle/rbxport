@@ -23,6 +23,10 @@ const MAX_VIEWS: usize = 16;
 pub struct AppState {
     pub(crate) edit_gate: parking_lot::ReentrantMutex<()>,
     pub(crate) edit_history: parking_lot::Mutex<EditHistory>,
+    /// Told when a write outside the library history ended its Redo branch,
+    /// so the window's Edit menu stops offering it. Set once by the app;
+    /// tests run without one.
+    history_changed: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>>,
     pub(crate) analysis_write: parking_lot::Mutex<()>,
     pub(crate) backup_progress: parking_lot::Mutex<crate::backups::BackupProgress>,
     pub(crate) backup_sizes: parking_lot::Mutex<crate::backup_sizes::SizeCache>,
@@ -138,6 +142,14 @@ impl EditHistory {
         self.redo.clear();
     }
 
+    /// Takes the next Undo (`undo`) or Redo entry off its stack and leaves
+    /// every other entry where it is: what a refused, conflicting entry
+    /// comes to (#506). Each remaining entry checks its own rows when it
+    /// runs, so keeping them cannot overwrite anything either.
+    pub(crate) fn drop_next(&mut self, undo: bool) -> Option<HistoryEntry> {
+        if undo { self.undo.pop() } else { self.redo.pop() }
+    }
+
     pub(crate) fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
@@ -204,6 +216,7 @@ impl AppState {
         Self {
             edit_gate: parking_lot::ReentrantMutex::new(()),
             edit_history: parking_lot::Mutex::new(EditHistory::default()),
+            history_changed: std::sync::OnceLock::new(),
             analysis_write: parking_lot::Mutex::new(()),
             backup_progress: parking_lot::Mutex::new(crate::backups::BackupProgress::default()),
             backup_sizes: parking_lot::Mutex::new(crate::backup_sizes::SizeCache::default()),
@@ -339,8 +352,43 @@ impl AppState {
 
     /// Keep the encrypted connection and edit gate through the refresh, so
     /// a small edit neither pays for another key derivation nor races a writer.
+    ///
+    /// A write here is outside the library history: if it changed any row,
+    /// the history's Redo branch ends, as after any edit the history does
+    /// not record ("a non-recorded edit after an undo starts a new branch").
+    /// A Redo replayed over it would put back values it has since changed.
+    /// That holds for every such writer at once (cue edits, analysis, grid
+    /// saves, players over LINK, imports) rather than each having to
+    /// remember (#506). Undo itself stays: each entry refuses to run over
+    /// rows changed since ([`rbl_db::DbError::Conflict`]).
     pub fn write_then<T, U>(
         &self,
+        edit: impl FnOnce(&mut rbl_db::write::Writer) -> Result<T, rbl_db::DbError>,
+        refresh: impl FnOnce(&rbl_db::Library, T) -> Result<U, rbl_db::DbError>,
+    ) -> Result<U, rbl_db::DbError> {
+        self.write_inner(false, edit, refresh)
+    }
+
+    /// [`Self::write_then`] for the code that keeps the library history
+    /// itself (recording an entry, Undo, Redo): the Redo branch is left for
+    /// it to manage.
+    pub(crate) fn write_history_then<T, U>(
+        &self,
+        edit: impl FnOnce(&mut rbl_db::write::Writer) -> Result<T, rbl_db::DbError>,
+        refresh: impl FnOnce(&rbl_db::Library, T) -> Result<U, rbl_db::DbError>,
+    ) -> Result<U, rbl_db::DbError> {
+        self.write_inner(true, edit, refresh)
+    }
+
+    /// Who to tell when a write outside the history ended its Redo branch.
+    /// The first call wins; the app makes it once, at start.
+    pub fn on_history_changed(&self, listener: impl Fn() + Send + Sync + 'static) {
+        let _ = self.history_changed.set(Box::new(listener));
+    }
+
+    fn write_inner<T, U>(
+        &self,
+        owns_history: bool,
         edit: impl FnOnce(&mut rbl_db::write::Writer) -> Result<T, rbl_db::DbError>,
         refresh: impl FnOnce(&rbl_db::Library, T) -> Result<U, rbl_db::DbError>,
     ) -> Result<U, rbl_db::DbError> {
@@ -365,11 +413,34 @@ impl AppState {
         let open_ms = started.elapsed().as_millis();
         let result = edit(&mut writer);
         let edit_ms = started.elapsed().as_millis();
+        // Counted before the refresh, which only reads. A failed edit that
+        // changed rows before it stopped counts too: its rows may not all
+        // have been put back.
+        let wrote = writer.library().connection().total_changes() > 0;
         let result = result.and_then(|value| refresh(writer.library(), value));
         tracing::debug!(gate_ms, open_ms = open_ms - gate_ms,
             edit_ms = edit_ms - open_ms, refresh_ms = started.elapsed().as_millis() - edit_ms,
             "library write phases");
+        if wrote && !owns_history {
+            self.end_redo_branch();
+        }
         result
+    }
+
+    /// Ends the Redo branch after a write the history does not record, and
+    /// tells the window when there was one to end.
+    fn end_redo_branch(&self) {
+        let ended = {
+            let mut history = self.edit_history.lock();
+            let had = !history.redo.is_empty();
+            history.clear_redo();
+            had
+        };
+        if ended {
+            if let Some(listener) = self.history_changed.get() {
+                listener();
+            }
+        }
     }
 
     /// Runs one read against the database, opening the handle if needed.

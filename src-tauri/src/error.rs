@@ -16,6 +16,10 @@ pub enum ErrorKind {
     Malformed,
     /// The user cancelled a long-running job.
     Cancelled,
+    /// Undo or Redo was refused because what it would write was changed
+    /// since by something outside the library history (#506). Nothing was
+    /// written; the entry is gone from the history.
+    Conflict,
     /// A bug in our code; the detail is a crash-log reference, not a message for the user.
     Internal,
 }

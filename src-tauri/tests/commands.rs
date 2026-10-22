@@ -684,8 +684,9 @@ fn a_folder_drop_replacement_undoes_after_newer_siblings() {
     assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the rename before it undone too");
 }
 
-/// #426: Undo of a replacement refuses once the new playlist has changed,
-/// and the history keeps the entry rather than losing it.
+/// #426: Undo of a replacement refuses once the new playlist has changed.
+/// Since #506 the refused entry leaves the history, so it cannot block the
+/// entries older than it.
 #[test]
 fn a_folder_drop_replacement_refuses_undo_after_its_playlist_changed() {
     let s = shell();
@@ -703,9 +704,12 @@ fn a_folder_drop_replacement_refuses_undo_after_its_playlist_changed() {
     let tree = tree_ids(&s);
 
     let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
-    assert!(error.message.contains("can no longer be undone"), "{}", error.message);
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert!(error.message.starts_with("Can't undo Replace Playlist:"), "{}", error.message);
     assert_eq!(tree_ids(&s), tree, "nothing written");
     assert_eq!(s.playlist_rows(&made).len(), 2);
+    // #506: the refused entry is gone, so it does not block what is older.
+    assert_eq!(run(commands::undo_edit(s.handle(), s.state())).unwrap_err().kind, ErrorKind::NotFound);
 }
 
 #[test]
@@ -796,6 +800,56 @@ fn an_import_ends_the_redo_branch_and_keeps_undo() {
     assert_eq!(error.kind, ErrorKind::NotFound, "the import ended the redo branch");
     run(commands::undo_edit(s.handle(), s.state())).unwrap();
     assert_eq!(run(details::track_details(s.state(), track)).unwrap().rating, 0);
+}
+
+/// #506: a cue edit writes outside the library history, so it ends the
+/// redo branch as any unrecorded edit does. Undo stays.
+#[test]
+fn a_cue_edit_ends_the_redo_branch_and_keeps_undo() {
+    let s = shell();
+    let track = track_id(7);
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 4)).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 5)).unwrap();
+    assert!(run(commands::undo_edit(s.handle(), s.state())).unwrap().can_redo);
+
+    // Opening the library for a write that changes nothing is no edit.
+    s.state().write(|_| Ok(())).unwrap();
+    run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 1_000)).unwrap();
+
+    let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::NotFound, "the cue edit ended the redo branch");
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(run(details::track_details(s.state(), track)).unwrap().rating, 0);
+}
+
+/// #506: a write by another program while RBXport stays open (rekordbox
+/// takes the file back between edits) is not seen here, so it cannot end
+/// the redo branch. Redo over it is refused instead: the newer value is
+/// kept, and the rest of the history stays usable.
+#[test]
+fn redo_refuses_a_rating_changed_by_another_program_and_keeps_the_rest() {
+    let s = shell();
+    let track = track_id(7);
+    run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed 506".into())).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 4)).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().rating, 0);
+
+    // Another program sets 2: written straight to the file, not through
+    // the app, so nothing here hears of it.
+    let mut other = rbl_db::write::Writer::open(s.location.clone(), s._dir.path().join("other-backups")).unwrap();
+    other.disable_automatic_backups();
+    other.set_rating(&track, 2).unwrap();
+    drop(other);
+
+    let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't redo Track Edit: the track has changed since. The newer change was kept.");
+    assert_eq!(run(details::track_details(s.state(), track)).unwrap().rating, 2, "the newer rating is kept");
+    assert_eq!(run(commands::redo_edit(s.handle(), s.state())).unwrap_err().kind, ErrorKind::NotFound);
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert!(!undone.can_undo);
+    assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the unrelated rename still undoes");
 }
 
 /// #427: an XML import told to replace same-named lists rewrites their

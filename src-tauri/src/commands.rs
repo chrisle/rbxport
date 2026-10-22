@@ -718,7 +718,7 @@ where
     let event = touched.event();
     let (generation, history) = blocking(name, move || {
         let _gate = state.edit_gate.lock();
-        let generation = state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched)).map_err(write_error)?;
+        let generation = state.write_history_then(action, |db, ()| refresh_after_edit(&state, db, touched)).map_err(write_error)?;
         // Any non-recorded edit after an undo starts a new branch.
         let mut history = state.edit_history.lock();
         history.clear_redo();
@@ -745,7 +745,7 @@ where
     let event = touched.event();
     let (generation, history) = blocking(name, move || {
         let _gate = state.edit_gate.lock();
-        let generation = state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched))
+        let generation = state.write_history_then(action, |db, ()| refresh_after_edit(&state, db, touched))
             .map_err(write_error)?;
         let mut history = state.edit_history.lock();
         history.clear();
@@ -804,7 +804,7 @@ where
     let state = Arc::clone(&state);
     let dto = blocking(name, move || {
         let _gate = state.edit_gate.lock();
-        let (generation, reversible) = state.write_then(
+        let (generation, reversible) = state.write_history_then(
             action,
             |db, reversible| refresh_after_edit(&state, db, touched).map(|generation| (generation, reversible)),
         ).map_err(write_error)?;
@@ -828,6 +828,19 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
         LibraryEdit::Track(_) | LibraryEdit::TrackTags(_) => Touched::Tracks,
+    }
+}
+
+/// Refuses, with [`rbl_db::DbError::Conflict`] and before anything is
+/// written, an entry of several steps any one of which no longer finds the
+/// value it expects. An entry of one step, or one written in a single
+/// transaction, is checked by the writer as it runs.
+fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool) -> Result<(), rbl_db::DbError> {
+    match edit {
+        LibraryEdit::Track(values) => values.iter().try_for_each(|value| writer.check_track_edit(value, undo)),
+        LibraryEdit::TrackTags(values) => values.iter().try_for_each(|value| writer.check_tag_edit(value, undo)),
+        LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) | LibraryEdit::MovePlaylist(_)
+        | LibraryEdit::ReplacePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_) => Ok(()),
     }
 }
 
@@ -897,6 +910,7 @@ pub(crate) fn refresh_after_edit(state: &AppState, db: &rbl_db::Library, touched
 pub(crate) fn write_error(error: rbl_db::DbError) -> AppError {
     match error {
         rbl_db::DbError::WriteRefused(reason) => AppError::new(ErrorKind::ReadOnly, reason),
+        rbl_db::DbError::Conflict(reason) => AppError::new(ErrorKind::Conflict, reason),
         other => AppError::new(ErrorKind::Internal, other.to_string()),
     }
 }
@@ -3695,24 +3709,7 @@ pub async fn undo_edit<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
 ) -> AppResult<EditHistoryDto> {
-    let state = Arc::clone(&state);
-    let dto = blocking("undo_edit", move || {
-        let _gate = state.edit_gate.lock();
-        let entry = state.edit_history.lock().undo.last().cloned()
-            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no library edit to undo."))?;
-        let touched = touched_by(&entry.edit);
-        let generation = state.write_then(
-            |w| apply_history(w, &entry.edit, true),
-            |db, ()| refresh_after_edit(&state, db, touched),
-        ).map_err(write_error)?;
-        let mut history = state.edit_history.lock();
-        history.undo.pop();
-        history.redo.push(entry);
-        Ok(history_dto(generation, &history))
-    }).await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
-    let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
-    Ok(dto)
+    run_history(app, Arc::clone(&state), true).await
 }
 
 #[tauri::command]
@@ -3720,24 +3717,78 @@ pub async fn redo_edit<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
 ) -> AppResult<EditHistoryDto> {
-    let state = Arc::clone(&state);
-    let dto = blocking("redo_edit", move || {
-        let _gate = state.edit_gate.lock();
-        let entry = state.edit_history.lock().redo.last().cloned()
-            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no library edit to redo."))?;
-        let touched = touched_by(&entry.edit);
-        let generation = state.write_then(
-            |w| apply_history(w, &entry.edit, false),
-            |db, ()| refresh_after_edit(&state, db, touched),
-        ).map_err(write_error)?;
-        let mut history = state.edit_history.lock();
-        history.redo.pop();
-        history.undo.push(entry);
-        Ok(history_dto(generation, &history))
-    }).await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
-    let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
-    Ok(dto)
+    run_history(app, Arc::clone(&state), false).await
+}
+
+/// Edit › Undo or Redo of the library history, and the window told what
+/// the menu offers next. A refused conflicting entry is gone from the
+/// history, so the window hears of that too.
+async fn run_history<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: Arc<AppState>,
+    undo: bool,
+) -> AppResult<EditHistoryDto> {
+    let worker = Arc::clone(&state);
+    let name = if undo { "undo_edit" } else { "redo_edit" };
+    let result = blocking(name, move || step_history(&worker, undo)).await;
+    match &result {
+        Ok(dto) => {
+            let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
+            let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
+        }
+        Err(error) if error.kind == ErrorKind::Conflict => announce_history(&app, &state),
+        Err(_) => {}
+    }
+    result
+}
+
+/// Runs the next Undo (`undo`) or Redo entry of the library history.
+///
+/// Every row it would write is checked first against the value the entry
+/// expects there: the edit's result for Undo, what it replaced for Redo.
+/// When something outside the history (a player over LINK, an import,
+/// rekordbox) changed one since, nothing is written, the newer value stays,
+/// and only that entry leaves the history, refused with
+/// [`ErrorKind::Conflict`] and a message saying why. The rest of the
+/// history stays usable: each entry checks its own rows when it runs.
+/// Chris's decision of 2026-10-22 on #506 (refuse, keep unrelated history).
+pub(crate) fn step_history(state: &AppState, undo: bool) -> AppResult<EditHistoryDto> {
+    let _gate = state.edit_gate.lock();
+    let entry = {
+        let history = state.edit_history.lock();
+        if undo { history.undo.last().cloned() } else { history.redo.last().cloned() }
+    }
+    .ok_or_else(|| AppError::new(ErrorKind::NotFound, if undo {
+        "There is no library edit to undo."
+    } else {
+        "There is no library edit to redo."
+    }))?;
+    let touched = touched_by(&entry.edit);
+    let result = state.write_history_then(
+        |w| {
+            check_history(w, &entry.edit, undo)?;
+            apply_history(w, &entry.edit, undo)
+        },
+        |db, ()| refresh_after_edit(state, db, touched),
+    );
+    let mut history = state.edit_history.lock();
+    match result {
+        Ok(generation) => {
+            history.drop_next(undo);
+            if undo { history.redo.push(entry); } else { history.undo.push(entry); }
+            Ok(history_dto(generation, &history))
+        }
+        Err(rbl_db::DbError::Conflict(reason)) => {
+            history.drop_next(undo);
+            tracing::info!(label = entry.label, undo, %reason, "library history entry refused: changed since");
+            Err(AppError::new(ErrorKind::Conflict, format!(
+                "Can't {} {}: {reason}. The newer change was kept.",
+                if undo { "undo" } else { "redo" },
+                entry.label,
+            )))
+        }
+        Err(error) => Err(write_error(error)),
+    }
 }
 
 #[tauri::command]

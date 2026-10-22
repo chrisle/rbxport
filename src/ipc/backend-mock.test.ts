@@ -198,17 +198,20 @@ describe("mock edits", () => {
     expect(await topLevel()).toEqual(dropped);
   });
 
-  it("refuses to undo a Replace existing once its playlist changed, and keeps the entry (#426)", async () => {
+  it("refuses to undo a Replace existing once its playlist changed, and drops only that entry (#426, #506)", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.createPlaylist("Warm Up", TREE_ROOT);
     const old = (await backend.playlistTree()).find((n) => n.name === "Warm Up")!;
     const replaced = await backend.importFolderPlaylist("/music/Warm Up", TREE_ROOT, old.id, null);
     await backend.edits.addTracksToPlaylist(replaced.playlist!, ["100003"]);
     const tree = (await backend.playlistTree()).map((n) => n.id);
-    await expect(backend.edits.undoEdit()).rejects.toThrow("can no longer be undone");
+    await expect(backend.edits.undoEdit()).rejects.toMatchObject({
+      kind: "conflict",
+      message: "Can't undo Replace Playlist: the playlists have changed since. The newer change was kept.",
+    });
     expect((await backend.playlistTree()).map((n) => n.id)).toEqual(tree);
-    // Kept on top, as the real backend keeps it: the next Undo refuses too.
-    await expect(backend.edits.undoEdit()).rejects.toThrow("can no longer be undone");
+    // Gone, as the real backend drops it, so it blocks nothing older.
+    await expect(backend.edits.undoEdit()).rejects.toThrow("no library edit to undo");
   });
 
   it("clears library redo when a new edit branches from an undo", async () => {

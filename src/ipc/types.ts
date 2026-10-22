@@ -245,7 +245,12 @@ export interface Diagnostics {
 
 /** Every command returns this shape on failure. */
 export interface AppErrorDto {
-  kind: "readOnly" | "notFound" | "malformed" | "cancelled" | "internal";
+  /**
+   * `conflict`: an Undo or Redo was refused because what it would write was
+   * changed since by something outside the history; nothing was written and
+   * the entry is gone (#506).
+   */
+  kind: "readOnly" | "notFound" | "malformed" | "cancelled" | "conflict" | "internal";
   message: string;
   detail?: string;
 }

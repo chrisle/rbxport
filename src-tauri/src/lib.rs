@@ -446,6 +446,14 @@ pub fn run() {
                 Err(e) => tracing::warn!(error = %e, "could not read the webview's version"),
             }
             screen_cache::initialize(app.handle());
+            // A write outside the library history (a player over LINK, a cue,
+            // analysis) that ends its Redo branch updates the Edit menu.
+            {
+                let handle = app.handle().clone();
+                app.state::<Arc<AppState>>().on_history_changed(move || {
+                    commands::announce_history(&handle, handle.state::<Arc<AppState>>().inner());
+                });
+            }
             #[cfg(target_os = "macos")]
             if let Some(store) = crate::test_port::data_store() {
                 let config = app.config().app.windows.iter().find(|window| window.label == MAIN_WINDOW)

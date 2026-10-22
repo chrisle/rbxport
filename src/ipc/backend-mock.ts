@@ -1067,8 +1067,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     undoEdit: async () => {
       const edit = editUndo.at(-1);
       if (!edit) throw new Error("There is no library edit to undo.");
-      // A refused undo stays on the stack, as in the real backend.
-      edit.undo();
+      // A refused entry leaves the history and nothing else does, as in
+      // the real backend (#506).
+      try {
+        edit.undo();
+      } catch (e) {
+        editUndo.pop();
+        announceHistory();
+        return historyConflict("undo", edit.label, e);
+      }
       editUndo.pop();
       editRedo.push(edit);
       await bump(false);
@@ -1077,7 +1084,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     redoEdit: async () => {
       const edit = editRedo.at(-1);
       if (!edit) throw new Error("There is no library edit to redo.");
-      edit.redo();
+      try {
+        edit.redo();
+      } catch (e) {
+        editRedo.pop();
+        announceHistory();
+        return historyConflict("redo", edit.label, e);
+      }
       editRedo.pop();
       editUndo.push(edit);
       await bump(false);
@@ -1694,6 +1707,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const failed = (kind: AppErrorDto["kind"], message: string) =>
     Promise.reject(Object.assign(new Error(message), { kind }));
   const refuse = (message: string) => failed("readOnly", message);
+  // An Undo or Redo refused because what it would write changed since, in
+  // the real backend's words.
+  const historyConflict = (action: "undo" | "redo", label: string, reason: unknown) =>
+    failed("conflict", `Can't ${action} ${label}: ${reason instanceof Error ? reason.message : String(reason)}. The newer change was kept.`);
   const notFound = (message: string) => failed("notFound", message);
 
   /*
@@ -3020,8 +3037,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           const listsUnder = () => childrenOf(parent).filter((n) => n.kind !== "history").map((n) => n.id);
           const afterIds = listsUnder();
           const root = nodes[0]?.id ?? "";
-          const refuse = (undo: boolean) => new Error(
-            `that replacement can no longer be ${undo ? "undone" : "redone"}`);
+          const refuse = (_undo: boolean) => new Error("the playlists have changed since");
           const sameList = (a: readonly string[], b: readonly string[]) =>
             a.length === b.length && a.every((value, i) => value === b[i]);
           // `entering` (a node and what is under it) put back right after the
