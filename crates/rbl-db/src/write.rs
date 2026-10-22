@@ -784,6 +784,31 @@ pub enum MyTagOperation {
     Remove,
 }
 
+/// One run of My Tag siblings put in a new order: the categories (`parent`
+/// is [`ROOT`]) or the tags of one category (`parent` is its id). Each side
+/// holds every live sibling's id and exact `Seq`, in the order read, so Undo
+/// puts back the numbers that were there, gaps and all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MyTagOrder {
+    parent: String,
+    before: Vec<(String, Option<i64>)>,
+    after: Vec<(String, Option<i64>)>,
+}
+
+impl MyTagOrder {
+    /// The reorder left every row's `Seq` as it was.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.before == self.after
+    }
+
+    /// [`ROOT`] for the categories, otherwise the category whose tags moved.
+    #[must_use]
+    pub fn parent(&self) -> &str {
+        &self.parent
+    }
+}
+
 /// The My Tag set before and after one information-panel edit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackTagEdit {
@@ -4332,6 +4357,92 @@ impl Writer {
         Ok(Changed { rows, usn })
     }
 
+    /// Puts one run of My Tag siblings in the order given: every category,
+    /// or every tag of one category, each named once. Nothing else changes:
+    /// no row is made, deleted, renamed or given another parent, and no
+    /// track's memberships are touched.
+    ///
+    /// rekordbox orders categories by `Seq` among `ParentID = 'root'` rows
+    /// and tags by `Seq` within their category (its `djmdMyTag` reads
+    /// `... ParentID = 'root' order by Seq` and `... ParentID = %lu order by
+    /// Seq`, 7.2.19 arm64 strings). Its My Tag panel reorders by drag
+    /// (`BrowseMyTagView::itemDroppedMyTag` @0x10066f618 calls
+    /// `DatabaseIF::moveMyTag(id, parent, seq)`) and
+    /// `SongListRepositoryBase<MyTag>::Move` @0x100229d28 leaves the run
+    /// numbered `Seq` 1..N, writing only the rows whose number changes, each
+    /// with an update number of its own (`LibrarySyncRepository::
+    /// UpdateLocalUsn` per row). This writes the order that a sequence of
+    /// such moves would leave, in the same shape. rekordbox's drag can also
+    /// put a tag in another category; this cannot, because the list must be
+    /// exactly one run of siblings.
+    ///
+    /// Every id is checked before anything is written, in one transaction:
+    /// an unknown, deleted, repeated or missing id, or ids from two runs,
+    /// refuse the whole request. An order the library already has writes
+    /// nothing and its edit is empty.
+    pub fn reorder_my_tags_with_undo(&mut self, order: &[String]) -> Result<(Changed, MyTagOrder)> {
+        self.prepare()?;
+        let Some(first) = order.first() else {
+            return Err(DbError::WriteRefused("name the My Tags to put in order".to_owned()));
+        };
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let parent = my_tag_run_of(&tx, first)?;
+        let before = my_tag_run(&tx, &parent)?;
+        let what = if parent == ROOT { "every My Tag category" } else { "every tag in its category" };
+        let mut seen: Vec<&str> = Vec::with_capacity(order.len());
+        for id in order {
+            if seen.contains(&id.as_str()) {
+                return Err(DbError::WriteRefused(format!("My Tag {id} is named more than once")));
+            }
+            if !before.iter().any(|(sibling, _)| sibling == id) {
+                // Distinguish a typo from an id in another run.
+                my_tag_run_of(&tx, id)?;
+                return Err(DbError::WriteRefused(format!(
+                    "My Tag {id} is not in the same run as {first}: name {what}, and only those"
+                )));
+            }
+            seen.push(id);
+        }
+        if let Some((missing, _)) = before.iter().find(|(sibling, _)| !seen.contains(&sibling.as_str())) {
+            return Err(DbError::WriteRefused(format!("the order leaves out My Tag {missing}: name {what}")));
+        }
+        let after: Vec<(String, Option<i64>)> = order.iter().cloned().zip((1_i64..).map(Some)).collect();
+        let edit = MyTagOrder { parent, before, after };
+        let changed = write_my_tag_seqs(&tx, &edit.before, &edit.after, &stamp)?;
+        tx.commit()?;
+        Ok((changed, edit))
+    }
+
+    /// Puts a run of My Tags back in the order it had, refused as a
+    /// [`DbError::Conflict`] unless it is still exactly as the reorder left
+    /// it: a tag made, deleted, renamed into place or moved there since
+    /// would otherwise be given a place it does not have.
+    pub fn undo_my_tag_order(&mut self, edit: &MyTagOrder) -> Result<Changed> {
+        self.step_my_tag_order(edit, true)
+    }
+
+    /// Reorders a run of My Tags again, as [`Self::undo_my_tag_order`]
+    /// does the other way.
+    pub fn redo_my_tag_order(&mut self, edit: &MyTagOrder) -> Result<Changed> {
+        self.step_my_tag_order(edit, false)
+    }
+
+    fn step_my_tag_order(&mut self, edit: &MyTagOrder, undo: bool) -> Result<Changed> {
+        self.prepare()?;
+        let (expected, target) = if undo { (&edit.after, &edit.before) } else { (&edit.before, &edit.after) };
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if my_tag_run(&tx, &edit.parent)? != *expected {
+            return Err(DbError::Conflict("the order of those My Tags has changed since".to_owned()));
+        }
+        let changed = write_my_tag_seqs(&tx, expected, target, &stamp)?;
+        tx.commit()?;
+        Ok(changed)
+    }
+
     /// A My Tag id rekordbox could have chosen and the table does not hold,
     /// deleted rows included since they keep their key.
     fn unused_my_tag_id(&mut self) -> Result<String> {
@@ -6005,6 +6116,72 @@ fn write_child_order(conn: &Connection, parent: &str, order: &[String], stamp: &
         )?;
     }
     set_counter(conn, usn)?;
+    Ok(Changed { rows, usn })
+}
+
+/// The run of siblings a live My Tag is ordered in: [`ROOT`] for a
+/// category, otherwise its category's id. An unknown or deleted id is
+/// refused.
+fn my_tag_run_of(conn: &Connection, id: &str) -> Result<String> {
+    let row: Option<(i64, String)> = conn.query_row(
+        "SELECT COALESCE(Attribute, 0), COALESCE(ParentID, '') FROM djmdMyTag
+         WHERE ID = ?1 AND rb_local_deleted = 0",
+        params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).optional()?;
+    match row {
+        None => Err(DbError::WriteRefused(format!("no My Tag {id}"))),
+        Some((1, parent)) if parent == ROOT => Ok(ROOT.to_owned()),
+        Some((0, parent)) => Ok(parent),
+        Some(_) => Err(DbError::WriteRefused(format!("My Tag {id} is neither a category nor a tag in one"))),
+    }
+}
+
+/// Every live sibling in one My Tag run, with its `Seq` as stored, in the
+/// order rekordbox reads them.
+fn my_tag_run(conn: &Connection, parent: &str) -> Result<Vec<(String, Option<i64>)>> {
+    let attribute = i64::from(parent == ROOT);
+    let mut statement = conn.prepare(
+        "SELECT ID, Seq FROM djmdMyTag
+         WHERE ParentID = ?1 AND Attribute = ?2 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+    )?;
+    let run = statement
+        .query_map(params![parent, attribute], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(run)
+}
+
+/// Writes `target`'s `Seq` over the rows of `current` (the same ids) whose
+/// number differs, each with the next update number, as rekordbox's
+/// `SongListRepositoryBase::Move` stamps a renumbered row.
+fn write_my_tag_seqs(
+    conn: &Connection,
+    current: &[(String, Option<i64>)],
+    target: &[(String, Option<i64>)],
+    stamp: &str,
+) -> Result<Changed> {
+    let mut rows = 0;
+    let mut usn = 0;
+    let mut next = None;
+    for (id, seq) in target {
+        if current.iter().any(|(was, old)| was == id && old == seq) {
+            continue;
+        }
+        let this = match next {
+            Some(n) => n,
+            None => next_usn(conn)?,
+        };
+        rows += conn.execute(
+            "UPDATE djmdMyTag SET Seq = ?1, rb_local_usn = ?2, updated_at = ?3
+             WHERE ID = ?4 AND rb_local_deleted = 0",
+            params![seq, this, stamp, id],
+        )?;
+        usn = this;
+        next = Some(this.checked_add(1).ok_or_else(|| DbError::WriteRefused("local update counter overflow".into()))?);
+    }
+    if rows > 0 {
+        set_counter(conn, usn)?;
+    }
     Ok(Changed { rows, usn })
 }
 

@@ -3106,6 +3106,205 @@ fn my_tag_delta_rolls_back_when_a_later_insert_fails() {
     assert_eq!(counter, f.one::<i64>("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]));
 }
 
+/// A second category ("Genre", Seq 2) with three tags, and a third
+/// ("Mood", Seq 3) with none, beside the fixture's "Situation" (#584).
+fn my_tag_taxonomy(f: &Fixture) {
+    for (id, seq, name, attribute, parent) in [
+        ("800001", 2, "Genre", 1, "root"),
+        ("800002", 1, "House", 0, "800001"),
+        ("800003", 2, "Techno", 0, "800001"),
+        ("800004", 5, "Disco", 0, "800001"),
+        ("800005", 3, "Mood", 1, "root"),
+        // A deleted tag keeps its place out of every run.
+        ("800006", 3, "Gone", 0, "800001"),
+    ] {
+        f.conn().execute(
+            "INSERT INTO djmdMyTag
+                (ID, Seq, Name, Attribute, ParentID, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, 0, 0, NULL, 1, '2026-01-01', '2026-01-01')",
+            params![id, seq, name, attribute, parent, format!("uuid-{id}")],
+        ).unwrap();
+    }
+    f.conn().execute("UPDATE djmdMyTag SET rb_local_deleted = 1 WHERE ID = '800006'", []).unwrap();
+}
+
+/// Every `djmdMyTag` row, whole, so a refused or empty reorder can be shown
+/// to have written nothing.
+fn my_tag_rows(f: &Fixture) -> Vec<Vec<rusqlite::types::Value>> {
+    let mut statement = f.conn().prepare("SELECT * FROM djmdMyTag ORDER BY ID").unwrap();
+    let columns = statement.column_count();
+    statement.query_map([], |row| (0..columns).map(|column| row.get(column)).collect()).unwrap()
+        .map(Result::unwrap).collect()
+}
+
+/// `(ID, Seq)` of one run as rekordbox reads it.
+fn my_tag_run(f: &Fixture, parent: &str) -> Vec<(String, i64)> {
+    let mut statement = f.conn().prepare(
+        "SELECT ID, Seq FROM djmdMyTag WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+    ).unwrap();
+    statement.query_map([parent], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+}
+
+fn ids(list: &[&str]) -> Vec<String> {
+    list.iter().map(|&id| id.to_owned()).collect()
+}
+
+#[test]
+fn reordering_my_tags_renumbers_one_run_and_keeps_ids_names_parents_and_memberships() {
+    use rbl_db::fixture::{MY_TAG_CATEGORY, MY_TAG_PEAK};
+    let mut f = fixture();
+    my_tag_taxonomy(&f);
+    f.writer.set_my_tags(&track_id(1), &ids(&[MY_TAG_PEAK, "800003"])).unwrap();
+    let members = |f: &Fixture| -> Vec<(String, String, i64)> {
+        let mut s = f.conn().prepare(
+            "SELECT ContentID, MyTagID, rb_local_deleted FROM djmdSongMyTag ORDER BY ContentID, MyTagID",
+        ).unwrap();
+        s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(Result::unwrap).collect()
+    };
+    let members_before = members(&f);
+    let names_before: Vec<(String, String, String, i64)> = {
+        let mut s = f.conn().prepare("SELECT ID, Name, ParentID, Attribute FROM djmdMyTag ORDER BY ID").unwrap();
+        s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(Result::unwrap).collect()
+    };
+    let counter: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    let situation_before = my_tag_run(&f, MY_TAG_CATEGORY);
+
+    let (changed, edit) = f.writer.reorder_my_tags_with_undo(&ids(&["800004", "800002", "800003"])).unwrap();
+    assert!(!edit.is_empty());
+    assert_eq!(edit.parent(), "800001");
+    // Disco 5 -> 1, House 1 -> 2, Techno 2 -> 3: all three moved.
+    assert_eq!(changed.rows, 3);
+    assert_eq!(my_tag_run(&f, "800001"), vec![
+        ("800004".to_owned(), 1), ("800002".to_owned(), 2), ("800003".to_owned(), 3),
+    ]);
+    // Each renumbered row its own update number, as rekordbox's Move gives.
+    let usns: Vec<i64> = {
+        let mut s = f.conn().prepare(
+            "SELECT rb_local_usn FROM djmdMyTag WHERE ParentID = '800001' AND rb_local_deleted = 0 ORDER BY Seq",
+        ).unwrap();
+        s.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    };
+    assert_eq!(usns, vec![counter + 1, counter + 2, counter + 3]);
+    assert_eq!(counter + 3, f.one::<i64>("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]));
+    // Nothing outside the run moved; no id, name, parent or kind changed;
+    // no membership touched; the deleted tag kept its number.
+    assert_eq!(my_tag_run(&f, MY_TAG_CATEGORY), situation_before);
+    assert_eq!(f.one::<i64>("SELECT Seq FROM djmdMyTag WHERE ID = '800006'", &[]), 3);
+    let names_after: Vec<(String, String, String, i64)> = {
+        let mut s = f.conn().prepare("SELECT ID, Name, ParentID, Attribute FROM djmdMyTag ORDER BY ID").unwrap();
+        s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(Result::unwrap).collect()
+    };
+    assert_eq!(names_before, names_after);
+    assert_eq!(members_before, members(&f));
+
+    // The catalog reads the new order back.
+    let genre: Vec<String> = rbl_db::export_info::my_tags(f.conn()).unwrap().into_iter()
+        .filter(|row| row.parent == "800001").map(|row| row.name).collect();
+    assert_eq!(genre, vec!["Disco", "House", "Techno"]);
+
+    // The same order again writes nothing.
+    let rows = my_tag_rows(&f);
+    let (changed, again) = f.writer.reorder_my_tags_with_undo(&ids(&["800004", "800002", "800003"])).unwrap();
+    assert_eq!(changed.rows, 0);
+    assert!(again.is_empty());
+    assert_eq!(rows, my_tag_rows(&f));
+
+    // Moving one tag writes only the rows whose number changes.
+    let (changed, _) = f.writer.reorder_my_tags_with_undo(&ids(&["800004", "800003", "800002"])).unwrap();
+    assert_eq!(changed.rows, 2);
+}
+
+#[test]
+fn reordering_my_tag_categories_moves_the_categories_and_not_their_tags() {
+    use rbl_db::fixture::MY_TAG_CATEGORY;
+    let mut f = fixture();
+    my_tag_taxonomy(&f);
+    let genre_tags = my_tag_run(&f, "800001");
+    let (changed, edit) = f.writer.reorder_my_tags_with_undo(&ids(&["800005", MY_TAG_CATEGORY, "800001"])).unwrap();
+    assert_eq!(edit.parent(), "root");
+    assert_eq!(changed.rows, 3);
+    let categories: Vec<(String, i64)> = {
+        let mut s = f.conn().prepare(
+            "SELECT ID, Seq FROM djmdMyTag WHERE Attribute = 1 AND rb_local_deleted = 0 ORDER BY Seq",
+        ).unwrap();
+        s.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+    };
+    assert_eq!(categories, vec![
+        ("800005".to_owned(), 1), (MY_TAG_CATEGORY.to_owned(), 2), ("800001".to_owned(), 3),
+    ]);
+    assert_eq!(my_tag_run(&f, "800001"), genre_tags);
+    let names: Vec<String> = rbl_db::export_info::my_tags(f.conn()).unwrap().into_iter()
+        .filter(|row| row.attribute == 1).map(|row| row.name).collect();
+    assert_eq!(names, vec!["Mood", "Situation", "Genre"]);
+}
+
+#[test]
+fn an_invalid_my_tag_order_writes_nothing() {
+    use rbl_db::fixture::{MY_TAG_CATEGORY, MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let mut f = fixture();
+    my_tag_taxonomy(&f);
+    let rows = my_tag_rows(&f);
+    let counter: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    for order in [
+        vec![],
+        // Unknown and deleted ids.
+        ids(&["800004", "800002", "no-such-tag"]),
+        ids(&["800004", "800002", "800003", "800006"]),
+        // Named twice, or one left out.
+        ids(&["800004", "800002", "800003", "800002"]),
+        ids(&["800004", "800002"]),
+        // A tag of another category: no tag changes category.
+        ids(&["800004", "800002", "800003", MY_TAG_PEAK]),
+        ids(&[MY_TAG_PEAK, MY_TAG_WARM_UP, "800002"]),
+        // Categories and tags in one list.
+        ids(&[MY_TAG_CATEGORY, "800001", "800005", "800002"]),
+        ids(&["800002", "800003", "800004", "800001"]),
+    ] {
+        let result = f.writer.reorder_my_tags_with_undo(&order);
+        assert!(matches!(result, Err(DbError::WriteRefused(_))), "{order:?} must be refused, got {result:?}");
+        assert_eq!(rows, my_tag_rows(&f), "{order:?} must write nothing");
+    }
+    assert_eq!(counter, f.one::<i64>("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]));
+}
+
+#[test]
+fn a_my_tag_reorder_undoes_and_redoes_exactly_and_refuses_a_changed_run() {
+    use rbl_db::fixture::MY_TAG_CATEGORY;
+    let mut f = fixture();
+    my_tag_taxonomy(&f);
+    let before = my_tag_run(&f, "800001");
+    let (_, edit) = f.writer.reorder_my_tags_with_undo(&ids(&["800003", "800004", "800002"])).unwrap();
+    let after = my_tag_run(&f, "800001");
+
+    // Undo puts back the numbers that were there, the gap (5) included.
+    f.writer.undo_my_tag_order(&edit).unwrap();
+    assert_eq!(my_tag_run(&f, "800001"), before);
+    assert!(matches!(f.writer.undo_my_tag_order(&edit), Err(DbError::Conflict(_))));
+    f.writer.redo_my_tag_order(&edit).unwrap();
+    assert_eq!(my_tag_run(&f, "800001"), after);
+    assert!(matches!(f.writer.redo_my_tag_order(&edit), Err(DbError::Conflict(_))));
+
+    // A tag added to the run since: Undo refuses and writes nothing.
+    let made = f.writer.create_my_tag("800001").unwrap();
+    let rows = my_tag_rows(&f);
+    assert!(matches!(f.writer.undo_my_tag_order(&edit), Err(DbError::Conflict(_))));
+    assert_eq!(rows, my_tag_rows(&f));
+
+    // A category order, undone after another run changed, still undoes.
+    let (_, categories) = f.writer.reorder_my_tags_with_undo(&ids(&["800001", MY_TAG_CATEGORY, "800005"])).unwrap();
+    f.writer.reorder_my_tags_with_undo(&ids(&["800002", "800003", "800004", &made.id])).unwrap();
+    f.writer.undo_my_tag_order(&categories).unwrap();
+    let names: Vec<String> = {
+        let mut s = f.conn().prepare(
+            "SELECT Name FROM djmdMyTag WHERE Attribute = 1 AND rb_local_deleted = 0 ORDER BY Seq",
+        ).unwrap();
+        s.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    };
+    assert_eq!(names, vec!["Situation", "Genre", "Mood"]);
+}
+
 #[test]
 fn the_tag_list_takes_tracks_on_the_end_and_closes_up_when_one_comes_off() {
     let mut f = fixture();
