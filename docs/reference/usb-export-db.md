@@ -1470,7 +1470,8 @@ stick; a missing image is an error, never an instruction to delete data.
 Obsolete files are removed only *after* the commit, and only if not retained.
 
 Every track write re-checks the volume's dev/ino to catch the stick being
-swapped, and `ENXIO`/`ENODEV`/`EIO` become `DeviceGone`.
+swapped, and `ENXIO`/`ENODEV`/`EIO` (on Windows `ERROR_NOT_READY`,
+`ERROR_DEV_NOT_EXIST` or `ERROR_DEVICE_NOT_CONNECTED`) become `DeviceGone`.
 
 #### Ejecting after publication
 
