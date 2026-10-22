@@ -73,9 +73,9 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
 ### Cue and loop Undo (#504)
 
 A cue edit made on a deck or in the cue list is undone with Edit › Undo
-(Cmd+Z on macOS, Ctrl+Z elsewhere) and redone with Edit › Redo, when no text
-field has focus and no deck's grid editor is armed (an armed grid editor
-owns Undo for its grid). The menu names the edit: Undo Set Hot Cue, Undo
+(Cmd+Z on macOS, Ctrl+Z elsewhere) and redone with Edit › Redo
+(Shift+Cmd+Z, Ctrl+Shift+Z), when no text field has focus and no deck's
+grid editor is armed (an armed grid editor owns Undo for its grid). The menu names the edit: Undo Set Hot Cue, Undo
 Move Cue, Undo Delete Cue, Undo Convert Memory Cues to Hot Cues, and so on.
 
 - An entry holds every `djmdCue` column a cue edit can change, for exactly
