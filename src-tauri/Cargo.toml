@@ -77,6 +77,8 @@ rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"]
 tauri = { version = "2", features = ["test"] }
 # The database server's side of a link test: what a player is answered.
 rbl-dbserver = { path = "../crates/rbl-dbserver" }
+# Tags written into fixture audio files, for Reload Tag (#503).
+lofty = { version = "0.22", default-features = false }
 
 # macOS builds menu items on the main thread only, and the test harness runs
 # every test on a spawned one. Without a harness, `main` is the main thread.
