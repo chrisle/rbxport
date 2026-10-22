@@ -66,6 +66,7 @@ impl From<GridEdit> for Edit {
 /// What the panel needs to know about a track's grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools, reason = "the panel's wire shape: each flag greys a different control")]
 pub struct GridStateDto {
     /// The grid's tempo x100, from its first beat; 0 without a grid.
     pub bpm_x100: u32,
@@ -75,6 +76,10 @@ pub struct GridStateDto {
     pub undo_label: Option<&'static str>,
     pub redo_label: Option<&'static str>,
     pub locked: bool,
+    /// Whether the GRID panel's lock can be set here: a collection track's
+    /// can, a Devices tree track's cannot (its lock would be the stick's,
+    /// which rbxport does not write).
+    pub lockable: bool,
 }
 
 /// What one action asks for.
@@ -177,6 +182,10 @@ pub struct GridEditor {
     backup_dir: PathBuf,
     /// Files checked for a backup this session, so the check is one per file.
     backed_up: parking_lot::Mutex<HashSet<PathBuf>>,
+    /// A stick's analysis files as this session last wrote them: the file
+    /// and a digest of its bytes. One still holding those bytes is the
+    /// session's own edit, already backed up before it, and is not copied.
+    device_written: parking_lot::Mutex<HashSet<(PathBuf, blake3::Hash)>>,
 }
 
 impl Default for GridEditor {
@@ -205,6 +214,7 @@ impl GridEditor {
             locks_path: root.join("grid-locks.json"),
             backup_dir: root.join("backups/analysis"),
             backed_up: parking_lot::Mutex::new(HashSet::new()),
+            device_written: parking_lot::Mutex::new(HashSet::new()),
         }
     }
 
@@ -248,6 +258,7 @@ impl GridEditor {
             undo_label: history.and_then(|h| h.undo.last().map(|entry| entry.label)),
             redo_label: history.and_then(|h| h.redo.last().map(|entry| entry.label)),
             locked: self.is_locked(track),
+            lockable: true,
         }
     }
 
@@ -269,6 +280,37 @@ impl GridEditor {
             std::fs::copy(file, &copy).map_err(|e| file_error("backed up", &copy, &e))?;
         }
         self.backed_up.lock().insert(file.to_path_buf());
+        Ok(())
+    }
+
+    /// Copies a stick's analysis file under the backup directory before it
+    /// is rewritten, at `relative` with a digest of its bytes in the name.
+    /// Sticks often share a volume name and the same track has the same
+    /// analysis path on each, so neither names one stick's file: the digest
+    /// keeps each stick's original apart, and a copy already there holds
+    /// these very bytes. Bytes this session wrote to the file are skipped,
+    /// as what they replaced was copied first.
+    fn back_up_device(&self, file: &Path, relative: &str) -> AppResult<()> {
+        if !file.is_file() {
+            return Ok(());
+        }
+        // perf-ok: called from the commands' blocking closures only
+        let bytes = std::fs::read(file).map_err(|e| file_error("backed up", file, &e))?;
+        let digest = blake3::hash(&bytes);
+        if self.device_written.lock().contains(&(file.to_path_buf(), digest)) {
+            return Ok(());
+        }
+        let named = self.backup_dir.join(relative.trim_start_matches(['/', '\\']));
+        let stem = named.file_stem().map_or_else(|| "analysis".into(), |s| s.to_string_lossy().into_owned());
+        let extension = named.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+        let copy = named.with_file_name(format!("{stem}-{}{extension}", &digest.to_hex()[..16]));
+        if !copy.exists() {
+            if let Some(parent) = copy.parent() {
+                // perf-ok: called from the commands' blocking closures only
+                std::fs::create_dir_all(parent).map_err(|e| file_error("backed up", &copy, &e))?;
+            }
+            write_atomically(&copy, &bytes).map_err(|e| file_error("backed up", &copy, &e))?;
+        }
         Ok(())
     }
 }
@@ -412,6 +454,53 @@ fn conflict(action: GridAction, label: &str) -> AppError {
         format!("Can't {what} {label}: the track's beat grid has changed since. The newer change was kept."))
 }
 
+/// The grid an action leaves, or `None` when an edit changes nothing.
+/// `duration_ms` is the track's length when known; `locked` refuses an edit.
+/// Undo and Redo refuse, and drop their entry, when the grid is no longer
+/// the one the entry expects.
+fn plan_next(editor: &GridEditor, track: &str, beats: &[Beat], action: GridAction, options: &GridOptions,
+    duration_ms: Option<u32>, locked: bool) -> AppResult<Option<Vec<Beat>>> {
+    match action {
+        GridAction::Edit { edit, from_ms } => {
+            if locked {
+                return Err(AppError::new(ErrorKind::ReadOnly, "The beat grid is locked. Unlock it to edit."));
+            }
+            rbl_anlz::grid::validate(beats, from_ms, edit.into())
+                .map_err(|message| AppError::new(ErrorKind::Malformed, message))?;
+            if matches!(edit, GridEdit::Stretch { .. } | GridEdit::Tempo { .. })
+                && !options.allow_dynamic && rbl_anlz::grid::is_dynamic_from(beats, from_ms) {
+                return Err(AppError::new(ErrorKind::Malformed, "Confirm replacing this section's tempo changes before adjusting its tempo."));
+            }
+            let duration = duration_ms.unwrap_or_else(|| beats.last().map_or(0, |b| b.time_ms));
+            let next = apply_with_duration(beats, from_ms, edit.into(), duration);
+            if next.is_empty() {
+                return Err(AppError::new(ErrorKind::Malformed, "That edit would leave the track without a beat."));
+            }
+            Ok((next != beats).then_some(next))
+        }
+        GridAction::Undo | GridAction::Redo => {
+            let mut histories = editor.histories.lock();
+            let history = histories.entry(track.to_owned()).or_default();
+            let from = if action == GridAction::Undo { &history.undo } else { &history.redo };
+            let Some(entry) = from.last() else {
+                let what = if action == GridAction::Undo { "undo" } else { "redo" };
+                return Err(AppError::new(ErrorKind::NotFound, format!("Nothing to {what}.")));
+            };
+            let (expected, target) = if action == GridAction::Undo { (&entry.after, &entry.before) } else { (&entry.before, &entry.after) };
+            if expected.as_slice() != beats {
+                // Only that entry goes, as #506 drops a conflicting library
+                // entry: left on top it would block every older one, which
+                // may still fit (an outside write that put the grid back).
+                let label = entry.label;
+                let from = if action == GridAction::Undo { &mut history.undo } else { &mut history.redo };
+                from.pop();
+                return Err(conflict(action, label));
+            }
+            Ok(Some(target.clone()))
+        }
+    }
+}
+
 fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::LibraryLocation,
     track: &str, action: GridAction, options: &GridOptions,
     set_bpm: &mut dyn FnMut(u32) -> AppResult<()>) -> AppResult<GridOutcome> {
@@ -430,54 +519,16 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
     let files = files_of(library, &location.share_root, track, options.registered.as_deref())?;
     let (parsed, beats) = read_dat(&files.dat)?;
 
-    let next: Vec<Beat> = match action {
-        GridAction::Edit { edit, from_ms } => {
-            if editor.is_locked(track) || database_locked(location, track)? {
-                return Err(AppError::new(ErrorKind::ReadOnly, "The beat grid is locked. Unlock it to edit."));
-            }
-            rbl_anlz::grid::validate(&beats, from_ms, edit.into())
-                .map_err(|message| AppError::new(ErrorKind::Malformed, message))?;
-            if matches!(edit, GridEdit::Stretch { .. } | GridEdit::Tempo { .. })
-                && !options.allow_dynamic && rbl_anlz::grid::is_dynamic_from(&beats, from_ms) {
-                return Err(AppError::new(ErrorKind::Malformed, "Confirm replacing this section's tempo changes before adjusting its tempo."));
-            }
-            let row = library.row_of(track).map(|row| row as usize);
-            let duration = options.duration_ms.or_else(|| row.and_then(|i| library.length_sec.get(i)).map(|s| s.saturating_mul(1000)))
-                .unwrap_or_else(|| beats.last().map_or(0, |b| b.time_ms));
-            let next = apply_with_duration(&beats, from_ms, edit.into(), duration);
-            if next.is_empty() {
-                return Err(AppError::new(ErrorKind::Malformed, "That edit would leave the track without a beat."));
-            }
-            if next == beats {
-                return Ok(GridOutcome {
-                    state: editor.state_for(track, &beats),
-                    bpm_changed: false,
-                    written: false,
-                    beats: wire_beats(&beats),
-                });
-            }
-            next
-        }
-        GridAction::Undo | GridAction::Redo => {
-            let mut histories = editor.histories.lock();
-            let history = histories.entry(track.to_owned()).or_default();
-            let from = if action == GridAction::Undo { &history.undo } else { &history.redo };
-            let Some(entry) = from.last() else {
-                let what = if action == GridAction::Undo { "undo" } else { "redo" };
-                return Err(AppError::new(ErrorKind::NotFound, format!("Nothing to {what}.")));
-            };
-            let (expected, target) = if action == GridAction::Undo { (&entry.after, &entry.before) } else { (&entry.before, &entry.after) };
-            if *expected != beats {
-                // Only that entry goes, as #506 drops a conflicting library
-                // entry: left on top it would block every older one, which
-                // may still fit (an outside write that put the grid back).
-                let label = entry.label;
-                let from = if action == GridAction::Undo { &mut history.undo } else { &mut history.redo };
-                from.pop();
-                return Err(conflict(action, label));
-            }
-            target.clone()
-        }
+    let locked = matches!(action, GridAction::Edit { .. }) && (editor.is_locked(track) || database_locked(location, track)?);
+    let row = library.row_of(track).map(|row| row as usize);
+    let duration = options.duration_ms.or_else(|| row.and_then(|i| library.length_sec.get(i)).map(|s| s.saturating_mul(1000)));
+    let Some(next) = plan_next(editor, track, &beats, action, options, duration, locked)? else {
+        return Ok(GridOutcome {
+            state: editor.state_for(track, &beats),
+            bpm_changed: false,
+            written: false,
+            beats: wire_beats(&beats),
+        });
     };
 
     editor.back_up(&files.dat, &files.relative, "DAT")?;
@@ -563,8 +614,124 @@ fn set_tempo_inner(state: &AppState, editor: &GridEditor, track: &str, value: &s
     Ok(())
 }
 
+/// A Devices tree track's grid: its analysis files on the stick and its
+/// row in the library it was browsed in (#660).
+struct DeviceGrid {
+    mount: PathBuf,
+    format: rbl_export::device_library::Format,
+    track: u32,
+    dat: PathBuf,
+    ext: PathBuf,
+}
+
+impl DeviceGrid {
+    fn of(assets: &crate::device_library::DeviceAssets) -> AppResult<Self> {
+        let Some((format, track)) = assets.library else {
+            return Err(AppError::new(ErrorKind::NotFound, "That track's device library is not known. Open it again from the device."));
+        };
+        let Some(dat) = assets.analysis_dat() else {
+            return Err(AppError::new(ErrorKind::NotFound, "That track has not been analysed, so it has no grid to edit."));
+        };
+        let ext = rbl_anlz::sibling(&dat, "EXT");
+        Ok(Self { mount: assets.mount.clone(), format, track, dat, ext })
+    }
+
+    /// `path`, relative to the stick's root.
+    fn relative(&self, path: &Path) -> AppResult<PathBuf> {
+        path.strip_prefix(&self.mount).map(Path::to_path_buf)
+            .map_err(|_| AppError::internal(format!("{} is not on the device", path.display())))
+    }
+
+    /// Where the backups of this stick's analysis files go, under the
+    /// editor's backup directory: `devices/<volume>/<path on the stick>`,
+    /// to which `GridEditor::back_up_device` adds a digest of the content.
+    fn backup_key(&self, path: &Path) -> AppResult<String> {
+        let volume = self.mount.file_name().map_or_else(|| "device".into(), |n| n.to_string_lossy().into_owned());
+        Ok(format!("devices/{volume}/{}", self.relative(path)?.to_string_lossy()))
+    }
+}
+
+/// The grid of a Devices tree track, as the panel sees it. Its lock is not
+/// offered: that would be the stick's to keep.
+pub(crate) fn device_state(editor: &GridEditor, assets: &crate::device_library::DeviceAssets, track: &str) -> AppResult<GridStateDto> {
+    let grid = DeviceGrid::of(assets)?;
+    let (_, beats) = read_dat(&grid.dat)?;
+    Ok(GridStateDto { locked: false, lockable: false, ..editor.state_for(track, &beats) })
+}
+
+/// Why a grid edit to a stick must be refused, if it must: rekordbox holds
+/// a connected stick's libraries open and writes them itself, so only one
+/// application may write the stick at a time, as for its playlists.
+pub(crate) fn device_refusal(rekordbox_running: bool) -> Option<AppError> {
+    rekordbox_running.then(|| AppError::new(ErrorKind::ReadOnly, "Quit rekordbox before editing a beat grid on this USB so only one application writes it."))
+}
+
+/// Applies one action to a Devices tree track's grid, on the stick: the
+/// track's `.DAT` and `.EXT` there and, when the tempo changed, its row in
+/// the stick's library, published together through the export journal
+/// (`rbl_export::device_library::write_grid`). Before a file is rewritten,
+/// its bytes are copied to the editor's backups unless this session wrote
+/// them or a copy of the same bytes is already there. rekordbox does
+/// the same for a device track's grid (see `GridWrite`).
+pub(crate) fn apply_device(editor: &GridEditor, assets: &crate::device_library::DeviceAssets, track: &str,
+    action: GridAction, options: &GridOptions, rekordbox_running: bool) -> AppResult<GridOutcome> {
+    if let Some(refused) = device_refusal(rekordbox_running) {
+        return Err(refused);
+    }
+    let _editing = editor.editing.lock();
+    let grid = DeviceGrid::of(assets)?;
+    let (parsed, beats) = read_dat(&grid.dat)?;
+    let unchanged = |beats: &[Beat]| GridOutcome {
+        state: GridStateDto { locked: false, lockable: false, ..editor.state_for(track, beats) },
+        bpm_changed: false,
+        written: false,
+        beats: wire_beats(beats),
+    };
+    let Some(next) = plan_next(editor, track, &beats, action, options, options.duration_ms, false)? else {
+        return Ok(unchanged(&beats));
+    };
+    editor.back_up_device(&grid.dat, &grid.backup_key(&grid.dat)?)?;
+    let mut files = vec![(grid.relative(&grid.dat)?, parsed.with_beat_grid(&next))];
+    if grid.ext.is_file() {
+        editor.back_up_device(&grid.ext, &grid.backup_key(&grid.ext)?)?;
+        let ext = rbl_anlz::Anlz::read(&grid.ext).map_err(|e| AppError::internal(e.to_string()))?;
+        if let Some(bytes) = ext.with_extended_grid_edit(&parsed.beat_grid().unwrap_or_default(), &next, parsed.grid_offset().unwrap_or(0)) {
+            files.push((grid.relative(&grid.ext)?, bytes));
+        }
+    }
+    let (old_bpm, new_bpm) = (u32::from(tempo_x100(&beats)), u32::from(tempo_x100(&next)));
+    let bpm_changed = new_bpm != old_bpm;
+    let written: Vec<(PathBuf, blake3::Hash)> = files.iter().map(|(path, bytes)| (grid.mount.join(path), blake3::hash(bytes))).collect();
+    let write = rbl_export::device_library::GridWrite { track: grid.track, files, bpm_x100: bpm_changed.then_some(new_bpm) };
+    rbl_export::device_library::write_grid(&grid.mount, grid.format, &write).map_err(|e| crate::device_library::device_error(&e))?;
+    {
+        let mut known = editor.device_written.lock();
+        known.retain(|(path, _)| !written.iter().any(|(file, _)| file == path));
+        known.extend(written);
+    }
+    record_history(editor, track, action, beats, next.clone(), options);
+    Ok(GridOutcome {
+        state: GridStateDto { locked: false, lockable: false, ..editor.state_for(track, &next) },
+        bpm_changed,
+        written: true,
+        beats: wire_beats(&next),
+    })
+}
+
 fn wire_beats(beats: &[Beat]) -> Vec<(u32, u8)> {
     beats.iter().map(|beat| (beat.time_ms, u8::try_from(beat.beat_number).unwrap_or(0))).collect()
+}
+
+/// After a written edit: the deck's metronome takes the new grid, and every
+/// deck showing the track refetches it (the track's id, inside the event
+/// cap).
+fn follow_grid<R: tauri::Runtime>(app: &tauri::AppHandle<R>, player: &crate::player::Player, deck: Option<String>, outcome: &GridOutcome, track: &str) {
+    // The deck's metronome plays the grid it was given on load; give it this one.
+    if let (Some(deck), Some(engine)) = (deck, player.opened()) {
+        let grid: Vec<(u32, bool)> = outcome.beats.iter().map(|&(ms, number)| (ms, number == 1)).collect();
+        engine.set_metronome_grid(crate::player::deck_of(&deck), &grid);
+    }
+    let _ = tauri::Emitter::emit(app, "grid:changed", track);
 }
 
 /// Runs one action under `blocking` (a `spawn_blocking` thread: the files
@@ -582,6 +749,16 @@ async fn run<R: tauri::Runtime>(
     deck: Option<String>,
     mut options: GridOptions,
 ) -> AppResult<GridStateDto> {
+    // A Devices tree track: its grid is on the stick, not in the library.
+    if let Some(assets) = state.device_assets(&track) {
+        let editor = Arc::clone(&editor);
+        let changed = track.clone();
+        let outcome = blocking(name, move || apply_device(&editor, &assets, &track, action, &options, rbl_db::is_rekordbox_app_running())).await?;
+        if outcome.written {
+            follow_grid(&app, &player, deck, &outcome, &changed);
+        }
+        return Ok(outcome.state);
+    }
     let library = state.library()?;
     let location = state.location()?;
     options.registered = state.registered_analysis(&track);
@@ -615,15 +792,9 @@ async fn run<R: tauri::Runtime>(
     if !outcome.written {
         return Ok(outcome.state);
     }
-    // The deck's metronome plays the grid it was given on load; give it this one.
-    if let (Some(deck), Some(engine)) = (deck, player.opened()) {
-        let grid: Vec<(u32, bool)> = outcome.beats.iter().map(|&(ms, number)| (ms, number == 1)).collect();
-        engine.set_metronome_grid(crate::player::deck_of(&deck), &grid);
-    }
-    // The track's id, inside the event cap: every deck showing the track
-    // refetches its grid. A changed tempo is a changed column, so the
-    // library is re-read as it is after any other track edit.
-    let _ = tauri::Emitter::emit(&app, "grid:changed", &track);
+    follow_grid(&app, &player, deck, &outcome, &track);
+    // A changed tempo is a changed column, so the library is re-read as it
+    // is after any other track edit.
     if outcome.bpm_changed {
         reload(app, state).await?;
     }
@@ -637,6 +808,10 @@ pub async fn grid_state(
     editor: State<'_, Arc<GridEditor>>,
     track: String,
 ) -> AppResult<GridStateDto> {
+    if let Some(assets) = state.device_assets(&track) {
+        let editor = Arc::clone(&editor);
+        return blocking("grid_state", move || device_state(&editor, &assets, &track)).await;
+    }
     let library = state.library()?;
     let location = state.location()?;
     let registered = state.registered_analysis(&track);
@@ -701,6 +876,9 @@ pub async fn grid_lock<R: tauri::Runtime>(
     track: String,
     on: bool,
 ) -> AppResult<GridStateDto> {
+    if state.device_assets(&track).is_some() {
+        return Err(AppError::new(ErrorKind::ReadOnly, "Analysis Lock is set on a track in the collection, not on a device."));
+    }
     let library = state.library()?;
     let location = state.location()?;
     let registered = state.registered_analysis(&track);
@@ -1105,7 +1283,7 @@ mod tests {
         let undone = f.run(GridAction::Undo).unwrap();
         assert_eq!(f.bpms, vec![12_048, 12_000]);
         assert_eq!(f.times(), (0..8).map(|i| 500 + i * 500).collect::<Vec<_>>());
-        assert_eq!(undone.state, GridStateDto { bpm_x100: 12_000, beats: 8, can_undo: false, can_redo: true, undo_label: None, redo_label: Some("Adjust Tempo"), locked: false });
+        assert_eq!(undone.state, GridStateDto { bpm_x100: 12_000, beats: 8, can_undo: false, can_redo: true, undo_label: None, redo_label: Some("Adjust Tempo"), locked: false, lockable: true });
 
         let redone = f.run(GridAction::Redo).unwrap();
         assert_eq!(f.bpms, vec![12_048, 12_000, 12_048]);
@@ -1270,5 +1448,227 @@ mod tests {
         let err = state_of(&f.editor, &f.library, &f.location.share_root, "no-such-track").unwrap_err();
         assert_eq!(err.kind, ErrorKind::NotFound);
         assert!(f.run(GridAction::Redo).is_err());
+    }
+
+    // A Devices tree track (#660): its grid is edited on the stick, in a
+    // tempdir standing for one; no library is opened.
+    mod device {
+        use super::*;
+        use rbl_export::device_library::{self as stick, Format};
+
+        struct Stick {
+            _src: tempfile::TempDir,
+            dest: tempfile::TempDir,
+            editor: GridEditor,
+            _app: tempfile::TempDir,
+        }
+
+        impl Stick {
+            fn assets(&self, format: Format) -> crate::device_library::DeviceAssets {
+                let track = stick::read(self.dest.path(), format).unwrap().track(1).unwrap().clone();
+                crate::device_library::DeviceAssets {
+                    mount: self.dest.path().to_path_buf(),
+                    audio: track.path,
+                    analysis: track.analysis_path,
+                    artwork: String::new(),
+                    library: Some((format, 1)),
+                }
+            }
+
+            fn run(&self, format: Format, action: GridAction) -> AppResult<GridOutcome> {
+                apply_device(&self.editor, &self.assets(format), "file:track-1", action, &GridOptions::default(), false)
+            }
+
+            fn tempo(&self, format: Format) -> u32 {
+                stick::read(self.dest.path(), format).unwrap().track(1).unwrap().bpm_x100
+            }
+
+            fn beats(&self, format: Format) -> Vec<Beat> {
+                let dat = self.assets(format).analysis_dat().unwrap();
+                rbl_anlz::Anlz::read(&dat).unwrap().beat_grid().unwrap()
+            }
+        }
+
+        fn exported() -> Stick {
+            let (src, dest, app) = (tempfile::tempdir().unwrap(), crate::test_stick::stick(), tempfile::tempdir().unwrap());
+            let audio = src.path().join("source-1.mp3");
+            std::fs::write(&audio, vec![1_u8; 2048]).unwrap();
+            let track = rbl_export::SourceTrack {
+                id: 1,
+                source_path: audio,
+                title: "Track 1".into(),
+                bpm_x100: 12_000,
+                duration_sec: 300,
+                analysis: vec![("DAT".into(), AnlzBuilder::new().path("/x.mp3").beat_grid(&grid()).finish())],
+                ..Default::default()
+            };
+            rbl_export::export(dest.path(), &[track], &[]).unwrap();
+            Stick { _src: src, dest, editor: GridEditor::at(&app.path().join("app")), _app: app }
+        }
+
+        #[test]
+        fn a_devices_tree_track_has_a_grid_to_edit_and_no_lock() {
+            let s = exported();
+            let state = device_state(&s.editor, &s.assets(Format::DeviceLibrary), "file:track-1").unwrap();
+            assert_eq!((state.bpm_x100, state.beats, state.locked, state.lockable), (12_000, 8, false, false));
+        }
+
+        #[test]
+        fn a_shift_moves_the_grid_on_the_stick_and_leaves_its_libraries() {
+            for format in [Format::DeviceLibrary, Format::OneLibrary] {
+                let s = exported();
+                let libraries = |s: &Stick| [Format::DeviceLibrary, Format::OneLibrary].map(|f| std::fs::read(s.dest.path().join("PIONEER/rekordbox").join(f.file_name())).unwrap());
+                let before = libraries(&s);
+                let first = s.beats(format)[0].time_ms;
+                let done = s.run(format, GridAction::Edit { edit: GridEdit::Nudge { ms: 5 }, from_ms: None }).unwrap();
+                assert!(done.written && !done.bpm_changed);
+                // The beat at `first` is 5 ms later; the grid may reach back
+                // to the start of the track with one more beat.
+                let after: Vec<u32> = s.beats(format).iter().map(|b| b.time_ms).collect();
+                assert!(after.contains(&(first + 5)) && !after.contains(&first), "{format:?}: {after:?}");
+                assert_eq!(libraries(&s), before, "{format:?}: a shift changes no row");
+                assert!(done.state.can_undo);
+                // The first rewrite kept the file as it was, in the app's backups.
+                let backups = s.editor.backup_dir.join("devices");
+                assert!(backups.is_dir(), "{format:?}");
+            }
+        }
+
+        #[test]
+        fn a_new_tempo_reaches_the_rows_and_undo_puts_everything_back() {
+            for format in [Format::DeviceLibrary, Format::OneLibrary] {
+                let s = exported();
+                let original = s.beats(format);
+                let done = s.run(format, GridAction::Edit { edit: GridEdit::Double, from_ms: None }).unwrap();
+                assert!(done.bpm_changed);
+                assert_eq!(done.state.bpm_x100, 24_000);
+                assert_eq!((s.tempo(Format::DeviceLibrary), s.tempo(Format::OneLibrary)), (24_000, 24_000), "{format:?}");
+
+                let undone = s.run(format, GridAction::Undo).unwrap();
+                assert_eq!(undone.state.bpm_x100, 12_000);
+                assert_eq!(s.beats(format), original, "{format:?}");
+                assert_eq!((s.tempo(Format::DeviceLibrary), s.tempo(Format::OneLibrary)), (12_000, 12_000), "{format:?}");
+                let check = rbl_export::verify(s.dest.path()).unwrap();
+                assert!(check.is_ok(), "{format:?}: {:?}", check.errors);
+            }
+        }
+
+        /// A stick mounted as `NO NAME` under `parent`, holding one track
+        /// whose grid starts at `first_ms`.
+        fn exported_named(parent: &Path, src: &Path, first_ms: u32) -> PathBuf {
+            let mount = parent.join("NO NAME");
+            let audio = src.join("source-1.mp3");
+            std::fs::write(&audio, vec![1_u8; 2048]).unwrap();
+            let beats: Vec<Beat> = grid().into_iter().map(|b| Beat { time_ms: b.time_ms - 500 + first_ms, ..b }).collect();
+            let track = rbl_export::SourceTrack {
+                id: 1,
+                source_path: audio,
+                title: "Track 1".into(),
+                bpm_x100: 12_000,
+                duration_sec: 300,
+                analysis: vec![("DAT".into(), AnlzBuilder::new().path("/x.mp3").beat_grid(&beats).finish())],
+                ..Default::default()
+            };
+            rbl_export::export(&mount, &[track], &[]).unwrap();
+            mount
+        }
+
+        fn assets_at(mount: &Path) -> crate::device_library::DeviceAssets {
+            let track = stick::read(mount, Format::DeviceLibrary).unwrap().track(1).unwrap().clone();
+            crate::device_library::DeviceAssets {
+                mount: mount.to_path_buf(),
+                audio: track.path,
+                analysis: track.analysis_path,
+                artwork: String::new(),
+                library: Some((Format::DeviceLibrary, 1)),
+            }
+        }
+
+        fn nudge(editor: &GridEditor, mount: &Path) {
+            let done = apply_device(editor, &assets_at(mount), "file:track-1",
+                GridAction::Edit { edit: GridEdit::Nudge { ms: 5 }, from_ms: None }, &GridOptions::default(), false).unwrap();
+            assert!(done.written);
+        }
+
+        /// Every backup's bytes, under the editor's device backups.
+        fn backed_up(editor: &GridEditor) -> Vec<Vec<u8>> {
+            fn walk(dir: &Path, out: &mut Vec<Vec<u8>>) {
+                for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                    let path = entry.path();
+                    if path.is_dir() { walk(&path, out) } else { out.push(std::fs::read(&path).unwrap()) }
+                }
+            }
+            let mut out = Vec::new();
+            walk(&editor.backup_dir.join("devices"), &mut out);
+            out
+        }
+
+        fn dat_of(mount: &Path) -> Vec<u8> {
+            std::fs::read(assets_at(mount).analysis_dat().unwrap()).unwrap()
+        }
+
+        #[test]
+        fn two_sticks_with_one_volume_name_each_keep_their_original() {
+            // Two sticks both named `NO NAME`, each with the same track at
+            // the same analysis path but a different grid, edited in turn by
+            // two sessions sharing one backup directory.
+            let (src, app) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            let (one, two) = (crate::test_stick::stick(), crate::test_stick::stick());
+            let (a, b) = (exported_named(one.path(), src.path(), 500), exported_named(two.path(), src.path(), 520));
+            assert_eq!(assets_at(&a).analysis, assets_at(&b).analysis, "the same analysis path on each stick");
+            let (original_a, original_b) = (dat_of(&a), dat_of(&b));
+            assert_ne!(original_a, original_b);
+
+            let first = GridEditor::at(&app.path().join("app"));
+            nudge(&first, &a);
+            nudge(&first, &a);
+            let second = GridEditor::at(&app.path().join("app"));
+            nudge(&second, &b);
+
+            let copies = backed_up(&second);
+            assert!(copies.contains(&original_a), "stick one's original was backed up");
+            assert!(copies.contains(&original_b), "stick two's original was backed up");
+            // The second nudge on stick one rewrote this session's own bytes,
+            // which were not copied again.
+            assert_eq!(copies.len(), 2, "one copy per stick");
+        }
+
+        #[test]
+        fn a_stick_swapped_in_at_the_same_mount_keeps_its_original() {
+            // One session edits a stick, which is ejected; another stick with
+            // the same name is mounted at the same place and edited too.
+            let (src, app, parent) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), crate::test_stick::stick());
+            let editor = GridEditor::at(&app.path().join("app"));
+            let mount = exported_named(parent.path(), src.path(), 500);
+            let original_a = dat_of(&mount);
+            nudge(&editor, &mount);
+
+            std::fs::remove_dir_all(&mount).unwrap();
+            let again = exported_named(parent.path(), src.path(), 520);
+            assert_eq!(again, mount);
+            let original_b = dat_of(&mount);
+            nudge(&editor, &mount);
+
+            let copies = backed_up(&editor);
+            assert!(copies.contains(&original_a) && copies.contains(&original_b));
+        }
+
+        #[test]
+        fn a_stick_edit_is_refused_while_rekordbox_runs() {
+            let s = exported();
+            let before = std::fs::read(s.assets(Format::DeviceLibrary).analysis_dat().unwrap()).unwrap();
+            let refused = apply_device(&s.editor, &s.assets(Format::DeviceLibrary), "file:track-1",
+                GridAction::Edit { edit: GridEdit::Nudge { ms: 5 }, from_ms: None }, &GridOptions::default(), true).unwrap_err();
+            assert_eq!(refused.kind, ErrorKind::ReadOnly);
+            assert_eq!(std::fs::read(s.assets(Format::DeviceLibrary).analysis_dat().unwrap()).unwrap(), before);
+        }
+
+        #[test]
+        fn a_track_without_its_library_is_not_edited() {
+            let s = exported();
+            let assets = crate::device_library::DeviceAssets { library: None, ..s.assets(Format::DeviceLibrary) };
+            let err = apply_device(&s.editor, &assets, "file:track-1", GridAction::Edit { edit: GridEdit::Double, from_ms: None }, &GridOptions::default(), false).unwrap_err();
+            assert_eq!(err.kind, ErrorKind::NotFound);
+        }
     }
 }

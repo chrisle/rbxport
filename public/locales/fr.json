@@ -1778,5 +1778,8 @@
   "Playlist cannot be edited or deleted while searching.": "Impossible de modifier ou de supprimer la liste de lecture pendant une recherche.",
   "Add \"My Tag\" to the \"Comments\"": "Ajouter « Mon signet » aux « Commentaires »",
   "This operation can take few minutes.": "Cette opération peut demander du temps.",
-  "Please wait for a while": "Veuillez patienter"
+  "Please wait for a while": "Veuillez patienter",
+  "Analysis Lock is set on tracks in the collection, not on a device": "Analysis Lock is set on tracks in the collection, not on a device",
+  "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
+  "Unlock the beat grid for editing": "Unlock the beat grid for editing"
 }
