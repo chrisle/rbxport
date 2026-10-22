@@ -232,6 +232,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const desiredKeyShift = useRef(0);
   const desiredLoop = useRef<DeckLoop | null>(null);
   const pendingLoop = useRef<DeckLoop | null>(null);
+  const loopGeneration = useRef(0);
   /** Whether a drag is running, so a move is aimed rather than seeked. */
   const scrubbing = useRef(false);
   /** When a drag let go, until the seek that ends it comes back. */
@@ -332,6 +333,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       setLoopState(null);
       desiredLoop.current = null;
       pendingLoop.current = null;
+      loopGeneration.current = 0;
     }
     emit(at);
     void (async () => {
@@ -357,10 +359,23 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       const deck = DECK === "b" ? tick.b : tick.a;
       const target = targetLoad.current;
       if (target !== null && deck.loadId !== undefined && deck.loadId !== target.loadId) return;
+      if (deck.generation < loopGeneration.current) return;
+      const rate = tick.sampleRate;
+      const reportedLoop = rate > 0 && deck.loopOutFrames > deck.loopInFrames
+        ? { inSeconds: deck.loopInFrames / rate, outSeconds: deck.loopOutFrames / rate, active: deck.looping }
+        : null;
+      const pendingRange = pendingLoop.current;
+      if (pendingRange !== null) {
+        // Ignore the whole tick, including its old head. A second press must
+        // calculate both the bounds and head from the first queued move.
+        if (reportedLoop === null || Math.abs(reportedLoop.inSeconds - pendingRange.inSeconds) > 1 / rate ||
+            Math.abs(reportedLoop.outSeconds - pendingRange.outSeconds) > 1 / rate ||
+            reportedLoop.active !== pendingRange.active) return;
+        pendingLoop.current = null;
+      }
       if (target !== null && loadPending.current) completeLoad(target);
       if (target !== null && applyingLoad.current === target.loadId) return;
       if (target !== null) readyLoad.current = target.loadId;
-      const rate = tick.sampleRate;
       const now = performance.now();
       setPlaying(deck.playing);
       desiredPlaying.current = deck.playing;
@@ -375,17 +390,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       desiredKeyShift.current = deck.keyShift;
       setShiftsKey(tick.shiftsKey);
       setLoopState((current) => {
-        const next =
-          rate > 0 && deck.loopOutFrames > deck.loopInFrames
-            ? { inSeconds: deck.loopInFrames / rate, outSeconds: deck.loopOutFrames / rate, active: deck.looping }
-            : null;
-        if (pendingLoop.current !== null) {
-          // Engine bounds are rounded to whole audio frames.
-          if (next === null || Math.abs(next.inSeconds - pendingLoop.current.inSeconds) > 1 / rate ||
-              Math.abs(next.outSeconds - pendingLoop.current.outSeconds) > 1 / rate ||
-              next.active !== pendingLoop.current.active) return current;
-          pendingLoop.current = null;
-        }
+        const next = reportedLoop;
         // Same loop, same object: a tick must not re-render every reader.
         if (
           current === next ||
@@ -543,6 +548,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     deferredSeek.current = null;
     desiredLoop.current = null;
     pendingLoop.current = null;
+    loopGeneration.current = 0;
     anchor.current = NO_ANCHOR;
     setPosition(0);
     setDuration(0);
@@ -957,9 +963,18 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     setPosition(at);
     emit(at);
     // Rapid presses and the loop's initial set must reach the engine in order.
-    loopCall((b) => b.deckMoveLoop(DECK, inSeconds * 1000, outSeconds * 1000,
-      headBySeconds * 1000, gridTimesMs, beats));
-  }, [idle, isLoaded, positionNow, emit, loopCall, DECK, setPosition]);
+    loopCall(async (b) => {
+      await b.deckMoveLoop(DECK, inSeconds * 1000, outSeconds * 1000,
+        headBySeconds * 1000, gridTimesMs, beats);
+      const snapshot = await b.deckState();
+      // A later press owns the desired range. Only the latest command may
+      // reconcile it, including when the engine rejected an out-of-track move.
+      if (pendingLoop.current !== next) return;
+      pendingLoop.current = null;
+      loopGeneration.current = (DECK === "b" ? snapshot.b : snapshot.a).generation;
+      anchorOn(snapshot);
+    });
+  }, [idle, isLoaded, positionNow, emit, loopCall, DECK, setPosition, anchorOn]);
   const setLoopActive = useCallback((on: boolean) => {
     if (desiredLoop.current !== null) {
       desiredLoop.current = { ...desiredLoop.current, active: on };
