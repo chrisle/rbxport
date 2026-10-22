@@ -108,8 +108,8 @@ The tempo is measured again in 16-second windows over the whole track, by
 autocorrelation of each window alone, as a ratio to the tempo of the line
 fitted through the whole track (not the candidate stage's estimate, which
 can be a percent off: a stretch at exactly 2⁄3 of 150 measured against a
-148.5 estimate reads 0.674 and escapes the band around 2⁄3), with a parabola refining the peak
-between lag bins. Octave folding stays inside the requested BPM range
+148.5 estimate reads 0.674 and escapes the band around 2⁄3), with a
+parabola refining the peak between lag bins. Octave folding stays inside the requested BPM range
 (70–180 in the app), so 128 measured against 174 cannot turn into 256. A
 window where the track's tempo still fits at 60 % of the best peak has not
 changed. A second tempo is believed when at least three windows agree
@@ -122,11 +122,14 @@ absorbed into their neighbours.
 A window's tempo is read off the whole mix, so a pad, an arp or a
 polyrhythm can hold a period of its own (9⁄8 or 9⁄16 of the track's, say)
 for a minute while the kick carries on at the track's tempo, or stops.
-Where a kick band or an attack map can be read, a run is therefore a tempo
-of its own only when its own period, at its best phase, collects the kick
-(thump plus click) over its stretch at least 1.5 times as well as each
-neighbouring run's period does there, and hears at least 0.15 of a kick a
-beat at all. A run that fails is merged into the neighbour it loses to;
+Where a kick band can be read, a run is therefore a tempo of its own only
+when its own period, at its best phase, collects the kick-band peaks over
+its stretch at least 1.5 times as well as each neighbouring run's period
+does there, and hears at least 0.15 of a kick a beat at all. The attack
+map is not counted when there is a kick band: it is the 900–9000 Hz band,
+where a pluck or a hat is as loud as the kick's click, and counting it
+let a pluck at 9⁄8 pass for the kick when the kick under it was quiet or
+had stopped. Without a kick band the attack map stands in for it. A run that fails is merged into the neighbour it loses to;
 between two stretches with no kick, the one further from the track's tempo
 gives way. Neighbours left at one tempo become one run.
 
