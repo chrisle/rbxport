@@ -4851,3 +4851,34 @@ fn undo_of_a_reorder_refuses_a_playlist_changed_since() {
     assert!(matches!(f.writer.undo_reorder(&reorder), Err(DbError::Conflict(_))));
     assert_eq!(members_of(&f, &list), now, "nothing written");
 }
+
+/// #499, #506: Redo of a reorder refuses once the playlist changed after
+/// its Undo; nothing is written.
+#[test]
+fn redo_of_a_reorder_refuses_a_playlist_changed_since() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0), track_id(1)]).unwrap();
+    let (_, reorder) = f.writer.reorder_with_undo(&list, &[track_id(1), track_id(0)]).unwrap();
+    f.writer.undo_reorder(&reorder).unwrap();
+    f.writer.add_tracks(&list, &[track_id(2)]).unwrap();
+    let now = members_of(&f, &list);
+    assert!(matches!(f.writer.redo_reorder(&reorder), Err(DbError::Conflict(_))));
+    assert_eq!(members_of(&f, &list), now, "nothing written");
+}
+
+/// #499, #506: Redo of an add refuses once the rows before it were
+/// renumbered, even in the same order: the rows it brings back would
+/// share numbers with them.
+#[test]
+fn redo_of_an_add_refuses_a_playlist_renumbered_since() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0)]).unwrap();
+    let (_, addition) = f.writer.add_tracks_with_undo(&list, &[track_id(1)], false).unwrap();
+    f.writer.undo_track_addition(&addition).unwrap();
+    f.conn().execute("UPDATE djmdSongPlaylist SET TrackNo = 2 WHERE PlaylistID = ?1 AND rb_local_deleted = 0", params![list]).unwrap();
+    let now = members_of(&f, &list);
+    assert!(matches!(f.writer.redo_track_addition(&addition), Err(DbError::Conflict(_))));
+    assert_eq!(members_of(&f, &list), now, "nothing written");
+}

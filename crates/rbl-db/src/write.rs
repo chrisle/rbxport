@@ -656,15 +656,16 @@ impl PlaylistTrackRemoval {
 }
 
 /// The exact membership rows one Add Tracks to Playlist created (#499), and
-/// the playlist's live memberships in order before and after it. Undo
+/// the playlist's live memberships, with their `TrackNo`, in order before
+/// and after it. Undo
 /// soft-deletes exactly `added`; rows the playlist already held, a track's
 /// earlier copy included, are never touched.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PlaylistTrackAddition {
     playlist: String,
     added: Vec<String>,
-    before: Vec<String>,
-    after: Vec<String>,
+    before: Vec<(String, i64)>,
+    after: Vec<(String, i64)>,
 }
 
 impl PlaylistTrackAddition {
@@ -2443,11 +2444,11 @@ impl Writer {
         contents: &[String],
         allow_duplicates: bool,
     ) -> Result<(Changed, PlaylistTrackAddition)> {
-        let before = live_members(self.library.connection(), playlist)?;
+        let before = numbered_members(self.library.connection(), playlist)?;
         let changed = self.add_tracks_allowing(playlist, contents, allow_duplicates)?;
-        let after = live_members(self.library.connection(), playlist)?;
-        let held: std::collections::HashSet<&String> = before.iter().collect();
-        let added = after.iter().filter(|id| !held.contains(id)).cloned().collect();
+        let after = numbered_members(self.library.connection(), playlist)?;
+        let held: std::collections::HashSet<&String> = before.iter().map(|(id, _)| id).collect();
+        let added = after.iter().filter(|(id, _)| !held.contains(id)).map(|(id, _)| id.clone()).collect();
         let edit = PlaylistTrackAddition { playlist: playlist.to_owned(), added, before, after };
         Ok((changed, edit))
     }
@@ -2470,13 +2471,14 @@ impl Writer {
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        // The playlist must hold exactly what the history left in it: the
-        // add's result for an Undo, what it started from for a Redo. A track
-        // added, removed or moved there since would otherwise be lost from
-        // the order or numbered twice (#506).
+        // The playlist must hold exactly what the history left in it, at
+        // the same numbers: the add's result for an Undo, what it started
+        // from for a Redo. A track added, removed, moved or renumbered there
+        // since would otherwise be lost from the order or numbered twice
+        // (#506).
         let (expected, result) = if deleted { (&edit.after, &edit.before) } else { (&edit.before, &edit.after) };
         let changed = "the playlist's tracks have changed since";
-        if live_members(&tx, &edit.playlist)? != *expected {
+        if numbered_members(&tx, &edit.playlist)? != *expected {
             return Err(DbError::Conflict(changed.to_owned()));
         }
         // `next_usn` scans every sync table, so it is read once and counted
@@ -2493,7 +2495,7 @@ impl Writer {
         }
         // A row gone for good, or numbered elsewhere since: the dropped
         // transaction writes nothing.
-        if rows != edit.added.len() || live_members(&tx, &edit.playlist)? != *result {
+        if rows != edit.added.len() || numbered_members(&tx, &edit.playlist)? != *result {
             return Err(DbError::Conflict(changed.to_owned()));
         }
         set_counter(&tx, usn)?;
