@@ -560,7 +560,7 @@ mod tests {
             "CREATE TABLE djmdContent (
                 ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
                 TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
-                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, BPM INTEGER,
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, ContentLink INTEGER, BPM INTEGER,
                 AnalysisDataPath TEXT, Length INTEGER, KeyID TEXT, ImagePath TEXT
              );
              CREATE TABLE djmdCue (
