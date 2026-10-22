@@ -97,6 +97,14 @@ pub(crate) enum LibraryEdit {
     ReplacePlaylistContents(Vec<rbl_db::write::MembershipReplacement>),
     SortPlaylists(rbl_db::write::PlaylistSort),
     RemovePlaylistTracks(rbl_db::write::PlaylistTrackRemoval),
+    /// One Add Tracks to Playlist (#499): every slice of one drop or menu
+    /// choice, joined while they share `transaction`.
+    AddPlaylistTracks {
+        addition: rbl_db::write::PlaylistTrackAddition,
+        transaction: Option<String>,
+    },
+    /// One reorder or Renumber Track Order of a playlist (#499).
+    ReorderPlaylist(rbl_db::write::PlaylistReorder),
     Track(Vec<rbl_db::write::TrackEdit>),
     /// One My Tag set per track: the Info tab's toggles edit one track,
     /// a tick in the My Tag panel every selected track.
@@ -119,6 +127,8 @@ impl LibraryEdit {
             Self::DeletePlaylist(edit) => edit.is_empty(),
             Self::RemovePlaylistTracks(edit) => edit.is_empty(),
             Self::ReplacePlaylistContents(edits) => edits.is_empty(),
+            Self::AddPlaylistTracks { addition, .. } => addition.is_empty(),
+            Self::ReorderPlaylist(edit) => edit.is_empty(),
             Self::Track(edits) => edits.is_empty() || edits.iter().all(rbl_db::write::TrackEdit::is_empty),
             Self::TrackTags(edits) => edits.iter().all(rbl_db::write::TrackTagEdit::is_empty),
             Self::RenamePlaylist(_) | Self::MovePlaylist(_) | Self::ReplacePlaylist(_) | Self::CreatePlaylist(_) => false,
@@ -153,6 +163,30 @@ impl EditHistory {
             self.undo.remove(0);
         }
         self.redo.clear();
+    }
+
+    /// Records one slice of an Add Tracks to Playlist (#499). A slice of the
+    /// same add (the same `transaction`) that carries on from the entry on
+    /// top of Undo joins it, so a drop of thousands, sent a hundred at a
+    /// time, is still one Undo. Anything else is an entry of its own.
+    pub(crate) fn record_addition(
+        &mut self,
+        addition: rbl_db::write::PlaylistTrackAddition,
+        transaction: Option<String>,
+        label: &'static str,
+    ) {
+        if addition.is_empty() {
+            return;
+        }
+        if let (Some(id), Some(HistoryEntry { edit: LibraryEdit::AddPlaylistTracks { addition: open, transaction: Some(open_id) }, .. }))
+            = (&transaction, self.undo.last_mut())
+        {
+            if open_id == id && open.absorb(&addition) {
+                self.redo.clear();
+                return;
+            }
+        }
+        self.record(LibraryEdit::AddPlaylistTracks { addition, transaction }, label);
     }
 
     pub(crate) fn clear_redo(&mut self) {

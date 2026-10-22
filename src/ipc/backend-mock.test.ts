@@ -204,8 +204,16 @@ describe("mock edits", () => {
     await backend.edits.createPlaylist("Warm Up", TREE_ROOT);
     const old = (await backend.playlistTree()).find((n) => n.name === "Warm Up")!;
     const replaced = await backend.importFolderPlaylist("/music/Warm Up", TREE_ROOT, old.id, null);
-    await backend.edits.addTracksToPlaylist(replaced.playlist!, ["100003"]);
+    await backend.edits.addTracksToPlaylist(replaced.playlist!, ["100003", "100004"]);
+    // Another program takes one out again. The mock has no second writer;
+    // Remove from History writes the list's tracks outside the history.
+    await backend.edits.removeFromHistory(replaced.playlist!, ["100004"]);
     const tree = (await backend.playlistTree()).map((n) => n.id);
+    // The add (#499) is refused first, then the replacement.
+    await expect(backend.edits.undoEdit()).rejects.toMatchObject({
+      kind: "conflict",
+      message: "Can't undo Add Tracks to Playlist: the playlist's tracks have changed since. The newer change was kept.",
+    });
     await expect(backend.edits.undoEdit()).rejects.toMatchObject({
       kind: "conflict",
       message: "Can't undo Replace Playlist: the playlists have changed since. The newer change was kept.",
@@ -296,6 +304,33 @@ describe("mock edits", () => {
     // Nothing above should have thrown, and the generation keeps advancing.
     const generation = await backend.edits.reorderPlaylist(list.id, []);
     expect(generation).toBeGreaterThan(4);
+  });
+
+  it("undoes one add sent in slices, and a reorder, as one step each (#499)", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createPlaylist("Set", TREE_ROOT);
+    const list = (await backend.playlistTree()).find((n) => n.name === "Set")!;
+    const order = async () => (await backend.fetchRows(
+      (await backend.openView({ source: { kind: "playlist", id: list.id }, sort: "trackNo", descending: false, query: "" })).viewId,
+      0, 20,
+    )).map((row) => row.id);
+
+    await backend.edits.addTracksToPlaylist(list.id, ["100000"]);
+    await backend.edits.addTracksToPlaylist(list.id, ["100001", "100002"], false, "job-499");
+    await backend.edits.addTracksToPlaylist(list.id, ["100003"], false, "job-499");
+    expect(await order()).toEqual(["100000", "100001", "100002", "100003"]);
+    await backend.edits.reorderPlaylist(list.id, ["100003", "100000"]);
+    expect(await order()).toEqual(["100003", "100000", "100001", "100002"]);
+
+    expect((await backend.edits.undoEdit()).undoLabel).toBe("Add Tracks to Playlist");
+    expect(await order()).toEqual(["100000", "100001", "100002", "100003"]);
+    const undone = await backend.edits.undoEdit();
+    expect(await order()).toEqual(["100000"]);
+    expect(undone.redoLabel).toBe("Add Tracks to Playlist");
+    await backend.edits.redoEdit();
+    expect(await order()).toEqual(["100000", "100001", "100002", "100003"]);
+    expect((await backend.edits.redoEdit()).undoLabel).toBe("Reorder Playlist");
+    expect(await order()).toEqual(["100003", "100000", "100001", "100002"]);
   });
 
   it("clamps a rating to the range the backend accepts", async () => {

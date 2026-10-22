@@ -255,9 +255,9 @@ fn a_playlist_folder_lists_unique_tracks_from_nested_playlists() {
     let friday = s.node("Friday");
     let saturday = s.node("Saturday");
     let outside = s.node("Outside");
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), friday.id, vec![track_id(3), track_id(1)], None)).unwrap();
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), saturday.id, vec![track_id(1), track_id(2)], None)).unwrap();
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), outside.id, vec![track_id(4)], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), friday.id, vec![track_id(3), track_id(1)], None, None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), saturday.id, vec![track_id(1), track_id(2)], None, None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), outside.id, vec![track_id(4)], None, None)).unwrap();
 
     let (view, len) = s.open(playlist_folder_spec(&shows.id));
     assert_eq!(len, 3);
@@ -491,7 +491,7 @@ fn a_playlist_is_made_filled_reordered_renamed_moved_and_deleted() {
         s.state(),
         friday.id.clone(),
         vec![t3.clone(), t1.clone(), t2.clone()],
-        None
+        None, None
     ))
     .unwrap();
     let rows = s.playlist_rows(&friday.id);
@@ -559,7 +559,7 @@ fn a_deleted_playlist_tree_can_be_undone_and_redone() {
         s.state(),
         playlist.id.clone(),
         tracks.clone(),
-        None
+        None, None
     )).unwrap();
 
     let deleted = run(commands::delete_playlist(s.handle(), s.state(), folder.id.clone())).unwrap();
@@ -569,7 +569,9 @@ fn a_deleted_playlist_tree_can_be_undone_and_redone() {
     assert!(!s.has_node("Friday"));
 
     let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
-    assert_eq!(undone.undo_label.as_deref(), Some("Create Playlist"), "the creations before it (#500)");
+    // What is left to undo is the add before the delete (#499), then the
+    // creations before it (#500).
+    assert_eq!(undone.undo_label.as_deref(), Some("Add Tracks to Playlist"));
     assert!(undone.can_redo);
     assert_eq!(s.node("Sets").id, folder.id);
     assert_eq!(s.node("Friday").id, playlist.id);
@@ -595,7 +597,7 @@ fn a_folder_drop_replacement_is_one_undo_and_one_redo() {
     run(commands::create_playlist(s.handle(), s.state(), "Early".into(), old.id.clone(), None)).unwrap();
     let early = s.node("Early");
     let tracks = vec![track_id(3), track_id(1)];
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), early.id.clone(), tracks.clone(), None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), early.id.clone(), tracks.clone(), None, None)).unwrap();
     run(commands::rename_playlist(s.handle(), s.state(), early.id.clone(), "Opening".into())).unwrap();
     let before = tree_ids(&s);
 
@@ -641,7 +643,7 @@ fn a_folder_drop_replacement_undoes_after_newer_siblings() {
     let s = shell();
     run(commands::create_playlist(s.handle(), s.state(), "Warm Up".into(), ROOT.into(), None)).unwrap();
     let old = s.node("Warm Up");
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), old.id.clone(), vec![track_id(2)], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), old.id.clone(), vec![track_id(2)], None, None)).unwrap();
     run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed".into())).unwrap();
 
     let dropped = |name: &str| {
@@ -701,7 +703,12 @@ fn a_folder_drop_replacement_refuses_undo_after_its_playlist_changed() {
     ))
     .unwrap();
     let made = replaced.playlist.unwrap();
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), made.clone(), vec![track_id(4)], None)).unwrap();
+    // Another program adds a track: an add made here is its own Undo (#499).
+    let mut other = rbl_db::write::Writer::open(s.location.clone(), s._dir.path().join("other-backups")).unwrap();
+    other.disable_automatic_backups();
+    other.add_tracks(&made, &[track_id(4)]).unwrap();
+    drop(other);
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
     let tree_ids = |s: &Shell| s.tree().into_iter().map(|n| (n.id, n.name, n.depth)).collect::<Vec<_>>();
     let tree = tree_ids(&s);
 
@@ -742,7 +749,7 @@ fn library_history_names_and_reverses_each_supported_edit() {
     let tracks = vec![track_id(1), track_id(2), track_id(3)];
     run(commands::add_tracks_to_playlist(
         s.handle(), s.state(), playlist.id.clone(), tracks.clone(),
-        None
+        None, None
     )).unwrap();
     let removed = run(commands::remove_tracks_from_playlist(
         s.handle(), s.state(), playlist.id.clone(), vec![tracks[1].clone()],
@@ -1069,6 +1076,111 @@ fn redo_refuses_a_rating_changed_by_another_program_and_keeps_the_rest() {
     assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the unrelated rename still undoes");
 }
 
+/// #499: one Add Tracks to Playlist, sent a slice at a time under one
+/// transaction, is one Undo; Undo and Redo give back the exact order.
+#[test]
+fn an_add_sent_in_slices_is_one_undo_and_one_redo() {
+    let s = shell();
+    run(commands::create_playlist(s.handle(), s.state(), "Set 499".into(), ROOT.into(), None)).unwrap();
+    let list = s.node("Set 499").id;
+    let order = |s: &Shell| s.playlist_rows(&list).iter().map(|r| (r.id.clone(), r.track_no)).collect::<Vec<_>>();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), list.clone(), vec![track_id(5)], None, None)).unwrap();
+    let before = order(&s);
+
+    let job = Some("add-499".to_owned());
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), list.clone(), vec![track_id(1), track_id(2)], None, job.clone())).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), list.clone(), vec![track_id(3)], None, job)).unwrap();
+    let after = order(&s);
+    assert_eq!(after.len(), 4);
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some("Add Tracks to Playlist"));
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(order(&s), before, "both slices undone at once");
+    assert_eq!(undone.undo_label.as_deref(), Some("Add Tracks to Playlist"), "the earlier add is its own entry");
+    assert_eq!(undone.redo_label.as_deref(), Some("Add Tracks to Playlist"));
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(order(&s), after);
+
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert!(order(&s).is_empty());
+}
+
+/// #499: an add with duplicates allowed undoes only the copies it added.
+#[test]
+fn undo_of_an_add_with_duplicates_leaves_the_tracks_already_there() {
+    let s = shell();
+    run(commands::create_playlist(s.handle(), s.state(), "Dupes 499".into(), ROOT.into(), None)).unwrap();
+    let list = s.node("Dupes 499").id;
+    let order = |s: &Shell| s.playlist_rows(&list).iter().map(|r| (r.id.clone(), r.track_no)).collect::<Vec<_>>();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), list.clone(), vec![track_id(1), track_id(2)], None, None)).unwrap();
+    let before = order(&s);
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), list.clone(), vec![track_id(2), track_id(1)], Some(true), None)).unwrap();
+    assert_eq!(order(&s).len(), 4);
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(order(&s), before);
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(ids(&s.playlist_rows(&list)), [track_id(1), track_id(2), track_id(2), track_id(1)]);
+
+    // Without duplicates the same tracks add nothing, and nothing is recorded.
+    let history = commands::current_history(&s.state());
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), list.clone(), vec![track_id(1)], None, None)).unwrap();
+    let unchanged = commands::current_history(&s.state());
+    assert_eq!((unchanged.can_undo, unchanged.undo_label), (history.can_undo, history.undo_label));
+}
+
+/// #499: a reorder, and Renumber Track Order, which comes the same way, is
+/// one Undo that puts the old order back; Redo the new one.
+#[test]
+fn a_reorder_is_one_undo_and_one_redo() {
+    let s = shell();
+    run(commands::create_playlist(s.handle(), s.state(), "Order 499".into(), ROOT.into(), None)).unwrap();
+    let list = s.node("Order 499").id;
+    let tracks = vec![track_id(1), track_id(2), track_id(3)];
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), list.clone(), tracks.clone(), None, None)).unwrap();
+    run(commands::reorder_playlist(s.handle(), s.state(), list.clone(), vec![track_id(3), track_id(1), track_id(2)])).unwrap();
+    assert_eq!(ids(&s.playlist_rows(&list)), [track_id(3), track_id(1), track_id(2)]);
+    assert_eq!(commands::current_history(&s.state()).undo_label.as_deref(), Some("Reorder Playlist"));
+
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    let rows = s.playlist_rows(&list);
+    assert_eq!(ids(&rows), tracks.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(rows.iter().map(|r| r.track_no).collect::<Vec<_>>(), [1, 2, 3]);
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(ids(&s.playlist_rows(&list)), [track_id(3), track_id(1), track_id(2)]);
+}
+
+/// #499, #506: Undo of an add or a reorder over a playlist another program
+/// changed since is refused; the newer tracks stay and so does the rest of
+/// the history.
+#[test]
+fn undo_of_an_add_or_reorder_refuses_a_playlist_changed_since() {
+    let s = shell();
+    run(commands::create_playlist(s.handle(), s.state(), "Clash 499".into(), ROOT.into(), None)).unwrap();
+    let list = s.node("Clash 499").id;
+    run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed 499".into())).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), list.clone(), vec![track_id(1), track_id(2)], None, None)).unwrap();
+    run(commands::reorder_playlist(s.handle(), s.state(), list.clone(), vec![track_id(2), track_id(1)])).unwrap();
+
+    let outside = |track: String| {
+        let mut other = rbl_db::write::Writer::open(s.location.clone(), s._dir.path().join("other-backups")).unwrap();
+        other.disable_automatic_backups();
+        other.add_tracks(&list, &[track]).unwrap();
+    };
+    outside(track_id(3));
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't undo Reorder Playlist: the playlist's tracks have changed since. The newer change was kept.");
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.message, "Can't undo Add Tracks to Playlist: the playlist's tracks have changed since. The newer change was kept.");
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
+    assert_eq!(ids(&s.playlist_rows(&list)), [track_id(2), track_id(1), track_id(3)], "the newer track is kept");
+
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the unrelated rename still undoes");
+}
+
 /// A rekordbox XML document over `files` (`TrackID` 1..N, named by
 /// `names`) with one top-level playlist per `(name, keys)`.
 fn xml_doc_501(files: &[PathBuf], names: &[&str], lists: &[(&str, &[usize])]) -> String {
@@ -1287,7 +1399,7 @@ fn removing_several_tracks_from_the_collection_removes_every_one() {
     run(commands::create_playlist(s.handle(), s.state(), "Set".into(), ROOT.into(), None)).unwrap();
     let playlist = s.node("Set").id;
     let members = vec![track_id(1), track_id(2), track_id(3), track_id(4)];
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist.clone(), members.clone(), None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist.clone(), members.clone(), None, None)).unwrap();
 
     let (view, before) = s.open(collection_spec());
     let all = s.rows(view);
@@ -1359,7 +1471,7 @@ fn an_edit_closes_the_views_that_were_open_over_the_old_library() {
     let (view, _) = s.open(playlist_spec(&playlist_id(0)));
     assert_eq!(s.rows(view).len(), 5);
 
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(0), vec![track_id(30)], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(0), vec![track_id(30)], None, None)).unwrap();
 
     // The page the frontend held is gone; it reopens against the new tree.
     let err = run(commands::fetch_rows(s.state(), view, 0, 10, None)).unwrap_err();
@@ -1895,7 +2007,7 @@ fn an_imported_file_goes_into_a_playlist_and_plays_on_a_deck() {
     assert_eq!(rows[0].duration_sec, 2);
 
     // Into a playlist, and loaded from there.
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![id.clone()], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![id.clone()], None, None)).unwrap();
     assert_eq!(s.playlist_rows(&playlist_id(1)).len(), 6);
 
     // Nothing has opened the audio output yet: a window nobody played in
@@ -2432,7 +2544,7 @@ fn usb_export_preflight_reports_missing_source_audio() {
         s.state(),
         playlist_id(1),
         vec![imported.tracks[0].id.clone()],
-        None
+        None, None
     ))
     .unwrap();
     std::fs::remove_file(&audio).unwrap();
@@ -2461,7 +2573,7 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
     ))
     .unwrap();
     let (first, second) = (report.tracks[0].id.clone(), report.tracks[1].id.clone());
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![first.clone()], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![first.clone()], None, None)).unwrap();
 
     // The second track goes on a blank stick on its own: one track, no
     // playlist, and the record says it is loose.
@@ -2559,7 +2671,7 @@ fn a_stick_pulled_during_a_sync_is_reported_as_disconnected() {
     let audio = s._dir.path().join("Pulled.wav");
     write_wav(&audio, 2);
     let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![report.tracks[0].id.clone()], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![report.tracks[0].id.clone()], None, None)).unwrap();
     let stick = tempfile::tempdir().unwrap();
     let mount = stick.path().join("USB");
     std::fs::create_dir_all(&mount).unwrap();
@@ -2588,7 +2700,7 @@ fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them
     write_wav(&audio, 2);
     let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
     let id = report.tracks[0].id.clone();
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![id], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![id], None, None)).unwrap();
 
     let progress: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&progress);
@@ -2692,7 +2804,7 @@ fn exporting_a_folder_writes_the_folder_with_its_playlists_inside() {
     run(commands::create_folder(s.handle(), s.state(), "Set".into(), ROOT.into())).unwrap();
     let set = s.node("Set");
     run(commands::create_playlist(s.handle(), s.state(), "Inside".into(), set.id.clone(), None)).unwrap();
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), s.node("Inside").id, vec![song], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), s.node("Inside").id, vec![song], None, None)).unwrap();
     run(commands::create_folder(s.handle(), s.state(), "Later".into(), set.id.clone())).unwrap();
     let rule = SmartRuleDto {
         logic: "all".to_owned(),
@@ -3036,8 +3148,8 @@ fn the_information_panel_names_the_playlists_a_track_is_in() {
     // before anything is written here: three lists, two without a path.
     let friday = s.node("Friday");
     let bright = s.node("Bright");
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), friday.id.clone(), vec![track_id(3)], None)).unwrap();
-    run(commands::add_tracks_to_playlist(s.handle(), s.state(), bright.id.clone(), vec![track_id(3)], None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), friday.id.clone(), vec![track_id(3)], None, None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), bright.id.clone(), vec![track_id(3)], None, None)).unwrap();
 
     let got = run(details::track_playlists(s.state(), track_id(3))).unwrap();
     assert_eq!(

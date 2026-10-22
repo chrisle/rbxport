@@ -872,7 +872,7 @@ async fn delete_work(id: u64) -> Result<ScriptValue, ScriptError> {
 async fn add_work(playlist: u64, tracks: Vec<u64>) -> Result<ScriptValue, ScriptError> {
     let app = app()?;
     let tracks = tracks.iter().map(u64::to_string).collect();
-    done(crate::commands::add_tracks_to_playlist(app.clone(), app.state(), playlist.to_string(), tracks, None).await)
+    done(crate::commands::add_tracks_to_playlist(app.clone(), app.state(), playlist.to_string(), tracks, None, None).await)
 }
 
 async fn remove_work(playlist: u64, tracks: Vec<u64>) -> Result<ScriptValue, ScriptError> {

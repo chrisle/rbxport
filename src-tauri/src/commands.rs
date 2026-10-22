@@ -808,6 +808,29 @@ pub(crate) async fn recorded_edit<R: tauri::Runtime, F>(
 where
     F: FnOnce(&mut rbl_db::write::Writer) -> Result<LibraryEdit, rbl_db::DbError> + Send + 'static,
 {
+    recorded_edit_with(app, state, name, touched, action, move |history, reversible: LibraryEdit| {
+        if !reversible.is_empty() {
+            history.record(reversible, label);
+        }
+    }).await
+}
+
+/// [`recorded_edit`], with the caller deciding how the write's result goes
+/// into the history: an add sent a slice at a time joins the entry its
+/// first slice made (#499).
+pub(crate) async fn recorded_edit_with<R: tauri::Runtime, F, T, G>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    name: &'static str,
+    touched: Touched,
+    action: F,
+    record: G,
+) -> AppResult<EditHistoryDto>
+where
+    F: FnOnce(&mut rbl_db::write::Writer) -> Result<T, rbl_db::DbError> + Send + 'static,
+    T: Send + 'static,
+    G: FnOnce(&mut EditHistory, T) + Send + 'static,
+{
     let state = Arc::clone(&state);
     let dto = blocking(name, move || {
         let _gate = state.edit_gate.lock();
@@ -816,9 +839,7 @@ where
             |db, reversible| refresh_after_edit(&state, db, touched).map(|generation| (generation, reversible)),
         ).map_err(write_error)?;
         let mut history = state.edit_history.lock();
-        if !reversible.is_empty() {
-            history.record(reversible, label);
-        }
+        record(&mut history, reversible);
         Ok(history_dto(generation, &history))
     }).await?;
     let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
@@ -831,6 +852,7 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) |
         LibraryEdit::MovePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_) |
         LibraryEdit::CreatePlaylist(_) | LibraryEdit::PlaylistEdit(_) |
+        LibraryEdit::AddPlaylistTracks { .. } | LibraryEdit::ReorderPlaylist(_) |
         // The tracks a replacement imported stay in the collection.
         LibraryEdit::ReplacePlaylist(_) | LibraryEdit::ReplacePlaylistContents(_) => Touched::Playlists,
         // Tokens keep their database row ids private; a full reload after an
@@ -850,6 +872,7 @@ fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool)
         LibraryEdit::TrackTags(values) => values.iter().try_for_each(|value| writer.check_tag_edit(value, undo)),
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) | LibraryEdit::MovePlaylist(_)
         | LibraryEdit::ReplacePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_)
+        | LibraryEdit::AddPlaylistTracks { .. } | LibraryEdit::ReorderPlaylist(_)
         // Every playlist of a replacement is checked in the one transaction
         // that writes them.
         | LibraryEdit::ReplacePlaylistContents(_) => Ok(()),
@@ -881,6 +904,8 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
         }.map(|_| ()),
         LibraryEdit::SortPlaylists(value) => if undo { writer.undo_sort(value) } else { writer.redo_sort(value) }.map(|_| ()),
         LibraryEdit::RemovePlaylistTracks(value) => if undo { writer.undo_track_removal(value) } else { writer.redo_track_removal(value) }.map(|_| ()),
+        LibraryEdit::AddPlaylistTracks { addition, .. } => if undo { writer.undo_track_addition(addition) } else { writer.redo_track_addition(addition) }.map(|_| ()),
+        LibraryEdit::ReorderPlaylist(value) => if undo { writer.undo_reorder(value) } else { writer.redo_reorder(value) }.map(|_| ()),
         LibraryEdit::Track(values) => {
             let ordered: Box<dyn Iterator<Item = _>> = if undo {
                 Box::new(values.iter().rev())
@@ -3848,6 +3873,9 @@ pub(crate) fn step_history(state: &AppState, undo: bool) -> AppResult<(EditHisto
     }
 }
 
+/// Add Tracks to Playlist: one Undo per drop or menu choice (#499). The
+/// window sends a large add a slice at a time, each with the same
+/// `transaction`, and the slices join one history entry.
 #[tauri::command]
 pub async fn add_tracks_to_playlist<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -3855,12 +3883,19 @@ pub async fn add_tracks_to_playlist<R: tauri::Runtime>(
     playlist: String,
     tracks: Vec<String>,
     allow_duplicates: Option<bool>,
+    transaction: Option<String>,
 ) -> AppResult<u32> {
     let allow = allow_duplicates.unwrap_or(false);
-    edit(app, state, "add_tracks_to_playlist", Touched::Playlists, move |w| {
-        w.add_tracks_allowing(&playlist, &tracks, allow).map(|_| ())
-    })
+    recorded_edit_with(
+        app,
+        state,
+        "add_tracks_to_playlist",
+        Touched::Playlists,
+        move |w| w.add_tracks_with_undo(&playlist, &tracks, allow).map(|(_, addition)| addition),
+        move |history, addition| history.record_addition(addition, transaction, "Add Tracks to Playlist"),
+    )
     .await
+    .map(|dto| dto.generation)
 }
 
 /// Which of `tracks` the playlist already holds, for the question asked
@@ -4507,6 +4542,7 @@ pub async fn remove_from_collection<R: tauri::Runtime>(
     .await
 }
 
+/// A drag into a new order, or Renumber Track Order: one Undo (#499).
 #[tauri::command]
 pub async fn reorder_playlist<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -4514,7 +4550,11 @@ pub async fn reorder_playlist<R: tauri::Runtime>(
     playlist: String,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "reorder_playlist", Touched::Playlists, move |w| w.reorder(&playlist, &tracks).map(|_| ())).await
+    recorded_edit(app, state, "reorder_playlist", Touched::Playlists, "Reorder Playlist", move |w| {
+        w.reorder_with_undo(&playlist, &tracks).map(|(_, edit)| LibraryEdit::ReorderPlaylist(edit))
+    })
+    .await
+    .map(|dto| dto.generation)
 }
 
 /// Runs one track edit on each of `tracks` and keeps them as one step of

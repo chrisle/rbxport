@@ -1959,8 +1959,10 @@ export interface Edits {
   /**
    * Adds tracks to the end of a playlist. A track the playlist already holds
    * is left out unless `allowDuplicates` is true, which adds it again.
+   * One add is one step of Edit › Undo: the slices of one drop or menu
+   * choice share a `transaction` and join one entry (#499).
    */
-  addTracksToPlaylist(playlist: string, tracks: string[], allowDuplicates?: boolean): Promise<number>;
+  addTracksToPlaylist(playlist: string, tracks: string[], allowDuplicates?: boolean, transaction?: string): Promise<number>;
   /** The ones of `tracks` the playlist already holds. */
   playlistDuplicates(playlist: string, tracks: string[]): Promise<string[]>;
   /** Reload Tag: the files' tags read again over the rows. */
@@ -1978,6 +1980,7 @@ export interface Edits {
   removeFromHistory(history: string, tracks: string[]): Promise<number>;
   /** Remove from Collection: the tracks leave the library and every playlist. The files stay. */
   removeFromCollection(tracks: string[]): Promise<number>;
+  /** A new order, or Renumber Track Order: one step of Edit › Undo (#499). */
   reorderPlaylist(playlist: string, tracks: string[]): Promise<number>;
   /**
    * The edits below take every track they apply to — one from the list, or

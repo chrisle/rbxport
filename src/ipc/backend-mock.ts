@@ -566,7 +566,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return candidates;
   };
   const tree = makeTree(playlistFixture);
-  type MockEdit = { label: string; undo: () => void; redo: () => void };
+  type MockEdit = {
+    label: string; undo: () => void; redo: () => void;
+    /** An Add Tracks to Playlist still open to its next slice (#499). */
+    transaction?: string | undefined; playlist?: string; after?: string[];
+  };
   const editUndo: MockEdit[] = [];
   const editRedo: MockEdit[] = [];
 
@@ -636,6 +640,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     { id: "2", name: "Components", tags: [{ id: "t-synth", name: "Synth" }, { id: "t-vocal", name: "Vocal" }] },
   ];
   let nextMyTag = 0;
+
+  /**
+   * An add's or a reorder's Undo or Redo (#499): refused, as the real
+   * backend refuses it, unless the playlist holds exactly `expected`.
+   */
+  const setMembersFrom = (playlist: string, expected: readonly string[], next: readonly string[]) => {
+    const now = membersOf(playlist);
+    if (now.length !== expected.length || now.some((track, i) => track !== expected[i])) {
+      throw new Error("the playlist's tracks have changed since");
+    }
+    membership.set(playlist, [...next]);
+  };
 
   const recordEdit = async (edit: MockEdit): Promise<EditHistoryState> => {
     await bump(false);
@@ -1136,13 +1152,29 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       await bump(false);
       return announceHistory();
     },
-    addTracksToPlaylist: (playlist, tracks, allowDuplicates = false) => {
+    addTracksToPlaylist: async (playlist, tracks, allowDuplicates = false, transaction) => {
       // The real backend refuses while Rekordbox holds the database; the mock
       // never does, so the happy path is what `pnpm dev:mock` exercises.
+      const before = [...membersOf(playlist)];
       const current = membersOf(playlist);
       for (const track of tracks) if (allowDuplicates || !current.includes(track)) current.push(track);
       membership.set(playlist, current);
-      return bump();
+      const after = [...current];
+      if (after.length === before.length) return bump();
+      // A slice of the same add joins the entry its first slice made, as
+      // the real backend's history does (#499).
+      const open = editUndo.at(-1);
+      if (transaction && open?.transaction === transaction && open.playlist === playlist
+        && open.after?.join() === before.join()) {
+        open.after = after;
+        return bump();
+      }
+      const opened: MockEdit = {
+        label: "Add Tracks to Playlist", transaction, playlist, after,
+        undo: () => setMembersFrom(playlist, opened.after ?? after, before),
+        redo: () => setMembersFrom(playlist, before, opened.after ?? after),
+      };
+      return (await recordEdit(opened)).generation;
     },
     playlistDuplicates: (playlist, tracks) => {
       const current = new Set(membersOf(playlist));
@@ -1220,8 +1252,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // Mirrors the backend: tracks not named keep their place after the rest,
       // so a partial order cannot silently drop any.
       const named = tracks.filter((t) => current.includes(t));
-      membership.set(playlist, [...named, ...current.filter((t) => !named.includes(t))]);
-      return bump();
+      const after = [...named, ...current.filter((t) => !named.includes(t))];
+      const before = [...current];
+      membership.set(playlist, after);
+      if (after.join() === before.join()) return bump();
+      return recordEdit({
+        label: "Reorder Playlist",
+        undo: () => setMembersFrom(playlist, after, before),
+        redo: () => setMembersFrom(playlist, before, after),
+      }).then((history) => history.generation);
     },
     setTrackRating: (tracks, stars) => {
       const after = Math.max(0, Math.min(5, stars));

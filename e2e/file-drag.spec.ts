@@ -87,7 +87,17 @@ for (const count of [1, 2]) {
     expect(y).toBeLessThan(box.y + box.height);
     await rows.first().dragTo(scroller, { targetPosition: { x: 300, y: y - box.y } });
     await expect(page.getByRole("contentinfo")).toContainText("Playlist reordered.");
-    await expect.poll(titles).toEqual([...before.slice(count), ...before.slice(0, count)]);
+    const after = [...before.slice(count), ...before.slice(0, count)];
+    await expect.poll(titles).toEqual(after);
+
+    // One Undo puts the old order back, one Redo the new (#499).
+    const menu = (id: string) => page.evaluate((item) => (window as unknown as { __menu?: (id: string) => void }).__menu?.(item), id);
+    await menu("undo");
+    await expect(page.getByRole("contentinfo")).toContainText("Edit undone.");
+    await expect.poll(titles).toEqual(before);
+    await menu("redo");
+    await expect(page.getByRole("contentinfo")).toContainText("Edit redone.");
+    await expect.poll(titles).toEqual(after);
   });
 }
 

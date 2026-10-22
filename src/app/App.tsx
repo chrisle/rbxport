@@ -1132,10 +1132,12 @@ function AppBody() {
           const held = allowDuplicates ? 0 : (await backend.edits.playlistDuplicates(playlistId, trackIds)).length;
           update({ total: trackIds.length, pendingRows: trackIds.length });
           let added = 0;
+          // Every slice of this add is one step of Edit › Undo (#499).
+          const transaction = crypto.randomUUID();
           try {
             for (const slice of slices(trackIds, ADD_SLICE)) {
               if (signal.aborted) break;
-              await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates);
+              await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates, transaction);
               added += slice.length;
               update({ done: added, pendingRows: trackIds.length - added });
             }
@@ -1244,9 +1246,12 @@ function AppBody() {
           update({ label: t("Adding {count} to {name}", { count: total, name }) });
           const allowDuplicates = signal.aborted ? false : await resolveDuplicates(playlistId, toAdd, name);
           let added = 0;
+          // Every slice of this add is one step of Edit › Undo (#499); the
+          // import before it is not in the history.
+          const transaction = crypto.randomUUID();
           for (const slice of slices(toAdd, ADD_SLICE)) {
             if (signal.aborted || allowDuplicates === null) break;
-            await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates);
+            await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates, transaction);
             added += slice.length;
             update({ done: total + added, pendingRows: toAdd.length - added });
           }
