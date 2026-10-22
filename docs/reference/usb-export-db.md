@@ -1285,7 +1285,10 @@ rekordbox resolves the same collision differently: it keeps the path and
 writes the second track's analysis as `ANLZ0001.*` in the same directory.
 A player tries `ANLZ0000` to `ANLZ0010` there and takes the file whose
 `PPTH` names the track. A retained device-only track keeps that slot, and
-its slot file is never overwritten with `ANLZ0000` (#599, #616).
+its slot file is never overwritten with `ANLZ0000` (#599, #616). It holds
+only that slot: a selected track whose path hashes to the same directory
+still gets `ANLZ0000` there and keeps its path, instead of being renamed
+and copied again.
 
 A retained device-only track also keeps its audio path. When a selected
 track lays out on that path, the selected track gets the suffix. rekordbox

@@ -660,6 +660,9 @@ In loop order:
    audio path is a `Conflict`. A preserved device track keeps its path, its
    analysis directory, and its `ANLZ000n` slot as the stick has them. A
    selected track laid out on its path is the one that gets the suffix.
+   The analysis collision check reserves the preserved track's directory
+   and slot together, so a preserved `ANLZ0001` leaves that directory's
+   `ANLZ0000` free for a selected track.
 6. **Reuse, move, or copy.**
    - *In place*: the library's own file is already on the stick
      (`on_stick`). The databases point at it, nothing is copied, and it is
