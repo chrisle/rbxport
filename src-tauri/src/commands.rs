@@ -2843,6 +2843,20 @@ pub async fn deck_move(
     Ok(())
 }
 
+/// Count grid beats from the engine head when the command arrives.
+#[tauri::command]
+pub async fn deck_move_grid(
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    grid_times_ms: Vec<f64>,
+    beats: f64,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.move_grid_beats(crate::player::deck_of(&deck), &grid_times_ms, beats);
+    }
+    Ok(())
+}
+
 /// Sets a deck's loop between two points and turns it on; a head already
 /// past the out point goes back to the in point.
 #[tauri::command]
@@ -2862,6 +2876,7 @@ pub async fn deck_set_loop<R: tauri::Runtime>(
 
 /// Move a playing loop and the audio head together, with the head offset
 /// measured against the engine's position when this command arrives.
+#[allow(clippy::too_many_arguments, reason = "Tauri command arguments mirror the typed IPC contract")]
 #[tauri::command]
 pub async fn deck_move_loop<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

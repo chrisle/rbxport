@@ -2647,6 +2647,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       sendTick();
       return wait(undefined);
     },
+    deckMoveGrid: (deck, gridTimesMs, beats) => {
+      const d = deckOf(deck);
+      const grid = { times: Uint32Array.from(gridTimesMs), numbers: new Uint8Array(), tempos: new Uint16Array() };
+      const targetMs = shiftByGridBeats(grid, d.frames / SAMPLE_RATE * 1000, beats);
+      if (targetMs !== null) {
+        d.frames = Math.round(targetMs / 1000 * SAMPLE_RATE);
+        d.generation += 1;
+        sendTick();
+      }
+      return wait(undefined);
+    },
     deckSetLoop: (deck, inMs, outMs) => {
       const d = deckOf(deck);
       const from = Math.max(0, Math.round((inMs / 1000) * SAMPLE_RATE));
