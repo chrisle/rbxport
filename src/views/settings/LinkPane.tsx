@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/i18n";
 import { getBackend } from "@/ipc/client";
 import type { LinkStatus } from "@/ipc/types";
+import { listedLinkDevices } from "@/lib/linkDevices";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import { Button, Section, Toggle } from "./controls";
@@ -123,6 +124,8 @@ export function LinkPane() {
         : link.state === "waiting" ? "Waiting for devices"
           : link.state === "down" ? "Connection lost" : "Connecting…";
   const problem = error ?? statusError ?? link?.problem;
+  // Only the devices with IDs up to 100 are listed (issue #582).
+  const devices = link?.on ? listedLinkDevices(link.players) : [];
 
   return (
     <Section title="PRO DJ LINK" label="Link">
@@ -199,12 +202,12 @@ export function LinkPane() {
         </div>
       ) : null}
       <div className={styles.linkDevices}>
-        <h4>Devices on your network <span>{link?.on ? link.players.length : 0}</span></h4>
-        {link?.on && link.players.length ? (
+        <h4>Devices on your network <span>{devices.length}</span></h4>
+        {devices.length ? (
           <table aria-label="Devices on the link">
             <thead><tr><th>Device</th><th>Role</th><th>IP address</th><th>Status</th></tr></thead>
             <tbody>
-              {link.players.map((player) => (
+              {devices.map((player) => (
                 <tr key={player.number}>
                   <td>
                     <strong>{player.name}</strong>
@@ -235,7 +238,7 @@ export function LinkPane() {
               : "Choose a network interface and connect to see your players and mixers here."}</p>
           </div>
         )}
-        {link?.on && link.players.some((player) => player.kind === "player") ? (
+        {devices.some((player) => player.kind === "player") ? (
           <p className={styles.linkHelp}>Track details appear when a player loads a track from this library.</p>
         ) : null}
       </div>

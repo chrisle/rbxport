@@ -96,3 +96,21 @@ it("offers automatic LINK joining and saves it as an opt-in", async () => {
   act(() => toggle?.click());
   expect(held.update).toHaveBeenCalledWith("djSystem", { autoJoinLink: true });
 });
+
+it("lists devices up to ID 100 and leaves out TC-SHOWKONTROL above it (issue #582)", async () => {
+  const device = (number: number, name: string, kind = "device") => ({
+    number, name, kind, address: `10.0.0.${number % 255}`, loaded: null, playing: false, master: false,
+    sync: false, cued: false, linkCue: false, mounted: false,
+  });
+  held.backend.linkStatus.mockResolvedValue({
+    ...off, on: true, state: "up", interface: { name: "en0", address: "10.0.0.2" } as LinkStatus["interface"],
+    players: [device(33, "XDJ-AZ", "player"), device(100, "Edge device"), device(101, "TC-SHOWKONTROL")],
+  });
+  await act(async () => { root.render(<LinkPane />); await Promise.resolve(); });
+  const table = host.querySelector('table[aria-label="Devices on the link"]');
+  expect(table?.textContent).toContain("XDJ-AZ");
+  expect(table?.textContent).toContain("Edge device");
+  expect(table?.textContent).not.toContain("TC-SHOWKONTROL");
+  expect(table?.querySelectorAll("tbody tr")).toHaveLength(2);
+  expect(host.querySelector("h4 span")?.textContent).toBe("2");
+});
