@@ -230,6 +230,13 @@ describe("recovered grid control behavior", () => {
     act(() => { grid.double(); grid.toggleLock(); }); await settle();
     expect(edits.gridEdit).not.toHaveBeenCalled(); expect(edits.gridLock).toHaveBeenCalledWith("t1", false);
   });
+  it("edits a Devices tree track's grid but never sets its lock (#660)", async () => {
+    mount({ trackId: "file:/Volumes/TEST/Contents/a.mp3", state: gridState({ lockable: false }) });
+    expect(grid.canEdit).toBe(true);
+    act(() => { grid.double(); grid.toggleLock(); }); await settle();
+    expect(edits.gridEdit.mock.calls[0]?.[0]).toBe("file:/Volumes/TEST/Contents/a.mp3");
+    expect(edits.gridLock).not.toHaveBeenCalled();
+  });
   it("clears scope when loading another track", async () => {
     mount(); act(() => grid.adjustFrom()); await settle();
     mount({trackId: "t2"}); expect(grid.fromMs).toBeNull();
