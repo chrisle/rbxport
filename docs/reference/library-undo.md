@@ -15,6 +15,8 @@ Add Tracks to Playlist and playlist reordering were added for #499 on
 2026-10-22.
 Undo and Redo of a key edit that wrote the audio file's key tag restore the
 tag with the library for #507 on 2026-10-22.
+Relocate, Relocate by location and Auto Relocate were added for #502 on
+2026-10-22.
 
 Evidence markers follow the project convention: `[OBS]` is something read in
 the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
@@ -34,7 +36,9 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
     could name rows the write removed for good.
 
   Writers that call `AppState::write` or `write_then` directly (imports,
-  relocation, analysis, grid saves, LINK, deck plays) record nothing.
+  analysis, grid saves, LINK, deck plays) record nothing. Relocate by
+  location and Auto Relocate record their own entry under the edit gate
+  (`relocate::record_relocation`, #502).
   Since #506 `write_then` itself ends the Redo branch whenever the write
   changed a row (SQLite `total_changes` on the writer's connection), and
   tells the window through the listener `lib.rs` sets
@@ -49,7 +53,7 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`,
   `PlaylistTrackRemoval`, `PlaylistTrackAddition`, `PlaylistReorder`,
   `PlaylistCreation`, `PlaylistEdit`, `MembershipReplacement`, `TrackEdit`,
-  `TrackTagEdit`, `CueRevision` in
+  `TrackTagEdit`, `CueRevision`, `TrackRelocation` in
   `crates/rbl-db/src/write.rs`; `KeyTagWrite` in `src-tauri/src/key_tag.rs`). A multi-track edit is one entry with one
   step per track, undone last first [OBS code].
 - **Conflict check (#506).** Before Undo or Redo writes, the rows it would
@@ -86,6 +90,13 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   the row is live again or the folder it was made in is gone. A rule or
   artwork entry compares the column by SQL `IS`, as a track field does
   [OBS code; creation tests below].
+  A relocation (#502) is checked through `Writer::relocation_conflict`,
+  and again in the transaction that writes: every track of the run must
+  still hold the link (`FolderPath`, `FileNameL`, `rb_file_id`, each by SQL
+  `IS`) the run left for Undo or found for Redo, and no other track in the
+  collection may point at the path it would restore ("Can't undo
+  Relocate: the track has been pointed at another file since. The newer
+  change was kept.") [OBS code; relocation tests below].
 - **Other histories.** Text fields keep WebKit's own history. Each track's
   beat grid has its own stack in `GridEditor` (`src-tauri/src/grid.rs`),
   which Edit › Undo reaches while a deck's grid editor is armed
@@ -163,6 +174,26 @@ MP3's or AIFF's `ID3v2`, the first `INITIALKEY` in a FLAC), as rekordbox's
   before and after. Undo puts the previous reference back; the copied image
   file stays, as track artwork Undo leaves it.
 
+### Relocate Undo (#502)
+
+Approved by Chris on 2026-10-22 (issue #502): Undo restores the library's
+previous links to audio files; it never moves or deletes a file.
+
+- Each file chosen in **Relocate** (Track menu or the Missing File
+  Manager; over a selection, each track's chooser is its own Relocate),
+  one **Relocate by location** run ("find other missing file using the
+  location of this track") and one **Auto Relocate** run are one entry
+  each, labelled Relocate. The Relocate by location that follows a chosen
+  file is a second entry, so Undo takes back the found tracks first.
+- The entry keeps each track's `FolderPath`, `FileNameL` and `rb_file_id`
+  exactly as stored before and after (`TrackRelocation` in
+  `crates/rbl-db/src/write.rs`). A run is written in one transaction, and
+  its Undo and Redo each in one transaction, last track first for Undo.
+- Undo puts back the old path even when nothing is there: the track is
+  missing again and can be relocated anew. The file number goes back to the
+  old one too, so a later Auto Relocate looks for the old file.
+- The track lists reload after Undo and Redo (`Touched::Tracks`).
+
 ## rekordbox
 
 rekordbox has no library Undo to copy. In rekordbox 7.2.19 (macOS), no
@@ -207,8 +238,8 @@ holds their ids.
 | Reload Tag | `reload_tags` | Title, Comment, Artist, Album, Genre, Label, Key, Year, Track No. from the file | Not recorded | code | Yes: manual edits lost. #503 |
 | Remove from Collection, Delete key | `remove_from_collection` | soft-deletes tracks and their memberships | Permanent: clears history, "This can't be undone" | `removing_from_collection_is_permanent_and_clears_history` | Yes, by design |
 | Missing File Manager › Delete | `relocate::remove_missing_tracks` | same | Permanent | code | Yes, by design |
-| Relocate (one track) | `relocate_track` | `FolderPath`, `FileNameL`, `rb_file_id` | Not recorded | code | Old path lost. #502 |
-| Relocate by location, Auto Relocate | `relocate::relocate_by_location`, `auto_relocate` | same, many tracks | Not recorded; ends the redo branch | code | Old paths lost. #502 |
+| Relocate (one track) | `relocate_track` | `FolderPath`, `FileNameL`, `rb_file_id` | Undo, one "Relocate" entry: the old link (path, name, file number) comes back even when its file is missing; no file moves. Refused if the track was pointed elsewhere since, or another track took the file | `a_relocate_is_one_undo_that_restores_the_old_link`, `undo_of_a_relocate_refuses_a_track_pointed_elsewhere_since_and_keeps_the_rest` (`src-tauri/tests/commands.rs`); `a_relocation_run_undoes_and_redoes_every_link_at_once` and the other #502 tests in `crates/rbl-db/tests/writes.rs` | No while the entry lives (#502) |
+| Relocate by location, Auto Relocate | `relocate::relocate_by_location`, `auto_relocate` | same, many tracks, one transaction | Undo, one "Relocate" entry per run for every track it pointed somewhere; a run that found nothing records nothing | `a_relocate_by_location_is_one_undo_for_every_track_it_found`, `an_auto_relocate_run_is_one_undo` (`relocate.rs` unit) | No while the entry lives (#502) |
 | Analyze (BPM, key, waveform, grid) | `analysis::analyse_track` | `.DAT/.EXT/.2EX`, BPM, key, analysis path | Not recorded [ASSUME: matches rekordbox, which has no analysis Undo]; ends the redo branch | code | Re-analysis replaces the old grid |
 | Phrase edit | `analysis::edit_phrase` | `.EXT` phrase section | Not recorded | code. [UNKNOWN] whether rekordbox's phrase editing undoes; `editapp::ScoreEditManager::undo` exists but is not traced to it | Previous phrases lost |
 | Beat grid edits, grid lock | `grid::grid_edit`, `grid_lock` | `.DAT/.EXT`, `BPM`, lock | Grid edits: own per-track Undo, which refuses (`ErrorKind::Conflict`) and drops the top entry when the grid on disk is no longer the one the entry expects, keeping the newer grid; lock: not recorded. Both end the library redo branch | `useGridEditor.test.tsx`, `e2e/grid-edit.spec.ts`, `an_undo_over_a_grid_changed_elsewhere_is_refused_and_keeps_the_newer_grid` (`grid.rs` unit) | No |
