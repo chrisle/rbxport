@@ -4221,6 +4221,7 @@ name = "rbxport"
 version = "1.10.0"
 dependencies = [
  "base64 0.22.1",
+ "blake3",
  "dirs 5.0.1",
  "drag",
  "fs2",
