@@ -750,6 +750,12 @@ impl TrackEdit {
     pub fn is_empty(&self) -> bool {
         self.before == self.after
     }
+
+    /// The track the edit changes.
+    #[must_use]
+    pub fn content(&self) -> &str {
+        &self.content
+    }
 }
 
 /// The `djmdCue` columns a cue edit can change, kept whole so Undo puts back

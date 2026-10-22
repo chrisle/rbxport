@@ -106,6 +106,14 @@ pub(crate) enum LibraryEdit {
     /// One reorder or Renumber Track Order of a playlist (#499).
     ReorderPlaylist(rbl_db::write::PlaylistReorder),
     Track(Vec<rbl_db::write::TrackEdit>),
+    /// A key edit that also wrote the key into audio files, with "Write the
+    /// value to the ID3 tag" on (#507): the library's steps, as `Track`, and
+    /// each file written with the key its tag held. Undo and Redo put both
+    /// back or neither. A key edit that wrote no file is a `Track` entry.
+    KeyEdit {
+        tracks: Vec<rbl_db::write::TrackEdit>,
+        files: Vec<crate::key_tag::KeyTagWrite>,
+    },
     /// One My Tag set per track: the Info tab's toggles edit one track,
     /// a tick in the My Tag panel every selected track.
     TrackTags(Vec<rbl_db::write::TrackTagEdit>),
@@ -129,7 +137,9 @@ impl LibraryEdit {
             Self::ReplacePlaylistContents(edits) => edits.is_empty(),
             Self::AddPlaylistTracks { addition, .. } => addition.is_empty(),
             Self::ReorderPlaylist(edit) => edit.is_empty(),
-            Self::Track(edits) => edits.is_empty() || edits.iter().all(rbl_db::write::TrackEdit::is_empty),
+            Self::Track(edits) | Self::KeyEdit { tracks: edits, .. } => {
+                edits.is_empty() || edits.iter().all(rbl_db::write::TrackEdit::is_empty)
+            }
             Self::TrackTags(edits) => edits.iter().all(rbl_db::write::TrackTagEdit::is_empty),
             Self::RenamePlaylist(_) | Self::MovePlaylist(_) | Self::ReplacePlaylist(_) | Self::CreatePlaylist(_) => false,
             Self::SortPlaylists(edit) => edit.is_empty(),

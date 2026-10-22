@@ -2178,6 +2178,221 @@ fn a_key_edited_over_several_tracks_is_tagged_only_into_the_files_it_changed() {
     }
 }
 
+/// An MP3 with an `ID3v2` tag holding `key` (none: no tag), imported: the file,
+/// its bytes and the track's id (#507).
+fn tagged_mp3(s: &Shell, name: &str, key: Option<&str>) -> (std::path::PathBuf, Vec<u8>, String) {
+    let (audio, _) = write_key_mp3(s, name);
+    if let Some(key) = key {
+        rbl_db::key_tag::write_key(&audio, key).unwrap();
+    }
+    let id = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap().tracks[0].id.clone();
+    let bytes = std::fs::read(&audio).unwrap();
+    (audio, bytes, id)
+}
+
+fn key_of(s: &Shell, id: &str) -> String {
+    run(details::track_details(s.state(), id.to_owned())).unwrap().key
+}
+
+fn file_key(path: &Path) -> Option<String> {
+    rbl_db::key_tag::read_key(path).unwrap()
+}
+
+/// Sets the track's key straight in the database, as another program
+/// would, outside the app's history.
+fn set_key_elsewhere(s: &Shell, id: &str, key: &str) {
+    let mut other = rbl_db::write::Writer::open(s.location.clone(), s._dir.path().join("other-backups")).unwrap();
+    other.disable_automatic_backups();
+    other.set_field(id, rbl_db::write::TrackField::Key, key).unwrap();
+    drop(other);
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
+}
+
+/// #507 (Chris, 2026-10-22, option A): Undo of a key edit that wrote the
+/// file's key tag puts back both the library's key and the file's, and Redo
+/// writes both again.
+#[test]
+fn undo_and_redo_of_a_key_edit_restore_the_files_tag_with_the_library() {
+    let s = shell();
+    let (audio, original, id) = tagged_mp3(&s, "issue-507 Tagged.mp3", Some("Am"));
+    s.state().write(|w| { w.ensure_detected_key("Am")?; w.ensure_detected_key("Fm")?; w.ensure_detected_key("Gm") }).unwrap();
+    let imported = key_of(&s, &id);
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Gm".into(), None)).unwrap();
+    assert_eq!(std::fs::read(&audio).unwrap(), original, "a library-only edit");
+
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Fm".into(), Some(true))).unwrap();
+    assert_eq!((key_of(&s, &id), file_key(&audio)), ("Fm".into(), Some("Fm".into())));
+    assert_eq!(commands::current_history(&s.state()).undo_label.as_deref(), Some("Track Edit"));
+
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!((key_of(&s, &id), file_key(&audio)), ("Gm".into(), Some("Am".into())));
+    assert_eq!(std::fs::read(&audio).unwrap(), original, "the tag is as it was");
+
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!((key_of(&s, &id), file_key(&audio)), ("Fm".into(), Some("Fm".into())));
+
+    // Back past the key edit to the library-only one: the file stays.
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    let restored = file_identity(&audio);
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(key_of(&s, &id), imported);
+    assert_eq!(file_identity(&audio), restored, "Undo of an edit that wrote no tag writes none");
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(file_identity(&audio), restored, "nor does its Redo");
+}
+
+/// #507: a file whose tag had no key gets none back on Undo; an MP3 that
+/// had no tag at all comes back byte for byte.
+#[test]
+fn undo_of_a_key_written_into_a_file_without_one_takes_the_key_out_again() {
+    let s = shell();
+    let (audio, original, id) = tagged_mp3(&s, "issue-507 Bare.mp3", None);
+    s.state().write(|w| w.ensure_detected_key("Dbm")).unwrap();
+    assert_eq!(key_of(&s, &id), "");
+
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Dbm".into(), Some(true))).unwrap();
+    assert_eq!(file_key(&audio), Some("Dbm".into()));
+
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(key_of(&s, &id), "");
+    assert_eq!(file_key(&audio), None);
+    assert_eq!(std::fs::read(&audio).unwrap(), original);
+
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!((key_of(&s, &id), file_key(&audio)), ("Dbm".into(), Some("Dbm".into())));
+}
+
+/// #507: a WAV, which rekordbox writes no key into, gets no file write from
+/// the edit, so its Undo and Redo are the library's only.
+#[test]
+fn a_key_edit_that_wrote_no_file_undoes_in_the_library_only() {
+    let s = shell();
+    let audio = s._dir.path().join("issue-507 Click.wav");
+    write_click_wav(&audio, 2);
+    let id = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap().tracks[0].id.clone();
+    s.state().write(|w| w.ensure_detected_key("Am")).unwrap();
+    let before = file_identity(&audio);
+
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Am".into(), Some(true))).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(key_of(&s, &id), "");
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(key_of(&s, &id), "Am");
+    assert_eq!(file_identity(&audio), before);
+}
+
+/// #507 with #506's policy: a key tag changed in the file since (another
+/// app, a tagger) refuses the Undo. Neither the library nor the file is
+/// written, the newer tag stays, and only that entry leaves the history.
+#[test]
+fn undo_of_a_key_edit_is_refused_when_the_files_tag_changed_since() {
+    let s = shell();
+    let (audio, _, id) = tagged_mp3(&s, "issue-507 Retagged.mp3", Some("Am"));
+    s.state().write(|w| w.ensure_detected_key("Fm")).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![id.clone()], 3)).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Fm".into(), Some(true))).unwrap();
+
+    rbl_db::key_tag::write_key(&audio, "Gm").unwrap();
+    let retagged = file_identity(&audio);
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Can't undo Track Edit: the key tag of “issue-507 Retagged.mp3” has changed since. The newer change was kept."
+    );
+    assert_eq!(key_of(&s, &id), "Fm", "the library keeps the edited key");
+    assert_eq!(file_identity(&audio), retagged, "the newer tag stays");
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some("Track Edit"), "the rating edit is still there");
+    assert!(!history.can_redo);
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(run(details::track_details(s.state(), id)).unwrap().rating, 0);
+}
+
+/// #507: a key changed in the library since refuses the Redo, and the file,
+/// whose tag the Undo put back, is not written either.
+#[test]
+fn redo_of_a_key_edit_is_refused_when_the_library_key_changed_since() {
+    let s = shell();
+    let (audio, _, id) = tagged_mp3(&s, "issue-507 Library.mp3", Some("Am"));
+    s.state().write(|w| { w.ensure_detected_key("Fm")?; w.ensure_detected_key("Gm") }).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Fm".into(), Some(true))).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    let undone = file_identity(&audio);
+
+    set_key_elsewhere(&s, &id, "Gm");
+
+    let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't redo Track Edit: the track has changed since. The newer change was kept.");
+    assert_eq!(key_of(&s, &id), "Gm");
+    assert_eq!(file_identity(&audio), undone, "the file is not written");
+    assert_eq!(run(commands::redo_edit(s.handle(), s.state())).unwrap_err().kind, ErrorKind::NotFound);
+}
+
+/// #507: a file that cannot be written back (made read-only since) fails
+/// the Undo with nothing changed: the other file the edit wrote is put back
+/// as it was, the library keeps the edited key, and the entry stays to be
+/// tried again once the file can be written.
+#[cfg(unix)]
+#[test]
+fn a_failed_tag_write_undoes_nothing_and_keeps_the_entry() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = shell();
+    let (first, _, first_id) = tagged_mp3(&s, "issue-507 First.mp3", Some("Am"));
+    let (locked, _, locked_id) = tagged_mp3(&s, "issue-507 Locked.mp3", Some("Am"));
+    s.state().write(|w| w.ensure_detected_key("Fm")).unwrap();
+    let imported = (key_of(&s, &first_id), key_of(&s, &locked_id));
+    run(details::set_track_field(
+        s.handle(),
+        s.state(),
+        vec![first_id.clone(), locked_id.clone()],
+        "key".into(),
+        "Fm".into(),
+        Some(true),
+    ))
+    .unwrap();
+    assert_eq!((file_key(&first), file_key(&locked)), (Some("Fm".into()), Some("Fm".into())));
+
+    // Undo runs last first, so the second track's file is written back
+    // first; the first one's, locked, then fails, and the second has to be
+    // put back.
+    std::fs::set_permissions(&first, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_ne!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Can't undo Track Edit: the key could not be written to “issue-507 First.mp3” (the file is read-only). Nothing was changed."
+    );
+    assert_eq!((file_key(&first), file_key(&locked)), (Some("Fm".into()), Some("Fm".into())), "the written file was put back");
+    assert_eq!((key_of(&s, &first_id), key_of(&s, &locked_id)), ("Fm".into(), "Fm".into()));
+    assert_eq!(commands::current_history(&s.state()).undo_label.as_deref(), Some("Track Edit"), "the entry stays");
+
+    std::fs::set_permissions(&first, std::fs::Permissions::from_mode(0o644)).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!((file_key(&first), file_key(&locked)), (Some("Am".into()), Some("Am".into())));
+    assert_eq!((key_of(&s, &first_id), key_of(&s, &locked_id)), imported);
+}
+
+/// #507: a file the edit wrote that is gone since is a change made since:
+/// the Undo is refused and leaves the library's key, and only the entry
+/// goes.
+#[test]
+fn undo_of_a_key_edit_whose_file_is_gone_is_refused() {
+    let s = shell();
+    let (audio, _, id) = tagged_mp3(&s, "issue-507 Gone.mp3", Some("Am"));
+    s.state().write(|w| w.ensure_detected_key("Fm")).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), vec![id.clone()], "key".into(), "Fm".into(), Some(true))).unwrap();
+    std::fs::remove_file(&audio).unwrap();
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't undo Track Edit: “issue-507 Gone.mp3” is no longer there. The newer change was kept.");
+    assert_eq!(key_of(&s, &id), "Fm");
+    assert!(!commands::current_history(&s.state()).can_undo);
+}
+
 /// Twenty seconds of an A minor triad as 16-bit mono AIFF: something with a
 /// key for analysis to find, in a format rekordbox writes a key into.
 fn write_chord_aiff(path: &Path) {

@@ -857,7 +857,7 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
         LibraryEdit::ReplacePlaylist(_) | LibraryEdit::ReplacePlaylistContents(_) => Touched::Playlists,
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
-        LibraryEdit::Track(_) | LibraryEdit::TrackTags(_) => Touched::Tracks,
+        LibraryEdit::Track(_) | LibraryEdit::KeyEdit { .. } | LibraryEdit::TrackTags(_) => Touched::Tracks,
         LibraryEdit::Cues(revision) => Touched::Cues(revision.content().to_owned()),
     }
 }
@@ -869,6 +869,12 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
 fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool) -> Result<(), rbl_db::DbError> {
     match edit {
         LibraryEdit::Track(values) => values.iter().try_for_each(|value| writer.check_track_edit(value, undo)),
+        // The library's rows and every file the edit wrote, before either is
+        // written (#507).
+        LibraryEdit::KeyEdit { tracks, files } => {
+            tracks.iter().try_for_each(|value| writer.check_track_edit(value, undo))?;
+            crate::key_tag::check_restore(files, undo, TRACK_EDIT)
+        }
         LibraryEdit::TrackTags(values) => values.iter().try_for_each(|value| writer.check_tag_edit(value, undo)),
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) | LibraryEdit::MovePlaylist(_)
         | LibraryEdit::ReplacePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_)
@@ -917,6 +923,26 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
             }
             Ok(())
         }
+        // The files first: they are what can still fail after the check (a
+        // file made read-only since). A failure there has put back the files
+        // it wrote and leaves the library as it was; a failure in the library
+        // puts the files and the tracks already written back (#507).
+        LibraryEdit::KeyEdit { tracks, files } => {
+            crate::key_tag::restore(files, undo, TRACK_EDIT)?;
+            let error = match step_track_edits(writer, tracks, undo) {
+                Ok(()) => return Ok(()),
+                Err(error) => error,
+            };
+            let written: Vec<_> = if undo { files.iter().rev().collect() } else { files.iter().collect() };
+            let stranded = crate::key_tag::revert(&written, undo);
+            if stranded == 0 {
+                return Err(error);
+            }
+            Err(rbl_db::DbError::Io(std::io::Error::other(format!(
+                "{error}; {stranded} of {} files could not be changed back",
+                files.len()
+            ))))
+        }
         LibraryEdit::TrackTags(values) => {
             let ordered: Box<dyn Iterator<Item = _>> = if undo {
                 Box::new(values.iter().rev())
@@ -932,6 +958,40 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
         LibraryEdit::CreatePlaylist(value) => if undo { writer.undo_creation(value) } else { writer.redo_creation(value) }.map(|_| ()),
         LibraryEdit::PlaylistEdit(value) => if undo { writer.undo_playlist_edit(value) } else { writer.redo_playlist_edit(value) }.map(|_| ()),
     }
+}
+
+/// The history label of an Info panel, rating, colour or comment edit.
+pub(crate) const TRACK_EDIT: &str = "Track Edit";
+
+/// Undoes (`undo`, last first) or redoes the steps of a track edit, all or
+/// none: a step that fails has the ones before it put back.
+fn step_track_edits(
+    writer: &mut rbl_db::write::Writer,
+    values: &[rbl_db::write::TrackEdit],
+    undo: bool,
+) -> Result<(), rbl_db::DbError> {
+    let ordered: Vec<&rbl_db::write::TrackEdit> = if undo { values.iter().rev().collect() } else { values.iter().collect() };
+    for (at, value) in ordered.iter().enumerate() {
+        let step = if undo { writer.undo_track_edit(value) } else { writer.redo_track_edit(value) };
+        if let Err(error) = step {
+            let mut stranded = 0usize;
+            for done in ordered.get(..at).unwrap_or_default().iter().rev() {
+                let back = if undo { writer.redo_track_edit(done) } else { writer.undo_track_edit(done) };
+                if let Err(back) = back {
+                    tracing::error!(error = %back, "could not put a track back after a failed Undo or Redo");
+                    stranded += 1;
+                }
+            }
+            if stranded == 0 {
+                return Err(error);
+            }
+            return Err(rbl_db::DbError::Io(std::io::Error::other(format!(
+                "{error}; {stranded} of {} already-changed tracks could not be changed back",
+                ordered.len()
+            ))));
+        }
+    }
+    Ok(())
 }
 
 /// Shared by desktop and CDJ edits; the writer holds the edit gate until
