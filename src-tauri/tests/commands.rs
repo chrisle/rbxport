@@ -1145,8 +1145,13 @@ fn reload_tag_over_a_selection_is_one_undo_and_one_redo() {
     let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
     assert_eq!((tag_row(&s, &a), tag_row(&s, &b)), before, "one Undo puts back both tracks, ids included");
     assert!(undone.can_undo && undone.can_redo);
+    // Redo must use the values captured at Reload Tag time, even when the
+    // audio file's tags have changed since Undo.
+    tag_wav(&tracks[0].0, &[(ItemKey::TrackTitle, "Changed after Undo")]);
+    let audio_before_redo = std::fs::read(&tracks[0].0).unwrap();
     let redone = run(commands::redo_edit(s.handle(), s.state())).unwrap();
     assert_eq!((tag_row(&s, &a), tag_row(&s, &b)), after, "Redo writes the files' values again");
+    assert_eq!(std::fs::read(&tracks[0].0).unwrap(), audio_before_redo, "Redo does not rewrite audio tags");
     assert!(!redone.can_redo);
 
     // The entries before it are still there, in order.
