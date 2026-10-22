@@ -1317,6 +1317,138 @@ fn relocating_leaves_the_analysis_and_memberships_alone() {
     assert_eq!(after, analysis, "the grid's files stay the track's");
 }
 
+/// A track's stored link to its file: `FolderPath`, `FileNameL`,
+/// `rb_file_id`, exactly as stored.
+fn link(f: &Fixture, id: &str) -> (Option<String>, Option<String>, Option<String>) {
+    f.conn()
+        .query_row(
+            "SELECT FolderPath, FileNameL, rb_file_id FROM djmdContent WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+}
+
+#[test]
+fn a_relocation_run_undoes_and_redoes_every_link_at_once() {
+    // #502: one run over two tracks is one entry; Undo restores the path,
+    // the name and the file number each had, including a NULL number, and
+    // Redo the run's. The old files are not there either way.
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a moved.mp3"), dir.path().join("b moved.mp3"));
+    std::fs::write(&a, b"audio a").unwrap();
+    std::fs::write(&b, b"audio b").unwrap();
+    let mut f = fixture();
+    f.conn().execute("UPDATE djmdContent SET rb_file_id = '77' WHERE ID = ?1", params![track_id(0)]).unwrap();
+    let before = (link(&f, &track_id(0)), link(&f, &track_id(1)));
+    assert_eq!(before.1 .2, None, "the fixture's second track has no file number");
+
+    let (changed, run) = f
+        .writer
+        .relocate_with_undo(&[(track_id(0), a.clone()), (track_id(1), b.clone())])
+        .unwrap();
+    assert_eq!(changed.rows, 2);
+    assert_eq!(run.len(), 2);
+    assert!(!run.is_empty());
+    assert_eq!(run.tracks().collect::<Vec<_>>(), vec![track_id(0).as_str(), track_id(1).as_str()]);
+    let after = (link(&f, &track_id(0)), link(&f, &track_id(1)));
+    assert_eq!(after.0 .0.as_deref(), Some(a.to_string_lossy().as_ref()));
+    assert_eq!(after.1 .1.as_deref(), Some("b moved.mp3"));
+    assert_eq!(after.0 .2, Some(rbl_db::file_id::column(&a)));
+
+    let usn_before: i64 = f.one("SELECT rb_local_usn FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    f.writer.undo_relocation(&run).unwrap();
+    assert_eq!((link(&f, &track_id(0)), link(&f, &track_id(1))), before);
+    let usn_after: i64 = f.one("SELECT rb_local_usn FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    assert!(usn_after > usn_before, "an Undo is a write rekordbox must see");
+    assert!(std::fs::metadata("/fixture/audio/track000.mp3").is_err(), "the old file stays missing");
+    assert!(a.is_file() && b.is_file(), "no file is moved or deleted");
+
+    f.writer.redo_relocation(&run).unwrap();
+    assert_eq!((link(&f, &track_id(0)), link(&f, &track_id(1))), after);
+}
+
+#[test]
+fn a_relocation_names_each_track_once_and_refuses_a_run_with_a_bad_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.mp3");
+    std::fs::write(&a, b"audio").unwrap();
+    let mut f = fixture();
+    let before = link(&f, &track_id(0));
+
+    let refused = f.writer.relocate_with_undo(&[(track_id(0), a.clone()), (track_id(1), dir.path().join("none.mp3"))]);
+    assert!(matches!(refused, Err(DbError::WriteRefused(_))));
+    assert_eq!(link(&f, &track_id(0)), before, "nothing of a refused run is written");
+
+    let (_, run) = f
+        .writer
+        .relocate_with_undo(&[(track_id(0), a.clone()), (track_id(0), a.clone()), ("no such track".into(), a.clone())])
+        .unwrap();
+    assert_eq!(run.len(), 1);
+    f.writer.undo_relocation(&run).unwrap();
+    assert_eq!(link(&f, &track_id(0)), before);
+}
+
+#[test]
+fn undo_of_a_relocation_refuses_a_track_pointed_elsewhere_since() {
+    // #506's policy: the newer link stays and nothing of the run is put back.
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b, c) = (dir.path().join("a.mp3"), dir.path().join("b.mp3"), dir.path().join("c.mp3"));
+    for file in [&a, &b, &c] {
+        std::fs::write(file, b"audio").unwrap();
+    }
+    let mut f = fixture();
+    let (_, run) = f.writer.relocate_with_undo(&[(track_id(0), a.clone()), (track_id(1), b.clone())]).unwrap();
+    f.writer.relocate(&track_id(1), &c).unwrap();
+    let held = (link(&f, &track_id(0)), link(&f, &track_id(1)));
+
+    let reason = f.writer.relocation_conflict(&run, true).unwrap();
+    assert_eq!(reason.as_deref(), Some("one of the tracks has been pointed at another file since"));
+    match f.writer.undo_relocation(&run) {
+        Err(DbError::Conflict(reason)) => assert_eq!(reason, "one of the tracks has been pointed at another file since"),
+        other => panic!("expected a conflict, got {other:?}"),
+    }
+    assert_eq!((link(&f, &track_id(0)), link(&f, &track_id(1))), held, "neither track was written");
+
+    // A removed track refuses too.
+    let (_, single) = f.writer.relocate_with_undo(&[(track_id(2), a.clone())]).unwrap();
+    f.writer.delete_track(&track_id(2)).unwrap();
+    assert_eq!(
+        f.writer.relocation_conflict(&single, true).unwrap().as_deref(),
+        Some("the track is no longer in the collection"),
+    );
+}
+
+#[test]
+fn undo_and_redo_of_a_relocation_refuse_a_file_another_track_took_since() {
+    // Undo or Redo must not leave two tracks on one file: a track imported
+    // at the old (or new) place since keeps it.
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.mp3");
+    std::fs::write(&a, b"audio").unwrap();
+    let mut f = fixture();
+    let old = link(&f, &track_id(0));
+    let (_, run) = f.writer.relocate_with_undo(&[(track_id(0), a.clone())]).unwrap();
+
+    // Another track now points at the old path.
+    f.conn()
+        .execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = ?2", params![old.0, track_id(5)])
+        .unwrap();
+    assert!(matches!(f.writer.undo_relocation(&run), Err(DbError::Conflict(reason)) if reason == "another track in the collection uses that file now"));
+    f.conn()
+        .execute("UPDATE djmdContent SET FolderPath = '/fixture/audio/track005.mp3' WHERE ID = ?1", params![track_id(5)])
+        .unwrap();
+    f.writer.undo_relocation(&run).unwrap();
+    assert_eq!(link(&f, &track_id(0)), old);
+
+    // Another track now points at the new file.
+    f.conn()
+        .execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = ?2", params![a.to_string_lossy(), track_id(5)])
+        .unwrap();
+    assert!(matches!(f.writer.redo_relocation(&run), Err(DbError::Conflict(_))));
+    assert_eq!(link(&f, &track_id(0)), old, "the refused Redo wrote nothing");
+}
+
 // ------------------------------------------------------------------- cues
 
 #[test]

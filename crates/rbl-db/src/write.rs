@@ -758,6 +758,46 @@ impl TrackEdit {
     }
 }
 
+/// The `djmdContent` columns a Relocate writes: where the track's file is,
+/// its name, and the file's number ([`crate::file_id`]).
+const LINK_COLUMNS: [&str; 3] = ["FolderPath", "FileNameL", "rb_file_id"];
+
+/// One track's link to its audio file before and after a relocation, the
+/// exact stored values of [`LINK_COLUMNS`].
+#[derive(Debug, Clone, PartialEq)]
+struct TrackLink {
+    content: String,
+    before: [Value; 3],
+    after: [Value; 3],
+}
+
+/// Every link one Relocate, Relocate by location or Auto Relocate run
+/// changed, in the order written (#502). Undo puts them all back in one
+/// transaction; the audio files are not touched either way.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TrackRelocation {
+    links: Vec<TrackLink>,
+}
+
+impl TrackRelocation {
+    /// The run wrote nothing, or wrote back the links the tracks had.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.links.iter().all(|link| link.before == link.after)
+    }
+
+    /// How many tracks the run pointed somewhere.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.links.len()
+    }
+
+    /// The tracks the run relocated, in the order written.
+    pub fn tracks(&self) -> impl Iterator<Item = &str> {
+        self.links.iter().map(|link| link.content.as_str())
+    }
+}
+
 /// The `djmdCue` columns a cue edit can change, kept whole so Undo puts back
 /// exactly what was there. `rb_local_deleted` is one of them: a cue's add is
 /// undone by deleting it, and its delete by bringing the same row back.
@@ -4719,23 +4759,94 @@ impl Writer {
     /// file's number, a later Auto Relocate could take another file that
     /// happens to have it.
     pub fn relocate(&mut self, content: &str, path: &Path) -> Result<Changed> {
-        if !path.is_file() {
-            return Err(DbError::WriteRefused(format!(
-                "{} is not a file; a track must point at one",
-                path.display()
-            )));
+        self.relocate_with_undo(&[(content.to_owned(), path.to_path_buf())]).map(|(changed, _)| changed)
+    }
+
+    /// Points each track of `moves` at its file in one transaction, as one
+    /// Relocate, Relocate by location or Auto Relocate run, and keeps each
+    /// track's link (`FolderPath`, `FileNameL`, `rb_file_id`) before and
+    /// after for Undo (#502). Every path is checked before anything is
+    /// written: one that is not a file refuses the whole run. A track named
+    /// twice is moved by its first entry; one not in the collection is
+    /// passed over.
+    pub fn relocate_with_undo(&mut self, moves: &[(String, PathBuf)]) -> Result<(Changed, TrackRelocation)> {
+        for (_, path) in moves {
+            if !path.is_file() {
+                return Err(DbError::WriteRefused(format!(
+                    "{} is not a file; a track must point at one",
+                    path.display()
+                )));
+            }
         }
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let full = path.to_string_lossy().into_owned();
         self.prepare()?;
         let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
-        let file_id = crate::file_id::column(path);
-        let rows = tx.execute("UPDATE djmdContent SET FolderPath=?1, FileNameL=?2, rb_file_id=?6, rb_local_usn=?3, updated_at=?4 WHERE ID=?5 AND rb_local_deleted=0",
-            params![full, name, usn, time::now(), content, file_id])?;
+        let stamp = time::now();
+        let mut links = Vec::with_capacity(moves.len());
+        let mut seen = std::collections::HashSet::with_capacity(moves.len());
+        let mut rows = 0;
+        for (content, path) in moves {
+            if !seen.insert(content.as_str()) {
+                continue;
+            }
+            let Some(before) = link_of(&tx, content)? else { continue };
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let after = [
+                Value::Text(path.to_string_lossy().into_owned()),
+                Value::Text(name),
+                Value::Text(crate::file_id::column(path)),
+            ];
+            rows += write_link(&tx, content, &after, usn, &stamp)?;
+            links.push(TrackLink { content: content.clone(), before, after });
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok((Changed { rows, usn }, TrackRelocation { links }))
+    }
+
+    /// Puts back every link `edit` changed, in one transaction, last first.
+    /// The old file need not be there: Undo restores where the library
+    /// pointed, so a track whose old file is gone is missing again and can
+    /// be relocated anew. Refused with [`DbError::Conflict`], writing
+    /// nothing, as [`Self::relocation_conflict`] says.
+    pub fn undo_relocation(&mut self, edit: &TrackRelocation) -> Result<Changed> {
+        self.write_relocation(edit, true)
+    }
+
+    /// Points the tracks of `edit` at the files it chose again, under the
+    /// same condition as [`Self::undo_relocation`] the other way round.
+    pub fn redo_relocation(&mut self, edit: &TrackRelocation) -> Result<Changed> {
+        self.write_relocation(edit, false)
+    }
+
+    /// Why Undo (`undo`) or Redo of `edit` would overwrite something written
+    /// since outside the history, or `None` when it would not (#506): each
+    /// track must still hold the link the history expects (the run's for
+    /// Undo, the one it replaced for Redo), compared column by column with
+    /// SQL `IS`, and no other track in the collection may have taken the
+    /// file it would point at since, which would leave two tracks on one
+    /// file.
+    pub fn relocation_conflict(&self, edit: &TrackRelocation, undo: bool) -> Result<Option<String>> {
+        relocation_conflict_in(self.library.connection(), edit, undo)
+    }
+
+    fn write_relocation(&mut self, edit: &TrackRelocation, undo: bool) -> Result<Changed> {
+        self.prepare()?;
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(reason) = relocation_conflict_in(&tx, edit, undo)? {
+            return Err(DbError::Conflict(reason));
+        }
+        let usn = next_usn(&tx)?;
+        let stamp = time::now();
+        let mut rows = 0;
+        let ordered: Box<dyn Iterator<Item = &TrackLink>> =
+            if undo { Box::new(edit.links.iter().rev()) } else { Box::new(edit.links.iter()) };
+        for link in ordered {
+            rows += write_link(&tx, &link.content, if undo { &link.before } else { &link.after }, usn, &stamp)?;
+        }
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })
@@ -5873,6 +5984,72 @@ fn cue_conflict(conn: &Connection, revision: &CueRevision, undo: bool) -> Result
                 Some(slot) => format!("Hot Cue {} has been set since", char::from(b'A' + u8::try_from(slot).unwrap_or(0))),
                 None => "another loop has become the Active Loop since".to_owned(),
             }));
+        }
+    }
+    Ok(None)
+}
+
+/// A live track's stored link ([`LINK_COLUMNS`]), or `None` when it is not
+/// in the collection.
+fn link_of(conn: &Connection, content: &str) -> Result<Option<[Value; 3]>> {
+    conn.query_row(
+        "SELECT FolderPath, FileNameL, rb_file_id FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+        params![content],
+        |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?]),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+fn write_link(conn: &Connection, content: &str, link: &[Value; 3], usn: i64, stamp: &str) -> Result<usize> {
+    conn.execute(
+        "UPDATE djmdContent SET FolderPath = ?1, FileNameL = ?2, rb_file_id = ?3, rb_local_usn = ?4, updated_at = ?5
+         WHERE ID = ?6 AND rb_local_deleted = 0",
+        params![link[0], link[1], link[2], usn, stamp, content],
+    )
+    .map_err(Into::into)
+}
+
+/// [`Writer::relocation_conflict`] on `conn`, so the transaction that
+/// writes can check again what it reads.
+fn relocation_conflict_in(conn: &Connection, edit: &TrackRelocation, undo: bool) -> Result<Option<String>> {
+    let several = edit.links.len() > 1;
+    for link in &edit.links {
+        let (expected, target) = if undo { (&link.after, &link.before) } else { (&link.before, &link.after) };
+        let held: Option<bool> = conn
+            .query_row(
+                &format!(
+                    "SELECT ({} IS ?2) AND ({} IS ?3) AND ({} IS ?4) FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+                    LINK_COLUMNS[0], LINK_COLUMNS[1], LINK_COLUMNS[2],
+                ),
+                params![link.content, expected[0], expected[1], expected[2]],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match held {
+            None if several => return Ok(Some("one of the tracks is no longer in the collection".to_owned())),
+            None => return Ok(Some("the track is no longer in the collection".to_owned())),
+            Some(false) if several => return Ok(Some("one of the tracks has been pointed at another file since".to_owned())),
+            Some(false) => return Ok(Some("the track has been pointed at another file since".to_owned())),
+            Some(true) => {}
+        }
+        let empty = match &target[0] {
+            Value::Null => true,
+            Value::Text(path) => path.is_empty(),
+            _ => false,
+        };
+        if empty {
+            continue;
+        }
+        let mut stmt = conn.prepare_cached(
+            "SELECT ID FROM djmdContent WHERE FolderPath IS ?1 AND rb_local_deleted = 0",
+        )?;
+        let holders = stmt.query_map(params![target[0]], |r| r.get::<_, String>(0))?;
+        for holder in holders {
+            let holder = holder?;
+            if !edit.links.iter().any(|other| other.content == holder) {
+                return Ok(Some("another track in the collection uses that file now".to_owned()));
+            }
         }
     }
     Ok(None)
