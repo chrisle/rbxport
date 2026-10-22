@@ -800,9 +800,11 @@ function gridButton(
       };
     case "lock":
       return {
-        disabled: !editor.hasGrid || deck.readOnly,
+        disabled: !editor.hasGrid || deck.readOnly || editor.state?.lockable === false,
         pressed: locked,
-        title: locked ? "Unlock the beat grid for editing" : "Lock the beat grid so nothing here changes it",
+        title: editor.state?.lockable === false
+          ? "Analysis Lock is set on tracks in the collection, not on a device"
+          : locked ? "Unlock the beat grid for editing" : "Lock the beat grid so nothing here changes it",
         handlers: { onClick: editor.toggleLock },
       };
     default:

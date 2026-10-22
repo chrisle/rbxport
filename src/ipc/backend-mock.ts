@@ -1580,7 +1580,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const duration = options?.durationMs ?? (all[Number.parseInt(track, 10) - 100000]?.durationSec ?? 0) * 1000;
       const next = applyEditFrom(held.beats, options?.fromMs ?? null, edit, duration);
       if (next.length === 0) return failed("malformed", "That edit would leave the track without a beat.");
-      if (sameGrid(next, held.beats)) return wait(gridStateOf(held));
+      if (sameGrid(next, held.beats)) return wait(gridStateOf(held, track));
       const label = edit.kind === "nudge"
         ? (edit.ms < 0 ? "Shift Beat Grid Left" : "Shift Beat Grid Right")
         : { double: "Double Tempo", halve: "Halve Tempo", downbeat: "Set Downbeat",
@@ -1614,6 +1614,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     gridLock: (track, on) => {
       const held = gridOf(track);
       if (!held) return notFound("That track has no beat grid to edit.");
+      if (track.startsWith("file:")) return refuse("Analysis Lock is set on a track in the collection, not on a device.");
       held.locked = on;
       return gridChanged(track, held);
     },
@@ -1642,8 +1643,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const gridOf = (trackId: string): HeldGrid | null => {
     const held = gridStore.get(trackId);
     if (held) return held;
-    const row = all[Number.parseInt(trackId, 10) - 100000];
-    if (!row || row.analysed === 0 || row.bpmX100 === 0) return null;
+    // A Devices tree track's grid is the stick's (#660).
+    const row = all[Number.parseInt(trackId, 10) - 100000] ?? stickLibraries.track(trackId);
+    if (!row || ("analysed" in row && row.analysed === 0) || row.bpmX100 === 0) return null;
     const beatMs = (60 / (row.bpmX100 / 100)) * 1000;
     const count = Math.min(Math.floor((row.durationSec * 1000) / beatMs) + 1, 65536);
     const beats: EditableBeat[] = [];
@@ -1657,7 +1659,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const sameGrid = (a: readonly EditableBeat[], b: readonly EditableBeat[]) =>
     a.length === b.length
     && a.every((beat, i) => beat.timeMs === b[i]?.timeMs && beat.number === b[i]?.number && beat.tempoX100 === b[i]?.tempoX100);
-  const gridStateOf = (held: HeldGrid): GridState => ({
+  const gridStateOf = (held: HeldGrid, trackId?: string): GridState => ({
+    ...(trackId !== undefined && trackId.startsWith("file:") ? { lockable: false } : {}),
     bpmX100: tempoX100(held.beats),
     beats: held.beats.length,
     canUndo: held.undo.length > 0,
@@ -1676,7 +1679,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (d) d.bpmX100 = bpm;
       await bump();
     }
-    return wait(gridStateOf(held));
+    return wait(gridStateOf(held, trackId));
   };
 
   /**
@@ -2301,7 +2304,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     gridState: (trackId) => {
       const held = gridOf(trackId);
       if (!held) return notFound("That track has no beat grid.");
-      return wait(gridStateOf(held));
+      return wait(gridStateOf(held, trackId));
     },
 
     // The memory cue and the row's own hot cues, so the player's markers and
