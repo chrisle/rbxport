@@ -1,5 +1,7 @@
 # Auto Relocate Search Folders
 
+[Documentation](../README.md)
+
 Research record for #487 (settings to add Auto Relocate search folders). It
 compares rekordbox's "Auto Relocate Search Folders" preferences with what
 rbxport has. It is research only: Auto Relocate stays hidden and its settings
@@ -30,9 +32,11 @@ live view-only observation of 7.2.14 Windows).
 - [OBS] Search order for Auto Relocate (mode 2): file-identifier lookup
   first; otherwise folders in order: folder of the last track relocated in the
   run, Specified user folders that exist, Music, Movies, Desktop. Each is
-  walked recursively (hidden files included, links followed) for a file whose
+  walked recursively (hidden files included) for a file whose
   name equals `FileNameL` exactly; the first match ends the search. Folders
   are not de-duplicated.
+- [ASSUME] The walk follows symbolic links: the source marks this as a
+  hypothesis (JUCE enum value 2 read as "yes"), from static analysis only.
 - [OBS] Dependencies: Library Protection blocks the action; a match that is
   already in the collection is listed under "Track exists in the collection"
   instead of relocated; `relocateTrack` rewrites the `djmdContent` row and the
@@ -48,7 +52,7 @@ live view-only observation of 7.2.14 Windows).
 | Folder list | `relocateFolders: string[]` | same |
 | Preferences section with Add/Del | Not shown in Preferences (by design for now) | `src/app/App.tsx` comment at `relocateSearch` |
 | Search order and exact-name recursive walk | Implemented | `src-tauri/src/relocate.rs` (`search_roots`, `Walks`, `plan`) |
-| Hidden files, followed links, first match wins | Implemented, tested | `relocate.rs` tests |
+| Hidden files, first match wins; links followed is [ASSUME] for rekordbox | Implemented, tested | `relocate.rs` tests |
 | Duplicate-in-collection list | Implemented | `Plan::in_collection` |
 | File-ID lookup | macOS only (APFS/HFS) | `relocate.rs` `by_file_id` |
 
@@ -60,10 +64,14 @@ part that is not to be exposed yet.
 
 Recorded on #415 (2026-10-22 check of dev), tracked under #454, not changed here:
 
-- Non-macOS file-ID lookup returns none; rekordbox on Windows has none either
-  for Auto Relocate on non-APFS/HFS volumes (`getFilePathFromID` passes false for
-  the `find -inum` branch), so [ASSUME] the Windows gap is smaller than it looks
-  but is `[UNKNOWN]` for Windows rekordbox's own ID lookup.
+- Non-macOS file-ID lookup returns none. [OBS] Windows rekordbox does have the
+  step (`../alphatheta-docs/platform/rekordbox-auto-relocate.md`, "Windows"):
+  `OpenFileById` and `GetFileInformationByHandleEx` in the function at
+  `0x141d1e720`, called from the counterpart of the macOS lookup at
+  `0x1419385a0`. The `find -inum` bool has no effect there. So this is a real
+  parity gap on Windows. The ID only means something on the machine and volume
+  that wrote it, so a library moved between macOS and Windows gets no help from
+  it in either app.
 - rbxport caps the walk at 2,000,000 directory entries; rekordbox is uncapped
   and cancellable.
 - Relocation writes do not yet cover `rb_data_status`, `ContentLink` and the
@@ -71,9 +79,8 @@ Recorded on #415 (2026-10-22 check of dev), tracked under #454, not changed here
 
 ## Unknowns
 
-- [UNKNOWN] Windows 7.2.14 preference key names and the Windows file-ID lookup:
-  the executable has no symbols; only the key names and component name were
-  matched. A view-only Winrig check of the Add/Del behavior would settle it.
+- [UNKNOWN] Windows 7.2.14 preference key names: the executable has no
+  symbols; only the key names and component name were matched. A view-only Winrig check of the Add/Del behavior would settle it.
 - [UNKNOWN] Whether the folder list persists `;`-containing paths correctly in
   rekordbox (hypothesis in the source doc); rbxport stores an array so the
   question does not arise.
