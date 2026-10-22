@@ -524,6 +524,26 @@ pub struct ListReplacement {
     after: Vec<(String, Option<i64>)>,
 }
 
+/// One playlist's members as [`Writer::set_tracks_with_undo`] rewrote them,
+/// as exact rows (#501): the live membership rows it tombstoned and the rows
+/// it wrote in their place, each in `TrackNo` order. An XML or iTunes
+/// import's Replace existing keeps one per playlist whose members changed,
+/// and Undo and Redo swap the two sets back and forth.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MembershipReplacement {
+    playlist: String,
+    before: Vec<String>,
+    after: Vec<String>,
+}
+
+impl MembershipReplacement {
+    /// The playlist whose members were replaced.
+    #[must_use]
+    pub fn playlist(&self) -> &str {
+        &self.playlist
+    }
+}
+
 /// What [`Writer::import_folder_as_playlist`] does when the target already
 /// holds a playlist, folder or intelligent playlist with the folder's name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1953,6 +1973,16 @@ impl Writer {
     /// intelligent playlist, a folder, and a track not in the library.
     /// `rows` is the membership rows written for the new members.
     pub fn set_tracks(&mut self, playlist: &str, contents: &[String]) -> Result<Changed> {
+        self.set_tracks_with_undo(playlist, contents).map(|(changed, _)| changed)
+    }
+
+    /// [`Writer::set_tracks`], also answering the exact rows it tombstoned
+    /// and wrote, for Undo (#501). `None` when it wrote nothing.
+    pub fn set_tracks_with_undo(
+        &mut self,
+        playlist: &str,
+        contents: &[String],
+    ) -> Result<(Changed, Option<MembershipReplacement>)> {
         let mut seen = std::collections::HashSet::new();
         let wanted: Vec<&String> = contents.iter().filter(|c| seen.insert(c.as_str())).collect();
         self.prepare()?;
@@ -1989,7 +2019,7 @@ impl Writer {
         if current.len() == wanted.len()
             && current.iter().zip(&wanted).all(|((_, have), want)| have == *want)
         {
-            return Ok(Changed { rows: 0, usn: 0 });
+            return Ok((Changed { rows: 0, usn: 0 }, None));
         }
 
         let mut usn = 0;
@@ -2002,6 +2032,7 @@ impl Writer {
             )?;
         }
         let mut rows = 0;
+        let mut after = Vec::with_capacity(wanted.len());
         for ((track_no, content), (row_id, uuid)) in (1_i64..).zip(&wanted).zip(ids) {
             // Checked here, after the old rows are gone, so a refusal is the
             // transaction rolling back, never a half-replaced playlist.
@@ -2017,6 +2048,94 @@ impl Writer {
                  VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
                 params![row_id, playlist, content, track_no, uuid, usn, stamp],
             )?;
+            after.push(row_id);
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        let replacement = MembershipReplacement {
+            playlist: playlist.to_owned(),
+            before: current.into_iter().map(|(row_id, _)| row_id).collect(),
+            after,
+        };
+        Ok((Changed { rows, usn }, Some(replacement)))
+    }
+
+    /// Undoes an XML or iTunes import's Replace existing (#501) in one
+    /// transaction: in every playlist named, the rows the import wrote become
+    /// tombstones again and the rows it tombstoned come back, numbered
+    /// `TrackNo` 1..N in their old order. Tracks the import added stay in the
+    /// collection, and lists it made stay where they are.
+    ///
+    /// Refuses with [`DbError::Conflict`], writing nothing, when any of those
+    /// playlists no longer holds exactly the rows the import left in it, in
+    /// that order, or a track a returning row names has left the collection.
+    pub fn undo_membership_replacements(&mut self, edits: &[MembershipReplacement]) -> Result<Changed> {
+        self.set_membership_replacements(edits, true)
+    }
+
+    /// Applies an import's replacements again after
+    /// [`Writer::undo_membership_replacements`], with the same rows, under the
+    /// same conditions.
+    pub fn redo_membership_replacements(&mut self, edits: &[MembershipReplacement]) -> Result<Changed> {
+        self.set_membership_replacements(edits, false)
+    }
+
+    fn set_membership_replacements(&mut self, edits: &[MembershipReplacement], undo: bool) -> Result<Changed> {
+        if edits.is_empty() {
+            return Err(DbError::WriteRefused("empty playlist replacement history".to_owned()));
+        }
+        let changed = || DbError::Conflict("the playlist's tracks have changed since".to_owned());
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Every playlist is checked before any is written.
+        for edit in edits {
+            let (leaving, entering) = if undo { (&edit.after, &edit.before) } else { (&edit.before, &edit.after) };
+            if !node_exists(&tx, &edit.playlist)? || live_members(&tx, &edit.playlist)? != *leaving {
+                return Err(changed());
+            }
+            for row in entering {
+                let content: Option<String> = tx
+                    .query_row(
+                        "SELECT ContentID FROM djmdSongPlaylist
+                         WHERE ID = ?1 AND PlaylistID = ?2 AND rb_local_deleted = 1",
+                        params![row, edit.playlist],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                let Some(content) = content else {
+                    return Err(changed());
+                };
+                if !content_exists(&tx, &content)? {
+                    return Err(DbError::Conflict("a track it held is no longer in the collection".to_owned()));
+                }
+            }
+        }
+        let mut rows = 0;
+        let mut usn = 0;
+        for edit in edits {
+            let (leaving, entering) = if undo { (&edit.after, &edit.before) } else { (&edit.before, &edit.after) };
+            for row in leaving {
+                usn = next_usn(&tx)?;
+                rows += tx.execute(
+                    "UPDATE djmdSongPlaylist SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
+                     WHERE ID = ?3 AND rb_local_deleted = 0",
+                    params![usn, stamp, row],
+                )?;
+            }
+            for (track_no, row) in (1_i64..).zip(entering) {
+                usn = next_usn(&tx)?;
+                rows += tx.execute(
+                    "UPDATE djmdSongPlaylist SET rb_local_deleted = 0, TrackNo = ?1, rb_local_usn = ?2,
+                        updated_at = ?3
+                     WHERE ID = ?4 AND rb_local_deleted = 1",
+                    params![track_no, usn, stamp, row],
+                )?;
+            }
+            if live_members(&tx, &edit.playlist)? != *entering {
+                return Err(changed());
+            }
         }
         set_counter(&tx, usn)?;
         tx.commit()?;

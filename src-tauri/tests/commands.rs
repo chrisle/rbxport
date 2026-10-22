@@ -1069,37 +1069,211 @@ fn redo_refuses_a_rating_changed_by_another_program_and_keeps_the_rest() {
     assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the unrelated rename still undoes");
 }
 
-/// #427: an XML import told to replace same-named lists rewrites their
-/// members with no undo, so it ends the history too.
-#[test]
-fn an_xml_import_that_replaces_a_list_ends_the_library_history() {
-    let s = shell();
-    let audio: Vec<PathBuf> =
-        ["One", "Two"].iter().map(|n| write_wav(&s._dir.path().join(format!("{n} 427.wav")), 1)).collect();
+/// A rekordbox XML document over `files` (`TrackID` 1..N, named by
+/// `names`) with one top-level playlist per `(name, keys)`.
+fn xml_doc_501(files: &[PathBuf], names: &[&str], lists: &[(&str, &[usize])]) -> String {
     let location = |p: &Path| format!("file://localhost{}", p.to_string_lossy().replace(' ', "%20"));
-    let file = s._dir.path().join("collection-427.xml");
-    std::fs::write(&file, format!(
-        r#"<?xml version="1.0"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="2">
-        <TRACK TrackID="1" Name="One" Location="{}"/>
-        <TRACK TrackID="2" Name="Two" Location="{}"/>
-        </COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="1">
-        <NODE Name="Issue 427" Type="1" KeyType="0" Entries="2"><TRACK Key="1"/><TRACK Key="2"/></NODE>
-        </NODE></PLAYLISTS></DJ_PLAYLISTS>"#,
-        location(&audio[0]),
-        location(&audio[1]),
-    )).unwrap();
+    let tracks: String = files
+        .iter()
+        .zip(names)
+        .enumerate()
+        .map(|(i, (file, name))| format!(r#"<TRACK TrackID="{}" Name="{name}" Location="{}"/>"#, i + 1, location(file)))
+        .collect();
+    let nodes: String = lists
+        .iter()
+        .map(|(name, keys)| {
+            let members: String = keys.iter().map(|k| format!(r#"<TRACK Key="{k}"/>"#)).collect();
+            format!(r#"<NODE Name="{name}" Type="1" KeyType="0" Entries="{}">{members}</NODE>"#, keys.len())
+        })
+        .collect();
+    format!(
+        r#"<?xml version="1.0"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="{}">{tracks}</COLLECTION>
+        <PLAYLISTS><NODE Type="0" Name="ROOT" Count="{}">{nodes}</NODE></PLAYLISTS></DJ_PLAYLISTS>"#,
+        files.len(),
+        lists.len(),
+    )
+}
+
+/// A playlist's live membership row ids, in order, read from the database:
+/// Undo must bring back these rows themselves, not lookalikes.
+fn membership_rows(s: &Shell, playlist: &str) -> Vec<String> {
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let mut stmt = db
+        .connection()
+        .prepare("SELECT ID FROM djmdSongPlaylist WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo")
+        .unwrap();
+    stmt.query_map([playlist], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+}
+
+const REPLACE_501: &str = "Replace Playlist Contents";
+
+/// #501: an XML import that replaces several playlists is one Undo step.
+/// Undo puts back every replaced playlist's own membership rows in their
+/// old order; Redo the file's. The track and the list the import added
+/// stay, an unchanged list is not part of it, and the history before it
+/// (a Remove Tracks from Playlist on a replaced list, a rename) still
+/// undoes behind it.
+#[test]
+fn an_xml_import_that_replaces_lists_is_one_undo_and_one_redo() {
+    let s = shell();
+    let names = ["One", "Two", "Three", "Four"];
+    let audio: Vec<PathBuf> =
+        names.iter().map(|n| write_wav(&s._dir.path().join(format!("{n} 501.wav")), 1)).collect();
+    let file = s._dir.path().join("collection-501.xml");
+    std::fs::write(&file, xml_doc_501(&audio[..3], &names[..3], &[
+        ("A 501", &[1, 2]),
+        ("B 501", &[3, 1]),
+        ("Same 501", &[2]),
+    ])).unwrap();
     let path = file.display().to_string();
     let first = run(commands::import_xml(s.handle(), s.state(), path.clone(), None)).unwrap();
-    assert_eq!(first.playlists, 1);
-    let list = s.node("Issue 427").id;
-    let one = first.tracks.iter().find(|t| t.title == "One").unwrap().id.clone();
-    let removed = run(commands::remove_tracks_from_playlist(s.handle(), s.state(), list, vec![one])).unwrap();
-    assert!(removed.can_undo);
+    assert_eq!((first.imported, first.playlists), (3, 3));
+    let id_of = |title: &str| first.tracks.iter().find(|t| t.title == title).unwrap().id.clone();
+    let (one, two, three) = (id_of("One"), id_of("Two"), id_of("Three"));
+    let (a, b, same) = (s.node("A 501").id, s.node("B 501").id, s.node("Same 501").id);
 
+    run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed 501".into())).unwrap();
+    run(commands::remove_tracks_from_playlist(s.handle(), s.state(), b.clone(), vec![one.clone()])).unwrap();
+    let before = (membership_rows(&s, &a), membership_rows(&s, &b), membership_rows(&s, &same));
+    assert_eq!(ids(&s.playlist_rows(&b)), [three.as_str()]);
+
+    // The next export: A reordered with a new track, B emptied of nothing
+    // but given "One" back, Same as it was, and a new list.
+    std::fs::write(&file, xml_doc_501(&audio, &names, &[
+        ("A 501", &[2, 4, 1]),
+        ("B 501", &[1, 3]),
+        ("Same 501", &[2]),
+        ("New 501", &[4]),
+    ])).unwrap();
+    let asked = run(commands::import_xml(s.handle(), s.state(), path.clone(), None)).unwrap();
+    assert_eq!(asked.same_named, vec!["A 501", "B 501", "Same 501"]);
     let replaced = run(commands::import_xml(s.handle(), s.state(), path, Some(true))).unwrap();
-    assert!(replaced.same_named.is_empty());
+    assert_eq!((replaced.imported, replaced.playlists), (1, 1));
+    let four = replaced.tracks[0].id.clone();
+    let new = s.node("New 501").id;
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some(REPLACE_501));
+    assert!(!history.can_redo);
+    assert_eq!(ids(&s.playlist_rows(&a)), [two.as_str(), four.as_str(), one.as_str()]);
+    assert_eq!(ids(&s.playlist_rows(&b)), [one.as_str(), three.as_str()]);
+    let after = (membership_rows(&s, &a), membership_rows(&s, &b), membership_rows(&s, &same));
+    assert_eq!(after.2, before.2, "an unchanged list is not rewritten");
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(undone.redo_label.as_deref(), Some(REPLACE_501));
+    assert_eq!(undone.undo_label.as_deref(), Some("Remove Tracks from Playlist"), "older history is kept");
+    assert_eq!((membership_rows(&s, &a), membership_rows(&s, &b), membership_rows(&s, &same)), before);
+    assert_eq!(ids(&s.playlist_rows(&a)), [one.as_str(), two.as_str()]);
+    assert_eq!(ids(&s.playlist_rows(&b)), [three.as_str()]);
+    assert_eq!(ids(&s.playlist_rows(&new)), [four.as_str()], "the new list stays");
+    assert!(run(details::track_details(s.state(), four.clone())).is_ok(), "the imported track stays");
+
+    let redone = run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(redone.undo_label.as_deref(), Some(REPLACE_501));
+    assert!(!redone.can_redo);
+    assert_eq!((membership_rows(&s, &a), membership_rows(&s, &b), membership_rows(&s, &same)), after);
+    assert_eq!(ids(&s.playlist_rows(&a)), [two.as_str(), four.as_str(), one.as_str()]);
+
+    // Undo three times: the replacement, the removal, the rename.
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(ids(&s.playlist_rows(&b)), [three.as_str(), one.as_str()]);
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(s.node("Playlist 0").id, playlist_id(0));
+}
+
+/// #501: File › Import iTunes Library… with Replace existing is undone and
+/// redone the same way.
+#[test]
+fn an_itunes_import_that_replaces_a_list_is_one_undo_and_one_redo() {
+    let s = shell();
+    let audio: Vec<PathBuf> =
+        ["Alpha", "Beta"].iter().map(|n| write_wav(&s._dir.path().join(format!("{n} 501.wav")), 1)).collect();
+    let location = |p: &Path| format!("file://{}", p.to_string_lossy().replace(' ', "%20"));
+    let plist = |items: &[u32]| {
+        let items: String =
+            items.iter().map(|id| format!("<dict><key>Track ID</key><integer>{id}</integer></dict>")).collect();
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>Tracks</key><dict>
+<key>101</key><dict><key>Track ID</key><integer>101</integer><key>Name</key><string>Alpha</string><key>Location</key><string>{}</string></dict>
+<key>102</key><dict><key>Track ID</key><integer>102</integer><key>Name</key><string>Beta</string><key>Location</key><string>{}</string></dict>
+</dict>
+<key>Playlists</key><array>
+<dict><key>Name</key><string>Warm Up 501</string><key>Playlist Persistent ID</key><string>P1</string><key>Playlist Items</key><array>{items}</array></dict>
+</array></dict></plist>"#,
+            location(&audio[0]),
+            location(&audio[1]),
+        )
+    };
+    let file = s._dir.path().join("Library-501.xml");
+    std::fs::write(&file, plist(&[101, 102])).unwrap();
+    let path = file.display().to_string();
+    let first = run(commands::import_itunes(s.handle(), s.state(), path.clone(), None)).unwrap();
+    assert_eq!((first.imported, first.playlists), (2, 1));
+    let id_of = |title: &str| first.tracks.iter().find(|t| t.title == title).unwrap().id.clone();
+    let (alpha, beta) = (id_of("Alpha"), id_of("Beta"));
+    let list = s.node("Warm Up 501").id;
+    let before = membership_rows(&s, &list);
+
+    std::fs::write(&file, plist(&[102])).unwrap();
+    assert_eq!(run(commands::import_itunes(s.handle(), s.state(), path.clone(), None)).unwrap().same_named, vec!["Warm Up 501"]);
+    run(commands::import_itunes(s.handle(), s.state(), path, Some(true))).unwrap();
+    assert_eq!(ids(&s.playlist_rows(&list)), [beta.as_str()]);
+    assert_eq!(commands::current_history(&s.state()).undo_label.as_deref(), Some(REPLACE_501));
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert!(!undone.can_undo, "the first import is not in the history");
+    assert_eq!(membership_rows(&s, &list), before);
+    assert_eq!(ids(&s.playlist_rows(&list)), [alpha.as_str(), beta.as_str()]);
+
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(ids(&s.playlist_rows(&list)), [beta.as_str()]);
+}
+
+/// #501 under #506's policy: a replaced list changed since by something
+/// outside the history (another program here) is not overwritten. Undo is
+/// refused with a message, only that entry leaves the history, and the
+/// older entry behind it stays.
+#[test]
+fn undo_of_an_xml_replacement_changed_since_is_refused_and_keeps_the_newer_change() {
+    let s = shell();
+    let names = ["One", "Two"];
+    let audio: Vec<PathBuf> =
+        names.iter().map(|n| write_wav(&s._dir.path().join(format!("{n} 501c.wav")), 1)).collect();
+    let file = s._dir.path().join("collection-501c.xml");
+    std::fs::write(&file, xml_doc_501(&audio, &names, &[("C 501", &[1, 2])])).unwrap();
+    let path = file.display().to_string();
+    run(commands::import_xml(s.handle(), s.state(), path.clone(), None)).unwrap();
+    let list = s.node("C 501").id;
+    run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed 501".into())).unwrap();
+
+    std::fs::write(&file, xml_doc_501(&audio, &names, &[("C 501", &[2])])).unwrap();
+    run(commands::import_xml(s.handle(), s.state(), path, Some(true))).unwrap();
+    assert_eq!(membership_rows(&s, &list).len(), 1);
+
+    let mut other = rbl_db::write::Writer::open(s.location.clone(), s._dir.path().join("other-backups")).unwrap();
+    other.disable_automatic_backups();
+    other.add_tracks(&list, &[track_id(3)]).unwrap();
+    drop(other);
+    // Written straight to the file, so the index here has not heard of it:
+    // what is kept is read back from the database.
+    let newer = membership_rows(&s, &list);
+    assert_eq!(newer.len(), 2);
+
     let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::NotFound, "nothing older than the replacement can be undone");
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Can't undo Replace Playlist Contents: the playlist's tracks have changed since. The newer change was kept.",
+    );
+    assert_eq!(membership_rows(&s, &list), newer, "the newer track is kept, nothing written");
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some("Rename Playlist"), "the older entry stays");
+    assert!(!history.can_redo);
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(s.node("Playlist 0").id, playlist_id(0));
 }
 
 /// A multi-selection removed from the collection (#136) takes every selected

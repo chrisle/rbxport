@@ -37,7 +37,7 @@ use std::path::PathBuf;
 use rbl_core::xml::{attribute, tags, Tag};
 use rusqlite::params;
 
-use crate::write::{Writer, ATTRIBUTE_FOLDER, ATTRIBUTE_PLAYLIST, ROOT};
+use crate::write::{MembershipReplacement, Writer, ATTRIBUTE_FOLDER, ATTRIBUTE_PLAYLIST, ROOT};
 use crate::{Library, Result};
 
 /// One `POSITION_MARK`.
@@ -246,6 +246,9 @@ pub struct XmlImportReport {
     pub cues: usize,
     /// The tracks that landed, `(id, title)`, so they can be analysed.
     pub tracks: Vec<(String, String)>,
+    /// The exact membership rows of every replaced playlist whose contents
+    /// or order changed, in document order: what Undo puts back (#501).
+    pub replacements: Vec<MembershipReplacement>,
 }
 
 /// A cut-down copy holding only the playlists at `keep` — indices into
@@ -369,7 +372,9 @@ pub fn import(writer: &mut Writer, library: &XmlLibrary, progress: &mut dyn FnMu
             report.playlists_replaced += 1;
             if !node.folder {
                 // One transaction: a failure leaves the old members as they were.
-                report.playlist_tracks += writer.set_tracks(&id, &members)?.rows;
+                let (changed, replacement) = writer.set_tracks_with_undo(&id, &members)?;
+                report.playlist_tracks += changed.rows;
+                report.replacements.extend(replacement);
             }
             id
         } else {

@@ -10,6 +10,7 @@ updated during integration on 2026-10-21 to retain #426 support already in `dev`
 Cue and loop edits were added to the history for #504 on 2026-10-22.
 Playlist, folder and Intelligent Playlist creation, rule edits and playlist
 artwork were added for #500 on 2026-10-22.
+XML and iTunes Replace existing became one Undo step for #501 on 2026-10-22.
 
 Evidence markers follow the project convention: `[OBS]` is something read in
 the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
@@ -37,20 +38,21 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   that changed nothing (a probe for a path) leaves Redo. The code that keeps
   the history itself (`recorded_edit`, `edit`, `permanent_edit`, Undo,
   Redo, and cue edits, which record their own entry under the edit gate
-  since #504) uses `write_history_then`, which does not. XML/iTunes replace
-  also calls `wrote_outside_history(_, true)` to clear both stacks [OBS code].
+  since #504) uses `write_history_then`, which does not. Since #501 no
+  path clears both stacks with `wrote_outside_history(_, true)`: XML/iTunes
+  Replace existing records its own entry instead [OBS code].
 - **Payloads are exact.** Entries keep row ids and before/after column values
   (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`,
-  `PlaylistTrackRemoval`, `PlaylistCreation`, `PlaylistEdit`, `TrackEdit`,
-  `TrackTagEdit`, `CueRevision` in
+  `PlaylistTrackRemoval`, `PlaylistCreation`, `PlaylistEdit`,
+  `MembershipReplacement`, `TrackEdit`, `TrackTagEdit`, `CueRevision` in
   `crates/rbl-db/src/write.rs`). A multi-track edit is one entry with one
   step per track, undone last first [OBS code].
 - **Conflict check (#506).** Before Undo or Redo writes, the rows it would
   write must still hold what the entry expects: the edit's result for Undo,
   what it replaced for Redo. Track fields compare by SQL `IS` (NULL equals
   NULL); My Tags as a set; a rename by name; a move by parent and place
-  among its siblings; a track removal by the playlist's live members in
-  order; deletion, Sort Items and folder-drop replacement by the rows they
+  among its siblings; a track removal, and an XML/iTunes replacement of
+  a playlist's members, by the playlist's live members in order; deletion, Sort Items and folder-drop replacement by the rows they
   name. An entry of several tracks is checked whole before any is written.
   When something outside the history changed one since (a player over LINK,
   a USB import, rekordbox while RBXport stayed open), nothing is written,
@@ -195,7 +197,7 @@ holds their ids.
 | Folder drop onto the tree, new or "Import as copy" | `import_folder_playlist` | new tracks, playlist, memberships | Not recorded; ends the redo branch | code (`import_folder_playlist`) | No |
 | Folder drop, "Replace existing" | same, `replace` | tombstones the replaced subtree, then imports | Undo: one replacement entry restores the old subtree and memberships | `a_folder_drop_replacement_is_one_undo_and_one_redo` | No while the entry lives |
 | Import XML / iTunes | `import_xml`, `import_itunes`, `import_itunes_selected` | tracks, rating, comment, cues, playlists | Not recorded; ends the redo branch | `an_xml_import_that_would_replace_lists_writes_nothing_until_told_to` | No |
-| Import XML / iTunes, replace same-named lists | same, `replace` | rewrites members of existing lists (`set_tracks`) | Permanent for now: clears history | `an_xml_import_that_replaces_a_list_ends_the_library_history` | Yes. #501 |
+| Import XML / iTunes, replace same-named lists | same, `replace` | rewrites members of existing lists (`set_tracks_with_undo`) | Undo, one "Replace Playlist Contents" entry per import: restores every replaced playlist's own membership rows and order; Redo the file's. The tracks and lists the import added stay. Refused if a replaced list's members changed since (#506) | `an_xml_import_that_replaces_lists_is_one_undo_and_one_redo`, `an_itunes_import_that_replaces_a_list_is_one_undo_and_one_redo`, `undo_of_an_xml_replacement_changed_since_is_refused_and_keeps_the_newer_change` (`src-tauri/tests/commands.rs`); `a_set_of_playlists_tracks_undoes_and_redoes_with_the_same_rows` (`rbl-db` `writes.rs`) | No while the entry lives (#501) |
 | Import a device playlist into the library | `device_library::device_playlist_import` | tracks, playlist | Not recorded; ends the redo branch (`edit`) | code | No |
 | USB import (cues, grids, histories, ratings, My Settings) | `usb_import::import_usb` | ANLZ files, `djmdCue`, histories, ratings, settings stash | Not recorded; ends the redo branch (also after a failure part way) | code | Cue/grid and rating overwrites are not kept |
 

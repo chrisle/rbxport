@@ -762,7 +762,8 @@ where
 /// not record (an import, a relocation), as [`edit`] does: a Redo replayed
 /// over that write would put back values it has since changed. `permanent`
 /// drops Undo as well, as [`permanent_edit`] does, for a write that removed
-/// or replaced rows an older entry may name (Replace existing).
+/// or replaced rows an older entry may name. No caller needs that since an
+/// XML or iTunes import's Replace existing became an entry (#501).
 ///
 /// Call it while holding the edit gate taken around the write, so no Undo
 /// can run between the write and this; then [`announce_history`].
@@ -831,7 +832,7 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
         LibraryEdit::MovePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_) |
         LibraryEdit::CreatePlaylist(_) | LibraryEdit::PlaylistEdit(_) |
         // The tracks a replacement imported stay in the collection.
-        LibraryEdit::ReplacePlaylist(_) => Touched::Playlists,
+        LibraryEdit::ReplacePlaylist(_) | LibraryEdit::ReplacePlaylistContents(_) => Touched::Playlists,
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
         LibraryEdit::Track(_) | LibraryEdit::TrackTags(_) => Touched::Tracks,
@@ -848,7 +849,10 @@ fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool)
         LibraryEdit::Track(values) => values.iter().try_for_each(|value| writer.check_track_edit(value, undo)),
         LibraryEdit::TrackTags(values) => values.iter().try_for_each(|value| writer.check_tag_edit(value, undo)),
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) | LibraryEdit::MovePlaylist(_)
-        | LibraryEdit::ReplacePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_) => Ok(()),
+        | LibraryEdit::ReplacePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_)
+        // Every playlist of a replacement is checked in the one transaction
+        // that writes them.
+        | LibraryEdit::ReplacePlaylistContents(_) => Ok(()),
         // One transaction, but the pad check reads rows the entry does not
         // name, so it is done here as well as in the writer (#504).
         LibraryEdit::Cues(revision) => match writer.cue_revision_conflict(revision, undo)? {
@@ -870,6 +874,11 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
         LibraryEdit::RenamePlaylist(value) => if undo { writer.undo_rename(value) } else { writer.redo_rename(value) }.map(|_| ()),
         LibraryEdit::MovePlaylist(value) => if undo { writer.undo_move(value) } else { writer.redo_move(value) }.map(|_| ()),
         LibraryEdit::ReplacePlaylist(value) => if undo { writer.undo_replacement(value) } else { writer.redo_replacement(value) }.map(|_| ()),
+        LibraryEdit::ReplacePlaylistContents(values) => if undo {
+            writer.undo_membership_replacements(values)
+        } else {
+            writer.redo_membership_replacements(values)
+        }.map(|_| ()),
         LibraryEdit::SortPlaylists(value) => if undo { writer.undo_sort(value) } else { writer.redo_sort(value) }.map(|_| ()),
         LibraryEdit::RemovePlaylistTracks(value) => if undo { writer.undo_track_removal(value) } else { writer.redo_track_removal(value) }.map(|_| ()),
         LibraryEdit::Track(values) => {
@@ -4108,6 +4117,11 @@ pub async fn import_itunes_selected<R: tauri::Runtime>(
     .await
 }
 
+/// The Edit menu's name for an XML or iTunes import's Replace existing:
+/// "Undo Replace Playlist Contents". It names only what Undo reverses, the
+/// replaced playlists' members, not the tracks the import added.
+const REPLACE_PLAYLIST_CONTENTS: &str = "Replace Playlist Contents";
+
 /// Reads a collection file with `parse` and imports what it holds.
 ///
 /// A folder or playlist the file holds that already stands in the library
@@ -4160,7 +4174,7 @@ async fn import_collection<R: tauri::Runtime>(
                 rbl_db::xml::import(writer, &document, &mut on_progress).map(Ok)
             })
             .map_err(write_error)?;
-        let report = match outcome {
+        let mut report = match outcome {
             Ok(report) => report,
             Err(same_named) => {
                 return Ok((XmlImportReportDto {
@@ -4177,10 +4191,19 @@ async fn import_collection<R: tauri::Runtime>(
         // A replaced playlist may have changed without a list or track being
         // made: that, too, needs a reload.
         let changed_playlists = report.playlist_tracks > 0 || report.playlists_replaced > 0;
-        if report.imported > 0 || report.playlists > 0 || changed_playlists {
-            // Replacing a same-named list rewrote its members, which an
-            // older Remove Tracks from Playlist may name, and has no undo.
-            wrote_outside_history(&writing, report.playlists_replaced > 0);
+        let replacements = std::mem::take(&mut report.replacements);
+        if !replacements.is_empty() {
+            // Replace existing is one step of history (#501): Undo puts back
+            // every replaced playlist's members and order, Redo the file's.
+            // The tracks and lists the import added stay. Recording it also
+            // ends the redo branch; older entries stay, each checking its
+            // own rows when it runs (#506).
+            writing.edit_history.lock().record(
+                LibraryEdit::ReplacePlaylistContents(replacements),
+                REPLACE_PLAYLIST_CONTENTS,
+            );
+        } else if report.imported > 0 || report.playlists > 0 || changed_playlists {
+            wrote_outside_history(&writing, false);
         }
         Ok((XmlImportReportDto {
             imported: u32::try_from(report.imported).unwrap_or(u32::MAX),

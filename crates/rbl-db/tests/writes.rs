@@ -553,6 +553,69 @@ fn setting_a_playlists_tracks_replaces_them_in_the_order_given() {
     assert_eq!(f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'"), usn);
 }
 
+/// #501: the rows `set_tracks_with_undo` tombstoned and wrote, for several
+/// playlists at once, swap back and forth exactly: the same row ids, in the
+/// same order, numbered 1..N, in one transaction for every playlist.
+#[test]
+fn a_set_of_playlists_tracks_undoes_and_redoes_with_the_same_rows() {
+    let mut f = fixture();
+    let first = f.writer.create_playlist("First 501", ROOT).unwrap();
+    let second = f.writer.create_playlist("Second 501", ROOT).unwrap();
+    f.writer.add_tracks(&first, &[track_id(0), track_id(1), track_id(2)]).unwrap();
+    f.writer.add_tracks(&second, &[track_id(4)]).unwrap();
+    let rows = |f: &Fixture, list: &str| -> Vec<String> {
+        let mut stmt = f.conn().prepare(
+            "SELECT ID FROM djmdSongPlaylist WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo",
+        ).unwrap();
+        stmt.query_map([list], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    };
+    let (first_before, second_before) = (rows(&f, &first), rows(&f, &second));
+
+    let (_, unchanged) = f.writer.set_tracks_with_undo(&second, &[track_id(4)]).unwrap();
+    assert!(unchanged.is_none(), "writing nothing records nothing");
+    let (_, a) = f.writer.set_tracks_with_undo(&first, &[track_id(2), track_id(5)]).unwrap();
+    let (_, b) = f.writer.set_tracks_with_undo(&second, &[]).unwrap();
+    let edits = vec![a.unwrap(), b.unwrap()];
+    let (first_after, second_after) = (rows(&f, &first), rows(&f, &second));
+    assert_eq!(f.order(&first), vec![track_id(2), track_id(5)]);
+    assert!(second_after.is_empty());
+
+    let usn = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+    let undone = f.writer.undo_membership_replacements(&edits).unwrap();
+    assert!(undone.usn > usn, "restored rows get new USNs");
+    assert_eq!(rows(&f, &first), first_before, "the old rows themselves come back");
+    assert_eq!(f.order(&first), vec![track_id(0), track_id(1), track_id(2)]);
+    assert_eq!(f.track_numbers(&first), vec![1, 2, 3]);
+    assert_eq!(rows(&f, &second), second_before);
+
+    f.writer.redo_membership_replacements(&edits).unwrap();
+    assert_eq!(rows(&f, &first), first_after);
+    assert_eq!(f.track_numbers(&first), vec![1, 2]);
+    assert!(rows(&f, &second).is_empty());
+
+    // A track added to one of them since: neither playlist is written.
+    f.writer.add_tracks(&second, &[track_id(6)]).unwrap();
+    let held = (rows(&f, &first), rows(&f, &second));
+    let err = f.writer.undo_membership_replacements(&edits).unwrap_err();
+    assert!(matches!(err, DbError::Conflict(ref reason) if reason == "the playlist's tracks have changed since"), "{err:?}");
+    assert_eq!((rows(&f, &first), rows(&f, &second)), held, "nothing was written");
+}
+
+/// #501: a row Undo would bring back must still name a track in the
+/// collection; a track removed since refuses the whole step.
+#[test]
+fn a_set_of_a_playlists_tracks_is_not_undone_onto_a_removed_track() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set 501", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0), track_id(1)]).unwrap();
+    let (_, edit) = f.writer.set_tracks_with_undo(&list, &[track_id(1)]).unwrap();
+    f.writer.delete_track(&track_id(0)).unwrap();
+
+    let err = f.writer.undo_membership_replacements(&[edit.unwrap()]).unwrap_err();
+    assert!(matches!(err, DbError::Conflict(_)), "{err:?}");
+    assert_eq!(f.order(&list), vec![track_id(1)]);
+}
+
 #[test]
 fn a_set_of_a_playlists_tracks_that_fails_partway_leaves_the_old_ones() {
     // The old members are soft-deleted before the bad track is reached; the
