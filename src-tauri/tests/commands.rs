@@ -814,6 +814,10 @@ fn a_cue_edit_ends_the_redo_branch_and_keeps_undo() {
 
     // Opening the library for a write that changes nothing is no edit.
     s.state().write(|_| Ok(())).unwrap();
+    let redone = run(commands::redo_edit(s.handle(), s.state())).expect("a write that changed nothing leaves Redo");
+    assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().rating, 5);
+    assert!(!redone.can_redo);
+    assert!(run(commands::undo_edit(s.handle(), s.state())).unwrap().can_redo, "Redo offered again before the cue edit");
     run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 1_000)).unwrap();
 
     let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();

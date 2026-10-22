@@ -1122,6 +1122,12 @@ mod grid_offset_tests {
         assert_eq!(std::fs::read(&dat).unwrap(), original);
         assert!(save_grid_offset(&state, "999999", 234).is_err());
     }
+}
+
+#[cfg(test)]
+mod history_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
 
     /// #506: a rating recorded in the window, then changed by a player over
     /// LINK. Undo refuses to put the old rating back over the player's, says
