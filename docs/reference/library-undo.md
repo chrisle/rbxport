@@ -21,6 +21,10 @@ Remove from Tag List, Clear Tag List and Remove from History became one Undo
 step each for #508 on 2026-10-22.
 AppleScript My Tag reordering was added to the history for #584 on
 2026-10-22.
+Re-checked for #427 on 2026-10-22 against `dev` at `dbe066d5`: every
+`LibraryEdit` variant and every `recorded_edit`, `edit` and
+`permanent_edit` caller has a row; Sort Items, the AppleScript removal and
+My Tag create, rename and delete were added.
 
 Evidence markers follow the project convention: `[OBS]` is something read in
 the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
@@ -54,8 +58,8 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   path clears both stacks with `wrote_outside_history(_, true)`: XML/iTunes
   Replace existing records its own entry instead [OBS code].
 - **Payloads are exact.** Entries keep row ids and before/after column values
-  (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`,
-  `PlaylistTrackRemoval`, `PlaylistTrackAddition`, `PlaylistReorder`,
+  (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`, `PlaylistSort`,
+  `ListReplacement`, `PlaylistTrackRemoval`, `PlaylistTrackAddition`, `PlaylistReorder`,
   `PlaylistCreation`, `PlaylistEdit`, `MembershipReplacement`, `TrackEdit`,
   `TrackTagEdit`, `MyTagOrder`, `CueRevision`, `TrackRelocation`, `ListRemoval` in
   `crates/rbl-db/src/write.rs`; `KeyTagWrite` in `src-tauri/src/key_tag.rs`). A multi-track edit is one entry with one
@@ -268,12 +272,14 @@ holds their ids.
 | Info panel fields (title, artist, album, genre, key, year…) | `details::set_track_field` | `djmdContent` columns, interned names | Undo | same test (title); multi-track genre unit test | No |
 | Key with "Write the value to the ID3 tag" | same, `write_key_tag` | also the audio file's key tag | Undo, one entry: the library's key and each written file's previous key tag; refused if either changed since; a file that cannot be written back changes nothing | `undo_and_redo_of_a_key_edit_restore_the_files_tag_with_the_library`, `undo_of_a_key_written_into_a_file_without_one_takes_the_key_out_again`, `undo_of_a_key_edit_is_refused_when_the_files_tag_changed_since`, `a_failed_tag_write_undoes_nothing_and_keeps_the_entry` (`src-tauri/tests/commands.rs`) | No while the entry lives (#507) |
 | BPM in the info panel | `set_track_field` `bpm` → `grid::set_tempo` | `.DAT/.EXT` grid, `BPM` | One "Set Tempo" entry in the track's grid history, as the grid editor's own; earlier grid entries stay; ends the library redo branch | `a_typed_bpm_is_one_grid_undo_step_and_keeps_the_earlier_ones` (`grid.rs` unit) | No (#505) |
-| My Tags | `details::set_my_tags` | `djmdSongMyTag` | Undo | code (`LibraryEdit::TrackTags`) [ASSUME: no command-level test] | No |
+| My Tags (Info tab, My Tag panel tick, AppleScript `add my tags` / `remove my tags`) | `details::set_my_tags`, `put_my_tag`, `scripting::my_tags::update` | `djmdSongMyTag` | Undo, one entry per track edit or per panel tick over the selection | `a_my_tag_panel_tick_tags_the_whole_selection_as_one_step` (`src-tauri/tests/commands.rs`) | No |
+| Create or rename a My Tag or category | `details::create_my_tag`, `rename_my_tag` | `djmdMyTag` | Not recorded; ends the redo branch (`edit`). No follow-up: a new tag is on no track, and a rename can be typed back | code | No |
+| Delete a My Tag | `details::delete_my_tag` | tombstones the tag and takes it off every track | Permanent: clears history (an older tick could name the tag). The My Tag panel does not ask first | `a_my_tag_panel_tick_tags_the_whole_selection_as_one_step` (undo after delete fails) | Yes: the tag's tracks are not kept |
 | My Tag order (AppleScript `reorder my tags`) | `scripting::my_tags::reorder` → `Writer::reorder_my_tags_with_undo` | `djmdMyTag.Seq` of the categories or of one category's tags | Undo, one "Reorder My Tags" entry; refused if that list's ids or `Seq` changed since | `a_my_tag_reorder_undoes_and_redoes_exactly_and_refuses_a_changed_run` (`crates/rbl-db/tests/writes.rs`), `script_reorder_honors_protection_refresh_undo_and_refuses_bad_orders` (`scripting/my_tags.rs` unit) | No (#584) |
 | Add / Delete Artwork (tracks) | `details::add_artwork`, `clear_artwork` | `ImagePath`; image copied into the share | Undo (path only; the copied file stays) | code [ASSUME: no command-level Undo test] | No |
 | Reset DJ Play Count | `reset_play_count` | `DJPlayCount` | Undo | code [ASSUME: no command-level Undo test] | No |
 | Reload Tag | `reload_tags` | Title, Comment, Artist, Album, Genre, Label, Key, Year, Track No. from the file | Not recorded | code | Yes: manual edits lost. #503 |
-| Remove from Collection, Delete key | `remove_from_collection` | soft-deletes tracks and their memberships | Permanent: clears history, "This can't be undone" | `removing_from_collection_is_permanent_and_clears_history` | Yes, by design |
+| Remove from Collection, Delete key, AppleScript `remove collection tracks` | `remove_from_collection`, `scripting::collection::remove` | soft-deletes tracks and their memberships | Permanent: clears history, "This can't be undone" | `removing_from_collection_is_permanent_and_clears_history` | Yes, by design |
 | Missing File Manager › Delete | `relocate::remove_missing_tracks` | same | Permanent | code | Yes, by design |
 | Relocate (one track) | `relocate_track` | `FolderPath`, `FileNameL`, `rb_file_id` | Undo, one "Relocate" entry: the old link (path, name, file number) comes back even when its file is missing; no file moves. Refused if the track was pointed elsewhere since, or another track took the file | `a_relocate_is_one_undo_that_restores_the_old_link`, `undo_of_a_relocate_refuses_a_track_pointed_elsewhere_since_and_keeps_the_rest` (`src-tauri/tests/commands.rs`); `a_relocation_run_undoes_and_redoes_every_link_at_once` and the other #502 tests in `crates/rbl-db/tests/writes.rs` | No while the entry lives (#502) |
 | Relocate by location, Auto Relocate | `relocate::relocate_by_location`, `auto_relocate` | same, many tracks, one transaction | Undo, one "Relocate" entry per run for every track it pointed somewhere; a run that found nothing records nothing | `a_relocate_by_location_is_one_undo_for_every_track_it_found`, `an_auto_relocate_run_is_one_undo` (`relocate.rs` unit) | No while the entry lives (#502) |
@@ -289,6 +295,7 @@ holds their ids.
 | --- | --- | --- | --- | --- | --- |
 | Rename | `rename_playlist` | `Name` | Undo | `library_history_names_and_reverses_each_supported_edit` | No |
 | Move (drag in the tree) | `move_playlist` | `ParentID`, sibling `Seq` | Undo | same | No |
+| Sort Items (folder) | `sort_playlist_items` | sibling `Seq` | Undo, one "Sort Items" entry; a sort that moved nothing records nothing | `sort_items_orders_a_folder_as_one_undo_step` (`src-tauri/tests/commands.rs`) | No |
 | Delete playlist or folder (with contents) | `delete_playlist` | tombstones subtree and memberships | Undo | `a_deleted_playlist_tree_can_be_undone_and_redone` | No while the entry lives |
 | Remove Tracks from Playlist | `remove_tracks_from_playlist` | tombstones memberships, renumbers | Undo | `library_history_names_and_reverses_each_supported_edit` | No |
 | Add Tracks to Playlist (menu, drop, duplicates "Add", AppleScript `add`) | `add_tracks_to_playlist` | new memberships | Undo, one entry per drop or menu choice: the window's slices of 100 share a `transaction` and join the entry while each carries on from the last. Undo soft-deletes exactly the rows the add made (an earlier copy of a duplicate stays); Redo brings the same rows back at their numbers. Tracks imported on the way in stay in the collection. Refused if the playlist's tracks changed since | `an_add_sent_in_slices_is_one_undo_and_one_redo`, `undo_of_an_add_with_duplicates_leaves_the_tracks_already_there`, `undo_of_an_add_or_reorder_refuses_a_playlist_changed_since` (`src-tauri/tests/commands.rs`); `an_add_undoes_and_redoes_the_exact_rows_it_made` and the other #499 tests in `crates/rbl-db/tests/writes.rs` | No while the entry lives (#499) |
@@ -339,5 +346,5 @@ The audit found two new product decisions:
    2026-10-22: Undo and Redo rewrite the tag with the library, and refuse
    when either changed since (see "Key tag Undo" above).
 
-The other gaps (#499, #501 to #505, #508) extend the existing contract and
+The other gaps (#499 to #505, #508) extend the existing contract and
 need no new policy.
