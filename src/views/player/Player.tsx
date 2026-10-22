@@ -237,7 +237,15 @@ export interface PlayerProps {
    * the flag, since the master is the shell's to name.
    */
   synced?: boolean;
+  /**
+   * BEAT SYNC lit. The master's can be lit too, as in rekordbox, but the
+   * master leads rather than follows, so `synced` is false for it. Defaults
+   * to `synced`.
+   */
+  syncOn?: boolean | undefined;
   onSyncToggle?: (() => void) | undefined;
+  /** This deck started playing: the first deck to play takes MASTER. */
+  onStartPlaying?: (() => void) | undefined;
   /**
    * The tempo the master is playing at, in hundredths of a BPM, or null
    * with no master track. A synced deck re-matches whenever it changes —
@@ -868,7 +876,7 @@ export const Player = memo(function Player({
   dragging = false, deck = "a",
   simple = false, transportSlot, flipped = false, dual = false, publishZoom, onWheelZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
-  publishSync, peerSync, isMaster = false, onMaster, synced = false, onSyncToggle,
+  publishSync, peerSync, isMaster = false, onMaster, synced = false, syncOn = synced, onSyncToggle, onStartPlaying,
   leaderBpmX100 = null, onPlayingBpm, onKeyShift, onGridNudge, publishGridFollow, readOnly = false,
   drawing = false,
 }: PlayerProps) {
@@ -1935,9 +1943,16 @@ export const Player = memo(function Player({
       matchLeader();
       return;
     }
-    if (!synced) matchLeader();
+    // Lighting it on a deck with a master to follow matches it now; the
+    // master's own, or one pressed before either deck has played, only lights.
+    if (!syncOn && !isMaster && leaderBpmX100 !== null) matchLeader();
     onSyncToggle();
-  }, [onSyncToggle, synced, matchLeader]);
+  }, [onSyncToggle, syncOn, isMaster, leaderBpmX100, matchLeader]);
+
+  // The first deck to play takes MASTER [rekordbox 7.2.18 manual p.121].
+  useEffect(() => {
+    if (playback.playing) onStartPlaying?.();
+  }, [playback.playing, onStartPlaying]);
 
   // Following: the tempo alone, with the bar left where the press put it.
   // The master's BPM arrives from the shell rather than being read through
@@ -2471,7 +2486,7 @@ export const Player = memo(function Player({
             baseBpmX100={bpmX100}
             onBpmChange={setDisplayedBpm}
             onBeatSync={beatSync}
-            synced={synced}
+            synced={syncOn}
             isMaster={isMaster}
             onMaster={onMaster}
           />
@@ -2499,13 +2514,13 @@ export const Player = memo(function Player({
                 type="button"
                 className={styles.chip}
                 aria-label="Beat sync"
-                aria-pressed={synced}
-                data-on={synced ? "" : undefined}
-                disabled={!track || isMaster}
+                aria-pressed={syncOn}
+                data-on={syncOn ? "" : undefined}
+                disabled={!track}
                 title={tip(
                   isMaster
                     ? "This deck is the master; sync the other one to it."
-                    : synced
+                    : syncOn
                       ? "Following the master's tempo; press to stop."
                       : "Match this deck to the master's tempo and bar, and keep its tempo.",
                 )}

@@ -670,7 +670,9 @@ test("PLAY on a BPM SYNC deck with Q off starts on the master's beat", async ({ 
 });
 
 test("a new track on the master deck hands MASTER to the other deck", async ({ page }) => {
-  const { a, b, titles, bpms, first, toB } = await syncedPair(page);
+  const { a, b, titles, bpms, first, toB, play } = await syncedPair(page);
+  // A plays first, so A is the master [rekordbox 7.2.18 manual p.121].
+  await play.first().click();
   const bpmA = a.getByTestId("player-bpm");
   const bpmB = b.getByTestId("player-bpm");
   const master = Number(bpms[first]);

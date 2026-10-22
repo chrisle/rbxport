@@ -3,6 +3,7 @@ import type { DuplicateAnswer } from "@/components/DuplicateTracksDialog";
 import type { FolderClashAnswer } from "@/lib/folderDrop";
 import { JobQueue, slices, type JobView } from "@/lib/jobQueue";
 import { importInSlices, removeInSlices } from "@/lib/bulkJobs";
+import { INITIAL_SYNC, deckStartedPlaying, isFollowing, pressMaster, toggleBeatSync, type SyncState } from "@/lib/syncMaster";
 import { skippedTail } from "@/lib/importSkips";
 import { useBackupProgress } from "@/store/useBackupProgress";
 import { useExportProgress } from "@/store/useExportProgress";
@@ -287,27 +288,27 @@ function AppBody() {
    * value to both, so a wheel over one waveform moves the other with it.
    */
   /**
-   * Which deck the other syncs to.
+   * Which deck the other syncs to, and each deck's BEAT SYNC.
    *
-   * Deck A to begin with, because that is the one a single-player layout has
-   * and the one a first track lands on. Only ever one, which is what MASTER
-   * means.
+   * No deck is the master until one plays; the first to play takes it, as
+   * rekordbox's EXPORT mode does. BEAT SYNC is each deck's own toggle, the
+   * master's included; a lit deck follows only while the other deck is the
+   * master. See `@/lib/syncMaster` for the evidence.
    */
-  const [syncMaster, setSyncMasterState] = useState<DeckId>("a");
-  /**
-   * BEAT SYNC held on, per deck. A deck follows the master's tempo for as
-   * long as its button is lit; the master itself never follows, so making a
-   * deck the master puts its own light out.
-   */
-  const [synced, setSynced] = useState<Record<DeckId, boolean>>({ a: false, b: false });
-  const setSyncMaster = useCallback((deck: DeckId) => {
-    setSyncMasterState(deck);
-    setSynced((s) => (s[deck] ? { ...s, [deck]: false } : s));
-  }, []);
+  const [sync, setSync] = useState<SyncState>(INITIAL_SYNC);
+  const syncMaster = sync.master;
+  const setSyncMaster = useCallback((deck: DeckId) => setSync((s) => pressMaster(s, deck)), []);
   const toggleSync = useMemo(
     () => ({
-      a: () => setSynced((s) => ({ ...s, a: !s.a })),
-      b: () => setSynced((s) => ({ ...s, b: !s.b })),
+      a: () => setSync((s) => toggleBeatSync(s, "a")),
+      b: () => setSync((s) => toggleBeatSync(s, "b")),
+    }),
+    [],
+  );
+  const startedPlaying = useMemo(
+    () => ({
+      a: () => setSync((s) => deckStartedPlaying(s, "a")),
+      b: () => setSync((s) => deckStartedPlaying(s, "b")),
     }),
     [],
   );
@@ -323,7 +324,7 @@ function AppBody() {
     }),
     [],
   );
-  const leaderBpmX100 = playingBpm[syncMaster];
+  const leaderBpmX100 = syncMaster === null ? null : playingBpm[syncMaster];
   /** Each deck's key shift in semitones, so the Traffic Light reads the key the deck sounds in. */
   const [keyShift, setKeyShift] = useState<Record<DeckId, number>>({ a: 0, b: 0 });
   const reportKeyShift = useMemo(
@@ -564,7 +565,7 @@ function AppBody() {
   const activeTrafficLight = trafficLight === "b" && deckCount(layout) < 2 ? "a" : trafficLight;
   /** The track list's artwork display pattern, the two buttons beside MASTER. */
   const [artworkMode, setArtworkMode] = useState<ArtworkMode>(restored.artworkMode);
-  const trafficDeck: DeckId = deckCount(layout) < 2 ? "a" : activeTrafficLight === "master" ? syncMaster : activeTrafficLight;
+  const trafficDeck: DeckId = deckCount(layout) < 2 ? "a" : activeTrafficLight === "master" ? (syncMaster ?? "a") : activeTrafficLight;
   /*
    * A new track on the master deck, or none, hands MASTER to the other deck
    * when that one holds a track, as rekordbox does: the deck that was
@@ -581,10 +582,10 @@ function AppBody() {
   useEffect(() => {
     const held = masterHeld.current;
     masterHeld.current = { deck: syncMaster, track: masterTrackId };
-    if (held.deck !== syncMaster || held.track === null || held.track === masterTrackId) return;
+    if (syncMaster === null || held.deck !== syncMaster || held.track === null || held.track === masterTrackId) return;
     if (!twoDecks || otherTrackId === null) return;
-    setSyncMasterState(syncMaster === "a" ? "b" : "a");
-  }, [syncMaster, masterTrackId, otherTrackId, twoDecks]);
+    setSyncMaster(syncMaster === "a" ? "b" : "a");
+  }, [syncMaster, masterTrackId, otherTrackId, twoDecks, setSyncMaster]);
   const trafficTrack = trafficDeck === "b" ? playerTrackB : playerTrack;
   const trafficKey = trafficTrack ? transposeKey(trafficTrack.key, keyShift[trafficDeck]) : null;
   const master = useMasterControls();
@@ -3213,7 +3214,9 @@ function AppBody() {
             {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
             isMaster={syncMaster === "a"}
             onMaster={masterA}
-            synced={synced.a && syncMaster !== "a"}
+            synced={isFollowing(sync, "a")}
+            syncOn={sync.on.a}
+            onStartPlaying={startedPlaying.a}
             onSyncToggle={deckCount(layout) > 1 ? toggleSync.a : undefined}
             leaderBpmX100={syncMaster === "a" ? null : leaderBpmX100}
             onPlayingBpm={reportPlayingBpm.a}
@@ -3251,7 +3254,9 @@ function AppBody() {
               peerSync={peerSync.b}
               isMaster={syncMaster === "b"}
               onMaster={masterB}
-              synced={synced.b && syncMaster !== "b"}
+              synced={isFollowing(sync, "b")}
+              syncOn={sync.on.b}
+              onStartPlaying={startedPlaying.b}
               onSyncToggle={toggleSync.b}
               leaderBpmX100={syncMaster === "b" ? null : leaderBpmX100}
               onPlayingBpm={reportPlayingBpm.b}
