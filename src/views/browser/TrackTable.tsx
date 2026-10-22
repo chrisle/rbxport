@@ -35,7 +35,7 @@ import { ArtworkAllIcon, ArtworkPartIcon, FilterIcon, SortDownIcon, SortUpIcon }
 import { Artwork } from "@/components/Artwork";
 import { RatingStar } from "@/components/RatingStar";
 import { RecordIcon } from "@/components/icons";
-import { EXTRA_COLUMNS, reorderTarget, type ColumnKey, type ColumnSpec } from "@/lib/columns";
+import { EXTRA_COLUMNS, FIXED_WIDTH, reorderTarget, type ColumnKey, type ColumnSpec } from "@/lib/columns";
 import { COLOR_NAMES } from "@/lib/trackFilter";
 import { browseListVars, browseScale, formatKey } from "@/lib/preferences";
 import { trafficLightLit, type TrafficLightReach } from "@/lib/camelot";
@@ -84,9 +84,6 @@ const SKELETON_WIDTHS = ["42%", "66%", "54%"];
 const COL_HEADER_H = 24;
 /** No deck holds anything: the table outside the app's own decks. */
 const NO_DECKS: readonly (string | null)[] = [];
-/// --s-preview-band-h: the strip the row's waveform and its cue badges share.
-/// The canvas needs the number for its backing store; the cell's CSS places it.
-const PREVIEW_BAND_H = 15;
 
 export type Column = ColumnSpec;
 
@@ -419,10 +416,16 @@ const EditableCell = memo(function EditableCell({
 const TrackRow = memo(function TrackRow({
   row, top, selected, played, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
   onComment, onEditField, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
-  reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache,
+  reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache, previewHeight,
 }: {
   row: RowDto | undefined;
   top: number;
+  /**
+   * The strip the row's waveform and its cue badges share, from
+   * `previewBand`. The canvas needs the number for its backing store; the
+   * cell's CSS places it.
+   */
+  previewHeight: number;
   selected: boolean;
   /** Played (#540): the row's text is drawn in rekordbox's played green. */
   played: boolean;
@@ -646,6 +649,24 @@ const TrackRow = memo(function TrackRow({
             </div>
           );
         }
+        if (col.key === "summary") {
+          // rekordbox's `ListViewer::paintHybridColumn` @0x1003f1934: the
+          // title in the list's font on the first line; the artist, the BPM
+          // and the key a size smaller on the second, both in the row's text
+          // colour (`getTextColumnColor`), left-aligned and centred on their
+          // lines, with the row's spare height shared equally above, between
+          // and below them [OBS static, rekordbox 7.2.19].
+          return (
+            <div key={col.key} className={`${styles.cell} ${styles.summary}`} data-col={col.key} role="gridcell">
+              <span className={styles.summaryTitle}>{row.title}</span>
+              <span className={styles.summaryLine}>
+                <span className={styles.summaryText}>{row.artist}</span>
+                <span className={styles.summaryText}>{cellText(row, "bpm")}</span>
+                <span className={styles.summaryText}>{formatKey(row.key, keyDisplay)}</span>
+              </span>
+            </div>
+          );
+        }
         if (col.key === "comment" && onComment) {
           return (
             <EditableCell
@@ -705,7 +726,7 @@ const TrackRow = memo(function TrackRow({
                 <WaveformPreview
                   trackId={row.id}
                   width={col.width - 6}
-                  height={PREVIEW_BAND_H}
+                  height={previewHeight}
                   hotCues={previewCues ? row.hotCues : NO_CUES}
                   memoryCues={previewCues ? row.memoryCues : undefined}
                   memoryCueColours={previewCues ? row.memoryCueColours : undefined}
@@ -983,12 +1004,25 @@ const ARTWORK_MODES: readonly { mode: ArtworkMode; label: string; Icon: typeof A
 ];
 
 /**
- * The columns as the list draws them. Showing the whole artwork, rekordbox's
- * `ListViewer::updateRowHeight` sets the Artwork column (header id 61) as
- * wide as the doubled row is tall, so every cell is a square holding the
- * whole sleeve. Only the drawing changes: the stored layout keeps its own
- * width, which comes back with the upper-part rows, as rekordbox keeps a
- * header layout per artwork mode.
+ * The whole-artwork Artwork column's width for a row height. rekordbox's
+ * `ListViewer::updateRowHeight` @0x10040a268 sets header column 61 to twice
+ * the line height, the whole-artwork row's height, and JUCE's
+ * `TableHeaderComponent::setColumnWidth` holds it between the minimum and
+ * maximum the column was added with, 25 and 85 [OBS static, rekordbox
+ * 7.2.19: the width table at 0x1037b50ac]. Every row height this app draws
+ * falls inside, so the cell is always a square.
+ */
+export function fullArtworkWidth(rowHeight: number): number {
+  return Math.min(85, Math.max(25, rowHeight));
+}
+
+/**
+ * The columns as the list draws them. The caller passes the artwork mode's
+ * own layout (rekordbox keeps one per mode); showing the whole artwork, the
+ * Artwork column is as wide as a row is tall, so every cell is a square
+ * holding the whole sleeve, and its heading is blank, as rekordbox adds
+ * column 61 with no name [OBS static, rekordbox 7.2.19: the name table at
+ * 0x1053aab68 holds "" for it].
  */
 export function columnsForArtworkMode(
   columns: readonly ColumnSpec[],
@@ -996,7 +1030,21 @@ export function columnsForArtworkMode(
   rowHeight: number,
 ): readonly ColumnSpec[] {
   if (mode !== "full" || !columns.some((col) => col.key === "artwork")) return columns;
-  return columns.map((col) => (col.key === "artwork" ? { ...col, width: rowHeight } : col));
+  return columns.map((col) =>
+    col.key === "artwork" ? { ...col, label: "", width: fullArtworkWidth(rowHeight) } : col,
+  );
+}
+
+/**
+ * Where the Preview column's waveform sits in a row of this height.
+ * rekordbox's `PreviewComponent::resized` @0x101d2309c insets the waveform
+ * by a fifth of the cell's height above and below, and `paint` centres it
+ * there, so it is 15 high, 5 down, in a 25-point row and twice that in the
+ * whole artwork's [OBS static, rekordbox 7.2.19].
+ */
+export function previewBand(rowHeight: number): { top: number; height: number } {
+  const top = Math.trunc(rowHeight * 0.2);
+  return { top, height: rowHeight - 2 * top };
 }
 
 /**
@@ -1061,6 +1109,7 @@ export const TrackTable = memo(function TrackTable({
     () => columnsForArtworkMode(layoutColumns, artworkMode, rowH),
     [layoutColumns, artworkMode, rowH],
   );
+  const band = previewBand(rowH);
   const extraColumns = useMemo(() => EXTRA_COLUMNS.filter((key) => columns.some((column) => column.key === key)), [columns]);
   const view = useTrackView(spec, libraryGeneration, pendingEdits, seed, extraColumns);
   const played = usePlayedTracks();
@@ -2131,8 +2180,12 @@ export const TrackTable = memo(function TrackTable({
             The resize grip. Its own mousedown stops the header's click, so
             dragging an edge never also re-sorts the table.
           */}
-          {/* The whole artwork's column is as wide as a row is tall. */}
-          {col.key === "artwork" && artworkMode === "full" ? null : <span
+          {/*
+            rekordbox adds neither Artwork column as resizable: the upper
+            part's is 80 wide at most and at least, and the whole artwork's
+            follows the row height.
+          */}
+          {FIXED_WIDTH.includes(col.key) ? null : <span
             className={styles.grip}
             onMouseDown={(e) => {
               e.stopPropagation();
@@ -2146,13 +2199,14 @@ export const TrackTable = memo(function TrackTable({
           />}
         </div>
       )),
-    [columns, spec.sort, onSortChange, sortIndicator, dragKey, artworkMode],
+    [columns, spec.sort, onSortChange, sortIndicator, dragKey],
   );
 
   return (
     <div
       ref={rootRef}
       data-browser-pane="list"
+      data-artwork={artworkMode === "full" && fullArtworkWidth(rowH) === rowH ? "full" : undefined}
       data-browser-side={listScope}
       className={styles.browser}
       style={{
@@ -2163,6 +2217,7 @@ export const TrackTable = memo(function TrackTable({
         // of them.
         ...browseListVars(preferences.view, ROW_H),
         ["--s-row-height" as string]: `${rowH}px`,
+        ["--s-preview-band-top" as string]: `${band.top}px`,
       }}
       data-file-over={fileOver || undefined}
       // Below the last row takes a reorder on entering too, as a row does
@@ -2393,6 +2448,7 @@ export const TrackTable = memo(function TrackTable({
                 onReorderOver={reorderOver}
                 onReorderDrop={reorderDrop}
                 startupCache={seed !== undefined}
+                previewHeight={band.height}
               />
             );
           })}
@@ -2513,6 +2569,7 @@ export const TrackTable = memo(function TrackTable({
           onAutoSize={onColumnAutoSize}
           onAutoSizeAll={onColumnAutoSizeAll}
           renumber={onRenumber && spec.sort !== "trackNo" ? { disabled: query !== "", onRenumber: renumber } : undefined}
+          artworkMode={artworkMode}
           onClose={() => setMenu(null)}
         />
       ) : null}
