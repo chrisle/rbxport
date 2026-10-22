@@ -870,6 +870,12 @@ export interface Backend {
    */
   missingTracks(offset: number, limit: number, rescan: boolean, keepOrder?: boolean): Promise<MissingTracks>;
   /**
+   * Whether a track's file is gone, looked at now: rekordbox looks again
+   * at the one row selected (`BrowseBasicView::updateMissingStatus`).
+   * `null` for an id that is not a collection track.
+   */
+  trackMissing(trackId: string): Promise<boolean | null>;
+  /**
    * A click on a Missing File Manager column heading: the list, as it
    * stands, sorted by that column, forwards or backwards, rekordbox's way
    * (`relocate::sorted_rows`).

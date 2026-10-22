@@ -509,6 +509,7 @@ async function realBackend(): Promise<Backend> {
     resetPlayedTracks: () => invoke<void>("reset_played_tracks"),
     onPlayedChanged: (listener) => subscribe("played:changed", () => listener()),
     missingTracks: (offset, limit, rescan, keepOrder) => invoke<MissingTracks>("missing_tracks", { offset, limit, rescan, keepOrder }),
+    trackMissing: (trackId) => invoke<boolean | null>("track_missing", { track: trackId }),
     sortMissingTracks: (column, forwards) => invoke<void>("sort_missing_tracks", { column, forwards }),
     removeMissingTracks: (tracks) => invoke<number>("remove_missing_tracks", { tracks }),
     unanalysedTracks: (from, limit) => invoke<UnanalysedTracks>("unanalysed_tracks", { from, limit }),

@@ -1771,6 +1771,18 @@ export const TrackTable = memo(function TrackTable({
   // A list that is no longer shown has nothing to tally.
   useEffect(() => () => onTotalsChange?.(undefined), [onTotalsChange]);
 
+  // rekordbox looks at the file of the one row selected again and redraws
+  // its [!] (`BrowseBasicView::changedSelectedRows` @0x100321688 calls
+  // `updateMissingStatus` only when one row is selected), so a file that
+  // went missing after the list was read shows once its row is picked
+  // (#682). A stick's rows are not collection tracks.
+  const onlySelected = selection.ids.size === 1 ? [...selection.ids][0] : undefined;
+  const { recheckMissing } = view;
+  useEffect(() => {
+    if (onlySelected === undefined || spec.source.kind === "device") return;
+    recheckMissing(onlySelected);
+  }, [onlySelected, recheckMissing, spec.source.kind]);
+
   const reportedRow = useRef<string | null>(null);
   useEffect(() => {
     if (!onSelectedRow) return;

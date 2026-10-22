@@ -43,6 +43,10 @@ let holdFetches: boolean;
 let heldFetches: Array<() => void>;
 /** The library generation the app passes down. */
 let generation: number;
+/** Tracks whose files are gone, as the disk says now (#682). */
+let gone: Set<string>;
+/** How many times a track's file was looked at again. */
+let rechecks: number;
 
 const SPEC: ViewSpec = {
   source: { kind: "collection" },
@@ -103,6 +107,10 @@ function makeBackend(): Backend {
     // The hook also listens for cue edits, to patch a cached row's letters
     // in place. Nothing here edits a cue, so the subscription is inert.
     onCuesChanged: () => () => {},
+    trackMissing: (trackId: string) => {
+      rechecks += 1;
+      return Promise.resolve(Number(trackId) < 500 ? gone.has(trackId) : null);
+    },
     onTagListChanged: (listener: () => void) => {
       tagListListeners.add(listener);
       return () => tagListListeners.delete(listener);
@@ -129,6 +137,7 @@ let latest: {
   loading: boolean;
   rowAt: (i: number) => RowDto | undefined;
   fresh: (i: number) => boolean;
+  recheckMissing: (trackId: string) => void;
 };
 
 /** The scroll position the stand-in table is showing. */
@@ -166,6 +175,8 @@ beforeEach(async () => {
   heldFetches = [];
   generation = 0;
   extraColumns = [];
+  gone = new Set();
+  rechecks = 0;
   ({ __setBackend: setBackend } = await import("@/ipc/client"));
   setBackend(makeBackend());
   ({ useTrackView } = await import("./useTrackView"));
@@ -448,6 +459,58 @@ describe("useTrackView, when a player or the menu tags a track", () => {
     await tagListChanged();
 
     expect(opens).toBe(before + 1);
+  });
+});
+
+describe("useTrackView, when a track's file goes missing under an open view", () => {
+  // rekordbox looks at the disk again for the one row selected
+  // (`changedSelectedRows` -> `updateMissingStatus`) and redraws it; the
+  // pages here were read before the file went, and nothing else refetches
+  // them (#682).
+  it("redraws a cached row with the [!] once it is looked at again", async () => {
+    ready = true;
+    act(() => root.render(<Probe />));
+    await settle();
+    const before = opens;
+    expect(latest.rowAt(3)?.missing).toBeUndefined();
+
+    gone.add("3");
+    act(() => latest.recheckMissing("3"));
+    await settle();
+
+    expect(latest.rowAt(3)?.missing).toBe(true);
+    expect(latest.rowAt(2)?.missing).toBeUndefined();
+    expect(opens).toBe(before);
+
+    // And takes it away when the file is back.
+    gone.delete("3");
+    act(() => latest.recheckMissing("3"));
+    await settle();
+    expect(latest.rowAt(3)?.missing).toBe(false);
+  });
+
+  it("leaves a row that is not cached to the fetch of its page", async () => {
+    ready = true;
+    act(() => root.render(<Probe />));
+    await settle();
+
+    act(() => latest.recheckMissing("400"));
+    await settle();
+
+    expect(rechecks).toBe(0);
+  });
+
+  it("keeps the same row when nothing changed", async () => {
+    ready = true;
+    act(() => root.render(<Probe />));
+    await settle();
+    const shown = latest.rowAt(5);
+
+    act(() => latest.recheckMissing("5"));
+    await settle();
+
+    expect(rechecks).toBe(1);
+    expect(latest.rowAt(5)).toBe(shown);
   });
 });
 

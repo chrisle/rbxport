@@ -3241,6 +3241,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         })),
       });
     },
+    trackMissing: (trackId) => {
+      const row = all.find((r) => r.id === trackId);
+      return wait(row ? row.missing === true : null);
+    },
     sortMissingTracks: (column, forwards) => {
       // `relocate::sorted_rows`, over the list as it stands: ICU's en-US
       // order, then the row's place, reversed forwards (rekordbox's
