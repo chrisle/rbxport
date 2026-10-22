@@ -13,6 +13,8 @@ artwork were added for #500 on 2026-10-22.
 XML and iTunes Replace existing became one Undo step for #501 on 2026-10-22.
 Add Tracks to Playlist and playlist reordering were added for #499 on
 2026-10-22.
+Undo and Redo of a key edit that wrote the audio file's key tag restore the
+tag with the library for #507 on 2026-10-22.
 
 Evidence markers follow the project convention: `[OBS]` is something read in
 the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
@@ -48,7 +50,7 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   `PlaylistTrackRemoval`, `PlaylistTrackAddition`, `PlaylistReorder`,
   `PlaylistCreation`, `PlaylistEdit`, `MembershipReplacement`, `TrackEdit`,
   `TrackTagEdit`, `CueRevision` in
-  `crates/rbl-db/src/write.rs`). A multi-track edit is one entry with one
+  `crates/rbl-db/src/write.rs`; `KeyTagWrite` in `src-tauri/src/key_tag.rs`). A multi-track edit is one entry with one
   step per track, undone last first [OBS code].
 - **Conflict check (#506).** Before Undo or Redo writes, the rows it would
   write must still hold what the entry expects: the edit's result for Undo,
@@ -106,6 +108,43 @@ Move Cue, Undo Delete Cue, Undo Convert Memory Cues to Hot Cues, and so on.
 - The decks and the browser row follow through `cues:changed` for the track,
   as after the edit itself.
 
+### Key tag Undo (#507)
+
+With Preferences > Analysis > "Write the value to the ID3 tag" on, a key
+edited in the Info panel goes into each changed track's file (`TKEY` in an
+MP3's or AIFF's `ID3v2`, the first `INITIALKEY` in a FLAC), as rekordbox's
+`modifyTrack` → `modifyTagData` writes it. Policy chosen by Chris on
+2026-10-22 (#507, option A):
+
+- The files are written under the edit gate, right after the library. The
+  entry (`LibraryEdit::KeyEdit`) keeps the library's steps and, for each file
+  whose tag was actually written, its path, the key its tag held before
+  (none, for a tag without a key) and the key written. A file passed over
+  (WAV, M4A, read-only, no path, a tag that cannot be read strictly) is not
+  in it; an edit that wrote no file is a plain Track Edit entry, so its Undo
+  and Redo never write a file.
+- Undo puts back the library's key and each file's previous key; a file
+  that had no key loses the one written (`swap_key(.., None)`), and an MP3
+  whose tag held only that key comes back without a tag, byte for byte.
+  Redo writes both again. The label stays Track Edit.
+- Before anything is written, the track rows are checked as any Track Edit,
+  and each file must still hold the key the step expects (the key written,
+  for Undo; the previous key, for Redo). A tag changed since by another
+  app, or a file that is gone, refuses the entry as #506 does: nothing is
+  written, the newer value stays, only that entry goes ("Can't undo Track
+  Edit: the key tag of “Song.mp3” has changed since. The newer change was
+  kept."). Each file is checked again under the same lock as its write.
+- The files are written first, then the library. A file that cannot be
+  written (made read-only since, a write whose copy does not check out)
+  stops the step: the files already written are put back, the library is
+  not touched, the entry stays to be tried again, and the error says so
+  ("Can't undo Track Edit: the key could not be written to “Song.mp3” (the
+  file is read-only). Nothing was changed."). A library write that fails
+  after the files puts the files and the tracks already written back.
+- Undo restores the key, not the tag's layout: an `ID3v2.3` tag the edit
+  saved as `ID3v2.4` stays `ID3v2.4`, and a FLAC comment block the edit
+  added stays, without the key [OBS code; `crates/rbl-db/tests/key_tag.rs`].
+
 ### Playlist creation, rule and artwork Undo (#500)
 
 - **Create New Playlist / Folder / Intelligent Playlist** (tree menu, menu
@@ -160,7 +199,7 @@ holds their ids.
 | --- | --- | --- | --- | --- | --- |
 | Rating, colour, comment (one or many tracks) | `set_track_rating`, `set_track_color`, `set_track_comment` | `djmdContent` columns | Undo, one entry per selection | `library_history_names_and_reverses_each_supported_edit`; `a_failure_partway_through_several_tracks_puts_the_earlier_ones_back` (`commands.rs` unit) | No |
 | Info panel fields (title, artist, album, genre, key, year…) | `details::set_track_field` | `djmdContent` columns, interned names | Undo | same test (title); multi-track genre unit test | No |
-| Key with "Write the value to the ID3 tag" | same, `write_key_tag` | also the audio file's key tag | Undo restores the database only; the file keeps the new key | code (`details.rs`) | File tag: yes. Policy in #507 |
+| Key with "Write the value to the ID3 tag" | same, `write_key_tag` | also the audio file's key tag | Undo, one entry: the library's key and each written file's previous key tag; refused if either changed since; a file that cannot be written back changes nothing | `undo_and_redo_of_a_key_edit_restore_the_files_tag_with_the_library`, `undo_of_a_key_written_into_a_file_without_one_takes_the_key_out_again`, `undo_of_a_key_edit_is_refused_when_the_files_tag_changed_since`, `a_failed_tag_write_undoes_nothing_and_keeps_the_entry` (`src-tauri/tests/commands.rs`) | No while the entry lives (#507) |
 | BPM in the info panel | `set_track_field` `bpm` → `grid::set_tempo` | `.DAT/.EXT` grid, `BPM` | One "Set Tempo" entry in the track's grid history, as the grid editor's own; earlier grid entries stay; ends the library redo branch | `a_typed_bpm_is_one_grid_undo_step_and_keeps_the_earlier_ones` (`grid.rs` unit) | No (#505) |
 | My Tags | `details::set_my_tags` | `djmdSongMyTag` | Undo | code (`LibraryEdit::TrackTags`) [ASSUME: no command-level test] | No |
 | Add / Delete Artwork (tracks) | `details::add_artwork`, `clear_artwork` | `ImagePath`; image copied into the share | Undo (path only; the copied file stays) | code [ASSUME: no command-level Undo test] | No |
@@ -228,8 +267,9 @@ The audit found two new product decisions:
    2026-10-22: refuse that entry with a message, keep the newer value and the
    rest of the history (#506; see "Conflict check" above).
 2. Whether Undo of a key edit that also wrote the file tag should rewrite the
-   tag, only say it did not, or not be offered (#507). Still open, filed with
-   `needs-product-decision`.
+   tag, only say it did not, or not be offered (#507). Decided on
+   2026-10-22: Undo and Redo rewrite the tag with the library, and refuse
+   when either changed since (see "Key tag Undo" above).
 
 The other gaps (#499, #501 to #505, #508) extend the existing contract and
 need no new policy.

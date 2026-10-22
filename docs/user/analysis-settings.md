@@ -90,6 +90,18 @@ why:
 
 The evidence is in `crates/rbl-db/src/key_tag.rs`.
 
+Edit > Undo of a key edited in the information panel puts the files' keys
+back too: each file the edit wrote gets the key it had before (a file that
+had none has the key taken out again), and Redo writes the edited key again.
+rekordbox has no Undo for this; it is rbx's own. If the file's key or the
+track's key has changed since (another app retagged the file, say), or the
+file is gone, the Undo is refused, nothing is written and the newer key
+stays. If a file cannot be written back (it has been made read-only), nothing
+is changed, and the Undo can be tried again once it can be written. Undo of
+a key edit that wrote no file (the setting off, or a WAV or M4A) changes the
+library only. Analysis is not undone. Details:
+[Library Undo coverage](../reference/library-undo.md#key-tag-undo-507).
+
 ## Queued settings
 
 Each queued track holds a copy of its settings. Later preference changes or
