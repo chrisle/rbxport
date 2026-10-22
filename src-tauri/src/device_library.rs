@@ -98,6 +98,9 @@ pub struct DeviceAssets {
     pub analysis: String,
     /// The artwork image the library names, volume-relative; empty for none.
     pub artwork: String,
+    /// The library the row was browsed in and the track's id there, for a
+    /// grid edit's write back to the stick (#660). `None` when not known.
+    pub library: Option<(Format, u32)>,
 }
 
 impl DeviceAssets {
@@ -207,7 +210,7 @@ fn connected(path: &str) -> AppResult<PathBuf> {
 
 /// What a failed read or write of the stick says. A refused edit is the
 /// user's to fix, not a bug.
-fn device_error(e: &rbl_export::ExportError) -> AppError {
+pub(crate) fn device_error(e: &rbl_export::ExportError) -> AppError {
     match e {
         rbl_export::ExportError::Conflict(message) => AppError::new(ErrorKind::Malformed, message.clone()),
         rbl_export::ExportError::DeviceGone => AppError::new(ErrorKind::NotFound, "That device is no longer connected."),
@@ -1089,7 +1092,7 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
             .enumerate()
             .filter_map(|(at, id)| library.track(*id).map(|t| device_row(&mount, t, at)))
             .collect();
-        handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, t)));
+        handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, format, t)));
         let mut view = DeviceView::open(rows, &parsed, field);
         let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
         for row in &mut view.rows {
@@ -1286,7 +1289,7 @@ fn one_library_cues(mount: &Path) -> HashMap<u32, Vec<rbl_index::Cue>> {
 }
 
 /// A stick track's row id with what its library names beside the audio.
-fn assets_of(mount: &Path, track: &device::Track) -> (String, DeviceAssets) {
+fn assets_of(mount: &Path, format: Format, track: &device::Track) -> (String, DeviceAssets) {
     (
         rbl_index::folder::loose_id(&audio_path(mount, &track.path)),
         DeviceAssets {
@@ -1294,6 +1297,7 @@ fn assets_of(mount: &Path, track: &device::Track) -> (String, DeviceAssets) {
             audio: track.path.clone(),
             analysis: track.analysis_path.clone(),
             artwork: track.artwork_path.clone(),
+            library: Some((format, track.id)),
         },
     )
 }
@@ -2215,7 +2219,7 @@ mod tests {
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
             let library = device::read(mount, format).unwrap();
             let state = Arc::new(AppState::new());
-            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, t)));
+            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, format, t)));
             let rows: Vec<RowDto> = library.tracks.iter().enumerate().map(|(at, t)| row_dto(&device_row(mount, t, at))).collect();
             let (full, bare) = (rows.iter().find(|r| r.title == "Track 1").unwrap(), rows.iter().find(|r| r.title == "Track 2").unwrap());
             assert_eq!((full.analysed, full.has_artwork), (1, true), "{format:?}");
@@ -2276,7 +2280,7 @@ mod tests {
             let library = device::read(mount, format).unwrap();
             assert!(library.tracks.iter().all(|t| t.path.starts_with("/Contents/")), "{:?}", library.tracks);
             let state = AppState::new();
-            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, t)));
+            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, format, t)));
             let rows: Vec<RowDto> = library.tracks.iter().enumerate().map(|(at, t)| row_dto(&device_row(mount, t, at))).collect();
             for (row, track) in rows.iter().zip(&library.tracks) {
                 let spelled = mount.join(track.path.trim_start_matches('/'));
@@ -2333,7 +2337,7 @@ mod tests {
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
             let library = device::read(mount, format).unwrap();
             let state = Arc::new(AppState::new());
-            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, t)));
+            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, format, t)));
             let row = row_dto(&device_row(mount, &library.tracks[0], 0));
             assert_eq!(row.analysed, 1, "{format:?}: the deck draws only an analysed row's waveform");
             let dat = state.device_assets(&row.id).unwrap().analysis_dat().unwrap();
@@ -2378,7 +2382,7 @@ mod tests {
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
             let library = device::read(mount, format).unwrap();
             let state = Arc::new(AppState::new());
-            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, t)));
+            state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, format, t)));
             let row = row_dto(&device_row(mount, &library.tracks[0], 0));
             assert_eq!(row.analysed, 1, "{format:?}");
             let dat = state.device_assets(&row.id).unwrap().analysis_dat().unwrap();
@@ -2395,7 +2399,7 @@ mod tests {
     fn a_stick_path_that_climbs_out_is_not_read() {
         let stick = crate::test_stick::stick();
         std::fs::create_dir_all(stick.path().join("PIONEER")).unwrap();
-        let assets = DeviceAssets { mount: stick.path().join("PIONEER"), audio: String::new(), analysis: "/../outside.DAT".into(), artwork: "../x.jpg".into() };
+        let assets = DeviceAssets { mount: stick.path().join("PIONEER"), audio: String::new(), analysis: "/../outside.DAT".into(), artwork: "../x.jpg".into(), library: None };
         std::fs::write(stick.path().join("outside.DAT"), b"x").unwrap();
         assert_eq!((assets.analysis_dat(), assets.artwork_file()), (None, None));
     }
@@ -2412,6 +2416,7 @@ mod tests {
             audio: "/Contents/missing.mp3".into(),
             analysis: "/PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT".into(),
             artwork: "/PIONEER/Artwork/00001/a1.jpg".into(),
+            library: None,
         };
         assert_eq!((assets.audio_file(), assets.analysis_dat()), (None, None));
         assert_eq!(assets.artwork_file(), Some(stick.path().join("PIONEER/Artwork/00001/a1.jpg")));
@@ -2439,6 +2444,7 @@ mod tests {
             audio: "/Contents.mp3".into(),
             analysis: "/PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT".into(),
             artwork: "/PIONEER/Artwork/00001/a1.jpg".into(),
+            library: None,
         };
         assert_eq!((assets.audio_file(), assets.analysis_dat(), assets.artwork_file()), (None, None, None));
         // The case-insensitive fallback (#334) does not get round it either.
@@ -2449,7 +2455,7 @@ mod tests {
     #[test]
     fn a_reread_or_ejected_stick_forgets_its_earlier_tracks() {
         let (first, other) = (Path::new("/Volumes/STICK"), Path::new("/Volumes/OTHER"));
-        let at = |mount: &Path, analysis: &str| DeviceAssets { mount: mount.to_path_buf(), audio: String::new(), analysis: analysis.into(), artwork: String::new() };
+        let at = |mount: &Path, analysis: &str| DeviceAssets { mount: mount.to_path_buf(), audio: String::new(), analysis: analysis.into(), artwork: String::new(), library: None };
         let state = AppState::new();
         state.remember_device_assets(first, [("file:/Volumes/STICK/a.mp3".to_string(), at(first, "/a.DAT"))]);
         state.remember_device_assets(other, [("file:/Volumes/OTHER/o.mp3".to_string(), at(other, "/o.DAT"))]);
