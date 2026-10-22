@@ -3170,8 +3170,12 @@ impl Writer {
         }
         let mut expected = if undo { edit.after.clone() } else { edit.before.clone() };
         let mut current = self.track_tags(&edit.content)?;
+        // As sets: a duplicate live row for one tag (possible in a library
+        // another program wrote) is still one tag.
         expected.sort();
+        expected.dedup();
         current.sort();
+        current.dedup();
         if current == expected {
             Ok(())
         } else {
