@@ -45,10 +45,17 @@ function render(props: {
   artworkMode?: ArtworkMode;
   onArtworkMode?: (mode: ArtworkMode) => void;
   columns?: readonly ColumnSpec[];
+  keyDisplay?: typeof DEFAULT_PREFERENCES.view.keyDisplay;
 }) {
   act(() => {
     root.render(
-      <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update: noop, reset: noop }}>
+      <PreferencesProvider value={{
+        preferences: props.keyDisplay
+          ? { ...DEFAULT_PREFERENCES, view: { ...DEFAULT_PREFERENCES.view, keyDisplay: props.keyDisplay } }
+          : DEFAULT_PREFERENCES,
+        update: noop,
+        reset: noop,
+      }}>
         <TrackTable
           spec={COLLECTION}
           onSortChange={noop}
@@ -205,14 +212,34 @@ describe("the whole artwork's list (#575)", () => {
     const summary = cell("summary");
     expect(summary).not.toBeNull();
     const [first, second] = [...(summary?.children ?? [])] as HTMLElement[];
-    expect(first?.textContent).not.toBe("");
-    expect(second?.children).toHaveLength(3);
+    // The deterministic collection fixture's first row pins the values, not
+    // only the shape of the Summary renderer.
+    expect(first?.textContent).toBe("Something In The Air (Radio Edit)");
+    expect([...(second?.children ?? [])].map((part) => part.textContent)).toEqual([
+      "The Temper Trap", "122.00", "Dbm",
+    ]);
+    // An unanalysed row leaves both unavailable values empty.
+    const missing = [...host.querySelectorAll<HTMLElement>('[data-col="summary"]')]
+      .find((entry) => entry.firstElementChild?.textContent === "Your Eyes (Extended Remix)");
+    expect(missing).toBeDefined();
+    expect([...(missing?.children.item(1)?.children ?? [])].map((part) => part.textContent)).toEqual([
+      "Tujamo", "", "",
+    ]);
     expect(cell("title")).toBeNull();
     const headings = [...host.querySelectorAll('[role="columnheader"]')].map((heading) => heading.textContent);
     expect(headings.slice(0, 4)).toEqual(["#", "Preview", "", "Summary"]);
     expect(host.querySelector('[aria-label="Resize Artwork"]')).toBeNull();
     expect(browser().style.getPropertyValue("--s-preview-band-top")).toBe("10px");
     expect(browser().dataset.artwork).toBe("full");
+  });
+
+  it("formats Summary's key with the selected key display", async () => {
+    render({ artworkMode: "full", onArtworkMode: noop, columns: fullColumns, keyDisplay: "alphanumeric" });
+    await settle();
+    await settle();
+    const summary = cell("summary");
+    const line = summary?.children.item(1);
+    expect(line?.children.item(2)?.textContent).toBe("12A");
   });
 
   it("offers Summary rather than Artwork in the whole artwork's column menu", async () => {
