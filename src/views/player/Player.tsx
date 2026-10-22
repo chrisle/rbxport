@@ -16,6 +16,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { createPortal } from "react-dom";
 import { TimeReadouts } from "./TimeReadouts";
 import { useEventCallback } from "@/store/useEventCallback";
+import { useTranslation } from "@/i18n";
 
 import type { Cue, DeckId, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
@@ -718,6 +719,7 @@ function gridButton(
   editor: ReturnType<typeof useGridEditor>,
   hold: ReturnType<typeof useHoldRepeat>,
   deck: { metronome: boolean; metronomeLevel: string; metronomeBusy: boolean; toggleMetronome: () => void; cycleMetronomeVolume: () => void; idle: boolean; readOnly: boolean },
+  t: ReturnType<typeof useTranslation>,
 ): GridButton {
   const reason = !editor.hasGrid
     ? "This track has no beat grid to edit"
@@ -802,9 +804,9 @@ function gridButton(
       return {
         disabled: !editor.hasGrid || deck.readOnly || editor.state?.lockable === false,
         pressed: locked,
-        title: editor.state?.lockable === false
+        title: t(editor.state?.lockable === false
           ? "Analysis Lock is set on tracks in the collection, not on a device"
-          : locked ? "Unlock the beat grid for editing" : "Lock the beat grid so nothing here changes it",
+          : locked ? "Unlock the beat grid for editing" : "Lock the beat grid so nothing here changes it"),
         handlers: { onClick: editor.toggleLock },
       };
     default:
@@ -883,6 +885,7 @@ export const Player = memo(function Player({
   drawing = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck, false);
+  const t = useTranslation();
   // A waveform to draw: the analysis's, or one an analysis is drawing now.
   const hasWaveform = track !== null && (track.analysed > 0 || drawing);
   // The waveforms follow their containers, which change with the window and
@@ -2701,7 +2704,7 @@ export const Player = memo(function Player({
                       {group.map((edit) => {
                         const button = gridButton(edit.id, gridEditor, hold, {
                           metronome, metronomeLevel, metronomeBusy, toggleMetronome, cycleMetronomeVolume, idle: playback.idle, readOnly,
-                        });
+                        }, t);
                         // The padlock closes when the grid is locked.
                         const Icon = edit.id === "lock" && button.pressed ? GridLockIcon : EDIT_ICONS[edit.id];
                         return (

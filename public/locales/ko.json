@@ -1776,5 +1776,8 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "\"내 태그\"를 \"커멘트\"에 추가합니다",
   "This operation can take few minutes.": "본 조작은 오랜 시간을 소요합니다.",
-  "Please wait for a while": "잠시만 기다리십시오"
+  "Please wait for a while": "잠시만 기다리십시오",
+  "Analysis Lock is set on tracks in the collection, not on a device": "Analysis Lock is set on tracks in the collection, not on a device",
+  "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
+  "Unlock the beat grid for editing": "Unlock the beat grid for editing"
 }
