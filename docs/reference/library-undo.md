@@ -8,6 +8,8 @@ library or user files can be undone, and why the rest cannot. Audited for
 action is added or starts recording history. Folder replacement coverage was
 updated during integration on 2026-10-21 to retain #426 support already in `dev`.
 Cue and loop edits were added to the history for #504 on 2026-10-22.
+Playlist, folder and Intelligent Playlist creation, rule edits and playlist
+artwork were added for #500 on 2026-10-22.
 
 Evidence markers follow the project convention: `[OBS]` is something read in
 the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
@@ -39,7 +41,8 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   also calls `wrote_outside_history(_, true)` to clear both stacks [OBS code].
 - **Payloads are exact.** Entries keep row ids and before/after column values
   (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`,
-  `PlaylistTrackRemoval`, `TrackEdit`, `TrackTagEdit`, `CueRevision` in
+  `PlaylistTrackRemoval`, `PlaylistCreation`, `PlaylistEdit`, `TrackEdit`,
+  `TrackTagEdit`, `CueRevision` in
   `crates/rbl-db/src/write.rs`). A multi-track edit is one entry with one
   step per track, undone last first [OBS code].
 - **Conflict check (#506).** Before Undo or Redo writes, the rows it would
@@ -65,6 +68,15 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   cue pad (or the Active Loop) it would fill must not be held by another
   cue now ("Can't undo Delete Cue: Hot Cue B has been set since. The newer
   change was kept.") [OBS code; cue tests below].
+  A creation (#500) is checked through `Writer::creation_conflict`, and
+  again in the transaction that writes: Undo only tombstones a row that is
+  still as it was made (same parent, name, rule, no artwork) and holds no
+  tracks and no playlists, so tracks or lists put in it since are never
+  deleted with it ("Can't undo Create Playlist: tracks have been added to
+  the playlist since. The newer change was kept."). Redo is refused when
+  the row is live again or the folder it was made in is gone. A rule or
+  artwork entry compares the column by SQL `IS`, as a track field does
+  [OBS code; creation tests below].
 - **Other histories.** Text fields keep WebKit's own history. Each track's
   beat grid has its own stack in `GridEditor` (`src-tauri/src/grid.rs`),
   which Edit › Undo reaches while a deck's grid editor is armed
@@ -86,6 +98,24 @@ Move Cue, Undo Delete Cue, Undo Convert Memory Cues to Hot Cues, and so on.
   row (same id) back. Restored rows get a new `rb_local_usn`, as any edit.
 - The decks and the browser row follow through `cues:changed` for the track,
   as after the edit itself.
+
+### Playlist creation, rule and artwork Undo (#500)
+
+- **Create New Playlist / Folder / Intelligent Playlist** (tree menu, menu
+  bar, AppleScript `make playlist`) are one entry each, labelled Create
+  Playlist, Create Folder and Create Intelligent Playlist. The entry keeps
+  the new row's id and its parent's children as `(ID, Seq)` before and
+  after. Undo soft-deletes the same row and, when the parent holds exactly
+  the children it had, gives each the `Seq` it had (a playlist made at a
+  place renumbers the run). Redo brings the same row back with its rule, in
+  its place. AppleScript `make` at an index is one entry, not a create and a
+  move.
+- **Edit Intelligent Playlist** (saving the rule) is one entry holding the
+  `SmartList` text before and after; Undo puts back the exact text. A
+  rename saved from the same dialog stays its own Rename Playlist entry.
+- **Add Artwork** on a playlist or folder is one entry holding `ImagePath`
+  before and after. Undo puts the previous reference back; the copied image
+  file stays, as track artwork Undo leaves it.
 
 ## rekordbox
 
@@ -149,9 +179,9 @@ holds their ids.
 | Remove Tracks from Playlist | `remove_tracks_from_playlist` | tombstones memberships, renumbers | Undo | `library_history_names_and_reverses_each_supported_edit` | No |
 | Add Tracks to Playlist (menu, drop, duplicates "Add") | `add_tracks_to_playlist` | new memberships | Not recorded | code | No. #499 |
 | Reorder, Renumber Track Order | `reorder_playlist` | `TrackNo` of every member | Not recorded | code | Previous order lost. #499 |
-| Create Playlist / Folder / Intelligent Playlist (also AppleScript `make playlist`) | `create_playlist`, `create_folder`, `create_smart_playlist` | new `djmdPlaylist` row | Not recorded | code | No. #500 |
-| Edit Intelligent Playlist rule | `set_smart_rule` | `SmartList` | Not recorded | code | Old rule lost. #500 |
-| Add Artwork (playlist or folder) | `details::add_playlist_artwork` | `ImagePath` | Not recorded | code | Old image reference lost. #500 |
+| Create Playlist / Folder / Intelligent Playlist (also AppleScript `make playlist`) | `create_playlist`, `create_folder`, `create_smart_playlist` | new `djmdPlaylist` row, sibling `Seq` | Undo, one entry each; refused once tracks or playlists were put in it, or it was renamed, moved or deleted outside the history | `each_creation_is_one_undo_and_one_redo_that_restore_the_exact_tree`, `undo_of_a_creation_keeps_the_tracks_and_playlists_added_to_it_since`, `undo_and_redo_of_a_creation_refuse_a_playlist_changed_since` (`src-tauri/tests/commands.rs`) | No (#500) |
+| Edit Intelligent Playlist rule | `set_smart_rule` | `SmartList` | Undo, the exact previous rule text; refused if the rule changed since | `a_rule_edit_and_playlist_artwork_undo_to_the_exact_previous_values` | No while the entry lives (#500) |
+| Add Artwork (playlist or folder) | `details::add_playlist_artwork` | `ImagePath`; image copied into the share | Undo (reference only; the copied file stays) | same | No while the entry lives (#500) |
 | Tag List: add | `add_to_tag_list` | Tag List rows | Not recorded | code | No |
 | Tag List: remove, clear | `remove_from_tag_list`, `clear_tag_list` | soft-deletes Tag List rows | Not recorded; asks first | code | Yes. #508 |
 | Remove from History | `remove_from_history` | soft-deletes `djmdSongHistory` rows | Not recorded; asks first | code | Yes. #508 |
@@ -194,5 +224,5 @@ The audit found two new product decisions:
    tag, only say it did not, or not be offered (#507). Still open, filed with
    `needs-product-decision`.
 
-The other gaps (#499 to #505, #508) extend the existing contract and
+The other gaps (#499, #501 to #505, #508) extend the existing contract and
 need no new policy.
