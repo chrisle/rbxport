@@ -321,8 +321,20 @@ shared cache is pruned.
   `export_progress()`. Repeated events of the same stage and unit within
   100 ms are dropped; a new stage, unit, or terminal state is sent at once.
   `canCancel` is computed from the stage.
+- While it writes, it holds `rbl_devices::awake::KeepAwake`: an IOKit
+  `PreventUserIdleDisplaySleep` assertion on macOS (the one rekordbox holds
+  while it is in front) and system and display power requests on Windows,
+  so a long sync never runs into idle sleep, as in rekordbox. Sleep the user
+  asks for is not blocked; Linux asks nothing. `[ASSUME]` Idle sleep may be
+  one way a stick gets cut off under in-flight writes; that is not
+  established for #661.
 - On success it updates the job with `upToDate`, counters, and
   `warningsCount`.
+- `sync_error` words a failed write the stick itself reported (EIO on macOS
+  and Linux, a CRC, I/O device or hardware error on Windows, or the
+  export's `DeviceGone`) as "An error occurred while exporting: the USB
+  drive could not read or write its data…", telling the user to check the
+  drive before syncing to it again. The OS error stays as the detail.
 - Errors pass through `disconnected_during_export`. If the export failed and
   the mount path is no longer a directory, the error becomes "The USB was
   disconnected during the sync. Plug it back in and sync again; the sync
@@ -648,7 +660,9 @@ In loop order:
    naming the path, nothing is copied, and verification does not count that
    file as missing (#317). rekordbox's export only visits the tracks it is
    given, so it leaves such a row as well. `ENXIO`, `ENODEV`, or `EIO`
-   becomes `DeviceGone`.
+   becomes `DeviceGone`; on Windows, where those numbers mean access
+   denied, invalid handle and write protected, only `ERROR_NOT_READY`,
+   `ERROR_DEV_NOT_EXIST` and `ERROR_DEVICE_NOT_CONNECTED` do.
 4. **Conversion.** `compatibility` is set and the cache's probe says the
    file needs it. The file is renamed `{stem}-rbx-cdj-{export_id}.{ext}`.
    Preserved device tracks are never converted. Conversion profiles are
