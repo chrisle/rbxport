@@ -105,7 +105,10 @@ zero, as rekordbox does — and forward to the end.
 ## 5. Does the tempo change?
 
 The tempo is measured again in 16-second windows over the whole track, by
-autocorrelation of each window alone, with a parabola refining the peak
+autocorrelation of each window alone, as a ratio to the tempo of the line
+fitted through the whole track (not the candidate stage's estimate, which
+can be a percent off: a stretch at exactly 2⁄3 of 150 measured against a
+148.5 estimate reads 0.674 and escapes the band around 2⁄3), with a parabola refining the peak
 between lag bins. Octave folding stays inside the requested BPM range
 (70–180 in the app), so 128 measured against 174 cannot turn into 256. A
 window where the track's tempo still fits at 60 % of the best peak has not
@@ -114,7 +117,20 @@ within 1% of that candidate, it differs by more than 2%, and it is not
 within 1% of a ratio a rhythm makes on its own (3⁄2, 2⁄3, 4⁄3, 3⁄4).
 The former 3% rhythm exclusion incorrectly swallowed 128→174. Tight
 clustering also stops drifting rhythmic aliases from becoming a new tempo. Runs of fewer than three settled windows are
-absorbed into their neighbours. The stretches where each tempo is
+absorbed into their neighbours.
+
+A window's tempo is read off the whole mix, so a pad, an arp or a
+polyrhythm can hold a period of its own (9⁄8 or 9⁄16 of the track's, say)
+for a minute while the kick carries on at the track's tempo, or stops.
+Where a kick band or an attack map can be read, a run is therefore a tempo
+of its own only when its own period, at its best phase, collects the kick
+(thump plus click) over its stretch at least 1.5 times as well as each
+neighbouring run's period does there, and hears at least 0.15 of a kick a
+beat at all. A run that fails is merged into the neighbour it loses to;
+between two stretches with no kick, the one further from the track's tempo
+gives way. Neighbours left at one tempo become one run.
+
+The stretches where each tempo is
 *settled* — consecutive windows at one tempo — are the anchors for step 6.
 
 ## 6. Grid the change

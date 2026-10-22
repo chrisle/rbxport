@@ -35,6 +35,12 @@ and measurements live in [Reference evaluation](validation/reference-playlist.md
 - **The Normal preset is one constant tempo**, as rekordbox's Normal
   analysis is. The RBXport preset follows tempo changes, ramps and
   re-phased returns as described below.
+- **A tempo change needs the kick to follow it.** A stretch whose own
+  period does not collect the kick clearly better than the tempo around
+  it (an arp, pads or a polyrhythm over a steady or absent kick) keeps the
+  track's tempo. Stretches are compared with the tempo of the line fitted
+  through the whole track, so a pattern at a rhythmic ratio of it (3⁄2,
+  2⁄3, 4⁄3, 3⁄4) is recognised as one.
 - **A tempo change is a new segment**, with the beat count carrying on 1–4
   across the join, as rekordbox writes it — whatever the new music does
   on that beat. Beat 1 is decided on the first tempo's own music, and the

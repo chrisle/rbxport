@@ -1150,6 +1150,135 @@ fn run_bounds(labels: &[f64]) -> Vec<(usize, usize)> {
     out
 }
 
+/// The tempo the windows are measured against: the line through the whole
+/// track near the candidate `bpm`, or `bpm` itself where that line has
+/// wandered further than a tempo change from it.
+fn reference_bpm(reader: Reader<'_>, bpm: f64, options: TempoOptions) -> f64 {
+    let fitted = fit(reader, bpm, 0, reader.values.len(), options)
+        .filter(|f| f.period > 0.0)
+        .map_or(bpm, |f| reader.rate * 60.0 / f.period);
+    if (fitted / bpm - 1.0).abs() <= options.segment_threshold { fitted } else { bpm }
+}
+
+/// Phases tried when measuring how much of a stretch's kick a period
+/// collects: a thirty-second of a beat, well inside the tenth of a beat a
+/// beat reads its kick from.
+const KICK_PHASES: usize = 32;
+
+/// The kick (the kick band's thump plus the click's attack) that a grid at
+/// `period` collects over `from..to` at its best phase, as `(total,
+/// beats)`.
+fn kick_collected(reader: Reader<'_>, period: f64, from: usize, to: usize) -> (f64, usize) {
+    if period < 2.0 || to <= from {
+        return (0.0, 0);
+    }
+    let mut best = (0.0_f64, 0usize);
+    for step in 0..KICK_PHASES {
+        let phase = from as f64 + period * step as f64 / KICK_PHASES as f64;
+        let mut total = 0.0;
+        let mut beats = 0;
+        let mut x = phase;
+        while x < to as f64 {
+            let heard = reader.evidence(x, period);
+            total += heard.kick + heard.attack;
+            beats += 1;
+            x += period;
+        }
+        if total > best.0 || best.1 == 0 {
+            best = (total, beats);
+        }
+    }
+    best
+}
+
+/// How well a stretch's own tempo carries its kick against another tempo's:
+/// the kick its own period collects over the stretch, over what `other`
+/// collects there, each at its best phase. Zero when its own grid hears
+/// next to no kick at all (less than `KICK_PRESENT` a beat): an arp, pads
+/// or a polyrhythm with no kick of its own do not state a tempo.
+fn kick_margin(reader: Reader<'_>, own: f64, other: f64, from: usize, to: usize) -> f64 {
+    let (here, beats) = kick_collected(reader, own, from, to);
+    if beats == 0 || here < KICK_PRESENT * beats as f64 {
+        return 0.0;
+    }
+    let (there, _) = kick_collected(reader, other, from, to);
+    if there <= 0.0 { f64::INFINITY } else { here / there }
+}
+
+/// The runs of [`label_runs`] whose tempo the kick follows.
+///
+/// A window's tempo is read off the whole mix, and in ambient, downtempo
+/// and leftfield music a pad, an arp or a polyrhythm can hold a period of
+/// its own for a minute while the kick carries on at the track's tempo, or
+/// stops. Such a stretch has not changed tempo. So where a kick band or an
+/// attack map can be read, a run stands as its own tempo only when its own
+/// period collects the kick over its stretch by `KICK_MARGIN` over each
+/// neighbour's period; a run that does not is merged into the neighbour it
+/// loses to, and neighbours left at one tempo become one run. Without
+/// either source the runs stand as labelled.
+fn kicked_runs(reader: Reader<'_>, mut runs: Vec<(usize, usize, f64, usize)>, bpm: f64, options: TempoOptions) -> Vec<(usize, usize, f64, usize)> {
+    if reader.kicks.is_none() && reader.attacks.is_none() {
+        return runs;
+    }
+    let same_tempo = |a: f64, b: f64| (a / b - 1.0).abs() <= options.segment_threshold;
+    while runs.len() > 1 {
+        // Each run's own period, fitted over its settled stretch.
+        let periods: Vec<f64> = runs
+            .iter()
+            .map(|&(from, to, run_bpm, _)| fit(reader, run_bpm, from, to, options).map_or(reader.rate * 60.0 / run_bpm, |f| f.period))
+            .collect();
+        // The run its kick holds up least well, and the neighbour it loses
+        // to. Ties, two stretches with no kick at all, go against the run
+        // further from the track's tempo, then the shorter.
+        let mut weakest: Option<(usize, usize, f64)> = None;
+        for (i, &(from, to, _, _)) in runs.iter().enumerate() {
+            for j in [i.checked_sub(1), Some(i + 1).filter(|&j| j < runs.len())].into_iter().flatten() {
+                let margin = kick_margin(reader, periods[i], periods[j], from, to);
+                if margin >= KICK_MARGIN {
+                    continue;
+                }
+                let worse = weakest.is_none_or(|(w, _, m)| {
+                    let away = |k: usize| (runs[k].2 / bpm - 1.0).abs();
+                    let length = |k: usize| runs[k].1.saturating_sub(runs[k].0);
+                    margin < m - 1e-9 || ((margin - m).abs() <= 1e-9 && (away(i) > away(w) + 1e-9 || ((away(i) - away(w)).abs() <= 1e-9 && length(i) < length(w))))
+                });
+                if worse {
+                    weakest = Some((i, j, margin));
+                }
+            }
+        }
+        let Some((i, j, margin)) = weakest else { break };
+        tracing::debug!(
+            from_secs = to_secs_of(reader, runs[i].0 as f64),
+            to_secs = to_secs_of(reader, runs[i].1 as f64),
+            bpm = runs[i].2,
+            into_bpm = runs[j].2,
+            margin,
+            "tempo change: the kick does not follow it; merged into its neighbour"
+        );
+        let gone = runs.remove(i);
+        if j < i {
+            let kept = &mut runs[j];
+            kept.1 = gone.1;
+            kept.3 = gone.3;
+        } else {
+            runs[i].0 = gone.0;
+        }
+        // Neighbours now at one tempo are one stretch.
+        let mut k = 1;
+        while k < runs.len() {
+            if same_tempo(runs[k].2, runs[k - 1].2) {
+                let later = runs.remove(k);
+                runs[k - 1].1 = later.1;
+                runs[k - 1].3 = later.3;
+            } else {
+                k += 1;
+            }
+        }
+    }
+    runs
+}
+
 /// Splits the track where the tempo changes and fits each stretch.
 fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&mut Vec<GapDecision>>) -> Vec<Segment> {
     let (values, rate, origin_secs) = (reader.values, reader.rate, reader.origin_secs);
@@ -1163,6 +1292,11 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&m
             .collect();
     }
     let window = ((options.segment_window_secs * rate) as usize).max(64);
+    // The windows are measured against the track's fitted tempo, not the
+    // candidate stage's estimate: that can be a percent off, which is the
+    // whole band `rhythmic_ratio` allows, and a stretch at exactly two
+    // thirds of the track's tempo then reads as a tempo of its own.
+    let bpm = reference_bpm(reader, bpm, options);
     // Local tempo per window, as a ratio to the track's, or None where the
     // window has too little to say.
     let hop = window / 2;
@@ -1178,6 +1312,7 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&m
     let mut segments: Vec<Segment> = Vec::new();
     let runs = label_runs(&local, &starts, window, n, bpm, options);
     tracing::debug!(bpm, ?local, ?runs, "local tempo segments");
+    let runs = kicked_runs(reader, runs, bpm, options);
 
     // (change from, settled from, settled to, fit)
     let mut fits: Vec<(usize, usize, usize, Fit)> = Vec::new();
@@ -2397,6 +2532,116 @@ mod tests {
         for w in segments.windows(2) {
             assert!(w[1].from_secs >= w[0].to_secs - 1e-9);
         }
+    }
+
+    /// An onset envelope with a peak of its own height at each hit, in
+    /// seconds.
+    fn envelope_of(hits: &[(f64, f32)], secs: f64) -> OnsetEnvelope {
+        let mut values = vec![0.0_f32; (secs * RATE) as usize];
+        for &(t, height) in hits {
+            let i = (t * RATE).round() as usize;
+            if let Some(v) = values.get_mut(i) {
+                *v = v.max(height);
+            }
+            if let Some(v) = values.get_mut(i + 1) {
+                *v = v.max(height * 0.4);
+            }
+        }
+        OnsetEnvelope { values, rate: RATE, origin_secs: 0.0 }
+    }
+
+    /// Hits every `60 / bpm` seconds from `first` through `from..to`, at
+    /// `height`.
+    fn train(bpm: f64, first: f64, from: f64, to: f64, height: f32) -> Vec<(f64, f32)> {
+        let period = 60.0 / bpm;
+        let k = ((from - first) / period).ceil().max(0.0);
+        (0..100_000)
+            .map(|i| first + (k + f64::from(i)) * period)
+            .take_while(|&t| t < to)
+            .map(|t| (t, height))
+            .collect()
+    }
+
+    fn describe(segments: &[Segment]) -> Vec<String> {
+        segments.iter().map(|s| format!("{:.1}-{:.1}s {:.2}", s.from_secs, s.to_secs, s.bpm())).collect()
+    }
+
+    #[test]
+    fn windows_at_two_thirds_of_the_fitted_tempo_are_not_a_change_when_the_estimate_is_off() {
+        // A track at 150 throughout, whose intro and outro carry only a
+        // pattern at 100, two thirds of it. The candidate stage put the
+        // track at 148.2, a percent and more under the 150 the fit finds:
+        // measured against that, the 100 windows sit outside the band
+        // around two thirds and became their own tempo.
+        let mut hits = train(150.0, 0.05, 40.0, 250.0, 1.0);
+        hits.extend(train(100.0, 0.05, 0.0, 40.0, 1.0));
+        hits.extend(train(100.0, 0.05, 250.0, 300.0, 1.0));
+        let onsets = envelope_of(&hits, 300.0);
+        let values: Vec<f64> = onsets.values.iter().map(|&v| f64::from(v)).collect();
+        let reader = Reader { values: &values, rate: RATE, origin_secs: 0.0, attacks: None, kicks: None };
+        let segments = segment(reader, 148.2, options(), None);
+        assert_eq!(segments.len(), 1, "{:?}", describe(&segments));
+        assert!((segments[0].bpm() - 150.0).abs() < 0.05, "{:?}", describe(&segments));
+    }
+
+    /// A track at 150 whose kick plays throughout at `kick_height` in the
+    /// kick band, except where `kick_follows` moves the kick onto the
+    /// pattern, with a pattern at 168.75 (nine eighths of it) much louder
+    /// than the kick in the full band from 120 s to 180 s.
+    fn nine_eighths(kick_height: f32, kick_follows: bool) -> (OnsetEnvelope, OnsetEnvelope) {
+        let (start, end) = (120.0, 180.0);
+        let mut all = train(150.0, 0.05, 0.0, start, 1.0);
+        all.extend(train(150.0, 0.05, start, end, 0.25));
+        all.extend(train(168.75, start, start, end, 1.0));
+        all.extend(train(150.0, 0.05, end, 300.0, 1.0));
+        let mut kicks = train(150.0, 0.05, 0.0, start, 1.0);
+        if kick_follows {
+            kicks.extend(train(168.75, start, start, end, 1.0));
+        } else {
+            kicks.extend(train(150.0, 0.05, start, end, kick_height));
+        }
+        kicks.extend(train(150.0, 0.05, end, 300.0, 1.0));
+        (envelope_of(&all, 300.0), envelope_of(&kicks, 300.0))
+    }
+
+    #[test]
+    fn a_pattern_the_kick_does_not_follow_is_not_a_tempo_change() {
+        // The kick stays at 150 under the pattern, at full level or quietly,
+        // or stops: the music has not changed tempo, the 150 grid still
+        // collects the kick, and the grid stays at 150.
+        for kick in [1.0, 0.2, 0.0] {
+            let (onsets, kicks) = nine_eighths(kick, false);
+            let result = detect_tempo_with(&onsets, Some(&kicks), None, options());
+            assert_eq!(result.segments.len(), 1, "kick at {kick}: {:?}", describe(&result.segments));
+            assert!((result.bpm - 150.0).abs() < 0.05, "kick at {kick}: {}", result.bpm);
+        }
+    }
+
+    #[test]
+    fn a_kickless_intro_at_another_period_takes_the_track_s_tempo() {
+        // Forty seconds of an arp at 96.75, nine sixteenths of 172, with
+        // no kick, then the kick at 172 to the end: one tempo, 172, from
+        // the start of the file.
+        let mut all = train(96.75, 0.1, 0.0, 40.0, 1.0);
+        all.extend(train(172.0, 0.1, 40.0, 240.0, 1.0));
+        let kicks = train(172.0, 0.1, 40.0, 240.0, 1.0);
+        let (onsets, kicks) = (envelope_of(&all, 240.0), envelope_of(&kicks, 240.0));
+        let result = detect_tempo_with(&onsets, Some(&kicks), None, options());
+        assert_eq!(result.segments.len(), 1, "{:?}", describe(&result.segments));
+        assert!((result.bpm - 172.0).abs() < 0.05, "{}", result.bpm);
+        assert!(result.segments[0].from_secs < 0.01, "{:?}", describe(&result.segments));
+    }
+
+    #[test]
+    fn a_tempo_the_kick_follows_is_still_a_tempo_change() {
+        // The same track with the kick on the pattern: a DJ edit that
+        // jumps to 168.75 and back. It keeps its three tempos.
+        let (onsets, kicks) = nine_eighths(0.0, true);
+        let result = detect_tempo_with(&onsets, Some(&kicks), None, options());
+        let segments = &result.segments;
+        assert!(segments.len() >= 3, "{:?}", describe(segments));
+        assert!(segments.iter().any(|s| (s.bpm() - 168.75).abs() < 0.1), "{:?}", describe(segments));
+        assert!((segments[0].bpm() - 150.0).abs() < 0.05 && (segments[segments.len() - 1].bpm() - 150.0).abs() < 0.05, "{:?}", describe(segments));
     }
 
     #[test]
