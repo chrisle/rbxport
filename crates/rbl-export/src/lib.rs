@@ -2829,13 +2829,22 @@ fn context(what: String) -> impl Fn(std::io::Error) -> std::io::Error {
     move |error| std::io::Error::new(error.kind(), format!("{what}: {error}"))
 }
 
-/// Errors that mean the media was unplugged mid-write.
+/// Errors that mean the media was unplugged or stopped answering mid-write.
+///
+/// The raw numbers differ by OS: on Windows 5, 6 and 19 are
+/// `ERROR_ACCESS_DENIED`, `ERROR_INVALID_HANDLE` and `ERROR_WRITE_PROTECT`,
+/// which say nothing about the device going away, so they are not matched
+/// there.
 fn is_device_gone(e: &std::io::Error) -> bool {
-    matches!(
-        e.raw_os_error(),
-        // ENXIO, ENODEV, EIO
-        Some(6 | 19 | 5)
-    )
+    #[cfg(unix)]
+    // ENXIO, ENODEV, EIO
+    const CODES: &[i32] = &[6, 19, 5];
+    #[cfg(windows)]
+    // ERROR_NOT_READY, ERROR_DEV_NOT_EXIST, ERROR_DEVICE_NOT_CONNECTED
+    const CODES: &[i32] = &[21, 55, 1167];
+    #[cfg(not(any(unix, windows)))]
+    const CODES: &[i32] = &[];
+    e.raw_os_error().is_some_and(|code| CODES.contains(&code))
 }
 
 /// Re-reads an export with the independent parser and checks it is coherent.
@@ -2978,6 +2987,24 @@ mod tests {
         assert_eq!(my_tag_master_db_id(Some(&sync(u64::from(u32::MAX), 0))), 0, "a 32-bit add, as rekordbox's");
         assert_eq!(my_tag_master_db_id(Some(&sync(0, 0))), 0);
         assert_eq!(my_tag_master_db_id(None), 0);
+    }
+
+    /// ENXIO, ENODEV and EIO mean the stick went away on macOS and Linux.
+    /// The same numbers on Windows are Access denied, Invalid handle and
+    /// Write protected, which are not a vanished device; Windows has its own
+    /// not-ready and not-connected codes.
+    #[test]
+    fn device_gone_codes_are_the_operating_systems_own() {
+        let gone = |code| is_device_gone(&std::io::Error::from_raw_os_error(code));
+        if cfg!(unix) {
+            assert!(gone(5) && gone(6) && gone(19));
+            assert!(!gone(30) && !gone(2) && !gone(13));
+        }
+        if cfg!(windows) {
+            assert!(!gone(5) && !gone(6) && !gone(19), "access denied, invalid handle, write protected");
+            assert!(gone(21) && gone(55) && gone(1167));
+        }
+        assert!(!is_device_gone(&std::io::Error::other("Input/output error")));
     }
 
     #[test]

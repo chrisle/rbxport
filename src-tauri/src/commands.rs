@@ -2290,8 +2290,9 @@ fn write_export_registered<R: tauri::Runtime>(
     reservation: &ExportReservation<R>,
 ) -> AppResult<ExportReportDto> {
     reservation.check(destination)?;
-    // A long sync runs with nobody at the computer; idle sleep part-way
-    // through can cut the stick off under the writes (#661, #662).
+    // rekordbox keeps the computer from idle sleep while it runs, exports
+    // included. [ASSUME] Idle sleep part-way through a long sync may also
+    // cut the stick off under the writes; that is not established.
     let _awake = rbl_devices::awake::KeepAwake::new(&format!("RBXport is writing to {}", destination.display()));
     let total = u32::try_from(selection.tracks.len()).unwrap_or(u32::MAX);
     let path = destination.to_string_lossy().into_owned();
@@ -2387,8 +2388,10 @@ fn sync_error(e: &rbl_export::ExportError) -> AppError {
         rbl_export::ExportError::Io(io) if media_failed(io) => AppError::new(ErrorKind::Internal, MEDIA_FAILED)
             .with_detail(format!("({io})")),
         // The export's own name for a read or write the stick failed (EIO,
-        // ENXIO, ENODEV). A stick that is gone afterwards is reported as
-        // unplugged by `disconnected_during_export`; one still mounted failed.
+        // ENXIO, ENODEV on Unix; not ready or not connected on Windows, never
+        // access denied or write protected). A stick that is gone afterwards
+        // is reported as unplugged by `disconnected_during_export`; one still
+        // mounted failed.
         rbl_export::ExportError::DeviceGone => AppError::new(ErrorKind::Internal, MEDIA_FAILED)
             .with_detail(format!("({e})")),
         _ => AppError::new(ErrorKind::Internal, e.to_string()),
@@ -5016,6 +5019,12 @@ mod tests {
         assert!(super::media_failed(&std::io::Error::from_raw_os_error(23)));
         assert!(super::media_failed(&std::io::Error::from_raw_os_error(1117)));
         assert!(!super::media_failed(&std::io::Error::from_raw_os_error(5)));
+        // A write-protected stick or a file another program holds keeps the
+        // operating system's own words, not "the drive may be failing".
+        for code in [5, 19, 32] {
+            let error = super::sync_error(&rbl_export::ExportError::Io(std::io::Error::from_raw_os_error(code)));
+            assert_ne!(error.message, super::MEDIA_FAILED, "os error {code}");
+        }
     }
 
     /// A track whose analysis folder is gone from disk is exported without
