@@ -2290,6 +2290,9 @@ fn write_export_registered<R: tauri::Runtime>(
     reservation: &ExportReservation<R>,
 ) -> AppResult<ExportReportDto> {
     reservation.check(destination)?;
+    // A long sync runs with nobody at the computer; idle sleep part-way
+    // through can cut the stick off under the writes (#661, #662).
+    let _awake = rbl_devices::awake::KeepAwake::new(&format!("RBXport is writing to {}", destination.display()));
     let total = u32::try_from(selection.tracks.len()).unwrap_or(u32::MAX);
     let path = destination.to_string_lossy().into_owned();
     let cancel = &reservation.cancel;
