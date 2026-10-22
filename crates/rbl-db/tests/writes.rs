@@ -7,7 +7,7 @@
 
 use rbl_db::fixture::{self, playlist_id, track_id, Shape};
 use rbl_db::write::{
-    FolderClash,
+    CueRevision, FolderClash,
     AnalysisRegistration, Changed, TrackField, Unsupported, Writer, ANALYSED_FULL, ATTRIBUTE_FOLDER,
     ATTRIBUTE_PLAYLIST, ROOT,
 };
@@ -1323,6 +1323,63 @@ fn a_hot_cue_moves_to_a_slot_and_the_cues_between_shift_over() {
     let before = kinds(&f);
     f.writer.move_hot_cue(&c, 5).unwrap();
     assert_eq!(kinds(&f), before);
+}
+
+/// #504: a hot cue moved across slots rewrites three rows; the revision
+/// holds those three and no other, and Undo/Redo write them back exactly
+/// under a new change counter, as any other edit.
+#[test]
+fn a_cue_revision_names_only_the_rows_the_command_changed_and_restores_them() {
+    let mut f = fixture();
+    let track = track_id(0);
+    let a = f.writer.add_cue(&track, 1, 1_000).unwrap();
+    let b = f.writer.add_cue(&track, 2, 2_000).unwrap();
+    let c = f.writer.add_cue(&track, 3, 3_000).unwrap();
+    let memory = f.writer.add_cue(&track, 0, 9_000).unwrap();
+    let other = f.writer.add_cue(&track_id(1), 1, 1_000).unwrap();
+    let kinds = |f: &Fixture| -> Vec<i64> {
+        [&a, &b, &c, &memory].iter().map(|id| f.one("SELECT Kind FROM djmdCue WHERE ID = ?1", &[*id])).collect()
+    };
+
+    let before = f.writer.cue_rows(&track).unwrap();
+    f.writer.move_hot_cue(&c, 1).unwrap();
+    let after = f.writer.cue_rows(&track).unwrap();
+    let revision = CueRevision::between(&track, &before, &after);
+    assert_eq!(kinds(&f), [2, 3, 1, 0]);
+
+    let usn: i64 = f.one("SELECT rb_local_usn FROM djmdCue WHERE ID = ?1", &[&c]);
+    assert_eq!(f.writer.undo_cue_revision(&revision).unwrap().rows, 3, "A, B and C; not the memory cue");
+    assert_eq!(kinds(&f), [1, 2, 3, 0]);
+    let undone: i64 = f.one("SELECT rb_local_usn FROM djmdCue WHERE ID = ?1", &[&c]);
+    assert!(undone > usn, "the restored rows carry a new change counter for rekordbox's sync");
+    f.writer.redo_cue_revision(&revision).unwrap();
+    assert_eq!(kinds(&f), [2, 3, 1, 0]);
+    let theirs: i64 = f.one("SELECT Kind FROM djmdCue WHERE ID = ?1", &[&other]);
+    assert_eq!(theirs, 1, "another track's cue is never named");
+}
+
+/// An add is undone as a soft delete of the same row, and a revision whose
+/// rows changed since is refused in the transaction that would write it.
+#[test]
+fn a_cue_revision_refuses_rows_changed_since() {
+    let mut f = fixture();
+    let track = track_id(0);
+    let before = f.writer.cue_rows(&track).unwrap();
+    let id = f.writer.add_cue(&track, 0, 1_000).unwrap();
+    let revision = CueRevision::between(&track, &before, &f.writer.cue_rows(&track).unwrap());
+    assert!(!revision.is_empty());
+
+    f.writer.undo_cue_revision(&revision).unwrap();
+    let deleted: i64 = f.one("SELECT rb_local_deleted FROM djmdCue WHERE ID = ?1", &[&id]);
+    assert_eq!(deleted, 1);
+    assert_eq!(f.writer.cue_revision_conflict(&revision, false).unwrap(), None);
+    f.writer.redo_cue_revision(&revision).unwrap();
+
+    f.writer.move_cue(&id, 5_000).unwrap();
+    assert!(f.writer.cue_revision_conflict(&revision, true).unwrap().is_some());
+    assert!(matches!(f.writer.undo_cue_revision(&revision), Err(DbError::WriteRefused(_))));
+    let position: i64 = f.one("SELECT InMsec FROM djmdCue WHERE ID = ?1", &[&id]);
+    assert_eq!(position, 5_000, "the newer move kept");
 }
 
 #[test]

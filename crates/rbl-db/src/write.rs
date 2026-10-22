@@ -633,6 +633,103 @@ impl TrackEdit {
     }
 }
 
+/// The `djmdCue` columns a cue edit can change, kept whole so Undo puts back
+/// exactly what was there. `rb_local_deleted` is one of them: a cue's add is
+/// undone by deleting it, and its delete by bringing the same row back.
+const CUE_STATE: [&str; 19] = [
+    "ContentID", "InMsec", "InFrame", "InMpegFrame", "InMpegAbs",
+    "OutMsec", "OutFrame", "OutMpegFrame", "OutMpegAbs",
+    "Kind", "Color", "ColorTableIndex", "ActiveLoop", "Comment", "BeatLoopSize",
+    "CueMicrosec", "InPointSeekInfo", "OutPointSeekInfo", "rb_local_deleted",
+];
+
+/// The hot cue slots in pad order: A to C are `Kind` 1 to 3, D onward 5 to 17.
+const HOT_CUE_SLOTS: [i64; 16] = [1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+
+/// One `djmdCue` row's [`CUE_STATE`] at one moment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CueRow {
+    id: String,
+    values: Vec<Value>,
+}
+
+impl CueRow {
+    fn column(&self, name: &str) -> Option<&Value> {
+        CUE_STATE.iter().position(|c| *c == name).and_then(|i| self.values.get(i))
+    }
+
+    fn live(&self) -> bool {
+        !matches!(self.column("rb_local_deleted"), Some(Value::Integer(1)))
+    }
+
+    fn kind(&self) -> Option<i64> {
+        match self.column("Kind") {
+            Some(Value::Integer(kind)) => Some(*kind),
+            _ => None,
+        }
+    }
+
+    /// The same row, soft-deleted: what an added cue was before it was added.
+    fn deleted(&self) -> Self {
+        let mut row = self.clone();
+        if let Some(slot) = CUE_STATE.iter().position(|c| *c == "rb_local_deleted").and_then(|i| row.values.get_mut(i)) {
+            *slot = Value::Integer(1);
+        }
+        row
+    }
+}
+
+/// The cue rows one cue command changed, each before and after it (#504):
+/// what Undo and Redo put back. A command that rewrites several rows — a hot
+/// cue moved across slots, a new Active Loop clearing the old one, a whole
+/// Convert Memory Cues to Hot Cues — is one revision. Rows the command did
+/// not change are not in it, so Undo leaves them as they are.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CueRevision {
+    content: String,
+    steps: Vec<(CueRow, CueRow)>,
+}
+
+impl CueRevision {
+    /// What changed between two reads of one track's cues
+    /// ([`Writer::cue_rows`]) taken around a command under the edit gate.
+    /// A row only in `after` is one the command added.
+    #[must_use]
+    pub fn between(content: &str, before: &[CueRow], after: &[CueRow]) -> Self {
+        let steps = after
+            .iter()
+            .filter_map(|now| {
+                let was = before.iter().find(|row| row.id == now.id).cloned().unwrap_or_else(|| now.deleted());
+                (was != *now).then(|| (was, now.clone()))
+            })
+            .collect();
+        Self { content: content.to_owned(), steps }
+    }
+
+    /// Folds a later command on the same track into this one, as one entry:
+    /// a row both touched keeps its first "before" and takes the last "after".
+    pub fn extend(&mut self, later: Self) {
+        for (before, after) in later.steps {
+            match self.steps.iter_mut().find(|(_, row)| row.id == after.id) {
+                Some(step) => step.1 = after,
+                None => self.steps.push((before, after)),
+            }
+        }
+        self.steps.retain(|(before, after)| before != after);
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
+    }
+
+    /// The track whose cues the revision changes.
+    #[must_use]
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+}
+
 impl PlaylistDeletion {
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -2618,6 +2715,65 @@ impl Writer {
             "UPDATE djmdCue SET Kind = ?1, rb_local_usn = ?2, updated_at = ?3 WHERE ID = ?4",
             params![if on { ACTIVE } else { 0 }, usn, stamp, cue],
         )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// Every cue row of a track, deleted ones included, for
+    /// [`CueRevision::between`]. Read through the writer's own connection so
+    /// a caller holding the edit gate sees exactly what it is about to change.
+    pub fn cue_rows(&self, content: &str) -> Result<Vec<CueRow>> {
+        cue_rows_where(self.library.connection(), "ContentID = ?1", content)
+    }
+
+    /// Why Undo (`undo`) or Redo of a cue revision would overwrite a change
+    /// made since, as a bare clause ("the track's cues have changed since"),
+    /// or `None` when it can go ahead (#504, #506's policy: refuse, keep the
+    /// newer change). Two things count: a row the revision names no longer
+    /// holds what the revision left there, or a hot cue slot (or the Active
+    /// Loop) it would fill is held by another cue now.
+    pub fn cue_revision_conflict(&self, revision: &CueRevision, undo: bool) -> Result<Option<String>> {
+        cue_conflict(self.library.connection(), revision, undo)
+    }
+
+    /// Puts a cue revision's rows back as they were before it.
+    pub fn undo_cue_revision(&mut self, revision: &CueRevision) -> Result<Changed> {
+        self.restore_cue_rows(revision, true)
+    }
+
+    /// Writes a cue revision's rows again after an Undo.
+    pub fn redo_cue_revision(&mut self, revision: &CueRevision) -> Result<Changed> {
+        self.restore_cue_rows(revision, false)
+    }
+
+    fn restore_cue_rows(&mut self, revision: &CueRevision, undo: bool) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Checked again inside the transaction that writes, so nothing can
+        // land between the check and the write.
+        if let Some(conflict) = cue_conflict(&tx, revision, undo)? {
+            return Err(DbError::WriteRefused(conflict));
+        }
+        let usn = next_usn(&tx)?;
+        let assignments: Vec<String> = CUE_STATE.iter().enumerate().map(|(i, c)| format!("{c} = ?{}", i + 1)).collect();
+        let sql = format!(
+            "UPDATE djmdCue SET {}, rb_local_usn = ?{}, updated_at = ?{} WHERE ID = ?{}",
+            assignments.join(", "),
+            CUE_STATE.len() + 1,
+            CUE_STATE.len() + 2,
+            CUE_STATE.len() + 3,
+        );
+        let mut rows = 0;
+        let steps: Box<dyn Iterator<Item = &(CueRow, CueRow)>> =
+            if undo { Box::new(revision.steps.iter().rev()) } else { Box::new(revision.steps.iter()) };
+        for (before, after) in steps {
+            let target = if undo { before } else { after };
+            let mut values = target.values.clone();
+            values.extend([Value::Integer(usn), Value::Text(stamp.clone()), Value::Text(target.id.clone())]);
+            rows += tx.execute(&sql, rusqlite::params_from_iter(values))?;
+        }
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })
@@ -5034,6 +5190,42 @@ fn write_artwork_sizes(target: &Path, bytes: &[u8]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn cue_rows_where(conn: &Connection, filter: &str, value: &str) -> Result<Vec<CueRow>> {
+    let mut stmt = conn.prepare(&format!("SELECT ID, {} FROM djmdCue WHERE {filter} ORDER BY ID", CUE_STATE.join(", ")))?;
+    let rows = stmt.query_map([value], |r| {
+        let values = (1..=CUE_STATE.len()).map(|i| r.get::<_, Value>(i)).collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(CueRow { id: r.get(0)?, values })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// See [`Writer::cue_revision_conflict`].
+fn cue_conflict(conn: &Connection, revision: &CueRevision, undo: bool) -> Result<Option<String>> {
+    for (before, after) in &revision.steps {
+        let expected = if undo { after } else { before };
+        let current = cue_rows_where(conn, "ID = ?1", &expected.id)?;
+        if current.first() != Some(expected) {
+            return Ok(Some("the track's cues have changed since".to_owned()));
+        }
+    }
+    // A slot the revision would fill, held now by a cue it does not name:
+    // a hot cue set on that pad since, or another loop made the Active Loop.
+    let named: Vec<&str> = revision.steps.iter().map(|(row, _)| row.id.as_str()).collect();
+    let live = cue_rows_where(conn, "ContentID = ?1 AND rb_local_deleted = 0", &revision.content)?;
+    for (before, after) in &revision.steps {
+        let target = if undo { before } else { after };
+        let Some(kind) = target.kind().filter(|kind| *kind > 0 && target.live()) else { continue };
+        let taken = live.iter().any(|row| !named.contains(&row.id.as_str()) && row.kind() == Some(kind));
+        if taken {
+            return Ok(Some(match HOT_CUE_SLOTS.iter().position(|slot| *slot == kind) {
+                Some(slot) => format!("Hot Cue {} has been set since", char::from(b'A' + u8::try_from(slot).unwrap_or(0))),
+                None => "another loop has become the Active Loop since".to_owned(),
+            }));
+        }
+    }
+    Ok(None)
 }
 
 pub(crate) fn next_usn(conn: &Connection) -> Result<i64> {
