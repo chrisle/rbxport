@@ -73,6 +73,13 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({ analysis: { writeKeyTag: true } }).analysis.writeKeyTag).toBe(true);
   });
 
+  it("leaves Add My Tag to the Comments off until it is switched on", () => {
+    // rekordbox's `writeMytag` defaults to off (#605).
+    expect(DEFAULT_PREFERENCES.advanced.myTagComments).toBe(false);
+    expect(sanitisePreferences({ advanced: { myTagComments: "yes" } }).advanced.myTagComments).toBe(false);
+    expect(sanitisePreferences({ advanced: { myTagComments: true } }).advanced.myTagComments).toBe(true);
+  });
+
   it("analyses the key unless Analyze key is switched off", () => {
     expect(DEFAULT_PREFERENCES.analysis.detectKey).toBe(true);
     expect(sanitisePreferences({ analysis: { detectKey: "no" } }).analysis.detectKey).toBe(true);

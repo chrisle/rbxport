@@ -1778,5 +1778,8 @@
   "Copied {count} music files to {folder}.": "已将 {count} 个音乐文件复制到 {folder}。",
   "That folder could not be found.": "找不到该文件夹。",
   "Sorted {name}.": "Sorted {name}.",
-  "Playlist cannot be edited or deleted while searching.": "搜索时无法编辑或删除播放列表。"
+  "Playlist cannot be edited or deleted while searching.": "搜索时无法编辑或删除播放列表。",
+  "Add \"My Tag\" to the \"Comments\"": "将“我的标签”添加到“备注”中",
+  "This operation can take few minutes.": "此操作可能会花点时间。",
+  "Please wait for a while": "请稍等"
 }

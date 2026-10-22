@@ -26,6 +26,12 @@
  *   (`deleteItem`, no confirmation). A category heading has no menu: its
  *   categories cannot be deleted.
  *
+ * - With Preferences > Advanced > Browse > Add "My Tag" to the "Comments"
+ *   on, a tick, a rename and a delete also rewrite each selected track's
+ *   comment with its tags in a slash-star block (#605,
+ *   `BrowseListViewer::updateCommentWithMyTag`): only the selected tracks,
+ *   so a rename or a delete leaves the other tracks' comments as they were.
+ *
  * Not rekordbox's: a file the Explorer lists that is not in the collection
  * leaves the boxes greyed here, where rekordbox would import it first
  * (`importCheckBeforeAddMyTag`); every other edit in this app refuses such
@@ -38,7 +44,7 @@ import { getBackend } from "@/ipc/client";
 import type { Backend, TrackLookups } from "@/ipc/types";
 import { isLooseId } from "@/lib/explorer";
 import { MY_TAG_LIMIT } from "@/lib/myTags";
-import { useTooltip } from "@/store/usePreferences";
+import { usePreferences, useTooltip } from "@/store/usePreferences";
 import styles from "./MyTagPanel.module.css";
 
 /** rekordbox cuts a typed name to this many characters (`labelTextChanged`). */
@@ -61,6 +67,7 @@ export interface MyTagPanelProps {
 
 export function MyTagPanel({ className, selection, readOnly, libraryGeneration, onEdit }: MyTagPanelProps) {
   const tip = useTooltip();
+  const myTagComments = usePreferences().advanced.myTagComments;
   const [categories, setCategories] = useState<Categories>([]);
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   /** The id whose name is open for editing. */
@@ -101,9 +108,9 @@ export function MyTagPanel({ className, selection, readOnly, libraryGeneration, 
         if (on) next.add(tag); else next.delete(tag);
         return next;
       });
-      void onEdit(on ? "My Tag added." : "My Tag removed.", (b) => b.edits.putMyTag(tracks, tag, on));
+      void onEdit(on ? "My Tag added." : "My Tag removed.", (b) => b.edits.putMyTag(tracks, tag, on, myTagComments));
     },
-    [tickable, tracks, onEdit],
+    [tickable, tracks, onEdit, myTagComments],
   );
 
   const add = useCallback(
@@ -122,14 +129,16 @@ export function MyTagPanel({ className, selection, readOnly, libraryGeneration, 
       setEditing(null);
       // An emptied box, or the name it had, writes nothing.
       if (name === "" || name === current) return;
-      void onEdit("My Tag renamed.", (b) => b.edits.renameMyTag(id, name));
+      void onEdit("My Tag renamed.", (b) => b.edits.renameMyTag(id, name, myTagComments ? tracks : undefined));
     },
-    [onEdit],
+    [onEdit, myTagComments, tracks],
   );
 
   const remove = useCallback(
-    (id: string) => { void onEdit("My Tag deleted.", (b) => b.edits.deleteMyTag(id)); },
-    [onEdit],
+    (id: string) => {
+      void onEdit("My Tag deleted.", (b) => b.edits.deleteMyTag(id, myTagComments ? tracks : undefined));
+    },
+    [onEdit, myTagComments, tracks],
   );
 
   const addButton = (category: Categories[number]) => {

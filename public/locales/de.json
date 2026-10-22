@@ -1772,5 +1772,8 @@
   "Copied {count} music files to {folder}.": "{count} Musikdateien nach {folder} kopiert.",
   "That folder could not be found.": "Dieser Ordner konnte nicht gefunden werden.",
   "Sorted {name}.": "Sorted {name}.",
-  "Playlist cannot be edited or deleted while searching.": "Die Wiedergabeliste kann beim Suchen nicht bearbeitet oder gelöscht werden."
+  "Playlist cannot be edited or deleted while searching.": "Die Wiedergabeliste kann beim Suchen nicht bearbeitet oder gelöscht werden.",
+  "Add \"My Tag\" to the \"Comments\"": "Den \"Kommentaren\" \"My Tag\" hinzufügen",
+  "This operation can take few minutes.": "Dieser Vorgang kann längere Zeit dauern.",
+  "Please wait for a while": "Bitte warten"
 }

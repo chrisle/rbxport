@@ -279,6 +279,14 @@ export interface AdvancedPreferences {
   relocateVideo: boolean;
   relocateDesktop: boolean;
   relocateUserFolders: boolean;
+  /**
+   * Browse › My Tag › Add "My Tag" to the "Comments" (#605): a track's My
+   * Tags are written after its comment in a slash-star block
+   * (`Comment /* Peak / Warm-up`, then a closing star-slash), as rekordbox's
+   * `writeMytag` does. Off by default, as it is in rekordbox. The switch
+   * rewrites every tagged track's comment before it changes.
+   */
+  myTagComments: boolean;
   /** Library Protection: refuse every edit, whatever rekordbox is doing. */
   protectLibrary: boolean;
   /** Edit Library › Double-click to edit; off is a click on a selected row. */
@@ -413,6 +421,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     relocateVideo: true,
     relocateDesktop: true,
     relocateUserFolders: false,
+    myTagComments: false,
     protectLibrary: true,
     doubleClickToEdit: false,
     duplicateTracks: "ask",
@@ -608,6 +617,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       // that user's writable library; only a truly empty store gets defaults.
       protectLibrary: bool(advanced.protectLibrary, hasStoredSection ? false : d.advanced.protectLibrary),
       doubleClickToEdit: bool(advanced.doubleClickToEdit, d.advanced.doubleClickToEdit),
+      myTagComments: bool(advanced.myTagComments, d.advanced.myTagComments),
       duplicateTracks: oneOf(advanced.duplicateTracks, DUPLICATE_TRACKS, d.advanced.duplicateTracks),
       deviceImportMissing: oneOf(advanced.deviceImportMissing, DEVICE_IMPORT_MISSING, d.advanced.deviceImportMissing),
       folderDropClash: oneOf(advanced.folderDropClash, FOLDER_DROP_CLASH, d.advanced.folderDropClash),

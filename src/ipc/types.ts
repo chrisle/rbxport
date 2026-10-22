@@ -2002,13 +2002,23 @@ export interface Edits {
    */
   /** `writeKeyTag`: an edited key also goes into each track's file. */
   setTrackField(tracks: readonly string[], field: TrackField, value: string, options?: { writeKeyTag?: boolean }): Promise<EditHistoryState>;
-  /** Sets the My Tags on a track to exactly these ids. */
-  setMyTags(track: string, tags: string[]): Promise<EditHistoryState>;
+  /**
+   * Sets the My Tags on a track to exactly these ids. `comments` (Add "My
+   * Tag" to the "Comments" on, #605) rewrites its comment in the same step.
+   */
+  setMyTags(track: string, tags: string[], comments?: boolean): Promise<EditHistoryState>;
   /**
    * A tick in the My Tag panel: `tag` goes on every one of `tracks` (`on`)
-   * or comes off them, as one step of history.
+   * or comes off them, as one step of history. `comments` as for `setMyTags`,
+   * for every one of `tracks`.
    */
-  putMyTag(tracks: readonly string[], tag: string, on: boolean): Promise<EditHistoryState>;
+  putMyTag(tracks: readonly string[], tag: string, on: boolean, comments?: boolean): Promise<EditHistoryState>;
+  /**
+   * Add "My Tag" to the "Comments" turned on or off (#605): every track with
+   * a My Tag gets its tags written after its comment, or taken off, as one
+   * step of history.
+   */
+  writeMyTagComments(on: boolean): Promise<EditHistoryState>;
   /**
    * Adding My Tag: a new tag at the end of a category, named "My Comment"
    * or the first "My Comment (n)" the category lacks. Refused once the
@@ -2019,9 +2029,13 @@ export interface Edits {
    * Renames a My Tag or a category. Refused with "An item with the same
    * name already exists!" when another under the same parent has it.
    */
-  renameMyTag(id: string, name: string): Promise<number>;
-  /** Deletes a My Tag and takes it off every track. Not undoable; categories are refused. */
-  deleteMyTag(id: string): Promise<number>;
+  renameMyTag(id: string, name: string, comments?: readonly string[]): Promise<number>;
+  /**
+   * Deletes a My Tag and takes it off every track. Not undoable; categories
+   * are refused. `comments`, for both: the selected tracks whose comments
+   * Add "My Tag" to the "Comments" rewrites (#605).
+   */
+  deleteMyTag(id: string, comments?: readonly string[]): Promise<number>;
   /** Add Artwork: the image is filed in the share tree and the track points at it. */
   addArtwork(tracks: readonly string[], image: string): Promise<EditHistoryState>;
   /** Add Artwork on a playlist or folder, from the tree menu. */

@@ -1769,5 +1769,8 @@
   "Copied {count} music files to {folder}.": "Kopierede {count} musikfiler til {folder}.",
   "That folder could not be found.": "Den mappe kunne ikke findes.",
   "Sorted {name}.": "Sorted {name}.",
-  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching."
+  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
+  "Add \"My Tag\" to the \"Comments\"": "Tilføj \"Mit mærke\" til \"Kommentarer\"",
+  "This operation can take few minutes.": "Denne operation kan vare længe.",
+  "Please wait for a while": "Vent venligst"
 }

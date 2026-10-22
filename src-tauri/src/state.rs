@@ -115,8 +115,14 @@ pub(crate) enum LibraryEdit {
         files: Vec<crate::key_tag::KeyTagWrite>,
     },
     /// One My Tag set per track: the Info tab's toggles edit one track,
-    /// a tick in the My Tag panel every selected track.
-    TrackTags(Vec<rbl_db::write::TrackTagEdit>),
+    /// a tick in the My Tag panel every selected track. `comments` are the
+    /// comments Add "My Tag" to the "Comments" rewrote with it (#605), put
+    /// back and written again with the tags. Turning that setting on or off
+    /// is an entry with comments and no tags.
+    TrackTags {
+        tags: Vec<rbl_db::write::TrackTagEdit>,
+        comments: Vec<rbl_db::write::TrackEdit>,
+    },
     /// The categories, or one category's tags, put in a new order (#584).
     MyTagOrder(rbl_db::write::MyTagOrder),
     /// One cue or loop command on one track (#504): an add, move, slot,
@@ -148,7 +154,10 @@ impl LibraryEdit {
             Self::Track(edits) | Self::KeyEdit { tracks: edits, .. } => {
                 edits.is_empty() || edits.iter().all(rbl_db::write::TrackEdit::is_empty)
             }
-            Self::TrackTags(edits) => edits.iter().all(rbl_db::write::TrackTagEdit::is_empty),
+            Self::TrackTags { tags, comments } => {
+                tags.iter().all(rbl_db::write::TrackTagEdit::is_empty)
+                    && comments.iter().all(rbl_db::write::TrackEdit::is_empty)
+            }
             Self::MyTagOrder(edit) => edit.is_empty(),
             Self::RenamePlaylist(_) | Self::MovePlaylist(_) | Self::ReplacePlaylist(_) | Self::CreatePlaylist(_) => false,
             Self::SortPlaylists(edit) => edit.is_empty(),

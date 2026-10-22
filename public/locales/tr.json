@@ -1774,5 +1774,8 @@
   "Copied {count} music files to {folder}.": "{count} müzik dosyası {folder} klasörüne kopyalandı.",
   "That folder could not be found.": "Bu klasör bulunamadı.",
   "Sorted {name}.": "Sorted {name}.",
-  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching."
+  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
+  "Add \"My Tag\" to the \"Comments\"": "\"Etiketim\"i \"Açıklamalar\"a ekle",
+  "This operation can take few minutes.": "Bu işlem uzun zaman gerektirebilir.",
+  "Please wait for a while": "Lütfen bekleyin"
 }

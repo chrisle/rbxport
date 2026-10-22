@@ -1354,6 +1354,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         apply(after);
         return { undo: () => apply(before), redo: () => apply(after) };
       }),
+    // The mock keeps no comment text for My Tags (#605); the run is still a
+    // step of history, as the real backend's is.
+    writeMyTagComments: () => recordEdit({ label: "Track Edit", undo: () => {}, redo: () => {} }),
     createMyTag: async (category) => {
       const into = myTagCategories.find((c) => c.id === category);
       if (!into) throw new Error(`no My Tag category ${category}`);

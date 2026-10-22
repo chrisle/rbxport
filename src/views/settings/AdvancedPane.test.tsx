@@ -42,8 +42,14 @@ function mount(protectLibrary = true) {
   ));
 }
 
+function switchLabelled(label: string) {
+  return [...host.querySelectorAll<HTMLLabelElement>("label")]
+    .find((row) => row.textContent === label)
+    ?.querySelector<HTMLInputElement>('input[role="switch"]') ?? null;
+}
+
 async function toggleProtection() {
-  const toggle = host.querySelector<HTMLInputElement>('input[role="switch"]');
+  const toggle = switchLabelled("Protect library edit.");
   if (!toggle) throw new Error("Library Protection toggle missing");
   await act(async () => { toggle.click(); await Promise.resolve(); await Promise.resolve(); });
 }
@@ -113,6 +119,59 @@ it("offers the four same-name folder choices, Import as a copy first and chosen 
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
   expect(update).toHaveBeenCalledWith("advanced", { folderDropClash: "ask" });
+});
+
+describe("My Tag", () => {
+  const LABEL = 'Add "My Tag" to the "Comments"';
+
+  function mountMyTag(backend: Partial<Backend>, myTagComments = false) {
+    __setBackend({ listBackups, ...backend } as unknown as Backend);
+    const preferences = { ...DEFAULT_PREFERENCES, advanced: { ...DEFAULT_PREFERENCES.advanced, myTagComments } };
+    act(() => root.render(
+      <PreferencesProvider value={{ preferences, update, reset: vi.fn() }}>
+        <AdvancedPane tab="browse" summary={null} />
+      </PreferencesProvider>,
+    ));
+  }
+
+  async function flip() {
+    const toggle = switchLabelled(LABEL);
+    if (!toggle) throw new Error("My Tag toggle missing");
+    await act(async () => { toggle.click(); for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  }
+
+  it("is the first section of the Browse tab, off by default, as in rekordbox (#605)", () => {
+    mountMyTag({});
+    expect(host.querySelector("section h3")?.textContent).toBe("My Tag");
+    expect(switchLabelled(LABEL)?.checked).toBe(false);
+  });
+
+  it("asks first, and writes nothing and keeps the setting on Cancel", async () => {
+    const confirm = vi.fn().mockResolvedValue(false);
+    const writeMyTagComments = vi.fn();
+    mountMyTag({ confirm, edits: { writeMyTagComments } as unknown as Backend["edits"] });
+    await flip();
+    expect(confirm).toHaveBeenCalledWith("This operation can take few minutes.", { yes: "OK", no: "Cancel" });
+    expect(writeMyTagComments).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("writes every tagged track's comment on OK, then stores the setting", async () => {
+    const writeMyTagComments = vi.fn().mockResolvedValue({ generation: 2, canUndo: true, canRedo: false });
+    mountMyTag({ confirm: vi.fn().mockResolvedValue(true), edits: { writeMyTagComments } as unknown as Backend["edits"] });
+    await flip();
+    expect(writeMyTagComments).toHaveBeenCalledWith(true);
+    expect(update).toHaveBeenCalledWith("advanced", { myTagComments: true });
+  });
+
+  it("takes the tags off on the way back, and keeps the setting when the library refuses", async () => {
+    const writeMyTagComments = vi.fn().mockRejectedValue({ kind: "readOnly", message: "Library Protection is on." });
+    mountMyTag({ confirm: vi.fn().mockResolvedValue(true), edits: { writeMyTagComments } as unknown as Backend["edits"] }, true);
+    await flip();
+    expect(writeMyTagComments).toHaveBeenCalledWith(false);
+    expect(update).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Library Protection is on.");
+  });
 });
 
 describe("Database management", () => {

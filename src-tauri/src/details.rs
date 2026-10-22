@@ -298,17 +298,69 @@ pub async fn track_lookups(state: State<'_, Arc<AppState>>) -> AppResult<TrackLo
     .await
 }
 
-/// Sets the My Tags on a track to exactly the ids given.
+/// Sets the My Tags on a track to exactly the ids given. With `comments`
+/// (Add "My Tag" to the "Comments" on, #605) the track's comment is
+/// rewritten with them, in the same history entry.
 #[tauri::command]
 pub async fn set_my_tags<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
     tags: Vec<String>,
+    comments: Option<bool>,
 ) -> AppResult<crate::dto::EditHistoryDto> {
     recorded_edit(app, state, "set_my_tags", Touched::Tracks, "Track Edit", move |w| {
-        w.set_my_tags_with_undo(&track, &tags).map(|(_, edit)| LibraryEdit::TrackTags(vec![edit]))
+        let (_, edit) = w.set_my_tags_with_undo(&track, &tags)?;
+        let tags = vec![edit];
+        let comments = if comments.unwrap_or(false) {
+            refresh_comments(w, std::slice::from_ref(&track), &tags)?
+        } else {
+            Vec::new()
+        };
+        Ok(LibraryEdit::TrackTags { tags, comments })
     }).await
+}
+
+/// Add "My Tag" to the "Comments" (#605): rewrites the comment of each of
+/// `tracks` with its My Tags, as rekordbox's `BrowseListViewer::
+/// updateCommentWithMyTag` does for every selected track after a My Tag
+/// edit, whether or not that track's own tags changed. A track no longer in
+/// the collection is passed over. On a failure the comments already
+/// written and `tags` are put back, and the error returned.
+fn refresh_comments(
+    w: &mut rbl_db::write::Writer,
+    tracks: &[String],
+    tags: &[rbl_db::write::TrackTagEdit],
+) -> Result<Vec<rbl_db::write::TrackEdit>, rbl_db::DbError> {
+    let mut comments: Vec<rbl_db::write::TrackEdit> = Vec::with_capacity(tracks.len());
+    for track in tracks {
+        let step = match w.has_track(track) {
+            Ok(false) => continue,
+            Ok(true) => w.refresh_my_tag_comment_with_undo(track),
+            Err(error) => Err(error),
+        };
+        match step {
+            Ok((_, edit)) => {
+                if !edit.is_empty() {
+                    comments.push(edit);
+                }
+            }
+            Err(error) => {
+                for applied in comments.iter().rev() {
+                    if let Err(undo) = w.undo_track_edit(applied) {
+                        tracing::error!(%undo, "a My Tag comment could not be put back after a failure");
+                    }
+                }
+                for applied in tags.iter().rev().filter(|edit| !edit.is_empty()) {
+                    if let Err(undo) = w.undo_tag_edit(applied) {
+                        tracing::error!(%undo, "a My Tag edit could not be put back after a failure");
+                    }
+                }
+                return Err(error);
+            }
+        }
+    }
+    Ok(comments)
 }
 
 /// The My Tags every one of `tracks` has: the ticks of the My Tag panel.
@@ -328,6 +380,8 @@ pub async fn selection_my_tags(
 
 /// A tick in the My Tag panel: `tag` goes on each of `tracks`, or comes
 /// off, as one step of history. Every track or none, as [`each_track`].
+/// With `comments` (Add "My Tag" to the "Comments" on, #605) each track's
+/// comment is rewritten too, in the same step.
 #[tauri::command]
 pub async fn put_my_tag<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -335,6 +389,7 @@ pub async fn put_my_tag<R: tauri::Runtime>(
     tracks: Vec<String>,
     tag: String,
     on: bool,
+    comments: Option<bool>,
 ) -> AppResult<crate::dto::EditHistoryDto> {
     recorded_edit(app, state, "put_my_tag", Touched::Tracks, "Track Edit", move |w| {
         let mut edits: Vec<rbl_db::write::TrackTagEdit> = Vec::with_capacity(tracks.len());
@@ -360,7 +415,25 @@ pub async fn put_my_tag<R: tauri::Runtime>(
                 }
             }
         }
-        Ok(LibraryEdit::TrackTags(edits))
+        let comments = if comments.unwrap_or(false) { refresh_comments(w, &tracks, &edits)? } else { Vec::new() };
+        Ok(LibraryEdit::TrackTags { tags: edits, comments })
+    }).await
+}
+
+/// Preferences > Advanced > Browse > My Tag > Add "My Tag" to the
+/// "Comments" turned on (`on`) or off (#605): every track with a My Tag has
+/// the tags written after its comment, or taken off, as one step of
+/// history. The window asks first, as rekordbox does ("This operation can
+/// take few minutes."), and changes the setting only once this succeeds.
+#[tauri::command]
+pub async fn write_my_tag_comments<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    on: bool,
+) -> AppResult<crate::dto::EditHistoryDto> {
+    recorded_edit(app, state, "write_my_tag_comments", Touched::Tracks, "Track Edit", move |w| {
+        let (_, comments) = w.write_my_tag_comments_with_undo(on)?;
+        Ok(LibraryEdit::TrackTags { tags: Vec::new(), comments })
     }).await
 }
 
@@ -398,28 +471,52 @@ pub async fn create_my_tag<R: tauri::Runtime>(
 
 /// Renames a My Tag or a category. The My Tag column shows names, so the
 /// track list is read again.
+///
+/// `comments` are the selected tracks while Add "My Tag" to the "Comments"
+/// is on (#605): their comments are rewritten with the new name, as
+/// rekordbox's `didChangeMyTagName` refreshes only the selected tracks.
+/// Not recorded, as the rename is not.
 #[tauri::command]
 pub async fn rename_my_tag<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     id: String,
     name: String,
+    comments: Option<Vec<String>>,
 ) -> AppResult<u32> {
-    edit(app, state, "rename_my_tag", Touched::Tracks, move |w| w.rename_my_tag(&id, &name).map(|_| ())).await
+    edit(app, state, "rename_my_tag", Touched::Tracks, move |w| {
+        w.rename_my_tag(&id, &name)?;
+        rewrite_comments(w, comments.as_deref().unwrap_or_default())
+    }).await
 }
 
 /// Deletes a My Tag and takes it off every track. Not undoable, and the
 /// history before it goes: an older tick could name the tag it removes.
+/// `comments` as for [`rename_my_tag`]: the selected tracks' comments lose
+/// the tag (rekordbox's `didDeleteMyTag`); other tracks keep theirs.
 #[tauri::command]
 pub async fn delete_my_tag<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     id: String,
+    comments: Option<Vec<String>>,
 ) -> AppResult<u32> {
     crate::commands::permanent_edit(app, state, "delete_my_tag", Touched::Tracks, move |w| {
-        w.delete_my_tag(&id).map(|_| ())
+        w.delete_my_tag(&id)?;
+        rewrite_comments(w, comments.as_deref().unwrap_or_default())
     })
     .await
+}
+
+/// The comment rewrite after a rename or a delete, which no history entry
+/// holds: each track still in the collection, written as it comes.
+fn rewrite_comments(w: &mut rbl_db::write::Writer, tracks: &[String]) -> Result<(), rbl_db::DbError> {
+    for track in tracks {
+        if w.has_track(track)? {
+            w.refresh_my_tag_comment_with_undo(track)?;
+        }
+    }
+    Ok(())
 }
 
 /// Add Artwork: the image at `image` is filed in the share tree and each of

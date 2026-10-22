@@ -78,7 +78,7 @@ pub async fn update<R: Runtime>(
         bridge.refuse_if_protected().map_err(|error| rbl_db::DbError::WriteRefused(error.message))?;
         let (_, edit) = writer.update_my_tags_with_undo(&track, &tags, operation)?;
         result.store(!edit.is_empty(), Ordering::SeqCst);
-        Ok(LibraryEdit::TrackTags(vec![edit]))
+        Ok(LibraryEdit::TrackTags { tags: vec![edit], comments: Vec::new() })
     }).await?;
     Ok(ScriptValue::Bool(changed.load(Ordering::SeqCst)))
 }

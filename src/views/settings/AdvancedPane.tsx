@@ -4,13 +4,13 @@
  *
  * Database holds the library's own facts and rekordbox's Database management
  * (the one place rekordbox chooses which library it works on). Browse holds
- * Library Protection, Edit Library and the Playback time setting. Others holds BEAT/BPM SYNC, the
- * quantize beat value and play history.
+ * My Tag, Library Protection, Edit Library and the Playback time setting.
+ * Others holds BEAT/BPM SYNC, the quantize beat value and play history.
  *
  * Not here: Auto Relocate Search Folders and Duplicates (hidden; Auto
  * Relocate searches the stored folders, Music, Movies and Desktop by
  * default), iTunes and rekordbox xml (neither is read), Auto Export and
- * Database management's Move Database (neither is built), My Tag, colour names, display
+ * Database management's Move Database (neither is built), colour names, display
  * speed, the long-press menu and the Tag List (none exist here), the
  * export name (link export is not built), hot cue GATE, loop export,
  * Recordings, and every streaming service.
@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { DatabaseDrive, LibrarySummary } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
+import { errorMessage } from "@/lib/errorMessage";
 import { PLAYBACK_TIME, QUANTIZE_BEATS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
@@ -42,6 +43,8 @@ export function AdvancedPane({ tab, summary }: {
   const advanced = preferences.advanced;
   const set = (patch: Partial<typeof advanced>) => update("advanced", patch);
   const [checkingBackup, setCheckingBackup] = useState(false);
+  const [writingMyTags, setWritingMyTags] = useState(false);
+  const [myTagFailure, setMyTagFailure] = useState<string | null>(null);
   const [unlockWarning, setUnlockWarning] = useState(false);
   const warningDialog = useRef<HTMLElement>(null);
 
@@ -68,9 +71,45 @@ export function AdvancedPane({ tab, summary }: {
     }
   };
 
+  /**
+   * rekordbox's `DetailMyTag::buttonClicked` (7.2.x arm64, static, #605):
+   * "This operation can take few minutes." with OK and Cancel; Cancel
+   * leaves the switch as it was, OK writes the tags into every tagged
+   * track's comment, or takes them off, under "Please wait for a while".
+   * rekordbox stores the setting before it writes; here it is stored once
+   * the write succeeds, since a protected library refuses it.
+   */
+  const setMyTagComments = async (on: boolean) => {
+    const backend = await getBackend();
+    const sure = await backend.confirm(t("This operation can take few minutes."), { yes: t("OK"), no: t("Cancel") });
+    if (!sure) return;
+    setWritingMyTags(true);
+    setMyTagFailure(null);
+    try {
+      await backend.edits.writeMyTagComments(on);
+      set({ myTagComments: on });
+    } catch (error) {
+      setMyTagFailure(errorMessage(error));
+    } finally {
+      setWritingMyTags(false);
+    }
+  };
+
   if (tab === "browse") {
     return (
       <>
+        {/* First on rekordbox's Browse tab (`setPageName`: My Tag, Color,
+            ..., Library Protection, Edit Library, Playback time). */}
+        <Section title="My Tag">
+          <Toggle
+            label={'Add "My Tag" to the "Comments"'}
+            checked={advanced.myTagComments}
+            disabled={writingMyTags}
+            onChange={(on) => { void setMyTagComments(on); }}
+          />
+          {writingMyTags ? <Note>{t("Please wait for a while")}</Note> : null}
+          {myTagFailure ? <Note failed>{myTagFailure}</Note> : null}
+        </Section>
         <Section title="Library Protection">
           <Toggle
             label="Protect library edit."

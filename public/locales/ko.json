@@ -1773,5 +1773,8 @@
   "Copied {count} music files to {folder}.": "음악 파일 {count}개를 {folder}에 복사했습니다.",
   "That folder could not be found.": "해당 폴더를 찾을 수 없습니다.",
   "Sorted {name}.": "Sorted {name}.",
-  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching."
+  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
+  "Add \"My Tag\" to the \"Comments\"": "\"내 태그\"를 \"커멘트\"에 추가합니다",
+  "This operation can take few minutes.": "본 조작은 오랜 시간을 소요합니다.",
+  "Please wait for a while": "잠시만 기다리십시오"
 }

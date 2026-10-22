@@ -379,7 +379,11 @@ function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFo
   const { ids, text } = view;
   // Key Analysis > "Write the value to the ID3 tag": an edited key also goes
   // into each file, as rekordbox's `modifyTrack` writes it.
-  const writeKeyTag = usePreferences().analysis.writeKeyTag;
+  const preferences = usePreferences();
+  const writeKeyTag = preferences.analysis.writeKeyTag;
+  // Add "My Tag" to the "Comments" (#605): a toggle here rewrites the
+  // track's comment as a tick in the My Tag panel does.
+  const myTagComments = preferences.advanced.myTagComments;
 
   const commit = useCallback(
     (field: TrackField, value: string) => {
@@ -521,7 +525,7 @@ function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFo
                           const next = on ? current.filter((t) => t !== tag.id) : [...current, tag.id];
                           const [id] = ids;
                           if (id === undefined) return;
-                          void onEdit(`My Tag ${on ? "removed" : "added"}.`, (b) => b.edits.setMyTags(id, next));
+                          void onEdit(`My Tag ${on ? "removed" : "added"}.`, (b) => b.edits.setMyTags(id, next, myTagComments));
                         }}
                       >
                         {tag.name}

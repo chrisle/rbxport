@@ -1775,5 +1775,8 @@
   "Copied {count} music files to {folder}.": "{count} fichiers musicaux copiés dans {folder}.",
   "That folder could not be found.": "Ce dossier est introuvable.",
   "Sorted {name}.": "Sorted {name}.",
-  "Playlist cannot be edited or deleted while searching.": "Impossible de modifier ou de supprimer la liste de lecture pendant une recherche."
+  "Playlist cannot be edited or deleted while searching.": "Impossible de modifier ou de supprimer la liste de lecture pendant une recherche.",
+  "Add \"My Tag\" to the \"Comments\"": "Ajouter « Mon signet » aux « Commentaires »",
+  "This operation can take few minutes.": "Cette opération peut demander du temps.",
+  "Please wait for a while": "Veuillez patienter"
 }

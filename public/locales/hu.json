@@ -1773,5 +1773,8 @@
   "Copied {count} music files to {folder}.": "{count} zenefájl átmásolva ide: {folder}.",
   "That folder could not be found.": "A mappa nem található.",
   "Sorted {name}.": "Sorted {name}.",
-  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching."
+  "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
+  "Add \"My Tag\" to the \"Comments\"": "„Saját címke\" hozzáadása a „Megjegyzések\"-hez",
+  "This operation can take few minutes.": "Ez a műveletet hosszú időt vehet igénybe.",
+  "Please wait for a while": "Kérem, várjon"
 }

@@ -859,7 +859,7 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
         // The index's My Tag list (filters, panel) is read in a full load.
-        LibraryEdit::Track(_) | LibraryEdit::KeyEdit { .. } | LibraryEdit::TrackTags(_) | LibraryEdit::Relocate(_)
+        LibraryEdit::Track(_) | LibraryEdit::KeyEdit { .. } | LibraryEdit::TrackTags { .. } | LibraryEdit::Relocate(_)
         | LibraryEdit::MyTagOrder(_) => Touched::Tracks,
         LibraryEdit::Cues(revision) => Touched::Cues(revision.content().to_owned()),
         LibraryEdit::ListRemoval(removal) => match removal.list() {
@@ -882,7 +882,10 @@ fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool)
             tracks.iter().try_for_each(|value| writer.check_track_edit(value, undo))?;
             crate::key_tag::check_restore(files, undo, TRACK_EDIT)
         }
-        LibraryEdit::TrackTags(values) => values.iter().try_for_each(|value| writer.check_tag_edit(value, undo)),
+        LibraryEdit::TrackTags { tags, comments } => {
+            tags.iter().try_for_each(|value| writer.check_tag_edit(value, undo))?;
+            comments.iter().try_for_each(|value| writer.check_track_edit(value, undo))
+        }
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) | LibraryEdit::MovePlaylist(_)
         | LibraryEdit::ReplacePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_)
         | LibraryEdit::AddPlaylistTracks { .. } | LibraryEdit::ReorderPlaylist(_)
@@ -959,17 +962,7 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
                 files.len()
             ))))
         }
-        LibraryEdit::TrackTags(values) => {
-            let ordered: Box<dyn Iterator<Item = _>> = if undo {
-                Box::new(values.iter().rev())
-            } else {
-                Box::new(values.iter())
-            };
-            for value in ordered {
-                if undo { writer.undo_tag_edit(value)?; } else { writer.redo_tag_edit(value)?; }
-            }
-            Ok(())
-        }
+        LibraryEdit::TrackTags { tags, comments } => step_track_tags(writer, tags, comments, undo),
         LibraryEdit::MyTagOrder(value) => if undo { writer.undo_my_tag_order(value) } else { writer.redo_my_tag_order(value) }.map(|_| ()),
         LibraryEdit::Cues(value) => if undo { writer.undo_cue_revision(value) } else { writer.redo_cue_revision(value) }.map(|_| ()),
         LibraryEdit::CreatePlaylist(value) => if undo { writer.undo_creation(value) } else { writer.redo_creation(value) }.map(|_| ()),
@@ -981,6 +974,53 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
 
 /// The history label of an Info panel, rating, colour or comment edit.
 pub(crate) const TRACK_EDIT: &str = "Track Edit";
+
+/// Undoes or redoes a My Tag entry: the tags, and the comments Add "My
+/// Tag" to the "Comments" rewrote with them (#605), the comments in one
+/// transaction. Undo puts the comments back before the tags, Redo writes
+/// them after, so a refused comment step leaves the tags as they were; a
+/// tag step that fails after the comments has them stepped back again.
+fn step_track_tags(
+    writer: &mut rbl_db::write::Writer,
+    tags: &[rbl_db::write::TrackTagEdit],
+    comments: &[rbl_db::write::TrackEdit],
+    undo: bool,
+) -> Result<(), rbl_db::DbError> {
+    let step_tags = |writer: &mut rbl_db::write::Writer| -> Result<(), rbl_db::DbError> {
+        let ordered: Box<dyn Iterator<Item = _>> = if undo { Box::new(tags.iter().rev()) } else { Box::new(tags.iter()) };
+        for value in ordered {
+            if undo { writer.undo_tag_edit(value)?; } else { writer.redo_tag_edit(value)?; }
+        }
+        Ok(())
+    };
+    if !undo {
+        step_tags(writer)?;
+        if comments.is_empty() {
+            return Ok(());
+        }
+        if let Err(error) = writer.step_track_edits_at_once(comments, false) {
+            for value in tags.iter().rev() {
+                if let Err(back) = writer.undo_tag_edit(value) {
+                    tracing::error!(%back, "a My Tag edit could not be put back after a failed Redo");
+                }
+            }
+            return Err(error);
+        }
+        return Ok(());
+    }
+    if !comments.is_empty() {
+        writer.step_track_edits_at_once(comments, true)?;
+    }
+    if let Err(error) = step_tags(writer) {
+        if !comments.is_empty() {
+            if let Err(back) = writer.step_track_edits_at_once(comments, false) {
+                tracing::error!(%back, "the My Tag comments could not be written again after a failed Undo");
+            }
+        }
+        return Err(error);
+    }
+    Ok(())
+}
 
 /// Undoes (`undo`, last first) or redoes the steps of a track edit, all or
 /// none: a step that fails has the ones before it put back.

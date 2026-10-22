@@ -3371,10 +3371,10 @@ fn a_my_tag_panel_tick_tags_the_whole_selection_as_one_step() {
     use rbl_db::fixture::{MY_TAG_CATEGORY, MY_TAG_PEAK, MY_TAG_WARM_UP};
     let s = shell();
     let tracks = vec![track_id(1), track_id(2)];
-    run(details::set_my_tags(s.handle(), s.state(), track_id(1), vec![MY_TAG_WARM_UP.to_owned()])).unwrap();
+    run(details::set_my_tags(s.handle(), s.state(), track_id(1), vec![MY_TAG_WARM_UP.to_owned()], None)).unwrap();
     assert!(run(details::selection_my_tags(s.state(), tracks.clone())).unwrap().is_empty());
 
-    let ticked = run(details::put_my_tag(s.handle(), s.state(), tracks.clone(), MY_TAG_PEAK.to_owned(), true)).unwrap();
+    let ticked = run(details::put_my_tag(s.handle(), s.state(), tracks.clone(), MY_TAG_PEAK.to_owned(), true, None)).unwrap();
     assert!(ticked.can_undo);
     assert_eq!(run(details::selection_my_tags(s.state(), tracks.clone())).unwrap(), vec![MY_TAG_PEAK.to_owned()]);
 
@@ -3403,16 +3403,96 @@ fn a_my_tag_panel_tick_tags_the_whole_selection_as_one_step() {
             .collect()
     };
     assert!(filter_tags().iter().any(|t| t == "My Comment"), "{:?}", filter_tags());
-    run(details::rename_my_tag(s.handle(), s.state(), made.id.clone(), "Opener".to_owned())).unwrap();
+    run(details::rename_my_tag(s.handle(), s.state(), made.id.clone(), "Opener".to_owned(), None)).unwrap();
     let lookups = run(details::track_lookups(s.state())).unwrap();
     let category = lookups.my_tag_categories.iter().find(|c| c.id == MY_TAG_CATEGORY).unwrap();
     assert_eq!(category.tags.last().map(|t| t.name.as_str()), Some("Opener"));
 
     // Deleting a tag takes it off the tracks and leaves nothing to undo
     // that could name it.
-    run(details::delete_my_tag(s.handle(), s.state(), MY_TAG_PEAK.to_owned())).unwrap();
+    run(details::delete_my_tag(s.handle(), s.state(), MY_TAG_PEAK.to_owned(), None)).unwrap();
     assert!(run(details::selection_my_tags(s.state(), tracks)).unwrap().is_empty());
     assert!(run(commands::undo_edit(s.handle(), s.state())).is_err());
+}
+
+/// Add "My Tag" to the "Comments" on (#605): a tick rewrites each selected
+/// track's comment in the same Undo step, a rename or a delete rewrites the
+/// selected tracks' only, and turning the setting on or off is one step.
+#[test]
+fn my_tag_comments_follow_ticks_renames_deletes_and_the_setting_with_undo() {
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let s = shell();
+    let comment = |id: &str| -> Option<String> {
+        let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+        db.connection().query_row("SELECT Commnt FROM djmdContent WHERE ID = ?1", [id], |r| r.get(0)).unwrap()
+    };
+    let set_comment = |id: &str, text: &str| {
+        run(commands::set_track_comment(s.handle(), s.state(), vec![id.to_owned()], text.to_owned())).unwrap();
+    };
+    set_comment(&track_id(1), "Bandcamp");
+    set_comment(&track_id(2), "");
+    let tracks = vec![track_id(1), track_id(2)];
+
+    // A tick with the setting on: both selected tracks, one step.
+    run(details::put_my_tag(s.handle(), s.state(), tracks.clone(), MY_TAG_WARM_UP.to_owned(), true, Some(true))).unwrap();
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Warm-up */"));
+    assert_eq!(comment(&track_id(2)).as_deref(), Some(" /* Warm-up */"));
+    run(details::put_my_tag(s.handle(), s.state(), vec![track_id(1)], MY_TAG_PEAK.to_owned(), true, Some(true))).unwrap();
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Warm-up / Peak */"));
+
+    // Undo puts the tag and the comment back together; Redo writes both.
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Warm-up */"));
+    assert_eq!(run(details::selection_my_tags(s.state(), vec![track_id(1)])).unwrap(), vec![MY_TAG_WARM_UP.to_owned()]);
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Warm-up / Peak */"));
+
+    // A comment written outside the history since refuses the Undo of the
+    // tick that wrote it, tags and all.
+    let mut other = rbl_db::write::Writer::open(s.location.clone(), s._dir.path().join("other-backups")).unwrap();
+    other.disable_automatic_backups();
+    other.set_comment(&track_id(2), "typed since").unwrap();
+    drop(other);
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Warm-up */"));
+    let refused = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Conflict);
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Warm-up */"));
+    assert_eq!(comment(&track_id(2)).as_deref(), Some("typed since"));
+    assert_eq!(run(details::selection_my_tags(s.state(), tracks.clone())).unwrap(), vec![MY_TAG_WARM_UP.to_owned()]);
+    run(details::put_my_tag(s.handle(), s.state(), vec![track_id(1)], MY_TAG_PEAK.to_owned(), true, Some(true))).unwrap();
+
+    // With the setting off, a tick leaves comments alone.
+    run(details::put_my_tag(s.handle(), s.state(), vec![track_id(3)], MY_TAG_PEAK.to_owned(), true, None)).unwrap();
+    let untouched = comment(&track_id(3));
+
+    // A rename rewrites only the tracks selected with it.
+    run(details::rename_my_tag(s.handle(), s.state(), MY_TAG_WARM_UP.to_owned(), "Opener".to_owned(), Some(vec![track_id(1)]))).unwrap();
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Opener / Peak */"));
+    assert_eq!(comment(&track_id(2)).as_deref(), Some("typed since"));
+
+    // Turning the setting on rewrites every tagged track in the panel's
+    // order (Peak before Opener), as one step.
+    let on = run(details::write_my_tag_comments(s.handle(), s.state(), true)).unwrap();
+    assert!(on.can_undo);
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Peak / Opener */"));
+    assert_eq!(comment(&track_id(2)).as_deref(), Some("typed since /* Opener */"));
+    assert_ne!(comment(&track_id(3)), untouched);
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Opener / Peak */"));
+    assert_eq!(comment(&track_id(2)).as_deref(), Some("typed since"));
+    assert_eq!(comment(&track_id(3)), untouched);
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+
+    // A delete takes the tag out of the selected tracks' comments.
+    run(details::delete_my_tag(s.handle(), s.state(), MY_TAG_PEAK.to_owned(), Some(vec![track_id(1)]))).unwrap();
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp /* Opener */"));
+
+    // Off takes every block off a tagged track.
+    run(details::write_my_tag_comments(s.handle(), s.state(), false)).unwrap();
+    assert_eq!(comment(&track_id(1)).as_deref(), Some("Bandcamp"));
+    assert_eq!(comment(&track_id(2)).as_deref(), Some("typed since"));
 }
 
 #[test]
@@ -3422,8 +3502,8 @@ fn an_intelligent_playlist_on_a_my_tag_holds_the_tracks_carrying_it() {
     use rbl_db::fixture::MY_TAG_PEAK;
     use rbxport_lib::dto::{SmartConditionDto, SmartRuleDto};
     let s = shell();
-    run(details::set_my_tags(s.handle(), s.state(), track_id(3), vec![MY_TAG_PEAK.to_owned()])).unwrap();
-    run(details::set_my_tags(s.handle(), s.state(), track_id(5), vec![MY_TAG_PEAK.to_owned()])).unwrap();
+    run(details::set_my_tags(s.handle(), s.state(), track_id(3), vec![MY_TAG_PEAK.to_owned()], None)).unwrap();
+    run(details::set_my_tags(s.handle(), s.state(), track_id(5), vec![MY_TAG_PEAK.to_owned()], None)).unwrap();
     let rule = SmartRuleDto {
         logic: "all".to_owned(),
         conditions: vec![SmartConditionDto {
