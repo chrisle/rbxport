@@ -5,7 +5,7 @@
  * The rules asserted here are the ones `crates/rbl-db/tests/writes.rs` asserts
  * on the other side.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createMockBackend } from "./backend-mock";
 import { TREE_ROOT } from "./types";
@@ -520,5 +520,45 @@ describe("mock File Created column (#308)", () => {
     const known = values.slice(2) as number[];
     expect(known.every((value) => typeof value === "number")).toBe(true);
     expect([...known].sort((a, b) => a - b)).toEqual(known);
+  });
+});
+
+describe("mock Relocate Undo (#502)", () => {
+  // The mock's relocate keeps what it was asked on `window`.
+  afterEach(() => vi.unstubAllGlobals());
+  const backendWithMissing = () => {
+    vi.stubGlobal("window", {});
+    return createMockBackend({ trackCount: 20, missingEvery: 5 });
+  };
+  const missingIds = async (backend: ReturnType<typeof createMockBackend>) =>
+    (await backend.missingTracks(0, 100, true)).tracks.map((track) => track.id);
+
+  it("undoes one Relocate and one Relocate by location as one step each", async () => {
+    const backend = backendWithMissing();
+    const missing = await missingIds(backend);
+    expect(missing.length).toBe(4);
+    const [first = "", ...rest] = missing;
+
+    expect(await backend.relocateTrack(first, "/Users/mock/Music/Moved/a.mp3")).toBe(true);
+    expect(await backend.relocateByLocation(rest, "/old", "/new")).toBe(3);
+    expect(await missingIds(backend)).toEqual([]);
+
+    const undone = await backend.edits.undoEdit();
+    expect(undone).toMatchObject({ undoLabel: "Relocate", redoLabel: "Relocate" });
+    expect(await missingIds(backend)).toEqual(rest);
+    await backend.edits.undoEdit();
+    expect(await missingIds(backend)).toEqual(missing);
+    await backend.edits.redoEdit();
+    expect(await missingIds(backend)).toEqual(rest);
+  });
+
+  it("undoes an Auto Relocate run as one step", async () => {
+    const backend = backendWithMissing();
+    const missing = await missingIds(backend);
+    const report = await backend.autoRelocate({ folders: ["/x"], music: false, video: false, desktop: false }, null);
+    expect(report.relocated).toBe(2);
+    const history = await backend.edits.undoEdit();
+    expect(history).toMatchObject({ canUndo: false, redoLabel: "Relocate" });
+    expect(await missingIds(backend)).toEqual(missing);
   });
 });

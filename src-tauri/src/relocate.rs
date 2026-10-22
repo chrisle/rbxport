@@ -45,11 +45,11 @@ use tauri::{Manager, State};
 
 use rbl_index::Library;
 
-use crate::commands::{announce_history, blocking, permanent_edit, reload, write_error, wrote_outside_history, MAX_ROWS};
+use crate::commands::{announce_history, blocking, permanent_edit, reload, write_error, MAX_ROWS, RELOCATE_LABEL};
 use crate::dto::{MissingTrackDto, MissingTracksDto};
 use crate::error::{AppError, AppResult};
 use crate::commands::Touched;
-use crate::state::AppState;
+use crate::state::{AppState, LibraryEdit};
 
 /// Whether a track's file is gone: it has a path and nothing is there.
 ///
@@ -634,6 +634,23 @@ pub fn plan(
     out
 }
 
+/// Writes one relocation run (Relocate by location, Auto Relocate) in one
+/// transaction and records it as one "Relocate" entry of the library
+/// history (#502), under the edit gate so no Undo runs between the two.
+/// Answers how many tracks it pointed somewhere.
+fn record_relocation(state: &AppState, moves: &[(String, PathBuf)]) -> AppResult<u32> {
+    let _gate = state.edit_gate.lock();
+    let relocation = state
+        .write_history_then(|writer| writer.relocate_with_undo(moves), |_, (_, relocation)| Ok(relocation))
+        .map_err(write_error)?;
+    let count = u32::try_from(relocation.len()).unwrap_or(u32::MAX);
+    let edit = LibraryEdit::Relocate(relocation);
+    if !edit.is_empty() {
+        state.edit_history.lock().record(edit, RELOCATE_LABEL);
+    }
+    Ok(count)
+}
+
 /// Points missing tracks at their moved files, as rekordbox's Auto Relocate
 /// finds them: the tracks named, or every missing track when none are.
 ///
@@ -696,17 +713,7 @@ pub async fn auto_relocate<R: tauri::Runtime>(
         let relocated = if plan.moves.is_empty() {
             0
         } else {
-            let _gate = writing.edit_gate.lock();
-            let relocated = writing
-                .write(|writer| {
-                    for (id, path) in &plan.moves {
-                        writer.relocate(id, path)?;
-                    }
-                    Ok(u32::try_from(plan.moves.len()).unwrap_or(u32::MAX))
-                })
-                .map_err(write_error)?;
-            wrote_outside_history(&writing, false);
-            relocated
+            record_relocation(&writing, &plan.moves)?
         };
         Ok(RelocateReportDto { relocated, unresolved, in_collection, in_collection_total })
     })
@@ -885,17 +892,7 @@ pub async fn relocate_by_location<R: tauri::Runtime>(
         if moves.is_empty() {
             return Ok(0);
         }
-        let _gate = writing.edit_gate.lock();
-        let found = writing
-            .write(|writer| {
-                for (id, path) in &moves {
-                    writer.relocate(id, path)?;
-                }
-                Ok(u32::try_from(moves.len()).unwrap_or(u32::MAX))
-            })
-            .map_err(write_error)?;
-        wrote_outside_history(&writing, false);
-        Ok(found)
+        record_relocation(&writing, &moves)
     })
     .await?;
     if found > 0 {
@@ -1256,5 +1253,115 @@ mod tests {
     fn replacing_ignores_case_and_takes_every_occurrence() {
         assert_eq!(replace_ignoring_case("/Old/a/old/b", "/old", "/new"), "/new/a/new/b");
         assert_eq!(replace_ignoring_case("abc", "", "x"), "abc");
+    }
+
+    /// An app over a fresh fixture library, as the window drives it, and the
+    /// folder the fixture lives in.
+    fn app_over_fixture() -> (tempfile::TempDir, tauri::App<tauri::test::MockRuntime>) {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        crate::backups::create(&state).unwrap();
+        let app = tauri::test::mock_app();
+        app.manage(state);
+        (dir, app)
+    }
+
+    fn run<T>(future: impl std::future::Future<Output = T>) -> T {
+        tauri::async_runtime::block_on(future)
+    }
+
+    /// `FolderPath`, `FileNameL` and `rb_file_id` as stored.
+    fn link_of(app: &tauri::App<tauri::test::MockRuntime>, id: &str) -> (Option<String>, Option<String>, Option<String>) {
+        app.state::<Arc<AppState>>()
+            .read_db(|db| {
+                Ok(db.connection().query_row(
+                    "SELECT FolderPath, FileNameL, rb_file_id FROM djmdContent WHERE ID = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?)
+            })
+            .unwrap()
+    }
+
+    fn undo_label(app: &tauri::App<tauri::test::MockRuntime>) -> Option<String> {
+        crate::commands::current_history(&app.state::<Arc<AppState>>()).undo_label
+    }
+
+    /// #502: a Relocate by location over two tracks is one "Relocate" entry;
+    /// Undo puts both links back (the old files are still missing), Redo
+    /// the run's, and the index the lists read follows.
+    #[test]
+    fn a_relocate_by_location_is_one_undo_for_every_track_it_found() {
+        let (dir, app) = app_over_fixture();
+        let state = || app.state::<Arc<AppState>>();
+        let moved = dir.path().join("moved");
+        let tracks: Vec<String> = (1..=2).map(rbl_db::fixture::track_id).collect();
+        for at in 1..=2 {
+            touch(&moved.join(format!("track{at:03}.mp3")));
+        }
+        let before: Vec<_> = tracks.iter().map(|t| link_of(&app, t)).collect();
+        run(crate::commands::rename_playlist(app.handle().clone(), state(), rbl_db::fixture::playlist_id(0), "Earlier 502".into())).unwrap();
+
+        let found = run(relocate_by_location(
+            app.handle().clone(),
+            state(),
+            tracks.clone(),
+            "/fixture/audio".into(),
+            moved.to_string_lossy().into_owned(),
+        ))
+        .unwrap();
+        assert_eq!(found, 2);
+        let after: Vec<_> = tracks.iter().map(|t| link_of(&app, t)).collect();
+        assert_ne!(after, before);
+        assert_eq!(undo_label(&app).as_deref(), Some("Relocate"));
+
+        let undone = run(crate::commands::undo_edit(app.handle().clone(), state())).unwrap();
+        assert_eq!(tracks.iter().map(|t| link_of(&app, t)).collect::<Vec<_>>(), before, "both tracks in one step");
+        assert_eq!(undone.undo_label.as_deref(), Some("Rename Playlist"), "the earlier entry stays below it");
+        assert_eq!(undone.redo_label.as_deref(), Some("Relocate"));
+        let library = state().library().unwrap();
+        let row = library.row_of(&tracks[0]).unwrap();
+        assert!(is_missing(library.folder_path.get(row as usize)), "missing again, to relocate anew");
+
+        run(crate::commands::redo_edit(app.handle().clone(), state())).unwrap();
+        assert_eq!(tracks.iter().map(|t| link_of(&app, t)).collect::<Vec<_>>(), after);
+        let library = state().library().unwrap();
+        let row = library.row_of(&tracks[1]).unwrap();
+        assert!(!is_missing(library.folder_path.get(row as usize)));
+    }
+
+    /// #502: an Auto Relocate run is one "Relocate" entry too, and a run
+    /// that found nothing records nothing.
+    #[test]
+    fn an_auto_relocate_run_is_one_undo() {
+        let (dir, app) = app_over_fixture();
+        let state = || app.state::<Arc<AppState>>();
+        let search = dir.path().join("search");
+        std::fs::create_dir_all(&search).unwrap();
+        let only = |folders: Vec<String>| RelocateSearch { folders, music: false, video: false, desktop: false };
+        let tracks: Vec<String> = (3..=5).map(rbl_db::fixture::track_id).collect();
+
+        let report = run(auto_relocate(app.handle().clone(), state(), only(vec![search.to_string_lossy().into_owned()]), Some(tracks.clone()))).unwrap();
+        assert_eq!(report.relocated, 0);
+        assert_eq!(undo_label(&app), None, "nothing found, nothing recorded");
+
+        touch(&search.join("a/track003.mp3"));
+        touch(&search.join("b/track004.mp3"));
+        let before: Vec<_> = tracks.iter().map(|t| link_of(&app, t)).collect();
+        let report = run(auto_relocate(app.handle().clone(), state(), only(vec![search.to_string_lossy().into_owned()]), Some(tracks.clone()))).unwrap();
+        assert_eq!((report.relocated, report.unresolved), (2, 1));
+        let after: Vec<_> = tracks.iter().map(|t| link_of(&app, t)).collect();
+        assert_eq!(after[2], before[2], "the track not found is untouched");
+        assert_eq!(after[0].2, Some(rbl_db::file_id::column(&search.join("a/track003.mp3"))), "the file number follows the file");
+
+        let undone = run(crate::commands::undo_edit(app.handle().clone(), state())).unwrap();
+        assert!(!undone.can_undo, "one entry for the whole run");
+        assert_eq!(tracks.iter().map(|t| link_of(&app, t)).collect::<Vec<_>>(), before);
+        run(crate::commands::redo_edit(app.handle().clone(), state())).unwrap();
+        assert_eq!(tracks.iter().map(|t| link_of(&app, t)).collect::<Vec<_>>(), after);
     }
 }

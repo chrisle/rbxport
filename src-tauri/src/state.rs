@@ -127,6 +127,9 @@ pub(crate) enum LibraryEdit {
     /// An intelligent playlist's rule saved, or a playlist's or folder's
     /// artwork reference changed (#500).
     PlaylistEdit(rbl_db::write::PlaylistEdit),
+    /// One Relocate, Relocate by location or Auto Relocate run (#502):
+    /// every track's file link before and after, put back in one step.
+    Relocate(rbl_db::write::TrackRelocation),
 }
 
 impl LibraryEdit {
@@ -145,6 +148,7 @@ impl LibraryEdit {
             Self::SortPlaylists(edit) => edit.is_empty(),
             Self::Cues(edit) => edit.is_empty(),
             Self::PlaylistEdit(edit) => edit.is_empty(),
+            Self::Relocate(edit) => edit.is_empty(),
         }
     }
 }

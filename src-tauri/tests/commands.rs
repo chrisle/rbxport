@@ -2557,6 +2557,80 @@ fn relocate_refuses_a_file_the_collection_already_holds() {
     assert_eq!(s.state().library().unwrap().audio_path_of(&track_id(1)), Some(free.as_str()));
 }
 
+/// `FolderPath`, `FileNameL` and `rb_file_id` of a track, as stored.
+fn file_link(s: &Shell, track: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    db.connection()
+        .query_row(
+            "SELECT FolderPath, FileNameL, rb_file_id FROM djmdContent WHERE ID = ?1",
+            [track],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+}
+
+/// #502: one Relocate is one "Relocate" entry. Undo points the track back
+/// at its old file, which is still missing, with its old file number;
+/// Redo at the chosen file again. No file is moved or deleted.
+#[test]
+fn a_relocate_is_one_undo_that_restores_the_old_link() {
+    let s = shell();
+    let track = track_id(2);
+    let before = file_link(&s, &track);
+    let chosen = write_wav(&s._dir.path().join("chosen 502.wav"), 1);
+    let path = chosen.display().to_string();
+
+    assert!(run(commands::relocate_track(s.handle(), s.state(), track.clone(), path.clone())).unwrap());
+    let after = file_link(&s, &track);
+    assert_eq!(after.0.as_deref(), Some(path.as_str()));
+    assert_eq!(after.2, Some(rbl_db::file_id::column(&chosen)));
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some("Relocate"));
+
+    let undone = undo(&s);
+    assert_eq!(file_link(&s, &track), before);
+    assert_eq!(s.state().library().unwrap().audio_path_of(&track), before.0.as_deref(), "the list shows the old path");
+    assert!(!undone.can_undo);
+    assert_eq!(undone.redo_label.as_deref(), Some("Relocate"));
+    assert!(chosen.is_file(), "the chosen file stays where it is");
+
+    redo(&s);
+    assert_eq!(file_link(&s, &track), after);
+    assert_eq!(s.state().library().unwrap().audio_path_of(&track), Some(path.as_str()));
+}
+
+/// #502 under #506's policy: a track pointed elsewhere since by something
+/// outside the history keeps its newer file; only the Relocate entry goes,
+/// and the earlier entries still undo.
+#[test]
+fn undo_of_a_relocate_refuses_a_track_pointed_elsewhere_since_and_keeps_the_rest() {
+    let s = shell();
+    let track = track_id(3);
+    run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed 502".into())).unwrap();
+    let chosen = write_wav(&s._dir.path().join("chosen.wav"), 1).display().to_string();
+    assert!(run(commands::relocate_track(s.handle(), s.state(), track.clone(), chosen)).unwrap());
+
+    let elsewhere = write_wav(&s._dir.path().join("elsewhere.wav"), 1);
+    let mut other = external(&s);
+    other.disable_automatic_backups();
+    other.relocate(&track, &elsewhere).unwrap();
+    drop(other);
+    let newer = file_link(&s, &track);
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Can't undo Relocate: the track has been pointed at another file since. The newer change was kept."
+    );
+    assert_eq!(file_link(&s, &track), newer, "the newer file is kept");
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some("Rename Playlist"));
+    assert!(!history.can_redo);
+    undo(&s);
+    assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the unrelated rename still undoes");
+}
+
 #[test]
 fn auto_analysis_is_offered_the_unanalysed_tracks_whose_files_are_there_a_page_at_a_time() {
     let s = shell();

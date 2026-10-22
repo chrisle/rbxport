@@ -857,7 +857,7 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
         LibraryEdit::ReplacePlaylist(_) | LibraryEdit::ReplacePlaylistContents(_) => Touched::Playlists,
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
-        LibraryEdit::Track(_) | LibraryEdit::KeyEdit { .. } | LibraryEdit::TrackTags(_) => Touched::Tracks,
+        LibraryEdit::Track(_) | LibraryEdit::KeyEdit { .. } | LibraryEdit::TrackTags(_) | LibraryEdit::Relocate(_) => Touched::Tracks,
         LibraryEdit::Cues(revision) => Touched::Cues(revision.content().to_owned()),
     }
 }
@@ -894,6 +894,11 @@ fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool)
             None => Ok(()),
         },
         LibraryEdit::PlaylistEdit(value) => writer.check_playlist_edit(value, undo),
+        // Checked again in the writer's transaction (#502).
+        LibraryEdit::Relocate(relocation) => match writer.relocation_conflict(relocation, undo)? {
+            Some(reason) => Err(rbl_db::DbError::Conflict(reason)),
+            None => Ok(()),
+        },
     }
 }
 
@@ -957,6 +962,7 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
         LibraryEdit::Cues(value) => if undo { writer.undo_cue_revision(value) } else { writer.redo_cue_revision(value) }.map(|_| ()),
         LibraryEdit::CreatePlaylist(value) => if undo { writer.undo_creation(value) } else { writer.redo_creation(value) }.map(|_| ()),
         LibraryEdit::PlaylistEdit(value) => if undo { writer.undo_playlist_edit(value) } else { writer.redo_playlist_edit(value) }.map(|_| ()),
+        LibraryEdit::Relocate(value) => if undo { writer.undo_relocation(value) } else { writer.redo_relocation(value) }.map(|_| ()),
     }
 }
 
@@ -3615,6 +3621,9 @@ pub async fn import_folder_playlist<R: tauri::Runtime>(
     Ok(report)
 }
 
+/// The history's name for every relocation run (#502): Undo Relocate.
+pub(crate) const RELOCATE_LABEL: &str = "Relocate";
+
 /// Relocate: points a track at the file chosen for it.
 ///
 /// [OBS rekordbox 7.2.19 static, `MissingFileTable::showFileChooser`
@@ -3634,8 +3643,11 @@ pub async fn relocate_track<R: tauri::Runtime>(
     if held {
         return Ok(false);
     }
-    edit(app, state, "relocate_track", Touched::Tracks, move |w| {
-        w.relocate(&track, std::path::Path::new(&path)).map(|_| ())
+    // One Relocate is one Undo step (#502): Undo points the track back at
+    // its old file, whether or not that file is there; no file is moved.
+    recorded_edit(app, state, "relocate_track", Touched::Tracks, RELOCATE_LABEL, move |w| {
+        w.relocate_with_undo(&[(track, std::path::PathBuf::from(path))])
+            .map(|(_, relocation)| LibraryEdit::Relocate(relocation))
     })
     .await?;
     Ok(true)

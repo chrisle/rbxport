@@ -677,6 +677,22 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     });
   };
 
+  /**
+   * One Relocate, Relocate by location or Auto Relocate run (#502): its
+   * tracks stop being missing, and one "Relocate" entry puts them all back
+   * (missing again) or forward, as the real backend records the run.
+   */
+  const recordRelocation = (rows: readonly RowDto[]): Promise<EditHistoryState> => {
+    const relink = (missing: boolean) => {
+      for (const row of rows) {
+        if (missing) row.missing = true;
+        else delete row.missing;
+      }
+    };
+    relink(false);
+    return recordEdit({ label: "Relocate", undo: () => relink(true), redo: () => relink(false) });
+  };
+
   const setHasArtwork = (track: string, value: boolean) => {
     const row = all.find((r) => r.id === track);
     const before = row?.hasArtwork ?? false;
@@ -3289,10 +3305,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const row = all.find((r) => r.id === trackId);
       const taken = all.some((r) => r.id !== trackId && r.missing !== true && String(r.extra?.location ?? "") === path);
       if (taken) return false;
-      if (row?.missing === true) {
-        delete row.missing;
-        await bump();
-      }
+      if (row?.missing === true) await recordRelocation([row]);
       return true;
     },
     relocationTargets: (tracks) => {
@@ -3314,8 +3327,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const page = window as unknown as { __relocatedBy?: string[] };
       (page.__relocatedBy ??= []).push(`${from} -> ${to}`);
       const found = all.filter((row) => row.missing === true && tracks.includes(row.id));
-      for (const row of found) delete row.missing;
-      if (found.length > 0) await bump();
+      if (found.length > 0) await recordRelocation(found);
       return found.length;
     },
     // The search folders hold every other missing file, in list order, so a
@@ -3335,8 +3347,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const searched = search.folders.length > 0 || search.music || search.video || search.desktop;
       const gone = all.filter((row) => row.missing === true && (tracks === null || tracks.includes(row.id)));
       const found = searched ? gone.filter((_, at) => at % 2 === 0) : [];
-      for (const row of found) delete row.missing;
-      if (found.length > 0) await bump();
+      if (found.length > 0) await recordRelocation(found);
       return { relocated: found.length, unresolved: gone.length - found.length, inCollection: [], inCollectionTotal: 0 };
     },
     // No dialogs in a browser: the folder is a fixed one, so the search
