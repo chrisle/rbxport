@@ -54,6 +54,9 @@ export interface Playback {
   loop: DeckLoop | null;
   /** Sets a loop between two points, in seconds, and turns it on. */
   setLoop: (inSeconds: number, outSeconds: number) => void;
+  /** Move an active loop and the engine head by grid-derived distances. */
+  moveLoop: (inSeconds: number, outSeconds: number, headBySeconds: number,
+    gridTimesMs: number[], beats: number) => void;
   /** RELOOP (true) or EXIT (false). */
   setLoopActive: (on: boolean) => void;
   clearLoop: () => void;
@@ -904,16 +907,15 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
 
   // The loop is the engine's: shown from the tick, so what is drawn is what
   // sounds. A failure is reported as a deck error, like a seek's.
+  const loopQueue = useRef<Promise<void>>(Promise.resolve());
   const loopCall = useCallback(
     (call: (backend: Backend) => Promise<void>) => {
       if (idle || !isLoaded()) return;
-      void (async () => {
-        try {
-          await call(await getBackend());
-        } catch (failure) {
-          setError(failure instanceof Error ? failure.message : FALLBACK);
-        }
-      })();
+      loopQueue.current = loopQueue.current.then(async () => {
+        await call(await getBackend());
+      }).catch((failure: unknown) => {
+        setError(failure instanceof Error ? failure.message : FALLBACK);
+      });
     },
     [idle, isLoaded],
   );
@@ -927,6 +929,22 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     },
     [loopCall, DECK],
   );
+  const moveLoop = useCallback((inSeconds: number, outSeconds: number, headBySeconds: number,
+    gridTimesMs: number[], beats: number) => {
+    if (idle || !isLoaded() || !desiredLoop.current?.active ||
+        !Number.isFinite(inSeconds) || !Number.isFinite(outSeconds) ||
+        !Number.isFinite(headBySeconds) || inSeconds < 0 || outSeconds <= inSeconds) return;
+    const next = { inSeconds, outSeconds, active: true };
+    desiredLoop.current = next;
+    setLoopState(next);
+    const at = positionNow() + headBySeconds;
+    anchor.current = pinned(anchor.current, at, performance.now());
+    setPosition(at);
+    emit(at);
+    // Rapid presses and the loop's initial set must reach the engine in order.
+    loopCall((b) => b.deckMoveLoop(DECK, inSeconds * 1000, outSeconds * 1000,
+      headBySeconds * 1000, gridTimesMs, beats));
+  }, [idle, isLoaded, positionNow, emit, loopCall, DECK, setPosition]);
   const setLoopActive = useCallback((on: boolean) => {
     if (desiredLoop.current !== null) {
       desiredLoop.current = { ...desiredLoop.current, active: on };
@@ -944,8 +962,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     playing, position, duration, idle, error, toggle, playAfter, seek, moveBy, seekFraction,
     scrubBegin, scrubTo, scrubEnd, isScrubbing, positionRef, positionNow, subscribe,
     tempo, masterTempo, keyShift, shiftsKey, setKeyShift, setTempo, nudgeTempo, setMasterTempo,
-    loop, setLoop, setLoopActive, clearLoop,
+    loop, setLoop, moveLoop, setLoopActive, clearLoop,
   }), [playing, position, duration, idle, error, toggle, playAfter, seek, moveBy, seekFraction,
     scrubBegin, scrubTo, scrubEnd, isScrubbing, positionNow, subscribe, tempo, masterTempo, keyShift, shiftsKey,
-    setKeyShift, setTempo, nudgeTempo, setMasterTempo, loop, setLoop, setLoopActive, clearLoop]);
+    setKeyShift, setTempo, nudgeTempo, setMasterTempo, loop, setLoop, moveLoop, setLoopActive, clearLoop]);
 }

@@ -43,6 +43,8 @@ import {
   JUMP_SIZE_ID,
   jumpSizeById,
   jumpStepSeconds,
+  movedLoopByBeats,
+  shiftByGridBeats,
   zoomBy,
   createWheelZoomGate,
   isWheelNotch,
@@ -1300,14 +1302,41 @@ export const Player = memo(function Player({
   });
   const seekInPhase = useCallback((at: number) => playback.seek(inPhase(at)), [playback, inPhase]);
 
+  const [beatLoop, setBeatLoop] = useState<LoopRange | null>(null);
+
   /** Moves by the chosen size: a number of beats, or the fine nudge. */
   const jump = useCallback(
     (direction: number) => {
-      const step = jumpStepSeconds(jumpSizeById(jumpSizeId), bpmX100);
-      if (step === 0) return;
-      seekInPhase(playback.positionRef.current + step * direction);
+      const size = jumpSizeById(jumpSizeId);
+      const beats = size.beats * direction;
+      const now = playback.positionNow();
+      if (playback.loop?.active && size.beats > 0) {
+        const old = playback.loop;
+        const fixed = jumpStepSeconds(size, bpmX100) * direction * 1000;
+        const moved = grid.times.length >= 2
+          ? movedLoopByBeats(grid, old.inSeconds * 1000, old.outSeconds * 1000,
+              now * 1000, beats, playback.duration * 1000)
+          : fixed !== 0 && old.inSeconds * 1000 + fixed >= 0 &&
+              old.outSeconds * 1000 + fixed <= playback.duration * 1000
+            ? { fromMs: old.inSeconds * 1000 + fixed, toMs: old.outSeconds * 1000 + fixed,
+                headMs: now * 1000 + fixed }
+            : null;
+        if (!moved) return;
+        if (beatLoop && sameLoopRange(old, beatLoop)) {
+          setBeatLoop({ inSeconds: moved.fromMs / 1000, outSeconds: moved.toMs / 1000 });
+        }
+        playback.moveLoop(moved.fromMs / 1000, moved.toMs / 1000,
+          (moved.headMs - now * 1000) / 1000, Array.from(grid.times), beats);
+        return;
+      }
+      const gridTarget = size.beats > 0 ? shiftByGridBeats(grid, now * 1000, beats) : null;
+      const by = gridTarget === null ? jumpStepSeconds(size, bpmX100) * direction :
+        (gridTarget - now * 1000) / 1000;
+      if (by === 0) return;
+      if (phaseLocked) seekInPhase(now + by);
+      else playback.moveBy(by);
     },
-    [jumpSizeId, bpmX100, playback, seekInPhase],
+    [jumpSizeId, bpmX100, playback, seekInPhase, grid, beatLoop, phaseLocked],
   );
 
 
@@ -1525,7 +1554,6 @@ export const Player = memo(function Player({
    * `CueState::clearAutoBeatLoopState`). A called memory loop of four beats
    * is not shown as the field's 32 (#352).
    */
-  const [beatLoop, setBeatLoop] = useState<LoopRange | null>(null);
   const beatLoopOn = activeLoop && beatLoop !== null && playback.loop !== null && sameLoopRange(playback.loop, beatLoop);
   // A locked deck loops on whole beats: a loop IN between two beats, or a
   // length such as 1.5 beats, takes the deck off the master's beat.
