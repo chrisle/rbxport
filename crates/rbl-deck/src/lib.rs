@@ -700,6 +700,71 @@ impl Engine {
         handle.send(deck::Command::Wake);
     }
 
+    /// Move the loop and the current audio head by the corresponding grid distances.
+    /// The head is mapped from the engine clock on the supplied grid. Without
+    /// a grid, the UI's fixed-tempo offset is applied to that same clock.
+    pub fn move_loop_ms(
+        &self,
+        deck: Deck,
+        in_ms: f64,
+        out_ms: f64,
+        head_by_ms: f64,
+        grid_times_ms: &[f64],
+        beats: f64,
+    ) {
+        let Some(handle) = self.deck(deck) else {
+            return;
+        };
+        if !handle.clock().looping()
+            || !in_ms.is_finite()
+            || !out_ms.is_finite()
+            || !head_by_ms.is_finite()
+            || in_ms < 0.0
+            || out_ms <= in_ms
+        {
+            return;
+        }
+        let rate = f64::from(self.sample_rate) / 1000.0;
+        let from = (in_ms * rate) as u64;
+        let to = (out_ms * rate) as u64;
+        let current = handle.clock().position() as f64 - handle.clock().pre_roll() as f64;
+        let current_ms = current / rate;
+        let target = Self::shifted_grid_ms(grid_times_ms, current_ms, beats)
+            .unwrap_or(current_ms + head_by_ms)
+            * rate;
+        if to <= from
+            || to > handle.clock().total()
+            || target < from as f64
+            || target >= to as f64
+        {
+            return;
+        }
+        handle.clock().set_loop(Some((from, to)));
+        handle.clock().set_looping(true);
+        self.seek_frames(deck, target as u64);
+        handle.send(deck::Command::Wake);
+    }
+
+    /// Map the engine's current head, including its fractional beat, at command time.
+    fn shifted_grid_ms(times: &[f64], ms: f64, beats: f64) -> Option<f64> {
+        if times.len() < 2 || !ms.is_finite() || !beats.is_finite() {
+            return None;
+        }
+        let after = times.partition_point(|&time| time < ms);
+        let at = after.saturating_sub(1).min(times.len() - 2);
+        let width = (times[at + 1] - times[at]).max(1.0);
+        let index = at as f64 + (ms - times[at]) / width + beats;
+        let end = times.len() - 1;
+        if index < 0.0 {
+            return Some(times[0] + index * (times[1] - times[0]));
+        }
+        if index >= end as f64 {
+            return Some(times[end] + (index - end as f64) * (times[end] - times[end - 1]));
+        }
+        let step = index.floor() as usize;
+        Some(times[step] + (index - step as f64) * (times[step + 1] - times[step]))
+    }
+
     /// RELOOP and EXIT: back into the loop from its in point, or out of it
     /// with the range kept for the next RELOOP.
     pub fn set_looping(&self, deck: Deck, on: bool) {

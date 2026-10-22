@@ -19,6 +19,8 @@ import {
   JUMP_SIZE_ID,
   jumpSizeById,
   jumpStepSeconds,
+  movedLoopByBeats,
+  shiftByGridBeats,
   FINE_JUMP_SECONDS,
   jumpSeconds,
   nextJumpSize,
@@ -641,6 +643,41 @@ describe("jumpStepSeconds", () => {
 
   it("cannot move a beat length with no tempo behind it", () => {
     expect(jumpStepSeconds(jumpSizeById("8beats"), 0)).toBe(0);
+  });
+});
+
+describe("moving a playing loop by grid beats", () => {
+  const constant: BeatGrid = {
+    times: Uint32Array.from({ length: 45 }, (_, i) => i * 500),
+    numbers: Uint8Array.from({ length: 45 }, (_, i) => i % 4 + 1),
+    tempos: Uint16Array.from({ length: 45 }, () => 12_000),
+  };
+
+  it.each([
+    [4, 12_000, 14_000, 12_750],
+    [-4, 8_000, 10_000, 8_750],
+    [8, 14_000, 16_000, 14_750],
+    [-8, 6_000, 8_000, 6_750],
+  ])("moves %i beats with the head's fractional beat intact", (beats, from, to, head) => {
+    expect(movedLoopByBeats(constant, 10_000, 12_000, 10_750, beats, 22_000))
+      .toEqual({ fromMs: from, toMs: to, headMs: head });
+  });
+
+  it("counts across a tempo change and repeated moves without time drift", () => {
+    const variable: BeatGrid = {
+      ...constant,
+      times: Uint32Array.from({ length: 45 }, (_, i) => i <= 24 ? i * 500 : 12_000 + (i - 24) * 400),
+    };
+    const first = movedLoopByBeats(variable, 10_000, 12_000, 10_750, 4, 20_000);
+    expect(first).toEqual({ fromMs: 12_000, toMs: 13_600, headMs: 12_600 });
+    const second = movedLoopByBeats(variable, first!.fromMs, first!.toMs, first!.headMs, -4, 20_000);
+    expect(second).toEqual({ fromMs: 10_000, toMs: 12_000, headMs: 10_750 });
+    expect(shiftByGridBeats(variable, 10_750, 8)).toBe(14_200);
+  });
+
+  it("keeps the old loop when the requested range would leave the track", () => {
+    expect(movedLoopByBeats(constant, 10_000, 12_000, 10_750, -24, 22_000)).toBeNull();
+    expect(movedLoopByBeats(constant, 10_000, 12_000, 10_750, 24, 22_000)).toBeNull();
   });
 });
 

@@ -578,6 +578,7 @@ pub fn run() {
             commands::deck_unload,
             commands::deck_play,
             commands::deck_set_loop,
+            commands::deck_move_loop,
             commands::deck_loop_active,
             commands::deck_clear_loop,
             commands::deck_play_after,
