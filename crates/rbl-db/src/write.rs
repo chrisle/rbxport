@@ -655,6 +655,63 @@ impl PlaylistTrackRemoval {
     }
 }
 
+/// The exact membership rows one Add Tracks to Playlist created (#499), and
+/// the playlist's live memberships in order before and after it. Undo
+/// soft-deletes exactly `added`; rows the playlist already held, a track's
+/// earlier copy included, are never touched.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaylistTrackAddition {
+    playlist: String,
+    added: Vec<String>,
+    before: Vec<String>,
+    after: Vec<String>,
+}
+
+impl PlaylistTrackAddition {
+    /// Nothing was added: every track was already there.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty()
+    }
+
+    /// The membership rows the add created, in the order they were added.
+    #[must_use]
+    pub fn added(&self) -> &[String] {
+        &self.added
+    }
+
+    /// Takes `next`, the next slice of the same add, into this one, so a
+    /// large drop sent a slice at a time stays one Undo. Only when `next`
+    /// is to the same playlist and started from exactly the order this one
+    /// left; otherwise nothing changes and false is returned.
+    pub fn absorb(&mut self, next: &Self) -> bool {
+        if next.playlist != self.playlist || next.before != self.after {
+            return false;
+        }
+        self.added.extend(next.added.iter().cloned());
+        self.after.clone_from(&next.after);
+        true
+    }
+}
+
+/// One reorder of a playlist's tracks (a drag, or Renumber Track Order;
+/// #499): every live membership row with its `TrackNo`, in order, before and
+/// after.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaylistReorder {
+    playlist: String,
+    before: Vec<(String, i64)>,
+    after: Vec<(String, i64)>,
+}
+
+impl PlaylistReorder {
+    /// The reorder left every row where it was.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.before == self.after
+    }
+}
+
 /// The exact database value changed by one editable track field.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrackEdit {
@@ -2377,6 +2434,73 @@ impl Writer {
         Ok(Changed { rows, usn })
     }
 
+    /// [`Writer::add_tracks_allowing`], keeping the membership rows it
+    /// created and the playlist's order before and after, so the add can be
+    /// undone without touching any row that was there before it (#499).
+    pub fn add_tracks_with_undo(
+        &mut self,
+        playlist: &str,
+        contents: &[String],
+        allow_duplicates: bool,
+    ) -> Result<(Changed, PlaylistTrackAddition)> {
+        let before = live_members(self.library.connection(), playlist)?;
+        let changed = self.add_tracks_allowing(playlist, contents, allow_duplicates)?;
+        let after = live_members(self.library.connection(), playlist)?;
+        let held: std::collections::HashSet<&String> = before.iter().collect();
+        let added = after.iter().filter(|id| !held.contains(id)).cloned().collect();
+        let edit = PlaylistTrackAddition { playlist: playlist.to_owned(), added, before, after };
+        Ok((changed, edit))
+    }
+
+    /// Takes the rows an add created out of the playlist again.
+    pub fn undo_track_addition(&mut self, edit: &PlaylistTrackAddition) -> Result<Changed> {
+        self.set_track_addition(edit, true)
+    }
+
+    /// Puts the same rows an add created back, at the numbers they had.
+    pub fn redo_track_addition(&mut self, edit: &PlaylistTrackAddition) -> Result<Changed> {
+        self.set_track_addition(edit, false)
+    }
+
+    fn set_track_addition(&mut self, edit: &PlaylistTrackAddition, deleted: bool) -> Result<Changed> {
+        if edit.is_empty() {
+            return Err(DbError::WriteRefused("empty playlist track-addition history".to_owned()));
+        }
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // The playlist must hold exactly what the history left in it: the
+        // add's result for an Undo, what it started from for a Redo. A track
+        // added, removed or moved there since would otherwise be lost from
+        // the order or numbered twice (#506).
+        let (expected, result) = if deleted { (&edit.after, &edit.before) } else { (&edit.before, &edit.after) };
+        let changed = "the playlist's tracks have changed since";
+        if live_members(&tx, &edit.playlist)? != *expected {
+            return Err(DbError::Conflict(changed.to_owned()));
+        }
+        // `next_usn` scans every sync table, so it is read once and counted
+        // up from there, as the add itself does.
+        let mut usn = next_usn(&tx)? - 1;
+        let mut rows = 0;
+        for membership in &edit.added {
+            usn += 1;
+            rows += tx.execute(
+                "UPDATE djmdSongPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2, updated_at = ?3
+                 WHERE ID = ?4 AND PlaylistID = ?5 AND rb_local_deleted = ?6",
+                params![i64::from(deleted), usn, stamp, membership, edit.playlist, i64::from(!deleted)],
+            )?;
+        }
+        // A row gone for good, or numbered elsewhere since: the dropped
+        // transaction writes nothing.
+        if rows != edit.added.len() || live_members(&tx, &edit.playlist)? != *result {
+            return Err(DbError::Conflict(changed.to_owned()));
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
     // ---------------------------------------------------------------- tag list
 
     /// Adds tracks to the Tag List, rekordbox's one temporary list, on the
@@ -2520,6 +2644,59 @@ impl Writer {
         }
         tx.commit()?;
         Ok(Changed { rows, usn })
+    }
+
+    /// [`Writer::reorder`], keeping every membership row's `TrackNo` before
+    /// and after so the reorder can be undone and redone exactly (#499).
+    pub fn reorder_with_undo(&mut self, playlist: &str, order: &[String]) -> Result<(Changed, PlaylistReorder)> {
+        let before = numbered_members(self.library.connection(), playlist)?;
+        let changed = self.reorder(playlist, order)?;
+        let after = numbered_members(self.library.connection(), playlist)?;
+        Ok((changed, PlaylistReorder { playlist: playlist.to_owned(), before, after }))
+    }
+
+    /// Puts a reordered playlist back in the order, and numbers, it had.
+    pub fn undo_reorder(&mut self, edit: &PlaylistReorder) -> Result<Changed> {
+        self.set_reorder(&edit.after, &edit.before, &edit.playlist)
+    }
+
+    /// Reorders the playlist again, to the order the reorder gave it.
+    pub fn redo_reorder(&mut self, edit: &PlaylistReorder) -> Result<Changed> {
+        self.set_reorder(&edit.before, &edit.after, &edit.playlist)
+    }
+
+    /// Writes `target`'s numbers, refused with nothing written unless the
+    /// playlist's live rows are exactly `expected`, numbers included: a track
+    /// added, removed or moved there since would otherwise be left out or
+    /// numbered twice (#506).
+    fn set_reorder(&mut self, expected: &[(String, i64)], target: &[(String, i64)], playlist: &str) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if numbered_members(&tx, playlist)? != expected {
+            return Err(DbError::Conflict("the playlist's tracks have changed since".to_owned()));
+        }
+        let now: std::collections::HashMap<&str, i64> = expected.iter().map(|(id, no)| (id.as_str(), *no)).collect();
+        let mut usn = next_usn(&tx)? - 1;
+        let mut rows = 0;
+        for (id, number) in target {
+            // Only rows whose number moves get a new USN, as `renumber` does.
+            if now.get(id.as_str()) == Some(number) {
+                continue;
+            }
+            usn += 1;
+            rows += tx.execute(
+                "UPDATE djmdSongPlaylist SET TrackNo = ?1, rb_local_usn = ?2, updated_at = ?3
+                 WHERE ID = ?4 AND PlaylistID = ?5 AND rb_local_deleted = 0",
+                params![number, usn, stamp, id, playlist],
+            )?;
+        }
+        if rows > 0 {
+            set_counter(&tx, usn)?;
+        }
+        tx.commit()?;
+        Ok(Changed { rows, usn: if rows > 0 { usn } else { 0 } })
     }
 
     // ---------------------------------------------------------------- import
@@ -5425,6 +5602,17 @@ fn live_members(conn: &Connection, playlist: &str) -> Result<Vec<String>> {
          WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID",
     )?;
     let found = stmt.query_map(params![playlist], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(found)
+}
+
+/// [`live_members`] with each row's `TrackNo`.
+fn numbered_members(conn: &Connection, playlist: &str) -> Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT ID, TrackNo FROM djmdSongPlaylist
+         WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID",
+    )?;
+    let found = stmt.query_map(params![playlist], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     Ok(found)
 }

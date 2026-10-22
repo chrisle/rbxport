@@ -4731,3 +4731,123 @@ fn undo_of_a_track_removal_refuses_a_playlist_changed_since() {
     f.writer.undo_track_removal(&removal).unwrap();
     assert_eq!(f.track_numbers(&list), [1, 2, 3]);
 }
+
+/// A playlist's live membership rows as (row id, track id, `TrackNo`), in order.
+fn members_of(f: &Fixture, playlist: &str) -> Vec<(String, String, i64)> {
+    let mut stmt = f.conn().prepare(
+        "SELECT ID, ContentID, TrackNo FROM djmdSongPlaylist
+         WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID",
+    ).unwrap();
+    stmt.query_map(params![playlist], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect()
+}
+
+/// #499: Undo of an add takes out exactly the rows it made and Redo puts
+/// the same rows back, at the same numbers.
+#[test]
+fn an_add_undoes_and_redoes_the_exact_rows_it_made() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0), track_id(1)]).unwrap();
+    let before = members_of(&f, &list);
+    let (_, addition) = f.writer.add_tracks_with_undo(&list, &[track_id(2), track_id(3)], false).unwrap();
+    let after = members_of(&f, &list);
+    assert_eq!(addition.added(), [after[2].0.clone(), after[3].0.clone()]);
+
+    f.writer.undo_track_addition(&addition).unwrap();
+    assert_eq!(members_of(&f, &list), before);
+    let gone: i64 = f.one("SELECT rb_local_deleted FROM djmdSongPlaylist WHERE ID = ?1", &[&after[2].0]);
+    assert_eq!(gone, 1, "soft-deleted, kept for Redo");
+
+    f.writer.redo_track_addition(&addition).unwrap();
+    assert_eq!(members_of(&f, &list), after, "the same rows, ids and numbers");
+}
+
+/// #499: an add with duplicates allowed undoes only the copies it made;
+/// the track's earlier membership stays.
+#[test]
+fn undo_of_an_add_with_duplicates_keeps_the_earlier_copy() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0), track_id(1)]).unwrap();
+    let before = members_of(&f, &list);
+    let (_, addition) = f.writer.add_tracks_with_undo(&list, &[track_id(1), track_id(0)], true).unwrap();
+    assert_eq!(members_of(&f, &list).len(), 4);
+    assert_eq!(addition.added().len(), 2);
+    assert!(before.iter().all(|(id, ..)| !addition.added().contains(id)));
+    f.writer.undo_track_addition(&addition).unwrap();
+    assert_eq!(members_of(&f, &list), before);
+    f.writer.redo_track_addition(&addition).unwrap();
+    let ids: Vec<String> = members_of(&f, &list).into_iter().map(|(_, content, _)| content).collect();
+    assert_eq!(ids, [track_id(0), track_id(1), track_id(1), track_id(0)]);
+}
+
+/// #499, #506: Undo or Redo of an add refuses, writing nothing, once the
+/// playlist's tracks changed since.
+#[test]
+fn undo_and_redo_of_an_add_refuse_a_playlist_changed_since() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0)]).unwrap();
+    let (_, addition) = f.writer.add_tracks_with_undo(&list, &[track_id(1)], false).unwrap();
+    f.writer.add_tracks(&list, &[track_id(2)]).unwrap();
+    let now = members_of(&f, &list);
+    assert!(matches!(f.writer.undo_track_addition(&addition), Err(DbError::Conflict(_))));
+    assert_eq!(members_of(&f, &list), now, "nothing written");
+
+    f.writer.remove_tracks(&list, &[track_id(2)]).unwrap();
+    f.writer.undo_track_addition(&addition).unwrap();
+    f.writer.reorder(&list, &[track_id(0)]).unwrap();
+    f.writer.add_tracks(&list, &[track_id(3)]).unwrap();
+    let now = members_of(&f, &list);
+    assert!(matches!(f.writer.redo_track_addition(&addition), Err(DbError::Conflict(_))));
+    assert_eq!(members_of(&f, &list), now, "nothing written");
+}
+
+/// #499: the slices of one large add join one entry while each carries on
+/// from the last; a slice after another change does not.
+#[test]
+fn the_slices_of_one_add_join_one_undo() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    let (_, mut first) = f.writer.add_tracks_with_undo(&list, &[track_id(0), track_id(1)], false).unwrap();
+    let (_, second) = f.writer.add_tracks_with_undo(&list, &[track_id(2)], false).unwrap();
+    assert!(first.absorb(&second));
+    assert_eq!(first.added().len(), 3);
+    f.writer.add_tracks(&list, &[track_id(3)]).unwrap();
+    let (_, third) = f.writer.add_tracks_with_undo(&list, &[track_id(4)], false).unwrap();
+    assert!(!first.absorb(&third), "something else changed the playlist in between");
+    assert_eq!(first.added().len(), 3);
+}
+
+/// #499: Undo of a reorder puts back every row's number; Redo the new ones.
+#[test]
+fn a_reorder_undoes_and_redoes_every_number() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0), track_id(1), track_id(2)]).unwrap();
+    let before = members_of(&f, &list);
+    let (_, reorder) = f.writer.reorder_with_undo(&list, &[track_id(2), track_id(0), track_id(1)]).unwrap();
+    assert!(!reorder.is_empty());
+    let after = members_of(&f, &list);
+    assert_eq!(after.iter().map(|(_, c, _)| c.clone()).collect::<Vec<_>>(), [track_id(2), track_id(0), track_id(1)]);
+    f.writer.undo_reorder(&reorder).unwrap();
+    assert_eq!(members_of(&f, &list), before);
+    f.writer.redo_reorder(&reorder).unwrap();
+    assert_eq!(members_of(&f, &list), after);
+}
+
+/// #499, #506: Undo of a reorder refuses once the playlist changed since.
+#[test]
+fn undo_of_a_reorder_refuses_a_playlist_changed_since() {
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0), track_id(1)]).unwrap();
+    let (_, reorder) = f.writer.reorder_with_undo(&list, &[track_id(1), track_id(0)]).unwrap();
+    f.writer.add_tracks(&list, &[track_id(2)]).unwrap();
+    let now = members_of(&f, &list);
+    assert!(matches!(f.writer.undo_reorder(&reorder), Err(DbError::Conflict(_))));
+    assert_eq!(members_of(&f, &list), now, "nothing written");
+}
