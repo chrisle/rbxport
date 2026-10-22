@@ -1,16 +1,19 @@
 //! Keeps the computer and its display from going to sleep on their own while
-//! a USB stick is being written.
+//! a USB stick is being written, as rekordbox does.
 //!
-//! A long sync runs with nobody touching the computer. If the display or the
-//! system idles into sleep part-way through, macOS and Windows may power the
-//! USB port down or remount the volume under the writes still in flight, and
-//! the stick answers "Input/output error" (#661, #662). rekordbox does not let
-//! that happen: its start-up (`RekordboxApplication::initialise`, rekordbox
+//! rekordbox's start-up (`RekordboxApplication::initialise`, rekordbox
 //! 7.2.19 for macOS at `0x1008407ac`) calls JUCE's
 //! `Desktop::setScreenSaverEnabled(false)`, whose `ScreenSaverDefeater` holds
 //! an `IOKit` `PreventUserIdleDisplaySleep` assertion while rekordbox is in
-//! front (`timerCallback` at `0x1027069f0`). An export here holds the same
-//! assertion for as long as it writes, whichever app is in front.
+//! front (`timerCallback` at `0x1027069f0`), so a long export never runs into
+//! idle sleep. An export here holds the same assertion for as long as it
+//! writes, whichever app is in front.
+//!
+//! `[ASSUME]` Idle sleep part-way through a long sync may also be one way a
+//! stick gets cut off under writes still in flight (the OS may power the USB
+//! port down or remount the volume). That is a possible contributing factor
+//! to failed writes, not an observed cause; the reason for holding the
+//! request is rekordbox parity.
 //!
 //! Sleep the user asks for (closing the lid, the Sleep menu item) is never
 //! blocked. Where the platform has no way to ask, or the request fails, the
@@ -173,6 +176,7 @@ mod platform {
             Self
         }
 
+        #[allow(clippy::unused_self, reason = "same signature as the macOS and Windows requests")]
         pub(super) fn held(&self) -> bool {
             false
         }
