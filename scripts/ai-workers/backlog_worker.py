@@ -27,7 +27,7 @@ SESSION = os.environ.get("RBX_SESSION", "rbx backlog worker")
 CHECK_INTERVAL = int(os.environ.get("RBX_CHECK_INTERVAL", 12 * 3600))
 REPO_DIR = Path(__file__).resolve().parents[2]
 GOAL = (
-    "/goal Continuously run the take-tickets skill. If it stalls, restart it on "
+    "/goal Continuously run the take-tickets skill with 4 tickets per batch. If it stalls, restart it on "
     "different tickets until everything is stalled or there are no tickets left."
 )
 # Text claude prints in the pane when /goal finishes one way or the other.
