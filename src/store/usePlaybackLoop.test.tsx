@@ -34,14 +34,16 @@ const IDLE = {
 };
 
 /** A tick with deck A holding the given loop, in seconds. */
-function tickWithLoop(loop: { inSeconds: number; outSeconds: number; active: boolean } | null): Tick {
+function tickWithLoop(loop: { inSeconds: number; outSeconds: number; active: boolean } | null,
+  head = 0, generation = 1): Tick {
   return {
     a: {
       ...IDLE,
       loaded: true,
       playing: true,
+      frames: head * RATE,
       totalFrames: 300 * RATE,
-      generation: 1,
+      generation,
       loopInFrames: (loop?.inSeconds ?? 0) * RATE,
       loopOutFrames: (loop?.outSeconds ?? 0) * RATE,
       looping: loop?.active ?? false,
@@ -63,12 +65,16 @@ let sent: string[];
 let mountedTrack: string | null;
 /** What the loop commands answer with, so a test can make one fail. */
 let answer: () => Promise<void>;
+let engineLoop: { inSeconds: number; outSeconds: number; active: boolean } | null;
+let engineHead: number;
+let engineGeneration: number;
+let acceptMove: boolean;
 
 const done = () => Promise.resolve();
 
 function stubBackend(): Backend {
   return {
-    deckState: () => Promise.resolve(tickWithLoop(null)),
+    deckState: () => Promise.resolve(tickWithLoop(engineLoop, engineHead, engineGeneration)),
     onDeckTick: (listener: (tick: Tick) => void) => {
       ticked = listener;
       return () => {};
@@ -81,10 +87,16 @@ function stubBackend(): Backend {
     deckSeek: () => done(),
     deckSetLoop: (_d: string, inMs: number, outMs: number) => {
       sent.push(`set:${inMs}:${outMs}`);
+      engineLoop = { inSeconds: inMs / 1000, outSeconds: outMs / 1000, active: true };
       return answer();
     },
     deckMoveLoop: (_d: string, inMs: number, outMs: number, byMs: number, grid: number[], beats: number) => {
       sent.push(`move:${inMs}:${outMs}:${byMs}:${grid.join(",")}:${beats}`);
+      if (acceptMove) {
+        engineLoop = { inSeconds: inMs / 1000, outSeconds: outMs / 1000, active: true };
+        engineHead += byMs / 1000;
+        engineGeneration += 1;
+      }
       return answer();
     },
     deckLoopActive: (_d: string, on: boolean) => {
@@ -118,6 +130,10 @@ beforeEach(async () => {
   sent = [];
   mountedTrack = "track-1";
   answer = done;
+  engineLoop = null;
+  engineHead = 0;
+  engineGeneration = 1;
+  acceptMove = true;
   vi.stubGlobal("requestAnimationFrame", () => 1);
   vi.stubGlobal("cancelAnimationFrame", () => {});
   __setBackend(stubBackend());
@@ -166,6 +182,8 @@ describe("setting a loop", () => {
     const grid = { times: Uint32Array.from({ length: 45 }, (_, i) =>
       i <= 24 ? i * 500 : 12_000 + (i - 24) * 400),
       numbers: new Uint8Array(), tempos: new Uint16Array() };
+    engineHead = 10.75;
+    deliver(tickWithLoop(null, 10.75));
     act(() => deck.setLoop(10, 12));
     await settle();
     const move = (beats: number, headMs: number) => {
@@ -180,15 +198,31 @@ describe("setting a loop", () => {
     move(4, 10_750);
     deliver(tickWithLoop({ inSeconds: 10, outSeconds: 12, active: true }));
     expect(deck.currentLoop()).toEqual({ inSeconds: 12, outSeconds: 13.6, active: true });
+    expect(deck.positionNow()).toBeGreaterThan(12.5);
     move(4, 12_600);
     await settle();
+    deliver(tickWithLoop({ inSeconds: 10, outSeconds: 12, active: true }));
     expect(deck.currentLoop()).toEqual({ inSeconds: 13.6, outSeconds: 15.2, active: true });
+    expect(deck.positionNow()).toBeGreaterThan(14);
     expect(sent.filter((command) => command.startsWith("move:"))).toEqual([
       expect.stringMatching(/^move:12000:13600:/),
       expect.stringMatching(/^move:13600:15200:/),
     ]);
     move(-4, 14_200);
+    await settle();
     expect(deck.currentLoop()).toEqual({ inSeconds: 12, outSeconds: 13.6, active: true });
+  });
+  it("restores engine loop and head when a move is rejected", async () => {
+    engineHead = 10.75;
+    act(() => deck.setLoop(10, 12));
+    await settle();
+    deliver(tickWithLoop({ inSeconds: 10, outSeconds: 12, active: true }, 10.75));
+    acceptMove = false;
+    act(() => deck.moveLoop(12, 14, 2, [10_000, 10_500], 4));
+    await settle();
+    expect(deck.currentLoop()).toEqual({ inSeconds: 10, outSeconds: 12, active: true });
+    expect(deck.loop).toEqual({ inSeconds: 10, outSeconds: 12, active: true });
+    expect(deck.positionNow()).toBeCloseTo(10.75, 1);
   });
   it("sends the two points down in milliseconds", async () => {
     act(() => deck.setLoop(1.5, 3.25));
