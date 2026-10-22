@@ -1281,6 +1281,17 @@ If different audio paths collide on the hash,
 suffix the audio filename and
 recompute, including checks against retained analysis directories.
 
+rekordbox resolves the same collision differently: it keeps the path and
+writes the second track's analysis as `ANLZ0001.*` in the same directory.
+A player tries `ANLZ0000` to `ANLZ0010` there and takes the file whose
+`PPTH` names the track. A retained device-only track keeps that slot, and
+its slot file is never overwritten with `ANLZ0000` (#599, #616).
+
+A retained device-only track also keeps its audio path. When a selected
+track lays out on that path, the selected track gets the suffix. rekordbox
+likewise never replaces a file that is already at a track's device path
+(`DatabaseMediator::calc_device_file_path`).
+
 #### Analysis export transformation
 
 Every exported companion's `PPTH` is rewritten to the final leading-slash
