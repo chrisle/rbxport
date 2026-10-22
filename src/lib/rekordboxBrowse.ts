@@ -1,10 +1,18 @@
 /** Import the parts of rekordbox's browseSetting.xml that our rows support. */
-import { AVAILABLE_COLUMNS, sanitise, type ColumnKey, type Layout } from "./columns";
+import { availableColumns, sanitise, type ColumnKey, type Layout } from "./columns";
+import type { ArtworkMode } from "./session";
 import { loadPreferences } from "./preferences";
 import { getBackend } from "@/ipc/client";
 import { loadSession, saveSession } from "./session";
 
 export type BrowseContext = "collection" | "playlist" | "history" | "subBrowser" | "folder";
+/**
+ * A context's layout for an artwork mode: the context itself for the upper
+ * part, and `<context>.full` for the whole artwork, which rekordbox keeps
+ * under the same header name with `-FullArtwork` appended
+ * (`BrowseHeaderManager::getXmlKeyName`, rekordbox 7.2.19).
+ */
+export type BrowseLayoutKey = BrowseContext | `${BrowseContext}.full`;
 
 // Numeric column IDs, from the measured rekordbox headers and from the
 // comparator rekordbox 7.2.11 binds to each ID in
@@ -22,6 +30,10 @@ const IDS: Readonly<Record<string, ColumnKey>> = {
   "39": "dateCreated", "41": "fileName", "42": "size", "43": "sampleRate",
   "44": "duration", "46": "albumArtist", "47": "discNo", "48": "mixName",
   "49": "originalArtist", "52": "bitDepth", "53": "releaseDate", "60": "artwork",
+  // The whole-artwork header's Artwork and Summary columns, which only its
+  // `-FullArtwork` layouts hold [OBS static, rekordbox 7.2.19
+  // `kSmallArtworkHeaderDefault`; `updateRowHeight` sizes column 61].
+  "61": "artwork", "63": "summary",
   "66": "publishTrackInfo", "67": "message", "68": "preview", "72": "lyricist",
 };
 
@@ -33,26 +45,35 @@ const SOURCES: Readonly<Record<BrowseContext, readonly string[]>> = {
   folder: ["TableHeader-FolderTracks"],
 };
 
-export function parseRekordboxBrowse(xml: string): Partial<Record<BrowseContext, Layout>> {
+export function parseRekordboxBrowse(xml: string): Partial<Record<BrowseLayoutKey, Layout>> {
   const doc = new DOMParser().parseFromString(xml, "application/xml");
   if (doc.querySelector("parsererror")) return {};
   const values = Array.from(doc.getElementsByTagName("VALUE"));
-  const layouts: Partial<Record<BrowseContext, Layout>> = {};
+  const layouts: Partial<Record<BrowseLayoutKey, Layout>> = {};
   for (const context of Object.keys(SOURCES) as BrowseContext[]) {
-    const value = SOURCES[context]
-      .map((name) => values.find((entry) => entry.getAttribute("name") === name))
-      .find((entry) => entry?.getElementsByTagName("COLUMN").length);
-    if (!value) continue;
-    const order: ColumnKey[] = [];
-    const widths: Layout["widths"] = {};
-    for (const column of Array.from(value.getElementsByTagName("COLUMN"))) {
-      const key = IDS[column.getAttribute("id") ?? ""];
-      if (!key || !AVAILABLE_COLUMNS.includes(key)) continue;
-      const width = Number(column.getAttribute("width"));
-      if (Number.isFinite(width) && width > 0) widths[key] = width;
-      if (key !== "trackNo" && column.getAttribute("visible") === "1" && !order.includes(key)) order.push(key);
+    for (const mode of ["partial", "full"] as const satisfies readonly ArtworkMode[]) {
+      const suffix = mode === "full" ? "-FullArtwork" : "";
+      const value = SOURCES[context]
+        .map((name) => values.find((entry) => entry.getAttribute("name") === `${name}${suffix}`))
+        .find((entry) => entry?.getElementsByTagName("COLUMN").length);
+      if (!value) continue;
+      const available = availableColumns(mode);
+      const order: ColumnKey[] = [];
+      const widths: Layout["widths"] = {};
+      for (const column of Array.from(value.getElementsByTagName("COLUMN"))) {
+        const key = IDS[column.getAttribute("id") ?? ""];
+        if (!key || !available.includes(key)) continue;
+        const width = Number(column.getAttribute("width"));
+        if (Number.isFinite(width) && width > 0) widths[key] = width;
+        if (key !== "trackNo" && column.getAttribute("visible") === "1" && !order.includes(key)) order.push(key);
+      }
+      // An upper-part layout without a title is not one this app can read;
+      // the whole artwork hides the title by default, and its Artwork
+      // column is always there.
+      const usable = mode === "full" ? order.includes("artwork") : order.includes("title");
+      const key: BrowseLayoutKey = mode === "full" ? `${context}.full` : context;
+      if (usable) layouts[key] = sanitise({ order, widths }, undefined, mode);
     }
-    if (order.includes("title")) layouts[context] = sanitise({ order, widths });
   }
   return layouts;
 }
@@ -88,7 +109,7 @@ export function parseRekordboxBrowseWidths(xml: string): { treeWidth?: number; s
  */
 const IMPORTED_KEY = "rbl.browse-import.v1";
 
-type Imported = Partial<Record<BrowseContext | "panes", string>>;
+type Imported = Partial<Record<BrowseLayoutKey | "panes", string>>;
 
 function loadImported(): Imported {
   try {
@@ -112,7 +133,7 @@ function loadImported(): Imported {
 export function applyRekordboxBrowse(xml: string): void {
   const imported = loadImported();
   const next: Imported = { ...imported };
-  for (const [context, layout] of Object.entries(parseRekordboxBrowse(xml)) as [BrowseContext, Layout][]) {
+  for (const [context, layout] of Object.entries(parseRekordboxBrowse(xml)) as [BrowseLayoutKey, Layout][]) {
     const value = JSON.stringify(layout);
     if (imported[context] === value) continue;
     localStorage.setItem(`rbl.columns.v2.${context}`, value);
