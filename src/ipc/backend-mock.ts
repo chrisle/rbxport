@@ -633,6 +633,28 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return wait(generation);
   };
 
+  /**
+   * Remove from Tag List or Clear Tag List (#508): keeps the tracks `keep`
+   * passes, and records one entry whose Undo puts the list back as it was,
+   * refused, as the real backend refuses it, once the list changed since.
+   */
+  const recordTagListRemoval = (label: string, keep: (track: string) => boolean): Promise<number> => {
+    const before = [...tagList];
+    const after = before.filter(keep);
+    if (after.length === before.length) return wait(generation);
+    const setFrom = (expected: readonly string[], next: readonly string[]) => {
+      if (tagList.length !== expected.length || tagList.some((track, i) => track !== expected[i])) {
+        throw new Error("the Tag List has changed since");
+      }
+      tagList.splice(0, tagList.length, ...next);
+      for (const listener of tagListListeners) listener();
+    };
+    tagList.splice(0, tagList.length, ...after);
+    editUndo.push({ label, undo: () => setFrom(after, before), redo: () => setFrom(before, after) });
+    if (editUndo.length > 50) editUndo.shift();
+    return tagListChanged();
+  };
+
   // The library's My Tags. Edited in place by Adding My Tag, a rename and a
   // delete, as the real backend's table is.
   const myTagCategories: { id: string; name: string; tags: { id: string; name: string }[] }[] = [
@@ -1202,17 +1224,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       for (const track of tracks) if (!tagList.includes(track)) tagList.push(track);
       return tagListChanged();
     },
-    removeFromTagList: (tracks) => {
-      for (const track of tracks) {
-        const at = tagList.indexOf(track);
-        if (at >= 0) tagList.splice(at, 1);
-      }
-      return tagListChanged();
-    },
-    clearTagList: () => {
-      tagList.length = 0;
-      return tagListChanged();
-    },
+    // One Undo per removal or clear, as the real backend records them
+    // (#508); a removal of nothing records nothing.
+    removeFromTagList: (tracks) => recordTagListRemoval("Remove from Tag List", (t) => !tracks.includes(t)),
+    clearTagList: () => recordTagListRemoval("Clear Tag List", () => false),
     removeTracksFromPlaylist: (playlist, tracks) => {
       const before = [...membersOf(playlist)];
       const current = membersOf(playlist).filter((t) => !tracks.includes(t));

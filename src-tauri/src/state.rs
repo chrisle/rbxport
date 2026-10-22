@@ -130,6 +130,9 @@ pub(crate) enum LibraryEdit {
     /// One Relocate, Relocate by location or Auto Relocate run (#502):
     /// every track's file link before and after, put back in one step.
     Relocate(rbl_db::write::TrackRelocation),
+    /// One Remove from Tag List, Clear Tag List or Remove from History
+    /// (#508): the rows taken off the list and its order before and after.
+    ListRemoval(rbl_db::write::ListRemoval),
 }
 
 impl LibraryEdit {
@@ -149,6 +152,7 @@ impl LibraryEdit {
             Self::Cues(edit) => edit.is_empty(),
             Self::PlaylistEdit(edit) => edit.is_empty(),
             Self::Relocate(edit) => edit.is_empty(),
+            Self::ListRemoval(edit) => edit.is_empty(),
         }
     }
 }

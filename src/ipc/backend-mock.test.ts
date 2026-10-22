@@ -341,6 +341,35 @@ describe("mock edits", () => {
     expect(await order()).toEqual(["100003", "100000", "100001", "100002"]);
   });
 
+  it("undoes Remove from Tag List and Clear Tag List one step each, in order, and refuses a list changed since (#508)", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const tagged = async () => (await backend.fetchRows(
+      (await backend.openView({ source: { kind: "tagList" }, sort: "trackNo", descending: false, query: "" })).viewId,
+      0, 20,
+    )).map((row) => row.id);
+    await backend.edits.addToTagList(["100003", "100001", "100004", "100002"]);
+    await backend.edits.removeFromTagList(["100001", "100002"]);
+    expect(await tagged()).toEqual(["100003", "100004"]);
+    await backend.edits.clearTagList();
+    expect(await tagged()).toEqual([]);
+
+    expect(await backend.edits.undoEdit()).toMatchObject({ undoLabel: "Remove from Tag List", redoLabel: "Clear Tag List" });
+    expect(await tagged()).toEqual(["100003", "100004"]);
+    await backend.edits.undoEdit();
+    expect(await tagged()).toEqual(["100003", "100001", "100004", "100002"]);
+    expect(await backend.edits.redoEdit()).toMatchObject({ undoLabel: "Remove from Tag List" });
+    expect(await tagged()).toEqual(["100003", "100004"]);
+
+    // A removal of nothing records nothing; a tag added since refuses the Undo.
+    await backend.edits.removeFromTagList(["100009"]);
+    await backend.edits.addToTagList(["100007"]);
+    await expect(backend.edits.undoEdit()).rejects.toMatchObject({
+      kind: "conflict",
+      message: "Can't undo Remove from Tag List: the Tag List has changed since. The newer change was kept.",
+    });
+    expect(await tagged()).toEqual(["100003", "100004", "100007"]);
+  });
+
   it("clamps a rating to the range the backend accepts", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.setTrackRating(["100000"], 9);

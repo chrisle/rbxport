@@ -832,6 +832,7 @@ where
     G: FnOnce(&mut EditHistory, T) + Send + 'static,
 {
     let state = Arc::clone(&state);
+    let event = touched.event();
     let dto = blocking(name, move || {
         let _gate = state.edit_gate.lock();
         let (generation, reversible) = state.write_history_then(
@@ -842,7 +843,7 @@ where
         record(&mut history, reversible);
         Ok(history_dto(generation, &history))
     }).await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
+    let _ = tauri::Emitter::emit(&app, event, dto.generation);
     let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
     Ok(dto)
 }
@@ -859,6 +860,10 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
         // undo is uncommon and guarantees every view and sort follows it.
         LibraryEdit::Track(_) | LibraryEdit::KeyEdit { .. } | LibraryEdit::TrackTags(_) | LibraryEdit::Relocate(_) => Touched::Tracks,
         LibraryEdit::Cues(revision) => Touched::Cues(revision.content().to_owned()),
+        LibraryEdit::ListRemoval(removal) => match removal.list() {
+            rbl_db::write::RemovalList::TagList => Touched::TagList,
+            rbl_db::write::RemovalList::History(_) => Touched::Histories(Vec::new()),
+        },
     }
 }
 
@@ -879,6 +884,8 @@ fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool)
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) | LibraryEdit::MovePlaylist(_)
         | LibraryEdit::ReplacePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_)
         | LibraryEdit::AddPlaylistTracks { .. } | LibraryEdit::ReorderPlaylist(_)
+        // Checked in the one transaction that writes it (#508).
+        | LibraryEdit::ListRemoval(_)
         // Every playlist of a replacement is checked in the one transaction
         // that writes them.
         | LibraryEdit::ReplacePlaylistContents(_) => Ok(()),
@@ -963,6 +970,7 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
         LibraryEdit::CreatePlaylist(value) => if undo { writer.undo_creation(value) } else { writer.redo_creation(value) }.map(|_| ()),
         LibraryEdit::PlaylistEdit(value) => if undo { writer.undo_playlist_edit(value) } else { writer.redo_playlist_edit(value) }.map(|_| ()),
         LibraryEdit::Relocate(value) => if undo { writer.undo_relocation(value) } else { writer.redo_relocation(value) }.map(|_| ()),
+        LibraryEdit::ListRemoval(value) => if undo { writer.undo_list_removal(value) } else { writer.redo_list_removal(value) }.map(|_| ()),
     }
 }
 
@@ -3875,12 +3883,14 @@ async fn run_history<R: tauri::Runtime>(
     let name = if undo { "undo_edit" } else { "redo_edit" };
     let result = blocking(name, move || step_history(&worker, undo)).await;
     match &result {
-        Ok((dto, cue_track)) => {
+        Ok((dto, stepped)) => {
             // A cue entry names its track, as the cue edit itself does,
-            // rather than making every list fetch again (#504).
-            let _ = match cue_track {
-                Some(track) => tauri::Emitter::emit(&app, "cues:changed", track),
-                None => tauri::Emitter::emit(&app, "library:changed", dto.generation),
+            // rather than making every list fetch again (#504); a Tag List
+            // entry tells the Tag List alone, as its removal did (#508).
+            let _ = match stepped {
+                Stepped::Cues(track) => tauri::Emitter::emit(&app, "cues:changed", track),
+                Stepped::TagList => tauri::Emitter::emit(&app, Touched::TagList.event(), dto.generation),
+                Stepped::Library => tauri::Emitter::emit(&app, "library:changed", dto.generation),
             };
             let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
         }
@@ -3888,6 +3898,15 @@ async fn run_history<R: tauri::Runtime>(
         Err(_) => {}
     }
     result.map(|(dto, _)| dto)
+}
+
+/// What an Undo or Redo changed, for the event the window is sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Stepped {
+    Library,
+    TagList,
+    /// One track's cues (#504).
+    Cues(String),
 }
 
 /// Runs the next Undo (`undo`) or Redo entry of the library history.
@@ -3900,9 +3919,10 @@ async fn run_history<R: tauri::Runtime>(
 /// [`ErrorKind::Conflict`] and a message saying why. The rest of the
 /// history stays usable: each entry checks its own rows when it runs.
 /// Chris's decision of 2026-10-22 on #506 (refuse, keep unrelated history).
-/// Also answers the track a cue entry changed, which the window is told
-/// of by `cues:changed` rather than `library:changed`.
-pub(crate) fn step_history(state: &AppState, undo: bool) -> AppResult<(EditHistoryDto, Option<String>)> {
+/// Also answers what the window is to be told changed: the track a cue
+/// entry changed (`cues:changed`), the Tag List (`tag-list:changed`), or
+/// the library (`library:changed`).
+pub(crate) fn step_history(state: &AppState, undo: bool) -> AppResult<(EditHistoryDto, Stepped)> {
     let _gate = state.edit_gate.lock();
     let entry = {
         let history = state.edit_history.lock();
@@ -3925,12 +3945,13 @@ pub(crate) fn step_history(state: &AppState, undo: bool) -> AppResult<(EditHisto
     match result {
         Ok(generation) => {
             history.drop_next(undo);
-            let cue_track = match &entry.edit {
-                LibraryEdit::Cues(revision) => Some(revision.content().to_owned()),
-                _ => None,
+            let stepped = match &entry.edit {
+                LibraryEdit::Cues(revision) => Stepped::Cues(revision.content().to_owned()),
+                LibraryEdit::ListRemoval(removal) if matches!(removal.list(), rbl_db::write::RemovalList::TagList) => Stepped::TagList,
+                _ => Stepped::Library,
             };
             if undo { history.redo.push(entry); } else { history.undo.push(entry); }
-            Ok((history_dto(generation, &history), cue_track))
+            Ok((history_dto(generation, &history), stepped))
         }
         Err(rbl_db::DbError::Conflict(reason)) => {
             history.drop_next(undo);
@@ -4026,8 +4047,10 @@ pub async fn remove_from_tag_list<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "remove_from_tag_list", Touched::TagList, move |w| w.tag_list_remove(&tracks).map(|_| ()))
-        .await
+    recorded_list_removal(app, state, "remove_from_tag_list", Touched::TagList, "Remove from Tag List", move |w| {
+        w.tag_list_remove_with_undo(&tracks)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -4035,7 +4058,30 @@ pub async fn clear_tag_list<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
 ) -> AppResult<u32> {
-    edit(app, state, "clear_tag_list", Touched::TagList, move |w| w.tag_list_clear().map(|_| ())).await
+    recorded_list_removal(app, state, "clear_tag_list", Touched::TagList, "Clear Tag List", rbl_db::write::Writer::tag_list_clear_with_undo)
+        .await
+}
+
+/// Remove from Tag List, Clear Tag List and Remove from History: one Undo
+/// entry for the whole selection or the whole clear (#508). The window
+/// still asks first, in rekordbox's words; nothing taken off records
+/// nothing. Answers the generation, as the edit did before it was recorded.
+async fn recorded_list_removal<R: tauri::Runtime, F>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    name: &'static str,
+    touched: Touched,
+    label: &'static str,
+    action: F,
+) -> AppResult<u32>
+where
+    F: FnOnce(&mut rbl_db::write::Writer) -> Result<(rbl_db::write::Changed, rbl_db::write::ListRemoval), rbl_db::DbError>
+        + Send
+        + 'static,
+{
+    recorded_edit(app, state, name, touched, label, move |w| action(w).map(|(_, removal)| LibraryEdit::ListRemoval(removal)))
+        .await
+        .map(|dto| dto.generation)
 }
 
 #[tauri::command]
@@ -4563,8 +4609,8 @@ pub async fn remove_from_history<R: tauri::Runtime>(
     history: String,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "remove_from_history", Touched::Histories(Vec::new()), move |w| {
-        w.remove_from_history(&history, &tracks).map(|_| ())
+    recorded_list_removal(app, state, "remove_from_history", Touched::Histories(Vec::new()), "Remove from History", move |w| {
+        w.remove_from_history_with_undo(&history, &tracks)
     })
     .await
 }

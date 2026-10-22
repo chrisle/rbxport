@@ -1653,6 +1653,156 @@ fn a_tag_list_add_naming_a_track_that_is_not_there_is_read_only_and_adds_none_of
     assert_eq!(*s.tag_list_changes.lock().unwrap(), 1, "only the add that went through announced");
 }
 
+/// Waits for `n` `tag-list:changed`, which the mock app delivers on its own thread.
+fn wait_for_tag_list_changes(s: &Shell, n: usize) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while *s.tag_list_changes.lock().unwrap() < n && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(*s.tag_list_changes.lock().unwrap(), n);
+}
+
+/// The live Tag List rows' ids in `TrackNo` order, read from the database:
+/// Undo must bring back these rows themselves, not lookalikes.
+fn tag_list_row_ids(s: &Shell) -> Vec<(String, i64)> {
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let mut stmt = db
+        .connection()
+        .prepare("SELECT ID, TrackNo FROM djmdSongTagList WHERE rb_local_deleted = 0 ORDER BY TrackNo, ID")
+        .unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+}
+
+#[test]
+fn remove_from_tag_list_and_clear_tag_list_are_one_undo_each() {
+    let s = shell();
+    let (t1, t2, t3, t4) = (track_id(1), track_id(2), track_id(3), track_id(4));
+    run(commands::add_to_tag_list(s.handle(), s.state(), vec![t3.clone(), t1.clone(), t4.clone(), t2.clone()])).unwrap();
+    let full = tag_list_row_ids(&s);
+    let tagged = || {
+        let (view, _) = s.open(tag_list_spec());
+        s.rows(view).into_iter().map(|r| r.id).collect::<Vec<_>>()
+    };
+
+    // The whole selection, one entry.
+    run(commands::remove_from_tag_list(s.handle(), s.state(), vec![t1.clone(), t2.clone()])).unwrap();
+    assert_eq!(tagged(), [t3.clone(), t4.clone()]);
+    assert_eq!(commands::current_history(&s.state()).undo_label.as_deref(), Some("Remove from Tag List"));
+    run(commands::clear_tag_list(s.handle(), s.state())).unwrap();
+    assert!(tagged().is_empty());
+    assert_eq!(commands::current_history(&s.state()).undo_label.as_deref(), Some("Clear Tag List"));
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(undone.undo_label.as_deref(), Some("Remove from Tag List"));
+    assert_eq!(undone.redo_label.as_deref(), Some("Clear Tag List"));
+    assert_eq!(tagged(), [t3.clone(), t4.clone()]);
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(tagged(), [t3.clone(), t1.clone(), t4.clone(), t2.clone()], "back in their places");
+    assert_eq!(tag_list_row_ids(&s), full, "the same rows at the same numbers");
+
+    let redone = run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(redone.undo_label.as_deref(), Some("Remove from Tag List"));
+    assert_eq!(tagged(), [t3.clone(), t4.clone()]);
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert!(tagged().is_empty());
+
+    // Each removal, clear, Undo and Redo told the Tag List alone, as the
+    // add did; no list was made to refetch.
+    wait_for_tag_list_changes(&s, 7);
+    assert!(s.changes.lock().unwrap().is_empty(), "nothing told every list to refetch");
+
+    // Taking off a track not on the list records nothing.
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    run(commands::remove_from_tag_list(s.handle(), s.state(), vec![track_id(9)])).unwrap();
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some("Remove from Tag List"));
+    assert_eq!(history.redo_label.as_deref(), Some("Clear Tag List"), "a removal of nothing keeps Redo");
+}
+
+#[test]
+fn undo_of_a_tag_list_removal_refuses_a_tag_added_since_and_keeps_the_rest() {
+    let s = shell();
+    run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed 508".into())).unwrap();
+    run(commands::add_to_tag_list(s.handle(), s.state(), vec![track_id(1), track_id(2)])).unwrap();
+    run(commands::remove_from_tag_list(s.handle(), s.state(), vec![track_id(1)])).unwrap();
+
+    // A player tags a track over LINK: outside the history.
+    let mut other = rbl_db::write::Writer::open(s.location.clone(), s._dir.path().join("other-backups")).unwrap();
+    other.disable_automatic_backups();
+    other.tag_list_add(&[track_id(7)]).unwrap();
+    drop(other);
+    let newer = tag_list_row_ids(&s);
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't undo Remove from Tag List: the Tag List has changed since. The newer change was kept.");
+    assert_eq!(tag_list_row_ids(&s), newer, "nothing written");
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the unrelated rename still undoes");
+}
+
+type Plays = Vec<(String, String, i64)>;
+
+/// A history session's live plays as `(ID, ContentID, TrackNo)` in order,
+/// and every track's `DJPlayCount`.
+fn history_plays(s: &Shell, history: &str) -> (Plays, Vec<Option<i64>>) {
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let mut stmt = db
+        .connection()
+        .prepare("SELECT ID, ContentID, TrackNo FROM djmdSongHistory WHERE HistoryID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID")
+        .unwrap();
+    let plays = stmt.query_map([history], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(Result::unwrap).collect();
+    let mut stmt = db.connection().prepare("SELECT DJPlayCount FROM djmdContent ORDER BY ID").unwrap();
+    let counts = stmt.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+    (plays, counts)
+}
+
+#[test]
+fn remove_from_history_is_one_undo_that_restores_the_plays_and_not_the_counts() {
+    let s = shell();
+    let session = fixture::history_id(0);
+    let spec = ViewSpecDto { source: TrackSourceDto::History { id: session.clone() }, sort: "trackNo".into(), ..collection_spec() };
+    let listed = || {
+        let (view, _) = s.open(spec.clone());
+        s.rows(view).into_iter().map(|r| r.id).collect::<Vec<_>>()
+    };
+    let (before, counts) = history_plays(&s, &session);
+    let order = listed();
+    assert_eq!(order, (0..5).map(track_id).collect::<Vec<_>>());
+
+    run(commands::remove_from_history(s.handle(), s.state(), session.clone(), vec![track_id(1), track_id(3)])).unwrap();
+    assert_eq!(listed(), [track_id(0), track_id(2), track_id(4)]);
+    let (after, counted) = history_plays(&s, &session);
+    assert_eq!(counted, counts, "Remove from History leaves DJ Play Count");
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(undone.redo_label.as_deref(), Some("Remove from History"));
+    assert_eq!(listed(), order, "back in their places");
+    assert_eq!(history_plays(&s, &session), (before, counts.clone()), "the same plays at the same numbers; counts as they were");
+
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(history_plays(&s, &session), (after, counts));
+    assert_eq!(listed(), [track_id(0), track_id(2), track_id(4)]);
+}
+
+#[test]
+fn undo_of_a_history_removal_refuses_a_play_added_since() {
+    let s = shell();
+    let session = fixture::history_id(0);
+    run(commands::remove_from_history(s.handle(), s.state(), session.clone(), vec![track_id(2)])).unwrap();
+    let mut other = rbl_db::write::Writer::open(s.location.clone(), s._dir.path().join("other-backups")).unwrap();
+    other.disable_automatic_backups();
+    other.add_to_history(&session, &track_id(8)).unwrap();
+    drop(other);
+    let newer = history_plays(&s, &session);
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't undo Remove from History: the history has changed since. The newer change was kept.");
+    assert_eq!(history_plays(&s, &session), newer, "the newer play and every count are kept");
+    assert!(!commands::current_history(&s.state()).can_undo, "only that entry left the history");
+}
+
 // ----------------------------------------------------------- track editing
 
 #[test]
