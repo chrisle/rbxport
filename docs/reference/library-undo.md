@@ -17,6 +17,8 @@ Undo and Redo of a key edit that wrote the audio file's key tag restore the
 tag with the library for #507 on 2026-10-22.
 Relocate, Relocate by location and Auto Relocate were added for #502 on
 2026-10-22.
+Remove from Tag List, Clear Tag List and Remove from History became one Undo
+step each for #508 on 2026-10-22.
 
 Evidence markers follow the project convention: `[OBS]` is something read in
 the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
@@ -53,7 +55,7 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`,
   `PlaylistTrackRemoval`, `PlaylistTrackAddition`, `PlaylistReorder`,
   `PlaylistCreation`, `PlaylistEdit`, `MembershipReplacement`, `TrackEdit`,
-  `TrackTagEdit`, `CueRevision`, `TrackRelocation` in
+  `TrackTagEdit`, `CueRevision`, `TrackRelocation`, `ListRemoval` in
   `crates/rbl-db/src/write.rs`; `KeyTagWrite` in `src-tauri/src/key_tag.rs`). A multi-track edit is one entry with one
   step per track, undone last first [OBS code].
 - **Conflict check (#506).** Before Undo or Redo writes, the rows it would
@@ -62,7 +64,9 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   NULL); My Tags as a set; a rename by name; a move by parent and place
   among its siblings; a track removal or addition, and an XML/iTunes
   replacement of a playlist's members, by the playlist's live members in
-  order (an addition with their `TrackNo`); a reorder by those members and
+  order (an addition with their `TrackNo`); a Tag List or history removal
+  by the list's live rows and their `TrackNo` (and, for a history, that the
+  session is not deleted); a reorder by those members and
   their `TrackNo`; deletion, Sort Items and folder-drop replacement by the rows they
   name. An entry of several tracks is checked whole before any is written.
   When something outside the history changed one since (a player over LINK,
@@ -155,6 +159,36 @@ MP3's or AIFF's `ID3v2`, the first `INITIALKEY` in a FLAC), as rekordbox's
 - Undo restores the key, not the tag's layout: an `ID3v2.3` tag the edit
   saved as `ID3v2.4` stays `ID3v2.4`, and a FLAC comment block the edit
   added stays, without the key [OBS code; `crates/rbl-db/tests/key_tag.rs`].
+
+### Tag List and history removal Undo (#508)
+
+Approved by Chris on 2026-10-22 (issue #508 comment). rekordbox has no
+library Undo here (see "rekordbox" below); the confirmation stays as
+rekordbox words it.
+
+- **Remove from Tag List** (the whole selection), **Clear Tag List** and
+  **Remove from History** (the whole selection) are one entry each,
+  labelled with the action. The entry (`ListRemoval` in
+  `crates/rbl-db/src/write.rs`) keeps the ids of the rows soft-deleted and
+  the list's live rows with their `TrackNo` before and after, all read in
+  the transaction that removes them. A removal that took nothing off
+  records nothing.
+- Undo brings back exactly those rows (same ids) and gives every row of the
+  list the number it had; Redo soft-deletes the same rows and gives the
+  rest the numbers the removal left. Rows whose number does not move are
+  not written. Every play of a track in the session leaves and comes back
+  together.
+- No track's `DJPlayCount` changes: not on Remove from History, Undo or
+  Redo. Tag List rows keep no update numbers, as rekordbox writes them;
+  history rows take a new `rb_local_usn`, as the removal gives them.
+- Refused as #506 refuses: when the list's live rows or numbers are not
+  exactly what the entry left (a player tagged a track or added a play
+  over LINK, rekordbox changed the list), or the history session has been
+  deleted since, nothing is written and only that entry leaves ("Can't undo
+  Remove from Tag List: the Tag List has changed since. The newer change
+  was kept.").
+- A Tag List entry's Undo and Redo tell the window through
+  `tag-list:changed`, as the removal does, so no other list refetches.
 
 ### Playlist creation, rule and artwork Undo (#500)
 
@@ -260,8 +294,8 @@ holds their ids.
 | Edit Intelligent Playlist rule | `set_smart_rule` | `SmartList` | Undo, the exact previous rule text; refused if the rule changed since | `a_rule_edit_and_playlist_artwork_undo_to_the_exact_previous_values` | No while the entry lives (#500) |
 | Add Artwork (playlist or folder) | `details::add_playlist_artwork` | `ImagePath`; image copied into the share | Undo (reference only; the copied file stays) | same | No while the entry lives (#500) |
 | Tag List: add | `add_to_tag_list` | Tag List rows | Not recorded | code | No |
-| Tag List: remove, clear | `remove_from_tag_list`, `clear_tag_list` | soft-deletes Tag List rows | Not recorded; asks first | code | Yes. #508 |
-| Remove from History | `remove_from_history` | soft-deletes `djmdSongHistory` rows | Not recorded; asks first | code | Yes. #508 |
+| Tag List: remove, clear | `remove_from_tag_list`, `clear_tag_list` | soft-deletes Tag List rows, renumbers | Undo, one entry per removal or clear; asks first. Undo restores the same rows at their numbers; refused if the Tag List changed since | `remove_from_tag_list_and_clear_tag_list_are_one_undo_each`, `undo_of_a_tag_list_removal_refuses_a_tag_added_since_and_keeps_the_rest` (`src-tauri/tests/commands.rs`); `a_tag_list_removal_undoes_to_the_same_rows_in_their_order_and_redoes`, `a_tag_list_clear_undoes_whole_and_redoes`, `undo_of_a_tag_list_removal_refuses_a_list_changed_since_and_writes_nothing` (`writes.rs`) | No while the entry lives (#508) |
+| Remove from History | `remove_from_history` | soft-deletes `djmdSongHistory` rows, renumbers | Undo, one entry per removal; asks first. `DJPlayCount` unchanged throughout; refused if the session changed or was deleted since | `remove_from_history_is_one_undo_that_restores_the_plays_and_not_the_counts`, `undo_of_a_history_removal_refuses_a_play_added_since` (`src-tauri/tests/commands.rs`); `a_history_removal_undoes_to_the_same_plays_in_order_and_leaves_play_counts`, `undo_of_a_history_removal_refuses_a_session_changed_or_deleted_since` (`writes.rs`) | No while the entry lives (#508) |
 | A play recorded by the deck | `record_play` | history row, `DJPlayCount` | Not a user edit; not recorded | code | No |
 
 ### Imports

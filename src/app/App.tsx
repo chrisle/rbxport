@@ -1804,7 +1804,8 @@ function AppBody() {
     query === "" &&
     spec.filter === undefined;
 
-  // Asked first, as rekordbox asks (its history wording); there is no undo.
+  // Asked first, as rekordbox asks (its history wording). One Undo entry
+  // for the whole selection; play counts stay as they are (#508).
   const removeTracksFromHistory = useCallback(
     async (history: string, ids: readonly string[]): Promise<boolean> => {
       if (ids.length === 0) return false;
@@ -2030,7 +2031,8 @@ function AppBody() {
     [write],
   );
 
-  // Asked first, as rekordbox asks; there is no undo.
+  // Asked first, as rekordbox asks. One Undo entry for the whole selection
+  // (#508).
   const removeFromTagList = useCallback(
     async (ids: readonly string[]): Promise<boolean> => {
       if (ids.length === 0) return false;
