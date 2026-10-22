@@ -16,7 +16,7 @@ use lofty::id3::v2::{Frame, FrameId, Id3v2Tag, TextInformationFrame};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::TagExt;
 use lofty::TextEncoding;
-use rbl_db::key_tag::{read_key, write_key, KeyTagOutcome};
+use rbl_db::key_tag::{read_key, swap_key, write_key, KeySwap, KeyTagOutcome};
 
 /// Bytes that are not silence, so a shifted or truncated copy shows.
 fn noise(len: usize, seed: u32) -> Vec<u8> {
@@ -601,4 +601,104 @@ fn a_replacement_left_by_a_crash_is_cleared_on_the_next_write() {
     assert!(!old.exists(), "a stale replacement of this file is removed");
     assert!(fresh.exists(), "one written in the last hour may still be in use");
     assert!(unrelated.exists(), "a name not of that shape is not ours");
+}
+
+// --- Undo and Redo of a key edit (#507) -------------------------------------
+
+#[test]
+fn a_swap_reports_the_key_it_replaced_and_puts_it_back_in_the_same_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-507-busy.mp3");
+    write_mp3(&path, Some(&busy_tag(Some("Am"))), false);
+    let before = read_id3(&path);
+
+    assert_eq!(swap_key(&path, None, Some("Dbm")).unwrap(), KeySwap::Written { before: Some("Am".into()) });
+    // Undo: only while the file still holds what the edit wrote.
+    assert_eq!(swap_key(&path, Some(Some("Dbm")), Some("Am")).unwrap(), KeySwap::Written { before: Some("Dbm".into()) });
+
+    let after = read_id3(&path);
+    assert_eq!(tkeys(&after), vec![("Am".to_owned(), TextEncoding::Latin1)], "the frame's encoding is kept both ways");
+    assert_eq!(others(&after), others(&before));
+    assert!(std::fs::read(&path).unwrap().ends_with(&mp3_audio()));
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn taking_out_a_key_first_written_into_a_file_without_a_tag_leaves_the_file_as_it_was() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-507-clean.mp3");
+    write_mp3(&path, None, false);
+    let original = std::fs::read(&path).unwrap();
+
+    assert_eq!(swap_key(&path, None, Some("Dbm")).unwrap(), KeySwap::Written { before: None });
+    assert_eq!(swap_key(&path, Some(Some("Dbm")), None).unwrap(), KeySwap::Written { before: Some("Dbm".into()) });
+
+    assert_eq!(read_key(&path).unwrap(), None);
+    assert_eq!(std::fs::read(&path).unwrap(), original, "the tag that held only the key is gone with it");
+}
+
+#[test]
+fn taking_out_a_key_keeps_every_other_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-507-keyless.mp3");
+    write_mp3(&path, Some(&busy_tag(None)), false);
+    let before = read_id3(&path);
+
+    assert_eq!(swap_key(&path, None, Some("12A")).unwrap(), KeySwap::Written { before: None });
+    assert_eq!(swap_key(&path, Some(Some("12A")), None).unwrap(), KeySwap::Written { before: Some("12A".into()) });
+
+    let after = read_id3(&path);
+    assert!(tkeys(&after).is_empty());
+    assert_eq!(others(&after), others(&before));
+}
+
+#[test]
+fn a_swap_over_a_key_changed_since_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-507-changed.mp3");
+    write_mp3(&path, Some(&busy_tag(Some("Fm"))), false);
+    let bytes = std::fs::read(&path).unwrap();
+
+    assert_eq!(swap_key(&path, Some(Some("Dbm")), Some("Am")).unwrap(), KeySwap::Changed { found: Some("Fm".into()) });
+    assert_eq!(swap_key(&path, Some(None), Some("Am")).unwrap(), KeySwap::Changed { found: Some("Fm".into()) });
+
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}
+
+#[test]
+fn a_flac_key_taken_out_leaves_the_other_comments_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-507.flac");
+    write_flac(&path, Some(&["title=t507 flac", "encoder=Lavf61.1.100"]), 8192);
+    let (_, audio_before) = flac_comments(&path);
+
+    assert_eq!(swap_key(&path, None, Some("Dbm")).unwrap(), KeySwap::Written { before: None });
+    assert_eq!(swap_key(&path, Some(Some("Dbm")), None).unwrap(), KeySwap::Written { before: Some("Dbm".into()) });
+
+    let (comments, audio_after) = flac_comments(&path);
+    assert_eq!(comments, ["title=t507 flac", "encoder=Lavf61.1.100"]);
+    assert_eq!(audio_after, audio_before, "the padding took the difference back");
+    assert_eq!(read_key(&path).unwrap(), None);
+}
+
+#[test]
+fn a_swap_of_a_read_only_or_unsupported_file_says_so_and_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue-507-locked.mp3");
+    write_mp3(&path, Some(&busy_tag(Some("Am"))), false);
+    let before = std::fs::read(&path).unwrap();
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&path, permissions.clone()).unwrap();
+
+    assert_eq!(swap_key(&path, Some(Some("Am")), None).unwrap(), KeySwap::ReadOnly);
+
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    std::fs::set_permissions(&path, permissions).unwrap();
+
+    let m4a = dir.path().join("issue-507.m4a");
+    std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/silent.m4a"), &m4a).unwrap();
+    assert_eq!(swap_key(&m4a, None, Some("Am")).unwrap(), KeySwap::Unsupported);
 }

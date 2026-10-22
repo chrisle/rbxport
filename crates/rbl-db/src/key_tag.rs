@@ -99,6 +99,45 @@ const INITIALKEY: &str = "INITIALKEY";
 /// strictly, or the rewritten copy did not check out. The original is
 /// untouched in every case.
 pub fn write_key(path: &Path, key: &str) -> Result<KeyTagOutcome> {
+    match swap_key(path, None, Some(key))? {
+        KeySwap::Written { .. } => Ok(KeyTagOutcome::Written),
+        KeySwap::Unsupported => Ok(KeyTagOutcome::Unsupported),
+        KeySwap::ReadOnly => Ok(KeyTagOutcome::ReadOnly),
+        // Only a caller that names what it expects can be told otherwise.
+        KeySwap::Changed { .. } => Err(KeyTagError::Tag("the key changed while it was written".into())),
+    }
+}
+
+/// What [`swap_key`] did with the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeySwap {
+    /// The tag holds the new key now. `before` is the key it held, as
+    /// [`read_key`] reads it: `None` for a tag without one.
+    Written { before: Option<String> },
+    /// The tag no longer holds the key the caller expected; nothing was
+    /// written. `found` is what it holds.
+    Changed { found: Option<String> },
+    /// A format rekordbox writes no key into (M4A, WAV, anything else).
+    Unsupported,
+    /// The file is read-only.
+    ReadOnly,
+}
+
+/// Sets the key in the tag of the audio file at `path` (`Some`), or takes the
+/// key out of it (`None`: the `TKEY` frame, or the first `INITIALKEY`
+/// comment, goes), and says what the tag held before. With `expected`, the
+/// file is written only while its key still reads as that, checked under
+/// the same lock as the write, so an Undo or Redo of a key edit cannot put
+/// back a key over one written since (#507).
+///
+/// Taking the key out of an `ID3v2` tag that holds nothing else takes the
+/// tag out too, as it was before a key was first written into a file
+/// without one. A `FLAC` keeps its comment block, without the key.
+///
+/// # Errors
+///
+/// As [`write_key`]. The original is untouched in every case.
+pub fn swap_key(path: &Path, expected: Option<Option<&str>>, key: Option<&str>) -> Result<KeySwap> {
     let _one = WRITING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     // The file itself: a symlink is followed, so the link stays a link.
     let path = fs::canonicalize(path)?;
@@ -107,15 +146,21 @@ pub fn write_key(path: &Path, key: &str) -> Result<KeyTagOutcome> {
         return Err(KeyTagError::Io(io::Error::new(io::ErrorKind::InvalidInput, "not a file")));
     }
     if !can_write(&path, &meta)? {
-        return Ok(KeyTagOutcome::ReadOnly);
+        return Ok(KeySwap::ReadOnly);
     }
     let Some(format) = format_of(&path)? else {
-        return Ok(KeyTagOutcome::Unsupported);
+        return Ok(KeySwap::Unsupported);
     };
     if links(&meta) > 1 {
         // rekordbox writes in place, so every name of the file sees the key.
         // A replacement would leave the other names on the old file.
         return Err(KeyTagError::Tag("the file has other hard links, which a replacement would split off".into()));
+    }
+    let before = read_key(&path)?;
+    if let Some(expected) = expected {
+        if before.as_deref() != expected {
+            return Ok(KeySwap::Changed { found: before });
+        }
     }
     remove_stale_temps(&path);
     let temp = temp_beside(&path);
@@ -123,7 +168,7 @@ pub fn write_key(path: &Path, key: &str) -> Result<KeyTagOutcome> {
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
-    result.map(|()| KeyTagOutcome::Written)
+    result.map(|()| KeySwap::Written { before })
 }
 
 /// The key as the file now holds it: `TKEY` or `INITIALKEY`, or `None` for a
@@ -227,7 +272,7 @@ fn remove_stale_temps(path: &Path) {
     }
 }
 
-fn replace_via(path: &Path, temp: &Path, format: Format, key: &str, meta: &fs::Metadata) -> Result<()> {
+fn replace_via(path: &Path, temp: &Path, format: Format, key: Option<&str>, meta: &fs::Metadata) -> Result<()> {
     // A copy first, whatever the format: it carries the file's permissions
     // and, where the platform copies them, its attributes and extended
     // attributes, which a file created from nothing would not have.
@@ -479,7 +524,7 @@ fn lofty_read_everything(raw: &[u8], tag: Option<&Id3v2Tag>) -> Result<()> {
     Ok(())
 }
 
-fn write_id3(original: &Path, temp: &Path, format: Format, key: &str) -> Result<()> {
+fn write_id3(original: &Path, temp: &Path, format: Format, key: Option<&str>) -> Result<()> {
     let tag = read_id3(original, format)?;
     if let Some(raw) = raw_id3(original, format)? {
         lofty_read_everything(&raw, tag.as_ref())?;
@@ -488,8 +533,15 @@ fn write_id3(original: &Path, temp: &Path, format: Format, key: &str) -> Result<
     // TagLib's `setText` keeps the replaced frame's encoding; a new frame
     // is UTF-8, as `Frame::createTextualFrame` makes it [OBS: UTF-8 TKEY].
     let encoding = tkey(&tag).map_or(TextEncoding::UTF8, |(_, encoding)| encoding);
-    // `insert` replaces the first frame with the same id and keeps the rest.
-    tag.insert(Frame::Text(TextInformationFrame::new(FrameId::Valid(TKEY.into()), encoding, key.to_owned())));
+    match key {
+        // `insert` replaces the first frame with the same id and keeps the rest.
+        Some(key) => {
+            tag.insert(Frame::Text(TextInformationFrame::new(FrameId::Valid(TKEY.into()), encoding, key.to_owned())));
+        }
+        // The one `TKEY` (a tag repeating it was refused above). A tag left
+        // with no frames is written as no tag at all.
+        None => drop(tag.remove(&FrameId::Valid(TKEY.into())).count()),
+    }
     let mut file = OpenOptions::new().read(true).write(true).open(temp)?;
     file.seek(SeekFrom::Start(0))?;
     tag.save_to(&mut file, WriteOptions::default())?;
@@ -597,6 +649,13 @@ impl Comments {
             None => self.fields.push(field),
         }
     }
+
+    /// The first `name` field goes; every other field stays where it was.
+    fn remove_first(&mut self, name: &str) {
+        if let Some(at) = self.fields.iter().position(|f| Self::is_named(f, name)) {
+            self.fields.remove(at);
+        }
+    }
 }
 
 fn read_exact_vec<R: Read>(reader: &mut R, n: usize) -> io::Result<Vec<u8>> {
@@ -644,7 +703,7 @@ fn read_flac<R: Read + Seek>(reader: &mut R) -> Result<Flac> {
     Ok(Flac { prefix, blocks, audio_at })
 }
 
-fn write_flac(original: &Path, temp: &Path, key: &str) -> Result<()> {
+fn write_flac(original: &Path, temp: &Path, key: Option<&str>) -> Result<()> {
     let mut source = BufReader::new(File::open(original)?);
     let mut flac = read_flac(&mut source)?;
     let mut comments = match flac.comments() {
@@ -654,7 +713,10 @@ fn write_flac(original: &Path, temp: &Path, key: &str) -> Result<()> {
         }
         None => Comments { vendor: b"rbxport".to_vec(), fields: Vec::new() },
     };
-    comments.set_first(INITIALKEY, key);
+    match key {
+        Some(key) => comments.set_first(INITIALKEY, key),
+        None => comments.remove_first(INITIALKEY),
+    }
     let rendered = comments.render().ok_or_else(|| KeyTagError::Tag("FLAC: comment too large".into()))?;
     let old_len = flac.blocks.iter().find(|b| b.kind == FLAC_VORBIS_COMMENT).map(|b| b.data.len());
     match flac.blocks.iter_mut().find(|b| b.kind == FLAC_VORBIS_COMMENT) {
@@ -702,16 +764,21 @@ fn write_flac(original: &Path, temp: &Path, key: &str) -> Result<()> {
 
 // --- Checking the copy ------------------------------------------------------
 
-fn verify(original: &Path, temp: &Path, format: Format, key: &str) -> Result<()> {
+fn verify(original: &Path, temp: &Path, format: Format, key: Option<&str>) -> Result<()> {
     let fail = |what: String| Err(KeyTagError::Verify(what));
     match format {
         Format::Mp3 | Format::Aiff => {
             let before = read_id3(original, format)?;
             let after = read_id3(temp, format)?;
-            let Some(after) = after else { return fail("no tag".into()) };
-            match tkey(&after) {
-                Some((text, _)) if text == key => {}
-                other => return fail(format!("TKEY reads back as {other:?}")),
+            // A key taken out of a tag holding nothing else takes the tag.
+            let after = match (after, key) {
+                (Some(after), _) => after,
+                (None, None) => Id3v2Tag::default(),
+                (None, Some(_)) => return fail("no tag".into()),
+            };
+            let read_back = tkey(&after).map(|(text, _)| text);
+            if read_back.as_deref() != key {
+                return fail(format!("TKEY reads back as {read_back:?}"));
             }
             // Every frame but the first TKEY as it was.
             let strip_first_tkey = |tag: Option<&Id3v2Tag>| {
@@ -749,7 +816,7 @@ fn verify(original: &Path, temp: &Path, format: Format, key: &str) -> Result<()>
                 return fail("a metadata block other than the comment changed".into());
             }
             let Some(comments) = after.comments() else { return fail("no comment".into()) };
-            if comments.first_value(INITIALKEY).as_deref() != Some(key) {
+            if comments.first_value(INITIALKEY).as_deref() != key {
                 return fail("INITIALKEY reads back wrong".into());
             }
             let mut expected = before.comments().map(|c| c.fields).unwrap_or_default();
@@ -757,8 +824,10 @@ fn verify(original: &Path, temp: &Path, format: Format, key: &str) -> Result<()>
                 expected.remove(first);
             }
             let mut got = comments.fields;
-            if let Some(first) = got.iter().position(|f| Comments::is_named(f, INITIALKEY)) {
-                got.remove(first);
+            if key.is_some() {
+                if let Some(first) = got.iter().position(|f| Comments::is_named(f, INITIALKEY)) {
+                    got.remove(first);
+                }
             }
             if expected != got {
                 return fail("another comment changed".into());
