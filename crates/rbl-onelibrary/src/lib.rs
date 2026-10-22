@@ -7,6 +7,7 @@
 //! stick (see [`key`]), because any machine has to be able to read it.
 
 pub mod build;
+pub mod content;
 pub mod key;
 pub mod playlists;
 pub mod settings;
