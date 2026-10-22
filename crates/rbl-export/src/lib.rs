@@ -1121,8 +1121,7 @@ fn export_cancellable_inner(
     }
     if let Some(cache) = cache {
         let recorded: BTreeMap<_, _> = previous.as_ref().into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();
-        let count = tracks.len();
-        for (index, track) in tracks.iter_mut().enumerate() {
+        for track in &mut tracks {
             if cancelled() { return Err(ExportError::Cancelled); }
             if !track.source_path.is_file() || track.device.as_ref().is_some_and(|d| d.preserve) || on_stick(destination, &track.source_path).is_some() { continue; }
             let old = recorded.get(&track_key(track.id, &track.source_path.to_string_lossy())).copied();
@@ -1135,17 +1134,10 @@ fn export_cancellable_inner(
                 if old.is_some() && !same_source { let _ = cache.properties(&track.source_path)?; }
                 let same_profile = old.is_some_and(|old| old.conversion == conversion.map_or("", rbl_audio::compatibility::Format::profile));
                 if (same_source || source_contents_unchanged.contains(&track_key(track.id, &track.source_path.to_string_lossy()))) && same_profile { return Ok(None); }
-                if let Some(target) = conversion {
-                    let (path, _, _) = cache.converted(&track.source_path, target, &mut |done, total| {
-                        progress(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), unit: "milliseconds", title: track.title.clone(), tracks_done: index, tracks_total: count, ..Default::default() });
-                    }, cancelled)?;
-                    Ok(Some(path))
-                } else if track.device.is_some() && old.is_none() {
-                    // Cold adoption is checked against the existing copy below.
-                    Ok(None)
-                } else { cache.original(&track.source_path, &mut |done, total| {
-                    progress(&ExportProgress { stage: "preparing", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, tracks_done: index, tracks_total: count, ..Default::default() });
-                }, cancelled).map(Some) }
+                // Preparation only determines the profile. Conversion happens
+                // while staging this track, so the cache never holds a whole
+                // selected batch of converted audio awaiting publication.
+                Ok(None)
             })();
             match prepared {
                 Ok(path) => track.prepared_audio = path,
@@ -1464,16 +1456,26 @@ fn export_cancellable_inner(
                 Some(target) => {
                     report.converted += 1;
                     if let Some(cache) = cache.filter(|_| !track.cache_bypass) {
-                        match cache.converted(&track.source_path, target, &mut |done, total| {
-                            progress(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), title: track.title.clone(), unit: "milliseconds", reused: report.reused, converted: report.converted, tracks_done: index, tracks_total: tracks.len(), ..Default::default() });
-                        }, cancelled) {
-                            Ok((path, _, _)) => {
-                                copy_staged_observed(&path, &audio_dest, &mut |done, total| {
-                                    progress(&ExportProgress { stage: "copying", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, tracks_done: index, tracks_total: tracks.len() });
+                        let shared_progress = std::cell::RefCell::new(&mut *progress);
+                        match cache.with_converted(&track.source_path, target, &mut |done, total| {
+                            (*shared_progress.borrow_mut())(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), title: track.title.clone(), unit: "milliseconds", reused: report.reused, converted: report.converted, tracks_done: index, tracks_total: tracks.len(), ..Default::default() });
+                        }, cancelled, |path, _, _| {
+                                copy_staged_observed(path, &audio_dest, &mut |done, total| {
+                                    (*shared_progress.borrow_mut())(&ExportProgress { stage: "copying", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, tracks_done: index, tracks_total: tracks.len() });
                                     !cancelled()
-                                }).map(|(bytes, hash)| { copied_hash.set(Some(hash)); bytes })
-                            }
+                                }).map(|(bytes, hash)| { copied_hash.set(Some(hash)); bytes }).map_err(ExportError::Io)
+                        }) {
+                            Ok(bytes) => Ok(bytes),
                             Err(ExportError::Cancelled) => return Err(ExportError::Cancelled),
+                            Err(ExportError::Io(error)) if !audio_dest.exists() && matches!(error.kind(), std::io::ErrorKind::StorageFull | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::NotADirectory) => {
+                                // An unwritable/full internal cache or a single
+                                // conversion above its 2 GiB cap uses the
+                                // destination stage instead.
+                                rbl_audio::compatibility::convert_observed(&track.source_path, &audio_dest, target, &mut |done, total| {
+                                    progress(&ExportProgress { stage: "converting", done: usize::try_from(done).unwrap_or(usize::MAX), total: total.and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::from(track.duration_sec) * 1000), title: track.title.clone(), unit: "milliseconds", reused: report.reused, converted: report.converted, tracks_done: index, tracks_total: tracks.len(), ..Default::default() });
+                                    !cancelled()
+                                }).map_err(|e| std::io::Error::other(format!("{}: {e}", track.title)))
+                            }
                             Err(e) => Err(std::io::Error::other(e.to_string())),
                         }
                     } else {
@@ -1483,7 +1485,7 @@ fn export_cancellable_inner(
                         }).map_err(|e| std::io::Error::other(format!("{}: {e}", track.title)))
                     }
                 },
-                None => copy_staged_observed(track.prepared_audio.as_deref().unwrap_or(&track.source_path), &audio_dest, &mut |done, total| {
+                None => copy_staged_observed(&track.source_path, &audio_dest, &mut |done, total| {
                     progress(&ExportProgress { stage: "copying", done: 0, total: 0, title: track.title.clone(), unit: "bytes", bytes_done: done, bytes_total: total, reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, tracks_done: index, tracks_total: tracks.len() });
                     !cancelled()
                 }).map(|(bytes, hash)| { copied_hash.set(Some(hash)); bytes }),

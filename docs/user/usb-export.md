@@ -203,9 +203,20 @@ are one format reference, not proof of every player's compatibility.
 ## Conversion and incremental sync
 
 When playlists or export preferences change, Sync Manager updates each USB's
-space bar with projected additional use and space left. The separate temporary
-space line includes the room needed to keep the previous library recoverable.
-Conversion estimates are approximate until a completed cached copy is available.
+space bar with projected additional use and space left. The temporary-space
+line describes space needed on the destination USB to keep the previous
+export recoverable while new files are staged. Ordinary
+tracks are copied from their source directly into that destination stage;
+they do not make a second full-size copy on the computer's internal disk.
+Converted tracks may use the app's internal cache for reuse across several
+USBs. Completed cache files are reduced to 6 GiB before a conversion, and a
+single conversion's internal staging file is limited to 2 GiB, for up to
+8 GiB of managed internal cache files during export, plus small metadata
+overhead. Interrupted conversion files are cleaned up at the next cache
+prune. If the internal cache is
+full or a converted file would exceed 2 GiB, conversion runs in the
+destination stage instead. Conversion size estimates remain approximate
+until a completed converted file is available.
 An identical sync says “Already up to date”; a playlist-only edit leaves
 unchanged audio, analysis, and artwork alone. Several sticks can share one
 conversion while retaining independent progress and results.
