@@ -87,6 +87,12 @@ export interface MockDeviceLibraries {
    * Import Playlist.
    */
   playlist(path: string, format: DeviceFormat, playlist: string): { name: string; entries: MockImportEntry[] };
+  /**
+   * The tempo and length of the stick track a row id names, for its beat
+   * grid; null when no stick holds it. Every track here is analysed, as
+   * an exported track is.
+   */
+  track(row: string): { bpmX100: number; durationSec: number } | null;
 }
 
 /** Depth first from the top level, siblings by sequence then id. */
@@ -120,7 +126,7 @@ function trackRow(path: string, track: MockTrack, position: number): RowDto {
     key: track.key,
     durationSec: track.durationSec,
     rating: 0,
-    analysed: 0,
+    analysed: 1,
     dateAdded: "2026-10-08",
     releaseDate: "",
     hotCues: [],
@@ -147,6 +153,13 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
   };
 
   return {
+    track: (row) => {
+      for (const path of sticks.keys()) {
+        const track = TRACKS.find((t) => trackRow(path, t, 0).id === row);
+        if (track) return { bpmX100: track.bpmX100, durationSec: track.durationSec };
+      }
+      return null;
+    },
     libraries: (path) =>
       (sticks.get(path) ?? []).map((library) => ({
         format: library.format,
