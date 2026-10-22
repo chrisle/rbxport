@@ -4173,6 +4173,178 @@ impl Writer {
         Ok((changed, TrackTagEdit { content: content.to_owned(), before, after }))
     }
 
+    /// Writes a track's My Tags into its comment, as rekordbox does after a
+    /// My Tag edit while Add "My Tag" to the "Comments" is on (#605; see
+    /// [`crate::my_tag_comment`]): the comment up to its first ` /* `, then
+    /// the track's tags. A comment that already reads so is left alone and
+    /// its edit is empty.
+    ///
+    /// The tags are in the order they were put on the track: rekordbox
+    /// reads a track's `djmdSongMyTag` rows with no `ORDER BY`
+    /// (`AppSyncDBController::updateMyTagInfoOnTracks` @0x100a60530) and
+    /// adds a new tag to the end of that list [ASSUME: SQLite returns them
+    /// in rowid order]. A membership of a tag that is not in a live
+    /// category has no name and is passed over.
+    pub fn refresh_my_tag_comment_with_undo(&mut self, content: &str) -> Result<(Changed, TrackEdit)> {
+        let conn = self.library.connection();
+        let comment: Option<String> = conn.query_row(
+            "SELECT COALESCE(Commnt, '') FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![content],
+            |r| r.get(0),
+        ).optional()?;
+        let Some(comment) = comment else {
+            return Err(DbError::WriteRefused(format!("no track {content}")));
+        };
+        let mut statement = conn.prepare(
+            "SELECT COALESCE(t.Name, '') FROM djmdSongMyTag s
+             LEFT JOIN djmdMyTag t ON t.ID = s.MyTagID AND t.rb_local_deleted = 0
+                 AND t.ParentID IN (SELECT ID FROM djmdMyTag WHERE ParentID = 'root' AND rb_local_deleted = 0)
+             WHERE s.ContentID = ?1 AND s.rb_local_deleted = 0
+             ORDER BY s.rowid",
+        )?;
+        let names: Vec<String> = statement.query_map(params![content], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(statement);
+        let next = crate::my_tag_comment::refreshed(&comment, names.iter().map(String::as_str));
+        self.set_comment_with_undo(content, &next)
+    }
+
+    /// Turning Add "My Tag" to the "Comments" on (`on`) or off, as
+    /// rekordbox's `WriteOrEraseMyTagWindow::run` @0x101fe92a4 does it
+    /// (#605): every track that has a My Tag gets the block written with
+    /// its tags in the My Tag panel's order, or taken off. A track with no
+    /// My Tag, or whose comment already reads so, is left as it is.
+    ///
+    /// One transaction; each rewritten row takes the next update number, as
+    /// rekordbox calls `modifyTrackData` once per track. The edits returned
+    /// are the rows written, for one Undo of the whole run.
+    pub fn write_my_tag_comments_with_undo(&mut self, on: bool) -> Result<(Changed, Vec<TrackEdit>)> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // The panel: categories by `Seq`, then each one's tags by `Seq`
+        // (`getMyTagList`, "... ParentID = 'root' order by Seq" and
+        // "... ParentID = %lu order by Seq").
+        let mut statement = tx.prepare(
+            "SELECT t.ID, COALESCE(t.Name, '') FROM djmdMyTag t
+             JOIN djmdMyTag c ON c.ID = t.ParentID AND c.ParentID = 'root' AND c.rb_local_deleted = 0
+             WHERE t.rb_local_deleted = 0
+             ORDER BY c.Seq, c.ID, t.Seq, t.ID",
+        )?;
+        let panel: Vec<(String, String)> = statement.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(statement);
+        let mut statement = tx.prepare(
+            "SELECT s.ContentID, s.MyTagID FROM djmdSongMyTag s
+             JOIN djmdContent c ON c.ID = s.ContentID AND c.rb_local_deleted = 0
+             WHERE s.rb_local_deleted = 0
+             ORDER BY s.ContentID",
+        )?;
+        let memberships: Vec<(String, String)> = statement.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(statement);
+        let mut tracks: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+        for (content, tag) in memberships {
+            tracks.entry(content).or_default().push(tag);
+        }
+        let mut edits = Vec::new();
+        let mut rows = 0;
+        let mut usn = 0;
+        let mut next = None;
+        for (content, tags) in &tracks {
+            let before: Value = tx.query_row(
+                "SELECT Commnt FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![content],
+                |r| r.get(0),
+            )?;
+            let comment = match &before {
+                Value::Text(text) => text.clone(),
+                _ => String::new(),
+            };
+            let after = if on {
+                let names = panel.iter().filter(|(id, _)| tags.contains(id)).map(|(_, name)| name.as_str());
+                crate::my_tag_comment::written(&comment, names)
+            } else {
+                crate::my_tag_comment::erased(&comment).to_owned()
+            };
+            if after == comment {
+                continue;
+            }
+            let this = match next {
+                Some(n) => n,
+                None => next_usn(&tx)?,
+            };
+            rows += tx.execute(
+                "UPDATE djmdContent SET Commnt = ?1, rb_local_usn = ?2, updated_at = ?3
+                 WHERE ID = ?4 AND rb_local_deleted = 0",
+                params![after, this, stamp, content],
+            )?;
+            usn = this;
+            next = Some(this + 1);
+            edits.push(TrackEdit { content: content.clone(), column: "Commnt", before, after: Value::Text(after) });
+        }
+        if rows > 0 {
+            set_counter(&tx, usn)?;
+        }
+        tx.commit()?;
+        Ok((Changed { rows, usn }, edits))
+    }
+
+    /// Undoes (`undo`) or redoes every step of `edits` in one transaction:
+    /// all of them, or, when any track no longer holds the value the step
+    /// expects ([`Self::check_track_edit`]), none, refused as a
+    /// [`DbError::Conflict`]. For a run of many tracks, such as the comments
+    /// [`Self::write_my_tag_comments_with_undo`] rewrote.
+    pub fn step_track_edits_at_once(&mut self, edits: &[TrackEdit], undo: bool) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for edit in edits {
+            if !WRITABLE_COLUMNS.contains(&edit.column) {
+                return Err(DbError::WriteRefused(format!("{} is not writable", edit.column)));
+            }
+            let expected = if undo { &edit.after } else { &edit.before };
+            let same: Option<bool> = tx.query_row(
+                &format!("SELECT (`{}` IS ?2) FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0", edit.column),
+                params![edit.content, expected],
+                |row| row.get(0),
+            ).optional()?;
+            match same {
+                Some(true) => {}
+                Some(false) => return Err(DbError::Conflict("the track has changed since".to_owned())),
+                None => return Err(DbError::Conflict("the track is no longer in the collection".to_owned())),
+            }
+        }
+        let mut rows = 0;
+        let mut usn = 0;
+        let mut next = None;
+        let ordered: Vec<&TrackEdit> = if undo { edits.iter().rev().collect() } else { edits.iter().collect() };
+        for edit in ordered {
+            let this = match next {
+                Some(n) => n,
+                None => next_usn(&tx)?,
+            };
+            let value = if undo { &edit.before } else { &edit.after };
+            rows += tx.execute(
+                &format!(
+                    "UPDATE djmdContent SET `{}` = ?1, rb_local_usn = ?2, updated_at = ?3
+                     WHERE ID = ?4 AND rb_local_deleted = 0",
+                    edit.column
+                ),
+                params![value, this, stamp, edit.content],
+            )?;
+            usn = this;
+            next = Some(this + 1);
+        }
+        if rows > 0 {
+            set_counter(&tx, usn)?;
+        }
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
     /// Adding My Tag: a new tag at the end of `category`, named as
     /// rekordbox names one, and its id and name returned.
     ///

@@ -3106,6 +3106,153 @@ fn my_tag_delta_rolls_back_when_a_later_insert_fails() {
     assert_eq!(counter, f.one::<i64>("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]));
 }
 
+fn comment_of(f: &Fixture, id: &str) -> Option<String> {
+    f.one("SELECT Commnt FROM djmdContent WHERE ID = ?1", &[&id])
+}
+
+fn local_usn_of(f: &Fixture, id: &str) -> i64 {
+    f.one("SELECT rb_local_usn FROM djmdContent WHERE ID = ?1", &[&id])
+}
+
+/// Add "My Tag" to the "Comments" after a tick (#605): the comment up to
+/// its first ` /* `, then the track's tags in the order they were put on it.
+#[test]
+fn a_my_tag_edit_writes_the_tags_after_the_comment_in_the_order_they_were_put_on() {
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let mut f = fixture();
+    let id = track_id(2);
+    f.writer.set_comment(&id, "Visit https://example.bandcamp.com").unwrap();
+
+    // Warm-up first, then Peak: the block keeps that order, not the panel's.
+    f.writer.put_my_tag_with_undo(&id, MY_TAG_WARM_UP, true).unwrap();
+    let (_, first) = f.writer.refresh_my_tag_comment_with_undo(&id).unwrap();
+    assert!(!first.is_empty());
+    assert_eq!(comment_of(&f, &id).as_deref(), Some("Visit https://example.bandcamp.com /* Warm-up */"));
+    f.writer.put_my_tag_with_undo(&id, MY_TAG_PEAK, true).unwrap();
+    f.writer.refresh_my_tag_comment_with_undo(&id).unwrap();
+    assert_eq!(comment_of(&f, &id).as_deref(), Some("Visit https://example.bandcamp.com /* Warm-up / Peak */"));
+
+    // A comment that already reads so is not written again.
+    let usn = local_usn_of(&f, &id);
+    let (changed, same) = f.writer.refresh_my_tag_comment_with_undo(&id).unwrap();
+    assert_eq!(changed.rows, 0);
+    assert!(same.is_empty());
+    assert_eq!(local_usn_of(&f, &id), usn);
+
+    // Text typed after the block goes with it; text before it stays.
+    f.writer.set_comment(&id, "Keep /* stale */ typed after").unwrap();
+    f.writer.refresh_my_tag_comment_with_undo(&id).unwrap();
+    assert_eq!(comment_of(&f, &id).as_deref(), Some("Keep /* Warm-up / Peak */"));
+
+    // A rename shows on the next refresh.
+    f.writer.rename_my_tag(MY_TAG_PEAK, "Peak Time").unwrap();
+    f.writer.refresh_my_tag_comment_with_undo(&id).unwrap();
+    assert_eq!(comment_of(&f, &id).as_deref(), Some("Keep /* Warm-up / Peak Time */"));
+
+    // Taking a tag off, or deleting it, takes it out; the last one gone
+    // takes the whole block off.
+    f.writer.put_my_tag_with_undo(&id, MY_TAG_WARM_UP, false).unwrap();
+    f.writer.refresh_my_tag_comment_with_undo(&id).unwrap();
+    assert_eq!(comment_of(&f, &id).as_deref(), Some("Keep /* Peak Time */"));
+    f.writer.delete_my_tag(MY_TAG_PEAK).unwrap();
+    let (_, last) = f.writer.refresh_my_tag_comment_with_undo(&id).unwrap();
+    assert_eq!(comment_of(&f, &id).as_deref(), Some("Keep"));
+
+    // The edit undoes to the exact comment, and is refused once the
+    // comment changed since.
+    f.writer.undo_track_edit(&last).unwrap();
+    assert_eq!(comment_of(&f, &id).as_deref(), Some("Keep /* Peak Time */"));
+    f.writer.set_comment(&id, "typed since").unwrap();
+    assert!(matches!(f.writer.redo_track_edit(&last), Err(DbError::Conflict(_))));
+
+    assert!(matches!(f.writer.refresh_my_tag_comment_with_undo("no-such-track"), Err(DbError::WriteRefused(_))));
+}
+
+/// A track with no My Tag and no block is not written at all, and a NULL
+/// comment stays NULL.
+#[test]
+fn a_my_tag_refresh_leaves_a_track_without_tags_alone() {
+    let mut f = fixture();
+    let id = track_id(3);
+    f.conn().execute("UPDATE djmdContent SET Commnt = NULL WHERE ID = ?1", [&id]).unwrap();
+    let usn = local_usn_of(&f, &id);
+    let (changed, edit) = f.writer.refresh_my_tag_comment_with_undo(&id).unwrap();
+    assert_eq!(changed.rows, 0);
+    assert!(edit.is_empty());
+    assert_eq!(comment_of(&f, &id), None);
+    assert_eq!(local_usn_of(&f, &id), usn);
+}
+
+/// Turning the setting on and off (#605, `WriteOrEraseMyTagWindow::run`):
+/// every track with a My Tag, its tags in the panel's order; one Undo.
+#[test]
+fn turning_my_tag_comments_on_and_off_rewrites_every_tagged_track_and_undoes_at_once() {
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let mut f = fixture();
+    my_tag_taxonomy(&f);
+    // Put on in the opposite order to the panel's: Situation (Peak,
+    // Warm-up) comes before Genre (House, Techno).
+    f.writer.set_my_tags(&track_id(1), &ids(&["800003"])).unwrap();
+    f.writer.put_my_tag_with_undo(&track_id(1), MY_TAG_WARM_UP, true).unwrap();
+    f.writer.put_my_tag_with_undo(&track_id(1), MY_TAG_PEAK, true).unwrap();
+    f.writer.set_comment(&track_id(1), "Bandcamp").unwrap();
+    f.writer.set_my_tags(&track_id(2), &ids(&["800002"])).unwrap();
+    f.writer.set_comment(&track_id(2), &"x".repeat(249)).unwrap();
+    // No My Tag: left alone, stale block and all.
+    f.writer.set_comment(&track_id(3), "Untagged /* Old */").unwrap();
+    let untagged_usn = local_usn_of(&f, &track_id(3));
+    let before = counter(&f);
+
+    let (changed, edits) = f.writer.write_my_tag_comments_with_undo(true).unwrap();
+    assert_eq!(comment_of(&f, &track_id(1)).as_deref(), Some("Bandcamp /* Peak / Warm-up / Techno */"));
+    // Past 248 characters: no block.
+    assert_eq!(comment_of(&f, &track_id(2)).as_deref(), Some("x".repeat(249).as_str()));
+    assert_eq!(comment_of(&f, &track_id(3)).as_deref(), Some("Untagged /* Old */"));
+    assert_eq!(local_usn_of(&f, &track_id(3)), untagged_usn);
+    assert_eq!(changed.rows, 1);
+    assert_eq!(edits.len(), 1);
+    assert_eq!(counter(&f), changed.usn);
+    assert!(changed.usn > before);
+
+    // Again: nothing left to write.
+    let (again, none) = f.writer.write_my_tag_comments_with_undo(true).unwrap();
+    assert_eq!(again.rows, 0);
+    assert!(none.is_empty());
+
+    // Off takes the block off the tagged tracks only.
+    let (_, erased) = f.writer.write_my_tag_comments_with_undo(false).unwrap();
+    assert_eq!(comment_of(&f, &track_id(1)).as_deref(), Some("Bandcamp"));
+    assert_eq!(comment_of(&f, &track_id(3)).as_deref(), Some("Untagged /* Old */"));
+    assert_eq!(erased.len(), 1);
+
+    // Undo and Redo of a run, in one transaction each.
+    f.writer.step_track_edits_at_once(&erased, true).unwrap();
+    assert_eq!(comment_of(&f, &track_id(1)).as_deref(), Some("Bandcamp /* Peak / Warm-up / Techno */"));
+    f.writer.step_track_edits_at_once(&erased, false).unwrap();
+    assert_eq!(comment_of(&f, &track_id(1)).as_deref(), Some("Bandcamp"));
+    f.writer.step_track_edits_at_once(&erased, true).unwrap();
+    f.writer.step_track_edits_at_once(&edits, true).unwrap();
+    assert_eq!(comment_of(&f, &track_id(1)).as_deref(), Some("Bandcamp"));
+}
+
+#[test]
+fn undo_of_a_my_tag_comment_run_writes_nothing_when_one_track_changed_since() {
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let mut f = fixture();
+    f.writer.set_my_tags(&track_id(1), &[MY_TAG_PEAK.to_owned()]).unwrap();
+    f.writer.set_my_tags(&track_id(2), &[MY_TAG_WARM_UP.to_owned()]).unwrap();
+    f.writer.set_comment(&track_id(1), "one").unwrap();
+    f.writer.set_comment(&track_id(2), "two").unwrap();
+    let (_, edits) = f.writer.write_my_tag_comments_with_undo(true).unwrap();
+    assert_eq!(edits.len(), 2);
+    f.writer.set_comment(&track_id(2), "typed since").unwrap();
+    let usn = counter(&f);
+    assert!(matches!(f.writer.step_track_edits_at_once(&edits, true), Err(DbError::Conflict(_))));
+    assert_eq!(comment_of(&f, &track_id(1)).as_deref(), Some("one /* Peak */"));
+    assert_eq!(comment_of(&f, &track_id(2)).as_deref(), Some("typed since"));
+    assert_eq!(counter(&f), usn);
+}
+
 /// A second category ("Genre", Seq 2) with three tags, and a third
 /// ("Mood", Seq 3) with none, beside the fixture's "Situation" (#584).
 fn my_tag_taxonomy(f: &Fixture) {

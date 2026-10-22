@@ -22,6 +22,7 @@ pub mod itunes;
 pub mod key;
 pub mod key_tag;
 pub mod locate;
+pub mod my_tag_comment;
 pub mod new_library;
 pub mod write;
 pub mod xml;
