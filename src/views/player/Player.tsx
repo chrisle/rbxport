@@ -44,7 +44,6 @@ import {
   jumpSizeById,
   jumpStepSeconds,
   movedLoopByBeats,
-  shiftByGridBeats,
   zoomBy,
   createWheelZoomGate,
   isWheelNotch,
@@ -111,6 +110,7 @@ import { nudgeGrid } from "@/lib/gridEdit";
 import { listenEditHistory } from "@/lib/editHistory";
 import { registerDeck } from "@/lib/scripting";
 import { useHoldRepeat } from "./useHoldRepeat";
+import { jumpHead } from "./beatJump";
 import { DeckInfo } from "./DeckInfo";
 import { DualControls, DualHead } from "./DualDeck";
 import { READ_ONLY_REASON, useMemoryCues } from "./useMemoryCues";
@@ -1329,13 +1329,7 @@ export const Player = memo(function Player({
           (moved.headMs - now * 1000) / 1000, Array.from(grid.times), beats);
         return;
       }
-      const gridTarget = size.beats > 0 ? shiftByGridBeats(grid, now * 1000, beats) : null;
-      const by = gridTarget === null ? jumpStepSeconds(size, bpmX100) * direction :
-        (gridTarget - now * 1000) / 1000;
-      if (by === 0) return;
-      if (phaseLocked) seekInPhase(now + by);
-      else if (gridTarget !== null) playback.moveByGridBeats(Array.from(grid.times), beats);
-      else playback.moveBy(by);
+      jumpHead(playback, grid, size, bpmX100, now, direction, phaseLocked, seekInPhase);
     },
     [jumpSizeId, bpmX100, playback, seekInPhase, grid, beatLoop, phaseLocked],
   );
