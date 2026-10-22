@@ -256,7 +256,15 @@ describe("mock edits", () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.createPlaylist("Friday", TREE_ROOT);
     const friday = (await backend.playlistTree()).find((n) => n.name === "Friday")!;
-    await backend.edits.addTracksToPlaylist(friday.id, ["100001"]);
+    await backend.edits.addTracksToPlaylist(friday.id, ["100001", "100002"]);
+    // Another program takes one out again, so the add (#499) is refused
+    // first. The mock has no second writer; Remove from History writes the
+    // list's tracks outside the history.
+    await backend.edits.removeFromHistory(friday.id, ["100002"]);
+    await expect(backend.edits.undoEdit()).rejects.toMatchObject({
+      kind: "conflict",
+      message: "Can't undo Add Tracks to Playlist: the playlist's tracks have changed since. The newer change was kept.",
+    });
     await expect(backend.edits.undoEdit()).rejects.toMatchObject({
       kind: "conflict",
       message: "Can't undo Create Playlist: tracks have been added to the playlist since. The newer change was kept.",
