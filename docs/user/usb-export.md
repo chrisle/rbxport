@@ -193,6 +193,8 @@ and ALAC, is converted to the selected output format:
 | MP3 | 320 kbps CBR, 44.1 kHz, stereo; smaller files with lossy compression. |
 
 Compatible MP3 and integer PCM WAV/AIFF at 44.1 or 48 kHz are copied as-is.
+An AIFF-C file that labels plain PCM with `in24`, `in32`, `FL32` or `FL64`
+plays and analyzes, and is converted rather than copied.
 Selecting MP3 does not recompress a compatible WAV or MP3. This targets older
 USB-capable players; filesystem and model-specific library requirements
 still apply. The [CDJ-350 specifications](https://www.pioneerdj.com/en/product/player/cdj-350/)
