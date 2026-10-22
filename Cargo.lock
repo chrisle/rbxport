@@ -4219,6 +4219,7 @@ name = "rbxport"
 version = "1.9.0"
 dependencies = [
  "base64 0.22.1",
+ "blake3",
  "dirs 5.0.1",
  "drag",
  "icu_collator",

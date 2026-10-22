@@ -22,6 +22,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-window-state = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+# Names a stick's analysis backups by their content (#660).
+blake3 = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

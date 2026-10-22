@@ -182,6 +182,10 @@ pub struct GridEditor {
     backup_dir: PathBuf,
     /// Files checked for a backup this session, so the check is one per file.
     backed_up: parking_lot::Mutex<HashSet<PathBuf>>,
+    /// A stick's analysis files as this session last wrote them: the file
+    /// and a digest of its bytes. One still holding those bytes is the
+    /// session's own edit, already backed up before it, and is not copied.
+    device_written: parking_lot::Mutex<HashSet<(PathBuf, blake3::Hash)>>,
 }
 
 impl Default for GridEditor {
@@ -210,6 +214,7 @@ impl GridEditor {
             locks_path: root.join("grid-locks.json"),
             backup_dir: root.join("backups/analysis"),
             backed_up: parking_lot::Mutex::new(HashSet::new()),
+            device_written: parking_lot::Mutex::new(HashSet::new()),
         }
     }
 
@@ -275,6 +280,37 @@ impl GridEditor {
             std::fs::copy(file, &copy).map_err(|e| file_error("backed up", &copy, &e))?;
         }
         self.backed_up.lock().insert(file.to_path_buf());
+        Ok(())
+    }
+
+    /// Copies a stick's analysis file under the backup directory before it
+    /// is rewritten, at `relative` with a digest of its bytes in the name.
+    /// Sticks often share a volume name and the same track has the same
+    /// analysis path on each, so neither names one stick's file: the digest
+    /// keeps each stick's original apart, and a copy already there holds
+    /// these very bytes. Bytes this session wrote to the file are skipped,
+    /// as what they replaced was copied first.
+    fn back_up_device(&self, file: &Path, relative: &str) -> AppResult<()> {
+        if !file.is_file() {
+            return Ok(());
+        }
+        // perf-ok: called from the commands' blocking closures only
+        let bytes = std::fs::read(file).map_err(|e| file_error("backed up", file, &e))?;
+        let digest = blake3::hash(&bytes);
+        if self.device_written.lock().contains(&(file.to_path_buf(), digest)) {
+            return Ok(());
+        }
+        let named = self.backup_dir.join(relative.trim_start_matches(['/', '\\']));
+        let stem = named.file_stem().map_or_else(|| "analysis".into(), |s| s.to_string_lossy().into_owned());
+        let extension = named.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+        let copy = named.with_file_name(format!("{stem}-{}{extension}", &digest.to_hex()[..16]));
+        if !copy.exists() {
+            if let Some(parent) = copy.parent() {
+                // perf-ok: called from the commands' blocking closures only
+                std::fs::create_dir_all(parent).map_err(|e| file_error("backed up", &copy, &e))?;
+            }
+            write_atomically(&copy, &bytes).map_err(|e| file_error("backed up", &copy, &e))?;
+        }
         Ok(())
     }
 }
@@ -607,7 +643,8 @@ impl DeviceGrid {
     }
 
     /// Where the backups of this stick's analysis files go, under the
-    /// editor's backup directory: `devices/<volume>/<path on the stick>`.
+    /// editor's backup directory: `devices/<volume>/<path on the stick>`,
+    /// to which `GridEditor::back_up_device` adds a digest of the content.
     fn backup_key(&self, path: &Path) -> AppResult<String> {
         let volume = self.mount.file_name().map_or_else(|| "device".into(), |n| n.to_string_lossy().into_owned());
         Ok(format!("devices/{volume}/{}", self.relative(path)?.to_string_lossy()))
@@ -632,8 +669,9 @@ pub(crate) fn device_refusal(rekordbox_running: bool) -> Option<AppError> {
 /// Applies one action to a Devices tree track's grid, on the stick: the
 /// track's `.DAT` and `.EXT` there and, when the tempo changed, its row in
 /// the stick's library, published together through the export journal
-/// (`rbl_export::device_library::write_grid`). Each file is copied to the
-/// editor's backups before its first rewrite this session. rekordbox does
+/// (`rbl_export::device_library::write_grid`). Before a file is rewritten,
+/// its bytes are copied to the editor's backups unless this session wrote
+/// them or a copy of the same bytes is already there. rekordbox does
 /// the same for a device track's grid (see `GridWrite`).
 pub(crate) fn apply_device(editor: &GridEditor, assets: &crate::device_library::DeviceAssets, track: &str,
     action: GridAction, options: &GridOptions, rekordbox_running: bool) -> AppResult<GridOutcome> {
@@ -652,10 +690,10 @@ pub(crate) fn apply_device(editor: &GridEditor, assets: &crate::device_library::
     let Some(next) = plan_next(editor, track, &beats, action, options, options.duration_ms, false)? else {
         return Ok(unchanged(&beats));
     };
-    editor.back_up(&grid.dat, &grid.backup_key(&grid.dat)?, "DAT")?;
+    editor.back_up_device(&grid.dat, &grid.backup_key(&grid.dat)?)?;
     let mut files = vec![(grid.relative(&grid.dat)?, parsed.with_beat_grid(&next))];
     if grid.ext.is_file() {
-        editor.back_up(&grid.ext, &grid.backup_key(&grid.dat)?, "EXT")?;
+        editor.back_up_device(&grid.ext, &grid.backup_key(&grid.ext)?)?;
         let ext = rbl_anlz::Anlz::read(&grid.ext).map_err(|e| AppError::internal(e.to_string()))?;
         if let Some(bytes) = ext.with_extended_grid_edit(&parsed.beat_grid().unwrap_or_default(), &next, parsed.grid_offset().unwrap_or(0)) {
             files.push((grid.relative(&grid.ext)?, bytes));
@@ -663,8 +701,14 @@ pub(crate) fn apply_device(editor: &GridEditor, assets: &crate::device_library::
     }
     let (old_bpm, new_bpm) = (u32::from(tempo_x100(&beats)), u32::from(tempo_x100(&next)));
     let bpm_changed = new_bpm != old_bpm;
+    let written: Vec<(PathBuf, blake3::Hash)> = files.iter().map(|(path, bytes)| (grid.mount.join(path), blake3::hash(bytes))).collect();
     let write = rbl_export::device_library::GridWrite { track: grid.track, files, bpm_x100: bpm_changed.then_some(new_bpm) };
     rbl_export::device_library::write_grid(&grid.mount, grid.format, &write).map_err(|e| crate::device_library::device_error(&e))?;
+    {
+        let mut known = editor.device_written.lock();
+        known.retain(|(path, _)| !written.iter().any(|(file, _)| file == path));
+        known.extend(written);
+    }
     record_history(editor, track, action, beats, next.clone(), options);
     Ok(GridOutcome {
         state: GridStateDto { locked: false, lockable: false, ..editor.state_for(track, &next) },
@@ -1507,6 +1551,106 @@ mod tests {
                 let check = rbl_export::verify(s.dest.path()).unwrap();
                 assert!(check.is_ok(), "{format:?}: {:?}", check.errors);
             }
+        }
+
+        /// A stick mounted as `NO NAME` under `parent`, holding one track
+        /// whose grid starts at `first_ms`.
+        fn exported_named(parent: &Path, src: &Path, first_ms: u32) -> PathBuf {
+            let mount = parent.join("NO NAME");
+            let audio = src.join("source-1.mp3");
+            std::fs::write(&audio, vec![1_u8; 2048]).unwrap();
+            let beats: Vec<Beat> = grid().into_iter().map(|b| Beat { time_ms: b.time_ms - 500 + first_ms, ..b }).collect();
+            let track = rbl_export::SourceTrack {
+                id: 1,
+                source_path: audio,
+                title: "Track 1".into(),
+                bpm_x100: 12_000,
+                duration_sec: 300,
+                analysis: vec![("DAT".into(), AnlzBuilder::new().path("/x.mp3").beat_grid(&beats).finish())],
+                ..Default::default()
+            };
+            rbl_export::export(&mount, &[track], &[]).unwrap();
+            mount
+        }
+
+        fn assets_at(mount: &Path) -> crate::device_library::DeviceAssets {
+            let track = stick::read(mount, Format::DeviceLibrary).unwrap().track(1).unwrap().clone();
+            crate::device_library::DeviceAssets {
+                mount: mount.to_path_buf(),
+                audio: track.path,
+                analysis: track.analysis_path,
+                artwork: String::new(),
+                library: Some((Format::DeviceLibrary, 1)),
+            }
+        }
+
+        fn nudge(editor: &GridEditor, mount: &Path) {
+            let done = apply_device(editor, &assets_at(mount), "file:track-1",
+                GridAction::Edit { edit: GridEdit::Nudge { ms: 5 }, from_ms: None }, &GridOptions::default(), false).unwrap();
+            assert!(done.written);
+        }
+
+        /// Every backup's bytes, under the editor's device backups.
+        fn backed_up(editor: &GridEditor) -> Vec<Vec<u8>> {
+            fn walk(dir: &Path, out: &mut Vec<Vec<u8>>) {
+                for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                    let path = entry.path();
+                    if path.is_dir() { walk(&path, out) } else { out.push(std::fs::read(&path).unwrap()) }
+                }
+            }
+            let mut out = Vec::new();
+            walk(&editor.backup_dir.join("devices"), &mut out);
+            out
+        }
+
+        fn dat_of(mount: &Path) -> Vec<u8> {
+            std::fs::read(assets_at(mount).analysis_dat().unwrap()).unwrap()
+        }
+
+        #[test]
+        fn two_sticks_with_one_volume_name_each_keep_their_original() {
+            // Two sticks both named `NO NAME`, each with the same track at
+            // the same analysis path but a different grid, edited in turn by
+            // two sessions sharing one backup directory.
+            let (src, app) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            let (one, two) = (crate::test_stick::stick(), crate::test_stick::stick());
+            let (a, b) = (exported_named(one.path(), src.path(), 500), exported_named(two.path(), src.path(), 520));
+            assert_eq!(assets_at(&a).analysis, assets_at(&b).analysis, "the same analysis path on each stick");
+            let (original_a, original_b) = (dat_of(&a), dat_of(&b));
+            assert_ne!(original_a, original_b);
+
+            let first = GridEditor::at(&app.path().join("app"));
+            nudge(&first, &a);
+            nudge(&first, &a);
+            let second = GridEditor::at(&app.path().join("app"));
+            nudge(&second, &b);
+
+            let copies = backed_up(&second);
+            assert!(copies.contains(&original_a), "stick one's original was backed up");
+            assert!(copies.contains(&original_b), "stick two's original was backed up");
+            // The second nudge on stick one rewrote this session's own bytes,
+            // which were not copied again.
+            assert_eq!(copies.len(), 2, "one copy per stick");
+        }
+
+        #[test]
+        fn a_stick_swapped_in_at_the_same_mount_keeps_its_original() {
+            // One session edits a stick, which is ejected; another stick with
+            // the same name is mounted at the same place and edited too.
+            let (src, app, parent) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), crate::test_stick::stick());
+            let editor = GridEditor::at(&app.path().join("app"));
+            let mount = exported_named(parent.path(), src.path(), 500);
+            let original_a = dat_of(&mount);
+            nudge(&editor, &mount);
+
+            std::fs::remove_dir_all(&mount).unwrap();
+            let again = exported_named(parent.path(), src.path(), 520);
+            assert_eq!(again, mount);
+            let original_b = dat_of(&mount);
+            nudge(&editor, &mount);
+
+            let copies = backed_up(&editor);
+            assert!(copies.contains(&original_a) && copies.contains(&original_b));
         }
 
         #[test]
