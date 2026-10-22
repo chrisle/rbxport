@@ -34,7 +34,7 @@ BACKOFF_RESET_AFTER = float(os.environ.get("RBX_BACKOFF_RESET_AFTER", "600"))
 REPO_DIR = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = Path(__file__).resolve()
 GOAL = (
-    "/goal Continuously run the take-tickets skill. If it stalls, restart it on "
+    "/goal Continuously run the take-tickets skill with 4 tickets per batch. If it stalls, restart it on "
     "different tickets until everything is stalled or there are no tickets left."
 )
 # Text Claude Code prints in the pane when /goal finishes one way or the other.
