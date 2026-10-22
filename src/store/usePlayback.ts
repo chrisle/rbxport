@@ -52,6 +52,10 @@ export interface Playback {
   seekFraction: (fraction: number) => void;
   /** The deck's loop, as the engine reports it; null for none. */
   loop: DeckLoop | null;
+  /** Latest commanded loop, including moves still waiting for an engine tick. */
+  currentLoop: () => DeckLoop | null;
+  /** Move the engine head by grid beats, mapped when the command arrives. */
+  moveByGridBeats: (gridTimesMs: number[], beats: number) => void;
   /** Sets a loop between two points, in seconds, and turns it on. */
   setLoop: (inSeconds: number, outSeconds: number) => void;
   /** Move an active loop and the engine head by grid-derived distances. */
@@ -229,6 +233,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const desiredMasterTempo = useRef(false);
   const desiredKeyShift = useRef(0);
   const desiredLoop = useRef<DeckLoop | null>(null);
+  const pendingLoop = useRef<DeckLoop | null>(null);
   /** Whether a drag is running, so a move is aimed rather than seeked. */
   const scrubbing = useRef(false);
   /** When a drag let go, until the seek that ends it comes back. */
@@ -328,6 +333,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       setDuration(0);
       setLoopState(null);
       desiredLoop.current = null;
+      pendingLoop.current = null;
     }
     emit(at);
     void (async () => {
@@ -383,6 +389,13 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
           rate > 0 && deck.loopOutFrames > deck.loopInFrames
             ? { inSeconds: deck.loopInFrames / rate, outSeconds: deck.loopOutFrames / rate, active: deck.looping }
             : null;
+        if (pendingLoop.current !== null) {
+          // Engine bounds are rounded to whole audio frames.
+          if (next === null || Math.abs(next.inSeconds - pendingLoop.current.inSeconds) > 1 / rate ||
+              Math.abs(next.outSeconds - pendingLoop.current.outSeconds) > 1 / rate ||
+              next.active !== pendingLoop.current.active) return current;
+          pendingLoop.current = null;
+        }
         // Same loop, same object: a tick must not re-render every reader.
         if (
           current === next ||
@@ -540,6 +553,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     desiredDelay.current = null;
     deferredSeek.current = null;
     desiredLoop.current = null;
+    pendingLoop.current = null;
     anchor.current = NO_ANCHOR;
     setPosition(0);
     setDuration(0);
@@ -694,6 +708,16 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     },
     [idle, isLoaded, DECK],
   );
+  const moveByGridBeats = useCallback((gridTimesMs: number[], beats: number) => {
+    if (idle || !isLoaded() || gridTimesMs.length < 2 || !Number.isFinite(beats)) return;
+    void (async () => {
+      try {
+        await (await getBackend()).deckMoveGrid(DECK, gridTimesMs, beats);
+      } catch (failure) {
+        setError(reasonFrom(failure));
+      }
+    })();
+  }, [idle, isLoaded, DECK]);
 
   /**
    * Audio follows the pointer while a waveform is dragged.
@@ -899,6 +923,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   );
 
   const isScrubbing = useCallback(() => scrubbing.current || landing.current !== null, []);
+  const currentLoop = useCallback(() => desiredLoop.current, []);
 
   const positionNow = useCallback(
     () => (anchor.current.playing ? extrapolate(anchor.current, performance.now()) : positionRef.current),
@@ -924,6 +949,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       if (!Number.isFinite(inSeconds) || !Number.isFinite(outSeconds) || outSeconds <= inSeconds) return;
       const next = { inSeconds: Math.max(0, inSeconds), outSeconds, active: true };
       desiredLoop.current = next;
+      pendingLoop.current = next;
       setLoopState(next);
       loopCall((b) => b.deckSetLoop(DECK, next.inSeconds * 1000, next.outSeconds * 1000));
     },
@@ -936,6 +962,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         !Number.isFinite(headBySeconds) || inSeconds < 0 || outSeconds <= inSeconds) return;
     const next = { inSeconds, outSeconds, active: true };
     desiredLoop.current = next;
+    pendingLoop.current = next;
     setLoopState(next);
     const at = positionNow() + headBySeconds;
     anchor.current = pinned(anchor.current, at, performance.now());
@@ -948,22 +975,24 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const setLoopActive = useCallback((on: boolean) => {
     if (desiredLoop.current !== null) {
       desiredLoop.current = { ...desiredLoop.current, active: on };
+      pendingLoop.current = desiredLoop.current;
       setLoopState(desiredLoop.current);
     }
     loopCall((b) => b.deckLoopActive(DECK, on));
   }, [loopCall, DECK]);
   const clearLoop = useCallback(() => {
     desiredLoop.current = null;
+    pendingLoop.current = null;
     setLoopState(null);
     loopCall((b) => b.deckClearLoop(DECK));
   }, [loopCall, DECK]);
 
   return useMemo(() => ({
-    playing, position, duration, idle, error, toggle, playAfter, seek, moveBy, seekFraction,
+    playing, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
     scrubBegin, scrubTo, scrubEnd, isScrubbing, positionRef, positionNow, subscribe,
     tempo, masterTempo, keyShift, shiftsKey, setKeyShift, setTempo, nudgeTempo, setMasterTempo,
-    loop, setLoop, moveLoop, setLoopActive, clearLoop,
-  }), [playing, position, duration, idle, error, toggle, playAfter, seek, moveBy, seekFraction,
+    loop, currentLoop, setLoop, moveLoop, setLoopActive, clearLoop,
+  }), [playing, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
     scrubBegin, scrubTo, scrubEnd, isScrubbing, positionNow, subscribe, tempo, masterTempo, keyShift, shiftsKey,
-    setKeyShift, setTempo, nudgeTempo, setMasterTempo, loop, setLoop, moveLoop, setLoopActive, clearLoop]);
+    setKeyShift, setTempo, nudgeTempo, setMasterTempo, loop, currentLoop, setLoop, moveLoop, setLoopActive, clearLoop]);
 }

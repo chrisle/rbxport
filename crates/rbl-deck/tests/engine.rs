@@ -1548,6 +1548,49 @@ fn moving_a_loop_maps_the_engine_head_across_a_tempo_change() {
 }
 
 #[test]
+fn rejected_loop_moves_preserve_bounds_active_state_and_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    ramp(&path, RATE as usize * 6);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.set_loop_ms(Deck::A, 2_000.0, 3_000.0);
+    h.engine.seek_ms(Deck::A, 2_375.0);
+    let before = h.engine.snapshot().a;
+    h.engine.move_loop_ms(Deck::A, -1_000.0, 0.0, -3_000.0, &[], -6.0);
+    let after_start = h.engine.snapshot().a;
+    assert_eq!(after_start.loop_in_frames, before.loop_in_frames);
+    assert_eq!(after_start.loop_out_frames, before.loop_out_frames);
+    assert_eq!(after_start.looping, before.looping);
+    assert_eq!(after_start.position_frames, before.position_frames);
+    h.engine.move_loop_ms(Deck::A, 5_500.0, 6_500.0, 3_500.0, &[], 7.0);
+    let after_end = h.engine.snapshot().a;
+    assert_eq!(after_end.loop_in_frames, before.loop_in_frames);
+    assert_eq!(after_end.loop_out_frames, before.loop_out_frames);
+    assert_eq!(after_end.looping, before.looping);
+    assert_eq!(after_end.position_frames, before.position_frames);
+}
+
+#[test]
+fn grid_move_uses_the_engine_head_across_a_tempo_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    ramp(&path, RATE as usize * 20);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    let grid: Vec<f64> = (0..45)
+        .map(|i| if i <= 24 { f64::from(i) * 500.0 } else { 12_000.0 + f64::from(i - 24) * 400.0 })
+        .collect();
+    // The UI sampled 10.75 s, but audio advanced before its command arrived.
+    h.engine.seek_ms(Deck::A, 11_750.0);
+    h.engine.move_grid_beats(Deck::A, &grid, 4.0);
+    assert_eq!(h.position(Deck::A), u64::from(RATE) * 67 / 5);
+    assert!(!h.engine.snapshot().a.looping);
+}
+
+#[test]
 fn the_metronome_keeps_its_volume_when_the_master_is_turned_down() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("silence.wav");

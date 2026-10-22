@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
 import type { Backend, DeckEvent, Tick } from "@/ipc/types";
+import { movedLoopByBeats } from "@/lib/player";
 import { usePlayback, type Playback } from "./usePlayback";
 
 declare global {
@@ -160,6 +161,34 @@ describe("setting a loop", () => {
       "move:14000:16000:2000:12000,12500:4",
     ]);
     expect(deck.loop).toEqual({ inSeconds: 14, outSeconds: 16, active: true });
+  });
+  it("keeps the commanded range through an old tick between rapid moves", async () => {
+    const grid = { times: Uint32Array.from({ length: 45 }, (_, i) =>
+      i <= 24 ? i * 500 : 12_000 + (i - 24) * 400),
+      numbers: new Uint8Array(), tempos: new Uint16Array() };
+    act(() => deck.setLoop(10, 12));
+    await settle();
+    const move = (beats: number, headMs: number) => {
+      const current = deck.currentLoop();
+      expect(current).not.toBeNull();
+      const moved = movedLoopByBeats(grid, current!.inSeconds * 1000,
+        current!.outSeconds * 1000, headMs, beats, 20_000);
+      expect(moved).not.toBeNull();
+      act(() => deck.moveLoop(moved!.fromMs / 1000, moved!.toMs / 1000,
+        (moved!.headMs - headMs) / 1000, Array.from(grid.times), beats));
+    };
+    move(4, 10_750);
+    deliver(tickWithLoop({ inSeconds: 10, outSeconds: 12, active: true }));
+    expect(deck.currentLoop()).toEqual({ inSeconds: 12, outSeconds: 13.6, active: true });
+    move(4, 12_600);
+    await settle();
+    expect(deck.currentLoop()).toEqual({ inSeconds: 13.6, outSeconds: 15.2, active: true });
+    expect(sent.filter((command) => command.startsWith("move:"))).toEqual([
+      expect.stringMatching(/^move:12000:13600:/),
+      expect.stringMatching(/^move:13600:15200:/),
+    ]);
+    move(-4, 14_200);
+    expect(deck.currentLoop()).toEqual({ inSeconds: 12, outSeconds: 13.6, active: true });
   });
   it("sends the two points down in milliseconds", async () => {
     act(() => deck.setLoop(1.5, 3.25));
