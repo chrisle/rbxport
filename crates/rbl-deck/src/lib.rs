@@ -765,6 +765,18 @@ impl Engine {
         Some(times[step] + (index - step as f64) * (times[step + 1] - times[step]))
     }
 
+    /// Move from the engine head by grid beats at command time. A displayed
+    /// head can be behind the audio clock, especially across a tempo change.
+    pub fn move_grid_beats(&self, deck: Deck, grid_times_ms: &[f64], beats: f64) {
+        let Some(handle) = self.deck(deck) else { return };
+        let clock = handle.clock();
+        let current_ms = (clock.position() as f64 - clock.pre_roll() as f64)
+            * 1000.0 / f64::from(self.sample_rate);
+        if let Some(target_ms) = Self::shifted_grid_ms(grid_times_ms, current_ms, beats) {
+            self.seek_ms(deck, target_ms);
+        }
+    }
+
     /// RELOOP and EXIT: back into the loop from its in point, or out of it
     /// with the range kept for the next RELOOP.
     pub fn set_looping(&self, deck: Deck, on: bool) {

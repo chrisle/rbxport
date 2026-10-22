@@ -1310,8 +1310,9 @@ export const Player = memo(function Player({
       const size = jumpSizeById(jumpSizeId);
       const beats = size.beats * direction;
       const now = playback.positionNow();
-      if (playback.loop?.active && size.beats > 0) {
-        const old = playback.loop;
+      const commandedLoop = playback.currentLoop();
+      if (commandedLoop?.active && size.beats > 0) {
+        const old = commandedLoop;
         const fixed = jumpStepSeconds(size, bpmX100) * direction * 1000;
         const moved = grid.times.length >= 2
           ? movedLoopByBeats(grid, old.inSeconds * 1000, old.outSeconds * 1000,
@@ -1334,6 +1335,7 @@ export const Player = memo(function Player({
         (gridTarget - now * 1000) / 1000;
       if (by === 0) return;
       if (phaseLocked) seekInPhase(now + by);
+      else if (gridTarget !== null) playback.moveByGridBeats(Array.from(grid.times), beats);
       else playback.moveBy(by);
     },
     [jumpSizeId, bpmX100, playback, seekInPhase, grid, beatLoop, phaseLocked],
