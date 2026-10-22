@@ -1,6 +1,7 @@
 node_modules/
 .wrangler/
 dist/
+dist-mock/
 target/
 .DS_Store
 *.log
