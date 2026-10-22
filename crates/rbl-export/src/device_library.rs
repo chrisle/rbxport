@@ -728,13 +728,23 @@ pub struct GridWrite {
 /// all through one publication of the export journal, so an interruption
 /// leaves the old grid or the new one and never half of each.
 ///
-/// The analysis files are the stick's, not one library's: when the other
-/// library on the stick names the same `.DAT` for a track, that row takes
-/// the new tempo too, so the two libraries never disagree with the grid
-/// they share or with each other [ASSUME: which libraries rekordbox's
-/// device controller updates is not observed; rbxport's own `verify`
-/// refuses a stick whose libraries disagree on a track's BPM]. The audio
-/// and every other file are left alone.
+/// The track's row in the other library on the stick takes the new tempo
+/// too, as rekordbox's does [static, 7.2.19: `DatabaseMediator::modifyTrack`
+/// @0x100c46a3c, after the browsed device's controller, walks
+/// `getEnableSameDeviceDBList`, which `addDeviceLibraryPlus_internal`
+/// fills to pair a stick's `export.pdb` with its `exportLibrary.db`, finds
+/// the row there by `getContentIDBsByMasterIDs` (the row's `masterDbId`
+/// and `masterContentId`), and modifies it the same way]. A row whose
+/// library does not say where it came from (both ids 0) is matched by the
+/// analysis file it names instead [ASSUME: rekordbox has no such case].
+///
+/// Only the tempo changes. rekordbox bumps none of the row's update
+/// counters on a device (`rekordboxDBController::updateTrackInfoUpdated`
+/// @0x1017e5cd8 returns at once for a device database, `RbDBIndex` 1) and
+/// writes nothing to the device's database from `setBeatInfo`, so
+/// `informationUpdateCount`, `analysisDataUpdateCount`, `cueUpdateCount`
+/// and `hasModified` stay as they are. The audio and every other file are
+/// left alone.
 pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> {
     crate::recover(root)?;
     let dir = db_dir(root)?;
@@ -770,14 +780,18 @@ pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> 
         let relative = dir.strip_prefix(root).map_err(std::io::Error::other)?.to_path_buf();
         let staged_dir = publication.stage().join(&relative);
         rbl_core::durable::create_dir_all(&staged_dir)?;
+        let master = (track.master_db_id, track.master_content_id);
         let analysis = (!track.analysis_path.is_empty()).then(|| path_key(&track.analysis_path));
         for library_format in &present {
             let rows: Vec<u32> = if *library_format == format {
                 vec![write.track]
             } else {
-                let Some(analysis) = &analysis else { continue };
                 let library = read_unlocked(root, *library_format)?;
-                library.tracks.iter().filter(|t| !t.analysis_path.is_empty() && path_key(&t.analysis_path) == *analysis).map(|t| t.id).collect()
+                library.tracks.iter().filter(|t| if master == (0, 0) {
+                    analysis.as_ref().is_some_and(|a| !t.analysis_path.is_empty() && path_key(&t.analysis_path) == *a)
+                } else {
+                    (t.master_db_id, t.master_content_id) == master
+                }).map(|t| t.id).collect()
             };
             if rows.is_empty() {
                 continue;
