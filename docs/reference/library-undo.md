@@ -25,18 +25,38 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   - `permanent_edit` writes and clears both stacks, because an older entry
     could name rows the write removed for good.
 
-  Writers that call `AppState::write` directly (imports, relocation, cues,
-  analysis, LINK) record nothing. Since #427 the imports and relocations
-  among them call `wrote_outside_history`, which clears Redo, or both stacks
-  for an XML/iTunes replace, then send `edit-history:changed` [OBS code].
+  Writers that call `AppState::write` or `write_then` directly (imports,
+  relocation, cues, analysis, grid saves, LINK, deck plays) record nothing.
+  Since #506 `write_then` itself ends the Redo branch whenever the write
+  changed a row (SQLite `total_changes` on the writer's connection), and
+  tells the window through the listener `lib.rs` sets
+  (`AppState::on_history_changed` sends `edit-history:changed`). A write
+  that changed nothing (a probe for a path) leaves Redo. The code that keeps
+  the history itself (`recorded_edit`, `edit`, `permanent_edit`, Undo,
+  Redo) uses `write_history_then`, which does not. XML/iTunes replace also
+  calls `wrote_outside_history(_, true)` to clear both stacks [OBS code].
 - **Payloads are exact.** Entries keep row ids and before/after column values
   (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`,
   `PlaylistTrackRemoval`, `TrackEdit`, `TrackTagEdit` in
   `crates/rbl-db/src/write.rs`). A multi-track edit is one entry with one
   step per track, undone last first [OBS code].
-- **No conflict check.** Undo and Redo of a track edit write the stored value
-  whether or not the row changed since. Playlist deletion refuses when a row
-  is no longer in the state it expects [OBS code; #506].
+- **Conflict check (#506).** Before Undo or Redo writes, the rows it would
+  write must still hold what the entry expects: the edit's result for Undo,
+  what it replaced for Redo. Track fields compare by SQL `IS` (NULL equals
+  NULL); My Tags as a set; a rename by name; a move by parent and place
+  among its siblings; a track removal by the playlist's live members in
+  order; deletion, Sort Items and folder-drop replacement by the rows they
+  name. An entry of several tracks is checked whole before any is written.
+  When something outside the history changed one since (a player over LINK,
+  a USB import, rekordbox while RBXport stayed open), nothing is written,
+  the newer value stays, only that entry leaves its stack, and the command
+  fails with `ErrorKind::Conflict`: "Can't undo Track Edit: the track has
+  changed since. The newer change was kept." The rest of the history
+  stays; each entry checks its own rows when it runs. Policy chosen by
+  Chris on 2026-10-22 (#506, option A) [OBS code;
+  `undo_keeps_a_rating_a_player_set_over_link_and_the_rest_of_the_history`
+  in `link.rs`, `redo_refuses_a_rating_changed_by_another_program_and_keeps_the_rest`
+  in `tests/commands.rs`].
 - **Other histories.** Text fields keep WebKit's own history. Each track's
   beat grid has its own stack in `GridEditor` (`src-tauri/src/grid.rs`),
   which Edit › Undo reaches while a deck's grid editor is armed
@@ -88,10 +108,10 @@ holds their ids.
 | Missing File Manager › Delete | `relocate::remove_missing_tracks` | same | Permanent | code | Yes, by design |
 | Relocate (one track) | `relocate_track` | `FolderPath`, `FileNameL`, `rb_file_id` | Not recorded | code | Old path lost. #502 |
 | Relocate by location, Auto Relocate | `relocate::relocate_by_location`, `auto_relocate` | same, many tracks | Not recorded; ends the redo branch | code | Old paths lost. #502 |
-| Analyze (BPM, key, waveform, grid) | `analysis::analyse_track` | `.DAT/.EXT/.2EX`, BPM, key, analysis path | Not recorded [ASSUME: matches rekordbox, which has no analysis Undo] | code | Re-analysis replaces the old grid |
+| Analyze (BPM, key, waveform, grid) | `analysis::analyse_track` | `.DAT/.EXT/.2EX`, BPM, key, analysis path | Not recorded [ASSUME: matches rekordbox, which has no analysis Undo]; ends the redo branch | code | Re-analysis replaces the old grid |
 | Phrase edit | `analysis::edit_phrase` | `.EXT` phrase section | Not recorded | code. [UNKNOWN] whether rekordbox's phrase editing undoes; `editapp::ScoreEditManager::undo` exists but is not traced to it | Previous phrases lost |
-| Beat grid edits, grid lock | `grid::grid_edit`, `grid_lock` | `.DAT/.EXT`, `BPM`, lock | Grid edits: own per-track Undo, which refuses and drops the top entry when the grid on disk is no longer the one the entry expects, keeping the newer grid; lock: not recorded | `useGridEditor.test.tsx`, `e2e/grid-edit.spec.ts`, `an_undo_over_a_grid_changed_elsewhere_is_refused_and_keeps_the_newer_grid` (`grid.rs` unit) | No |
-| Cue and loop edits, Convert Memory Cues to Hot Cues | `cues::*` | `djmdCue`, ANLZ cue sections | Not recorded, and does not end the redo branch | code | Deleted cue lost. #504, #506 |
+| Beat grid edits, grid lock | `grid::grid_edit`, `grid_lock` | `.DAT/.EXT`, `BPM`, lock | Grid edits: own per-track Undo, which refuses (`ErrorKind::Conflict`) and drops the top entry when the grid on disk is no longer the one the entry expects, keeping the newer grid; lock: not recorded. Both end the library redo branch | `useGridEditor.test.tsx`, `e2e/grid-edit.spec.ts`, `an_undo_over_a_grid_changed_elsewhere_is_refused_and_keeps_the_newer_grid` (`grid.rs` unit) | No |
+| Cue and loop edits, Convert Memory Cues to Hot Cues | `cues::*` | `djmdCue`, ANLZ cue sections | Not recorded; ends the redo branch | `a_cue_edit_ends_the_redo_branch_and_keeps_undo` | Deleted cue lost. #504 |
 
 ### Playlists, folders and intelligent playlists
 
@@ -133,19 +153,20 @@ holds their ids.
 | Stick settings | `device_settings::save_device_settings`, `write_device_defaults` | `MYSETTING*.DAT` on the stick | External | code |
 | Export XML, playlist file, loop WAV | `export_xml`, `export_playlist_file`, `export_loop_wav` | a file the person chose | External | code |
 | Backups: create, delete, change folder | `back_up_library`, `delete_backup`, `set_backup_directory` | archives outside the library | External. Delete asks "This cannot be undone" | code |
-| Edits from players over LINK (rating, Tag List, cues, history) | `link.rs` `StateSource::edit`, `history_write`, `player_cue_edit` | the library | Not recorded, and does not end the redo branch | code. #506 |
+| Edits from players over LINK (rating, Tag List, cues, history) | `link.rs` `StateSource::edit`, `history_write`, `player_cue_edit` | the library | Not recorded; ends the redo branch, and an Undo that would overwrite one is refused | `undo_keeps_a_rating_a_player_set_over_link_and_the_rest_of_the_history` (#506) |
 | Preferences | `preferences.rs`, `localStorage` | settings | Out of scope: not library data | — |
 
-## Policy choices still open
+## Policy choices
 
-These are the only new product decisions the audit found. Each is filed with
-`needs-product-decision`:
+The audit found two new product decisions:
 
 1. What Undo/Redo should do when a recorded row was changed since by
-   something outside the history (LINK, USB import, rekordbox): refuse,
-   clear everything, or overwrite as now (#506).
+   something outside the history (LINK, USB import, rekordbox). Decided on
+   2026-10-22: refuse that entry with a message, keep the newer value and the
+   rest of the history (#506; see "Conflict check" above).
 2. Whether Undo of a key edit that also wrote the file tag should rewrite the
-   tag, only say it did not, or not be offered (#507).
+   tag, only say it did not, or not be offered (#507). Still open, filed with
+   `needs-product-decision`.
 
 The other gaps (#499 to #505, #508) extend the existing contract and
 need no new policy.
