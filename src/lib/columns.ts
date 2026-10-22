@@ -10,11 +10,12 @@
  * place rather than being spread through the table component.
  */
 import type { SortColumn } from "@/ipc/types";
+import type { ArtworkMode } from "@/lib/session";
 
 /** Keys that name a real column. Sortable ones match `SortColumn`. */
 export type ColumnKey =
   | SortColumn
-  | "attr" | "preview" | "artwork" | "hotCue" | "myTag" | "cloud";
+  | "attr" | "preview" | "artwork" | "summary" | "hotCue" | "myTag" | "cloud";
 
 export interface ColumnSpec {
   key: ColumnKey;
@@ -53,7 +54,18 @@ export const CATALOGUE: readonly ColumnSpec[] = [
   { key: "trackNo", label: "#", width: 47, align: "right", sortable: true, fixed: true },
   { key: "attr", label: "Attribute", width: 67, sortable: false },
   { key: "preview", label: "Preview", width: 128, sortable: false },
+  // rekordbox's upper-part Artwork column is header id 60, added at 80 with
+  // a minimum and maximum of 80 and flags 13 (visible, draggable, on the
+  // menu; not resizable, not sortable) [OBS static, rekordbox 7.2.19 macOS:
+  // `BrowseHeaderManager::addColumn` @0x100d7d1a8 reads the width, minimum
+  // and maximum from the table at 0x1037b50ac and the flags from
+  // `kCollentionHeaderDefault`].
   { key: "artwork", label: "Artwork", width: 80, sortable: false },
+  // Only in the whole-artwork layouts: header id 63, "Summary", 128 wide,
+  // with no comparator bound (`ListViewSorter::setCompFunc` clears it, as
+  // for Artwork). `ListViewer::paintHybridColumn` @0x1003f1934 draws the
+  // title over the artist, BPM and key [OBS static, rekordbox 7.2.19].
+  { key: "summary", label: "Summary", width: 128, sortable: false },
   { key: "title", label: "Track Title", width: 387, sortable: true },
   { key: "key", label: "Key", width: 73, sortable: true },
   { key: "bpm", label: "BPM", width: 80, align: "right", sortable: true },
@@ -113,8 +125,37 @@ export const FIXED: readonly ColumnKey[] = CATALOGUE.filter((c) => c.fixed).map(
 /** Columns the header menu cannot hide. Track Title may still be moved. */
 export const REQUIRED_COLUMNS: readonly ColumnKey[] = [...FIXED, "title"];
 
+/**
+ * Columns only the whole-artwork layouts have. rekordbox adds Summary (id 63)
+ * from its whole-artwork default tables alone (`kSmallArtworkHeaderDefault`
+ * and the playlist and folder ones beside it); the upper-part tables never
+ * add it, so it is not in that header or its menu [OBS static].
+ */
+export const FULL_ARTWORK_ONLY: readonly ColumnKey[] = ["summary"];
+
 /** Every menu column is backed by a browser row or a requested detail field. */
-export const AVAILABLE_COLUMNS: readonly ColumnKey[] = CATALOGUE.map((column) => column.key);
+export const AVAILABLE_COLUMNS: readonly ColumnKey[] = CATALOGUE
+  .map((column) => column.key)
+  .filter((key) => !FULL_ARTWORK_ONLY.includes(key));
+
+/** Columns a layout for the artwork mode may hold. */
+export function availableColumns(mode: ArtworkMode = "partial"): readonly ColumnKey[] {
+  return mode === "full" ? CATALOGUE.map((column) => column.key) : AVAILABLE_COLUMNS;
+}
+
+/**
+ * Columns the header menu cannot hide, for the artwork mode. Showing the
+ * whole artwork, rekordbox adds the Artwork column (id 61) with flags 5,
+ * visible and draggable but not on the column menu, so it cannot be hidden;
+ * and its whole-artwork defaults hide Track Title, which the Summary column
+ * stands in for [OBS static, rekordbox 7.2.19 `kSmallArtworkHeaderDefault`].
+ */
+export function requiredColumns(mode: ArtworkMode = "partial"): readonly ColumnKey[] {
+  return mode === "full" ? [...FIXED, "artwork"] : REQUIRED_COLUMNS;
+}
+
+/** Columns whose edge cannot be dragged: rekordbox adds both Artworks without the resizable flag. */
+export const FIXED_WIDTH: readonly ColumnKey[] = ["artwork"];
 
 /** Fields read from the database only when a table shows one of them. */
 export const EXTRA_COLUMNS: readonly ColumnKey[] = [
@@ -138,6 +179,24 @@ const MENU_ORDER: readonly ColumnKey[] = [
 export const MENU_COLUMNS: readonly ColumnSpec[] = MENU_ORDER
   .map((key) => CATALOGUE.find((column) => column.key === key))
   .filter((column): column is ColumnSpec => column !== undefined);
+
+/**
+ * The header menu for the whole artwork. rekordbox's menu is JUCE's
+ * `TableHeaderComponent::addMenuItems` (called from
+ * `CustomTableListBox::Header::addMenuItems` @0x101a2a404), which lists the
+ * header's columns in header order and skips any without the
+ * appears-on-menu flag. The whole-artwork Artwork column lacks it, and
+ * Summary sits where Artwork does in every whole-artwork default table, so
+ * Summary takes Artwork's place here [OBS static, rekordbox 7.2.19].
+ */
+const FULL_MENU_COLUMNS: readonly ColumnSpec[] = MENU_COLUMNS.map((column) =>
+  column.key === "artwork" ? (CATALOGUE.find((spec) => spec.key === "summary") ?? column) : column,
+);
+
+/** The header menu's columns for the artwork mode. */
+export function menuColumns(mode: ArtworkMode = "partial"): readonly ColumnSpec[] {
+  return mode === "full" ? FULL_MENU_COLUMNS : MENU_COLUMNS;
+}
 
 /** A column's place in the table: which, in what order, how wide. */
 export interface Layout {
@@ -172,24 +231,66 @@ export function folderLayout(): Layout {
   return { order: [...FOLDER_VISIBLE], widths: { ...FOLDER_WIDTHS } };
 }
 
+/**
+ * The whole-artwork layout a table opens with, from its upper-part default.
+ *
+ * rekordbox keeps a second header layout per table for the whole artwork
+ * (`BrowseHeaderManager::getXmlKeyName` appends `-FullArtwork` when the
+ * mode is 1) and, with none saved, fills it from a second default table
+ * (`setDefaultHeaderColumn` picks it on the same mode). Every pair of
+ * tables differs the same way: the Artwork column becomes id 61 and Summary
+ * (id 63) follows it; the collection and playlist tables also hide Track
+ * Title, Artist, BPM and Key, which Summary shows, and the folder table
+ * keeps them [OBS static, rekordbox 7.2.19: `kCollentionHeaderDefault` /
+ * `kSmallArtworkHeaderDefault`, the playlist pair at 0x1037b541c /
+ * 0x1037b5684, the folder pair at 0x1037b621c / 0x1037b634c]. The same
+ * change is made to this app's own upper-part default.
+ */
+export function fullArtworkLayout(base: Layout, hideSummarised: boolean): Layout {
+  const order = base.order.filter(
+    (key) => key !== "summary" && !(hideSummarised && SUMMARISED.includes(key)),
+  );
+  if (!order.includes("artwork")) order.splice(catalogueSlot(order, "artwork"), 0, "artwork");
+  order.splice(order.indexOf("artwork") + 1, 0, "summary");
+  const widths = { ...base.widths };
+  delete widths.artwork;
+  return { order, widths };
+}
+
+/** What the Summary column shows, so the whole-artwork defaults hide them. */
+const SUMMARISED: readonly ColumnKey[] = ["title", "artist", "bpm", "key"];
+
+/** Where a column goes back into an order: before the first that follows it in the catalogue. */
+function catalogueSlot(order: readonly ColumnKey[], key: ColumnKey): number {
+  const rank = CATALOGUE.findIndex((column) => column.key === key);
+  const at = order.findIndex((other) => CATALOGUE.findIndex((column) => column.key === other) > rank);
+  return at === -1 ? order.length : at;
+}
+
 const BY_KEY = new Map(CATALOGUE.map((c) => [c.key, c]));
 
 export function specOf(key: ColumnKey): ColumnSpec | undefined {
   return BY_KEY.get(key);
 }
 
-/** The width a column is drawn at. */
+/**
+ * The width a column is drawn at. A fixed-width column keeps its catalogue
+ * width whatever a layout says: rekordbox's upper-part Artwork has a minimum
+ * and maximum of 80, so a width read back from anywhere is clamped to 80.
+ */
 export function widthOf(layout: Layout, key: ColumnKey): number {
-  return layout.widths[key] ?? specOf(key)?.width ?? 120;
+  const spec = specOf(key);
+  if (spec && FIXED_WIDTH.includes(key)) return spec.width;
+  return layout.widths[key] ?? spec?.width ?? 120;
 }
 
-/** Restore a required title at its catalogue position in an older layout. */
-function withTitle(order: readonly ColumnKey[]): ColumnKey[] {
-  if (order.includes("title")) return [...order];
-  const titleRank = CATALOGUE.findIndex((column) => column.key === "title");
-  const at = order.findIndex((key) => CATALOGUE.findIndex((column) => column.key === key) > titleRank);
+/** Restore the mode's required columns at their catalogue positions in an older layout. */
+function withRequired(order: readonly ColumnKey[], mode: ArtworkMode): ColumnKey[] {
   const restored = [...order];
-  restored.splice(at === -1 ? restored.length : at, 0, "title");
+  for (const key of requiredColumns(mode)) {
+    if (FIXED.includes(key) || restored.includes(key)) continue;
+    restored.splice(catalogueSlot(restored, key), 0, key);
+  }
   return restored;
 }
 
@@ -199,8 +300,9 @@ function withTitle(order: readonly ColumnKey[]): ColumnKey[] {
  * Fixed columns lead, whatever the saved layout holds — including a layout
  * saved before they existed, which is every layout already on disk.
  */
-export function resolve(layout: Layout): ColumnSpec[] {
-  const chosen = withTitle(layout.order.filter((key) => AVAILABLE_COLUMNS.includes(key) && !FIXED.includes(key)));
+export function resolve(layout: Layout, mode: ArtworkMode = "partial"): ColumnSpec[] {
+  const available = availableColumns(mode);
+  const chosen = withRequired(layout.order.filter((key) => available.includes(key) && !FIXED.includes(key)), mode);
   return [...FIXED, ...chosen]
     .map((key) => specOf(key))
     .filter((spec): spec is ColumnSpec => spec !== undefined)
@@ -214,17 +316,13 @@ export function resolve(layout: Layout): ColumnSpec[] {
  * than to the end, so ticking something in the header menu puts it where the
  * menu implies it will be.
  */
-export function toggleColumn(layout: Layout, key: ColumnKey): Layout {
-  if (!AVAILABLE_COLUMNS.includes(key) || REQUIRED_COLUMNS.includes(key)) return layout;
+export function toggleColumn(layout: Layout, key: ColumnKey, mode: ArtworkMode = "partial"): Layout {
+  if (!availableColumns(mode).includes(key) || requiredColumns(mode).includes(key)) return layout;
   if (layout.order.includes(key)) {
     return { ...layout, order: layout.order.filter((k) => k !== key) };
   }
-  const wanted = CATALOGUE.findIndex((c) => c.key === key);
-  const at = layout.order.findIndex(
-    (k) => CATALOGUE.findIndex((c) => c.key === k) > wanted,
-  );
   const order = [...layout.order];
-  order.splice(at === -1 ? order.length : at, 0, key);
+  order.splice(catalogueSlot(order, key), 0, key);
   return { ...layout, order };
 }
 
@@ -237,7 +335,7 @@ export function toggleColumn(layout: Layout, key: ColumnKey): Layout {
  * detail with the code that knows about fixed columns at all.
  */
 export function moveColumn(layout: Layout, key: ColumnKey, to: number): Layout {
-  if (!AVAILABLE_COLUMNS.includes(key) || FIXED.includes(key)) return layout;
+  if (!BY_KEY.has(key) || FIXED.includes(key)) return layout;
   const from = layout.order.indexOf(key);
   if (from === -1) return layout;
   const target = to - FIXED.length;
@@ -249,7 +347,7 @@ export function moveColumn(layout: Layout, key: ColumnKey, to: number): Layout {
 
 /** Sets a column's width, clamped so it stays readable and finite. */
 export function resizeColumn(layout: Layout, key: ColumnKey, width: number): Layout {
-  if (!BY_KEY.has(key)) return layout;
+  if (!BY_KEY.has(key) || FIXED_WIDTH.includes(key)) return layout;
   const clamped = Math.round(
     Math.min(Math.max(Number.isFinite(width) ? width : MIN_COLUMN_WIDTH, MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH),
   );
@@ -277,13 +375,18 @@ export function autoSizeAll(layout: Layout): Layout {
  * simply falling back. `fallback` is what it falls back to: the table's own
  * default, which is not the same for every context.
  */
-export function sanitise(value: unknown, fallback: () => Layout = defaultLayout): Layout {
+export function sanitise(
+  value: unknown,
+  fallback: () => Layout = defaultLayout,
+  mode: ArtworkMode = "partial",
+): Layout {
   if (typeof value !== "object" || value === null) return fallback();
   const raw = value as Partial<Layout>;
+  const available = availableColumns(mode);
   const seen = new Set<ColumnKey>();
   const order = (Array.isArray(raw.order) ? raw.order : []).filter(
     (key): key is ColumnKey => {
-      if (typeof key !== "string" || !AVAILABLE_COLUMNS.includes(key)) return false;
+      if (typeof key !== "string" || !available.includes(key)) return false;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -294,13 +397,13 @@ export function sanitise(value: unknown, fallback: () => Layout = defaultLayout)
   const widths: Partial<Record<ColumnKey, number>> = {};
   const rawWidths = typeof raw.widths === "object" && raw.widths !== null ? raw.widths : {};
   for (const [key, width] of Object.entries(rawWidths)) {
-    if (!AVAILABLE_COLUMNS.includes(key as ColumnKey)) continue;
+    if (!available.includes(key as ColumnKey)) continue;
     if (typeof width !== "number" || !Number.isFinite(width)) continue;
     widths[key as ColumnKey] = Math.round(
       Math.min(Math.max(width, MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH),
     );
   }
-  return { order: withTitle(order), widths };
+  return { order: withRequired(order, mode), widths };
 }
 
 /** A rendered heading's horizontal extent, in any one coordinate space. */

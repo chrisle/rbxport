@@ -42,6 +42,39 @@ describe("rekordbox browse settings", () => {
     ]);
   });
 
+  it("imports each table's whole-artwork layout from its -FullArtwork header (#575)", () => {
+    // rekordbox 7.2.19 names it `TableHeader-<table>[-sub]-FullArtwork`, with
+    // the Artwork as column 61 and Summary as 63 (getXmlKeyName,
+    // kSmallArtworkHeaderDefault).
+    const xml = `<PROPERTIES>
+      <VALUE name="TableHeader-CollectionTracks"><TABLELAYOUT>
+        <COLUMN id="60" visible="1" width="80"/>
+        <COLUMN id="21" visible="1" width="400"/>
+      </TABLELAYOUT></VALUE>
+      <VALUE name="TableHeader-CollectionTracks-FullArtwork"><TABLELAYOUT>
+        <COLUMN id="20" visible="1" width="60"/>
+        <COLUMN id="68" visible="1" width="200"/>
+        <COLUMN id="61" visible="1" width="42"/>
+        <COLUMN id="63" visible="1" width="250"/>
+        <COLUMN id="21" visible="0" width="128"/>
+        <COLUMN id="24" visible="1" width="130"/>
+      </TABLELAYOUT></VALUE>
+      <VALUE name="TableHeader-PlaylistTracks-sub-FullArtwork"><TABLELAYOUT>
+        <COLUMN id="61" visible="1" width="42"/>
+        <COLUMN id="63" visible="1" width="128"/>
+      </TABLELAYOUT></VALUE>
+    </PROPERTIES>`;
+    const parsed = parseRekordboxBrowse(xml);
+    expect(parsed.collection?.order).toEqual(["artwork", "title"]);
+    expect(parsed["collection.full"]?.order).toEqual(["preview", "artwork", "summary", "genre"]);
+    expect(parsed["collection.full"]?.widths.summary).toBe(250);
+    expect(parsed["subBrowser.full"]?.order).toEqual(["artwork", "summary"]);
+    expect(parsed["playlist.full"]).toBeUndefined();
+    applyRekordboxBrowse(xml);
+    expect(JSON.parse(localStorage.getItem("rbl.columns.v2.collection.full") ?? "{}").order)
+      .toEqual(["preview", "artwork", "summary", "genre"]);
+  });
+
   it("ignores malformed XML and incomplete layouts", () => {
     expect(parseRekordboxBrowse("<PROPERTIES><VALUE>")).toEqual({});
     expect(parseRekordboxBrowse('<VALUE name="TableHeader-PlaylistTracks"><COLUMN id="68" visible="1"/></VALUE>')).toEqual({});

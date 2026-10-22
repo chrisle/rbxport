@@ -14,7 +14,10 @@ import {
   REQUIRED_COLUMNS,
   defaultLayout,
   folderLayout,
+  fullArtworkLayout,
   MAX_COLUMN_WIDTH,
+  menuColumns,
+  requiredColumns,
   MIN_COLUMN_WIDTH,
   moveColumn,
   resizeColumn,
@@ -84,8 +87,10 @@ describe("the catalogue", () => {
     // rekordbox 7.2.11's `BrowseHeaderManager::isSortableColumn`: everything
     // but Artwork, Preview, My Tag, Attribute and Cloud. Hot Cue is left out
     // here because rekordbox sorts it by Hot Cue Auto Load, which this
-    // column does not show.
-    const unsortable = ["attr", "preview", "artwork", "hotCue", "myTag", "cloud"];
+    // column does not show. Summary, the whole artwork's, is sortable by
+    // `isSortableColumn` but `ListViewSorter::setCompFunc` binds it no
+    // comparator, as for Artwork (rekordbox 7.2.19), so it has no order.
+    const unsortable = ["attr", "preview", "artwork", "summary", "hotCue", "myTag", "cloud"];
     for (const column of CATALOGUE) {
       expect(column.sortable, column.key).toBe(!unsortable.includes(column.key));
     }
@@ -344,5 +349,76 @@ describe("reorderTarget", () => {
 
   it("never moves in front of the fixed columns", () => {
     expect(reorderTarget(spans, 1, -40, 88, 1)).toBe(1);
+  });
+});
+
+describe("the whole artwork's layout (#575)", () => {
+  // rekordbox 7.2.19 macOS, static: each table keeps a second layout under
+  // its name with `-FullArtwork` appended, opened from a second default
+  // table. Between every pair the Artwork column becomes id 61, Summary
+  // (id 63) follows it, and the collection and playlist tables hide Track
+  // Title, Artist, BPM and Key; the folder table keeps them.
+  const full = fullArtworkLayout(defaultLayout(), true);
+
+  it("opens with Summary after the Artwork and without the columns Summary shows", () => {
+    expect(full.order).toEqual([
+      "preview", "artwork", "summary", "duration", "rating", "comment", "label", "dateAdded", "releaseDate",
+    ]);
+    expect(resolve(full, "full").map((column) => column.key)).toEqual(["trackNo", ...full.order]);
+    expect(specOf("summary")).toMatchObject({ label: "Summary", width: 128, sortable: false });
+  });
+
+  it("keeps the Explorer's columns, adding only Summary", () => {
+    const folder = fullArtworkLayout(folderLayout(), false);
+    expect(folder.order).toEqual(["preview", "artwork", "summary", ...FOLDER_VISIBLE.slice(2)]);
+    // The upper part's Artwork width does not carry over.
+    expect(folder.widths.artwork).toBeUndefined();
+    expect(folder.widths.title).toBe(128);
+  });
+
+  it("puts the Artwork back when the layout it starts from had hidden it", () => {
+    const base = toggleColumn(defaultLayout(), "artwork");
+    expect(fullArtworkLayout(base, true).order.slice(0, 3)).toEqual(["preview", "artwork", "summary"]);
+  });
+
+  it("cannot hide the whole artwork's Artwork column, and can hide Track Title", () => {
+    expect(requiredColumns("full")).toEqual(["trackNo", "artwork"]);
+    expect(requiredColumns("partial")).toEqual(REQUIRED_COLUMNS);
+    expect(toggleColumn(full, "artwork", "full")).toBe(full);
+    const titled = toggleColumn(full, "title", "full");
+    expect(titled.order).toContain("title");
+    expect(toggleColumn(titled, "title", "full").order).not.toContain("title");
+    // A whole-artwork layout missing its Artwork has it restored, not Title.
+    const bare = { order: ["summary", "genre"] as ColumnKey[], widths: {} };
+    expect(resolve(bare, "full").map((column) => column.key)).toEqual(["trackNo", "artwork", "summary", "genre"]);
+    expect(sanitise(bare, defaultLayout, "full").order).toEqual(["artwork", "summary", "genre"]);
+  });
+
+  it("keeps Summary out of the upper part's table and menu", () => {
+    expect(AVAILABLE_COLUMNS).not.toContain("summary");
+    expect(resolve(full).map((column) => column.key)).not.toContain("summary");
+    expect(toggleColumn(defaultLayout(), "summary")).toEqual(defaultLayout());
+    expect(sanitise(full).order).not.toContain("summary");
+    expect(menuColumns("partial")).toBe(MENU_COLUMNS);
+  });
+
+  it("lists Summary in the menu where the Artwork is, which the whole artwork's menu has not", () => {
+    const keys = menuColumns("full").map((column) => column.key);
+    const at = MENU_COLUMNS.findIndex((column) => column.key === "artwork");
+    expect(keys[at]).toBe("summary");
+    expect(keys).not.toContain("artwork");
+    expect(keys).toHaveLength(MENU_COLUMNS.length);
+  });
+});
+
+describe("the Artwork column's width (#575)", () => {
+  // rekordbox 7.2.19 adds the upper part's Artwork (id 60) at 80 with a
+  // minimum and maximum of 80 and without the resizable flag.
+  it("stays 80 wide whatever a layout says, and its edge cannot be dragged", () => {
+    const layout = defaultLayout();
+    expect(resizeColumn(layout, "artwork", 140)).toBe(layout);
+    const stored = { order: layout.order, widths: { artwork: 140 } };
+    expect(widthOf(stored, "artwork")).toBe(80);
+    expect(resolve(sanitise(stored)).find((column) => column.key === "artwork")?.width).toBe(80);
   });
 });

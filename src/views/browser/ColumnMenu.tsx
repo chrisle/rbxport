@@ -14,7 +14,8 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { useTranslation } from "@/i18n";
-import { MENU_COLUMNS, REQUIRED_COLUMNS, type ColumnKey } from "@/lib/columns";
+import { MENU_COLUMNS, menuColumns, requiredColumns, type ColumnKey } from "@/lib/columns";
+import type { ArtworkMode } from "@/lib/session";
 import styles from "./ColumnMenu.module.css";
 
 /** Matches `.menu`'s width, for keeping the menu inside the window. */
@@ -42,12 +43,16 @@ export interface ColumnMenuProps {
   onAutoSizeAll: () => void;
   /** Shown only when given: a playlist sorted by a column other than `#`. */
   renumber?: RenumberItem | undefined;
+  /** The artwork mode, whose header has its own columns. */
+  artworkMode?: ArtworkMode;
   onClose: () => void;
 }
 
 export function ColumnMenu({
-  x, y, target, visible, onToggle, onAutoSize, onAutoSizeAll, renumber, onClose,
+  x, y, target, visible, onToggle, onAutoSize, onAutoSizeAll, renumber, artworkMode = "partial", onClose,
 }: ColumnMenuProps) {
+  const columns = menuColumns(artworkMode);
+  const required = requiredColumns(artworkMode);
   const t = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
 
@@ -128,14 +133,14 @@ export function ColumnMenu({
       </button>
       <div className={styles.separator} role="separator" />
       <div className={styles.list}>
-        {MENU_COLUMNS.map((column) => (
+        {columns.map((column) => (
           <button
             key={column.key}
             type="button"
             className={styles.item}
             role="menuitemcheckbox"
             aria-checked={shown.has(column.key)}
-            disabled={REQUIRED_COLUMNS.includes(column.key)}
+            disabled={required.includes(column.key)}
             onClick={() => onToggle(column.key)}
           >
             <span className={styles.tick} aria-hidden>
