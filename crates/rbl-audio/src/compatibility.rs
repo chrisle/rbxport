@@ -121,9 +121,11 @@ struct Output {
     encoder: Option<mp3lame_encoder::Encoder>,
     bytes: Vec<u8>,
     frames: u64,
+    byte_limit: Option<u64>,
+    bytes_written: u64,
 }
 impl Output {
-    fn new(path: &Path, format: Format) -> Result<Self> {
+    fn new(path: &Path, format: Format, byte_limit: Option<u64>) -> Result<Self> {
         // create_new also prevents accidentally overwriting a source path.
         let mut file = BufWriter::new(File::options().write(true).create_new(true).open(path)?);
         let encoder = if format == Format::Mp3 {
@@ -161,7 +163,15 @@ impl Output {
             encoder,
             bytes: Vec::with_capacity(16384),
             frames: 0,
+            byte_limit,
+            bytes_written: if format == Format::Mp3 { 0 } else if format == Format::Wav { 44 } else { 54 },
         })
+    }
+    fn check_bytes(byte_limit: Option<u64>, bytes_written: u64, additional: usize) -> Result<()> {
+        if byte_limit.is_some_and(|limit| bytes_written.saturating_add(additional as u64) > limit) {
+            return Err(AudioError::Io(std::io::Error::new(std::io::ErrorKind::StorageFull, "conversion exceeds internal cache limit")));
+        }
+        Ok(())
     }
     fn write(&mut self, left: &[f32], right: &[f32]) -> Result<()> {
         self.bytes.clear();
@@ -193,7 +203,9 @@ impl Output {
                 }
             }
         }
+        Self::check_bytes(self.byte_limit, self.bytes_written, self.bytes.len())?;
         self.file.write_all(&self.bytes)?;
+        self.bytes_written += self.bytes.len() as u64;
         self.frames += left.len() as u64;
         Ok(())
     }
@@ -207,7 +219,9 @@ impl Output {
             encoder
                 .flush_to_vec::<mp3lame_encoder::FlushGap>(&mut self.bytes)
                 .map_err(error)?;
+            Self::check_bytes(self.byte_limit, self.bytes_written, self.bytes.len())?;
             self.file.write_all(&self.bytes)?;
+            self.bytes_written += self.bytes.len() as u64;
             // Replace the reserved Info frame with duration/delay/padding.
             self.bytes.clear();
             self.bytes.reserve(encoder.lame_tag_size());
@@ -275,6 +289,13 @@ pub fn convert(source: &Path, destination: &Path, target: Format) -> Result<u64>
 /// Progress is decoded milliseconds; false cancels between audio packets.
 #[allow(clippy::too_many_lines, reason = "linear streaming decode and resample loop")]
 pub fn convert_observed(source: &Path, destination: &Path, target: Format, progress: &mut dyn FnMut(u64, Option<u64>) -> bool) -> Result<u64> {
+    convert_observed_limited(source, destination, target, None, progress)
+}
+
+/// Limit the bytes written to a conversion staging file. The limit is checked
+/// before each encoded packet is written, including the final MP3 flush.
+#[allow(clippy::too_many_lines, reason = "linear streaming decode and resample loop")]
+pub fn convert_observed_limited(source: &Path, destination: &Path, target: Format, byte_limit: Option<u64>, progress: &mut dyn FnMut(u64, Option<u64>) -> bool) -> Result<u64> {
     let (mut format, _) = open(source)?;
     let track = format.default_track().ok_or(AudioError::NoTrack)?;
     let track_id = track.id;
@@ -305,7 +326,7 @@ pub fn convert_observed(source: &Path, destination: &Path, target: Format, progr
     let mut decoder = symphonia::default::get_codecs()
         .make(params, &DecoderOptions::default())
         .map_err(error)?;
-    let mut output = Output::new(destination, target)?;
+    let mut output = Output::new(destination, target, byte_limit)?;
     let mut resampler = if rate == RATE {
         None
     } else {
@@ -408,6 +429,16 @@ mod tests {
     use super::*;
     fn fixture() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stereo-96k.flac")
+    }
+
+    #[test]
+    fn limited_conversion_stops_before_exceeding_cache_space() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("limited.wav");
+        let limit = 1024;
+        let error = convert_observed_limited(&fixture(), &dest, Format::Wav, Some(limit), &mut |_, _| true).unwrap_err();
+        assert!(matches!(error, AudioError::Io(ref io) if io.kind() == std::io::ErrorKind::StorageFull));
+        assert!(std::fs::metadata(&dest).unwrap().len() <= limit);
     }
 
     #[test]
