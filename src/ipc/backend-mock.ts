@@ -949,18 +949,48 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     };
   };
 
+  /**
+   * A playlist, folder or intelligent playlist just made, as one Undo step
+   * (#500). Undo takes the same node away unless something has been put in
+   * it since, which it refuses, as the real backend does; Redo puts it back
+   * in the place it had.
+   */
+  const recordCreation = async (id: string, parent: string, label: string): Promise<number> => {
+    const made = findNode(id);
+    // The flat tree's next node: what the made one goes back in front of.
+    const next = tree[tree.findIndex((n) => n.id === id) + 1]?.id;
+    const state = await recordEdit({
+      label,
+      undo: () => {
+        const at = tree.findIndex((n) => n.id === id);
+        if (at < 0) throw new Error("the playlist is no longer there");
+        if (subtreeLength(at) > 1) throw new Error("playlists have been added to the folder since");
+        if ((membership.get(id) ?? []).length > 0) throw new Error("tracks have been added to the playlist since");
+        tree.splice(at, 1);
+      },
+      redo: () => {
+        if (!made) return;
+        const at = next === undefined ? -1 : tree.findIndex((n) => n.id === next);
+        if (at < 0) insertUnder(parent, { ...made });
+        else tree.splice(at, 0, { ...made });
+      },
+    });
+    return state.generation;
+  };
+
   const edits: Edits = {
     createPlaylist: (name, parent, index) => {
       const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
       const id = `made-${nextId++}`;
       membership.set(id, []);
       insertUnder(parent, { id, name, kind: "playlist", depth, childCount: 0 }, index);
-      return bump();
+      return recordCreation(id, parent, "Create Playlist");
     },
     createFolder: (name, parent) => {
       const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
-      insertUnder(parent, { id: `made-${nextId++}`, name, kind: "folder", depth, expanded: true });
-      return bump();
+      const id = `made-${nextId++}`;
+      insertUnder(parent, { id, name, kind: "folder", depth, expanded: true });
+      return recordCreation(id, parent, "Create Folder");
     },
     // The mock keeps the rule and answers it back; it does not evaluate
     // one, so a made intelligent playlist opens empty here.
@@ -970,11 +1000,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       smartRules.set(id, rule);
       membership.set(id, []);
       insertUnder(parent, { id, name, kind: "smartPlaylist", depth, childCount: 0 });
-      return bump();
+      return recordCreation(id, parent, "Create Intelligent Playlist");
     },
-    setSmartRule: (playlist, rule) => {
+    setSmartRule: async (playlist, rule) => {
+      const before = smartRules.get(playlist);
       smartRules.set(playlist, rule);
-      return bump();
+      const restore = (value: SmartRule | undefined) => {
+        if (value === undefined) smartRules.delete(playlist);
+        else smartRules.set(playlist, value);
+      };
+      const state = await recordEdit({
+        label: "Edit Intelligent Playlist",
+        undo: () => restore(before),
+        redo: () => restore(rule),
+      });
+      return state.generation;
     },
     renamePlaylist: (id, name) => {
       const node = findNode(id);
@@ -1275,7 +1315,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       editUndo.length = 0;
       return bump();
     },
-    addPlaylistArtwork: () => bump(),
+    // The mock keeps no playlist artwork; the step is in the history as the
+    // real backend's is (#500).
+    addPlaylistArtwork: async () =>
+      (await recordEdit({ label: "Add Artwork", undo: () => {}, redo: () => {} })).generation,
     addArtwork: (tracks) => recordTrackEdits(tracks, (track) => setHasArtwork(track, true)),
     clearArtwork: (tracks) => recordTrackEdits(tracks, (track) => setHasArtwork(track, false)),
     setTrackField: (tracks, field, value) => {

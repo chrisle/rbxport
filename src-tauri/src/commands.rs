@@ -829,6 +829,7 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
     match edit {
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) |
         LibraryEdit::MovePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_) |
+        LibraryEdit::CreatePlaylist(_) | LibraryEdit::PlaylistEdit(_) |
         // The tracks a replacement imported stay in the collection.
         LibraryEdit::ReplacePlaylist(_) => Touched::Playlists,
         // Tokens keep their database row ids private; a full reload after an
@@ -854,6 +855,12 @@ fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool)
             Some(reason) => Err(rbl_db::DbError::Conflict(reason)),
             None => Ok(()),
         },
+        // Checked again in the writer's transaction (#500).
+        LibraryEdit::CreatePlaylist(creation) => match writer.creation_conflict(creation, undo)? {
+            Some(reason) => Err(rbl_db::DbError::Conflict(reason)),
+            None => Ok(()),
+        },
+        LibraryEdit::PlaylistEdit(value) => writer.check_playlist_edit(value, undo),
     }
 }
 
@@ -888,6 +895,8 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
             Ok(())
         }
         LibraryEdit::Cues(value) => if undo { writer.undo_cue_revision(value) } else { writer.redo_cue_revision(value) }.map(|_| ()),
+        LibraryEdit::CreatePlaylist(value) => if undo { writer.undo_creation(value) } else { writer.redo_creation(value) }.map(|_| ()),
+        LibraryEdit::PlaylistEdit(value) => if undo { writer.undo_playlist_edit(value) } else { writer.redo_playlist_edit(value) }.map(|_| ()),
     }
 }
 
@@ -3546,14 +3555,12 @@ pub async fn create_playlist<R: tauri::Runtime>(
     parent: String,
     index: Option<usize>,
 ) -> AppResult<u32> {
-    edit(app, state, "create_playlist", Touched::Playlists, move |w| {
-        let id = w.create_playlist(&name, &parent)?;
-        if index.is_some() {
-            w.move_to(&id, &parent, index)?;
-        }
-        Ok(())
+    recorded_edit(app, state, "create_playlist", Touched::Playlists, "Create Playlist", move |w| {
+        w.create_with_undo(&name, &parent, rbl_db::write::ATTRIBUTE_PLAYLIST, index)
+            .map(|(_, made)| LibraryEdit::CreatePlaylist(made))
     })
     .await
+    .map(|history| history.generation)
 }
 
 /// An intelligent playlist's rule, for the editor. Refused when the rule
@@ -3641,10 +3648,12 @@ pub async fn create_smart_playlist<R: tauri::Runtime>(
     rule: SmartRuleDto,
 ) -> AppResult<u32> {
     let rule = rule_from_dto(&rule)?;
-    edit(app, state, "create_smart_playlist", Touched::Playlists, move |w| {
-        w.create_smart_playlist(&name, &parent, |id| rule.to_xml(id.parse().unwrap_or(0))).map(|_| ())
+    recorded_edit(app, state, "create_smart_playlist", Touched::Playlists, "Create Intelligent Playlist", move |w| {
+        w.create_smart_playlist_with_undo(&name, &parent, |id| rule.to_xml(id.parse().unwrap_or(0)))
+            .map(|(_, made)| LibraryEdit::CreatePlaylist(made))
     })
     .await
+    .map(|history| history.generation)
 }
 
 /// Replaces an intelligent playlist's rule.
@@ -3657,7 +3666,11 @@ pub async fn set_smart_rule<R: tauri::Runtime>(
 ) -> AppResult<u32> {
     let rule = rule_from_dto(&rule)?;
     let xml = rule.to_xml(playlist.parse().unwrap_or(0));
-    edit(app, state, "set_smart_rule", Touched::Playlists, move |w| w.set_smart_list(&playlist, &xml).map(|_| ())).await
+    recorded_edit(app, state, "set_smart_rule", Touched::Playlists, "Edit Intelligent Playlist", move |w| {
+        w.set_smart_list_with_undo(&playlist, &xml).map(|(_, edit)| LibraryEdit::PlaylistEdit(edit))
+    })
+    .await
+    .map(|history| history.generation)
 }
 
 #[tauri::command]
@@ -3667,7 +3680,12 @@ pub async fn create_folder<R: tauri::Runtime>(
     name: String,
     parent: String,
 ) -> AppResult<u32> {
-    edit(app, state, "create_folder", Touched::Playlists, move |w| w.create_folder(&name, &parent).map(|_| ())).await
+    recorded_edit(app, state, "create_folder", Touched::Playlists, "Create Folder", move |w| {
+        w.create_with_undo(&name, &parent, rbl_db::write::ATTRIBUTE_FOLDER, None)
+            .map(|(_, made)| LibraryEdit::CreatePlaylist(made))
+    })
+    .await
+    .map(|history| history.generation)
 }
 
 #[tauri::command]

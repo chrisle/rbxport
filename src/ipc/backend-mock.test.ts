@@ -180,12 +180,13 @@ describe("mock edits", () => {
     const before = await topLevel();
 
     // One drop: the clash replaced at index 0, then a new folder at the
-    // drop's same index, then a playlist made later; none but the first is
-    // in the history.
+    // drop's same index, then a playlist made later by another drop; none
+    // but the first is in the history (a playlist made from the menu would
+    // be, since #500).
     const replaced = await backend.importFolderPlaylist("/music/Warm Up", TREE_ROOT, old.id, 0);
     const fresh = await backend.importFolderPlaylist("/music/Brand New", TREE_ROOT, undefined, replaced.at);
-    await backend.edits.createPlaylist("Later", TREE_ROOT);
-    const later = (await backend.playlistTree()).find((n) => n.name === "Later")!;
+    const laterDrop = await backend.importFolderPlaylist("/music/Later", TREE_ROOT, undefined, null);
+    const later = (await backend.playlistTree()).find((n) => n.id === laterDrop.playlist)!;
     const dropped = await topLevel();
     expect(dropped.slice(0, 2)).toEqual([fresh.playlist, replaced.playlist]);
 
@@ -210,8 +211,49 @@ describe("mock edits", () => {
       message: "Can't undo Replace Playlist: the playlists have changed since. The newer change was kept.",
     });
     expect((await backend.playlistTree()).map((n) => n.id)).toEqual(tree);
-    // Gone, as the real backend drops it, so it blocks nothing older.
+    // Gone, as the real backend drops it, so it blocks nothing older: next
+    // is the replaced playlist's own creation, which is refused too since
+    // the replacement took it away (#500).
+    await expect(backend.edits.undoEdit()).rejects.toMatchObject({
+      kind: "conflict",
+      message: "Can't undo Create Playlist: the playlist is no longer there. The newer change was kept.",
+    });
     await expect(backend.edits.undoEdit()).rejects.toThrow("no library edit to undo");
+  });
+
+  it("undoes and redoes a playlist, folder and intelligent playlist creation, one step each (#500)", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const ids = async () => (await backend.playlistTree()).map((n) => n.id);
+    const before = await ids();
+    await backend.edits.createFolder("Crates", TREE_ROOT);
+    const folder = (await backend.playlistTree()).find((n) => n.name === "Crates")!;
+    await backend.edits.createPlaylist("Friday", folder.id);
+    await backend.edits.createSmartPlaylist("Sevens", TREE_ROOT, { logic: "all", conditions: [] });
+    await backend.edits.setSmartRule((await backend.playlistTree()).find((n) => n.name === "Sevens")!.id, {
+      logic: "any",
+      conditions: [],
+    });
+    const after = await ids();
+
+    expect(await backend.edits.undoEdit()).toMatchObject({ redoLabel: "Edit Intelligent Playlist", undoLabel: "Create Intelligent Playlist" });
+    expect(await backend.edits.undoEdit()).toMatchObject({ undoLabel: "Create Playlist" });
+    expect(await backend.edits.undoEdit()).toMatchObject({ undoLabel: "Create Folder" });
+    expect(await backend.edits.undoEdit()).toMatchObject({ canUndo: false });
+    expect(await ids()).toEqual(before);
+    for (let i = 0; i < 4; i += 1) await backend.edits.redoEdit();
+    expect(await ids()).toEqual(after);
+  });
+
+  it("refuses to undo a creation once something was put in it, and keeps it (#500, #506)", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createPlaylist("Friday", TREE_ROOT);
+    const friday = (await backend.playlistTree()).find((n) => n.name === "Friday")!;
+    await backend.edits.addTracksToPlaylist(friday.id, ["100001"]);
+    await expect(backend.edits.undoEdit()).rejects.toMatchObject({
+      kind: "conflict",
+      message: "Can't undo Create Playlist: tracks have been added to the playlist since. The newer change was kept.",
+    });
+    expect((await backend.playlistTree()).some((n) => n.id === friday.id)).toBe(true);
   });
 
   it("clears library redo when a new edit branches from an undo", async () => {

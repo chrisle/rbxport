@@ -838,19 +838,23 @@ fn insert_playlist(value: &AnyObject, parent: String, index: Option<NSUInteger>)
         let app = app()?;
         let written = Arc::new(StdMutex::new(None::<String>));
         let into = Arc::clone(&written);
-        let under = parent.clone();
-        crate::commands::edit(app.clone(), app.state(), "create_playlist", crate::commands::Touched::Playlists, move |w| {
-            let id = if folder { w.create_folder(&name, &under)? } else { w.create_playlist(&name, &under)? };
+        let under = parent;
+        // One Undo step, as the window's Create New Playlist (#500): the
+        // place it is made at is part of the same entry.
+        let (attribute, label) = if folder {
+            (rbl_db::write::ATTRIBUTE_FOLDER, "Create Folder")
+        } else {
+            (rbl_db::write::ATTRIBUTE_PLAYLIST, "Create Playlist")
+        };
+        crate::commands::recorded_edit(app.clone(), app.state(), "create_playlist", crate::commands::Touched::Playlists, label, move |w| {
+            let (id, made) = w.create_with_undo(&name, &under, attribute, index)?;
             if let Ok(mut slot) = into.lock() {
                 *slot = Some(id);
             }
-            Ok(())
+            Ok(crate::state::LibraryEdit::CreatePlaylist(made))
         })
         .await?;
         let id: u64 = written.lock().ok().and_then(|slot| slot.clone()).and_then(|id| id.parse().ok()).unwrap_or(0);
-        if let Some(index) = index {
-            crate::commands::move_playlist(app.clone(), app.state(), id.to_string(), parent, Some(index)).await?;
-        }
         Ok(ScriptValue::Playlist(id))
     });
     // `make` answers with the object it built, which now names the playlist

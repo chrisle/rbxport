@@ -569,7 +569,7 @@ fn a_deleted_playlist_tree_can_be_undone_and_redone() {
     assert!(!s.has_node("Friday"));
 
     let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
-    assert!(!undone.can_undo);
+    assert_eq!(undone.undo_label.as_deref(), Some("Create Playlist"), "the creations before it (#500)");
     assert!(undone.can_redo);
     assert_eq!(s.node("Sets").id, folder.id);
     assert_eq!(s.node("Friday").id, playlist.id);
@@ -662,7 +662,9 @@ fn a_folder_drop_replacement_undoes_after_newer_siblings() {
     let new_folder =
         run(commands::import_folder_playlist(s.handle(), s.state(), fresh, ROOT.into(), None, replaced.at, None)).unwrap();
     let new_list = new_folder.playlist.unwrap();
-    run(commands::create_playlist(s.handle(), s.state(), "Later".into(), ROOT.into(), None)).unwrap();
+    // Made by another program: since #500 one made here is in the history.
+    other_program(&s).create_playlist("Later", ROOT).unwrap();
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
     let later = s.node("Later");
 
     let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
@@ -768,6 +770,215 @@ fn library_history_names_and_reverses_each_supported_edit() {
     assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().title, "Track 007");
     run(commands::redo_edit(s.handle(), s.state())).unwrap();
     assert_eq!(run(details::track_details(s.state(), track)).unwrap().title, "Seven");
+}
+
+/// `parent`'s live children as `(ID, Seq)` in tree order, read from the file.
+fn child_seqs(s: &Shell, parent: &str) -> Vec<(String, Option<i64>)> {
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let mut stmt = db
+        .connection()
+        .prepare("SELECT ID, Seq FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID")
+        .unwrap();
+    stmt.query_map([parent], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+}
+
+/// One column of one playlist row, read from the file.
+fn playlist_column(s: &Shell, id: &str, column: &str) -> Option<String> {
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    db.connection()
+        .query_row(&format!("SELECT {column} FROM djmdPlaylist WHERE ID = ?1"), [id], |r| r.get(0))
+        .unwrap()
+}
+
+/// Another program (rekordbox, while RBXport stays open) writing the
+/// library: nothing in the app hears of it.
+fn other_program(s: &Shell) -> rbl_db::write::Writer {
+    let mut other = rbl_db::write::Writer::open(s.location.clone(), s._dir.path().join("other-backups")).unwrap();
+    other.disable_automatic_backups();
+    other
+}
+
+fn smart_rule(property: &str, value: &str) -> rbxport_lib::dto::SmartRuleDto {
+    rbxport_lib::dto::SmartRuleDto {
+        logic: "all".to_owned(),
+        conditions: vec![rbxport_lib::dto::SmartConditionDto {
+            property: property.to_owned(),
+            operator: "11".to_owned(),
+            left: value.to_owned(),
+            right: String::new(),
+            unit: String::new(),
+        }],
+    }
+}
+
+/// #500: Create Playlist, Create Folder and Create Intelligent Playlist are
+/// one entry each. Undo takes the same row away and gives the siblings back
+/// their exact `Seq`; Redo brings the same row back in its place. The older
+/// history stays behind them.
+#[test]
+fn each_creation_is_one_undo_and_one_redo_that_restore_the_exact_tree() {
+    let s = shell();
+    run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed 500".into())).unwrap();
+    let root = child_seqs(&s, ROOT);
+    let history = |s: &Shell| commands::current_history(&s.state());
+
+    // A playlist made at a place among the others renumbers the whole run.
+    run(commands::create_playlist(s.handle(), s.state(), "Opening".into(), ROOT.into(), Some(0))).unwrap();
+    let made = s.node("Opening");
+    let after_playlist = child_seqs(&s, ROOT);
+    assert_eq!(after_playlist[0].0, made.id, "put first");
+    assert_eq!(history(&s).undo_label.as_deref(), Some("Create Playlist"));
+    run(commands::create_folder(s.handle(), s.state(), "Crates".into(), ROOT.into())).unwrap();
+    let folder = s.node("Crates");
+    assert_eq!(history(&s).undo_label.as_deref(), Some("Create Folder"));
+    run(commands::create_smart_playlist(s.handle(), s.state(), "Sevens".into(), folder.id.clone(), smart_rule("name", "7")))
+        .unwrap();
+    let smart = s.node("Sevens");
+    let smart_list = playlist_column(&s, &smart.id, "SmartList");
+    let after_all = child_seqs(&s, ROOT);
+    assert_eq!(history(&s).undo_label.as_deref(), Some("Create Intelligent Playlist"));
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(undone.redo_label.as_deref(), Some("Create Intelligent Playlist"));
+    assert!(!s.has_node("Sevens"));
+    assert!(child_seqs(&s, &folder.id).is_empty());
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(undone.redo_label.as_deref(), Some("Create Folder"));
+    assert!(!s.has_node("Crates"));
+    assert_eq!(child_seqs(&s, ROOT), after_playlist);
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(undone.redo_label.as_deref(), Some("Create Playlist"));
+    assert_eq!(undone.undo_label.as_deref(), Some("Rename Playlist"), "the older history stays");
+    assert!(!s.has_node("Opening"));
+    assert_eq!(child_seqs(&s, ROOT), root, "the siblings have the Seq they had");
+
+    for _ in 0..3 {
+        run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    }
+    assert_eq!(child_seqs(&s, ROOT), after_all, "the same rows, in the same places");
+    assert_eq!(s.node("Opening").id, made.id);
+    assert_eq!(s.node("Crates").id, folder.id);
+    let smart_again = s.node("Sevens");
+    assert_eq!((smart_again.id.as_str(), smart_again.depth), (smart.id.as_str(), 2));
+    assert_eq!(playlist_column(&s, &smart.id, "SmartList"), smart_list, "the same rule");
+    assert_eq!(s.playlist_rows(&smart.id).len(), 4, "and it lists what it did");
+    assert!(!history(&s).can_redo);
+}
+
+/// #500, following #506: Undo of a creation never takes away what was put
+/// in it since. A playlist given tracks, or a folder given a playlist, by
+/// something outside the history is kept with them; only that entry leaves
+/// the history, and the older entries still undo.
+#[test]
+fn undo_of_a_creation_keeps_the_tracks_and_playlists_added_to_it_since() {
+    let s = shell();
+    run(commands::rename_playlist(s.handle(), s.state(), playlist_id(0), "Renamed 500".into())).unwrap();
+    run(commands::create_folder(s.handle(), s.state(), "Crates".into(), ROOT.into())).unwrap();
+    let folder = s.node("Crates");
+    run(commands::create_playlist(s.handle(), s.state(), "Friday".into(), ROOT.into(), None)).unwrap();
+    let playlist = s.node("Friday");
+
+    let mut other = other_program(&s);
+    other.add_tracks(&playlist.id, &[track_id(3), track_id(4)]).unwrap();
+    let inside = other.create_playlist("Inside", &folder.id).unwrap();
+    drop(other);
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
+    let tree = s.tree().into_iter().map(|n| (n.id, n.depth)).collect::<Vec<_>>();
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Can't undo Create Playlist: tracks have been added to the playlist since. The newer change was kept."
+    );
+    assert_eq!(ids(&s.playlist_rows(&playlist.id)), [track_id(3).as_str(), track_id(4).as_str()]);
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Can't undo Create Folder: playlists have been added to the folder since. The newer change was kept."
+    );
+    assert_eq!(s.tree().into_iter().map(|n| (n.id, n.depth)).collect::<Vec<_>>(), tree, "nothing written");
+    assert!(s.tree().iter().any(|n| n.id == inside));
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert!(!undone.can_undo, "only the refused entries left the history");
+    assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the older rename still undoes");
+}
+
+/// #500: a creation renamed or moved outside the history is kept as it is,
+/// and Redo of one whose folder has gone since is refused.
+#[test]
+fn undo_and_redo_of_a_creation_refuse_a_playlist_changed_since() {
+    let s = shell();
+    run(commands::create_playlist(s.handle(), s.state(), "Friday".into(), ROOT.into(), None)).unwrap();
+    let playlist = s.node("Friday");
+    other_program(&s).rename(&playlist.id, "Saturday").unwrap();
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.message, "Can't undo Create Playlist: the playlist has been renamed since. The newer change was kept.");
+    assert_eq!(child_seqs(&s, ROOT).iter().filter(|(id, _)| *id == playlist.id).count(), 1, "kept");
+
+    run(commands::create_folder(s.handle(), s.state(), "Crates".into(), ROOT.into())).unwrap();
+    let folder = s.node("Crates");
+    run(commands::create_playlist(s.handle(), s.state(), "Inside".into(), folder.id.clone(), None)).unwrap();
+    let inside = s.node("Inside");
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    other_program(&s).delete_playlist(&folder.id).unwrap();
+    let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Can't redo Create Playlist: the folder it was made in is no longer there. The newer change was kept."
+    );
+    assert!(child_seqs(&s, &folder.id).iter().all(|(id, _)| *id != inside.id), "not brought back under a deleted folder");
+}
+
+/// #500: Edit Intelligent Playlist and Add Artwork on a playlist are one
+/// entry each that give back the exact rule text and image reference; the
+/// copied image stays on disk. A rule changed since outside the history is
+/// kept.
+#[test]
+fn a_rule_edit_and_playlist_artwork_undo_to_the_exact_previous_values() {
+    let s = shell();
+    run(commands::create_smart_playlist(s.handle(), s.state(), "Sevens".into(), ROOT.into(), smart_rule("name", "7"))).unwrap();
+    let smart = s.node("Sevens");
+    let first = playlist_column(&s, &smart.id, "SmartList");
+    run(commands::set_smart_rule(s.handle(), s.state(), smart.id.clone(), smart_rule("name", "8"))).unwrap();
+    let second = playlist_column(&s, &smart.id, "SmartList");
+    assert_ne!(first, second);
+    assert_eq!(commands::current_history(&s.state()).undo_label.as_deref(), Some("Edit Intelligent Playlist"));
+
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(playlist_column(&s, &smart.id, "SmartList"), first, "the exact rule text");
+    assert_eq!(s.node("Sevens").id, smart.id, "the playlist stays: only the rule was undone");
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(playlist_column(&s, &smart.id, "SmartList"), second);
+
+    let image = s._dir.path().join("cover-500.png");
+    std::fs::write(&image, b"\x89PNG not really").unwrap();
+    let before = playlist_column(&s, &playlist_id(1), "ImagePath");
+    run(details::add_playlist_artwork(s.handle(), s.state(), playlist_id(1), image.display().to_string())).unwrap();
+    let after = playlist_column(&s, &playlist_id(1), "ImagePath").expect("an image reference");
+    assert_eq!(commands::current_history(&s.state()).undo_label.as_deref(), Some("Add Artwork"));
+    let filed = s.location.share_root.join(after.trim_start_matches('/'));
+    assert!(filed.is_file());
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(playlist_column(&s, &playlist_id(1), "ImagePath"), before, "the exact previous reference");
+    assert!(filed.is_file(), "the copied image stays, as track artwork Undo leaves it");
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(playlist_column(&s, &playlist_id(1), "ImagePath").as_deref(), Some(after.as_str()));
+
+    // Undo the artwork again, then the rule, after rekordbox changed the rule.
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    other_program(&s).set_smart_list(&smart.id, "<NODE Id=\"1\" LogicalOperator=\"1\"/>").unwrap();
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Can't undo Edit Intelligent Playlist: the playlist's rule has changed since. The newer change was kept."
+    );
+    assert_eq!(playlist_column(&s, &smart.id, "SmartList").as_deref(), Some("<NODE Id=\"1\" LogicalOperator=\"1\"/>"));
 }
 
 #[test]
@@ -2697,7 +2908,7 @@ fn sort_items_orders_a_folder_as_one_undo_step() {
     assert_eq!(again.undo_label.as_deref(), Some("Sort Items"));
     let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
     assert_eq!(children(&s), ["delta", "Bravo", "alpha", "Écho", "echo"], "one undo puts the whole order back");
-    assert_eq!(undone.undo_label, None, "the second sort recorded nothing");
+    assert_eq!(undone.undo_label.as_deref(), Some("Create Playlist"), "the second sort recorded nothing: next are the creations (#500)");
     run(commands::redo_edit(s.handle(), s.state())).unwrap();
     assert_eq!(children(&s), ["alpha", "Bravo", "delta", "echo", "Écho"]);
 

@@ -244,6 +244,20 @@ test("deleting a playlist takes it out of the tree and the view moves off it", a
   await expect(item(page, "Eurodance")).toBeVisible();
 });
 
+test("Create New Playlist is one Undo and one Redo (#500)", async ({ page }) => {
+  await open(page);
+  await chooseFromTreeMenu(page, item(page, "Melodic Vox"), "Create New Playlist");
+  await expect(item(page, "New playlist")).toBeVisible();
+
+  const menu = (id: string) => page.evaluate((m) => (window as unknown as { __menu?: (id: string) => void }).__menu?.(m), id);
+  await menu("undo");
+  await expect(page.getByRole("contentinfo")).toContainText("Edit undone.");
+  await expect(page.getByRole("treeitem").filter({ hasText: "New playlist" })).toHaveCount(0);
+  await menu("redo");
+  await expect(page.getByRole("contentinfo")).toContainText("Edit redone.");
+  await expect(item(page, "New playlist")).toBeVisible();
+});
+
 test("a folder's menu deletes the folder", async ({ page }) => {
   await open(page);
   await chooseFromTreeMenu(page, item(page, "CURRENT"), "Create New Folder");

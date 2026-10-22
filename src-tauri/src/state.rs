@@ -101,6 +101,12 @@ pub(crate) enum LibraryEdit {
     /// colour, comment, Active Loop or delete, or a whole Convert Memory
     /// Cues to Hot Cues.
     Cues(rbl_db::write::CueRevision),
+    /// A playlist, folder or intelligent playlist made (#500). Undo
+    /// tombstones the same row unless something has been put in it since.
+    CreatePlaylist(rbl_db::write::PlaylistCreation),
+    /// An intelligent playlist's rule saved, or a playlist's or folder's
+    /// artwork reference changed (#500).
+    PlaylistEdit(rbl_db::write::PlaylistEdit),
 }
 
 impl LibraryEdit {
@@ -110,9 +116,10 @@ impl LibraryEdit {
             Self::RemovePlaylistTracks(edit) => edit.is_empty(),
             Self::Track(edits) => edits.is_empty() || edits.iter().all(rbl_db::write::TrackEdit::is_empty),
             Self::TrackTags(edits) => edits.iter().all(rbl_db::write::TrackTagEdit::is_empty),
-            Self::RenamePlaylist(_) | Self::MovePlaylist(_) | Self::ReplacePlaylist(_) => false,
+            Self::RenamePlaylist(_) | Self::MovePlaylist(_) | Self::ReplacePlaylist(_) | Self::CreatePlaylist(_) => false,
             Self::SortPlaylists(edit) => edit.is_empty(),
             Self::Cues(edit) => edit.is_empty(),
+            Self::PlaylistEdit(edit) => edit.is_empty(),
         }
     }
 }

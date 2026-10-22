@@ -450,10 +450,12 @@ pub async fn add_playlist_artwork<R: tauri::Runtime>(
     playlist: String,
     image: String,
 ) -> AppResult<u32> {
-    edit(app, state, "add_playlist_artwork", Touched::Playlists, move |w| {
-        w.set_playlist_artwork(&playlist, Some(std::path::Path::new(&image))).map(|_| ())
+    recorded_edit(app, state, "add_playlist_artwork", Touched::Playlists, "Add Artwork", move |w| {
+        w.set_playlist_artwork_with_undo(&playlist, Some(std::path::Path::new(&image)))
+            .map(|(_, edit)| LibraryEdit::PlaylistEdit(edit))
     })
     .await
+    .map(|history| history.generation)
 }
 
 /// Delete Artwork: each of `tracks` points at no image; the files stay.
