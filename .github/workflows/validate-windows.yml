@@ -88,9 +88,36 @@ jobs:
       # from Unix (handle access rights, open-file locking). Run them natively.
       - name: Backup tests
         if: inputs.check_rust
+        shell: pwsh
         env:
           RB_LITE_TEST: "1"
-        run: cargo test -p rbxport --lib backup
+        run: |
+          # Cargo's lib-test executable does not get Tauri's app manifest. It
+          # imports TaskDialogIndirect, which exists in Common Controls v6 but
+          # not the unactivated System32 v5 DLL (0xc0000139 at process start).
+          $artifacts = @(cargo test -p rbxport --lib backup --no-run --message-format=json |
+            ForEach-Object { if ($_ -match '^\{') { $_ | ConvertFrom-Json } })
+          if ($LASTEXITCODE -ne 0) { throw "Backup test build failed: $LASTEXITCODE" }
+          $testExe = @($artifacts | Where-Object {
+            $_.reason -eq 'compiler-artifact' -and
+            $_.target.name -eq 'rbxport_lib' -and $_.executable
+          } | Select-Object -Last 1)
+          if ($testExe.Count -ne 1 -or -not (Test-Path $testExe[0].executable)) {
+            throw 'Cargo did not report the rbxport_lib test executable.'
+          }
+          $sdkBin = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+          $mt = Get-ChildItem $sdkBin -Recurse -Filter mt.exe |
+            Where-Object { $_.FullName -match '\\x64\\mt\.exe$' } |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $mt) { throw 'Windows SDK x64 mt.exe is required for Backup tests.' }
+          & $mt.FullName -manifest src-tauri/windows/test-common-controls-v6.manifest `
+            "-outputresource:$($testExe[0].executable);#1"
+          if ($LASTEXITCODE -ne 0) { throw "Embedding test manifest failed: $LASTEXITCODE" }
+          Push-Location src-tauri
+          try {
+            & $testExe[0].executable backup
+            if ($LASTEXITCODE -ne 0) { throw "Backup tests failed: $LASTEXITCODE" }
+          } finally { Pop-Location }
 
       - uses: pnpm/action-setup@v4
         if: inputs.check_file_drop
