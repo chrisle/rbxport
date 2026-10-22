@@ -1377,7 +1377,7 @@ fn a_cue_revision_refuses_rows_changed_since() {
 
     f.writer.move_cue(&id, 5_000).unwrap();
     assert!(f.writer.cue_revision_conflict(&revision, true).unwrap().is_some());
-    assert!(matches!(f.writer.undo_cue_revision(&revision), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.undo_cue_revision(&revision), Err(DbError::Conflict(_))));
     let position: i64 = f.one("SELECT InMsec FROM djmdCue WHERE ID = ?1", &[&id]);
     assert_eq!(position, 5_000, "the newer move kept");
 }

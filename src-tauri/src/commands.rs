@@ -692,6 +692,8 @@ pub(crate) enum Touched {
     Metadata(Vec<String>),
     /// History membership, optionally with play counts to refresh.
     Histories(Vec<String>),
+    /// One track's cues, re-read on their own as a cue edit does (#504).
+    Cues(String),
 }
 
 impl Touched {
@@ -776,8 +778,12 @@ pub(crate) fn wrote_outside_history(state: &AppState, permanent: bool) {
 /// Tells the window what Undo and Redo offer now, after
 /// [`wrote_outside_history`].
 pub(crate) fn announce_history<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state: &AppState) {
-    let dto = history_dto(state.summary().3, &state.edit_history.lock());
-    let _ = tauri::Emitter::emit(app, "edit-history:changed", dto);
+    let _ = tauri::Emitter::emit(app, "edit-history:changed", current_history(state));
+}
+
+/// What Undo and Redo offer now, as `edit-history:changed` reports it.
+pub fn current_history(state: &AppState) -> EditHistoryDto {
+    history_dto(state.summary().3, &state.edit_history.lock())
 }
 
 fn history_dto(generation: u32, history: &EditHistory) -> EditHistoryDto {
@@ -828,6 +834,7 @@ fn touched_by(edit: &LibraryEdit) -> Touched {
         // Tokens keep their database row ids private; a full reload after an
         // undo is uncommon and guarantees every view and sort follows it.
         LibraryEdit::Track(_) | LibraryEdit::TrackTags(_) => Touched::Tracks,
+        LibraryEdit::Cues(revision) => Touched::Cues(revision.content().to_owned()),
     }
 }
 
@@ -841,6 +848,12 @@ fn check_history(writer: &rbl_db::write::Writer, edit: &LibraryEdit, undo: bool)
         LibraryEdit::TrackTags(values) => values.iter().try_for_each(|value| writer.check_tag_edit(value, undo)),
         LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) | LibraryEdit::MovePlaylist(_)
         | LibraryEdit::ReplacePlaylist(_) | LibraryEdit::SortPlaylists(_) | LibraryEdit::RemovePlaylistTracks(_) => Ok(()),
+        // One transaction, but the pad check reads rows the entry does not
+        // name, so it is done here as well as in the writer (#504).
+        LibraryEdit::Cues(revision) => match writer.cue_revision_conflict(revision, undo)? {
+            Some(reason) => Err(rbl_db::DbError::Conflict(reason)),
+            None => Ok(()),
+        },
     }
 }
 
@@ -874,6 +887,7 @@ fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: b
             }
             Ok(())
         }
+        LibraryEdit::Cues(value) => if undo { writer.undo_cue_revision(value) } else { writer.redo_cue_revision(value) }.map(|_| ()),
     }
 }
 
@@ -883,6 +897,11 @@ pub(crate) fn refresh_after_edit(state: &AppState, db: &rbl_db::Library, touched
     match touched {
         Touched::Metadata(ids) => state.refresh_metadata(db, &ids, false),
         Touched::Histories(ids) if !ids.is_empty() => state.refresh_metadata(db, &ids, true),
+        Touched::Cues(track) => {
+            let library = state.library().map_err(|e| rbl_db::DbError::Open(e.to_string()))?;
+            rbl_index::reload_cues_of(db, &library, &track)?;
+            Ok(state.summary().3)
+        }
         Touched::Tracks => {
             let started = std::time::Instant::now();
             let (library, _) = rbl_index::load(db)?;
@@ -3732,14 +3751,19 @@ async fn run_history<R: tauri::Runtime>(
     let name = if undo { "undo_edit" } else { "redo_edit" };
     let result = blocking(name, move || step_history(&worker, undo)).await;
     match &result {
-        Ok(dto) => {
-            let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
+        Ok((dto, cue_track)) => {
+            // A cue entry names its track, as the cue edit itself does,
+            // rather than making every list fetch again (#504).
+            let _ = match cue_track {
+                Some(track) => tauri::Emitter::emit(&app, "cues:changed", track),
+                None => tauri::Emitter::emit(&app, "library:changed", dto.generation),
+            };
             let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
         }
         Err(error) if error.kind == ErrorKind::Conflict => announce_history(&app, &state),
         Err(_) => {}
     }
-    result
+    result.map(|(dto, _)| dto)
 }
 
 /// Runs the next Undo (`undo`) or Redo entry of the library history.
@@ -3752,7 +3776,9 @@ async fn run_history<R: tauri::Runtime>(
 /// [`ErrorKind::Conflict`] and a message saying why. The rest of the
 /// history stays usable: each entry checks its own rows when it runs.
 /// Chris's decision of 2026-10-22 on #506 (refuse, keep unrelated history).
-pub(crate) fn step_history(state: &AppState, undo: bool) -> AppResult<EditHistoryDto> {
+/// Also answers the track a cue entry changed, which the window is told
+/// of by `cues:changed` rather than `library:changed`.
+pub(crate) fn step_history(state: &AppState, undo: bool) -> AppResult<(EditHistoryDto, Option<String>)> {
     let _gate = state.edit_gate.lock();
     let entry = {
         let history = state.edit_history.lock();
@@ -3775,8 +3801,12 @@ pub(crate) fn step_history(state: &AppState, undo: bool) -> AppResult<EditHistor
     match result {
         Ok(generation) => {
             history.drop_next(undo);
+            let cue_track = match &entry.edit {
+                LibraryEdit::Cues(revision) => Some(revision.content().to_owned()),
+                _ => None,
+            };
             if undo { history.redo.push(entry); } else { history.undo.push(entry); }
-            Ok(history_dto(generation, &history))
+            Ok((history_dto(generation, &history), cue_track))
         }
         Err(rbl_db::DbError::Conflict(reason)) => {
             history.drop_next(undo);

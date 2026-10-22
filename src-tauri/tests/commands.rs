@@ -802,8 +802,8 @@ fn an_import_ends_the_redo_branch_and_keeps_undo() {
     assert_eq!(run(details::track_details(s.state(), track)).unwrap().rating, 0);
 }
 
-/// #506: a cue edit writes outside the library history, so it ends the
-/// redo branch as any unrecorded edit does. Undo stays.
+/// #506: a cue edit ends the redo branch; since #504 it does so as a
+/// recorded edit, its own entry on top of the Undo that stays.
 #[test]
 fn a_cue_edit_ends_the_redo_branch_and_keeps_undo() {
     let s = shell();
@@ -822,6 +822,8 @@ fn a_cue_edit_ends_the_redo_branch_and_keeps_undo() {
 
     let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
     assert_eq!(error.kind, ErrorKind::NotFound, "the cue edit ended the redo branch");
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert!(run(commands::track_cues(s.state(), track.clone())).unwrap().is_empty(), "the cue edit undoes first");
     run(commands::undo_edit(s.handle(), s.state())).unwrap();
     assert_eq!(run(details::track_details(s.state(), track)).unwrap().rating, 0);
 }
@@ -2702,4 +2704,222 @@ fn sort_items_orders_a_folder_as_one_undo_step() {
     // A playlist is not a folder.
     let alpha = s.node("alpha");
     assert!(run(commands::sort_playlist_items(s.handle(), s.state(), alpha.id, None)).is_err());
+}
+
+// ---------------------------------------------------------------- cue undo (#504)
+
+/// Every live cue row of a track, every column but the change counters and
+/// timestamps, in id order: what "the exact rows" means for an Undo.
+fn live_cue_rows(s: &Shell, track: &str) -> Vec<Vec<rusqlite::types::Value>> {
+    const COLUMNS: &str = "ID, ContentID, InMsec, InFrame, InMpegFrame, InMpegAbs, OutMsec, OutFrame, \
+        OutMpegFrame, OutMpegAbs, Kind, Color, ColorTableIndex, ActiveLoop, Comment, BeatLoopSize, \
+        CueMicrosec, InPointSeekInfo, OutPointSeekInfo, ContentUUID, UUID, rb_local_deleted";
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let mut stmt = db
+        .connection()
+        .prepare(&format!("SELECT {COLUMNS} FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY ID"))
+        .unwrap();
+    let rows = stmt
+        .query_map([track], |r| (0..22).map(|i| r.get::<_, rusqlite::types::Value>(i)).collect())
+        .unwrap();
+    rows.collect::<rusqlite::Result<_>>().unwrap()
+}
+
+fn undo(s: &Shell) -> rbxport_lib::dto::EditHistoryDto {
+    run(commands::undo_edit(s.handle(), s.state())).unwrap()
+}
+
+fn redo(s: &Shell) -> rbxport_lib::dto::EditHistoryDto {
+    run(commands::redo_edit(s.handle(), s.state())).unwrap()
+}
+
+/// What a write from outside the history is: rekordbox with RBXport open,
+/// or a player over LINK, through its own writer.
+fn external(s: &Shell) -> rbl_db::write::Writer {
+    rbl_db::write::Writer::open(s.state().location().unwrap(), s._dir.path().join("external-backups")).unwrap()
+}
+
+/// #504: each cue command is one entry. Undo puts the track's cue rows back
+/// exactly as they were before it, Redo exactly as it left them, and the
+/// index the decks read follows both.
+#[test]
+fn each_cue_and_loop_edit_is_one_undo_that_restores_the_exact_rows() {
+    let s = shell();
+    let track = track_id(4);
+    let announced = cue_announcements(&s);
+    let label = |s: &Shell| commands::current_history(&s.state()).undo_label;
+
+    let empty = live_cue_rows(&s, &track);
+    let hot = run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Hot('A'), 12_000)).unwrap();
+    assert_eq!(label(&s).as_deref(), Some("Set Hot Cue"));
+    let one = live_cue_rows(&s, &track);
+    assert_eq!(undo(&s).redo_label.as_deref(), Some("Set Hot Cue"));
+    assert_eq!(live_cue_rows(&s, &track), empty, "the added hot cue is gone");
+    assert!(run(commands::track_cues(s.state(), track.clone())).unwrap().is_empty(), "and the decks' index follows");
+    redo(&s);
+    assert_eq!(live_cue_rows(&s, &track), one, "the same row, the same id, back");
+
+    let looped = run(cues::add_loop(s.handle(), s.state(), track.clone(), CueKind::Memory, 40_000, 44_000, Some(8.0))).unwrap();
+    assert_eq!(label(&s).as_deref(), Some("Set Loop"));
+    let two = live_cue_rows(&s, &track);
+    undo(&s);
+    assert_eq!(live_cue_rows(&s, &track), one);
+    redo(&s);
+    assert_eq!(live_cue_rows(&s, &track), two);
+
+    // Each attribute edit, undone and redone in turn.
+    type Step = Box<dyn Fn(&Shell)>;
+    let steps: Vec<(&str, Step)> = vec![
+        ("Move Cue", Box::new({ let hot = hot.clone(); move |s: &Shell| run(cues::move_cue(s.handle(), s.state(), hot.clone(), 15_000)).unwrap() })),
+        ("Move Hot Cue", Box::new({ let hot = hot.clone(); move |s: &Shell| run(cues::move_hot_cue(s.handle(), s.state(), hot.clone(), CueKind::Hot('C'))).unwrap() })),
+        ("Cue Color", Box::new({ let hot = hot.clone(); move |s: &Shell| run(cues::set_cue_colour(s.handle(), s.state(), hot.clone(), Some(9))).unwrap() })),
+        ("Cue Comment", Box::new({ let hot = hot.clone(); move |s: &Shell| run(cues::set_cue_comment(s.handle(), s.state(), hot.clone(), "Drop".into())).unwrap() })),
+        ("Active Loop", Box::new({ let looped = looped.clone(); move |s: &Shell| run(cues::set_active_loop(s.handle(), s.state(), looped.clone(), true)).unwrap() })),
+        ("Delete Cue", Box::new({ let hot = hot.clone(); move |s: &Shell| run(cues::delete_cue(s.handle(), s.state(), hot.clone())).unwrap() })),
+    ];
+    for (name, step) in steps {
+        let before = live_cue_rows(&s, &track);
+        step(&s);
+        let after = live_cue_rows(&s, &track);
+        assert_ne!(before, after, "{name} changed something");
+        assert_eq!(label(&s).as_deref(), Some(name));
+        undo(&s);
+        assert_eq!(live_cue_rows(&s, &track), before, "{name} undone exactly");
+        redo(&s);
+        assert_eq!(live_cue_rows(&s, &track), after, "{name} redone exactly");
+    }
+
+    // A deleted hot cue comes back as itself, every column as it was.
+    let without = live_cue_rows(&s, &track);
+    undo(&s);
+    let back = run(commands::track_cues(s.state(), track.clone())).unwrap();
+    let restored = back.iter().find(|c| c.id == hot).expect("the deleted hot cue is back");
+    assert_eq!((restored.letter.as_str(), restored.position_ms, restored.comment.as_str()), ("C", 15_000, "Drop"));
+    redo(&s);
+    assert_eq!(live_cue_rows(&s, &track), without);
+
+    // Every write and every Undo/Redo named the track to the decks.
+    assert!(announced(30).iter().all(|t| *t == track));
+}
+
+/// #504: a whole-track Convert Memory Cues to Hot Cues is one entry; the
+/// memory cues it read stay where they were through Undo and Redo.
+#[test]
+fn a_conversion_is_one_undo_for_the_whole_track() {
+    let s = shell();
+    let track = track_id(5);
+    run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 30_000)).unwrap();
+    run(cues::add_loop(s.handle(), s.state(), track.clone(), CueKind::Memory, 10_000, 14_000, None)).unwrap();
+    run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 50_000)).unwrap();
+    let memory_only = live_cue_rows(&s, &track);
+
+    assert_eq!(run(cues::convert_memory_cues_to_hot(s.handle(), s.state(), track.clone())).unwrap(), 3);
+    let converted = live_cue_rows(&s, &track);
+    assert_eq!(converted.len(), 6);
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some("Convert Memory Cues to Hot Cues"));
+
+    let undone = undo(&s);
+    assert_eq!(live_cue_rows(&s, &track), memory_only, "one Undo takes all three hot cues away");
+    assert_eq!(undone.undo_label.as_deref(), Some("Set Memory Cue"), "and only the conversion");
+    redo(&s);
+    assert_eq!(live_cue_rows(&s, &track), converted);
+}
+
+/// #504 under #506's policy: a cue changed since the entry by something
+/// outside the history keeps that change. The entry is refused with the
+/// reason and dropped; the rest of the history is kept.
+#[test]
+fn undo_of_a_cue_changed_since_is_refused_and_keeps_the_newer_change() {
+    let s = shell();
+    let rated = track_id(7);
+    run(commands::set_track_rating(s.handle(), s.state(), vec![rated.clone()], 4)).unwrap();
+    let track = track_id(4);
+    let hot = run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Hot('A'), 12_000)).unwrap();
+    run(cues::move_cue(s.handle(), s.state(), hot.clone(), 20_000)).unwrap();
+
+    external(&s).move_cue(&hot, 33_000).unwrap();
+    let newer = live_cue_rows(&s, &track);
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't undo Move Cue: the track's cues have changed since. The newer change was kept.");
+    assert_eq!(live_cue_rows(&s, &track), newer, "nothing written");
+
+    // The refused entry is gone and nothing went to Redo. The add before it
+    // names the same row, which has changed since too, so it is refused in
+    // turn; the rating edit before both is untouched and still undoes.
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some("Set Hot Cue"));
+    assert!(!history.can_redo);
+    assert!(run(commands::undo_edit(s.handle(), s.state())).is_err());
+    assert_eq!(live_cue_rows(&s, &track), newer);
+    assert_eq!(undo(&s).undo_label, None);
+    assert_eq!(run(details::track_details(s.state(), rated)).unwrap().rating, 0);
+}
+
+/// Unrelated cues are not part of an entry: a change to another cue of the
+/// same track since does not stop the Undo, and survives it.
+#[test]
+fn undo_leaves_the_track_s_other_cues_as_they_are_now() {
+    let s = shell();
+    let track = track_id(4);
+    let first = run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Hot('A'), 1_000)).unwrap();
+    let second = run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 2_000)).unwrap();
+    run(cues::set_cue_comment(s.handle(), s.state(), first.clone(), "Intro".into())).unwrap();
+    external(&s).move_cue(&second, 9_000).unwrap();
+
+    undo(&s);
+    let cues = run(commands::track_cues(s.state(), track)).unwrap();
+    assert_eq!(cues.iter().find(|c| c.id == first).unwrap().comment, "", "the comment undone");
+    assert_eq!(cues.iter().find(|c| c.id == second).unwrap().position_ms, 9_000, "the other cue's move kept");
+}
+
+/// A deleted hot cue is not put back over a hot cue set on its pad since:
+/// that would leave two cues on one pad.
+#[test]
+fn undo_of_a_delete_is_refused_when_the_pad_was_set_again() {
+    let s = shell();
+    let track = track_id(4);
+    let hot = run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Hot('B'), 1_000)).unwrap();
+    run(cues::delete_cue(s.handle(), s.state(), hot)).unwrap();
+    external(&s).add_cue(&track, 2, 7_000).unwrap(); // Hot Cue B, over LINK or in rekordbox
+    let newer = live_cue_rows(&s, &track);
+
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't undo Delete Cue: Hot Cue B has been set since. The newer change was kept.");
+    assert_eq!(live_cue_rows(&s, &track), newer);
+    let cues = run(commands::track_cues(s.state(), track)).unwrap();
+    assert_eq!(cues.iter().filter(|c| c.letter == "B").count(), 1);
+}
+
+/// Redo is held to the same rule: an undone add is not redone onto a pad
+/// set since.
+#[test]
+fn redo_of_a_cue_is_refused_when_the_pad_was_set_since() {
+    let s = shell();
+    let track = track_id(4);
+    run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Hot('A'), 1_000)).unwrap();
+    undo(&s);
+    external(&s).add_cue(&track, 1, 5_000).unwrap();
+
+    let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't redo Set Hot Cue: Hot Cue A has been set since. The newer change was kept.");
+    let cues = run(commands::track_cues(s.state(), track)).unwrap();
+    assert_eq!(cues.iter().map(|c| c.position_ms).collect::<Vec<_>>(), [5_000]);
+    assert!(!commands::current_history(&s.state()).can_redo);
+}
+
+/// A recorded cue edit after an Undo starts a new branch, as every recorded
+/// edit does.
+#[test]
+fn a_cue_edit_after_an_undo_ends_the_redo_branch() {
+    let s = shell();
+    let track = track_id(7);
+    run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 4)).unwrap();
+    assert!(undo(&s).can_redo);
+    run(cues::add_cue(s.handle(), s.state(), track, CueKind::Memory, 1_000)).unwrap();
+    assert!(!commands::current_history(&s.state()).can_redo);
 }

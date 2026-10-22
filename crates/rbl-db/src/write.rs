@@ -2754,7 +2754,7 @@ impl Writer {
         // Checked again inside the transaction that writes, so nothing can
         // land between the check and the write.
         if let Some(conflict) = cue_conflict(&tx, revision, undo)? {
-            return Err(DbError::WriteRefused(conflict));
+            return Err(DbError::Conflict(conflict));
         }
         let usn = next_usn(&tx)?;
         let assignments: Vec<String> = CUE_STATE.iter().enumerate().map(|(i, c)| format!("{c} = ?{}", i + 1)).collect();
