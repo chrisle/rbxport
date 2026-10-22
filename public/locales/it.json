@@ -1789,5 +1789,8 @@
   "Being written to now. What it holds shows when the sync finishes.": "Being written to now. What it holds shows when the sync finishes.",
   "Some files were not imported": "Some files were not imported",
   "{count} files were not imported:": "{count} files were not imported:",
-  "Resize the information panel": "Resize the information panel"
+  "Resize the information panel": "Resize the information panel",
+  "Analysis Lock is set on tracks in the collection, not on a device": "Analysis Lock is set on tracks in the collection, not on a device",
+  "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
+  "Unlock the beat grid for editing": "Unlock the beat grid for editing"
 }
