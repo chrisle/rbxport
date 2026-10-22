@@ -447,7 +447,28 @@ function AppBody() {
   // The table's layout follows the kind of thing being browsed, as
   // browseSetting.xml does, rather than each individual playlist.
   const columnContext: ColumnContext = columnContextFor(selectedNode?.kind);
-  const cols = useColumns(columnContext);
+  /**
+   * The artwork display pattern, the two buttons beside MASTER. The main
+   * browser and the sub-browser each have their own pair and their own mode
+   * (rekordbox's `ListViewer` holds an `ArtworkStatus` each), and both keep
+   * the last one chosen under one name, `ArtworkStatus-TrackList`, which both
+   * start from [OBS static, rekordbox 7.2.19: `SubTrackListHeader` makes both
+   * buttons and its `getHeaderType` is 0, the main list's].
+   */
+  const [artworkMode, chooseArtworkMode] = useState<ArtworkMode>(restored.artworkMode);
+  const [subArtworkMode, chooseSubArtworkMode] = useState<ArtworkMode>(restored.artworkMode);
+  const [savedArtworkMode, setSavedArtworkMode] = useState<ArtworkMode>(restored.artworkMode);
+  const setArtworkMode = useCallback((mode: ArtworkMode) => {
+    chooseArtworkMode(mode);
+    setSavedArtworkMode(mode);
+  }, []);
+  const setSubArtworkMode = useCallback((mode: ArtworkMode) => {
+    chooseSubArtworkMode(mode);
+    setSavedArtworkMode(mode);
+  }, []);
+  // Each mode has its own columns, as rekordbox keeps a `-FullArtwork`
+  // layout beside each table's.
+  const cols = useColumns(columnContext, artworkMode);
   // The Preferences window, and the pane it opens on: the missing-file
   // manager lives under Advanced, so the File menu opens it there. In the
   // shell it is a window of its own; in a browser, which has no windows to
@@ -563,8 +584,6 @@ function AppBody() {
    */
   const [trafficLight, setTrafficLight] = useState<TrafficLightSource>(restored.trafficLight);
   const activeTrafficLight = trafficLight === "b" && deckCount(layout) < 2 ? "a" : trafficLight;
-  /** The track list's artwork display pattern, the two buttons beside MASTER. */
-  const [artworkMode, setArtworkMode] = useState<ArtworkMode>(restored.artworkMode);
   const trafficDeck: DeckId = deckCount(layout) < 2 ? "a" : activeTrafficLight === "master" ? (syncMaster ?? "a") : activeTrafficLight;
   /*
    * A new track on the master deck, or none, hands MASTER to the other deck
@@ -3037,12 +3056,12 @@ function AppBody() {
       subWidth,
       subTreeWidth,
       trafficLight,
-      artworkMode,
+      artworkMode: savedArtworkMode,
       waveformZoom,
       jumpSize,
       dualControl: dual,
     });
-  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, myTagOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, artworkMode, waveformZoom, jumpSize, dual]);
+  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, myTagOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, savedArtworkMode, waveformZoom, jumpSize, dual]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
@@ -3440,6 +3459,8 @@ function AppBody() {
             // load decks and take edits the same way.
             tree={subTree}
             list={subList}
+            artworkMode={subArtworkMode}
+            onArtworkMode={setSubArtworkMode}
           />
         ) : null}
         {infoOpen ? (
