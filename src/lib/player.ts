@@ -648,6 +648,24 @@ function msAtStepIndex(times: Uint32Array, index: number): number {
   return from + (index - at) * (to - from);
 }
 
+/** Move a position by signed grid beats without losing its fractional-beat phase. */
+export function shiftByGridBeats(grid: BeatGrid, ms: number, beats: number): number | null {
+  const index = stepIndexAt(grid.times, ms);
+  return index === null ? null : msAtStepIndex(grid.times, index + beats);
+}
+
+/** Move an active loop and the head together; reject out-of-track ranges. */
+export function movedLoopByBeats(
+  grid: BeatGrid, fromMs: number, toMs: number, headMs: number, beats: number, durationMs: number,
+): { fromMs: number; toMs: number; headMs: number } | null {
+  const from = shiftByGridBeats(grid, fromMs, beats);
+  const to = shiftByGridBeats(grid, toMs, beats);
+  const head = shiftByGridBeats(grid, headMs, beats);
+  if (from === null || to === null || head === null || from < 0 || to > durationMs ||
+      to <= from || head < from || head >= to) return null;
+  return { fromMs: from, toMs: to, headMs: head };
+}
+
 /**
  * Where a hot cue called with Q on fires: the first place at or after the
  * playhead that sits at the same point of a quantize step as the cue does.

@@ -2860,6 +2860,28 @@ pub async fn deck_set_loop<R: tauri::Runtime>(
     Ok(())
 }
 
+/// Move a playing loop and the audio head together, with the head offset
+/// measured against the engine's position when this command arrives.
+#[tauri::command]
+pub async fn deck_move_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    in_ms: f64,
+    out_ms: f64,
+    head_by_ms: f64,
+    grid_times_ms: Vec<f64>,
+    beats: f64,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.move_loop_ms(
+            crate::player::deck_of(&deck), in_ms, out_ms, head_by_ms, &grid_times_ms, beats,
+        );
+        crate::player::start_ticker(&app);
+    }
+    Ok(())
+}
+
 /// RELOOP (on) and EXIT (off): back into the loop from its in point, or out
 /// of it with the range kept.
 #[tauri::command]

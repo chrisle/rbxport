@@ -12,6 +12,7 @@
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
 import theme from "@/styles/theme";
 import { rowMemoryCueColours } from "@/lib/memoryCueColours";
+import { shiftByGridBeats } from "@/lib/player";
 
 import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
@@ -1859,10 +1860,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   if (typeof window !== "undefined") {
     (window as unknown as {
       __deckSeconds: () => {
-        a: number; aNow: number; b: number; beat: number; beatA: number; looping: boolean; loopingA: boolean; playingB: boolean;
+        a: number; aNow: number; aLoopIn: number; aLoopOut: number;
+        b: number; beat: number; beatA: number; looping: boolean; loopingA: boolean; playingB: boolean;
       };
     }).__deckSeconds = () => ({
       a: deckA.frames / SAMPLE_RATE,
+      aLoopIn: deckA.loopInFrames / SAMPLE_RATE,
+      aLoopOut: deckA.loopOutFrames / SAMPLE_RATE,
       // A's head brought up to now rather than to the last tick, for a test
       // that times a jump against a busy runner's late ticks.
       aNow: (deckA.frames + (deckA.playing ? Math.max(0, performance.now() - Math.max(clockAt, deckA.startsAt)) / 1000 * SAMPLE_RATE : 0)) / SAMPLE_RATE,
@@ -2656,6 +2660,24 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         d.generation += 1;
         d.startsAt = Math.max(d.startsAt, performance.now());
       }
+      sendTick();
+      return wait(undefined);
+    },
+    deckMoveLoop: (deck, inMs, outMs, headByMs, gridTimesMs, beats) => {
+      const d = deckOf(deck);
+      const from = Math.max(0, Math.round((inMs / 1000) * SAMPLE_RATE));
+      const to = Math.max(0, Math.round((outMs / 1000) * SAMPLE_RATE));
+      const currentMs = d.frames / SAMPLE_RATE * 1000;
+      const grid = { times: Uint32Array.from(gridTimesMs), numbers: new Uint8Array(), tempos: new Uint16Array() };
+      const targetMs = shiftByGridBeats(grid, currentMs, beats) ?? currentMs + headByMs;
+      const target = Math.round(targetMs / 1000 * SAMPLE_RATE);
+      if (!d.looping || to <= from || to > d.totalFrames || target < from || target >= to) return wait(undefined);
+      d.loopInFrames = from;
+      d.loopOutFrames = to;
+      d.looping = true;
+      d.frames = target;
+      d.generation += 1;
+      d.startsAt = Math.max(d.startsAt, performance.now());
       sendTick();
       return wait(undefined);
     },

@@ -717,6 +717,9 @@ export interface Backend {
    * point itself, on the frame, with nothing faded at the seam.
    */
   deckSetLoop(deck: DeckId, inMs: number, outMs: number): Promise<void>;
+  /** Move loop bounds and the engine head together by grid-derived distances. */
+  deckMoveLoop(deck: DeckId, inMs: number, outMs: number, headByMs: number,
+    gridTimesMs: number[], beats: number): Promise<void>;
   /** RELOOP (on): back in from the in point. EXIT (off): out, the range kept. */
   deckLoopActive(deck: DeckId, on: boolean): Promise<void>;
   deckClearLoop(deck: DeckId): Promise<void>;

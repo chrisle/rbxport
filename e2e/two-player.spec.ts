@@ -238,6 +238,48 @@ test("a manual loop on the same beats as the last auto beat loop leaves the fiel
   await expect(exit).toHaveAttribute("aria-pressed", "false");
 });
 
+test("beat jump moves an active loop and keeps the head within it", async ({ page }) => {
+  const { a } = await twoPlayer(page, "?writable=1");
+  const read = () => page.evaluate(() => (window as unknown as {
+    __deckSeconds: () => { a: number; aLoopIn: number; aLoopOut: number; loopingA: boolean };
+  }).__deckSeconds());
+  // Put the loop away from the track boundary, then start it while playing.
+  await page.getByRole("button", { name: "Beat jump forward" }).first().click();
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await a.getByTestId("player-controls").getByRole("button", { name: "4 beat loop" }).click();
+  await expect.poll(async () => (await read()).loopingA).toBe(true);
+  await page.getByRole("group", { name: "Deck A transport" })
+    .getByRole("button", { name: "Pause", exact: true }).click();
+  const before = await read();
+  await page.getByRole("button", { name: "Beat jump forward" }).first().click();
+  await expect.poll(async () => (await read()).aLoopIn).toBeGreaterThan(before.aLoopIn + 1);
+  const after = await read();
+  expect(after.loopingA).toBe(true);
+  expect(after.aLoopOut - after.aLoopIn).toBeCloseTo(before.aLoopOut - before.aLoopIn, 1);
+  expect(after.a).toBeGreaterThanOrEqual(after.aLoopIn);
+  expect(after.a).toBeLessThan(after.aLoopOut);
+  expect(after.a - after.aLoopIn).toBeCloseTo(before.a - before.aLoopIn, 1);
+  await page.getByRole("button", { name: "Beat jump forward" }).first().click();
+  await expect.poll(async () => (await read()).aLoopIn).toBeGreaterThan(after.aLoopIn + 1);
+  const twice = await read();
+  expect(twice.a - twice.aLoopIn).toBeCloseTo(before.a - before.aLoopIn, 1);
+  await page.getByRole("button", { name: "Beat jump back" }).first().click();
+  await expect.poll(async () => (await read()).aLoopIn).toBeLessThan(twice.aLoopIn - 1);
+  const back = await read();
+  expect(back.a - back.aLoopIn).toBeCloseTo(before.a - before.aLoopIn, 1);
+});
+
+test("beat jump without a loop moves the head and does not start a loop", async ({ page }) => {
+  await twoPlayer(page, "?writable=1");
+  const read = () => page.evaluate(() => (window as unknown as {
+    __deckSeconds: () => { a: number; loopingA: boolean };
+  }).__deckSeconds());
+  const before = await read();
+  await page.getByRole("button", { name: "Beat jump forward" }).first().click();
+  await expect.poll(async () => (await read()).a).toBeGreaterThan(before.a + 1);
+  expect((await read()).loopingA).toBe(false);
+});
+
 // rekordbox 7.2.11's AutoBeatLoopController labels, which ‹ and › step
 // through and stop at; the manual gives the same 1/64 to 512 (issue #241).
 const REKORDBOX_LOOP_LENGTHS = [

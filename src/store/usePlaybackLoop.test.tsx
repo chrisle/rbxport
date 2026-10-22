@@ -82,6 +82,10 @@ function stubBackend(): Backend {
       sent.push(`set:${inMs}:${outMs}`);
       return answer();
     },
+    deckMoveLoop: (_d: string, inMs: number, outMs: number, byMs: number, grid: number[], beats: number) => {
+      sent.push(`move:${inMs}:${outMs}:${byMs}:${grid.join(",")}:${beats}`);
+      return answer();
+    },
     deckLoopActive: (_d: string, on: boolean) => {
       sent.push(`active:${on}`);
       return answer();
@@ -136,6 +140,27 @@ async function settle() {
 const deliver = (tick: Tick) => act(() => ticked(tick));
 
 describe("setting a loop", () => {
+  it("sends one coordinated move for a playing loop and leaves it active", async () => {
+    act(() => deck.setLoop(10, 12));
+    await settle();
+    act(() => deck.moveLoop(12, 14, 2, [10_000, 10_500], 4));
+    await settle();
+    expect(sent).toEqual(["set:10000:12000", "move:12000:14000:2000:10000,10500:4"]);
+    expect(deck.loop).toEqual({ inSeconds: 12, outSeconds: 14, active: true });
+  });
+
+  it("delivers repeated loop moves in order", async () => {
+    act(() => deck.setLoop(10, 12));
+    act(() => deck.moveLoop(12, 14, 2, [10_000, 10_500], 4));
+    act(() => deck.moveLoop(14, 16, 2, [12_000, 12_500], 4));
+    await settle();
+    expect(sent).toEqual([
+      "set:10000:12000",
+      "move:12000:14000:2000:10000,10500:4",
+      "move:14000:16000:2000:12000,12500:4",
+    ]);
+    expect(deck.loop).toEqual({ inSeconds: 14, outSeconds: 16, active: true });
+  });
   it("sends the two points down in milliseconds", async () => {
     act(() => deck.setLoop(1.5, 3.25));
     await settle();
