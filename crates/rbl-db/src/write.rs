@@ -5029,6 +5029,18 @@ impl Writer {
     /// copies the text fields even when empty; what rekordbox then shows for
     /// one has not been observed]. Returns how many changed.
     pub fn reload_tags(&mut self, content: &str) -> Result<usize> {
+        self.reload_tags_with_undo(content).map(|(changed, _)| changed)
+    }
+
+    /// [`Self::reload_tags`] as an edit to undo (#503): one [`TrackEdit`]
+    /// per column whose stored value the file changed, each holding the
+    /// exact value before and after (the interned artist, album, genre,
+    /// label and key ids, not their names). They are read in the same
+    /// transaction as the write, so nothing can come between. A column the
+    /// file left as it was gives no edit, so a reload that changed nothing
+    /// has nothing to undo. The lookup rows the reload made stay when it is
+    /// undone, as they do for [`Self::set_field_with_undo`].
+    pub fn reload_tags_with_undo(&mut self, content: &str) -> Result<(usize, Vec<TrackEdit>)> {
         self.prepare()?;
         let Some(stored) = self.library.stored_path(content)? else {
             return Err(DbError::WriteRefused(format!("no track {content}")));
@@ -5057,14 +5069,25 @@ impl Writer {
         if tags.year != 0 { fields.push(("ReleaseYear", Value::Integer(i64::from(tags.year)))); }
         if tags.track_no != 0 { fields.push(("TrackNo", Value::Integer(i64::from(tags.track_no)))); }
         let mut changed = 0;
+        let mut edits = Vec::new();
         for (column, value) in fields {
+            let read = |tx: &rusqlite::Transaction<'_>| -> Result<Option<Value>> {
+                tx.query_row(&format!("SELECT {column} FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0"), [content], |r| r.get(0))
+                    .optional()
+                    .map_err(Into::into)
+            };
+            let before = read(&tx)?;
             let usn = next_usn(&tx)?;
             changed += tx.execute(&format!("UPDATE djmdContent SET {column}=?1, rb_local_usn=?2, updated_at=?3 WHERE ID=?4 AND rb_local_deleted=0"),
                 params![value, usn, stamp, content])?;
             set_counter(&tx, usn)?;
+            if let (Some(before), Some(after)) = (before, read(&tx)?) {
+                let edit = TrackEdit { content: content.to_owned(), column, before, after };
+                if !edit.is_empty() { edits.push(edit); }
+            }
         }
         tx.commit()?;
-        Ok(changed)
+        Ok((changed, edits))
     }
 
     /// A BPM typed over the analysed one: `128`, `128.5`.
