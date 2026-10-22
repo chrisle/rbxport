@@ -6,21 +6,26 @@
 
 # rbxport
 
-rbxport is a music library management app inspired by rekordbox. It keeps its
-feature set deliberately small, aiming for a faster, simpler user experience.
+rbxport aims to be a fast rekordbox clone with a deliberately limited feature
+set. It prioritizes speed and responsiveness, including on older machines.
 
 Its scope is limited to library management, USB exporting, and PRO DJ LINK.
 
 ## Project vision
 
-The core vision of rbxport is **fewer features**.
+rbxport trades feature breadth for speed. It focuses on a limited set of
+rekordbox workflows: library management, USB exporting, and PRO DJ LINK. Within
+that scope, it aims to reproduce rekordbox's behavior and compatibility.
 
-Because rbxport is open source, you are free to fork it and build a version of
-rekordbox customized by the community. The core project does not aim to be that.
-A project that keeps adding features eventually becomes what rekordbox already is: full-featured
-DJ software. rbxport stays small on purpose. Any contribution that adds a feature
-is weighed carefully against this vision, and a good feature can still be
-declined.
+The core project does not aim to become a full DJ performance application or
+an advanced library manager beyond what rekordbox offers. A feature having a
+rekordbox counterpart is necessary for inclusion, but does not guarantee it
+belongs in this focused subset. See the [product decisions](docs/development/product-decisions.md)
+for specific scope decisions.
+
+rbxport also aims to be a useful foundation for others to fork and build their
+own DJ software. Forks can pursue broader features and different product goals
+while the core project stays focused and fast.
 
 Two commitments define what "small" must not cost:
 

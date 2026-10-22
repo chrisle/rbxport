@@ -19,10 +19,21 @@ trigger, result, and validation without reading a chat history.
 
 ## Feature proposals
 
-The core vision of rbxport is **fewer features**. It is not a version of
-rekordbox customized by the community: a project that keeps accumulating
-features ends up as the full-featured DJ software that rekordbox already is. You are welcome to fork
-rbxport and extend it however you like, but the core project stays small.
+rbxport aims to be a fast rekordbox clone with a deliberately limited feature
+set. It trades feature breadth for speed and responsiveness, including on older
+machines. The core focuses on library management, USB exporting, and PRO DJ
+LINK, reproducing rekordbox behavior within that scope.
+
+The core does not aim to become a full DJ performance application, support
+other DJ software, or provide advanced library management beyond what
+rekordbox offers. An established rekordbox counterpart is necessary for a new
+feature, but does not guarantee inclusion. Check the
+[product decisions](docs/development/product-decisions.md) before proposing work.
+
+Providing a useful foundation for forks is also a project goal. You are welcome
+to use rbxport to build your own DJ software with broader features or a
+different focus. Keep reusable components clear and maintainable without
+expanding the core product's scope to accommodate every fork.
 
 Every contribution that adds a feature is carefully considered against this
 vision, and a working, well-tested feature can still be declined. Before writing
