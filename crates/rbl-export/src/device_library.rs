@@ -699,6 +699,172 @@ fn one_change(before: &[Node], after: &[Node]) -> rbl_onelibrary::playlists::Cha
     change
 }
 
+/// A beat grid edit to one track of one library on the stick, as the GRID
+/// panel makes it on a Devices tree track (#660).
+///
+/// rekordbox saves a device track's edited grid to that track's analysis
+/// files on the device, and a changed tempo to the track's row in the
+/// device's library [static, rekordbox 7.2.19 macOS arm64:
+/// `BeatGridAdjustment::saveBeatPosition` @0x1010bfdc0 calls
+/// `DatabaseIF::modifyTrackData` (BPM column) and then
+/// `DatabaseIF::setBeatInfo` with the loaded item's browse type and device;
+/// `DatabaseMediator::setBeatInfo` @0x100c5b398 sends any browse type but
+/// the collection's (1) to `get_device_controller` and writes the `.DAT`
+/// and `.EXT` that device's row names through
+/// `CAnalyzerIF::setBeatInfoWithExtBeat`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridWrite {
+    /// The track's id in the library it was browsed from.
+    pub track: u32,
+    /// The analysis files rewritten, each volume-relative as it is on disk,
+    /// with its new bytes. Each must already be on the stick.
+    pub files: Vec<(PathBuf, Vec<u8>)>,
+    /// The track's new tempo x100 when the edit changed it.
+    pub bpm_x100: Option<u32>,
+}
+
+/// Publishes a [`GridWrite`] to the stick at `root`, for a track browsed in
+/// `format`: the analysis files and, with a new tempo, the track's row,
+/// all through one publication of the export journal, so an interruption
+/// leaves the old grid or the new one and never half of each.
+///
+/// The analysis files are the stick's, not one library's: when the other
+/// library on the stick names the same `.DAT` for a track, that row takes
+/// the new tempo too, so the two libraries never disagree with the grid
+/// they share or with each other [ASSUME: which libraries rekordbox's
+/// device controller updates is not observed; rbxport's own `verify`
+/// refuses a stick whose libraries disagree on a track's BPM]. The audio
+/// and every other file are left alone.
+pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> {
+    crate::recover(root)?;
+    let dir = db_dir(root)?;
+    if !dir.join(format.file_name()).is_file() {
+        return Err(missing(format));
+    }
+    for (relative, _) in &write.files {
+        let plain = relative.components().all(|c| matches!(c, std::path::Component::Normal(_)));
+        if !plain || relative.as_os_str().is_empty() || !root.join(relative).is_file() {
+            return Err(refused("That track's analysis file is not on the device. Nothing was changed."));
+        }
+    }
+    let publication = rbl_core::durable::Publication::new(root, PUBLICATION)?;
+    let present = formats(root);
+    let stamps = |dir: &Path| -> Result<Vec<_>> {
+        present.iter().map(|f| Ok((file_stamp(&dir.join(f.file_name()))?, file_stamp(&dir.join(format!("{}-wal", f.file_name())))?))).collect()
+    };
+    let stamp = stamps(&dir)?;
+    let browsed = read_unlocked(root, format)?;
+    let Some(track) = browsed.track(write.track) else {
+        return Err(refused("That track is no longer in this device library. Nothing was changed."));
+    };
+    let mut files = Vec::with_capacity(write.files.len() + 6);
+    for (relative, bytes) in &write.files {
+        let staged = publication.stage().join(relative);
+        if let Some(parent) = staged.parent() {
+            rbl_core::durable::create_dir_all(parent)?;
+        }
+        rbl_core::durable::write(&staged, bytes)?;
+        files.push(relative.clone());
+    }
+    if let Some(bpm_x100) = write.bpm_x100 {
+        let relative = dir.strip_prefix(root).map_err(std::io::Error::other)?.to_path_buf();
+        let staged_dir = publication.stage().join(&relative);
+        rbl_core::durable::create_dir_all(&staged_dir)?;
+        let analysis = (!track.analysis_path.is_empty()).then(|| path_key(&track.analysis_path));
+        for library_format in &present {
+            let rows: Vec<u32> = if *library_format == format {
+                vec![write.track]
+            } else {
+                let Some(analysis) = &analysis else { continue };
+                let library = read_unlocked(root, *library_format)?;
+                library.tracks.iter().filter(|t| !t.analysis_path.is_empty() && path_key(&t.analysis_path) == *analysis).map(|t| t.id).collect()
+            };
+            if rows.is_empty() {
+                continue;
+            }
+            files.extend(stage_tempo(root, &staged_dir, &relative, *library_format, &rows, bpm_x100)?);
+        }
+    }
+    // rekordbox, or a player, may have written a library while this staged.
+    if stamps(&dir)? != stamp {
+        return Err(refused("The device library changed while it was being edited. Nothing was changed; try again."));
+    }
+    publication.commit(&files)?;
+    Ok(())
+}
+
+/// Stages one library with `rows` given `bpm_x100`, reads it back, and
+/// answers the files the publication replaces.
+fn stage_tempo(root: &Path, staged_dir: &Path, relative: &Path, format: Format, rows: &[u32], bpm_x100: u32) -> Result<Vec<PathBuf>> {
+    let dir = db_dir(root)?;
+    let name = format.file_name();
+    let path = dir.join(name);
+    let staged = staged_dir.join(name);
+    let (written, files) = match format {
+        Format::DeviceLibrary => {
+            let mut next = std::fs::read(&path)?;
+            for &row in rows {
+                next = patch_pdb_tempo(&next, row, bpm_x100)?;
+            }
+            rbl_core::durable::write(&staged, &next)?;
+            (read_pdb(&next)?.1, vec![relative.join(name)])
+        }
+        Format::OneLibrary => {
+            let wal_name = format!("{name}-wal");
+            std::fs::copy(&path, &staged)?;
+            let wal = dir.join(&wal_name);
+            if wal.is_file() {
+                std::fs::copy(&wal, staged_dir.join(&wal_name))?;
+            }
+            for &row in rows {
+                set_one_tempo(&staged, row, bpm_x100)?;
+            }
+            // The rollback journal leaves nothing beside the file; a stale
+            // `-wal` or `-shm` on the stick goes with the publication.
+            for suffix in ["-wal", "-shm"] {
+                let _ = std::fs::remove_file(staged_dir.join(format!("{name}{suffix}")));
+            }
+            (read_one(&staged)?.1, vec![relative.join(&wal_name), relative.join(format!("{name}-shm")), relative.join(name)])
+        }
+    };
+    let read_back = |id: u32| written.iter().find(|t| t.id == id).map(|t| t.bpm_x100);
+    if rows.iter().any(|&row| read_back(row) != Some(bpm_x100)) {
+        return Err(refused("The edited device library did not read back as planned. Nothing was changed."));
+    }
+    Ok(files)
+}
+
+/// `export.pdb` with every live row of `track` given `bpm_x100`. The tempo
+/// is a fixed four bytes of the row (0x38), so nothing else moves.
+fn patch_pdb_tempo(bytes: &[u8], track: u32, bpm_x100: u32) -> Result<Vec<u8>> {
+    use rbl_pdb::PageType;
+    let pdb = rbl_pdb::Pdb::parse(bytes).map_err(unreadable)?;
+    let cannot = || refused("This device's library could not be changed in place. Nothing was changed.");
+    let table = pdb.table(PageType::Tracks).ok_or_else(cannot)?;
+    let mut next = bytes.to_vec();
+    let mut found = false;
+    for row in pdb.rows(table) {
+        if pdb.u4_at(row, 0x48) != track {
+            continue;
+        }
+        let at = row.offset + 0x38;
+        next.get_mut(at..at + 4).ok_or_else(cannot)?.copy_from_slice(&bpm_x100.to_le_bytes());
+        found = true;
+    }
+    if !found {
+        return Err(cannot());
+    }
+    Ok(next)
+}
+
+/// Sets one `content` row's tempo in a staged copy of `exportLibrary.db`.
+fn set_one_tempo(path: &Path, track: u32, bpm_x100: u32) -> Result<()> {
+    if rbl_onelibrary::content::set_tempo(path, track, bpm_x100).map_err(one_error)? != 1 {
+        return Err(refused("This device's library could not be changed in place. Nothing was changed."));
+    }
+    Ok(())
+}
+
 /// `export.pdb` with its two playlist tables rewritten to `after`.
 ///
 /// Rows that did not change are written back as the file held them, in the
