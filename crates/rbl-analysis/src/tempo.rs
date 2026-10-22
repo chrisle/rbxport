@@ -1165,9 +1165,12 @@ fn reference_bpm(reader: Reader<'_>, bpm: f64, options: TempoOptions) -> f64 {
 /// beat reads its kick from.
 const KICK_PHASES: usize = 32;
 
-/// The kick (the kick band's thump plus the click's attack) that a grid at
-/// `period` collects over `from..to` at its best phase, as `(total,
-/// beats)`.
+/// The kick that a grid at `period` collects over `from..to` at its best
+/// phase, as `(total, beats)`. The kick is read from the kick band when
+/// there is one: the attack map is the 900-9000 Hz band, where an arp, a
+/// pluck or a hat is as loud as the kick's click, so counting it there
+/// lets a pattern the kick does not follow pass for the kick. Only
+/// without a kick band is the attack map the kick.
 fn kick_collected(reader: Reader<'_>, period: f64, from: usize, to: usize) -> (f64, usize) {
     if period < 2.0 || to <= from {
         return (0.0, 0);
@@ -1180,7 +1183,7 @@ fn kick_collected(reader: Reader<'_>, period: f64, from: usize, to: usize) -> (f
         let mut x = phase;
         while x < to as f64 {
             let heard = reader.evidence(x, period);
-            total += heard.kick + heard.attack;
+            total += if reader.kicks.is_some() { heard.kick } else { heard.attack };
             beats += 1;
             x += period;
         }
@@ -1210,10 +1213,10 @@ fn kick_margin(reader: Reader<'_>, own: f64, other: f64, from: usize, to: usize)
 /// A window's tempo is read off the whole mix, and in ambient, downtempo
 /// and leftfield music a pad, an arp or a polyrhythm can hold a period of
 /// its own for a minute while the kick carries on at the track's tempo, or
-/// stops. Such a stretch has not changed tempo. So where a kick band or an
-/// attack map can be read, a run stands as its own tempo only when its own
-/// period collects the kick over its stretch by `KICK_MARGIN` over each
-/// neighbour's period; a run that does not is merged into the neighbour it
+/// stops. Such a stretch has not changed tempo. So where a kick band (or,
+/// without one, an attack map) can be read, a run stands as its own tempo
+/// only when its own period collects the kick over its stretch by
+/// `KICK_MARGIN` over each neighbour's period; a run that does not is merged into the neighbour it
 /// loses to, and neighbours left at one tempo become one run. Without
 /// either source the runs stand as labelled.
 fn kicked_runs(reader: Reader<'_>, mut runs: Vec<(usize, usize, f64, usize)>, bpm: f64, options: TempoOptions) -> Vec<(usize, usize, f64, usize)> {
