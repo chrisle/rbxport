@@ -129,7 +129,7 @@ flowchart TD
     Per --> Stick[ExportSelection::for_stick: recover the stick, add its loose tracks]
     Stick --> Export[rbl_export::export_cancellable]
     Export --> Plan[plan::from_baseline: reconcile, estimate, peak-space check]
-    Plan --> Prep[Shared PreparationCache: probes, conversions, source copies]
+    Plan --> Prep[Shared PreparationCache: probes and bounded conversions]
     Prep --> Writers[rbl-pdb, ext_pdb, rbl-onelibrary, rbl-anlz]
     Writers --> Stage[(.rbxport-staging-* on the stick)]
     Stage --> Commit[Publication::commit_retained]
@@ -338,7 +338,7 @@ flowchart LR
     C --> D2[scoped thread: stick 2]
     D1 --> E1[export_cancellable]
     D2 --> E2[export_cancellable]
-    E1 --> P[PreparationCache: one preparation per input and profile, at most two at once]
+    E1 --> P[PreparationCache: serialized converted-file use]
     E2 --> P
     E1 --> F1[per-file copy: reader + writer thread, 4 x 1 MiB queue]
 ```
@@ -351,10 +351,15 @@ flowchart LR
   cannot happen in the middle of building a selection. The locks are dropped
   before any stick is written.
 - `EXPORT_CACHE` is one `rbl_export::cache::PreparationCache` under
-  `<state dir>/cache/usb-export`, shared by every job. A per-key gate makes
-  one worker prepare a given source and profile while others wait for it; a
-  counter allows at most two preparations at once. It is pruned to 8 GiB at
-  startup and when the last job ends. Recovery never depends on it.
+  `<state dir>/cache/usb-export`, shared by every job. Ordinary audio is read
+  from its source and copied directly into the destination's recoverable
+  stage; it has no full-size internal source copy. Converted audio is cached
+  for reuse across sticks. Converted-file use is serialized through the
+  destination copy so an active reader cannot be evicted. Before conversion,
+  completed entries are pruned to 6 GiB; the conversion staging file is
+  capped at 2 GiB. The cache is also pruned to 8 GiB at startup and after
+  the last job. An output above 2 GiB is converted in the destination stage.
+  Recovery never depends on the local cache.
 - `copy_data_observed` in `rbl-export` copies each file with a reader and a
   writer thread connected by a bounded channel (`COPY_QUEUE` = 4,
   `COPY_BUFFER` = 1 MiB), so the source read and the USB write overlap. It
@@ -470,7 +475,7 @@ is reported as `ExportError::Cancelled`.
 | 13 | Stamp the stick's analysis files by file information. | `snapshot::analysis_stamp` | Done after the baseline checks, so a refused sync says so at once (#331). Rechecked before publication. |
 | 14 | Plan: reconcile the selection with the stick, estimate audio actions, and compute peak space. Refuse if free space is below `peak_bytes` and no size is unknown. | `plan::from_baseline`, `reconcile::prepare`, `estimate::estimate_inspected` | The same planner backs the preview. See [Reconcile](#reconcile-what-is-kept-replaced-or-removed) and [Space accounting](#space-accounting). |
 | 15 | Hash recorded tracks whose source revision changed (`planning`). | `PreparationCache::source_hash` | A revision change with the same bytes (a touched mtime) keeps the copy. |
-| 16 | Shared preparation: probe, then convert or copy each new or changed source into the cache (`converting`, `preparing`). | `PreparationCache::needs_conversion`, `converted`, `original` | One preparation per input and profile across all sticks. A cache that cannot be written (full, read-only, permission) falls back to direct staging. A failed preparation keeps the existing USB version when there is one (`update-failed`), else fails the track. |
+| 16 | Shared preparation: probe each changed source and determine whether conversion is needed. Conversion runs as that track is staged. | `PreparationCache::needs_conversion`, `with_converted` | Ordinary audio is copied straight from source to the destination stage. Converted output can be reused across sticks within the bounded cache. If the internal cache is full or unwritable, conversion runs in the destination stage. A failed preparation keeps the existing USB version when there is one (`update-failed`), else fails the track. |
 | 17 | Merge the stick's My Tags into the library's. | inline | Tags that exist only on the stick are kept. |
 | 18 | Assign ids: playlists first, then tracks. Check that ids are unique and playlist membership is valid. | `playlist_ids`, `assign_ids` | Ids are pinned to the previous manifest, so they stay the same between syncs ([why](usb-export-db.md#incremental-sync)). |
 | 19 | Work out where each track goes: in place, adopted, or copied; the path; the collision suffix. | `previous_in_place`, `in_place_paths`, `adopted_paths`, `layouts` | Every path is decided before any file is written. Adoption reads both files (`checking` in bytes). |
@@ -681,9 +686,11 @@ In loop order:
      hashed against `audio_hash` and the source, and its new stamp is
      recorded. Manifests without `audio_hash` fall back to `files_equal`.
      See [Incremental sync](usb-export-db.md#incremental-sync).
-   - *Otherwise*: the prepared cache file, or the source, is copied into the
-     stage (`copying` in bytes), or converted (`converting` in milliseconds
-     of audio) when there is no cache. A copy failure on a new track fails
+   - *Otherwise*: ordinary audio is copied from the source into the destination
+     stage (`copying` in bytes). Converted audio is copied from the bounded
+     cache while its consumer lock is held, or converted directly into the
+     destination stage (`converting` in milliseconds of audio) if the cache
+     cannot hold it. A copy failure on a new track fails
      that track and the sync continues. A failure on a track the stick
      already holds, a full disk, or a lost device stops the run.
 7. If the track moved, the old audio path and analysis directory go on the
@@ -925,8 +932,10 @@ Cancellation is checked at the start, during preparation and hashing (every
 immediately before commit. A cancelled run returns `ExportError::Cancelled`.
 Dropping `Publication` deletes the stage (`impl Drop`). The stick keeps its
 previous generation. What may remain: the directories created in step 3, the
-`.rbxport-write.lock` file, finished entries in the local cache, and the
-result of any recovery that ran at the start. Once `publishing` is reported,
+`.rbxport-write.lock` file, finished converted entries in the local cache,
+and the result of any recovery that ran at the start. An unfinished internal
+conversion file is removed with its temporary directory; the destination
+stage is dropped. Once `publishing` is reported,
 the run cannot be cancelled.
 
 ### On unplug
@@ -954,7 +963,13 @@ Sync Manager also leaves out sticks whose preview says there is not enough
 space. A stick that fills during staging fails the run with an I/O error
 ("Could not copy '…' to the USB"), and the stage is dropped. Commit needs no
 extra space because it only renames. A full local cache falls back to
-staging directly on the stick.
+conversion in the destination stage. Ordinary audio does not require an
+internal staging copy. Completed cache entries are reduced to 6 GiB before
+conversion, and a conversion staging file is capped at 2 GiB. Interrupted
+conversion directories are removed on the next cache prune. Managed cache
+files therefore use at most 8 GiB during a batch when cleanup succeeds,
+plus small receipt and filesystem metadata overhead. Destination staging
+still needs the space estimated by the planner.
 
 ### Conflicts that leave the stick unchanged
 
@@ -1116,7 +1131,7 @@ Before handing off, run the checks in [Testing](../development/testing.md#before
 | In place | A library file that already lives on the stick. It is pointed at, never copied, moved, or deleted. |
 | Stage | `.rbxport-staging-*`: where a run writes new files before commit. |
 | Journal | `.rbxport-publication/` with `publication.json`, `.previous/`, and while unverified `.verification-required`: commit intent that recovery completes or rolls back. |
-| Preparation cache | `PreparationCache` under the app's state directory: probes, conversions, and source copies shared across sticks. Disposable. |
+| Preparation cache | `PreparationCache` under the app's state directory: probes and bounded conversions shared across sticks. Ordinary audio is copied from source to the destination stage. Disposable. |
 | `DBID` | `djmdProperty.DBID` of the source library, stored in the manifest and the sync record. |
 | Root | `PIONEER/`, or `.PIONEER/` (hidden, chosen for blank HFS+ volumes). |
 
