@@ -3183,6 +3183,7 @@ function AppBody() {
   const openViewSettings = useCallback(() => openPreferences("view"), [openPreferences]);
   const ejectA = useCallback(() => { loadRequest.current.a++; setPlayerTrack(null); }, []);
   const ejectB = useCallback(() => { loadRequest.current.b++; setPlayerTrackB(null); }, []);
+  const ejectDevice = useCallback((node: TreeNode) => { void ejectDeviceFromTree(node); }, [ejectDeviceFromTree]);
   const masterA = useCallback(() => setSyncMaster("a"), [setSyncMaster]);
   const masterB = useCallback(() => setSyncMaster("b"), [setSyncMaster]);
   const exportDeckTrack = useCallback((device: string, id: string) => exportTrackTo(device, [id]), [exportTrackTo]);
@@ -3203,14 +3204,14 @@ function AppBody() {
     onAddArtwork: addPlaylistArtwork, onAddToShortcut: addToShortcut, onSortItems: sortItems,
     onDeviceCreate: createOnDevice, onDeviceRename: renameOnDevice,
     onDeviceDelete: deleteOnDevice, onDeviceImport: importFromDevice,
-    onEjectDevice: (node: TreeNode) => { void ejectDeviceFromTree(node); },
+    onEjectDevice: ejectDevice,
     ejectingDeviceId, deviceBusy: syncing || exportRunning || ejectingDeviceId !== null, readOnly,
   }), [
     draggedTracks, addDraggedTo, addDraggedToDevice, exportDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, menuDevices, exportPlaylistFile,
     createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, expandNode,
     viewPrefs.playlistCounts, openSyncManager, createSmartPlaylistIn, editSmartPlaylist,
     addPlaylistArtwork, addToShortcut, sortItems, createOnDevice, renameOnDevice, deleteOnDevice,
-    importFromDevice, ejectDeviceFromTree, ejectingDeviceId, syncing,
+    importFromDevice, ejectDevice, ejectingDeviceId, syncing,
     exportRunning,
   ]);
   const subList = useMemo(() => ({
@@ -3437,7 +3438,7 @@ function AppBody() {
           railShortcuts={railShortcuts}
           onOpenShortcut={openShortcut}
           onDeleteShortcut={deleteShortcut}
-          onEjectDevice={(node) => { void ejectDeviceFromTree(node); }}
+          onEjectDevice={ejectDevice}
           ejectingDeviceId={ejectingDeviceId}
           deviceBusy={deviceBusy}
           onDeviceCreate={createOnDevice}
