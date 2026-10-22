@@ -150,7 +150,10 @@ Changes use the same library writer, undo history, index refresh, and events as
 UI edits. Library Protection is checked again when the queued edit runs; the
 writer retains its Rekordbox-running and recovery guards. Native My Tags are
 database assignments: these commands do not embed tags into audio files or
-modify beat grids, cues, or ordinary track fields. The existing scripting error
+modify beat grids, cues, or ordinary track fields. That includes the comment: with
+Preferences > Advanced > Browse > Add "My Tag" to the "Comments" on, only an
+edit in the My Tag panel or the Info tab rewrites it, as rekordbox rewrites it
+only after an edit in its My Tag panel. The existing scripting error
 conventions apply: malformed ID lists are `-1703`, unresolved track objects are
 `-1728`, and writer refusals (including unknown tag IDs) are `-10003` with a
 reason. Read/database failures are errors rather than empty successful results.
