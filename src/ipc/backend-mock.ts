@@ -1289,7 +1289,22 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           return Promise.reject(new Error(`${JSON.stringify(value)} is not a BPM between 20 and 400`));
         }
         const row = all.find((r) => r.id === tracks[0]);
-        if (row) {
+        const held = tracks[0] === undefined ? null : gridOf(tracks[0]);
+        if (row && held) {
+          // As the real backend (#505): the grid editor's Set Tempo over the
+          // whole track, one entry in the track's grid history.
+          if (held.locked) return refuse("The beat grid is locked. Unlock it to edit.");
+          const next = applyEditFrom(held.beats, null, { kind: "tempo", bpmX100: Math.round(bpm * 100), anchorMs: 0 }, row.durationSec * 1000);
+          if (!sameGrid(next, held.beats)) {
+            held.undo.push({ beats: held.beats, label: "Set Tempo" });
+            held.transaction = undefined;
+            held.redo = [];
+            held.beats = next;
+          }
+          row.bpmX100 = Math.round(bpm * 100);
+          detailsOf(row).bpmX100 = row.bpmX100;
+          for (const listener of gridListeners) listener(row.id);
+        } else if (row) {
           row.bpmX100 = Math.round(bpm * 100);
           detailsOf(row).bpmX100 = row.bpmX100;
         }

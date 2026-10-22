@@ -505,11 +505,14 @@ pub async fn set_track_field<R: tauri::Runtime>(
         let state = Arc::clone(&state);
         let writing = Arc::clone(&state);
         let reported = track.clone();
-        if let Some(editor) = app.try_state::<Arc<crate::grid::GridEditor>>() {
-            if editor.is_locked(&track) { return Err(AppError::new(ErrorKind::ReadOnly, "The beat grid is locked. Unlock it to edit.")); }
-        }
-        blocking("set_track_bpm", move || crate::grid::set_tempo(&writing, &track, &value)).await?;
-        if let Some(editor) = app.try_state::<Arc<crate::grid::GridEditor>>() { editor.forget_history(&reported); }
+        let Some(editor) = app.try_state::<Arc<crate::grid::GridEditor>>().map(|editor| Arc::clone(&editor)) else {
+            return Err(AppError::internal("the grid editor is not running"));
+        };
+        if editor.is_locked(&track) { return Err(AppError::new(ErrorKind::ReadOnly, "The beat grid is locked. Unlock it to edit.")); }
+        // Recorded in the track's grid history as the grid editor's Set
+        // Tempo, so the grid panel's Undo puts back the grid and the BPM
+        // together and the track's earlier grid edits stay undoable (#505).
+        blocking("set_track_bpm", move || crate::grid::set_tempo(&writing, &editor, &track, &value)).await?;
         let _ = tauri::Emitter::emit(&app, "grid:changed", reported);
         let generation = crate::commands::reload(app.clone(), state.clone()).await?;
         let dto = {

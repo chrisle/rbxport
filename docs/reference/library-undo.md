@@ -79,7 +79,7 @@ holds their ids.
 | Rating, colour, comment (one or many tracks) | `set_track_rating`, `set_track_color`, `set_track_comment` | `djmdContent` columns | Undo, one entry per selection | `library_history_names_and_reverses_each_supported_edit`; `a_failure_partway_through_several_tracks_puts_the_earlier_ones_back` (`commands.rs` unit) | No |
 | Info panel fields (title, artist, album, genre, key, year…) | `details::set_track_field` | `djmdContent` columns, interned names | Undo | same test (title); multi-track genre unit test | No |
 | Key with "Write the value to the ID3 tag" | same, `write_key_tag` | also the audio file's key tag | Undo restores the database only; the file keeps the new key | code (`details.rs`) | File tag: yes. Policy in #507 |
-| BPM in the info panel | `set_track_field` `bpm` → `grid::set_tempo` | `.DAT` grid, `BPM` | Not recorded, and it clears the track's grid history | code | Grid: yes. #505 |
+| BPM in the info panel | `set_track_field` `bpm` → `grid::set_tempo` | `.DAT/.EXT` grid, `BPM` | One "Set Tempo" entry in the track's grid history, as the grid editor's own; earlier grid entries stay; ends the library redo branch | `a_typed_bpm_is_one_grid_undo_step_and_keeps_the_earlier_ones` (`grid.rs` unit) | No (#505) |
 | My Tags | `details::set_my_tags` | `djmdSongMyTag` | Undo | code (`LibraryEdit::TrackTags`) [ASSUME: no command-level test] | No |
 | Add / Delete Artwork (tracks) | `details::add_artwork`, `clear_artwork` | `ImagePath`; image copied into the share | Undo (path only; the copied file stays) | code [ASSUME: no command-level Undo test] | No |
 | Reset DJ Play Count | `reset_play_count` | `DJPlayCount` | Undo | code [ASSUME: no command-level Undo test] | No |
@@ -90,7 +90,7 @@ holds their ids.
 | Relocate by location, Auto Relocate | `relocate::relocate_by_location`, `auto_relocate` | same, many tracks | Not recorded; ends the redo branch | code | Old paths lost. #502 |
 | Analyze (BPM, key, waveform, grid) | `analysis::analyse_track` | `.DAT/.EXT/.2EX`, BPM, key, analysis path | Not recorded [ASSUME: matches rekordbox, which has no analysis Undo] | code | Re-analysis replaces the old grid |
 | Phrase edit | `analysis::edit_phrase` | `.EXT` phrase section | Not recorded | code. [UNKNOWN] whether rekordbox's phrase editing undoes; `editapp::ScoreEditManager::undo` exists but is not traced to it | Previous phrases lost |
-| Beat grid edits, grid lock | `grid::grid_edit`, `grid_lock` | `.DAT/.EXT`, `BPM`, lock | Grid edits: own per-track Undo; lock: not recorded | `useGridEditor.test.tsx`, `e2e/grid-edit.spec.ts` | No |
+| Beat grid edits, grid lock | `grid::grid_edit`, `grid_lock` | `.DAT/.EXT`, `BPM`, lock | Grid edits: own per-track Undo, which refuses and drops the top entry when the grid on disk is no longer the one the entry expects, keeping the newer grid; lock: not recorded | `useGridEditor.test.tsx`, `e2e/grid-edit.spec.ts`, `an_undo_over_a_grid_changed_elsewhere_is_refused_and_keeps_the_newer_grid` (`grid.rs` unit) | No |
 | Cue and loop edits, Convert Memory Cues to Hot Cues | `cues::*` | `djmdCue`, ANLZ cue sections | Not recorded, and does not end the redo branch | code | Deleted cue lost. #504, #506 |
 
 ### Playlists, folders and intelligent playlists

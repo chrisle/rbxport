@@ -279,6 +279,27 @@ describe("mock edits", () => {
     expect((await backend.trackDetails("100001")).genre).toBe("Techno");
   });
 
+  it("records an info-panel BPM as the grid's Set Tempo and keeps the earlier grid Undo (#505)", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    let id = "";
+    for (let n = 100000; n < 100020 && !id; n++) {
+      if (await backend.gridState(String(n)).then(() => true, () => false)) id = String(n);
+    }
+    expect(id).not.toBe("");
+    const original = (await backend.gridState(id)).bpmX100;
+    await backend.edits.gridEdit(id, { kind: "nudge", ms: 5 });
+    await backend.edits.setTrackField([id], "bpm", "150");
+    const typed = await backend.gridState(id);
+    expect(typed.bpmX100).toBe(15_000);
+    expect(typed.undoLabel).toBe("Set Tempo");
+    expect((await backend.trackDetails(id)).bpmX100).toBe(15_000);
+    const undone = await backend.edits.gridUndo(id);
+    expect(undone.bpmX100).toBe(original);
+    expect(undone.undoLabel).toBe("Shift Beat Grid Right");
+    expect((await backend.trackDetails(id)).bpmX100).toBe(original);
+    expect((await backend.edits.gridRedo(id)).bpmX100).toBe(15_000);
+  });
+
   it("refuses a title for several tracks, as rekordbox greys the box", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await expect(backend.edits.setTrackField(["100000", "100001"], "title", "Same")).rejects.toThrow();

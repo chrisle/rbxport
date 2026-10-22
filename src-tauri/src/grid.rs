@@ -133,9 +133,17 @@ struct History {
     redo: Vec<HistoryEntry>,
 }
 
+/// One recorded edit: the grid either side of it, so Undo and Redo can
+/// check that the grid on disk is still the one the edit left (or found)
+/// before writing the other over it.
 #[derive(Debug)]
 struct HistoryEntry {
-    beats: Vec<Beat>,
+    /// The grid before the edit: what Undo writes back, and what Redo
+    /// expects to find.
+    before: Vec<Beat>,
+    /// The grid the edit left: what Redo writes, and what Undo expects to
+    /// find.
+    after: Vec<Beat>,
     label: &'static str,
 }
 
@@ -363,35 +371,45 @@ pub fn apply(
     apply_options(editor, library, location, track, action, &GridOptions::default(), set_bpm)
 }
 
-#[allow(clippy::too_many_arguments, reason = "shared command and fixture boundary")]
 /// Records what just happened in the track's undo/redo history — the part
-/// of [`apply_options`] after the write has already landed.
-fn record_history(editor: &GridEditor, track: &str, action: GridAction, beats: Vec<Beat>, options: &GridOptions) {
+/// of [`apply_options`] after the write has already landed. `before` and
+/// `after` are the grid the action found and the grid it wrote.
+fn record_history(editor: &GridEditor, track: &str, action: GridAction, before: Vec<Beat>, after: Vec<Beat>,
+    options: &GridOptions) {
     let mut histories = editor.histories.lock();
     let history = histories.entry(track.to_owned()).or_default();
     match action {
         GridAction::Edit { edit, .. } => {
             history.redo.clear();
             let transaction = options.transaction.as_ref().filter(|_| matches!(edit, GridEdit::Tap { .. }));
-            if transaction.is_none() || history.transaction.as_ref() != transaction {
-                history.undo.push(HistoryEntry { beats, label: edit.label() });
+            match history.undo.last_mut() {
+                // A tap in the same run joins the entry the run started:
+                // Undo still goes back to the grid before the first tap.
+                Some(open) if transaction.is_some() && history.transaction.as_ref() == transaction => open.after = after,
+                _ => history.undo.push(HistoryEntry { before, after, label: edit.label() }),
             }
             history.transaction = transaction.cloned();
             if history.undo.len() > HISTORY_CAP { history.undo.remove(0); }
         }
         GridAction::Undo => {
             history.transaction = None;
-            if let Some(entry) = history.undo.pop() {
-                history.redo.push(HistoryEntry { beats, label: entry.label });
-            }
+            if let Some(entry) = history.undo.pop() { history.redo.push(entry); }
         }
         GridAction::Redo => {
             history.transaction = None;
-            if let Some(entry) = history.redo.pop() {
-                history.undo.push(HistoryEntry { beats, label: entry.label });
-            }
+            if let Some(entry) = history.redo.pop() { history.undo.push(entry); }
         }
     }
+}
+
+/// Undo or Redo found a grid other than the one its entry expects:
+/// something outside this history (rekordbox, say, while RBXport stayed
+/// open) changed the grid since. The newer grid is kept, as #506 keeps a
+/// newer library value, in the same words.
+fn conflict(action: GridAction, label: &str) -> AppError {
+    let what = if action == GridAction::Undo { "undo" } else { "redo" };
+    AppError::new(ErrorKind::ReadOnly,
+        format!("Can't {what} {label}: the track's beat grid has changed since. The newer change was kept."))
 }
 
 fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::LibraryLocation,
@@ -444,11 +462,21 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
             let mut histories = editor.histories.lock();
             let history = histories.entry(track.to_owned()).or_default();
             let from = if action == GridAction::Undo { &history.undo } else { &history.redo };
-            let Some(previous) = from.last() else {
+            let Some(entry) = from.last() else {
                 let what = if action == GridAction::Undo { "undo" } else { "redo" };
                 return Err(AppError::new(ErrorKind::NotFound, format!("Nothing to {what}.")));
             };
-            previous.beats.clone()
+            let (expected, target) = if action == GridAction::Undo { (&entry.after, &entry.before) } else { (&entry.before, &entry.after) };
+            if *expected != beats {
+                // Only that entry goes, as #506 drops a conflicting library
+                // entry: left on top it would block every older one, which
+                // may still fit (an outside write that put the grid back).
+                let label = entry.label;
+                let from = if action == GridAction::Undo { &mut history.undo } else { &mut history.redo };
+                from.pop();
+                return Err(conflict(action, label));
+            }
+            target.clone()
         }
     };
 
@@ -474,7 +502,7 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
     }
     journal.commit()?;
 
-    record_history(editor, track, action, beats, options);
+    record_history(editor, track, action, beats, next.clone(), options);
 
     Ok(GridOutcome {
         state: GridStateDto { locked: editor.is_locked(track) || database_locked(location, track)?, ..editor.state_for(track, &next) },
@@ -484,13 +512,18 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
     })
 }
 
-/// The Info panel's BPM field shares the durable file/row transaction.
-pub(crate) fn set_tempo(state: &AppState, track: &str, value: &str) -> AppResult<()> {
+/// The Info panel's BPM field: the grid editor's Set Tempo over the whole
+/// track, through the same durable file/row transaction and recorded in the
+/// same per-track history, so the grid panel's Undo puts the grid and
+/// `djmdContent.BPM` back together and earlier grid edits stay undoable
+/// (#505; rekordbox's `djplay::BeatGridAdjustment::ApplyNewBpm` is undoable
+/// too, 7.2.19 symbols).
+pub(crate) fn set_tempo(state: &AppState, editor: &GridEditor, track: &str, value: &str) -> AppResult<()> {
     let _edit_guard = state.edit_gate.lock();
-    set_tempo_inner(state, track, value)
+    set_tempo_inner(state, editor, track, value)
 }
 
-fn set_tempo_inner(state: &AppState, track: &str, value: &str) -> AppResult<()> {
+fn set_tempo_inner(state: &AppState, editor: &GridEditor, track: &str, value: &str) -> AppResult<()> {
     let bpm: f64 = value.trim().parse().map_err(|_| AppError::new(ErrorKind::Malformed, "Enter a BPM from 40 to 499."))?;
     if !bpm.is_finite() || !(40.0..=499.0).contains(&bpm) {
         return Err(AppError::new(ErrorKind::Malformed, "Enter a BPM from 40 to 499."));
@@ -508,27 +541,26 @@ fn set_tempo_inner(state: &AppState, track: &str, value: &str) -> AppResult<()> 
     let library = state.library()?;
     let row = library.row_of(track).ok_or_else(|| AppError::new(ErrorKind::NotFound, "That track is no longer in the library."))?;
     let relative = state.analysis_path_of(&library, row as usize, track);
+    let mut set_bpm = |bpm_x100: u32| state.write(|w| w.save_grid_revision(track, bpm_x100)).map_err(write_error);
     if relative.is_empty() {
-        return state.write(|w| w.save_grid_revision(track, u32::from(bpm_x100))).map_err(write_error);
+        // No analysis, so no grid and nothing for the grid history.
+        return set_bpm(u32::from(bpm_x100));
     }
-    let dat = rbl_anlz::resolve(&location.share_root, &relative);
-    let (parsed, beats) = read_dat(&dat)?;
+    let (_, beats) = read_dat(&rbl_anlz::resolve(&location.share_root, &relative))?;
     if rbl_anlz::grid::is_dynamic_from(&beats, None) { return Err(AppError::new(ErrorKind::Malformed, "Use the grid BPM field to confirm replacing tempo changes.")); }
-    let next = apply_with_duration(&beats, None, Edit::Tempo { bpm_x100, anchor_ms: 0 }, library.length_sec[row as usize].saturating_mul(1000));
-    let mut files = vec![(dat.clone(), parsed.with_beat_grid(&next))];
-    let ext = rbl_anlz::sibling(&dat, "EXT");
-    if ext.exists() {
-        let parsed = rbl_anlz::Anlz::read(&ext).map_err(|e| AppError::internal(e.to_string()))?;
-        if let Some(bytes) = parsed.with_extended_grid_cleared() { files.push((ext, bytes)); }
+    let options = GridOptions {
+        registered: state.registered_analysis(track),
+        duration_ms: library.length_sec.get(row as usize).map(|s| s.saturating_mul(1000)),
+        ..GridOptions::default()
+    };
+    let edit = GridAction::Edit { edit: GridEdit::Tempo { bpm_x100, anchor_ms: 0 }, from_ms: None };
+    let outcome = apply_options(editor, &library, &location, track, edit, &options, &mut set_bpm)?;
+    if !outcome.written {
+        // The grid already stands at that tempo: nothing to record, but the
+        // row still takes the typed value, as it did before #505.
+        set_bpm(u32::from(bpm_x100))?;
     }
-    let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, track,
-        u32::from(bpm_x100), None, true, &files)?;
-    if let Err(e) = journal.publish() { journal.rollback()?; return Err(e); }
-    if let Err(e) = state.write(|w| w.save_grid_revision(track, u32::from(bpm_x100))) {
-        journal.reconcile(&location)?;
-        return Err(write_error(e));
-    }
-    journal.commit()
+    Ok(())
 }
 
 fn wire_beats(beats: &[Beat]) -> Vec<(u32, u8)> {
@@ -567,7 +599,18 @@ async fn run<R: tauri::Runtime>(
             };
             apply_options(&editor, &library, &location, &track, action, &options, &mut set_bpm)
         })
-        .await?
+        .await
+    };
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(refused) => {
+            // A refused Undo or Redo may have dropped an entry that no
+            // longer fits the grid; the panel refetches, so its buttons say so.
+            if matches!(action, GridAction::Undo | GridAction::Redo) {
+                let _ = tauri::Emitter::emit(&app, "grid:changed", &track);
+            }
+            return Err(refused);
+        }
     };
     if !outcome.written {
         return Ok(outcome.state);
@@ -773,7 +816,7 @@ mod tests {
     fn typed_bpm_keeps_the_row_and_both_analysis_files_consistent() {
         let f = open();
         let state = app_state(&f);
-        set_tempo(&state, &Fixture::track(), "150").unwrap();
+        set_tempo(&state, &f.editor, &Fixture::track(), "150").unwrap();
         let beats = f.dat().beat_grid().unwrap();
         assert!(beats.iter().any(|b| b.time_ms == 500), "the anchor remains, with one preceding beat filled");
         assert_eq!(beats[2].time_ms, 900);
@@ -782,7 +825,7 @@ mod tests {
         let bpm: u32 = state.read_db(|db| Ok(db.connection().query_row(
             "SELECT BPM FROM djmdContent WHERE ID=?1", [Fixture::track()], |r| r.get(0))?)).unwrap();
         assert_eq!(bpm, 15_000);
-        set_tempo(&state, &track_id(2), "128.5").unwrap();
+        set_tempo(&state, &f.editor, &track_id(2), "128.5").unwrap();
         let bpm: u32 = state.read_db(|db| Ok(db.connection().query_row(
             "SELECT BPM FROM djmdContent WHERE ID=?1", [track_id(2)], |r| r.get(0))?)).unwrap();
         assert_eq!(bpm, 12_850, "a track without analysis still gets its BPM");
@@ -798,11 +841,11 @@ mod tests {
         let db = Db::open(f.location.clone(), OpenMode::ReadWrite).unwrap();
         db.connection().execute_batch("CREATE TRIGGER refuse_bpm BEFORE UPDATE OF BPM ON djmdContent BEGIN SELECT RAISE(ABORT, 'refused'); END;").unwrap();
         drop(db);
-        assert!(set_tempo(&state, &Fixture::track(), "150").is_err());
+        assert!(set_tempo(&state, &f.editor, &Fixture::track(), "150").is_err());
         assert_eq!(std::fs::read(&dat).unwrap(), before_dat);
         assert_eq!(std::fs::read(dat.with_extension("EXT")).unwrap(), before_ext);
         for invalid in ["NaN", "inf", "0", "401", "not a tempo"] {
-            assert!(set_tempo(&state, &Fixture::track(), invalid).is_err());
+            assert!(set_tempo(&state, &f.editor, &Fixture::track(), invalid).is_err());
         }
         assert_eq!(std::fs::read(&dat).unwrap(), before_dat);
     }
@@ -819,8 +862,143 @@ mod tests {
             }, &options, &mut save).unwrap();
         }
         assert_eq!(f.editor.histories.lock()[&Fixture::track()].undo.len(), 1);
+        let last_tap = f.dat().beat_grid().unwrap();
         apply(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Undo, &mut save).unwrap();
         assert_eq!(f.dat().beat_grid().unwrap(), original);
+        // Redo lands on the run's last tap, not its first.
+        apply(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Redo, &mut save).unwrap();
+        assert_eq!(f.dat().beat_grid().unwrap(), last_tap);
+    }
+
+    /// One grid action as the commands run it: the row written through the
+    /// app's writer, not the fixture's recorder.
+    fn through_writer(f: &Fixture, state: &AppState, action: GridAction) -> AppResult<GridOutcome> {
+        // Held as `run` holds it, so the writer leaves this journal alone.
+        let _files = state.analysis_write.lock();
+        let mut set_bpm = |bpm: u32| state.write(|w| w.save_grid_revision(&Fixture::track(), bpm)).map_err(write_error);
+        apply(&f.editor, &f.library, &f.location, &Fixture::track(), action, &mut set_bpm)
+    }
+
+    fn row_bpm(state: &AppState) -> u32 {
+        state.read_db(|db| Ok(db.connection().query_row(
+            "SELECT BPM FROM djmdContent WHERE ID=?1", [Fixture::track()], |r| r.get(0))?)).unwrap()
+    }
+
+    #[test]
+    fn a_typed_bpm_is_one_grid_undo_step_and_keeps_the_earlier_ones() {
+        // #505: the Info panel's BPM is recorded as the grid editor's Set
+        // Tempo. Undo puts the grid and the row back together, Redo puts the
+        // typed tempo back, and the grid edit made before it stays undoable.
+        let f = open();
+        let state = app_state(&f);
+        through_writer(&f, &state, GridAction::Edit { edit: GridEdit::Nudge { ms: 20 }, from_ms: None }).unwrap();
+        let nudged = f.dat().beat_grid().unwrap();
+        assert_eq!(row_bpm(&state), 12_000);
+
+        set_tempo(&state, &f.editor, &Fixture::track(), "150").unwrap();
+        let typed = f.dat().beat_grid().unwrap();
+        assert!(typed.iter().all(|b| b.tempo_x100 == 15_000));
+        assert_eq!(row_bpm(&state), 15_000);
+        let after_typing = f.editor.state_for(&Fixture::track(), &typed);
+        assert_eq!((after_typing.can_undo, after_typing.undo_label, after_typing.can_redo), (true, Some("Set Tempo"), false));
+        assert_eq!(f.editor.histories.lock()[&Fixture::track()].undo.len(), 2, "the nudge's entry survived the typed BPM");
+
+        let undone = through_writer(&f, &state, GridAction::Undo).unwrap();
+        assert_eq!(f.dat().beat_grid().unwrap(), nudged, "the grid is the one before the typed BPM");
+        assert_eq!(row_bpm(&state), 12_000, "and so is the row");
+        assert_eq!((undone.state.undo_label, undone.state.redo_label), (Some("Shift Beat Grid Right"), Some("Set Tempo")));
+
+        through_writer(&f, &state, GridAction::Redo).unwrap();
+        assert_eq!(f.dat().beat_grid().unwrap(), typed);
+        assert_eq!(row_bpm(&state), 15_000);
+
+        through_writer(&f, &state, GridAction::Undo).unwrap();
+        through_writer(&f, &state, GridAction::Undo).unwrap();
+        assert_eq!(f.dat().beat_grid().unwrap(), grid(), "the earlier nudge undid too");
+        assert_eq!(row_bpm(&state), 12_000);
+        assert!(!f.editor.state_for(&Fixture::track(), &grid()).can_undo);
+    }
+
+    #[test]
+    fn a_typed_bpm_after_an_undo_ends_the_redo_branch() {
+        let mut f = open();
+        f.edit(GridEdit::Double);
+        f.run(GridAction::Undo).unwrap();
+        let state = app_state(&f);
+        set_tempo(&state, &f.editor, &Fixture::track(), "125").unwrap();
+        let now = f.dat().beat_grid().unwrap();
+        let after = f.editor.state_for(&Fixture::track(), &now);
+        assert_eq!((after.can_redo, after.undo_label), (false, Some("Set Tempo")));
+    }
+
+    #[test]
+    fn a_refused_typed_bpm_records_nothing() {
+        let mut f = open();
+        f.edit(GridEdit::Nudge { ms: 10 });
+        let state = app_state(&f);
+        let db = Db::open(f.location.clone(), OpenMode::ReadWrite).unwrap();
+        db.connection().execute_batch("CREATE TRIGGER refuse_bpm BEFORE UPDATE OF BPM ON djmdContent BEGIN SELECT RAISE(ABORT, 'refused'); END;").unwrap();
+        drop(db);
+        assert!(set_tempo(&state, &f.editor, &Fixture::track(), "150").is_err());
+        let history = &f.editor.histories.lock()[&Fixture::track()];
+        assert_eq!(history.undo.len(), 1);
+        assert_eq!(history.undo[0].label, "Shift Beat Grid Right");
+    }
+
+    /// Writes `beats` into the fixture's analysis file the way another
+    /// program would: outside this editor and its history.
+    fn written_elsewhere(f: &Fixture, beats: &[Beat]) {
+        let dat = rbl_anlz::resolve(&f.location.share_root, RELATIVE);
+        std::fs::write(&dat, f.dat().with_beat_grid(beats)).unwrap();
+    }
+
+    #[test]
+    fn an_undo_over_a_grid_changed_elsewhere_is_refused_and_keeps_the_newer_grid() {
+        // #506's policy on the grid history: a grid written since the entry
+        // (rekordbox, say, while RBXport stayed open) is kept, and the
+        // Undo says why it did not happen.
+        let mut f = open();
+        f.edit(GridEdit::Double);
+        let elsewhere: Vec<Beat> = grid().into_iter().map(|b| Beat { time_ms: b.time_ms + 7, ..b }).collect();
+        written_elsewhere(&f, &elsewhere);
+        let refused = f.run(GridAction::Undo).unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::ReadOnly);
+        assert_eq!(refused.message, "Can't undo Double Tempo: the track's beat grid has changed since. The newer change was kept.");
+        assert_eq!(f.dat().beat_grid().unwrap(), elsewhere, "the newer grid stays");
+        assert_eq!(f.bpms.len(), 1, "the row was not written either");
+        let now = f.editor.state_for(&Fixture::track(), &elsewhere);
+        assert!(!now.can_undo && !now.can_redo, "the conflicting entry was dropped");
+    }
+
+    #[test]
+    fn a_refused_undo_drops_only_its_entry_and_the_older_ones_still_undo() {
+        // A grid put back elsewhere to the one before the newest edit: that
+        // edit's Undo is refused and dropped, the one before it still fits.
+        let mut f = open();
+        f.edit(GridEdit::Nudge { ms: 10 });
+        let nudged = f.dat().beat_grid().unwrap();
+        f.edit(GridEdit::Double);
+        written_elsewhere(&f, &nudged);
+        assert_eq!(f.run(GridAction::Undo).unwrap_err().kind, ErrorKind::ReadOnly);
+        let left = f.editor.state_for(&Fixture::track(), &nudged);
+        assert_eq!((left.undo_label, left.can_redo), (Some("Shift Beat Grid Right"), false));
+        f.run(GridAction::Undo).unwrap();
+        assert_eq!(f.dat().beat_grid().unwrap(), grid());
+    }
+
+    #[test]
+    fn a_redo_over_a_grid_changed_elsewhere_is_refused_and_other_tracks_keep_theirs() {
+        let mut f = open();
+        f.edit(GridEdit::Halve);
+        f.run(GridAction::Undo).unwrap();
+        f.editor.histories.lock().entry("other".into()).or_default().undo.push(HistoryEntry { before: grid(), after: grid(), label: "Set Tempo" });
+        let elsewhere: Vec<Beat> = grid().into_iter().map(|b| Beat { time_ms: b.time_ms + 3, ..b }).collect();
+        written_elsewhere(&f, &elsewhere);
+        let refused = f.run(GridAction::Redo).unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::ReadOnly);
+        assert_eq!(refused.message, "Can't redo Halve Tempo: the track's beat grid has changed since. The newer change was kept.");
+        assert_eq!(f.dat().beat_grid().unwrap(), elsewhere);
+        assert!(f.editor.state_for("other", &grid()).can_undo, "an unrelated track's history is preserved");
     }
 
     #[test]
