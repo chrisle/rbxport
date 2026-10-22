@@ -64,6 +64,30 @@ test("each mode keeps its own columns, the whole artwork's opening with Summary 
   const [title, line] = await summary.locator(":scope > span").evaluateAll((spans) =>
     spans.map((span) => Number.parseFloat(getComputedStyle(span).fontSize)));
   expect(line).toBeCloseTo((title ?? 0) - 2, 1);
+  // At the default 128px Summary width the long title clips within its cell
+  // instead of increasing the column width or spilling into the next cell.
+  const clipping = await summary.evaluate((cell) => {
+    const title = cell.firstElementChild as HTMLElement;
+    const cellBox = cell.getBoundingClientRect();
+    const titleBox = title.getBoundingClientRect();
+    const style = getComputedStyle(title);
+    return {
+      cellWidth: cellBox.width,
+      titleRight: titleBox.right,
+      cellRight: cellBox.right,
+      scrollWidth: title.scrollWidth,
+      clientWidth: title.clientWidth,
+      overflowX: style.overflowX,
+      textOverflow: style.textOverflow,
+      whiteSpace: style.whiteSpace,
+    };
+  });
+  expect(clipping.cellWidth).toBeCloseTo(128, 0);
+  expect(clipping.scrollWidth).toBeGreaterThan(clipping.clientWidth);
+  expect(clipping.titleRight).toBeLessThanOrEqual(clipping.cellRight);
+  expect(clipping.overflowX).toBe("hidden");
+  expect(clipping.textOverflow).toBe("clip");
+  expect(clipping.whiteSpace).toBe("nowrap");
 
   await page.getByTestId("artwork-mode-partial").click();
   await expect(heading("Track Title")).toBeVisible();
