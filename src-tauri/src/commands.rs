@@ -4074,19 +4074,31 @@ pub async fn playlist_duplicates(
 }
 
 /// Reload Tag: the file's tags read again over each track's row.
+///
+/// One Undo for the whole selection (#503), labelled "Track Edit" like the
+/// other multi-track edits: every column the files changed, with its exact
+/// value before and after. Undo puts the library's values back; it does not
+/// touch the files. Each track is its own transaction, so a track whose file
+/// cannot be read stops the reload and the tracks already reloaded are put
+/// back first, as [`each_track`] does: it lands on every track or on none.
 #[tauri::command]
 pub async fn reload_tags<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "reload_tags", Touched::Tracks, move |w| {
+    recorded_edit(app, state, "reload_tags", Touched::Tracks, "Track Edit", move |w| {
+        let mut edits = Vec::new();
         for track in &tracks {
-            w.reload_tags(track)?;
+            match w.reload_tags_with_undo(track) {
+                Ok((_, changed)) => edits.extend(changed),
+                Err(error) => return Err(roll_back(w, &edits, error)),
+            }
         }
-        Ok(())
+        Ok(LibraryEdit::Track(edits))
     })
     .await
+    .map(|dto| dto.generation)
 }
 
 /// Puts tracks on the Tag List, rekordbox's temporary list, on the end.

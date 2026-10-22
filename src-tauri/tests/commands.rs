@@ -1076,6 +1076,163 @@ fn redo_refuses_a_rating_changed_by_another_program_and_keeps_the_rest() {
     assert_eq!(s.node("Playlist 0").id, playlist_id(0), "the unrelated rename still undoes");
 }
 
+/// Gives a WAV the RIFF INFO tags Reload Tag reads a WAV's from (#503).
+fn tag_wav(path: &Path, items: &[(lofty::prelude::ItemKey, &str)]) {
+    use lofty::config::WriteOptions;
+    use lofty::prelude::TagExt;
+    use lofty::tag::{Tag, TagType};
+
+    let mut tag = Tag::new(TagType::RiffInfo);
+    for (key, value) in items {
+        tag.insert_text(key.clone(), (*value).to_owned());
+    }
+    tag.save_to_path(path, WriteOptions::default()).unwrap();
+}
+
+/// Imports fresh WAVs named `names` through the app, returning each file
+/// and its track id.
+fn import_wavs(s: &Shell, names: &[&str]) -> Vec<(PathBuf, String)> {
+    let files: Vec<PathBuf> = names.iter().map(|name| write_wav(&s._dir.path().join(format!("{name}.wav")), 1)).collect();
+    let report = run(commands::import_files(
+        s.handle(), s.state(), files.iter().map(|f| f.display().to_string()).collect(),
+    )).unwrap();
+    assert_eq!(report.imported as usize, files.len(), "{:?}", report.skipped);
+    files.into_iter().zip(report.tracks.into_iter().map(|t| t.id)).collect()
+}
+
+/// The columns Reload Tag writes, as stored (#503): references by id.
+type TagRow = (String, Option<String>, Option<String>, Option<String>, Option<i64>, Option<i64>);
+
+fn tag_row(s: &Shell, id: &str) -> TagRow {
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    db.connection()
+        .query_row(
+            "SELECT Title, Commnt, ArtistID, GenreID, TrackNo, Rating FROM djmdContent WHERE ID = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        )
+        .unwrap()
+}
+
+/// #503: Reload Tag over a selection is one "Track Edit". Undo puts back
+/// every value it replaced, the hand-edited title and the old artist and
+/// genre ids included, and Redo the files' values; fields Reload Tag does
+/// not write, and the entries before it, are left alone.
+#[test]
+fn reload_tag_over_a_selection_is_one_undo_and_one_redo() {
+    let s = shell();
+    let tracks = import_wavs(&s, &["Reload 503 A", "Reload 503 B"]);
+    let (a, b) = (tracks[0].1.clone(), tracks[1].1.clone());
+    run(details::set_track_field(s.handle(), s.state(), vec![a.clone()], "title".into(), "Typed by hand".into(), None)).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![b.clone()], 4)).unwrap();
+    let before = (tag_row(&s, &a), tag_row(&s, &b));
+    assert_eq!(before.0.0, "Typed by hand");
+
+    use lofty::prelude::ItemKey;
+    for (file, title) in [(&tracks[0].0, "File A"), (&tracks[1].0, "File B")] {
+        tag_wav(file, &[(ItemKey::TrackTitle, title), (ItemKey::TrackArtist, "Artist 503"), (ItemKey::Genre, "Genre 503"),
+            (ItemKey::Comment, "note 503"), (ItemKey::TrackNumber, "5")]);
+    }
+    run(commands::reload_tags(s.handle(), s.state(), vec![a.clone(), b.clone()])).unwrap();
+    let after = (tag_row(&s, &a), tag_row(&s, &b));
+    assert_eq!((after.0.0.as_str(), after.1.0.as_str()), ("File A", "File B"));
+    assert!(after.0.2.is_some() && after.0.2 == after.1.2, "both point at the one new artist row");
+    assert_eq!(after.1.5, Some(4), "Reload Tag does not touch the rating");
+    let history = commands::current_history(&s.state());
+    assert_eq!(history.undo_label.as_deref(), Some("Track Edit"));
+    assert!(!history.can_redo);
+
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!((tag_row(&s, &a), tag_row(&s, &b)), before, "one Undo puts back both tracks, ids included");
+    assert!(undone.can_undo && undone.can_redo);
+    let redone = run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!((tag_row(&s, &a), tag_row(&s, &b)), after, "Redo writes the files' values again");
+    assert!(!redone.can_redo);
+
+    // The entries before it are still there, in order.
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(tag_row(&s, &b).5, Some(0), "the rating undoes next");
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(tag_row(&s, &a).0, "Reload 503 A", "then the typed title");
+
+    // A reload that finds nothing new records nothing.
+    let redo_label = commands::current_history(&s.state()).redo_label;
+    tag_wav(&tracks[1].0, &[]);
+    run(commands::reload_tags(s.handle(), s.state(), vec![b.clone()])).unwrap();
+    let history = commands::current_history(&s.state());
+    assert!(!history.can_undo, "nothing changed, nothing to undo");
+    assert_eq!(history.redo_label, redo_label, "and the redo branch is kept");
+}
+
+/// #503 under #506: a value changed since the reload, by another program,
+/// is kept; the Undo or Redo is refused without writing to any track of the
+/// selection, only that entry is dropped, and older history still works.
+#[test]
+fn reload_tag_undo_and_redo_refuse_a_track_changed_since() {
+    use lofty::prelude::ItemKey;
+
+    let s = shell();
+    let tracks = import_wavs(&s, &["Conflict 503 A", "Conflict 503 B"]);
+    let (a, b) = (tracks[0].1.clone(), tracks[1].1.clone());
+    run(commands::set_track_rating(s.handle(), s.state(), vec![a.clone()], 2)).unwrap();
+    for (file, _) in &tracks {
+        tag_wav(file, &[(ItemKey::TrackTitle, "Reloaded 503"), (ItemKey::Genre, "Genre 503")]);
+    }
+    run(commands::reload_tags(s.handle(), s.state(), vec![a.clone(), b.clone()])).unwrap();
+    let reloaded_a = tag_row(&s, &a);
+
+    let mut other = other_program(&s);
+    other.set_field(&b, rbl_db::write::TrackField::Title, "Newer title").unwrap();
+    drop(other);
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't undo Track Edit: the track has changed since. The newer change was kept.");
+    assert_eq!(tag_row(&s, &a), reloaded_a, "nothing written to the other track either");
+    assert_eq!(tag_row(&s, &b).0, "Newer title", "the newer change is kept");
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(tag_row(&s, &a).5, Some(0), "the rating before it still undoes");
+
+    // Redo the other way round: both titles typed over, reload again,
+    // undo, then a newer change to the first track.
+    run(details::set_track_field(s.handle(), s.state(), vec![a.clone()], "title".into(), "Typed A".into(), None)).unwrap();
+    run(commands::reload_tags(s.handle(), s.state(), vec![a.clone(), b.clone()])).unwrap();
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!((tag_row(&s, &a).0.as_str(), tag_row(&s, &b).0.as_str()), ("Typed A", "Newer title"));
+    let mut other = other_program(&s);
+    other.set_field(&a, rbl_db::write::TrackField::Title, "Other A").unwrap();
+    drop(other);
+    let error = run(commands::redo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "Can't redo Track Edit: the track has changed since. The newer change was kept.");
+    assert_eq!(tag_row(&s, &a).0, "Other A", "the newer change is kept");
+    assert_eq!(tag_row(&s, &b).0, "Newer title", "nothing redone on the other track");
+    let history = commands::current_history(&s.state());
+    assert!(!history.can_redo);
+    assert_eq!(history.undo_label.as_deref(), Some("Track Edit"), "the typed title still undoes");
+}
+
+/// #503: a track whose file cannot be read stops Reload Tag, and the tracks
+/// before it are put back, so there is never a half-reloaded selection with
+/// nothing in the history to take it back.
+#[test]
+fn reload_tag_that_fails_partway_changes_no_track_and_records_nothing() {
+    use lofty::prelude::ItemKey;
+
+    let s = shell();
+    let tracks = import_wavs(&s, &["Partway 503 A", "Partway 503 B"]);
+    let (a, b) = (tracks[0].1.clone(), tracks[1].1.clone());
+    tag_wav(&tracks[0].0, &[(ItemKey::TrackTitle, "Would change")]);
+    std::fs::remove_file(&tracks[1].0).unwrap();
+    let before = tag_row(&s, &a);
+    let history = commands::current_history(&s.state());
+
+    assert!(run(commands::reload_tags(s.handle(), s.state(), vec![a.clone(), b])).is_err());
+    assert_eq!(tag_row(&s, &a), before, "the first track is put back");
+    let now = commands::current_history(&s.state());
+    assert_eq!((now.can_undo, now.undo_label), (history.can_undo, history.undo_label));
+}
+
 /// #499: one Add Tracks to Playlist, sent a slice at a time under one
 /// transaction, is one Undo; Undo and Redo give back the exact order.
 #[test]
