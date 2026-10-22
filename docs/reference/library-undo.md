@@ -7,6 +7,7 @@ library or user files can be undone, and why the rest cannot. Audited for
 #427 on 2026-10-16 against `dev` at `4a42662a`. Update the table when an
 action is added or starts recording history. Folder replacement coverage was
 updated during integration on 2026-10-21 to retain #426 support already in `dev`.
+Cue and loop edits were added to the history for #504 on 2026-10-22.
 
 Evidence markers follow the project convention: `[OBS]` is something read in
 the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
@@ -26,18 +27,19 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
     could name rows the write removed for good.
 
   Writers that call `AppState::write` or `write_then` directly (imports,
-  relocation, cues, analysis, grid saves, LINK, deck plays) record nothing.
+  relocation, analysis, grid saves, LINK, deck plays) record nothing.
   Since #506 `write_then` itself ends the Redo branch whenever the write
   changed a row (SQLite `total_changes` on the writer's connection), and
   tells the window through the listener `lib.rs` sets
   (`AppState::on_history_changed` sends `edit-history:changed`). A write
   that changed nothing (a probe for a path) leaves Redo. The code that keeps
   the history itself (`recorded_edit`, `edit`, `permanent_edit`, Undo,
-  Redo) uses `write_history_then`, which does not. XML/iTunes replace also
-  calls `wrote_outside_history(_, true)` to clear both stacks [OBS code].
+  Redo, and cue edits, which record their own entry under the edit gate
+  since #504) uses `write_history_then`, which does not. XML/iTunes replace
+  also calls `wrote_outside_history(_, true)` to clear both stacks [OBS code].
 - **Payloads are exact.** Entries keep row ids and before/after column values
   (`PlaylistDeletion`, `PlaylistRename`, `PlaylistMove`,
-  `PlaylistTrackRemoval`, `TrackEdit`, `TrackTagEdit` in
+  `PlaylistTrackRemoval`, `TrackEdit`, `TrackTagEdit`, `CueRevision` in
   `crates/rbl-db/src/write.rs`). A multi-track edit is one entry with one
   step per track, undone last first [OBS code].
 - **Conflict check (#506).** Before Undo or Redo writes, the rows it would
@@ -57,10 +59,33 @@ the code or observed, `[ASSUME]` is inferred, `[UNKNOWN]` is open.
   `undo_keeps_a_rating_a_player_set_over_link_and_the_rest_of_the_history`
   in `link.rs`, `redo_refuses_a_rating_changed_by_another_program_and_keeps_the_rest`
   in `tests/commands.rs`].
+  A cue entry (#504) is checked in `check_history` through
+  `Writer::cue_revision_conflict`, and again in the transaction that
+  writes: every row it names must hold what the entry left there, and a hot
+  cue pad (or the Active Loop) it would fill must not be held by another
+  cue now ("Can't undo Delete Cue: Hot Cue B has been set since. The newer
+  change was kept.") [OBS code; cue tests below].
 - **Other histories.** Text fields keep WebKit's own history. Each track's
   beat grid has its own stack in `GridEditor` (`src-tauri/src/grid.rs`),
   which Edit › Undo reaches while a deck's grid editor is armed
   (`listenEditHistory`, `src/lib/editHistory.ts`) [OBS code].
+
+### Cue and loop Undo (#504)
+
+A cue edit made on a deck or in the cue list is undone with Edit › Undo
+(Cmd+Z on macOS, Ctrl+Z elsewhere) and redone with Edit › Redo, when no text
+field has focus and no deck's grid editor is armed (an armed grid editor
+owns Undo for its grid). The menu names the edit: Undo Set Hot Cue, Undo
+Move Cue, Undo Delete Cue, Undo Convert Memory Cues to Hot Cues, and so on.
+
+- An entry holds every `djmdCue` column a cue edit can change, for exactly
+  the rows that command changed, read before and after it under the edit
+  gate (`CueRevision` in `crates/rbl-db/src/write.rs`). Other cues of the
+  track are not named and are left as they are.
+- Undo of an add soft-deletes the same row; Undo of a delete brings the same
+  row (same id) back. Restored rows get a new `rb_local_usn`, as any edit.
+- The decks and the browser row follow through `cues:changed` for the track,
+  as after the edit itself.
 
 ## rekordbox
 
@@ -111,7 +136,8 @@ holds their ids.
 | Analyze (BPM, key, waveform, grid) | `analysis::analyse_track` | `.DAT/.EXT/.2EX`, BPM, key, analysis path | Not recorded [ASSUME: matches rekordbox, which has no analysis Undo]; ends the redo branch | code | Re-analysis replaces the old grid |
 | Phrase edit | `analysis::edit_phrase` | `.EXT` phrase section | Not recorded | code. [UNKNOWN] whether rekordbox's phrase editing undoes; `editapp::ScoreEditManager::undo` exists but is not traced to it | Previous phrases lost |
 | Beat grid edits, grid lock | `grid::grid_edit`, `grid_lock` | `.DAT/.EXT`, `BPM`, lock | Grid edits: own per-track Undo, which refuses (`ErrorKind::Conflict`) and drops the top entry when the grid on disk is no longer the one the entry expects, keeping the newer grid; lock: not recorded. Both end the library redo branch | `useGridEditor.test.tsx`, `e2e/grid-edit.spec.ts`, `an_undo_over_a_grid_changed_elsewhere_is_refused_and_keeps_the_newer_grid` (`grid.rs` unit) | No |
-| Cue and loop edits, Convert Memory Cues to Hot Cues | `cues::*` | `djmdCue`, ANLZ cue sections | Not recorded; ends the redo branch | `a_cue_edit_ends_the_redo_branch_and_keeps_undo` | Deleted cue lost. #504 |
+| Cue and loop edits: Set Memory Cue / Hot Cue / Loop, move, move to another pad, colour, comment, Active Loop, delete | `cues::add_cue`, `add_loop`, `move_cue`, `move_hot_cue`, `set_cue_colour`, `set_cue_comment`, `set_active_loop`, `delete_cue` | `djmdCue` rows of one track | Undo, one entry per command; refused if the cue changed since | `each_cue_and_loop_edit_is_one_undo_that_restores_the_exact_rows`, `undo_of_a_cue_changed_since_is_refused_and_keeps_the_newer_change`, `undo_of_a_delete_is_refused_when_the_pad_was_set_again`, `redo_of_a_cue_is_refused_when_the_pad_was_set_since` (`src-tauri/tests/commands.rs`) | No while the entry lives |
+| Convert Memory Cues to Hot Cues | `cues::convert_memory_cues_to_hot` | new `djmdCue` rows | Undo, one entry for the whole track | `a_conversion_is_one_undo_for_the_whole_track` | No |
 
 ### Playlists, folders and intelligent playlists
 
