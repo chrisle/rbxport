@@ -385,6 +385,7 @@ async function realBackend(): Promise<Backend> {
     deckPause: (deck) => invoke<void>("deck_pause", { deck }),
     deckSeek: (deck, positionMs) => invoke<void>("deck_seek", { deck, positionMs }),
     deckMove: (deck, byMs) => invoke<void>("deck_move", { deck, byMs }),
+    deckMoveGrid: (deck, gridTimesMs, beats) => invoke<void>("deck_move_grid", { deck, gridTimesMs, beats }),
     previewPlay: (track, positionMs) => invoke<void>("preview_play", { track, positionMs }),
     previewStop: () => invoke<void>("preview_stop"),
     previewState: () => invoke<PreviewState>("preview_state"),

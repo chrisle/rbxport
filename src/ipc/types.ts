@@ -712,6 +712,8 @@ export interface Backend {
   deckSeek(deck: DeckId, positionMs: number): Promise<void>;
   /** Moves the playhead by `byMs` from where the engine has it now. */
   deckMove(deck: DeckId, byMs: number): Promise<void>;
+  /** Count grid beats from the engine's head when the command arrives. */
+  deckMoveGrid(deck: DeckId, gridTimesMs: number[], beats: number): Promise<void>;
   /**
    * Sets a loop between two points and turns it on. A head already past
    * the out point goes back to the in point. The deck rounds at the out

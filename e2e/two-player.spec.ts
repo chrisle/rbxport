@@ -302,6 +302,9 @@ test("beat jump moves an active loop and keeps the head within it", async ({ pag
   await page.getByRole("button", { name: "Play", exact: true }).first().click();
   await a.getByTestId("player-controls").getByRole("button", { name: "4 beat loop" }).click();
   await expect.poll(async () => (await read()).loopingA).toBe(true);
+  const loopField = a.getByTestId("player-controls")
+    .getByRole("group", { name: "Beat loop length" }).getByRole("button").nth(1);
+  await expect(loopField).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("group", { name: "Deck A transport" })
     .getByRole("button", { name: "Pause", exact: true }).click();
   const before = await read();
@@ -309,6 +312,7 @@ test("beat jump moves an active loop and keeps the head within it", async ({ pag
   await expect.poll(async () => (await read()).aLoopIn).toBeGreaterThan(before.aLoopIn + 1);
   const after = await read();
   expect(after.loopingA).toBe(true);
+  await expect(loopField).toHaveAttribute("aria-pressed", "true");
   expect(after.aLoopOut - after.aLoopIn).toBeCloseTo(before.aLoopOut - before.aLoopIn, 1);
   expect(after.a).toBeGreaterThanOrEqual(after.aLoopIn);
   expect(after.a).toBeLessThan(after.aLoopOut);
@@ -321,6 +325,13 @@ test("beat jump moves an active loop and keeps the head within it", async ({ pag
   await expect.poll(async () => (await read()).aLoopIn).toBeLessThan(twice.aLoopIn - 1);
   const back = await read();
   expect(back.a - back.aLoopIn).toBeCloseTo(before.a - before.aLoopIn, 1);
+  await page.getByRole("button", { name: "Beat jump size" }).first().click();
+  await page.getByRole("menu", { name: "Beat jump size" })
+    .getByRole("menuitemradio", { name: "8Beats" }).click();
+  await page.getByRole("button", { name: "Beat jump forward" }).first().click();
+  await expect.poll(async () => (await read()).aLoopIn).toBeGreaterThan(back.aLoopIn + 3);
+  expect((await read()).loopingA).toBe(true);
+  await expect(loopField).toHaveAttribute("aria-pressed", "true");
 });
 
 test("beat jump without a loop moves the head and does not start a loop", async ({ page }) => {
