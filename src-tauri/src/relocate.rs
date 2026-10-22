@@ -5,10 +5,11 @@
 //! File › Display All Missing Files opens the Missing File Manager: every
 //! track whose file is not there (36,444 of the rig's 38,733), with a
 //! "N Track" count and Auto Relocate, Relocate, Delete and OK. The browser
-//! checks the working path of each row it draws
+//! checks the working path of a row when it is selected
 //! (`BrowseBasicView::updateMissingStatus` @0x100321010 in 7.2.19 macOS,
-//! see `rbl_db::track_path`); this reads the same path, the index's
-//! resolved `folder_path`.
+//! see `rbl_db::track_path` and [`track_missing`]); this reads the same
+//! path, the index's resolved `folder_path`, each time a page of rows is
+//! fetched and again when one row is selected.
 //!
 //! Auto Relocate ([`auto_relocate`]) is rekordbox's
 //! (`MissingFileTable::relocateSelectedFiles` with `SearchMode` 2, the
@@ -64,6 +65,32 @@ pub fn is_missing(path: &str) -> bool {
 pub fn is_missing_path(path: &Path) -> bool {
     // perf-ok: one `stat`, as rekordbox's own load does before it opens.
     !path.as_os_str().is_empty() && !path.exists()
+}
+
+/// Whether a track's file is gone, looked at now; `None` for an id the
+/// library does not hold.
+///
+/// [OBS rekordbox 7.2.19 macOS arm64, static, issue #682] The browser's
+/// `[!]` is a flag on the track (bit `0x20` of `RowDataTrack+0x3f8`, read by
+/// `browse::Status::isMissing` @0x1018a2e04), not a look at the disk each
+/// time a row is drawn. `BrowseBasicView::changedSelectedRows` @0x100321688
+/// looks again when exactly one row is selected: it calls
+/// `BrowseBasicView::updateMissingStatus` @0x100321010 on that row, which
+/// sets or clears the flag (`DatabaseIF::changeFileExistence`) from
+/// `juce::File::existsAsFile` on the working path, then repaints the row
+/// (`CustomListBox::repaintRow`). So a file that goes missing, or comes
+/// back, while the list is up is shown once its row is selected. The
+/// browser asks this then, since the rows it holds were read when their page
+/// was fetched.
+fn track_missing_in(library: &Library, track: &str) -> Option<bool> {
+    library.row_of(track).map(|row| is_missing(library.folder_path.get(row as usize)))
+}
+
+/// See [`track_missing_in`].
+#[tauri::command]
+pub async fn track_missing(state: State<'_, Arc<AppState>>, track: String) -> AppResult<Option<bool>> {
+    let library = state.library()?;
+    blocking("track_missing", move || Ok(track_missing_in(&library, &track))).await
 }
 
 /// rekordbox's `kPlayerOperateErrorLoadMissingFile` (global 0x1056c6b00,
@@ -1082,6 +1109,31 @@ mod tests {
         assert!(is_missing(dir.path().join("gone.mp3").to_str().unwrap()));
         // No path is a track that never had a file, which is not this.
         assert!(!is_missing(""));
+    }
+
+    /// #682: a file that goes missing after its row was read is found
+    /// missing when the row is looked at again, and found again when it
+    /// comes back, as rekordbox's `updateMissingStatus` sets and clears its
+    /// flag on selection.
+    #[test]
+    fn a_track_is_looked_at_again_when_asked() {
+        use rbl_index::testing::{library_from, TestTrack};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("track.mp3");
+        std::fs::write(&file, b"x").unwrap();
+        let path: &'static str = Box::leak(file.to_string_lossy().into_owned().into_boxed_str());
+        let library = library_from(&[
+            TestTrack { id: 1, title: "Here, then gone", path, ..TestTrack::default() },
+            TestTrack { id: 2, title: "Never had one", path: "", ..TestTrack::default() },
+        ]);
+        assert_eq!(track_missing_in(&library, "1"), Some(false));
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(track_missing_in(&library, "1"), Some(true), "gone since the row was read");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(track_missing_in(&library, "1"), Some(false), "back again");
+        assert_eq!(track_missing_in(&library, "2"), Some(false));
+        assert_eq!(track_missing_in(&library, "99"), None, "not in the library");
+        assert_eq!(track_missing_in(&library, "/loose/file.mp3"), None);
     }
 
     #[test]

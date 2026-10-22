@@ -629,6 +629,7 @@ pub fn run() {
             commands::track_phrases,
             commands::track_vocals,
             relocate::missing_tracks,
+            relocate::track_missing,
             relocate::sort_missing_tracks,
             relocate::remove_missing_tracks,
             commands::unanalysed_tracks,
