@@ -408,7 +408,7 @@ fn record_history(editor: &GridEditor, track: &str, action: GridAction, before: 
 /// newer library value, in the same words.
 fn conflict(action: GridAction, label: &str) -> AppError {
     let what = if action == GridAction::Undo { "undo" } else { "redo" };
-    AppError::new(ErrorKind::ReadOnly,
+    AppError::new(ErrorKind::Conflict,
         format!("Can't {what} {label}: the track's beat grid has changed since. The newer change was kept."))
 }
 
@@ -962,7 +962,7 @@ mod tests {
         let elsewhere: Vec<Beat> = grid().into_iter().map(|b| Beat { time_ms: b.time_ms + 7, ..b }).collect();
         written_elsewhere(&f, &elsewhere);
         let refused = f.run(GridAction::Undo).unwrap_err();
-        assert_eq!(refused.kind, ErrorKind::ReadOnly);
+        assert_eq!(refused.kind, ErrorKind::Conflict);
         assert_eq!(refused.message, "Can't undo Double Tempo: the track's beat grid has changed since. The newer change was kept.");
         assert_eq!(f.dat().beat_grid().unwrap(), elsewhere, "the newer grid stays");
         assert_eq!(f.bpms.len(), 1, "the row was not written either");
@@ -979,7 +979,7 @@ mod tests {
         let nudged = f.dat().beat_grid().unwrap();
         f.edit(GridEdit::Double);
         written_elsewhere(&f, &nudged);
-        assert_eq!(f.run(GridAction::Undo).unwrap_err().kind, ErrorKind::ReadOnly);
+        assert_eq!(f.run(GridAction::Undo).unwrap_err().kind, ErrorKind::Conflict);
         let left = f.editor.state_for(&Fixture::track(), &nudged);
         assert_eq!((left.undo_label, left.can_redo), (Some("Shift Beat Grid Right"), false));
         f.run(GridAction::Undo).unwrap();
@@ -995,7 +995,7 @@ mod tests {
         let elsewhere: Vec<Beat> = grid().into_iter().map(|b| Beat { time_ms: b.time_ms + 3, ..b }).collect();
         written_elsewhere(&f, &elsewhere);
         let refused = f.run(GridAction::Redo).unwrap_err();
-        assert_eq!(refused.kind, ErrorKind::ReadOnly);
+        assert_eq!(refused.kind, ErrorKind::Conflict);
         assert_eq!(refused.message, "Can't redo Halve Tempo: the track's beat grid has changed since. The newer change was kept.");
         assert_eq!(f.dat().beat_grid().unwrap(), elsewhere);
         assert!(f.editor.state_for("other", &grid()).can_undo, "an unrelated track's history is preserved");
