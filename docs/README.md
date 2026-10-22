@@ -10,6 +10,8 @@ Commands in these guides run from the repository root unless stated otherwise.
 | [Getting started](development/getting-started.md) | Setting up a checkout and choosing a safe run mode. |
 | [Architecture](development/architecture.md) | Finding the owner of a feature or tracing a request. |
 | [Conventions](development/conventions.md) | Writing code that fits the project. |
+| [Product decisions](development/product-decisions.md) | Looking up Rekordbox-only scope and decisions on vocal/phrase detection and advanced metadata management. |
+| [Rekordbox parity decisions](development/rekordbox-parity-decisions.md) | Establishing reference behavior and deciding whether work is in scope. |
 | [Testing](development/testing.md) | Choosing checks and interpreting their results. |
 | [Contributing](../CONTRIBUTING.md) | Reporting an issue or preparing a change for review. |
 | [Debugging](development/debugging.md) | Diagnosing failures and managing local output. |

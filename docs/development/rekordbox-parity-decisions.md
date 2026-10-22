@@ -5,6 +5,12 @@ It records product direction from the October 2026 backlog review; it is not
 evidence that a particular rekordbox behavior exists. Establish that behavior
 first using the evidence conventions below.
 
+The October 22, 2026 [product decisions](product-decisions.md) govern scope:
+RBXport is Rekordbox-only, new features without a Rekordbox counterpart are
+declined, and vocal/phrase detection and advanced metadata cleanup are
+explicitly excluded. These decisions supersede the earlier case-by-case
+exception path for new RBXport-only features.
+
 ```mermaid
 flowchart TD
     start[New issue or proposed behavior] --> evidence{Is the claimed rekordbox behavior established?}
@@ -23,14 +29,11 @@ flowchart TD
 
     impact -->|No| workflow{Is it a workflow Rekordbox provides?}
     workflow -->|Yes| parityCandidate[Treat as a parity candidate\nAssess library/device write risk and evidence]
-    workflow -->|No| review[RBXport-specific workflow\nAdd needs-product-decision\nRequires Chris's case-by-case product decision]
+    workflow -->|No| close[Outside Rekordbox scope\nClose as not planned]
     parityCandidate --> approval{Does it write or rewrite\nlibrary or USB data?}
     approval -->|Yes| pending[Use safe, reversible handling\nDefer automatic-update policy until diff work lands]
     approval -->|No| regression
     pending --> regression
-    review --> decision{Approved?}
-    decision -->|Yes| regression
-    decision -->|No| close[Close or relabel as declined enhancement]
 ```
 
 ## Rules behind the flow
@@ -46,11 +49,12 @@ flowchart TD
 4. **Treat proven Rekordbox workflows as parity candidates.** Examples include
    device playlist editing, Intelligent Playlists, metadata import, and export
    behavior. Verify the actual Rekordbox behavior before adding it.
-5. **Treat new RBXport-only workflows as product decisions.** Do not describe
-   them as compatibility fixes. Add `needs-product-decision`, state the safest
-   default and alternatives, and exclude it from automatic backlog work until
-   the decision is recorded. Evidence requirements belong in the ticket scope,
-   not in a separate blocking label.
+5. **Decline new workflows outside Rekordbox scope.** Do not describe them as
+   compatibility fixes. Apply the recorded [product decisions](product-decisions.md),
+   including the explicit detection and metadata-cleanup exclusions. If the
+   claimed Rekordbox behavior is uncertain, investigate it before deciding
+   whether the request is parity. Evidence requirements belong in the ticket
+   scope, not in a separate blocking label.
 6. **Do not invent automatic library or USB changes.** The policy for applying
    discovered USB/library differences automatically is deferred until the
    active diff/reconciliation work establishes a safe design.
