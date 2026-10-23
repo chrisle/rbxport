@@ -1175,6 +1175,85 @@ fn row_dto(row: &DeviceRow) -> RowDto {
 mod tests {
     use super::*;
 
+    /// Runs the public command against a disposable stick and decoded audio,
+    /// through analysis and both device database writers.
+    #[test]
+    fn loose_wav_is_analysed_and_added_without_a_collection_entry_or_audio_copy() {
+        let (_src, dest) = stick();
+        let local = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(local.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let collection_count = || {
+            let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+            db.connection().query_row("SELECT COUNT(*) FROM djmdContent", [], |row| row.get::<_, i64>(0)).unwrap()
+        };
+        let before_collection = collection_count();
+        let root = dest.path();
+        let original = device::read(root, Format::DeviceLibrary).unwrap();
+        let playlist = original.nodes.iter().find(|node| node.name == "Friday").unwrap();
+        let existing_ids = playlist.tracks.clone();
+        let music = root.join("Music");
+        std::fs::create_dir_all(&music).unwrap();
+        let wav = music.join("click.wav");
+        write_test_wav(&wav);
+        let audio = std::fs::read(&wav).unwrap();
+        let path = root.to_str().unwrap().to_owned();
+        let id = playlist.id.to_string();
+        let row = rbl_index::folder::loose_id(&wav);
+        let add = || tauri::async_runtime::block_on(device_playlist_add_files(path.clone(), "deviceLibrary".into(), id.clone(), vec![row.clone()]));
+        assert_eq!(add().unwrap().changed, 1);
+        let legacy = device::read(root, Format::DeviceLibrary).unwrap();
+        let one = device::read(root, Format::OneLibrary).unwrap();
+        assert_eq!(legacy.nodes, one.nodes);
+        assert_eq!(legacy.tracks, one.tracks);
+        let entries = &legacy.node(playlist.id).unwrap().tracks;
+        assert_eq!(&entries[..existing_ids.len()], existing_ids);
+        assert_eq!(entries.len(), existing_ids.len() + 1);
+        let added = legacy.track(*entries.last().unwrap()).unwrap();
+        assert_eq!(added.path, "/Music/click.wav");
+        assert_ne!(added.analysis_path, "");
+        let dat = root.join(added.analysis_path.trim_start_matches('/'));
+        for file in [&dat, &rbl_anlz::sibling(&dat, "EXT"), &rbl_anlz::sibling(&dat, "2EX")] {
+            let parsed = rbl_anlz::Anlz::read(file).unwrap();
+            assert_eq!(parsed.path().as_deref(), Some("/Music/click.wav"));
+        }
+        assert!(rbl_export::verify(root).unwrap().is_ok());
+        assert_eq!(std::fs::read(&wav).unwrap(), audio);
+        assert!(!root.join("Contents").join("click.wav").exists());
+        assert_eq!(collection_count(), before_collection, "the local collection remains unchanged");
+        assert_eq!(add().unwrap().changed, 0);
+        assert_eq!(device::read(root, Format::DeviceLibrary).unwrap(), legacy);
+        assert_eq!(device::read(root, Format::OneLibrary).unwrap(), one);
+        assert_eq!(std::fs::read(&wav).unwrap(), audio);
+        assert_eq!(collection_count(), before_collection);
+    }
+
+    fn write_test_wav(path: &Path) {
+        let rate = 22_050_u32;
+        let frames = rate * 4;
+        let mut data = Vec::with_capacity(usize::try_from(frames * 2).unwrap());
+        for i in 0..frames {
+            let since = i % (rate / 2);
+            let sample: i16 = if since < 400 { i16::try_from(20_000 * (400 - since) / 400).unwrap() } else { 0 };
+            data.extend_from_slice(&sample.to_le_bytes());
+        }
+        let len = u32::try_from(data.len()).unwrap();
+        let mut wav = Vec::with_capacity(44 + data.len());
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&rate.to_le_bytes());
+        wav.extend_from_slice(&(rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&len.to_le_bytes());
+        wav.extend_from_slice(&data);
+        std::fs::write(path, wav).unwrap();
+    }
+
     /// A stick written by the export pipeline: a folder with a list, and a
     /// list at the top level.
     fn stick() -> (tempfile::TempDir, tempfile::TempDir) {
