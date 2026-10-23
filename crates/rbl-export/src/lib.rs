@@ -1235,7 +1235,7 @@ fn export_cancellable_inner(
             match prepared {
                 Ok(path) => track.prepared_audio = path,
                 Err(ExportError::Cancelled) => return Err(ExportError::Cancelled),
-                Err(ExportError::Io(error)) if matches!(error.kind(), std::io::ErrorKind::StorageFull | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::NotADirectory) && std::fs::File::open(&track.source_path).is_ok() => {
+                Err(ExportError::Io(error)) if matches!(error.kind(), std::io::ErrorKind::StorageFull | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::NotADirectory | std::io::ErrorKind::AlreadyExists) && std::fs::File::open(&track.source_path).is_ok() => {
                     track.cache_bypass = true;
                 }
                 Err(error) => {
@@ -1560,7 +1560,7 @@ fn export_cancellable_inner(
                         }) {
                             Ok(bytes) => Ok(bytes),
                             Err(ExportError::Cancelled) => return Err(ExportError::Cancelled),
-                            Err(ExportError::Io(error)) if !audio_dest.exists() && matches!(error.kind(), std::io::ErrorKind::StorageFull | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::NotADirectory) => {
+                            Err(ExportError::Io(error)) if !audio_dest.exists() && matches!(error.kind(), std::io::ErrorKind::StorageFull | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::NotADirectory | std::io::ErrorKind::AlreadyExists) => {
                                 // An unwritable/full internal cache or a single
                                 // conversion above its 2 GiB cap uses the
                                 // destination stage instead.
