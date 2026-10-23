@@ -1,0 +1,2 @@
+Disposable Team Toolkit Windows delivery qualification only.
+Close the draft PR without merging.
