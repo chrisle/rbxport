@@ -162,6 +162,13 @@ it("pins queued playback until an authoritative advancing deck tick", async () =
   act(() => frame?.(now));
   expect(deck.positionRef.current).toBe(0);
 
+  // A zero-frame playing tick must not start wall-clock interpolation. The
+  // next paint can arrive before the deck has produced its first buffer.
+  now += 400;
+  expect(deck.positionNow()).toBe(0);
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+
   act(() => tick({
     ...emptyTick,
     b: { ...emptyDeck, loadId: loads[0]!.id, loaded: true, playing: true, frames: RATE / 10, totalFrames: RATE * 300 },
