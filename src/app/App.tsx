@@ -3069,6 +3069,7 @@ function AppBody() {
   const openViewSettings = useCallback(() => openPreferences("view"), [openPreferences]);
   const ejectA = useCallback(() => setPlayerTrack(null), []);
   const ejectB = useCallback(() => setPlayerTrackB(null), []);
+  const ejectDevice = useCallback((node: TreeNode) => { void ejectDeviceFromTree(node); }, [ejectDeviceFromTree]);
   const masterA = useCallback(() => setSyncMaster("a"), [setSyncMaster]);
   const masterB = useCallback(() => setSyncMaster("b"), [setSyncMaster]);
   const exportDeckTrack = useCallback((device: string, id: string) => exportTrackTo(device, [id]), [exportTrackTo]);
@@ -3086,13 +3087,13 @@ function AppBody() {
     showCounts: viewPrefs.playlistCounts, onOpenSync: openSyncManager,
     onCreateSmartPlaylist: createSmartPlaylistIn, onEditSmartPlaylist: editSmartPlaylist,
     onAddArtwork: addPlaylistArtwork, onAddToShortcut: addToShortcut, onSortItems: sortItems,
-    onEjectDevice: (node: TreeNode) => { void ejectDeviceFromTree(node); },
+    onEjectDevice: ejectDevice,
     ejectingDeviceId, deviceBusy: syncing || exportRunning || ejectingDeviceId !== null, readOnly,
   }), [
     draggedTracks, addDraggedTo, exportDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, menuDevices, exportPlaylistFile,
     createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, expandNode,
     viewPrefs.playlistCounts, openSyncManager, createSmartPlaylistIn, editSmartPlaylist,
-    addPlaylistArtwork, addToShortcut, sortItems, ejectDeviceFromTree, ejectingDeviceId, syncing,
+    addPlaylistArtwork, addToShortcut, sortItems, ejectDevice, ejectingDeviceId, syncing,
     exportRunning,
   ]);
   const subList = useMemo(() => ({
@@ -3319,7 +3320,7 @@ function AppBody() {
           railShortcuts={railShortcuts}
           onOpenShortcut={openShortcut}
           onDeleteShortcut={deleteShortcut}
-          onEjectDevice={(node) => { void ejectDeviceFromTree(node); }}
+          onEjectDevice={ejectDevice}
           ejectingDeviceId={ejectingDeviceId}
           deviceBusy={deviceBusy}
           onDeviceCreate={createOnDevice}
