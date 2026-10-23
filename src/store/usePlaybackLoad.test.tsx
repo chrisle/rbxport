@@ -33,6 +33,7 @@ let root: Root;
 let deck: Playback;
 let track = "track-a";
 let loaded: (event: DeckEvent) => void;
+let tick: (value: Tick) => void;
 let reset: () => void;
 let loads: { track: string; id: number }[];
 let sent: string[];
@@ -42,7 +43,10 @@ const done = () => Promise.resolve();
 function backend(): Backend {
   return {
     deckState: () => Promise.resolve(emptyTick),
-    onDeckTick: (_listener: (tick: Tick) => void) => () => undefined,
+    onDeckTick: (listener: (tick: Tick) => void) => {
+      tick = listener;
+      return () => undefined;
+    },
     onDeckEvent: (listener: (event: DeckEvent) => void) => {
       loaded = listener;
       return () => undefined;
@@ -106,6 +110,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   __setBackend(null);
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -129,6 +134,50 @@ it("defers cue and play until the newest rapidly selected track is ready", async
   finish(loads[2]!);
   await settle();
   expect(sent).toEqual(["seek:12000", "play"]);
+});
+
+it("pins queued playback until an authoritative advancing deck tick", async () => {
+  let now = 1_000;
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  let frame: FrameRequestCallback | undefined;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frame = callback;
+    return 1;
+  });
+  act(() => deck.toggle());
+  finish(loads[0]!);
+  await settle();
+  expect(sent).toEqual(["play"]);
+
+  now += 400;
+  expect(deck.positionNow()).toBe(0);
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+
+  act(() => tick({
+    ...emptyTick,
+    b: { ...emptyDeck, loadId: loads[0]!.id, loaded: true, playing: true, totalFrames: RATE * 300 },
+  }));
+  expect(deck.positionNow()).toBe(0);
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+
+  // A zero-frame playing tick must not start wall-clock interpolation. The
+  // next paint can arrive before the deck has produced its first buffer.
+  now += 400;
+  expect(deck.positionNow()).toBe(0);
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+
+  act(() => tick({
+    ...emptyTick,
+    b: { ...emptyDeck, loadId: loads[0]!.id, loaded: true, playing: true, frames: RATE / 10, totalFrames: RATE * 300 },
+  }));
+  expect(deck.positionNow()).toBeCloseTo(0.1);
+  now += 16;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBeGreaterThan(0);
+  clock.mockRestore();
 });
 
 it("keeps an overview click made while the track opens, and starts from there", async () => {
