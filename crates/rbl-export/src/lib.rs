@@ -925,6 +925,97 @@ pub fn export_full(
     export_with_options(destination, tracks, playlists, my_tags, &ExportOptions { defaults, sync, ..Default::default() }, progress)
 }
 
+/// Add files already on a device to an existing device playlist without a
+/// desktop-library row or a second audio copy. A full export writes both
+/// database formats, so this operation refuses a device whose two libraries
+/// differ rather than overwrite edits held by only one of them.
+pub fn add_in_place_to_playlist(
+    root: &Path,
+    format: device_library::Format,
+    playlist_id: u32,
+    sources: &[SourceTrack],
+) -> Result<ExportReport> {
+    use device_library::Format;
+    let volume = rbl_core::durable::VolumeIdentity::capture(root)?;
+    let legacy = device_library::read(root, Format::DeviceLibrary)?;
+    let one = device_library::read(root, Format::OneLibrary)?;
+    if legacy.nodes != one.nodes || legacy.tracks != one.tracks {
+        return Err(ExportError::Conflict("This device's two libraries differ; a full export would overwrite a device-only edit. Nothing was changed.".into()));
+    }
+    let selected = match format {
+        Format::DeviceLibrary => &legacy,
+        Format::OneLibrary => &one,
+    };
+    if selected.node(playlist_id).is_none_or(|node| node.folder) {
+        return Err(ExportError::Conflict(
+            "That playlist is no longer on the device.".into(),
+        ));
+    }
+    if sources
+        .iter()
+        .any(|source| source.id != 0 || on_stick(root, &source.source_path).is_none())
+    {
+        return Err(ExportError::Conflict(
+            "Only files already on this device can be added in place.".into(),
+        ));
+    }
+    let before = snapshot::Snapshot::read(root)?;
+    let manifest = Manifest::load(root);
+    let record = sync_record::read(root);
+    if manifest.as_ref().is_some_and(|manifest| manifest.db_id != 0)
+        && record.as_ref().is_some_and(|record| record.db_id != 0 && Some(record.db_id) != manifest.as_ref().map(|manifest| manifest.db_id)) {
+        return Err(ExportError::Conflict("The device's sync owner differs from its last export. Nothing was changed.".into()));
+    }
+    let db_id = record.as_ref().map(|record| record.db_id).filter(|id| *id != 0)
+        .or_else(|| manifest.as_ref().map(|manifest| manifest.db_id)).unwrap_or(0);
+    let one_path = export_root(root).join("rekordbox/exportLibrary.db");
+    let one_db = rbl_onelibrary::ExportLibrary::open_read_only(&one_path).map_err(|error| ExportError::OneLibrary(error.to_string()))?;
+    let tag_id: u32 = one_db.connection().query_row("SELECT myTagMasterDBID FROM property LIMIT 1", [], |row| row.get(0))
+        .map_err(|error| ExportError::OneLibrary(error.to_string()))?;
+    drop(one_db);
+    let (mut tracks, mut playlists) = reconcile::all(root, &before, manifest.as_ref())?;
+    let playlist = playlists
+        .iter_mut()
+        .find(|node| node.device_id == playlist_id && !node.folder)
+        .ok_or_else(|| ExportError::Conflict("That playlist is no longer on the device.".into()))?;
+    let mut known: BTreeMap<String, usize> = tracks
+        .iter()
+        .enumerate()
+        .filter_map(|(index, track)| {
+            on_stick(root, &track.source_path).map(|path| (path_key(&path), index))
+        })
+        .collect();
+    for source in sources {
+        let path = on_stick(root, &source.source_path)
+            .ok_or_else(|| ExportError::Conflict("A source file left this device.".into()))?;
+        let index = if let Some(index) = known.get(&path_key(&path)) {
+            *index
+        } else {
+            let index = tracks.len();
+            tracks.push(source.clone());
+            known.insert(path_key(&path), index);
+            index
+        };
+        if !playlist.track_indices.contains(&index) {
+            playlist.track_indices.push(index);
+        }
+    }
+    export_with_options(
+        root,
+        &tracks,
+        &playlists,
+        &[],
+        &ExportOptions {
+            keep_unlisted: true,
+            expected_volume: Some(&volume),
+            db_id_override: Some(db_id),
+            my_tag_master_db_id_override: Some(tag_id),
+            ..Default::default()
+        },
+        &mut |_| {},
+    )
+}
+
 #[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CompatibilityFormat { Wav, Aiff, Mp3 }
@@ -956,6 +1047,8 @@ pub struct ExportOptions<'a> {
     /// their place, instead of being taken off. Export Playlist and Export
     /// Track add to a device as rekordbox's do; a SYNC leaves this off.
     pub keep_unlisted: bool,
+    pub db_id_override: Option<u64>,
+    pub my_tag_master_db_id_override: Option<u32>,
 }
 
 /// Export with optional conversion of audio outside the common CDJ formats.
@@ -1003,7 +1096,7 @@ fn export_cancellable_inner(
     let _inspection = incremental::Inspection::new();
     let started = std::time::Instant::now();
     let requested_tracks = tracks;
-    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all } = options;
+    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all, db_id_override, my_tag_master_db_id_override } = options;
     if let Some(volume) = expected_volume { volume.check(destination)?; }
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
@@ -1073,7 +1166,7 @@ fn export_cancellable_inner(
         previous.as_ref().and_then(|m| m.baseline.clone()).map_or_else(|| snapshot::Snapshot::read(destination), Ok)?
     } else { snapshot::Snapshot::read(destination)? };
     let trusted = incremental::trusted_paths(destination, previous.as_ref())?;
-    let db_id = sync.map_or(0, |s| s.db_id);
+    let db_id = db_id_override.unwrap_or_else(|| sync.map_or(0, |s| s.db_id));
     if let Some(old) = previous.as_mut().filter(|m| m.db_id == 0 && db_id != 0) {
         if sync_record::read(destination).is_some_and(|r| r.db_id == db_id) {
             // Old manifests lacked DBID. Upgrade only when rekordbox's own
@@ -1944,7 +2037,7 @@ fn export_cancellable_inner(
     std::fs::create_dir_all(&staged_db).map_err(context("Could not write export.pdb".to_owned()))?;
     std::fs::write(staged_db.join("export.pdb"), &pdb).map_err(context("Could not write export.pdb".to_owned()))?;
     // The tags and the tracks carrying them, for the player's Track Filter.
-    let master_db_id = my_tag_master_db_id(sync);
+    let master_db_id = my_tag_master_db_id_override.unwrap_or_else(|| my_tag_master_db_id(sync));
     let tagged: Vec<(u32, &[u64])> = one_library_tracks.iter().map(|t| (t.export_id, t.my_tags.as_slice())).collect();
     std::fs::write(staged_db.join("exportExt.pdb"), ext_pdb::build(my_tags, &tagged, master_db_id)).map_err(context("Could not write exportExt.pdb".to_owned()))?;
 

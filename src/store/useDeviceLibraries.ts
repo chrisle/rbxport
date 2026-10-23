@@ -23,6 +23,7 @@ export interface DeviceLibraries {
    * Rejects with the backend's reason, having changed nothing.
    */
   edit: (path: string, format: DeviceFormat, edit: DevicePlaylistEdit) => Promise<DevicePlaylistEditResult>;
+  refresh: (path: string) => Promise<void>;
   /** Bumped after every edit, so a view of a stick's library opens again. */
   revision: number;
 }
@@ -87,7 +88,12 @@ export function useDeviceLibraries(devices: readonly Device[]): DeviceLibraries 
     [read],
   );
 
+  const refresh = useCallback(async (path: string) => {
+    await read(path);
+    setRevision((revision) => revision + 1);
+  }, [read]);
+
   const nodes = useMemo(() => withDeviceLibraries(deviceNodes(devices), loaded), [devices, loaded]);
 
-  return useMemo(() => ({ nodes, expand, edit, revision }), [nodes, expand, edit, revision]);
+  return useMemo(() => ({ nodes, expand, edit, refresh, revision }), [nodes, expand, edit, refresh, revision]);
 }
