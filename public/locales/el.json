@@ -1778,5 +1778,6 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "Προσθήκη των \"Ετικετών μου\" στα \"Σχόλια\"",
   "This operation can take few minutes.": "Η λειτουργία αυτή μπορεί να χρειαστεί πολλή ώρα.",
-  "Please wait for a while": "Παρακαλώ περιμένετε"
+  "Please wait for a while": "Παρακαλώ περιμένετε",
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled."
 }

@@ -1241,6 +1241,7 @@
   "The latest version has been downloaded. It will be used the next time rbxport opens.",
   "The length of time before a track is added to Histories",
   "The library could not be found.",
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.",
   "The library has not finished loading yet.",
   "The library is read-only.",
   "The location can be changed at [Advanced] tab of [Preferences] window.",

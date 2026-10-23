@@ -1781,5 +1781,6 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "在「註解」中新增「我的標籤」",
   "This operation can take few minutes.": "此操作可能會花點時間。",
-  "Please wait for a while": "請稍等"
+  "Please wait for a while": "請稍等",
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled."
 }

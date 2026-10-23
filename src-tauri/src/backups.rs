@@ -92,6 +92,25 @@ fn tree_size(path: &Path, check: &mut dyn FnMut() -> AppResult<()>) -> AppResult
 fn error(e: impl std::fmt::Display) -> AppError {
     AppError::internal(format!("Backup: {e}"))
 }
+
+fn database_error(e: rusqlite::Error) -> AppError {
+    match &e {
+        rusqlite::Error::SqliteFailure(code, _)
+            if matches!(code.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) =>
+        {
+            tracing::warn!(error = %e, "library database was busy during backup");
+            AppError::new(crate::error::ErrorKind::Busy, "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.")
+        }
+        _ => error(e),
+    }
+}
+
+fn library_error(e: rbl_db::DbError) -> AppError {
+    match e {
+        rbl_db::DbError::Sqlite(e) => database_error(e),
+        other => error(other),
+    }
+}
 fn millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -389,9 +408,9 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
             };
             progress("copying", copied, total, &item)
         };
-        let snapshot = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).map_err(error)?;
-        snapshot.connection().execute("VACUUM main INTO ?1", [partial.join("master.db").to_string_lossy().as_ref()]).map_err(error)?;
-        let counts = rbl_backup::summary::count(snapshot.connection()).map_err(error)?;
+        let snapshot = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).map_err(library_error)?;
+        snapshot.connection().execute("VACUUM main INTO ?1", [partial.join("master.db").to_string_lossy().as_ref()]).map_err(database_error)?;
+        let counts = rbl_backup::summary::count(snapshot.connection()).map_err(database_error)?;
         drop(snapshot);
         let mut bytes = fs::metadata(partial.join("master.db")).map_err(error)?.len();
         let database_bytes = bytes + library_bytes;
@@ -626,6 +645,54 @@ mod tests {
         let backup = PathBuf::from(create(&state).unwrap());
         assert!(backup.is_file());
         assert_eq!(list(&state).unwrap().len(), 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn exclusive_database_lock_reports_contention_without_disabling_protection() {
+        let (dir, _state, location) = fixture();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.path().join("locked-backups"));
+        state.set_library(library, true, db.schema().db_version, 0, location.clone());
+        drop(db);
+
+        let blocker = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+        blocker.connection().execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let open = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap_err();
+        assert!(matches!(open, rbl_db::DbError::Sqlite(rusqlite::Error::SqliteFailure(code, _))
+            if code.code == rusqlite::ErrorCode::DatabaseBusy));
+        let failure = create(&state).unwrap_err();
+        assert_eq!(failure.kind, crate::error::ErrorKind::Busy);
+        assert!(failure.message.contains("Close rekordbox or another app"));
+        assert!(failure.message.contains("Keep Library Protection enabled"));
+        assert!(list(&state).unwrap().is_empty());
+        blocker.connection().execute_batch("ROLLBACK").unwrap();
+        drop(blocker);
+
+        let backup = PathBuf::from(create(&state).unwrap());
+        assert!(backup.is_file());
+        let summary = rbl_backup::summary::Summary::read(&backup).unwrap().unwrap();
+        assert_eq!(summary.counts.tracks, rbl_db::fixture::Shape::default().tracks as u64);
+        assert_eq!(list(&state).unwrap().len(), 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn backup_under_wal_writer_uses_only_committed_data() {
+        let (_dir, state, location) = fixture();
+        let track = rbl_db::fixture::track_id(1);
+        let writer = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+        writer.connection().execute_batch("PRAGMA journal_mode=WAL").unwrap();
+        writer.connection().execute("UPDATE djmdContent SET Rating=3 WHERE ID=?1", [&track]).unwrap();
+        writer.connection().execute_batch("BEGIN IMMEDIATE").unwrap();
+        writer.connection().execute("UPDATE djmdContent SET Rating=5 WHERE ID=?1", [&track]).unwrap();
+
+        let backup = PathBuf::from(create(&state).unwrap());
+        writer.connection().execute_batch("ROLLBACK").unwrap();
+        drop(writer);
+        restore(&state, &location, &backup, rbl_backup::restore::Parts::ALL);
+        assert_eq!(rating(&state), 3);
     }
 
     #[test]
