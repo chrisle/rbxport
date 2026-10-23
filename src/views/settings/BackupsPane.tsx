@@ -52,8 +52,9 @@ export function BackupsPane() {
   const copying = job.progress.phase === "copying" && job.progress.totalBytes > 0;
   const percent = Math.min(100, Math.max(0, Math.floor(job.progress.copiedBytes / (job.progress.totalBytes || 1) * 100)));
   const stopping = job.progress.phase === "stopping";
+  const activeError = error || job.error;
   return <Section title={t("Backups")}>
-    {error || job.error ? <p role="alert" className={styles.error}>{error || job.error}</p> : null}
+    {activeError ? <p role="alert" className={styles.error}>{t(activeError)}</p> : null}
 
     <BackupSizeChart />
     <section className={`${layout.summary} ${job.progress.running ? styles.activeBackup : ""}`} aria-label={t("Backup your Library")}>

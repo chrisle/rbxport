@@ -45,6 +45,7 @@ rbl-onelibrary = { path = "../crates/rbl-onelibrary" }
 # Backup archives' manifest, summary and sizes, and the restore journal
 # RBXport Restore shares.
 rbl-backup = { path = "../crates/rbl-backup" }
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 # The diagnostics readout in the title bar: this process's CPU and memory.
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 parking_lot = "0.12"
@@ -71,7 +72,6 @@ zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 tempfile = "3"
 
 [dev-dependencies]
-rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 # `test` gives a mock app, so the native menu can be built and inspected
 # without opening a window — which cannot be screenshotted on this machine.
 tauri = { version = "2", features = ["test"] }

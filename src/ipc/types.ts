@@ -250,7 +250,7 @@ export interface AppErrorDto {
    * changed since by something outside the history; nothing was written and
    * the entry is gone (#506).
    */
-  kind: "readOnly" | "notFound" | "malformed" | "cancelled" | "conflict" | "internal";
+  kind: "readOnly" | "notFound" | "malformed" | "cancelled" | "busy" | "conflict" | "internal";
   message: string;
   detail?: string;
 }

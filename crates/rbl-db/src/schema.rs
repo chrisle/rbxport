@@ -47,10 +47,12 @@ impl SchemaProbe {
         // This is also the first real read, so a wrong passphrase surfaces here.
         let table_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'", [], |r| r.get(0))
-            .map_err(|e| {
-                DbError::Open(format!(
+            .map_err(|e| match &e {
+                rusqlite::Error::SqliteFailure(code, _)
+                    if matches!(code.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => DbError::Sqlite(e),
+                _ => DbError::Open(format!(
                     "could not read the schema (usually a wrong passphrase): {e}"
-                ))
+                )),
             })?;
 
         // Stored as TEXT ("6000"), not an integer. Reading it as i64 fails, and
