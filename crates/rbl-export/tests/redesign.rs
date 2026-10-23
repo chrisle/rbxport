@@ -167,7 +167,7 @@ fn conversion_uses_destination_stage_when_internal_cache_is_unavailable() {
     let cache = rbl_export::cache::PreparationCache::new(unavailable.join("cache"));
     let report = rbl_export::export_with_options(usb.path(), &[audio], &playlists(vec![0]), &[],
         &ExportOptions { compatibility: Some(rbl_export::CompatibilityFormat::Mp3), cache: Some(&cache), ..Default::default() }, &mut |_| {}).unwrap();
-    assert_eq!(report.tracks, 1);
+    assert_eq!(report.tracks, 1, "{:?}", report.failed);
     assert!(report.failed.is_empty());
     assert_eq!(report.converted, 1);
     assert!(rbl_export::verify(usb.path()).unwrap().is_ok());

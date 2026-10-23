@@ -76,11 +76,76 @@ mod tests {
             .map(|entry| entry.unwrap().metadata().unwrap().len()).sum();
         assert!(retained_bytes <= 64, "retained {retained_bytes} bytes");
     }
+
+    #[test]
+    fn size_limited_cache_retries_conversion_in_destination_stage() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("source.flac");
+        std::fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("../rbl-audio/tests/fixtures/stereo-96k.flac"), &source).unwrap();
+        let limit = 1024;
+        let mut cache = PreparationCache::new(cache_dir.path().to_owned());
+        cache.conversion_temp_limit = limit;
+        let cache_error = cache.with_converted(
+            &source, rbl_audio::compatibility::Format::Wav,
+            &mut |_, _| {}, &|| false, |_, _, _| Ok(()),
+        ).unwrap_err();
+        assert!(matches!(cache_error, ExportError::Io(ref error) if error.kind() == std::io::ErrorKind::StorageFull));
+        let track = crate::SourceTrack {
+            id: 1,
+            source_path: source.clone(),
+            title: "Converted track".into(),
+            artist: "Artist".into(),
+            duration_sec: 1,
+            sample_rate: 96_000,
+            ..Default::default()
+        };
+        let playlist = crate::SourcePlaylist {
+            id: 10,
+            name: "Playlist".into(),
+            track_indices: vec![0],
+            ..Default::default()
+        };
+        let mut saw_verification = false;
+        let report = crate::export_with_options(
+            destination.path(), &[track], &[playlist], &[],
+            &crate::ExportOptions {
+                compatibility: Some(crate::CompatibilityFormat::Wav),
+                cache: Some(&cache),
+                ..Default::default()
+            },
+            &mut |progress| { if progress.stage == "verifying" { saw_verification = true; } },
+        ).unwrap();
+
+        assert_eq!(report.tracks, 1);
+        assert_eq!(report.converted, 1);
+        assert_eq!(report.metrics.conversions, 1, "cache conversion must be attempted before destination fallback");
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert!(saw_verification, "export must reach destination-stage verification");
+        assert!(report.verified);
+        let manifest = crate::Manifest::load(destination.path()).unwrap();
+        let exported = destination.path().join(manifest.tracks[0].audio.trim_start_matches('/'));
+        let exported_size = std::fs::metadata(&exported).unwrap().len();
+        assert_eq!(exported_size, 44 + 11_025 * 4);
+        assert!(exported_size > limit);
+        assert!(!rbl_audio::compatibility::needs_conversion(&exported).unwrap());
+        assert!(crate::verify(destination.path()).unwrap().is_ok());
+        assert_eq!(cache.converted_size(&source, rbl_audio::compatibility::Format::Wav), None);
+        let mut internal_bytes = 0;
+        for entry in std::fs::read_dir(cache_dir.path()).unwrap() {
+            let entry = entry.unwrap();
+            assert!(!entry.file_type().unwrap().is_dir(), "temporary conversion directory remains: {:?}", entry.path());
+            internal_bytes += entry.metadata().unwrap().len();
+        }
+        assert!(internal_bytes <= limit, "internal cache retained {internal_bytes} bytes with a {limit}-byte conversion limit");
+    }
 }
 
 #[derive(Debug)]
 pub struct PreparationCache {
     root: PathBuf,
+    conversion_temp_limit: u64,
     consumers: Mutex<()>,
     gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     probes: Mutex<HashMap<String, rbl_audio::compatibility::AudioProperties>>,
@@ -150,7 +215,7 @@ impl PreparationCache {
         Ok(path)
     }
     pub fn new(root: PathBuf) -> Self {
-        Self { root, consumers: Mutex::new(()), gates: Mutex::new(HashMap::new()), probes: Mutex::new(HashMap::new()), hashes: Mutex::new(HashMap::new()), preparing: Mutex::new(0), ready: Condvar::new(), dirty: std::sync::atomic::AtomicBool::new(true) }
+        Self { root, conversion_temp_limit: CONVERSION_TEMP_LIMIT, consumers: Mutex::new(()), gates: Mutex::new(HashMap::new()), probes: Mutex::new(HashMap::new()), hashes: Mutex::new(HashMap::new()), preparing: Mutex::new(0), ready: Condvar::new(), dirty: std::sync::atomic::AtomicBool::new(true) }
     }
 
     fn key(source: &Path, profile: &str) -> Result<(String, incremental::FileRevision)> {
@@ -268,7 +333,7 @@ impl PreparationCache {
         let temp = tempfile::Builder::new().prefix("conversion-").tempdir_in(&self.root)?;
         let prepared = temp.path().join(format!("audio.{}", target.extension()));
         incremental::count(false, true, false);
-        let size = rbl_audio::compatibility::convert_observed_limited(source, &prepared, target, Some(CONVERSION_TEMP_LIMIT), &mut |done, total| {
+        let size = rbl_audio::compatibility::convert_observed_limited(source, &prepared, target, Some(self.conversion_temp_limit), &mut |done, total| {
             if cancelled() { return false; }
             progress(done, total);
             true
