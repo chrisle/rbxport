@@ -3,6 +3,13 @@ use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex, Condva
 use serde::{Deserialize, Serialize};
 use crate::{incremental, Result, ExportError};
 
+/// The conversion temp is limited to 2 GiB. Completed entries are reduced to
+/// 6 GiB before a new conversion so the internal conversion cache stays below
+/// 8 GiB while encoding. A larger track is converted on the destination.
+pub const CONVERSION_TEMP_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
+pub const COMPLETED_CACHE_LIMIT: u64 = 6 * 1024 * 1024 * 1024;
+pub const TOTAL_CACHE_LIMIT: u64 = COMPLETED_CACHE_LIMIT + CONVERSION_TEMP_LIMIT;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Receipt {
     source: incremental::FileRevision,
@@ -46,11 +53,100 @@ mod tests {
         assert!(!first.2);
         assert!(second.2, "second conversion should reuse its receipt; source {:?}, output {:?}", incremental::revision(&source), incremental::copy_revision(&first.0));
     }
+
+    #[test]
+    fn pruning_bounds_completed_files_and_removes_interrupted_conversion() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = PreparationCache::new(dir.path().join("cache"));
+        cache.gates.lock().unwrap().insert("old-source".into(), Arc::new(Mutex::new(())));
+        cache.hashes.lock().unwrap().insert("old-source".into(), 42);
+        std::fs::create_dir_all(&cache.root).unwrap();
+        let interrupted = cache.root.join("conversion-interrupted");
+        std::fs::create_dir(&interrupted).unwrap();
+        std::fs::write(interrupted.join("audio.wav"), vec![1; 64]).unwrap();
+        for digit in ['a', 'b'] {
+            let key: String = std::iter::repeat_n(digit, 64).collect();
+            std::fs::write(cache.root.join(format!("{key}.wav")), vec![1; 64]).unwrap();
+        }
+        cache.prune(64).unwrap();
+        assert!(cache.gates.lock().unwrap().is_empty());
+        assert!(cache.hashes.lock().unwrap().is_empty());
+        assert!(!interrupted.exists());
+        let retained_bytes: u64 = std::fs::read_dir(&cache.root).unwrap()
+            .map(|entry| entry.unwrap().metadata().unwrap().len()).sum();
+        assert!(retained_bytes <= 64, "retained {retained_bytes} bytes");
+    }
+
+    #[test]
+    fn size_limited_cache_retries_conversion_in_destination_stage() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("source.flac");
+        std::fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("../rbl-audio/tests/fixtures/stereo-96k.flac"), &source).unwrap();
+        let limit = 1024;
+        let mut cache = PreparationCache::new(cache_dir.path().to_owned());
+        cache.conversion_temp_limit = limit;
+        let cache_error = cache.with_converted(
+            &source, rbl_audio::compatibility::Format::Wav,
+            &mut |_, _| {}, &|| false, |_, _, _| Ok(()),
+        ).unwrap_err();
+        assert!(matches!(cache_error, ExportError::Io(ref error) if error.kind() == std::io::ErrorKind::StorageFull));
+        let track = crate::SourceTrack {
+            id: 1,
+            source_path: source.clone(),
+            title: "Converted track".into(),
+            artist: "Artist".into(),
+            duration_sec: 1,
+            sample_rate: 96_000,
+            ..Default::default()
+        };
+        let playlist = crate::SourcePlaylist {
+            id: 10,
+            name: "Playlist".into(),
+            track_indices: vec![0],
+            ..Default::default()
+        };
+        let mut saw_verification = false;
+        let report = crate::export_with_options(
+            destination.path(), &[track], &[playlist], &[],
+            &crate::ExportOptions {
+                compatibility: Some(crate::CompatibilityFormat::Wav),
+                cache: Some(&cache),
+                ..Default::default()
+            },
+            &mut |progress| { if progress.stage == "verifying" { saw_verification = true; } },
+        ).unwrap();
+
+        assert_eq!(report.tracks, 1);
+        assert_eq!(report.converted, 1);
+        assert_eq!(report.metrics.conversions, 1, "cache conversion must be attempted before destination fallback");
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert!(saw_verification, "export must reach destination-stage verification");
+        assert!(report.verified);
+        let manifest = crate::Manifest::load(destination.path()).unwrap();
+        let exported = destination.path().join(manifest.tracks[0].audio.trim_start_matches('/'));
+        let exported_size = std::fs::metadata(&exported).unwrap().len();
+        assert_eq!(exported_size, 44 + 11_025 * 4);
+        assert!(exported_size > limit);
+        assert!(!rbl_audio::compatibility::needs_conversion(&exported).unwrap());
+        assert!(crate::verify(destination.path()).unwrap().is_ok());
+        assert_eq!(cache.converted_size(&source, rbl_audio::compatibility::Format::Wav), None);
+        let mut internal_bytes = 0;
+        for entry in std::fs::read_dir(cache_dir.path()).unwrap() {
+            let entry = entry.unwrap();
+            assert!(!entry.file_type().unwrap().is_dir(), "temporary conversion directory remains: {:?}", entry.path());
+            internal_bytes += entry.metadata().unwrap().len();
+        }
+        assert!(internal_bytes <= limit, "internal cache retained {internal_bytes} bytes with a {limit}-byte conversion limit");
+    }
 }
 
 #[derive(Debug)]
 pub struct PreparationCache {
     root: PathBuf,
+    conversion_temp_limit: u64,
+    consumers: Mutex<()>,
     gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     probes: Mutex<HashMap<String, rbl_audio::compatibility::AudioProperties>>,
     hashes: Mutex<HashMap<String, u64>>,
@@ -119,7 +215,7 @@ impl PreparationCache {
         Ok(path)
     }
     pub fn new(root: PathBuf) -> Self {
-        Self { root, gates: Mutex::new(HashMap::new()), probes: Mutex::new(HashMap::new()), hashes: Mutex::new(HashMap::new()), preparing: Mutex::new(0), ready: Condvar::new(), dirty: std::sync::atomic::AtomicBool::new(true) }
+        Self { root, conversion_temp_limit: CONVERSION_TEMP_LIMIT, consumers: Mutex::new(()), gates: Mutex::new(HashMap::new()), probes: Mutex::new(HashMap::new()), hashes: Mutex::new(HashMap::new()), preparing: Mutex::new(0), ready: Condvar::new(), dirty: std::sync::atomic::AtomicBool::new(true) }
     }
 
     fn key(source: &Path, profile: &str) -> Result<(String, incremental::FileRevision)> {
@@ -196,9 +292,24 @@ impl PreparationCache {
         Ok(value)
     }
 
-    /// Exactly one consumer prepares a given input/profile; other sticks wait.
-    /// The caller owns the returned file until its batch has finished.
-    pub fn converted(
+    /// Hold the cache consumer lock through use of the converted file. This
+    /// prevents another stick from evicting it during its destination copy.
+    pub fn with_converted<T>(
+        &self, source: &Path, target: rbl_audio::compatibility::Format,
+        progress: &mut dyn FnMut(u64, Option<u64>), cancelled: &dyn Fn() -> bool,
+        consume: impl FnOnce(&Path, u64, bool) -> Result<T>,
+    ) -> Result<T> {
+        let _consumer = Self::lock_gate(&self.consumers, cancelled)?;
+        let (path, size, reused) = self.converted(source, target, progress, cancelled)?;
+        let result = consume(&path, size, reused);
+        // Evict only after the caller has closed its source file. Keep the
+        // result of the actual export even if disposable cache cleanup fails.
+        let _ = self.prune_inner(TOTAL_CACHE_LIMIT);
+        result
+    }
+
+    /// Legacy path-returning API for callers that manage file lifetime.
+    fn converted(
         &self, source: &Path, target: rbl_audio::compatibility::Format,
         progress: &mut dyn FnMut(u64, Option<u64>), cancelled: &dyn Fn() -> bool,
     ) -> Result<(PathBuf, u64, bool)> {
@@ -217,11 +328,12 @@ impl PreparationCache {
         }
         std::fs::create_dir_all(&self.root)?;
         self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.prune_inner(COMPLETED_CACHE_LIMIT)?;
         let _permit = self.permit(cancelled)?;
         let temp = tempfile::Builder::new().prefix("conversion-").tempdir_in(&self.root)?;
         let prepared = temp.path().join(format!("audio.{}", target.extension()));
         incremental::count(false, true, false);
-        let size = rbl_audio::compatibility::convert_observed(source, &prepared, target, &mut |done, total| {
+        let size = rbl_audio::compatibility::convert_observed_limited(source, &prepared, target, Some(self.conversion_temp_limit), &mut |done, total| {
             if cancelled() { return false; }
             progress(done, total);
             true
@@ -244,17 +356,29 @@ impl PreparationCache {
 
     /// Evict only known completed entries before attaching active consumers.
     pub fn prune(&self, budget: u64) -> std::io::Result<()> {
-        // No active consumer calls this. Bound retained in-memory key tables
-        // to one batch as well as the completed files on disk.
+        let _consumer = self.consumers.lock().map_err(|e| std::io::Error::other(e.to_string()))?;
+        // Export-boundary pruning also discards per-source bookkeeping. The
+        // process-wide cache must not retain keys from every prior export.
         self.gates.lock().map_err(|e| std::io::Error::other(e.to_string()))?.clear();
         self.probes.lock().map_err(|e| std::io::Error::other(e.to_string()))?.clear();
         self.hashes.lock().map_err(|e| std::io::Error::other(e.to_string()))?.clear();
-        if !self.dirty.swap(false, std::sync::atomic::Ordering::Relaxed) { return Ok(()); }
+        self.prune_inner(budget)
+    }
+
+    fn prune_inner(&self, budget: u64) -> std::io::Result<()> {
+        self.dirty.store(false, std::sync::atomic::Ordering::Relaxed);
         let Ok(entries) = std::fs::read_dir(&self.root) else { return Ok(()); };
         let mut files = Vec::new();
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
+            // A process killed during conversion cannot drop its TempDir.
+            // Every normal conversion holds `consumers`, so these directories
+            // are leftovers rather than active work when pruning runs.
+            if entry.file_type()?.is_dir() && entry.file_name().to_string_lossy().starts_with("conversion-") {
+                std::fs::remove_dir_all(path)?;
+                continue;
+            }
             let key = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
             if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) || !entry.file_type()?.is_file() { continue; }
             let meta = entry.metadata()?;
