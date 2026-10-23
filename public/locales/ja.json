@@ -1785,5 +1785,6 @@
   "Playlist cannot be edited or deleted while searching.": "プレイリストの検索中には、編集・削除できません。",
   "Add \"My Tag\" to the \"Comments\"": "「マイタグ」を「コメント」に追加する",
   "This operation can take few minutes.": "この操作には時間がかかる場合があります。",
-  "Please wait for a while": "お待ちください"
+  "Please wait for a while": "お待ちください",
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled."
 }

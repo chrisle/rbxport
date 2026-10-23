@@ -1775,5 +1775,6 @@
   "Playlist cannot be edited or deleted while searching.": "Die Wiedergabeliste kann beim Suchen nicht bearbeitet oder gelöscht werden.",
   "Add \"My Tag\" to the \"Comments\"": "Den \"Kommentaren\" \"My Tag\" hinzufügen",
   "This operation can take few minutes.": "Dieser Vorgang kann längere Zeit dauern.",
-  "Please wait for a while": "Bitte warten"
+  "Please wait for a while": "Bitte warten",
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled."
 }

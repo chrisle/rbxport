@@ -1776,5 +1776,6 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "„Saját címke\" hozzáadása a „Megjegyzések\"-hez",
   "This operation can take few minutes.": "Ez a műveletet hosszú időt vehet igénybe.",
-  "Please wait for a while": "Kérem, várjon"
+  "Please wait for a while": "Kérem, várjon",
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled."
 }

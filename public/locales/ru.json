@@ -1781,5 +1781,6 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "Добавить  \"Свой тег\" к  \"Комментариям\"",
   "This operation can take few minutes.": "Данная операция может занять длительное время.",
-  "Please wait for a while": "Пожалуйста, подождите"
+  "Please wait for a while": "Пожалуйста, подождите",
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled."
 }

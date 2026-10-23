@@ -4,6 +4,9 @@
 
 Preferences → Backups creates and lists library backups. Quit rekordbox before
 creating one. Music files are excluded, so keep a separate backup of your audio.
+If a backup says the database is busy, close rekordbox or another app using
+the library and try again. Leave Library Protection enabled; creating a backup
+does not require write access to the library.
 
 ## Contents and format
 
