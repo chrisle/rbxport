@@ -26,6 +26,28 @@ function inLibrary(page: Page, library: 0 | 1, name: string): Locator {
 
 const rows = (page: Page) => page.getByRole("row").filter({ has: page.getByRole("gridcell") });
 
+test("a loose file on the TEST USB joins a playlist on that USB once", async ({ page }) => {
+  await page.goto("/?writable=1&usbOnlyFixture=1");
+  await expect(page.getByRole("grid")).toBeVisible();
+  await page.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Explorer" }).click();
+  await page.getByRole("button", { name: "Expand TEST USB" }).click();
+  await page.getByRole("treeitem", { name: /Music$/ }).last().click();
+  await expect(rows(page)).toHaveCount(1);
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await rows(page).first().dispatchEvent("dragstart", { dataTransfer });
+  await page.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
+  await page.getByRole("button", { name: "Expand TEST" }).click();
+  const target = inLibrary(page, 0, "Melodic Vox");
+  await target.dispatchEvent("dragenter", { dataTransfer });
+  await target.dispatchEvent("dragover", { dataTransfer });
+  await target.dispatchEvent("drop", { dataTransfer });
+  await expect(page.getByRole("contentinfo")).toContainText("Added to Melodic Vox.");
+  await target.click();
+  await expect(rows(page)).toHaveCount(4);
+  await inLibrary(page, 1, "Melodic Vox").click();
+  await expect(rows(page)).toHaveCount(4);
+});
+
 test("a stick lists each of its libraries with its own playlists, and a playlist opens its tracks", async ({ page }) => {
   await openStick(page);
   await expect(kind(page, "deviceLibrary")).toHaveText(["Device Library", "OneLibrary"]);
