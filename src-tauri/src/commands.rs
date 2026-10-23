@@ -2434,6 +2434,8 @@ fn write_export_with_phase(
             compatibility: compatibility_format,
             root: preferred_root,
             keep_unlisted: selection.keep_unlisted,
+            db_id_override: None,
+            my_tag_master_db_id_override: None,
             settings_files: &imported_settings,
             cache: Some(&EXPORT_CACHE),
             expected_volume,

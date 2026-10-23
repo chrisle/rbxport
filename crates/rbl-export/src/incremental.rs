@@ -142,7 +142,8 @@ pub fn request(tracks: &[SourceTrack], playlists: &[SourcePlaylist], tags: &[Sou
     // SyncSource and StickSettings have complete, deterministic Debug forms;
     // the transform/schema version controls changes to this representation.
     digest(&(tracks, playlists, tags, options.compatibility, options.keep_unlisted,
-        format!("{:?}", options.sync), format!("{:?}", options.defaults), TRANSFORM_VERSION, PDB_LAYOUT))
+        format!("{:?}", options.sync), options.db_id_override, options.my_tag_master_db_id_override,
+        format!("{:?}", options.defaults), TRANSFORM_VERSION, PDB_LAYOUT))
 }
 
 pub fn inputs(tracks: &[SourceTrack]) -> std::io::Result<BTreeMap<String, Option<FileRevision>>> {

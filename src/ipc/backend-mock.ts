@@ -239,11 +239,13 @@ const EXPLORER_CHILDREN: ReadonlyMap<string, readonly string[]> = new Map([
   ["/Users", ["mock", "Shared"]],
   ["/Volumes/SD", ["Contents", "PIONEER"]],
   ["/Volumes/SD/PIONEER", ["rekordbox", "USBANLZ"]],
+  ["/Volumes/TEST", ["Music"]],
 ]);
 /** Files per folder: a library row index, or a loose file's name. */
 const EXPLORER_FILES: ReadonlyMap<string, readonly (number | string)[]> = new Map([
   ["/Users/mock/Music/Downloads", [0, 1, 2, 3, 4, 5, "Untitled Bounce 1.wav", "Untitled Bounce 2.wav", "demo_128.aiff", "live edit.mp3", "promo (radio).mp3", "voice memo.m4a"]],
   ["/Users/mock/Music/Sets", ["Set 2026-08-30.mp3", "Set 2026-09-04.mp3", "Warmup.flac"]],
+  ["/Volumes/TEST/Music", ["loose.mp3"]],
 ]);
 
 /** A row for a file the library does not hold: its name, and nothing else. */
@@ -3568,6 +3570,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         return Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }
     },
+    devicePlaylistAddFiles: (path, format, playlist, tracks) => {
+      try {
+        return wait(stickLibraries.addFiles(path, format, playlist, tracks));
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    },
     devicePlaylistDuplicates: (path, format, playlist, tracks) => {
       try {
         return wait(stickLibraries.duplicates(path, format, playlist, tracks));
@@ -3646,7 +3655,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           : undefined) ?? 128 * 1024 ** 3,
       });
     },
-    explorerRoots: () => wait(EXPLORER_ROOTS.map((root) => ({ ...root }))),
+    explorerRoots: () => wait([
+      ...EXPLORER_ROOTS.map((root) => ({ ...root })),
+      ...(readFlagFromUrl("usbOnlyFixture") ? [{ name: "TEST USB", path: "/Volumes/TEST" }] : []),
+    ]),
     explorerChildren: (path) => {
       const names = [...(EXPLORER_CHILDREN.get(path) ?? [])];
       // The stick's PIONEER folder stands in for one the cap cut: the real

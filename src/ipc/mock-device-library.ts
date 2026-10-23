@@ -35,6 +35,7 @@ interface MockTrack {
    * does not have.
    */
   masterContentId: string | null;
+  path?: string;
 }
 
 /**
@@ -75,6 +76,7 @@ export interface MockDeviceLibraries {
   libraries(path: string): DeviceLibrary[];
   collectionTracks(path: string, format: DeviceFormat, ids: string[], exportedIds?: readonly string[]): (string | null)[];
   edit(path: string, format: DeviceFormat, edit: DevicePlaylistEdit): DevicePlaylistEditResult;
+  addFiles(path: string, format: DeviceFormat, playlist: string, files: string[]): DevicePlaylistEditResult;
   /** The rows whose track `playlist` already holds, each once. */
   duplicates(path: string, format: DeviceFormat, playlist: string, tracks: string[]): string[];
   /** A playlist's rows in its order, or every track for `"0"`. */
@@ -104,9 +106,9 @@ function inTreeOrder(nodes: readonly MockNode[]): { node: MockNode; depth: numbe
 }
 
 function trackRow(path: string, track: MockTrack, position: number): RowDto {
-  const fileName = `${track.title}.mp3`;
+  const fileName = track.path?.split("/").pop() ?? `${track.title}.mp3`;
   return {
-    id: `file:${path}/Contents/${track.artist}/${fileName}`,
+    id: `file:${track.path ?? `${path}/Contents/${track.artist}/${fileName}`}`,
     trackNo: position,
     title: track.title,
     artist: track.artist,
@@ -129,6 +131,7 @@ function trackRow(path: string, track: MockTrack, position: number): RowDto {
 }
 
 export function createMockDeviceLibraries(): MockDeviceLibraries {
+  const deviceTracks: MockTrack[] = TRACKS.map((track) => ({ ...track }));
   const sticks = new Map<string, MockLibrary[]>([
     ["/Volumes/TEST", [testLibrary("deviceLibrary"), testLibrary("oneLibrary")]],
   ]);
@@ -138,7 +141,7 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
     return library;
   };
   const trackByRow = (path: string, row: string): number => {
-    const track = TRACKS.find((t) => trackRow(path, t, 0).id === row);
+    const track = deviceTracks.find((t) => trackRow(path, t, 0).id === row);
     if (!track) throw new Error("Only tracks of this library on the device can go into its playlists.");
     return track.id;
   };
@@ -147,7 +150,7 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
     libraries: (path) =>
       (sticks.get(path) ?? []).map((library) => ({
         format: library.format,
-        tracks: TRACKS.length,
+        tracks: deviceTracks.length,
         nodes: inTreeOrder(library.nodes).map(({ node, depth }) => ({
           id: String(node.id),
           parentId: String(node.parent),
@@ -158,8 +161,8 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
         })),
       })),
     collectionTracks: (path, _format, ids, exportedIds = []) => ids.map((id) => {
-      const track = TRACKS.find((candidate) => candidate.masterContentId === id)
-        ?? (exportedIds.includes(id) ? TRACKS.find((candidate) => candidate.id === 5) : undefined);
+      const track = deviceTracks.find((candidate) => candidate.masterContentId === id)
+        ?? (exportedIds.includes(id) ? deviceTracks.find((candidate) => candidate.id === 5) : undefined);
       return track ? trackRow(path, track, 0).id : null;
     }),
     duplicates: (path, format, playlist, rows) => {
@@ -176,10 +179,10 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
     rows: (path, format, playlist) => {
       const library = libraryOf(path, format);
       const ids = playlist === "0"
-        ? TRACKS.map((t) => t.id)
+        ? deviceTracks.map((t) => t.id)
         : library.nodes.find((n) => String(n.id) === playlist)?.tracks ?? [];
       return ids.flatMap((id, at) => {
-        const track = TRACKS.find((t) => t.id === id);
+        const track = deviceTracks.find((t) => t.id === id);
         return track ? [trackRow(path, track, at + 1)] : [];
       });
     },
@@ -189,10 +192,43 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
       return {
         name: node.name,
         entries: node.tracks.flatMap((id) => {
-          const track = TRACKS.find((t) => t.id === id);
+          const track = deviceTracks.find((t) => t.id === id);
           return track ? [{ master: track.masterContentId, row: trackRow(path, track, 0) }] : [];
         }),
       };
+    },
+    addFiles: (path, format, playlist, files) => {
+      const libraries = sticks.get(path);
+      if (!libraries || libraries.length !== 2) throw new Error("This device needs both libraries for a USB-only playlist edit.");
+      const [legacy, one] = libraries;
+      if (!legacy || !one || JSON.stringify(legacy.nodes) !== JSON.stringify(one.nodes)) {
+        throw new Error("This device's two libraries differ; a full export would overwrite a device-only edit. Nothing was changed.");
+      }
+      const target = libraryOf(path, format).nodes.find((node) => String(node.id) === playlist && !node.folder);
+      if (!target) throw new Error("That playlist is no longer on the device.");
+      const incoming = files.map((file) => {
+        if (!file.startsWith(`file:${path}/`) || file.includes("/../")) {
+          throw new Error("Only audio files on this device can go into its playlist.");
+        }
+        return file;
+      });
+      let changed = 0;
+      for (const file of incoming) {
+        let track = deviceTracks.find((candidate) => trackRow(path, candidate, 0).id === file);
+        if (!track) {
+          const source = file.slice("file:".length);
+          const fileName = source.split("/").pop() ?? "";
+          track = { id: Math.max(0, ...deviceTracks.map((candidate) => candidate.id)) + 1,
+            title: fileName.replace(/\.[^.]+$/, ""), artist: "", bpmX100: 0, key: "", durationSec: 0,
+            masterContentId: null, path: source };
+          deviceTracks.push(track);
+        }
+        if (!target.tracks.includes(track.id)) {
+          for (const library of libraries) library.nodes.find((node) => node.id === target.id)?.tracks.push(track.id);
+          changed += 1;
+        }
+      }
+      return { id: playlist, changed };
     },
     edit: (path, format, edit) => {
       const library = libraryOf(path, format);

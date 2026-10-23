@@ -2691,7 +2691,7 @@ function AppBody() {
     const drag = draggedTracks;
     setDraggedTracks(null);
     const ref = parseDeviceNodeId(node.id);
-    if (!drag || drag.sourceKind === "device" || node.kind !== "devicePlaylist" || !ref) return;
+    if (!drag || node.kind !== "devicePlaylist" || !ref) return;
     if (deviceBusy) {
       refuse(t("Wait for the device to finish before changing its playlists."));
       return;
@@ -2700,10 +2700,24 @@ function AppBody() {
     void (async () => {
       try {
         const backend = await getBackend();
-        const edit = await prepareDevicePlaylistDrop(
-          backend, ref.path, ref.format, ref.id, drag.ids, stickDefaults, compatibilityFormat,
-          askDuplicates, node.name,
-        );
+        if (drag.sourceKind === "folder" && drag.ids.some((id) => id.startsWith("file:"))) {
+          const result = await backend.devicePlaylistAddFiles(ref.path, ref.format, ref.id, [...drag.ids]);
+          if (result.changed > 0) report(t("Added to {name}.", { name: node.name }));
+          await deviceLibraries.refresh(ref.path);
+          setDevices(await backend.listDevices());
+          return;
+        }
+        const edit = drag.sourceKind === "device"
+          ? await (async () => {
+            const tracks = [...drag.ids];
+            const held = await backend.devicePlaylistDuplicates(ref.path, ref.format, ref.id, tracks);
+            const duplicates = await askDuplicates(held.length, tracks.length, node.name);
+            return duplicates === null ? null : { kind: "add" as const, playlist: ref.id, tracks, duplicates };
+          })()
+          : await prepareDevicePlaylistDrop(
+            backend, ref.path, ref.format, ref.id, drag.ids, stickDefaults, compatibilityFormat,
+            askDuplicates, node.name,
+          );
         if (edit === null) return;
         if (edit.tracks.length === 0) return;
         const result = await deviceLibraries.edit(ref.path, ref.format, edit);
@@ -3321,7 +3335,7 @@ function AppBody() {
           selectedId={selectedNode?.id ?? null}
           onSelect={setSelectedNode}
           dragging={draggedTracks !== null}
-          canDropToDevicePlaylists={draggedTracks?.sourceKind !== "device"}
+          canDropToDevicePlaylists={Boolean(draggedTracks)}
           onDropDeviceTracks={addDraggedToDevice}
           onDropTracks={addDraggedTo}
           draggingToDevice={draggedTracks !== null && !hasLooseId(draggedTracks.ids)}

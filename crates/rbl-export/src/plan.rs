@@ -40,7 +40,7 @@ pub fn preview(destination: &Path, tracks: &[SourceTrack], playlists: &[SourcePl
     }
     let mut before = previous.as_ref().filter(|m| m.generation.as_ref().is_some_and(|g| g.databases == signatures))
         .and_then(|m| m.baseline.clone()).map_or_else(|| Snapshot::read(destination), Ok)?;
-    let db_id = options.sync.map_or(0, |s| s.db_id);
+    let db_id = options.db_id_override.unwrap_or_else(|| options.sync.map_or(0, |s| s.db_id));
     let playlist_record = crate::reconcile::playlist_namespace(destination, &mut before, previous.as_ref(), db_id);
     let rewritten = crate::reconcile::rewritten(playlist_record.as_ref(), &before, previous.as_ref(), tracks, playlists, db_id);
     before.check_baseline_except(previous.as_ref(), db_id, &rewritten)?;
@@ -55,7 +55,7 @@ pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Opt
 #[allow(clippy::too_many_arguments, reason = "from_baseline's inputs and the allocation unit it measured")]
 fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Manifest>, tracks: &[SourceTrack], playlists: &[SourcePlaylist], options: &ExportOptions<'_>, record: Option<&crate::sync_record::SyncRecord>, unit: u64) -> Result<SyncPlan> {
     let on_disk = |bytes: u64| allocation(bytes, unit);
-    let db_id = options.sync.map_or(0, |s| s.db_id);
+    let db_id = options.db_id_override.unwrap_or_else(|| options.sync.map_or(0, |s| s.db_id));
     let crate::reconcile::Prepared { tracks, playlists, device_additions } = crate::reconcile::prepare(destination, before, previous, tracks, playlists, db_id, options.keep_unlisted, record)?;
     let estimate = crate::estimate::estimate_inspected(destination, db_id, &tracks, false, options.compatibility, Some(before), options.cache, unit);
     let trusted = incremental::trusted_paths(destination, previous)?;
