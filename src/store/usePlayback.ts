@@ -218,6 +218,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   /** Transport/settings intent survives a load and an audio-engine rebuild. */
   const desiredPlaying = useRef(false);
   const desiredDelay = useRef<number | null>(null);
+  /** A queued start must wait for frames from the deck, not the load event. */
+  const awaitingLoadedStart = useRef<number | null>(null);
   const transportVersion = useRef(0);
   const deferredSeek = useRef<number | null>(null);
   const desiredTempo = useRef(1);
@@ -279,19 +281,18 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
           const wait = desiredDelay.current;
           desiredDelay.current = null;
           setPlaying(true);
-          anchor.current = {
-            ...anchor.current,
-            playing: true,
-            at: performance.now() + (wait ?? 0),
-          };
+          awaitingLoadedStart.current = positionRef.current;
+          anchor.current = pinned(anchor.current, positionRef.current, performance.now());
           if (wait !== null && wait > 0) await backend.deckPlayAfter(DECK, wait);
           else await backend.deckPlay(DECK);
         } else {
+          awaitingLoadedStart.current = null;
           setPlaying(false);
         }
       } catch (failure) {
         if (currentLoad(request)) {
           desiredPlaying.current = false;
+          awaitingLoadedStart.current = null;
           setPlaying(false);
           setError(reasonFrom(failure));
         }
@@ -309,6 +310,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     readyLoad.current = 0;
     loadPending.current = true;
     applyingLoad.current = 0;
+    awaitingLoadedStart.current = null;
     scrubbing.current = false;
     landing.current = null;
     pending.current = null;
@@ -353,6 +355,14 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       if (target !== null) readyLoad.current = target.loadId;
       const rate = tick.sampleRate;
       const now = performance.now();
+      // A load completion can precede the first audible output buffer. An
+      // older stopped or zero-frame tick cannot override queued Play intent.
+      const start = awaitingLoadedStart.current;
+      if (start !== null && (!deck.playing || rate <= 0 || deck.frames <= start * rate)) {
+        anchor.current = pinned({ ...anchor.current, sampleRate: rate }, positionRef.current, now);
+        return;
+      }
+      awaitingLoadedStart.current = null;
       setPlaying(deck.playing);
       desiredPlaying.current = deck.playing;
       setDuration(rate > 0 ? deck.totalFrames / rate : 0);
@@ -523,6 +533,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     loadPending.current = false;
     applyingLoad.current = 0;
     desiredPlaying.current = false;
+    awaitingLoadedStart.current = null;
     desiredDelay.current = null;
     deferredSeek.current = null;
     desiredLoop.current = null;
@@ -574,6 +585,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     // may already be queued. A second press cancels that intent.
     const wanted = isReady() ? !playing : !desiredPlaying.current;
     desiredPlaying.current = wanted;
+    if (!wanted) awaitingLoadedStart.current = null;
     desiredDelay.current = null;
     const version = ++transportVersion.current;
     // The button follows at once rather than on the next tick, which is up to
