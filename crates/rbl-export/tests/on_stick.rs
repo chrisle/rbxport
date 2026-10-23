@@ -8,9 +8,218 @@
 
 mod common;
 
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
-use rbl_export::{export, export_full, verify, Manifest, SourcePlaylist, SourceTrack, SyncNode, SyncSource};
+use rbl_export::{export, export_full, verify, Manifest, SourceMyTag, SourcePlaylist, SourceTrack, SyncNode, SyncSource};
+
+#[test]
+fn usb_only_track_can_join_existing_device_playlist_in_one_export() {
+    let dest = common::stick();
+    let mut existing = track(
+        &dest.path().join("Music/existing.mp3"),
+        1,
+        "Existing",
+        "TRIODE",
+        1,
+    );
+    existing.cues = Some(vec![rbl_anlz::cues::ExportCue {
+        kind: 1, time_ms: 1000, comment: "Owned cue".into(), ..Default::default()
+    }]);
+    existing.analysis.push(("EXT".into(), rbl_anlz::AnlzBuilder::new().path("/existing.mp3").finish()));
+    existing.analysis.push(("2EX".into(), rbl_anlz::AnlzBuilder::new().path("/existing.mp3").finish()));
+    existing.my_tags = vec![11];
+    let tags = [
+        SourceMyTag { id: 1, seq: 1, name: "Category".into(), attribute: 1, parent: 0 },
+        SourceMyTag { id: 11, seq: 1, name: "Keep me".into(), attribute: 0, parent: 1 },
+    ];
+    sync_with_tags(
+        dest.path(),
+        &[existing],
+        &[SourcePlaylist {
+            name: "Set".into(),
+            track_indices: vec![0],
+            ..Default::default()
+        }], &tags,
+    )
+    .unwrap();
+    let owner_before = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let sync_before = std::fs::read(dest.path().join("PIONEER/rekordbox/playlists3.sync")).unwrap();
+    let before = rbl_export::snapshot::Snapshot::read(dest.path()).unwrap();
+    let tag_owner_before = tag_owner(dest.path());
+    let ext_owner_before = ext_tag_owner(dest.path());
+    let playlist = rbl_export::device_library::read(
+        dest.path(),
+        rbl_export::device_library::Format::DeviceLibrary,
+    )
+    .unwrap()
+    .nodes
+    .into_iter()
+    .find(|node| node.name == "Set")
+    .unwrap();
+    let file = dest.path().join("Music/new.mp3");
+    let mut fresh = track(&file, 0, "New", "TRIODE", 2);
+    for extension in ["EXT", "2EX"] {
+        fresh.analysis.push((extension.into(), rbl_anlz::AnlzBuilder::new().path("/x.mp3").finish()));
+    }
+    let report = rbl_export::add_in_place_to_playlist(
+        dest.path(),
+        rbl_export::device_library::Format::DeviceLibrary,
+        playlist.id,
+        &[fresh.clone()],
+    )
+    .unwrap();
+    assert_eq!(report.bytes_copied, 0);
+    assert!(verify(dest.path()).unwrap().is_ok());
+    assert_eq!(std::fs::read(dest.path().join("Music/existing.mp3")).unwrap(), vec![1; 2048]);
+    assert_eq!(std::fs::read(&file).unwrap(), vec![2; 2048]);
+    assert!(files_under(&dest.path().join("Contents")).is_empty());
+    assert_eq!(std::fs::read(dest.path().join("PIONEER/rekordbox/playlists3.sync")).unwrap(), sync_before);
+    assert_eq!(Manifest::load(dest.path()).unwrap().db_id, 123);
+    let after = rbl_export::snapshot::Snapshot::read(dest.path()).unwrap();
+    assert_eq!(after.cues, before.cues);
+    assert_eq!(after.my_tags, before.my_tags);
+    assert_eq!(after.tag_memberships, before.tag_memberships);
+    assert!(!after.cues.is_empty());
+    assert!(!after.tag_memberships.is_empty());
+    assert_eq!(tag_owner(dest.path()), tag_owner_before);
+    assert_eq!(ext_tag_owner(dest.path()), ext_owner_before);
+    assert_ne!(std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap(), owner_before);
+    let entry = Manifest::load(dest.path()).unwrap().tracks.into_iter().find(|track| track.audio == "/Music/new.mp3").unwrap();
+    assert!(entry.in_place);
+    assert!(dest.path().join(entry.anlz_dir.trim_start_matches('/')).is_dir());
+    let library = rbl_export::device_library::read(
+        dest.path(),
+        rbl_export::device_library::Format::DeviceLibrary,
+    )
+    .unwrap();
+    let playlist = library
+        .nodes
+        .iter()
+        .find(|node| node.name == "Set")
+        .unwrap();
+    assert_eq!(playlist.tracks.len(), 2);
+    let one = rbl_export::device_library::read(dest.path(), rbl_export::device_library::Format::OneLibrary).unwrap();
+    assert_eq!(one.node(playlist.id).unwrap().tracks.len(), 2);
+    for library in [&library, &one] {
+        let added = library.track(playlist.tracks[1]).unwrap();
+        assert_eq!(added.path, "/Music/new.mp3");
+        let dat = dest.path().join(added.analysis_path.trim_start_matches('/'));
+        assert!(dat.is_file());
+        assert!(rbl_anlz::sibling(&dat, "EXT").is_file());
+        assert!(rbl_anlz::sibling(&dat, "2EX").is_file());
+        let previous = library.track(playlist.tracks[0]).unwrap();
+        assert_eq!(previous.master_db_id, 123);
+        assert_eq!(previous.id, 1);
+        let prior_ext = rbl_anlz::sibling(&dest.path().join(previous.analysis_path.trim_start_matches('/')), "EXT");
+        assert!(rbl_anlz::Anlz::read(&prior_ext).unwrap().cue_entries().iter().any(|cue| cue.time_ms == 1000));
+    }
+    assert_eq!(
+        library.track(playlist.tracks[0]).unwrap().path,
+        "/Music/existing.mp3"
+    );
+    assert_eq!(
+        library.track(playlist.tracks[1]).unwrap().path,
+        "/Music/new.mp3"
+    );
+    let first_state = device_files(dest.path());
+    let first_legacy = library.clone();
+    let first_one = one.clone();
+    let first_snapshot = rbl_export::snapshot::Snapshot::read(dest.path()).unwrap();
+    let first_manifest = Manifest::load(dest.path()).unwrap();
+    let again = rbl_export::add_in_place_to_playlist(
+        dest.path(),
+        rbl_export::device_library::Format::DeviceLibrary,
+        playlist.id,
+        &[fresh],
+    )
+    .unwrap();
+    assert_eq!(again.bytes_copied, 0);
+    let repeated_state = device_files(dest.path());
+    assert_eq!(first_state.keys().collect::<Vec<_>>(), repeated_state.keys().collect::<Vec<_>>());
+    for (path, bytes) in &first_state {
+        if path == "PIONEER/rbxport/manifest.json" || path == "PIONEER/rekordbox/exportLibrary.db" { continue; }
+        assert_eq!(repeated_state.get(path).unwrap(), bytes, "repeat changed {path}");
+    }
+    assert_eq!(rbl_export::snapshot::Snapshot::read(dest.path()).unwrap(), first_snapshot);
+    let repeated_manifest = Manifest::load(dest.path()).unwrap();
+    assert_eq!(repeated_manifest.db_id, first_manifest.db_id);
+    let before_tracks = serde_json::to_value(&first_manifest.tracks).unwrap();
+    let after_tracks = serde_json::to_value(&repeated_manifest.tracks).unwrap();
+    assert_eq!(before_tracks.as_array().unwrap().len(), after_tracks.as_array().unwrap().len());
+    for (before, after) in before_tracks.as_array().unwrap().iter().zip(after_tracks.as_array().unwrap()) {
+        let changed: Vec<_> = before.as_object().unwrap().keys().filter(|key| before[*key] != after[*key]).collect();
+        assert!(changed.is_empty(), "repeat changed manifest track fields: {changed:?} source={} preserved {} -> {}", before["source"], before["preserved"], after["preserved"]);
+    }
+    assert_eq!(serde_json::to_value(&repeated_manifest.playlists).unwrap(), serde_json::to_value(&first_manifest.playlists).unwrap());
+    assert_eq!(repeated_manifest.loose, first_manifest.loose);
+    assert_eq!(rbl_export::device_library::read(dest.path(), rbl_export::device_library::Format::DeviceLibrary).unwrap(), first_legacy);
+    assert_eq!(rbl_export::device_library::read(dest.path(), rbl_export::device_library::Format::OneLibrary).unwrap(), first_one);
+    let library = rbl_export::device_library::read(
+        dest.path(),
+        rbl_export::device_library::Format::DeviceLibrary,
+    )
+    .unwrap();
+    assert_eq!(
+        library
+            .nodes
+            .iter()
+            .find(|node| node.name == "Set")
+            .unwrap()
+            .tracks
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn usb_only_add_refuses_divergent_libraries_without_changes() {
+    let dest = common::stick();
+    let existing = track(&dest.path().join("Music/existing.mp3"), 1, "Existing", "TRIODE", 1);
+    export(dest.path(), &[existing], &[SourcePlaylist { name: "Set".into(), track_indices: vec![0], ..Default::default() }]).unwrap();
+    let legacy = rbl_export::device_library::read(dest.path(), rbl_export::device_library::Format::DeviceLibrary).unwrap();
+    let playlist = legacy.nodes.iter().find(|node| node.name == "Set").unwrap().id;
+    rbl_export::device_library::apply(dest.path(), rbl_export::device_library::Format::DeviceLibrary,
+        &rbl_export::device_library::Edit::Rename { id: playlist, name: "Deck edit".into() }).unwrap();
+    let new = track(&dest.path().join("Music/new.mp3"), 0, "New", "TRIODE", 2);
+    let before = device_files(dest.path());
+    assert!(rbl_export::add_in_place_to_playlist(dest.path(), rbl_export::device_library::Format::DeviceLibrary, playlist, &[new]).is_err());
+    assert_eq!(device_files(dest.path()), before);
+    assert!(!dest.path().join("Contents/TRIODE/Single/new.mp3").exists());
+}
+
+#[test]
+fn usb_only_add_refuses_each_missing_database_without_changes() {
+    for missing in ["export.pdb", "exportLibrary.db"] {
+        let dest = common::stick();
+        let existing = track(&dest.path().join("Music/existing.mp3"), 1, "Existing", "TRIODE", 1);
+        export(dest.path(), &[existing], &[SourcePlaylist { name: "Set".into(), track_indices: vec![0], ..Default::default() }]).unwrap();
+        let playlist = rbl_export::device_library::read(dest.path(), rbl_export::device_library::Format::DeviceLibrary)
+            .unwrap().nodes.into_iter().find(|node| node.name == "Set").unwrap().id;
+        std::fs::remove_file(dest.path().join("PIONEER/rekordbox").join(missing)).unwrap();
+        let fresh = track(&dest.path().join("Music/new.mp3"), 0, "New", "TRIODE", 2);
+        let before = device_files(dest.path());
+        assert!(rbl_export::add_in_place_to_playlist(dest.path(), rbl_export::device_library::Format::DeviceLibrary, playlist, &[fresh]).is_err());
+        assert_eq!(device_files(dest.path()), before, "missing {missing} must refuse without touching the stick");
+    }
+}
+
+#[test]
+fn usb_only_add_accepts_an_existing_device_without_rbxport_manifest() {
+    let dest = common::stick();
+    let existing = track(&dest.path().join("Music/existing.mp3"), 1, "Existing", "TRIODE", 1);
+    export(dest.path(), &[existing], &[SourcePlaylist { name: "Set".into(), track_indices: vec![0], ..Default::default() }]).unwrap();
+    std::fs::remove_file(Manifest::path(dest.path())).unwrap();
+    let library = rbl_export::device_library::read(dest.path(), rbl_export::device_library::Format::DeviceLibrary).unwrap();
+    let playlist = library.nodes.iter().find(|node| node.name == "Set").unwrap().id;
+    let new = track(&dest.path().join("Music/new.mp3"), 0, "New", "TRIODE", 2);
+    let report = rbl_export::add_in_place_to_playlist(dest.path(), rbl_export::device_library::Format::DeviceLibrary, playlist, &[new]).unwrap();
+    assert_eq!(report.bytes_copied, 0);
+    assert!(verify(dest.path()).unwrap().is_ok());
+    for format in [rbl_export::device_library::Format::DeviceLibrary, rbl_export::device_library::Format::OneLibrary] {
+        let library = rbl_export::device_library::read(dest.path(), format).unwrap();
+        assert_eq!(library.node(playlist).unwrap().tracks.len(), 2);
+    }
+}
 
 fn track(path: &Path, id: u64, title: &str, artist: &str, byte: u8) -> SourceTrack {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -171,8 +380,39 @@ fn a_path_a_stick_cannot_name_is_copied_as_rekordbox_does() {
 /// A sync from a library: what the app does, with the stick's own history
 /// and device playlists reconciled into the selection.
 fn sync(root: &Path, tracks: &[SourceTrack], playlists: &[SourcePlaylist]) -> rbl_export::Result<rbl_export::ExportReport> {
+    sync_with_tags(root, tracks, playlists, &[])
+}
+
+fn sync_with_tags(root: &Path, tracks: &[SourceTrack], playlists: &[SourcePlaylist], tags: &[SourceMyTag]) -> rbl_export::Result<rbl_export::ExportReport> {
     let tree = playlists.iter().map(|p| SyncNode { id: p.id, parent: p.parent_id, attribute: u8::from(p.folder) }).collect();
-    export_full(root, tracks, playlists, &[], None, Some(&SyncSource { db_id: 123, tree, automatic: false, cloud_db_id: 0 }), &mut |_| {})
+    export_full(root, tracks, playlists, tags, None, Some(&SyncSource { db_id: 123, tree, automatic: false, cloud_db_id: 0 }), &mut |_| {})
+}
+
+fn device_files(root: &Path) -> BTreeMap<String, Vec<u8>> {
+    fn visit(root: &Path, path: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            if common::is_os_metadata(&entry.file_name()) { continue; }
+            let path = entry.path();
+            if path.is_dir() { visit(root, &path, out); }
+            else { out.insert(path.strip_prefix(root).unwrap().to_string_lossy().into_owned(), std::fs::read(path).unwrap()); }
+        }
+    }
+    let mut files = BTreeMap::new();
+    visit(root, root, &mut files);
+    files
+}
+
+fn tag_owner(root: &Path) -> i64 {
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(&root.join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    db.connection().query_row("SELECT myTagMasterDBID FROM property", [], |row| row.get(0)).unwrap()
+}
+
+fn ext_tag_owner(root: &Path) -> u32 {
+    let bytes = std::fs::read(root.join("PIONEER/rekordbox/exportExt.pdb")).unwrap();
+    let ext = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let master = ext.rows(ext.table(rbl_pdb::PageType::PlaylistTree).unwrap())[0];
+    ext.u4_at(master, 0x18)
 }
 
 fn listed(id: u64, tracks: &[SourceTrack]) -> Vec<SourcePlaylist> {

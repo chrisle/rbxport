@@ -10,6 +10,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockBackend } from "./backend-mock";
 import { TREE_ROOT } from "./types";
 
+describe("USB-only playlist files", () => {
+  it("adds a loose device file once to both libraries without collection import", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const path = "/Volumes/TEST";
+    const libraries = await backend.deviceLibraries(path);
+    const playlist = libraries[0]?.nodes.find((node) => node.name === "Melodic Vox")?.id ?? "";
+    const file = `file:${path}/Music/loose.mp3`;
+    expect((await backend.devicePlaylistAddFiles(path, "deviceLibrary", playlist, [file])).changed).toBe(1);
+    expect((await backend.devicePlaylistAddFiles(path, "deviceLibrary", playlist, [file])).changed).toBe(0);
+    for (const format of ["deviceLibrary", "oneLibrary"] as const) {
+      expect(await backend.devicePlaylistDuplicates(path, format, playlist, [file])).toEqual([file]);
+    }
+  });
+});
+
 describe("related playlists", () => {
   it("lists edited playlists a track belongs to, alongside the seeded ones", async () => {
     const backend = createMockBackend({ trackCount: 20 });

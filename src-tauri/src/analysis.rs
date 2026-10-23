@@ -427,6 +427,87 @@ fn rekordbox_waves(waves: rbl_analysis::wave_creator::Waves) -> rbl_anlz::Rekord
     }
 }
 
+/// Prepare a loose file for a USB-only export. All work stays in memory;
+/// the export journal publishes its analysis and device rows together.
+pub(crate) fn usb_source(path: &std::path::Path) -> AppResult<rbl_export::SourceTrack> {
+    let tags = rbl_db::import::read_tags(path).map_err(|error| {
+        AppError::new(
+            ErrorKind::Malformed,
+            "That USB file could not be read as audio.",
+        )
+        .with_detail(error.to_string())
+    })?;
+    let options = AnalysisSettings::default().options(rbl_analysis::AnalysisPreset::Rekordbox)?;
+    let (analysis, waves, duration) = analyse_file(path, &options, DECODE_CAP_SECS, None)?;
+    let beats: Vec<rbl_anlz::Beat> = analysis
+        .tempo
+        .beats
+        .iter()
+        .map(|beat| rbl_anlz::Beat {
+            beat_number: beat.beat_number,
+            tempo_x100: beat.tempo_x100,
+            time_ms: beat.time_ms,
+        })
+        .collect();
+    let files = rbl_anlz::author_with_rekordbox_waves(
+        "/pending",
+        &beats,
+        &waves,
+        rbl_anlz::Existing {
+            dat: None,
+            ext: None,
+            two_ex: None,
+        },
+    );
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped before narrowing"
+    )]
+    let bpm_x100 = (analysis.tempo.bpm * 100.0)
+        .round()
+        .clamp(0.0, f64::from(u32::MAX)) as u32;
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped before narrowing"
+    )]
+    let duration_sec = duration.round().clamp(0.0, f64::from(u16::MAX)) as u16;
+    Ok(rbl_export::SourceTrack {
+        id: 0,
+        source_path: path.to_path_buf(),
+        title: tags.title,
+        artist: tags.artist,
+        album: tags.album,
+        genre: tags.genre,
+        label: tags.label,
+        key: analysis
+            .key
+            .as_ref()
+            .map_or(tags.key, |key| key.name.clone()),
+        comment: tags.comment,
+        duration_sec,
+        bpm_x100,
+        bitrate: tags.bitrate,
+        sample_rate: tags.sample_rate,
+        file_size: tags.file_size,
+        year: tags.year,
+        metadata: rbl_core::ExportMetadata {
+            track_number: u32::from(tags.track_no),
+            bit_depth: u16::from(tags.bit_depth),
+            analysed: u32::try_from(rbl_db::write::ANALYSED_BY_THIS_APP).unwrap_or_default(),
+            ..rbl_core::ExportMetadata::default()
+        },
+        cues: Some(Vec::new()),
+        analysis: vec![
+            ("DAT".into(), files.dat),
+            ("EXT".into(), files.ext),
+            ("2EX".into(), files.two_ex),
+        ],
+        ..rbl_export::SourceTrack::default()
+    })
+}
+
 /// Adds a memory cue at `first_beat_ms` unless a memory cue is already
 /// there, and re-reads the track's cues into the index. Resolves to whether
 /// a cue was added.
@@ -687,6 +768,25 @@ mod tests {
         out.extend_from_slice(&data_len.to_le_bytes());
         out.extend_from_slice(&data);
         std::fs::write(path, out).unwrap();
+    }
+
+    #[test]
+    fn usb_source_analyses_a_loose_audio_file_without_writing_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let audio = dir.path().join("loose.wav");
+        write_click_wav(&audio, 4, 0.5);
+        let original = std::fs::read(&audio).unwrap();
+        let source = usb_source(&audio).unwrap();
+        assert_eq!(source.id, 0);
+        assert_eq!(source.source_path, audio);
+        assert_eq!(source.cues, Some(Vec::new()));
+        assert_eq!(source.metadata.analysed, 105);
+        assert_eq!(source.analysis.len(), 3);
+        for (_, bytes) in &source.analysis {
+            assert!(rbl_anlz::parse(bytes).is_ok());
+        }
+        assert_eq!(std::fs::read(&audio).unwrap(), original);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     /// A fixture library whose first track is a 20-second click track that

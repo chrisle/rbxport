@@ -613,6 +613,8 @@ async function realBackend(): Promise<Backend> {
       invoke<(string | null)[]>("device_playlist_collection_tracks", { path, format, tracks }),
     devicePlaylistEdit: (path, format, edit) =>
       invoke<DevicePlaylistEditResult>("device_playlist_edit", { path, format, edit }),
+    devicePlaylistAddFiles: (path, format, playlist, tracks) =>
+      invoke<DevicePlaylistEditResult>("device_playlist_add_files", { path, format, playlist, tracks }),
     devicePlaylistDuplicates: (path, format, playlist, tracks) =>
       invoke<string[]>("device_playlist_duplicates", { path, format, playlist, tracks }),
     devicePlaylistImport: (path, format, id, missing, destination) =>
