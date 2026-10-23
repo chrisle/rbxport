@@ -795,7 +795,7 @@ fn fill_source_details(
     // Tracks only. Its playlist ids use no recorded floor, unlike
     // `prepare`'s `merged_library_above`: do not rely on them here.
     let current = before.merged_library();
-    let recorded: BTreeMap<_, _> = manifest.into_iter().flat_map(|m| m.tracks.iter().map(|t| (t.export_id, (m.db_id, t.library_id)))).collect();
+    let recorded: BTreeMap<_, _> = manifest.into_iter().flat_map(|m| m.tracks.iter().map(|t| (t.export_id, (m.db_id, t.library_id, t.preserved != Some(true))))).collect();
     for t in current.as_ref().into_iter().flat_map(|l| &l.tracks) {
         let track = out
             .get_mut(&t.id)
@@ -818,7 +818,7 @@ fn fill_source_details(
             .get(&t.id)
             .copied()
             .or_else(|| {
-                recorded.get(&t.id).copied()
+                recorded.get(&t.id).map(|(db, content, _)| (*db, *content))
             })
             .unwrap_or_default();
         track.device = Some(DeviceTrack {
@@ -828,7 +828,7 @@ fn fill_source_details(
             audio: t.path.clone(),
             analysis_dir,
             preserve: true,
-            exported: false,
+            exported: recorded.get(&t.id).is_some_and(|(_, _, exported)| *exported),
         });
     }
     Ok(())
@@ -840,10 +840,19 @@ pub fn all(
     before: &Snapshot,
     manifest: Option<&Manifest>,
 ) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>)> {
-    // Runs only when one database is missing, so no playlist is re-id'd and
-    // the floor `prepare` passes to `merged_library_above` cannot matter.
+    // Keep each device row's id; the caller publishes the same playlist tree.
     let current = before.merged_library();
-    let sources = sources(root, before)?;
+    let mut sources = sources(root, before)?;
+    // Cached device sources do not encode this export's ownership record.
+    // Carry their recorded origin through a repeat add, rather than turning a
+    // newly exported in-place track into a device-owned track.
+    if let Some(manifest) = manifest {
+        for entry in &manifest.tracks {
+            if let Some(device) = sources.get_mut(&entry.export_id).and_then(|source| source.device.as_mut()) {
+                device.exported = entry.preserved != Some(true);
+            }
+        }
+    }
     let positions: BTreeMap<u32, usize> =
         sources.keys().enumerate().map(|(i, id)| (*id, i)).collect();
     let tracks = sources.into_values().collect();
