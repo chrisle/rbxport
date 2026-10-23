@@ -2202,8 +2202,10 @@ fn export_cancellable_inner(
     // Content reclamation was journaled. Empty folders are only cosmetic;
     // remove_dir refuses any directory another writer has populated.
     for (relative, directory) in obsolete {
-        if retained.contains(&relative.to_lowercase()) { continue; }
-        let path = checked_under(destination, &relative)?;
+        if relative.is_empty() || retained.contains(&relative.to_lowercase()) { continue; }
+        let path = checked_under(destination, &relative).map_err(|error| {
+            ExportError::Conflict(format!("Could not clean obsolete device path {relative:?} after publication: {error}"))
+        })?;
         let mut empty = if directory { Some(path.as_path()) } else { path.parent() };
         while let Some(dir) = empty.filter(|p| *p != destination && p.starts_with(destination)) {
             if std::fs::remove_dir(dir).is_err() { break; }
