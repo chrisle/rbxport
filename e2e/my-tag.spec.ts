@@ -70,11 +70,12 @@ test("a tick tags every selected track, and shows only what they all share", asy
   // Ticking it now tags both.
   await synth.click();
   await expect(synth).toHaveAttribute("aria-checked", "true");
-  await titleCell(page, 2).click();
-  await expect(synth).toHaveAttribute("aria-checked", "true");
-  await titleCell(page, 1).click();
-  await expect(synth).toHaveAttribute("aria-checked", "true");
+  // Unticking a shared tag removes it from the full selection.
   await synth.click();
+  await expect(synth).toHaveAttribute("aria-checked", "false");
+  await titleCell(page, 2).click();
+  await expect(synth).toHaveAttribute("aria-checked", "false");
+  await titleCell(page, 1).click();
   await expect(synth).toHaveAttribute("aria-checked", "false");
 });
 
