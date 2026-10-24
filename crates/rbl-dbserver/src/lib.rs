@@ -360,7 +360,8 @@ pub mod kind {
     /// The all-content track list used by RX3 load/search-depth transitions.
     /// It has the same `[context, sort]` shape and contents as
     /// [`TRACK_MENU`], but comes from the player-side `dbcl_GetTrack_Content`
-    /// path.
+    /// path. With a track id in a third argument (`[context, sort, id]`, sent
+    /// when loading a search result) it lists just that track.
     pub const CONTENT_TRACKS: u16 = 0x1200;
     /// Distinct rounded BPM values.
     pub const BPM_MENU: u16 = 0x1006;
