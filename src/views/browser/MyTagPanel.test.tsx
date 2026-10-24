@@ -40,18 +40,46 @@ afterEach(() => {
   __setBackend(null);
 });
 
-async function mount(myTagComments: boolean) {
+async function mount(myTagComments: boolean, selection: string[] = ["t1", "t2"], onEdit?: (what: string, edit: (b: Backend) => Promise<unknown>) => Promise<void>) {
   const preferences = { ...DEFAULT_PREFERENCES, advanced: { ...DEFAULT_PREFERENCES.advanced, myTagComments } };
-  const onEdit = async (_what: string, edit: (b: Backend) => Promise<unknown>) => { await edit(backend); };
+  const edit = onEdit ?? (async (_what: string, action: (b: Backend) => Promise<unknown>) => { await action(backend); });
   await act(async () => {
     root.render(
       <PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
-        <MyTagPanel selection={["t1", "t2"]} readOnly={false} libraryGeneration={0} onEdit={onEdit} />
+        <MyTagPanel selection={selection} readOnly={false} libraryGeneration={0} onEdit={edit} />
       </PreferencesProvider>,
     );
     for (let i = 0; i < 6; i++) await Promise.resolve();
   });
 }
+
+it("does not reuse the previous selection's ticks while the next selection loads", async () => {
+  let finish: ((tags: string[]) => void) | undefined;
+  vi.spyOn(backend, "selectionMyTags")
+    .mockResolvedValueOnce(["10"])
+    .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  await mount(false, ["t1"]);
+  const peak = host.querySelector<HTMLButtonElement>('button[role="checkbox"][aria-label="Peak"]');
+  expect(peak?.getAttribute("aria-checked")).toBe("true");
+  await mount(false, ["t1", "t2"]);
+  expect(peak?.disabled).toBe(true);
+  expect(peak?.getAttribute("aria-checked")).toBe("false");
+  await act(async () => { finish?.([]); await Promise.resolve(); });
+  expect(peak?.disabled).toBe(false);
+  await tick("Peak");
+  expect(edits.putMyTag).toHaveBeenCalledWith(["t1", "t2"], "10", true, false);
+});
+
+it("restores confirmed ticks after a refused bulk edit", async () => {
+  const lookup = vi.spyOn(backend, "selectionMyTags").mockResolvedValue(["10"]);
+  edits.putMyTag.mockRejectedValueOnce(new Error("library held"));
+  await mount(false, ["t1", "t2"], async (_what, edit) => { try { await edit(backend); } catch { /* App reports the refusal. */ } });
+  await tick("Peak");
+  const peak = host.querySelector<HTMLButtonElement>('button[role="checkbox"][aria-label="Peak"]');
+  expect(peak?.getAttribute("aria-checked")).toBe("true");
+  expect(peak?.disabled).toBe(false);
+  expect(lookup).toHaveBeenCalledTimes(2);
+});
 
 async function tick(name: string) {
   const box = host.querySelector<HTMLButtonElement>(`button[role="checkbox"][aria-label="${name}"]`);
