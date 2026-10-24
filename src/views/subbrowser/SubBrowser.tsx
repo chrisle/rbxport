@@ -45,6 +45,7 @@ export type SubTreeProps = Pick<
   | "onDeleteNode" | "onRenameNode" | "onMoveNode" | "onDropFiles" | "onExpand" | "showCounts"
   | "onOpenSync" | "onCreateSmartPlaylist" | "onEditSmartPlaylist" | "onAddArtwork"
   | "onAddToShortcut" | "onSortItems" | "onEjectDevice" | "ejectingDeviceId" | "deviceBusy"
+  | "onDeviceCreate" | "onDeviceRename" | "onDeviceDelete" | "onDeviceImport"
   | "readOnly"
 >;
 

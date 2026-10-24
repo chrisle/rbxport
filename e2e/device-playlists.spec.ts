@@ -98,6 +98,27 @@ test("a playlist made, filled and deleted on the stick changes only its own libr
   await expect(lists).toHaveCount(6);
 });
 
+test("device playlist actions work from the secondary Devices tree", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await page.getByRole("button", { name: "Sub-Browser Window" }).click();
+  const panel = page.getByRole("region", { name: "Sub-Browser" });
+  await panel.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
+  await panel.getByRole("button", { name: "Expand TEST" }).dispatchEvent("mousedown");
+
+  await panel.locator('[role="treeitem"][data-kind="devicePlaylists"]').first().click({ button: "right" });
+  const create = page.getByRole("menu", { name: "Playlists" }).getByRole("menuitem", { name: "Create New Playlist" });
+  await expect(create).toBeEnabled();
+  await create.click();
+  await expect(page.getByRole("contentinfo")).toContainText("Created Untitled Playlist.");
+
+  const created = panel.locator('[role="treeitem"][data-kind="devicePlaylist"]').filter({ hasText: "Untitled Playlist" });
+  await expect(created).toHaveCount(1);
+  await created.click({ button: "right" });
+  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Delete Playlist" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Deleted Untitled Playlist.");
+  await expect(created).toHaveCount(0);
+});
+
 test("adding a track a stick playlist already holds asks Add or Skip, as rekordbox does", async ({ page }) => {
   await openStick(page);
   // Melodic Vox holds the stick's tracks 2 to 4; tracks 1 and 2 are picked.
