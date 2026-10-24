@@ -664,6 +664,14 @@ fn analysed_bits(value: i64) -> u32 {
     u32::try_from(value).unwrap_or_else(|_| u32::from(value.to_le_bytes()[0]))
 }
 
+/// `DeviceSQL` stores the year as `u16`; zero already means no known year.
+/// `OneLibrary`'s SQLite column can contain an invalid negative value (#630).
+/// Treat values outside the shared range as unknown rather than wrapping or
+/// making up a year when both databases are rebuilt.
+fn release_year(value: i64) -> u16 {
+    u16::try_from(value).unwrap_or(0)
+}
+
 /// `OneLibrary`'s share of [`sources`]: every track it has metadata for.
 fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack>) -> Result<()> {
     let db = rbl_onelibrary::ExportLibrary::open_read_only(&dir.join("exportLibrary.db"))
@@ -693,7 +701,7 @@ fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack
                     duration_sec: r.get(11)?,
                     rating: crate::snapshot::onelibrary_stars(r.get(12)?),
                     color_id: r.get(13)?,
-                    year: r.get(14)?,
+                    year: release_year(r.get(14)?),
                     bitrate: r.get(15)?,
                     sample_rate: r.get(16)?,
                     file_size: u64::try_from(r.get::<_, i64>(17)?).unwrap_or(0),
