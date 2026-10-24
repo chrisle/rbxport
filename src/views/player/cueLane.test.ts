@@ -35,12 +35,14 @@ describe("the detail's cue lane", () => {
     expect(px("--s-cue-marker-top") + px("--s-cue-marker-h")).toBeLessThanOrEqual(px("--s-beat-marker-top"));
   });
 
-  it("starts the waveform below every cue marker", () => {
+  it("keeps cues above the waveform while beat heads overlap its top edge", () => {
     const wave = px("--s-wave-inset-top");
     expect(px("--s-cue-badge-top") + px("--s-cue-badge")).toBeLessThanOrEqual(wave);
     expect(px("--s-cue-marker-top") + px("--s-cue-marker-h")).toBeLessThanOrEqual(wave);
-    // The beat markers still reach 15px above the waveform (by request, 2026-09-18).
-    expect(wave - px("--s-beat-marker-top")).toBe(15);
+    // Rekordbox preserves waveform height by letting the 4px beat head overlap
+    // its top edge; cues themselves remain in the clear lane above it.
+    expect(px("--s-beat-marker-top")).toBeLessThan(wave);
+    expect(px("--s-beat-marker-top") + px("--s-beat-head-h")).toBeGreaterThan(wave);
   });
 
   it("paints the playhead in the colours rekordbox does", () => {

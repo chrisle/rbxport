@@ -690,9 +690,9 @@
    covering the red triangle's point.
 
    Vertically they keep to a lane of their own along the band's top: the
-   memory cue's triangle and the hot cue's badge first, the beat heads on the
-   row after the badge's last, then the waveform, so no marker covers the
-   audio. That is the order rekordbox 7.2.14 draws them in (#393). */
+   memory cue's triangle and the hot cue's badge first, then the beat heads on
+   the row after the badge's last. Rekordbox lets those heads overlap the
+   waveform's top edge, keeping the waveform at its full height (#393). */
 /* A loop is a band over the waveform: a stored memory loop dim, the deck's
    own lit while it plays, in the pad blue the AU button lights with. */
 .loopBand {

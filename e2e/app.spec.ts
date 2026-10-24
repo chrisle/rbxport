@@ -1698,15 +1698,18 @@ test("the detail waveform draws a beat grid with heavier downbeats", async ({ pa
   expect(marks).toContain("rgb(255, 255, 255)|rgb(234, 51, 35)");
   expect(marks).toContain("rgb(76, 76, 76)|rgb(124, 124, 124)");
 
-  // And they do not span the band: a marker starts 15px above the waveform,
-  // head included, so its line starts the head's height and a point lower.
+  // The beat head starts below the cue badge and overlaps the waveform top;
+  // the former 15px extension rule would unnecessarily shrink the waveform.
   const band = await detail.boundingBox();
   const marker = await detail.locator("span").first().boundingBox();
   const token = (name: string) =>
     page.evaluate((n) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n)), name);
   expect((marker?.y ?? 0) - (band?.y ?? 0)).toBeCloseTo(
-    (await token("--s-wave-inset-top")) - 15 + (await token("--s-beat-head-h")) + 1, 0,
+    (await token("--s-beat-marker-top")) + (await token("--s-beat-head-h")) + 1, 0,
   );
+  expect(await token("--s-beat-marker-top")).toBeLessThan(await token("--s-wave-inset-top"));
+  expect((await token("--s-beat-marker-top")) + (await token("--s-beat-head-h")))
+    .toBeGreaterThan(await token("--s-wave-inset-top"));
   expect((band?.y ?? 0) + (band?.height ?? 0) - ((marker?.y ?? 0) + (marker?.height ?? 0)))
     .toBeGreaterThan(4);
 });

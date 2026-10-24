@@ -321,6 +321,18 @@ test("deck B reads the other way up, and its detail meets deck A's at the centre
   expect(beatBoxA.y - detailA.y).toBeCloseTo(lineTop, 0);
   expect(bottom(detail) - bottom(beatBox)).toBeCloseTo(lineTop, 0);
   expect(beatBox.y - detail.y).toBeLessThan(beatBoxA.y - detailA.y);
+  // Both mirrored details use the restored waveform height. The head crosses
+  // its edge by two CSS pixels instead of forcing a 15px clear strip.
+  const waveTop = await token(page, "--s-wave-inset-top");
+  const beatTop = await token(page, "--s-beat-marker-top");
+  const headH = await token(page, "--s-beat-head-h");
+  expect(waveTop).toBe(20);
+  expect(beatTop).toBeLessThan(waveTop);
+  expect(beatTop + headH).toBeGreaterThan(waveTop);
+  const headA = await box(a.getByTestId("player-detail-head"));
+  const headB = await box(b.getByTestId("player-detail-head"));
+  expect(headA.height).toBeCloseTo(detailA.height, 0);
+  expect(headB.height).toBeCloseTo(detail.height, 0);
 });
 
 test("the shared column, strip and zoom are placed where the capture puts them", async ({ page }) => {
