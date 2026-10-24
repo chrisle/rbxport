@@ -146,6 +146,9 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         report.skipped += gone;
         // Open the guarded writer even for an empty device; read-only must not look like success.
         state.write(|_| Ok(())).map_err(write_error)?;
+        // Parse every eligible ANLZ before publishing any cue/grid changes. A
+        // later malformed track must not leave earlier tracks committed.
+        let mut prepared = Vec::new();
         for (id, analysis) in tracks.values() {
             // Read on the open handle. Opening the library, for the lock
             // bit here and the analysis path below, derives its key again:
@@ -155,11 +158,15 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             if editor.is_locked(id) || state.read_db(|db| crate::grid::locked_in(db, id)).map_err(write_error)? { report.skipped += 1; continue; }
             if analysis.is_empty() { report.skipped += 1; continue; }
             let source = within(root, analysis)?;
-            let source_dat = rbl_anlz::Anlz::read(&source).map_err(err)?;
+            let source_dat = rbl_anlz::Anlz::read(&source)
+                .map_err(|e| err(format!("USB DAT for track {id}: {e}")))?;
             // `source` is canonical and `root` need not be (a symlinked mount),
             // so the `.EXT` is found from the relative path, not by stripping.
             let ext_relative = Path::new(analysis).with_extension("EXT");
-            let source_cues = if source.with_extension("EXT").exists() { rbl_anlz::Anlz::read(&within(root, &ext_relative.to_string_lossy())?).map_err(err)? } else { source_dat.clone() };
+            let source_cues = if source.with_extension("EXT").exists() {
+                rbl_anlz::Anlz::read(&within(root, &ext_relative.to_string_lossy())?)
+                    .map_err(|e| err(format!("USB EXT for track {id}: {e}")))?
+            } else { source_dat.clone() };
             if source_cues.section(b"PCO2").is_none() { report.skipped += 1; continue; }
             let entries = source_cues.cue_entries();
             let beats = source_dat.beat_grid().unwrap_or_default();
@@ -177,7 +184,8 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             for extension in ["DAT", "EXT"] {
                 let target = target.with_extension(extension);
                 if !target.exists() { continue; }
-                let mut dest = rbl_anlz::Anlz::read(&target).map_err(err)?;
+                let mut dest = rbl_anlz::Anlz::read(&target)
+                    .map_err(|e| err(format!("local library {extension} for track {id}: {e}")))?;
                 let src = if extension == "DAT" { &source_dat } else { &source_cues };
                 differs |= !dest.sections.iter().filter(|s| s.is_cue_list()).eq(src.sections.iter().filter(|s| s.is_cue_list()));
                 if extension == "DAT" && !beats.is_empty() {
@@ -194,11 +202,14 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             }
             if files.is_empty() { report.skipped += 1; continue; }
             if !differs && !bpm_changed && database_cues_match(state, id, &entries)? { report.unchanged += 1; continue; }
-            let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, id, bpm, None, true, &files)?;
+            prepared.push((id.clone(), entries, bpm, files));
+        }
+        for (id, entries, bpm, files) in prepared {
+            let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, &id, bpm, None, true, &files)?;
             if let Err(e) = journal.publish() { journal.rollback()?; return Err(e); }
-            if let Err(e) = state.write(|w| w.import_usb_cues(id, &entries, bpm)) { journal.reconcile(&location)?; return Err(write_error(e)); }
+            if let Err(e) = state.write(|w| w.import_usb_cues(&id, &entries, bpm)) { journal.reconcile(&location)?; return Err(write_error(e)); }
             journal.commit()?;
-            editor.forget_history(id);
+            editor.forget_history(&id);
             report.changed.push(id.clone());
             report.tracks += 1;
         }
@@ -312,6 +323,64 @@ fn validate_settings(name: &str, bytes: &[u8]) -> Result<(), String> {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+    #[test]
+    fn malformed_anlz_preflight_leaves_all_cues_and_grids_untouched() {
+        // Two matched tracks have writable local analysis. Regardless of
+        // HashMap traversal order, an invalid file on one must prevent a
+        // valid track from committing. Exercise all four ANLZ read sites.
+        for (stage, extension) in [
+            ("USB", "DAT"), ("USB", "EXT"),
+            ("local library", "DAT"), ("local library", "EXT"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (state, location, usb, _) = library_and_stick(dir.path());
+            let ids = [rbl_db::fixture::track_id(0), rbl_db::fixture::track_id(1)];
+            let mut targets = Vec::new();
+            for id in &ids {
+                let relative = state.write(|w| w.analysis_data_path_for(id)).unwrap();
+                state.write(|w| w.register_analysis(id, &rbl_db::write::AnalysisRegistration {
+                    bpm_x100: 12000, key: None, analysis_data_path: &relative,
+                })).unwrap();
+                let target = rbl_anlz::resolve(&location.share_root, &relative);
+                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                let mut dat = rbl_anlz::write::AnlzBuilder::new();
+                dat.path("/original.mp3").cue_lists(false);
+                std::fs::write(&target, dat.finish()).unwrap();
+                let mut ext = rbl_anlz::write::AnlzBuilder::new();
+                ext.path("/original.mp3").cue_lists(true);
+                std::fs::write(target.with_extension("EXT"), ext.finish()).unwrap();
+                targets.push(target);
+            }
+            let bad = if stage == "USB" {
+                usb.join("PIONEER/USBANLZ/P000/00000002/ANLZ0000.DAT").with_extension(extension)
+            } else {
+                targets[1].with_extension(extension)
+            };
+            std::fs::write(&bad, b"NOPE00000000").unwrap();
+            let snapshot = || ids.iter().zip(&targets).map(|(id, target)| {
+                let db = state.read_db(|db| {
+                    let track = db.connection().query_row(
+                        "SELECT BPM, AnalysisUpdated, rb_local_usn FROM djmdContent WHERE ID=?1", [id],
+                        |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?)),
+                    )?;
+                    let cues = db.connection().query_row(
+                        "SELECT COUNT(*) FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0", [id],
+                        |r| r.get::<_, i64>(0),
+                    )?;
+                    Ok((track, cues))
+                }).unwrap();
+                (db, std::fs::read(target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap())
+            }).collect::<Vec<_>>();
+            let before = snapshot();
+            let editor = crate::grid::GridEditor::at(state.backup_dir());
+            let error = import(&state, &editor, &usb, true, false, false, false).unwrap_err().to_string();
+            assert!(error.contains(&format!("{stage} {extension} for track {}", ids[1])), "{error}");
+            assert!(error.contains("PMAI"), "{error}");
+            assert!(!error.contains(&dir.path().to_string_lossy().to_string()), "path leaked: {error}");
+            assert_eq!(snapshot(), before, "{stage} {extension} changed another track");
+            assert_eq!(std::fs::read(&bad).unwrap(), b"NOPE00000000", "malformed input was rewritten");
+        }
+    }
     #[test]
     fn imports_only_cues_and_grid_preserving_local_path_and_waveform() {
         let dir = tempfile::tempdir().unwrap();
