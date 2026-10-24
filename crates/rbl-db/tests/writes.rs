@@ -30,6 +30,15 @@ fn fixture() -> Fixture {
     fixture_with(Shape::default())
 }
 
+#[test]
+fn playlist_add_refuses_a_missing_track_without_storing_invisible_membership() {
+    let mut f = fixture_with(Shape { tracks: 1, playlists: 1, tracks_per_playlist: 0, history_sessions: 0, start_usn: 1000 });
+    let playlist = playlist_id(0);
+    let missing = "999999".to_owned();
+    assert!(f.writer.add_tracks(&playlist, &[track_id(0), missing]).is_err());
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 0"), 0);
+}
+
 impl Fixture {
     fn conn(&self) -> &rusqlite::Connection {
         self.writer.library().connection()
