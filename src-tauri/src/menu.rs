@@ -358,7 +358,7 @@ const PLAYLIST_MENU: &[Row] = &[
     Row::Separator,
     Row::Item("delete-playlist", "Delete Playlist"),
     Row::Separator,
-    // Sort Items (0x500d) goes here, before Renumber Track Order (#443).
+    Row::Item("sort-items", "Sort Items"),
     Row::Item("renumber-track-order", "Renumber Track Order"),
     // Titled with the String rekordbox builds at 0x101b99558; the items show
     // the commands' own names, 0x5005 and 0x5006.
@@ -568,6 +568,7 @@ mod tests {
                 "-",
                 "delete-playlist",
                 "-",
+                "sort-items",
                 "renumber-track-order",
                 "export-playlist-file",
                 "export-playlist-txt",

@@ -58,3 +58,24 @@ test("the Playlist menu follows the tree's selection", async ({ page }) => {
   await click(page, "create-playlist");
   await expect(status(page)).toContainText("Created New playlist.");
 });
+
+test("Playlist Sort Items runs the shared command for a populated folder", async ({ page }) => {
+  await open(page);
+  const labels = () => page.getByRole("treeitem").evaluateAll((items) =>
+    items.map((item) => item.querySelector("span[class*='label']")?.textContent ?? ""));
+  const children = async () => {
+    const names = await labels();
+    return names.slice(names.indexOf("CURRENT") + 1, names.indexOf("USB"));
+  };
+  expect(await enabled(page, "sort-items")).toBe(false);
+  expect(await children()).toEqual(["Melodic Vox", "Hardstyle", "Drum and Bass", "Fresh 128s"]);
+
+  await page.getByRole("treeitem").filter({ hasText: "CURRENT" }).first().click();
+  await expect.poll(() => enabled(page, "sort-items")).toBe(true);
+  await click(page, "sort-items");
+  await expect(status(page)).toContainText("Sorted CURRENT.");
+  await expect.poll(children).toEqual(["Drum and Bass", "Fresh 128s", "Hardstyle", "Melodic Vox"]);
+
+  await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  await expect.poll(() => enabled(page, "sort-items")).toBe(false);
+});

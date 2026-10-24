@@ -518,8 +518,12 @@ export const TreeView = memo(function TreeView({
     exportPlaylistM3u8: onSelected(onExportFile && ((node) => onExportFile(node, "m3u8"))),
   }, side);
   useEffect(() => {
-    publishTreeMenuState(side, { kind: selectedNode?.kind ?? null });
-  }, [side, selectedNode?.kind]);
+    const parent = selectedNode?.kind === "collection" ? TREE_ROOT : selectedNode?.id;
+    publishTreeMenuState(side, {
+      kind: selectedNode?.kind ?? null,
+      hasChildren: parent !== undefined && childrenOf(nodes, parent).length > 0,
+    });
+  }, [side, selectedNode, nodes]);
   useEffect(() => () => publishTreeMenuState(side, null), [side]);
   /** The row whose name is being typed over, if any. */
   const [renamingId, setRenamingId] = useState<string | null>(null);

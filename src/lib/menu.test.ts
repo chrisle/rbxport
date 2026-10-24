@@ -30,6 +30,12 @@ describe("menu", () => {
   });
 
   it("refuses a Track or Playlist menu write on a protected library, as rekordbox does", () => {
+    expect(resolveMenu("sort-items", false)).toMatchObject({
+      action: "bar-command", item: { action: "sortItems", scope: "global" },
+    });
+    expect(resolveMenu("sort-items", true, true)).toEqual({
+      refused: "Editing is locked by Library Protection. Turn it off in Preferences to edit.",
+    });
     expect(resolveMenu("delete-playlist", true, true)).toEqual({
       refused: "Editing is locked by Library Protection. Turn it off in Preferences to edit.",
     });

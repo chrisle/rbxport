@@ -32,6 +32,8 @@ export interface ListMenuState {
 /** What the tree on one side has selected. */
 export interface TreeMenuState {
   kind: TreeNode["kind"] | null;
+  /** Whether the selected folder or Playlists heading has a child row. */
+  hasChildren: boolean;
 }
 
 /** A native menu item that runs a shared command. */
@@ -42,6 +44,8 @@ export interface MenuBarItem {
   owner: "list" | "tree";
   /** Writes the library: refused, with the reason, while it is read-only. */
   writes: boolean;
+  /** App owns this command without a browser-side scope. */
+  scope?: "global";
 }
 
 /** Ids as `src-tauri/src/menu.rs` gives them. */
@@ -58,6 +62,7 @@ export const MENU_BAR_ITEMS: readonly MenuBarItem[] = [
   { id: "create-intelligent-playlist", action: "createIntelligentPlaylist", owner: "tree", writes: true },
   { id: "create-folder", action: "createFolder", owner: "tree", writes: true },
   { id: "delete-playlist", action: "deletePlaylist", owner: "tree", writes: true },
+  { id: "sort-items", action: "sortItems", owner: "tree", writes: true, scope: "global" },
   { id: "renumber-track-order", action: "renumberTrackOrder", owner: "list", writes: true },
   { id: "export-playlist-txt", action: "exportPlaylistTxt", owner: "tree", writes: false },
   { id: "export-playlist-m3u8", action: "exportPlaylistM3u8", owner: "tree", writes: false },
@@ -99,7 +104,7 @@ export interface MenuBarInput {
   lists: Partial<Record<BrowserSide, ListMenuState>>;
   trees: Partial<Record<BrowserSide, TreeMenuState>>;
   /** Whether something on screen answers a command for a side (`hasCommand`). */
-  has: (action: Action, side: BrowserSide) => boolean;
+  has: (action: Action, side?: BrowserSide) => boolean;
 }
 
 /**
@@ -118,7 +123,7 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   const tree = focus !== null ? trees[side] : undefined;
   const live = (id: string, rule: boolean) => {
     const item = menuBarItem(id);
-    out[id] = rule && (item === null || has(item.action, side));
+    out[id] = rule && (item === null || has(item.action, item.scope === "global" ? undefined : side));
   };
 
   const n = list?.selected ?? 0;
@@ -162,6 +167,10 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   // folder. rekordbox also offers it on the Playlists heading; what it does
   // there is not known, so it is greyed here.
   live("delete-playlist", kind === "folder" || kind === "playlist" || kind === "smartPlaylist");
+  // Sort Items, 0x500d: the selected folder or Playlists heading with
+  // children, as the tree context menu offers it. The shared command owns
+  // the search refusal for every entry point.
+  live("sort-items", side === "main" && (kind === "folder" || kind === "collection") && tree?.hasChildren === true);
   // Renumber Track Order, 0x500e: a playlist that is not intelligent, whose
   // list is the one that renumbers.
   live("renumber-track-order", kind === "playlist");
@@ -200,7 +209,8 @@ export function publishListMenuState(side: BrowserSide, state: ListMenuState | n
 /** A tree's report; null when it goes away. */
 export function publishTreeMenuState(side: BrowserSide, state: TreeMenuState | null): void {
   const next = state ?? undefined;
-  if (trees[side]?.kind === next?.kind && (trees[side] === undefined) === (next === undefined)) return;
+  if (trees[side]?.kind === next?.kind && trees[side]?.hasChildren === next?.hasChildren &&
+    (trees[side] === undefined) === (next === undefined)) return;
   if (next === undefined) delete trees[side];
   else trees[side] = next;
   changed();
