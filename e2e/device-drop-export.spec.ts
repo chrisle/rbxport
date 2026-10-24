@@ -61,14 +61,46 @@ test("a playlist dropped on a stick is exported to it, and stays where it was", 
   await expect(playlist).toHaveAttribute("style", depth ?? "");
 });
 
-test("a stick's own playlists take no tracks from the collection", async ({ page }) => {
-  const { panel } = await stickBesideCollection(page, "/?writable=1");
+test("a collection playlist track dropped onto a USB playlist in the main tree is added", async ({ page }) => {
+  const { panel } = await stickBesideCollection(page, "/?writable=1&tracks=4");
   await page.getByRole("button", { name: "Expand TEST" }).dispatchEvent("mousedown");
   const onStick = page.locator('[role="treeitem"][data-kind="devicePlaylist"]').first();
   await expect(onStick).toBeVisible();
-  await panel.getByRole("tree").getByRole("treeitem").filter({ hasText: "All Tracks" }).first().click();
+  await panel.getByRole("tree").locator('[role="treeitem"][data-kind="playlist"]').filter({ hasText: "Melodic Vox" }).first().click();
   const rows = panel.getByRole("grid").locator('[role="row"]:has([role="gridcell"])');
   await dropRow(page, rows.first(), onStick);
-  await page.waitForTimeout(500);
-  await expect(exported(page)).toHaveCount(0);
+  await expect(page.getByRole("contentinfo")).toContainText("Added to NP3-TEST-MP3.");
+  await onStick.click();
+  await expect(page.getByRole("grid").first().locator('[role="row"]:has([role="gridcell"])')).toHaveCount(3);
+});
+
+test("a collection playlist track dropped onto a USB playlist in the sub-browser is added", async ({ page }) => {
+  await page.goto("/?writable=1&tracks=4");
+  await expect(page.getByTestId("browser-title")).toContainText("Melodic Vox");
+  await page.getByRole("button", { name: "Sub-Browser Window" }).click();
+  const panel = page.getByRole("region", { name: "Sub-Browser" });
+  await expect(panel).toBeVisible();
+  await panel.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
+  await panel.getByRole("button", { name: "Expand TEST" }).dispatchEvent("mousedown");
+  const onStick = panel.locator('[role="treeitem"][data-kind="devicePlaylist"]').first();
+  await expect(onStick).toBeVisible();
+  const rows = page.getByRole("grid").first().locator('[role="row"]:has([role="gridcell"])');
+  await expect(rows.first()).toBeVisible();
+
+  const transfer = await page.evaluateHandle(() => new DataTransfer());
+  await rows.first().dispatchEvent("dragstart", { dataTransfer: transfer });
+  await expect(onStick).toHaveAttribute("data-device-track-drop", "true");
+  await onStick.dispatchEvent("dragenter", { dataTransfer: transfer });
+  await onStick.dispatchEvent("dragover", { dataTransfer: transfer });
+  await expect(onStick).toHaveAttribute("data-over", "true");
+  await onStick.dispatchEvent("drop", { dataTransfer: transfer });
+  await rows.first().dispatchEvent("dragend", { dataTransfer: transfer });
+  await expect(page.getByRole("contentinfo")).toContainText("Added to NP3-TEST-MP3.");
+  await onStick.click();
+  await expect(panel.getByRole("grid").locator('[role="row"]:has([role="gridcell"])')).toHaveCount(3);
+  const otherLibrary = panel.locator('[role="treeitem"][data-kind="devicePlaylist"]').nth(3);
+  await otherLibrary.click();
+  await expect(panel.getByRole("grid").locator('[role="row"]:has([role="gridcell"])')).toHaveCount(2);
+  await onStick.click();
+  await expect(panel.getByRole("grid").locator('[role="row"]:has([role="gridcell"])')).toHaveCount(3);
 });
