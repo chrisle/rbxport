@@ -14,8 +14,9 @@ it("sends every native menu label through the active translator", () => {
   expect(labels.Help).toBe("translated:Help");
   expect(labels["Report bug…"]).toBe("translated:Report bug…");
   expect(labels.Playlist).toBe("translated:Playlist");
+  expect(labels["Sort Items"]).toBe("translated:Sort Items");
   expect(labels["Analysis Lock On"]).toBe("translated:Analysis Lock On");
   expect(labels["Export a playlist to a file for music apps (*.m3u8)"])
     .toBe("translated:Export a playlist to a file for music apps (*.m3u8)");
-  expect(Object.keys(labels)).toHaveLength(55);
+  expect(Object.keys(labels)).toHaveLength(56);
 });
