@@ -139,7 +139,7 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   live("import-to-collection", list !== undefined && n > 0 && list.loose);
   // Analyze Track, 0x4000: a selected track that is not missing.
   // `analyseSelection` is the main browser's.
-  out["analyze-track"] = tracks && side === "main" && anyPresent && has("analyseSelection", side);
+  out["analyze-track"] = tracks && side === "main" && anyPresent && has("analyseSelection");
   // Analysis Lock On, 0x4012: as Analyze Track. Off, 0x4013: rekordbox wants
   // a locked track among them; the list here does not carry the lock, so
   // Off is live for any track, as the context menu's is.
