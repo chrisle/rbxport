@@ -667,7 +667,7 @@ fn analysed_bits(value: i64) -> u32 {
 /// `DeviceSQL` stores the year as `u16`; zero already means no known year.
 /// `OneLibrary`'s SQLite column can contain an invalid negative value (#630).
 /// Treat values outside the shared range as unknown rather than wrapping or
-/// making up a year when both databases are rebuilt.
+/// making up a year. `DeviceSQL` can still supply a valid year for that track.
 fn release_year(value: i64) -> u16 {
     u16::try_from(value).unwrap_or(0)
 }
@@ -722,8 +722,8 @@ fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack
     Ok(())
 }
 
-/// The legacy database's share of [`sources`]: whatever `OneLibrary` did not
-/// already provide (`or_insert`), since both name the same tracks.
+/// The legacy database's share of [`sources`]: tracks `OneLibrary` did not
+/// provide, plus a valid year when `OneLibrary` has no usable year.
 fn sources_from_legacy(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack>) -> Result<()> {
     use rbl_pdb::PageType;
     let bytes = std::fs::read(dir.join("export.pdb"))?;
@@ -749,7 +749,12 @@ fn sources_from_legacy(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTr
         .map(|t| pdb.track_rows(t))
         .unwrap_or_default()
     {
-        out.entry(t.id).or_insert(SourceTrack {
+        let legacy_year = t.year;
+        out.entry(t.id).and_modify(|one| {
+            if one.year == 0 && legacy_year != 0 {
+                one.year = legacy_year;
+            }
+        }).or_insert(SourceTrack {
             metadata: rbl_core::ExportMetadata { track_number: t.track_number, play_count: u32::from(t.play_count), bit_depth: t.sample_depth, disc_number: t.disc_number, hot_cue_auto_load: t.hot_cue_auto_load, date_created: t.date_created, content_link: t.content_link, ..Default::default() },
             title: t.title,
             artist: artists.get(&t.artist_id).cloned().unwrap_or_default(),
