@@ -113,10 +113,32 @@ test("device playlist actions work from the secondary Devices tree", async ({ pa
 
   const created = panel.locator('[role="treeitem"][data-kind="devicePlaylist"]').filter({ hasText: "Untitled Playlist" });
   await expect(created).toHaveCount(1);
-  await created.click({ button: "right" });
-  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Delete Playlist" }).click();
-  await expect(page.getByRole("contentinfo")).toContainText("Deleted Untitled Playlist.");
+  await created.click();
+  await created.press("F2");
+  const rename = panel.getByRole("textbox", { name: "Rename Untitled Playlist" });
+  await rename.fill("Secondary Set");
+  await rename.press("Enter");
+  await expect(page.getByRole("contentinfo")).toContainText("Renamed to Secondary Set.");
   await expect(created).toHaveCount(0);
+  const renamed = panel.locator('[role="treeitem"][data-kind="devicePlaylist"]').filter({ hasText: "Secondary Set" });
+  await expect(renamed).toHaveCount(1);
+
+  await renamed.click({ button: "right" });
+  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Delete Playlist" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Deleted Secondary Set.");
+  await expect(renamed).toHaveCount(0);
+
+  // Import a populated playlist through the secondary Devices menu. The
+  // collection already has Melodic Vox inside CURRENT, so the import adds one.
+  await panel.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
+  const expand = panel.getByRole("button", { name: "Expand TEST" });
+  if (await expand.count()) await expand.dispatchEvent("mousedown");
+  const imported = panel.locator('[role="treeitem"][data-kind="devicePlaylist"]').filter({ hasText: /^\s*Melodic Vox/ }).first();
+  await imported.click({ button: "right" });
+  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Import Playlist" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Imported Melodic Vox.");
+  await panel.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Playlists" }).click();
+  await expect(panel.locator('[role="treeitem"][data-kind="playlist"]').filter({ hasText: /^\s*Melodic Vox\s*(\(\d+\))?\s*$/ })).toHaveCount(2);
 });
 
 test("adding a track a stick playlist already holds asks Add or Skip, as rekordbox does", async ({ page }) => {
