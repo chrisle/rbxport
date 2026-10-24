@@ -69,7 +69,7 @@ export function MyTagPanel({ className, selection, readOnly, libraryGeneration, 
   const tip = useTooltip();
   const myTagComments = usePreferences().advanced.myTagComments;
   const [categories, setCategories] = useState<Categories>([]);
-  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  const [loaded, setLoaded] = useState<{ key: string; ids: ReadonlySet<string>; writing: boolean } | null>(null);
   /** The id whose name is open for editing. */
   const [editing, setEditing] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; tag: string } | null>(null);
@@ -84,33 +84,45 @@ export function MyTagPanel({ className, selection, readOnly, libraryGeneration, 
   }, [libraryGeneration]);
 
   const tracks = selection.filter((id) => !isLooseId(id));
-  const tickable = !readOnly && selection.length > 0 && tracks.length === selection.length;
   const selectionKey = tracks.join("\n");
+  const stateKey = `${selectionKey}\0${libraryGeneration}`;
+  const ticked = loaded?.key === stateKey ? loaded.ids : null;
+  const tickable = !readOnly && selection.length > 0 && tracks.length === selection.length && ticked !== null && !loaded?.writing;
   useEffect(() => {
     let live = true;
     if (selectionKey === "") {
-      setTicked(new Set());
+      setLoaded({ key: stateKey, ids: new Set(), writing: false });
       return;
     }
     void getBackend()
       .then((b) => b.selectionMyTags(selectionKey.split("\n")))
-      .then((ids) => { if (live) setTicked(new Set(ids)); })
-      .catch(() => { if (live) setTicked(new Set()); });
+      .then((ids) => { if (live) setLoaded({ key: stateKey, ids: new Set(ids), writing: false }); })
+      .catch(() => { if (live) setLoaded(null); });
     return () => { live = false; };
-  }, [selectionKey, libraryGeneration]);
+  }, [selectionKey, stateKey]);
 
   const tick = useCallback(
     (tag: string, on: boolean) => {
       if (!tickable) return;
-      // Shown at once; the reload that follows the write confirms it.
-      setTicked((current) => {
-        const next = new Set(current);
+      // Keep this selection's controls busy until the database confirms the edit.
+      setLoaded((current) => {
+        if (current?.key !== stateKey) return current;
+        const next = new Set(current.ids);
         if (on) next.add(tag); else next.delete(tag);
-        return next;
+        return { key: stateKey, ids: next, writing: true };
       });
-      void onEdit(on ? "My Tag added." : "My Tag removed.", (b) => b.edits.putMyTag(tracks, tag, on, myTagComments));
+      void (async () => {
+        try {
+          await onEdit(on ? "My Tag added." : "My Tag removed.", (b) => b.edits.putMyTag(tracks, tag, on, myTagComments));
+          // runEdit reports refusals without throwing, so always read back.
+          const ids = await (await getBackend()).selectionMyTags(tracks);
+          setLoaded((current) => current?.key === stateKey ? { key: stateKey, ids: new Set(ids), writing: false } : current);
+        } catch {
+          setLoaded((current) => current?.key === stateKey ? null : current);
+        }
+      })();
     },
-    [tickable, tracks, onEdit, myTagComments],
+    [tickable, tracks, onEdit, myTagComments, stateKey],
   );
 
   const add = useCallback(
@@ -180,7 +192,7 @@ export function MyTagPanel({ className, selection, readOnly, libraryGeneration, 
               {category.tags.length === 0 ? addButton(category) : null}
             </div>
             {category.tags.map((tag, index) => {
-              const on = ticked.has(tag.id);
+              const on = ticked?.has(tag.id) ?? false;
               return (
                 <div
                   key={tag.id}
