@@ -782,6 +782,8 @@ export interface TrackDrag {
    * was on [OBS].
    */
   row: RowDto;
+  /** Position of the row the deck loads, including for a selected group. */
+  position: ListPosition;
 }
 
 export interface TrackTableProps {
@@ -1539,12 +1541,12 @@ export const TrackTable = memo(function TrackTable({
   }, [platform, keyOverrides, answersLocate, listScope]);
 
   const startDragOut = useCallback(
-    (row: RowDto) => {
+    (row: RowDto, index: number) => {
       // Whatever is selected, plus the row grabbed if it was not part of it —
       // dragging an unselected row should move that row, not the selection
       // somewhere else on screen.
       if (!selection.ids.has(row.id)) {
-        onDragTracks?.({ ids: [row.id], row, sourceKind: spec.source.kind });
+        onDragTracks?.({ ids: [row.id], row, sourceKind: spec.source.kind, position: { spec, index } });
         return;
       }
       // A playlist takes all of them; a deck takes the first in list order,
@@ -1553,16 +1555,18 @@ export const TrackTable = memo(function TrackTable({
       // selection was made from are in the cache, and the walk ends at the
       // first hit. Once per drag, not per frame.
       let first = row;
+      let firstIndex = index;
       for (let i = 0; i < view.count; i += 1) {
         const at = view.rowAt(i);
         if (at && selection.ids.has(at.id)) {
           first = at;
+          firstIndex = i;
           break;
         }
       }
-      onDragTracks?.({ ids: [...selection.ids], row: first, sourceKind: spec.source.kind });
+      onDragTracks?.({ ids: [...selection.ids], row: first, sourceKind: spec.source.kind, position: { spec, index: firstIndex } });
     },
-    [selection.ids, onDragTracks, spec.source.kind, view],
+    [selection.ids, onDragTracks, spec, view],
   );
 
   // The ids travelling with the hand, and where they would land. Held here
@@ -1672,7 +1676,7 @@ export const TrackTable = memo(function TrackTable({
         item.index < index && item.index < view.count && view.rowAt(item.index)?.id === row.id);
       setDragSourceKey(copyAbove ? `${row.id}#${String(slot)}` : row.id);
       carrying.current = selection.ids.has(row.id) ? [...selection.ids] : [row.id];
-      startDragOut(row);
+      startDragOut(row, index);
       if (!nativeTrackDragging()) return false;
       nativeDrag.current = true;
       void dragTracksToDesktop(carrying.current)
