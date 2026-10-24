@@ -253,24 +253,36 @@ fn exported_years(dest: &Path, device_id: u32) -> (u16, i64) {
 #[test]
 fn a_negative_release_year_on_a_track_the_stick_keeps_does_not_stop_the_sync() {
     let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
-    let (tracks, _) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
+    let mut tracks: Vec<SourceTrack> = (1..=3).map(|id| track(src.path(), id, 0)).collect();
+    tracks[2].year = 2020;
+    let initial = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1, 2], ..Default::default() }];
+    sync_to(dest.path(), &tracks, &initial, DB_ID).unwrap();
+    std::fs::remove_file(rbl_export::Manifest::path(dest.path())).unwrap();
     let kept = device_id(dest.path(), 3);
+    assert_eq!(exported_years(dest.path(), kept), (2020, 2020));
     set_release_year(dest.path(), kept, -9517);
+    assert_eq!(exported_years(dest.path(), kept), (2020, -9517), "only OneLibrary has the malformed year");
     let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
     let report = sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap();
     assert_eq!(report.tracks, 3);
-    assert_eq!(exported_years(dest.path(), kept), (0, 0), "an invalid year becomes unknown in both databases");
+    assert_eq!(exported_years(dest.path(), kept), (2020, 2020), "the valid DeviceSQL year survives in both databases");
     assert!(rbl_export::verify_databases(dest.path()).unwrap().errors.is_empty());
     sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap();
-    assert_eq!(exported_years(dest.path(), kept), (0, 0));
+    assert_eq!(exported_years(dest.path(), kept), (2020, 2020));
 }
 
 #[test]
 fn a_negative_release_year_on_a_track_the_sync_rewrites_uses_the_library_year() {
     let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
-    let (mut tracks, playlists) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
+    let mut tracks: Vec<SourceTrack> = (1..=3).map(|id| track(src.path(), id, 0)).collect();
+    tracks[1].year = 2019;
+    let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1, 2], ..Default::default() }];
+    sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
+    std::fs::remove_file(rbl_export::Manifest::path(dest.path())).unwrap();
     let rewritten = device_id(dest.path(), 2);
+    assert_eq!(exported_years(dest.path(), rewritten), (2019, 2019));
     set_release_year(dest.path(), rewritten, -9517);
+    assert_eq!(exported_years(dest.path(), rewritten), (2019, -9517));
     tracks[1].year = 2020;
     let report = sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
     assert_eq!(report.tracks, 3);
