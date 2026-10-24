@@ -2575,13 +2575,7 @@ pub async fn track_beats(
     blocking("track_beats", move || {
         let Some(dat) = dat else { return Ok(Vec::new()) };
         let beats = read_beat_grid(&dat);
-        let mut out: Vec<u8> = Vec::with_capacity(beats.len() * BEAT_BYTES);
-        for (time_ms, number, tempo_x100) in beats {
-            out.extend_from_slice(&time_ms.to_le_bytes());
-            out.push(number);
-            out.extend_from_slice(&tempo_x100.to_le_bytes());
-        }
-        Ok(out)
+        Ok(encode_beat_grid(&beats))
     })
     .await
     .map(tauri::ipc::Response::new)
@@ -2593,6 +2587,7 @@ pub async fn track_beats(
 fn read_beat_grid(path: &std::path::Path) -> Vec<(u32, u8, u16)> {
     let Ok(bytes) = std::fs::read(path) else { return Vec::new() };
     let Ok(file) = rbl_anlz::parse(&bytes) else { return Vec::new() };
+    let offset = i64::from(file.grid_offset().unwrap_or(0));
     file.sections
         .iter()
         .find_map(rbl_anlz::Section::as_beat_grid)
@@ -2600,12 +2595,28 @@ fn read_beat_grid(path: &std::path::Path) -> Vec<(u32, u8, u16)> {
             beats
                 .iter()
                 .take(MAX_BEATS)
-                .map(|beat| {
-                    (beat.time_ms, u8::try_from(beat.beat_number).unwrap_or(0), beat.tempo_x100)
+                .filter_map(|beat| {
+                    u32::try_from(i64::from(beat.time_ms) + offset).ok().map(|time_ms| {
+                        (time_ms, u8::try_from(beat.beat_number).unwrap_or(0), beat.tempo_x100)
+                    })
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn encode_beat_grid(beats: &[(u32, u8, u16)]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(beats.len() * BEAT_BYTES);
+    for &(time_ms, number, tempo_x100) in beats {
+        out.extend_from_slice(&time_ms.to_le_bytes());
+        out.push(number);
+        out.extend_from_slice(&tempo_x100.to_le_bytes());
+    }
+    out
+}
+
+fn metronome_beat_grid(beats: &[(u32, u8, u16)]) -> Vec<(u32, bool)> {
+    beats.iter().map(|&(ms, number, _)| (ms, number == 1)).collect()
 }
 
 /// Bytes one beat takes in that encoding: `u32` milliseconds, its number, then
@@ -2660,7 +2671,7 @@ pub async fn deck_load<R: tauri::Runtime>(
     if player.loaded_tracks.lock().get(&which) == Some(&track) {
         engine.set_metronome_grid(
             which,
-            &grid.iter().map(|&(ms, number, _)| (ms, number == 1)).collect::<Vec<_>>(),
+            &metronome_beat_grid(&grid),
         );
     }
     Ok(())
@@ -4862,6 +4873,45 @@ pub async fn filter_values(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::{expand_import_paths, read_analysis};
+
+    #[test]
+    fn imported_dat_grid_correction_reaches_track_beats_and_metronome() {
+        let dir = tempfile::tempdir().unwrap();
+        let dat = dir.path().join("ANLZ0000.DAT");
+        let beats = [
+            rbl_anlz::Beat { time_ms: 250, beat_number: 1, tempo_x100: 12_000 },
+            rbl_anlz::Beat { time_ms: 750, beat_number: 2, tempo_x100: 12_000 },
+            rbl_anlz::Beat { time_ms: 1_150, beat_number: 3, tempo_x100: 15_000 },
+        ];
+        let raw = rbl_anlz::parse(&rbl_anlz::AnlzBuilder::new().beat_grid(&beats).finish()).unwrap();
+        for (offset, times) in [(0, [250, 750, 1_150]), (125, [375, 875, 1_275]), (-100, [150, 650, 1_050])] {
+            std::fs::write(&dat, raw.with_grid_offset(offset).unwrap()).unwrap();
+            let parsed = super::read_beat_grid(&dat);
+            assert_eq!(parsed, [(times[0], 1, 12_000), (times[1], 2, 12_000), (times[2], 3, 15_000)], "offset {offset}");
+            let wire = super::encode_beat_grid(&parsed);
+            assert_eq!(wire.len(), 3 * super::BEAT_BYTES);
+            for (record, &(ms, number, tempo)) in wire.chunks_exact(super::BEAT_BYTES).zip(&parsed) {
+                assert_eq!(record, [&ms.to_le_bytes()[..], &[number], &tempo.to_le_bytes()[..]].concat());
+            }
+            assert_eq!(super::metronome_beat_grid(&parsed), [(times[0], true), (times[1], false), (times[2], false)]);
+        }
+    }
+
+    #[test]
+    fn imported_dat_grid_correction_drops_times_outside_u32() {
+        let dir = tempfile::tempdir().unwrap();
+        let dat = dir.path().join("ANLZ0000.DAT");
+        let beats = [
+            rbl_anlz::Beat { time_ms: 0, beat_number: 1, tempo_x100: 12_000 },
+            rbl_anlz::Beat { time_ms: 250, beat_number: 2, tempo_x100: 12_000 },
+            rbl_anlz::Beat { time_ms: u32::MAX, beat_number: 3, tempo_x100: 15_000 },
+        ];
+        let raw = rbl_anlz::parse(&rbl_anlz::AnlzBuilder::new().beat_grid(&beats).finish()).unwrap();
+        for (offset, expected) in [(-1, vec![(249, 2, 12_000), (u32::MAX - 1, 3, 15_000)]), (1, vec![(1, 1, 12_000), (251, 2, 12_000)])] {
+            std::fs::write(&dat, raw.with_grid_offset(offset).unwrap()).unwrap();
+            assert_eq!(super::read_beat_grid(&dat), expected, "offset {offset}");
+        }
+    }
 
     /// A stick that fills up mid-sync says so as rekordbox does, keeping the
     /// operating system's error as the detail (#591).

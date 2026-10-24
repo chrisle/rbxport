@@ -324,6 +324,16 @@ describe("parseBeatGrid", () => {
     expect(Array.from(grid.tempos)).toEqual([13_800, 13_800, 16_000]);
   });
 
+  it("uses already corrected DAT times from the backend without shifting them again", () => {
+    const correctedTimes: [number, number, number][] = [[250, 750, 1150], [375, 875, 1275], [150, 650, 1050]];
+    for (const times of correctedTimes) {
+      const grid = parseBeatGrid(encode([[times[0], 1, 12_000], [times[1], 2, 12_000], [times[2], 3, 15_000]]));
+      expect(Array.from(grid.times)).toEqual(times);
+      expect(Array.from(grid.numbers)).toEqual([1, 2, 3]);
+      expect(Array.from(grid.tempos)).toEqual([12_000, 12_000, 15_000]);
+    }
+  });
+
   it("holds a whole track without turning it into objects", () => {
     // A three-hour mix is about 23,000 beats — a list of objects here is what
     // the windowed fetch existed to avoid.
