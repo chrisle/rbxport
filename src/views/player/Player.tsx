@@ -582,8 +582,9 @@ const JUMPS = [
 /**
  * What the waveform leaves clear at the top and bottom of its band: the
  * `--s-wave-inset-*` tokens, read once. The strip above carries the bar
- * count and the cue markers' lane, and the beat markers reach 15px past the
- * waveform at both ends, which is why it is inset as far as it is.
+ * count and the cue markers' lane. The beat-marker heads overlap the waveform
+ * at its top edge, as rekordbox does, while the bottom inset keeps the feet
+ * clear of the band's edge.
  * The overview does not take it: its own grid row is already the 30pt the
  * capture paints.
  */
@@ -595,7 +596,7 @@ function waveInsetOf(): { top: number; bottom: number } {
     const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
     return Number.isFinite(value) ? value : fallback;
   };
-  waveInset = { top: read("--s-wave-inset-top", 33), bottom: read("--s-wave-inset-bottom", 16) };
+  waveInset = { top: read("--s-wave-inset-top", 20), bottom: read("--s-wave-inset-bottom", 16) };
   return waveInset;
 }
 
