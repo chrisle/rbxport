@@ -158,6 +158,7 @@ pub async fn analyse_track<R: tauri::Runtime>(
     settings: Option<AnalysisSettings>,
     key_tag: Option<crate::key_tag::KeyNotation>,
     drawing: Option<bool>,
+    key_display: Option<crate::key_tag::KeyNotation>,
 ) -> AppResult<AnalysisResultDto> {
     let preset = match mode.as_deref().unwrap_or("rbxport") {
         "rekordbox" => rbl_analysis::AnalysisPreset::Rekordbox,
@@ -169,6 +170,7 @@ pub async fn analyse_track<R: tauri::Runtime>(
     let state = Arc::clone(&state);
     let editor = Arc::clone(&editor);
     let settings = settings.unwrap_or_default();
+    let notation = key_display.or(key_tag).unwrap_or(crate::key_tag::KeyNotation::Classic);
     let drawing = drawing.unwrap_or(false);
     let drawn = track_id.clone();
     let progress = {
@@ -190,7 +192,7 @@ pub async fn analyse_track<R: tauri::Runtime>(
             .filter(|&secs| secs > 0)
             .map(f64::from);
         let hook = Drawing { publish: &progress, length_secs };
-        let result = analyse_and_save(&state, &library, &share, &track_id, preset, &settings, &editor, drawing.then_some(&hook))?;
+        let result = analyse_and_save_notated(&state, &library, &share, &track_id, preset, &settings, &editor, drawing.then_some(&hook), notation)?;
         // After the library has the key, as rekordbox writes the tag after
         // `modTrackKeyInfo` stores it. Only with the preference on, which is
         // what `key_tag` being sent says.
@@ -217,6 +219,7 @@ pub async fn analyse_track<R: tauri::Runtime>(
 
 /// The whole job, apart from the event: what the command runs on a worker
 /// thread, and what the tests run directly.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments, reason = "the command's inputs, passed through to one worker")]
 fn analyse_and_save(
     state: &AppState,
@@ -227,6 +230,21 @@ fn analyse_and_save(
     settings: &AnalysisSettings,
     editor: &crate::grid::GridEditor,
     drawing: Option<&Drawing<'_>>,
+) -> AppResult<AnalysisResultDto> {
+    analyse_and_save_notated(state, library, share, track_id, preset, settings, editor, drawing, crate::key_tag::KeyNotation::Classic)
+}
+
+#[allow(clippy::too_many_arguments, reason = "the command's inputs, passed through to one worker")]
+fn analyse_and_save_notated(
+    state: &AppState,
+    library: &rbl_index::Library,
+    share: &std::path::Path,
+    track_id: &str,
+    preset: rbl_analysis::AnalysisPreset,
+    settings: &AnalysisSettings,
+    editor: &crate::grid::GridEditor,
+    drawing: Option<&Drawing<'_>>,
+    notation: crate::key_tag::KeyNotation,
 ) -> AppResult<AnalysisResultDto> {
     let options = settings.options(preset)?;
     let registry=crate::analysis_pipeline::registry(&options,settings)?;
@@ -255,7 +273,7 @@ fn analyse_and_save(
     let started = std::time::Instant::now();
     if !settings.bpm_grid && !ordered {
         let audio = rbl_audio::decode_mono(std::path::Path::new(path), Some(DECODE_CAP_SECS)).map_err(|e| decode_error(&e))?;
-        return analyse_key_only(state, library, row, track_id, &audio, editor, started);
+        return analyse_key_only(state, library, row, track_id, &audio, editor, started, notation);
     }
     let captured=std::cell::RefCell::new(None);
     let (analysis,waves,duration_secs)=if ordered {
@@ -267,7 +285,7 @@ fn analyse_and_save(
     let (analysis_artifacts,completed_stages)=captured.into_inner().map_or_else(||(std::collections::BTreeMap::new(),Vec::new()),|r|(r.artifacts,r.order));
     if !settings.bpm_grid {
         let mut result=if settings.key {
-            save_key_only(state,library,row,track_id,analysis.key.as_ref(),analysis.peak,editor,started)?
+            save_key_only(state,library,row,track_id,analysis.key.as_ref(),analysis.peak,editor,started,notation)?
         } else {
             AnalysisResultDto {analysis_artifacts:std::collections::BTreeMap::new(),completed_stages:Vec::new(),track_id:track_id.into(),analysed:library.analysed.get(row).copied().unwrap_or(0),bpm_x100:library.bpm_x100.get(row).copied().unwrap_or(0),key:library.keys.name(library.key.get(row).copied().unwrap_or(0)).into(),beats:0,peak:analysis.peak,duration_sec:library.length_sec.get(row).copied().unwrap_or(0),elapsed_ms:u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),analysis_path:state.analysis_path_of(library,row,track_id),added_first_beat_cue:false,detected_key:None}
         };
@@ -317,7 +335,7 @@ fn analyse_and_save(
     let to_u32 = |v: f64| v.round().clamp(0.0, f64::from(u32::MAX)) as u32;
     let bpm_x100 = to_u32(analysis.tempo.bpm * 100.0);
     let found_key = settings.key.then(|| analysis.key.as_ref().map(detected)).flatten();
-    let detected_key = found_key.as_ref().map(|k| k.classic.clone());
+    let detected_key = found_key.as_ref().map(|k| k.name_for(notation).to_owned());
     let key = detected_key.clone().unwrap_or_else(|| library.keys.name(library.key.get(row).copied().unwrap_or(0)).to_owned());
     let duration_sec = to_u32(duration_secs);
     // The whole file was decoded, however long, so this is its length.
@@ -647,16 +665,18 @@ fn ensure_analysis_unlocked(state: &AppState, editor: &crate::grid::GridEditor, 
 }
 
 /// A key-only pass never authors files or updates grid metadata.
+#[allow(clippy::too_many_arguments, reason = "the analysis pass and selected key notation share this fixture-safe path")]
 fn analyse_key_only(state: &AppState, library: &rbl_index::Library, row: usize, track_id: &str,
-    audio: &rbl_audio::Audio, editor: &crate::grid::GridEditor, started: std::time::Instant) -> AppResult<AnalysisResultDto> {
+    audio: &rbl_audio::Audio, editor: &crate::grid::GridEditor, started: std::time::Instant,
+    notation: crate::key_tag::KeyNotation) -> AppResult<AnalysisResultDto> {
     let key=rbl_analysis::detect_key(&audio.samples,audio.sample_rate);
-    save_key_only(state,library,row,track_id,key.as_ref(),audio.samples.iter().fold(0_f32,|peak,s|peak.max(s.abs())),editor,started)
+    save_key_only(state,library,row,track_id,key.as_ref(),audio.samples.iter().fold(0_f32,|peak,s|peak.max(s.abs())),editor,started,notation)
 }
 
 #[allow(clippy::too_many_arguments, reason="Same key-only persistence contract as the analysis worker")]
-fn save_key_only(state:&AppState,library:&rbl_index::Library,row:usize,track_id:&str,key:Option<&rbl_analysis::MusicalKey>,peak:f32,editor:&crate::grid::GridEditor,started:std::time::Instant)->AppResult<AnalysisResultDto> {
+fn save_key_only(state:&AppState,library:&rbl_index::Library,row:usize,track_id:&str,key:Option<&rbl_analysis::MusicalKey>,peak:f32,editor:&crate::grid::GridEditor,started:std::time::Instant,notation:crate::key_tag::KeyNotation)->AppResult<AnalysisResultDto> {
     let found_key=key.map(detected);
-    let key = found_key.as_ref().map(|key| key.classic.clone());
+    let key = found_key.as_ref().map(|key| key.name_for(notation).to_owned());
     let _edit_guard = state.edit_gate.lock();
     ensure_analysis_unlocked(state, editor, track_id)?;
     // Match full analysis: only use keys already named by this library.

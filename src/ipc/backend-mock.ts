@@ -3026,7 +3026,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       { id: "key", label: "KEY", description: "", requires: ["core.audio"], produces: ["core.key"], defaultEnabled: true, requiresFullTrack: false, revision: "1" },
       { id: "waveform", label: "Waveform", description: "", requires: ["core.audio"], produces: ["core.waveform"], defaultEnabled: true, requiresFullTrack: false, revision: "1" },
     ]),
-    analyseTrack: (trackId, _mode, settings, _keyTag, drawing) => {
+    analyseTrack: (trackId, _mode, settings, _keyTag, drawing, keyDisplay) => {
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
       if (!row) return Promise.reject(new Error("That track is not in the library."));
@@ -3061,7 +3061,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
               row.analysed = 1;
               row.bpmX100 ||= 12_800;
             }
-            if (settings?.key !== false) row.key ||= "Am";
+            if (settings?.key !== false) row.key ||= keyDisplay === "alphanumeric" ? "8A" : "Am";
             // As the shell says it: a deck showing the track redraws.
             for (const listener of analysisListeners) listener(trackId);
             const firstBeatMs = settings?.bpmGrid !== false && settings?.firstBeatCue
