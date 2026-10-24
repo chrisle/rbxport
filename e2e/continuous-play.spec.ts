@@ -29,10 +29,15 @@ async function seekNearEnd(page: Page) {
   await page.mouse.click(overview.x + overview.width - 1, overview.y + overview.height / 2);
 }
 
-/** Puts the head a breath before the end, then presses PLAY. */
+/** Starts the loaded deck, then puts the head a breath before the end. */
 async function playOutTheEnd(page: Page) {
-  await seekNearEnd(page);
   await play(page).click();
+  const progress = player(page).getByTestId("player-overview")
+    .or(player(page).getByTestId("simple-player-overview"));
+  // The title and transport can update before the async deck load finishes.
+  // A moving head proves the engine is playing before the seek.
+  await expect.poll(async () => Number(await progress.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+  await seekNearEnd(page);
 }
 
 test("the next row of the playlist loads and plays when the track ends", async ({ page }) => {
@@ -65,12 +70,7 @@ for (const layout of ["1 PLAYER", "SIMPLE PLAYER"] as const) {
     await rows.nth(1).dragTo(deck);
     const deckTitle = layout === "1 PLAYER" ? deck.getByTestId("player-title") : deck.getByTestId("simple-player-title");
     await expect(deckTitle).toHaveText(first);
-    await play(page).click();
-    const progress = deck.getByTestId("player-overview").or(deck.getByTestId("simple-player-overview"));
-    // The title and transport can update before the async deck load finishes.
-    // A moving head proves the engine is playing before the seek.
-    await expect.poll(async () => Number(await progress.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
-    await seekNearEnd(page);
+    await playOutTheEnd(page);
 
     await expect(deckTitle).toHaveText(second, { timeout: 10_000 });
     await expect(play(page, "Pause")).toBeVisible();
