@@ -19,7 +19,7 @@ function enabled(
   const out = menuBarEnabled({
     focus,
     lists: list === null ? {} : { main: state },
-    trees: { main: { kind: tree } },
+    trees: { main: { kind: tree, hasChildren: true } },
     has,
   });
   return Object.entries(out).filter(([, on]) => on).map(([id]) => id).sort();
@@ -122,20 +122,22 @@ describe("menuBarEnabled", () => {
   });
 
   it("offers a folder's items", () => {
-    // rekordbox-playlist-menu-folder.png: Create x3 and Delete Playlist live,
-    // Renumber greyed. rekordbox also offers Export a playlist to a file on a
+    // rekordbox-playlist-menu-folder.png: Create x3, Delete Playlist, and Sort
+    // Items live; Renumber greyed. rekordbox also offers file export on a
     // folder; what it writes is not known, so it is greyed here.
     expect(enabled(TREE, null, "folder")).toEqual([
       "create-folder", "create-intelligent-playlist", "create-playlist", "delete-playlist",
+      "sort-items",
     ]);
   });
 
-  it("offers only the Create items on the Playlists heading and the Collection", () => {
+  it("offers Sort Items on the Playlists heading", () => {
     // rekordbox-playlist-menu-playlists-root.png also has Delete Playlist and
     // Export live there; not known what they do, so greyed here.
-    // rekordbox-playlist-menu-collection-list-focused.png: Create x3 only.
+    // rekordbox-playlist-menu-collection-list-focused.png: Create x3; the
+    // Playlists heading's Sort Items command also has a selected root.
     const create = ["create-folder", "create-intelligent-playlist", "create-playlist"];
-    expect(enabled(TREE, null, "collection")).toEqual(create);
+    expect(enabled(TREE, null, "collection")).toEqual([...create, "sort-items"]);
     expect(enabled(LIST, { selected: 1, rows: [{}] }, "allTracks").filter((id) => id.startsWith("create"))).toEqual(create);
   });
 
@@ -146,6 +148,24 @@ describe("menuBarEnabled", () => {
 
   it("does not renumber an intelligent playlist", () => {
     expect(enabled(TREE, null, "smartPlaylist")).not.toContain("renumber-track-order");
+  });
+
+  it("greys Sort Items for an empty folder and without its unscoped command", () => {
+    const input = {
+      focus: TREE,
+      lists: {},
+      trees: { main: { kind: "folder" as const, hasChildren: false } },
+      has: () => true,
+    };
+    expect(menuBarEnabled(input)["sort-items"]).toBe(false);
+    input.trees.main.hasChildren = true;
+    expect(menuBarEnabled({ ...input, has: (action, side) => action !== "sortItems" || side !== undefined })["sort-items"])
+      .toBe(false);
+    expect(menuBarEnabled(input)["sort-items"]).toBe(true);
+    expect(menuBarEnabled({ ...input, focus: null })["sort-items"]).toBe(false);
+    expect(menuBarEnabled({ ...input, focus: { pane: "tree", side: "sub" }, trees: { sub: input.trees.main } })["sort-items"])
+      .toBe(false);
+    expect(menuBarItem("sort-items")).toMatchObject({ action: "sortItems", owner: "tree", writes: true, scope: "global" });
   });
 
   it("greys an item nothing on screen answers", () => {
@@ -172,9 +192,11 @@ describe("menu bar state", () => {
     const state: ListMenuState = { source: "playlist", selected: 1, rows: [{ missing: false }], loose: false };
     publishListMenuState("main", state);
     publishListMenuState("main", { ...state, rows: [{ missing: false }] });
-    publishTreeMenuState("main", { kind: "playlist" });
-    publishTreeMenuState("main", { kind: "playlist" });
+    publishTreeMenuState("main", { kind: "playlist", hasChildren: false });
+    publishTreeMenuState("main", { kind: "playlist", hasChildren: false });
     expect(calls).toBe(2);
+    publishTreeMenuState("main", { kind: "playlist", hasChildren: true });
+    expect(calls).toBe(3);
     expect(menuBarState().lists.main?.selected).toBe(1);
     publishListMenuState("main", null);
     expect(menuBarState().lists.main).toBeUndefined();

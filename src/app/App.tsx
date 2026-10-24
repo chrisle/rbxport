@@ -2365,9 +2365,10 @@ function AppBody() {
       return;
     }
     if (outcome.action === "bar-command" && outcome.item) {
-      // Track and Playlist menu items: the command the focused list or tree
-      // registered, which its context-menu entry runs too.
-      runCommand(outcome.item.action, { scope: menuBarSide(browserFocus()) });
+      // Track and Playlist items use the same command as their other entry
+      // points. Sort Items is owned by App and has no browser-side scope.
+      runCommand(outcome.item.action, outcome.item.scope === "global"
+        ? undefined : { scope: menuBarSide(browserFocus()) });
       return;
     }
     if (outcome.action === "analyze-track") {
@@ -2414,7 +2415,7 @@ function AppBody() {
         focus: browserFocus(),
         ...menuBarState(),
         // Analyze Track is the shell's own command, not a list's.
-        has: (action, side) => action === "analyseSelection" ? hasCommand(action) : hasCommand(action, side),
+        has: (action, side) => side === undefined ? hasCommand(action) : hasCommand(action, side),
       });
       const changed: Record<string, boolean> = {};
       for (const [id, on] of Object.entries(enabled)) {
