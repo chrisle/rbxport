@@ -1132,7 +1132,7 @@ fn undo_of_an_add_with_duplicates_leaves_the_tracks_already_there() {
 
 #[test]
 fn playlist_add_reports_only_stored_visible_membership() {
-    let s = shell_with_shape(Shape { tracks: 1, playlists: 1, tracks_per_playlist: 0, history_sessions: 0, start_usn: 1000 });
+    let s = shell_with_shape(Shape { tracks: 1, playlists: 2, tracks_per_playlist: 0, history_sessions: 0, start_usn: 1000 });
     let playlist = playlist_id(0);
     let track = track_id(0);
     assert!(s.playlist_rows(&playlist).is_empty());
@@ -1142,6 +1142,15 @@ fn playlist_add_reports_only_stored_visible_membership() {
     assert_eq!(result.added, 1, "two attempted IDs made one membership");
     assert_eq!(ids(&s.playlist_rows(&playlist)), [track.as_str()]);
     assert_eq!(run(commands::playlist_duplicates(s.state(), playlist.clone(), vec![track.clone()])).unwrap(), [track.as_str()]);
+    let other_playlist = playlist_id(1);
+    assert!(run(commands::playlist_duplicates(s.state(), other_playlist.clone(), vec![track.clone()])).unwrap().is_empty());
+    assert!(s.playlist_rows(&other_playlist).is_empty());
+    let (_, filtered_count) = s.open(ViewSpecDto { query: "no matching track".into(), ..playlist_spec(&playlist) });
+    assert_eq!(filtered_count, 0, "search can hide a stored playlist member");
+    assert_eq!(run(commands::playlist_duplicates(s.state(), playlist.clone(), vec![track.clone()])).unwrap(), [track.as_str()],
+        "duplicate detection considers the whole selected playlist, not its filtered view");
+    let (_, unfiltered_count) = s.open(playlist_spec(&playlist));
+    assert_eq!(unfiltered_count, 1, "clearing search reveals the stored member");
     let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
     let stored: i64 = db.connection().query_row(
         "SELECT COUNT(*) FROM djmdSongPlaylist WHERE PlaylistID = ?1 AND ContentID = ?2 AND rb_local_deleted = 0",
