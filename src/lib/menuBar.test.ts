@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { BrowserFocus } from "./browserFocus";
+import { hasCommand, registerCommand } from "./commands";
 import {
   menuBarEnabled, menuBarItem, menuBarState, onMenuBarState, publishListMenuState, publishTreeMenuState,
   type ListMenuState, type TreeMenuState,
@@ -105,6 +106,27 @@ describe("menuBarEnabled", () => {
     });
     expect(out["analyze-track"]).toBe(false);
     expect(out["remove-from-collection"]).toBe(true);
+  });
+
+  it("finds global Analyze Track and Sort Items commands in the real registry", () => {
+    const releaseAnalyze = registerCommand("analyseSelection", () => true);
+    const releaseSort = registerCommand("sortItems", () => true);
+    const has = (action: Parameters<typeof hasCommand>[0], side?: Parameters<typeof hasCommand>[1]) =>
+      side === undefined ? hasCommand(action) : hasCommand(action, side);
+    try {
+      const input = {
+        focus: LIST,
+        lists: { main: { source: "collection" as const, selected: 1, rows: [{}], loose: false } },
+        trees: { main: { kind: "folder" as const, hasChildren: true } },
+        has,
+      };
+      expect(hasCommand("analyseSelection", "main")).toBe(false);
+      expect(menuBarEnabled(input)["analyze-track"]).toBe(true);
+      expect(menuBarEnabled({ ...input, focus: TREE })["sort-items"]).toBe(true);
+    } finally {
+      releaseSort();
+      releaseAnalyze();
+    }
   });
 
   it("greys a stick's tracks", () => {
