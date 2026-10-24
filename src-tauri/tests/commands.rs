@@ -2599,33 +2599,64 @@ fn analysis_writes_the_detected_key_into_the_file_in_the_display_notation() {
     let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
     let id = report.tracks[0].id.clone();
     let key_only = AnalysisSettings { bpm_grid: false, ..AnalysisSettings::default() };
-    let analyse = |notation: Option<&str>| {
+    let analyse = |notation: Option<&str>, display: Option<&str>, settings: AnalysisSettings| {
         run(rbxport_lib::analysis::analyse_track(
             s.handle(),
             s.state(),
             s.app.state::<Arc<rbxport_lib::grid::GridEditor>>(),
             id.clone(),
             None,
-            Some(key_only.clone()),
+            Some(settings),
             notation.map(|n| serde_json::from_str(&format!("\"{n}\"")).unwrap()),
             None,
+            display.map(|n| serde_json::from_str(&format!("\"{n}\"")).unwrap()),
         ))
         .expect("the chord analyses")
     };
 
     let untouched = std::fs::read(&audio).unwrap();
-    let result = analyse(None);
+    let result = analyse(None, None, key_only.clone());
     assert!(!result.key.is_empty(), "a triad has a key");
     assert_eq!(std::fs::read(&audio).unwrap(), untouched, "the preference off: no write");
 
-    let result = analyse(Some("classic"));
+    let result = analyse(Some("classic"), Some("classic"), key_only.clone());
     assert_eq!(rbl_db::key_tag::read_key(&audio).unwrap().as_deref(), Some(result.key.as_str()));
 
-    analyse(Some("alphanumeric"));
+    let alphanumeric = analyse(Some("alphanumeric"), Some("alphanumeric"), key_only.clone());
     let camelot = rbl_core::musickey::parse(&result.key).map(|k| {
         rbl_analysis::MusicalKey { name: result.key.clone(), tonic: k.pitch, minor: k.mode == rbl_core::musickey::Mode::Minor }.camelot()
     });
     assert_eq!(rbl_db::key_tag::read_key(&audio).unwrap(), camelot);
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let (key_id, scale_name): (String, String) = db.connection().query_row(
+        "SELECT c.KeyID, k.ScaleName FROM djmdContent c JOIN djmdKey k ON k.ID = c.KeyID WHERE c.ID = ?1",
+        [&id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    assert!(!key_id.is_empty());
+    assert_eq!(Some(scale_name), camelot, "analysis must persist the selected notation through KeyID");
+    assert_eq!(Some(alphanumeric.key.as_str()), camelot.as_deref());
+
+    // The display preference is independent of the optional audio-tag write.
+    let tagged = std::fs::read(&audio).unwrap();
+    let classic = analyse(None, Some("classic"), key_only.clone());
+    assert_eq!(classic.key, result.key);
+    assert_eq!(std::fs::read(&audio).unwrap(), tagged);
+    let alphanumeric = analyse(None, Some("alphanumeric"), AnalysisSettings::default());
+    assert_eq!(Some(alphanumeric.key.as_str()), camelot.as_deref());
+    assert_eq!(std::fs::read(&audio).unwrap(), tagged);
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let stored: (String, String) = db.connection().query_row(
+        "SELECT c.KeyID, k.ScaleName FROM djmdContent c JOIN djmdKey k ON k.ID = c.KeyID WHERE c.ID = ?1",
+        [&id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    assert_eq!(stored.0, key_id, "full analysis keeps the same key identity");
+    assert_eq!(Some(stored.1), camelot);
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
+    let (view, _) = s.open(collection_spec());
+    let row = s.rows(view).into_iter().find(|row| row.id == id).unwrap();
+    assert_eq!(row.key, alphanumeric.key, "the reloaded browser row exposes the saved key");
 }
 
 /// What Auto Analysis does after File > Import: the imported track's id goes
@@ -2654,6 +2685,7 @@ fn an_imported_file_analyses_into_a_waveform_and_a_grid() {
         s.state(),
         s.app.state::<Arc<rbxport_lib::grid::GridEditor>>(),
         id.clone(),
+        None,
         None,
         None,
         None,

@@ -62,8 +62,10 @@ export function useAnalysis(
   // analysis completes. The key display format decides the notation.
   const keyTag = useRef<"classic" | "alphanumeric" | undefined>(undefined);
   const keyDisplay = stored.view.keyDisplay;
+  const keyDisplayRef = useRef(keyDisplay);
   useEffect(() => {
     keyTag.current = writeKeyTag ? keyDisplay : undefined;
+    keyDisplayRef.current = keyDisplay;
   }, [writeKeyTag, keyDisplay]);
   const [state, setState] = useState<QueueState>(emptyQueue);
   // The tracks whose request is in flight, so the effect below never sends
@@ -96,7 +98,9 @@ export function useAnalysis(
         try {
           const backend = await getBackend();
           const trackMode = track.analysis?.mode ?? mode;
-          const result = track.drawing
+          const result = keyDisplayRef.current === "alphanumeric"
+            ? await backend.analyseTrack(track.id, trackMode, track.analysis, keyTag.current, track.drawing || undefined, keyDisplayRef.current)
+            : track.drawing
             ? await backend.analyseTrack(track.id, trackMode, track.analysis, keyTag.current, true)
             : keyTag.current
               ? await backend.analyseTrack(track.id, trackMode, track.analysis, keyTag.current)

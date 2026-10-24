@@ -208,6 +208,8 @@ describe("formatKey", () => {
     expect(formatKey("Ebm", "classic")).toBe("Ebm");
     expect(formatKey("Ebm", "alphanumeric")).toBe("2A");
     expect(formatKey("C", "alphanumeric")).toBe("8B");
+    expect(formatKey("12A", "classic")).toBe("Dbm");
+    expect(formatKey("12A", "alphanumeric")).toBe("12A");
     // A key the wheel does not know is shown as it is, not hidden.
     expect(formatKey("Unknown", "alphanumeric")).toBe("Unknown");
     expect(formatKey("", "alphanumeric")).toBe("");

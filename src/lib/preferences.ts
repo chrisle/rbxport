@@ -13,7 +13,7 @@
 import { ANALYSIS_SLOTS, SLOTS } from "./queue";
 import { KEY_PRESETS, type KeyPreset } from "./keyPresets";
 import type { KeyChord } from "./shortcuts";
-import { toCamelot, type TrafficLightReach } from "./camelot";
+import { fromCamelot, toCamelot, type TrafficLightReach } from "./camelot";
 import type {
   KeyDisplay, MenuSlot, OverviewWaveform, WaveformColor, WaveformPosition,
 } from "@/ipc/types";
@@ -441,9 +441,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   },
 };
 
-/** `Ebm` as the library stores it, or `2A` when the window says Alphanumeric. */
+/** Show either notation regardless of how the library stored the key. */
 export function formatKey(key: string, display: KeyDisplay): string {
-  if (display !== "alphanumeric" || key === "") return key;
+  if (key === "") return key;
+  if (display === "classic") return fromCamelot(key) || key;
   // A key the wheel does not know — a blank, "Unknown", a typo — is shown as
   // it is rather than hidden.
   return toCamelot(key) || key;
