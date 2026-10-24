@@ -3,7 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAnalysis, type Analysis } from "./useAnalysis";
-import type { AnalysisPreferences } from "@/lib/preferences";
+import { DEFAULT_PREFERENCES, type AnalysisPreferences } from "@/lib/preferences";
+import { PreferencesProvider } from "./usePreferences";
 import type { AnalysisResult } from "@/ipc/types";
 
 const held = vi.hoisted(() => ({ analyseTrack: vi.fn() }));
@@ -100,6 +101,20 @@ it("asks for the key to be written into the file only with Write the value to th
   await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 2, auto: true, firstBeatCue: false, bpmRange: "70-180", writeKeyTag: true, detectKey: true }} />); await Promise.resolve(); });
   await act(async () => { analysis.add([{ id: "on", title: "On" }]); await Promise.resolve(); });
   expect(held.analyseTrack).toHaveBeenLastCalledWith("on", "rbxport", expect.anything(), "classic");
+});
+
+it("passes Alphanumeric display to analysis even when tag writing is off (#646)", async () => {
+  const preferences: AnalysisPreferences = { mode: "rbxport", concurrentTracks: 1, auto: true, firstBeatCue: false, bpmRange: "70-180", writeKeyTag: false, detectKey: true };
+  await act(async () => {
+    root.render(
+      <PreferencesProvider value={{ preferences: { ...DEFAULT_PREFERENCES, view: { ...DEFAULT_PREFERENCES.view, keyDisplay: "alphanumeric" } }, update: () => {}, reset: () => {} }}>
+        <Harness preferences={preferences} />
+      </PreferencesProvider>,
+    );
+    await Promise.resolve();
+  });
+  await act(async () => { analysis.add([{ id: "key", title: "Detected" }]); await Promise.resolve(); });
+  expect(held.analyseTrack).toHaveBeenCalledWith("key", "rbxport", expect.anything(), undefined, undefined, "alphanumeric");
 });
 
 it("analyses a deck's track next, ahead of a batch, and asks for it to be drawn", async () => {

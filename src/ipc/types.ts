@@ -426,7 +426,7 @@ export interface Backend {
    * decodes, and `onAnalysisProgress` says when there is more of it. That
    * costs a second waveform pass, so a batch leaves it off.
    */
-  analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport", settings?: AnalysisSettings, keyTag?: KeyDisplay, drawing?: boolean): Promise<AnalysisResult>;
+  analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport", settings?: AnalysisSettings, keyTag?: KeyDisplay, drawing?: boolean, keyDisplay?: KeyDisplay): Promise<AnalysisResult>;
 
   /**
    * A track's whole beat grid, as raw bytes: seven per beat, a little-endian
