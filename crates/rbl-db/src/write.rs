@@ -1770,6 +1770,14 @@ impl Writer {
         let mut rows = 0;
         let mut usn = 0;
         for (content, (row_id, uuid)) in contents.iter().zip(ids) {
+            let live: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0)",
+                params![content],
+                |r| r.get(0),
+            )?;
+            if !live {
+                return Err(DbError::Conflict(format!("track {content} is no longer in the collection")));
+            }
             if !members.insert(content.clone()) && !allow_duplicates {
                 continue;
             }
