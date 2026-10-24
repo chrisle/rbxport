@@ -239,6 +239,10 @@ pub enum TrackScope {
     },
     /// A player's text search: the string as typed (upper case).
     Search(String),
+    /// One track by id: what an RX3 asks for (`1200` with the id) to load
+    /// a row it picked from a search. Empty when the id is not in the
+    /// library.
+    Track(u32),
 }
 
 /// A menu whose rows come from the library.

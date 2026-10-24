@@ -203,7 +203,17 @@ impl LinkSession {
 
     fn library(&mut self, message: &Message, query: Query) -> Vec<Message> {
         let mut rows = self.catalog.list(&query);
-        self.catalog.filter_rows(&mut rows, &self.filter);
+        // A track asked for by id is the one the player is loading; the
+        // filter already applied to the list it was picked from.
+        if !matches!(
+            query,
+            Query::Tracks {
+                scope: TrackScope::Track(_),
+                ..
+            }
+        ) {
+            self.catalog.filter_rows(&mut rows, &self.filter);
+        }
         self.menu(message, Menu::Library { query, rows })
     }
 
@@ -1148,8 +1158,14 @@ impl LinkSession {
                 self.tracks(message, TrackScope::Album(album))
             }
             // RX3 uses `0x1200` for the same all-track list while changing
-            // its load/search depth (`djdsqlGetTrack_Content`).
-            kind::TRACK_MENU | kind::CONTENT_TRACKS => self.tracks(message, TrackScope::All),
+            // its load/search depth (`djdsqlGetTrack_Content`). Loading a
+            // search result, it names the picked track in argument 2 and
+            // renders row 0, so that list must hold just that track.
+            kind::TRACK_MENU => self.tracks(message, TrackScope::All),
+            kind::CONTENT_TRACKS => match Self::number(message, 2) {
+                0 => self.tracks(message, TrackScope::All),
+                id => self.tracks(message, TrackScope::Track(id)),
+            },
             kind::FILE_NAME_MENU => self.tracks(message, TrackScope::FileName),
             kind::MATCHING_TRACKS => {
                 self.tracks(message, TrackScope::Matching(Self::number(message, 2)))
