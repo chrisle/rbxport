@@ -120,6 +120,7 @@ test("a track dropped on a new playlist is in it, and its menu takes it out agai
   await page.getByRole("alertdialog", { name: "Duplicate tracks" })
     .getByRole("button", { name: "Skip duplicates" }).click();
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(page.getByRole("contentinfo")).toContainText("Already in New playlist.");
 
   await made.click();
   await expect(page.getByTestId("browser-title")).toHaveText("New playlist (1 Tracks)");
