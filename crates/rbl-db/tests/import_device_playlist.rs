@@ -313,7 +313,7 @@ fn a_file_the_collection_already_holds_is_used_as_it_is() {
 }
 
 fn cue(hot_cue: u32, kind: u8, time_ms: u32, loop_time_ms: u32) -> rbl_anlz::CueEntry {
-    rbl_anlz::CueEntry { hot_cue, kind, time_ms, loop_time_ms, color_id: 0, comment: None, color_code: Some(if hot_cue == 0 { 0 } else { 1 }), rgb: None }
+    rbl_anlz::CueEntry { active_loop: false, hot_cue, kind, time_ms, loop_time_ms, color_id: 0, comment: None, color_code: Some(if hot_cue == 0 { 0 } else { 1 }), rgb: None }
 }
 
 #[test]
