@@ -1090,7 +1090,8 @@ pub async fn device_track_cues(path: String, format: String, device_track_id: u3
         let ext = ext.to_str().and_then(|relative| DeviceAssets::on_stick(&mount, relative));
         let cue_file = ext.as_deref().unwrap_or(&dat);
         let analysis = rbl_anlz::Anlz::read(cue_file).map_err(|e| AppError::new(ErrorKind::Internal, "The device cues could not be read.").with_detail(e.to_string()))?;
-        Ok(analysis.cue_entries().into_iter().map(|cue| {
+        let entries = if ext.is_some() { analysis.cue_entries() } else { analysis.legacy_cue_entries() };
+        Ok(entries.into_iter().map(|cue| {
             let memory = cue.hot_cue == 0;
             let colour = if memory {
                 rbl_anlz::cues::memory_colour_of_row(cue.color_id)
@@ -1729,6 +1730,35 @@ mod tests {
                 ),
                 "{format:?}: unmatched Explorer file has the same file: namespace"
             );
+        }
+    }
+
+    #[test]
+    fn issue_608_dat_only_cues_map_for_both_device_databases() {
+        let rig = rig_with(analysed_on_the_stick);
+        let mount = rig.stick.path();
+        let first = device::read(mount, Format::DeviceLibrary).unwrap();
+        let track = first.tracks.iter().find(|t| t.title == "Track 0").unwrap();
+        let dat_path = audio_path(mount, &track.analysis_path);
+        let ext_path = rbl_anlz::sibling(&dat_path, "EXT");
+        std::fs::remove_file(&ext_path).unwrap();
+        assert!(!ext_path.exists(), "fixture has no EXT cue source");
+        let dat = rbl_anlz::Anlz::read(&dat_path).unwrap();
+        assert_eq!(dat.legacy_cue_entries().len(), 2, "DAT has hot and memory PCPT cues");
+
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let library = device::read(mount, format).unwrap();
+            let track = library.tracks.iter().find(|t| t.title == "Track 0").unwrap();
+            let row = row_dto(&device_row(mount, track, 0));
+            let cues = tauri::async_runtime::block_on(device_track_cues(
+                mount.to_string_lossy().into_owned(),
+                format_name(format).to_owned(),
+                track.id,
+                row.id,
+            )).unwrap();
+            assert_eq!(cues.len(), 2, "{format:?}: DAT-only cue count");
+            assert!(cues.iter().any(|cue| cue.letter == "A" && !cue.memory && cue.position_ms == 25 && cue.out_ms == 0 && cue.id.is_empty() && cue.colour.is_none()), "{format:?}: hot A mapping");
+            assert!(cues.iter().any(|cue| cue.letter.is_empty() && cue.memory && cue.position_ms == 494 && cue.out_ms == 2369 && cue.id.is_empty() && cue.colour.is_none()), "{format:?}: memory loop mapping");
         }
     }
 

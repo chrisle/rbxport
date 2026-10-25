@@ -451,6 +451,37 @@ fn extended_cues_carry_their_colour() {
     assert_eq!(entries[1].color_code, Some(36));
 }
 
+#[test]
+fn legacy_dat_cues_read_hot_and_memory_pcpt_entries() {
+    let mut hot = vec![0; 56];
+    hot[..4].copy_from_slice(b"PCPT");
+    hot[4..8].copy_from_slice(&28_u32.to_be_bytes());
+    hot[8..12].copy_from_slice(&56_u32.to_be_bytes());
+    hot[12..16].copy_from_slice(&1_u32.to_be_bytes());
+    hot[28] = 1;
+    hot[32..36].copy_from_slice(&25_u32.to_be_bytes());
+    hot[36..40].copy_from_slice(&u32::MAX.to_be_bytes());
+    let mut memory = hot.clone();
+    memory[12..16].copy_from_slice(&0_u32.to_be_bytes());
+    memory[28] = 2;
+    memory[32..36].copy_from_slice(&494_u32.to_be_bytes());
+    memory[36..40].copy_from_slice(&2369_u32.to_be_bytes());
+    let header = |hot: bool| {
+        let mut bytes = vec![0; 12];
+        bytes[3] = u8::from(hot);
+        bytes[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        bytes
+    };
+    let file = build(&[(b"PCOB", header(true), hot), (b"PCOB", header(false), memory)]);
+    let anlz = parse(&file).unwrap();
+    assert!(anlz.cue_entries().is_empty(), "extended decoder stays PCO2-only");
+    let cues = anlz.legacy_cue_entries();
+    assert_eq!(cues.len(), 2);
+    assert_eq!((cues[0].hot_cue, cues[0].kind, cues[0].time_ms), (1, 1, 25));
+    assert_eq!((cues[1].hot_cue, cues[1].kind, cues[1].time_ms, cues[1].loop_time_ms), (0, 2, 494, 2369));
+    assert!(cues.iter().all(|cue| cue.comment.is_none() && cue.color_code.is_none() && cue.rgb.is_none()));
+}
+
 /// The share tree's cue lists are headers with nothing in them, and that is
 /// not a parse failure.
 #[test]
