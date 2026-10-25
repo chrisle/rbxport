@@ -486,6 +486,34 @@ fn legacy_dat_cues_read_hot_and_memory_pcpt_entries() {
     assert!(cues.iter().all(|cue| cue.comment.is_none() && cue.color_code.is_none() && cue.rgb.is_none()));
 }
 
+#[test]
+fn legacy_dat_cues_stop_at_malformed_pcpt_entries() {
+    let mut valid = vec![0; 56];
+    valid[..4].copy_from_slice(b"PCPT");
+    valid[8..12].copy_from_slice(&56_u32.to_be_bytes());
+    valid[12..16].copy_from_slice(&1_u32.to_be_bytes());
+    valid[28] = 1;
+    valid[32..36].copy_from_slice(&25_u32.to_be_bytes());
+
+    let malformed = [
+        ("truncated", valid[..55].to_vec()),
+        ("short declared length", { let mut entry = valid.clone(); entry[8..12].copy_from_slice(&55_u32.to_be_bytes()); entry }),
+        ("length beyond payload", { let mut entry = valid.clone(); entry[8..12].copy_from_slice(&57_u32.to_be_bytes()); entry }),
+        ("huge declared length", { let mut entry = valid.clone(); entry[8..12].copy_from_slice(&u32::MAX.to_be_bytes()); entry }),
+    ];
+    for (case, entry) in malformed {
+        let file = build(&[(b"PCOB", vec![0; 12], entry.clone())]);
+        assert!(parse(&file).unwrap().legacy_cue_entries().is_empty(), "{case}");
+
+        let mut after_valid = valid.clone();
+        after_valid.extend(entry);
+        let file = build(&[(b"PCOB", vec![0; 12], after_valid)]);
+        let cues = parse(&file).unwrap().legacy_cue_entries();
+        assert_eq!(cues.len(), 1, "{case}: preserve only the valid prefix");
+        assert_eq!((cues[0].hot_cue, cues[0].time_ms), (1, 25));
+    }
+}
+
 /// The share tree's cue lists are headers with nothing in them, and that is
 /// not a parse failure.
 #[test]
