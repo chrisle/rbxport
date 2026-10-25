@@ -665,10 +665,15 @@ pub fn plan(
 /// transaction and records it as one "Relocate" entry of the library
 /// history (#502), under the edit gate so no Undo runs between the two.
 /// Answers how many tracks it pointed somewhere.
-fn record_relocation(state: &AppState, moves: &[(String, PathBuf)]) -> AppResult<u32> {
+fn record_relocation(state: &AppState, moves: &[(String, PathBuf)], manual: bool) -> AppResult<u32> {
     let _gate = state.edit_gate.lock();
     let relocation = state
-        .write_history_then(|writer| writer.relocate_with_undo(moves), |_, (_, relocation)| Ok(relocation))
+        .write_history_then(
+            |writer| {
+                if manual { writer.relocate_manual_with_undo(moves) } else { writer.relocate_with_undo(moves) }
+            },
+            |_, (_, relocation)| Ok(relocation),
+        )
         .map_err(write_error)?;
     let count = u32::try_from(relocation.len()).unwrap_or(u32::MAX);
     let edit = LibraryEdit::Relocate(relocation);
@@ -740,7 +745,7 @@ pub async fn auto_relocate<R: tauri::Runtime>(
         let relocated = if plan.moves.is_empty() {
             0
         } else {
-            record_relocation(&writing, &plan.moves)?
+            record_relocation(&writing, &plan.moves, false)?
         };
         Ok(RelocateReportDto { relocated, unresolved, in_collection, in_collection_total })
     })
@@ -919,7 +924,7 @@ pub async fn relocate_by_location<R: tauri::Runtime>(
         if moves.is_empty() {
             return Ok(0);
         }
-        record_relocation(&writing, &moves)
+        record_relocation(&writing, &moves, true)
     })
     .await?;
     if found > 0 {
@@ -1369,6 +1374,7 @@ mod tests {
         assert_eq!(found, 2);
         let after: Vec<_> = tracks.iter().map(|t| link_of(&app, t)).collect();
         assert_ne!(after, before);
+        assert!(after.iter().zip(&before).all(|(new, old)| new.1 == old.1), "manual batch preserves stored filenames");
         assert_eq!(undo_label(&app).as_deref(), Some("Relocate"));
 
         let undone = run(crate::commands::undo_edit(app.handle().clone(), state())).unwrap();

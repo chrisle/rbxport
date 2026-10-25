@@ -5202,17 +5202,29 @@ impl Writer {
     /// file's number, a later Auto Relocate could take another file that
     /// happens to have it.
     pub fn relocate(&mut self, content: &str, path: &Path) -> Result<Changed> {
-        self.relocate_with_undo(&[(content.to_owned(), path.to_path_buf())]).map(|(changed, _)| changed)
+        self.relocate_manual_with_undo(&[(content.to_owned(), path.to_path_buf())]).map(|(changed, _)| changed)
     }
 
-    /// Points each track of `moves` at its file in one transaction, as one
-    /// Relocate, Relocate by location or Auto Relocate run, and keeps each
+    /// Manual Relocate keeps the track's stored `FileNameL`, even if the
+    /// chosen file has another basename. Rekordbox's `modifyContentFilePath`
+    /// does not write that column (7.2.19 arm64, #454). Auto Relocate keeps
+    /// its existing writer path while its UI remains hidden under #415.
+    pub fn relocate_manual_with_undo(&mut self, moves: &[(String, PathBuf)]) -> Result<(Changed, TrackRelocation)> {
+        self.relocate_with_name_policy(moves, true)
+    }
+
+    /// Points each track of `moves` at its file in one transaction for the
+    /// existing Auto Relocate path, and keeps each
     /// track's link (`FolderPath`, `FileNameL`, `rb_file_id`) before and
     /// after for Undo (#502). Every path is checked before anything is
     /// written: one that is not a file refuses the whole run. A track named
     /// twice is moved by its first entry; one not in the collection is
     /// passed over.
     pub fn relocate_with_undo(&mut self, moves: &[(String, PathBuf)]) -> Result<(Changed, TrackRelocation)> {
+        self.relocate_with_name_policy(moves, false)
+    }
+
+    fn relocate_with_name_policy(&mut self, moves: &[(String, PathBuf)], preserve_name: bool) -> Result<(Changed, TrackRelocation)> {
         for (_, path) in moves {
             if !path.is_file() {
                 return Err(DbError::WriteRefused(format!(
@@ -5233,13 +5245,17 @@ impl Writer {
                 continue;
             }
             let Some(before) = link_of(&tx, content)? else { continue };
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
+            let name = if preserve_name {
+                before[1].clone()
+            } else {
+                Value::Text(path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default())
+            };
             let after = [
                 Value::Text(path.to_string_lossy().into_owned()),
-                Value::Text(name),
+                name,
                 Value::Text(crate::file_id::column(path)),
             ];
             rows += write_link(&tx, content, &after, usn, &stamp)?;
