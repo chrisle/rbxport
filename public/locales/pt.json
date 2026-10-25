@@ -1782,8 +1782,8 @@
   "Add \"My Tag\" to the \"Comments\"": "Adicione \"A minha Tag\" aos \"Comentários\"",
   "This operation can take few minutes.": "Esta operação pode demorar muito tempo.",
   "Please wait for a while": "Favor aguardar",
-  "Don't copy": "Don't copy",
-  "If any track is missing from your collection, the playlist is not imported.": "If any track is missing from your collection, the playlist is not imported.",
-  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.",
-  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import."
+  "Don't copy": "Não copiar",
+  "If any track is missing from your collection, the playlist is not imported.": "Se alguma faixa estiver ausente da sua coleção, a lista de reprodução não será importada.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Só são importadas as faixas que já estão na sua coleção. As faixas sem correspondência são ignoradas; se nenhuma corresponder, não será criada nenhuma lista de reprodução.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Quando faltarem faixas, escolha se pretende copiá-las e onde guardá-las. Cancelar interrompe a importação."
 }
