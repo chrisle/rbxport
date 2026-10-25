@@ -469,13 +469,14 @@ fn a_view_nobody_opened_is_not_found_rather_than_empty() {
 
 #[test]
 fn copied_playlist_track_is_in_later_page_and_search_after_reload() {
-    let s = shell_with_shape(Shape { tracks: 100, playlists: 2, tracks_per_playlist: 87, history_sessions: 0, ..Shape::default() });
+    let s = shell_with_shape(Shape { tracks: 200, playlists: 2, tracks_per_playlist: 87, history_sessions: 0, ..Shape::default() });
     let destination = playlist_id(0);
     let source = playlist_id(1);
-    let copied = track_id(99);
+    let copied = track_id(199);
     run(commands::add_tracks_to_playlist(s.handle(), s.state(), source.clone(), vec![copied.clone()], None, None)).unwrap();
     assert_eq!(s.playlist_rows(&source).last().map(|row| row.id.as_str()), Some(copied.as_str()));
     run(commands::add_tracks_to_playlist(s.handle(), s.state(), destination.clone(), vec![copied.clone()], None, None)).unwrap();
+    run(commands::set_track_rating(s.handle(), s.state(), vec![copied.clone()], 4)).unwrap();
 
     let check = |s: &Shell| {
         assert_eq!(s.node("Playlist 0").child_count, Some(88));
@@ -484,11 +485,23 @@ fn copied_playlist_track_is_in_later_page_and_search_after_reload() {
         let page = run(commands::fetch_rows(s.state(), view, 64, 64, None)).unwrap();
         assert_eq!(page.len(), 24);
         assert_eq!(page.last().map(|row| (row.id.as_str(), row.track_no)), Some((copied.as_str(), 88)));
-        let searched = ViewSpecDto { query: "Track 099".into(), ..playlist_spec(&destination) };
+        let detailed_page = run(commands::fetch_rows(s.state(), view, 64, 64, Some(vec!["fileType".into()]))).unwrap();
+        assert_eq!(detailed_page.len(), 24);
+        assert_eq!(detailed_page.last().map(|row| row.id.as_str()), Some(copied.as_str()));
+        let searched = ViewSpecDto { query: "Track 199".into(), ..playlist_spec(&destination) };
         let (search_view, search_count) = s.open(searched);
         assert_eq!(search_count, 1);
         assert_eq!(s.rows(search_view)[0].id, copied);
         assert_eq!(s.rows(search_view)[0].track_no, 88);
+        let (sorted_view, sorted_count) = s.open(ViewSpecDto { sort: "title".into(), descending: true, ..playlist_spec(&destination) });
+        assert_eq!(sorted_count, 88);
+        assert_eq!(s.rows(sorted_view)[0].id, copied);
+        assert_eq!(s.rows(sorted_view)[0].track_no, 88);
+        let filtered = ViewSpecDto { filter: TrackFilterDto { ratings: Some(vec![4]), ..TrackFilterDto::default() }, ..playlist_spec(&destination) };
+        let (filtered_view, filtered_count) = s.open(filtered);
+        assert_eq!(filtered_count, 1);
+        assert_eq!(s.rows(filtered_view)[0].id, copied);
+        assert_eq!(s.rows(filtered_view)[0].track_no, 88);
     };
     check(&s);
     run(commands::reload_library(s.handle(), s.state())).unwrap();
