@@ -49,20 +49,21 @@ impl Aifc {
 
 /// The code symphonia knows for the same sample layout, if `code` is an
 /// alias for uncompressed PCM.
-fn canonical(code: [u8; 4]) -> Option<[u8; 4]> {
+fn canonical(code: [u8; 4]) -> Option<([u8; 4], u16)> {
     match &code {
-        b"FL32" => Some(*b"fl32"),
-        b"FL64" => Some(*b"fl64"),
+        b"FL32" => Some((*b"fl32", 32)),
+        b"FL64" => Some((*b"fl64", 64)),
         // Big-endian signed integers, the layout AIFF itself uses; the
-        // width comes from COMM's sample size, as it does for `NONE`.
-        b"in24" | b"in32" => Some(*b"NONE"),
+        // sample width must agree with the alias before showing `NONE`.
+        b"in24" => Some((*b"NONE", 24)),
+        b"in32" => Some((*b"NONE", 32)),
         _ => None,
     }
 }
 
 /// Where an AIFF-C file's compression type is and what it says, or `None`
 /// for anything else. Leaves `file` wherever it stopped.
-fn find_compression(file: &mut File) -> io::Result<Option<(u64, [u8; 4])>> {
+fn find_compression(file: &mut File) -> io::Result<Option<(u64, [u8; 4], u16)>> {
     let mut header = [0_u8; 12];
     if file.read_exact(&mut header).is_err() || &header[0..4] != b"FORM" || &header[8..12] != b"AIFC" {
         return Ok(None);
@@ -82,10 +83,13 @@ fn find_compression(file: &mut File) -> io::Result<Option<(u64, [u8; 4])>> {
             if size < 22 {
                 return Ok(None);
             }
+            let mut sample_size = [0_u8; 2];
+            file.seek(SeekFrom::Start(data + 6))?;
+            file.read_exact(&mut sample_size)?;
             let mut code = [0_u8; 4];
             file.seek(SeekFrom::Start(data + 18))?;
             file.read_exact(&mut code)?;
-            return Ok(Some((data + 18, code)));
+            return Ok(Some((data + 18, code, u16::from_be_bytes(sample_size))));
         }
         // Chunks are padded to an even length.
         at = data + size + (size & 1);
@@ -142,12 +146,21 @@ pub fn open(path: &Path) -> io::Result<(Box<dyn MediaSource>, Aifc)> {
     let mut file = File::open(path)?;
     let found = find_compression(&mut file)?;
     file.seek(SeekFrom::Start(0))?;
-    let Some((at, code)) = found else {
+    let Some((at, code, bits)) = found else {
         return Ok((Box::new(file), Aifc::default()));
     };
-    let Some(bytes) = canonical(code) else {
+    let Some((bytes, expected_bits)) = canonical(code) else {
         return Ok((Box::new(file), Aifc { compression: Some(code), aliased: false }));
     };
+    if bits != expected_bits {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "AIFF-C compression type '{}' requires {expected_bits}-bit samples, COMM sample width is {bits} bits",
+                code.escape_ascii()
+            ),
+        ));
+    }
     let len = file.metadata().ok().map(|m| m.len());
     let source = Patched { file, position: 0, at, bytes, len };
     Ok((Box::new(source), Aifc { compression: Some(code), aliased: true }))
