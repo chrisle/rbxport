@@ -1779,8 +1779,8 @@
   "Add \"My Tag\" to the \"Comments\"": "Προσθήκη των \"Ετικετών μου\" στα \"Σχόλια\"",
   "This operation can take few minutes.": "Η λειτουργία αυτή μπορεί να χρειαστεί πολλή ώρα.",
   "Please wait for a while": "Παρακαλώ περιμένετε",
-  "Don't copy": "Don't copy",
-  "If any track is missing from your collection, the playlist is not imported.": "If any track is missing from your collection, the playlist is not imported.",
-  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.",
-  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import."
+  "Don't copy": "Να μην αντιγραφούν",
+  "If any track is missing from your collection, the playlist is not imported.": "Αν λείπει οποιοδήποτε κομμάτι από τη συλλογή σας, η λίστα αναπαραγωγής δεν εισάγεται.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Εισάγονται μόνο κομμάτια που υπάρχουν ήδη στη συλλογή σας. Τα κομμάτια χωρίς αντιστοίχιση παραλείπονται· αν δεν αντιστοιχεί κανένα, δεν δημιουργείται λίστα αναπαραγωγής.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Όταν λείπουν κομμάτια, επιλέξτε αν θα αντιγραφούν και πού θα αποθηκευτούν. Η ακύρωση σταματά την εισαγωγή."
 }

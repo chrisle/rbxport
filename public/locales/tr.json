@@ -1778,8 +1778,8 @@
   "Add \"My Tag\" to the \"Comments\"": "\"Etiketim\"i \"Açıklamalar\"a ekle",
   "This operation can take few minutes.": "Bu işlem uzun zaman gerektirebilir.",
   "Please wait for a while": "Lütfen bekleyin",
-  "Don't copy": "Don't copy",
-  "If any track is missing from your collection, the playlist is not imported.": "If any track is missing from your collection, the playlist is not imported.",
-  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.",
-  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import."
+  "Don't copy": "Kopyalama",
+  "If any track is missing from your collection, the playlist is not imported.": "Koleksiyonunuzda herhangi bir parça eksikse çalma listesi içe aktarılmaz.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Yalnızca koleksiyonunuzda zaten bulunan parçalar içe aktarılır. Eşleşmeyen parçalar atlanır; hiçbiri eşleşmezse çalma listesi oluşturulmaz.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Eksik parçalar varsa bunların kopyalanıp kopyalanmayacağını ve nereye kaydedileceğini seçin. İptal etmek içe aktarmayı durdurur."
 }
