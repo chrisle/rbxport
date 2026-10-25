@@ -435,9 +435,27 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   // The browser fixture's current file state can change while a fetched row
   // still carries its old missing flag, as when an audio drive reconnects.
   const fileMissing = new Map<string, boolean>();
-  (window as unknown as { __setFileMissing: (id: string, missing: boolean) => void }).__setFileMissing = (id, missing) => {
-    fileMissing.set(id, missing);
-  };
+  const heldFileChecks = new Set<string>();
+  const pendingFileChecks = new Map<string, Array<() => void>>();
+  let completedFileChecks = 0;
+  if (typeof window !== "undefined") {
+    const hooks = window as unknown as {
+      __setFileMissing: (id: string, missing: boolean) => void;
+      __holdFileCheck: (id: string) => void;
+      __releaseFileCheck: (id: string) => void;
+      __pendingFileChecks: (id: string) => number;
+      __completedFileChecks: () => number;
+    };
+    hooks.__setFileMissing = (id, missing) => { fileMissing.set(id, missing); };
+    hooks.__holdFileCheck = (id) => { heldFileChecks.add(id); };
+    hooks.__releaseFileCheck = (id) => {
+      heldFileChecks.delete(id);
+      for (const release of pendingFileChecks.get(id) ?? []) release();
+      pendingFileChecks.delete(id);
+    };
+    hooks.__pendingFileChecks = (id) => pendingFileChecks.get(id)?.length ?? 0;
+    hooks.__completedFileChecks = () => completedFileChecks;
+  }
   const colors = makeColors(trackCount);
   const rowPositions = new Map(all.map((row, index) => [row.id, index]));
   // What the row DTO does not carry, made up per track and edited in place.
@@ -3254,7 +3272,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     trackMissing: (trackId) => {
       const row = all.find((r) => r.id === trackId);
-      return wait(row ? (fileMissing.get(trackId) ?? row.missing) === true : null);
+      const missing = row ? (fileMissing.get(trackId) ?? row.missing) === true : null;
+      if (heldFileChecks.has(trackId)) {
+        return new Promise<boolean | null>((resolve) => {
+          const pending = pendingFileChecks.get(trackId) ?? [];
+          pending.push(() => { completedFileChecks++; resolve(missing); });
+          pendingFileChecks.set(trackId, pending);
+        });
+      }
+      return wait(missing);
     },
     sortMissingTracks: (column, forwards) => {
       // `relocate::sorted_rows`, over the list as it stands: ICU's en-US

@@ -206,6 +206,61 @@ test("a file gone since row fetch leaves the current deck loaded (#644)", async 
   await expect(title).toHaveText(loaded);
 });
 
+test("eject cancels a file check pending for the same deck (#644)", async ({ page }) => {
+  await open(page, "?missing=7");
+  const title = page.getByTestId("player-title").first();
+  await rowOf(page, 0).locator('[data-col="title"]').dblclick();
+  await expect(title).not.toHaveText("");
+  await page.evaluate(() => {
+    (window as unknown as { __holdFileCheck: (id: string) => void }).__holdFileCheck("100002");
+  });
+  await rowOf(page, 2).locator('[data-col="title"]').dblclick();
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __pendingFileChecks: (id: string) => number }).__pendingFileChecks("100002"),
+  )).toBe(1);
+  await page.getByRole("button", { name: "Eject" }).first().click();
+  await expect(title).toHaveText("");
+  await page.evaluate(() => {
+    (window as unknown as { __releaseFileCheck: (id: string) => void }).__releaseFileCheck("100002");
+  });
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __completedFileChecks: () => number }).__completedFileChecks(),
+  )).toBe(1);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(title).toHaveText("");
+});
+
+test("the latest load wins when file checks finish in reverse order (#644)", async ({ page }) => {
+  await open(page, "?missing=7");
+  const title = page.getByTestId("player-title").first();
+  const secondTitle = await rowOf(page, 2).locator('[data-col="title"]').innerText();
+  await page.evaluate(() => {
+    const hooks = window as unknown as { __holdFileCheck: (id: string) => void };
+    hooks.__holdFileCheck("100000");
+    hooks.__holdFileCheck("100002");
+  });
+  await rowOf(page, 0).locator('[data-col="title"]').dblclick();
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __pendingFileChecks: (id: string) => number }).__pendingFileChecks("100000"),
+  )).toBe(1);
+  await rowOf(page, 2).locator('[data-col="title"]').dblclick();
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __pendingFileChecks: (id: string) => number }).__pendingFileChecks("100002"),
+  )).toBe(1);
+  await page.evaluate(() => {
+    (window as unknown as { __releaseFileCheck: (id: string) => void }).__releaseFileCheck("100002");
+  });
+  await expect(title).toHaveText(secondTitle);
+  await page.evaluate(() => {
+    (window as unknown as { __releaseFileCheck: (id: string) => void }).__releaseFileCheck("100000");
+  });
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __completedFileChecks: () => number }).__completedFileChecks(),
+  )).toBe(2);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(title).toHaveText(secondTitle);
+});
+
 test("the Missing File Manager lists every missing track and relocates them", async ({ page }) => {
   // The manager, then three rescans: longer than one view.
   test.setTimeout(60_000);
