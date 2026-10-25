@@ -1071,6 +1071,7 @@ fn device_cues(
     // OneLibrary's table owns cue timing and identity. EXT is only needed to
     // supplement memory-cue colors, so most rows need no companion read.
     if format == Format::OneLibrary && !cues.iter().any(rbl_index::Cue::is_memory) {
+        cues.sort_by_key(|cue| (cue.position_ms, cue.kind));
         return cues;
     }
     let analysis = assets_of(mount, track)
