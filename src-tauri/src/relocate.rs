@@ -1136,6 +1136,51 @@ mod tests {
         assert_eq!(track_missing_in(&library, "/loose/file.mp3"), None);
     }
 
+    /// #644: a cached missing row cannot decide a later deck load. The
+    /// library keeps the same audio path while the disposable file goes away
+    /// and returns; the load guard must look at that path again.
+    #[test]
+    fn a_restored_audio_file_is_not_missing_at_load_time() {
+        use rbl_index::testing::{library_from, TestTrack};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("track.wav");
+        let path: &'static str = Box::leak(file.to_string_lossy().into_owned().into_boxed_str());
+        let library = library_from(&[TestTrack {
+            id: 1, title: "Returned audio", path, ..TestTrack::default()
+        }]);
+        assert_eq!(track_missing_in(&library, "1"), Some(true));
+        let resolved = library.audio_path_of("1").unwrap();
+        assert!(is_missing_path(Path::new(&resolved)));
+
+        // A short, valid empty PCM WAV; the test never touches a real library.
+        let mut wav = b"RIFF".to_vec();
+        wav.extend_from_slice(&36_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&44_100_u32.to_le_bytes());
+        wav.extend_from_slice(&88_200_u32.to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&0_u32.to_le_bytes());
+        std::fs::write(&file, wav).unwrap();
+        assert_eq!(track_missing_in(&library, "1"), Some(false));
+        assert!(!is_missing_path(Path::new(&resolved)));
+        assert!(std::fs::File::open(&file).is_ok());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+            assert!(!is_missing_path(Path::new(&resolved)), "unreadable is not missing");
+            if let Err(error) = std::fs::File::open(&file) {
+                assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            }
+        }
+    }
+
     #[test]
     fn the_scan_lists_the_missing_tracks_in_index_order() {
         use rbl_index::testing::{library_from, TestTrack};

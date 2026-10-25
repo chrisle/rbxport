@@ -1315,10 +1315,30 @@ function AppBody() {
    * is there, else shows `kPlayerOperateErrorLoadMissingFile`, "Load error.
    * The file could not be found.", @0x101abb0f4 and returns].
    */
-  const loadOnto = useEventCallback((set: (row: RowDto | null) => void, row: RowDto | null) => {
-    if (row?.missing === true) {
+  const loadRequest = useRef({ a: 0, b: 0 });
+  const loadOnto = useEventCallback(async (deck: DeckId, set: (row: RowDto | null) => void, row: RowDto | null): Promise<boolean> => {
+    const request = ++loadRequest.current[deck];
+    if (row && /^\d+$/.test(row.id)) {
+      // A fetched collection row is only a snapshot. Its audio drive may have
+      // disconnected or returned at the same path since the row was fetched.
+      try {
+        const backend = await getBackend();
+        const missing = await backend.trackMissing(row.id);
+        if (request !== loadRequest.current[deck]) return false;
+        if (missing === true || (missing === null && row.missing === true)) {
+          refuse(t("Load error. The file could not be found."));
+          return false;
+        }
+      } catch (error) {
+        if (request === loadRequest.current[deck]) {
+          refuse(error instanceof Error ? error.message : t("Load error. The file could not be found."));
+        }
+        return false;
+      }
+    } else if (row?.missing === true) {
+      // Loose/device rows are not addressed by trackMissing.
       refuse(t("Load error. The file could not be found."));
-      return;
+      return false;
     }
     // What this session has written to the row since the list read it, an
     // analysis among it: the library is re-read only once a run is over.
@@ -1335,10 +1355,11 @@ function AppBody() {
     if (current && !(current.analysed > 0) && !readOnly && /^\d+$/.test(current.id)) {
       analysis.draw({ id: current.id, title: current.title });
     }
+    return true;
   });
   const deckLoaders = useMemo(() => ({
-    a: (row: RowDto | null) => loadOnto(setPlayerTrack, row),
-    b: (row: RowDto | null) => loadOnto(setPlayerTrackB, row),
+    a: (row: RowDto | null) => { void loadOnto("a", setPlayerTrack, row); },
+    b: (row: RowDto | null) => { void loadOnto("b", setPlayerTrackB, row); },
   }), [loadOnto]);
   // The tracks an analysis is drawing for a deck, so the deck shows the
   // waveform before the analysis is over.
@@ -1406,12 +1427,11 @@ function AppBody() {
    * matches.
    */
   const continuation = useRef<{ position: ListPosition; trackId: string } | null>(null);
-  const openInDeckA = useCallback((row: RowDto | null, from?: ListPosition) => {
-    continuation.current = row && from && row.missing !== true
-      ? { position: from, trackId: row.id }
-      : null;
-    deckLoaders.a(row);
-  }, [deckLoaders]);
+  const openInDeckA = useCallback(async (row: RowDto | null, from?: ListPosition) => {
+    if (!await loadOnto("a", setPlayerTrack, row)) return false;
+    continuation.current = row && from ? { position: from, trackId: row.id } : null;
+    return true;
+  }, [loadOnto]);
 
   /**
    * Loads the row after (or before) deck 1's track in the list it came
@@ -1440,8 +1460,7 @@ function AppBody() {
       const [row] = await backend.fetchRows(handle.viewId, index, 1);
       // Something else was loaded while the list was read.
       if (!row || continuation.current !== from) return;
-      openInDeckA(row, { spec: listed, index });
-      if (!play || row.missing === true) return;
+      if (!await openInDeckA(row, { spec: listed, index }) || !play) return;
       await whenLoaded("a", row.id);
       setPlaying("a", true);
     } catch {
@@ -3385,7 +3404,7 @@ function AppBody() {
           trafficKey={trafficKey}
           artworkMode={artworkMode}
           onArtworkMode={setArtworkMode}
-          onFocusedRow={openInDeckA}
+          onFocusedRow={(row, from) => { void openInDeckA(row, from); }}
           onSelectedRow={setSelectedRow}
           onDragTracks={setDraggedTracks}
           dragging={draggedTracks !== null}

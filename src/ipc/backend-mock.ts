@@ -432,6 +432,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (row) row.missing = true;
     }
   }
+  // The browser fixture's current file state can change while a fetched row
+  // still carries its old missing flag, as when an audio drive reconnects.
+  const fileMissing = new Map<string, boolean>();
+  (window as unknown as { __setFileMissing: (id: string, missing: boolean) => void }).__setFileMissing = (id, missing) => {
+    fileMissing.set(id, missing);
+  };
   const colors = makeColors(trackCount);
   const rowPositions = new Map(all.map((row, index) => [row.id, index]));
   // What the row DTO does not carry, made up per track and edited in place.
@@ -2566,7 +2572,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
       // A missing file is refused before the deck changes, as the app's is.
-      if (row?.missing === true) return notFound("Load error. The file could not be found.");
+      if ((fileMissing.get(trackId) ?? row?.missing) === true) return notFound("Load error. The file could not be found.");
       d.frames = 0;
       d.totalFrames = row ? row.durationSec * SAMPLE_RATE : 0;
       deckBeat[deck] = row && row.bpmX100 > 0 ? 6000 / row.bpmX100 : 0;
@@ -3243,7 +3249,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     trackMissing: (trackId) => {
       const row = all.find((r) => r.id === trackId);
-      return wait(row ? row.missing === true : null);
+      return wait(row ? (fileMissing.get(trackId) ?? row.missing) === true : null);
     },
     sortMissingTracks: (column, forwards) => {
       // `relocate::sorted_rows`, over the list as it stands: ICU's en-US
