@@ -185,6 +185,32 @@ impl Section {
         }
         Some(entries)
     }
+
+    /// DAT's legacy `PCOB` entries contain cue positions and loop state,
+    /// without the extended comment or colour fields.
+    pub fn as_legacy_cue_entries(&self) -> Option<Vec<CueEntry>> {
+        if self.tag != FourCc::new(b"PCOB") {
+            return None;
+        }
+        let mut entries = Vec::new();
+        for entry in self.payload.chunks_exact(56) {
+            if entry.get(..4) != Some(b"PCPT") || be32(entry, 8) != 56 {
+                break;
+            }
+            entries.push(CueEntry {
+                hot_cue: be32(entry, 12),
+                active_loop: be32(entry, 16) == 4,
+                kind: entry[28],
+                time_ms: be32(entry, 32),
+                loop_time_ms: be32(entry, 36),
+                color_id: 0,
+                comment: None,
+                color_code: None,
+                rgb: None,
+            });
+        }
+        Some(entries)
+    }
 }
 
 /// One entry of an extended cue list.
@@ -196,6 +222,8 @@ impl Section {
 pub struct CueEntry {
     /// Zero for a memory cue, otherwise the hot cue's slot — 1 is A.
     pub hot_cue: u32,
+    /// The legacy memory loop's active marker (PCPT word at offset 16).
+    pub active_loop: bool,
     /// 1 is a cue, 2 a loop.
     pub kind: u8,
     pub time_ms: u32,
@@ -215,7 +243,8 @@ impl CueEntry {
     /// The `djmdCue.Kind` this entry is stored as: 0 a memory cue, 1-3 hot
     /// cues A-C, 5-17 D-P (Kind 4 is the Active Loop, not a slot).
     pub fn library_kind(&self) -> u32 {
-        if self.hot_cue >= 4 { self.hot_cue + 1 } else { self.hot_cue }
+        if self.hot_cue == 0 && self.kind == 2 && self.active_loop { 4 }
+        else if self.hot_cue >= 4 { self.hot_cue + 1 } else { self.hot_cue }
     }
 
     /// The `djmdCue.Color` this entry is stored with: a memory cue's colour
@@ -407,6 +436,7 @@ pub fn cue_colour_drawn(index: u8) -> Option<[u8; 3]> {
 fn cue_entry(e: &[u8], len_entry: usize) -> CueEntry {
     let mut entry = CueEntry {
         hot_cue: be32(e, 12),
+        active_loop: false,
         kind: e.get(16).copied().unwrap_or(0),
         time_ms: be32(e, 20),
         loop_time_ms: be32(e, 24),
@@ -583,6 +613,11 @@ impl Anlz {
             .filter_map(Section::as_cue_entries)
             .flatten()
             .collect()
+    }
+
+    /// DAT's legacy cue lists, used when no EXT analysis file is present.
+    pub fn legacy_cue_entries(&self) -> Vec<CueEntry> {
+        self.sections.iter().filter_map(Section::as_legacy_cue_entries).flatten().collect()
     }
 
     pub fn path(&self) -> Option<String> {
