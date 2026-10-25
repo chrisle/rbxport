@@ -2482,7 +2482,7 @@ mod tests {
         let mut analysis = rbl_anlz::Anlz::read(&ext).unwrap();
         analysis.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; MAX_BROWSER_EXT_BYTES as usize]));
         std::fs::write(&ext, analysis.to_bytes()).unwrap();
-        assert!(rbl_anlz::Anlz::read(&ext).unwrap().cue_entries().len() > 0);
+        assert!(!rbl_anlz::Anlz::read(&ext).unwrap().cue_entries().is_empty());
         let before = contents_under(mount);
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
             let one_cues = if format == Format::OneLibrary { one_library_cues(mount) } else { HashMap::new() };
@@ -2502,8 +2502,8 @@ mod tests {
         assert_eq!(contents_under(mount), before, "browsing must not write to the stick");
         std::fs::remove_file(&ext).unwrap();
         let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
-        assert!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty());
-        assert!(!device_cues(mount, track, Format::OneLibrary, &one_library_cues(mount), &mut remaining).is_empty());
+        assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
+        assert_ne!(device_cues(mount, track, Format::OneLibrary, &one_library_cues(mount), &mut remaining), [] as [rbl_index::Cue; 0]);
     }
 
     #[test]
@@ -2518,10 +2518,10 @@ mod tests {
         let size = std::fs::metadata(ext).unwrap().len();
         let mut remaining = size * 2;
         for _ in 0..2 {
-            assert!(!device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty());
+            assert_ne!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
         }
         assert_eq!(remaining, 0);
-        assert!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty());
+        assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
     }
 
     #[test]
