@@ -1781,5 +1781,9 @@
   "Playlist cannot be edited or deleted while searching.": "Não é possível editar ou eliminar a lista de reprodução durante a pesquisa.",
   "Add \"My Tag\" to the \"Comments\"": "Adicione \"A minha Tag\" aos \"Comentários\"",
   "This operation can take few minutes.": "Esta operação pode demorar muito tempo.",
-  "Please wait for a while": "Favor aguardar"
+  "Please wait for a while": "Favor aguardar",
+  "Don't copy": "Don't copy",
+  "If any track is missing from your collection, the playlist is not imported.": "If any track is missing from your collection, the playlist is not imported.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import."
 }
