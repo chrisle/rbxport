@@ -2488,7 +2488,8 @@ mod tests {
             }
             assert_eq!(view.len(), 600);
             assert!(view.rows.iter().all(|row| !row.cues.is_empty()));
-            eprintln!("{format:?}: 600-track browser fixture opened in {:?}", started.elapsed());
+            let elapsed = started.elapsed();
+            assert!(elapsed < std::time::Duration::from_secs(10), "{format:?}: 600-track browser fixture took {elapsed:?}");
         }
     }
 }
