@@ -34,6 +34,7 @@ export function useTrackCues(
       return;
     }
     const id = track.id;
+    const device = track.deviceSource;
     let live = true;
     let first = true;
     let stopCues: (() => void) | undefined;
@@ -41,7 +42,7 @@ export function useTrackCues(
 
     const fetch = async () => {
       const backend = await getBackend();
-      const found = await backend.trackCues(id);
+      const found = await backend.trackCues(id, device);
       // The track may have changed while this was in flight.
       if (!live) return;
       setCues(found);

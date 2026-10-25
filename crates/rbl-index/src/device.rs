@@ -47,6 +47,8 @@ pub struct DeviceRow {
 #[derive(Debug, Default)]
 pub struct DeviceView {
     pub rows: Vec<DeviceRow>,
+    /// Source identity retained across sorting and paging.
+    pub source: Option<(PathBuf, String)>,
 }
 
 impl DeviceView {
@@ -79,7 +81,13 @@ impl DeviceView {
         if spec.descending {
             rows.reverse();
         }
-        Self { rows }
+        Self { rows, source: None }
+    }
+
+    #[must_use]
+    pub fn with_source(mut self, mount: PathBuf, format: String) -> Self {
+        self.source = Some((mount, format));
+        self
     }
 
     #[must_use]
