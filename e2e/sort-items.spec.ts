@@ -81,8 +81,8 @@ test("Sort Items from a key refuses over a searched tree, as the menu's does", a
 });
 
 for (const { name, writable, protectLibrary, message } of [
-  { name: "Library Protection", writable: true, protectLibrary: true, message: "Library Protection" },
-  { name: "a read-only library", writable: false, protectLibrary: false, message: "Library read-only" },
+  { name: "Library Protection", writable: true, protectLibrary: true, message: "Editing is locked by Library Protection. Turn it off in Preferences to edit." },
+  { name: "a read-only library", writable: false, protectLibrary: false, message: "Editing is locked while rekordbox is running. Quit rekordbox to enable editing." },
 ]) {
   test(`Sort Items from a key refuses with ${name}`, async ({ page }) => {
     await page.addInitScript((protect) => localStorage.setItem("rbl.preferences", JSON.stringify({
@@ -95,7 +95,7 @@ for (const { name, writable, protectLibrary, message } of [
     expect(await between(page, "CURRENT", "USB")).toEqual(order);
     await item(page, "CURRENT").click();
     await page.keyboard.press("Shift+Alt+KeyY");
-    await expect(page.getByRole("contentinfo")).toContainText(message);
+    await expect(page.getByRole("contentinfo").getByRole("alert")).toHaveText(message);
     expect(await between(page, "CURRENT", "USB")).toEqual(order);
   });
 }
