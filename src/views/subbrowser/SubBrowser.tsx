@@ -53,7 +53,7 @@ export type SubTreeProps = Pick<
 export type SubListProps = Pick<
   TrackTableProps,
   "onDragTracks" | "onDragError" | "players" | "onLoadTrack" | "onShowInformation" | "onShowInFinder"
-  | "onRate" | "onComment" | "pendingEdits" | "readOnly" | "dragging" | "onDropTracks"
+  | "onRate" | "onComment" | "onEditColor" | "pendingEdits" | "readOnly" | "dragging" | "onDropTracks"
   | "onResetPlayCount" | "onConvertMemoryCues" | "onRemoveFromCollection" | "onImportToCollection"
   | "onAutoRelocate" | "onRelocate"
   | "onAnalysisLock" | "onAddToPlaylist" | "onAddToTagList" | "onRemoveFromTagList" | "onReloadTag"

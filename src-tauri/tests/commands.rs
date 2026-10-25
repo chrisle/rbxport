@@ -1813,13 +1813,16 @@ fn a_rating_a_comment_and_a_colour_show_in_the_rows_after_the_edit() {
     run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 4)).unwrap();
     run(commands::set_track_comment(s.handle(), s.state(), vec![track.clone()], "opener — long intro".into()))
         .unwrap();
-    run(commands::set_track_color(s.handle(), s.state(), vec![track.clone()], Some("pink".into()))).unwrap();
+    run(commands::set_track_color(s.handle(), s.state(), vec![track.clone()], Some("2".into()))).unwrap();
 
     let (view, _) = s.open(collection_spec());
     let rows = s.rows(view);
     let row = rows.iter().find(|r| r.id == track).expect("the track is still in the collection");
     assert_eq!(row.rating, 4);
     assert_eq!(row.comment, "opener — long intro");
+    let colored = run(commands::fetch_rows(s.state(), view, 0, 50, Some(vec!["color".into()]))).unwrap();
+    assert_eq!(colored.iter().find(|r| r.id == track).unwrap().extra.as_ref().unwrap()["color"], serde_json::json!(2));
+    assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().color, "2");
 
     // And the sort that reads the column sees it too.
     let (view, _) = s.open(ViewSpecDto { sort: "rating".into(), descending: true, ..collection_spec() });
@@ -1829,6 +1832,8 @@ fn a_rating_a_comment_and_a_colour_show_in_the_rows_after_the_edit() {
     run(commands::set_track_color(s.handle(), s.state(), vec![track.clone()], None)).unwrap();
     let (view, _) = s.open(collection_spec());
     assert_eq!(s.rows(view).iter().find(|r| r.id == track).unwrap().rating, 0);
+    let cleared = run(commands::fetch_rows(s.state(), view, 0, 50, Some(vec!["color".into()]))).unwrap();
+    assert_eq!(cleared.iter().find(|r| r.id == track).unwrap().extra.as_ref().unwrap()["color"], serde_json::json!(0));
 }
 
 #[test]

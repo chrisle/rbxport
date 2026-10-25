@@ -513,6 +513,43 @@ test("Color sorts in rekordbox's palette order, not by name", async ({ page }) =
   expect((ballBox?.x ?? 0) - (cellBox?.x ?? 0)).toBe(5);
 });
 
+test("Color can be edited from a selected collection row and cancelled", async ({ page }) => {
+  await page.goto("/?writable");
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Color", exact: true }).click();
+
+  const cell = page.locator('[role="gridcell"][data-col="color"]').first();
+  const before = await cell.innerText();
+  await cell.click(); // select the track
+  await cell.click(); // open the list's Color modifier
+  const editor = cell.getByRole("combobox", { name: "Color" });
+  await expect(editor).toBeVisible();
+  await editor.press("Escape");
+  await expect(cell).toHaveText(before);
+
+  await cell.click();
+  await cell.getByRole("combobox", { name: "Color" }).selectOption("2");
+  await expect(page.getByRole("contentinfo")).toContainText("Color saved");
+  await expect(cell).toHaveText("Red");
+
+  await page.waitForFunction(() => "__menu" in window);
+  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("info"));
+  const panel = page.getByRole("complementary", { name: "Information" });
+  await panel.getByRole("tab", { name: "Info" }).click();
+  await expect(panel.getByRole("combobox", { name: "Color" })).toHaveValue("2");
+
+  await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Color", exact: true }).click();
+  const playlistCell = page.locator('[role="gridcell"][data-col="color"]').first();
+  await playlistCell.click();
+  await playlistCell.click();
+  await playlistCell.getByRole("combobox", { name: "Color" }).selectOption("5");
+  await expect(playlistCell).toHaveText("Green");
+});
+
 test("Track number sorts by the tag's number, apart from the # column", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
