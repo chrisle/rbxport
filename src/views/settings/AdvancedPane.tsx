@@ -24,7 +24,7 @@ import { errorMessage } from "@/lib/errorMessage";
 import { PLAYBACK_TIME, QUANTIZE_BEATS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
-import { Button, Note, Radios, Section, Select, Slider, Sub, Toggle } from "./controls";
+import { Button, Note, Radios, Section, Select, Separator, Slider, Sub, Toggle } from "./controls";
 
 export type AdvancedTab = "database" | "browse" | "others";
 
@@ -152,19 +152,28 @@ export function AdvancedPane({ tab, summary }: {
             ]}
             onChange={(duplicateTracks) => set({ duplicateTracks })}
           />
+          <Separator />
           <Sub>{t("When importing a playlist from a device")}</Sub>
-          <Note>{t("Tracks the collection does not have are copied to PioneerDJ/Imported from Device in your Music folder. Files already there are never replaced.")}</Note>
           <Select
             label={t("When importing a playlist from a device")}
             value={advanced.deviceImportMissing}
             choices={[
               { value: "copy", label: t("Copy missing tracks") },
+              { value: "matched", label: t("Don't copy") },
               { value: "ask", label: t("Ask each import") },
-              { value: "matched", label: t("Import only already-matched tracks") },
               { value: "cancel", label: t("Cancel when any track is missing") },
             ]}
             onChange={(deviceImportMissing) => set({ deviceImportMissing })}
           />
+          {advanced.deviceImportMissing === "copy" ?
+            <Note>{t("Tracks the collection does not have are copied to PioneerDJ/Imported from Device in your Music folder. Files already there are never replaced.")}</Note> : null}
+          {advanced.deviceImportMissing === "matched" ?
+            <Note>{t("Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.")}</Note> : null}
+          {advanced.deviceImportMissing === "ask" ?
+            <Note>{t("When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.")}</Note> : null}
+          {advanced.deviceImportMissing === "cancel" ?
+            <Note>{t("If any track is missing from your collection, the playlist is not imported.")}</Note> : null}
+          <Separator />
           <Sub>{t("When a dropped folder has the same name as a list")}</Sub>
           <Select
             label={t("When a dropped folder has the same name as a list")}

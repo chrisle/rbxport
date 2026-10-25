@@ -151,9 +151,10 @@ When importing a playlist from a device**:
   copied, their size and where they go. **Change…** picks another folder
   for the copies, as in rekordbox; OK is unavailable while that folder's
   drive has too little free space. OK copies, Cancel imports nothing.
-- **Import only already-matched tracks**: the track is left out and the note
-  says how many were. If none of the tracks are in the collection, nothing
-  is imported.
+- **Don't copy**: only tracks already matched to your collection are imported.
+  Unmatched tracks are left out, and the note says how many. If none match,
+  no playlist is created. This does not add playable references to files that
+  exist only on the USB device.
 - **Cancel when any track is missing**: nothing is imported, and the note
   says how many tracks are missing.
 

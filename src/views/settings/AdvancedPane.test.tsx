@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
 import type { Backend } from "@/ipc/types";
-import { DEFAULT_PREFERENCES } from "@/lib/preferences";
+import { DEFAULT_PREFERENCES, type DeviceImportMissingPreference } from "@/lib/preferences";
 import { PreferencesProvider } from "@/store/usePreferences";
 import { AdvancedPane } from "./AdvancedPane";
 
@@ -30,10 +30,10 @@ afterEach(() => {
   __setBackend(null);
 });
 
-function mount(protectLibrary = true) {
+function mount(protectLibrary = true, deviceImportMissing: DeviceImportMissingPreference = "copy") {
   const preferences = {
     ...DEFAULT_PREFERENCES,
-    advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary },
+    advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary, deviceImportMissing },
   };
   act(() => root.render(
     <PreferencesProvider value={{ preferences, update, reset: vi.fn() }}>
@@ -41,6 +41,39 @@ function mount(protectLibrary = true) {
     </PreferencesProvider>,
   ));
 }
+
+it("offers the requested device import choices with copy selected by default (#759)", () => {
+  mount();
+  const select = host.querySelector<HTMLSelectElement>('select[aria-label="When importing a playlist from a device"]');
+  if (!select) throw new Error("device import choices missing");
+  expect([...select.options].map(({ value, textContent }) => [value, textContent])).toEqual([
+    ["copy", "Copy missing tracks"],
+    ["matched", "Don't copy"],
+    ["ask", "Ask each import"],
+    ["cancel", "Cancel when any track is missing"],
+  ]);
+  expect(select.value).toBe("copy");
+  expect(host.textContent).toContain("Files already there are never replaced.");
+
+  act(() => {
+    select.value = "matched";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(update).toHaveBeenCalledWith("advanced", { deviceImportMissing: "matched" });
+});
+
+it.each([
+  ["matched", "Unmatched tracks are left out; if none match, no playlist is created."],
+  ["ask", "Cancel stops the import."],
+  ["cancel", "If any track is missing from your collection, the playlist is not imported."],
+] as const)("preserves and explains the saved %s device import choice (#759)", (choice, explanation) => {
+  mount(true, choice);
+  const select = host.querySelector<HTMLSelectElement>('select[aria-label="When importing a playlist from a device"]');
+  expect(select?.value).toBe(choice);
+  expect(host.textContent).toContain(explanation);
+  expect(host.textContent).not.toContain("Files already there are never replaced.");
+  expect(update).not.toHaveBeenCalled();
+});
 
 function switchLabelled(label: string) {
   return [...host.querySelectorAll<HTMLLabelElement>("label")]
