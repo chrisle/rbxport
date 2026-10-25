@@ -7,6 +7,7 @@
 //! libraries at a time and publishes the file through the export journal.
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -19,6 +20,11 @@ use crate::commands::{blocking, MAX_ROWS};
 use crate::dto::{cue_colour_css, RowCueDto, RowDto, ViewHandleDto, ViewSpecDto};
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{sort_from_wire, AppState};
+
+// The USB browser is opened on a blocking thread. Keep companion reads bounded
+// even when a stick has corrupt file lengths or a very large playlist.
+const MAX_BROWSER_EXT_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_BROWSER_EXT_VIEW_BYTES: u64 = 64 * 1024 * 1024;
 
 /// One library on a stick, for the tree.
 #[derive(Debug, Clone, Serialize)]
@@ -1009,10 +1015,16 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
         let rows: Vec<DeviceRow> = ids
             .iter()
             .enumerate()
-            .filter_map(|(at, id)| library.track(*id).map(|t| device_row_with_cues(&mount, t, at, format, &one_cues)))
+            .filter_map(|(at, id)| library.track(*id).map(|t| device_row(&mount, t, at)))
             .collect();
         handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, t)));
-        let view = DeviceView::open(rows, &parsed, field);
+        let mut view = DeviceView::open(rows, &parsed, field);
+        let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+        for row in &mut view.rows {
+            if let Some(track) = library.track(row.id) {
+                row.cues = device_cues(&mount, track, format, &one_cues, &mut remaining);
+            }
+        }
         let (view_id, len, generation) = handle.open_device_view(view);
         Ok(ViewHandleDto { view_id, len, gen: generation, totals: None })
     })
@@ -1044,14 +1056,23 @@ fn device_row(mount: &Path, track: &device::Track, at: usize) -> DeviceRow {
 
 /// Read the format's cue source while the view is opened on a blocking thread.
 /// A damaged analysis companion cannot make its track disappear from the browser.
-fn device_row_with_cues(
+fn device_cues(
     mount: &Path,
     track: &device::Track,
-    at: usize,
     format: Format,
     one_cues: &HashMap<u32, Vec<rbl_index::Cue>>,
-) -> DeviceRow {
-    let mut row = device_row(mount, track, at);
+    remaining: &mut u64,
+) -> Vec<rbl_index::Cue> {
+    let mut cues = if format == Format::OneLibrary {
+        one_cues.get(&track.id).cloned().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    // OneLibrary's table owns cue timing and identity. EXT is only needed to
+    // supplement memory-cue colors, so most rows need no companion read.
+    if format == Format::OneLibrary && !cues.iter().any(rbl_index::Cue::is_memory) {
+        return cues;
+    }
     let analysis = assets_of(mount, track)
         .1
         .analysis_dat()
@@ -1059,15 +1080,12 @@ fn device_row_with_cues(
             let ext = dat.with_extension("EXT");
             let relative = ext.strip_prefix(mount).ok()?.to_str()?;
             let ext = DeviceAssets::on_stick(mount, relative)?;
-            rbl_anlz::Anlz::read(&ext)
-                .ok()
-                .map(|file| file.cue_entries())
+            read_browser_ext(&ext, remaining).map(|file| file.cue_entries())
         })
         .unwrap_or_default();
-    row.cues = match format {
+    cues = match format {
         Format::DeviceLibrary => analysis.iter().filter_map(cue_from_analysis).collect(),
         Format::OneLibrary => {
-            let mut cues = one_cues.get(&track.id).cloned().unwrap_or_default();
             for cue in &mut cues {
                 if cue.is_memory() {
                     cue.memory_colour = analysis
@@ -1087,8 +1105,29 @@ fn device_row_with_cues(
             cues
         }
     };
-    row.cues.sort_by_key(|cue| (cue.position_ms, cue.kind));
-    row
+    cues.sort_by_key(|cue| (cue.position_ms, cue.kind));
+    cues
+}
+
+fn read_browser_ext(path: &Path, remaining: &mut u64) -> Option<rbl_anlz::Anlz> {
+    let limit = MAX_BROWSER_EXT_BYTES.min(*remaining);
+    if limit == 0 {
+        return None;
+    }
+    let file = std::fs::File::open(path).ok()?;
+    if file.metadata().ok()?.len() > limit {
+        return None;
+    }
+    // The metadata check avoids ordinary oversized reads; take also caps a
+    // companion that grows between the check and the read.
+    let mut bytes = Vec::new();
+    let read = file.take(limit + 1).read_to_end(&mut bytes);
+    *remaining = remaining.saturating_sub(bytes.len() as u64);
+    read.ok()?;
+    if bytes.len() as u64 > limit {
+        return None;
+    }
+    rbl_anlz::parse(&bytes).ok()
 }
 
 fn cue_from_analysis(entry: &rbl_anlz::CueEntry) -> Option<rbl_index::Cue> {
@@ -2335,11 +2374,16 @@ mod tests {
             } else {
                 HashMap::new()
             };
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
             let rows: Vec<_> = library
                 .tracks
                 .iter()
                 .enumerate()
-                .map(|(at, track)| device_row_with_cues(mount, track, at, format, &one_cues))
+                .map(|(at, track)| {
+                    let mut row = device_row(mount, track, at);
+                    row.cues = device_cues(mount, track, format, &one_cues, &mut remaining);
+                    row
+                })
                 .collect();
             let cued_row = rows.iter().find(|row| row.title == "Track 0").unwrap();
             assert!(cued_row.cues.iter().any(|cue| cue.is_memory() && cue.position_ms == 3_000 && cue.out_ms == 5_000), "{format:?}");
@@ -2393,11 +2437,13 @@ mod tests {
             .unwrap()
             .with_extension("EXT");
         std::fs::write(&ext, b"malformed analysis").unwrap();
-        let damaged = device_row_with_cues(mount, track, 0, Format::DeviceLibrary, &HashMap::new());
+        let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+        let mut damaged = device_row(mount, track, 0);
+        damaged.cues = device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining);
         assert!(row_dto(&damaged).hot_cues.is_empty());
         let one_cues = one_library_cues(mount);
-        let still_in_database =
-            device_row_with_cues(mount, track, 0, Format::OneLibrary, &one_cues);
+        let mut still_in_database = device_row(mount, track, 0);
+        still_in_database.cues = device_cues(mount, track, Format::OneLibrary, &one_cues, &mut remaining);
         assert_eq!(row_dto(&still_in_database).memory_cues, [3_000]);
         #[cfg(unix)]
         {
@@ -2406,8 +2452,117 @@ mod tests {
             std::fs::write(&target, original_ext).unwrap();
             std::fs::remove_file(&ext).unwrap();
             std::os::unix::fs::symlink(&target, &ext).unwrap();
-            let linked = device_row_with_cues(mount, track, 0, Format::DeviceLibrary, &HashMap::new());
+            let mut linked = device_row(mount, track, 0);
+            linked.cues = device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining);
             assert!(row_dto(&linked).hot_cues.is_empty(), "analysis symlinks outside the stick are not followed");
+        }
+    }
+
+    #[test]
+    fn oversized_browser_ext_is_nonfatal_and_bounded() {
+        let rig = rig_with(|index, track| {
+            analysed_on_the_stick(index, track);
+            if index == 0 {
+                track.cues = Some(vec![rbl_anlz::cues::ExportCue {
+                    kind: 1,
+                    time_ms: 1_000,
+                    ..Default::default()
+                }, rbl_anlz::cues::ExportCue {
+                    time_ms: 3_000,
+                    loop_time_ms: Some(5_000),
+                    ..Default::default()
+                }]);
+            }
+        });
+        let mount = rig.stick.path();
+        let library = device::read(mount, Format::DeviceLibrary).unwrap();
+        let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
+        let ext = assets_of(mount, track).1.analysis_dat().unwrap().with_extension("EXT");
+        let mut analysis = rbl_anlz::Anlz::read(&ext).unwrap();
+        analysis.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; MAX_BROWSER_EXT_BYTES as usize]));
+        std::fs::write(&ext, analysis.to_bytes()).unwrap();
+        assert!(rbl_anlz::Anlz::read(&ext).unwrap().cue_entries().len() > 0);
+        let before = contents_under(mount);
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let one_cues = if format == Format::OneLibrary { one_library_cues(mount) } else { HashMap::new() };
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            let cues = device_cues(mount, track, format, &one_cues, &mut remaining);
+            assert_eq!(remaining, MAX_BROWSER_EXT_VIEW_BYTES, "oversized file should not be read");
+            let mut row = device_row(mount, track, 0);
+            row.cues = cues;
+            let dto = row_dto(&row);
+            if format == Format::DeviceLibrary {
+                assert!(dto.hot_cues.is_empty());
+            } else {
+                assert_eq!(dto.hot_cues[0].0, 'A');
+                assert_eq!(dto.memory_cues, [3_000]);
+            }
+        }
+        assert_eq!(contents_under(mount), before, "browsing must not write to the stick");
+        std::fs::remove_file(&ext).unwrap();
+        let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+        assert!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty());
+        assert!(!device_cues(mount, track, Format::OneLibrary, &one_library_cues(mount), &mut remaining).is_empty());
+    }
+
+    #[test]
+    fn browser_ext_reads_share_a_view_budget() {
+        let rig = rig_with(|index, track| {
+            analysed_on_the_stick(index, track);
+        });
+        let mount = rig.stick.path();
+        let library = device::read(mount, Format::DeviceLibrary).unwrap();
+        let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
+        let ext = assets_of(mount, track).1.analysis_dat().unwrap().with_extension("EXT");
+        let size = std::fs::metadata(ext).unwrap().len();
+        let mut remaining = size * 2;
+        for _ in 0..2 {
+            assert!(!device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty());
+        }
+        assert_eq!(remaining, 0);
+        assert!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty());
+    }
+
+    #[test]
+    fn browser_open_many_tracks_records_fixture_latency() {
+        let (src, stick) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let mut seed = rbl_export::SourceTrack::default();
+        analysed_on_the_stick(0, &mut seed);
+        let tracks: Vec<_> = (0..600_u64)
+            .map(|id| {
+                let path = src.path().join(format!("t{id}.mp3"));
+                std::fs::write(&path, [0_u8; 512]).unwrap();
+                rbl_export::SourceTrack {
+                    id: id + 1,
+                    source_path: path,
+                    title: format!("Track {id}"),
+                    analysis: seed.analysis.clone(),
+                    cues: seed.cues.clone(),
+                    ..Default::default()
+                }
+            })
+            .collect();
+        rbl_export::export(stick.path(), &tracks, &[]).unwrap();
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let started = std::time::Instant::now();
+            let library = device::read(stick.path(), format).unwrap();
+            let one_cues = if format == Format::OneLibrary { one_library_cues(stick.path()) } else { HashMap::new() };
+            let rows = library.tracks.iter().enumerate().map(|(at, track)| device_row(stick.path(), track, at)).collect();
+            let mut view = DeviceView::open(rows, &rbl_index::ViewSpec {
+                source: rbl_index::TrackSource::Collection,
+                sort: rbl_index::SortColumn::Title,
+                descending: false,
+                query: String::new(),
+                filter: rbl_index::TrackFilter::default(),
+            }, rbl_index::SearchField::All);
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            for row in &mut view.rows {
+                let track = library.track(row.id).unwrap();
+                row.cues = device_cues(stick.path(), track, format, &one_cues, &mut remaining);
+            }
+            assert_eq!(view.len(), 600);
+            assert!(view.rows.iter().all(|row| !row.cues.is_empty()));
+            eprintln!("{format:?}: 600-track browser fixture opened in {:?}", started.elapsed());
         }
     }
 }
