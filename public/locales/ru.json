@@ -1782,8 +1782,8 @@
   "Add \"My Tag\" to the \"Comments\"": "Добавить  \"Свой тег\" к  \"Комментариям\"",
   "This operation can take few minutes.": "Данная операция может занять длительное время.",
   "Please wait for a while": "Пожалуйста, подождите",
-  "Don't copy": "Don't copy",
-  "If any track is missing from your collection, the playlist is not imported.": "If any track is missing from your collection, the playlist is not imported.",
-  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.",
-  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import."
+  "Don't copy": "Не копировать",
+  "If any track is missing from your collection, the playlist is not imported.": "Если в вашей коллекции отсутствует хотя бы один трек, плейлист не будет импортирован.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Импортируются только треки, которые уже есть в вашей коллекции. Треки без совпадений пропускаются; если совпадений нет, плейлист не создаётся.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Если треки отсутствуют, выберите, копировать ли их и куда сохранить. Отмена останавливает импорт."
 }
