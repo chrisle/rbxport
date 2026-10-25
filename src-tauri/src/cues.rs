@@ -650,6 +650,50 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_hot_loop_survives_reload_without_changing_a_plain_hot_cue() {
+        // #491: an empty hot pad pressed during a playing loop sends AddLoop.
+        // The same track must still expose both ends when cues are reloaded.
+        let mut f = open();
+        let track = track_id(1);
+        let looped = apply(
+            &mut f.writer,
+            CueEdit::AddLoop {
+                track: track.clone(),
+                kind: CueKind::Hot('C'),
+                in_ms: 8_000,
+                out_ms: 12_000,
+                beat_loop: Some((8, 1)),
+            },
+        )
+        .unwrap();
+        apply(
+            &mut f.writer,
+            CueEdit::Add { track: track.clone(), kind: CueKind::Hot('D'), position_ms: 15_000 },
+        )
+        .unwrap();
+
+        let stored: (i64, i64, i64, i64) = f.writer.library().connection().query_row(
+            "SELECT Kind, InMsec, OutMsec, BeatLoopSize FROM djmdCue WHERE ID = ?1",
+            [&looped.cue],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(stored, (3, 8_000, 12_000, (8 << 16) | 1));
+
+        f.reload(&track);
+        let cues = f.cues(&track);
+        assert_eq!(cues.len(), 2);
+        assert_eq!((cues[0].hot_letter(), cues[0].position_ms, cues[0].out_ms), (Some('C'), 8_000, 12_000));
+        assert_eq!((cues[1].hot_letter(), cues[1].position_ms, cues[1].out_ms), (Some('D'), 15_000, 0));
+
+        // Rebuild the index as an app restart would, using the disposable DB.
+        let db = Db::open(f.writer.library().location().clone(), OpenMode::ReadOnly).unwrap();
+        let (reopened, _) = rbl_index::load(&db).unwrap();
+        let cues = reopened.cues_of(reopened.row_of(&track).unwrap());
+        assert_eq!((cues[0].hot_letter(), cues[0].position_ms, cues[0].out_ms), (Some('C'), 8_000, 12_000));
+        assert_eq!((cues[1].hot_letter(), cues[1].position_ms, cues[1].out_ms), (Some('D'), 15_000, 0));
+    }
+
+    #[test]
     fn the_browser_row_s_letters_follow_a_hot_cue_edit_without_a_reload() {
         // What `fetch_rows` hands the browser after an edit: the same
         // `rows_to_dto` over the same index, with only the track re-read.
