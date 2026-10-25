@@ -206,6 +206,16 @@ pub fn read(root: &Path, format: Format) -> Result<Library> {
     }
 }
 
+/// Reads a library without recovering an interrupted export. Cue display is
+/// observational: it must not finish or roll back a publication on the stick.
+pub fn read_without_recovery(root: &Path, format: Format) -> Result<Library> {
+    let _lease = rbl_core::durable::read_lease(root)?;
+    if crate::recovery_pending(root) {
+        return Err(ExportError::Conflict("The device has an interrupted export that must be recovered before its cues can be read.".into()));
+    }
+    read_unlocked(root, format)
+}
+
 fn read_unlocked(root: &Path, format: Format) -> Result<Library> {
     let path = db_dir(root)?.join(format.file_name());
     if !path.is_file() {

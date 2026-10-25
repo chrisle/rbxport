@@ -1079,7 +1079,7 @@ pub async fn device_track_cues(path: String, format: String, device_track_id: u3
         const MEMORY_CSS: [&str; 8] = ["#E778F1", "#E33122", "#EBA44A", "#F4E458", "#66DD42", "#56BDF3", "#204FEF", "#8B1EEF"];
         let mount = connected(&path)?;
         let format = format_from(&format)?;
-        let library = device::read(&mount, format).map_err(|e| device_error(&e))?;
+        let library = device::read_without_recovery(&mount, format).map_err(|e| device_error(&e))?;
         let Some(row) = library.track(device_track_id) else { return Ok(Vec::new()) };
         if rbl_index::folder::loose_id(&audio_path(&mount, &row.path)) != track {
             return Ok(Vec::new());
@@ -1734,6 +1734,46 @@ mod tests {
                 ),
                 "{format:?}: unmatched Explorer file has the same file: namespace"
             );
+        }
+    }
+
+    #[test]
+    fn issue_608_cue_read_refuses_pending_export_without_changing_stick() {
+        let rig = rig_with(analysed_on_the_stick);
+        let mount = rig.stick.path();
+        let selected: Vec<_> = [Format::DeviceLibrary, Format::OneLibrary]
+            .into_iter()
+            .map(|format| {
+                let library = device::read(mount, format).unwrap();
+                let track = library.tracks.iter().find(|t| t.title == "Track 0").unwrap();
+                (format, track.id, assets_of(mount, track).0)
+            })
+            .collect();
+
+        // A staged replacement is a real interrupted publication, not just
+        // an empty marker. Recovery would publish it and remove this journal.
+        let manifest = "PIONEER/rbxport/manifest.json";
+        let journal = mount.join(".rbxport-publication");
+        let staged = journal.join(manifest);
+        std::fs::create_dir_all(staged.parent().unwrap()).unwrap();
+        std::fs::write(&staged, b"staged replacement").unwrap();
+        std::fs::write(
+            journal.join("publication.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"path": manifest, "present": true, "had_target": true, "exact": true}
+            ])).unwrap(),
+        ).unwrap();
+        let before = contents_under(mount);
+
+        for (format, id, track) in selected {
+            let error = tauri::async_runtime::block_on(device_track_cues(
+                mount.to_string_lossy().into_owned(),
+                format_name(format).to_owned(),
+                id,
+                track,
+            )).unwrap_err();
+            assert!(error.message.contains("interrupted export"), "{format:?}: {error}");
+            assert_eq!(contents_under(mount), before, "{format:?}: cue read changed the stick");
         }
     }
 
