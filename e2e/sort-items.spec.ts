@@ -89,7 +89,7 @@ for (const { name, writable, protectLibrary, message } of [
       advanced: { protectLibrary: protect },
       keyboard: { preset: "export", overrides: { sortItems: { key: "y", shiftKey: true, altKey: true } } },
     })), protectLibrary);
-    await page.goto(`/?writable=${writable ? "1" : "0"}`);
+    await page.goto(writable ? "/?writable=1" : "/");
     await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
     const order = ["Melodic Vox", "Hardstyle", "Drum and Bass", "Fresh 128s"];
     expect(await between(page, "CURRENT", "USB")).toEqual(order);
