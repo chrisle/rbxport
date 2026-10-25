@@ -2733,6 +2733,7 @@ fn a_relocate_is_one_undo_that_restores_the_old_link() {
     assert!(run(commands::relocate_track(s.handle(), s.state(), track.clone(), path.clone())).unwrap());
     let after = file_link(&s, &track);
     assert_eq!(after.0.as_deref(), Some(path.as_str()));
+    assert_eq!(after.1, before.1, "manual Relocate preserves FileNameL across the IPC command");
     assert_eq!(after.2, Some(rbl_db::file_id::column(&chosen)));
     let history = commands::current_history(&s.state());
     assert_eq!(history.undo_label.as_deref(), Some("Relocate"));

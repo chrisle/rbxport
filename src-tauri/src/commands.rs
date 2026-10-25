@@ -3699,7 +3699,7 @@ pub async fn relocate_track<R: tauri::Runtime>(
     // One Relocate is one Undo step (#502): Undo points the track back at
     // its old file, whether or not that file is there; no file is moved.
     recorded_edit(app, state, "relocate_track", Touched::Tracks, RELOCATE_LABEL, move |w| {
-        w.relocate_with_undo(&[(track, std::path::PathBuf::from(path))])
+        w.relocate_manual_with_undo(&[(track, std::path::PathBuf::from(path))])
             .map(|(_, relocation)| LibraryEdit::Relocate(relocation))
     })
     .await?;
