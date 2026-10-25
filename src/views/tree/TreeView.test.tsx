@@ -77,3 +77,32 @@ describe("TreeView device playlist drops", () => {
     expect(dropped).not.toHaveBeenCalled();
   });
 });
+
+describe("TreeView playlist context export", () => {
+  const selected: TreeNode = { id: "playlist-selected", name: "Selected", kind: "playlist", depth: 0, childCount: 1 };
+  const clicked: TreeNode = { id: "playlist-clicked", name: "Clicked", kind: "playlist", depth: 0, childCount: 1 };
+
+  it("passes the right-clicked playlist and chosen USB path to export", () => {
+    const onExport = vi.fn();
+    act(() => root.render(<TreeView
+      nodes={[selected, clicked]}
+      selectedId={selected.id}
+      onSelect={() => {}}
+      onExport={onExport}
+      exportDevices={[{ id: "/Volumes/DJ STICK", name: "DJ STICK" }]}
+    />));
+
+    const row = host.querySelector('[role="treeitem"][data-kind="playlist"]:nth-child(2)');
+    expect(row).not.toBeNull();
+    act(() => { row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    const exportItem = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((item) => item.textContent === "Export Playlist");
+    expect(exportItem).toBeDefined();
+    act(() => { exportItem?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); });
+    const stick = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((item) => item.textContent === "DJ STICK");
+    expect(stick).toBeDefined();
+    act(() => { stick?.click(); });
+    expect(onExport).toHaveBeenCalledExactlyOnceWith(clicked, "/Volumes/DJ STICK");
+  });
+});
