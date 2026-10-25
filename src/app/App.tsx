@@ -1664,6 +1664,10 @@ function AppBody() {
         refuse(t("Playlist cannot be edited or deleted while searching."));
         return;
       }
+      if (readOnly) {
+        explainEditLock();
+        return;
+      }
       const parent = folder.kind === "collection" ? TREE_ROOT : folder.id;
       if (childrenOf(tree, parent).length < 2) return;
       write(async (backend) => {
@@ -1673,7 +1677,7 @@ function AppBody() {
         return t("Sorted {name}.", { name: folder.kind === "collection" ? t("Playlists") : folder.name });
       });
     },
-    [tree, write, refuse, t, viewPrefs.locale],
+    [tree, write, refuse, t, viewPrefs.locale, readOnly, explainEditLock],
   );
   // Playlist › Sort Items (0x500d) from a key or the menu bar: the folder
   // selected in the tree, as rekordbox's command acts on the tree's
