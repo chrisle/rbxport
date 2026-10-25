@@ -33,6 +33,25 @@ async function chooseFromTreeMenu(page: Page, node: Locator, entry: string) {
 
 const rows = (page: Page) => page.getByRole("row").filter({ has: page.getByRole("gridcell") });
 
+test("a copied track at position 88 is visible beside its playlist count and search result", async ({ page }) => {
+  await page.goto("/?writable=1&trackCount=100&playlistFixture=deep");
+  const source = item(page, "Source");
+  const destination = item(page, "Destination");
+  await source.click();
+  const copiedTitle = (await rows(page).first().locator('[data-col="title"]').innerText()).trim();
+  await rows(page).first().dragTo(destination);
+  await destination.click();
+  await expect(page.getByTestId("browser-title")).toHaveText("Destination (88 Tracks)");
+  const scroller = page.getByTestId("track-scroll");
+  await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  const copied = rows(page).filter({ has: page.locator('[data-col="trackNo"]', { hasText: /^88$/ }) });
+  await expect(copied.locator('[data-col="title"]')).toHaveText(copiedTitle);
+  const search = page.getByRole("searchbox", { name: "Search within this track list", exact: true }).first();
+  await search.fill(copiedTitle);
+  await expect(rows(page).filter({ has: page.locator('[data-col="trackNo"]', { hasText: /^88$/ }) })
+    .locator('[data-col="title"]')).toHaveText(copiedTitle);
+});
+
 function collection(page: Page): Locator {
   return page.locator('[role="treeitem"][data-kind="collection"]');
 }

@@ -280,18 +280,23 @@ const PLAYLISTS = [
 
 /** How many tracks a mock playlist holds, from its id, so every path agrees. */
 function mockPlaylistSize(id: string): number {
+  if (id === "pl-deep-dest") return 87;
+  if (id === "pl-deep-source") return 1;
   const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
   return 14 + (seed % 30);
 }
 
-type PlaylistFixture = "default" | "empty" | "cueOnly";
+type PlaylistFixture = "default" | "empty" | "cueOnly" | "deep";
 
 function makeTree(playlistFixture: PlaylistFixture): TreeNode[] {
   const nodes: TreeNode[] = [
     { id: "all", name: "All Tracks", kind: "allTracks", depth: 0 },
     { id: "playlists", name: "Playlists", kind: "collection", depth: 0, expanded: true },
   ];
-  if (playlistFixture === "cueOnly") {
+  if (playlistFixture === "deep") {
+    nodes.push({ id: "pl-deep-source", name: "Source", kind: "playlist", depth: 1, childCount: 1 });
+    nodes.push({ id: "pl-deep-dest", name: "Destination", kind: "playlist", depth: 1, childCount: 87 });
+  } else if (playlistFixture === "cueOnly") {
     nodes.push({ id: "cue", name: "CUE", kind: "playlist", depth: 1, childCount: mockPlaylistSize("cue") });
   } else if (playlistFixture === "default") {
     let n = 0;
@@ -458,6 +463,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
   /** The deterministic slice a list shows before it is edited. */
   const seededMembers = (id: string): number[] => {
+    if (id === "pl-deep-dest") return Array.from({ length: 87 }, (_, i) => i);
+    if (id === "pl-deep-source") return [99];
     const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
     const size = 14 + (seed % 30);
     return Array.from({ length: size }, (_, i) => (seed * 37 + i * 101) % trackCount);
@@ -2113,16 +2120,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         folderViews.set(viewId, rows);
         return wait<ViewHandle>({ viewId, len: rows.length, gen: 1 });
       }
-      let candidates = candidatesFor(spec);
+      // Playlist numbers describe membership positions, including when a
+      // search or filter narrows the view. Keep each position coupled to its
+      // entry, since the same track may occur more than once in a playlist.
+      const playlistSource = spec.source.kind === "playlist";
+      const sourceCandidates = candidatesFor(playlistSource ? { ...spec, query: "" } : spec);
+      const query = fold(spec.query.trim());
       const filter = spec.filter;
-      if (filter) {
-        candidates = candidates.filter((i) => {
-          const row = all[i];
-          return row ? passesFilter(row, colors[i] ?? 0, filter) : false;
+      const order = sourceCandidates
+        .map((row, position) => ({ row, trackNo: position + 1 }))
+        .filter(({ row }) => {
+          const entry = all[row];
+          if (!entry) return false;
+          if (playlistSource && query && !matchesSearch(entry, query, spec.searchField ?? "all")) return false;
+          return !filter || passesFilter(entry, colors[row] ?? 0, filter);
         });
-      }
-
-      const order = candidates.map((row, position) => ({ row, trackNo: position + 1 }));
       const rows = all;
       // `trackNo` is not a column to rank by: it means "leave them in the
       // order this view produced them", which for a playlist is its
@@ -3715,7 +3727,7 @@ function readFlagFromUrl(name: string): boolean {
 function readPlaylistFixtureFromUrl(): PlaylistFixture {
   if (typeof location === "undefined") return "default";
   const fixture = new URLSearchParams(location.search).get("playlistFixture");
-  return fixture === "empty" || fixture === "cueOnly" ? fixture : "default";
+  return fixture === "empty" || fixture === "cueOnly" || fixture === "deep" ? fixture : "default";
 }
 
 /**
