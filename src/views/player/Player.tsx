@@ -2618,6 +2618,10 @@ export const Player = memo(function Player({
             memory={memory}
             quantize={quantize}
             onQuantize={runQuantize}
+            onPlayerMenu={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              setDeckMenuAt({ x: box.left, y: box.bottom });
+            }}
             loop={dualLoop}
           />
         ) : null}

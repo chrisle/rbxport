@@ -15,7 +15,7 @@ import type { GridEditorActions } from "./useGridEditor";
  * keys. These are the rows it draws when it is told `dual`, given the values
  * it already holds.
  */
-import { memo, type ReactNode } from "react";
+import { memo, type MouseEventHandler, type ReactNode } from "react";
 
 import type { RowDto } from "@/ipc/types";
 import { LoopInIcon, LoopOutIcon, MagnifierMinusIcon, MagnifierPlusIcon } from "@/components/icons";
@@ -143,6 +143,7 @@ export interface DualControlsProps {
   };
   quantize: boolean;
   onQuantize: () => void;
+  onPlayerMenu: MouseEventHandler<HTMLButtonElement>;
   /** The loop controls. `Player` owns the loop; the row only draws it. */
   loop: DualLoop;
 }
@@ -188,7 +189,7 @@ export interface DualLoop {
  * use the shared grid editor, and the loop buttons drive `Player`'s loop.
  */
 export const DualControls = memo(function DualControls({
-  gridEditor, readOnly, memory, quantize, onQuantize, loop,
+  gridEditor, readOnly, memory, quantize, onQuantize, onPlayerMenu, loop,
 }: DualControlsProps) {
   const hold = useHoldRepeat();
   const gridReason = "Edit the beat grid";
@@ -306,6 +307,10 @@ export const DualControls = memo(function DualControls({
         onClick={onQuantize}
       >
         Q
+      </button>
+      <button type="button" className={styles.chip} aria-label="Player menu"
+        aria-haspopup="menu" onClick={onPlayerMenu}>
+        ≡
       </button>
     </div>
   );

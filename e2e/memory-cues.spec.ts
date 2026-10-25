@@ -8,7 +8,7 @@
  * map. The mock backend keeps cues per track, so an edit here is a real round
  * trip: written, announced, refetched, redrawn.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { enableTooltips } from "./helpers";
 
 const player = (page: Page) => page.getByRole("region", { name: "Preview player" });
@@ -292,13 +292,63 @@ test("the Active Loop toggle is disabled while the library is read-only (#577)",
 const deckLooping = (page: Page) => page.evaluate(() =>
   (window as unknown as { __deckSeconds: () => { loopingA: boolean } }).__deckSeconds().loopingA);
 
-async function activeLoopPlayback(page: Page, choice: "On" | "Off") {
-  await player(page).getByRole("button", { name: "Player menu" }).click();
+async function activeLoopPlayback(page: Page, choice: "On" | "Off", deck: Locator = player(page)) {
+  await deck.getByRole("button", { name: "Player menu" }).click();
   await page.getByRole("menu", { name: "Player menu" })
     .getByRole("menuitem", { name: "Active Loop Playback" }).hover();
   await page.getByRole("menu", { name: "Active Loop Playback" })
     .getByRole("menuitemradio", { name: choice, exact: true }).click();
 }
+
+test("Active Loop Playback On/Off is independent across decks (#743)", async ({ page }) => {
+  await page.goto("/?memoryLoops=1&activeLoopNearStart=1");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)", { timeout: 15_000 });
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  const a = page.getByRole("region", { name: "Preview player", exact: true });
+  const b = page.getByRole("region", { name: "Preview player B" });
+  const track = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  await track.dblclick();
+  await track.click({ button: "right" });
+  const trackMenu = page.getByRole("menu", { name: "Track" });
+  await trackMenu.getByRole("menuitem", { name: "Load", exact: true }).hover();
+  await trackMenu.getByRole("menuitem", { name: "Load track to player 2" }).click();
+  await expect(a.getByTestId("player-title")).not.toHaveText("");
+  await expect(b.getByTestId("player-title")).toHaveText(await a.getByTestId("player-title").innerText());
+  for (const deck of [a, b]) {
+    await expect(deck.locator('[data-testid="memory-cue-loop"][data-active]'))
+      .toHaveCount(1);
+  }
+
+  const state = () => page.evaluate(() => (window as unknown as {
+    __deckSeconds: () => { a: number; b: number; loopingA: boolean; looping: boolean };
+  }).__deckSeconds());
+  await activeLoopPlayback(page, "On", a);
+  await activeLoopPlayback(page, "Off", b);
+  const transportA = page.getByRole("group", { name: "Deck A transport" });
+  const transportB = page.getByRole("group", { name: "Deck B transport" });
+  await transportA.getByRole("button", { name: "Play", exact: true }).click();
+  await transportB.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(async () => (await state()).loopingA, { timeout: 6_000 }).toBe(true);
+  await expect.poll(async () => (await state()).b, { timeout: 6_000 }).toBeGreaterThan(4);
+  expect((await state()).looping).toBe(false);
+
+  await activeLoopPlayback(page, "On", b);
+  await transportB.getByRole("button", { name: "Cue", exact: true }).click();
+  await transportB.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(async () => (await state()).looping, { timeout: 6_000 }).toBe(true);
+  expect((await state()).loopingA).toBe(true);
+  await a.getByRole("button", { name: "Player menu" }).click();
+  await page.getByRole("menu", { name: "Player menu" })
+    .getByRole("menuitem", { name: "Active Loop Playback" }).hover();
+  await expect(page.getByRole("menu", { name: "Active Loop Playback" })
+    .getByRole("menuitemradio", { name: "On", exact: true })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await activeLoopPlayback(page, "Off", a);
+  await expect.poll(async () => (await state()).loopingA).toBe(false);
+  expect((await state()).looping).toBe(true);
+});
 
 test("a saved Active Loop catches playback at IN, EXIT runs on, and RELOOP restores it (#743)", async ({ page }) => {
   await load(page, "?memoryLoops=1&activeLoopNearStart=1");
