@@ -12,7 +12,7 @@ import { reportStartupPaint } from "@/lib/startup";
 import { useEventCallback } from "@/store/useEventCallback";
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { DeckId, ListTotals, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/types";
@@ -37,6 +37,7 @@ import { RatingStar } from "@/components/RatingStar";
 import { RecordIcon } from "@/components/icons";
 import { EXTRA_COLUMNS, reorderTarget, type ColumnKey, type ColumnSpec } from "@/lib/columns";
 import { COLOR_NAMES } from "@/lib/trackFilter";
+import { COLORS } from "@/views/info/fields";
 import { browseListVars, browseScale, formatKey } from "@/lib/preferences";
 import { trafficLightLit, type TrafficLightReach } from "@/lib/camelot";
 import { TickIcon } from "@/components/icons";
@@ -226,11 +227,12 @@ const Stars = memo(function Stars({
  * safe.
  */
 const EditableCell = memo(function EditableCell({
-  value, label, col, onCommit, onClick, tip, doubleClickLoads = false, onEditBlocked, choices, choiceLabel, display, lit, onOpen,
+  value, label, col, onCommit, onClick, tip, doubleClickLoads = false, onEditBlocked, choices, choiceLabel, display, lit, onOpen, className,
 }: {
   value: string;
   /** What the cell shows when it is not being edited; the value itself when absent. */
-  display?: string;
+  display?: ReactNode;
+  className?: string;
   label: string;
   /**
    * The values the field accepts. Present, the cell opens a list rather than
@@ -307,7 +309,7 @@ const EditableCell = memo(function EditableCell({
     };
     return (
       <div
-        className={styles.cell}
+        className={className ?? styles.cell}
         data-col={col}
         data-lit={lit || undefined}
         role="gridcell"
@@ -418,7 +420,7 @@ const EditableCell = memo(function EditableCell({
 
 const TrackRow = memo(function TrackRow({
   row, top, selected, played, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
-  onComment, onEditField, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
+  onComment, onEditField, onEditColor, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
   reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache,
 }: {
   row: RowDto | undefined;
@@ -453,6 +455,7 @@ const TrackRow = memo(function TrackRow({
   onComment: ((id: string, comment: string) => void) | undefined;
   /** Write a metadata field typed over in the row. */
   onEditField: ((id: string, field: TrackField, value: string) => void) | undefined;
+  onEditColor: ((id: string, color: string) => void) | undefined;
   onEditBlocked?: (() => void) | undefined;
   onMenu: (index: number, row: RowDto, at: { x: number; y: number }) => void;
   onDragEnd: () => void;
@@ -727,6 +730,27 @@ const TrackRow = memo(function TrackRow({
           // rekordbox's ListViewer::paintColourColumn: the colour's ball, then
           // its name; a track with no colour leaves the cell empty.
           const name = cellText(row, col.key);
+          if (onEditColor) {
+            return (
+              <EditableCell
+                key={col.key}
+                value={String(row.extra?.color ?? 0)}
+                className={`${styles.cell} ${styles.colorCell}`}
+                display={<>
+                  {name ? <span className={styles.colorBall} data-color={name} aria-hidden /> : null}
+                  {name}
+                </>}
+                label={col.label}
+                col={col.key}
+                choices={["0", ...COLORS.map((color) => color.id)]}
+                choiceLabel={(color) => COLORS.find((entry) => entry.id === color)?.name ?? ""}
+                onCommit={(color) => onEditColor(row.id, color)}
+                onClick={selected}
+                onEditBlocked={onEditBlocked}
+                tip={undefined}
+              />
+            );
+          }
           return (
             <div key={col.key} className={`${styles.cell} ${styles.colorCell}`} data-col={col.key} role="gridcell">
               {name ? <span className={styles.colorBall} data-color={name} aria-hidden /> : null}
@@ -842,6 +866,8 @@ export interface TrackTableProps {
   /** Edit a track's rating or comment. Absent where writes are impossible. */
   onRate?: (id: string, stars: number) => void;
   onComment?: (id: string, comment: string) => void;
+  /** Set one track's Color from a Collection or Playlist cell. */
+  onEditColor?: (id: string, color: string) => void;
   /**
    * Write the playlist's new order, dragged by hand.
    *
@@ -1040,7 +1066,7 @@ function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: 
 export const TrackTable = memo(function TrackTable({
   deckTrackIds = NO_DECKS, onShowCollection, spec, onSortChange, onSelectionChange, onTotalsChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns: layoutColumns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onRenumber, subBrowser = false, onEditField, onEditBlocked, seed, onFirstRows,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onRenumber, subBrowser = false, onEditField, onEditColor, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, pendingRows = 0, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
   onRemoveFromCollection, onAutoRelocate, onRelocate, onConvertMemoryCues, readOnly = false,
@@ -2370,6 +2396,7 @@ export const TrackTable = memo(function TrackTable({
                 onRate={onRate}
                 onComment={onComment}
                 onEditField={onEditField}
+                onEditColor={spec.source.kind === "collection" || spec.source.kind === "playlist" ? onEditColor : undefined}
                 onEditBlocked={onEditBlocked}
                 keyDisplay={keyDisplay}
                 keyChoices={keyChoices}
