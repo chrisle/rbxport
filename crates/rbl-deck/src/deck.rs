@@ -420,6 +420,14 @@ impl Worker {
     /// Input already past the out point is not held to it: it was read before
     /// the loop was set, and the head deals with that when it gets there.
     fn input_room(&self, wanted: usize) -> usize {
+        if !self.clock.looping() {
+            if let Some((from, _)) = self.clock.active_candidate() {
+                let at = self.input_at();
+                if at < from {
+                    return usize::try_from(from - at).map_or(wanted, |left| left.min(wanted));
+                }
+            }
+        }
         let Some((_, to)) = self.active_loop() else { return wanted };
         let at = self.input_at();
         if at >= to {
@@ -496,6 +504,13 @@ impl Worker {
     /// at the out point. Returns where the first frame sits in the track and
     /// how many were read; `None` when the file could not be read.
     fn read_input(&mut self, out: &mut [f32]) -> Option<(u64, usize)> {
+        if !self.clock.looping() {
+            if let Some((from, to)) = self.clock.active_candidate() {
+                if self.input_at() == from {
+                    self.clock.engage_active_candidate(from, to);
+                }
+            }
+        }
         let room = self.input_room(out.len() / 2);
         if let (Some(at), Some((from, _))) = (self.from_loop_audio, self.loop_audio_range) {
             let held = self.loop_audio.len() / 2;
@@ -1082,6 +1097,56 @@ mod tests {
             .map(|(at, _)| at + 2)
             .collect();
         seams.windows(2).map(|pair| pair[1] - pair[0]).collect()
+    }
+
+    #[test]
+    fn saved_active_loop_catches_exactly_at_in_without_seeking() {
+        let mut rig = Rig::new(1.0, false);
+        let to = FROM + BEAT_64;
+        rig.clock.set_active_candidate(Some((FROM, to)));
+        let render = rig.render(FROM as usize + 3 * BEAT_64 as usize);
+        let expected: Vec<f64> = (0..render.frames.len() as u64)
+            .map(|at| (if at < FROM { at } else { FROM + (at - FROM) % BEAT_64 }) as f64)
+            .collect();
+        assert_eq!(render.frames, expected, "the saved loop skipped IN or played past OUT");
+        assert_eq!(rig.clock.loop_range(), Some((FROM, to)));
+        assert!(rig.clock.looping());
+    }
+
+    #[test]
+    fn cleared_or_disabled_active_loop_runs_straight_through() {
+        for cleared in [false, true] {
+            let mut rig = Rig::new(1.0, false);
+            if cleared {
+                rig.clock.set_active_candidate(Some((FROM, FROM + BEAT_64)));
+                rig.clock.set_active_candidate(None);
+            }
+            let render = rig.render(FROM as usize + 2 * BEAT_64 as usize);
+            assert!(render.frames.iter().enumerate().all(|(at, &sample)| (sample - at as f64).abs() < 0.01));
+            assert!(!rig.clock.looping());
+        }
+    }
+
+    #[test]
+    fn saved_active_loop_never_steals_a_playing_loop() {
+        let mut rig = Rig::new(1.0, false);
+        let manual = (FROM / 2, FROM + 2 * BEAT_64);
+        rig.set_loop(manual.0, manual.1);
+        rig.clock.set_active_candidate(Some((FROM, FROM + BEAT_64)));
+        let _ = rig.render(2 * (manual.1 - manual.0) as usize);
+        assert_eq!(rig.clock.loop_range(), Some(manual));
+        assert!(rig.clock.looping());
+    }
+
+    #[test]
+    fn exit_does_not_recapture_the_same_active_loop_pass() {
+        let mut rig = Rig::new(1.0, false);
+        rig.clock.set_active_candidate(Some((FROM, FROM + BEAT_64)));
+        let _ = rig.render(FROM as usize + BEAT_64 as usize * 2);
+        rig.clock.set_looping(false);
+        let render = rig.render(3 * BEAT_64 as usize);
+        assert!(!rig.clock.looping());
+        assert!(render.frames.windows(2).all(|pair| pair[1] > pair[0]));
     }
 
     /// At the file's own speed a loop of any length plays exactly its own

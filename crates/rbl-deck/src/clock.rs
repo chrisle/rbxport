@@ -63,6 +63,13 @@ pub struct DeckClock {
     loop_in: AtomicU64,
     loop_out: AtomicU64,
     looping: AtomicBool,
+    /// Saved memory loop to catch at its next in point, separate from the
+    /// current loop so a hot cue or manual loop keeps playing.
+    active_in: AtomicU64,
+    active_out: AtomicU64,
+    active_enabled: AtomicBool,
+    active_fired: AtomicBool,
+    auto_looping: AtomicBool,
 }
 
 /// A deck's state at one instant, for the tick the interface extrapolates from.
@@ -113,7 +120,9 @@ impl DeckClock {
             start_in_frames: self.start_in.load(Ordering::Relaxed),
             loop_in_frames: self.loop_in.load(Ordering::Relaxed),
             loop_out_frames: self.loop_out.load(Ordering::Relaxed),
-            looping: self.looping.load(Ordering::Relaxed),
+            looping: self.looping.load(Ordering::Relaxed)
+                && (!self.auto_looping.load(Ordering::Relaxed)
+                    || self.position() >= self.loop_in.load(Ordering::Relaxed)),
             played_out: self.played_out.load(Ordering::Relaxed),
         }
     }
@@ -126,6 +135,7 @@ impl DeckClock {
 
     /// Sets the loop; `None` clears it and leaves the loop off.
     pub fn set_loop(&self, range: Option<(u64, u64)>) {
+        self.auto_looping.store(false, Ordering::Relaxed);
         let (from, to) = range.filter(|(from, to)| to > from).unwrap_or((0, 0));
         // Out first: a reader between the two stores sees either the old
         // range or `from..old_out`, never a range that ends before it starts
@@ -143,6 +153,53 @@ impl DeckClock {
 
     pub fn set_looping(&self, on: bool) {
         self.looping.store(on && self.loop_range().is_some(), Ordering::Relaxed);
+        if !on {
+            self.auto_looping.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Replace the saved candidate. Clearing its mark or disabling playback
+    /// exits only a loop this candidate started, never a manual or hot loop.
+    pub fn set_active_candidate(&self, range: Option<(u64, u64)>) -> bool {
+        let current = self.active_enabled.load(Ordering::Relaxed).then(|| {
+            (self.active_in.load(Ordering::Relaxed), self.active_out.load(Ordering::Relaxed))
+        });
+        if current == range { return false; }
+        self.active_enabled.store(false, Ordering::Relaxed);
+        if self.auto_looping.load(Ordering::Relaxed) {
+            self.set_looping(false);
+        }
+        let (from, to) = range.filter(|(from, to)| to > from).unwrap_or((0, 0));
+        self.active_out.store(to, Ordering::Relaxed);
+        self.active_in.store(from, Ordering::Relaxed);
+        self.active_fired.store(false, Ordering::Relaxed);
+        self.active_enabled.store(to > from, Ordering::Relaxed);
+        true
+    }
+
+    pub fn active_candidate(&self) -> Option<(u64, u64)> {
+        if !self.active_enabled.load(Ordering::Relaxed) || self.active_fired.load(Ordering::Relaxed) {
+            return None;
+        }
+        let (from, to) = (self.active_in.load(Ordering::Relaxed), self.active_out.load(Ordering::Relaxed));
+        (to > from).then_some((from, to))
+    }
+
+    /// The decoder reached IN. It may have read ahead of the sound; the
+    /// snapshot waits for the audible head before displaying the active flag.
+    pub fn engage_active_candidate(&self, from: u64, to: u64) {
+        if self.looping() || self.active_candidate() != Some((from, to)) { return; }
+        self.set_loop(Some((from, to)));
+        self.auto_looping.store(true, Ordering::Relaxed);
+        self.active_fired.store(true, Ordering::Relaxed);
+        self.set_looping(true);
+    }
+
+    /// A deliberate seek back before IN gives the saved loop a new crossing.
+    pub fn rearm_active_before(&self, frame: u64) {
+        if frame < self.active_in.load(Ordering::Relaxed) {
+            self.active_fired.store(false, Ordering::Relaxed);
+        }
     }
 
     /// Frames of silence the callback has still to let pass before the deck

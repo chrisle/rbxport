@@ -13,6 +13,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Cue, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 
+const EMPTY_CUES: Cue[] = [];
+
 export function useTrackCues(
   track: RowDto | null,
   /**
@@ -22,7 +24,7 @@ export function useTrackCues(
    */
   onLoaded?: (cues: Cue[]) => void,
 ): Cue[] {
-  const [cues, setCues] = useState<Cue[]>([]);
+  const [snapshot, setSnapshot] = useState<{ id: string; cues: Cue[] } | null>(null);
   // A ref so the fetch effect does not re-run when the callback's identity
   // does; the deck passes a fresh closure each render.
   const loaded = useRef(onLoaded);
@@ -30,21 +32,23 @@ export function useTrackCues(
 
   useEffect(() => {
     if (!track) {
-      setCues([]);
+      setSnapshot(null);
       return;
     }
     const id = track.id;
     let live = true;
     let first = true;
+    let request = 0;
     let stopCues: (() => void) | undefined;
     let stopLibrary: (() => void) | undefined;
 
     const fetch = async () => {
+      const current = ++request;
       const backend = await getBackend();
       const found = await backend.trackCues(id);
       // The track may have changed while this was in flight.
-      if (!live) return;
-      setCues(found);
+      if (!live || current !== request) return;
+      setSnapshot({ id, cues: found });
       if (first) {
         first = false;
         loaded.current?.(found);
@@ -76,5 +80,7 @@ export function useTrackCues(
     };
   }, [track]);
 
-  return cues;
+  // A new track must never see the previous track's Kind-4 candidate while
+  // its own cue request is in flight.
+  return snapshot !== null && snapshot.id === track?.id ? snapshot.cues : EMPTY_CUES;
 }
