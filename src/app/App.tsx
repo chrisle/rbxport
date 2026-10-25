@@ -1056,6 +1056,14 @@ function AppBody() {
   );
   const commentTrack = useCallback((id: string, comment: string) => commentTracks([id], comment), [commentTracks]);
 
+  const editTrackColor = useCallback((id: string, color: string) => {
+    if (refuseLoose(id)) return;
+    // Let the library-changed event update the table and Info panel only after
+    // the write succeeds. A refused write must leave the previous color visible.
+    void runEdit(color === "0" ? "Color cleared." : "Color saved.", (b) =>
+      b.edits.setTrackColor([id], color));
+  }, [refuseLoose, runEdit]);
+
   const editTrackField = useCallback(
     (id: string, field: TrackField, value: string) => {
       if (refuseLoose(id)) return;
@@ -3143,7 +3151,7 @@ function AppBody() {
   const subList = useMemo(() => ({
     onDragTracks: setDraggedTracks, onDragError: refuse, players: deckCount(layout), onLoadTrack: loadTrack,
     onShowInformation: showInformation, onShowInFinder: revealTrack, onRate: rateTrack,
-    onComment: commentTrack, onResetPlayCount: resetPlayCount, onConvertMemoryCues: convertMemoryCues,
+    onComment: commentTrack, onEditColor: editTrackColor, onResetPlayCount: resetPlayCount, onConvertMemoryCues: convertMemoryCues,
     onRemoveFromCollection: removeFromCollection, onImportToCollection: importToCollection,
     onAutoRelocate: autoRelocate, onRelocate: relocate,
     onAnalysisLock: analysisLock, onAddToPlaylist: addToPlaylist, onAddToTagList: addToTagList,
@@ -3156,7 +3164,7 @@ function AppBody() {
     onRemoveTracksFromHistory: removeTracksFromHistory, onReorderPlaylist: reorderPlaylist,
     onDropFilesIntoPlaylist: importDroppedFilesTo, onAnalyseTracks: analyseTracks,
   }), [
-    layout, loadTrack, openInDeckA, showInformation, revealTrack, rateTrack, commentTrack, resetPlayCount,
+    layout, loadTrack, openInDeckA, showInformation, revealTrack, rateTrack, commentTrack, editTrackColor, resetPlayCount,
     convertMemoryCues, removeFromCollection, importToCollection, autoRelocate, relocate, analysisLock, addToPlaylist,
     addToTagList, removeFromTagList, reloadTag, exportTrackTo, menuPlaylists, menuDevices,
     editTrackField, readOnly, explainEditLock, pendingEdits, draggedTracks, addDraggedTo,
@@ -3441,6 +3449,7 @@ function AppBody() {
           onLoadTrack={loadTrack}
           onRate={rateTrack}
           onComment={commentTrack}
+          onEditColor={editTrackColor}
           // The sub-browser's list is left out on purpose: it has a source and
           // a sort of its own, which this gate does not describe.
           onReorder={canReorder ? reorderPlaylistTracks : undefined}
