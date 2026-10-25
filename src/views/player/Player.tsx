@@ -2101,7 +2101,11 @@ export const Player = memo(function Player({
     // auto-repeat then ran the pair thirty times a second for as long as the
     // key was held. `keyup` below lets go.
     cue: once(holdCue),
-    quantize: live(toggleQuantize),
+    // Q is a deck setting, and its button is usable even before a track loads.
+    quantize: () => {
+      toggleQuantize();
+      return true;
+    },
     memoryCue: once(memory.store),
     previousMemoryCue: live(memory.callPrevious),
     nextMemoryCue: live(memory.callNext),
@@ -2141,6 +2145,7 @@ export const Player = memo(function Player({
     deckCommands[`clearHotCue${letter}` as Action] = once(() => hot.clear(letter));
   }
   useCommands(deckCommands, deck);
+  const runQuantize = () => { runCommand("quantize", { scope: deck }); };
   const onDeckKey = useEventCallback((event: KeyboardEvent) => {
     const hit = dispatchBinding(event, platform, event.target as HTMLElement | null, keyOverrides);
     if (hit?.action === undefined || !Object.hasOwn(deckCommands, hit.action)) return;
@@ -2572,7 +2577,7 @@ export const Player = memo(function Player({
             readOnly={readOnly}
             memory={memory}
             quantize={quantize}
-            onQuantize={toggleQuantize}
+            onQuantize={runQuantize}
             loop={dualLoop}
           />
         ) : null}
@@ -2935,7 +2940,7 @@ export const Player = memo(function Player({
             aria-label="Quantize"
             aria-pressed={quantize}
             data-on={quantize ? "" : undefined}
-            onClick={toggleQuantize}
+            onClick={runQuantize}
           >
             Q
           </button>
