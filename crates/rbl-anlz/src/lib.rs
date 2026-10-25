@@ -162,8 +162,8 @@ impl Section {
     /// Empty in the share tree, where the cue list is a header and nothing
     /// else, and populated in an export, where rekordbox writes the cues it
     /// wants a player to draw. Only the extended list is read: the older
-    /// `PCOB`/`PCPT` form carries no colour, which is the only reason to read
-    /// one of these at all.
+    /// The `PCOB`/`PCPT` form carries no colour; read it separately for DAT
+    /// files without a corresponding EXT.
     pub fn as_cue_entries(&self) -> Option<Vec<CueEntry>> {
         if self.tag != FourCc::new(b"PCO2") {
             return None;
@@ -186,38 +186,45 @@ impl Section {
         Some(entries)
     }
 
-    /// DAT's legacy `PCOB` entries contain cue positions and loop state,
-    /// without the extended comment or colour fields.
+    /// `PCOB` — legacy `PCPT` entries in a DAT file. These have no comment
+    /// or colour fields, unlike the extended `PCP2` entries in EXT.
     pub fn as_legacy_cue_entries(&self) -> Option<Vec<CueEntry>> {
+        const LEGACY_ENTRY_MIN: usize = 56;
         if self.tag != FourCc::new(b"PCOB") {
             return None;
         }
-        let Some(count) = self.header.get(6..8) else {
-            return Some(Vec::new());
-        };
-        let count = usize::from(u16::from_be_bytes([count[0], count[1]]));
+        let b = &self.payload;
         let mut entries = Vec::new();
-        for entry in self.payload.chunks_exact(56).take(count) {
-            if entry.get(..4) != Some(b"PCPT") || be32(entry, 8) != 56 {
+        let mut at = 0usize;
+        while let Some(e) = b.get(at..at.saturating_add(LEGACY_ENTRY_MIN)) {
+            if e.get(..4) != Some(b"PCPT") {
                 break;
             }
+            let len_entry = be32(e, 8) as usize;
+            if len_entry < LEGACY_ENTRY_MIN {
+                break;
+            }
+            let Some(end) = at.checked_add(len_entry).filter(|&end| end <= b.len()) else {
+                break;
+            };
             entries.push(CueEntry {
-                hot_cue: be32(entry, 12),
-                active_loop: be32(entry, 16) == 4,
-                kind: entry[28],
-                time_ms: be32(entry, 32),
-                loop_time_ms: be32(entry, 36),
+                hot_cue: be32(e, 12),
+                active_loop: be32(e, 16) == 4,
+                kind: e[28],
+                time_ms: be32(e, 32),
+                loop_time_ms: be32(e, 36),
                 color_id: 0,
                 comment: None,
                 color_code: None,
                 rgb: None,
             });
+            at = end;
         }
         Some(entries)
     }
 }
 
-/// One entry of an extended cue list.
+/// One decoded cue entry, from an extended or legacy cue list.
 ///
 /// The colour is the point: an entry rekordbox wrote carries both the index it
 /// stores in `djmdCue.ColorTableIndex` and the RGB it paints for that index,
@@ -619,9 +626,14 @@ impl Anlz {
             .collect()
     }
 
-    /// DAT's legacy cue lists, used when no EXT analysis file is present.
+    /// Legacy cue entries in DAT `PCOB` lists. Call this only when EXT is
+    /// absent: an EXT may contain both PCOB and PCO2 copies of the same cue.
     pub fn legacy_cue_entries(&self) -> Vec<CueEntry> {
-        self.sections.iter().filter_map(Section::as_legacy_cue_entries).flatten().collect()
+        self.sections
+            .iter()
+            .filter_map(Section::as_legacy_cue_entries)
+            .flatten()
+            .collect()
     }
 
     pub fn path(&self) -> Option<String> {
