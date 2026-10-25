@@ -1568,7 +1568,15 @@ fn export_cancellable_inner(
                 let retained = carried.filter(|c| (unchanged || retained_audio || in_place || adopted || moved.is_some()) && !c.anlz_dir.is_empty());
                 let (kept, is_kept) = match retained {
                     Some(c) => {
-                        let fallback = SourceTrack { analysis_source: Some(under(destination, &format!("{}/ANLZ0000.DAT", c.anlz_dir))), ..Default::default() };
+                        // A retained manifest can name an analysis directory
+                        // that is not the database's current one. Validate
+                        // every companion before load_analysis reads any of
+                        // them, including optional EXT and 2EX files.
+                        let fallback_base = checked_under(destination, &format!("{}/ANLZ0000.DAT", c.anlz_dir))?;
+                        for extension in ["EXT", "2EX"] {
+                            checked_under(destination, &format!("{}/ANLZ0000.{extension}", c.anlz_dir))?;
+                        }
+                        let fallback = SourceTrack { analysis_source: Some(fallback_base), ..Default::default() };
                         if c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/')))) {
                             (incremental::load_analysis(&fallback)?, true)
                         } else {
