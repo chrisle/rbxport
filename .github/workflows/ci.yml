@@ -236,7 +236,8 @@ jobs:
             const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: event.number });
             if (pr.state !== 'open' || pr.draft || pr.base.ref !== 'dev' ||
                 pr.head.repo?.full_name !== `${owner}/${repo}` ||
-                !process.env.VALIDATED_HEAD || pr.head.sha !== process.env.VALIDATED_HEAD) {
+                !process.env.VALIDATED_HEAD || pr.head.sha !== process.env.VALIDATED_HEAD ||
+                pr.head.sha !== event.head.sha) {
               core.notice('PR changed since validation; leaving it open.');
               return;
             }
