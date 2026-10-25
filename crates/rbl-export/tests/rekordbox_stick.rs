@@ -314,6 +314,13 @@ fn named(dir: &Path, id: u64, name: &str) -> SourceTrack {
     SourceTrack { source_path: { let p = dir.join(name); std::fs::write(&p, vec![id as u8; 2048]).unwrap(); p }, ..track(dir, id, 0) }
 }
 
+fn with_companions(mut track: SourceTrack) -> SourceTrack {
+    for extension in ["EXT", "2EX"] {
+        track.analysis.push((extension.into(), rbl_anlz::AnlzBuilder::new().path("/x.mp3").finish()));
+    }
+    track
+}
+
 fn replace_bytes(bytes: &mut [u8], from: &[u8], to: &[u8]) -> usize {
     assert_eq!(from.len(), to.len());
     let mut count = 0;
@@ -338,7 +345,7 @@ fn replace_bytes(bytes: &mut [u8], from: &[u8], to: &[u8]) -> usize {
 /// removed.
 fn collision_stick(src: &Path, dest: &Path) -> (Vec<SourceTrack>, Vec<SourcePlaylist>) {
     // Exported as c55555 (same length), so the export does not number it.
-    let tracks = vec![named(src, 1, "c10013.mp3"), named(src, 2, "c55555.mp3")];
+    let tracks = vec![with_companions(named(src, 1, "c10013.mp3")), with_companions(named(src, 2, "c55555.mp3"))];
     let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
     sync_to(dest, &tracks, &playlists, DB_ID).unwrap();
     std::fs::remove_file(rbl_export::Manifest::path(dest)).unwrap();
@@ -350,11 +357,12 @@ fn collision_stick(src: &Path, dest: &Path) -> (Vec<SourceTrack>, Vec<SourcePlay
     let analysis = first.analysis_path.replace("ANLZ0000", "ANLZ0001");
     std::fs::rename(dest.join(second.path.trim_start_matches('/')), dest.join(path.trim_start_matches('/'))).unwrap();
     let old = dest.join(second.analysis_path.trim_start_matches('/'));
-    let mut parsed = rbl_anlz::parse(&std::fs::read(&old).unwrap()).unwrap();
-    parsed.sections.retain(|s| s.tag != rbl_core::FourCc::new(b"PPTH"));
-    parsed.sections.splice(0..0, rbl_anlz::parse(&rbl_anlz::AnlzBuilder::new().path(&path).finish()).unwrap().sections);
-    std::fs::write(dest.join(analysis.trim_start_matches('/')), parsed.to_bytes()).unwrap();
-    std::fs::remove_file(&old).unwrap();
+    for extension in ["DAT", "EXT", "2EX"] {
+        let source = old.with_extension(extension);
+        let parsed = rbl_anlz::parse(&std::fs::read(&source).unwrap()).unwrap();
+        std::fs::write(dest.join(analysis.trim_start_matches('/')).with_extension(extension), parsed.with_path(&path)).unwrap();
+        std::fs::remove_file(source).unwrap();
+    }
     std::fs::remove_dir(old.parent().unwrap()).unwrap();
     let pdb = dest.join("PIONEER/rekordbox/export.pdb");
     let mut bytes = std::fs::read(&pdb).unwrap();
@@ -432,4 +440,78 @@ fn a_selected_track_beside_one_in_rekordboxs_second_slot_syncs() {
     assert_eq!(files_under(&dest.path().join("Contents")), files_before, "no second copy, nothing orphaned");
     assert_eq!(files_under(&dest.path().join("PIONEER/USBANLZ")), analysis_before);
     assert!(rbl_export::verify(dest.path()).unwrap().is_ok());
+}
+
+/// The exact PAWSA path reported in #616 shares an existing stick with a
+/// rekordbox `ANLZ0001` collision. A new library selects a different audio
+/// file that wants PAWSA's path. The carried PAWSA file must keep its name,
+/// hashed analysis directory and PPTH through both syncs.
+#[test]
+fn a_pawsa_path_collision_keeps_every_carried_file_on_first_and_repeat_sync() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    type CarriedRow = (String, String, BTreeMap<String, Vec<u8>>);
+
+    fn rows_and_bytes(dest: &Path) -> BTreeMap<String, CarriedRow> {
+        device_library::read(dest, Format::DeviceLibrary).unwrap().tracks.into_iter().map(|row| {
+            let mut files = BTreeMap::new();
+            files.insert(row.path.clone(), std::fs::read(dest.join(row.path.trim_start_matches('/'))).unwrap());
+            for extension in ["DAT", "EXT", "2EX"] {
+                let relative = Path::new(&row.analysis_path).with_extension(extension).to_string_lossy().into_owned();
+                let bytes = std::fs::read(dest.join(relative.trim_start_matches('/'))).unwrap();
+                assert_eq!(rbl_anlz::parse(&bytes).unwrap().path().as_deref(), Some(row.path.as_str()), "{relative} PPTH");
+                files.insert(relative, bytes);
+            }
+            (row.title, (row.path, row.analysis_path, files))
+        }).collect()
+    }
+
+    fn assert_no_orphans(dest: &Path) {
+        let rows = device_library::read(dest, Format::DeviceLibrary).unwrap().tracks;
+        let audio: BTreeSet<_> = rows.iter().map(|row| row.path.trim_start_matches('/').trim_start_matches("Contents/").to_owned()).collect();
+        let analysis: BTreeSet<_> = rows.iter().flat_map(|row| ["DAT", "EXT", "2EX"].map(move |extension| {
+            Path::new(&row.analysis_path).with_extension(extension).to_string_lossy()
+                .trim_start_matches('/').trim_start_matches("PIONEER/USBANLZ/").to_owned()
+        })).collect();
+        assert_eq!(audio.len(), rows.len(), "no duplicate audio paths");
+        assert_eq!(analysis.len(), rows.len() * 3, "no duplicate analysis paths");
+        assert_eq!(files_under(&dest.join("Contents")).into_iter().collect::<BTreeSet<_>>(), audio, "no orphan audio");
+        assert_eq!(files_under(&dest.join("PIONEER/USBANLZ")).into_iter().collect::<BTreeSet<_>>(), analysis, "no orphan analysis");
+    }
+
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    collision_stick(src.path(), dest.path());
+    let pawsa_name = "PAWSA - TOO COOL TO BE CARELESS.mp3";
+    let mut pawsa = with_companions(named(src.path(), 3, pawsa_name));
+    pawsa.artist = "PAWSA".into();
+    pawsa.album = "TOO COOL TO BE CARELESS".into();
+    let pawsa_playlist = [SourcePlaylist { id: 30, name: "PAWSA".into(), track_indices: vec![0], ..Default::default() }];
+    sync_to(dest.path(), &[pawsa], &pawsa_playlist, DB_ID + 2).unwrap();
+    std::fs::remove_file(rbl_export::Manifest::path(dest.path())).unwrap();
+
+    let before = rows_and_bytes(dest.path());
+    let pawsa_path = "/Contents/PAWSA/TOO COOL TO BE CARELESS/PAWSA - TOO COOL TO BE CARELESS.mp3";
+    assert_eq!(before["Track 3"].0, pawsa_path);
+    assert_eq!(before["Track 3"].1, "/PIONEER/USBANLZ/P059/0001CF89/ANLZ0000.DAT");
+    assert_eq!(before["Track 2"].1, "/PIONEER/USBANLZ/P009/0000DCB1/ANLZ0001.DAT");
+    assert_no_orphans(dest.path());
+
+    let other = tempfile::tempdir().unwrap();
+    let mut selected = with_companions(named(other.path(), 9, pawsa_name));
+    selected.artist = "PAWSA".into();
+    selected.album = "TOO COOL TO BE CARELESS".into();
+    let playlists = [SourcePlaylist { id: 40, name: "New library".into(), track_indices: vec![0], ..Default::default() }];
+    let source = sync(DB_ID + 3);
+    for attempt in 0..2 {
+        rbl_export::export_with_options(dest.path(), &[selected.clone()], &playlists, &[],
+            &rbl_export::ExportOptions { verify_all: true, sync: Some(&source), ..Default::default() }, &mut |_| {}).unwrap();
+        let after = rows_and_bytes(dest.path());
+        assert_eq!(after.len(), 4);
+        for (title, original) in &before {
+            assert_eq!(&after[title], original, "carried {title} changed on attempt {attempt}");
+        }
+        assert_ne!(after["Track 9"].0, pawsa_path, "selected audio must take a suffix");
+        assert_no_orphans(dest.path());
+        assert!(rbl_export::verify(dest.path()).unwrap().is_ok());
+    }
 }
