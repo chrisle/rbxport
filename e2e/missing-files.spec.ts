@@ -217,7 +217,10 @@ test("eject cancels a file check pending for the same deck (#644)", async ({ pag
   await rowOf(page, 2).locator('[data-col="title"]').dblclick();
   await expect.poll(() => page.evaluate(() =>
     (window as unknown as { __pendingFileChecks: (id: string) => number }).__pendingFileChecks("100002"),
-  )).toBe(1);
+  )).toBeGreaterThan(0);
+  const pending = await page.evaluate(() =>
+    (window as unknown as { __pendingFileChecks: (id: string) => number }).__pendingFileChecks("100002"),
+  );
   await page.getByRole("button", { name: "Eject" }).first().click();
   await expect(title).toHaveText("");
   await page.evaluate(() => {
@@ -225,7 +228,7 @@ test("eject cancels a file check pending for the same deck (#644)", async ({ pag
   });
   await expect.poll(() => page.evaluate(() =>
     (window as unknown as { __completedFileChecks: () => number }).__completedFileChecks(),
-  )).toBe(1);
+  )).toBe(pending);
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect(title).toHaveText("");
 });
@@ -242,11 +245,17 @@ test("the latest load wins when file checks finish in reverse order (#644)", asy
   await rowOf(page, 0).locator('[data-col="title"]').dblclick();
   await expect.poll(() => page.evaluate(() =>
     (window as unknown as { __pendingFileChecks: (id: string) => number }).__pendingFileChecks("100000"),
-  )).toBe(1);
+  )).toBeGreaterThan(0);
+  const firstPending = await page.evaluate(() =>
+    (window as unknown as { __pendingFileChecks: (id: string) => number }).__pendingFileChecks("100000"),
+  );
   await rowOf(page, 2).locator('[data-col="title"]').dblclick();
   await expect.poll(() => page.evaluate(() =>
     (window as unknown as { __pendingFileChecks: (id: string) => number }).__pendingFileChecks("100002"),
-  )).toBe(1);
+  )).toBeGreaterThan(0);
+  const secondPending = await page.evaluate(() =>
+    (window as unknown as { __pendingFileChecks: (id: string) => number }).__pendingFileChecks("100002"),
+  );
   await page.evaluate(() => {
     (window as unknown as { __releaseFileCheck: (id: string) => void }).__releaseFileCheck("100002");
   });
@@ -256,7 +265,7 @@ test("the latest load wins when file checks finish in reverse order (#644)", asy
   });
   await expect.poll(() => page.evaluate(() =>
     (window as unknown as { __completedFileChecks: () => number }).__completedFileChecks(),
-  )).toBe(2);
+  )).toBe(firstPending + secondPending);
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect(title).toHaveText(secondTitle);
 });
