@@ -1781,5 +1781,7 @@
   "Don't copy": "Nekopírovat",
   "If any track is missing from your collection, the playlist is not imported.": "Pokud některá skladba chybí ve vaší kolekci, playlist se neimportuje.",
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Importují se pouze skladby, které již máte ve své kolekci. Nespárované skladby se vynechají; pokud se nespáruje žádná, playlist se nevytvoří.",
-  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Pokud některé skladby chybí, vyberte, zda je chcete zkopírovat a kam je uložit. Zrušení import zastaví."
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Pokud některé skladby chybí, vyberte, zda je chcete zkopírovat a kam je uložit. Zrušení import zastaví.",
+  "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
+  "No tracks found to import.": "No tracks found to import."
 }

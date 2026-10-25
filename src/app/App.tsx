@@ -1278,38 +1278,75 @@ function AppBody() {
       advancedPrefs.folderDropClash, askFolderClash],
   );
 
+  const importDroppedPathsToCollection = useCallback((paths: string[]) => {
+    if (readOnly) {
+      refuse(refusal(advancedPrefs.protectLibrary));
+      return;
+    }
+    jobs.add({
+      label: t("Adding track data to the Collection"),
+      run: async ({ signal, update }) => {
+        const backend = await getBackend();
+        const files = await backend.listImportFiles(paths);
+        if (signal.aborted) return;
+        if (files.length === 0) {
+          refuse(t("No tracks found to import."));
+          return;
+        }
+        update({ total: files.length });
+        let landed = 0;
+        let imported;
+        try {
+          imported = await importInSlices(files, (slice) => backend.importPathsSlice(slice), signal, (reached, sofar) => {
+            landed = sofar.imported;
+            update({ done: reached });
+          });
+        } finally {
+          if (landed > 0) await backend.reloadLibrary();
+        }
+        if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
+        const already = imported.existing > 0 ? `; ${imported.existing} already in the library` : "";
+        report(`Imported ${imported.imported} of ${files.length} files${skippedTail(imported.skipped)}${already}.`);
+      },
+    });
+  }, [readOnly, advancedPrefs.protectLibrary, refuse, jobs, t, analysisPrefs.auto, analysis, report]);
+
+  const importDroppedPaths = useCallback((target: string, paths: string[]) => {
+    if (target === "all") importDroppedPathsToCollection(paths);
+    else importDroppedPathsTo(target, paths);
+  }, [importDroppedPathsToCollection, importDroppedPathsTo]);
+
   const importDroppedFilesTo = useCallback(
-    (playlistId: string, files: File[]) => {
+    (target: string, files: File[]) => {
       // Resolve immediately: macOS's drag pasteboard belongs to the current
       // OS drag, not to the File object retained by this callback.
       void droppedFilePaths(files)
-        .then((paths) => importDroppedPathsTo(playlistId, paths))
+        .then((paths) => importDroppedPaths(target, paths))
         .catch((e: unknown) => refuse(e instanceof Error ? e.message : "Those files could not be imported."));
     },
-    [importDroppedPathsTo, refuse],
+    [importDroppedPaths, refuse],
   );
 
   useEffect(() => subscribeNativeFileDrops((drop) => {
     const target = document.elementFromPoint(drop.x, drop.y);
     const row = target?.closest<HTMLElement>("[data-file-drop-playlist]");
-    const playlistId = row?.dataset.fileDropPlaylist
+    const dropTarget = row?.dataset.fileDropPlaylist
       ?? (target?.closest('[data-testid="track-scroll"]') && selectedNode?.kind === "playlist"
         ? selectedNode.id
+        : target?.closest('[data-testid="track-scroll"]') && selectedNode?.kind === "allTracks"
+          ? "all"
         : undefined);
-    if (playlistId) importDroppedPathsTo(playlistId, drop.paths);
-    else refuse("Drop files or folders onto a playlist to import them.");
-  }), [selectedNode, importDroppedPathsTo, refuse]);
+    if (dropTarget) importDroppedPaths(dropTarget, drop.paths);
+    else refuse(t("Drop files or folders onto All Tracks or a playlist to import them."));
+  }), [selectedNode, importDroppedPaths, refuse, t]);
 
   /**
-   * The same drop, for files dropped straight into the open playlist's own
-   * list rather than onto its row in the tree — the tree row is easy to miss
-   * with a full list open, and an empty playlist has no rows to aim at.
-   * `undefined` outside a real playlist so the list gives no false promise
-   * of a drop it would not act on.
+   * Files dropped into the open All Tracks or playlist list follow the same
+   * route as their tree rows. Empty lists accept files; other sources do not.
    */
   const importDroppedFilesIntoOpen = useMemo(
     () =>
-      readOnly || selectedNode?.kind !== "playlist"
+      readOnly || (selectedNode?.kind !== "playlist" && selectedNode?.kind !== "allTracks")
         ? undefined
         : (files: File[]) => importDroppedFilesTo(selectedNode.id, files),
     [readOnly, selectedNode, importDroppedFilesTo],
