@@ -2407,7 +2407,7 @@ mod tests {
         let mut analysis = rbl_anlz::Anlz::read(&ext).unwrap();
         analysis.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; MAX_BROWSER_EXT_BYTES as usize]));
         std::fs::write(&ext, analysis.to_bytes()).unwrap();
-        assert!(!rbl_anlz::Anlz::read(&ext).unwrap().cue_entries().is_empty());
+        assert_ne!(rbl_anlz::Anlz::read(&ext).unwrap().cue_entries(), [] as [rbl_anlz::CueEntry; 0]);
         let before = contents_under(mount);
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
             let one_cues = if format == Format::OneLibrary { one_library_cues(mount) } else { HashMap::new() };
