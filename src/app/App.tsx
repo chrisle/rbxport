@@ -3090,12 +3090,12 @@ function AppBody() {
 
   const tip = useTooltip();
   const openViewSettings = useCallback(() => openPreferences("view"), [openPreferences]);
-  const ejectA = useCallback(() => setPlayerTrack(null), []);
-  const ejectB = useCallback(() => setPlayerTrackB(null), []);
+  const ejectA = useCallback(() => { loadRequest.current.a++; setPlayerTrack(null); }, []);
+  const ejectB = useCallback(() => { loadRequest.current.b++; setPlayerTrackB(null); }, []);
   const masterA = useCallback(() => setSyncMaster("a"), [setSyncMaster]);
   const masterB = useCallback(() => setSyncMaster("b"), [setSyncMaster]);
   const exportDeckTrack = useCallback((device: string, id: string) => exportTrackTo(device, [id]), [exportTrackTo]);
-  const showInformation = useCallback((row: RowDto) => { setPlayerTrack(row); setInfoOpen(true); setMyTagOpen(false); }, []);
+  const showInformation = useCallback((row: RowDto) => { loadRequest.current.a++; setPlayerTrack(row); setInfoOpen(true); setMyTagOpen(false); }, []);
   const toggleFilter = useCallback(() => setFilterOpen(was => !was), []);
   const filterBar = useMemo(() => <TrackFilter state={filterState} onChange={setFilterState}
     values={filterValues} masterBpmX100={masterBpmX100} />, [filterState, filterValues, masterBpmX100]);
