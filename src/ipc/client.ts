@@ -394,6 +394,7 @@ async function realBackend(): Promise<Backend> {
     deckSetLoop: (deck, inMs, outMs) => invoke<void>("deck_set_loop", { deck, inMs, outMs }),
     deckMoveLoop: (deck, inMs, outMs, headByMs, gridTimesMs, beats) =>
       invoke<void>("deck_move_loop", { deck, inMs, outMs, headByMs, gridTimesMs, beats }),
+    deckSetActiveLoop: (deck, inMs, outMs) => invoke<void>("deck_set_active_loop", { deck, inMs, outMs }),
     deckLoopActive: (deck, on) => invoke<void>("deck_loop_active", { deck, on }),
     deckClearLoop: (deck) => invoke<void>("deck_clear_loop", { deck }),
     deckScrubBegin: (deck) => invoke<void>("deck_scrub_begin", { deck }),

@@ -725,6 +725,8 @@ export interface Backend {
   /** Move loop bounds and the engine head together by grid-derived distances. */
   deckMoveLoop(deck: DeckId, inMs: number, outMs: number, headByMs: number,
     gridTimesMs: number[], beats: number): Promise<void>;
+  /** Arm a saved Kind-4 memory loop, or pass nulls to run straight through. */
+  deckSetActiveLoop(deck: DeckId, inMs: number | null, outMs: number | null): Promise<void>;
   /** RELOOP (on): back in from the in point. EXIT (off): out, the range kept. */
   deckLoopActive(deck: DeckId, on: boolean): Promise<void>;
   deckClearLoop(deck: DeckId): Promise<void>;
