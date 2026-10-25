@@ -1781,5 +1781,7 @@
   "Playlist cannot be edited or deleted while searching.": "搜索时无法编辑或删除播放列表。",
   "Add \"My Tag\" to the \"Comments\"": "将“我的标签”添加到“备注”中",
   "This operation can take few minutes.": "此操作可能会花点时间。",
-  "Please wait for a while": "请稍等"
+  "Please wait for a while": "请稍等",
+  "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
+  "No tracks found to import.": "No tracks found to import."
 }
