@@ -378,6 +378,22 @@ mod tests {
         assert_eq!(truncated.as_legacy_cue_entries().unwrap(), []);
     }
 
+    #[test]
+    fn dat_legacy_cues_respect_declared_count() {
+        let cues = [
+            ExportCue { kind: 1, time_ms: 25, ..Default::default() },
+            ExportCue { kind: 2, time_ms: 50, ..Default::default() },
+        ];
+        let mut hot = sections(&cues, false).remove(0);
+        assert_eq!(hot.payload.len(), 112);
+        hot.header[6..8].copy_from_slice(&0_u16.to_be_bytes());
+        assert_eq!(hot.as_legacy_cue_entries().unwrap(), Vec::new());
+        hot.header[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        let entries = hot.as_legacy_cue_entries().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].time_ms, 25);
+    }
+
     /// #617: `djmdCue.Color` 0 (Pink) to 7 (Purple) goes to a device as rows
     /// 1 to 8, none as 0, and a device's row comes back as the same Color.
     #[test]

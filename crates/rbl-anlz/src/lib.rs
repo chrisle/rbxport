@@ -192,8 +192,12 @@ impl Section {
         if self.tag != FourCc::new(b"PCOB") {
             return None;
         }
+        let Some(count) = self.header.get(6..8) else {
+            return Some(Vec::new());
+        };
+        let count = usize::from(u16::from_be_bytes([count[0], count[1]]));
         let mut entries = Vec::new();
-        for entry in self.payload.chunks_exact(56) {
+        for entry in self.payload.chunks_exact(56).take(count) {
             if entry.get(..4) != Some(b"PCPT") || be32(entry, 8) != 56 {
                 break;
             }

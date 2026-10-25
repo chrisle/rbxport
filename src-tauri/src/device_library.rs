@@ -1626,36 +1626,55 @@ mod tests {
     #[test]
     fn dat_only_stick_analysis_imports_cues_for_copied_tracks() {
         for format in [Format::OneLibrary, Format::DeviceLibrary] {
-            let rig = rig_with(|i, track| {
-                analysed_on_the_stick(i, track);
-                if i == 0 { track.analysis.retain(|(extension, _)| extension == "DAT"); }
-            });
-            rig.came_from_elsewhere(0);
-            let library = device::read(rig.stick.path(), format).unwrap();
-            let track = library.tracks.iter().find(|t| t.title == "Track 0").unwrap();
-            let dat = rbl_anlz::Anlz::read(&audio_path(rig.stick.path(), &track.analysis_path)).unwrap();
-            assert!(dat.section(b"PCOB").is_some_and(|s| s.payload.starts_with(b"PCPT")), "DAT contains a hot cue entry");
-            assert!(!audio_path(rig.stick.path(), &track.analysis_path).with_extension("EXT").exists());
-            let stick_before = contents_under(rig.stick.path());
-            let state = state_over(&rig);
-            let plan = rig.plan(format, "Friday");
-            let music = tempfile::tempdir().unwrap();
-            let destination = rbl_export::device_import::destination(music.path());
-            let (entries, _, carried) = copy_missing(&plan, &plan.copies(), &destination).unwrap();
-            let made = state.write(|w| w.import_device_playlist_entries(&plan.name, &entries)).unwrap();
-            assert_eq!(carry_all(&state, rig.stick.path(), &made.added, &carried), (1, 0));
-            let db = rbl_db::Library::open(rig.location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
-            let mut stmt = db.connection().prepare("SELECT InMsec, OutMsec, Kind FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY InMsec").unwrap();
-            let cues: Vec<(i64, Option<i64>, i64)> = stmt.query_map([&made.added[0].0], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(Result::unwrap).collect();
-            assert_eq!(cues, vec![(25, None, 1), (494, Some(2369), 0)], "{format:?}: DAT-only hot cue and memory loop");
-            assert_eq!(contents_under(rig.stick.path()), stick_before, "USB fixture is read only");
-            assert!(files_under(&rig.dir.path().join("backups/analysis-journal")).is_empty(), "journal is closed");
+            for active_loop in [false, true] {
+                let rig = rig_with(|i, track| {
+                    analysed_on_the_stick(i, track);
+                    if i == 0 {
+                        track.analysis.retain(|(extension, _)| extension == "DAT");
+                        if active_loop {
+                            let loop_cue = &mut track.cues.as_mut().unwrap()[1];
+                            loop_cue.kind = 4;
+                            loop_cue.active_loop = true;
+                        }
+                    }
+                });
+                rig.came_from_elsewhere(0);
+                let library = device::read(rig.stick.path(), format).unwrap();
+                let track = library.tracks.iter().find(|t| t.title == "Track 0").unwrap();
+                let dat = rbl_anlz::Anlz::read(&audio_path(rig.stick.path(), &track.analysis_path)).unwrap();
+                assert!(dat.section(b"PCOB").is_some_and(|s| s.payload.starts_with(b"PCPT")), "DAT contains a hot cue entry");
+                assert!(!audio_path(rig.stick.path(), &track.analysis_path).with_extension("EXT").exists());
+                let stick_before = contents_under(rig.stick.path());
+                let state = state_over(&rig);
+                let plan = rig.plan(format, "Friday");
+                let music = tempfile::tempdir().unwrap();
+                let destination = rbl_export::device_import::destination(music.path());
+                let (entries, _, carried) = copy_missing(&plan, &plan.copies(), &destination).unwrap();
+                let made = state.write(|w| w.import_device_playlist_entries(&plan.name, &entries)).unwrap();
+                assert_eq!(carry_all(&state, rig.stick.path(), &made.added, &carried), (1, 0));
+                let db = rbl_db::Library::open(rig.location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+                let mut stmt = db.connection().prepare("SELECT InMsec, OutMsec, Kind FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY InMsec").unwrap();
+                let cues: Vec<(i64, Option<i64>, i64)> = stmt.query_map([&made.added[0].0], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(Result::unwrap).collect();
+                assert_eq!(cues, vec![(25, None, 1), (494, Some(2369), if active_loop { 4 } else { 0 })], "{format:?}: DAT-only hot cue and memory loop, active={active_loop}");
+                assert_eq!(contents_under(rig.stick.path()), stick_before, "USB fixture is read only");
+                assert!(files_under(&rig.dir.path().join("backups/analysis-journal")).is_empty(), "journal is closed");
+            }
         }
     }
 
     fn copied_track_brings_the_sticks_analysis(format: Format) {
         let rig = rig_with(analysed_on_the_stick);
         rig.came_from_elsewhere(0);
+        let library = device::read(rig.stick.path(), format).unwrap();
+        let track = library.tracks.iter().find(|t| t.title == "Track 0").unwrap();
+        let stick_dat_path = audio_path(rig.stick.path(), &track.analysis_path);
+        let mut divergent_dat = rbl_anlz::Anlz::read(&stick_dat_path).unwrap();
+        let hot_list = divergent_dat.sections.iter_mut().find(|s| &s.tag.0 == b"PCOB" && s.header.get(..4) == Some(&[0, 0, 0, 1])).unwrap();
+        hot_list.payload[32..36].copy_from_slice(&125_u32.to_be_bytes());
+        std::fs::write(&stick_dat_path, divergent_dat.to_bytes()).unwrap();
+        assert_eq!(divergent_dat.legacy_cue_entries()[0].time_ms, 125, "DAT fixture differs from EXT");
+        let stick_ext = rbl_anlz::Anlz::read(&stick_dat_path.with_extension("EXT")).unwrap();
+        assert_eq!(stick_ext.cue_entries()[0].time_ms, 25, "EXT retains its own cue");
         rbl_db::Library::open(rig.location.clone(), rbl_db::OpenMode::ReadWrite)
             .unwrap()
             .connection()
