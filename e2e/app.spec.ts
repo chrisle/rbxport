@@ -550,6 +550,67 @@ test("Color can be edited from a selected collection row and cancelled", async (
   await expect(playlistCell).toHaveText("Green");
 });
 
+test("Color follows the double-click editing preference", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({ advanced: { doubleClickToEdit: true, protectLibrary: false } })));
+  await page.goto("/?writable");
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Color", exact: true }).click();
+
+  const cell = page.locator('[role="gridcell"][data-col="color"]').first();
+  await cell.click(); // select
+  await cell.click(); // preference must prevent single-click editing
+  await expect(cell.getByRole("combobox", { name: "Color" })).toHaveCount(0);
+  await cell.dblclick();
+  await expect(cell.getByRole("combobox", { name: "Color" })).toBeVisible();
+  await expect(cell.getByRole("option", { name: "No Color" })).toHaveCount(1);
+});
+
+test("a refused Color write leaves the table and Information panel unchanged", async ({ page }) => {
+  await page.goto("/?writable&refuseColorWrite");
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Color", exact: true }).click();
+
+  const cell = page.locator('[role="gridcell"][data-col="color"]').first();
+  const before = await cell.innerText();
+  await cell.click();
+  await page.waitForFunction(() => "__menu" in window);
+  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("info"));
+  const panel = page.getByRole("complementary", { name: "Information" });
+  await panel.getByRole("tab", { name: "Info" }).click();
+  const detail = panel.getByRole("combobox", { name: "Color" });
+  const detailBefore = await detail.inputValue();
+
+  await cell.click();
+  await cell.getByRole("combobox", { name: "Color" }).selectOption(detailBefore === "2" ? "3" : "2");
+  await expect(page.getByRole("contentinfo")).toContainText("That could not be saved.");
+  await expect(cell).toHaveText(before);
+  await expect(detail).toHaveValue(detailBefore);
+});
+
+test("editing a Color cell changes only that track after a multi-selection", async ({ page }) => {
+  await page.goto("/?writable");
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Color", exact: true }).click();
+
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  const first = rows.first();
+  const second = rows.nth(1);
+  const firstColor = first.locator('[role="gridcell"][data-col="color"]');
+  const secondColor = second.locator('[role="gridcell"][data-col="color"]');
+  const secondBefore = await secondColor.innerText();
+  await firstColor.click();
+  await second.click({ modifiers: ["ControlOrMeta"] });
+  await expect(first).toHaveAttribute("aria-selected", "true");
+  await expect(second).toHaveAttribute("aria-selected", "true");
+  await firstColor.click();
+  await firstColor.getByRole("combobox", { name: "Color" }).selectOption("2");
+  await expect(firstColor).toHaveText("Red");
+  await expect(secondColor).toHaveText(secondBefore);
+});
+
 test("Track number sorts by the tag's number, apart from the # column", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
