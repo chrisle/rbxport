@@ -95,7 +95,14 @@ for (const { name, writable, protectLibrary, message } of [
     expect(await between(page, "CURRENT", "USB")).toEqual(order);
     await item(page, "CURRENT").click();
     await page.keyboard.press("Shift+Alt+KeyY");
-    await expect(page.getByRole("contentinfo").getByRole("alert")).toHaveText(message);
+    const alert = page.getByRole("contentinfo").getByRole("alert");
+    await expect(alert).toContainText(message);
+    const preferencesButton = alert.getByRole("button", { name: "Open Preferences" });
+    if (protectLibrary) {
+      await expect(preferencesButton).toBeVisible();
+    } else {
+      await expect(preferencesButton).toHaveCount(0);
+    }
     expect(await between(page, "CURRENT", "USB")).toEqual(order);
   });
 }
