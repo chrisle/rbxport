@@ -114,7 +114,7 @@ const Row = memo(function Row({
   onDropDeviceTracks: (() => void) | undefined;
   /**
    * Files dragged in from outside the app, dropped on this row: a playlist's
-   * id, or the Playlists root's (`"playlists"`) or a playlist folder's, where
+   * id, the All Tracks root (`"all"`), or the Playlists root's (`"playlists"`) or a playlist folder's, where
    * each dropped folder becomes a playlist, as in rekordbox.
    */
   onDropFiles: ((target: string, files: File[]) => void) | undefined;
@@ -159,11 +159,11 @@ const Row = memo(function Row({
   const pressedOnSelected = useRef(false);
   // A file dragged in from Finder/Explorer never sets `dragging`/`droppable`
   // (nothing inside the app started that drag), so it is its own path: any
-  // playlist row that was given `onDropFiles` takes one, gated on the
+  // playlist or All Tracks row that was given `onDropFiles` takes one, gated on the
   // browser's own file-drag signal instead. So do the Playlists root and a
   // playlist folder, which make a playlist of each folder dropped there.
   const fileDroppable = Boolean(onDropFiles)
-    && (node.kind === "playlist" || node.kind === "folder" || node.id === "playlists");
+    && (node.kind === "playlist" || node.kind === "folder" || node.kind === "allTracks" || node.id === "playlists");
   useEffect(() => {
     if (!droppable && !deviceDroppable && !fileDroppable && tracksToDevice === null && playlistToDevice === null) setOver(false);
   }, [droppable, deviceDroppable, fileDroppable, tracksToDevice, playlistToDevice]);

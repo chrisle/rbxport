@@ -1778,5 +1778,7 @@
   "Don't copy": "Kopiera inte",
   "If any track is missing from your collection, the playlist is not imported.": "Om något spår saknas i din samling importeras inte spellistan.",
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Endast spår som redan finns i din samling importeras. Spår utan matchning utelämnas; om inget spår matchar skapas ingen spellista.",
-  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "När spår saknas väljer du om de ska kopieras och var de ska sparas. Avbryt stoppar importen."
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "När spår saknas väljer du om de ska kopieras och var de ska sparas. Avbryt stoppar importen.",
+  "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
+  "No tracks found to import.": "No tracks found to import."
 }

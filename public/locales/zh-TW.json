@@ -1785,5 +1785,7 @@
   "Don't copy": "不複製",
   "If any track is missing from your collection, the playlist is not imported.": "如果收藏中缺少任何曲目，則不會匯入播放清單。",
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "僅匯入收藏中已有的曲目。未比對的曲目會略過；如果沒有任何曲目符合，則不會建立播放清單。",
-  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "如果有缺少的曲目，請選擇是否複製以及儲存位置。取消將停止匯入。"
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "如果有缺少的曲目，請選擇是否複製以及儲存位置。取消將停止匯入。",
+  "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
+  "No tracks found to import.": "No tracks found to import."
 }
