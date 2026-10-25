@@ -56,6 +56,8 @@ export interface RowDto {
   missing?: boolean;
   /** Extra database fields requested for visible browser columns. */
   extra?: Record<string, string | number | boolean | null>;
+  /** Selected Devices database row; Explorer and collection rows omit this. */
+  deviceSource?: { path: string; format: DeviceFormat; trackId: number };
 }
 
 export type TrackSource =
@@ -449,7 +451,7 @@ export interface Backend {
   gridState(trackId: string): Promise<GridState>;
 
   /** A track's cue points, ordered by position. */
-  trackCues(trackId: string): Promise<Cue[]>;
+  trackCues(trackId: string, device?: { path: string; format: DeviceFormat; trackId: number }): Promise<Cue[]>;
 
   /**
    * Asks for files and adds them to the library.

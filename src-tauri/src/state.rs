@@ -1110,6 +1110,7 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
                 file_name: library.file_name.get(index).to_owned(),
                 missing: crate::relocate::is_missing(library.folder_path.get(index)),
                 extra: None,
+                device_source: None,
             }
         })
         .collect()

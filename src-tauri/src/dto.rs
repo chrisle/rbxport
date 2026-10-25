@@ -51,6 +51,17 @@ pub struct RowDto {
     pub missing: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Present only for rows from a selected Devices database.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_source: Option<DeviceTrackSourceDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceTrackSourceDto {
+    pub path: String,
+    pub format: String,
+    pub track_id: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
