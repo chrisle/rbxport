@@ -3,7 +3,10 @@ import { expect, test } from "@playwright/test";
 const trackRows = (page: import("@playwright/test").Page) =>
   page.getByRole("row").filter({ has: page.getByRole("gridcell") });
 
-test("external files dropped on All Tracks enter the collection and remain after reload", async ({ page }) => {
+test("external files dropped on All Tracks enter the collection and remain after reload", async ({ page, browserName }) => {
+  // WebKit drops the synthetic File.path property before dispatch. The real
+  // macOS host resolves paths from AppKit's pasteboard, which this mock lacks.
+  test.skip(browserName === "webkit", "synthetic WebKit files have no filesystem path");
   await page.goto("/?writable=1&dropFixture=1");
   const root = page.locator('[role="treeitem"][data-kind="allTracks"]');
   await expect(root).toHaveAttribute("data-file-drop-playlist", "all", { timeout: 30_000 });
@@ -37,10 +40,28 @@ test("external files dropped on All Tracks enter the collection and remain after
   }
 });
 
-test("Library Edit gate keeps All Tracks from accepting external files", async ({ page }) => {
+test("All Tracks receives external WebKit files even when their paths are hidden", async ({ page, browserName }) => {
+  test.skip(browserName !== "webkit", "WebKit-specific path boundary");
+  await page.goto("/?writable=1");
+  const root = page.locator('[role="treeitem"][data-kind="allTracks"]');
+  await expect(root).toHaveAttribute("data-file-drop-playlist", "all", { timeout: 30_000 });
+  const transfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    data.items.add(new File(["audio"], "Collection Drop 642.mp3", { type: "audio/mpeg" }));
+    return data;
+  });
+  await root.dispatchEvent("drop", { dataTransfer: transfer });
+  await expect(page.getByRole("contentinfo")).toContainText("Drop files in the desktop app to import them.");
+});
+
+test("Library Edit and Library Protection gates keep All Tracks from accepting external files", async ({ page }) => {
   await page.goto("/?dropFixture=1");
   const root = page.locator('[role="treeitem"][data-kind="allTracks"]');
-  await expect(root).toBeVisible();
+  await expect(root).toBeVisible({ timeout: 30_000 });
+  await expect(root).not.toHaveAttribute("data-file-drop-playlist", "all");
+  await page.evaluate(() => localStorage.setItem("rbl.preferences", JSON.stringify({ advanced: { protectLibrary: true } })));
+  await page.goto("/?writable=1&dropFixture=1");
+  await expect(root).toBeVisible({ timeout: 30_000 });
   await expect(root).not.toHaveAttribute("data-file-drop-playlist", "all");
 });
 
