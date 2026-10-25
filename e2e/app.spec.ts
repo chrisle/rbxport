@@ -515,9 +515,16 @@ test("Color sorts in rekordbox's palette order, not by name", async ({ page }) =
 
 test("Color can be edited from a selected collection row and cancelled", async ({ page }) => {
   await page.goto("/?writable");
+  await page.getByRole("treeitem", { name: /All Tracks/ }).click();
+  await expect(page.getByTestId("browser-title")).toContainText("All Tracks");
+  await expect(page.locator('[role="gridcell"][data-col="title"]').first()).toBeVisible();
   await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
-  await page.getByRole("menu", { name: "Columns" })
-    .getByRole("menuitemcheckbox", { name: "Color", exact: true }).click();
+  const colorOption = page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Color", exact: true });
+  await expect(colorOption).toHaveAttribute("aria-checked", "false");
+  await colorOption.click();
+  await expect(colorOption).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("columnheader", { name: /^Color/ })).toBeVisible();
 
   const cell = page.locator('[role="gridcell"][data-col="color"]').first();
   const before = await cell.innerText();
@@ -540,10 +547,15 @@ test("Color can be edited from a selected collection row and cancelled", async (
   await expect(panel.getByRole("combobox", { name: "Color" })).toHaveValue("2");
 
   await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  await expect(page.getByTestId("browser-title")).toContainText("Melodic Vox");
+  await expect(page.locator('[role="gridcell"][data-col="title"]').first()).toBeVisible();
   await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
-  await page.getByRole("menu", { name: "Columns" })
-    .getByRole("menuitemcheckbox", { name: "Color", exact: true }).click();
+  await expect(colorOption).toHaveAttribute("aria-checked", "false");
+  await colorOption.click();
+  await expect(colorOption).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("columnheader", { name: /^Color/ })).toBeVisible();
   const playlistCell = page.locator('[role="gridcell"][data-col="color"]').first();
+  await expect(playlistCell).toBeVisible();
   await playlistCell.click();
   await playlistCell.click();
   await playlistCell.getByRole("combobox", { name: "Color" }).selectOption("5");
