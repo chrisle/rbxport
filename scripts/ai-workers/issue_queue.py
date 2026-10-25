@@ -46,10 +46,23 @@ def gh_json(*args: str):
     return json.loads(result.stdout)
 
 
+def candidate(issue: dict) -> dict:
+    """Return the compact gh issue-list fields consumed by take-tickets."""
+    return {
+        "number": issue["number"],
+        "title": issue["title"],
+        "labels": [{"name": label["name"]} for label in issue.get("labels", [])],
+        "assignees": [{"login": user["login"]} for user in issue.get("assignees", [])],
+        "createdAt": issue["created_at"],
+        "updatedAt": issue["updated_at"],
+        "url": issue["html_url"],
+    }
+
+
 def list_issues() -> list[dict]:
     pages = gh_json("api", f"repos/{REPO}/issues?state=open&per_page=100", "--paginate", "--slurp")
     return [
-        issue
+        candidate(issue)
         for page in pages
         for issue in page
         if "pull_request" not in issue and not excluded(issue)
