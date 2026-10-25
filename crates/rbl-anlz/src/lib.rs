@@ -185,6 +185,29 @@ impl Section {
         }
         Some(entries)
     }
+
+    /// Decode a complete extended cue list. Importers must not replace local
+    /// cues with the partial result of a damaged entry frame.
+    pub fn strict_cue_entries(&self) -> Result<Option<Vec<CueEntry>>> {
+        if self.tag != FourCc::new(b"PCO2") {
+            return Ok(None);
+        }
+        let mut entries = Vec::new();
+        let mut at = 0usize;
+        while at < self.payload.len() {
+            let remaining = &self.payload[at..];
+            if remaining.len() < CUE_ENTRY_MIN || remaining.get(..4) != Some(b"PCP2") {
+                return Err(AnlzError::Truncated("PCO2 cue entry frame"));
+            }
+            let length = be32(remaining, 8) as usize;
+            if length < CUE_ENTRY_MIN || length > remaining.len() {
+                return Err(AnlzError::Truncated("PCO2 cue entry length"));
+            }
+            entries.push(cue_entry(&remaining[..length], length));
+            at += length;
+        }
+        Ok(Some(entries))
+    }
 }
 
 /// One entry of an extended cue list.
@@ -583,6 +606,18 @@ impl Anlz {
             .filter_map(Section::as_cue_entries)
             .flatten()
             .collect()
+    }
+
+
+    /// All modern cues, rejecting malformed framing in any PCO2 section.
+    pub fn strict_cue_entries(&self) -> Result<Vec<CueEntry>> {
+        let mut entries = Vec::new();
+        for section in &self.sections {
+            if let Some(decoded) = section.strict_cue_entries()? {
+                entries.extend(decoded);
+            }
+        }
+        Ok(entries)
     }
 
     pub fn path(&self) -> Option<String> {
