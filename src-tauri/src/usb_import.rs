@@ -524,6 +524,29 @@ mod tests {
             } else { dest.to_bytes().len() };
         }
         assert!(first_stage_bytes > 1);
+        // A fresh fixture with only the first track eligible must import at
+        // this exact limit. Otherwise the two-track error below could come
+        // from rejecting the first track before the second is considered.
+        let single_dir = tempfile::tempdir().unwrap();
+        let (single_state, single_location, single_usb, _) = library_and_stick(single_dir.path());
+        let first_id = &ids[0];
+        let relative = single_state.write(|w| w.analysis_data_path_for(first_id)).unwrap();
+        single_state.write(|w| w.register_analysis(first_id, &rbl_db::write::AnalysisRegistration {
+            bpm_x100: 12000, key: None, analysis_data_path: &relative,
+        })).unwrap();
+        let single_target = rbl_anlz::resolve(&single_location.share_root, &relative);
+        std::fs::create_dir_all(single_target.parent().unwrap()).unwrap();
+        let mut dat = rbl_anlz::write::AnlzBuilder::new();
+        dat.path("/original.mp3").cue_lists(false);
+        std::fs::write(&single_target, dat.finish()).unwrap();
+        let mut ext = rbl_anlz::write::AnlzBuilder::new();
+        ext.path("/original.mp3").cue_lists(true);
+        std::fs::write(single_target.with_extension("EXT"), ext.finish()).unwrap();
+        let single_editor = crate::grid::GridEditor::at(single_state.backup_dir());
+        let admitted = import_with_stage_budget(&single_state, &single_editor, &single_usb, true, false, false, false, first_stage_bytes as u64).unwrap();
+        assert_eq!(admitted.tracks, 1, "the first staged track must fit the exact aggregate limit");
+        assert_eq!(admitted.changed, vec![first_id.clone()]);
+
         let editor = crate::grid::GridEditor::at(state.backup_dir());
         let error = import_with_stage_budget(&state, &editor, &usb, true, false, false, false, first_stage_bytes as u64).unwrap_err().to_string();
         assert!(error.contains("aggregate limit"), "{error}");
