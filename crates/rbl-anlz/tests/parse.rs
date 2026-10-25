@@ -472,8 +472,14 @@ fn a_truncated_cue_entry_does_not_run_off_the_end() {
 fn strict_cue_decoder_rejects_partial_entries_in_any_section() {
     let valid = cue_entry(1, 1, 100, "a", Some((21, [1, 2, 3])));
     let header = vec![0, 0, 0, 1, 0, 1, 0, 0];
-    let empty = build(&[(b"PCO2", header.clone(), Vec::new())]);
+    let empty = build(&[(b"PCO2", vec![0, 0, 0, 1, 0, 0, 0, 0], Vec::new())]);
     assert!(parse(&empty).unwrap().strict_cue_entries().unwrap().is_empty());
+    for (declared, payload) in [(1, Vec::new()), (2, valid.clone())] {
+        let mut bad_header = header.clone();
+        bad_header[5] = declared;
+        let file = build(&[(b"PCO2", header.clone(), valid.clone()), (b"PCO2", bad_header, payload)]);
+        assert!(parse(&file).unwrap().strict_cue_entries().is_err(), "declared {declared}");
+    }
     for damage in ["marker", "short length", "overrun", "trailing"] {
         let mut broken = valid.clone();
         match damage {

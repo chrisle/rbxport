@@ -206,6 +206,12 @@ impl Section {
             entries.push(cue_entry(&remaining[..length], length));
             at += length;
         }
+        let declared = self.header.get(4..6)
+            .map(|count| usize::from(u16::from_be_bytes([count[0], count[1]])))
+            .ok_or(AnlzError::Truncated("PCO2 cue count"))?;
+        if entries.len() != declared {
+            return Err(AnlzError::Truncated("PCO2 cue count"));
+        }
         Ok(Some(entries))
     }
 }

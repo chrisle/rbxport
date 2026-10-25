@@ -229,6 +229,9 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
             if analysis.is_empty() { report.skipped += 1; continue; }
             let source = within(root, analysis)?;
             let source_dat = read_import_anlz(&source, "USB", "DAT", id)?;
+            // DAT cue sections are copied to the library even when EXT is the
+            // authoritative cue source. Validate their framing as well.
+            source_dat.strict_cue_entries().map_err(|e| err(format!("USB DAT for track {id}: {e}")))?;
             // `source` is canonical and `root` need not be (a symlinked mount),
             // so the `.EXT` is found from the relative path, not by stripping.
             let ext_relative = Path::new(analysis).with_extension("EXT");
@@ -492,15 +495,45 @@ mod tests {
             targets.push(target);
         }
         let before = targets.iter().map(|target| (std::fs::read(target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap())).collect::<Vec<_>>();
+        let snapshot = || ids.iter().map(|id| state.read_db(|db| {
+            let track = db.connection().query_row("SELECT BPM, AnalysisUpdated, rb_local_usn FROM djmdContent WHERE ID=?1", [id],
+                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?)))?;
+            let mut q = db.connection().prepare("SELECT InMsec, OutMsec, Kind, ColorTableIndex, Comment FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0 ORDER BY InMsec")?;
+            let cues = q.query_map([id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, Option<String>>(4)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((track, cues))
+        }).unwrap()).collect::<Vec<_>>();
+        let before_db = snapshot();
+        // The first track's complete staged payload is the boundary: it must
+        // fit, while the next track must cross the aggregate limit.
+        let first_stick = usb.join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT");
+        let source_dat = rbl_anlz::Anlz::read(&first_stick).unwrap();
+        let source_ext = rbl_anlz::Anlz::read(&first_stick.with_extension("EXT")).unwrap();
+        let mut first_stage_bytes = source_ext.to_bytes().len();
+        for extension in ["DAT", "EXT"] {
+            let mut dest = rbl_anlz::Anlz::read(&targets[0].with_extension(extension)).unwrap();
+            let src = if extension == "DAT" { &source_dat } else { &source_ext };
+            dest.sections.retain(|s| !s.is_cue_list());
+            dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
+            if extension == "DAT" {
+                dest.sections.retain(|s| s.as_beat_grid().is_none());
+                if let Some(grid) = source_dat.section(b"PQTZ") { dest.sections.push(grid.clone()); }
+            }
+            first_stage_bytes += if extension == "EXT" {
+                dest.with_extended_grid_cleared().unwrap_or_else(|| dest.to_bytes()).len()
+            } else { dest.to_bytes().len() };
+        }
+        assert!(first_stage_bytes > 1);
         let editor = crate::grid::GridEditor::at(state.backup_dir());
-        let error = import_with_stage_budget(&state, &editor, &usb, true, false, false, false, 1).unwrap_err().to_string();
+        let error = import_with_stage_budget(&state, &editor, &usb, true, false, false, false, first_stage_bytes as u64).unwrap_err().to_string();
         assert!(error.contains("aggregate limit"), "{error}");
         assert_eq!(targets.iter().map(|target| (std::fs::read(target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap())).collect::<Vec<_>>(), before);
+        assert_eq!(snapshot(), before_db, "aggregate preflight changed local cues or track metadata");
         assert!(!std::fs::read_dir(state.backup_dir()).unwrap().any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with(STAGE_PREFIX)));
     }
     #[test]
     fn malformed_later_cue_frame_preserves_both_tracks() {
-        for damage in ["marker", "short length", "overrun", "trailing"] {
+        for damage in ["marker", "short length", "overrun", "trailing", "count 1/0", "count 2/1", "DAT count 2/1"] {
             let dir = tempfile::tempdir().unwrap();
             let (state, location, usb, _) = library_and_stick(dir.path());
             let ids = [rbl_db::fixture::track_id(0), rbl_db::fixture::track_id(1)];
@@ -528,14 +561,21 @@ mod tests {
                 let stick = usb.join(format!("PIONEER/USBANLZ/P000/{:08}/", index + 1));
                 write_stick(&stick, &[stick_cue(1, 2000, None, 22, "changed")]);
             }
-            let bad = usb.join("PIONEER/USBANLZ/P000/00000002/ANLZ0000.EXT");
+            let bad = usb.join("PIONEER/USBANLZ/P000/00000002/ANLZ0000.DAT")
+                .with_extension(if damage == "DAT count 2/1" { "DAT" } else { "EXT" });
             let mut anlz = rbl_anlz::Anlz::read(&bad).unwrap();
+            if damage == "DAT count 2/1" {
+                let ext = rbl_anlz::Anlz::read(&bad.with_extension("EXT")).unwrap();
+                anlz.sections.extend(ext.sections.into_iter().filter(|s| s.tag.0 == *b"PCO2"));
+            }
             let cue = anlz.sections.iter_mut().find(|s| s.tag.0 == *b"PCO2" && !s.payload.is_empty()).unwrap();
             match damage {
                 "marker" => cue.payload[..4].copy_from_slice(b"BAD!"),
                 "short length" => cue.payload[8..12].copy_from_slice(&1_u32.to_be_bytes()),
                 "overrun" => cue.payload[8..12].copy_from_slice(&u32::MAX.to_be_bytes()),
                 "trailing" => cue.payload.push(0),
+                "count 1/0" => cue.payload.clear(),
+                "count 2/1" | "DAT count 2/1" => cue.header[4..6].copy_from_slice(&2_u16.to_be_bytes()),
                 _ => unreachable!(),
             }
             std::fs::write(&bad, anlz.to_bytes()).unwrap();
@@ -553,7 +593,8 @@ mod tests {
             let before = snapshot();
             assert!(before.iter().all(|(db, _, _)| !db.1.is_empty()), "fixture must hold real local cues");
             let error = import(&state, &editor, &usb, true, false, false, false).unwrap_err().to_string();
-            assert!(error.contains(&format!("USB EXT for track {}", ids[1])), "{error}");
+            let extension = if damage == "DAT count 2/1" { "DAT" } else { "EXT" };
+            assert!(error.contains(&format!("USB {extension} for track {}", ids[1])), "{error}");
             assert_eq!(snapshot(), before, "{damage} changed local state");
             assert_eq!(std::fs::read(&bad).unwrap(), anlz.to_bytes());
         }
