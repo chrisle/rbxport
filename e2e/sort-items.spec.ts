@@ -79,3 +79,23 @@ test("Sort Items from a key refuses over a searched tree, as the menu's does", a
   await expect(page.getByRole("contentinfo")).toContainText("Sorted CURRENT.");
   await expect.poll(() => between(page, "CURRENT", "USB")).toEqual(["Drum and Bass", "Fresh 128s", "Hardstyle", "Melodic Vox"]);
 });
+
+for (const { name, writable, protectLibrary, message } of [
+  { name: "Library Protection", writable: true, protectLibrary: true, message: "Library Protection" },
+  { name: "a read-only library", writable: false, protectLibrary: false, message: "Library read-only" },
+]) {
+  test(`Sort Items from a key refuses with ${name}`, async ({ page }) => {
+    await page.addInitScript((protect) => localStorage.setItem("rbl.preferences", JSON.stringify({
+      advanced: { protectLibrary: protect },
+      keyboard: { preset: "export", overrides: { sortItems: { key: "y", shiftKey: true, altKey: true } } },
+    })), protectLibrary);
+    await page.goto(`/?writable=${writable ? "1" : "0"}`);
+    await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+    const order = ["Melodic Vox", "Hardstyle", "Drum and Bass", "Fresh 128s"];
+    expect(await between(page, "CURRENT", "USB")).toEqual(order);
+    await item(page, "CURRENT").click();
+    await page.keyboard.press("Shift+Alt+KeyY");
+    await expect(page.getByRole("contentinfo")).toContainText(message);
+    expect(await between(page, "CURRENT", "USB")).toEqual(order);
+  });
+}
