@@ -1824,12 +1824,21 @@ fn a_rating_a_comment_and_a_colour_show_in_the_rows_after_the_edit() {
     assert_eq!(colored.iter().find(|r| r.id == track).unwrap().extra.as_ref().unwrap()["color"], serde_json::json!(2));
     assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().color, "2");
 
+    // Reload the disposable library from disk, rather than trusting the
+    // in-memory row and detail updates from the edit command.
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
+    let (view, _) = s.open(collection_spec());
+    let reopened = run(commands::fetch_rows(s.state(), view, 0, 50, Some(vec!["color".into()]))).unwrap();
+    assert_eq!(reopened.iter().find(|r| r.id == track).unwrap().extra.as_ref().unwrap()["color"], serde_json::json!(2));
+    assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().color, "2");
+
     // And the sort that reads the column sees it too.
     let (view, _) = s.open(ViewSpecDto { sort: "rating".into(), descending: true, ..collection_spec() });
     assert_eq!(s.rows(view)[0].id, track);
 
     run(commands::set_track_rating(s.handle(), s.state(), vec![track.clone()], 0)).unwrap();
     run(commands::set_track_color(s.handle(), s.state(), vec![track.clone()], None)).unwrap();
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
     let (view, _) = s.open(collection_spec());
     assert_eq!(s.rows(view).iter().find(|r| r.id == track).unwrap().rating, 0);
     let cleared = run(commands::fetch_rows(s.state(), view, 0, 50, Some(vec!["color".into()]))).unwrap();
