@@ -1104,7 +1104,7 @@ pub async fn device_track_cues(path: String, format: String, device_track_id: u3
                 out_ms: if cue.kind == 2 { cue.loop_time_ms } else { 0 },
                 letter: if (1..=16).contains(&cue.hot_cue) { char::from_u32(u32::from(b'A') + cue.hot_cue - 1).map(|c| c.to_string()).unwrap_or_default() } else { String::new() },
                 memory,
-                active_loop: false,
+                active_loop: cue.active_loop,
                 colour,
             }
         }).collect())
@@ -1634,7 +1634,11 @@ mod tests {
             loop_numerator: 0,
             loop_denominator: 0,
         };
-        track.cues = Some(vec![cue(1, 25, None), cue(0, 494, Some(2369))]);
+        track.cues = Some(vec![cue(1, 25, None), rbl_anlz::cues::ExportCue {
+            kind: 4,
+            active_loop: true,
+            ..cue(0, 494, Some(2369))
+        }]);
     }
 
     #[test]
@@ -1714,7 +1718,7 @@ mod tests {
             )).unwrap();
             assert_eq!(cues.len(), 2, "{format:?}: read both on-stick cues");
             assert!(cues.iter().any(|cue| cue.letter == "A" && cue.position_ms == 25 && !cue.memory && cue.id.is_empty()));
-            assert!(cues.iter().any(|cue| cue.memory && cue.position_ms == 494 && cue.out_ms == 2369 && cue.id.is_empty()));
+            assert!(cues.iter().any(|cue| cue.memory && !cue.active_loop && cue.position_ms == 494 && cue.out_ms == 2369 && cue.id.is_empty()));
             assert!(tauri::async_runtime::block_on(device_track_cues(
                 rig.stick.path().to_string_lossy().into_owned(),
                 format_name(format).to_owned(),
@@ -1757,8 +1761,8 @@ mod tests {
                 row.id,
             )).unwrap();
             assert_eq!(cues.len(), 2, "{format:?}: DAT-only cue count");
-            assert!(cues.iter().any(|cue| cue.letter == "A" && !cue.memory && cue.position_ms == 25 && cue.out_ms == 0 && cue.id.is_empty() && cue.colour.is_none()), "{format:?}: hot A mapping");
-            assert!(cues.iter().any(|cue| cue.letter.is_empty() && cue.memory && cue.position_ms == 494 && cue.out_ms == 2369 && cue.id.is_empty() && cue.colour.is_none()), "{format:?}: memory loop mapping");
+            assert!(cues.iter().any(|cue| cue.letter == "A" && !cue.memory && !cue.active_loop && cue.position_ms == 25 && cue.out_ms == 0 && cue.id.is_empty() && cue.colour.is_none()), "{format:?}: hot A mapping");
+            assert!(cues.iter().any(|cue| cue.letter.is_empty() && cue.memory && cue.active_loop && cue.position_ms == 494 && cue.out_ms == 2369 && cue.id.is_empty() && cue.colour.is_none()), "{format:?}: active memory loop mapping");
         }
     }
 

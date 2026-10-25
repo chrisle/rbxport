@@ -439,6 +439,7 @@ fn extended_cues_carry_their_colour() {
 
     assert_eq!(entries[0].hot_cue, 1);
     assert_eq!(entries[0].kind, 1);
+    assert!(!entries[0].active_loop);
     assert_eq!(entries[0].time_ms, 4321);
     assert_eq!(entries[0].comment.as_deref(), Some("intro"));
     assert_eq!(entries[0].color_code, Some(21));
@@ -463,6 +464,7 @@ fn legacy_dat_cues_read_hot_and_memory_pcpt_entries() {
     hot[36..40].copy_from_slice(&u32::MAX.to_be_bytes());
     let mut memory = hot.clone();
     memory[12..16].copy_from_slice(&0_u32.to_be_bytes());
+    memory[16..20].copy_from_slice(&4_u32.to_be_bytes());
     memory[28] = 2;
     memory[32..36].copy_from_slice(&494_u32.to_be_bytes());
     memory[36..40].copy_from_slice(&2369_u32.to_be_bytes());
@@ -479,6 +481,8 @@ fn legacy_dat_cues_read_hot_and_memory_pcpt_entries() {
     assert_eq!(cues.len(), 2);
     assert_eq!((cues[0].hot_cue, cues[0].kind, cues[0].time_ms), (1, 1, 25));
     assert_eq!((cues[1].hot_cue, cues[1].kind, cues[1].time_ms, cues[1].loop_time_ms), (0, 2, 494, 2369));
+    assert!(!cues[0].active_loop);
+    assert!(cues[1].active_loop);
     assert!(cues.iter().all(|cue| cue.comment.is_none() && cue.color_code.is_none() && cue.rgb.is_none()));
 }
 

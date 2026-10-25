@@ -209,6 +209,7 @@ impl Section {
             };
             entries.push(CueEntry {
                 hot_cue: be32(e, 12),
+                active_loop: be32(e, 16) == 4,
                 kind: e[28],
                 time_ms: be32(e, 32),
                 loop_time_ms: be32(e, 36),
@@ -232,6 +233,8 @@ impl Section {
 pub struct CueEntry {
     /// Zero for a memory cue, otherwise the hot cue's slot — 1 is A.
     pub hot_cue: u32,
+    /// The legacy DAT PCPT entry marks the active memory loop with 4.
+    pub active_loop: bool,
     /// 1 is a cue, 2 a loop.
     pub kind: u8,
     pub time_ms: u32,
@@ -443,6 +446,7 @@ pub fn cue_colour_drawn(index: u8) -> Option<[u8; 3]> {
 fn cue_entry(e: &[u8], len_entry: usize) -> CueEntry {
     let mut entry = CueEntry {
         hot_cue: be32(e, 12),
+        active_loop: false,
         kind: e.get(16).copied().unwrap_or(0),
         time_ms: be32(e, 20),
         loop_time_ms: be32(e, 24),
