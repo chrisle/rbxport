@@ -1775,5 +1775,9 @@
   "Playlist cannot be edited or deleted while searching.": "De afspeellijst kan niet worden bewerkt of verwijderd tijdens het zoeken.",
   "Add \"My Tag\" to the \"Comments\"": "\"Mijn tag\" toevoegen aan de \"Opmerkingen\"",
   "This operation can take few minutes.": "Deze handeling kan lang duren.",
-  "Please wait for a while": "Even geduld a.u.b."
+  "Please wait for a while": "Even geduld a.u.b.",
+  "Don't copy": "Don't copy",
+  "If any track is missing from your collection, the playlist is not imported.": "If any track is missing from your collection, the playlist is not imported.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import."
 }

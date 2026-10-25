@@ -1776,5 +1776,9 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "„Saját címke\" hozzáadása a „Megjegyzések\"-hez",
   "This operation can take few minutes.": "Ez a műveletet hosszú időt vehet igénybe.",
-  "Please wait for a while": "Kérem, várjon"
+  "Please wait for a while": "Kérem, várjon",
+  "Don't copy": "Don't copy",
+  "If any track is missing from your collection, the playlist is not imported.": "If any track is missing from your collection, the playlist is not imported.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import."
 }
