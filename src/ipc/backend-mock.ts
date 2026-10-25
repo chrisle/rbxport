@@ -1768,7 +1768,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     if (row && row.analysed !== 0) {
       const total = row.durationSec * 1000;
       made.push(
-        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.02), outMs: 0, letter: "", memory: true, colour: null, comment: "136 BPM" },
+        { id: `cue-${nextCueId++}`, positionMs: readFlagFromUrl("activeLoopNearStart") ? 0 : Math.round(total * 0.02), outMs: 0, letter: "", memory: true, colour: null, comment: "136 BPM" },
         ...row.hotCues.map(([letter, positionMs, colour]) => (
           { id: `cue-${nextCueId++}`, positionMs, outMs: 0, letter, memory: false, colour }
         )),
@@ -1780,7 +1780,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (readFlagFromUrl("memoryLoops")) {
         const fourBeats = Math.round((4 * 60_000) / 136);
         const loopAt = Math.round(total * 0.3);
-        const activeAt = Math.round(total * 0.85);
+        const activeAt = readFlagFromUrl("activeLoopNearStart") ? 2_000 : Math.round(total * 0.85);
         made.push(
           { id: `cue-${nextCueId++}`, positionMs: loopAt, outMs: loopAt + fourBeats, letter: "", memory: true, colour: null },
           { id: `cue-${nextCueId++}`, positionMs: activeAt, outMs: activeAt + fourBeats, letter: "", memory: true, activeLoop: true, colour: null },
@@ -1842,6 +1842,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false, loadId: 0,
     tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
     loopInFrames: 0, loopOutFrames: 0, looping: false, startsAt: 0,
+    activeInFrames: 0, activeOutFrames: 0, activeFired: false, autoLooping: false,
   };
   // Deck B holds its own tempo and key lock even though a browser has no
   // audio to apply them to: a control that snapped back on the next tick would
@@ -1850,6 +1851,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false, loadId: 0,
     tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
     loopInFrames: 0, loopOutFrames: 0, looping: false, startsAt: 0,
+    activeInFrames: 0, activeOutFrames: 0, activeFired: false, autoLooping: false,
   };
   /** The deck that a command names. */
   const deckOf = (deck: DeckId) => (deck === "a" ? deckA : deckB);
@@ -1952,7 +1954,16 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         // A held start (see `deckPlayAfter`) or a move counts from then, not from the last step.
         const from = Math.max(clockAt, deck.startsAt);
         if (now <= from) continue;
+        const previous = deck.frames;
         deck.frames = Math.min(deck.frames + Math.round(((now - from) / 1000) * SAMPLE_RATE), deck.totalFrames);
+        if (!deck.looping && !deck.activeFired && deck.activeOutFrames > deck.activeInFrames &&
+          previous <= deck.activeInFrames && deck.frames >= deck.activeInFrames) {
+          deck.loopInFrames = deck.activeInFrames;
+          deck.loopOutFrames = deck.activeOutFrames;
+          deck.looping = true;
+          deck.autoLooping = true;
+          deck.activeFired = true;
+        }
         // Inside a loop the head rounds at the out point, as the deck does.
         if (deck.looping && deck.loopOutFrames > deck.loopInFrames && deck.frames >= deck.loopOutFrames) {
           deck.frames = deck.loopInFrames + ((deck.frames - deck.loopOutFrames) % (deck.loopOutFrames - deck.loopInFrames));
@@ -2571,6 +2582,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       d.totalFrames = row ? row.durationSec * SAMPLE_RATE : 0;
       deckBeat[deck] = row && row.bpmX100 > 0 ? 6000 / row.bpmX100 : 0;
       d.playing = false;
+      d.activeInFrames = 0;
+      d.activeOutFrames = 0;
+      d.activeFired = false;
+      d.autoLooping = false;
       d.loaded = row !== undefined;
       d.loadId = row === undefined ? 0 : loadId;
       d.generation += 1;
@@ -2591,6 +2606,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const d = deckOf(deck);
       d.loaded = false;
       d.playing = false;
+      d.activeInFrames = 0;
+      d.activeOutFrames = 0;
+      d.activeFired = false;
+      d.autoLooping = false;
       d.frames = 0;
       d.loadId = 0;
       if (!deckA.playing && !deckB.playing) stopClock();
@@ -2631,6 +2650,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     deckSeek: (deck, positionMs) => {
       const d = deckOf(deck);
       d.frames = Math.max(-5 * SAMPLE_RATE, Math.round((positionMs / 1000) * SAMPLE_RATE));
+      if (d.frames < d.activeInFrames) d.activeFired = false;
       d.generation += 1;
       d.startsAt = Math.max(d.startsAt, performance.now());
       sendTick();
@@ -2651,11 +2671,25 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       d.loopInFrames = from;
       d.loopOutFrames = to;
       d.looping = true;
+      d.autoLooping = false;
       if (d.frames >= to || d.frames < from) {
         d.frames = from;
         d.generation += 1;
         d.startsAt = Math.max(d.startsAt, performance.now());
       }
+      sendTick();
+      return wait(undefined);
+    },
+    deckSetActiveLoop: (deck, inMs, outMs) => {
+      const d = deckOf(deck);
+      const from = inMs === null ? 0 : Math.max(0, Math.round(inMs / 1000 * SAMPLE_RATE));
+      const to = outMs === null ? 0 : Math.max(0, Math.round(outMs / 1000 * SAMPLE_RATE));
+      if (d.activeInFrames === from && d.activeOutFrames === to) return wait(undefined);
+      if (d.autoLooping) d.looping = false;
+      d.autoLooping = false;
+      d.activeInFrames = from;
+      d.activeOutFrames = to > from ? to : 0;
+      d.activeFired = false;
       sendTick();
       return wait(undefined);
     },
@@ -2678,6 +2712,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         }
       }
       d.looping = on;
+      d.autoLooping = false;
       if (on) {
         d.frames = d.loopInFrames;
         d.generation += 1;
@@ -2691,6 +2726,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       d.loopInFrames = 0;
       d.loopOutFrames = 0;
       d.looping = false;
+      d.autoLooping = false;
       sendTick();
       return wait(undefined);
     },

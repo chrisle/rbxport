@@ -1489,6 +1489,31 @@ fn a_loop_rounds_at_its_out_point_with_no_gap_and_exit_plays_on() {
 }
 
 #[test]
+fn a_saved_loop_armed_after_load_catches_playback_and_clearing_it_exits() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("active-ramp.wav");
+    ramp(&path, RATE as usize * 4);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    // The decode ring is already prefetched when the cue list arrives.
+    std::thread::sleep(Duration::from_millis(30));
+    let from = u64::from(RATE);
+    let to = from + u64::from(RATE) / 2;
+    h.engine.set_active_loop_ms(Deck::A, Some((1000.0, 1500.0)));
+    assert_eq!(h.position(Deck::A), 0, "arming moved the audible head");
+    h.engine.play(Deck::A);
+    h.play_until_paced(Deck::A, from + 100);
+    assert_eq!(h.engine.snapshot().a.loop_in_frames, from);
+    assert_eq!(h.engine.snapshot().a.loop_out_frames, to);
+    assert!(h.engine.snapshot().a.looping, "the saved loop did not catch IN");
+    h.engine.set_active_loop_ms(Deck::A, None);
+    h.play_until_paced(Deck::A, to + 2_048);
+    assert!(!h.engine.snapshot().a.looping);
+    assert!(h.position(Deck::A) > to, "clearing the mark did not run through OUT");
+}
+
+#[test]
 fn the_metronome_keeps_its_volume_when_the_master_is_turned_down() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("silence.wav");

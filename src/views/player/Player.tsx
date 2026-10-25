@@ -100,6 +100,7 @@ import { SimplePlayer } from "./SimplePlayer";
 import { JumpMenu } from "./JumpMenu";
 import { VocalStrip } from "./VocalStrip";
 import { useTrackCues } from "./useTrackCues";
+import { activeMemoryLoop } from "./activeLoopPlayback";
 import { usePlayRecorder } from "./usePlayRecorder";
 import { previousRestarts } from "@/lib/continuousPlay";
 import { useTrackDetails } from "./useTrackDetails";
@@ -965,6 +966,18 @@ export const Player = memo(function Player({
     const first = cuesFor(loaded, "memory")[0];
     setCuePoint(first ? first.positionMs / 1000 : 0);
   });
+  // Until the player menu turns it on, a saved loop is only a marker.
+  const [activeLoopPlayback, setActiveLoopPlayback] = useState(false);
+  useEffect(() => {
+    let live = true;
+    // Only a saved memory loop may arm the deck. A plain memory loop, hot
+    // loop, or cleared mark sends no range and cannot catch playback.
+    const saved = activeLoopPlayback && track && playback.duration > 0 ? activeMemoryLoop(cues) : null;
+    void getBackend().then((backend) => {
+      if (live) return backend.deckSetActiveLoop(deck, saved?.positionMs ?? null, saved?.outMs ?? null);
+    }).catch((e: unknown) => onError?.(e instanceof Error ? e.message : String(e)));
+    return () => { live = false; };
+  }, [activeLoopPlayback, cues, deck, onError, playback.duration, track]);
   // The INFO tab's record, fetched only while that tab is showing — see
   // `useTrackDetails` for why not on every load.
   const details = useTrackDetails(track?.id ?? null, panel === "info");
@@ -1028,6 +1041,8 @@ export const Player = memo(function Player({
         case "beatToMemoryBeats": updatePreferences("view", { beatCount: "toMemoryBeats" }); break;
         case "waveformClickOn": updatePreferences("view", { waveformClick: true }); break;
         case "waveformClickOff": updatePreferences("view", { waveformClick: false }); break;
+        case "activeLoopPlaybackOn": setActiveLoopPlayback(true); break;
+        case "activeLoopPlaybackOff": setActiveLoopPlayback(false); break;
         case "analyse": if (track) onAnalyse?.(track.id, track.title); break;
         default: break;
       }
@@ -2973,6 +2988,7 @@ export const Player = memo(function Player({
               waveformColor: viewPrefs.waveformColor,
               beatCount: viewPrefs.beatCount,
               waveformClick: viewPrefs.waveformClick,
+              activeLoopPlayback,
               hasLoop: playback.loop !== null && track !== null,
               devices,
             })}
