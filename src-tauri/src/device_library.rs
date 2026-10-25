@@ -2405,7 +2405,7 @@ mod tests {
         let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
         let ext = assets_of(mount, track).1.analysis_dat().unwrap().with_extension("EXT");
         let mut analysis = rbl_anlz::Anlz::read(&ext).unwrap();
-        analysis.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; MAX_BROWSER_EXT_BYTES as usize]));
+        analysis.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; usize::try_from(MAX_BROWSER_EXT_BYTES).unwrap()]));
         std::fs::write(&ext, analysis.to_bytes()).unwrap();
         assert_ne!(rbl_anlz::Anlz::read(&ext).unwrap().cue_entries(), [] as [rbl_anlz::CueEntry; 0]);
         let before = contents_under(mount);
