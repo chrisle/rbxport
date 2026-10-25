@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use crate::strings::fold;
-use crate::{SearchField, SortColumn, ViewSpec};
+use crate::{Cue, SearchField, SortColumn, ViewSpec};
 
 /// One row: a track of the stick's library.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -39,6 +39,8 @@ pub struct DeviceRow {
     pub analysed: bool,
     /// Whether the stick's library names artwork for the track.
     pub has_artwork: bool,
+    /// Cues read from this device library when the view was opened.
+    pub cues: Vec<Cue>,
 }
 
 /// The rows a view shows, ordered and searched.
