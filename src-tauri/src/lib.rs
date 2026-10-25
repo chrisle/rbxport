@@ -619,6 +619,7 @@ pub fn run() {
             commands::preview_stop,
             commands::preview_state,
             commands::track_cues,
+            device_library::device_track_cues,
             // The GRID panel: every one rewrites the track's analysis files
             // and is refused while rekordbox runs, like the edits above.
             grid::grid_state,

@@ -222,7 +222,9 @@ async function realBackend(): Promise<Backend> {
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
     gridState: (trackId) => invoke<GridState>("grid_state", { track: trackId }),
-    trackCues: (trackId) => invoke<Cue[]>("track_cues", { track: trackId }),
+    trackCues: (trackId, device) => device
+      ? invoke<Cue[]>("device_track_cues", { track: trackId, path: device.path, format: device.format, deviceTrackId: device.trackId })
+      : invoke<Cue[]>("track_cues", { track: trackId }),
     trackPhrases: (trackId) => invoke<Phrase[]>("track_phrases", { track: trackId }),
     editPhrase: (trackId, beat, action) => invoke<boolean>("edit_phrase", { trackId, beat, action }),
     trackVocals: async (trackId) => {

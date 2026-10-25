@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::{blocking, MAX_ROWS};
-use crate::dto::{RowDto, ViewHandleDto, ViewSpecDto};
+use crate::dto::{CueDto, DeviceTrackSourceDto, RowDto, ViewHandleDto, ViewSpecDto};
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{sort_from_wire, AppState};
 
@@ -1009,7 +1009,7 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
             .filter_map(|(at, id)| library.track(*id).map(|t| device_row(&mount, t, at)))
             .collect();
         handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, t)));
-        let view = DeviceView::open(rows, &parsed, field);
+        let view = DeviceView::open(rows, &parsed, field).with_source(mount, format_name(format).to_owned());
         let (view_id, len, generation) = handle.open_device_view(view);
         Ok(ViewHandleDto { view_id, len, gen: generation, totals: None })
     })
@@ -1058,7 +1058,56 @@ pub fn fetch_rows(view: &DeviceView, offset: u32, len: u32) -> AppResult<Vec<Row
         return Err(AppError::new(ErrorKind::Malformed, "Too many rows requested at once.")
             .with_detail(format!("len {len} exceeds the {MAX_ROWS}-row cap")));
     }
-    Ok(view.window(offset as usize, len as usize).iter().map(row_dto).collect())
+    Ok(view.window(offset as usize, len as usize).iter().map(|row| {
+        let mut dto = row_dto(row);
+        if let Some((mount, format)) = &view.source {
+            dto.device_source = Some(DeviceTrackSourceDto {
+                path: mount.to_string_lossy().into_owned(),
+                format: format.clone(),
+                track_id: row.id,
+            });
+        }
+        dto
+    }).collect())
+}
+
+/// Cues from the exact on-stick row selected in the Devices tree. Explorer
+/// files never carry this source identity and retain the collection route.
+#[tauri::command]
+pub async fn device_track_cues(path: String, format: String, device_track_id: u32, track: String) -> AppResult<Vec<CueDto>> {
+    blocking("device_track_cues", move || {
+        const MEMORY_CSS: [&str; 8] = ["#E778F1", "#E33122", "#EBA44A", "#F4E458", "#66DD42", "#56BDF3", "#204FEF", "#8B1EEF"];
+        let mount = connected(&path)?;
+        let format = format_from(&format)?;
+        let library = device::read(&mount, format).map_err(|e| device_error(&e))?;
+        let Some(row) = library.track(device_track_id) else { return Ok(Vec::new()) };
+        if rbl_index::folder::loose_id(&audio_path(&mount, &row.path)) != track {
+            return Ok(Vec::new());
+        }
+        let assets = assets_of(&mount, row).1;
+        let Some(dat) = assets.analysis_dat() else { return Ok(Vec::new()) };
+        let ext = rbl_anlz::sibling(Path::new(&row.analysis_path), "EXT");
+        let ext = ext.to_str().and_then(|relative| DeviceAssets::on_stick(&mount, relative));
+        let cue_file = ext.as_deref().unwrap_or(&dat);
+        let analysis = rbl_anlz::Anlz::read(cue_file).map_err(|e| AppError::new(ErrorKind::Internal, "The device cues could not be read.").with_detail(e.to_string()))?;
+        Ok(analysis.cue_entries().into_iter().map(|cue| {
+            let memory = cue.hot_cue == 0;
+            let colour = if memory {
+                rbl_anlz::cues::memory_colour_of_row(cue.color_id)
+                    .and_then(|index| MEMORY_CSS.get(usize::from(index)).map(|css| (*css).to_owned()))
+            } else { crate::dto::cue_colour_css(cue.library_color_table_index()) };
+            CueDto {
+                comment: cue.comment.unwrap_or_default(),
+                id: String::new(), // On-stick cues have no collection djmdCue ID.
+                position_ms: cue.time_ms,
+                out_ms: if cue.kind == 2 { cue.loop_time_ms } else { 0 },
+                letter: if (1..=16).contains(&cue.hot_cue) { char::from_u32(u32::from(b'A') + cue.hot_cue - 1).map(|c| c.to_string()).unwrap_or_default() } else { String::new() },
+                memory,
+                active_loop: false,
+                colour,
+            }
+        }).collect())
+    }).await
 }
 
 /// The row ids between two positions of a device view, for a shift-click.
@@ -1092,6 +1141,7 @@ fn row_dto(row: &DeviceRow) -> RowDto {
         has_artwork: row.has_artwork,
         file_name: row.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         extra: None,
+        device_source: None,
         // A stick's own row: its file is on the stick, not a collection
         // file that rekordbox could mark missing.
         missing: false,
@@ -1587,6 +1637,102 @@ mod tests {
     }
 
     #[test]
+    fn issue_608_fixture_cues_exist_but_device_and_explorer_file_ids_miss_collection_lookup() {
+        use tauri::Manager;
+
+        let rig = rig_with(analysed_on_the_stick);
+        let collection = state_over(&rig);
+        let app = tauri::test::mock_app();
+        app.manage(Arc::new(collection));
+        let state = app.state::<Arc<AppState>>();
+        let index = state.library().unwrap();
+        let collection_id = rbl_db::fixture::track_id(0);
+        assert!(index.row_of(&collection_id).is_some());
+        let collection_path = PathBuf::from(index.audio_path_of(&collection_id).unwrap());
+        let spec = rbl_index::ViewSpec {
+            source: rbl_index::TrackSource::Collection,
+            sort: rbl_index::SortColumn::TrackNo,
+            descending: false,
+            query: String::new(),
+            filter: rbl_index::TrackFilter::default(),
+        };
+        let matched = index.open_folder(vec![("collection.wav".into(), collection_path)], &spec);
+        assert!(
+            matches!(
+                matched.window(0, 1),
+                [rbl_index::folder::FolderEntry::Track(_)]
+            ),
+            "Explorer returns a numeric collection row when its path matches the library"
+        );
+
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let usb = device::read(rig.stick.path(), format).unwrap();
+            let track = usb.tracks.iter().find(|t| t.title == "Track 0").unwrap();
+            let row = row_dto(&device_row(rig.stick.path(), track, 0));
+            let view = DeviceView::open(vec![device_row(rig.stick.path(), track, 0)], &spec, rbl_index::SearchField::All)
+                .with_source(rig.stick.path().to_path_buf(), format_name(format).to_owned());
+            let fetched = fetch_rows(&view, 0, 1).unwrap();
+            let provenance = fetched[0].device_source.as_ref().unwrap();
+            assert_eq!(provenance.format, format_name(format));
+            assert_eq!(provenance.track_id, track.id);
+            assert_eq!(provenance.path, rig.stick.path().to_string_lossy().as_ref());
+            let audio = audio_path(rig.stick.path(), &track.path);
+            let dat =
+                rbl_anlz::Anlz::read(&audio_path(rig.stick.path(), &track.analysis_path)).unwrap();
+            let ext = rbl_anlz::Anlz::read(&rbl_anlz::sibling(
+                &audio_path(rig.stick.path(), &track.analysis_path),
+                "EXT",
+            ))
+            .unwrap();
+            assert!(audio.is_file() && dat.section(b"PCOB").is_some());
+            assert_eq!(
+                ext.cue_entries().len(),
+                2,
+                "{format:?}: USB has a hot and memory cue"
+            );
+            assert_eq!(row.id, rbl_index::folder::loose_id(&audio));
+            assert!(
+                index.row_of(&row.id).is_none(),
+                "{format:?}: device ID does not name a collection row"
+            );
+            assert!(
+                tauri::async_runtime::block_on(crate::commands::track_cues(
+                    state.clone(),
+                    row.id.clone()
+                ))
+                .unwrap()
+                .is_empty(),
+                "{format:?}: current command does not read USB cues"
+            );
+
+            let cues = tauri::async_runtime::block_on(device_track_cues(
+                rig.stick.path().to_string_lossy().into_owned(),
+                format_name(format).to_owned(),
+                track.id,
+                row.id.clone(),
+            )).unwrap();
+            assert_eq!(cues.len(), 2, "{format:?}: read both on-stick cues");
+            assert!(cues.iter().any(|cue| cue.letter == "A" && cue.position_ms == 25 && !cue.memory && cue.id.is_empty()));
+            assert!(cues.iter().any(|cue| cue.memory && cue.position_ms == 494 && cue.out_ms == 2369 && cue.id.is_empty()));
+            assert!(tauri::async_runtime::block_on(device_track_cues(
+                rig.stick.path().to_string_lossy().into_owned(),
+                format_name(format).to_owned(),
+                track.id,
+                "file:/run/media/tester/other.wav".to_owned(),
+            )).unwrap().is_empty());
+
+            let folder = index.open_folder(vec![("t0.wav".into(), audio)], &spec);
+            assert!(
+                matches!(
+                    folder.window(0, 1),
+                    [rbl_index::folder::FolderEntry::File(_)]
+                ),
+                "{format:?}: unmatched Explorer file has the same file: namespace"
+            );
+        }
+    }
+
+    #[test]
     fn a_copied_track_brings_the_sticks_bpm_key_waveform_grid_and_cues() {
         // #568: the copy came in as a bare file, its BPM, waveform, cues and
         // key lost. rekordbox gives each track it copies the device's row,
@@ -1850,7 +1996,11 @@ mod tests {
                 rbl_export::SourceTrack { id: u64::from(i), source_path: path, title: format!("Track {i}"), ..Default::default() }
             })
             .collect();
-        tracks[0].analysis = vec![("DAT".into(), rbl_anlz::AnlzBuilder::new().path("/t1.mp3").finish())];
+        tracks[0].analysis = vec![
+            ("DAT".into(), rbl_anlz::AnlzBuilder::new().path("/t1.mp3").finish()),
+            ("EXT".into(), rbl_anlz::AnlzBuilder::new().path("/t1.mp3").cue_lists(true).finish()),
+        ];
+        tracks[0].cues = Some(vec![rbl_anlz::cues::ExportCue { kind: 1, time_ms: 25, ..Default::default() }]);
         tracks[0].artwork = Some(image);
         rbl_export::export(dest.path(), &tracks, &[]).unwrap();
         let mount = dest.path();
@@ -1868,6 +2018,13 @@ mod tests {
             }
         }
 
+        // Keep the database's `.EXT` spelling while the file uses lower case.
+        let first = device::read(mount, Format::DeviceLibrary).unwrap();
+        let analysis = &first.tracks[0].analysis_path;
+        let actual_dat = DeviceAssets::on_stick(mount, analysis).unwrap();
+        let actual_ext = rbl_anlz::sibling(&actual_dat, "EXT");
+        std::fs::rename(&actual_ext, actual_ext.with_extension("ext")).unwrap();
+
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
             let library = device::read(mount, format).unwrap();
             assert!(library.tracks.iter().all(|t| t.path.starts_with("/Contents/")), "{:?}", library.tracks);
@@ -1883,6 +2040,11 @@ mod tests {
             let full = state.device_assets(&rows[0].id).unwrap();
             assert!(full.analysis_dat().is_some_and(|dat| dat.is_file()), "{format:?}: {full:?}");
             assert!(full.artwork_file().is_some_and(|art| art.is_file()), "{format:?}: {full:?}");
+            let cues = tauri::async_runtime::block_on(device_track_cues(
+                mount.to_string_lossy().into_owned(), format_name(format).to_owned(),
+                library.tracks[0].id, rows[0].id.clone(),
+            )).unwrap();
+            assert!(cues.iter().any(|cue| cue.letter == "A" && cue.position_ms == 25), "{format:?}: cue read resolves case-spelled EXT");
             assert_eq!(track_ids(mount, format, &[rows[1].id.clone()]).unwrap(), vec![library.tracks[1].id], "{format:?}");
         }
         // Anything that is not a stick's track is handed back as it came.
