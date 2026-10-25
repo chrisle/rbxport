@@ -2911,9 +2911,8 @@ function AppBody() {
    */
   const writeToDevice = useCallback(
     async (playlistId: string, device: { name: string; path: string }): Promise<string> => {
-      const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
       setSyncing(true);
-      report(`Writing ${name} to ${device.name}…`);
+      report(t("Writing to {device}…", { device: device.name }));
       try {
         const backend = await getBackend();
         const written = await backend.exportPlaylist(playlistId, device.path, stickDefaults, deleteUnlistedMusic, compatibilityFormat);
@@ -2932,7 +2931,7 @@ function AppBody() {
         setSyncing(false);
       }
     },
-    [tree, report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat, t],
+    [report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat, t],
   );
 
   const syncToDevice = useCallback(
@@ -3010,10 +3009,14 @@ function AppBody() {
   // Export Playlist / Export Folder › a stick: the tree menu lists the
   // connected sticks, so the export goes straight to the one chosen.
   const exportPlaylist = useCallback((node: TreeNode, path: string) => {
-    const device = devices.find((d) => d.path === path) ?? { name: path, path };
+    const device = devices.find((d) => d.path === path);
+    if (!device) {
+      refuse(t("That device is no longer connected."));
+      return;
+    }
     // Said in the note already; nothing else to do with it here.
     void writeToDevice(node.id, device).catch(() => undefined);
-  }, [devices, writeToDevice]);
+  }, [devices, refuse, t, writeToDevice]);
 
   // The top of the current view, kept only to write the next start's opening
   // screen. The library itself still lives entirely in Rust.
