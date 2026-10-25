@@ -1060,9 +1060,9 @@ function AppBody() {
     if (refuseLoose(id)) return;
     // Let the library-changed event update the table and Info panel only after
     // the write succeeds. A refused write must leave the previous color visible.
-    void runEdit(color === "0" ? "Color cleared." : "Color saved.", (b) =>
+    void runEdit(t(color === "0" ? "Color cleared." : "Color saved."), (b) =>
       b.edits.setTrackColor([id], color));
-  }, [refuseLoose, runEdit]);
+  }, [refuseLoose, runEdit, t]);
 
   const editTrackField = useCallback(
     (id: string, field: TrackField, value: string) => {

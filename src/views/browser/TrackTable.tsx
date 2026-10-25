@@ -38,6 +38,7 @@ import { RecordIcon } from "@/components/icons";
 import { EXTRA_COLUMNS, reorderTarget, type ColumnKey, type ColumnSpec } from "@/lib/columns";
 import { COLOR_NAMES } from "@/lib/trackFilter";
 import { COLORS } from "@/views/info/fields";
+import { useTranslation } from "@/i18n";
 import { browseListVars, browseScale, formatKey } from "@/lib/preferences";
 import { trafficLightLit, type TrafficLightReach } from "@/lib/camelot";
 import { TickIcon } from "@/components/icons";
@@ -469,6 +470,7 @@ const TrackRow = memo(function TrackRow({
   onReorderDrop: (at: { index: number; below: boolean }) => void;
   startupCache: boolean;
 }) {
+  const t = useTranslation();
   // Stops watching a press that might become a native drag. The pointer is
   // followed on the window: a quick flick leaves a row before the row sees
   // the 5px of travel, and the drag then never started.
@@ -738,14 +740,14 @@ const TrackRow = memo(function TrackRow({
                 className={`${styles.cell} ${styles.colorCell}`}
                 display={<>
                   {name ? <span className={styles.colorBall} data-color={name} aria-hidden /> : null}
-                  {name}
+                  {t(name)}
                 </>}
                 label={col.label}
                 col={col.key}
                 choices={["0", ...COLORS.map((color) => color.id)]}
-                choiceLabel={(color) => COLORS.find((entry) => entry.id === color)?.name ?? ""}
+                choiceLabel={(color) => t(color === "0" ? "No Color" : COLORS.find((entry) => entry.id === color)?.name ?? "")}
                 onCommit={(color) => onEditColor(row.id, color)}
-                onClick={selected}
+                onClick={clickToEdit && selected}
                 onEditBlocked={onEditBlocked}
                 tip={undefined}
               />
