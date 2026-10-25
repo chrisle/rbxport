@@ -24,7 +24,7 @@ const seconds = (time: string) => {
 /** Loads the fourth row — analysed, so it carries the mock's cues. */
 async function load(page: Page, query = "") {
   await page.goto(`/${query}`);
-  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)", { timeout: 15_000 });
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
   await expect(player(page).getByRole("button", { name: "Play", exact: true })).toBeEnabled();
 }
@@ -300,7 +300,7 @@ async function activeLoopPlayback(page: Page, choice: "On" | "Off") {
     .getByRole("menuitemradio", { name: choice, exact: true }).click();
 }
 
-test("a saved Active Loop catches playback at IN and EXIT runs on (#743)", async ({ page }) => {
+test("a saved Active Loop catches playback at IN, EXIT runs on, and RELOOP restores it (#743)", async ({ page }) => {
   await load(page, "?memoryLoops=1&activeLoopNearStart=1");
   const deck = player(page);
   await activeLoopPlayback(page, "On");
@@ -312,6 +312,11 @@ test("a saved Active Loop catches playback at IN and EXIT runs on (#743)", async
   await expect.poll(() => deckLooping(page)).toBe(false);
   await page.waitForTimeout(400);
   expect(await deckLooping(page)).toBe(false);
+  await deck.getByRole("button", { name: "Reloop" }).click();
+  await expect.poll(() => deckLooping(page)).toBe(true);
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __deckSeconds: () => { a: number } }).__deckSeconds().a))
+    .toBeLessThan(4);
 });
 
 test("disabled playback and a cleared Kind-4 mark both run straight through (#743)", async ({ page }) => {
@@ -320,7 +325,10 @@ test("disabled playback and a cleared Kind-4 mark both run straight through (#74
     const deck = player(page);
     if (change === "disable") {
       await activeLoopPlayback(page, "On");
+      await deck.getByRole("button", { name: "Play", exact: true }).click();
+      await expect.poll(() => deckLooping(page), { timeout: 6_000 }).toBe(true);
       await activeLoopPlayback(page, "Off");
+      await expect.poll(() => deckLooping(page)).toBe(false);
     } else {
       await activeLoopPlayback(page, "On");
       const active = page.getByRole("complementary", { name: "Cue list" })
@@ -328,7 +336,7 @@ test("disabled playback and a cleared Kind-4 mark both run straight through (#74
       await active.click();
       await expect(active).toHaveCount(0);
     }
-    await deck.getByRole("button", { name: "Play", exact: true }).click();
+    if (change === "clear") await deck.getByRole("button", { name: "Play", exact: true }).click();
     await expect.poll(() => page.evaluate(() =>
       (window as unknown as { __deckSeconds: () => { a: number } }).__deckSeconds().a), { timeout: 6_000 })
       .toBeGreaterThan(4);

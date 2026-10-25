@@ -1514,6 +1514,37 @@ fn a_saved_loop_armed_after_load_catches_playback_and_clearing_it_exits() {
 }
 
 #[test]
+fn an_automatically_engaged_saved_loop_can_exit_and_reloop() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("active-reloop-ramp.wav");
+    ramp(&path, RATE as usize * 4);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    let from = u64::from(RATE);
+    let to = from + u64::from(RATE) / 2;
+    h.engine.set_active_loop_ms(Deck::A, Some((1000.0, 1500.0)));
+    h.engine.play(Deck::A);
+    h.play_until_paced(Deck::A, from + 100);
+    let engaged = h.engine.snapshot().a;
+    assert!(engaged.looping, "the saved loop did not engage at IN");
+    assert_eq!((engaged.loop_in_frames, engaged.loop_out_frames), (from, to));
+
+    h.engine.set_looping(Deck::A, false);
+    h.play_until_paced(Deck::A, to + 2_048);
+    assert!(!h.engine.snapshot().a.looping, "EXIT did not release the loop");
+    assert!(h.position(Deck::A) > to, "EXIT did not run through OUT");
+
+    h.engine.set_looping(Deck::A, true);
+    let resumed = h.engine.snapshot().a;
+    assert!(resumed.looping, "RELOOP did not restore the loop");
+    assert_eq!((resumed.loop_in_frames, resumed.loop_out_frames), (from, to));
+    assert_eq!(h.position(Deck::A), from, "RELOOP did not return to saved IN");
+    h.play_until_paced(Deck::A, from + 100);
+    assert!(h.engine.snapshot().a.looping, "the restored loop did not keep playing");
+}
+
+#[test]
 fn the_metronome_keeps_its_volume_when_the_master_is_turned_down() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("silence.wav");
