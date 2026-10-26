@@ -1235,7 +1235,7 @@ fn a_track_can_be_pointed_at_a_moved_file() {
         )
         .unwrap();
     assert_eq!(folder, moved.to_string_lossy());
-    assert_eq!(name, "moved elsewhere.mp3");
+    assert_eq!(name, "track000.mp3", "manual Relocate leaves rekordbox's stored filename intact");
 }
 
 #[test]
@@ -1327,6 +1327,56 @@ fn link(f: &Fixture, id: &str) -> (Option<String>, Option<String>, Option<String
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap()
+}
+
+#[test]
+fn manual_relocate_keeps_filename_and_link_state_across_drive_and_usn_cases() {
+    // [OBS static] rekordbox 7.2.19 modifyContentFilePath never writes FileNameL.
+    // These cases start with ContentLink's drive bit and rb_data_status already
+    // consistent with the chosen drive and usn. Their transition rules are a
+    // separate #454 parity gap; this test guards the scoped filename repair.
+    for same_name in [true, false] {
+        for source_usn in [0_i64, 57] {
+            for mapped_drive in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let name = if same_name { "track000.mp3" } else { "chosen-other.mp3" };
+                let chosen = dir.path().join(name);
+                std::fs::write(&chosen, b"audio").unwrap();
+                let mut f = fixture();
+                if mapped_drive {
+                    f.conn().execute(
+                        "UPDATE djmdProperty SET BaseDBDrive = '/fixture/', CurrentDBDrive = '/'",
+                        [],
+                    ).unwrap();
+                    assert!(f.writer.library().drive_mapping().is_some());
+                } else {
+                    assert!(f.writer.library().drive_mapping().is_none());
+                }
+                let content_link = 0x2c0600 | if mapped_drive { 0x80 } else { 0 };
+                let data_status = if source_usn == 0 { 0 } else { 257 };
+                f.conn().execute(
+                    "UPDATE djmdContent SET FileNameL = 'track000.mp3', usn = ?1, ContentLink = ?2, rb_data_status = ?3 WHERE ID = ?4",
+                    params![source_usn, content_link, data_status, track_id(0)],
+                ).unwrap();
+                let before = link(&f, &track_id(0));
+                let (_, edit) = f.writer.relocate_manual_with_undo(&[(track_id(0), chosen.clone())]).unwrap();
+                let after = link(&f, &track_id(0));
+                assert_eq!(after.0.as_deref(), Some(chosen.to_string_lossy().as_ref()));
+                assert_eq!(after.1, before.1, "same={same_name}, usn={source_usn}, mapped={mapped_drive}");
+                assert_eq!(after.2.as_deref(), Some(rbl_db::file_id::column(&chosen).as_str()));
+                let state: (i64, i64, i64) = f.conn().query_row(
+                    "SELECT ContentLink, rb_data_status, usn FROM djmdContent WHERE ID = ?1",
+                    [track_id(0)],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                ).unwrap();
+                assert_eq!(state, (content_link, data_status, source_usn));
+                f.writer.undo_relocation(&edit).unwrap();
+                assert_eq!(link(&f, &track_id(0)), before);
+                f.writer.redo_relocation(&edit).unwrap();
+                assert_eq!(link(&f, &track_id(0)), after);
+            }
+        }
+    }
 }
 
 #[test]
