@@ -1340,6 +1340,14 @@ function AppBody() {
     a: (row: RowDto | null) => loadOnto(setPlayerTrack, row),
     b: (row: RowDto | null) => loadOnto(setPlayerTrackB, row),
   }), [loadOnto]);
+  /** The list position deck A needs to load the next row at track end. */
+  const continuation = useRef<{ position: ListPosition; trackId: string } | null>(null);
+  const openInDeckA = useCallback((row: RowDto | null, from?: ListPosition) => {
+    continuation.current = row && from && row.missing !== true
+      ? { position: from, trackId: row.id }
+      : null;
+    deckLoaders.a(row);
+  }, [deckLoaders]);
   // The tracks an analysis is drawing for a deck, so the deck shows the
   // waveform before the analysis is over.
   const drawingIds = useMemo(
@@ -1355,15 +1363,15 @@ function AppBody() {
    * frame the app draws.
    */
   const loadDroppedInto = useMemo(() => {
-    const into = (put: (row: RowDto) => void) => () => {
-      const row = draggedTracks?.row;
+    const into = (put: (row: RowDto, position: ListPosition) => void) => () => {
+      const dragged = draggedTracks;
       setDraggedTracks(null);
       // Nothing is written: which track a deck is holding is not part of the
       // library, so this is the one drop that cannot be refused.
-      if (row) put(row);
+      if (dragged) put(dragged.row, dragged.position);
     };
-    return { a: into(deckLoaders.a), b: into(deckLoaders.b) };
-  }, [draggedTracks, deckLoaders]);
+    return { a: into(openInDeckA), b: into((row) => deckLoaders.b(row)) };
+  }, [draggedTracks, deckLoaders, openInDeckA]);
 
   // Dropping a track onto a CDJ row in the LINK strip tells that player to
   // load it from us over Pro DJ Link.
@@ -1397,21 +1405,6 @@ function AppBody() {
       b: () => deckLoaders.b(selectedRow),
     };
   }, [selectedRow, deckLoaders]);
-
-  /**
-   * Where deck 1's track was opened from. Whether that list goes on into its
-   * next row is asked when the track ends, as rekordbox does, since it turns
-   * on the layout shown then: see `src/lib/continuousPlay.ts`. A load from
-   * anywhere else leaves a stale entry behind, which the track id no longer
-   * matches.
-   */
-  const continuation = useRef<{ position: ListPosition; trackId: string } | null>(null);
-  const openInDeckA = useCallback((row: RowDto | null, from?: ListPosition) => {
-    continuation.current = row && from && row.missing !== true
-      ? { position: from, trackId: row.id }
-      : null;
-    deckLoaders.a(row);
-  }, [deckLoaders]);
 
   /**
    * Loads the row after (or before) deck 1's track in the list it came

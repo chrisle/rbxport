@@ -21,13 +21,23 @@ const play = (page: Page, name = "Play") =>
     .or(page.getByRole("group", { name: "Deck A transport" }))
     .getByRole("button", { name, exact: true });
 
-/** Puts the head a breath before the end, then presses PLAY. */
-async function playOutTheEnd(page: Page) {
+/** Puts the head a breath before the end. */
+async function seekNearEnd(page: Page) {
   const overview = await player(page).getByTestId("player-overview")
     .or(player(page).getByTestId("simple-player-overview")).boundingBox();
   if (!overview) throw new Error("no overview");
   await page.mouse.click(overview.x + overview.width - 1, overview.y + overview.height / 2);
+}
+
+/** Starts the loaded deck, then puts the head a breath before the end. */
+async function playOutTheEnd(page: Page) {
   await play(page).click();
+  const progress = player(page).getByTestId("player-overview")
+    .or(player(page).getByTestId("simple-player-overview"));
+  // The title and transport can update before the async deck load finishes.
+  // A moving head proves the engine is playing before the seek.
+  await expect.poll(async () => Number(await progress.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+  await seekNearEnd(page);
 }
 
 test("the next row of the playlist loads and plays when the track ends", async ({ page }) => {
@@ -44,6 +54,28 @@ test("the next row of the playlist loads and plays when the track ends", async (
   await expect(deck.getByTestId("player-title")).toHaveText(second, { timeout: 10_000 });
   await expect(play(page, "Pause")).toBeVisible();
 });
+
+for (const layout of ["1 PLAYER", "SIMPLE PLAYER"] as const) {
+  test(`a selected group dropped on ${layout} continues after its first track`, async ({ page }) => {
+    await openPlaylist(page);
+    await page.getByRole("button", { name: "Layout" }).click();
+    await page.getByRole("menuitemradio", { name: layout }).click();
+    const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+    const first = await titles(page).nth(0).innerText();
+    const second = await titles(page).nth(1).innerText();
+    await rows.nth(0).click();
+    await rows.nth(1).click({ modifiers: ["Shift"] });
+    await expect(page.getByText("Selected: 2 Tracks")).toBeVisible();
+    const deck = player(page);
+    await rows.nth(1).dragTo(deck);
+    const deckTitle = layout === "1 PLAYER" ? deck.getByTestId("player-title") : deck.getByTestId("simple-player-title");
+    await expect(deckTitle).toHaveText(first);
+    await playOutTheEnd(page);
+
+    await expect(deckTitle).toHaveText(second, { timeout: 10_000 });
+    await expect(play(page, "Pause")).toBeVisible();
+  });
+}
 
 test("the last row goes round to the first", async ({ page }) => {
   await openPlaylist(page);
