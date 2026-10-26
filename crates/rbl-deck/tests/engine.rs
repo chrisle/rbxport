@@ -1489,6 +1489,108 @@ fn a_loop_rounds_at_its_out_point_with_no_gap_and_exit_plays_on() {
 }
 
 #[test]
+fn moving_a_loop_keeps_the_engine_head_and_audio_in_the_new_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    ramp(&path, RATE as usize * 6);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.set_loop_ms(Deck::A, 1_000.0, 2_000.0);
+    h.engine.seek_ms(Deck::A, 1_375.0);
+    h.engine.move_loop_ms(Deck::A, 3_000.0, 4_000.0, 2_000.0, &[], 0.0);
+    let snap = h.engine.snapshot().a;
+    assert_eq!(snap.loop_in_frames, u64::from(RATE) * 3);
+    assert_eq!(snap.loop_out_frames, u64::from(RATE) * 4);
+    assert!(snap.looping);
+    assert_eq!(snap.position_frames, u64::from(RATE) * 27 / 8);
+    h.engine.play(Deck::A);
+    let out = h.play_until_paced(Deck::A, snap.position_frames + 4_096);
+    assert!(!out.is_empty(), "the moved loop did not produce audio");
+    let heard: Vec<f32> = out.into_iter().skip(4_096).filter(|s| *s > 0.0).collect();
+    assert!(!heard.is_empty(), "the moved head stayed silent");
+    assert!(
+        heard.iter().any(|s| *s > 0.73 && *s < 0.87),
+        "audio never reached the moved 3–4 second loop"
+    );
+    assert!(h.position(Deck::A) >= snap.loop_in_frames);
+    assert!(h.position(Deck::A) < snap.loop_out_frames);
+}
+
+#[test]
+fn moving_a_loop_maps_the_engine_head_across_a_tempo_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    ramp(&path, RATE as usize * 20);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    let grid: Vec<f64> = (0..45)
+        .map(|i| {
+            if i <= 24 {
+                f64::from(i) * 500.0
+            } else {
+                12_000.0 + f64::from(i - 24) * 400.0
+            }
+        })
+        .collect();
+    h.engine.set_loop_ms(Deck::A, 10_000.0, 12_000.0);
+    h.engine.seek_ms(Deck::A, 10_750.0);
+    // The supplied time offset comes from an earlier UI reading. The engine
+    // must use its own current head and the grid, not that stale offset.
+    h.engine.move_loop_ms(Deck::A, 12_000.0, 13_600.0, 1_800.0, &grid, 4.0);
+    let snap = h.engine.snapshot().a;
+    assert_eq!(snap.loop_in_frames, u64::from(RATE) * 12);
+    assert_eq!(snap.loop_out_frames, u64::from(RATE) * 68 / 5);
+    assert_eq!(snap.position_frames, u64::from(RATE) * 63 / 5);
+    h.engine.move_loop_ms(Deck::A, 10_000.0, 12_000.0, -1_800.0, &grid, -4.0);
+    assert_eq!(h.engine.snapshot().a.position_frames, u64::from(RATE) * 43 / 4);
+}
+
+#[test]
+fn rejected_loop_moves_preserve_bounds_active_state_and_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    ramp(&path, RATE as usize * 6);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.set_loop_ms(Deck::A, 2_000.0, 3_000.0);
+    h.engine.seek_ms(Deck::A, 2_375.0);
+    let before = h.engine.snapshot().a;
+    h.engine.move_loop_ms(Deck::A, -1_000.0, 0.0, -3_000.0, &[], -6.0);
+    let after_start = h.engine.snapshot().a;
+    assert_eq!(after_start.loop_in_frames, before.loop_in_frames);
+    assert_eq!(after_start.loop_out_frames, before.loop_out_frames);
+    assert_eq!(after_start.looping, before.looping);
+    assert_eq!(after_start.position_frames, before.position_frames);
+    h.engine.move_loop_ms(Deck::A, 5_500.0, 6_500.0, 3_500.0, &[], 7.0);
+    let after_end = h.engine.snapshot().a;
+    assert_eq!(after_end.loop_in_frames, before.loop_in_frames);
+    assert_eq!(after_end.loop_out_frames, before.loop_out_frames);
+    assert_eq!(after_end.looping, before.looping);
+    assert_eq!(after_end.position_frames, before.position_frames);
+}
+
+#[test]
+fn grid_move_uses_the_engine_head_across_a_tempo_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    ramp(&path, RATE as usize * 20);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    let grid: Vec<f64> = (0..45)
+        .map(|i| if i <= 24 { f64::from(i) * 500.0 } else { 12_000.0 + f64::from(i - 24) * 400.0 })
+        .collect();
+    // The UI sampled 10.75 s, but audio advanced before its command arrived.
+    h.engine.seek_ms(Deck::A, 11_750.0);
+    h.engine.move_grid_beats(Deck::A, &grid, 4.0);
+    assert_eq!(h.position(Deck::A), u64::from(RATE) * 67 / 5);
+    assert!(!h.engine.snapshot().a.looping);
+}
+
+#[test]
 fn the_metronome_keeps_its_volume_when_the_master_is_turned_down() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("silence.wav");
