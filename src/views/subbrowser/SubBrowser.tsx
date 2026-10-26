@@ -26,6 +26,7 @@
  * the main list's rows; the two share nothing but the library.
  */
 import type { TrackSearchField } from "@/lib/search";
+import type { ArtworkMode } from "@/lib/session";
 
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -81,6 +82,14 @@ export interface SubBrowserProps {
   onTreeWidthChange: (width: number) => void;
   tree: SubTreeProps;
   list: SubListProps;
+  /**
+   * Its own artwork display pattern and the two buttons for it, which
+   * rekordbox's sub-browser header has after the list's name
+   * (`SubTrackListHeader::resized` places them before the search box)
+   * [OBS static, rekordbox 7.2.19].
+   */
+  artworkMode?: ArtworkMode;
+  onArtworkMode?: (mode: ArtworkMode) => void;
 }
 
 /**
@@ -172,6 +181,7 @@ function useSplitterDrag(width: number, sign: 1 | -1, onChange: (width: number) 
 
 export const SubBrowser = memo(function SubBrowser({
   nodes, libraryGeneration, width, treeWidth, onWidthChange, onTreeWidthChange, tree, list,
+  artworkMode = "partial", onArtworkMode,
 }: SubBrowserProps) {
   const self = useRef<HTMLElement>(null);
   // Its own selection, deliberately not shared with the main browser. Held as
@@ -196,7 +206,8 @@ export const SubBrowser = memo(function SubBrowser({
   }, [reportSelection]);
   // Its own columns too: a sub-browser is usually kept narrow, and forcing it
   // to share the main table's widths would make it useless.
-  const cols = useColumns("subBrowser");
+  // And one per artwork mode, as rekordbox keeps `-sub-FullArtwork` apart.
+  const cols = useColumns("subBrowser", artworkMode);
 
   const { keyDisplay, keySort } = usePreferences().view;
   const spec: ViewSpec = useMemo(
@@ -310,6 +321,8 @@ export const SubBrowser = memo(function SubBrowser({
         }
         onRenumber={selected?.kind === "playlist" ? reorderPlaylist : undefined}
         subBrowser
+        artworkMode={artworkMode}
+        {...(onArtworkMode ? { onArtworkMode } : {})}
         onSelectedTracks={onSelectedTracks}
         onAnalyse={analyseSelection}
       />
