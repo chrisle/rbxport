@@ -7,7 +7,7 @@
 
 mod common;
 
-use rbl_export::{export, verify, Manifest, SourcePlaylist, SourceTrack};
+use rbl_export::{export, verify, ExportError, ExportOptions, Manifest, SourcePlaylist, SourceTrack};
 
 /// Writes a dummy audio file and returns a track that points at it.
 fn track(dir: &std::path::Path, id: u64, title: &str, artist: &str) -> SourceTrack {
@@ -76,6 +76,38 @@ fn a_second_export_of_the_same_tracks_copies_nothing() {
     assert!(check.is_ok());
     assert_eq!(check.tracks, 2);
     assert_eq!(check.playlist_entries, 2);
+}
+
+#[test]
+fn adding_analysis_after_an_export_without_it_completes_publication() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = common::stick();
+    let mut tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
+    let analysis = std::mem::take(&mut tracks[0].analysis);
+    export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
+    assert!(Manifest::load(dest.path()).unwrap().tracks[0].anlz_dir.is_empty());
+
+    tracks[0].analysis = analysis;
+    let before = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let stop = std::cell::Cell::new(false);
+    let cancelled = rbl_export::export_cancellable(
+        dest.path(), &tracks, &one_list(&tracks), &[], &ExportOptions::default(),
+        &mut |progress| { if progress.stage == "database" { stop.set(true); } }, &|| stop.get(),
+    );
+    assert!(matches!(cancelled, Err(ExportError::Cancelled)));
+    assert_eq!(std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap(), before);
+    assert!(Manifest::load(dest.path()).unwrap().tracks[0].anlz_dir.is_empty());
+    assert!(!rbl_export::recovery_pending(dest.path()));
+
+    let report = export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
+    assert!(report.verified);
+    assert_eq!(report.tracks, 1);
+    let manifest = Manifest::load(dest.path()).unwrap();
+    let analysis_dir = &manifest.tracks[0].anlz_dir;
+    assert!(!analysis_dir.is_empty());
+    assert!(dest.path().join(analysis_dir.trim_start_matches('/')).join("ANLZ0000.DAT").is_file());
+    assert!(verify(dest.path()).unwrap().is_ok());
+    assert!(!rbl_export::recovery_pending(dest.path()));
 }
 
 #[test]
