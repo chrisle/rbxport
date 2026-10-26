@@ -1772,5 +1772,9 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "Tilføj \"Mit mærke\" til \"Kommentarer\"",
   "This operation can take few minutes.": "Denne operation kan vare længe.",
-  "Please wait for a while": "Vent venligst"
+  "Please wait for a while": "Vent venligst",
+  "Don't copy": "Kopiér ikke",
+  "If any track is missing from your collection, the playlist is not imported.": "Hvis et nummer mangler i din samling, importeres playlisten ikke.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Kun numre, der allerede findes i din samling, importeres. Numre uden match udelades; hvis ingen matcher, oprettes der ingen playliste.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Når der mangler numre, skal du vælge, om de skal kopieres, og hvor de skal gemmes. Annullering stopper importen."
 }

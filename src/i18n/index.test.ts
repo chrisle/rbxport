@@ -37,6 +37,22 @@ describe("localization", () => {
     }
   });
 
+  it("localizes the device playlist import choices in every non-English catalog", async () => {
+    const playlistChoices = [
+      "Don't copy",
+      "If any track is missing from your collection, the playlist is not imported.",
+      "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.",
+      "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.",
+    ];
+    for (const locale of LOCALES.filter((value) => value !== "en")) {
+      const catalog = (await import(`../../public/locales/${locale}.json`)).default as Catalog;
+      for (const source of playlistChoices) {
+        expect(catalog[source], `${locale}: ${source}`).toBeTruthy();
+        expect(catalog[source], `${locale}: ${source}`).not.toBe(source);
+      }
+    }
+  });
+
   it("never shows a blank string for a non-blank one", async () => {
     // translate() shows "" verbatim; rekordbox's own .lang files leave some
     // sentences blank (the device import copy question, #248), so a copied

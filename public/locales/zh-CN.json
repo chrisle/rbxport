@@ -1781,5 +1781,9 @@
   "Playlist cannot be edited or deleted while searching.": "搜索时无法编辑或删除播放列表。",
   "Add \"My Tag\" to the \"Comments\"": "将“我的标签”添加到“备注”中",
   "This operation can take few minutes.": "此操作可能会花点时间。",
-  "Please wait for a while": "请稍等"
+  "Please wait for a while": "请稍等",
+  "Don't copy": "不复制",
+  "If any track is missing from your collection, the playlist is not imported.": "如果收藏中缺少任何曲目，则不会导入播放列表。",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "仅导入收藏中已有的曲目。未匹配的曲目会被跳过；如果没有任何曲目匹配，则不会创建播放列表。",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "如果有缺失的曲目，请选择是否复制以及保存位置。取消将停止导入。"
 }

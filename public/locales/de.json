@@ -1775,5 +1775,9 @@
   "Playlist cannot be edited or deleted while searching.": "Die Wiedergabeliste kann beim Suchen nicht bearbeitet oder gelöscht werden.",
   "Add \"My Tag\" to the \"Comments\"": "Den \"Kommentaren\" \"My Tag\" hinzufügen",
   "This operation can take few minutes.": "Dieser Vorgang kann längere Zeit dauern.",
-  "Please wait for a while": "Bitte warten"
+  "Please wait for a while": "Bitte warten",
+  "Don't copy": "Nicht kopieren",
+  "If any track is missing from your collection, the playlist is not imported.": "Wenn ein Titel in Ihrer Sammlung fehlt, wird die Wiedergabeliste nicht importiert.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Nur Titel, die bereits in Ihrer Sammlung vorhanden sind, werden importiert. Nicht zugeordnete Titel werden ausgelassen; wenn keiner zugeordnet ist, wird keine Wiedergabeliste erstellt.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Wenn Titel fehlen, wählen Sie, ob sie kopiert und wo sie gespeichert werden sollen. Abbrechen beendet den Import."
 }

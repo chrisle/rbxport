@@ -1780,5 +1780,9 @@
   "Playlist cannot be edited or deleted while searching.": "La lista de reproducción no puede editarse ni eliminarse durante la búsqueda.",
   "Add \"My Tag\" to the \"Comments\"": "Añadir \"Mi etiqueta\" a \"Comentarios\"",
   "This operation can take few minutes.": "Esta operación puede tardar mucho tiempo.",
-  "Please wait for a while": "Espere por favor"
+  "Please wait for a while": "Espere por favor",
+  "Don't copy": "No copiar",
+  "If any track is missing from your collection, the playlist is not imported.": "Si falta alguna pista en tu colección, la lista de reproducción no se importa.",
+  "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Solo se importan las pistas que ya están en tu colección. Se omiten las pistas sin coincidencia; si ninguna coincide, no se crea ninguna lista de reproducción.",
+  "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Si faltan pistas, elige si quieres copiarlas y dónde guardarlas. Cancelar detiene la importación."
 }
