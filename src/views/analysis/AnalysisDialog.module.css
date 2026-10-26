@@ -65,3 +65,10 @@
   .modeBlurb { margin-left: 98px; }
   .field { grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
 }
+
+.stageOrder { padding-left: 24px; }
+.stageOrder li { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.stageOrder li span { flex: 1; }
+.stageOrder button { color: inherit; background: var(--c-raised); border: 1px solid var(--c-pref-button-border); cursor: pointer; }
+.stageOrder button:disabled { opacity: .4; cursor: default; }
+.stageDescription { margin: 2px 0 8px 24px; color: var(--c-text-dim); }

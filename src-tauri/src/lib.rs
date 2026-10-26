@@ -15,6 +15,8 @@ mod sentry;
 #[cfg(test)]
 mod test_stick;
 pub mod analysis;
+mod analysis_extensions;
+mod analysis_pipeline;
 pub mod commands;
 mod usb_import;
 pub mod cues;
@@ -551,6 +553,7 @@ pub fn run() {
             commands::track_waveform,
             commands::track_pcm_waveform,
             analysis::analyse_track,
+            analysis::analysis_stages,
             analysis::edit_phrase,
             commands::reload_library,
             // Editing. Every one of these is refused while rekordbox is

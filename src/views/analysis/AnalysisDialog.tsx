@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { AnalysisSettings } from "@/ipc/types";
+import type { AnalysisSettings, AnalysisStageDescriptor } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
 import { BPM_RANGES, bpmRangeLimits, type AnalysisMode, type BpmRange } from "@/lib/preferences";
 import { lastAnalysisChoice, rememberAnalysisChoice } from "@/lib/analysisChoice";
+import { getBackend } from "@/ipc/client";
+import { BUILTIN_ANALYSIS_STAGES, selectedStageOrder, analysisDependencyError } from "@/lib/analysisStages";
 import styles from "./AnalysisDialog.module.css";
 
 export type AnalysisChoice = AnalysisSettings & { mode: AnalysisMode };
@@ -44,6 +46,21 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
     ...bpmRangeLimits(initialBpmRange),
     firstBeatCue: initialFirstBeatCue,
   }));
+  const [stages, setStages] = useState<AnalysisStageDescriptor[]>(BUILTIN_ANALYSIS_STAGES);
+  const [stageLoadFailed, setStageLoadFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void getBackend().then(backend => backend.analysisStages()).then(descriptors => {
+      if (active) {
+        setStages(descriptors); setStageLoadFailed(false);
+        setSettings(current => current.extensionStages !== undefined ? current : {
+          ...current,
+          extensionStages: descriptors.filter(stage => stage.defaultEnabled && !["grid", "key", "waveform"].includes(stage.id)).map(stage => stage.id),
+        });
+      }
+    }).catch(() => { if (active) setStageLoadFailed(true); });
+    return () => { active = false; };
+  }, []);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
@@ -56,13 +73,23 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
   }, []);
   const t = useTranslation();
   const update = (patch: Partial<AnalysisChoice>) => setSettings(current => ({ ...current, ...patch }));
-  const canAnalyse = settings.bpmGrid || settings.key;
+  const order = selectedStageOrder(settings, stages);
+  const dependency = analysisDependencyError(order, stages);
+  const canAnalyse = order.length > 0 && !dependency && !stageLoadFailed;
+  const move = (index: number, direction: number) => {
+    const next = [...order];
+    const current = next[index];
+    const adjacent = next[index + direction];
+    if (current === undefined || adjacent === undefined) return;
+    next[index] = adjacent; next[index + direction] = current;
+    update({ stageOrder: next });
+  };
 
   return (
     <dialog ref={dialog} className={styles.dialog} aria-labelledby="analysis-title"
       onCancel={event => { event.preventDefault(); onCancel(); }}
       onKeyDown={event => event.stopPropagation()}>
-      <form onSubmit={event => { event.preventDefault(); if (!canAnalyse) return; if (!auto) rememberAnalysisChoice(settings); onConfirm(settings); }}>
+      <form onSubmit={event => { event.preventDefault(); if (!canAnalyse) return; const chosen = { ...settings, stageOrder: order }; if (!auto) rememberAnalysisChoice(chosen); onConfirm(chosen); }}>
         <h2 id="analysis-title" className={styles.title}>{t("Analysis Setting")}</h2>
         {auto ? null : (
           <p className={styles.selection}>{count} {count === 1 ? t("track selected") : t("tracks selected")}</p>
@@ -102,6 +129,30 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
             <input type="checkbox" checked={settings.key} onChange={event => update({ key: event.target.checked })} />
             {t("KEY")}
           </label>
+          {stages.filter(stage => !["grid", "key", "waveform"].includes(stage.id)).map(stage => (
+            <div key={stage.id}>
+              <label className={styles.check}>
+                <input type="checkbox" checked={settings.extensionStages?.includes(stage.id) ?? false}
+                  onChange={event => update({ extensionStages: event.target.checked ? [...(settings.extensionStages ?? []), stage.id] : (settings.extensionStages ?? []).filter(id => id !== stage.id) })} />
+                {t(stage.label)}
+              </label>
+              {stage.description && <p className={styles.stageDescription}>{t(stage.description)}</p>}
+            </div>
+          ))}
+          <h3>{t("Analysis order")}</h3>
+          <ol className={styles.stageOrder}>
+            {order.map((id, index) => {
+              const stage = stages.find(stage => stage.id === id);
+              const label = stage?.label ?? id;
+              return <li key={id}>
+                <span>{t(label)}</span>
+                <button type="button" disabled={index === 0} aria-label={t("Move {stage} up", { stage: t(label) })} onClick={() => move(index, -1)}>↑</button>
+                <button type="button" disabled={index === order.length - 1} aria-label={t("Move {stage} down", { stage: t(label) })} onClick={() => move(index, 1)}>↓</button>
+              </li>;
+            })}
+          </ol>
+          {dependency && <p role="alert">{t("{stage} requires {requirement} earlier in the analysis order.", { stage: t(dependency.stage), requirement: t(dependency.requirement) })}</p>}
+          {stageLoadFailed && <p role="alert">{t("Analysis options could not be loaded. Close this dialog and try again.")}</p>}
         </div>
         {auto ? (
           <p className={styles.note}>{t("Auto Analysis is starting.")}</p>

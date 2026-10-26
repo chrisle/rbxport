@@ -7,7 +7,7 @@
 import { detectPlatform } from "@/lib/shortcuts";
 import { confirmHandler } from "./confirmHost";
 import type {
-  AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, ConfirmReplace, Cue, SyncEstimate, DeckEvent, Device, DeviceLibrary,
+  AnalysisStageDescriptor, AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, ConfirmReplace, Cue, SyncEstimate, DeckEvent, Device, DeviceLibrary,
   DevicePlaylistEditResult, DevicePlaylistImportPlan, DevicePlaylistImportResult, DeviceSettings, DeviceSyncState,
   Diagnostics, Duplicates, LogPage, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
   UpdateProgress, UpdateReady, XmlImportReport,
@@ -209,6 +209,7 @@ async function realBackend(): Promise<Backend> {
       if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
+    analysisStages: () => invoke<AnalysisStageDescriptor[]>("analysis_stages"),
     analyseTrack: (trackId, mode = "rbxport", settings, keyTag, drawing) =>
       invoke<AnalysisResult>("analyse_track", { trackId, mode, settings, keyTag: keyTag ?? null, drawing: drawing ?? false }),
     trackBeats: async (trackId) => {

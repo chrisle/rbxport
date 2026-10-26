@@ -24,6 +24,10 @@ export function lastAnalysisChoice(): Partial<RememberedAnalysisChoice> {
       out.minBpm = saved.minBpm;
       out.maxBpm = saved.maxBpm;
     }
+    for (const key of ["stageOrder", "extensionStages"] as const) {
+      const value = saved[key];
+      if (Array.isArray(value) && value.every(item => typeof item === "string") && new Set(value).size === value.length) out[key] = value;
+    }
     return out;
   } catch {
     return {};

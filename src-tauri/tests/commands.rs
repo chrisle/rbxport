@@ -2592,7 +2592,7 @@ fn analysis_writes_the_detected_key_into_the_file_in_the_display_notation() {
             s.app.state::<Arc<rbxport_lib::grid::GridEditor>>(),
             id.clone(),
             None,
-            Some(key_only),
+            Some(key_only.clone()),
             notation.map(|n| serde_json::from_str(&format!("\"{n}\"")).unwrap()),
             None,
         ))

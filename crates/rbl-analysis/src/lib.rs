@@ -16,6 +16,7 @@
     reason = "DSP converts freely between sample counts and float time; every such cast is bounded by the buffer length"
 )]
 
+pub mod stages;
 pub mod attack;
 pub mod downbeat;
 pub mod key;
@@ -138,7 +139,40 @@ pub fn analyse_with(samples: &[f32], sample_rate: u32, options: AnalysisOptions)
         }
     });
     let Front { onsets, kicks, attacks, frames, waveform, level: (peak, rms), key } = front;
-    let mut tempo = tempo::detect_tempo_with(&onsets, kicks.as_ref(), attacks.as_ref(), options.tempo);
+    let (tempo, grid) = finish_grid(samples, sample_rate, &options, &onsets, kicks.as_ref(), attacks.as_ref(), &frames);
+    // The key rules may read the bass on or between beats and after phrase
+    // starts; when one does, the key waits for the grid and is found here.
+    let key = match key {
+        KeyFront::Found(report) => report,
+        KeyFront::NeedsGrid => {
+            let key_grid = key::KeyGrid {
+                beats: tempo.beats.iter().map(|b| (f64::from(b.time_ms) / 1000.0, b.beat_number)).collect(),
+                phrase_starts: grid.phrase_starts.clone(),
+            };
+            key::detect_key_with(samples, sample_rate, options.key, key::DEFAULT_RULES, &key_grid)
+        }
+    };
+    let key = key.map(|report| report.key);
+
+    Analysis { tempo, key, waveform, peak, rms }
+}
+
+
+/// Run only BPM/beat/downbeat analysis, without key or waveform stages.
+pub fn analyse_grid_with(samples: &[f32], sample_rate: u32, options: AnalysisOptions) -> TempoResult {
+    let (onsets, kicks, attacks, frames) = std::thread::scope(|scope| {
+        let onsets=scope.spawn(||onset::onset_envelope(samples,sample_rate));
+        let kicks=scope.spawn(||onset::onset_envelope_band(samples,sample_rate,onset::Band::LOW));
+        let attacks=scope.spawn(||match options.tempo.placement {tempo::Placement::Attack=>Some(attack::AttackMap::new(samples,sample_rate,options.attacks)),tempo::Placement::Envelope=>None});
+        let frames=scope.spawn(||downbeat::band_frames(samples,sample_rate));
+        (onsets.join().unwrap_or_else(|_|onset::OnsetEnvelope{values:Vec::new(),rate:0.,origin_secs:0.}),kicks.join().ok(),attacks.join().ok().flatten(),frames.join().unwrap_or_default())
+    });
+    finish_grid(samples,sample_rate,&options,&onsets,kicks.as_ref(),attacks.as_ref(),&frames).0
+}
+
+#[allow(clippy::too_many_arguments, reason="Shared grid finalization keeps the default and ordered runners identical")]
+fn finish_grid(samples:&[f32],sample_rate:u32,options:&AnalysisOptions,onsets:&onset::OnsetEnvelope,kicks:Option<&onset::OnsetEnvelope>,attacks:Option<&attack::AttackMap>,frames:&[[f64;downbeat::BANDS]]) -> (TempoResult,downbeat::GridPhase) {
+    let mut tempo = tempo::detect_tempo_with(onsets, kicks, attacks, options.tempo);
     // The grid comes back numbered from its first beat, and possibly on the
     // off-beat. The downbeat stage looks at the music's structure and says
     // both; the grid is moved if it has to be and renumbered so that 1 is
@@ -150,7 +184,7 @@ pub fn analyse_with(samples: &[f32], sample_rate: u32, options: AnalysisOptions)
     // judge: on the golden playlist it tells the beat from the midpoint on
     // 153 of 155 rekordbox grids, the kick detector on 150 — the misses
     // being off-beat claps with a sharper transient than the kick.
-    let grid = downbeat::grid_phase_from(&frames, sample_rate, &beat_secs);
+    let grid = downbeat::grid_phase_from(frames, sample_rate, &beat_secs);
     if grid.half_beat_off {
         for segment in &mut tempo.segments {
             *segment = segment.shifted_half_beat();
@@ -169,27 +203,13 @@ pub fn analyse_with(samples: &[f32], sample_rate: u32, options: AnalysisOptions)
     let downbeat_secs = match tempo.segments.first() {
         Some(first) if tempo.segments.len() > 1 && first.beats() >= downbeat::MIN_BEATS_FOR_OWN_PHASE => {
             let own: Vec<f64> = tempo::beats_of(&tempo.segments[..1], 0).iter().map(|b| f64::from(b.time_ms) / 1000.0).collect();
-            downbeat::grid_phase_from(&frames, sample_rate, &own).downbeat_secs
+            downbeat::grid_phase_from(frames, sample_rate, &own).downbeat_secs
         }
         _ => grid.downbeat_secs,
     };
     tempo.beats = tempo::beats_of(&tempo.segments, phase_for(&tempo.segments, downbeat_secs));
     anchor_file_start(&mut tempo, samples, sample_rate, downbeat_secs);
-    // The key rules may read the bass on or between beats and after phrase
-    // starts; when one does, the key waits for the grid and is found here.
-    let key = match key {
-        KeyFront::Found(report) => report,
-        KeyFront::NeedsGrid => {
-            let key_grid = key::KeyGrid {
-                beats: tempo.beats.iter().map(|b| (f64::from(b.time_ms) / 1000.0, b.beat_number)).collect(),
-                phrase_starts: grid.phrase_starts.clone(),
-            };
-            key::detect_key_with(samples, sample_rate, options.key, key::DEFAULT_RULES, &key_grid)
-        }
-    };
-    let key = key.map(|report| report.key);
-
-    Analysis { tempo, key, waveform, peak, rms }
+    (tempo,grid)
 }
 
 /// What the front stages produce from the audio alone.

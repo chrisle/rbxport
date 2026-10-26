@@ -9,6 +9,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 | --- | --- |
 | [Getting started](development/getting-started.md) | Setting up a checkout and choosing a safe run mode. |
 | [Architecture](development/architecture.md) | Finding the owner of a feature or tracing a request. |
+| [Analysis stages](development/analysis-stages.md) | Registering analysis extensions and controlling execution order. |
 | [Conventions](development/conventions.md) | Writing code that fits the project. |
 | [Product decisions](development/product-decisions.md) | Checking whether a feature fits RBXport's focused scope. |
 | [Testing](development/testing.md) | Choosing checks and interpreting their results. |

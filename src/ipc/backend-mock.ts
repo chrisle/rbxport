@@ -2995,6 +2995,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // Analysis is real work in the app; here it just answers, so the queue's
     // sequencing and progress can be driven end to end without audio.
+    analysisStages: () => wait([
+      { id: "grid", label: "BPM / Grid", description: "", requires: ["core.audio"], produces: ["core.beat_grid"], defaultEnabled: true, requiresFullTrack: false, revision: "1" },
+      { id: "key", label: "KEY", description: "", requires: ["core.audio"], produces: ["core.key"], defaultEnabled: true, requiresFullTrack: false, revision: "1" },
+      { id: "waveform", label: "Waveform", description: "", requires: ["core.audio"], produces: ["core.waveform"], defaultEnabled: true, requiresFullTrack: false, revision: "1" },
+    ]),
     analyseTrack: (trackId, _mode, settings, _keyTag, drawing) => {
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];

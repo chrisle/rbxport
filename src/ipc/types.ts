@@ -426,6 +426,7 @@ export interface Backend {
    * decodes, and `onAnalysisProgress` says when there is more of it. That
    * costs a second waveform pass, so a batch leaves it off.
    */
+  analysisStages(): Promise<AnalysisStageDescriptor[]>;
   analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport", settings?: AnalysisSettings, keyTag?: KeyDisplay, drawing?: boolean): Promise<AnalysisResult>;
 
   /**
@@ -1732,6 +1733,17 @@ export interface ExportProgress {
 }
 
 /** Results selected for replacement, and timing options for this batch. */
+export interface AnalysisStageDescriptor {
+  id: string;
+  label: string;
+  description: string;
+  requires: string[];
+  produces: string[];
+  defaultEnabled: boolean;
+  requiresFullTrack: boolean;
+  revision: string;
+}
+
 export interface AnalysisSettings {
   bpmGrid: boolean;
   key: boolean;
@@ -1740,10 +1752,16 @@ export interface AnalysisSettings {
   maxBpm: number;
   /** Add a memory cue on the new grid's first beat unless one is there. */
   firstBeatCue: boolean;
+  /** Explicit selected stage order; omitted callers retain the legacy preset. */
+  stageOrder?: string[];
+  extensionStages?: string[];
+  stageSettings?: Record<string, unknown>;
 }
 
 /** What analysing one track found, now written to the library. */
 export interface AnalysisResult {
+  analysisArtifacts?: Record<string, unknown>;
+  completedStages?: string[];
   trackId: string;
   /** Key-only analysis preserves the existing analysed marker. */
   analysed?: number;
