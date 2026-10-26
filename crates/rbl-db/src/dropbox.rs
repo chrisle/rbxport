@@ -97,12 +97,23 @@ fn is_symlink(path: &Path) -> bool {
         return false;
     }
     let trim = |p: &Path| p.to_string_lossy().trim_end_matches(['/', '\\']).to_owned();
-    let (real, path) = (trim(&real), trim(path));
+    let (real, path) = (strip_verbatim_prefix(&trim(&real)), strip_verbatim_prefix(&trim(path)));
     if cfg!(any(target_os = "macos", windows)) {
         real.to_lowercase() != path.to_lowercase()
     } else {
         real != path
     }
+}
+
+/// `path` without the `\\?\` that `std::fs::canonicalize` puts on a Windows
+/// path, so it reads as the plain path the user, rekordbox and Dropbox write.
+/// The UNC form `\\?\UNC\server\share` goes back to `\\server\share`; any
+/// other path is returned as it came.
+fn strip_verbatim_prefix(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    path.strip_prefix(r"\\?\").unwrap_or(path).to_owned()
 }
 
 /// This machine's Dropbox folder as rekordbox would use it: from
@@ -169,6 +180,30 @@ mod tests {
         // No setting and no Dropbox app: no folder.
         assert_eq!(check_local_public_path("", &DropboxInfo::default()), None);
         assert_eq!(check_local_public_path(gone, &DropboxInfo::default()), None);
+    }
+
+    /// `std::fs::canonicalize` answers `\\?\C:\…` on Windows, so a real
+    /// folder must not read as a symlink just because that prefix differs
+    /// from the plain path the setting holds (a team Dropbox on `H:`, for
+    /// one, was left with no Dropbox folder at all).
+    #[cfg(windows)]
+    #[test]
+    fn a_plain_windows_folder_is_not_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().canonicalize().unwrap();
+        let plain = real.to_string_lossy().trim_start_matches(r"\\?\").to_owned();
+        assert!(Path::new(&plain).is_dir());
+        assert!(!is_symlink(Path::new(&plain)));
+        // So an existing setting is kept, as on every other platform.
+        assert_eq!(check_local_public_path(&plain, &DropboxInfo::default()), Some(plain));
+    }
+
+    #[test]
+    fn the_verbatim_prefix_is_removed_and_nothing_else_is() {
+        assert_eq!(strip_verbatim_prefix(r"\\?\H:\Team Dropbox"), r"H:\Team Dropbox");
+        assert_eq!(strip_verbatim_prefix(r"\\?\UNC\server\share\Dropbox"), r"\\server\share\Dropbox");
+        assert_eq!(strip_verbatim_prefix(r"H:\Team Dropbox"), r"H:\Team Dropbox");
+        assert_eq!(strip_verbatim_prefix("/Users/dj/Dropbox"), "/Users/dj/Dropbox");
     }
 
     #[cfg(unix)]
