@@ -129,8 +129,9 @@ The shell keeps the states (`set_menu_enabled`).
 Every deck command is registered by `Player` for its deck, and its key
 handler only checks the deck and calls `runCommand`. A command on the
 deck's track does not apply while the deck is empty (`playback.idle`), as
-before. Jump, Load on Player 1 and 2, the panel tabs and the metronome sound
-apply to an empty deck too.
+before. Quantize is a deck setting, so Q and its button both apply before a
+track loads. Jump, Load on Player 1 and 2, the panel tabs and the metronome
+sound apply to an empty deck too.
 
 ### Keys that are not in the key map
 
