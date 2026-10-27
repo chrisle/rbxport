@@ -1320,13 +1320,16 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         return { undo: () => apply(before), redo: () => apply(comment) };
       }),
     setTrackColor: (tracks, color) =>
-      recordTrackEdits(tracks, (track) => {
+      readFlagFromUrl("refuseColorWrite") ? refuse("That could not be saved.") : recordTrackEdits(tracks, (track) => {
         const at = all.findIndex((r) => r.id === track);
         const row = all[at];
         const before = details.get(track)?.color ?? String(colors[at] ?? 0);
         const apply = (value: string | null) => {
           const numeric = value === null ? 0 : Number.parseInt(value, 10);
-          if (row) row.artworkHue = numeric * 40;
+          if (row) {
+            row.artworkHue = numeric * 40;
+            row.extra = { ...row.extra, color: numeric };
+          }
           if (at >= 0) colors[at] = numeric;
           const detail = details.get(track);
           if (detail) detail.color = value ?? "0";
