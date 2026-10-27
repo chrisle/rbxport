@@ -62,6 +62,10 @@ fn fl64(v: f64) -> Vec<u8> {
     v.to_be_bytes().to_vec()
 }
 
+fn in16(v: f64) -> Vec<u8> {
+    ((v * 32767.0) as i16).to_be_bytes().to_vec()
+}
+
 #[test]
 fn aliased_pcm_aifc_decodes_to_the_written_samples() {
     let dir = tempfile::tempdir().unwrap();
@@ -78,6 +82,36 @@ fn aliased_pcm_aifc_decodes_to_the_written_samples() {
         for (i, got) in audio.samples.iter().enumerate() {
             assert!((f64::from(*got) - sample(i)).abs() < 1e-4, "{name} sample {i}: {got}");
         }
+    }
+}
+
+#[test]
+fn mismatched_alias_width_is_rejected_before_decode_or_export() {
+    let dir = tempfile::tempdir().unwrap();
+    let cases: [([u8; 4], u16, u16, Encode); 4] = [
+        (*b"in24", 24, 16, in16),
+        (*b"in32", 32, 16, in16),
+        (*b"FL32", 32, 64, fl64),
+        (*b"FL64", 64, 32, fl32),
+    ];
+    for (code, expected_bits, bits, encode) in cases {
+        let label = String::from_utf8_lossy(&code);
+        let source = dir.path().join(format!("issue-527-{label}-{bits}.aif"));
+        aifc(&source, code, bits, encode);
+        let original = std::fs::read(&source).unwrap();
+
+        let decode_error = rbl_audio::decode_mono(&source, None).unwrap_err().to_string();
+        assert!(decode_error.contains(label.as_ref()) && decode_error.contains(&bits.to_string()), "{decode_error}");
+        assert!(decode_error.contains(&format!("requires {expected_bits}-bit")), "{decode_error}");
+
+        let inspect_error = inspect(&source).unwrap_err().to_string();
+        assert!(inspect_error.contains(label.as_ref()) && inspect_error.contains(&bits.to_string()), "{inspect_error}");
+
+        let out = dir.path().join(format!("issue-527-{label}-{bits}-out.aiff"));
+        let export_error = convert(&source, &out, Format::Aiff).unwrap_err().to_string();
+        assert!(export_error.contains(label.as_ref()) && export_error.contains(&bits.to_string()), "{export_error}");
+        assert!(!out.exists(), "invalid input must not create an export");
+        assert_eq!(std::fs::read(&source).unwrap(), original, "source is read only");
     }
 }
 
