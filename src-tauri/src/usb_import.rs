@@ -1,5 +1,5 @@
 //! USB-to-library reads. Never infer track identity from a title or USB row id.
-use std::{collections::{HashMap, HashSet}, path::{Path, PathBuf}, sync::Arc};
+use std::{collections::{HashMap, HashSet}, io::Read, path::{Path, PathBuf}, sync::Arc};
 use serde::Serialize;
 use tauri::{State, Manager};
 use crate::{commands::{announce_history, blocking, reload, write_error, wrote_outside_history}, dto::{DeviceLibraryTreeDto, DevicePlaylistNodeDto}, error::{AppError, AppResult, ErrorKind}, state::AppState};
@@ -9,6 +9,56 @@ mod ratings;
 fn err(e: impl std::fmt::Display) -> AppError {
     let detail = format!("USB import: {e}");
     AppError::new(ErrorKind::Internal, detail.clone()).with_detail(detail)
+}
+// ANLZ is rendered in memory by the parser and the journal. Refuse a single
+// oversized file before reading it, so staging also has a per-track bound.
+const MAX_IMPORT_ANLZ_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_IMPORT_STAGE_BYTES: u64 = 512 * 1024 * 1024;
+const STAGE_PREFIX: &str = "usb-import-v1-";
+const STAGE_MARKER: &str = "owner.lock";
+
+fn stage_budget_add(used: &mut u64, bytes: usize, limit: u64) -> AppResult<()> {
+    *used = used.checked_add(u64::try_from(bytes).map_err(err)?)
+        .filter(|total| *total <= limit)
+        .ok_or_else(|| err("USB import staging exceeds the 512 MiB aggregate limit"))?;
+    Ok(())
+}
+
+fn recover_stale_stages(backup_dir: &Path) -> AppResult<()> {
+    if !backup_dir.exists() { return Ok(()); }
+    let root = backup_dir.canonicalize().map_err(err)?;
+    for entry in std::fs::read_dir(backup_dir).map_err(err)? {
+        let entry = entry.map_err(err)?;
+        if !entry.file_name().to_string_lossy().starts_with(STAGE_PREFIX) { continue; }
+        let path = entry.path();
+        if !entry.file_type().map_err(err)?.is_dir() || path.canonicalize().map_err(err)?.parent() != Some(root.as_path()) { continue; }
+        let marker_path = path.join(STAGE_MARKER);
+        if !std::fs::symlink_metadata(&marker_path).is_ok_and(|m| m.file_type().is_file()) { continue; }
+        let marker = std::fs::OpenOptions::new().read(true).write(true).open(&marker_path).map_err(err)?;
+        if fs2::FileExt::try_lock_exclusive(&marker).is_err() { continue; }
+        if std::fs::read_to_string(&marker_path).map_err(err)? != "rbxport usb import stage v1" { continue; }
+        // Close the marker before removing its directory on Windows. The
+        // exclusive lock proves another importer is not using this stage.
+        drop(marker);
+        std::fs::remove_dir_all(&path).map_err(err)?;
+    }
+    Ok(())
+}
+
+fn read_import_anlz(path: &Path, stage: &str, extension: &str, id: &str) -> AppResult<rbl_anlz::Anlz> {
+    let file = std::fs::File::open(path)
+        .map_err(|e| err(format!("{stage} {extension} for track {id}: {e}")))?;
+    read_import_anlz_file(file, stage, extension, id)
+}
+
+fn read_import_anlz_file(mut file: std::fs::File, stage: &str, extension: &str, id: &str) -> AppResult<rbl_anlz::Anlz> {
+    let mut bytes = Vec::new();
+    file.by_ref().take(MAX_IMPORT_ANLZ_BYTES + 1).read_to_end(&mut bytes)
+        .map_err(|e| err(format!("{stage} {extension} for track {id}: {e}")))?;
+    if bytes.len() as u64 > MAX_IMPORT_ANLZ_BYTES {
+        return Err(err(format!("{stage} {extension} for track {id}: analysis file exceeds the 64 MiB import limit")));
+    }
+    rbl_anlz::parse(&bytes).map_err(|e| err(format!("{stage} {extension} for track {id}: {e}")))
 }
 fn within(root: &Path, relative: &str) -> AppResult<PathBuf> {
     let path = root.join(relative.trim_start_matches('/')).canonicalize().map_err(err)?;
@@ -96,6 +146,13 @@ pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Stat
 
 #[allow(clippy::fn_params_excessive_bools, reason = "the same independent choices as import_usb")]
 fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues: bool, history: bool, settings: bool, ratings: bool) -> AppResult<ImportReport> {
+    import_with_stage_budget(state, editor, root, cues, history, settings, ratings, MAX_IMPORT_STAGE_BYTES)
+}
+
+#[allow(clippy::fn_params_excessive_bools, reason = "the same independent choices as import_usb")]
+#[allow(clippy::too_many_arguments, reason = "the stage limit allows disposable budget regression tests")]
+#[allow(clippy::too_many_lines, reason = "the existing import sequence keeps its preflight and journal together")]
+fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues: bool, history: bool, settings: bool, ratings: bool, stage_limit: u64) -> AppResult<ImportReport> {
     // The stick first, the library after: an import waiting here for an
     // export to finish writing the stick must not hold the library's edit
     // gate, or every analysis and the next sync's preparation wait behind
@@ -108,6 +165,7 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
     let mut report = ImportReport::default();
     let location = state.location()?;
     crate::file_journal::recover(state.backup_dir(), &location)?;
+    recover_stale_stages(state.backup_dir())?;
     let export = rbl_devices::settings::export_root(root);
     let one_path = export.join("rekordbox/exportLibrary.db");
     let one = if one_path.exists() { Some(rbl_onelibrary::ExportLibrary::open_read_only(&one_path).map_err(err)?) } else { None };
@@ -146,7 +204,22 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         report.skipped += gone;
         // Open the guarded writer even for an empty device; read-only must not look like success.
         state.write(|_| Ok(())).map_err(write_error)?;
-        for (id, analysis) in tracks.values() {
+        // Parse every eligible ANLZ before publishing any cue/grid changes. A
+        // later malformed track must not leave earlier tracks committed.
+        // Use the library's on-disk backup volume: /tmp can be tmpfs and
+        // would turn a large import back into an unbounded memory consumer.
+        std::fs::create_dir_all(state.backup_dir()).map_err(err)?;
+        let staging = tempfile::Builder::new().prefix(STAGE_PREFIX)
+            .tempdir_in(state.backup_dir()).map_err(err)?;
+        let marker_path = staging.path().join(STAGE_MARKER);
+        std::fs::write(&marker_path, "rbxport usb import stage v1").map_err(err)?;
+        let marker = std::fs::OpenOptions::new().read(true).write(true).open(&marker_path).map_err(err)?;
+        fs2::FileExt::lock_exclusive(&marker).map_err(err)?;
+        let mut staged_bytes = 0;
+        let mut prepared = Vec::new();
+        let mut ordered: Vec<_> = tracks.values().collect();
+        ordered.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (id, analysis) in ordered {
             // Read on the open handle. Opening the library, for the lock
             // bit here and the analysis path below, derives its key again:
             // about 155 ms each, two per track, so a stick of 20,000 tracks
@@ -155,13 +228,26 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             if editor.is_locked(id) || state.read_db(|db| crate::grid::locked_in(db, id)).map_err(write_error)? { report.skipped += 1; continue; }
             if analysis.is_empty() { report.skipped += 1; continue; }
             let source = within(root, analysis)?;
-            let source_dat = rbl_anlz::Anlz::read(&source).map_err(err)?;
+            let source_dat = read_import_anlz(&source, "USB", "DAT", id)?;
+            // DAT cue sections are copied to the library even when EXT is the
+            // authoritative cue source. Validate their framing as well.
+            source_dat.strict_cue_entries().map_err(|e| err(format!("USB DAT for track {id}: {e}")))?;
             // `source` is canonical and `root` need not be (a symlinked mount),
             // so the `.EXT` is found from the relative path, not by stripping.
             let ext_relative = Path::new(analysis).with_extension("EXT");
-            let source_cues = if source.with_extension("EXT").exists() { rbl_anlz::Anlz::read(&within(root, &ext_relative.to_string_lossy())?).map_err(err)? } else { source_dat.clone() };
+            let has_source_ext = source.with_extension("EXT").exists();
+            let source_cues = if has_source_ext {
+                read_import_anlz(&within(root, &ext_relative.to_string_lossy())?, "USB", "EXT", id)?
+            } else { source_dat.clone() };
             if source_cues.section(b"PCO2").is_none() { report.skipped += 1; continue; }
-            let entries = source_cues.cue_entries();
+            let entries = source_cues.strict_cue_entries().map_err(|e| {
+                let extension = if has_source_ext { "EXT" } else { "DAT" };
+                err(format!("USB {extension} for track {id}: {e}"))
+            })?;
+            if entries.iter().any(|c| c.hot_cue > 16 || !matches!(c.kind, 1 | 2) || (c.kind == 2 && c.loop_time_ms <= c.time_ms)) {
+                let extension = if has_source_ext { "EXT" } else { "DAT" };
+                return Err(err(format!("USB {extension} for track {id}: Invalid USB cue data")));
+            }
             let beats = source_dat.beat_grid().unwrap_or_default();
             let previous_bpm = state.read_db(|db| Ok(db.connection().query_row("SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [id], |r| r.get::<_,u32>(0))?)).map_err(write_error)?;
             let bpm = beats.first().map_or(previous_bpm, |b| u32::from(b.tempo_x100));
@@ -177,7 +263,7 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             for extension in ["DAT", "EXT"] {
                 let target = target.with_extension(extension);
                 if !target.exists() { continue; }
-                let mut dest = rbl_anlz::Anlz::read(&target).map_err(err)?;
+                let mut dest = read_import_anlz(&target, "local library", extension, id)?;
                 let src = if extension == "DAT" { &source_dat } else { &source_cues };
                 differs |= !dest.sections.iter().filter(|s| s.is_cue_list()).eq(src.sections.iter().filter(|s| s.is_cue_list()));
                 if extension == "DAT" && !beats.is_empty() {
@@ -194,14 +280,37 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             }
             if files.is_empty() { report.skipped += 1; continue; }
             if !differs && !bpm_changed && database_cues_match(state, id, &entries)? { report.unchanged += 1; continue; }
-            let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, id, bpm, None, true, &files)?;
+            // Keep only paths across tracks. The private temporary directory
+            // holds validated output and cue input until every track passes.
+            let slot = prepared.len();
+            let cue_path = staging.path().join(format!("{slot}.cues"));
+            let cue_bytes = source_cues.to_bytes();
+            stage_budget_add(&mut staged_bytes, cue_bytes.len(), stage_limit)?;
+            for (_, bytes) in &files { stage_budget_add(&mut staged_bytes, bytes.len(), stage_limit)?; }
+            std::fs::write(&cue_path, cue_bytes).map_err(err)?;
+            let mut staged_files = Vec::new();
+            for (index, (target, bytes)) in files.into_iter().enumerate() {
+                let staged = staging.path().join(format!("{slot}.{index}"));
+                std::fs::write(&staged, bytes).map_err(err)?;
+                staged_files.push((target, staged));
+            }
+            prepared.push((id.clone(), cue_path, bpm, staged_files));
+        }
+        for (id, cue_path, bpm, staged_files) in prepared {
+            let entries = read_import_anlz(&cue_path, "staged USB", "cue data", &id)?
+                .strict_cue_entries().map_err(|e| err(format!("staged USB cue data for track {id}: {e}")))?;
+            let files = staged_files.into_iter().map(|(target, staged)| {
+                std::fs::read(staged).map(|bytes| (target, bytes)).map_err(err)
+            }).collect::<AppResult<Vec<_>>>()?;
+            let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, &id, bpm, None, true, &files)?;
             if let Err(e) = journal.publish() { journal.rollback()?; return Err(e); }
-            if let Err(e) = state.write(|w| w.import_usb_cues(id, &entries, bpm)) { journal.reconcile(&location)?; return Err(write_error(e)); }
+            if let Err(e) = state.write(|w| w.import_usb_cues(&id, &entries, bpm)) { journal.reconcile(&location)?; return Err(write_error(e)); }
             journal.commit()?;
-            editor.forget_history(id);
+            editor.forget_history(&id);
             report.changed.push(id.clone());
             report.tracks += 1;
         }
+        drop(marker);
     }
     if history {
         let snapshot = rbl_export::snapshot::Snapshot::read(root)
@@ -312,6 +421,363 @@ fn validate_settings(name: &str, bytes: &[u8]) -> Result<(), String> {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+    #[test]
+    fn oversized_analysis_is_rejected_before_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("ANLZ0000.DAT");
+        std::fs::File::create(&file).unwrap().set_len(MAX_IMPORT_ANLZ_BYTES + 1).unwrap();
+        let error = read_import_anlz(&file, "USB", "DAT", "123").unwrap_err().to_string();
+        assert!(error.contains("USB DAT for track 123"), "{error}");
+        assert!(error.contains("64 MiB"), "{error}");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn open_handle_is_bounded_even_if_path_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ANLZ0000.DAT");
+        let mut valid = rbl_anlz::write::AnlzBuilder::new();
+        valid.path("/original.mp3");
+        std::fs::write(&path, valid.finish()).unwrap();
+        let handle = std::fs::File::open(&path).unwrap();
+        // Renaming keeps the original handle on its inode while the path now
+        // names an oversized replacement (on platforms allowing the rename).
+        let original = dir.path().join("original.DAT");
+        std::fs::rename(&path, &original).unwrap();
+        std::fs::File::create(&path).unwrap().set_len(MAX_IMPORT_ANLZ_BYTES + 1).unwrap();
+        assert_eq!(read_import_anlz_file(handle, "USB", "DAT", "123").unwrap().path().as_deref(), Some("/original.mp3"));
+        assert!(read_import_anlz(&path, "USB", "DAT", "123").unwrap_err().to_string().contains("64 MiB"));
+    }
+    #[test]
+    fn stage_recovery_only_removes_unlocked_owned_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let backup = dir.path();
+        let stale = backup.join(format!("{STAGE_PREFIX}stale"));
+        let active = backup.join(format!("{STAGE_PREFIX}active"));
+        let lookalike = backup.join(format!("{STAGE_PREFIX}unmarked"));
+        for path in [&stale, &active, &lookalike] { std::fs::create_dir(path).unwrap(); }
+        for path in [&stale, &active] {
+            std::fs::write(path.join(STAGE_MARKER), "rbxport usb import stage v1").unwrap();
+        }
+        let live = std::fs::OpenOptions::new().read(true).write(true).open(active.join(STAGE_MARKER)).unwrap();
+        fs2::FileExt::lock_exclusive(&live).unwrap();
+        recover_stale_stages(backup).unwrap();
+        assert!(!stale.exists());
+        assert!(active.exists());
+        assert!(lookalike.exists());
+        drop(live);
+        recover_stale_stages(backup).unwrap();
+        assert!(!active.exists());
+    }
+    #[test]
+    fn aggregate_stage_limit_prevents_any_track_commit_and_cleans_up() {
+        let mut used = 0;
+        stage_budget_add(&mut used, 400, 1000).unwrap();
+        stage_budget_add(&mut used, 400, 1000).unwrap();
+        assert!(stage_budget_add(&mut used, 201, 1000).is_err());
+        assert_eq!(used, 800);
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, usb, _) = library_and_stick(dir.path());
+        let ids = [rbl_db::fixture::track_id(0), rbl_db::fixture::track_id(1)];
+        let mut targets = Vec::new();
+        for id in &ids {
+            let relative = state.write(|w| w.analysis_data_path_for(id)).unwrap();
+            state.write(|w| w.register_analysis(id, &rbl_db::write::AnalysisRegistration {
+                bpm_x100: 12000, key: None, analysis_data_path: &relative,
+            })).unwrap();
+            let target = rbl_anlz::resolve(&location.share_root, &relative);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            let mut dat = rbl_anlz::write::AnlzBuilder::new();
+            dat.path("/original.mp3").cue_lists(false);
+            std::fs::write(&target, dat.finish()).unwrap();
+            let mut ext = rbl_anlz::write::AnlzBuilder::new();
+            ext.path("/original.mp3").cue_lists(true);
+            std::fs::write(target.with_extension("EXT"), ext.finish()).unwrap();
+            targets.push(target);
+        }
+        let before = targets.iter().map(|target| (std::fs::read(target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap())).collect::<Vec<_>>();
+        let snapshot = || ids.iter().map(|id| state.read_db(|db| {
+            let track = db.connection().query_row("SELECT BPM, AnalysisUpdated, rb_local_usn FROM djmdContent WHERE ID=?1", [id],
+                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?)))?;
+            let mut q = db.connection().prepare("SELECT InMsec, OutMsec, Kind, ColorTableIndex, Comment FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0 ORDER BY InMsec")?;
+            let cues = q.query_map([id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, Option<String>>(4)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((track, cues))
+        }).unwrap()).collect::<Vec<_>>();
+        let before_db = snapshot();
+        // The first track's complete staged payload is the boundary: it must
+        // fit, while the next track must cross the aggregate limit.
+        let first_stick = usb.join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT");
+        let source_dat = rbl_anlz::Anlz::read(&first_stick).unwrap();
+        let source_ext = rbl_anlz::Anlz::read(&first_stick.with_extension("EXT")).unwrap();
+        let mut first_stage_bytes = source_ext.to_bytes().len();
+        for extension in ["DAT", "EXT"] {
+            let mut dest = rbl_anlz::Anlz::read(&targets[0].with_extension(extension)).unwrap();
+            let src = if extension == "DAT" { &source_dat } else { &source_ext };
+            dest.sections.retain(|s| !s.is_cue_list());
+            dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
+            if extension == "DAT" {
+                dest.sections.retain(|s| s.as_beat_grid().is_none());
+                if let Some(grid) = source_dat.section(b"PQTZ") { dest.sections.push(grid.clone()); }
+            }
+            first_stage_bytes += if extension == "EXT" {
+                dest.with_extended_grid_cleared().unwrap_or_else(|| dest.to_bytes()).len()
+            } else { dest.to_bytes().len() };
+        }
+        assert!(first_stage_bytes > 1);
+        // A fresh fixture with only the first track eligible must import at
+        // this exact limit. Otherwise the two-track error below could come
+        // from rejecting the first track before the second is considered.
+        let single_dir = tempfile::tempdir().unwrap();
+        let (single_state, single_location, single_usb, _) = library_and_stick(single_dir.path());
+        let first_id = &ids[0];
+        let relative = single_state.write(|w| w.analysis_data_path_for(first_id)).unwrap();
+        single_state.write(|w| w.register_analysis(first_id, &rbl_db::write::AnalysisRegistration {
+            bpm_x100: 12000, key: None, analysis_data_path: &relative,
+        })).unwrap();
+        let single_target = rbl_anlz::resolve(&single_location.share_root, &relative);
+        std::fs::create_dir_all(single_target.parent().unwrap()).unwrap();
+        let mut dat = rbl_anlz::write::AnlzBuilder::new();
+        dat.path("/original.mp3").cue_lists(false);
+        std::fs::write(&single_target, dat.finish()).unwrap();
+        let mut ext = rbl_anlz::write::AnlzBuilder::new();
+        ext.path("/original.mp3").cue_lists(true);
+        std::fs::write(single_target.with_extension("EXT"), ext.finish()).unwrap();
+        let single_editor = crate::grid::GridEditor::at(single_state.backup_dir());
+        let admitted = import_with_stage_budget(&single_state, &single_editor, &single_usb, true, false, false, false, first_stage_bytes as u64).unwrap();
+        assert_eq!(admitted.tracks, 1, "the first staged track must fit the exact aggregate limit");
+        assert_eq!(admitted.changed, vec![first_id.clone()]);
+
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let error = import_with_stage_budget(&state, &editor, &usb, true, false, false, false, first_stage_bytes as u64).unwrap_err().to_string();
+        assert!(error.contains("aggregate limit"), "{error}");
+        assert_eq!(targets.iter().map(|target| (std::fs::read(target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap())).collect::<Vec<_>>(), before);
+        assert_eq!(snapshot(), before_db, "aggregate preflight changed local cues or track metadata");
+        assert!(!std::fs::read_dir(state.backup_dir()).unwrap().any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with(STAGE_PREFIX)));
+    }
+    #[test]
+    fn malformed_later_cue_frame_preserves_both_tracks() {
+        for damage in ["marker", "short length", "overrun", "trailing", "count 1/0", "count 2/1", "DAT count 2/1"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (state, location, usb, _) = library_and_stick(dir.path());
+            let ids = [rbl_db::fixture::track_id(0), rbl_db::fixture::track_id(1)];
+            let mut targets = Vec::new();
+            for (index, id) in ids.iter().enumerate() {
+                let relative = state.write(|w| w.analysis_data_path_for(id)).unwrap();
+                state.write(|w| w.register_analysis(id, &rbl_db::write::AnalysisRegistration {
+                    bpm_x100: 12000, key: None, analysis_data_path: &relative,
+                })).unwrap();
+                let target = rbl_anlz::resolve(&location.share_root, &relative);
+                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                let mut dat = rbl_anlz::write::AnlzBuilder::new();
+                dat.path("/original.mp3").cue_lists(false);
+                std::fs::write(&target, dat.finish()).unwrap();
+                let mut ext = rbl_anlz::write::AnlzBuilder::new();
+                ext.path("/original.mp3").cue_lists(true);
+                std::fs::write(target.with_extension("EXT"), ext.finish()).unwrap();
+                let stick = usb.join(format!("PIONEER/USBANLZ/P000/{:08}/", index + 1));
+                write_stick(&stick, &[stick_cue(1, 1000, None, 22, "original")]);
+                targets.push(target);
+            }
+            let editor = crate::grid::GridEditor::at(state.backup_dir());
+            assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().tracks, 2);
+            for index in 0..2 {
+                let stick = usb.join(format!("PIONEER/USBANLZ/P000/{:08}/", index + 1));
+                write_stick(&stick, &[stick_cue(1, 2000, None, 22, "changed")]);
+            }
+            let bad = usb.join("PIONEER/USBANLZ/P000/00000002/ANLZ0000.DAT")
+                .with_extension(if damage == "DAT count 2/1" { "DAT" } else { "EXT" });
+            let mut anlz = rbl_anlz::Anlz::read(&bad).unwrap();
+            if damage == "DAT count 2/1" {
+                let ext = rbl_anlz::Anlz::read(&bad.with_extension("EXT")).unwrap();
+                anlz.sections.extend(ext.sections.into_iter().filter(|s| s.tag.0 == *b"PCO2"));
+            }
+            let cue = anlz.sections.iter_mut().find(|s| s.tag.0 == *b"PCO2" && !s.payload.is_empty()).unwrap();
+            match damage {
+                "marker" => cue.payload[..4].copy_from_slice(b"BAD!"),
+                "short length" => cue.payload[8..12].copy_from_slice(&1_u32.to_be_bytes()),
+                "overrun" => cue.payload[8..12].copy_from_slice(&u32::MAX.to_be_bytes()),
+                "trailing" => cue.payload.push(0),
+                "count 1/0" => cue.payload.clear(),
+                "count 2/1" | "DAT count 2/1" => cue.header[4..6].copy_from_slice(&2_u16.to_be_bytes()),
+                _ => unreachable!(),
+            }
+            std::fs::write(&bad, anlz.to_bytes()).unwrap();
+            let snapshot = || ids.iter().zip(&targets).map(|(id, target)| {
+                let db = state.read_db(|db| {
+                    let track = db.connection().query_row("SELECT BPM, AnalysisUpdated, rb_local_usn FROM djmdContent WHERE ID=?1", [id],
+                        |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?)))?;
+                    let mut q = db.connection().prepare("SELECT InMsec, OutMsec, Kind, ColorTableIndex, Comment FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0 ORDER BY InMsec")?;
+                    let cues = q.query_map([id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, Option<String>>(4)?)))?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok((track, cues))
+                }).unwrap();
+                (db, std::fs::read(target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap())
+            }).collect::<Vec<_>>();
+            let before = snapshot();
+            assert!(before.iter().all(|(db, _, _)| !db.1.is_empty()), "fixture must hold real local cues");
+            let error = import(&state, &editor, &usb, true, false, false, false).unwrap_err().to_string();
+            let extension = if damage == "DAT count 2/1" { "DAT" } else { "EXT" };
+            assert!(error.contains(&format!("USB {extension} for track {}", ids[1])), "{error}");
+            assert_eq!(snapshot(), before, "{damage} changed local state");
+            assert_eq!(std::fs::read(&bad).unwrap(), anlz.to_bytes());
+        }
+    }
+    #[test]
+    fn malformed_anlz_preflight_leaves_all_cues_and_grids_untouched() {
+        // The valid lower-ID track precedes the malformed one in the sorted
+        // write order. Without preflight, it would commit first.
+        for (stage, extension) in [
+            ("USB", "DAT"), ("USB", "EXT"),
+            ("local library", "DAT"), ("local library", "EXT"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (state, location, usb, _) = library_and_stick(dir.path());
+            let ids = [rbl_db::fixture::track_id(0), rbl_db::fixture::track_id(1)];
+            let mut targets = Vec::new();
+            for id in &ids {
+                let relative = state.write(|w| w.analysis_data_path_for(id)).unwrap();
+                state.write(|w| w.register_analysis(id, &rbl_db::write::AnalysisRegistration {
+                    bpm_x100: 12000, key: None, analysis_data_path: &relative,
+                })).unwrap();
+                let target = rbl_anlz::resolve(&location.share_root, &relative);
+                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                let mut dat = rbl_anlz::write::AnlzBuilder::new();
+                dat.path("/original.mp3").cue_lists(false);
+                std::fs::write(&target, dat.finish()).unwrap();
+                let mut ext = rbl_anlz::write::AnlzBuilder::new();
+                ext.path("/original.mp3").cue_lists(true);
+                std::fs::write(target.with_extension("EXT"), ext.finish()).unwrap();
+                targets.push(target);
+            }
+            let bad = if stage == "USB" {
+                usb.join("PIONEER/USBANLZ/P000/00000002/ANLZ0000.DAT").with_extension(extension)
+            } else {
+                targets[1].with_extension(extension)
+            };
+            std::fs::write(&bad, b"NOPE00000000").unwrap();
+            let snapshot = || ids.iter().zip(&targets).map(|(id, target)| {
+                let db = state.read_db(|db| {
+                    let track = db.connection().query_row(
+                        "SELECT BPM, AnalysisUpdated, rb_local_usn FROM djmdContent WHERE ID=?1", [id],
+                        |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?)),
+                    )?;
+                    let cues = db.connection().query_row(
+                        "SELECT COUNT(*) FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0", [id],
+                        |r| r.get::<_, i64>(0),
+                    )?;
+                    Ok((track, cues))
+                }).unwrap();
+                (db, std::fs::read(target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap())
+            }).collect::<Vec<_>>();
+            let before = snapshot();
+            let editor = crate::grid::GridEditor::at(state.backup_dir());
+            let error = import(&state, &editor, &usb, true, false, false, false).unwrap_err().to_string();
+            assert!(error.contains(&format!("{stage} {extension} for track {}", ids[1])), "{error}");
+            assert!(error.contains("PMAI"), "{error}");
+            assert!(!error.contains(&dir.path().to_string_lossy().to_string()), "path leaked: {error}");
+            assert_eq!(snapshot(), before, "{stage} {extension} changed another track");
+            assert_eq!(std::fs::read(&bad).unwrap(), b"NOPE00000000", "malformed input was rewritten");
+        }
+    }
+    #[test]
+    fn parseable_invalid_cues_prevent_a_prior_track_from_committing() {
+        for (invalid_field, extension) in [
+            ("kind", "EXT"), ("hot cue", "EXT"), ("loop end", "EXT"),
+            ("kind", "DAT"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (state, location, usb, _) = library_and_stick(dir.path());
+            let ids = [rbl_db::fixture::track_id(0), rbl_db::fixture::track_id(1)];
+            let mut targets = Vec::new();
+            for id in &ids {
+                let relative = state.write(|w| w.analysis_data_path_for(id)).unwrap();
+                state.write(|w| w.register_analysis(id, &rbl_db::write::AnalysisRegistration {
+                    bpm_x100: 12000, key: None, analysis_data_path: &relative,
+                })).unwrap();
+                let target = rbl_anlz::resolve(&location.share_root, &relative);
+                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                let mut dat = rbl_anlz::write::AnlzBuilder::new();
+                dat.path("/original.mp3").cue_lists(false);
+                std::fs::write(&target, dat.finish()).unwrap();
+                let mut ext = rbl_anlz::write::AnlzBuilder::new();
+                ext.path("/original.mp3").cue_lists(true);
+                std::fs::write(target.with_extension("EXT"), ext.finish()).unwrap();
+                targets.push(target);
+            }
+            let bad = usb.join("PIONEER/USBANLZ/P000/00000002/ANLZ0000.DAT").with_extension(extension);
+            let mut anlz = rbl_anlz::Anlz::read(&bad).unwrap();
+            if extension == "DAT" {
+                let ext = bad.with_extension("EXT");
+                let extended = rbl_anlz::Anlz::read(&ext).unwrap();
+                anlz.sections.extend(extended.sections.into_iter().filter(|s| s.tag.0 == *b"PCO2"));
+                std::fs::remove_file(ext).unwrap();
+            }
+            let cue = anlz.sections.iter_mut().find(|s| s.tag.0 == *b"PCO2").unwrap();
+            // PCP2: slot at 12, kind at 16, start at 20, end at 24.
+            match invalid_field {
+                "kind" => cue.payload[16] = 0,
+                "hot cue" => cue.payload[12..16].copy_from_slice(&17_u32.to_be_bytes()),
+                "loop end" => {
+                    cue.payload[16] = 2;
+                    cue.payload[24..28].copy_from_slice(&0_u32.to_be_bytes());
+                }
+                _ => unreachable!(),
+            }
+            std::fs::write(&bad, anlz.to_bytes()).unwrap();
+            let parsed = rbl_anlz::Anlz::read(&bad).unwrap().cue_entries();
+            assert!(!parsed.is_empty(), "invalid cue must be parseable");
+            assert!(parsed.iter().any(|c| c.hot_cue > 16 || !matches!(c.kind, 1 | 2) || (c.kind == 2 && c.loop_time_ms <= c.time_ms)));
+            let snapshot = || ids.iter().zip(&targets).map(|(id, target)| {
+                let db = state.read_db(|db| {
+                    let row = db.connection().query_row(
+                        "SELECT BPM, AnalysisUpdated, rb_local_usn FROM djmdContent WHERE ID=?1", [id],
+                        |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?)),
+                    )?;
+                    let cues = db.connection().query_row(
+                        "SELECT COUNT(*) FROM djmdCue WHERE ContentID=?1 AND rb_local_deleted=0", [id],
+                        |r| r.get::<_, i64>(0),
+                    )?;
+                    Ok((row, cues))
+                }).unwrap();
+                (db, std::fs::read(target).unwrap(), std::fs::read(target.with_extension("EXT")).unwrap())
+            }).collect::<Vec<_>>();
+            let before = snapshot();
+            let editor = crate::grid::GridEditor::at(state.backup_dir());
+            let error = import(&state, &editor, &usb, true, false, false, false).unwrap_err().to_string();
+            assert!(error.contains(&format!("USB {extension} for track {}", ids[1])), "{error}");
+            assert!(error.contains("Invalid USB cue data"), "{error}");
+            assert_eq!(snapshot(), before, "{invalid_field} in {extension} partially wrote cues or grid");
+        }
+    }
+    #[test]
+    fn many_changed_tracks_import_without_retaining_all_replacements() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, usb, tracks) = library_and_stick(dir.path());
+        assert!(tracks >= 40);
+        for index in 0..tracks {
+            let id = rbl_db::fixture::track_id(index);
+            let relative = state.write(|w| w.analysis_data_path_for(&id)).unwrap();
+            state.write(|w| w.register_analysis(&id, &rbl_db::write::AnalysisRegistration {
+                bpm_x100: 12000, key: None, analysis_data_path: &relative,
+            })).unwrap();
+            let target = rbl_anlz::resolve(&location.share_root, &relative);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            let mut dat = rbl_anlz::write::AnlzBuilder::new();
+            dat.path("/original.mp3").waveform_preview(b"PWAV", &vec![0x55; 256 * 1024]).cue_lists(false);
+            std::fs::write(&target, dat.finish()).unwrap();
+            let mut ext = rbl_anlz::write::AnlzBuilder::new();
+            ext.path("/original.mp3").cue_lists(true);
+            std::fs::write(target.with_extension("EXT"), ext.finish()).unwrap();
+        }
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let first = import(&state, &editor, &usb, true, false, false, false).unwrap();
+        assert_eq!(first.tracks, tracks);
+        let again = import(&state, &editor, &usb, true, false, false, false).unwrap();
+        assert_eq!((again.tracks, again.unchanged), (0, tracks));
+        assert!(!std::fs::read_dir(state.backup_dir()).unwrap().any(|entry| {
+            entry.unwrap().file_name().to_string_lossy().starts_with("usb-import-")
+        }), "successful imports clean up disk staging");
+    }
     #[test]
     fn imports_only_cues_and_grid_preserving_local_path_and_waveform() {
         let dir = tempfile::tempdir().unwrap();
