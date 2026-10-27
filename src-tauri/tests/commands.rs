@@ -1989,6 +1989,25 @@ fn a_cue_added_through_the_command_is_read_back_and_announced() {
     assert!(announced.iter().all(|t| *t == track));
 }
 
+#[test]
+fn a_memory_cue_saved_by_the_command_survives_a_library_reopen() {
+    let s = shell();
+    let track = track_id(4);
+    let added = run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 12_500)).unwrap();
+    let live = run(commands::track_cues(s.state(), track.clone())).unwrap();
+    assert_eq!(live.len(), 1);
+    assert_eq!((live[0].id.as_str(), live[0].position_ms, live[0].memory), (added.as_str(), 12_500, true));
+
+    // A fresh connection and index must find the committed row independently
+    // of the command's in-memory cue update.
+    let reopened = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let (index, _) = rbl_index::load(&reopened).unwrap();
+    let row = index.row_of(&track).unwrap();
+    let saved = index.cues_of(row);
+    assert_eq!(saved.len(), 1);
+    assert_eq!((saved[0].id.to_string(), saved[0].position_ms, saved[0].kind), (added, 12_500, 0));
+}
+
 /// A drive library's Location, in the Info panel and the browser column, is
 /// the path rekordbox shows: the stored `FolderPath` with `BaseDBDrive`
 /// swapped for `CurrentDBDrive` (`replaceDrivePath`), not the raw column.
