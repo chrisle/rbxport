@@ -64,7 +64,9 @@ export type DeckAction =
   | "beatToMemoryBars"
   | "beatToMemoryBeats"
   | "waveformClickOn"
-  | "waveformClickOff";
+  | "waveformClickOff"
+  | "activeLoopPlaybackOn"
+  | "activeLoopPlaybackOff";
 
 export interface MenuEntry<A> {
   /** The label, as `german.lang` spells it. */
@@ -447,6 +449,7 @@ export interface DeckMenuState {
   waveformColor: "blue" | "rgb" | "3band";
   beatCount: "position" | "toMemoryBars" | "toMemoryBeats";
   waveformClick: boolean;
+  activeLoopPlayback: boolean;
   /** The deck has a loop set, so there is one to export. */
   hasLoop?: boolean;
   /** The connected sticks Export Track offers. */
@@ -460,9 +463,8 @@ export interface DeckMenuState {
  * here as well; each submenu ticks what is in force. Export Track lists the
  * connected sticks; Export Loop As WAV is live while the deck has a loop,
  * greyed otherwise as rekordbox greys it with nothing to export. Active
- * Loop Playback stays greyed: it writes `djmdCue.ActiveLoop`, whose "on"
- * value has never been seen [UNKNOWN: 0 on every cue in the reference
- * library]. Analyze Track analyses the loaded track and writes the result,
+ * Loop Playback arms a Kind-4 memory loop in the deck; it does not write the
+ * library's `ActiveLoop` column. Analyze Track writes the result,
  * as it does from the track list.
  */
 export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
@@ -508,7 +510,14 @@ export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
     SEPARATOR,
     { label: "Export Loop As WAV", action: state.hasLoop ? "exportLoopWav" : null },
     SEPARATOR,
-    { label: "Active Loop Playback", action: null, submenu: true },
+    {
+      label: "Active Loop Playback",
+      action: null,
+      items: [
+        { label: "On", action: "activeLoopPlaybackOn", ...tick(state.activeLoopPlayback) },
+        { label: "Off", action: "activeLoopPlaybackOff", ...tick(!state.activeLoopPlayback) },
+      ],
+    },
     SEPARATOR,
     {
       label: "Click on the waveform for PLAY and CUE",
