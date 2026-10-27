@@ -1774,5 +1774,8 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "Lägg till \"Min tagg\" till \"Kommentarer\"",
   "This operation can take few minutes.": "Denna åtgärd kan ta lång tid.",
-  "Please wait for a while": "V.g. vänta"
+  "Please wait for a while": "V.g. vänta",
+  "Analysis Lock is set on tracks in the collection, not on a device": "Analysis Lock is set on tracks in the collection, not on a device",
+  "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
+  "Unlock the beat grid for editing": "Unlock the beat grid for editing"
 }

@@ -2163,6 +2163,11 @@ export interface GridState {
   undoLabel?: string | null;
   redoLabel?: string | null;
   locked: boolean;
+  /**
+   * Whether the GRID panel's lock can be set: false for a Devices tree
+   * track, whose grid is edited on the stick (#660). Absent means true.
+   */
+  lockable?: boolean;
 }
 
 /** One of the folders the Explorer starts from. */

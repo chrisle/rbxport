@@ -1777,5 +1777,8 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "\"Etiketim\"i \"Açıklamalar\"a ekle",
   "This operation can take few minutes.": "Bu işlem uzun zaman gerektirebilir.",
-  "Please wait for a while": "Lütfen bekleyin"
+  "Please wait for a while": "Lütfen bekleyin",
+  "Analysis Lock is set on tracks in the collection, not on a device": "Analysis Lock is set on tracks in the collection, not on a device",
+  "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
+  "Unlock the beat grid for editing": "Unlock the beat grid for editing"
 }
