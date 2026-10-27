@@ -41,10 +41,11 @@ import styles from "./SubBrowser.module.css";
 /** What the sub-browser's tree does that the shell has to do for it. */
 export type SubTreeProps = Pick<
   TreeViewProps,
-  "dragging" | "onDropTracks" | "draggingToDevice" | "onDropTracksOnDevice" | "onExport" | "exportDevices" | "onExportFile" | "onCreatePlaylist" | "onCreateFolder"
+  "dragging" | "onDropTracks" | "canDropToDevicePlaylists" | "onDropDeviceTracks" | "draggingToDevice" | "onDropTracksOnDevice" | "onExport" | "exportDevices" | "onExportFile" | "onCreatePlaylist" | "onCreateFolder"
   | "onDeleteNode" | "onRenameNode" | "onMoveNode" | "onDropFiles" | "onExpand" | "showCounts"
   | "onOpenSync" | "onCreateSmartPlaylist" | "onEditSmartPlaylist" | "onAddArtwork"
   | "onAddToShortcut" | "onSortItems" | "onEjectDevice" | "ejectingDeviceId" | "deviceBusy"
+  | "onDeviceCreate" | "onDeviceRename" | "onDeviceDelete" | "onDeviceImport"
   | "readOnly"
 >;
 

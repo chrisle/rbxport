@@ -98,6 +98,49 @@ test("a playlist made, filled and deleted on the stick changes only its own libr
   await expect(lists).toHaveCount(6);
 });
 
+test("device playlist actions work from the secondary Devices tree", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await page.getByRole("button", { name: "Sub-Browser Window" }).click();
+  const panel = page.getByRole("region", { name: "Sub-Browser" });
+  await panel.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
+  await panel.getByRole("button", { name: "Expand TEST" }).dispatchEvent("mousedown");
+
+  await panel.locator('[role="treeitem"][data-kind="devicePlaylists"]').first().click({ button: "right" });
+  const create = page.getByRole("menu", { name: "Playlists" }).getByRole("menuitem", { name: "Create New Playlist" });
+  await expect(create).toBeEnabled();
+  await create.click();
+  await expect(page.getByRole("contentinfo")).toContainText("Created Untitled Playlist.");
+
+  const created = panel.locator('[role="treeitem"][data-kind="devicePlaylist"]').filter({ hasText: "Untitled Playlist" });
+  await expect(created).toHaveCount(1);
+  await created.click();
+  await created.press("F2");
+  const rename = panel.getByRole("textbox", { name: "Rename Untitled Playlist" });
+  await rename.fill("Secondary Set");
+  await rename.press("Enter");
+  await expect(page.getByRole("contentinfo")).toContainText("Renamed to Secondary Set.");
+  await expect(created).toHaveCount(0);
+  const renamed = panel.locator('[role="treeitem"][data-kind="devicePlaylist"]').filter({ hasText: "Secondary Set" });
+  await expect(renamed).toHaveCount(1);
+
+  await renamed.click({ button: "right" });
+  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Delete Playlist" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Deleted Secondary Set.");
+  await expect(renamed).toHaveCount(0);
+
+  // Import a populated playlist through the secondary Devices menu. The
+  // collection already has Melodic Vox inside CURRENT, so the import adds one.
+  await panel.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
+  const expand = panel.getByRole("button", { name: "Expand TEST" });
+  if (await expand.count()) await expand.dispatchEvent("mousedown");
+  const imported = panel.locator('[role="treeitem"][data-kind="devicePlaylist"]').filter({ hasText: /^\s*Melodic Vox/ }).first();
+  await imported.click({ button: "right" });
+  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Import Playlist" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Imported Melodic Vox.");
+  await panel.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Playlists" }).click();
+  await expect(panel.locator('[role="treeitem"][data-kind="playlist"]').filter({ hasText: /^\s*Melodic Vox\s*(\(\d+\))?\s*$/ })).toHaveCount(2);
+});
+
 test("adding a track a stick playlist already holds asks Add or Skip, as rekordbox does", async ({ page }) => {
   await openStick(page);
   // Melodic Vox holds the stick's tracks 2 to 4; tracks 1 and 2 are picked.

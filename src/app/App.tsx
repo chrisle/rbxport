@@ -3078,6 +3078,7 @@ function AppBody() {
     values={filterValues} masterBpmX100={masterBpmX100} />, [filterState, filterValues, masterBpmX100]);
   const subTree = useMemo(() => ({
     dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
+    canDropToDevicePlaylists: draggedTracks?.sourceKind !== "device", onDropDeviceTracks: addDraggedToDevice,
     draggingToDevice: draggedTracks !== null && !hasLooseId(draggedTracks.ids), onDropTracksOnDevice: exportDraggedTo,
     onDropFiles: readOnly ? undefined : importDroppedFilesTo,
     onExport: exportPlaylist, exportDevices: menuDevices, onExportFile: exportPlaylistFile, onCreatePlaylist: createPlaylistIn,
@@ -3086,13 +3087,16 @@ function AppBody() {
     showCounts: viewPrefs.playlistCounts, onOpenSync: openSyncManager,
     onCreateSmartPlaylist: createSmartPlaylistIn, onEditSmartPlaylist: editSmartPlaylist,
     onAddArtwork: addPlaylistArtwork, onAddToShortcut: addToShortcut, onSortItems: sortItems,
+    onDeviceCreate: createOnDevice, onDeviceRename: renameOnDevice,
+    onDeviceDelete: deleteOnDevice, onDeviceImport: importFromDevice,
     onEjectDevice: (node: TreeNode) => { void ejectDeviceFromTree(node); },
     ejectingDeviceId, deviceBusy: syncing || exportRunning || ejectingDeviceId !== null, readOnly,
   }), [
-    draggedTracks, addDraggedTo, exportDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, menuDevices, exportPlaylistFile,
+    draggedTracks, addDraggedTo, addDraggedToDevice, exportDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, menuDevices, exportPlaylistFile,
     createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, expandNode,
     viewPrefs.playlistCounts, openSyncManager, createSmartPlaylistIn, editSmartPlaylist,
-    addPlaylistArtwork, addToShortcut, sortItems, ejectDeviceFromTree, ejectingDeviceId, syncing,
+    addPlaylistArtwork, addToShortcut, sortItems, createOnDevice, renameOnDevice, deleteOnDevice,
+    importFromDevice, ejectDeviceFromTree, ejectingDeviceId, syncing,
     exportRunning,
   ]);
   const subList = useMemo(() => ({
@@ -3429,7 +3433,7 @@ function AppBody() {
         )}
         {subOpen ? (
           <SubBrowser
-            nodes={tree}
+            nodes={treeNodes}
             libraryGeneration={libraryGeneration}
             width={subWidth}
             treeWidth={subTreeWidth}
