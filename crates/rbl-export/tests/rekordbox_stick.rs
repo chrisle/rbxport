@@ -235,6 +235,63 @@ fn analysed_bits(dest: &Path, device_id: u32) -> i64 {
     one.connection().query_row("SELECT analysedBits FROM content WHERE content_id = ?1", [device_id], |r| r.get(0)).unwrap()
 }
 
+fn set_release_year(dest: &Path, device_id: u32, year: i64) {
+    let one = rbl_onelibrary::playlists::open_read_write(&dest.join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    assert_eq!(one.execute("UPDATE content SET releaseYear = ?2 WHERE content_id = ?1", rusqlite::params![device_id, year]).unwrap(), 1);
+}
+
+fn exported_years(dest: &Path, device_id: u32) -> (u16, i64) {
+    let bytes = std::fs::read(dest.join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let tracks = pdb.track_rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap());
+    let legacy = tracks.iter().find(|track| track.id == device_id).unwrap().year;
+    let one = rbl_onelibrary::ExportLibrary::open_read_only(&dest.join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    let year = one.connection().query_row("SELECT releaseYear FROM content WHERE content_id = ?1", [device_id], |row| row.get(0)).unwrap();
+    (legacy, year)
+}
+
+#[test]
+fn a_negative_release_year_on_a_track_the_stick_keeps_does_not_stop_the_sync() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    let mut tracks: Vec<SourceTrack> = (1..=3).map(|id| track(src.path(), id, 0)).collect();
+    tracks[2].year = 2020;
+    let initial = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1, 2], ..Default::default() }];
+    sync_to(dest.path(), &tracks, &initial, DB_ID).unwrap();
+    std::fs::remove_file(rbl_export::Manifest::path(dest.path())).unwrap();
+    let kept = device_id(dest.path(), 3);
+    assert_eq!(exported_years(dest.path(), kept), (2020, 2020));
+    set_release_year(dest.path(), kept, -9517);
+    assert_eq!(exported_years(dest.path(), kept), (2020, -9517), "only OneLibrary has the malformed year");
+    let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
+    let report = sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap();
+    assert_eq!(report.tracks, 3);
+    assert_eq!(exported_years(dest.path(), kept), (2020, 2020), "the valid DeviceSQL year survives in both databases");
+    assert!(rbl_export::verify_databases(dest.path()).unwrap().errors.is_empty());
+    sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap();
+    assert_eq!(exported_years(dest.path(), kept), (2020, 2020));
+}
+
+#[test]
+fn a_negative_release_year_on_a_track_the_sync_rewrites_uses_the_library_year() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    let mut tracks: Vec<SourceTrack> = (1..=3).map(|id| track(src.path(), id, 0)).collect();
+    tracks[1].year = 2019;
+    let playlists = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1, 2], ..Default::default() }];
+    sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
+    std::fs::remove_file(rbl_export::Manifest::path(dest.path())).unwrap();
+    let rewritten = device_id(dest.path(), 2);
+    assert_eq!(exported_years(dest.path(), rewritten), (2019, 2019));
+    set_release_year(dest.path(), rewritten, -9517);
+    assert_eq!(exported_years(dest.path(), rewritten), (2019, -9517));
+    tracks[1].year = 2020;
+    let report = sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
+    assert_eq!(report.tracks, 3);
+    assert_eq!(exported_years(dest.path(), rewritten), (2020, 2020));
+    assert!(rbl_export::verify_databases(dest.path()).unwrap().errors.is_empty());
+    sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
+    assert_eq!(exported_years(dest.path(), rewritten), (2020, 2020));
+}
+
 #[test]
 fn a_negative_analysed_bits_on_a_track_the_stick_keeps_does_not_stop_the_sync() {
     let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
