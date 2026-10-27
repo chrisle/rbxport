@@ -277,6 +277,78 @@ pub async fn device_playlist_edit(path: String, format: String, edit: DeviceEdit
     blocking("device_playlist_edit", move || apply_edit(&path, &format, edit, rbl_db::is_rekordbox_app_running())).await
 }
 
+/// Analyse loose audio already on this stick and add it to its playlist.
+/// The exporter publishes the track, analysis and membership together.
+#[tauri::command]
+pub async fn device_playlist_add_files(
+    path: String,
+    format: String,
+    playlist: String,
+    tracks: Vec<String>,
+) -> AppResult<DeviceEditResultDto> {
+    blocking("device_playlist_add_files", move || {
+        if let Some(refused) = edit_refusal(rbl_db::is_rekordbox_app_running()) {
+            return Err(refused);
+        }
+        let mount = connected(&path)?;
+        let volume = rbl_core::durable::VolumeIdentity::capture(&mount)
+            .map_err(|error| AppError::new(ErrorKind::NotFound, error.to_string()))?;
+        let format = format_from(&format)?;
+        let playlist_id = id_from(&playlist)?;
+        let before = device::read(&mount, format).map_err(|error| device_error(&error))?;
+        let before_count = before
+            .node(playlist_id)
+            .filter(|node| !node.folder)
+            .ok_or_else(|| {
+                AppError::new(
+                    ErrorKind::NotFound,
+                    "That playlist is no longer on the device.",
+                )
+            })?
+            .tracks
+            .len();
+        let mut sources = Vec::with_capacity(tracks.len());
+        for row in &tracks {
+            let source = rbl_index::folder::loose_path(row)
+                .filter(|source| plainly_under(&mount, source))
+                .ok_or_else(|| {
+                    AppError::new(
+                        ErrorKind::Malformed,
+                        "Only audio files on this device can go into its playlist.",
+                    )
+                })?;
+            if !source.is_file() {
+                return Err(AppError::new(
+                    ErrorKind::NotFound,
+                    "A file on this device is no longer there.",
+                ));
+            }
+            let indexed = before
+                .tracks
+                .iter()
+                .any(|track| audio_path(&mount, &track.path) == source);
+            sources.push(if indexed {
+                rbl_export::SourceTrack {
+                    source_path: source.to_path_buf(),
+                    ..rbl_export::SourceTrack::default()
+                }
+            } else {
+                crate::analysis::usb_source(source)?
+            });
+        }
+        volume.check(&mount).map_err(|error| AppError::new(ErrorKind::NotFound, error.to_string()))?;
+        rbl_export::add_in_place_to_playlist(&mount, format, playlist_id, &sources)
+            .map_err(|error| device_error(&error))?;
+        let after = device::read(&mount, format).map_err(|error| device_error(&error))?;
+        let after_count = after.node(playlist_id).map_or(0, |node| node.tracks.len());
+        Ok(DeviceEditResultDto {
+            id: playlist,
+            changed: u32::try_from(after_count.saturating_sub(before_count)).unwrap_or(u32::MAX),
+        })
+    })
+    .await
+}
+
 /// Maps collection ids to their rows in one device library. Missing rows are
 /// `None`; callers can export those tracks before asking for the mapping again.
 #[tauri::command]
@@ -294,16 +366,16 @@ pub async fn device_playlist_collection_tracks(
         let db_id = state
             .read_db(|db| rbl_db::export_info::db_id(db.connection()))
             .map_err(crate::commands::write_error)?;
-        Ok(collection_track_rows(&library, db_id, &tracks))
+        Ok(collection_track_rows(&mount, &library, db_id, &tracks))
     })
     .await
 }
 
-fn collection_track_rows(library: &device::Library, db_id: u64, tracks: &[String]) -> Vec<Option<String>> {
+fn collection_track_rows(mount: &Path, library: &device::Library, db_id: u64, tracks: &[String]) -> Vec<Option<String>> {
     let mut rows = std::collections::HashMap::new();
     for track in &library.tracks {
         if track.master_db_id == db_id && track.master_content_id != 0 {
-            rows.entry(track.master_content_id).or_insert_with(|| track.id.to_string());
+            rows.entry(track.master_content_id).or_insert_with(|| rbl_index::folder::loose_id(&audio_path(mount, &track.path)));
         }
     }
     tracks.iter().map(|id| id.parse::<u64>().ok().and_then(|id| rows.get(&id).cloned())).collect()
@@ -1103,6 +1175,85 @@ fn row_dto(row: &DeviceRow) -> RowDto {
 mod tests {
     use super::*;
 
+    /// Runs the public command against a disposable stick and decoded audio,
+    /// through analysis and both device database writers.
+    #[test]
+    fn loose_wav_is_analysed_and_added_without_a_collection_entry_or_audio_copy() {
+        let (_src, dest) = stick();
+        let local = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(local.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let collection_count = || {
+            let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+            db.connection().query_row("SELECT COUNT(*) FROM djmdContent", [], |row| row.get::<_, i64>(0)).unwrap()
+        };
+        let before_collection = collection_count();
+        let root = dest.path();
+        let original = device::read(root, Format::DeviceLibrary).unwrap();
+        let playlist = original.nodes.iter().find(|node| node.name == "Friday").unwrap();
+        let existing_ids = playlist.tracks.clone();
+        let music = root.join("Music");
+        std::fs::create_dir_all(&music).unwrap();
+        let wav = music.join("click.wav");
+        write_test_wav(&wav);
+        let audio = std::fs::read(&wav).unwrap();
+        let path = root.to_str().unwrap().to_owned();
+        let id = playlist.id.to_string();
+        let row = rbl_index::folder::loose_id(&wav);
+        let add = || tauri::async_runtime::block_on(device_playlist_add_files(path.clone(), "deviceLibrary".into(), id.clone(), vec![row.clone()]));
+        assert_eq!(add().unwrap().changed, 1);
+        let legacy = device::read(root, Format::DeviceLibrary).unwrap();
+        let one = device::read(root, Format::OneLibrary).unwrap();
+        assert_eq!(legacy.nodes, one.nodes);
+        assert_eq!(legacy.tracks, one.tracks);
+        let entries = &legacy.node(playlist.id).unwrap().tracks;
+        assert_eq!(&entries[..existing_ids.len()], existing_ids);
+        assert_eq!(entries.len(), existing_ids.len() + 1);
+        let added = legacy.track(*entries.last().unwrap()).unwrap();
+        assert_eq!(added.path, "/Music/click.wav");
+        assert_ne!(added.analysis_path, "");
+        let dat = root.join(added.analysis_path.trim_start_matches('/'));
+        for file in [&dat, &rbl_anlz::sibling(&dat, "EXT"), &rbl_anlz::sibling(&dat, "2EX")] {
+            let parsed = rbl_anlz::Anlz::read(file).unwrap();
+            assert_eq!(parsed.path().as_deref(), Some("/Music/click.wav"));
+        }
+        assert!(rbl_export::verify(root).unwrap().is_ok());
+        assert_eq!(std::fs::read(&wav).unwrap(), audio);
+        assert!(!root.join("Contents").join("click.wav").exists());
+        assert_eq!(collection_count(), before_collection, "the local collection remains unchanged");
+        assert_eq!(add().unwrap().changed, 0);
+        assert_eq!(device::read(root, Format::DeviceLibrary).unwrap(), legacy);
+        assert_eq!(device::read(root, Format::OneLibrary).unwrap(), one);
+        assert_eq!(std::fs::read(&wav).unwrap(), audio);
+        assert_eq!(collection_count(), before_collection);
+    }
+
+    fn write_test_wav(path: &Path) {
+        let rate = 22_050_u32;
+        let frames = rate * 4;
+        let mut data = Vec::with_capacity(usize::try_from(frames * 2).unwrap());
+        for i in 0..frames {
+            let since = i % (rate / 2);
+            let sample: i16 = if since < 400 { i16::try_from(20_000 * (400 - since) / 400).unwrap() } else { 0 };
+            data.extend_from_slice(&sample.to_le_bytes());
+        }
+        let len = u32::try_from(data.len()).unwrap();
+        let mut wav = Vec::with_capacity(44 + data.len());
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&rate.to_le_bytes());
+        wav.extend_from_slice(&(rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&len.to_le_bytes());
+        wav.extend_from_slice(&data);
+        std::fs::write(path, wav).unwrap();
+    }
+
     /// A stick written by the export pipeline: a folder with a list, and a
     /// list at the top level.
     fn stick() -> (tempfile::TempDir, tempfile::TempDir) {
@@ -1207,9 +1358,9 @@ mod tests {
         library.tracks[1].master_db_id = 77;
         library.tracks[1].master_content_id = 102;
 
-        assert_eq!(collection_track_rows(&library, 77, &["102".into(), "999".into(), "not-an-id".into()]),
-            [Some(library.tracks[1].id.to_string()), None, None]);
-        assert_eq!(collection_track_rows(&library, 78, &["101".into()]), [None]);
+        assert_eq!(collection_track_rows(dest.path(), &library, 77, &["102".into(), "999".into(), "not-an-id".into()]),
+            [Some(rbl_index::folder::loose_id(&audio_path(dest.path(), &library.tracks[1].path))), None, None]);
+        assert_eq!(collection_track_rows(dest.path(), &library, 78, &["101".into()]), [None]);
     }
 
     #[test]
