@@ -16,6 +16,8 @@ pub enum ErrorKind {
     Malformed,
     /// The user cancelled a long-running job.
     Cancelled,
+    /// A resource needed for this operation is temporarily held by another process.
+    Busy,
     /// Undo or Redo was refused because what it would write was changed
     /// since by something outside the library history (#506). Nothing was
     /// written; the entry is gone from the history.

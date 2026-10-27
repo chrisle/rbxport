@@ -1777,5 +1777,6 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "\"Etiketim\"i \"Açıklamalar\"a ekle",
   "This operation can take few minutes.": "Bu işlem uzun zaman gerektirebilir.",
-  "Please wait for a while": "Lütfen bekleyin"
+  "Please wait for a while": "Lütfen bekleyin",
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled."
 }
