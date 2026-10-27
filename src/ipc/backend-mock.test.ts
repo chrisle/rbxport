@@ -52,6 +52,17 @@ describe("related playlists", () => {
 });
 
 describe("mock edits", () => {
+  it("reports stored playlist additions instead of attempted track IDs", async () => {
+    const backend = createMockBackend({ trackCount: 2 });
+    await backend.edits.createPlaylist("Empty 444", TREE_ROOT);
+    const playlist = (await backend.playlistTree()).find((node) => node.name === "Empty 444")?.id ?? "";
+    const first = await backend.edits.addTracksToPlaylist(playlist, ["100000", "100000"]);
+    expect(first.added).toBe(1);
+    const again = await backend.edits.addTracksToPlaylist(playlist, ["100000"]);
+    expect(again.added).toBe(0);
+    expect(await backend.edits.playlistDuplicates(playlist, ["100000"])).toEqual(["100000"]);
+  });
+
   it("sorts a folder's children by name as one Undo step, as sort_playlist_items does", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.createFolder("Crate", TREE_ROOT);

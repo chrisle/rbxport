@@ -1198,21 +1198,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       for (const track of tracks) if (allowDuplicates || !current.includes(track)) current.push(track);
       membership.set(playlist, current);
       const after = [...current];
-      if (after.length === before.length) return bump();
+      if (after.length === before.length) return { generation: await bump(), added: 0 };
       // A slice of the same add joins the entry its first slice made, as
       // the real backend's history does (#499).
       const open = editUndo.at(-1);
       if (transaction && open?.transaction === transaction && open.playlist === playlist
         && open.after?.join() === before.join()) {
         open.after = after;
-        return bump();
+        return { generation: await bump(), added: after.length - before.length };
       }
       const opened: MockEdit = {
         label: "Add Tracks to Playlist", transaction, playlist, after,
         undo: () => setMembersFrom(playlist, opened.after ?? after, before),
         redo: () => setMembersFrom(playlist, before, opened.after ?? after),
       };
-      return (await recordEdit(opened)).generation;
+      return { generation: (await recordEdit(opened)).generation, added: after.length - before.length };
     },
     playlistDuplicates: (playlist, tracks) => {
       const current = new Set(membersOf(playlist));
