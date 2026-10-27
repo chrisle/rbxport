@@ -29,14 +29,14 @@ const box = async (locator: Locator): Promise<Box> =>
 const bottom = (b: Box) => b.y + b.height;
 const right = (b: Box) => b.x + b.width;
 
-/** Both decks loaded: the first row on A, the second on B by the track menu. */
-async function twoPlayer(page: Page, query = "") {
+/** Both decks loaded: the selected rows on A and B via the track menu. */
+async function twoPlayer(page: Page, query = "", rows: readonly [number, number] = [0, 1]) {
   await page.goto(`/${query}`);
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.getByRole("button", { name: "Layout" }).click();
   await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
-  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
-  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(1);
+  await page.locator('[role="gridcell"][data-col="title"]').nth(rows[0]).dblclick();
+  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(rows[1]);
   await cell.click({ button: "right" });
   const menu = page.getByRole("menu", { name: "Track" });
   await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
@@ -46,6 +46,60 @@ async function twoPlayer(page: Page, query = "") {
   await expect(b.getByTestId("player-title")).not.toHaveText("");
   return { a, b };
 }
+
+/** Painted PWV7 rows in canvas coordinates, before any CSS deck flip. */
+async function paintedRows(canvas: Locator): Promise<{ first: number; last: number; height: number; cssHeight: number }> {
+  return canvas.evaluate((element: HTMLCanvasElement) => {
+    const context = element.getContext("2d");
+    const { width, height } = element;
+    if (!context || !width || !height) return { first: -1, last: -1, height, cssHeight: element.getBoundingClientRect().height };
+    const pixels = context.getImageData(0, 0, width, height).data;
+    let first = -1;
+    let last = -1;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if ((pixels[(y * width + x) * 4 + 3] ?? 0) === 0) continue;
+        if (first === -1) first = y;
+        last = y;
+        break;
+      }
+    }
+    return { first, last, height, cssHeight: element.getBoundingClientRect().height };
+  });
+}
+
+test("both loaded PWV7 waveforms keep painted bounds after deck B flips", async ({ page }) => {
+  const { a, b } = await twoPlayer(page, "", [3, 4]);
+  const top = await token(page, "--s-wave-inset-top");
+  const bottom = await token(page, "--s-wave-inset-bottom");
+  expect(top).toBe(20);
+  expect(bottom).toBe(16);
+
+  for (const [deck, flipped] of [[a, false], [b, true]] as const) {
+    const detail = deck.getByTestId("player-detail");
+    await expect(detail).not.toHaveAttribute("data-pcm", /.+/);
+    const canvas = detail.locator("canvas").first();
+    await expect.poll(async () => (await paintedRows(canvas)).first).toBeGreaterThanOrEqual(0);
+    const rows = await paintedRows(canvas);
+    const scale = rows.height / rows.cssHeight;
+    const rawTop = rows.first / scale;
+    const rawBottom = (rows.height - 1 - rows.last) / scale;
+    // Pixel rounding and the fixture's sub-full-scale peaks leave a few px
+    // beyond the requested top edge. The baseline reaches the bottom edge.
+    expect(rawTop).toBeGreaterThanOrEqual(top - 1);
+    expect(rawTop).toBeLessThan(33);
+    expect(rawBottom).toBeGreaterThanOrEqual(bottom - 1);
+    expect(rawBottom).toBeLessThanOrEqual(bottom + 1);
+    const transform = await canvas.evaluate((el) => getComputedStyle(el).transform);
+    expect(transform).toBe(flipped ? "matrix(1, 0, 0, -1, 0, 0)" : "none");
+    // CSS flips the bitmap, so deck B's visible top is the raw bottom and
+    // its visible bottom is the raw top.
+    const visibleTop = flipped ? rawBottom : rawTop;
+    const visibleBottom = flipped ? rawTop : rawBottom;
+    expect(visibleTop).toBeGreaterThanOrEqual((flipped ? bottom : top) - 1);
+    expect(visibleBottom).toBeGreaterThanOrEqual((flipped ? top : bottom) - 1);
+  }
+});
 
 test("deck A is laid out the way the capture measures it", async ({ page }) => {
   const { a } = await twoPlayer(page);
@@ -321,6 +375,18 @@ test("deck B reads the other way up, and its detail meets deck A's at the centre
   expect(beatBoxA.y - detailA.y).toBeCloseTo(lineTop, 0);
   expect(bottom(detail) - bottom(beatBox)).toBeCloseTo(lineTop, 0);
   expect(beatBox.y - detail.y).toBeLessThan(beatBoxA.y - detailA.y);
+  // Both mirrored details use the restored waveform height. The head crosses
+  // its edge by two CSS pixels instead of forcing a 15px clear strip.
+  const waveTop = await token(page, "--s-wave-inset-top");
+  const beatTop = await token(page, "--s-beat-marker-top");
+  const headH = await token(page, "--s-beat-head-h");
+  expect(waveTop).toBe(20);
+  expect(beatTop).toBeLessThan(waveTop);
+  expect(beatTop + headH).toBeGreaterThan(waveTop);
+  const headA = await box(a.getByTestId("player-detail-head"));
+  const headB = await box(b.getByTestId("player-detail-head"));
+  expect(headA.height).toBeCloseTo(detailA.height, 0);
+  expect(headB.height).toBeCloseTo(detail.height, 0);
 });
 
 test("the shared column, strip and zoom are placed where the capture puts them", async ({ page }) => {
