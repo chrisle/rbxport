@@ -6,6 +6,8 @@
 //! [`rbl_export::device_library`], which changes one of the stick's two
 //! libraries at a time and publishes the file through the export journal.
 
+use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -15,9 +17,14 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::{blocking, MAX_ROWS};
-use crate::dto::{RowDto, ViewHandleDto, ViewSpecDto};
+use crate::dto::{cue_colour_css, RowCueDto, RowDto, ViewHandleDto, ViewSpecDto};
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{sort_from_wire, AppState};
+
+// The USB browser is opened on a blocking thread. Keep companion reads bounded
+// even when a stick has corrupt file lengths or a very large playlist.
+const MAX_BROWSER_EXT_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_BROWSER_EXT_VIEW_BYTES: u64 = 64 * 1024 * 1024;
 
 /// One library on a stick, for the tree.
 #[derive(Debug, Clone, Serialize)]
@@ -1003,13 +1010,20 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
         } else {
             library.node(playlist).map(|n| n.tracks.clone()).unwrap_or_default()
         };
+        let one_cues = if format == Format::OneLibrary { one_library_cues(&mount) } else { HashMap::new() };
         let rows: Vec<DeviceRow> = ids
             .iter()
             .enumerate()
             .filter_map(|(at, id)| library.track(*id).map(|t| device_row(&mount, t, at)))
             .collect();
         handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, t)));
-        let view = DeviceView::open(rows, &parsed, field);
+        let mut view = DeviceView::open(rows, &parsed, field);
+        let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+        for row in &mut view.rows {
+            if let Some(track) = library.track(row.id) {
+                row.cues = device_cues(&mount, track, format, &one_cues, &mut remaining);
+            }
+        }
         let (view_id, len, generation) = handle.open_device_view(view);
         Ok(ViewHandleDto { view_id, len, gen: generation, totals: None })
     })
@@ -1035,6 +1049,166 @@ fn device_row(mount: &Path, track: &device::Track, at: usize) -> DeviceRow {
         color: track.color,
         analysed: !track.analysis_path.is_empty(),
         has_artwork: !track.artwork_path.is_empty(),
+        cues: Vec::new(),
+    }
+}
+
+/// Read the format's cue source while the view is opened on a blocking thread.
+/// A damaged analysis companion cannot make its track disappear from the browser.
+fn device_cues(
+    mount: &Path,
+    track: &device::Track,
+    format: Format,
+    one_cues: &HashMap<u32, Vec<rbl_index::Cue>>,
+    remaining: &mut u64,
+) -> Vec<rbl_index::Cue> {
+    let mut cues = if format == Format::OneLibrary {
+        one_cues.get(&track.id).cloned().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    // OneLibrary's table owns cue timing and identity. EXT is only needed to
+    // supplement memory-cue colors, so most rows need no companion read.
+    if *remaining == 0 || (format == Format::OneLibrary && !cues.iter().any(rbl_index::Cue::is_memory)) {
+        cues.sort_by_key(|cue| (cue.position_ms, cue.kind));
+        return cues;
+    }
+    let analysis = assets_of(mount, track)
+        .1
+        .analysis_dat()
+        .and_then(|dat| {
+            let ext = dat.with_extension("EXT");
+            let relative = ext.strip_prefix(mount).ok()?.to_str()?;
+            let ext = DeviceAssets::on_stick(mount, relative)?;
+            read_browser_ext(&ext, remaining).map(|file| file.cue_entries())
+        })
+        .unwrap_or_default();
+    cues = match format {
+        Format::DeviceLibrary => analysis.iter().filter_map(cue_from_analysis).collect(),
+        Format::OneLibrary => {
+            for cue in &mut cues {
+                if cue.is_memory() {
+                    cue.memory_colour = analysis
+                        .iter()
+                        .find(|entry| {
+                            entry.hot_cue == 0
+                                && entry.time_ms == cue.position_ms
+                                && (entry.kind != 2 || entry.loop_time_ms == cue.out_ms)
+                        })
+                        .and_then(|entry| {
+                            u8::try_from(entry.library_color())
+                                .ok()
+                                .filter(|color| *color < 8)
+                        });
+                }
+            }
+            cues
+        }
+    };
+    cues.sort_by_key(|cue| (cue.position_ms, cue.kind));
+    cues
+}
+
+fn read_browser_ext(path: &Path, remaining: &mut u64) -> Option<rbl_anlz::Anlz> {
+    let limit = MAX_BROWSER_EXT_BYTES.min(*remaining);
+    if limit == 0 {
+        return None;
+    }
+    let file = std::fs::File::open(path).ok()?;
+    if file.metadata().ok()?.len() > limit {
+        return None;
+    }
+    // The metadata check avoids ordinary oversized reads; take also caps a
+    // companion that grows between the check and the read.
+    let mut bytes = Vec::new();
+    let read = file.take(limit + 1).read_to_end(&mut bytes);
+    *remaining = remaining.saturating_sub(bytes.len() as u64);
+    read.ok()?;
+    if bytes.len() as u64 > limit {
+        return None;
+    }
+    rbl_anlz::parse(&bytes).ok()
+}
+
+fn cue_from_analysis(entry: &rbl_anlz::CueEntry) -> Option<rbl_index::Cue> {
+    let kind = u8::try_from(entry.library_kind()).ok()?;
+    if !matches!(kind, 0..=3 | 5..=17) || !matches!(entry.kind, 1 | 2) {
+        return None;
+    }
+    Some(rbl_index::Cue {
+        kind,
+        position_ms: entry.time_ms,
+        out_ms: if entry.kind == 2 {
+            entry.loop_time_ms
+        } else {
+            0
+        },
+        colour: entry.library_color_table_index(),
+        memory_colour: u8::try_from(entry.library_color())
+            .ok()
+            .filter(|color| *color < 8),
+        ..Default::default()
+    })
+}
+
+/// `OneLibrary`'s cue table supplies its own cue identity and timing. The
+/// connection is explicitly read-only; malformed individual rows are ignored.
+fn one_library_cues(mount: &Path) -> HashMap<u32, Vec<rbl_index::Cue>> {
+    let read = || -> rbl_onelibrary::Result<HashMap<u32, Vec<rbl_index::Cue>>> {
+        let root = rbl_export::export_root_name(mount)
+            .map_err(|error| rbl_onelibrary::Error::Io(std::io::Error::other(error)))?;
+        let db = rbl_onelibrary::ExportLibrary::open_read_only(
+            &mount.join(root).join("rekordbox/exportLibrary.db"),
+        )?;
+        let mut stmt = db.connection().prepare(
+            "SELECT content_id, kind, colorTableIndex, inUsec, outUsec FROM cue ORDER BY cue_id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, Option<i64>>(4)?,
+            ))
+        })?;
+        let mut cues: HashMap<u32, Vec<rbl_index::Cue>> = HashMap::new();
+        for row in rows {
+            let Ok((track, kind, colour, start, end)) = row else {
+                continue;
+            };
+            let (Ok(track), Ok(kind), Ok(position_ms)) = (
+                u32::try_from(track),
+                u8::try_from(kind),
+                u32::try_from(start / 1000),
+            ) else {
+                continue;
+            };
+            if start < 0 || !matches!(kind, 0..=17) {
+                continue;
+            }
+            let out_ms = end
+                .filter(|end| *end >= 0)
+                .and_then(|end| u32::try_from(end / 1000).ok())
+                .unwrap_or(0);
+            cues.entry(track).or_default().push(rbl_index::Cue {
+                kind,
+                position_ms,
+                out_ms,
+                colour: colour
+                    .and_then(|value| u8::try_from(value).ok())
+                    .unwrap_or(0),
+                ..Default::default()
+            });
+        }
+        Ok(cues)
+    };
+    match read() {
+        Ok(cues) => cues,
+        Err(error) => {
+            tracing::warn!(device = %mount.display(), %error, "OneLibrary cues could not be read");
+            HashMap::new()
+        }
     }
 }
 
@@ -1069,6 +1243,10 @@ pub fn ids_in_range(view: &DeviceView, from: u32, to: u32) -> Vec<String> {
 }
 
 fn row_dto(row: &DeviceRow) -> RowDto {
+    let mut hot: Vec<_> = row.cues.iter().filter_map(|cue| cue.hot_letter().map(|letter| (cue.kind, RowCueDto(letter, cue.position_ms, cue_colour_css(cue.colour), cue.out_ms > cue.position_ms)))).collect();
+    hot.sort_by_key(|(kind, _)| *kind);
+    let memory: Vec<_> = row.cues.iter().filter(|cue| cue.is_memory()).collect();
+    let memory_cue_colours = if memory.iter().all(|cue| cue.memory_colour.is_none()) { Vec::new() } else { memory.iter().map(|cue| cue.memory_colour.unwrap_or(u8::MAX)).collect() };
     RowDto {
         id: rbl_index::folder::loose_id(&row.path),
         track_no: row.position,
@@ -1085,9 +1263,9 @@ fn row_dto(row: &DeviceRow) -> RowDto {
         analysed: u8::from(row.analysed),
         date_added: row.date_added.clone(),
         release_date: String::new(),
-        hot_cues: Vec::new(),
-        memory_cues: Vec::new(),
-        memory_cue_colours: Vec::new(),
+        hot_cues: hot.into_iter().map(|(_, cue)| cue).collect(),
+        memory_cues: memory.iter().map(|cue| cue.position_ms).collect(),
+        memory_cue_colours,
         artwork_hue: 0,
         has_artwork: row.has_artwork,
         file_name: row.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -2079,5 +2257,239 @@ mod tests {
         assert_eq!(page.iter().map(|r| (r.title.as_str(), r.track_no)).collect::<Vec<_>>(), [("Track 2", 2), ("Track 1", 1)]);
         assert_eq!(ids_in_range(&view, 1, 0), vec![page[0].id.clone(), page[1].id.clone()]);
         assert!(fetch_rows(&view, 0, MAX_ROWS + 1).is_err());
+    }
+    #[test]
+    fn browsing_both_device_formats_reads_cues_without_changing_a_clean_stick() {
+        let rig = rig_with(|index, track| {
+            analysed_on_the_stick(index, track);
+            if index == 0 {
+                track.cues = Some(vec![
+                    rbl_anlz::cues::ExportCue {
+                        kind: 1,
+                        time_ms: 1_000,
+                        color_code: 46,
+                        ..Default::default()
+                    },
+                    rbl_anlz::cues::ExportCue {
+                        kind: 5,
+                        time_ms: 2_000,
+                        ..Default::default()
+                    },
+                    rbl_anlz::cues::ExportCue {
+                        time_ms: 3_000,
+                        loop_time_ms: Some(5_000),
+                        color_id: 3,
+                        ..Default::default()
+                    },
+                ]);
+            }
+        });
+        let mount = rig.stick.path();
+        let before = contents_under(mount);
+        let probe = device::read(mount, Format::DeviceLibrary).unwrap();
+        let probe_track = probe.tracks.iter().find(|track| track.title == "Track 0").unwrap();
+        let probe_ext = assets_of(mount, probe_track).1.analysis_dat().unwrap().with_extension("EXT");
+        assert!(probe_ext.is_file(), "{}", probe_ext.display());
+        assert_ne!(rbl_anlz::Anlz::read(&probe_ext).unwrap().cue_entries().len(), 0);
+        #[cfg(unix)]
+        let original_ext = std::fs::read(&probe_ext).unwrap();
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let library = device::read(mount, format).unwrap();
+            let one_cues = if format == Format::OneLibrary {
+                one_library_cues(mount)
+            } else {
+                HashMap::new()
+            };
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            let rows: Vec<_> = library
+                .tracks
+                .iter()
+                .enumerate()
+                .map(|(at, track)| {
+                    let mut row = device_row(mount, track, at);
+                    row.cues = device_cues(mount, track, format, &one_cues, &mut remaining);
+                    row
+                })
+                .collect();
+            let cued_row = rows.iter().find(|row| row.title == "Track 0").unwrap();
+            assert!(cued_row.cues.iter().any(|cue| cue.is_memory() && cue.position_ms == 3_000 && cue.out_ms == 5_000), "{format:?}");
+            let view = DeviceView::open(
+                rows,
+                &rbl_index::ViewSpec {
+                    source: rbl_index::TrackSource::Collection,
+                    sort: rbl_index::SortColumn::TrackNo,
+                    descending: false,
+                    query: String::new(),
+                    filter: rbl_index::TrackFilter::default(),
+                },
+                rbl_index::SearchField::All,
+            );
+            let found = fetch_rows(&view, 0, 10).unwrap();
+            let cued = found.iter().find(|row| row.title == "Track 0").unwrap();
+            assert_eq!(
+                cued.hot_cues
+                    .iter()
+                    .map(|cue| (cue.0, cue.1, cue.3))
+                    .collect::<Vec<_>>(),
+                [('A', 1_000, false), ('D', 2_000, false)],
+                "{format:?}"
+            );
+            assert_eq!(cued.hot_cues[0].2, cue_colour_css(46), "{format:?}");
+            assert_eq!(cued.memory_cues, [3_000], "{format:?}");
+            assert_eq!(cued.memory_cue_colours, [2], "{format:?}");
+            assert!(
+                found
+                    .iter()
+                    .filter(|row| row.title != "Track 0")
+                    .all(|row| row.hot_cues.is_empty() && row.memory_cues.is_empty()),
+                "{format:?}"
+            );
+        }
+        assert_eq!(
+            contents_under(mount),
+            before,
+            "browsing a clean stick must not write to it"
+        );
+
+        let library = device::read(mount, Format::DeviceLibrary).unwrap();
+        let track = library
+            .tracks
+            .iter()
+            .find(|track| track.title == "Track 0")
+            .unwrap();
+        let ext = assets_of(mount, track)
+            .1
+            .analysis_dat()
+            .unwrap()
+            .with_extension("EXT");
+        std::fs::write(&ext, b"malformed analysis").unwrap();
+        let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+        let mut damaged = device_row(mount, track, 0);
+        damaged.cues = device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining);
+        assert!(row_dto(&damaged).hot_cues.is_empty());
+        let one_cues = one_library_cues(mount);
+        let mut still_in_database = device_row(mount, track, 0);
+        still_in_database.cues = device_cues(mount, track, Format::OneLibrary, &one_cues, &mut remaining);
+        assert_eq!(row_dto(&still_in_database).memory_cues, [3_000]);
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            let target = outside.path().join("ANLZ0000.EXT");
+            std::fs::write(&target, original_ext).unwrap();
+            std::fs::remove_file(&ext).unwrap();
+            std::os::unix::fs::symlink(&target, &ext).unwrap();
+            let mut linked = device_row(mount, track, 0);
+            linked.cues = device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining);
+            assert!(row_dto(&linked).hot_cues.is_empty(), "analysis symlinks outside the stick are not followed");
+        }
+    }
+
+    #[test]
+    fn oversized_browser_ext_is_nonfatal_and_bounded() {
+        let rig = rig_with(|index, track| {
+            analysed_on_the_stick(index, track);
+            if index == 0 {
+                track.cues = Some(vec![rbl_anlz::cues::ExportCue {
+                    kind: 1,
+                    time_ms: 1_000,
+                    ..Default::default()
+                }, rbl_anlz::cues::ExportCue {
+                    time_ms: 3_000,
+                    loop_time_ms: Some(5_000),
+                    ..Default::default()
+                }]);
+            }
+        });
+        let mount = rig.stick.path();
+        let library = device::read(mount, Format::DeviceLibrary).unwrap();
+        let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
+        let ext = assets_of(mount, track).1.analysis_dat().unwrap().with_extension("EXT");
+        let mut analysis = rbl_anlz::Anlz::read(&ext).unwrap();
+        analysis.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; usize::try_from(MAX_BROWSER_EXT_BYTES).unwrap()]));
+        std::fs::write(&ext, analysis.to_bytes()).unwrap();
+        assert_ne!(rbl_anlz::Anlz::read(&ext).unwrap().cue_entries(), [] as [rbl_anlz::CueEntry; 0]);
+        let before = contents_under(mount);
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let one_cues = if format == Format::OneLibrary { one_library_cues(mount) } else { HashMap::new() };
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            let cues = device_cues(mount, track, format, &one_cues, &mut remaining);
+            assert_eq!(remaining, MAX_BROWSER_EXT_VIEW_BYTES, "oversized file should not be read");
+            let mut row = device_row(mount, track, 0);
+            row.cues = cues;
+            let dto = row_dto(&row);
+            if format == Format::DeviceLibrary {
+                assert!(dto.hot_cues.is_empty());
+            } else {
+                assert_eq!(dto.hot_cues[0].0, 'A');
+                assert_eq!(dto.memory_cues, [3_000]);
+            }
+        }
+        assert_eq!(contents_under(mount), before, "browsing must not write to the stick");
+        std::fs::remove_file(&ext).unwrap();
+        let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+        assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
+        assert_ne!(device_cues(mount, track, Format::OneLibrary, &one_library_cues(mount), &mut remaining), [] as [rbl_index::Cue; 0]);
+    }
+
+    #[test]
+    fn browser_ext_reads_share_a_view_budget() {
+        let rig = rig_with(|index, track| {
+            analysed_on_the_stick(index, track);
+        });
+        let mount = rig.stick.path();
+        let library = device::read(mount, Format::DeviceLibrary).unwrap();
+        let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
+        let ext = assets_of(mount, track).1.analysis_dat().unwrap().with_extension("EXT");
+        let size = std::fs::metadata(ext).unwrap().len();
+        let mut remaining = size * 2;
+        for _ in 0..2 {
+            assert_ne!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
+        }
+        assert_eq!(remaining, 0);
+        assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
+    }
+
+    #[test]
+    fn browser_open_many_tracks_records_fixture_latency() {
+        let (src, stick) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let mut seed = rbl_export::SourceTrack::default();
+        analysed_on_the_stick(0, &mut seed);
+        let tracks: Vec<_> = (0..600_u64)
+            .map(|id| {
+                let path = src.path().join(format!("t{id}.mp3"));
+                std::fs::write(&path, [0_u8; 512]).unwrap();
+                rbl_export::SourceTrack {
+                    id: id + 1,
+                    source_path: path,
+                    title: format!("Track {id}"),
+                    analysis: seed.analysis.clone(),
+                    cues: seed.cues.clone(),
+                    ..Default::default()
+                }
+            })
+            .collect();
+        rbl_export::export(stick.path(), &tracks, &[]).unwrap();
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let started = std::time::Instant::now();
+            let library = device::read(stick.path(), format).unwrap();
+            let one_cues = if format == Format::OneLibrary { one_library_cues(stick.path()) } else { HashMap::new() };
+            let rows = library.tracks.iter().enumerate().map(|(at, track)| device_row(stick.path(), track, at)).collect();
+            let mut view = DeviceView::open(rows, &rbl_index::ViewSpec {
+                source: rbl_index::TrackSource::Collection,
+                sort: rbl_index::SortColumn::Title,
+                descending: false,
+                query: String::new(),
+                filter: rbl_index::TrackFilter::default(),
+            }, rbl_index::SearchField::All);
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            for row in &mut view.rows {
+                let track = library.track(row.id).unwrap();
+                row.cues = device_cues(stick.path(), track, format, &one_cues, &mut remaining);
+            }
+            assert_eq!(view.len(), 600);
+            assert!(view.rows.iter().all(|row| !row.cues.is_empty()));
+            let elapsed = started.elapsed();
+            assert!(elapsed < std::time::Duration::from_secs(10), "{format:?}: 600-track browser fixture took {elapsed:?}");
+        }
     }
 }
