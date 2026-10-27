@@ -439,6 +439,7 @@ fn extended_cues_carry_their_colour() {
 
     assert_eq!(entries[0].hot_cue, 1);
     assert_eq!(entries[0].kind, 1);
+    assert!(!entries[0].active_loop);
     assert_eq!(entries[0].time_ms, 4321);
     assert_eq!(entries[0].comment.as_deref(), Some("intro"));
     assert_eq!(entries[0].color_code, Some(21));
@@ -449,6 +450,68 @@ fn extended_cues_carry_their_colour() {
     assert_eq!(entries[1].hot_cue, 2);
     assert_eq!(entries[1].comment, None);
     assert_eq!(entries[1].color_code, Some(36));
+}
+
+#[test]
+fn legacy_dat_cues_read_hot_and_memory_pcpt_entries() {
+    let mut hot = vec![0; 56];
+    hot[..4].copy_from_slice(b"PCPT");
+    hot[4..8].copy_from_slice(&28_u32.to_be_bytes());
+    hot[8..12].copy_from_slice(&56_u32.to_be_bytes());
+    hot[12..16].copy_from_slice(&1_u32.to_be_bytes());
+    hot[28] = 1;
+    hot[32..36].copy_from_slice(&25_u32.to_be_bytes());
+    hot[36..40].copy_from_slice(&u32::MAX.to_be_bytes());
+    let mut memory = hot.clone();
+    memory[12..16].copy_from_slice(&0_u32.to_be_bytes());
+    memory[16..20].copy_from_slice(&4_u32.to_be_bytes());
+    memory[28] = 2;
+    memory[32..36].copy_from_slice(&494_u32.to_be_bytes());
+    memory[36..40].copy_from_slice(&2369_u32.to_be_bytes());
+    let header = |hot: bool| {
+        let mut bytes = vec![0; 12];
+        bytes[3] = u8::from(hot);
+        bytes[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        bytes
+    };
+    let file = build(&[(b"PCOB", header(true), hot), (b"PCOB", header(false), memory)]);
+    let anlz = parse(&file).unwrap();
+    assert!(anlz.cue_entries().is_empty(), "extended decoder stays PCO2-only");
+    let cues = anlz.legacy_cue_entries();
+    assert_eq!(cues.len(), 2);
+    assert_eq!((cues[0].hot_cue, cues[0].kind, cues[0].time_ms), (1, 1, 25));
+    assert_eq!((cues[1].hot_cue, cues[1].kind, cues[1].time_ms, cues[1].loop_time_ms), (0, 2, 494, 2369));
+    assert!(!cues[0].active_loop);
+    assert!(cues[1].active_loop);
+    assert!(cues.iter().all(|cue| cue.comment.is_none() && cue.color_code.is_none() && cue.rgb.is_none()));
+}
+
+#[test]
+fn legacy_dat_cues_stop_at_malformed_pcpt_entries() {
+    let mut valid = vec![0; 56];
+    valid[..4].copy_from_slice(b"PCPT");
+    valid[8..12].copy_from_slice(&56_u32.to_be_bytes());
+    valid[12..16].copy_from_slice(&1_u32.to_be_bytes());
+    valid[28] = 1;
+    valid[32..36].copy_from_slice(&25_u32.to_be_bytes());
+
+    let malformed = [
+        ("truncated", valid[..55].to_vec()),
+        ("short declared length", { let mut entry = valid.clone(); entry[8..12].copy_from_slice(&55_u32.to_be_bytes()); entry }),
+        ("length beyond payload", { let mut entry = valid.clone(); entry[8..12].copy_from_slice(&57_u32.to_be_bytes()); entry }),
+        ("huge declared length", { let mut entry = valid.clone(); entry[8..12].copy_from_slice(&u32::MAX.to_be_bytes()); entry }),
+    ];
+    for (case, entry) in malformed {
+        let file = build(&[(b"PCOB", vec![0; 12], entry.clone())]);
+        assert!(parse(&file).unwrap().legacy_cue_entries().is_empty(), "{case}");
+
+        let mut after_valid = valid.clone();
+        after_valid.extend(entry);
+        let file = build(&[(b"PCOB", vec![0; 12], after_valid)]);
+        let cues = parse(&file).unwrap().legacy_cue_entries();
+        assert_eq!(cues.len(), 1, "{case}: preserve only the valid prefix");
+        assert_eq!((cues[0].hot_cue, cues[0].time_ms), (1, 25));
+    }
 }
 
 /// The share tree's cue lists are headers with nothing in them, and that is

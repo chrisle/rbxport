@@ -204,6 +204,7 @@ fn loose_row(position: usize, name: &str, id: &str, tags: Option<&rbl_index::fol
         // Listed because it was just read off the disk.
         missing: false,
         extra: None,
+        device_source: None,
     }
 }
 
