@@ -3844,7 +3844,7 @@ fn usb_cues_replace_old_cues_and_preserve_loop_details() {
     let mut f = fixture();
     let track = track_id(0).to_string();
     f.writer.add_cue(&track, 1, 100).unwrap();
-    let cue = rbl_anlz::CueEntry { hot_cue: 4, kind: 2, time_ms: 1000, loop_time_ms: 5000, color_id: 0, comment: Some("USB loop".into()), color_code: Some(21), rgb: None };
+    let cue = rbl_anlz::CueEntry { active_loop: false, hot_cue: 4, kind: 2, time_ms: 1000, loop_time_ms: 5000, color_id: 0, comment: Some("USB loop".into()), color_code: Some(21), rgb: None };
     f.writer.import_usb_cues(&track, &[cue], 12800).unwrap();
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue WHERE rb_local_deleted=0"), 1);
     let values: (i64, i64, String) = f.conn().query_row("SELECT Kind, OutMsec, Comment FROM djmdCue WHERE rb_local_deleted=0", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
@@ -3859,7 +3859,7 @@ fn usb_cues_replace_old_cues_and_preserve_loop_details() {
 fn usb_cues_keep_a_memory_cues_colour() {
     let mut f = fixture();
     let track = track_id(0).to_string();
-    let memory = |time_ms: u32, color_id: u8| rbl_anlz::CueEntry { hot_cue: 0, kind: 1, time_ms, loop_time_ms: 0, color_id, comment: None, color_code: Some(0), rgb: None };
+    let memory = |time_ms: u32, color_id: u8| rbl_anlz::CueEntry { active_loop: false, hot_cue: 0, kind: 1, time_ms, loop_time_ms: 0, color_id, comment: None, color_code: Some(0), rgb: None };
     let cues = [memory(1000, 6), memory(2000, 0), rbl_anlz::CueEntry { color_code: None, ..memory(3000, 2) }];
     f.writer.import_usb_cues(&track, &cues, 12800).unwrap();
     let mut q = f.conn().prepare("SELECT InMsec, Kind, Color, ColorTableIndex FROM djmdCue WHERE rb_local_deleted=0 ORDER BY InMsec").unwrap();

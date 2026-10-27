@@ -361,6 +361,39 @@ mod tests {
         assert_eq!(extended_memory[0].color_id, 3, "a memory cue's colour");
     }
 
+    #[test]
+    fn dat_legacy_cues_keep_hot_memory_loop_and_active_state() {
+        let cues = [
+            ExportCue { kind: 1, time_ms: 25, ..Default::default() },
+            ExportCue { kind: 4, time_ms: 494, loop_time_ms: Some(2369), active_loop: true, ..Default::default() },
+        ];
+        let dat = sections(&cues, false);
+        let hot = dat[0].as_legacy_cue_entries().unwrap();
+        let memory = dat[1].as_legacy_cue_entries().unwrap();
+        assert_eq!((hot[0].hot_cue, hot[0].time_ms, hot[0].library_kind()), (1, 25, 1));
+        assert_eq!((memory[0].kind, memory[0].time_ms, memory[0].loop_time_ms, memory[0].library_kind()), (2, 494, 2369, 4));
+        assert_eq!(memory[0].comment, None);
+        let mut truncated = dat[1].clone();
+        truncated.payload.truncate(55);
+        assert_eq!(truncated.as_legacy_cue_entries().unwrap(), []);
+    }
+
+    #[test]
+    fn dat_legacy_cues_respect_declared_count() {
+        let cues = [
+            ExportCue { kind: 1, time_ms: 25, ..Default::default() },
+            ExportCue { kind: 2, time_ms: 50, ..Default::default() },
+        ];
+        let mut hot = sections(&cues, false).remove(0);
+        assert_eq!(hot.payload.len(), 112);
+        hot.header[6..8].copy_from_slice(&0_u16.to_be_bytes());
+        assert_eq!(hot.as_legacy_cue_entries().unwrap(), Vec::new());
+        hot.header[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        let entries = hot.as_legacy_cue_entries().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].time_ms, 25);
+    }
+
     /// #617: `djmdCue.Color` 0 (Pink) to 7 (Purple) goes to a device as rows
     /// 1 to 8, none as 0, and a device's row comes back as the same Color.
     #[test]

@@ -716,9 +716,10 @@ fn carry_all(state: &AppState, mount: &Path, added: &[(String, PathBuf)], carrie
 /// tree's `?/<file name>` ([`rbl_anlz::share_tree_ppth`]), every other
 /// section byte for byte as on the stick. They and the row are one
 /// journalled edit ([`crate::file_journal`]), so a failure or a crash
-/// leaves neither. The cues are the `.EXT`'s extended list, which carries
-/// their colours and comments [ASSUME: the stick's analysis cues are the
-/// ones its database lists; an export writes both from the same cues].
+/// leaves neither. The cues use the `.EXT`'s extended list when present,
+/// retaining colours and comments. DAT-only exports use the legacy list
+/// [ASSUME: the stick's analysis cues are the ones its database lists; an
+/// export writes both from the same cues].
 /// The stick is only read, and only below its mount point.
 fn carry_stick_analysis(state: &AppState, mount: &Path, content: &str, copy: &Path, stick: &MissingFile) -> AppResult<()> {
     let ppth = rbl_anlz::share_tree_ppth(&copy.to_string_lossy());
@@ -748,7 +749,7 @@ fn carry_stick_analysis(state: &AppState, mount: &Path, content: &str, copy: &Pa
     };
     let ext = read(&dat_relative.with_extension("EXT"))?;
     let two_ex = read(&dat_relative.with_extension("2EX"))?;
-    let cues = ext.as_ref().map(rbl_anlz::Anlz::cue_entries).unwrap_or_default();
+    let cues = ext.as_ref().map_or_else(|| dat.legacy_cue_entries(), rbl_anlz::Anlz::cue_entries);
 
     let relative = state.write(|w| w.analysis_data_path_for(content)).map_err(crate::commands::write_error)?;
     let target = rbl_anlz::resolve(&location.share_root, &relative);
@@ -1597,9 +1598,83 @@ mod tests {
         }
     }
 
+    #[test]
+    fn matched_collection_cues_are_unchanged_by_playlist_import() {
+        for format in [Format::OneLibrary, Format::DeviceLibrary] {
+            let rig = rig_with(analysed_on_the_stick);
+            let content = rbl_db::fixture::track_id(0);
+            rig.writer().add_cue(&content, 1, 1000).unwrap();
+            rig.writer().add_cue(&content, 0, 2000).unwrap();
+            let cues = || {
+                let db = rbl_db::Library::open(rig.location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+                let mut stmt = db.connection().prepare("SELECT InMsec, Kind FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY InMsec").unwrap();
+                stmt.query_map([&content], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))).unwrap().map(Result::unwrap).collect::<Vec<_>>()
+            };
+            let before = cues();
+            assert_eq!(before, vec![(1000, 1), (2000, 0)]);
+            let stick_before = contents_under(rig.stick.path());
+            let plan = rig.plan(format, "Friday");
+            assert_eq!(plan.missing(), 0, "{format:?}");
+            let made = rig.writer().import_device_playlist_entries(&plan.name, &plan.matched_entries()).unwrap();
+            assert!(made.added.is_empty(), "{format:?}");
+            assert_eq!(rig.entries(&made.id), ids(&[0, 1]));
+            assert_eq!(cues(), before, "{format:?}: matched collection cues remain untouched");
+            assert_eq!(contents_under(rig.stick.path()), stick_before, "USB fixture is read only");
+        }
+    }
+
+    #[test]
+    fn dat_only_stick_analysis_imports_cues_for_copied_tracks() {
+        for format in [Format::OneLibrary, Format::DeviceLibrary] {
+            for active_loop in [false, true] {
+                let rig = rig_with(|i, track| {
+                    analysed_on_the_stick(i, track);
+                    if i == 0 {
+                        track.analysis.retain(|(extension, _)| extension == "DAT");
+                        if active_loop {
+                            let loop_cue = &mut track.cues.as_mut().unwrap()[1];
+                            loop_cue.kind = 4;
+                            loop_cue.active_loop = true;
+                        }
+                    }
+                });
+                rig.came_from_elsewhere(0);
+                let library = device::read(rig.stick.path(), format).unwrap();
+                let track = library.tracks.iter().find(|t| t.title == "Track 0").unwrap();
+                let dat = rbl_anlz::Anlz::read(&audio_path(rig.stick.path(), &track.analysis_path)).unwrap();
+                assert!(dat.section(b"PCOB").is_some_and(|s| s.payload.starts_with(b"PCPT")), "DAT contains a hot cue entry");
+                assert!(!audio_path(rig.stick.path(), &track.analysis_path).with_extension("EXT").exists());
+                let stick_before = contents_under(rig.stick.path());
+                let state = state_over(&rig);
+                let plan = rig.plan(format, "Friday");
+                let music = tempfile::tempdir().unwrap();
+                let destination = rbl_export::device_import::destination(music.path());
+                let (entries, _, carried) = copy_missing(&plan, &plan.copies(), &destination).unwrap();
+                let made = state.write(|w| w.import_device_playlist_entries(&plan.name, &entries)).unwrap();
+                assert_eq!(carry_all(&state, rig.stick.path(), &made.added, &carried), (1, 0));
+                let db = rbl_db::Library::open(rig.location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+                let mut stmt = db.connection().prepare("SELECT InMsec, OutMsec, Kind FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY InMsec").unwrap();
+                let cues: Vec<(i64, Option<i64>, i64)> = stmt.query_map([&made.added[0].0], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(Result::unwrap).collect();
+                assert_eq!(cues, vec![(25, None, 1), (494, Some(2369), if active_loop { 4 } else { 0 })], "{format:?}: DAT-only hot cue and memory loop, active={active_loop}");
+                assert_eq!(contents_under(rig.stick.path()), stick_before, "USB fixture is read only");
+                assert!(files_under(&rig.dir.path().join("backups/analysis-journal")).is_empty(), "journal is closed");
+            }
+        }
+    }
+
     fn copied_track_brings_the_sticks_analysis(format: Format) {
         let rig = rig_with(analysed_on_the_stick);
         rig.came_from_elsewhere(0);
+        let library = device::read(rig.stick.path(), format).unwrap();
+        let track = library.tracks.iter().find(|t| t.title == "Track 0").unwrap();
+        let stick_dat_path = audio_path(rig.stick.path(), &track.analysis_path);
+        let mut divergent_dat = rbl_anlz::Anlz::read(&stick_dat_path).unwrap();
+        let hot_list = divergent_dat.sections.iter_mut().find(|s| &s.tag.0 == b"PCOB" && s.header.get(..4) == Some(&[0, 0, 0, 1])).unwrap();
+        hot_list.payload[32..36].copy_from_slice(&125_u32.to_be_bytes());
+        std::fs::write(&stick_dat_path, divergent_dat.to_bytes()).unwrap();
+        assert_eq!(divergent_dat.legacy_cue_entries()[0].time_ms, 125, "DAT fixture differs from EXT");
+        let stick_ext = rbl_anlz::Anlz::read(&stick_dat_path.with_extension("EXT")).unwrap();
+        assert_eq!(stick_ext.cue_entries()[0].time_ms, 25, "EXT retains its own cue");
         rbl_db::Library::open(rig.location.clone(), rbl_db::OpenMode::ReadWrite)
             .unwrap()
             .connection()
