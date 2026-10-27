@@ -13,6 +13,7 @@
 //! [`libraries`] finds rekordbox libraries kept on a connected drive, where
 //! rekordbox's own Database management looks for them.
 
+pub mod awake;
 pub mod settings;
 pub mod explorer;
 pub mod mounts;
