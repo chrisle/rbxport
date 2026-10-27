@@ -29,3 +29,6 @@ jobs:
           mapfile -t tests < <(find scripts -name '*.test.mjs' ! -name 'cleanup.test.mjs' -print | sort)
           test "${#tests[@]}" -gt 0
           node --test "${tests[@]}"
+
+      - name: Run backlog worker decision tests
+        run: python3 -m unittest discover -s scripts/ai-workers -p 'test_*.py'

@@ -34,8 +34,16 @@ BACKOFF_RESET_AFTER = float(os.environ.get("RBX_BACKOFF_RESET_AFTER", "600"))
 REPO_DIR = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = Path(__file__).resolve()
 GOAL = (
-    "/goal Continuously run the take-tickets skill. If it stalls, restart it on "
-    "different tickets until everything is stalled or there are no tickets left."
+    "/goal Continuously run the take-tickets skill. For each intake pass, use "
+    "`python scripts/ai-workers/issue_queue.py list` as the complete open-issue "
+    "inventory before prior-work or screening; do not use the skill's "
+    "`gh issue list --limit 100` query. The helper excludes acceptance-test "
+    "labels and explicit [acceptance test] report markers, and preserves HOLD. "
+    "Run `python scripts/ai-workers/issue_queue.py check <N>` before screening "
+    "and again immediately before any claim, resume, or dispatch; skip on "
+    "exit 1 and stop intake on exit 2. Keep the skill's foreign-claim and "
+    "other eligibility gates. If it stalls, restart it on different tickets "
+    "until everything is stalled or there are no tickets left."
 )
 # Text Claude Code prints in the pane when /goal finishes one way or the other.
 DONE_PATTERN = re.compile(r"Goal achieved|Goal could not be achieved|Goal cleared")
