@@ -3387,6 +3387,14 @@ fn a_my_tag_panel_tick_tags_the_whole_selection_as_one_step() {
     );
     run(commands::redo_edit(s.handle(), s.state())).unwrap();
 
+    // Unticking a shared tag removes it from both tracks, without replacing
+    // track 1's unrelated Warm-up. The saved memberships survive a reload.
+    run(details::put_my_tag(s.handle(), s.state(), tracks.clone(), MY_TAG_PEAK.to_owned(), false, None)).unwrap();
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
+    assert!(run(details::selection_my_tags(s.state(), tracks.clone())).unwrap().is_empty());
+    assert_eq!(run(details::selection_my_tags(s.state(), vec![track_id(1)])).unwrap(), vec![MY_TAG_WARM_UP.to_owned()]);
+    assert!(run(details::selection_my_tags(s.state(), vec![track_id(2)])).unwrap().is_empty());
+
     // A new tag shows in the lookups under its category, by id.
     let made = run(details::create_my_tag(s.handle(), s.state(), MY_TAG_CATEGORY.to_owned())).unwrap();
     assert_eq!(made.name, "My Comment");
@@ -3522,6 +3530,14 @@ fn an_intelligent_playlist_on_a_my_tag_holds_the_tracks_carrying_it() {
         (read.conditions[0].property.as_str(), read.conditions[0].operator.as_str(), read.conditions[0].left.as_str()),
         ("myTag", "8", MY_TAG_PEAK)
     );
+    run(details::put_my_tag(s.handle(), s.state(), vec![track_id(3), track_id(5)], MY_TAG_PEAK.to_owned(), false, None)).unwrap();
+    assert!(s.playlist_rows(&node.id).is_empty());
+    run(commands::reload_library(s.handle(), s.state())).unwrap();
+    assert!(s.playlist_rows(&node.id).is_empty());
+    let after = run(commands::smart_rule(s.state(), node.id.clone())).unwrap();
+    assert_eq!(after.conditions[0].left, MY_TAG_PEAK);
+    run(details::put_my_tag(s.handle(), s.state(), vec![track_id(3), track_id(5)], MY_TAG_PEAK.to_owned(), true, None)).unwrap();
+    assert_eq!(s.playlist_rows(&node.id).len(), 2);
 }
 
 #[test]
