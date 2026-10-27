@@ -1772,5 +1772,7 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "Tilføj \"Mit mærke\" til \"Kommentarer\"",
   "This operation can take few minutes.": "Denne operation kan vare længe.",
-  "Please wait for a while": "Vent venligst"
+  "Please wait for a while": "Vent venligst",
+  "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
+  "No tracks found to import.": "No tracks found to import."
 }

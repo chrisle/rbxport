@@ -1777,5 +1777,7 @@
   "Playlist cannot be edited or deleted while searching.": "Playlist cannot be edited or deleted while searching.",
   "Add \"My Tag\" to the \"Comments\"": "\"Etiketim\"i \"Açıklamalar\"a ekle",
   "This operation can take few minutes.": "Bu işlem uzun zaman gerektirebilir.",
-  "Please wait for a while": "Lütfen bekleyin"
+  "Please wait for a while": "Lütfen bekleyin",
+  "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
+  "No tracks found to import.": "No tracks found to import."
 }

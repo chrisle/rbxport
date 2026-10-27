@@ -413,6 +413,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   mockLogLine("debug", "rbxport_lib::logging", "logging to the browser preview");
   const playlistFixture = options.playlistFixture ?? readPlaylistFixtureFromUrl();
   const all = makeRows(trackCount);
+  // A disposable browser fixture for external file drops. It is opt-in and
+  // survives a page reload so the collection view can verify the import.
+  const dropFixture = readFlagFromUrl("dropFixture");
+  const dropFixtureKey = "rbxport.mock.collectionDrop";
+  const droppedPaths: string[] = dropFixture
+    ? JSON.parse(localStorage.getItem(dropFixtureKey) ?? "[]") as string[]
+    : [];
+  if (dropFixture) {
+    for (const path of droppedPaths) {
+      const row = { ...makeRows(1)[0]!, id: `drop-${all.length}`, title: path.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, ""),
+        fileName: path.split(/[\\/]/).pop()!, trackNo: all.length + 1,
+        extra: { ...makeRows(1)[0]!.extra, location: path } };
+      all.push(row);
+    }
+  }
   /** The Missing File Manager's order once a heading sorted it, by id. */
   let missingOrder: string[] | null = null;
   /** The missing rows in the manager's order; any not in it go last. */
@@ -559,7 +574,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     } else if (spec.source.kind === "related") {
       candidates = relatedTo(spec.source.track, spec.source.criterion);
     } else {
-      candidates = Array.from({ length: trackCount }, (_, i) => i);
+      candidates = Array.from({ length: all.length }, (_, i) => i);
     }
     const q = fold(spec.query.trim());
     if (q) candidates = candidates.filter((i) => all[i] && matchesSearch(all[i], q, spec.searchField ?? "all"));
@@ -2051,7 +2066,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     librarySummary: () =>
       ready
         ? wait<LibrarySummary>({
-            trackCount,
+            trackCount: all.length,
             playlistCount: tree.filter((n) => n.kind === "playlist").length,
             readOnly: !(options.writable ?? readFlagFromUrl("writable")),
             dbVersion: null,
@@ -3068,7 +3083,28 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     importPaths: (paths) => wait({ imported: 0, skipped: paths.map((p) => `${p}: the mock library takes no files`), tracks: [], existing: [] }),
     // No file system in a browser: a path is its own one file.
     listImportFiles: (paths) => wait([...paths]),
-    importPathsSlice: (paths) => wait({ imported: 0, skipped: paths.map((p) => `${p}: the mock library takes no files`), tracks: [], existing: [] }),
+    importPathsSlice: (paths) => {
+      if (!dropFixture) return wait({ imported: 0, skipped: paths.map((p) => `${p}: the mock library takes no files`), tracks: [], existing: [] });
+      const tracks: { id: string; title: string }[] = [];
+      const existing: { id: string; title: string }[] = [];
+      for (const path of paths) {
+        const held = all.find((row) => row.extra?.location === path);
+        if (held) {
+          existing.push({ id: held.id, title: held.title });
+          continue;
+        }
+        const fileName = path.split(/[\\/]/).pop() ?? path;
+        const template = makeRows(1)[0]!;
+        const row = { ...template, id: `drop-${all.length}`, title: fileName.replace(/\.[^.]+$/, ""),
+          fileName, trackNo: all.length + 1, extra: { ...template.extra, location: path } };
+        indexOfId.set(row.id, all.length);
+        all.push(row);
+        droppedPaths.push(path);
+        tracks.push({ id: row.id, title: row.title });
+      }
+      localStorage.setItem(dropFixtureKey, JSON.stringify(droppedPaths));
+      return wait({ imported: tracks.length, skipped: [], tracks, existing });
+    },
     // Emits progress, then holds until `window.__finishImport()` so a test
     // can watch the status line while an import is still running. A test
     // sets `window.__xmlSameNamed` to the lists the file would replace: the
