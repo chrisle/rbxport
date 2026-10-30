@@ -135,6 +135,10 @@ impl Catalog for Small {
                 id: TRACK,
                 position: 0x55,
             }],
+            Query::Tracks {
+                scope: TrackScope::Track(id),
+                ..
+            } if *id != TRACK => vec![],
             Query::Tracks { .. } => vec![Row::Track {
                 id: TRACK,
                 position: 0,
@@ -1786,6 +1790,57 @@ fn rx3_content_tracks_is_the_sorted_all_tracks_alias() {
     let regular = browse(&mut s, kind::TRACK_MENU, &[CTX, 4]);
     let content = browse(&mut s, kind::CONTENT_TRACKS, &[CTX, 4]);
     assert_eq!(content, regular);
+}
+
+/// XDJ-RX3 1.20 loading a search result: `1300` search, then `1200`
+/// `[context, 0, id]` and a one-row render at offset 0, whose row it loads.
+#[test]
+fn rx3_content_tracks_with_an_id_lists_just_that_track() {
+    let mut s = session();
+    let search = Message::new(
+        2,
+        kind::SEARCH,
+        vec![
+            Argument::Number(CTX),
+            Argument::Number(0),
+            Argument::Number(8),
+            Argument::String("AT YOUR".into()),
+            Argument::Number(0),
+        ],
+    );
+    assert_eq!(s.handle(&search)[0].arguments[1], Argument::Number(1));
+    let (count, items) = browse(&mut s, kind::CONTENT_TRACKS, &[CTX, 0, TRACK]);
+    assert_eq!(count, 1);
+    assert_eq!(items[0].arguments[1], Argument::Number(TRACK));
+    // [ASSUME] An id the library lacks lists nothing rather than falling
+    // back to every track, so the player never loads a track not picked.
+    assert_eq!(
+        browse(&mut s, kind::CONTENT_TRACKS, &[CTX, 0, TRACK + 1]).0,
+        0
+    );
+}
+
+#[test]
+fn rx3_content_track_by_id_is_not_dropped_by_the_track_filter() {
+    let mut s = session();
+    // A BPM range excluding the fixture, then filtering on.
+    let mut bytes = vec![1, 6, 2, 0];
+    bytes.extend_from_slice(&12000_u32.to_le_bytes());
+    bytes.extend_from_slice(&13000_u32.to_le_bytes());
+    s.handle(&Message::new(
+        2,
+        0x3207,
+        vec![
+            Argument::Number(CTX),
+            Argument::Number(6),
+            Argument::Number(0),
+            Argument::Number(12),
+            Argument::Blob(bytes),
+        ],
+    ));
+    s.handle(&numbers(0x3007, 3, &[CTX, 1]));
+    assert_eq!(browse(&mut s, kind::CONTENT_TRACKS, &[CTX, 0]).0, 0);
+    assert_eq!(browse(&mut s, kind::CONTENT_TRACKS, &[CTX, 0, TRACK]).0, 1);
 }
 
 #[test]

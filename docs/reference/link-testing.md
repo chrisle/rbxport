@@ -68,7 +68,7 @@ Use complete encoded-message comparisons for protocol layouts. Use semantic asse
 
 | Operation | XDJ-AZ | XDJ-RX3 | CDJ-3000 |
 | --- | --- | --- | --- |
-| All tracks | `1004` | `1200` content-tracks path | `1004` |
+| All tracks | `1004` | `1200` content-tracks path (one track when it names an id) | `1004` |
 | Key browser | `1014` related-key family | `100b` legacy key family | `1014` related-key family |
 | Keyboard search | `1300` until a device capture establishes otherwise `[ASSUME]` | `1300` | `1500` `[OBS]` |
 | Artwork while loading | `2003` | `2103` content-artwork path | `2003` |
@@ -104,7 +104,7 @@ An AtEmu case must assert a user-visible result, not only that a packet was acce
 | HW-LOD-05 | All | Load a track containing memory/hot cues. | Cue and loop markers appear and can be selected by the deck. | `2104` requests the legacy cue list through `4702`; `2b04` requests extended cues. The current server lacks the `2104` route, so this row is an open compatibility check. `2504` is VBR analysis and must be tested separately. | Manuals: cues, loops, and Hot Cues via Link Export; rekordbox 7.2.11 static dispatch. `[OBS]` server contract; player reachability varies by firmware. |
 | HW-LOD-06 | All | Let the deck read the loaded track. | Playback can start and proceeds from the actual audio file. | NFS mount, path traversal, chunked reads, and EOF reconstruct bytes identical to the fixture file. | Link Export server capture and manuals' Link Export playback result. `[OBS]` transport; audible playback needs hardware. |
 | HW-POST-01 | All | After loading, return to browse and continue using the RBX source. | The source remains present and the browser does not remain on “Waiting…”. | `3006` receives `4d02` with a 160-byte blob and `2602` renders 13 delivery-info rows. | CDJ-3000 firmware 3.20/capture `[OBS]`; accepted as compatibility behavior for AZ/RX3 `[ASSUME]`. |
-| HW-RX3-01 | XDJ-RX3 | Load or deepen a track list on the RX3. | The same all-track content remains available during the transition. | RX3 profile uses `1200` and gets the same three fixture tracks as `1004`. | RX3 firmware path `dbcl_GetTrack_Content`. `[OBS]` |
+| HW-RX3-01 | XDJ-RX3 | Load or deepen a track list on the RX3; load a track picked from a search. | The same all-track content remains available during the transition; the picked track loads, not the first track by title. | RX3 profile uses `1200` and gets the same three fixture tracks as `1004`. With a track id in argument 2 (`[context, sort, id]`, sent after a `1300` search) `1200` lists only that track, unfiltered; an unknown id lists none `[ASSUME]`. | RX3 firmware path `dbcl_GetTrack_Content`; XDJ-RX3 1.20 search-load capture. `[OBS]` |
 | HW-RX3-02 | XDJ-RX3 | Request artwork during an RX3 load. | Artwork is displayed when present; missing artwork does not block loading. | RX3 profile uses `2103` and receives the required `4002` envelope. | RX3 firmware `dbcl_GetImage2`. `[OBS]` |
 
 ## Current AtEmu automation

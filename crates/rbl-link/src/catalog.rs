@@ -820,6 +820,11 @@ impl IndexCatalog {
                 });
                 view.rows.iter().map(|&row| (row, 0)).collect()
             }
+            TrackScope::Track(id) => library
+                .row_of_id(u64::from(*id))
+                .map(|row| (row, 0))
+                .into_iter()
+                .collect(),
         }
     }
 
@@ -2773,6 +2778,63 @@ mod tests {
             }),
             [] as [rbl_dbserver::catalog::Row; 0]
         );
+    }
+
+    #[test]
+    fn a_track_scope_lists_just_that_track() {
+        let c = catalog();
+        let one = |id| {
+            ids(&c.list(&Query::Tracks {
+                scope: TrackScope::Track(id),
+                sort: Sort::Default,
+            }))
+        };
+        assert_eq!(one(10), [10]);
+        assert_eq!(one(99), [] as [u32; 0]);
+    }
+
+    /// XDJ-RX3 1.20 loading a search result: it searches, then asks `1200`
+    /// for the picked id and loads row 0 of that list. Answering with the
+    /// whole library loaded the first track by title instead.
+    #[test]
+    fn rx3_loads_the_search_result_it_picked() {
+        use rbl_dbserver::net::Handler;
+        use rbl_dbserver::{kind, setup_request, Argument, Message};
+        const CTX: u32 = 0x0c03_0401;
+        let number = |m: &Message, i: usize| match m.arguments.get(i) {
+            Some(Argument::Number(n)) => *n,
+            _ => panic!("argument {i} of {m:?} is not a number"),
+        };
+        let mut s = rbl_dbserver::session::CatalogHandler::new(Arc::new(catalog())).open();
+        s.handle(&setup_request(1));
+        let search = s.handle(&Message::new(
+            2,
+            kind::SEARCH,
+            vec![
+                Argument::Number(0x0c07_0401),
+                Argument::Number(0),
+                Argument::Number(14),
+                Argument::String("SECOND".into()),
+                Argument::Number(0),
+            ],
+        ));
+        assert_eq!(number(&search[0], 1), 2);
+        // Zebra (10) is the second hit; Apple (11) is first by title.
+        let numbers = |tx, kind, args: &[u32]| {
+            Message::new(
+                tx,
+                kind,
+                args.iter().map(|&n| Argument::Number(n)).collect(),
+            )
+        };
+        let content = s.handle(&numbers(3, kind::CONTENT_TRACKS, &[CTX, 0, 10]));
+        assert_eq!(number(&content[0], 1), 1);
+        let rendered = s.handle(&numbers(4, kind::RENDER, &[CTX, 0, 1, 0, 1, 0]));
+        assert_eq!(rendered[1].kind, kind::MENU_ITEM);
+        assert_eq!(number(&rendered[1], 1), 10);
+        // Without an id it stays the all-track alias.
+        let all = s.handle(&numbers(5, kind::CONTENT_TRACKS, &[CTX, 0]));
+        assert_eq!(number(&all[0], 1), 3);
     }
 
     #[test]
