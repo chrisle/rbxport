@@ -1968,11 +1968,14 @@ fn delivery_rows(t: &TrackDetails) -> Vec<Item> {
 /// The seven rows of a track-info reply.
 fn track_info_rows(t: &TrackDetails) -> Vec<Item> {
     vec![
-        // rekordbox puts the file's copyright comment here; we have no such
-        // field, so the row is blank but shaped the same.
+        // The first row's id is the file's type (`djmdContent.FileType`: 1 mp3, 5 flac, 11 wav, 12 aiff), which a
+        // CDJ-2000NXS2 reads to pick its decoder [OBS capture 2026-10-30: rekordbox sent 5 for a FLAC]. It was a
+        // constant 1 (the MP3 the row was first captured with), so an NXS2 took every track for an MP3: a FLAC was
+        // scanned through in 2 KiB reads, never finished loading, and a WAV ended in an error. An unknown type
+        // (0) keeps the old 1.
         Item {
             a: 1,
-            id: 1,
+            id: if t.file_type == 0 { 1 } else { t.file_type },
             item_type: item_type::TRACK,
             e: 0x100,
             key: t.row.key,
@@ -1988,4 +1991,17 @@ fn track_info_rows(t: &TrackDetails) -> Vec<Item> {
         Item::line(0, 1, "", item_type::INFO_UNKNOWN),
         Item::line(0, t.key_id, &t.key_name, item_type::KEY),
     ]
+}
+
+#[cfg(test)]
+mod track_info_tests {
+    use super::*;
+
+    #[test]
+    fn the_first_track_info_row_carries_the_files_type() {
+        for (file_type, sent) in [(1, 1), (5, 5), (11, 11), (12, 12), (0, 1)] {
+            let rows = track_info_rows(&TrackDetails { file_type, ..TrackDetails::default() });
+            assert_eq!(rows[0].id, sent, "file type {file_type}");
+        }
+    }
 }
