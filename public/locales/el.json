@@ -1784,5 +1784,7 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Εισάγονται μόνο κομμάτια που υπάρχουν ήδη στη συλλογή σας. Τα κομμάτια χωρίς αντιστοίχιση παραλείπονται· αν δεν αντιστοιχεί κανένα, δεν δημιουργείται λίστα αναπαραγωγής.",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Όταν λείπουν κομμάτια, επιλέξτε αν θα αντιγραφούν και πού θα αποθηκευτούν. Η ακύρωση σταματά την εισαγωγή.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Some files were not imported": "Some files were not imported",
+  "{count} files were not imported:": "{count} files were not imported:"
 }

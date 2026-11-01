@@ -115,6 +115,7 @@ const ROW_FIELDS: ReadonlySet<TrackField> = new Set<TrackField>([
 ]);
 
 const DuplicateTracksDialog = lazy(() => import("@/components/DuplicateTracksDialog").then(m => ({ default: m.DuplicateTracksDialog })));
+const ImportSkipsDialog = lazy(() => import("@/components/ImportSkipsDialog").then(m => ({ default: m.ImportSkipsDialog })));
 const FolderClashDialog = lazy(() => import("@/components/FolderClashDialog").then(m => ({ default: m.FolderClashDialog })));
 const DeviceImportCopyDialog = lazy(() => import("@/components/DeviceImportCopyDialog").then(m => ({ default: m.DeviceImportCopyDialog })));
 const AnalysisDialog = lazy(() => import("@/views/analysis/AnalysisDialog").then(m => ({ default: m.AnalysisDialog })));
@@ -1117,6 +1118,13 @@ function AppBody() {
     },
     [advancedPrefs.duplicateTracks, prefs],
   );
+  // Every file an import left out and why. The status line names only the
+  // first; with several, the rest would go unexplained (#800).
+  const [skipNotice, setSkipNotice] = useState<readonly string[] | null>(null);
+  const noteSkips = useCallback((skipped: readonly string[]) => {
+    if (skipped.length > 1) setSkipNotice(skipped);
+  }, []);
+
   const resolveDuplicates = useCallback(
     async (playlistId: string, trackIds: string[], name: string): Promise<boolean | null> => {
       const backend = await getBackend();
@@ -1148,6 +1156,7 @@ function AppBody() {
           const { ids: trackIds, report: imported } = await importLoose(ids, (paths) => backend.importPaths(paths));
           if (imported && analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
           const tail = skippedTail(imported?.skipped ?? []);
+          noteSkips(imported?.skipped ?? []);
           if (trackIds.length === 0) {
             refuse(`Nothing added to ${name}${tail}.`);
             return;
@@ -1182,7 +1191,7 @@ function AppBody() {
         },
       });
     },
-    [tree, report, refuse, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates],
+    [tree, report, refuse, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates, noteSkips],
   );
 
   const addDraggedTo = useCallback(
@@ -1289,6 +1298,7 @@ function AppBody() {
           if (analysisPrefs.auto && fresh.length > 0) analysis.add(fresh);
           const already = existing > 0 ? `; ${existing} already in the library` : "";
           const left = skippedTail(skipped);
+          noteSkips(skipped);
           report(signal.aborted
             ? `Stopped: ${noun(added)} added to ${name}${left}${already}.`
             : added === 0 && toAdd.length > 0
@@ -1298,7 +1308,7 @@ function AppBody() {
       });
     },
     [tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates,
-      advancedPrefs.folderDropClash, askFolderClash],
+      advancedPrefs.folderDropClash, askFolderClash, noteSkips],
   );
 
   const importDroppedPathsToCollection = useCallback((paths: string[]) => {
@@ -1329,10 +1339,11 @@ function AppBody() {
         }
         if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
         const already = imported.existing > 0 ? `; ${imported.existing} already in the library` : "";
+        noteSkips(imported.skipped);
         report(`Imported ${imported.imported} of ${files.length} files${skippedTail(imported.skipped)}${already}.`);
       },
     });
-  }, [readOnly, advancedPrefs.protectLibrary, refuse, jobs, t, analysisPrefs.auto, analysis, report]);
+  }, [readOnly, advancedPrefs.protectLibrary, refuse, jobs, t, analysisPrefs.auto, analysis, report, noteSkips]);
 
   const importDroppedPaths = useCallback((target: string, paths: string[]) => {
     if (target === "all") importDroppedPathsToCollection(paths);
@@ -2063,12 +2074,13 @@ function AppBody() {
           const said = signal.aborted
             ? t("Stopped: imported {imported} of {count} files.", values)
             : `Imported ${values.imported} of ${values.total} files${skippedTail(imported.skipped)}`;
+          noteSkips(imported.skipped);
           const already = imported.existing > 0 ? `; ${imported.existing} already in the library` : "";
           await afterWrite(signal.aborted ? said : `${said}${already}.`);
         },
       });
     },
-    [afterWrite, analysisPrefs.auto, analysis, jobs, t],
+    [afterWrite, analysisPrefs.auto, analysis, jobs, t, noteSkips],
   );
 
   // Analysis Lock: the GRID panel's lock, set from the list on every
@@ -2332,6 +2344,7 @@ function AppBody() {
         }
         const total = imported.imported + imported.skipped.length;
         const already = imported.existing.length > 0 ? `; ${imported.existing.length} already in the library` : "";
+        noteSkips(imported.skipped);
         report(`Imported ${imported.imported} of ${total} files${skippedTail(imported.skipped)}${already}.`);
         setTree(await backend.playlistTree());
         // Auto Analysis in Preferences: what just landed goes straight into
@@ -2341,7 +2354,7 @@ function AppBody() {
         refuse(e instanceof Error ? e.message : "Those files could not be imported.");
       }
     },
-    [report, refuse, analysisPrefs.auto, analysis],
+    [report, refuse, analysisPrefs.auto, analysis, noteSkips],
   );
 
   const importFromMenu = useCallback(
@@ -3608,6 +3621,7 @@ function AppBody() {
         <DuplicateTracksDialog playlist={duplicatePrompt.playlist} duplicates={duplicatePrompt.duplicates}
           total={duplicatePrompt.total} onAnswer={duplicatePrompt.settle} />
       ) : null}
+      {skipNotice ? <ImportSkipsDialog skipped={skipNotice} onClose={() => setSkipNotice(null)} /> : null}
       {folderClashPrompt ? <FolderClashDialog name={folderClashPrompt.name} onAnswer={folderClashPrompt.settle} /> : null}
       {copyPrompt ? (
         <DeviceImportCopyDialog

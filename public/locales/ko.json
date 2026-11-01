@@ -1782,5 +1782,7 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "컬렉션에 이미 있는 트랙만 가져옵니다. 일치하지 않는 트랙은 제외되며, 일치하는 트랙이 하나도 없으면 재생목록을 만들지 않습니다.",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "없는 트랙이 있으면 복사할지 여부와 저장 위치를 선택합니다. 취소하면 가져오기가 중단됩니다.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Some files were not imported": "Some files were not imported",
+  "{count} files were not imported:": "{count} files were not imported:"
 }

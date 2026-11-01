@@ -1787,5 +1787,7 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Импортируются только треки, которые уже есть в вашей коллекции. Треки без совпадений пропускаются; если совпадений нет, плейлист не создаётся.",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Если треки отсутствуют, выберите, копировать ли их и куда сохранить. Отмена останавливает импорт.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Some files were not imported": "Some files were not imported",
+  "{count} files were not imported:": "{count} files were not imported:"
 }
