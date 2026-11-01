@@ -1526,7 +1526,16 @@ fn sync_one_device<R: tauri::Runtime>(
         },
         Err(e) => {
             progress("failed");
-            tracing::warn!(destination, error = %e, detail = e.detail.as_deref().unwrap_or(""), "sync to one device failed");
+            let disk = rbl_devices::survey::disk_holding(std::path::Path::new(&destination));
+            tracing::warn!(
+                destination,
+                file_system = disk.as_ref().map_or("unknown", |d| d.file_system.as_str()),
+                total_bytes = disk.as_ref().map_or(0, |d| d.total_bytes),
+                mount_point = disk.as_ref().map_or("unknown", |d| d.mount_point.as_str()),
+                error = %e,
+                detail = e.detail.as_deref().unwrap_or(""),
+                "sync to one device failed"
+            );
             // The Sync Manager shows this line on its own, so an internal
             // error's detail — what actually failed — goes with its summary.
             let message = e.full_message();
@@ -2469,6 +2478,21 @@ fn write_export_with_phase(
     })
 }
 
+/// The disks last written to the log, so a call that finds the same set logs nothing.
+static LOGGED_DISKS: std::sync::LazyLock<std::sync::Mutex<Option<Vec<rbl_devices::survey::DiskDecision>>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+
+/// Logs every disk the OS listed, offered or skipped and why, when that set
+/// differs from the last one logged.
+fn log_disks_if_changed(current: &[rbl_devices::survey::DiskDecision]) {
+    if current.is_empty() { return; }
+    let mut last = LOGGED_DISKS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if rbl_devices::survey::changed(last.as_deref(), current) {
+        rbl_devices::survey::log(current);
+        *last = Some(current.to_vec());
+    }
+}
+
 /// Lists the volumes an export could be written to, and what is on each.
 ///
 /// Enumeration is cheap; reading a stick to see what it holds is not, so that
@@ -2477,7 +2501,9 @@ fn write_export_with_phase(
 #[tauri::command]
 pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
     blocking("list_devices", || {
-        Ok(rbl_devices::list()
+        let (devices, surveyed) = rbl_devices::list_surveyed();
+        log_disks_if_changed(&surveyed);
+        Ok(devices
             .into_iter()
             .map(|device| {
                 let found = rbl_devices::inspect(&device.mount_point);
