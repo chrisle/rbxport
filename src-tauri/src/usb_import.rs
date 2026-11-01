@@ -293,6 +293,10 @@ fn plan_cue_import(
 /// Each track keeps its own journal and its own database transaction, so a
 /// failure part-way leaves each track either fully imported or put back, as
 /// `file_journal::recover` decides from its row.
+///
+/// Every track is planned before any is published, so two tracks sharing one
+/// analysis file are both planned against the disk as it was before the batch:
+/// the later one can be counted unchanged and the earlier one's version stays.
 fn apply_cue_batch(
     state: &AppState, editor: &crate::grid::GridEditor, location: &rbl_db::LibraryLocation,
     batch: Vec<PendingCues>, report: &mut ImportReport,
@@ -317,7 +321,12 @@ fn apply_cue_batch(
     });
     if let Err(e) = written {
         // Rows already edited keep their new files; the rest are put back.
-        if let Some(journal) = journals.pop() { journal.reconcile(location)?; }
+        let reconciled = journals.pop().map_or(Ok(()), |journal| journal.reconcile(location));
+        // Tracks edited before the refusal now hold the stick's grid; Undo
+        // must not write the pre-import grid back over it. A refused track
+        // was never changed, so forgetting its history too loses nothing.
+        for item in &batch { editor.forget_history(&item.id); }
+        reconciled?;
         return Err(write_error(e));
     }
     for (journal, item) in journals.into_iter().zip(batch) {
@@ -481,13 +490,13 @@ mod tests {
         assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().skipped, 1);
     }
 
-    /// A cue as the master database holds it (`Kind` 0 memory, 1-3 A-C,
-    /// 5-17 D-P), for the stick's analysis files.
     trait HasEntries { fn exists_with_entries(&self) -> bool; }
     impl HasEntries for std::path::PathBuf {
         fn exists_with_entries(&self) -> bool { std::fs::read_dir(self).is_ok_and(|mut entries| entries.next().is_some()) }
     }
 
+    /// A cue as the master database holds it (`Kind` 0 memory, 1-3 A-C,
+    /// 5-17 D-P), for the stick's analysis files.
     fn stick_cue(kind: u8, time_ms: u32, loop_end: Option<u32>, color_code: u8, comment: &str) -> rbl_anlz::cues::ExportCue {
         rbl_anlz::cues::ExportCue { kind, time_ms, loop_time_ms: loop_end, color_code, comment: comment.into(), ..Default::default() }
     }
@@ -873,7 +882,11 @@ mod tests {
         );
         let before: Vec<Vec<u8>> = local.iter().map(|p| std::fs::read(p).unwrap()).collect();
         let editor = crate::grid::GridEditor::at(state.backup_dir());
+        // Grid edits made before the import, on a track imported ahead of the refusal.
+        let first = rbl_db::fixture::track_id(0);
+        editor.seed_history(&first);
         assert!(import(&state, &editor, &usb, true, false, false, false).is_err());
+        assert!(!editor.has_history(&first), "a failed batch leaves no Undo over the imported grid");
         let mut imported = 0;
         for (index, path) in local.iter().enumerate() {
             let now = std::fs::read(path).unwrap();
@@ -885,6 +898,8 @@ mod tests {
             assert_eq!(now != before[index], in_library, "track {index} has its file and its cues from different sides");
             imported += usize::from(in_library);
         }
+        let first_cues = rbl_anlz::Anlz::read(&usb.join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.EXT")).unwrap().cue_entries();
+        assert!(database_cues_match(&state, &first, &first_cues).unwrap(), "the seeded track was imported before the refusal");
         assert!(imported < tracks, "{imported} of {tracks} tracks imported before the refusal");
         assert!(!state.backup_dir().join("analysis-journal").exists_with_entries(), "no journal is left behind");
     }
