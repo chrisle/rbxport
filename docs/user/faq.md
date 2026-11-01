@@ -17,3 +17,21 @@ mode is not a bug in RBXport.
 
 To set up a controller or use its performance mode, use rekordbox or the
 controller's own software.
+
+## Can I manage my library in RBXport and use it in rekordbox performance mode?
+
+Yes, one after the other. RBXport has no library of its own: it opens the
+library rekordbox is set to use (the `master.db` and `share` folder named by
+`masterDbDirectory` in rekordbox's settings), so rekordbox opens the same
+library without any conversion or setup. RBXport still has no performance mode.
+Open rekordbox to use its performance mode and mixer.
+
+Use them one at a time. RBXport refuses to change the library while rekordbox
+or its agent is running, so quit rekordbox before editing in RBXport, then
+quit RBXport before reopening rekordbox. Backups and USB sync have the same
+requirement.
+
+To use a different library in both apps, switch it in RBXport under
+Preferences → Advanced → Database → Database management, or in rekordbox under
+Preferences → Advanced. Either one sets the location the other reads. See
+[Library location](../reference/library-location.md).
