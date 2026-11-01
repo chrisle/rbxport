@@ -48,9 +48,102 @@ fn platform_eject(path: &Path) -> io::Result<()> {
     .map(|_| ())
 }
 
+/// The `AppImage` runtime mounts its image at `/tmp/.mount_<name><random>`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const APPIMAGE_MOUNT_PREFIX: &str = "/tmp/.mount_";
+
+/// Whether a library search path entry points into the `AppImage`: under
+/// `$APPDIR` or under its `/tmp/.mount_*` mount.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn is_appimage_entry(entry: &str, appdir: Option<&str>) -> bool {
+    let inside = |root: &str| {
+        let root = root.trim_end_matches('/');
+        !root.is_empty()
+            && entry
+                .strip_prefix(root)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    };
+    entry.starts_with(APPIMAGE_MOUNT_PREFIX) || appdir.is_some_and(inside)
+}
+
+/// How a host helper's library variable differs from the inherited one.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Debug, PartialEq, Eq)]
+enum LibraryVar {
+    /// Leave it as inherited.
+    Inherit,
+    /// Remove it: only `AppImage` entries were in it.
+    Unset,
+    /// Replace it with the entries that remain.
+    Set(String),
+}
+
+/// What to set `LD_LIBRARY_PATH` and `LD_PRELOAD` to for a host helper
+/// (`findmnt`, `udisksctl`). The `AppImage` puts its bundled libraries first on
+/// the search path, so a host program newer than the bundle (util-linux 2.42
+/// `findmnt` against the bundled libmount 2.38) fails with `version
+/// MOUNT_2_41 not found` (#802). Entries that do
+/// not point into the `AppImage` (such as the host `libwayland-client`
+/// preload) are kept. Outside an `AppImage` nothing changes.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn host_helper_library_env(
+    appimage: Option<&str>,
+    appdir: Option<&str>,
+    ld_library_path: Option<&str>,
+    ld_preload: Option<&str>,
+) -> [LibraryVar; 2] {
+    let set = |v: Option<&str>| v.is_some_and(|s| !s.is_empty());
+    let in_appimage = set(appimage) || set(appdir);
+    let appdir = appdir.filter(|s| !s.is_empty());
+    let clean = |value: Option<&str>, separator: &[char]| -> LibraryVar {
+        let Some(value) = value.filter(|v| in_appimage && !v.is_empty()) else {
+            return LibraryVar::Inherit;
+        };
+        let kept: Vec<&str> = value
+            .split(separator)
+            .filter(|entry| !entry.is_empty() && !is_appimage_entry(entry, appdir))
+            .collect();
+        if kept.is_empty() {
+            return LibraryVar::Unset;
+        }
+        let kept = kept.join(&separator[0].to_string());
+        if kept == value {
+            LibraryVar::Inherit
+        } else {
+            LibraryVar::Set(kept)
+        }
+    };
+    // `LD_PRELOAD` entries may be separated by colons or spaces.
+    [
+        clean(ld_library_path, &[':']),
+        clean(ld_preload, &[':', ' ']),
+    ]
+}
+
+/// A host helper command that runs without the `AppImage` library injection.
+#[cfg(target_os = "linux")]
+fn host_command(program: &str) -> std::process::Command {
+    let get = |k: &str| std::env::var(k).ok();
+    let [library_path, preload] = host_helper_library_env(
+        get("APPIMAGE").as_deref(),
+        get("APPDIR").as_deref(),
+        get("LD_LIBRARY_PATH").as_deref(),
+        get("LD_PRELOAD").as_deref(),
+    );
+    let mut command = std::process::Command::new(program);
+    for (name, change) in [("LD_LIBRARY_PATH", library_path), ("LD_PRELOAD", preload)] {
+        match change {
+            LibraryVar::Set(value) => command.env(name, value),
+            LibraryVar::Unset => command.env_remove(name),
+            LibraryVar::Inherit => &mut command,
+        };
+    }
+    command
+}
+
 #[cfg(target_os = "linux")]
 fn platform_eject(path: &Path) -> io::Result<()> {
-    let source = run(std::process::Command::new("findmnt")
+    let source = run(host_command("findmnt")
         .args(["-n", "-o", "SOURCE", "--mountpoint"])
         .arg(path))?;
     let source = String::from_utf8_lossy(&source.stdout);
@@ -58,7 +151,7 @@ fn platform_eject(path: &Path) -> io::Result<()> {
     if !source.starts_with("/dev/") || source.lines().count() != 1 {
         return Err(io::Error::other("Could not identify the USB volume."));
     }
-    run(std::process::Command::new("udisksctl").args([
+    run(host_command("udisksctl").args([
         "unmount",
         "--no-user-interaction",
         "--block-device",
@@ -381,5 +474,71 @@ mod tests {
         for veto in 0..16 {
             assert!(!super::veto_message(veto, "x").contains("os error"));
         }
+    }
+
+    use super::LibraryVar;
+
+    const MOUNT: &str = "/tmp/.mount_rbxporcLAeFm";
+
+    #[test]
+    fn appimage_library_injection_is_removed_for_host_helpers() {
+        let path = format!("{MOUNT}/usr/lib:{MOUNT}/usr/lib64:/opt/host/lib");
+        let [lib, pre] = super::host_helper_library_env(
+            Some("/home/u/rbxport.AppImage"),
+            Some(MOUNT),
+            Some(&path),
+            Some(&format!(
+                "{MOUNT}/usr/lib/libx.so /usr/lib/libwayland-client.so.0"
+            )),
+        );
+        assert_eq!(lib, LibraryVar::Set("/opt/host/lib".to_owned()));
+        assert_eq!(
+            pre,
+            LibraryVar::Set("/usr/lib/libwayland-client.so.0".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_path_made_only_of_appimage_entries_is_unset() {
+        let path = format!("{MOUNT}/usr/lib::{MOUNT}/lib");
+        let [lib, pre] =
+            super::host_helper_library_env(Some("x"), Some(MOUNT), Some(&path), Some(""));
+        assert_eq!(lib, LibraryVar::Unset);
+        assert_eq!(pre, LibraryVar::Inherit);
+    }
+
+    #[test]
+    fn appdir_outside_tmp_mount_and_mount_without_appdir_are_recognised() {
+        let [lib, _] = super::host_helper_library_env(
+            Some("x"),
+            Some("/home/u/squashfs-root"),
+            Some("/home/u/squashfs-root/usr/lib:/home/u/squashfs-root-other/lib"),
+            None,
+        );
+        assert_eq!(
+            lib,
+            LibraryVar::Set("/home/u/squashfs-root-other/lib".to_owned())
+        );
+        let path = format!("{MOUNT}/usr/lib:/usr/lib");
+        let [lib, _] = super::host_helper_library_env(Some("x"), None, Some(&path), None);
+        assert_eq!(lib, LibraryVar::Set("/usr/lib".to_owned()));
+    }
+
+    #[test]
+    fn a_non_appimage_environment_is_untouched() {
+        let path = format!("{MOUNT}/usr/lib:/opt/lib");
+        assert_eq!(
+            super::host_helper_library_env(None, None, Some(&path), Some("/usr/lib/libfoo.so")),
+            [LibraryVar::Inherit, LibraryVar::Inherit]
+        );
+        assert_eq!(
+            super::host_helper_library_env(Some(""), Some(""), Some(&path), None),
+            [LibraryVar::Inherit, LibraryVar::Inherit]
+        );
+        // Inside an AppImage with nothing injected, nothing changes either.
+        assert_eq!(
+            super::host_helper_library_env(Some("x"), Some(MOUNT), Some("/opt/lib"), None),
+            [LibraryVar::Inherit, LibraryVar::Inherit]
+        );
     }
 }
