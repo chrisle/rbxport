@@ -153,6 +153,176 @@ fn three_destinations_share_one_conversion_and_warm_syncs_do_not_probe() {
     }
 }
 
+#[test]
+fn conversion_uses_destination_stage_when_internal_cache_is_unavailable() {
+    let source = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let mut audio = track(source.path(), 1);
+    let flac = source.path().join("source.flac");
+    std::fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("../rbl-audio/tests/fixtures/stereo-96k.flac"), &flac).unwrap();
+    audio.source_path = flac;
+    audio.sample_rate = 96_000;
+    let unavailable = source.path().join("occupied");
+    std::fs::write(&unavailable, b"file, not directory").unwrap();
+    let cache = rbl_export::cache::PreparationCache::new(unavailable.join("cache"));
+    let report = rbl_export::export_with_options(usb.path(), &[audio], &playlists(vec![0]), &[],
+        &ExportOptions { compatibility: Some(rbl_export::CompatibilityFormat::Mp3), cache: Some(&cache), ..Default::default() }, &mut |_| {}).unwrap();
+    assert_eq!(report.tracks, 1, "{:?}", report.failed);
+    assert!(report.failed.is_empty());
+    assert_eq!(report.converted, 1);
+    assert!(rbl_export::verify(usb.path()).unwrap().is_ok());
+    assert!(!unavailable.join("cache").exists());
+}
+
+#[test]
+fn cancellation_during_conversion_removes_internal_temp_and_preserves_destination() {
+    let source = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let cache_dir = tempfile::tempdir().unwrap();
+    let mut audio = track(source.path(), 1);
+    let flac = source.path().join("source.flac");
+    std::fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("../rbl-audio/tests/fixtures/stereo-96k.flac"), &flac).unwrap();
+    audio.source_path = flac;
+    audio.sample_rate = 96_000;
+    let cache = rbl_export::cache::PreparationCache::new(cache_dir.path().to_owned());
+    let stop = std::cell::Cell::new(false);
+    let result = rbl_export::export_cancellable(usb.path(), &[audio], &playlists(vec![0]), &[],
+        &ExportOptions { compatibility: Some(rbl_export::CompatibilityFormat::Mp3), cache: Some(&cache), ..Default::default() },
+        &mut |progress| { if progress.stage == "converting" && progress.done > 0 { stop.set(true); } }, &|| stop.get());
+    assert!(matches!(result, Err(rbl_export::ExportError::Cancelled)), "{result:?}");
+    assert!(std::fs::read_dir(cache_dir.path()).unwrap().all(|entry| !entry.unwrap().file_name().to_string_lossy().starts_with("conversion-")));
+    assert!(!usb.path().join("PIONEER/rekordbox/export.pdb").exists());
+    rbl_export::recover(usb.path()).unwrap();
+}
+
+#[test]
+fn ordinary_tracks_do_not_fill_the_shared_preparation_cache() {
+    let write_wav = |path: &Path, sample: i16| {
+        let pcm = sample.to_le_bytes().repeat(4096);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&44_100_u32.to_le_bytes());
+        bytes.extend_from_slice(&88_200_u32.to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&pcm);
+        std::fs::write(path, bytes).unwrap();
+    };
+    let source = tempfile::tempdir().unwrap();
+    let cache_dir = tempfile::tempdir().unwrap();
+    let cache = rbl_export::cache::PreparationCache::new(cache_dir.path().to_owned());
+    let first_stick = common::stick();
+    let second_stick = common::stick();
+    let mut tracks = vec![track(source.path(), 1), track(source.path(), 2)];
+    tracks[0].source_path = source.path().join("track-1.wav");
+    write_wav(&tracks[0].source_path, 1);
+    let first_size = std::fs::metadata(&tracks[0].source_path).unwrap().len();
+    let selection = playlists(vec![0, 1]);
+    let options = ExportOptions {
+        sync: Some(&SyncSource {
+            db_id: 123,
+            ..Default::default()
+        }),
+        cache: Some(&cache),
+        ..Default::default()
+    };
+    let cached_source_bytes = || {
+        std::fs::read_dir(cache_dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "source")
+            })
+            .map(|entry| entry.metadata().unwrap().len())
+            .sum::<u64>()
+    };
+    let internal_cache_bytes = || {
+        std::fs::read_dir(cache_dir.path()).unwrap()
+            .map(|entry| entry.unwrap())
+            .filter(|entry| entry.file_type().unwrap().is_file())
+            .map(|entry| entry.metadata().unwrap().len())
+            .sum::<u64>()
+    };
+
+    let first = rbl_export::export_with_options(
+        first_stick.path(),
+        &tracks,
+        &selection,
+        &[],
+        &options,
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!((first.tracks, first.bytes_copied), (2, first_size + 8192));
+    assert_eq!(
+        cached_source_bytes(),
+        0,
+        "ordinary source files must not be retained in the internal cache"
+    );
+    let first_cache_bytes = internal_cache_bytes();
+    assert!(first_cache_bytes < first_size, "cache grew by {first_cache_bytes} bytes for {} source bytes", first_size + 8192);
+    assert!(rbl_export::verify(first_stick.path()).unwrap().is_ok());
+
+    let noop = rbl_export::export_with_options(
+        first_stick.path(),
+        &tracks,
+        &selection,
+        &[],
+        &options,
+        &mut |_| {},
+    )
+    .unwrap();
+    assert!(noop.up_to_date);
+    assert_eq!(noop.bytes_copied, 0);
+    assert_eq!(cached_source_bytes(), 0);
+    assert_eq!(internal_cache_bytes(), first_cache_bytes);
+
+    write_wav(&tracks[0].source_path, 42);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&tracks[0].source_path)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(2))
+        .unwrap();
+    let changed = rbl_export::export_with_options(
+        first_stick.path(),
+        &tracks,
+        &selection,
+        &[],
+        &options,
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!(changed.bytes_copied, first_size, "{changed:?}");
+    assert_eq!(cached_source_bytes(), 0);
+    assert!(internal_cache_bytes() < first_size);
+    assert!(rbl_export::verify(first_stick.path()).unwrap().is_ok());
+
+    let second = rbl_export::export_with_options(
+        second_stick.path(),
+        &tracks,
+        &selection,
+        &[],
+        &options,
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!((second.tracks, second.bytes_copied), (2, first_size + 8192));
+    assert_eq!(cached_source_bytes(), 0);
+    assert!(internal_cache_bytes() < first_size);
+    assert!(rbl_export::verify(second_stick.path()).unwrap().is_ok());
+}
+
 #[cfg(unix)]
 #[test]
 fn same_size_source_rewrite_with_restored_mtime_is_detected_by_change_time() {
@@ -262,11 +432,13 @@ fn compatibility_profiles_are_independent_and_corrupt_cache_outputs_are_reprepar
     let source = tempfile::tempdir().unwrap(); let cache = rbl_export::cache::PreparationCache::new(source.path().join("cache"));
     let input = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rbl-audio/tests/fixtures/stereo-96k.flac");
     for format in [rbl_audio::compatibility::Format::Wav, rbl_audio::compatibility::Format::Aiff, rbl_audio::compatibility::Format::Mp3] {
-        let (path, size, reused) = cache.converted(&input, format, &mut |_, _| {}, &|| false).unwrap();
+        let (path, size, reused) = cache.with_converted(&input, format, &mut |_, _| {}, &|| false,
+            |path, size, reused| Ok((path.to_owned(), size, reused))).unwrap();
         assert!(!reused); assert!(size > 0); assert!(!rbl_audio::compatibility::needs_conversion(&path).unwrap());
         assert_eq!(cache.converted_size(&input, format), Some(size));
         std::fs::write(&path, b"corrupt").unwrap();
-        let repaired = cache.converted(&input, format, &mut |_, _| {}, &|| false).unwrap();
+        let repaired = cache.with_converted(&input, format, &mut |_, _| {}, &|| false,
+            |path, size, reused| Ok((path.to_owned(), size, reused))).unwrap();
         assert!(!repaired.2); assert!(!rbl_audio::compatibility::needs_conversion(&repaired.0).unwrap());
     }
 }
