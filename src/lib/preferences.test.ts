@@ -13,6 +13,14 @@ import {
 } from "./preferences";
 
 describe("sanitisePreferences", () => {
+  it("keeps the chosen output device and treats anything else as the system default (#799)", () => {
+    expect(DEFAULT_PREFERENCES.audio.outputDevice).toBeNull();
+    expect(sanitisePreferences({ audio: {} }).audio.outputDevice).toBeNull();
+    expect(sanitisePreferences({ audio: { outputDevice: "alsa:hw:M4" } }).audio.outputDevice).toBe("alsa:hw:M4");
+    for (const bad of ["", 3, {}, false, undefined]) {
+      expect(sanitisePreferences({ audio: { outputDevice: bad } }).audio.outputDevice).toBeNull();
+    }
+  });
   it("enables rating imports for older settings and remembers explicit off choices", () => {
     expect(DEFAULT_PREFERENCES.usbExport).toMatchObject({ importButtonRatings: true });
     expect(sanitisePreferences({ usbExport: {} }).usbExport).toMatchObject({ importButtonRatings: true });

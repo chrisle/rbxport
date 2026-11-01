@@ -68,6 +68,10 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
   // The slider moves over the stops; the stop is what is stored.
   const bufferStop = Math.max(0, BUFFER_SIZES.indexOf(prefs.bufferSize));
 
+  // A chosen device that is not in the list is one that has been unplugged:
+  // the engine is on the system default, and the select says so.
+  const chosenListed = audio === null || audio.chosen === null || audio.devices.some((d) => d.id === audio.chosen);
+
   // Read when the pane opens rather than held: an interface is plugged in
   // while the app is running more often than not, and a list from launch
   // would be missing whatever somebody just connected.
@@ -93,13 +97,21 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
             <select
               className={styles.select}
               aria-label="Audio output device"
-              value={audio.chosen ?? ""}
+              value={chosenListed ? audio.chosen ?? "" : ""}
               onChange={(event) => {
                 const chosen = event.target.value === "" ? null : event.target.value;
                 setAudio({ ...audio, chosen });
+                // Remembered first, so the choice survives a failed push and
+                // the next launch; the engine is told directly as well, since
+                // this pane can be in a window with no App behind it.
+                set({ outputDevice: chosen });
                 void (async () => {
-                  const backend = await getBackend();
-                  await backend.setAudioDevice(chosen);
+                  try {
+                    const backend = await getBackend();
+                    await backend.setAudioDevice(chosen);
+                  } catch {
+                    // No engine behind this build; the choice is still kept.
+                  }
                 })();
               }}
             >
@@ -116,6 +128,12 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
               ))}
             </select>
           </div>
+          {!chosenListed && (
+            <Note>
+              The saved output device is not connected, so the system default
+              is in use. The choice is kept and used again when it returns.
+            </Note>
+          )}
         </>
       ) : (
         <Note>

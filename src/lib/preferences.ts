@@ -159,6 +159,12 @@ export interface ViewPreferences {
 }
 
 export interface AudioPreferences {
+  /**
+   * The output device's stable id, or `null` for the system default. It is
+   * kept even while that device is unplugged: the engine falls back to the
+   * default for the time being and uses it again when it returns.
+   */
+  outputDevice: string | null;
   sampleRate: SampleRate;
   /** Frames per device buffer; one of `BUFFER_SIZES`. */
   bufferSize: number;
@@ -385,6 +391,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     waveformClick: true,
   },
   audio: {
+    outputDevice: null,
     // The capture shows 96000 Hz and 512 samples [OBS]; the rate is what
     // that machine's device ran at, and 48000 is what most do.
     sampleRate: 48_000,
@@ -569,6 +576,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       waveformClick: bool(view.waveformClick, d.view.waveformClick),
     },
     audio: {
+      outputDevice: typeof audio.outputDevice === "string" && audio.outputDevice !== "" ? audio.outputDevice : null,
       sampleRate: oneOfNumber(audio.sampleRate, SAMPLE_RATES, d.audio.sampleRate),
       bufferSize: oneOfNumber(audio.bufferSize, BUFFER_SIZES, d.audio.bufferSize),
       metronomeSound: oneOfNumber(audio.metronomeSound, METRONOME_SOUNDS, d.audio.metronomeSound),
