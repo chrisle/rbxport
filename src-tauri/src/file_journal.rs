@@ -34,7 +34,17 @@ impl FileJournal {
         bpm_after: u32, path_after: Option<String>, changes_row: bool,
         files: &[(PathBuf, Vec<u8>)]) -> AppResult<Self> {
         let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).map_err(error)?;
-        let (before_usn, _, _, analysis_update_before) = row(&db, track)?;
+        Self::prepare_with(&db, root, location, track, bpm_after, path_after, changes_row, files)
+    }
+
+    /// [`Self::prepare`] on a library handle the caller already holds. Opening
+    /// the library derives its key again, about 60 ms, so a loop preparing a
+    /// journal per track reads the row on the app's shared handle (#794).
+    #[allow(clippy::too_many_arguments, reason = "prepare's arguments plus the open handle")]
+    pub fn prepare_with(db: &rbl_db::Library, root: &Path, location: &rbl_db::LibraryLocation, track: &str,
+        bpm_after: u32, path_after: Option<String>, changes_row: bool,
+        files: &[(PathBuf, Vec<u8>)]) -> AppResult<Self> {
+        let (before_usn, _, _, analysis_update_before) = row(db, track)?;
         let dir = root.join("analysis-journal").join(uuid::Uuid::new_v4().to_string());
         crate::durable::create_dir_all(&dir).map_err(error)?;
         crate::durable::sync_dir(root).map_err(error)?;

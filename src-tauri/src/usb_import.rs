@@ -146,72 +146,32 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         report.skipped += gone;
         // Open the guarded writer even for an empty device; read-only must not look like success.
         state.write(|_| Ok(())).map_err(write_error)?;
+        // Edits apply in batches, one writer per batch. A writer per track
+        // meant two key derivations for each (the writer and the journal's
+        // read), about 60 ms apiece, so a stick of thousands of changed
+        // tracks held the library for many minutes (#794).
+        let mut pending: Vec<PendingCues> = Vec::new();
+        let mut pending_bytes = 0usize;
         for (id, analysis) in tracks.values() {
-            // Read on the open handle. Opening the library, for the lock
-            // bit here and the analysis path below, derives its key again:
-            // about 155 ms each, two per track, so a stick of 20,000 tracks
-            // held the library, and every analysis and sync, for well over
-            // an hour (#284).
-            if editor.is_locked(id) || state.read_db(|db| crate::grid::locked_in(db, id)).map_err(write_error)? { report.skipped += 1; continue; }
-            if analysis.is_empty() { report.skipped += 1; continue; }
-            let source_path = root.join(analysis.trim_start_matches('/'));
-            match std::fs::metadata(&source_path) {
-                Ok(_) => {},
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    report.skipped += 1;
-                    report.warnings.push(format!("Track {id}: USB analysis file is missing ({analysis}); cues and grid were left unchanged."));
-                    continue;
-                }
-                Err(e) => return Err(err(e)),
+            let planned = match plan_cue_import(state, editor, root, &location, id, analysis, &mut report) {
+                Ok(planned) => planned,
+                Err(e) => { apply_cue_batch(state, editor, &location, std::mem::take(&mut pending), &mut report)?; return Err(e); }
+            };
+            let Some(planned) = planned else { continue };
+            // Two tracks naming one analysis file must not share a batch: the
+            // second's journal would capture the file before the first's edit.
+            if pending.iter().any(|p| p.files.iter().any(|(path, _)| planned.files.iter().any(|(other, _)| other == path))) {
+                apply_cue_batch(state, editor, &location, std::mem::take(&mut pending), &mut report)?;
+                pending_bytes = 0;
             }
-            let source = within(root, analysis)?;
-            let source_dat = rbl_anlz::Anlz::read(&source).map_err(err)?;
-            // `source` is canonical and `root` need not be (a symlinked mount),
-            // so the `.EXT` is found from the relative path, not by stripping.
-            let ext_relative = Path::new(analysis).with_extension("EXT");
-            let source_cues = if source.with_extension("EXT").exists() { rbl_anlz::Anlz::read(&within(root, &ext_relative.to_string_lossy())?).map_err(err)? } else { source_dat.clone() };
-            if source_cues.section(b"PCO2").is_none() { report.skipped += 1; continue; }
-            let entries = source_cues.cue_entries();
-            let beats = source_dat.beat_grid().unwrap_or_default();
-            let previous_bpm = state.read_db(|db| Ok(db.connection().query_row("SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [id], |r| r.get::<_,u32>(0))?)).map_err(write_error)?;
-            let bpm = beats.first().map_or(previous_bpm, |b| u32::from(b.tempo_x100));
-            let bpm_changed = bpm != previous_bpm;
-            let relative = state.read_db(|db| rbl_db::write::analysis_data_path(db.connection(), id)).map_err(write_error)?;
-            let target = rbl_anlz::resolve(&location.share_root, &relative);
-            let mut files = Vec::new();
-            // A stick that carries the cues and grid the library already has
-            // is not a change: rewriting it would bump the track's analysis,
-            // drop its grid undo history and reload the whole library for
-            // nothing, and the next sync would copy it all back (#134).
-            let mut differs = false;
-            for extension in ["DAT", "EXT"] {
-                let target = target.with_extension(extension);
-                if !target.exists() { continue; }
-                let mut dest = rbl_anlz::Anlz::read(&target).map_err(err)?;
-                let src = if extension == "DAT" { &source_dat } else { &source_cues };
-                differs |= !dest.sections.iter().filter(|s| s.is_cue_list()).eq(src.sections.iter().filter(|s| s.is_cue_list()));
-                if extension == "DAT" && !beats.is_empty() {
-                    differs |= !dest.sections.iter().filter(|s| s.as_beat_grid().is_some()).eq(source_dat.section(b"PQTZ"));
-                }
-                dest.sections.retain(|s| !s.is_cue_list());
-                dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
-                if extension == "DAT" && !beats.is_empty() {
-                    dest.sections.retain(|s| s.as_beat_grid().is_none());
-                    if let Some(grid) = source_dat.section(b"PQTZ") { dest.sections.push(grid.clone()); }
-                }
-                let bytes = if extension == "EXT" { dest.with_extended_grid_cleared().unwrap_or_else(|| dest.to_bytes()) } else { dest.to_bytes() };
-                files.push((target, bytes));
+            pending_bytes += planned.files.iter().map(|(_, bytes)| bytes.len()).sum::<usize>();
+            pending.push(planned);
+            if pending.len() >= CUE_BATCH_TRACKS || pending_bytes >= CUE_BATCH_BYTES {
+                apply_cue_batch(state, editor, &location, std::mem::take(&mut pending), &mut report)?;
+                pending_bytes = 0;
             }
-            if files.is_empty() { report.skipped += 1; continue; }
-            if !differs && !bpm_changed && database_cues_match(state, id, &entries)? { report.unchanged += 1; continue; }
-            let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, id, bpm, None, true, &files)?;
-            if let Err(e) = journal.publish() { journal.rollback()?; return Err(e); }
-            if let Err(e) = state.write(|w| w.import_usb_cues(id, &entries, bpm)) { journal.reconcile(&location)?; return Err(write_error(e)); }
-            journal.commit()?;
-            editor.forget_history(id);
-            report.changed.push(id.clone());
-            report.tracks += 1;
         }
+        apply_cue_batch(state, editor, &location, pending, &mut report)?;
     }
     if history {
         let snapshot = rbl_export::snapshot::Snapshot::read(root)
@@ -246,6 +206,127 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         }
     }
     Ok(report)
+}
+
+/// Most tracks whose cues one writer applies, and the most analysis-file
+/// bytes held for them, before the batch is written.
+const CUE_BATCH_TRACKS: usize = 32;
+const CUE_BATCH_BYTES: usize = 32 << 20;
+
+/// One track's cues and the analysis files that carry them, ready to apply.
+struct PendingCues {
+    id: String,
+    entries: Vec<rbl_anlz::CueEntry>,
+    bpm: u32,
+    files: Vec<(std::path::PathBuf, Vec<u8>)>,
+}
+
+/// Reads one track's USB analysis and works out what importing it changes,
+/// counting it as skipped or unchanged when it changes nothing. Writes
+/// nothing: `None` is a track with nothing to apply.
+fn plan_cue_import(
+    state: &AppState, editor: &crate::grid::GridEditor, root: &Path, location: &rbl_db::LibraryLocation,
+    id: &str, analysis: &str, report: &mut ImportReport,
+) -> AppResult<Option<PendingCues>> {
+    // Read on the open handle. Opening the library, for the lock
+    // bit here and the analysis path below, derives its key again:
+    // about 155 ms each, two per track, so a stick of 20,000 tracks
+    // held the library, and every analysis and sync, for well over
+    // an hour (#284).
+    if editor.is_locked(id) || state.read_db(|db| crate::grid::locked_in(db, id)).map_err(write_error)? { report.skipped += 1; return Ok(None); }
+    if analysis.is_empty() { report.skipped += 1; return Ok(None); }
+    let source_path = root.join(analysis.trim_start_matches('/'));
+    match std::fs::metadata(&source_path) {
+        Ok(_) => {},
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            report.skipped += 1;
+            report.warnings.push(format!("Track {id}: USB analysis file is missing ({analysis}); cues and grid were left unchanged."));
+            return Ok(None);
+        }
+        Err(e) => return Err(err(e)),
+    }
+    let source = within(root, analysis)?;
+    let source_dat = rbl_anlz::Anlz::read(&source).map_err(err)?;
+    // `source` is canonical and `root` need not be (a symlinked mount),
+    // so the `.EXT` is found from the relative path, not by stripping.
+    let ext_relative = Path::new(analysis).with_extension("EXT");
+    let source_cues = if source.with_extension("EXT").exists() { rbl_anlz::Anlz::read(&within(root, &ext_relative.to_string_lossy())?).map_err(err)? } else { source_dat.clone() };
+    if source_cues.section(b"PCO2").is_none() { report.skipped += 1; return Ok(None); }
+    let entries = source_cues.cue_entries();
+    let beats = source_dat.beat_grid().unwrap_or_default();
+    let previous_bpm = state.read_db(|db| Ok(db.connection().query_row("SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [id], |r| r.get::<_,u32>(0))?)).map_err(write_error)?;
+    let bpm = beats.first().map_or(previous_bpm, |b| u32::from(b.tempo_x100));
+    let bpm_changed = bpm != previous_bpm;
+    let relative = state.read_db(|db| rbl_db::write::analysis_data_path(db.connection(), id)).map_err(write_error)?;
+    let target = rbl_anlz::resolve(&location.share_root, &relative);
+    let mut files = Vec::new();
+    // A stick that carries the cues and grid the library already has
+    // is not a change: rewriting it would bump the track's analysis,
+    // drop its grid undo history and reload the whole library for
+    // nothing, and the next sync would copy it all back (#134).
+    let mut differs = false;
+    for extension in ["DAT", "EXT"] {
+        let target = target.with_extension(extension);
+        if !target.exists() { continue; }
+        let mut dest = rbl_anlz::Anlz::read(&target).map_err(err)?;
+        let src = if extension == "DAT" { &source_dat } else { &source_cues };
+        differs |= !dest.sections.iter().filter(|s| s.is_cue_list()).eq(src.sections.iter().filter(|s| s.is_cue_list()));
+        if extension == "DAT" && !beats.is_empty() {
+            differs |= !dest.sections.iter().filter(|s| s.as_beat_grid().is_some()).eq(source_dat.section(b"PQTZ"));
+        }
+        dest.sections.retain(|s| !s.is_cue_list());
+        dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
+        if extension == "DAT" && !beats.is_empty() {
+            dest.sections.retain(|s| s.as_beat_grid().is_none());
+            if let Some(grid) = source_dat.section(b"PQTZ") { dest.sections.push(grid.clone()); }
+        }
+        let bytes = if extension == "EXT" { dest.with_extended_grid_cleared().unwrap_or_else(|| dest.to_bytes()) } else { dest.to_bytes() };
+        files.push((target, bytes));
+    }
+    if files.is_empty() { report.skipped += 1; return Ok(None); }
+    if !differs && !bpm_changed && database_cues_match(state, id, &entries)? { report.unchanged += 1; return Ok(None); }
+    Ok(Some(PendingCues { id: id.to_owned(), entries, bpm, files }))
+}
+
+/// Applies a batch of planned imports: every track's journal and files first,
+/// then all the library edits on one writer, then the journals are committed.
+/// Each track keeps its own journal and its own database transaction, so a
+/// failure part-way leaves each track either fully imported or put back, as
+/// `file_journal::recover` decides from its row.
+fn apply_cue_batch(
+    state: &AppState, editor: &crate::grid::GridEditor, location: &rbl_db::LibraryLocation,
+    batch: Vec<PendingCues>, report: &mut ImportReport,
+) -> AppResult<()> {
+    if batch.is_empty() { return Ok(()); }
+    let mut journals = Vec::with_capacity(batch.len());
+    for item in &batch {
+        let prepared = state.read_db(|db| Ok(crate::file_journal::FileJournal::prepare_with(db, state.backup_dir(), location, &item.id, item.bpm, None, true, &item.files)))
+            .map_err(write_error)
+            .and_then(|prepared| prepared);
+        match prepared {
+            Ok(journal) => journals.push(journal),
+            Err(e) => { for journal in &journals { journal.rollback()?; } return Err(e); }
+        }
+    }
+    for journal in &journals {
+        if let Err(e) = journal.publish() { for journal in &journals { journal.rollback()?; } return Err(e); }
+    }
+    let written = state.write(|w| {
+        for item in &batch { w.import_usb_cues(&item.id, &item.entries, item.bpm)?; }
+        Ok(())
+    });
+    if let Err(e) = written {
+        // Rows already edited keep their new files; the rest are put back.
+        if let Some(journal) = journals.pop() { journal.reconcile(location)?; }
+        return Err(write_error(e));
+    }
+    for (journal, item) in journals.into_iter().zip(batch) {
+        journal.commit()?;
+        editor.forget_history(&item.id);
+        report.changed.push(item.id);
+        report.tracks += 1;
+    }
+    Ok(())
 }
 
 /// Drops the stick's tracks whose library id names no live `djmdContent`
@@ -402,6 +483,11 @@ mod tests {
 
     /// A cue as the master database holds it (`Kind` 0 memory, 1-3 A-C,
     /// 5-17 D-P), for the stick's analysis files.
+    trait HasEntries { fn exists_with_entries(&self) -> bool; }
+    impl HasEntries for std::path::PathBuf {
+        fn exists_with_entries(&self) -> bool { std::fs::read_dir(self).is_ok_and(|mut entries| entries.next().is_some()) }
+    }
+
     fn stick_cue(kind: u8, time_ms: u32, loop_end: Option<u32>, color_code: u8, comment: &str) -> rbl_anlz::cues::ExportCue {
         rbl_anlz::cues::ExportCue { kind, time_ms, loop_time_ms: loop_end, color_code, comment: comment.into(), ..Default::default() }
     }
@@ -723,6 +809,84 @@ mod tests {
             elapsed < one_open * u32::try_from(tracks / 4).unwrap(),
             "{tracks} tracks took {elapsed:?}; one open of the library takes {one_open:?}",
         );
+    }
+
+    /// Gives each of the first `count` fixture tracks a local analysis file
+    /// whose cues differ from the stick's, so importing has to rewrite it.
+    fn local_analysis_for(state: &AppState, location: &rbl_db::LibraryLocation, count: usize) -> Vec<std::path::PathBuf> {
+        (0..count).map(|index| {
+            let id = rbl_db::fixture::track_id(index);
+            let relative = state.write(|w| w.analysis_data_path_for(&id)).unwrap();
+            state.write(|w| w.register_analysis(&id, &rbl_db::write::AnalysisRegistration {
+                bpm_x100: 12000, key: None, analysis_data_path: &relative,
+            })).unwrap();
+            let target = rbl_anlz::resolve(&location.share_root, &relative);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            let mut original = rbl_anlz::write::AnlzBuilder::new();
+            original.path("/original.mp3").beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12000, time_ms: 0 }]).cue_lists(true);
+            std::fs::write(&target, original.finish()).unwrap();
+            target
+        }).collect()
+    }
+
+    /// A stick whose tracks all differ from the library used to cost two
+    /// key derivations each (the writer's open and the journal's read), at
+    /// about 60 ms apiece, and a journal's fsyncs on top: a stick of 14,000
+    /// such tracks held the library for most of an hour and an import never
+    /// finished (#794). The writer is opened once for each batch instead,
+    /// and every track is still imported through its own journal.
+    #[test]
+    fn importing_changed_cues_opens_the_writer_once_per_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, usb, tracks) = library_and_stick(dir.path());
+        assert!(tracks >= 40);
+        let local = local_analysis_for(&state, &location, tracks);
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let opens = state.writer_opens();
+        let report = import(&state, &editor, &usb, true, false, false, false).unwrap();
+        assert_eq!((report.tracks, report.skipped, report.unchanged), (tracks, 0, 0));
+        let opened = state.writer_opens() - opens;
+        // One to check the library is writable, then one for each batch.
+        assert!(opened <= 1 + u64::try_from(tracks.div_ceil(CUE_BATCH_TRACKS)).unwrap(), "{tracks} tracks opened the writer {opened} times");
+        for path in &local {
+            assert_eq!(rbl_anlz::Anlz::read(path).unwrap().beat_grid().unwrap()[0].time_ms, 250);
+        }
+        assert!(!state.backup_dir().join("analysis-journal").exists_with_entries(), "every journal was committed");
+        let repeat = import(&state, &editor, &usb, true, false, false, false).unwrap();
+        assert_eq!((repeat.tracks, repeat.unchanged), (0, tracks), "what the batches wrote matches the stick");
+    }
+
+    /// A track the library refuses part-way through a batch leaves each
+    /// track whole: those edited before it keep their new files, it and the
+    /// rest are put back, and no journal is left behind.
+    #[test]
+    fn a_failed_edit_in_a_batch_leaves_every_track_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, usb, tracks) = library_and_stick(dir.path());
+        assert!(tracks >= 40);
+        let local = local_analysis_for(&state, &location, tracks);
+        // A loop that ends before it starts is data the library refuses.
+        let invalid = tracks - 5;
+        write_stick(
+            &usb.join(format!("PIONEER/USBANLZ/P000/{:08X}", invalid + 1)),
+            &[stick_cue(2, 3000, Some(1000), 22, "")],
+        );
+        let before: Vec<Vec<u8>> = local.iter().map(|p| std::fs::read(p).unwrap()).collect();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        assert!(import(&state, &editor, &usb, true, false, false, false).is_err());
+        let mut imported = 0;
+        for (index, path) in local.iter().enumerate() {
+            let now = std::fs::read(path).unwrap();
+            let id = rbl_db::fixture::track_id(index);
+            let stick_cues = rbl_anlz::Anlz::read(&usb.join(format!("PIONEER/USBANLZ/P000/{:08X}/ANLZ0000.EXT", index + 1))).unwrap().cue_entries();
+            let in_library = database_cues_match(&state, &id, &stick_cues).unwrap();
+            // The file and the row agree: both imported, or both as they were.
+            assert_eq!(stick_cues.len(), 1);
+            assert_eq!(now != before[index], in_library, "track {index} has its file and its cues from different sides");
+            imported += usize::from(in_library);
+        }
+        assert!(imported < tracks, "{imported} of {tracks} tracks imported before the refusal");
+        assert!(!state.backup_dir().join("analysis-journal").exists_with_entries(), "no journal is left behind");
     }
 
     /// An import that has to wait for the stick, while an export holds it,
