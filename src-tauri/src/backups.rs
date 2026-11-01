@@ -513,19 +513,41 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
     }
     result
 }
+/// Every problem SQLite's `quick_check` reports, not just the first row.
+fn integrity_problems(db: &rbl_db::Library) -> AppResult<Vec<String>> {
+    let mut statement = db.connection().prepare("PRAGMA quick_check").map_err(error)?;
+    let rows = statement.query_map([], |r| r.get::<_, String>(0)).map_err(error)?;
+    let mut problems = Vec::new();
+    for row in rows {
+        let row = row.map_err(error)?;
+        if row != "ok" { problems.push(row); }
+    }
+    Ok(problems)
+}
+
+/// The staged copy must open with the library's key and must not be worse than
+/// the library it was copied from. A library rekordbox itself left with
+/// constraint violations (for example a NULL in a NOT NULL column) reports the
+/// same rows in its faithful copy; that is not a damaged backup (#805). Only
+/// problems the source does not have prove the copy went wrong.
 fn validate_database(path: &Path, location: &rbl_db::LibraryLocation) -> AppResult<()> {
     let mut copy = location.clone();
     copy.master_db = path.to_path_buf();
     copy.is_real_install = false;
     let db = rbl_db::Library::open(copy, rbl_db::OpenMode::ReadOnly).map_err(error)?;
-    let check: String = db
-        .connection()
-        .query_row("PRAGMA quick_check", [], |r| r.get(0))
-        .map_err(error)?;
-    if check != "ok" {
-        return Err(error("The backup database is damaged."));
+    let staged = integrity_problems(&db)?;
+    if staged.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    drop(db);
+    let source = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).map_err(error)?;
+    let original = integrity_problems(&source)?;
+    match staged.iter().find(|problem| !original.contains(problem)) {
+        None => Ok(()),
+        Some(problem) => Err(error(format!(
+            "The backup copy of the library database (master.db) failed its integrity check: {problem}"
+        ))),
+    }
 }
 
 /// A restore RBXport Restore left unfinished must be rolled back or cleaned
@@ -626,6 +648,53 @@ mod tests {
         let backup = PathBuf::from(create(&state).unwrap());
         assert!(backup.is_file());
         assert_eq!(list(&state).unwrap().len(), 1);
+    }
+
+    /// A library whose own integrity check already reports rows (here a NULL in a
+    /// NOT NULL column) backs up as it is; it was no worse in the copy (#805).
+    #[test]
+    fn backup_keeps_a_library_that_already_reports_integrity_rows() {
+        let (_dir, state, location) = fixture();
+        {
+            let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+            db.connection().execute_batch(
+                "CREATE TABLE rbx_probe (x INTEGER, y);
+                 INSERT INTO rbx_probe VALUES (NULL, 1), (NULL, 2);
+                 PRAGMA writable_schema = ON;
+                 UPDATE sqlite_master SET sql = 'CREATE TABLE rbx_probe (x INTEGER NOT NULL, y)' WHERE name = 'rbx_probe';",
+            ).unwrap();
+        }
+        let source = rbl_db::Library::open(location, rbl_db::OpenMode::ReadOnly).unwrap();
+        assert!(integrity_problems(&source).unwrap().len() > 1, "fixture must report several rows");
+        let backup = PathBuf::from(create(&state).unwrap());
+        assert!(backup.is_file());
+        assert_eq!(list(&state).unwrap().len(), 1);
+    }
+
+    /// A copy that is worse than its source is still refused, and the message
+    /// says which database and why.
+    #[test]
+    fn validation_refuses_a_copy_with_problems_the_source_lacks() {
+        let (dir, _state, location) = fixture();
+        let copy = dir.path().join("copy.db");
+        let mut staged = location.clone();
+        staged.master_db = copy.clone();
+        fs::copy(&location.master_db, &copy).unwrap();
+        {
+            let db = rbl_db::Library::open(staged, rbl_db::OpenMode::ReadWrite).unwrap();
+            db.connection().execute_batch(
+                "CREATE TABLE rbx_probe (x INTEGER, y);
+                 INSERT INTO rbx_probe VALUES (NULL, 1);
+                 PRAGMA writable_schema = ON;
+                 UPDATE sqlite_master SET sql = 'CREATE TABLE rbx_probe (x INTEGER NOT NULL, y)' WHERE name = 'rbx_probe';",
+            ).unwrap();
+        }
+        let message = validate_database(&copy, &location).unwrap_err().detail.unwrap_or_default();
+        assert!(
+            message.contains("master.db") && message.contains("NULL value in rbx_probe.x"),
+            "{message}"
+        );
+        validate_database(&location.master_db, &location).unwrap();
     }
 
     #[test]
