@@ -683,7 +683,7 @@ fn read_my_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCategory>> {
     )?;
     let mut categories: Vec<TagCategory> = Vec::new();
     let mut index_by_id: HashMap<String, usize> = HashMap::new();
-    let mut tags: Vec<(String, String)> = Vec::new();
+    let mut tags: Vec<(String, String, i32)> = Vec::new();
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
         let Some(id) = text(r, 0)? else {
@@ -696,17 +696,20 @@ fn read_my_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCategory>> {
             categories.push(TagCategory {
                 name,
                 tags: Vec::new(),
+                ids: Vec::new(),
             });
         } else {
-            tags.push((parent, name));
+            let key = crate::smart::my_tag_key(&id);
+            tags.push((parent, name, key));
         }
     }
     // Tags after every category is known: `Seq` numbers restart per parent, so
     // a tag can precede its category in the read order.
-    for (parent, name) in tags {
+    for (parent, name, key) in tags {
         if let Some(&at) = index_by_id.get(&parent) {
             if let Some(category) = categories.get_mut(at) {
                 category.tags.push(name);
+                category.ids.push(key);
             }
         }
     }

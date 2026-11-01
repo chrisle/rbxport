@@ -59,7 +59,9 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// gone `OrgFolderPath`, and nothing in the snapshot could tell it had gone.
 /// 16 stores each memory cue's own colour (`djmdCue.Color`), which the
 /// browser's row preview draws (issue #533).
-pub const FORMAT: u32 = 16;
+/// 17 stores each My Tag's id beside its name, which the track filter's tag
+/// columns match tracks by (issue #779).
+pub const FORMAT: u32 = 17;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -275,6 +277,9 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
             column.push(tag);
         }
         w.strings(&column);
+        // Format 17: the tags' ids, as `u32` bit patterns.
+        let ids: Vec<u32> = category.ids.iter().map(|&id| id.cast_unsigned()).collect();
+        w.u32s(&ids);
     }
 
     // Format 3: cues, as five columns rather than a struct per cue, so a
@@ -496,9 +501,14 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
         if column.is_empty() {
             return None;
         }
+        let ids = r.u32s()?;
+        if ids.len() != column.len() - 1 {
+            return None;
+        }
         my_tags.push(TagCategory {
             name: column.get(0).to_owned(),
             tags: (1..column.len()).map(|i| column.get(i).to_owned()).collect(),
+            ids: ids.into_iter().map(u32::cast_signed).collect(),
         });
     }
 
