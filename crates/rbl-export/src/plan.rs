@@ -39,7 +39,7 @@ pub fn preview(destination: &Path, tracks: &[SourceTrack], playlists: &[SourcePl
             device_additions: std::collections::BTreeSet::new() });
     }
     let mut before = previous.as_ref().filter(|m| m.generation.as_ref().is_some_and(|g| g.databases == signatures))
-        .and_then(|m| m.baseline.clone()).map_or_else(|| Snapshot::read(destination), Ok)?;
+        .and_then(|m| m.baseline.clone()).map_or_else(|| Snapshot::read_for_write(destination), Ok)?;
     let db_id = options.db_id_override.unwrap_or_else(|| options.sync.map_or(0, |s| s.db_id));
     let playlist_record = crate::reconcile::playlist_namespace(destination, &mut before, previous.as_ref(), db_id);
     let rewritten = crate::reconcile::rewritten(playlist_record.as_ref(), &before, previous.as_ref(), tracks, playlists, db_id);

@@ -328,6 +328,73 @@ fn unsupported_schema_is_left_untouched() {
     assert_eq!(bytes, std::fs::read(path).unwrap());
 }
 
+/// Bytes of every file under the stick, to show a refusal changed none (#791).
+fn tree_bytes(root: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                out.insert(path.clone(), std::fs::read(path).unwrap());
+            }
+        }
+    }
+    out
+}
+/// Schema `10000`, as VirtualDJ's CDJ Export writes (#791), is read but never
+/// rewritten. [OBS: fixture only. A rbxport-built stick whose `dbVersion` is
+/// edited; the real VirtualDJ layout is UNKNOWN.]
+#[test]
+fn schema_10000_is_read_only() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track(src.path(), 1);
+    sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+    edit(usb.path(), "UPDATE property SET dbVersion='10000'");
+    let before = tree_bytes(usb.path());
+
+    let snapshot = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+    assert_eq!(snapshot.one_db_version.as_deref(), Some("10000"));
+    assert_eq!(snapshot.one.as_ref().unwrap().tracks.len(), 1);
+    assert_eq!(snapshot.one.as_ref().unwrap().playlists.len(), 1);
+
+    let err = sync(usb.path(), &[t], &[playlist(10, &[0])])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("schema 10000") && err.contains("read but not write"),
+        "{err}"
+    );
+    assert!(rbl_export::snapshot::Snapshot::read_for_write(usb.path()).is_err());
+    assert_eq!(
+        before,
+        tree_bytes(usb.path()),
+        "a refused write must not change the device"
+    );
+}
+/// Any version not on the allowlist is still refused outright, read or write.
+#[test]
+fn unknown_schema_99999_is_refused_without_changes() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track(src.path(), 1);
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
+    edit(usb.path(), "UPDATE property SET dbVersion='99999'");
+    let before = tree_bytes(usb.path());
+    let err = rbl_export::snapshot::Snapshot::read(usb.path())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("Unsupported OneLibrary schema 99999"),
+        "{err}"
+    );
+    assert!(sync(usb.path(), &[t], &[]).is_err());
+    assert_eq!(before, tree_bytes(usb.path()));
+}
+
 #[test]
 fn legacy_only_conversion_preserves_history_and_master_identity() {
     let src = tempfile::tempdir().unwrap();

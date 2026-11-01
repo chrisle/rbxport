@@ -68,7 +68,18 @@ pub struct Snapshot {
     /// `property` row, 0 when the stick has no such row.
     #[serde(default)]
     pub legacy_background: u8,
+    /// `property.dbVersion` of the stick's `exportLibrary.db`, when it has one.
+    #[serde(default)]
+    pub one_db_version: Option<String>,
 }
+
+/// `exportLibrary.db` schema versions other than rbxport's own that can be
+/// read. `10000` is what `VirtualDJ`'s CDJ Export writes (#791) [OBS: the issue
+/// report's error text only]. Its table layout is not documented anywhere, so
+/// these sticks are read-only: every write rebuilds the database as
+/// [`rbl_onelibrary::build::DB_VERSION`], which would silently convert it.
+pub const READ_ONLY_DB_VERSIONS: &[&str] = &["10000"];
+
 fn sql(e: impl std::fmt::Display) -> ExportError {
     ExportError::OneLibrary(e.to_string())
 }
@@ -89,6 +100,22 @@ pub(crate) fn onelibrary_stars(raw: i64) -> u8 {
 impl Snapshot {
     pub fn read(root: &Path) -> Result<Self> {
         Self::read_at(root, crate::export_root_name(root)?)
+    }
+    /// [`Self::read`] for an operation that goes on to write the stick:
+    /// refuses a database whose schema can be read but not safely rewritten.
+    pub fn read_for_write(root: &Path) -> Result<Self> {
+        let snapshot = Self::read(root)?;
+        snapshot.require_writable()?;
+        Ok(snapshot)
+    }
+    /// Refuses a stick whose `exportLibrary.db` is a read-only schema version.
+    pub fn require_writable(&self) -> Result<()> {
+        match self.one_db_version.as_deref() {
+            Some(version) if version != rbl_onelibrary::build::DB_VERSION => Err(ExportError::Conflict(format!(
+                "This device's OneLibrary database uses schema {version}, which rbxport can read but not write yet; the device was left unchanged."
+            ))),
+            _ => Ok(()),
+        }
     }
     pub fn read_at(root: &Path, name: &str) -> Result<Self> {
         let dir = root.join(name).join("rekordbox");
@@ -564,11 +591,12 @@ fn read_one_into(out: &mut Snapshot, path: &Path) -> Result<()> {
     let version: String = conn
         .query_row("SELECT dbVersion FROM property LIMIT 1", [], |r| r.get(0))
         .map_err(sql)?;
-    if version != rbl_onelibrary::build::DB_VERSION {
+    if version != rbl_onelibrary::build::DB_VERSION && !READ_ONLY_DB_VERSIONS.contains(&version.as_str()) {
         return Err(ExportError::Conflict(format!(
             "Unsupported OneLibrary schema {version}; the device was left unchanged."
         )));
     }
+    out.one_db_version = Some(version);
     read_one_library(&db, out)?;
     read_one_history_and_tags(&db, out)?;
     Ok(())
