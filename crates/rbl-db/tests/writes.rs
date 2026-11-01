@@ -5639,3 +5639,40 @@ fn redo_of_an_add_refuses_a_playlist_renumbered_since() {
     assert!(matches!(f.writer.redo_track_addition(&addition), Err(DbError::Conflict(_))));
     assert_eq!(members_of(&f, &list), now, "nothing written");
 }
+
+/// Issue #800: a batch with unreadable AIFFs imports the readable file and
+/// refuses each broken one under its own name and reason, so the page can
+/// list every skipped file rather than losing all but the first.
+#[test]
+fn unreadable_aiffs_are_each_refused_with_their_own_reason_and_the_rest_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let good = dir.path().join("Good.wav");
+    write_wav(&good, 2);
+    // "FORM"/"AIFF" container holding a "SSND" chunk but no "COMM" chunk.
+    let no_comm = dir.path().join("No COMM.aiff");
+    let mut body = b"AIFF".to_vec();
+    body.extend_from_slice(b"SSND");
+    body.extend_from_slice(&8_u32.to_be_bytes());
+    body.extend_from_slice(&[0; 8]);
+    let mut form = b"FORM".to_vec();
+    form.extend_from_slice(&u32::try_from(body.len()).unwrap().to_be_bytes());
+    form.extend_from_slice(&body);
+    std::fs::write(&no_comm, &form).unwrap();
+    // A header that promises more than the file holds.
+    let truncated = dir.path().join("Truncated.aiff");
+    std::fs::write(&truncated, b"FORM\x00\x00\x10\x00AIFFCOMM\x00\x00\x00\x12\x00").unwrap();
+
+    let mut f = fixture();
+    let files = [no_comm.clone(), good.clone(), truncated.clone()];
+    let outcomes = f.writer.import_files(&files).unwrap();
+    let mut lines = Vec::new();
+    for (file, outcome) in files.iter().zip(&outcomes) {
+        if let rbl_db::write::ImportOutcome::Refused(reason) = outcome {
+            lines.push(rbl_db::write::skipped_file(file, reason));
+        }
+    }
+    assert!(matches!(outcomes[1], rbl_db::write::ImportOutcome::Added(_)), "{outcomes:?}");
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].starts_with("No COMM.aiff: its tags could not be read: "), "{lines:?}");
+    assert!(lines[1].starts_with("Truncated.aiff: its tags could not be read: "), "{lines:?}");
+}

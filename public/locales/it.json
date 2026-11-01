@@ -1784,5 +1784,7 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Vengono importati solo i brani già presenti nella raccolta. I brani senza corrispondenza vengono esclusi; se nessuno corrisponde, non viene creata alcuna playlist.",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Se mancano dei brani, scegli se copiarli e dove salvarli. Annullando si interrompe l'importazione.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Some files were not imported": "Some files were not imported",
+  "{count} files were not imported:": "{count} files were not imported:"
 }

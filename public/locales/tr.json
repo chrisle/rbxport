@@ -1783,5 +1783,7 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Yalnızca koleksiyonunuzda zaten bulunan parçalar içe aktarılır. Eşleşmeyen parçalar atlanır; hiçbiri eşleşmezse çalma listesi oluşturulmaz.",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Eksik parçalar varsa bunların kopyalanıp kopyalanmayacağını ve nereye kaydedileceğini seçin. İptal etmek içe aktarmayı durdurur.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Some files were not imported": "Some files were not imported",
+  "{count} files were not imported:": "{count} files were not imported:"
 }

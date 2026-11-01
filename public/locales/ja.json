@@ -1791,5 +1791,7 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "コレクションに既にある楽曲だけをインポートします。一致しない楽曲は除外され、1曲も一致しない場合はプレイリストを作成しません。",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "楽曲が見つからない場合、コピーするかどうかと保存先を選択します。キャンセルするとインポートを中止します。",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Some files were not imported": "Some files were not imported",
+  "{count} files were not imported:": "{count} files were not imported:"
 }
