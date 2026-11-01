@@ -1778,5 +1778,7 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Kun numre, der allerede findes i din samling, importeres. Numre uden match udelades; hvis ingen matcher, oprettes der ingen playliste.",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Når der mangler numre, skal du vælge, om de skal kopieres, og hvor de skal gemmes. Annullering stopper importen.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Some files were not imported": "Some files were not imported",
+  "{count} files were not imported:": "{count} files were not imported:"
 }

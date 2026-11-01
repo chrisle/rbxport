@@ -1782,5 +1782,7 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Csak a gyűjteményében már meglévő számok lesznek importálva. A nem egyező számok kimaradnak; ha egyik sem egyezik, nem jön létre lejátszási lista.",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Ha számok hiányoznak, válassza ki, hogy átmásolja-e őket, és hová menti őket. A megszakítás leállítja az importálást.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Some files were not imported": "Some files were not imported",
+  "{count} files were not imported:": "{count} files were not imported:"
 }

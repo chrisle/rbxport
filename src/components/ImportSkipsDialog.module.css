@@ -1,0 +1,9 @@
+.list {
+  max-height: 240px;
+  margin: -8px 0 18px;
+  padding-left: 18px;
+  overflow-y: auto;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

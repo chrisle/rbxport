@@ -1781,5 +1781,7 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Alleen nummers die al in je collectie staan, worden geïmporteerd. Nummers zonder overeenkomst worden overgeslagen; als geen enkel nummer overeenkomt, wordt er geen afspeellijst gemaakt.",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Als er nummers ontbreken, kies je of je ze wilt kopiëren en waar je ze wilt opslaan. Annuleren stopt de import.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Some files were not imported": "Some files were not imported",
+  "{count} files were not imported:": "{count} files were not imported:"
 }
