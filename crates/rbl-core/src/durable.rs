@@ -320,19 +320,38 @@ pub fn same_root(left: &Path, right: &Path) -> std::io::Result<bool> {
 
 /// Holds the directory identity across planning and staging, including Windows.
 /// Reusing a mount path for another device must not redirect an active export.
-pub struct VolumeIdentity(same_file::Handle);
+pub struct VolumeIdentity { handle: same_file::Handle, seen: String }
 
 impl VolumeIdentity {
     pub fn capture(root: &Path) -> std::io::Result<Self> {
-        Ok(Self(same_file::Handle::from_path(root)?))
+        Ok(Self { handle: same_file::Handle::from_path(root)?, seen: describe(root) })
     }
 
+    /// Fails when `root` no longer names the directory captured at the start.
+    /// The message carries the device and inode seen at each end so a report
+    /// shows which part of the identity moved (#778: reported on a freshly
+    /// formatted stick under macOS with no device change).
     pub fn check(&self, root: &Path) -> std::io::Result<()> {
-        if self.0 != same_file::Handle::from_path(root)? {
-            return Err(std::io::Error::other("The destination changed since export started"));
+        if self.handle != same_file::Handle::from_path(root)? {
+            return Err(std::io::Error::other(format!(
+                "The destination changed since export started (at start: {}; now: {})",
+                self.seen,
+                describe(root)
+            )));
         }
         Ok(())
     }
+}
+
+#[cfg(unix)]
+fn describe(root: &Path) -> String {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(root).map_or_else(|e| format!("unreadable: {e}"), |m| format!("dev {} ino {}", m.dev(), m.ino()))
+}
+
+#[cfg(not(unix))]
+fn describe(root: &Path) -> String {
+    std::fs::metadata(root).map_or_else(|e| format!("unreadable: {e}"), |_| "directory".to_owned())
 }
 
 /// Durable commit intent for a set of files. Recovery rolls publication forward
@@ -1049,6 +1068,30 @@ fn lock(root: &Path) -> std::io::Result<std::fs::File> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unchanged_destination_keeps_its_identity_while_files_are_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let identity = VolumeIdentity::capture(dir.path()).unwrap();
+        identity.check(dir.path()).unwrap();
+        std::fs::create_dir(dir.path().join("PIONEER")).unwrap();
+        std::fs::write(dir.path().join("PIONEER/export.pdb"), b"x").unwrap();
+        identity.check(dir.path()).unwrap();
+        identity.check(&dir.path().join("PIONEER/..")).unwrap();
+    }
+
+    #[test]
+    fn a_replaced_destination_reports_both_identities() {
+        let dir = tempfile::tempdir().unwrap();
+        let usb = dir.path().join("usb");
+        std::fs::create_dir(&usb).unwrap();
+        let identity = VolumeIdentity::capture(&usb).unwrap();
+        std::fs::rename(&usb, dir.path().join("original")).unwrap();
+        std::fs::create_dir(&usb).unwrap();
+        let message = identity.check(&usb).unwrap_err().to_string();
+        assert!(message.starts_with("The destination changed since export started"), "{message}");
+        assert!(message.contains("at start:") && message.contains("now:"), "{message}");
+    }
 
     #[cfg(unix)]
     #[test]
