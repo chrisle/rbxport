@@ -2873,6 +2873,20 @@ pub async fn deck_set_loop<R: tauri::Runtime>(
     Ok(())
 }
 
+/// Arms or clears the loaded track's saved Active Loop without seeking.
+#[tauri::command]
+pub async fn deck_set_active_loop(
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    in_ms: Option<f64>,
+    out_ms: Option<f64>,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.set_active_loop_ms(crate::player::deck_of(&deck), in_ms.zip(out_ms));
+    }
+    Ok(())
+}
+
 /// RELOOP (on) and EXIT (off): back into the loop from its in point, or out
 /// of it with the range kept.
 #[tauri::command]

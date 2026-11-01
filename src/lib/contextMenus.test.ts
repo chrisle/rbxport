@@ -380,7 +380,7 @@ describe("the Explorer's track menu, against rekordbox's", () => {
 });
 
 describe("deckMenu", () => {
-  const state = { waveformColor: "3band" as const, beatCount: "position" as const, waveformClick: true };
+  const state = { waveformColor: "3band" as const, beatCount: "position" as const, waveformClick: true, activeLoopPlayback: false };
 
   it("is rekordbox's player menu, top to bottom, with its greyed entries", () => {
     const labels = entriesOf(deckMenu(state)).map((e) => e.label);
@@ -391,7 +391,8 @@ describe("deckMenu", () => {
     const context = { inPlaylist: false, hasFile: true, readOnly: false };
     const live = entriesOf(deckMenu(state)).filter((e) => enabled(e, context)).map((e) => e.label);
     expect(live).toEqual([
-      "Change waveform color", "Analyze Track", "Beat Count Display", "Click on the waveform for PLAY and CUE",
+      "Change waveform color", "Analyze Track", "Beat Count Display", "Active Loop Playback",
+      "Click on the waveform for PLAY and CUE",
     ]);
   });
 
@@ -404,6 +405,8 @@ describe("deckMenu", () => {
       .toEqual(["Count to the next MEMORY CUE (Beats)"]);
     expect(entriesOf(items("Click on the waveform for PLAY and CUE")).filter((e) => e.checked).map((e) => e.label))
       .toEqual(["Disable"]);
+    expect(entriesOf(items("Active Loop Playback")).filter((e) => e.checked).map((e) => e.label))
+      .toEqual(["Off"]);
   });
 
   it("offers Analyze Track for the loaded track", () => {

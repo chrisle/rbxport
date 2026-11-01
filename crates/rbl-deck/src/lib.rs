@@ -577,6 +577,7 @@ impl Engine {
     pub fn load_as(&self, deck: Deck, path: &Path, request: u64) {
         let request = request.max(1);
         if let Some(handle) = self.deck(deck) {
+            handle.clock().set_active_candidate(None);
             handle.clock().request_load(request);
             handle.send(deck::Command::Load { request, path: PathBuf::from(path) });
         }
@@ -585,6 +586,7 @@ impl Engine {
 
     pub fn unload(&self, deck: Deck) {
         if let Some(handle) = self.deck(deck) {
+            handle.clock().set_active_candidate(None);
             // Invalidates an open already in progress before its worker can
             // publish it, not only when the queued unload is handled.
             handle.clock().request_load(0);
@@ -645,6 +647,7 @@ impl Engine {
         // The clock moves now rather than when the first block after the seek
         // is played: a seek while paused must show where it landed.
         handle.clock().set_pre_roll(pre_roll);
+        handle.clock().rearm_active_before(frame);
         handle
             .clock()
             .set_position(frame.min(handle.clock().total().max(frame)));
@@ -716,6 +719,27 @@ impl Engine {
     pub fn clear_loop(&self, deck: Deck) {
         let Some(handle) = self.deck(deck) else { return };
         handle.clock().set_loop(None);
+    }
+
+    /// Arms a saved memory loop for the next forward crossing of IN. No seek
+    /// occurs and the range does not replace a loop already playing.
+    pub fn set_active_loop_ms(&self, deck: Deck, range: Option<(f64, f64)>) {
+        let Some(handle) = self.deck(deck) else { return };
+        let frames = range.and_then(|(from, to)| {
+            (from.is_finite() && to.is_finite() && from >= 0.0 && to > from).then(|| {
+                let scale = f64::from(self.sample_rate) / 1000.0;
+                ((from * scale) as u64, (to * scale) as u64)
+            })
+        });
+        let changed = handle.clock().set_active_candidate(frames);
+        // The decoder may already have buffered past IN before the cue list
+        // arrived. Refill from the audible head while it is still before IN;
+        // a candidate added after IN waits for a later crossing.
+        if changed && frames.is_some_and(|(from, _)| handle.clock().position() <= from)
+            && !handle.clock().looping() && handle.clock().loaded() {
+            self.seek_frames(deck, handle.clock().position());
+        }
+        handle.send(deck::Command::Wake);
     }
 
     /// Moves the playhead by `ms` from where it is now. The move is worked

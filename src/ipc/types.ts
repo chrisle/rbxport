@@ -718,6 +718,8 @@ export interface Backend {
    * point itself, on the frame, with nothing faded at the seam.
    */
   deckSetLoop(deck: DeckId, inMs: number, outMs: number): Promise<void>;
+  /** Arm a saved Kind-4 memory loop, or pass nulls to run straight through. */
+  deckSetActiveLoop(deck: DeckId, inMs: number | null, outMs: number | null): Promise<void>;
   /** RELOOP (on): back in from the in point. EXIT (off): out, the range kept. */
   deckLoopActive(deck: DeckId, on: boolean): Promise<void>;
   deckClearLoop(deck: DeckId): Promise<void>;
