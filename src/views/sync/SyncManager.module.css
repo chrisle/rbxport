@@ -360,3 +360,5 @@
 .exportReport strong { color: var(--c-text); font-weight: 700; }
 .exportReport .exportWarning,
 .exportReport .exportWarning strong { color: var(--c-error); }
+.importHint { margin: 0; color: var(--c-text-dim); font-size: var(--f-size-pref-small); text-align: left; }
+.linkButton { padding: 0; border: 0; background: none; color: var(--c-accent); font: inherit; text-decoration: underline; cursor: pointer; }

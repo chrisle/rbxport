@@ -1173,6 +1173,29 @@ it("blocks rating imports under Library Protection and while rekordbox is open",
   expect(importUsb).not.toHaveBeenCalled();
 });
 
+it("says beside Import why it is greyed under Library Protection, without hovering, and offers Preferences (#790)", async () => {
+  await renderWith({ importButtonCues: true, importButtonHistory: true, importButtonSettings: false, importButtonRatings: true }, true);
+  click(box("USB A"));
+  await settle();
+  expect(importButton().disabled).toBe(true);
+  const hint = host.querySelector("#import-blocked-hint");
+  expect(hint?.textContent).toContain("Turn off Library Protection to import cues and grids.");
+  expect(hint?.textContent).toContain("Turn off Library Protection to import play history.");
+  expect(hint?.textContent).toContain("Turn off Library Protection to import track ratings.");
+  expect(importButton().getAttribute("aria-describedby")).toBe("import-blocked-hint");
+  click([...hint?.querySelectorAll("button") ?? []].find(b => b.textContent === "Open Preferences"));
+  await settle();
+  expect(openPreferences).toHaveBeenCalledExactlyOnceWith("usbExportImport");
+  expect(importUsb).not.toHaveBeenCalled();
+});
+
+it("shows no import hint when Import can run", async () => {
+  await renderWith({ importButtonCues: true, importButtonHistory: false, importButtonSettings: false, importButtonRatings: false });
+  click(box("USB A"));
+  await settle();
+  expect(host.querySelector("#import-blocked-hint")).toBeNull();
+});
+
 it("rechecks rekordbox when Import is clicked", async () => {
   await renderWith({ importButtonCues: false, importButtonHistory: false, importButtonSettings: false, importButtonRatings: true });
   click(box("USB A"));
