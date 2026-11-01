@@ -1787,5 +1787,8 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "仅导入收藏中已有的曲目。未匹配的曲目会被跳过；如果没有任何曲目匹配，则不会创建播放列表。",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "如果有缺失的曲目，请选择是否复制以及保存位置。取消将停止导入。",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Analysis Lock is set on tracks in the collection, not on a device": "Analysis Lock is set on tracks in the collection, not on a device",
+  "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
+  "Unlock the beat grid for editing": "Unlock the beat grid for editing"
 }
