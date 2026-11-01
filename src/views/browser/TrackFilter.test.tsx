@@ -20,12 +20,12 @@ let host: HTMLDivElement;
 let root: Root;
 let latest: FilterState;
 
-function Harness({ onState }: { onState: (state: FilterState) => void }) {
+function Harness({ onState, values = VALUES }: { onState: (state: FilterState) => void; values?: FilterValues }) {
   const [state, setState] = useState<FilterState>(EMPTY_FILTER);
   return (
     <TrackFilter
       state={state}
-      values={VALUES}
+      values={values}
       masterBpmX100={null}
       onChange={(next) => {
         onState(next);
@@ -116,4 +116,25 @@ it("RST clears the tag picks", () => {
   click(chip(0, "Peak")!);
   click(host.querySelector('button[aria-label="Reset"]')!);
   expect(latest.tags.every((t) => t.values.length === 0 && !t.enabled)).toBe(true);
+});
+
+it("a column past the fourth ticks, picks and switches like the first four", () => {
+  const many: FilterValues = {
+    ...VALUES,
+    tags: Array.from({ length: 6 }, (_, i) => ({ name: `Cat ${i + 1}`, tags: [`A${i + 1}`, `B${i + 1}`] })),
+  };
+  act(() => root.render(<Harness onState={(s) => { latest = s; }} values={many} />));
+  expect(columns()).toHaveLength(6);
+  const box = (at: number) => columns()[at]!.querySelector<HTMLElement>('[role="checkbox"]')!;
+  click(box(4));
+  expect(latest.tags[4]).toEqual({ enabled: true, values: [], any: false });
+  click(chip(4, "B5")!);
+  expect(latest.tags[4]).toEqual({ enabled: true, values: ["B5"], any: false });
+  click(chip(4, "A5")!, { metaKey: true });
+  expect(latest.tags[4]?.values).toEqual(["B5", "A5"]);
+  click(box(5));
+  click(chip(5, "A6")!);
+  expect(latest.tags[5]).toEqual({ enabled: true, values: ["A6"], any: false });
+  expect(latest.tags[4]?.enabled).toBe(true);
+  expect(latest.tags.slice(0, 4).every((t) => !t.enabled && t.values.length === 0)).toBe(true);
 });
