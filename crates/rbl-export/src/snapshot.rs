@@ -73,6 +73,15 @@ fn sql(e: impl std::fmt::Display) -> ExportError {
     ExportError::OneLibrary(e.to_string())
 }
 
+/// An `exportLibrary.db` integer column read as the unsigned type this crate
+/// writes. SQLite columns are untyped, so a stick can hold a negative or
+/// oversized value that rusqlite refuses to read as unsigned ("Integer -1 out
+/// of range at index N", #787), which stopped the whole sync before it changed
+/// anything. Treat such a value as unknown (zero), like [`release_year`].
+pub(crate) fn unsigned_or_zero<T: TryFrom<i64> + Default>(value: i64) -> T {
+    T::try_from(value).unwrap_or_default()
+}
+
 /// Stars, 0 to 5, from a `OneLibrary` `content.rating`.
 ///
 /// rekordbox writes the stars themselves [OBS: a rekordbox 7 stick, ratings
@@ -591,9 +600,9 @@ fn read_one_library(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> R
                     title: r.get(1)?,
                     path: r.get(2)?,
                     analysis: r.get(3)?,
-                    bpm: r.get(4)?,
+                    bpm: unsigned_or_zero(r.get(4)?),
                     rating: u32::from(onelibrary_stars(r.get(5)?)),
-                    color: r.get(6)?,
+                    color: unsigned_or_zero(r.get(6)?),
                     comment: r.get(7)?,
                 },
                 (
