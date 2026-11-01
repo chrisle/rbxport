@@ -375,6 +375,39 @@ fn schema_10000_is_read_only() {
         "a refused write must not change the device"
     );
 }
+/// In-place device playlist edits rewrite the stick's `exportLibrary.db`, so a
+/// schema that is not rbxport's own is refused before anything is staged:
+/// `10000` (readable, not writable) and `99999` (unknown) alike. [OBS:
+/// fixtures only; rbxport-built sticks with `dbVersion` edited.]
+#[test]
+fn device_playlist_edit_is_refused_on_unwritable_schemas() {
+    use rbl_export::device_library::{self, Edit, Format};
+    for version in ["10000", "99999"] {
+        let src = tempfile::tempdir().unwrap();
+        let usb = common::stick();
+        let t = track(src.path(), 1);
+        sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
+        // Read the playlist and track ids while the stick is still `1000`.
+        let library = device_library::read(usb.path(), Format::OneLibrary).unwrap();
+        let list = library.nodes.iter().find(|n| !n.folder).unwrap().id;
+        let on_stick = library.tracks[0].id;
+        edit(usb.path(), &format!("UPDATE property SET dbVersion='{version}'"));
+        let before = tree_bytes(usb.path());
+
+        let err = device_library::apply(
+            usb.path(),
+            Format::OneLibrary,
+            &Edit::Remove { playlist: list, tracks: vec![on_stick] },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains(&format!("schema {version}")) && err.contains("read but not write") && err.contains("left unchanged"),
+            "{version}: {err}"
+        );
+        assert_eq!(before, tree_bytes(usb.path()), "{version}: a refused edit must not change the device");
+    }
+}
 /// Any version not on the allowlist is still refused outright, read or write.
 #[test]
 fn unknown_schema_99999_is_refused_without_changes() {

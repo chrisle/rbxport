@@ -591,6 +591,10 @@ pub fn apply(root: &Path, format: Format, edit: &Edit) -> Result<Applied> {
     }
     // Held to the end: no export or other edit of ours starts meanwhile.
     let publication = rbl_core::durable::Publication::new(root, PUBLICATION)?;
+    // Before anything is staged: a schema we can read but not safely rewrite.
+    if format == Format::OneLibrary {
+        crate::snapshot::require_writable_library(&path)?;
+    }
     let stamp = (file_stamp(&path)?, file_stamp(&dir.join(format!("{}-wal", format.file_name())))?);
     let current = read_unlocked(root, format)?;
     let tracks: BTreeSet<u32> = current.tracks.iter().map(|t| t.id).collect();

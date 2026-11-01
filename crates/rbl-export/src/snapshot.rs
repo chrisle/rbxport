@@ -80,6 +80,29 @@ pub struct Snapshot {
 /// [`rbl_onelibrary::build::DB_VERSION`], which would silently convert it.
 pub const READ_ONLY_DB_VERSIONS: &[&str] = &["10000"];
 
+/// The one gate every write to an `exportLibrary.db` passes: only the schema
+/// rbxport itself builds ([`rbl_onelibrary::build::DB_VERSION`]) may be
+/// rewritten. Read-only and unknown versions are both refused.
+pub fn require_writable_version(version: &str) -> Result<()> {
+    if version == rbl_onelibrary::build::DB_VERSION {
+        return Ok(());
+    }
+    Err(ExportError::Conflict(format!(
+        "This device's OneLibrary database uses schema {version}, which rbxport can read but not write yet; the device was left unchanged."
+    )))
+}
+
+/// [`require_writable_version`] for the `exportLibrary.db` at `path`, read
+/// without modifying it. For in-place edits that do not take a [`Snapshot`].
+pub fn require_writable_library(path: &Path) -> Result<()> {
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(path).map_err(sql)?;
+    let version: String = db
+        .connection()
+        .query_row("SELECT dbVersion FROM property LIMIT 1", [], |r| r.get(0))
+        .map_err(sql)?;
+    require_writable_version(&version)
+}
+
 fn sql(e: impl std::fmt::Display) -> ExportError {
     ExportError::OneLibrary(e.to_string())
 }
@@ -110,12 +133,7 @@ impl Snapshot {
     }
     /// Refuses a stick whose `exportLibrary.db` is a read-only schema version.
     pub fn require_writable(&self) -> Result<()> {
-        match self.one_db_version.as_deref() {
-            Some(version) if version != rbl_onelibrary::build::DB_VERSION => Err(ExportError::Conflict(format!(
-                "This device's OneLibrary database uses schema {version}, which rbxport can read but not write yet; the device was left unchanged."
-            ))),
-            _ => Ok(()),
-        }
+        self.one_db_version.as_deref().map_or(Ok(()), require_writable_version)
     }
     pub fn read_at(root: &Path, name: &str) -> Result<Self> {
         let dir = root.join(name).join("rekordbox");

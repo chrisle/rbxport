@@ -90,3 +90,49 @@ fn a_renamed_colour_reaches_the_pdb_as_well_as_the_library() {
     assert_eq!(rbl_devices::settings::read(stick.path()).library.unwrap().colors[0].name, "Vocal");
 }
 
+
+fn tree_bytes(root: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                out.insert(path.clone(), std::fs::read(path).unwrap());
+            }
+        }
+    }
+    out
+}
+
+/// A settings write rewrites `exportLibrary.db` in place, so a schema that is
+/// not rbxport's own (`10000` readable-only, `99999` unknown) is refused with
+/// every file on the stick unchanged (#791). [OBS: fixtures only; rbxport-built
+/// sticks with `dbVersion` edited.]
+#[test]
+fn a_settings_write_is_refused_on_unwritable_schemas() {
+    for version in ["10000", "99999"] {
+        let source = tempfile::tempdir().unwrap();
+        let stick = tempfile::tempdir().unwrap();
+        let tracks = vec![track(source.path(), 1, "One")];
+        let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0], ..Default::default() }];
+        rbl_export::export(stick.path(), &tracks, &playlists).unwrap();
+
+        let mut settings = rbl_devices::settings::read(stick.path());
+        settings.library.as_mut().expect("exportLibrary.db").colors[0].name = "Vocal".to_owned();
+
+        let conn = rusqlite::Connection::open(stick.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+        conn.pragma_update(None, "cipher", "sqlcipher").unwrap();
+        conn.pragma_update(None, "legacy", 4).unwrap();
+        conn.pragma_update(None, "key", rbl_onelibrary::key::passphrase().unwrap()).unwrap();
+        conn.execute_batch(&format!("UPDATE property SET dbVersion='{version}'")).unwrap();
+        drop(conn);
+        let before = tree_bytes(stick.path());
+
+        let err = rbl_devices::settings::write(stick.path(), &settings).unwrap_err().to_string();
+        assert!(err.contains(&format!("schema {version}")) && err.contains("read but not write"), "{version}: {err}");
+        assert_eq!(before, tree_bytes(stick.path()), "{version}: a refused write must not change the device");
+    }
+}

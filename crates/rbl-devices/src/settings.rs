@@ -272,6 +272,8 @@ pub enum SettingsError {
     Io(#[from] std::io::Error),
     #[error("could not update exportLibrary.db: {0}")]
     Library(#[from] rbl_onelibrary::Error),
+    #[error("{0}")]
+    Refused(String),
 }
 
 /// Reads what the stick holds. Never fails: a file that is missing or
@@ -361,6 +363,13 @@ fn write_changes_recovered(
     }
 
     let root = export_root(mount_point);
+    if library_changed {
+        let path = root.join("rekordbox/exportLibrary.db");
+        if path.is_file() {
+            // Before anything is staged: a schema we can read but not rewrite.
+            rbl_export::snapshot::require_writable_library(&path).map_err(|e| SettingsError::Refused(e.to_string()))?;
+        }
+    }
     let publication = rbl_core::durable::Publication::new(mount_point, ".rbxport-publication")?;
     let relative = root.strip_prefix(mount_point).map_err(std::io::Error::other)?;
     let staged_root = publication.stage().join(relative);
