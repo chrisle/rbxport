@@ -60,6 +60,7 @@ import {
 } from "@/lib/session";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { AppCost } from "@/views/topbar/AppCost";
+import { useAudioOutput } from "@/store/useAudioOutput";
 import { useLimiter } from "@/store/useLimiter";
 import { onPreviewError, stopPreview } from "@/store/usePreview";
 import { useUpdater } from "@/store/useUpdater";
@@ -616,6 +617,7 @@ function AppBody() {
   // device is opened with, and the metronome's click. On start and on every
   // change, from this window or the Preferences window's storage event.
   const audioPrefs = prefs.preferences.audio;
+  useAudioOutput(audioPrefs.outputDevice);
   useEffect(() => {
     void (async () => {
       const backend = await getBackend();
