@@ -47,6 +47,15 @@ export async function expanded(c) {
     else if(ignored) {assert.ok(drops.length<=1);if(drops.length)assert.equal(drops[0].trusted,true);}
     else { assert.equal(drops.length,1,'OS must deliver exactly one drop'); assert.equal(drops[0].trusted,true,'OS drop must be trusted'); assert.ok(drops[0].types.includes('Files')); }
   }
+  // A real outgoing track drag from the first All Tracks row, released on the
+  // toolbar (a completed drag that lands nowhere) or cancelled with Escape.
+  async function trackDragOut({cancel=false}={}) {
+    command(native,['--layout',String(c.pid())],{timeout:30000});
+    await until(()=>state('innerWidth===1200 && innerHeight===800'),'fixed 1200 × 800 viewport');
+    const at = await state(`(() => {const cell=document.querySelector('[role="gridcell"][data-col="title"]'); const bar=document.querySelector('header'); if(!cell||!bar)throw Error('Missing track row or toolbar'); const r=cell.getBoundingClientRect(), h=bar.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,toX:h.x+h.width/2,toY:h.y+h.height/2,height:innerHeight};})()`);
+    const evidence = JSON.parse(command(native,['--drag-out',String(c.pid()),String(at.x),String(at.y),String(at.height),String(at.toX),String(at.toY),...(cancel?['--cancel']:[])],{timeout:30000}));
+    writeFileSync(path.join(out,`track-drag-out-${c.resultCount()}.json`),JSON.stringify({cancel,at,evidence},null,2));
+  }
   const sources=path.join(root,`Finder Sources ${path.basename(root)}`);
   mkdirSync(sources);
   const single=path.join(sources,'Écho café 你好.wav');
@@ -147,6 +156,32 @@ export async function expanded(c) {
     const file=path.join(folder,'Nested','Folder tone.wav');copyFileSync(single,file);
     await nativeDrop([folder],'[role="treeitem"][data-kind="collection"]');
     await waitText(tree,path.basename(folder));await clickText(tree,path.basename(folder));await waitText(title,'(1 Tracks)');
+    assert.ok(held(file));
+  });
+  await scenario('Finder drops audio on All Tracks and adds it to the library',async()=> {
+    await collection();
+    const before=database().tracks.length;
+    const file=path.join(sources,'All Tracks drop.wav');copyFileSync(single,file);
+    await nativeDrop([file],'[data-testid="track-scroll"]');
+    await until(()=>database().tracks.length===before+1,'dropped file reaches the library');
+    assert.ok(held(file));
+  });
+  await scenario('a Finder drop still lands after a completed outgoing track drag',async()=> {
+    await collection();
+    await trackDragOut();
+    const before=database().tracks.length;
+    const file=path.join(sources,'After drag out.wav');copyFileSync(single,file);
+    await nativeDrop([file],'[data-testid="track-scroll"]');
+    await until(()=>database().tracks.length===before+1,'drop after an outgoing drag reaches the library');
+    assert.ok(held(file));
+  });
+  await scenario('a Finder drop still lands after a cancelled outgoing track drag',async()=> {
+    await collection();
+    await trackDragOut({cancel:true});
+    const before=database().tracks.length;
+    const file=path.join(sources,'After cancelled drag out.wav');copyFileSync(single,file);
+    await nativeDrop([file],'[data-testid="track-scroll"]');
+    await until(()=>database().tracks.length===before+1,'drop after a cancelled outgoing drag reaches the library');
     assert.ok(held(file));
   });
   await scenario('missing audio is refused without replacing the loaded deck',async()=> {
