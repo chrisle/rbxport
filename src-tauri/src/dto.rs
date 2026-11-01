@@ -413,6 +413,8 @@ pub struct DeviceDto {
     pub volume_id: String,
     /// What is already on it, absent when it holds no export.
     pub export: Option<DeviceExportDto>,
+    /// An export is writing to it, so what it holds could not be read.
+    pub busy: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

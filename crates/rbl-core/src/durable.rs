@@ -1033,6 +1033,24 @@ pub fn read_lease(root: &Path) -> std::io::Result<Option<std::fs::File>> {
     Ok(Some(file))
 }
 
+/// [`read_lease`] that does not wait: `Ok(None)` for no lock file, and
+/// `ErrorKind::WouldBlock` when a writer holds the device, as an export does
+/// from its start to its end (which can be over an hour with conversion).
+pub fn try_read_lease(root: &Path) -> std::io::Result<Option<std::fs::File>> {
+    let file = match std::fs::File::open(root.join(".rbxport-write.lock")) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    match fs2::FileExt::try_lock_shared(&file) {
+        Ok(()) => Ok(Some(file)),
+        Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+            Err(std::io::Error::new(std::io::ErrorKind::WouldBlock, "the device is being written"))
+        }
+        Err(e) => Err(e),
+    }
+}
+
 fn lock(root: &Path) -> std::io::Result<std::fs::File> {
     let file = std::fs::OpenOptions::new()
         .read(true)

@@ -201,8 +201,38 @@ fn is_drive_root(text: &str) -> bool {
 /// megabytes, and it is the thing that says whether a sync can be incremental.
 #[must_use]
 pub fn inspect(mount_point: &Path) -> Option<DeviceExport> {
+    match inspect_now(mount_point) {
+        Inspection::Found(found) => Some(found),
+        Inspection::Empty | Inspection::Busy => None,
+    }
+}
+
+/// What looking at a stick without waiting found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Inspection {
+    /// No export, or one that cannot be read.
+    Empty,
+    Found(DeviceExport),
+    /// An export is writing to it, so its contents are not readable yet.
+    Busy,
+}
+
+/// [`inspect`] that never waits on a writer. An export holds the stick's
+/// write lock for its whole run, and a conversion export runs for an hour or
+/// more; waiting for it left the device list unanswered until the export
+/// ended (#798).
+#[must_use]
+pub fn inspect_now(mount_point: &Path) -> Inspection {
     // Discovery is read-only. Recover pending publications only during an explicit operation.
-    let _lease = rbl_core::durable::read_lease(mount_point).ok()?;
+    let _lease = match rbl_core::durable::try_read_lease(mount_point) {
+        Ok(lease) => lease,
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Inspection::Busy,
+        Err(_) => return Inspection::Empty,
+    };
+    inspect_leased(mount_point).map_or(Inspection::Empty, Inspection::Found)
+}
+
+fn inspect_leased(mount_point: &Path) -> Option<DeviceExport> {
     if rbl_export::recovery_pending(mount_point) { return None; }
     // `PIONEER` or `.PIONEER`: rekordbox 7 can write the export hidden.
     let pdb = settings::export_root(mount_point).join("rekordbox/export.pdb");

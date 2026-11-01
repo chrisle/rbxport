@@ -90,3 +90,30 @@ fn a_renamed_colour_reaches_the_pdb_as_well_as_the_library() {
     assert_eq!(rbl_devices::settings::read(stick.path()).library.unwrap().colors[0].name, "Vocal");
 }
 
+
+/// An export holds the stick's write lock from start to end, which with
+/// conversion is over an hour. Looking at the stick must answer meanwhile
+/// (#798), or the Sync Manager's device list never comes back.
+#[test]
+fn a_stick_being_written_is_reported_busy_without_waiting_for_the_export() {
+    let src = tempfile::tempdir().unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    let tracks = vec![track(src.path(), 1, "One")];
+    let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0], ..Default::default() }];
+    export(stick.path(), &tracks, &playlists).unwrap();
+
+    let writing = rbl_core::durable::Publication::new(stick.path(), ".rbxport-publication").unwrap();
+    let (done, answered) = std::sync::mpsc::channel();
+    let mount = stick.path().to_path_buf();
+    std::thread::spawn(move || {
+        let _ = done.send((rbl_devices::inspect_now(&mount), rbl_devices::inspect(&mount)));
+    });
+    let (now, plain) = answered
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("inspecting a stick must not wait for the export writing to it");
+    assert_eq!(now, rbl_devices::Inspection::Busy);
+    assert_eq!(plain, None);
+
+    drop(writing);
+    assert!(matches!(rbl_devices::inspect_now(stick.path()), rbl_devices::Inspection::Found(_)));
+}
