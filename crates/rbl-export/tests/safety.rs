@@ -618,3 +618,67 @@ fn a_track_we_exported_and_a_device_playlist_kept_is_removed_once_unnamed() {
     assert!(!usb.path().join(audio.trim_start_matches('/')).exists(), "its audio stayed");
     assert!(verify(usb.path()).unwrap().is_ok());
 }
+
+/// Rekordbox's own exports carry `dbVersion` "10000" (issues #796, #618): the
+/// sync must read and rebuild them when the tables are the known ones.
+#[test]
+fn newer_db_version_with_the_known_schema_is_accepted() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track(src.path(), 1);
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
+    edit(usb.path(), "UPDATE property SET dbVersion='10000'");
+    sync(usb.path(), &[t], &[]).unwrap();
+    let snapshot = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+    assert_eq!(snapshot.one.as_ref().map(|l| l.tracks.len()), Some(1));
+}
+
+#[test]
+fn integer_typed_db_version_is_read_not_a_sql_error() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track(src.path(), 1);
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
+    edit(usb.path(), "UPDATE property SET dbVersion=10000");
+    sync(usb.path(), &[t], &[]).unwrap();
+}
+
+#[test]
+fn newer_db_version_with_an_unknown_column_is_rejected_unchanged() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track(src.path(), 1);
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
+    edit(
+        usb.path(),
+        "UPDATE property SET dbVersion='10000'; ALTER TABLE content ADD COLUMN futureField integer",
+    );
+    let path = usb.path().join("PIONEER/rekordbox/exportLibrary.db");
+    let bytes = std::fs::read(&path).unwrap();
+    let err = sync(usb.path(), &[t], &[]).unwrap_err().to_string();
+    assert!(err.contains("\"10000\"") && err.contains("expected \"1000\""), "{err}");
+    assert!(err.contains("futureField"), "{err}");
+    assert_eq!(bytes, std::fs::read(path).unwrap());
+}
+
+#[test]
+fn newer_db_version_with_an_unknown_table_is_rejected() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track(src.path(), 1);
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
+    edit(usb.path(), "UPDATE property SET dbVersion='10000'; CREATE TABLE futureTable(a integer)");
+    let err = sync(usb.path(), &[t], &[]).unwrap_err().to_string();
+    assert!(err.contains("unexpected table futureTable"), "{err}");
+}
+
+#[test]
+fn unknown_db_version_names_expected_and_found() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track(src.path(), 1);
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
+    edit(usb.path(), "UPDATE property SET dbVersion='9999'");
+    let err = sync(usb.path(), &[t], &[]).unwrap_err().to_string();
+    assert!(err.contains("\"9999\"") && err.contains("expected \"1000\""), "{err}");
+}
