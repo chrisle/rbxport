@@ -28,8 +28,8 @@ Open rekordbox to use its performance mode and mixer.
 
 Use them one at a time. RBXport refuses to change the library while rekordbox
 or its agent is running, so quit rekordbox before editing in RBXport, then
-quit RBXport before reopening rekordbox. Backups and USB sync have the same
-requirement.
+quit RBXport before reopening rekordbox. Restoring a backup and syncing a USB
+stick also need rekordbox closed; creating a backup does not.
 
 To use a different library in both apps, switch it in RBXport under
 Preferences → Advanced → Database → Database management, or in rekordbox under
