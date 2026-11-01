@@ -1988,7 +1988,7 @@ export interface Edits {
    * One add is one step of Edit › Undo: the slices of one drop or menu
    * choice share a `transaction` and join one entry (#499).
    */
-  addTracksToPlaylist(playlist: string, tracks: string[], allowDuplicates?: boolean, transaction?: string): Promise<number>;
+  addTracksToPlaylist(playlist: string, tracks: string[], allowDuplicates?: boolean, transaction?: string): Promise<{ generation: number; added: number }>;
   /** The ones of `tracks` the playlist already holds. */
   playlistDuplicates(playlist: string, tracks: string[]): Promise<string[]>;
   /** Reload Tag: the files' tags read again over the rows. */

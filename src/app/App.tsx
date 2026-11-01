@@ -1136,30 +1136,28 @@ function AppBody() {
             report(`Nothing added to ${name}${tail}.`);
             return;
           }
-          // Tracks the playlist already holds and keeps once, so the note
-          // counts only the ones that were added.
-          const held = allowDuplicates ? 0 : (await backend.edits.playlistDuplicates(playlistId, trackIds)).length;
           update({ total: trackIds.length, pendingRows: trackIds.length });
           let added = 0;
+          let processed = 0;
           // Every slice of this add is one step of Edit › Undo (#499).
           const transaction = crypto.randomUUID();
           try {
             for (const slice of slices(trackIds, ADD_SLICE)) {
               if (signal.aborted) break;
-              await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates, transaction);
-              added += slice.length;
-              update({ done: added, pendingRows: trackIds.length - added });
+              const result = await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates, transaction);
+              added += result.added;
+              processed += slice.length;
+              update({ done: processed, pendingRows: trackIds.length - processed });
             }
           } finally {
-            if (added > 0) setTree(withSources(await backend.playlistTree()));
+            if (processed > 0) setTree(withSources(await backend.playlistTree()));
           }
           const noun = (n: number) => `${n} track${n === 1 ? "" : "s"}`;
-          const count = added - held;
-          report(added < trackIds.length
+          report(processed < trackIds.length
             ? `Stopped: added ${added} of ${noun(trackIds.length)} to ${name}${tail}.`
-            : count <= 0
+            : added <= 0
               ? `Already in ${name}${tail}.`
-              : `Added ${noun(count)} to ${name}${tail}.`);
+              : `Added ${noun(added)} to ${name}${tail}.`);
         },
       });
     },
@@ -1255,14 +1253,16 @@ function AppBody() {
           update({ label: t("Adding {count} to {name}", { count: total, name }) });
           const allowDuplicates = signal.aborted ? false : await resolveDuplicates(playlistId, toAdd, name);
           let added = 0;
+          let processed = 0;
           // Every slice of this add is one step of Edit › Undo (#499); the
           // import before it is not in the history.
           const transaction = crypto.randomUUID();
           for (const slice of slices(toAdd, ADD_SLICE)) {
             if (signal.aborted || allowDuplicates === null) break;
-            await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates, transaction);
-            added += slice.length;
-            update({ done: total + added, pendingRows: toAdd.length - added });
+            const result = await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates, transaction);
+            added += result.added;
+            processed += slice.length;
+            update({ done: total + processed, pendingRows: toAdd.length - processed });
           }
           setTree(await backend.playlistTree());
           if (analysisPrefs.auto && fresh.length > 0) analysis.add(fresh);
@@ -1270,7 +1270,9 @@ function AppBody() {
           const left = skippedTail(skipped);
           report(signal.aborted
             ? `Stopped: ${noun(added)} added to ${name}${left}${already}.`
-            : `Added ${noun(added)} to ${name}${left}${already}.`);
+            : added === 0 && toAdd.length > 0
+              ? `Already in ${name}${left}${already}.`
+              : `Added ${noun(added)} to ${name}${left}${already}.`);
         },
       });
     },

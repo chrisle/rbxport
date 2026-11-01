@@ -6,6 +6,7 @@
 //! instead of taking the process down.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rbl_deck::{Band, Curve};
 use rbl_index::Library;
@@ -4027,6 +4028,13 @@ pub(crate) fn step_history(state: &AppState, undo: bool) -> AppResult<(EditHisto
 /// Add Tracks to Playlist: one Undo per drop or menu choice (#499). The
 /// window sends a large add a slice at a time, each with the same
 /// `transaction`, and the slices join one history entry.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTracksResultDto {
+    pub generation: u32,
+    pub added: usize,
+}
+
 #[tauri::command]
 pub async fn add_tracks_to_playlist<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -4035,18 +4043,23 @@ pub async fn add_tracks_to_playlist<R: tauri::Runtime>(
     tracks: Vec<String>,
     allow_duplicates: Option<bool>,
     transaction: Option<String>,
-) -> AppResult<u32> {
+) -> AppResult<AddTracksResultDto> {
     let allow = allow_duplicates.unwrap_or(false);
-    recorded_edit_with(
+    let added = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&added);
+    let dto = recorded_edit_with(
         app,
         state,
         "add_tracks_to_playlist",
         Touched::Playlists,
         move |w| w.add_tracks_with_undo(&playlist, &tracks, allow).map(|(_, addition)| addition),
-        move |history, addition| history.record_addition(addition, transaction, "Add Tracks to Playlist"),
+        move |history, addition: rbl_db::write::PlaylistTrackAddition| {
+            count.store(addition.added().len(), Ordering::Relaxed);
+            history.record_addition(addition, transaction, "Add Tracks to Playlist");
+        },
     )
-    .await
-    .map(|dto| dto.generation)
+    .await?;
+    Ok(AddTracksResultDto { generation: dto.generation, added: added.load(Ordering::Relaxed) })
 }
 
 /// Which of `tracks` the playlist already holds, for the question asked
