@@ -12,7 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
 import type { Backend, Limiter } from "@/ipc/types";
+import { DEFAULT_PREFERENCES } from "@/lib/preferences";
 import { DEFAULT_LIMITER } from "@/store/useLimiter";
+import { PreferencesProvider, type PreferencesStore } from "@/store/usePreferences";
 import { AudioPane } from "./AudioPane";
 
 declare global {
@@ -163,4 +165,77 @@ it("shows bypassed reduction as zero while continuing to meter output", async ()
   await settle();
   expect(host.querySelector('[aria-label="Gain reduction"]')?.getAttribute("aria-valuenow")).toBe("0");
   expect(host.querySelector('[aria-label="Gain reduction"]')?.getAttribute("aria-valuetext")).toBe("Limiter off");
+});
+
+describe("AudioPane's output device (#799)", () => {
+  const devices = [
+    { id: "a", name: "Built-in" },
+    { id: "m4", name: "M4" },
+  ];
+  const select = () => host.querySelector<HTMLSelectElement>('select[aria-label="Audio output device"]');
+
+  function mountWithStore(outputDevice: string | null, update: PreferencesStore["update"]) {
+    const store: PreferencesStore = {
+      preferences: { ...DEFAULT_PREFERENCES, audio: { ...DEFAULT_PREFERENCES.audio, outputDevice } },
+      update,
+      reset: () => {},
+    };
+    act(() => {
+      root.render(
+        <PreferencesProvider value={store}>
+          <AudioPane tab="configuration" limiter={DEFAULT_LIMITER} onLimiterChange={onLimiterChange} reduction={0} />
+        </PreferencesProvider>,
+      );
+    });
+  }
+
+  function choose(value: string) {
+    act(() => {
+      const el = select();
+      if (!el) throw new Error("no select");
+      el.value = value;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  it("stores the chosen device and sends it to the engine; System default stores null", async () => {
+    const setAudioDevice = vi.fn(() => Promise.resolve());
+    __setBackend({
+      audioDevices: () => Promise.resolve({ devices, default: "a", chosen: null }),
+      setAudioDevice,
+    } as unknown as Backend);
+    const update = vi.fn();
+    mountWithStore(null, update);
+    await settle();
+    choose("m4");
+    await settle();
+    expect(update).toHaveBeenLastCalledWith("audio", { outputDevice: "m4" });
+    expect(setAudioDevice).toHaveBeenLastCalledWith("m4");
+    choose("");
+    await settle();
+    expect(update).toHaveBeenLastCalledWith("audio", { outputDevice: null });
+    expect(setAudioDevice).toHaveBeenLastCalledWith(null);
+  });
+
+  it("shows the device the engine is on", async () => {
+    __setBackend({
+      audioDevices: () => Promise.resolve({ devices, default: "a", chosen: "m4" }),
+    } as unknown as Backend);
+    mountWithStore("m4", vi.fn());
+    await settle();
+    expect(select()?.value).toBe("m4");
+    expect(host.textContent).not.toContain("not connected");
+  });
+
+  it("says so when the saved device is missing, and does not overwrite the saved choice", async () => {
+    __setBackend({
+      audioDevices: () => Promise.resolve({ devices, default: "a", chosen: "m4-gone" }),
+    } as unknown as Backend);
+    const update = vi.fn();
+    mountWithStore("m4-gone", update);
+    await settle();
+    expect(select()?.value).toBe("");
+    expect(host.textContent).toContain("not connected");
+    expect(update).not.toHaveBeenCalled();
+  });
 });
