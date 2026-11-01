@@ -8,9 +8,8 @@
  * `FilterState`; what they do to the list is Rust's (`ViewSpec.filter`), and
  * the values on offer arrive from `filterValues`. Nothing here reads a row.
  *
- * The tag columns are drawn and inert: the library's tag memberships are not
- * read (see `Library::my_tags` in `rbl-index`), so their tick boxes and
- * AND / OR switch change nothing but themselves.
+ * A tag column's chips are picked like any other list, and its AND / OR switch
+ * says whether a track must carry all the picked tags or any of them.
  */
 import { memo, useMemo, type MouseEvent } from "react";
 import type { FilterValues } from "@/ipc/types";
@@ -254,7 +253,7 @@ export function TrackFilter({ state, onChange, values, masterBpmX100 }: TrackFil
 
         {Array.from({ length: Math.max(TAG_COLUMNS, categories.length) }, (_, at) => {
           const category = categories[at];
-          const tag = state.tags[at] ?? { enabled: false, any: false };
+          const tag = state.tags[at] ?? { enabled: false, values: [], any: false };
           return (
             <div className={styles.tagCol} key={at} data-testid="filter-tag-column">
               <div className={styles.head}>
@@ -283,12 +282,28 @@ export function TrackFilter({ state, onChange, values, masterBpmX100 }: TrackFil
                   OR
                 </button>
               </div>
-              <div className={`${styles.list} ${styles.tagList}`} role="listbox" aria-disabled>
-                {category?.tags.map((name) => (
-                  <div key={name} className={styles.chip} role="option" aria-selected={false}>
-                    {name}
-                  </div>
-                ))}
+              <div
+                className={`${styles.list} ${styles.tagList}`}
+                role="listbox"
+                aria-multiselectable
+                aria-disabled={category === undefined || undefined}
+                data-inert={category === undefined || undefined}
+              >
+                {category?.tags.map((name) => {
+                  const picked = tag.values.includes(name);
+                  return (
+                    <div
+                      key={name}
+                      className={styles.chip}
+                      role="option"
+                      aria-selected={picked}
+                      data-picked={picked || undefined}
+                      onClick={(e) => setTag(at, { values: pick(tag.values, name, toggling(e)) })}
+                    >
+                      {name}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );

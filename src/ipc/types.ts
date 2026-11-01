@@ -2304,6 +2304,19 @@ export interface TrackFilter {
   keys?: string[];
   ratings?: number[];
   colors?: string[];
+  /** One entry per ticked My Tag column with tags picked. */
+  tags?: TagPick[];
+}
+
+/**
+ * A My Tag column's picks. `category` is the column's position in
+ * `FilterValues.tags`; `tags` are names within it. `any` is OR (a track
+ * carrying any picked tag); otherwise AND (all of them).
+ */
+export interface TagPick {
+  category: number;
+  any: boolean;
+  tags: string[];
 }
 
 /** A value the bar can offer, with how many tracks of the list carry it. */
@@ -2312,7 +2325,7 @@ export interface Counted<T> {
   count: number;
 }
 
-/** A My Tag category and the tags under it, by name. Drawn, not filtered on. */
+/** A My Tag category and the tags under it, by name. */
 export interface TagCategory {
   name: string;
   tags: string[];

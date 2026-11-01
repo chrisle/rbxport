@@ -30,7 +30,7 @@ pub mod xml_export;
 
 pub use category::bpm_bucket;
 pub use filter::{
-    whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TrackFilter, COLOR_NAMES,
+    whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TagFilter, TrackFilter, COLOR_NAMES,
 };
 pub use load::{
     content_version, load, load_with_cue_reader, reload_cues_of, reload_histories, reload_metadata,
