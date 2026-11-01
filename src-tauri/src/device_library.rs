@@ -1149,7 +1149,7 @@ fn device_cues(
         cues.sort_by_key(|cue| (cue.position_ms, cue.kind));
         return cues;
     }
-    let analysis = assets_of(mount, track)
+    let analysis = assets_of(mount, format, track)
         .1
         .analysis_dat()
         .and_then(|dat| {
@@ -2520,7 +2520,7 @@ mod tests {
         let before = contents_under(mount);
         let probe = device::read(mount, Format::DeviceLibrary).unwrap();
         let probe_track = probe.tracks.iter().find(|track| track.title == "Track 0").unwrap();
-        let probe_ext = assets_of(mount, probe_track).1.analysis_dat().unwrap().with_extension("EXT");
+        let probe_ext = assets_of(mount, Format::DeviceLibrary, probe_track).1.analysis_dat().unwrap().with_extension("EXT");
         assert!(probe_ext.is_file(), "{}", probe_ext.display());
         assert_ne!(rbl_anlz::Anlz::read(&probe_ext).unwrap().cue_entries().len(), 0);
         #[cfg(unix)]
@@ -2589,7 +2589,7 @@ mod tests {
             .iter()
             .find(|track| track.title == "Track 0")
             .unwrap();
-        let ext = assets_of(mount, track)
+        let ext = assets_of(mount, Format::DeviceLibrary, track)
             .1
             .analysis_dat()
             .unwrap()
@@ -2635,7 +2635,7 @@ mod tests {
         let mount = rig.stick.path();
         let library = device::read(mount, Format::DeviceLibrary).unwrap();
         let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
-        let ext = assets_of(mount, track).1.analysis_dat().unwrap().with_extension("EXT");
+        let ext = assets_of(mount, Format::DeviceLibrary, track).1.analysis_dat().unwrap().with_extension("EXT");
         let mut analysis = rbl_anlz::Anlz::read(&ext).unwrap();
         analysis.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; usize::try_from(MAX_BROWSER_EXT_BYTES).unwrap()]));
         std::fs::write(&ext, analysis.to_bytes()).unwrap();
@@ -2671,7 +2671,7 @@ mod tests {
         let mount = rig.stick.path();
         let library = device::read(mount, Format::DeviceLibrary).unwrap();
         let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
-        let ext = assets_of(mount, track).1.analysis_dat().unwrap().with_extension("EXT");
+        let ext = assets_of(mount, Format::DeviceLibrary, track).1.analysis_dat().unwrap().with_extension("EXT");
         let size = std::fs::metadata(ext).unwrap().len();
         let mut remaining = size * 2;
         for _ in 0..2 {
