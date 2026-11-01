@@ -26,14 +26,15 @@ SQLCipher, and save event evidence. No DOM `File` or `DataTransfer` is fabricate
 Finder windows opened by the helper are closed; a reused existing window is
 left open and its previous bounds are restored.
 
-The full suite has 31 scenarios. Coverage includes:
+The full suite has 34 scenarios. Coverage includes:
 
 - Default protection, hot and memory cues, keyboard editing, waveform/list
   refresh, repeated edits, playback, search, and full-process cue persistence.
 - Playlist creation/rename and undo/redo; rating writes and undo/redo checked
   independently in the encrypted database.
 - Finder drops of Unicode filenames, multiple files and nested folders;
-  duplicate handling, cancelled drags, invalid targets and unsupported files.
+  duplicate handling, cancelled drags, invalid targets and unsupported files; drops onto
+  All Tracks, and drops after completed and cancelled outgoing track drags.
 - Missing audio refusal; analysis of deterministic 120 BPM audio with saved
   analysis artifacts; independent two-deck playback and beat-loop controls.
 - Desktop-menu export and repeat export to a temporary volume directory, with
