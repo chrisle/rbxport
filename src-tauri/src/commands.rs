@@ -2476,30 +2476,43 @@ fn write_export_with_phase(
 /// behind this — the panel asks when it is opened.
 #[tauri::command]
 pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
-    blocking("list_devices", || {
-        Ok(rbl_devices::list()
-            .into_iter()
-            .map(|device| {
-                let found = rbl_devices::inspect(&device.mount_point);
-                DeviceDto {
-                    name: device.name,
-                    path: device.mount_point.to_string_lossy().into_owned(),
-                    total_bytes: device.total_bytes,
-                    free_bytes: device.free_bytes,
-                    file_system: device.file_system,
-                    removable: device.removable,
-                    volume_id: device.volume_id,
-                    export: found.map(|export| DeviceExportDto {
-                        tracks: u32::try_from(export.tracks).unwrap_or(u32::MAX),
-                        playlists: u32::try_from(export.playlists).unwrap_or(u32::MAX),
-                        ours: export.ours,
-                        written: export.written,
-                    }),
-                }
-            })
-            .collect())
-    })
-    .await
+    blocking("list_devices", || Ok(device_dtos(rbl_devices::list(), rbl_devices::inspect_now)))
+        .await
+}
+
+/// A device row for each volume, whatever `inspect` finds. A stick an export
+/// is writing stays listed, marked busy, rather than holding the list back.
+fn device_dtos(
+    devices: Vec<rbl_devices::Device>,
+    inspect: impl Fn(&std::path::Path) -> rbl_devices::Inspection,
+) -> Vec<DeviceDto> {
+    devices
+        .into_iter()
+        .map(|device| {
+            let inspection = inspect(&device.mount_point);
+            let busy = inspection == rbl_devices::Inspection::Busy;
+            let found = match inspection {
+                rbl_devices::Inspection::Found(export) => Some(export),
+                rbl_devices::Inspection::Empty | rbl_devices::Inspection::Busy => None,
+            };
+            DeviceDto {
+                name: device.name,
+                path: device.mount_point.to_string_lossy().into_owned(),
+                total_bytes: device.total_bytes,
+                free_bytes: device.free_bytes,
+                file_system: device.file_system,
+                removable: device.removable,
+                volume_id: device.volume_id,
+                export: found.map(|export| DeviceExportDto {
+                    tracks: u32::try_from(export.tracks).unwrap_or(u32::MAX),
+                    playlists: u32::try_from(export.playlists).unwrap_or(u32::MAX),
+                    ours: export.ours,
+                    written: export.written,
+                }),
+                busy,
+            }
+        })
+        .collect()
 }
 
 /// Where a track's audio is read from.
@@ -4923,7 +4936,35 @@ pub async fn filter_values(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use super::{expand_import_paths, read_analysis};
+    use super::{device_dtos, expand_import_paths, read_analysis};
+
+    fn volume(name: &str) -> rbl_devices::Device {
+        rbl_devices::Device {
+            name: name.into(),
+            mount_point: std::path::PathBuf::from(name),
+            total_bytes: 8,
+            free_bytes: 4,
+            file_system: "FAT32".into(),
+            removable: true,
+            volume_id: name.into(),
+        }
+    }
+
+    /// #798: a stick an export is writing stays in the list, marked busy,
+    /// and does not hide the other sticks.
+    #[test]
+    fn a_busy_stick_stays_listed_beside_the_others() {
+        let listed = device_dtos(vec![volume("G"), volume("H")], |path| {
+            if path.ends_with("G") {
+                rbl_devices::Inspection::Busy
+            } else {
+                rbl_devices::Inspection::Empty
+            }
+        });
+        assert_eq!(listed.len(), 2);
+        assert!(listed[0].busy && listed[0].export.is_none());
+        assert!(!listed[1].busy);
+    }
 
     #[test]
     fn imported_dat_grid_correction_reaches_track_beats_and_metronome() {
