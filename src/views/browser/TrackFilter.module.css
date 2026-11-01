@@ -230,11 +230,15 @@
   padding-left: 12px;
   border-radius: 2px;
   background: var(--c-filter-chip);
-  color: var(--c-filter-chip-text);
+  color: var(--c-filter-text);
   font-size: var(--f-size-ui);
   white-space: nowrap;
   overflow: hidden;
+  cursor: default;
 }
+.chip[data-picked] { background: var(--c-filter-accent); }
+/* No category behind the column: drawn grey, as the capture's unused ones. */
+.list[data-inert] .chip { color: var(--c-filter-chip-text); }
 
 /* --- RST and the foot --------------------------------------------------- */
 

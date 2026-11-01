@@ -51,6 +51,56 @@ describe("toSpecFilter", () => {
   });
 });
 
+describe("tag columns", () => {
+  const tagged = (at: number, patch: Partial<FilterState["tags"][number]>): FilterState => ({
+    ...EMPTY_FILTER,
+    tags: EMPTY_FILTER.tags.map((tag, i) => (i === at ? { ...tag, ...patch } : tag)),
+  });
+
+  it("a ticked column with picks goes out by category position with its AND / OR switch", () => {
+    const state = tagged(1, { enabled: true, values: ["Peak", "Warm-up"], any: true });
+    expect(isNarrowing(state)).toBe(true);
+    expect(toSpecFilter(state, null)).toEqual({
+      tags: [{ category: 1, any: true, tags: ["Peak", "Warm-up"] }],
+    });
+    expect(toSpecFilter(tagged(0, { enabled: true, values: ["Synth"] }), null)).toEqual({
+      tags: [{ category: 0, any: false, tags: ["Synth"] }],
+    });
+  });
+
+  it("carries several columns, each with its own switch", () => {
+    const state: FilterState = {
+      ...EMPTY_FILTER,
+      tags: [
+        { enabled: true, values: ["A", "B"], any: false },
+        { enabled: false, values: ["X"], any: false },
+        { enabled: true, values: ["C"], any: true },
+        { enabled: true, values: [], any: true },
+      ],
+    };
+    expect(toSpecFilter(state, null)).toEqual({
+      tags: [
+        { category: 0, any: false, tags: ["A", "B"] },
+        { category: 2, any: true, tags: ["C"] },
+      ],
+    });
+  });
+
+  it("a category index past the default columns still goes out", () => {
+    const tags = [...EMPTY_FILTER.tags];
+    while (tags.length < 6) tags.push({ enabled: false, values: [], any: false });
+    tags[5] = { enabled: true, values: ["X", "Y"], any: true };
+    const state: FilterState = { ...EMPTY_FILTER, tags };
+    expect(isNarrowing(state)).toBe(true);
+    expect(toSpecFilter(state, null)).toEqual({ tags: [{ category: 5, any: true, tags: ["X", "Y"] }] });
+  });
+
+  it("an unticked column, or a ticked one at All, sends nothing", () => {
+    expect(toSpecFilter(tagged(0, { enabled: false, values: ["Synth"] }), null)).toBeUndefined();
+    expect(toSpecFilter(tagged(0, { enabled: true, values: [] }), null)).toBeUndefined();
+  });
+});
+
 describe("wholeBpm", () => {
   it("rounds to the nearest whole number", () => {
     expect(wholeBpm(12798)).toBe(128);

@@ -3,8 +3,8 @@
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use rbl_index::cache::{decode, encode, Fingerprint};
-use rbl_index::testing::{add_playlist, library_from, set_my_tags, TestTrack};
-use rbl_index::{BpmFilter, SortColumn, TagCategory, TrackFilter, TrackSource, ViewSpec};
+use rbl_index::testing::{add_playlist, library_from, set_my_tags, set_track_my_tags, TestTrack};
+use rbl_index::{BpmFilter, SortColumn, TagCategory, TagFilter, TrackFilter, TrackSource, ViewSpec};
 
 fn track(id: u64, bpm: u32, key: &'static str, rating: u8, color: u8) -> TestTrack {
     TestTrack { id, title: "t", artist: "a", bpm_x100: bpm, key, rating, color, ..TestTrack::default() }
@@ -123,6 +123,7 @@ fn ticked_columns_combine_with_and() {
         keys: Some(lib.key_ids_named(&["A".to_owned()])),
         ratings: Some(vec![3]),
         colors: Some(vec![2]),
+        ..TrackFilter::default()
     };
     assert_eq!(ids(&lib, filter), [4]);
 }
@@ -148,7 +149,7 @@ fn the_value_lists_count_the_unfiltered_list_in_the_bars_order() {
     let mut lib = library_from(&sample());
     set_my_tags(
         &mut lib,
-        vec![TagCategory { name: "Lexicon Tags".into(), tags: vec!["Components ▶ Synth".into()] }],
+        vec![TagCategory { name: "Lexicon Tags".into(), tags: vec!["Components ▶ Synth".into()], ids: vec![1] }],
     );
     // A filter that would leave one track must not shrink the lists.
     let values = lib.filter_values(&spec(bpm(&[140], 0, None)));
@@ -185,8 +186,8 @@ fn a_snapshot_keeps_the_tag_categories() {
     set_my_tags(
         &mut lib,
         vec![
-            TagCategory { name: "Lexicon Tags".into(), tags: vec!["Synth".into(), "Vocal".into()] },
-            TagCategory { name: "Empty Category".into(), tags: Vec::new() },
+            TagCategory { name: "Lexicon Tags".into(), tags: vec!["Synth".into(), "Vocal".into()], ids: vec![700_001, -5] },
+            TagCategory { name: "Empty Category".into(), tags: Vec::new(), ids: Vec::new() },
         ],
     );
     let fp = Fingerprint {
@@ -202,4 +203,123 @@ fn a_snapshot_keeps_the_tag_categories() {
     let restored = decode(&encode(&lib, fp), fp).expect("decodes");
     assert_eq!(restored.my_tags(), lib.my_tags());
     assert_eq!(restored.color, lib.color);
+}
+
+/// Two categories. `Vibe`: Warm (10), Peak (11), and a second `Peak` (12) the
+/// way a library can repeat a name. `Genre`: House (20), Techno (21).
+///
+/// Tracks (rows in `sample()` order, so ids are row + 1): 1 Warm+Peak+House;
+/// 2 Peak(12)+Techno; 3 Warm+House; 4 Techno; 5 no tags;
+/// 6 Warm+Peak+House+Techno.
+fn tagged() -> rbl_index::Library {
+    let mut lib = library_from(&sample());
+    set_my_tags(
+        &mut lib,
+        vec![
+            TagCategory {
+                name: "Vibe".into(),
+                tags: vec!["Warm".into(), "Peak".into(), "Peak".into()],
+                ids: vec![10, 11, 12],
+            },
+            TagCategory { name: "Genre".into(), tags: vec!["House".into(), "Techno".into()], ids: vec![20, 21] },
+        ],
+    );
+    set_track_my_tags(
+        &mut lib,
+        vec![(0, 10), (0, 11), (0, 20), (1, 12), (1, 21), (2, 10), (2, 20), (3, 21), (5, 10), (5, 11), (5, 20), (5, 21)],
+    );
+    lib
+}
+
+fn tags(category: usize, names: &[&str], any: bool) -> TagFilter {
+    let lib = tagged();
+    let names: Vec<String> = names.iter().map(|n| (*n).to_owned()).collect();
+    TagFilter { picks: lib.tag_picks_named(category, &names), any }
+}
+
+fn tag_ids(filters: Vec<TagFilter>) -> Vec<u64> {
+    ids(&tagged(), TrackFilter { tags: filters, ..TrackFilter::default() })
+}
+
+#[test]
+fn and_wants_every_picked_tag_in_the_column() {
+    assert_eq!(tag_ids(vec![tags(0, &["Warm"], false)]), [1, 3, 6]);
+    assert_eq!(tag_ids(vec![tags(0, &["Warm", "Peak"], false)]), [1, 6]);
+    assert_eq!(tag_ids(vec![tags(1, &["House", "Techno"], false)]), [6]);
+}
+
+#[test]
+fn or_wants_any_picked_tag_in_the_column() {
+    assert_eq!(tag_ids(vec![tags(0, &["Warm", "Peak"], true)]), [1, 2, 3, 6]);
+    assert_eq!(tag_ids(vec![tags(1, &["House", "Techno"], true)]), [1, 2, 3, 4, 6]);
+    // One pick is the same under either switch.
+    assert_eq!(tag_ids(vec![tags(1, &["Techno"], true)]), tag_ids(vec![tags(1, &["Techno"], false)]));
+}
+
+#[test]
+fn columns_for_different_categories_must_all_agree() {
+    assert_eq!(tag_ids(vec![tags(0, &["Warm"], false), tags(1, &["Techno"], false)]), [6]);
+    assert_eq!(
+        tag_ids(vec![tags(0, &["Warm", "Peak"], true), tags(1, &["House", "Techno"], true)]),
+        [1, 2, 3, 6]
+    );
+    // The switches are per column: all Vibe, any Genre.
+    assert_eq!(tag_ids(vec![tags(0, &["Warm", "Peak"], false), tags(1, &["Techno"], true)]), [6]);
+}
+
+#[test]
+fn empty_picks_and_no_columns_constrain_nothing() {
+    assert!(TrackFilter::default().is_empty());
+    assert!(!TrackFilter { tags: vec![tags(0, &["Warm"], false)], ..TrackFilter::default() }.is_empty());
+    assert_eq!(tag_ids(Vec::new()), [1, 2, 3, 4, 5, 6]);
+    for any in [false, true] {
+        assert_eq!(tag_ids(vec![tags(0, &[], any)]), [1, 2, 3, 4, 5, 6]);
+    }
+}
+
+#[test]
+fn a_duplicated_tag_name_matches_every_id_carrying_it() {
+    // `Peak` is ids 11 and 12: track 2 carries only the second.
+    assert_eq!(tag_ids(vec![tags(0, &["Peak"], false)]), [1, 2, 6]);
+}
+
+#[test]
+fn an_unknown_tag_or_category_fails_and_but_is_ignored_by_or() {
+    assert_eq!(tag_ids(vec![tags(0, &["Nope"], false)]), Vec::<u64>::new());
+    assert_eq!(tag_ids(vec![tags(0, &["Warm", "Nope"], false)]), Vec::<u64>::new());
+    assert_eq!(tag_ids(vec![tags(0, &["Warm", "Nope"], true)]), [1, 3, 6]);
+    assert_eq!(tag_ids(vec![tags(7, &["Warm"], true)]), Vec::<u64>::new());
+}
+
+#[test]
+fn tags_combine_with_the_other_columns() {
+    let lib = tagged();
+    let with_rating = TrackFilter { ratings: Some(vec![5, 0]), tags: vec![tags(1, &["House"], false)], ..TrackFilter::default() };
+    // House: 1, 3, 6; rating 5 or 0: 1, 3, 6.
+    assert_eq!(ids(&lib, with_rating), [1, 3, 6]);
+    let with_key = TrackFilter {
+        keys: Some(lib.key_ids_named(&["Fm".to_owned()])),
+        tags: vec![tags(1, &["House"], false)],
+        ..TrackFilter::default()
+    };
+    assert_eq!(ids(&lib, with_key), [1]);
+}
+
+#[test]
+fn a_snapshot_keeps_the_tag_ids() {
+    let lib = tagged();
+    let fp = Fingerprint {
+        format: rbl_index::cache::FORMAT,
+        db_len: 1,
+        db_modified_ns: 2,
+        wal_len: 3,
+        wal_modified_ns: 4,
+        db_version: 6000,
+        content: 5,
+        database: 6,
+    };
+    let restored = decode(&encode(&lib, fp), fp).expect("decodes");
+    assert_eq!(restored.my_tags(), lib.my_tags());
+    assert_eq!(restored.my_tag_keys(0), lib.my_tag_keys(0));
+    assert_eq!(restored.tag_picks_named(0, &["Peak".to_owned()]), vec![vec![11, 12]]);
 }
