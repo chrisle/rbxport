@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
-use crate::health::{AudioHealth, HealthMeter};
+use crate::health::{AudioHealth, HealthMeter, SignalProbe, SignalReport};
 use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -92,7 +92,9 @@ impl CpalSink {
         let callback_health = Arc::clone(&health);
         std::thread::Builder::new()
             .name("rbl-deck-device".to_owned())
-            .spawn(move || device_thread(render, wanted.as_deref(), wish, &ask_rx, &ready_tx, callback_health))
+            .spawn(move || {
+                device_thread(render, wanted.as_deref(), wish, &ask_rx, &ready_tx, callback_health);
+            })
             .map_err(DeckError::Io)?;
 
         // The rate decides what the decoders resample to, so opening is not
@@ -145,7 +147,8 @@ fn device_thread(
     ready: &Sender<Result<u32>>,
     health: Arc<HealthMeter>,
 ) {
-    let stream = match build_stream(render, wanted, wish, health) {
+    let probe = Arc::new(SignalProbe::default());
+    let stream = match build_stream(render, wanted, wish, health, Arc::clone(&probe)) {
         Ok((stream, rate)) => {
             if ready.send(Ok(rate)).is_err() {
                 return;
@@ -171,6 +174,7 @@ fn device_thread(
                     if let Err(e) = stream.pause() {
                         tracing::error!(error = %e, "the audio device would not stop");
                     }
+                    log_signal("audio output stopped", probe.take());
                     continue;
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -183,6 +187,7 @@ fn device_thread(
         match next {
             Ask::Start => {
                 due = None;
+                probe.take();
                 if let Err(e) = stream.play() {
                     tracing::error!(error = %e, "the audio device would not start");
                 }
@@ -195,7 +200,14 @@ fn device_thread(
     drop(stream);
 }
 
-/// Builds an output stream on the default device, in whatever format it wants.
+/// What the callback rendered while the stream ran, for a log a person can read
+/// when a report says the stream opened and ran but nothing was heard:
+/// `audible=false` means the app fed the device silence; `audible=true` means
+/// the signal left the callback and was lost after it.
+fn log_signal(what: &str, report: SignalReport) {
+    tracing::info!(callbacks = report.callbacks, peak = report.peak, audible = report.audible(), "{what}");
+}
+
 /// One output the audio can go to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioDevice {
@@ -284,7 +296,13 @@ fn configure(device: &cpal::Device, wish: StreamWish) -> Result<(cpal::StreamCon
     Ok((config, format))
 }
 
-fn build_stream(render: Render, wanted: Option<&str>, wish: StreamWish, health: Arc<HealthMeter>) -> Result<(cpal::Stream, u32)> {
+fn build_stream(
+    render: Render,
+    wanted: Option<&str>,
+    wish: StreamWish,
+    health: Arc<HealthMeter>,
+    probe: Arc<SignalProbe>,
+) -> Result<(cpal::Stream, u32)> {
     let host = cpal::default_host();
     // The named one if it is there, and the default if it is not: a device
     // that has been unplugged since it was chosen should not stop the app
@@ -306,6 +324,16 @@ fn build_stream(render: Render, wanted: Option<&str>, wish: StreamWish, health: 
     let rate = config.sample_rate;
     let channels = config.channels;
     tracing::debug!(device = %device, rate, buffer = ?config.buffer_size, "audio output opened");
+    // What the device agreed to, beyond the rate: a Bluetooth output can offer
+    // a format or channel count the callback has to be told about.
+    tracing::info!(
+        device = %device,
+        rate,
+        channels,
+        format = %format,
+        buffer = ?config.buffer_size,
+        "audio output negotiated"
+    );
 
     let error = |e: cpal::Error| match e.kind() {
         cpal::ErrorKind::Xrun => tracing::warn!(error = %e, "audio buffer underrun or overrun"),
@@ -313,10 +341,10 @@ fn build_stream(render: Render, wanted: Option<&str>, wish: StreamWish, health: 
         _ => tracing::error!(error = %e, "audio device error"),
     };
     let stream = match format {
-        cpal::SampleFormat::F32 => build::<f32>(&device, config, channels, render, error, health),
-        cpal::SampleFormat::I16 => build::<i16>(&device, config, channels, render, error, health),
-        cpal::SampleFormat::U16 => build::<u16>(&device, config, channels, render, error, health),
-        cpal::SampleFormat::I32 => build::<i32>(&device, config, channels, render, error, health),
+        cpal::SampleFormat::F32 => build::<f32>(&device, config, channels, render, error, health, probe),
+        cpal::SampleFormat::I16 => build::<i16>(&device, config, channels, render, error, health, probe),
+        cpal::SampleFormat::U16 => build::<u16>(&device, config, channels, render, error, health, probe),
+        cpal::SampleFormat::I32 => build::<i32>(&device, config, channels, render, error, health, probe),
         other => Err(DeckError::Device(format!("this device wants {other} samples, which we do not write"))),
     }?;
     Ok((stream, rate))
@@ -333,6 +361,7 @@ fn build<T>(
     mut render: Render,
     error: fn(cpal::Error),
     health: Arc<HealthMeter>,
+    probe: Arc<SignalProbe>,
 ) -> Result<cpal::Stream>
 where
     T: cpal::SizedSample + cpal::FromSample<f32>,
@@ -360,6 +389,7 @@ where
                     };
                     stereo.fill(0.0);
                     render(stereo);
+                    probe.record(stereo);
                     // Stereo into however many lanes the device has: a third
                     // and further channels stay silent rather than repeating.
                     for (frame, lane) in stereo.chunks_exact(2).zip(chunk.chunks_mut(lanes)) {

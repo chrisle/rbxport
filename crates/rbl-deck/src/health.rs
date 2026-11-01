@@ -38,9 +38,81 @@ impl HealthMeter {
     }
 }
 
+/// What the device callback has handed the device since it was last read.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub(crate) struct SignalReport {
+    /// Callbacks that ran.
+    pub callbacks: u64,
+    /// Largest absolute sample rendered, before conversion to the device format.
+    pub peak: f32,
+}
+
+impl SignalReport {
+    /// Whether anything but silence was rendered. A stream that ran with this
+    /// false was fed silence by the app; one that ran with it true and was
+    /// still not heard was lost after the callback, in the device or the OS.
+    pub fn audible(&self) -> bool { self.peak > 0.0 }
+}
+
+/// Counts callbacks and remembers the loudest sample rendered, so a report of
+/// "the stream runs but nothing is heard" can say which side the silence is on.
+/// Written by the device callback; read and reset from the device thread.
+#[derive(Default)]
+pub(crate) struct SignalProbe {
+    callbacks: AtomicU64,
+    peak: AtomicU32,
+}
+
+impl SignalProbe {
+    /// One writer: the device callback.
+    pub fn record(&self, samples: &[f32]) {
+        let loudest = peak_of(samples);
+        self.callbacks.fetch_add(1, Ordering::Relaxed);
+        if loudest > f32::from_bits(self.peak.load(Ordering::Relaxed)) {
+            self.peak.store(loudest.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// Reads and resets.
+    pub fn take(&self) -> SignalReport {
+        SignalReport {
+            callbacks: self.callbacks.swap(0, Ordering::Relaxed),
+            peak: f32::from_bits(self.peak.swap(0, Ordering::Relaxed)),
+        }
+    }
+}
+
+/// The largest absolute sample; NaN counts as silence rather than poisoning the peak.
+pub(crate) fn peak_of(samples: &[f32]) -> f32 {
+    samples.iter().fold(0.0_f32, |peak, sample| {
+        let magnitude = sample.abs();
+        if magnitude > peak { magnitude } else { peak }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[allow(clippy::float_cmp, reason = "peaks are copied samples, not computed")]
+    fn the_probe_tells_silence_from_signal_and_resets_when_read() {
+        let probe = SignalProbe::default();
+        probe.record(&[0.0; 8]);
+        probe.record(&[0.0; 8]);
+        let silent = probe.take();
+        assert_eq!(silent.callbacks, 2);
+        assert!(!silent.audible());
+
+        probe.record(&[0.0, -0.5, 0.25, f32::NAN]);
+        probe.record(&[0.1, 0.0]);
+        let heard = probe.take();
+        assert_eq!(heard.callbacks, 2);
+        assert_eq!(heard.peak, 0.5);
+        assert!(heard.audible());
+        assert_eq!(probe.take(), SignalReport::default());
+    }
+
     #[test]
     #[allow(clippy::float_cmp, reason = "load is clamped to exactly 1.0 and reset to exactly 0.0")]
     fn measures_the_deadline_smooths_and_counts_only_overruns() {
