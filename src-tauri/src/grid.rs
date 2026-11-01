@@ -210,6 +210,17 @@ impl GridEditor {
 
     pub(crate) fn forget_history(&self, track: &str) { self.histories.lock().remove(track); }
 
+    /// Gives the track one undoable edit, for tests of what clears it.
+    #[cfg(test)]
+    pub(crate) fn seed_history(&self, track: &str) {
+        self.histories.lock().entry(track.to_owned()).or_default()
+            .undo.push(HistoryEntry { before: Vec::new(), after: Vec::new(), label: "Seeded" });
+    }
+
+    /// Whether the track has any undo or redo entry.
+    #[cfg(test)]
+    pub(crate) fn has_history(&self, track: &str) -> bool { self.histories.lock().contains_key(track) }
+
     /// Whether the track's grid is locked against editing.
     pub fn is_locked(&self, track: &str) -> bool {
         self.with_locks(|locks| locks.contains(track))
