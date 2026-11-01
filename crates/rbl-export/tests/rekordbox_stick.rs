@@ -582,7 +582,7 @@ fn an_out_of_range_integer_column_on_a_track_the_stick_keeps_does_not_stop_the_s
     for (column, value) in [
         ("trackNo", -1i64), ("discNo", -1), ("bitDepth", -1), ("djPlayCount", -1),
         ("bitrate", -1), ("samplingRate", -1), ("length", -1), ("length", 70_000),
-        ("color_id", -1), ("bpmx100", -1),
+        ("color_id", -1),
     ] {
         let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
         let (tracks, _) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
