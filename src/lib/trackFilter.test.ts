@@ -86,6 +86,15 @@ describe("tag columns", () => {
     });
   });
 
+  it("a category index past the default columns still goes out", () => {
+    const tags = [...EMPTY_FILTER.tags];
+    while (tags.length < 6) tags.push({ enabled: false, values: [], any: false });
+    tags[5] = { enabled: true, values: ["X", "Y"], any: true };
+    const state: FilterState = { ...EMPTY_FILTER, tags };
+    expect(isNarrowing(state)).toBe(true);
+    expect(toSpecFilter(state, null)).toEqual({ tags: [{ category: 5, any: true, tags: ["X", "Y"] }] });
+  });
+
   it("an unticked column, or a ticked one at All, sends nothing", () => {
     expect(toSpecFilter(tagged(0, { enabled: false, values: ["Synth"] }), null)).toBeUndefined();
     expect(toSpecFilter(tagged(0, { enabled: true, values: [] }), null)).toBeUndefined();
