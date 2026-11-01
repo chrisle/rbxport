@@ -19,6 +19,7 @@ pub mod mounts;
 pub mod eject;
 pub mod format;
 pub mod libraries;
+pub mod survey;
 
 pub use mounts::MountWatcher;
 
@@ -105,6 +106,18 @@ fn devices_from(disks: &sysinfo::Disks) -> Vec<Device> {
     devices
 }
 
+/// The offerable volumes and the decision about every disk the OS listed, from
+/// one refresh. Under [`FAKE_VOLUMES`] there are no real disks to report.
+#[must_use]
+pub fn list_surveyed() -> (Vec<Device>, Vec<survey::DiskDecision>) {
+    if std::env::var_os(FAKE_VOLUMES).is_some() {
+        return (list(), Vec::new());
+    }
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let decisions = survey::decide(&survey::entries_from(&disks), dirs::home_dir().as_deref());
+    (devices_from(&disks), decisions)
+}
+
 /// A directory standing in for a stick, with the free space of whatever it
 /// actually sits on left unknown.
 fn fake_device(path: &Path) -> Device {
@@ -149,16 +162,31 @@ pub fn volume_id(mount_point: &Path) -> String {
 /// Linux desktop mount services use `/media` or `/run/media`, and on Windows
 /// anything that is not the system drive is a separate letter.
 fn is_offerable(mount_point: &Path, removable: bool) -> bool {
+    offer_reason(mount_point, removable).is_ok()
+}
+
+/// [`is_offerable`] with its reason: `Ok` when offered, `Err` when skipped.
+/// The one place the decision is made, so the diagnostics cannot disagree
+/// with what the panel shows.
+fn offer_reason(mount_point: &Path, removable: bool) -> Result<&'static str, &'static str> {
     if removable {
-        return true;
+        return Ok("reported removable");
     }
     let text = mount_point.to_string_lossy();
     if text == "/" || text.starts_with("/System") || text.starts_with("/private") {
-        return false;
+        return Err("system or boot volume");
     }
-    text.starts_with("/Volumes/")
-        || is_linux_mount_point(&text)
-        || (is_drive_root(&text) && !text.starts_with('C'))
+    if text.starts_with("/Volumes/") {
+        Ok("mounted under /Volumes")
+    } else if is_linux_mount_point(&text) {
+        Ok("mounted under a Linux mount directory")
+    } else if is_drive_root(&text) && !text.starts_with('C') {
+        Ok("non-system drive letter")
+    } else if is_drive_root(&text) {
+        Err("system or boot volume")
+    } else {
+        Err("not removable and not under a mount directory")
+    }
 }
 
 /// The paths used by the common Linux desktop mount services. `/mnt` is also
