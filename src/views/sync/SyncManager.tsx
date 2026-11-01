@@ -214,6 +214,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   const importKinds = chosenKinds.map(({ kind }) => kind).filter(kind => !importBlocked(kind));
   // Why each chosen kind is left out, said on the button and after an Import.
   const importBlockedNotes = [...new Set(chosenKinds.flatMap(({ kind }) => importBlocked(kind) ?? []))];
+  // Import has nothing it may bring back: say why beside the button, where it
+  // can be read without hovering, rather than leave it greyed (#790).
+  const importDeadReason = chosenKinds.length > 0 && importKinds.length === 0 ? importBlockedNotes.join(" ") : null;
   const importTitle = chosenKinds.length === 0 ? t("Nothing is set to import. Choose what Import brings back in Preferences.")
     : importKinds.length === 0 ? importBlockedNotes.join(" ")
     : t("Import {kinds} from the selected USB devices.", { kinds: IMPORT_KINDS.filter(({ kind }) => importKinds.includes(kind)).map(({ noun }) => t(noun)).join(", ") });
@@ -1051,6 +1054,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
           <div className={styles.actionRow}>
           <button type="button" className={`${styles.sync} ${styles.actionButton}`} onClick={() => runUsbImport(importKinds, importBlockedNotes)}
             disabled={busy || tickedDevices.size === 0 || importKinds.length === 0}
+            aria-describedby={importDeadReason ? "import-blocked-hint" : undefined}
             title={importTitle}>
             {operation === "import" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> {t("Importing…")}</> : <><ArrowLeft size={16} aria-hidden="true" /> {t("Import")}</>}
           </button>
@@ -1059,6 +1063,12 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
             <Settings2 size={14} aria-hidden="true" />
           </button>
           </div>
+          {importDeadReason ? (
+            <p id="import-blocked-hint" className={styles.importHint}>
+              {importDeadReason}{" "}
+              <button type="button" className={styles.linkButton} onClick={() => openUsbExportPreferences("usbExportImport")}>{t("Open Preferences")}</button>
+            </p>
+          ) : null}
           {importFailed && lastImport ? <button type="button" className={styles.button} onClick={() => runUsbImport(lastImport)} disabled={busy || tickedDevices.size === 0}>
             Retry import
           </button> : null}
