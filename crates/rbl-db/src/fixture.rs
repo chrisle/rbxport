@@ -278,6 +278,19 @@ pub fn point_at_audio(location: &LibraryLocation, index: usize, path: &str, seco
     mark_changed(&conn, index)
 }
 
+/// Adds a memory cue to a fixture track with `InMsec` stored exactly as
+/// given, as rekordbox libraries hold negative ones (#781). Not for the
+/// user's real install: it writes straight to the file.
+pub fn add_raw_cue(location: &LibraryLocation, index: usize, in_msec: i64) -> Result<()> {
+    let conn = open_fixture(location)?;
+    conn.execute(
+        "INSERT INTO djmdCue (ID, ContentID, InMsec, OutMsec, Kind, Color, ColorTableIndex, ActiveLoop, Comment, BeatLoopSize, rb_local_deleted, created_at, updated_at)
+         VALUES (?1, ?2, ?3, -1, 0, -1, 0, 0, '', 0, 0, '2026-01-01 00:00:00.000 +00:00', '2026-01-01 00:00:00.000 +00:00')",
+        params![format!("raw-cue-{index}"), track_id(index), in_msec],
+    )?;
+    mark_changed(&conn, index)
+}
+
 /// Points a fixture track's `AnalysisDataPath` at a file under the share
 /// root, as rekordbox does (`/PIONEER/USBANLZ/…/ANLZ0000.DAT`); the caller
 /// puts the analysis files there.

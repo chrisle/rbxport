@@ -218,6 +218,13 @@ fn whole(value: rusqlite::types::ValueRef<'_>) -> i64 {
     }
 }
 
+/// A column that is a count, position or small code, as an unsigned type:
+/// a negative value reads as 0 and one beyond `largest` as `largest`, rather
+/// than failing the query (#781: a cue `InMsec` of -121 stopped every sync).
+fn unsigned<T: TryFrom<i64> + Default>(value: rusqlite::types::ValueRef<'_>, largest: i64) -> T {
+    T::try_from(whole(value).clamp(0, largest)).unwrap_or_default()
+}
+
 /// The extras for a set of tracks, keyed by `djmdContent.ID`.
 ///
 /// One query per thousand ids, so a whole-library export stays a handful
@@ -237,11 +244,11 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
                 r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 r.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 rbl_core::ExportMetadata {
-                    track_number: r.get::<_, Option<u32>>(3)?.unwrap_or(0),
-                    disc_number: r.get::<_, Option<u16>>(4)?.unwrap_or(0),
-                    bit_depth: r.get::<_, Option<u16>>(5)?.unwrap_or(0),
-                    play_count: r.get::<_, Option<u32>>(6)?.unwrap_or(0),
-                    analysed: r.get::<_, Option<u32>>(7)?.unwrap_or(0),
+                    track_number: unsigned(r.get_ref(3)?, i64::from(u32::MAX)),
+                    disc_number: unsigned(r.get_ref(4)?, i64::from(u16::MAX)),
+                    bit_depth: unsigned(r.get_ref(5)?, i64::from(u16::MAX)),
+                    play_count: unsigned(r.get_ref(6)?, i64::from(u32::MAX)),
+                    analysed: unsigned(r.get_ref(7)?, i64::from(u32::MAX)),
                     hot_cue_auto_load: r.get::<_, Option<String>>(8)?.is_some_and(|v| v == "on"),
                     date_created: r.get::<_, Option<String>>(9)?.unwrap_or_default(),
                     isrc: r.get::<_, Option<String>>(10)?.unwrap_or_default(),
@@ -309,12 +316,13 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
                  AND q.ContentID IN ({marks}) ORDER BY q.rowid DESC"
             ))?;
             let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
-                let kind = r.get::<_, Option<u8>>(1)?.unwrap_or(0);
+                let kind: u8 = unsigned(r.get_ref(1)?, i64::from(u8::MAX));
                 let color = r.get::<_, Option<i64>>(4)?.unwrap_or(255);
                 let end = r.get::<_, Option<i64>>(3)?.unwrap_or(-1);
-                let beats = r.get::<_, Option<u32>>(8)?.unwrap_or(0);
-                let time_ms = r.get::<_, Option<u32>>(2)?.unwrap_or(0);
-                let bpm_x100 = r.get::<_, Option<u32>>(9)?.unwrap_or(0);
+                let beats: u32 = unsigned(r.get_ref(8)?, i64::from(u32::MAX));
+                // Negative in some libraries (#781, -121): the track's start.
+                let time_ms: u32 = unsigned(r.get_ref(2)?, i64::from(u32::MAX));
+                let bpm_x100: u32 = unsigned(r.get_ref(9)?, i64::from(u32::MAX));
                 Ok((
                     r.get::<_, String>(0)?,
                     rbl_anlz::cues::ExportCue {
@@ -327,7 +335,7 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
                         } else {
                             0
                         },
-                        color_code: r.get::<_, Option<u8>>(5)?.unwrap_or(0),
+                        color_code: unsigned(r.get_ref(5)?, i64::from(u8::MAX)),
                         comment: r.get::<_, Option<String>>(6)?.unwrap_or_default(),
                         active_loop: kind == 4 || r.get::<_, Option<i64>>(7)?.unwrap_or(0) != 0,
                         loop_numerator: u16::try_from(beats >> 16).unwrap_or(0),
@@ -593,6 +601,49 @@ mod tests {
         let mut written: Vec<u8> = memory.iter().map(|cue| cue.color_id).collect();
         written.sort_unstable();
         assert_eq!(written, [0, 0, 1, 2, 7, 8], "PCP2's byte at 0x1c");
+    }
+
+    /// #781, #782, #774: rekordbox libraries hold cues whose `InMsec` is
+    /// negative (the reporter's "Integer -121 out of range at index 2" is
+    /// this column, the third in the cue query). Reading it as `u32` failed
+    /// the whole selection, so every sync estimate and sync stopped before
+    /// any stick was looked at. The cue is kept, at the start of the track.
+    #[test]
+    fn a_cue_with_a_negative_position_does_not_stop_the_export() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE djmdContent (
+                ID TEXT PRIMARY KEY, rb_LocalFolderPath TEXT, OrgFolderPath TEXT,
+                TrackNo INTEGER, DiscNo INTEGER, BitDepth INTEGER, DJPlayCount INTEGER,
+                Analysed INTEGER, HotCueAutoLoad TEXT, DateCreated TEXT, ISRC TEXT, ContentLink INTEGER, BPM INTEGER,
+                AnalysisDataPath TEXT, Length INTEGER, KeyID TEXT, ImagePath TEXT
+             );
+             CREATE TABLE djmdCue (
+                ContentID TEXT, Kind INTEGER, InMsec INTEGER, OutMsec INTEGER,
+                Color INTEGER, ColorTableIndex INTEGER, Comment TEXT, ActiveLoop INTEGER,
+                BeatLoopSize INTEGER, rb_local_deleted INTEGER
+             );
+             INSERT INTO djmdContent (ID, BPM, TrackNo, DiscNo, BitDepth, DJPlayCount, Analysed)
+                VALUES ('7', -12800, -1, -2, -16, -3, -23);
+             INSERT INTO djmdCue VALUES
+                ('7', 0, -121, -1, -1, 0, 'before the start', 0, 0, 0),
+                ('7', 1, 5000, -1, -1, -5, '', 0, -1, 0),
+                ('7', 5, 90000, -1, -1, 21, '', 0, 0, 0);",
+        )
+        .unwrap();
+
+        let extras = track_extras(&conn, &["7".to_owned()]).unwrap();
+        let cues = &extras["7"].cues;
+        assert_eq!(cues.len(), 3, "no cue is dropped for its position");
+        let mut times: Vec<u32> = cues.iter().map(|cue| cue.time_ms).collect();
+        times.sort_unstable();
+        assert_eq!(times, [0, 5000, 90_000], "-121 ms is the start of the track");
+        let metadata = &extras["7"].metadata;
+        assert_eq!(
+            (metadata.track_number, metadata.disc_number, metadata.bit_depth, metadata.play_count),
+            (0, 0, 0, 0),
+            "negative counts read as none"
+        );
     }
 
     #[test]
