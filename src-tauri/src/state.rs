@@ -1014,6 +1014,8 @@ pub fn filter_from_wire(library: &Library, dto: &TrackFilterDto) -> TrackFilter 
         tags: dto
             .tags
             .iter()
+            // A column with nothing picked constrains nothing.
+            .filter(|t| !t.tags.is_empty())
             .map(|t| rbl_index::TagFilter {
                 picks: library.tag_picks_named(t.category, &t.tags),
                 any: t.any,

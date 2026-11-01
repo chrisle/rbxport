@@ -138,7 +138,11 @@ export function TrackFilter({ state, onChange, values, masterBpmX100 }: TrackFil
   const noCentre = state.bpm.values.length === 0 && (masterBpmX100 === null || masterBpmX100 <= 0);
 
   const setTag = (at: number, patch: Partial<TagColumn>) => {
-    const tags = state.tags.map((tag, i) => (i === at ? { ...tag, ...patch } : tag));
+    // The bar draws a column per My Tag category, which can outnumber the
+    // state's default TAG_COLUMNS: grow the state to reach column `at`.
+    const tags = [...state.tags];
+    while (tags.length <= at) tags.push({ enabled: false, values: [], any: false });
+    tags[at] = { ...tags[at]!, ...patch };
     onChange({ ...state, tags });
   };
 
