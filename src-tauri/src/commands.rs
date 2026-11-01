@@ -1550,23 +1550,33 @@ pub async fn estimate_sync(
     let share = state.share_root();
     let state = Arc::clone(&state);
     blocking("estimate_sync", move || {
-        let selection = ExportSelection::from_playlists(&state, &library, &share, &playlists, false)?;
+        // A selection that cannot be built (a library row that does not read)
+        // is every stick's estimate error, with its real cause, rather than a
+        // rejection of the whole command that the interface can only report
+        // as a generic failure (#781).
+        let selection = ExportSelection::from_playlists(&state, &library, &share, &playlists, false);
         let available: std::collections::HashMap<_, _> = rbl_devices::list().into_iter().filter(|d| d.total_bytes > 0).map(|d| (d.mount_point.to_string_lossy().into_owned(), d.free_bytes)).collect();
         Ok(destinations
             .into_iter()
             .map(|path| {
-                let options = rbl_export::ExportOptions { sync: Some(&selection.sync), compatibility: compatibility_format,
-                    cache: Some(&EXPORT_CACHE), ..Default::default() };
-                let plan = selection.for_stick_inspected(&state, &library, &share, std::path::Path::new(&path), delete_unlisted_music.unwrap_or(false), false)
-                    .map_err(|e| rbl_export::ExportError::Conflict(e.to_string()))
-                    .and_then(|selection| rbl_export::plan::preview(std::path::Path::new(&path), &selection.tracks, &selection.playlists, &selection.my_tags, &options));
+                let selected = selection.as_ref().map_or(0, |selection| selection.tracks.len());
+                let plan = match &selection {
+                    Err(e) => Err(rbl_export::ExportError::Conflict(e.full_message())),
+                    Ok(selection) => {
+                        let options = rbl_export::ExportOptions { sync: Some(&selection.sync), compatibility: compatibility_format,
+                            cache: Some(&EXPORT_CACHE), ..Default::default() };
+                        selection.for_stick_inspected(&state, &library, &share, std::path::Path::new(&path), delete_unlisted_music.unwrap_or(false), false)
+                            .map_err(|e| rbl_export::ExportError::Conflict(e.to_string()))
+                            .and_then(|selection| rbl_export::plan::preview(std::path::Path::new(&path), &selection.tracks, &selection.playlists, &selection.my_tags, &options))
+                    }
+                };
                 let (found, net, peak, database_bytes, asset_bytes, unknown_size, kept_existing, approximate, error) = match plan {
                     Ok(plan) => (plan.estimate, plan.net_additional_bytes, plan.peak_bytes, plan.database_bytes, plan.asset_bytes, plan.unknown_size, plan.kept_existing, plan.approximate, None),
                     Err(error) => (rbl_export::estimate::Estimate::default(), 0, 0, 0, 0, true, 0, true, Some(error.to_string())),
                 };
                 let free = available.get(&path).copied();
                 tracing::debug!(
-                    %path, selected = selection.tracks.len(), copy_bytes = found.copy_bytes, reuse_bytes = found.reuse_bytes,
+                    %path, selected, copy_bytes = found.copy_bytes, reuse_bytes = found.reuse_bytes,
                     free_bytes = found.free_bytes, new = found.tracks_new, changed = found.tracks_changed,
                     kept = found.tracks_kept, removed = found.tracks_removed, missing = found.tracks_missing,
                     "sync estimate"
@@ -5173,6 +5183,32 @@ mod tests {
         let want = ["Second", "First"];
         assert_eq!(roots(snapshot.legacy.as_ref().unwrap()), want, "export.pdb");
         assert_eq!(roots(snapshot.one.as_ref().unwrap()), want, "exportLibrary.db");
+        assert!(rbl_export::verify(&stick).unwrap().is_ok());
+    }
+
+    /// #781, #782, #774: a library cue at a negative position (the report's
+    /// "Integer -121 out of range at index 2") stopped the selection, so the
+    /// estimate for every stick failed before any stick was read. The cue is
+    /// kept at the track's start, and the stick estimates and syncs.
+    #[test]
+    fn a_library_cue_at_a_negative_position_still_estimates_and_syncs() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, stick_dir) = export_rig(dir.path(), |_| {});
+        for index in 0..rbl_db::fixture::Shape::default().tracks {
+            rbl_db::fixture::add_raw_cue(&location, index, -121).unwrap();
+        }
+        reload(&state, &location);
+        let stick = stick_dir.path().to_path_buf();
+        let a = rbl_db::fixture::playlist_id(0);
+        let library = state.library().unwrap();
+
+        let selection = super::ExportSelection::from_playlists(&state, &library, &location.share_root, &[a], false).unwrap();
+        let at_start = selection.tracks.iter().filter(|t| t.cues.as_ref().is_some_and(|cues| cues.iter().any(|cue| cue.time_ms == 0))).count();
+        assert!(at_start > 0, "the cue is kept, at the start of the track");
+        let options = rbl_export::ExportOptions { sync: Some(&selection.sync), ..Default::default() };
+        let plan = rbl_export::plan::preview(&stick, &selection.tracks, &selection.playlists, &selection.my_tags, &options).unwrap();
+        assert!(plan.estimate.tracks_new > 0, "the estimate counts the tracks");
+        super::write_export_with_phase(&stick, &selection, None, None, None, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
         assert!(rbl_export::verify(&stick).unwrap().is_ok());
     }
 
