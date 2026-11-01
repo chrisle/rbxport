@@ -572,3 +572,27 @@ fn a_pawsa_path_collision_keeps_every_carried_file_on_first_and_repeat_sync() {
         assert!(rbl_export::verify(dest.path()).unwrap().is_ok());
     }
 }
+
+// Any other integer column of a stick's `exportLibrary.db` holding a value the
+// unsigned type this crate writes cannot take (#787, the same "Integer N out of
+// range at index N" as #545/#583) must not stop the sync either: the value
+// reads as unknown (zero) and the rest of the stick syncs.
+#[test]
+fn an_out_of_range_integer_column_on_a_track_the_stick_keeps_does_not_stop_the_sync() {
+    for (column, value) in [
+        ("trackNo", -1i64), ("discNo", -1), ("bitDepth", -1), ("djPlayCount", -1),
+        ("bitrate", -1), ("samplingRate", -1), ("length", -1), ("length", 70_000),
+        ("color_id", -1), ("bpmx100", -1),
+    ] {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let (tracks, _) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
+        let kept = device_id(dest.path(), 3);
+        let one = rbl_onelibrary::playlists::open_read_write(&dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+        assert_eq!(one.execute(&format!("UPDATE content SET {column} = ?2 WHERE content_id = ?1"), rusqlite::params![kept, value]).unwrap(), 1);
+        drop(one);
+        let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
+        let report = sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap_or_else(|e| panic!("{column}={value}: {e}"));
+        assert_eq!(report.tracks, 3, "{column}={value}: the stick still holds track 3");
+        sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap_or_else(|e| panic!("{column}={value} second sync: {e}"));
+    }
+}

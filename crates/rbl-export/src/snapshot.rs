@@ -82,6 +82,15 @@ fn sql(e: impl std::fmt::Display) -> ExportError {
 /// non-zero one at or below it, so both read back to the same stars. Read
 /// on rbxport's scale alone, every rekordbox rating was 0, the stick's two
 /// databases disagreed, and its first sync from here was refused (#284).
+/// An `exportLibrary.db` integer column read as the unsigned type this crate
+/// writes. SQLite columns are untyped, so a stick can hold a negative or
+/// oversized value that rusqlite refuses to read as unsigned ("Integer -1 out
+/// of range at index N", #787), which stopped the whole sync before it changed
+/// anything. Treat such a value as unknown (zero), like [`release_year`].
+pub(crate) fn unsigned_or_zero<T: TryFrom<i64> + Default>(value: i64) -> T {
+    T::try_from(value).unwrap_or_default()
+}
+
 pub(crate) fn onelibrary_stars(raw: i64) -> u8 {
     let stars = if raw > 5 { raw / 51 } else { raw };
     u8::try_from(stars.clamp(0, 5)).unwrap_or(0)
@@ -591,9 +600,9 @@ fn read_one_library(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> R
                     title: r.get(1)?,
                     path: r.get(2)?,
                     analysis: r.get(3)?,
-                    bpm: r.get(4)?,
+                    bpm: unsigned_or_zero(r.get(4)?),
                     rating: u32::from(onelibrary_stars(r.get(5)?)),
-                    color: r.get(6)?,
+                    color: unsigned_or_zero(r.get(6)?),
                     comment: r.get(7)?,
                 },
                 (
