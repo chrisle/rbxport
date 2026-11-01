@@ -959,7 +959,7 @@ pub fn add_in_place_to_playlist(
             "Only files already on this device can be added in place.".into(),
         ));
     }
-    let before = snapshot::Snapshot::read(root)?;
+    let before = snapshot::Snapshot::read_for_write(root)?;
     let manifest = Manifest::load(root);
     let record = sync_record::read(root);
     if manifest.as_ref().is_some_and(|manifest| manifest.db_id != 0)
@@ -1163,8 +1163,8 @@ fn export_cancellable_inner(
         }
     }
     let mut before = if generation_matches {
-        previous.as_ref().and_then(|m| m.baseline.clone()).map_or_else(|| snapshot::Snapshot::read(destination), Ok)?
-    } else { snapshot::Snapshot::read(destination)? };
+        previous.as_ref().and_then(|m| m.baseline.clone()).map_or_else(|| snapshot::Snapshot::read_for_write(destination), Ok)?
+    } else { snapshot::Snapshot::read_for_write(destination)? };
     let trusted = incremental::trusted_paths(destination, previous.as_ref())?;
     let db_id = db_id_override.unwrap_or_else(|| sync.map_or(0, |s| s.db_id));
     if let Some(old) = previous.as_mut().filter(|m| m.db_id == 0 && db_id != 0) {
@@ -2382,7 +2382,7 @@ pub fn create_library_with_root(
     if legacy || one {
         // Convert by reading and retaining the existing content. Never publish
         // an empty sibling over a populated library.
-        let existing = snapshot::Snapshot::read(destination)?;
+        let existing = snapshot::Snapshot::read_for_write(destination)?;
         let (tracks, playlists) = reconcile::all(destination, &existing, Manifest::load(destination).as_ref())?;
         drop(publication);
         export_full(destination, &tracks, &playlists, my_tags, defaults, sync, &mut |_| {})?;

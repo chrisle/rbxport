@@ -530,6 +530,18 @@ Appendix B embeds all twenty-two `CREATE TABLE` statements and initial browse
 rows. Several tables are required to exist while empty. `dbVersion` is
 `"1000"`.
 
+A stick exported by VirtualDJ's CDJ Export reports `dbVersion` `"10000"`
+(#791) [OBS: issue report only; no real VirtualDJ `exportLibrary.db` has been
+inspected, so its layout, and which players accept it, are UNKNOWN]. rbxport
+reads `"10000"` through an explicit allowlist (`READ_ONLY_DB_VERSIONS` in
+`rbl-export/src/snapshot.rs`) so its tracks and playlists can be imported, and
+refuses every write to it: an export rebuilds the database as `"1000"`, which
+would silently convert it. Every path that rewrites `exportLibrary.db` (export
+and sync, in-place add to playlist, device playlist edits, and device settings
+writes) passes `require_writable_version`/`require_writable_library` in
+`rbl-export/src/snapshot.rs`, which allows only `"1000"`, before anything is
+staged. Any other version is refused for read and write.
+
 - `content` — tracks, including
   `masterDbId`/`masterContentId` (identity back to the desktop library),
   `analysisDataFilePath`, `path`, `bpmx100`, `bitrate`, `samplingRate`,
