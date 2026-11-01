@@ -75,6 +75,7 @@ fn main() {
             keys: Some(keys),
             ratings: Some(vec![0, 1, 2, 3, 4, 5]),
             colors: Some(vec![0]),
+            ..Default::default()
         }, "mix"),
     ];
     for (name, filter, query) in cases {

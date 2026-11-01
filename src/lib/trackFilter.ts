@@ -31,8 +31,7 @@ export const RATINGS: readonly number[] = [0, 1, 2, 3, 4, 5];
  * How many tag columns the bar draws.
  *
  * rekordbox draws one per My Tag category and the reference library has four;
- * the columns are inert (see `Library::my_tags`), so this only pads the bar
- * out to the capture when a library has fewer.
+ * this pads the bar out to the capture when a library has fewer.
  */
 export const TAG_COLUMNS = 4;
 
@@ -42,9 +41,8 @@ export interface PickedColumn<T> {
   values: T[];
 }
 
-/** A tag column's tick box and its AND / OR switch. Drawn, not applied. */
-export interface TagColumn {
-  enabled: boolean;
+/** A tag column's tick box, its picked tags (empty is `All`) and its AND / OR switch. */
+export interface TagColumn extends PickedColumn<string> {
   /** `true` is OR — a track carrying any picked tag; `false` is AND. */
   any: boolean;
 }
@@ -62,7 +60,7 @@ export const EMPTY_FILTER: FilterState = {
   key: { enabled: false, values: [] },
   rating: { enabled: false, values: [] },
   color: { enabled: false, values: [] },
-  tags: Array.from({ length: TAG_COLUMNS }, () => ({ enabled: false, any: false })),
+  tags: Array.from({ length: TAG_COLUMNS }, () => ({ enabled: false, values: [], any: false })),
 };
 
 /** The nearest whole BPM, as the bar's list groups them. */
@@ -85,7 +83,7 @@ export function pick<T>(values: readonly T[], value: T | null, toggle: boolean):
 
 /** Whether any column is ticked, which is when the bar narrows the list. */
 export function isNarrowing(state: FilterState): boolean {
-  return state.bpm.enabled || state.key.enabled || state.rating.enabled || state.color.enabled;
+  return state.bpm.enabled || state.key.enabled || state.rating.enabled || state.color.enabled || state.tags.some((t) => t.enabled);
 }
 
 /**
@@ -114,5 +112,10 @@ export function toSpecFilter(
   if (state.key.enabled && state.key.values.length > 0) out.keys = state.key.values;
   if (state.rating.enabled && state.rating.values.length > 0) out.ratings = state.rating.values;
   if (state.color.enabled && state.color.values.length > 0) out.colors = state.color.values;
+  // A tag column at `All` is no constraint either.
+  const tags = state.tags.flatMap((tag, category) =>
+    tag.enabled && tag.values.length > 0 ? [{ category, any: tag.any, tags: tag.values }] : [],
+  );
+  if (tags.length > 0) out.tags = tags;
   return Object.keys(out).length > 0 ? out : undefined;
 }

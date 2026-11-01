@@ -107,9 +107,18 @@ function makeColors(count: number): Uint8Array {
  * Whole BPMs at ±0% match by rounded bucket; a tolerance widens each picked
  * BPM into a band, or with `All` picked, a band around the master player —
  * and with no master player the BPM column matches everything. The other
- * columns are sets, and every ticked column has to agree.
+ * columns are sets, and every ticked column has to agree. A My Tag column
+ * names a category by position and the tags picked in it: AND is a track
+ * holding all of them, OR any. A name the category lacks is held by no track,
+ * so it fails AND and is ignored by OR, as in `rbl-index`.
  */
-function passesFilter(row: RowDto, color: number, filter: TrackFilter): boolean {
+function passesFilter(
+  row: RowDto,
+  color: number,
+  filter: TrackFilter,
+  held: readonly string[],
+  categories: readonly { tags: readonly { id: string; name: string }[] }[],
+): boolean {
   if (filter.bpm) {
     const { values, tolerancePct, masterBpmX100 } = filter.bpm;
     const within = (centre: number) =>
@@ -127,6 +136,12 @@ function passesFilter(row: RowDto, color: number, filter: TrackFilter): boolean 
   if (filter.keys && !filter.keys.includes(row.key)) return false;
   if (filter.ratings && !filter.ratings.includes(row.rating)) return false;
   if (filter.colors && !filter.colors.includes(COLOR_NAMES[color - 1] ?? "")) return false;
+  for (const pick of filter.tags ?? []) {
+    if (pick.tags.length === 0) continue;
+    const carries = (name: string) =>
+      (categories[pick.category]?.tags ?? []).some((t) => t.name === name && held.includes(t.id));
+    if (!(pick.any ? pick.tags.some(carries) : pick.tags.every(carries))) return false;
+  }
   return true;
 }
 
@@ -2166,7 +2181,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (filter) {
         candidates = candidates.filter((i) => {
           const row = all[i];
-          return row ? passesFilter(row, colors[i] ?? 0, filter) : false;
+          return row ? passesFilter(row, colors[i] ?? 0, filter, detailsOf(row).myTags, myTagCategories) : false;
         });
       }
 
@@ -3595,22 +3610,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
             const [ny, ly, sy] = keyOrder(y.value);
             return nx - ny || lx - ly || sx.localeCompare(sy);
           }),
-        // What the reference library holds, read once: one used category and
-        // rekordbox's three unused ones, which it names `Empty Category`.
-        tags: [
-          {
-            name: "Lexicon Tags",
-            tags: [
-              "Components ▶ Synth", "Components ▶ Vocal", "Components ▶ Beat",
-              "Components ▶ Sub Bass", "Components ▶ Percussion", "Components ▶ Piano",
-              "Components ▶ Upper", "Situation ▶ Main Floor", "Situation ▶ Second Floor",
-              "Situation ▶ Lounge",
-            ],
-          },
-          { name: "Empty Category", tags: [] },
-          { name: "Empty Category", tags: [] },
-          { name: "Empty Category", tags: [] },
-        ],
+        // The library's categories, in the order the filter's picks name them by.
+        tags: myTagCategories.map((c) => ({ name: c.name, tags: c.tags.map((t) => t.name) })),
       };
       return wait(values);
     },

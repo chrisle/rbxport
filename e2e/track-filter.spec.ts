@@ -130,3 +130,29 @@ test("the ± list is greyed until a deck is loaded", async ({ page }) => {
     "true",
   );
 });
+
+test("a My Tag column's chips can be picked, and OR widens what AND narrows", async ({ page }) => {
+  await page.goto("/");
+  const all = await trackCount(page);
+  await page.getByTestId("filter-toggle").click();
+  const bar = page.getByTestId("track-filter");
+  const column = bar.getByTestId("filter-tag-column").first();
+  await expect(column.getByRole("option").first()).toBeVisible();
+
+  await column.getByRole("checkbox").click();
+  await column.getByRole("option", { name: "Peak" }).click();
+  await expect(column.getByRole("option", { name: "Peak" })).toHaveAttribute("aria-selected", "true");
+  const peak = await trackCount(page);
+  expect(peak).toBeGreaterThan(0);
+  expect(peak).toBeLessThan(all);
+
+  // The mock holds Peak on some tracks and Warm-up on none: AND with it matches
+  // nothing, OR leaves the Peak tracks.
+  await column.getByRole("option", { name: "Warm-up" }).click({ modifiers: ["ControlOrMeta"] });
+  await expect(page.getByTestId("browser-title")).toContainText("(0 Tracks)");
+  await column.getByRole("button", { name: "OR" }).click();
+  await expect(page.getByTestId("browser-title")).toContainText(`(${peak} Tracks)`);
+
+  await bar.getByRole("button", { name: "Reset" }).click();
+  await expect(page.getByTestId("browser-title")).toContainText(`(${all} Tracks)`);
+});

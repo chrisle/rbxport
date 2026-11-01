@@ -990,6 +990,7 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
 /// A key name the library does not hold resolves to no id, so a ticked key
 /// column with only unknown names matches nothing — which is what the list
 /// would show for it. A colour name outside the eight is dropped the same way.
+/// A My Tag column's names resolve within its category to the ids tracks carry.
 pub fn filter_from_wire(library: &Library, dto: &TrackFilterDto) -> TrackFilter {
     TrackFilter {
         bpm: dto.bpm.as_ref().map(|b| BpmFilter {
@@ -1010,6 +1011,14 @@ pub fn filter_from_wire(library: &Library, dto: &TrackFilterDto) -> TrackFilter 
                 })
                 .collect()
         }),
+        tags: dto
+            .tags
+            .iter()
+            .map(|t| rbl_index::TagFilter {
+                picks: library.tag_picks_named(t.category, &t.tags),
+                any: t.any,
+            })
+            .collect(),
     }
 }
 

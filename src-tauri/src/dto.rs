@@ -661,6 +661,21 @@ pub struct TrackFilterDto {
     pub ratings: Option<Vec<u8>>,
     #[serde(default)]
     pub colors: Option<Vec<String>>,
+    /// One entry per ticked My Tag column with tags picked.
+    #[serde(default)]
+    pub tags: Vec<TagPickDto>,
+}
+
+/// A My Tag column's picks: the category by its position in the list the bar
+/// was drawn from, the tags by name, and the column's AND / OR switch.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagPickDto {
+    pub category: usize,
+    #[serde(default)]
+    pub any: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// A value the filter bar can offer, and how many tracks of the list carry it.

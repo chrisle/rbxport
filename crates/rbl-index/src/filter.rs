@@ -1,4 +1,4 @@
-//! The track filter: BPM, key, rating and colour, combined with AND.
+//! The track filter: BPM, key, rating, colour and My Tags, combined with AND.
 //!
 //! rekordbox's Track Filter drops down between the browser header and the
 //! column header. Each of its columns has a tick box; a ticked column narrows
@@ -39,6 +39,28 @@ pub struct TrackFilter {
     pub ratings: Option<Vec<u8>>,
     /// `djmdContent.ColorID`, 1 to 8 (see [`COLOR_NAMES`]).
     pub colors: Option<Vec<u8>>,
+    /// One entry per ticked My Tag column that has tags picked; empty means
+    /// no tag constraint. Every entry has to agree, as the other columns do.
+    pub tags: Vec<TagFilter>,
+}
+
+/// One My Tag column's picks and its AND / OR switch.
+///
+/// `[ASSUME]` Within a column, AND is a track carrying every picked tag and OR
+/// a track carrying any of them, as the issue (#779) states; nothing in
+/// alphatheta-docs describes the desktop Track Filter's rule, and the
+/// cross-column rule (every ticked column must agree, as for BPM, key, rating
+/// and colour) is `[UNKNOWN]` for tags until rekordbox is observed. A column
+/// with no tags picked is `All` and is not sent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TagFilter {
+    /// One entry per picked tag: every `djmdMyTag.ID` (as
+    /// [`my_tag_key`](crate::smart::my_tag_key) reads it) carrying that tag's
+    /// name in the column's category, so a duplicated name counts once. A name
+    /// the category does not hold is an empty entry, which no track carries.
+    pub picks: Vec<Vec<i32>>,
+    /// `true` is OR; `false` is AND.
+    pub any: bool,
 }
 
 /// The eight colour comments, indexed by `ColorID - 1`.
@@ -52,7 +74,11 @@ impl TrackFilter {
     /// Whether the filter constrains anything at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.bpm.is_none() && self.keys.is_none() && self.ratings.is_none() && self.colors.is_none()
+        self.bpm.is_none()
+            && self.keys.is_none()
+            && self.ratings.is_none()
+            && self.colors.is_none()
+            && self.tags.is_empty()
     }
 
     /// The filter in a shape the row loop can test without allocating.
@@ -92,7 +118,24 @@ impl TrackFilter {
                 BpmRule { ranges, whole: Vec::new(), any: false }
             }
         });
-        Compiled { bpm, keys, ratings, colors }
+        let tags = self
+            .tags
+            .iter()
+            .map(|t| TagRule {
+                picks: t
+                    .picks
+                    .iter()
+                    .map(|ids| {
+                        let mut ids = ids.clone();
+                        ids.sort_unstable();
+                        ids.dedup();
+                        ids
+                    })
+                    .collect(),
+                any: t.any,
+            })
+            .collect();
+        Compiled { bpm, keys, ratings, colors, tags }
     }
 }
 
@@ -132,6 +175,27 @@ impl BpmRule {
     }
 }
 
+#[derive(Debug, Clone)]
+struct TagRule {
+    picks: Vec<Vec<i32>>,
+    any: bool,
+}
+
+impl TagRule {
+    /// Whether a track carrying `tags` passes: every pick for AND, one for
+    /// OR. A column with nothing picked constrains nothing.
+    fn matches(&self, tags: &[i32]) -> bool {
+        let carries = |ids: &Vec<i32>| ids.iter().any(|id| tags.contains(id));
+        if self.picks.is_empty() {
+            true
+        } else if self.any {
+            self.picks.iter().any(carries)
+        } else {
+            self.picks.iter().all(carries)
+        }
+    }
+}
+
 /// A [`TrackFilter`] with its lists turned into masks and sorted ids.
 #[derive(Debug, Clone)]
 pub(crate) struct Compiled {
@@ -139,6 +203,7 @@ pub(crate) struct Compiled {
     keys: Option<Vec<u32>>,
     ratings: Option<u8>,
     colors: Option<u16>,
+    tags: Vec<TagRule>,
 }
 
 impl Compiled {
@@ -169,6 +234,12 @@ impl Compiled {
                 return false;
             }
         }
+        if !self.tags.is_empty() {
+            let carried = lib.my_tag_keys(index);
+            if !self.tags.iter().all(|rule| rule.matches(carried)) {
+                return false;
+            }
+        }
         true
     }
 }
@@ -185,6 +256,10 @@ pub struct Counted<T> {
 pub struct TagCategory {
     pub name: String,
     pub tags: Vec<String>,
+    /// Each tag's `djmdMyTag.ID`, parallel to `tags`, as
+    /// [`my_tag_key`](crate::smart::my_tag_key) reads it: what a track's
+    /// [`Library::my_tag_keys`] holds.
+    pub ids: Vec<i32>,
 }
 
 /// What the bar's lists hold for a source and query.
@@ -195,8 +270,7 @@ pub struct FilterValues {
     /// Key names present, in Camelot order; names the wheel does not know
     /// follow alphabetically. Tracks without a key are left out.
     pub keys: Vec<Counted<String>>,
-    /// The My Tag categories, for the bar's tag columns. Inert: the bar does
-    /// not filter on the tracks' tags (see [`Library::my_tags`]).
+    /// The My Tag categories, for the bar's tag columns.
     pub tags: Vec<TagCategory>,
 }
 
@@ -265,6 +339,31 @@ impl Library {
         keys.sort_by_cached_key(|c| (camelot_rank(&c.value), crate::strings::fold(&c.value)));
 
         FilterValues { bpms, keys, tags: self.my_tags().to_vec() }
+    }
+
+    /// The picks for a My Tag column: the category at `category` (an index
+    /// into [`my_tags`](Self::my_tags)) and the tag names picked in it.
+    ///
+    /// Each name becomes the ids carrying it in that category. A category
+    /// past the end, or a name it does not hold, yields an empty entry that no
+    /// track carries, so a stale pick narrows to nothing rather than being
+    /// dropped silently.
+    #[must_use]
+    pub fn tag_picks_named(&self, category: usize, names: &[String]) -> Vec<Vec<i32>> {
+        let found = self.my_tags().get(category);
+        names
+            .iter()
+            .map(|wanted| {
+                found.map_or_else(Vec::new, |c| {
+                    c.tags
+                        .iter()
+                        .zip(&c.ids)
+                        .filter(|(name, _)| *name == wanted)
+                        .map(|(_, &id)| id)
+                        .collect()
+                })
+            })
+            .collect()
     }
 
     /// Dense key ids whose name is one of `names`.
