@@ -40,6 +40,39 @@ test("external files dropped on All Tracks enter the collection and remain after
   }
 });
 
+for (const target of ["All Tracks", "a playlist"] as const) {
+  test(`several unimportable files dropped on ${target} are each listed with a reason (#800)`, async ({ page, browserName }) => {
+    test.skip(browserName === "webkit", "synthetic WebKit files have no filesystem path");
+    // The mock library takes no files without `dropFixture`, so every drop is skipped.
+    await page.goto("/?writable=1");
+    const destination = target === "All Tracks"
+      ? page.locator('[role="treeitem"][data-kind="allTracks"]')
+      : page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first();
+    await expect(destination).toBeVisible({ timeout: 30_000 });
+    const transfer = await page.evaluateHandle(() => {
+      const data = new DataTransfer();
+      for (const name of ["Broken A.aiff", "Broken B.aiff"]) {
+        data.items.add(new File(["not an aiff"], name, { type: "audio/aiff" }));
+      }
+      for (const [index, file] of [...data.files].entries()) {
+        Object.defineProperty(file, "path", { value: `/tmp/${["Broken A.aiff", "Broken B.aiff"][index] ?? ""}` });
+      }
+      return data;
+    });
+    await destination.dispatchEvent("dragover", { dataTransfer: transfer });
+    await destination.dispatchEvent("drop", { dataTransfer: transfer });
+    const dialog = page.getByRole("alertdialog", { name: "Some files were not imported" });
+    await expect(dialog).toBeVisible();
+    const lines = dialog.getByTestId("import-skips").getByRole("listitem");
+    await expect(lines).toHaveCount(2);
+    await expect(lines.nth(0)).toContainText("Broken A.aiff");
+    await expect(lines.nth(1)).toContainText("Broken B.aiff");
+    await expect(lines.nth(1)).toContainText("the mock library takes no files");
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await expect(dialog).toBeHidden();
+  });
+}
+
 test("All Tracks receives external WebKit files even when their paths are hidden", async ({ page, browserName }) => {
   test.skip(browserName !== "webkit", "WebKit-specific path boundary");
   await page.goto("/?writable=1");
