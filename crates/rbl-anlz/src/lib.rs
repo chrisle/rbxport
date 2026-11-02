@@ -193,10 +193,15 @@ impl Section {
         if self.tag != FourCc::new(b"PCOB") {
             return None;
         }
+        let Some(count) = self.header.get(6..8) else {
+            return Some(Vec::new());
+        };
+        let count = usize::from(u16::from_be_bytes([count[0], count[1]]));
         let b = &self.payload;
         let mut entries = Vec::new();
         let mut at = 0usize;
-        while let Some(e) = b.get(at..at.saturating_add(LEGACY_ENTRY_MIN)) {
+        while entries.len() < count {
+            let Some(e) = b.get(at..at.saturating_add(LEGACY_ENTRY_MIN)) else { break };
             if e.get(..4) != Some(b"PCPT") {
                 break;
             }

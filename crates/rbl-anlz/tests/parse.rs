@@ -502,12 +502,16 @@ fn legacy_dat_cues_stop_at_malformed_pcpt_entries() {
         ("huge declared length", { let mut entry = valid.clone(); entry[8..12].copy_from_slice(&u32::MAX.to_be_bytes()); entry }),
     ];
     for (case, entry) in malformed {
-        let file = build(&[(b"PCOB", vec![0; 12], entry.clone())]);
+        let mut header = vec![0; 12];
+        header[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        let file = build(&[(b"PCOB", header, entry.clone())]);
         assert!(parse(&file).unwrap().legacy_cue_entries().is_empty(), "{case}");
 
         let mut after_valid = valid.clone();
         after_valid.extend(entry);
-        let file = build(&[(b"PCOB", vec![0; 12], after_valid)]);
+        let mut header = vec![0; 12];
+        header[6..8].copy_from_slice(&2_u16.to_be_bytes());
+        let file = build(&[(b"PCOB", header, after_valid)]);
         let cues = parse(&file).unwrap().legacy_cue_entries();
         assert_eq!(cues.len(), 1, "{case}: preserve only the valid prefix");
         assert_eq!((cues[0].hot_cue, cues[0].time_ms), (1, 25));
