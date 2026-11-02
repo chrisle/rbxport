@@ -698,7 +698,9 @@ In loop order:
    or the audio was converted (source VBR offsets must not point into a
    different encoding), the export phrase mask and device preview encoding
    are applied, and the DAT and EXT cue lists are replaced with the library
-   cues (`rbl_anlz::cues::sections`). See
+   cues (`rbl_anlz::cues::sections`). A FLAC's EXT gains the `PVB2` seek
+   index rekordbox writes when it has none (`flac_seek`: 400 frame entries
+   built from the audio), and a converted track's EXT drops it. See
    [Analysis export transformation](usb-export-db.md#analysis-export-transformation)
    and [Source cue export](usb-export-db.md#source-cue-export).
 9. **Changed audio without new analysis.** If the audio content changed but
