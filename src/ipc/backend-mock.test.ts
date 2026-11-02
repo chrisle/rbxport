@@ -617,3 +617,24 @@ describe("mock Relocate Undo (#502)", () => {
     expect(await missingIds(backend)).toEqual(missing);
   });
 });
+
+it("keeps a manually moved saved loop active when Active Loop Playback is turned off", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  const backend = createMockBackend({ trackCount: 2 });
+  try {
+    await backend.deckLoad("a", "100000", 1);
+    await backend.deckSetActiveLoop("a", 1000, 2000);
+    await backend.deckPlay("a");
+    await vi.advanceTimersByTimeAsync(1200);
+    expect((await backend.deckState()).a.looping).toBe(true);
+    await backend.deckMoveLoop("a", 2000, 3000, 1000, [], 0);
+    await backend.deckSetActiveLoop("a", null, null);
+    const moved = (await backend.deckState()).a;
+    expect(moved.looping).toBe(true);
+    expect(moved.loopInFrames).toBe(2 * 44_100);
+    expect(moved.loopOutFrames).toBe(3 * 44_100);
+  } finally {
+    await backend.deckPause("a");
+    vi.useRealTimers();
+  }
+});
