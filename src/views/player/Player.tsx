@@ -2610,9 +2610,9 @@ export const Player = memo(function Player({
         <div className={styles.detailRow}>
           {/* The two-deck layout's zoom is the shell's, one for the pair. */}
           {dual ? null : (
-          <div className={styles.zoom}>
+          <div className={styles.zoom} data-own-activation="">
             <button type="button" aria-label="Zoom in" onClick={() => zoom(-1)}>+</button>
-            <span className={styles.rst} aria-hidden>RST</span>
+            <button type="button" className={styles.rst} aria-label="Reset zoom" title={tip("Reset the zoom ratio")} onClick={() => setBars(DETAIL_BARS)}>RST</button>
             <button type="button" aria-label="Zoom out" onClick={() => zoom(1)}>−</button>
           </div>
           )}
