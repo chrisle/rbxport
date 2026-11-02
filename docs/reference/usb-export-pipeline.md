@@ -542,8 +542,12 @@ is reported as `ExportError::Cancelled`.
   `exportLibrary.db` (`sources_from_one`) or `export.pdb`
   (`sources_from_legacy`), or from the manifest's `device_sources` when the
   baseline is reused. Their audio and analysis stay exactly as they are,
-  and conversion is skipped. The manifest records `preserved` for every
-  track. It is `true` for a track another writer put there, so a later sync
+  and conversion is skipped. A negative or oversized OneLibrary BPM stops
+  the sync before device changes are committed: a write-back source must
+  not turn invalid metadata into zero and erase the other database's BPM.
+  Valid zero and positive BPM values remain accepted. The manifest records
+  `preserved` for every track. It is `true` for a track another writer put
+  there, so a later sync
   still treats it as the stick's rather than as a track it exported and can
   take off (#317). It is `false` for a track an earlier export put there
   that a device playlist or history still names (`DeviceTrack::exported`):
