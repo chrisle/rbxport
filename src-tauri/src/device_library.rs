@@ -1964,11 +1964,7 @@ mod tests {
             loop_numerator: 0,
             loop_denominator: 0,
         };
-        track.cues = Some(vec![cue(1, 25, None), rbl_anlz::cues::ExportCue {
-            kind: 4,
-            active_loop: true,
-            ..cue(0, 494, Some(2369))
-        }]);
+        track.cues = Some(vec![cue(1, 25, None), cue(0, 494, Some(2369))]);
     }
 
     #[test]
@@ -2109,7 +2105,14 @@ mod tests {
 
     #[test]
     fn issue_608_dat_only_cues_map_for_both_device_databases() {
-        let rig = rig_with(analysed_on_the_stick);
+        let rig = rig_with(|i, track| {
+            analysed_on_the_stick(i, track);
+            if i == 0 {
+                let loop_cue = &mut track.cues.as_mut().unwrap()[1];
+                loop_cue.kind = 4;
+                loop_cue.active_loop = true;
+            }
+        });
         let mount = rig.stick.path();
         let first = device::read(mount, Format::DeviceLibrary).unwrap();
         let track = first.tracks.iter().find(|t| t.title == "Track 0").unwrap();
