@@ -1388,6 +1388,103 @@ fn manual_relocate_keeps_filename_and_link_state_across_drive_and_usn_cases() {
     }
 }
 
+/// Gives track 0 a `.DAT`, `.EXT`, `.2EX` and `.3EX` whose first three name
+/// `ppth` and whose `.3EX` has no `PPTH`; returns the four paths.
+fn analysis_with_ppth(f: &Fixture, ppth: &str) -> Vec<std::path::PathBuf> {
+    let location = f.writer.library().location().clone();
+    let relative = "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT";
+    let dat = rbl_anlz::resolve(&location.share_root, relative);
+    std::fs::create_dir_all(dat.parent().unwrap()).unwrap();
+    let beats = [rbl_anlz::Beat { beat_number: 1, tempo_x100: 12_000, time_ms: 250 }];
+    let mut paths = Vec::new();
+    for extension in ["DAT", "EXT", "2EX", "3EX"] {
+        let mut builder = rbl_anlz::AnlzBuilder::new();
+        if extension != "3EX" {
+            builder.path(ppth);
+        }
+        builder.beat_grid(&beats);
+        let file = rbl_anlz::sibling(&dat, extension);
+        std::fs::write(&file, builder.finish()).unwrap();
+        paths.push(file);
+    }
+    fixture::set_analysis_path(&location, 0, relative).unwrap();
+    paths
+}
+
+fn ppths(files: &[std::path::PathBuf]) -> Vec<Option<String>> {
+    files.iter().map(|file| rbl_anlz::Anlz::read(file).unwrap().path()).collect()
+}
+
+fn bytes_of(files: &[std::path::PathBuf]) -> Vec<Vec<u8>> {
+    files.iter().map(|file| std::fs::read(file).unwrap()).collect()
+}
+
+#[test]
+fn a_manual_relocate_that_renames_the_file_renames_ppth_and_undo_redo_follow() {
+    // [OBS rekordbox 7.2.14 Windows, #454] .DAT, .EXT and .2EX get the new
+    // name in PPTH; .3EX has none and is left alone.
+    for form in ["?/track000.mp3", "track000.mp3"] {
+        let dir = tempfile::tempdir().unwrap();
+        let chosen = dir.path().join("renamed track.mp3");
+        std::fs::write(&chosen, b"audio").unwrap();
+        let mut f = fixture();
+        let files = analysis_with_ppth(&f, form);
+        let original = bytes_of(&files);
+        let (_, edit) = f.writer.relocate_manual_with_undo(&[(track_id(0), chosen.clone())]).unwrap();
+        let renamed = form.replace("track000.mp3", "renamed track.mp3");
+        assert_eq!(
+            ppths(&files),
+            vec![Some(renamed.clone()), Some(renamed.clone()), Some(renamed.clone()), None],
+            "the form {form:?} is kept, only its file name changes"
+        );
+        let after = bytes_of(&files);
+        assert_eq!(after[3], original[3], ".3EX is untouched");
+        assert!(after[..3].iter().zip(&original[..3]).all(|(new, old)| new.len() == old.len() + 2 * ("renamed track.mp3".len() - "track000.mp3".len())));
+        f.writer.undo_relocation(&edit).unwrap();
+        assert_eq!(bytes_of(&files), original, "Undo restores the analysis byte for byte");
+        f.writer.redo_relocation(&edit).unwrap();
+        assert_eq!(bytes_of(&files), after, "Redo renames it again");
+    }
+}
+
+#[test]
+fn a_manual_relocate_that_keeps_the_file_name_leaves_the_analysis_byte_identical() {
+    let dir = tempfile::tempdir().unwrap();
+    let chosen = dir.path().join("track000.mp3");
+    std::fs::write(&chosen, b"audio").unwrap();
+    let mut f = fixture();
+    let files = analysis_with_ppth(&f, "?/track000.mp3");
+    let original = bytes_of(&files);
+    let (_, edit) = f.writer.relocate_manual_with_undo(&[(track_id(0), chosen.clone())]).unwrap();
+    assert_eq!(bytes_of(&files), original);
+    f.writer.undo_relocation(&edit).unwrap();
+    f.writer.redo_relocation(&edit).unwrap();
+    assert_eq!(bytes_of(&files), original);
+}
+
+#[test]
+fn auto_relocate_does_not_touch_the_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    let chosen = dir.path().join("other name.mp3");
+    std::fs::write(&chosen, b"audio").unwrap();
+    let mut f = fixture();
+    let files = analysis_with_ppth(&f, "?/track000.mp3");
+    let original = bytes_of(&files);
+    f.writer.relocate_with_undo(&[(track_id(0), chosen)]).unwrap();
+    assert_eq!(bytes_of(&files), original);
+}
+
+#[test]
+fn a_manual_relocate_stores_a_windows_path_as_rekordbox_does() {
+    use rbl_db::write::rekordbox_folder_path as stored;
+    assert_eq!(stored("c:\\Users\\dj\\Music\\a.wav"), "C:/Users/dj/Music/a.wav");
+    assert_eq!(stored("d:/Music/a.wav"), "D:/Music/a.wav");
+    assert_eq!(stored("C:/Music/a.wav"), "C:/Music/a.wav");
+    assert_eq!(stored("/Users/dj/Music/a.wav"), "/Users/dj/Music/a.wav");
+    assert_eq!(stored("\\\\server\\share\\a.wav"), "\\\\server\\share\\a.wav", "UNC paths were not observed and are kept");
+    assert_eq!(stored("relative\\a.wav"), "relative\\a.wav");
+}
+
 #[test]
 fn a_relocation_run_undoes_and_redoes_every_link_at_once() {
     // #502: one run over two tracks is one entry; Undo restores the path,

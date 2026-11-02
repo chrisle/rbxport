@@ -848,6 +848,93 @@ struct TrackLink {
     content: String,
     before: [Value; 3],
     after: [Value; 3],
+    /// The analysis files whose `PPTH` the run renamed with the file (#454);
+    /// empty for a run that kept the file's name.
+    ppth: Vec<PpthEdit>,
+}
+
+/// One analysis file's `PPTH` before and after a manual Relocate that
+/// changed the audio file's name.
+#[derive(Debug, Clone, PartialEq)]
+struct PpthEdit {
+    file: PathBuf,
+    before: String,
+    after: String,
+}
+
+/// The last component of a stored path, in either separator.
+fn base_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+/// `ppth` with its file name replaced by `name`, keeping whatever precedes
+/// it (the share tree's `?/`, or nothing) as rekordbox left it.
+fn renamed_ppth(ppth: &str, name: &str) -> String {
+    match ppth.rfind(['/', '\\']) {
+        Some(at) => format!("{}{name}", &ppth[..=at]),
+        None => name.to_owned(),
+    }
+}
+
+/// The `.DAT`, `.EXT` and `.2EX` of a track's analysis that exist and carry
+/// a `PPTH`, each paired with the `PPTH` it gets for audio file `name`.
+/// `.3EX` has no `PPTH` and is never touched.
+fn ppth_plan(share_root: &Path, analysis: Option<&str>, name: &str) -> Vec<PpthEdit> {
+    let Some(analysis) = analysis.filter(|a| !a.is_empty()) else { return Vec::new() };
+    let dat = rbl_anlz::resolve(share_root, analysis);
+    ["DAT", "EXT", "2EX"]
+        .iter()
+        .filter_map(|extension| {
+            let file = rbl_anlz::sibling(&dat, extension);
+            let before = rbl_anlz::Anlz::read(&file).ok()?.path()?;
+            let after = renamed_ppth(&before, name);
+            (before != after).then_some(PpthEdit { file, before, after })
+        })
+        .collect()
+}
+
+/// Writes `want` as the `PPTH` of `file`, every other section as it was.
+/// `false` when it already says so (or the file is gone), writing nothing.
+fn set_ppth(file: &Path, want: &str) -> Result<bool> {
+    let Ok(anlz) = rbl_anlz::Anlz::read(file) else { return Ok(false) };
+    if anlz.path().as_deref() == Some(want) {
+        return Ok(false);
+    }
+    rbl_core::durable::write(file, &anlz.with_path(want))?;
+    Ok(true)
+}
+
+/// Moves every file of `edits` to its `after` (or, for `undo`, its
+/// `before`) `PPTH`; if one fails, the ones already moved are put back.
+fn apply_ppth<'a>(edits: impl IntoIterator<Item = &'a PpthEdit>, undo: bool) -> Result<()> {
+    let mut done: Vec<(&PpthEdit, &str)> = Vec::new();
+    for edit in edits {
+        let (want, was) = if undo { (&edit.before, &edit.after) } else { (&edit.after, &edit.before) };
+        match set_ppth(&edit.file, want) {
+            Ok(true) => done.push((edit, was.as_str())),
+            Ok(false) => {}
+            Err(error) => {
+                for (edit, was) in done.into_iter().rev() {
+                    let _ = set_ppth(&edit.file, was);
+                }
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A Windows path as rekordbox stores `FolderPath` (7.2.14 Windows, #454):
+/// forward slashes and an uppercase drive letter, `C:/Users/…`. Anything
+/// that does not start with a drive letter is returned as it is.
+#[must_use]
+pub fn rekordbox_folder_path(path: &str) -> String {
+    let bytes = path.as_bytes();
+    if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'/' | b'\\') {
+        format!("{}{}", path[..1].to_ascii_uppercase(), path[1..].replace('\\', "/"))
+    } else {
+        path.to_owned()
+    }
 }
 
 /// Every link one Relocate, Relocate by location or Auto Relocate run
@@ -5265,6 +5352,7 @@ impl Writer {
             }
         }
         self.prepare()?;
+        let share_root = self.library.location().share_root.clone();
         let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
         let stamp = time::now();
@@ -5276,6 +5364,20 @@ impl Writer {
                 continue;
             }
             let Some(before) = link_of(&tx, content)? else { continue };
+            let mut ppth = Vec::new();
+            if preserve_name {
+                // Rekordbox renames the analysis files' `PPTH` with the file
+                // and leaves them untouched when the name stays [OBS 7.2.14
+                // Windows, #454].
+                let new_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                if matches!(&before[0], Value::Text(old) if base_name(old) != new_name) {
+                    let analysis: Option<String> = tx
+                        .query_row("SELECT AnalysisDataPath FROM djmdContent WHERE ID = ?1", params![content], |r| r.get(0))
+                        .optional()?
+                        .flatten();
+                    ppth = ppth_plan(&share_root, analysis.as_deref(), &new_name);
+                }
+            }
             let name = if preserve_name {
                 before[1].clone()
             } else {
@@ -5284,17 +5386,23 @@ impl Writer {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default())
             };
+            let stored = path.to_string_lossy();
             let after = [
-                Value::Text(path.to_string_lossy().into_owned()),
+                Value::Text(if preserve_name { rekordbox_folder_path(&stored) } else { stored.into_owned() }),
                 name,
                 Value::Text(crate::file_id::column(path)),
             ];
             rows += write_link(&tx, content, &after, usn, &stamp)?;
-            links.push(TrackLink { content: content.clone(), before, after });
+            links.push(TrackLink { content: content.clone(), before, after, ppth });
         }
         set_counter(&tx, usn)?;
-        tx.commit()?;
-        Ok((Changed { rows, usn }, TrackRelocation { links }))
+        let relocation = TrackRelocation { links };
+        apply_ppth(relocation.links.iter().flat_map(|link| &link.ppth), false)?;
+        if let Err(error) = tx.commit() {
+            let _ = apply_ppth(relocation.links.iter().flat_map(|link| &link.ppth), true);
+            return Err(error.into());
+        }
+        Ok((Changed { rows, usn }, relocation))
     }
 
     /// Puts back every link `edit` changed, in one transaction, last first.
@@ -5338,7 +5446,12 @@ impl Writer {
             rows += write_link(&tx, &link.content, if undo { &link.before } else { &link.after }, usn, &stamp)?;
         }
         set_counter(&tx, usn)?;
-        tx.commit()?;
+        let ppth = || edit.links.iter().flat_map(|link| &link.ppth);
+        if undo { apply_ppth(ppth().collect::<Vec<_>>().into_iter().rev(), true)? } else { apply_ppth(ppth(), false)? }
+        if let Err(error) = tx.commit() {
+            let _ = apply_ppth(ppth(), !undo);
+            return Err(error.into());
+        }
         Ok(Changed { rows, usn })
     }
 
