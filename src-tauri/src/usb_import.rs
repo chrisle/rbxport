@@ -1362,11 +1362,11 @@ mod tests {
         );
         let before: Vec<Vec<u8>> = local.iter().map(|p| std::fs::read(p).unwrap()).collect();
         let editor = crate::grid::GridEditor::at(state.backup_dir());
-        // Grid edits made before the import, on a track imported ahead of the refusal.
-        let first = rbl_db::fixture::track_id(0);
-        editor.seed_history(&first);
+        // Grid edits made before the import, on every track. Tracks are planned
+        // in map order, so which ones are imported ahead of the refusal varies
+        // (possibly none when the refused one leads its batch).
+        for index in 0..tracks { editor.seed_history(&rbl_db::fixture::track_id(index)); }
         assert!(import(&state, &editor, &usb, true, false, false, false).is_err());
-        assert!(!editor.has_history(&first), "a failed batch leaves no Undo over the imported grid");
         let mut imported = 0;
         for (index, path) in local.iter().enumerate() {
             let now = std::fs::read(path).unwrap();
@@ -1376,10 +1376,11 @@ mod tests {
             // The file and the row agree: both imported, or both as they were.
             assert_eq!(stick_cues.len(), 1);
             assert_eq!(now != before[index], in_library, "track {index} has its file and its cues from different sides");
+            // An imported track holds the stick's grid, so Undo over it is gone;
+            // one the import never reached keeps its history.
+            if in_library { assert!(!editor.has_history(&id), "a failed batch leaves no Undo over imported track {index}'s grid"); }
             imported += usize::from(in_library);
         }
-        let first_cues = rbl_anlz::Anlz::read(&usb.join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.EXT")).unwrap().cue_entries();
-        assert!(database_cues_match(&state, &first, &first_cues).unwrap(), "the seeded track was imported before the refusal");
         assert!(imported < tracks, "{imported} of {tracks} tracks imported before the refusal");
         assert!(!state.backup_dir().join("analysis-journal").exists_with_entries(), "no journal is left behind");
     }
