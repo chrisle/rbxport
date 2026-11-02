@@ -16,6 +16,18 @@ const MAX_IMPORT_ANLZ_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_IMPORT_STAGE_BYTES: u64 = 512 * 1024 * 1024;
 const STAGE_PREFIX: &str = "usb-import-v1-";
 const STAGE_MARKER: &str = "owner.lock";
+const STAGE_MARKER_CONTENT: &str = "rbxport usb import stage v1";
+
+// Read through the handle that holds the lock: Windows byte-range locks reject
+// reads from a second handle on the same file. Bounded so a foreign file
+// cannot be read whole.
+fn marker_has_owner_content(marker: &mut std::fs::File) -> std::io::Result<bool> {
+    use std::io::Seek;
+    marker.rewind()?;
+    let mut bytes = Vec::new();
+    marker.by_ref().take(STAGE_MARKER_CONTENT.len() as u64 + 1).read_to_end(&mut bytes)?;
+    Ok(bytes == STAGE_MARKER_CONTENT.as_bytes())
+}
 
 fn stage_budget_add(used: &mut u64, bytes: usize, limit: u64) -> AppResult<()> {
     *used = used.checked_add(u64::try_from(bytes).map_err(err)?)
@@ -34,9 +46,9 @@ fn recover_stale_stages(backup_dir: &Path) -> AppResult<()> {
         if !entry.file_type().map_err(err)?.is_dir() || path.canonicalize().map_err(err)?.parent() != Some(root.as_path()) { continue; }
         let marker_path = path.join(STAGE_MARKER);
         if !std::fs::symlink_metadata(&marker_path).is_ok_and(|m| m.file_type().is_file()) { continue; }
-        let marker = std::fs::OpenOptions::new().read(true).write(true).open(&marker_path).map_err(err)?;
+        let mut marker = std::fs::OpenOptions::new().read(true).write(true).open(&marker_path).map_err(err)?;
         if fs2::FileExt::try_lock_exclusive(&marker).is_err() { continue; }
-        if std::fs::read_to_string(&marker_path).map_err(err)? != "rbxport usb import stage v1" { continue; }
+        if !marker_has_owner_content(&mut marker).map_err(err)? { continue; }
         // Close the marker before removing its directory on Windows. The
         // exclusive lock proves another importer is not using this stage.
         drop(marker);
@@ -212,7 +224,7 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
         let staging = tempfile::Builder::new().prefix(STAGE_PREFIX)
             .tempdir_in(state.backup_dir()).map_err(err)?;
         let marker_path = staging.path().join(STAGE_MARKER);
-        std::fs::write(&marker_path, "rbxport usb import stage v1").map_err(err)?;
+        std::fs::write(&marker_path, STAGE_MARKER_CONTENT).map_err(err)?;
         let marker = std::fs::OpenOptions::new().read(true).write(true).open(&marker_path).map_err(err)?;
         fs2::FileExt::lock_exclusive(&marker).map_err(err)?;
         let mut staged_bytes = 0;
@@ -431,6 +443,7 @@ fn validate_settings(name: &str, bytes: &[u8]) -> Result<(), String> {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+    use std::io::Seek;
     #[test]
     fn oversized_analysis_is_rejected_before_reading() {
         let dir = tempfile::tempdir().unwrap();
@@ -477,6 +490,23 @@ mod tests {
         drop(live);
         recover_stale_stages(backup).unwrap();
         assert!(!active.exists());
+    }
+    #[test]
+    fn marker_content_is_read_through_the_locking_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(STAGE_MARKER);
+        std::fs::write(&path, STAGE_MARKER_CONTENT).unwrap();
+        let mut held = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        fs2::FileExt::lock_exclusive(&held).unwrap();
+        // Position must not matter: the helper rewinds before reading.
+        held.seek(std::io::SeekFrom::End(0)).unwrap();
+        assert!(marker_has_owner_content(&mut held).unwrap());
+        for bad in ["", "rbxport usb import stage v2", "rbxport usb import stage v1 trailing"] {
+            held.set_len(0).unwrap();
+            held.rewind().unwrap();
+            std::io::Write::write_all(&mut held, bad.as_bytes()).unwrap();
+            assert!(!marker_has_owner_content(&mut held).unwrap(), "{bad:?}");
+        }
     }
     #[test]
     fn aggregate_stage_limit_prevents_any_track_commit_and_cleans_up() {
