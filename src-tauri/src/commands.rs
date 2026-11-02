@@ -3691,7 +3691,8 @@ pub async fn relocate_track<R: tauri::Runtime>(
     path: String,
 ) -> AppResult<bool> {
     let library = state.library()?;
-    let chosen = std::path::PathBuf::from(&path);
+    // The index holds paths in rekordbox's stored form (`C:/…` on Windows).
+    let chosen = std::path::PathBuf::from(rbl_db::write::rekordbox_folder_path(&path));
     let held = blocking("relocate_track_check", move || Ok(library.row_for_path(&chosen).is_some())).await?;
     if held {
         return Ok(false);

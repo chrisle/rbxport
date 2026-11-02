@@ -876,14 +876,15 @@ fn moved_like(path: &str, file_name: &str, from: &str, to: &str, exists: impl Fn
     exists(&moved).then_some(moved)
 }
 
-/// A path built with `/` in Windows' own separators, as `juce::File` keeps
-/// it, so the library stores what rekordbox would.
-fn native(path: PathBuf) -> PathBuf {
-    if cfg!(windows) {
-        PathBuf::from(path.to_string_lossy().replace('/', "\\"))
-    } else {
-        path
-    }
+/// A path in the form the library stores it.
+///
+/// [OBS rekordbox 7.2.14 Windows, issue #454] `FolderPath` holds forward
+/// slashes and an uppercase drive letter, `C:/Users/…`, for a track Relocate
+/// pointed somewhere, not Windows' backslashes. The index compares stored
+/// paths as text, so a path looked up for "already in the collection" has to
+/// be in that form too. A path without a drive letter is left as it is.
+fn stored_form(path: PathBuf) -> PathBuf {
+    PathBuf::from(rbl_db::write::rekordbox_folder_path(&path.to_string_lossy()))
 }
 
 /// Relocate's "find other missing file using the location of this track":
@@ -917,7 +918,7 @@ pub async fn relocate_by_location<R: tauri::Runtime>(
                 }
                 let name = file_name(path)?;
                 // perf-ok: a `stat` or two per track, under `blocking`.
-                let moved = native(moved_like(path, &name, &from, &to, Path::is_file)?);
+                let moved = stored_form(moved_like(path, &name, &from, &to, Path::is_file)?);
                 library.row_for_path(&moved).is_none().then(|| (id.clone(), moved))
             })
             .collect();
