@@ -866,3 +866,25 @@ test("an empty HOT CUE row beside either deck sets that hot cue (#602)", async (
   await expect(row).not.toHaveAttribute("data-empty");
   await expect(row).toContainText(/\d\d:\d\d/);
 });
+
+test("two-deck RST resets both zooms and never plays or pauses (#832)", async ({ page }) => {
+  const { a } = await twoPlayer(page);
+  const playing = () => page.getByRole("button", { name: "Pause", exact: true }).count();
+  const zoomIn = page.getByRole("button", { name: "Zoom in", exact: true });
+  const reset = page.getByRole("button", { name: "Reset zoom" });
+  const before = await playing();
+
+  await zoomIn.click();
+  await expect.poll(() => zoomOf(page)).toEqual({ a: 8, b: 8 });
+  await reset.click();
+  await expect.poll(() => zoomOf(page)).toEqual({ a: 12, b: 12 });
+  expect(await playing()).toBe(before);
+
+  await zoomIn.click();
+  await reset.focus();
+  await page.keyboard.press("Space");
+  await expect.poll(() => zoomOf(page)).toEqual({ a: 12, b: 12 });
+  await page.keyboard.press("Enter");
+  expect(await playing()).toBe(before);
+  await expect(a.getByTestId("player-detail")).toBeVisible();
+});

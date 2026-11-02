@@ -630,7 +630,14 @@
   padding: 0;
 }
 .zoom button:hover { color: var(--c-icon-on); border-color: var(--c-icon-on); }
-.rst { font-size: var(--f-size-xs); color: var(--c-icon-off); }
+.zoom button.rst {
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  font-size: var(--f-size-xs);
+  color: var(--c-icon-off);
+}
 
 .detail {
   position: relative;

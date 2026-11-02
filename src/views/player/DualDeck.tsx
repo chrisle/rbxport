@@ -324,7 +324,7 @@ export const DualControls = memo(function DualControls({
 export function DualZoom({ onZoom, onReset }: { onZoom: (by: number) => void; onReset: () => void }) {
   const tip = useTooltip();
   return (
-    <div className={styles.zoom} role="group" aria-label="Waveform zoom">
+    <div className={styles.zoom} role="group" aria-label="Waveform zoom" data-own-activation="">
       <button type="button" className={styles.zoomButton} aria-label="Zoom in" onClick={() => onZoom(-1)}>
         <MagnifierPlusIcon className={styles.zoomGlyph} />
       </button>
