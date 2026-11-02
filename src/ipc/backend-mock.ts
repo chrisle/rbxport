@@ -2766,6 +2766,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       d.loopInFrames = from;
       d.loopOutFrames = to;
       d.looping = true;
+      d.autoLooping = false;
       d.frames = target;
       d.generation += 1;
       d.startsAt = Math.max(d.startsAt, performance.now());
