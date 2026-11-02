@@ -97,24 +97,25 @@ it("keeps KEY ticked by default and lets it be ticked for one batch when Analyze
 
 it("discovers registered options and enforces their dependencies while preserving user order", async () => {
   const backend = createMockBackend();
-  __setBackend({ ...backend, analysisStages: async () => [...BUILTIN_ANALYSIS_STAGES, {
+  __setBackend({ ...backend, analysisStages: () => Promise.resolve([...BUILTIN_ANALYSIS_STAGES, {
     id: "example.spectrum", label: "Spectrum", description: "Measure spectral changes", requires: ["core.beat_grid"], produces: ["example.spectrum"], defaultEnabled: false, requiresFullTrack: true, revision: "1",
-  }] });
+  }]) });
   let chosen: AnalysisChoice | undefined;
   await act(async () => {
     root.render(<AnalysisDialog count={1} initialMode="rbxport" initialBpmRange="70-180" initialFirstBeatCue={false}
       onConfirm={settings => { chosen = settings; }} onCancel={() => {}} />);
+    await Promise.resolve();
   });
   const extension = [...host.querySelectorAll("label")].find(label => label.textContent === "Spectrum")?.querySelector("input");
   expect(extension).toBeTruthy();
-  await act(async () => { extension?.click(); });
+  await act(async () => { extension?.click(); await Promise.resolve(); });
   const up = host.querySelector<HTMLButtonElement>('[aria-label="Move Spectrum up"]');
-  await act(async () => { up?.click(); }); // before KEY is valid
-  await act(async () => { up?.click(); }); // before Grid is invalid
+  await act(async () => { up?.click(); await Promise.resolve(); }); // before KEY is valid
+  await act(async () => { up?.click(); await Promise.resolve(); }); // before Grid is invalid
   const ok = [...host.querySelectorAll("button")].find(button => button.textContent === "OK");
   expect(ok?.disabled).toBe(true);
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("requires BPM / Grid");
-  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Move Spectrum down"]')?.click(); });
-  await act(async () => { ok?.click(); });
+  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Move Spectrum down"]')?.click(); await Promise.resolve(); });
+  await act(async () => { ok?.click(); await Promise.resolve(); });
   expect(chosen).toMatchObject({ extensionStages: ["example.spectrum"], stageOrder: ["waveform", "grid", "example.spectrum", "key"] });
 });
