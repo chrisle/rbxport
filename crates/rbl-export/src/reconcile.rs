@@ -697,7 +697,9 @@ fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack
                     comment: r.get(7)?,
                     date_added: r.get(8)?,
                     release_date: r.get(9)?,
-                    bpm_x100: crate::snapshot::unsigned_or_zero(r.get(10)?),
+                    // A carried/fallback row is written back to both databases.
+                    // Reject an invalid BPM before it can erase a healthy value.
+                    bpm_x100: r.get(10)?,
                     duration_sec: crate::snapshot::unsigned_or_zero(r.get(11)?),
                     rating: crate::snapshot::onelibrary_stars(r.get(12)?),
                     color_id: crate::snapshot::unsigned_or_zero(r.get(13)?),

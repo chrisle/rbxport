@@ -596,3 +596,63 @@ fn an_out_of_range_integer_column_on_a_track_the_stick_keeps_does_not_stop_the_s
         sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap_or_else(|e| panic!("{column}={value} second sync: {e}"));
     }
 }
+
+// A malformed OneLibrary BPM must not become a write-back source: carrying
+// that row or falling back to it when the master audio is missing used to
+// overwrite a healthy Device Library BPM with zero. Reject before changing
+// the stick, with and without a recorded baseline or a selected master row.
+#[test]
+fn invalid_onelibrary_bpm_stops_sync_without_changing_device_data() {
+    for invalid in [-1i64, i64::from(u32::MAX) + 1] {
+        for recorded in [false, true] {
+            for selected in [false, true] {
+                for missing_audio in [false, true] {
+                    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+                    let (tracks, playlists) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
+                    if recorded { sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap(); }
+                    let kept = device_id(dest.path(), 3);
+                    if missing_audio { std::fs::remove_file(&tracks[2].source_path).unwrap(); }
+                    let one = rbl_onelibrary::playlists::open_read_write(&dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+                    assert_eq!(one.execute("UPDATE content SET bpmx100 = ?2 WHERE content_id = ?1", rusqlite::params![kept, invalid]).unwrap(), 1);
+                    drop(one);
+                    let before: Vec<_> = files_under(dest.path()).into_iter().map(|name| {
+                        let bytes = std::fs::read(dest.path().join(&name)).unwrap();
+                        (name, bytes)
+                    }).collect();
+                    let result = if selected { sync_to(dest.path(), &tracks, &playlists, DB_ID) } else {
+                        let selection = [SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
+                        sync_to(dest.path(), &tracks[..2], &selection, DB_ID)
+                    };
+                    let legacy = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
+                    let bpm = legacy.tracks.iter().find(|t| t.id == kept).unwrap().bpm_x100;
+                    let context = format!("bpm={invalid}, recorded={recorded}, selected={selected}, missing_audio={missing_audio}");
+                    eprintln!("{context}: result={:?}, legacy_bpm={bpm}", result.as_ref().map(|r| r.tracks).map_err(ToString::to_string));
+                    assert!(result.is_err(), "{context}: malformed BPM must not be written back");
+                    assert_eq!(bpm, 12_800, "{context}: healthy legacy BPM");
+                    assert_eq!(tracks[2].bpm_x100, 12_800, "{context}: source metadata");
+                    assert_eq!(files_under(dest.path()), before.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>(), "{context}: file set");
+                    for (name, bytes) in before {
+                        assert_eq!(std::fs::read(dest.path().join(&name)).unwrap(), bytes, "{context}: {name}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn valid_zero_and_positive_bpm_still_sync() {
+    for bpm in [0, 12_800] {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let mut source = track(src.path(), 1, 0);
+        source.bpm_x100 = bpm;
+        let tracks = [source];
+        let playlists = [SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0], ..Default::default() }];
+        sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
+        std::fs::remove_file(rbl_export::Manifest::path(dest.path())).unwrap();
+        sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap();
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            assert_eq!(device_library::read(dest.path(), format).unwrap().tracks[0].bpm_x100, bpm);
+        }
+    }
+}
