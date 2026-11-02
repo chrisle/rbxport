@@ -17,6 +17,22 @@
   color: var(--c-icon-on);
   font-size: var(--f-size-pref-label);
 }
+/* ConfirmHost's own prompt: a native dialog, so it joins the top layer and
+   paints above any other open app dialog (#839) rather than behind it. */
+.dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  padding: 16px 20px 18px;
+  border: 1px solid var(--c-pref-button-border);
+  border-radius: 10px;
+  background: var(--c-black);
+  color: var(--c-icon-on);
+  font-size: var(--f-size-pref-label);
+}
+.dialog::backdrop { background: var(--c-modal-scrim); }
 .title { font-weight: 700; }
 .message { margin: 10px 0 18px; line-height: 1.4; }
 .buttons { display: flex; justify-content: flex-end; gap: var(--s-pref-button-gap); }
