@@ -88,6 +88,16 @@ describe("detectPlatform", () => {
 
 describe("dispatch", () => {
   const field = { tagName: "INPUT" };
+
+  it("leaves Space and Enter to a focused control that keeps them for itself (#832)", () => {
+    const rst = { tagName: "BUTTON", closest: (selector: string) => (selector === "[data-own-activation]" ? {} : null) };
+    const plain = { tagName: "BUTTON", closest: () => null };
+    expect(dispatch({ key: " " }, MAC, plain)).toBe("playPause");
+    expect(dispatch({ key: " " }, MAC, rst)).toBeNull();
+    expect(dispatch({ key: "Enter" }, MAC, rst)).toBeNull();
+    // Only those two keys: the rest of the map still applies beside the zoom.
+    expect(dispatch({ key: "q" }, MAC, rst)).toBe(dispatch({ key: "q" }, MAC, plain));
+  });
   const list = { tagName: "DIV" };
 
   it("lets a field keep its own arrow keys and selection", () => {

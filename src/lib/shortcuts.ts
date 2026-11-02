@@ -352,7 +352,11 @@ export function actionFor(chord: KeyChord, platform: Platform, overrides: KeyOve
 export interface FocusTarget {
   tagName?: string;
   isContentEditable?: boolean;
+  closest?: (selector: string) => unknown;
 }
+
+/** Marks a control that keeps Space and Enter for its own activation (#832). */
+export const OWN_ACTIVATION = "data-own-activation";
 
 /**
  * Whether a key press should be ignored because the user is typing into a
@@ -401,6 +405,9 @@ export function dispatchBinding(
   const binding = matchBinding(chord, platform, overrides);
   if (binding?.action === undefined) return null;
   if (isTyping(target) && !WHILE_TYPING.has(binding.action)) return null;
+  // Space is Play/Pause and Enter loads a track, but on a focused control that
+  // marks itself (the zoom buttons) they press that control, not the deck.
+  if ((chord.key === " " || chord.key === "Enter") && target?.closest?.(`[${OWN_ACTIVATION}]`)) return null;
   return binding;
 }
 

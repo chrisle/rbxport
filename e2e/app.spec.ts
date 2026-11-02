@@ -3225,3 +3225,36 @@ test("errors go to the status bar in red, not over the deck", async ({ page }) =
   }, red);
   expect(colour).toBe(expected);
 });
+
+test("single-deck RST resets the zoom and never plays or pauses (#832)", async ({ page }) => {
+  // rekordbox 7.2.18 manual p.75: RST is "Reset the zoom ratio".
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+  const detail = page.getByTestId("player-detail");
+  const beats = () => detail.locator("span").count();
+  await expect.poll(beats).toBeGreaterThan(10);
+  const normal = await beats();
+
+  const reset = page.getByRole("button", { name: "Reset zoom" });
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await expect.poll(beats).not.toBe(normal);
+
+  // Stopped: RST resets and the deck stays stopped.
+  await reset.click();
+  await expect.poll(beats).toBe(normal);
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+
+  // Playing: a click and Space/Enter on the focused RST leave it playing.
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await reset.click();
+  await expect.poll(beats).toBe(normal);
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await reset.focus();
+  await page.keyboard.press("Space");
+  await expect.poll(beats).toBe(normal);
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+});
