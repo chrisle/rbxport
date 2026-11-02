@@ -15,6 +15,7 @@ pub mod device_import;
 pub mod device_library;
 pub mod estimate;
 pub mod ext_pdb;
+pub mod flac_seek;
 pub mod manifest;
 pub mod incremental;
 pub mod cache;
@@ -1729,6 +1730,20 @@ fn export_cancellable_inner(
                     if extension == "DAT" || extension == "EXT" {
                         parsed.sections.retain(|s| !s.is_cue_list());
                         parsed.sections.extend(rbl_anlz::cues::sections(cues, extension == "EXT"));
+                    }
+                }
+                // rekordbox ends a FLAC's EXT with its `PVB2` seek index; a
+                // CDJ-2000NXS2 without one scans the file on load. A converted
+                // track is no longer that FLAC, so its index cannot stay.
+                if extension.eq_ignore_ascii_case("EXT") {
+                    let pvb2 = rbl_core::FourCc::new(b"PVB2");
+                    let flac = conversion.is_none() && place.audio.to_ascii_lowercase().ends_with(".flac");
+                    if !flac {
+                        parsed.sections.retain(|s| s.tag != pvb2);
+                    } else if parsed.section(b"PVB2").is_none() {
+                        if let Some(seek) = flac_seek::section(&track.source_path).ok().flatten() {
+                            parsed.sections.push(seek);
+                        }
                     }
                 }
                 Ok::<_, std::io::Error>((extension.clone(), parsed.to_bytes()))
