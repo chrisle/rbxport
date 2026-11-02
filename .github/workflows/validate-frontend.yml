@@ -103,9 +103,9 @@ jobs:
           FULL: ${{ inputs.full }}
         run: |
           if [ "$FULL" = true ] || [ -z "$BASE_REF" ]; then
-            pnpm test
+            pnpm test --maxWorkers=2
           else
-            pnpm exec vitest run --changed "$BASE_REF" --passWithNoTests
+            pnpm exec vitest run --maxWorkers=2 --changed "$BASE_REF" --passWithNoTests
           fi
 
       - name: Bundle budget
