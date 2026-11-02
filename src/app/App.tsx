@@ -2251,13 +2251,14 @@ function AppBody() {
 
   // Analysis writes the result to the library, so it is refused the way any
   // other write is while rekordbox holds the file or the library is protected.
-  const ANALYSIS_REFUSED = "The library is read-only, so nothing can be analysed.";
+  // The message names the real cause, as every other write refusal does.
+  const refuseAnalysis = useEventCallback(() => refuse(refusal(advancedPrefs.protectLibrary)));
   const [analysisSelection, setAnalysisSelection] = useState<readonly QueueItem[] | null>(null);
   /** Capture either browser's selection before opening the settings dialog. */
   const analyseTracks = useEventCallback((tracks: readonly { id: string; title: string }[]) => {
     if (tracks.length === 0) return;
     if (readOnly) {
-      refuse(ANALYSIS_REFUSED);
+      refuseAnalysis();
       return;
     }
     setAnalysisSelection(tracks.map(({ id, title }) => ({ id, title })));
@@ -2274,12 +2275,12 @@ function AppBody() {
   const analyseOne = useCallback(
     (id: string, title: string) => {
       if (readOnly) {
-        refuse(ANALYSIS_REFUSED);
+        refuseAnalysis();
         return;
       }
       setAnalysisSelection([{ id, title }]);
     },
-    [readOnly, refuse],
+    [readOnly, refuseAnalysis],
   );
   // Once, at launch, with Auto Analysis on: rekordbox asks "Auto Analysis is
   // starting." before it analyses the Collection tracks it never analysed.
@@ -2298,7 +2299,7 @@ function AppBody() {
   const startAutoAnalysis = useEventCallback(async (offer: UnanalysedTracks, settings: AnalysisChoice) => {
     setAutoAnalysis(null);
     if (readOnly) {
-      refuse(ANALYSIS_REFUSED);
+      refuseAnalysis();
       return;
     }
     // Gathered before queueing, so stopping the run cannot be undone by a
@@ -3654,7 +3655,7 @@ function AppBody() {
           initialKey={analysisPrefs.detectKey}
           onCancel={() => setAnalysisSelection(null)}
           onConfirm={settings => {
-            if (readOnly) { refuse(ANALYSIS_REFUSED); return; }
+            if (readOnly) { refuseAnalysis(); return; }
             analysis.add(analysisSelection, settings);
             setAnalysisSelection(null);
           }} />
