@@ -925,19 +925,74 @@ fn the_metronome_clicks_alike_on_all_four_beats_of_a_bar() {
 /// The median rather than a count over the window, because these tests pull
 /// the null sink from a thread that can be descheduled on a busy machine. Each
 /// underrun leaves a run of silence and a broken cycle either side of it, and
-/// a count over the window measures those as well as the tone. The cycles the
-/// deck did play are still the right length, and they are most of them.
+/// a count over the window measures those as well as the tone.
+///
+/// Only spacings inside one stretch of audible output count. Two crossings
+/// either side of a gap are not a cycle of the tone: the gap holds a whole
+/// number of them, plus the fade, and a spacing across it reads as a slower
+/// tone. Starved hard enough (24 busy loops on 4 cores) the window was 64%
+/// silence, 153 of its 310 spacings straddled a gap, and the median of them
+/// read 428 Hz for an octave the deck had played at 441. The cycles it did
+/// play are the right length.
 fn tone_hz(left: &[f32], rate: u32) -> f32 {
-    let rising: Vec<usize> = left
-        .windows(2)
-        .enumerate()
-        .filter(|(_, w)| w[0] <= 0.0 && w[1] > 0.0)
-        .map(|(i, _)| i)
-        .collect();
-    let mut periods: Vec<usize> = rising.windows(2).map(|w| w[1] - w[0]).collect();
+    let mut periods: Vec<usize> = Vec::new();
+    for stretch in audible_stretches(left) {
+        let rising: Vec<usize> =
+            stretch.windows(2).enumerate().filter(|(_, w)| w[0] <= 0.0 && w[1] > 0.0).map(|(i, _)| i).collect();
+        periods.extend(rising.windows(2).map(|w| w[1] - w[0]));
+    }
     assert!(periods.len() >= 8, "too few cycles to measure: {}", periods.len());
     periods.sort_unstable();
     rate as f32 / periods[periods.len() / 2] as f32
+}
+
+/// The stretches of `left` between gaps, a gap being two quiet samples in a
+/// row. The tone itself is never below the threshold for more than one: at
+/// 440 Hz it moves by about 0.05 a sample.
+fn audible_stretches(left: &[f32]) -> Vec<&[f32]> {
+    let mut stretches = Vec::new();
+    let mut start = 0;
+    let mut quiet = 0;
+    for (i, s) in left.iter().enumerate() {
+        if s.abs() < 1e-3 {
+            quiet += 1;
+            if quiet == 2 {
+                if i > start + 1 {
+                    stretches.push(&left[start..i - 1]);
+                }
+                start = i + 1;
+            } else if quiet > 2 {
+                start = i + 1;
+            }
+        } else {
+            quiet = 0;
+        }
+    }
+    if start < left.len() {
+        stretches.push(&left[start..]);
+    }
+    stretches
+}
+
+#[test]
+fn a_tone_read_through_underruns_is_measured_on_the_cycles_the_deck_played() {
+    // Bursts of 440 Hz each followed by 2.5 cycles of silence: the shape of a
+    // starved sink. One burst of three and a half cycles and five of under a
+    // cycle, over and over. Only the long one has a spacing of its own, so
+    // the spacings across the gaps outnumber it and their median reads a slow
+    // tone, where the cycles that played are exactly 440 Hz.
+    let cycle = 100.2_f32;
+    let mut left = Vec::new();
+    for _ in 0..40 {
+        for burst in [3.5_f32, 0.8, 0.8, 0.8, 0.8, 0.8] {
+            for n in 0..(burst * cycle) as usize {
+                left.push(0.8 * (n as f32 / cycle * std::f32::consts::TAU).sin());
+            }
+            left.extend(std::iter::repeat_n(0.0_f32, (2.5 * cycle) as usize));
+        }
+    }
+    let hz = tone_hz(&left, RATE);
+    assert!((hz - 440.0).abs() < 8.0, "a starved 440 Hz tone reads {hz} Hz");
 }
 
 /// Frames of the deck's own audio in the output, for timing what it played.
