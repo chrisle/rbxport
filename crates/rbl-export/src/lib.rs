@@ -319,7 +319,24 @@ fn fat_safe(name: &str) -> String {
     if out.is_empty() {
         out.push_str("Unknown");
     }
+    // Windows reserves these names for legacy devices (case-insensitively,
+    // up to the first dot) and `CreateFile`/`CreateDirectory` refuse them
+    // with `ERROR_INVALID_NAME` even written as e.g. `Con.mp3` (#844), so an
+    // artist, album or track named exactly one of these would fail every
+    // sync. Prefixing keeps the sync going with a name close to the original.
+    if is_reserved_device_name(out.split('.').next().unwrap_or(&out)) {
+        out.insert(0, '_');
+    }
     out
+}
+
+fn is_reserved_device_name(stem: &str) -> bool {
+    matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+            | "COM0" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
+            | "LPT0" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    )
 }
 
 /// A rekordbox-style audio filename: FAT-safe and short enough for the player,
@@ -3007,6 +3024,25 @@ mod tests {
         // Unicode is fine on FAT32 long names.
         assert_eq!(fat_safe("Ébano — Tiësto"), "Ébano — Tiësto");
         assert_eq!(fat_safe("Kesa\u{308} (On Kaunis).aiff"), "Kesä (On Kaunis).aiff");
+    }
+
+    /// #844: syncing an artist, album or track named exactly a Windows
+    /// reserved device name failed every stick at once with `ERROR_INVALID_NAME`
+    /// (os error 123), because `CreateFile`/`CreateDirectory` reject these
+    /// names even written with an extension, and nothing sanitized them.
+    #[test]
+    fn fat_safe_escapes_windows_reserved_device_names() {
+        assert_eq!(fat_safe("CON"), "_CON");
+        assert_eq!(fat_safe("con"), "_con");
+        assert_eq!(fat_safe("Nul"), "_Nul");
+        assert_eq!(fat_safe("COM1"), "_COM1");
+        assert_eq!(fat_safe("lpt9"), "_lpt9");
+        assert_eq!(dir_name("AUX"), "_AUX");
+        assert_eq!(fat_file_name("PRN.mp3"), "_PRN.mp3");
+        // Not reserved: longer names and non-matching digits stay untouched.
+        assert_eq!(fat_safe("Content"), "Content");
+        assert_eq!(fat_safe("COM10"), "COM10");
+        assert_eq!(fat_safe("CONTACT"), "CONTACT");
     }
 
     #[test]
