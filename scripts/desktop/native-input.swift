@@ -68,6 +68,35 @@ if args.count == 2, args[0] == "--layout", let pid = Int32(args[1]), let window 
     Thread.sleep(forTimeInterval:0.4)
     print("{\"layout\":true}"); exit(0)
 }
+// Drags a track row out of the library, to a point inside the same window, or
+// cancels it with Escape. Both leave the filesystem untouched: the drop never
+// lands on Finder or the desktop.
+if args.count >= 7, args[0] == "--drag-out", let pid = Int32(args[1]), let x = Double(args[2]), let y = Double(args[3]),
+   let viewport = Double(args[4]), let toX = Double(args[5]), let toY = Double(args[6]) {
+    guard let appWindow = windows(pid).first, let appOrigin = point(appWindow,kAXPositionAttribute), let appSize = size(appWindow) else { fail("No test app window") }
+    AXUIElementPerformAction(appWindow,kAXRaiseAction as CFString)
+    let top = appOrigin.y + appSize.height - viewport
+    let from = CGPoint(x:appOrigin.x+x,y:top+y)
+    let to = CGPoint(x:appOrigin.x+toX,y:top+toY)
+    mouse(.mouseMoved,from); Thread.sleep(forTimeInterval:0.15)
+    mouse(.leftMouseDown,from); Thread.sleep(forTimeInterval:0.2)
+    for step in 1...45 {
+        let t = Double(step)/45
+        mouse(.leftMouseDragged,CGPoint(x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t))
+        Thread.sleep(forTimeInterval:0.025)
+    }
+    Thread.sleep(forTimeInterval:0.4)
+    if args.contains("--cancel") {
+        let down = CGEvent(keyboardEventSource:nil,virtualKey:53,keyDown:true)
+        let up = CGEvent(keyboardEventSource:nil,virtualKey:53,keyDown:false)
+        down?.post(tap:.cghidEventTap); up?.post(tap:.cghidEventTap)
+        Thread.sleep(forTimeInterval:0.1)
+    }
+    mouse(.leftMouseUp,to)
+    Thread.sleep(forTimeInterval:0.7)
+    print("{\"trackDragOut\":true,\"cancelled\":\(args.contains("--cancel"))}")
+    exit(0)
+}
 guard args.count >= 5, let pid = Int32(args[0]), let x = Double(args[1]), let y = Double(args[2]), let viewport = Double(args[3]) else { fail("Usage: native-input <app-pid> <client-x> <client-y> <viewport-height> <files...> [--cancel]") }
 let cancel = args.contains("--cancel")
 let files = args.dropFirst(4).filter { $0 != "--cancel" }.map { URL(fileURLWithPath: $0) }
