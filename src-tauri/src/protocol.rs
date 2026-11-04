@@ -339,7 +339,7 @@ mod tests {
         std::os::unix::fs::symlink(&secret, stick.join("PIONEER/Artwork/00001/a2.jpg")).unwrap();
 
         let state = Arc::new(AppState::new());
-        let asset = |artwork: &str| crate::device_library::DeviceAssets { mount: stick.clone(), audio: String::new(), analysis: String::new(), artwork: artwork.into() };
+        let asset = |artwork: &str| crate::device_library::DeviceAssets { mount: stick.clone(), audio: String::new(), analysis: String::new(), artwork: artwork.into(), library: None };
         state.remember_device_assets(&stick, [
             ("file:plain".to_string(), asset("/PIONEER/Artwork/00001/a1.jpg")),
             ("file:linked".to_string(), asset("/PIONEER/Artwork/00001/a2.jpg")),

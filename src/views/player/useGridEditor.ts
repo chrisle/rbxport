@@ -212,7 +212,7 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   const undo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => edits.gridUndo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, run, cancelTaps]);
   const redo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => edits.gridRedo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, run, cancelTaps]);
   const toggleLock = useCallback(() => {
-    if (hasGrid && !readOnly && trackId !== null && state !== null) { cancelTaps(); run(edits => edits.gridLock(trackId, !state.locked)); }
+    if (hasGrid && !readOnly && trackId !== null && state !== null && state.lockable !== false) { cancelTaps(); run(edits => edits.gridLock(trackId, !state.locked)); }
   }, [hasGrid, readOnly, trackId, state, cancelTaps, run]);
   return { state, nudging, hasGrid, canEdit, fromMs, tapBpmX100: tapTempo(taps), tap, mark, shift, stretch, double, halve, adjustAll, adjustFrom, align, setBpm, undo, redo, toggleLock };
 }

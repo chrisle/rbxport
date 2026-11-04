@@ -1786,5 +1786,8 @@
   "Only tracks already in your collection are imported. Unmatched tracks are left out; if none match, no playlist is created.": "Solo se importan las pistas que ya están en tu colección. Se omiten las pistas sin coincidencia; si ninguna coincide, no se crea ninguna lista de reproducción.",
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Si faltan pistas, elige si quieres copiarlas y dónde guardarlas. Cancelar detiene la importación.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
-  "No tracks found to import.": "No tracks found to import."
+  "No tracks found to import.": "No tracks found to import.",
+  "Analysis Lock is set on tracks in the collection, not on a device": "Analysis Lock is set on tracks in the collection, not on a device",
+  "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
+  "Unlock the beat grid for editing": "Unlock the beat grid for editing"
 }
