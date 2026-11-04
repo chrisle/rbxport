@@ -103,10 +103,19 @@ jobs:
           FULL: ${{ inputs.full }}
         run: |
           if [ "$FULL" = true ] || [ -z "$BASE_REF" ]; then
-            pnpm test
-          else
-            pnpm exec vitest run --changed "$BASE_REF" --passWithNoTests
+            pnpm test --maxWorkers=2
+            exit
           fi
+          # A change to this workflow cannot be mapped to test files by
+          # --changed, which would select nothing and pass. Run the full suite.
+          # Any git failure (status other than 0 or 1) must fail the step.
+          status=0
+          git diff --quiet "$BASE_REF...HEAD" -- .github/workflows/validate-frontend.yml || status=$?
+          case "$status" in
+            0) pnpm exec vitest run --maxWorkers=2 --changed "$BASE_REF" --passWithNoTests ;;
+            1) pnpm test --maxWorkers=2 ;;
+            *) echo "git diff failed with status $status" >&2; exit "$status" ;;
+          esac
 
       - name: Bundle budget
         if: inputs.run_budget
