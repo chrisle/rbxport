@@ -28,6 +28,10 @@ pub struct AppState {
     /// tests run without one.
     history_changed: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>>,
     pub(crate) analysis_write: parking_lot::Mutex<()>,
+    /// How many times an edit has opened the library for writing. Each open
+    /// derives the key again (about 60 ms), so a loop that edits per track
+    /// is measured by this, not by the clock (#794).
+    writer_opens: std::sync::atomic::AtomicU64,
     pub(crate) backup_progress: parking_lot::Mutex<crate::backups::BackupProgress>,
     pub(crate) backup_sizes: parking_lot::Mutex<crate::backup_sizes::SizeCache>,
     inner: RwLock<Inner>,
@@ -299,6 +303,7 @@ impl AppState {
             edit_history: parking_lot::Mutex::new(EditHistory::default()),
             history_changed: std::sync::OnceLock::new(),
             analysis_write: parking_lot::Mutex::new(()),
+            writer_opens: std::sync::atomic::AtomicU64::new(0),
             backup_progress: parking_lot::Mutex::new(crate::backups::BackupProgress::default()),
             backup_sizes: parking_lot::Mutex::new(crate::backup_sizes::SizeCache::default()),
             inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }),
@@ -467,6 +472,12 @@ impl AppState {
         let _ = self.history_changed.set(Box::new(listener));
     }
 
+    /// How many times an edit has opened the library for writing.
+    #[cfg(test)]
+    pub(crate) fn writer_opens(&self) -> u64 {
+        self.writer_opens.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn write_inner<T, U>(
         &self,
         owns_history: bool,
@@ -490,6 +501,7 @@ impl AppState {
         }
         let gate_ms = started.elapsed().as_millis();
         let mut writer = rbl_db::write::Writer::open(location.clone(), self.backup_dir.clone())?;
+        self.writer_opens.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         writer.disable_automatic_backups();
         let open_ms = started.elapsed().as_millis();
         let result = edit(&mut writer);
