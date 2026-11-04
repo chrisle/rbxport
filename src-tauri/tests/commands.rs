@@ -2216,6 +2216,38 @@ fn a_memory_cue_saved_by_the_command_survives_a_library_reopen() {
     assert_eq!((saved[0].id.to_string(), saved[0].position_ms, saved[0].kind), (added, 12_500, 0));
 }
 
+#[test]
+fn issue_608_collection_cue_read_does_not_accept_linux_usb_file_ids() {
+    let s = shell();
+    let collection_id = track_id(4);
+    run(cues::add_cue(
+        s.handle(),
+        s.state(),
+        collection_id.clone(),
+        CueKind::Hot('A'),
+        25,
+    ))
+    .unwrap();
+    let collection_cues = run(commands::track_cues(s.state(), collection_id)).unwrap();
+    assert_eq!(collection_cues.len(), 1);
+    assert_eq!(
+        (
+            collection_cues[0].letter.as_str(),
+            collection_cues[0].position_ms
+        ),
+        ("A", 25)
+    );
+
+    for usb_id in [
+        "file:/run/media/tester/TEST_USB/Contents/Artist/Album/Track.wav",
+        "file:/run/media/tester/TEST_USB/contents/artist/album/track.wav",
+        "file:/run/media/tester/test_usb/Contents/Artist/Album/Track.wav",
+    ] {
+        assert!(run(commands::track_cues(s.state(), usb_id.into())).unwrap().is_empty(),
+            "file: IDs cannot resolve the collection row, regardless of mount or folder case: {usb_id}");
+    }
+}
+
 /// A drive library's Location, in the Info panel and the browser column, is
 /// the path rekordbox shows: the stored `FolderPath` with `BaseDBDrive`
 /// swapped for `CurrentDBDrive` (`replaceDrivePath`), not the raw column.
