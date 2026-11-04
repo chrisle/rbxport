@@ -215,6 +215,35 @@ impl Section {
         }
         Some(entries)
     }
+
+    /// Decode a complete extended cue list. Importers must not replace local
+    /// cues with the partial result of a damaged entry frame.
+    pub fn strict_cue_entries(&self) -> Result<Option<Vec<CueEntry>>> {
+        if self.tag != FourCc::new(b"PCO2") {
+            return Ok(None);
+        }
+        let mut entries = Vec::new();
+        let mut at = 0usize;
+        while at < self.payload.len() {
+            let remaining = &self.payload[at..];
+            if remaining.len() < CUE_ENTRY_MIN || remaining.get(..4) != Some(b"PCP2") {
+                return Err(AnlzError::Truncated("PCO2 cue entry frame"));
+            }
+            let length = be32(remaining, 8) as usize;
+            if length < CUE_ENTRY_MIN || length > remaining.len() {
+                return Err(AnlzError::Truncated("PCO2 cue entry length"));
+            }
+            entries.push(cue_entry(&remaining[..length], length));
+            at += length;
+        }
+        let declared = self.header.get(4..6)
+            .map(|count| usize::from(u16::from_be_bytes([count[0], count[1]])))
+            .ok_or(AnlzError::Truncated("PCO2 cue count"))?;
+        if entries.len() != declared {
+            return Err(AnlzError::Truncated("PCO2 cue count"));
+        }
+        Ok(Some(entries))
+    }
 }
 
 /// One entry of an extended cue list.
@@ -622,6 +651,18 @@ impl Anlz {
     /// DAT's legacy cue lists, used when no EXT analysis file is present.
     pub fn legacy_cue_entries(&self) -> Vec<CueEntry> {
         self.sections.iter().filter_map(Section::as_legacy_cue_entries).flatten().collect()
+    }
+
+
+    /// All modern cues, rejecting malformed framing in any PCO2 section.
+    pub fn strict_cue_entries(&self) -> Result<Vec<CueEntry>> {
+        let mut entries = Vec::new();
+        for section in &self.sections {
+            if let Some(decoded) = section.strict_cue_entries()? {
+                entries.extend(decoded);
+            }
+        }
+        Ok(entries)
     }
 
     pub fn path(&self) -> Option<String> {
