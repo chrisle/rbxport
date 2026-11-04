@@ -1393,6 +1393,8 @@ export interface Device {
   volumeId: string;
   /** What is already on it, null when it holds no export. */
   export: DeviceExport | null;
+  /** An export is writing to it, so what it holds could not be read. */
+  busy?: boolean;
 }
 
 /** One of the two libraries a stick can hold: `export.pdb` or `exportLibrary.db`. */

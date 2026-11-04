@@ -54,6 +54,10 @@ describe("devices", () => {
     expect(contentsText(stick)).toBe("No export on this device yet.");
   });
 
+  it("says a stick being written to is busy, not empty", () => {
+    expect(contentsText({ ...stick, busy: true })).toMatch(/Being written to/);
+  });
+
   it("says a sync will be incremental when it can be", () => {
     const ours = {
       ...stick,
