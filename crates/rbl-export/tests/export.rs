@@ -59,6 +59,42 @@ fn writes_a_tree_a_player_can_browse() {
     assert!(check.is_ok());
 }
 
+/// #844: syncing to Windows previously failed every stick at once with
+/// `ERROR_INVALID_NAME` ("The filename, directory name, or volume label
+/// syntax is incorrect.", os error 123) when an artist or album was named
+/// exactly a reserved Windows device name, because `Contents/<artist>/<album>`
+/// then collided with a name `CreateDirectory` refuses outright.
+#[test]
+fn an_artist_or_album_named_a_windows_reserved_device_name_still_exports() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = common::stick();
+    let path = src.path().join("source-1.mp3");
+    std::fs::write(&path, vec![1_u8; 2048]).unwrap();
+    let track = SourceTrack {
+        source_path: path,
+        title: "Reserved".into(),
+        artist: "CON".into(),
+        album: "AUX".into(),
+        genre: "House".into(),
+        key: "Am".into(),
+        bpm_x100: 12_800,
+        duration_sec: 300,
+        rating: 4,
+        date_added: "2026-09-06".into(),
+        analysis: vec![("DAT".into(), rbl_anlz::AnlzBuilder::new().path("/x.mp3").finish())],
+        ..SourceTrack::default()
+    };
+
+    let report = export(dest.path(), &[track], &[]).unwrap();
+    assert_eq!(report.tracks, 1);
+    assert!(report.skipped.is_empty());
+    assert!(report.failed.is_empty());
+    assert!(dest.path().join("Contents/_CON/_AUX/source-1.mp3").is_file());
+
+    let check = verify(dest.path()).unwrap();
+    assert!(check.is_ok());
+}
+
 #[test]
 fn hfs_export_uses_hidden_filesystem_and_database_paths() {
     let src = tempfile::tempdir().unwrap();
