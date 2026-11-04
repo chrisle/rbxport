@@ -21,6 +21,16 @@ owns file I/O, decoding, and resampling. The audio callback reads ring-buffer
 blocks, mixes them, fills missing audio with silence, and publishes positions.
 Blocks carry generation information so seeking can discard stale decoded data.
 
+A saved Active Loop is armed separately from the current deck loop. The app
+supplies only a marked Kind-4 memory loop while Active Loop Playback is enabled.
+The decoder limits a read at its IN frame, then starts that loop without a
+seek. An already playing manual, hot-cue, or beat loop keeps its range. EXIT
+disarms the current pass; a seek before IN permits a later crossing. Clearing
+the mark or disabling playback exits a loop that this candidate started.
+Arming after a load refills buffered audio from the audible head when that
+head is still before IN. Synthetic fixtures check this path; native audio and
+physical-player behavior require separate observation.
+
 Keep blocking work and locks out of the callback. The steady-state allocation
 test counts allocations after callback initialization; do not move file access,
 format decoding, or control-thread work into that path.
