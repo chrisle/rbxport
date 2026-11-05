@@ -1,5 +1,32 @@
 [
   {
+    "version": "1.10.0",
+    "date": "2026-11-05",
+    "changes": [
+      "(New) Create, rename, reorder, and delete My Tags, filter tracks by selectable My Tag columns, and optionally add My Tags to track comments.",
+      "(New) Undo cue and loop edits, track relocation, playlist creation and reordering, Reload Tag, and Tag List or history removals from Edit > Undo.",
+      "(New) Export tracks and playlists by dropping them onto a USB device, and add tracks already on a stick to its playlists.",
+      "(New) Choose upper-part or whole-artwork views with their own track-list columns in either browser.",
+      "(New) Edit track colours directly in collection and playlist rows, and see which playlists contain a track in its information panel.",
+      "(New) Mark played tracks in green, choose how long playback takes to mark a track as played, and reset played marks from Preferences.",
+      "(New) Assign fixed-distance beat-jump shortcuts and use Shift+Enter to load the selected track onto Player 2.",
+      "(New) Set an Active Loop from the MEMORY list and export it to USB as an active memory loop.",
+      "(New) Keep existing track keys during analysis with the Analyze key preference.",
+      "(Fixed) Beat jumps stay aligned with the audio head and move active loops, including jumps made with fixed-distance shortcuts.",
+      "(Fixed) USB sync preserves valid device BPM and year values when other metadata is invalid, and handles out-of-range device values and negative cue positions.",
+      "(Fixed) USB export bounds its internal preparation cache and escapes Windows reserved device names in exported paths.",
+      "(Fixed) USB imports can use DAT-only cues and skip missing analysis files without stopping the import.",
+      "(Fixed) Device actions and USB playlist drops work in the secondary browser, and Linux eject helpers run outside the AppImage library environment.",
+      "(Fixed) Decks remember the chosen audio output device, and either deck can follow the first playing deck with BEAT SYNC.",
+      "(Fixed) External file drops import into All Tracks, and playlist-add results report how many tracks were actually added.",
+      "(Fixed) Analysis saves keys in the selected notation, and blue, colour, and 3-band waveforms use the updated waveform generation.",
+      "(Fixed) The player RST button resets zoom without starting or stopping playback.",
+      "(Improved) The Missing File Manager can be resized, sorted, and adjusted by column, with an option to check a track's file again.",
+      "(Improved) Sort playlist-folder items from the native Playlist menu in one undoable operation, and keep each deck's beat-jump size between launches.",
+      "(Improved) Library Protection messages explain why import or analysis is unavailable."
+    ]
+  },
+  {
     "version": "1.9.0",
     "date": "2026-10-16",
     "changes": [
