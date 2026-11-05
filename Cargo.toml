@@ -3,7 +3,7 @@ members = ["src-tauri", "crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.9.0"
+version = "1.10.0"
 edition = "2021"
 rust-version = "1.89"
 license = "GPL-2.0-or-later"
