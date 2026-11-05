@@ -36,6 +36,7 @@ export interface DeckControls {
   track(): string | null;
   /** Nothing to play yet: no track, or one still opening. */
   idle(): boolean;
+  /** Play intent, including a start queued while the next track opens. */
   playing(): boolean;
   /** Why the track could not be opened, when it could not. */
   error(): string | null;

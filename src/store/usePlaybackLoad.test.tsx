@@ -12,6 +12,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { __setBackend } from "@/ipc/client";
 import type { Backend, DeckEvent, Tick } from "@/ipc/types";
 import { usePlayback, type Playback } from "./usePlayback";
+import { registerDeck, setPlaying as setScriptPlaying } from "@/lib/scripting";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -223,6 +224,14 @@ it("keeps the deck playing when its track is switched", async () => {
   const replacement = loads.at(-1)!;
   expect(replacement.track).toBe("replacement-track");
   expect(deck.playing).toBe(false);
+  // Track skipping asks for Play again while the new file opens. That must
+  // preserve the pending intent rather than toggling it off with the UI.
+  const unregister = registerDeck("b", {
+    track: () => track, idle: () => deck.idle, playing: () => deck.wantsPlaying(),
+    error: () => deck.error, togglePlay: () => deck.toggle(),
+  });
+  act(() => setScriptPlaying("b", true));
+  unregister();
   finish(replacement);
   await settle();
 

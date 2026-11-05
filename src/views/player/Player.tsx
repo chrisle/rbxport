@@ -1845,7 +1845,7 @@ export const Player = memo(function Player({
   // same PLAY a click gives: see `src/lib/scripting.ts`.
   const scriptTrack = useEventCallback(() => track?.id ?? null);
   const scriptIdle = useEventCallback(() => playback.idle);
-  const scriptPlaying = useEventCallback(() => playback.playing);
+  const scriptPlaying = useEventCallback(() => playback.wantsPlaying());
   const scriptError = useEventCallback(() => playback.error);
   const scriptPlay = useEventCallback(() => togglePlay());
   useEffect(

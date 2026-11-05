@@ -21,6 +21,8 @@ import { extrapolate, follow, NO_ANCHOR, pinned, SNAP_SECONDS, type Anchor } fro
 export interface Playback {
   /** True while audio is actually running. */
   playing: boolean;
+  /** Requested transport state, including Play preserved while a track opens. */
+  wantsPlaying: () => boolean;
   /**
    * Seconds elapsed, as React state — updated on each tick, ten times a
    * second, which is as fine as the readouts get and as often as the waveform
@@ -593,6 +595,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     return () => cancelAnimationFrame(frame);
   }, [playing, emit]);
 
+  const wantsPlaying = useCallback(() => desiredPlaying.current, []);
   const idle = !canPlay || trackId === null;
   const isLoaded = useCallback(() => {
     const target = targetLoad.current;
@@ -1003,11 +1006,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   }, [loopCall, DECK]);
 
   return useMemo(() => ({
-    playing, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
+    playing, wantsPlaying, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
     scrubBegin, scrubTo, scrubEnd, isScrubbing, positionRef, positionNow, subscribe,
     tempo, masterTempo, keyShift, shiftsKey, setKeyShift, setTempo, nudgeTempo, setMasterTempo,
     loop, currentLoop, setLoop, moveLoop, setLoopActive, clearLoop,
-  }), [playing, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
+  }), [playing, wantsPlaying, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
     scrubBegin, scrubTo, scrubEnd, isScrubbing, positionNow, subscribe, tempo, masterTempo, keyShift, shiftsKey,
     setKeyShift, setTempo, nudgeTempo, setMasterTempo, loop, currentLoop, setLoop, moveLoop, setLoopActive, clearLoop]);
 }
