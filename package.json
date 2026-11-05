@@ -1,7 +1,7 @@
 {
   "name": "rbxport",
   "private": true,
-  "version": "1.10.0",
+  "version": "1.9.0",
   "license": "GPL-2.0-or-later",
   "packageManager": "pnpm@10.17.1",
   "type": "module",
