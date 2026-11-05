@@ -41,7 +41,7 @@ import {
   detailSpan,
   dragSeconds,
   JUMP_SIZE_ID,
-  jumpSeconds,
+  type JumpSize,
   jumpSizeById,
   jumpStepSeconds,
   movedLoopByBeats,
@@ -1303,20 +1303,11 @@ export const Player = memo(function Player({
   });
   const seekInPhase = useCallback((at: number) => playback.seek(inPhase(at)), [playback, inPhase]);
 
-  /** Moves the head by a step, forward or back, keeping a locked deck in phase. */
-  const jumpBy = useCallback(
-    (step: number, direction: number) => {
-      if (step === 0) return;
-      seekInPhase(playback.positionRef.current + step * direction);
-    },
-    [playback, seekInPhase],
-  );
   const [beatLoop, setBeatLoop] = useState<LoopRange | null>(null);
 
   /** Moves by the chosen size: a number of beats, or the fine nudge. */
-  const jump = useCallback(
-    (direction: number) => {
-      const size = jumpSizeById(jumpSizeId);
+  const jumpBySize = useCallback(
+    (size: JumpSize, direction: number) => {
       const beats = size.beats * direction;
       const now = playback.positionNow();
       const commandedLoop = playback.currentLoop();
@@ -1341,16 +1332,15 @@ export const Player = memo(function Player({
       }
       jumpHead(playback, grid, size, bpmX100, now, direction, phaseLocked, seekInPhase);
     },
-    [jumpSizeId, bpmX100, playback, seekInPhase, grid, beatLoop, phaseLocked],
+    [bpmX100, playback, seekInPhase, grid, beatLoop, phaseLocked],
   );
-  /**
-   * Moves by a fixed number of beats whatever the menu says: PERFORMANCE
-   * mode's `Forward 4 beats`, `Backward 8 bars` and the rest. Nothing to
-   * move by without a tempo, as with the menu's sizes.
-   */
+  const jump = useCallback(
+    (direction: number) => jumpBySize(jumpSizeById(jumpSizeId), direction),
+    [jumpSizeId, jumpBySize],
+  );
   const jumpBeats = useCallback(
-    (beats: number, direction: number) => jumpBy(jumpSeconds(beats, bpmX100), direction),
-    [bpmX100, jumpBy],
+    (beats: number, direction: number) => jumpBySize({ id: `fixed-${beats}`, label: `${beats}Beats`, beats }, direction),
+    [jumpBySize],
   );
 
 
