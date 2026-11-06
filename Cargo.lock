@@ -3926,7 +3926,7 @@ checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
 
 [[package]]
 name = "rbl-analysis"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "rbl-anlz",
  "rbl-audio",
@@ -3944,7 +3944,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-anlz"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "dirs 5.0.1",
  "rbl-core",
@@ -3958,7 +3958,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-audio"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "mp3lame-encoder",
  "rbl-core",
@@ -3972,7 +3972,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-backup"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "crc32fast",
  "dirs 5.0.1",
@@ -3992,7 +3992,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-core"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -4008,7 +4008,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-db"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "base64 0.22.1",
  "blowfish",
@@ -4031,7 +4031,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-dbserver"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "socket2",
  "thiserror 2.0.20",
@@ -4040,7 +4040,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-deck"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "cc",
  "cpal",
@@ -4058,7 +4058,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-devices"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "dirs 5.0.1",
  "objc2-core-foundation",
@@ -4077,7 +4077,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-difftool"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "flate2",
  "rbl-db",
@@ -4091,7 +4091,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-export"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "blake3",
  "fs2",
@@ -4115,7 +4115,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-fakecdj"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "rbl-dbserver",
  "rbl-nfs",
@@ -4127,7 +4127,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-index"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "crc32fast",
  "icu_collator",
@@ -4146,7 +4146,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-link"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "alphatheta-connect",
  "core-foundation 0.10.1",
@@ -4173,7 +4173,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-nfs"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "if-addrs",
  "nix",
@@ -4186,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-onelibrary"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "flate2",
  "rbl-anlz",
@@ -4199,7 +4199,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-pdb"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "thiserror 2.0.20",
  "tracing",
@@ -4207,7 +4207,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-prolink"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4218,7 +4218,7 @@ dependencies = [
 
 [[package]]
 name = "rbxport"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
