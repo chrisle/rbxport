@@ -35,3 +35,9 @@ To use a different library in both apps, switch it in RBXport under
 Preferences → Advanced → Database → Database management, or in rekordbox under
 Preferences → Advanced. Either one sets the location the other reads. See
 [Library location](../reference/library-location.md).
+
+## Do I need rekordbox to use RBXport on Linux?
+
+No. On first start with no library, RBXport offers to create an empty one, and
+you can import music, build playlists and export to a USB stick without
+rekordbox or a copied `master.db`. See [Using RBXport on Linux](linux.md).
