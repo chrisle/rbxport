@@ -20,7 +20,7 @@ toolchain for native dependencies, and the Tauri 2 platform prerequisites.
 The Debian/Ubuntu package list used by CI is:
 
 ```sh
-sudo apt-get install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libasound2-dev
+sudo apt-get install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libgtk-3-dev libasound2-dev
 ```
 
 ## Install and run the browser UI
