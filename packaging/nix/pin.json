@@ -1,6 +1,6 @@
 {
-  "version": "1.9.0",
-  "hash": "sha256-bLtkKIwaIFg3bcpwMlMI3Zc/7j00tY8ggYi5YQ1Di6M=",
+  "version": "1.10.0",
+  "hash": "sha256-ilHIeeQTgRFd0zLA0xgSNvrjgRYiqKVYBeR4Z0zUPuY=",
   "source": {
     "pnpmDepsHash": "sha256-D9yTAZ/D4+oZfRtPhk9NvNFweU1o7qe6z7HJkNjmP2w=",
     "cargoOutputHashes": {
