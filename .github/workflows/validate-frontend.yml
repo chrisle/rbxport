@@ -96,18 +96,6 @@ jobs:
         if: inputs.run_build || inputs.run_e2e || inputs.run_budget
         run: pnpm exec vite build
 
-      - name: Unit tests
-        if: inputs.run_unit
-        env:
-          BASE_REF: ${{ inputs.base_ref }}
-          FULL: ${{ inputs.full }}
-        run: |
-          if [ "$FULL" = true ] || [ -z "$BASE_REF" ]; then
-            pnpm test
-          else
-            pnpm exec vitest run --changed "$BASE_REF" --passWithNoTests
-          fi
-
       - name: Bundle budget
         if: inputs.run_budget
         run: pnpm budget
@@ -148,3 +136,36 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  unit:
+    name: Frontend unit tests
+    if: inputs.run_unit
+    # These tests do not need the Mac desktop. Keep their concurrency bounded
+    # on Linux while the Mac handles browser and native builds.
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          FULL: ${{ inputs.full }}
+        run: |
+          if [ "$FULL" = true ] || [ -z "$BASE_REF" ]; then
+            pnpm test --maxWorkers=2
+          else
+            pnpm exec vitest run --changed "$BASE_REF" --passWithNoTests --maxWorkers=2
+          fi
