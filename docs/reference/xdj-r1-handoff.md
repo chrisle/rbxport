@@ -112,3 +112,61 @@ No installed library or real user's USB was written. Resource bounds are
 RBXport safety limits, not measured stock/device limits. Stock differential
 captures and physical R1 acceptance remain open as described above.
 No merge, push or release was performed.
+
+## Stock rekordbox 6 test attempt, 2026-11-07
+
+[OBS] On chris-m2-mac, cloned the stopped research VM `rb6-r1` to
+`rb6-r1-capture-20261107`. Original VM, original `r1-fat32.img`, host
+Collection and user USB media were preserved. Stock version 6.8.7.0303 has
+executable SHA-256
+`aab4838b9768860da941f232db3f31cfa397a7a79f6052cde1aa6584f2d5dc3c`,
+matching the analyzed build. The VM's Collection contains stock factory
+samples as well as two generated WAVs; no whole-Collection export was used.
+
+[OBS] Generated two-track classic/OneLibrary and R1 exports from this branch.
+Both exports verified; a separate Python parser checked all six generated
+Cbm files, record/category references, extents and sentinels. These are
+**generated RBXport outputs**, not stock captures. The new
+`xdj_r1_fixture` example requires `RB_LITE_TEST=1`, refuses an existing
+output directory, and accepts only the optional `--r1` flag. It expects
+stereo 16-bit 44.1 kHz generated alpha.wav (3 seconds) and beta.wav
+(4 seconds); it never opens an installed Collection. Example:
+
+```sh
+RB_LITE_TEST=1 cargo run -p rbl-export --example xdj_r1_fixture -- \
+  /path/to/generated-wavs /path/to/fresh-output --r1
+```
+
+[OBS] Stock EXPORT mode opened without virtual USB. A mounted FAT32 image
+was not listed under Devices. A custom Tart USB configuration repeatedly
+restarted the guest. A minimal native Virtualization host without the explicit
+XHCI controller reached the desktop with a 256 MiB FAT32 volume reported as
+USB, external physical, 512-byte blocks. After stock launch, guest reboot
+history advanced from 18:36 to 18:38. The guest then became unreachable
+again. No stock Cbm set or panic report was captured. [UNKNOWN] The cause
+of the guest restarts is unresolved. This is an environment blocker, not a
+codec compatibility verdict. The disposable USB image was seeded with the
+generated classic export, so the intended comparison was the unmodified
+stock Cbm writer over identical prepared inputs.
+
+Checks this attempt: example build and focused Clippy with `-D warnings`
+passed; missing test guard, existing destination and unknown flag were
+rejected without creating output. The initial example stdout lint was fixed.
+Independent generated-output parsing and Python syntax checks passed.
+No production/UI code changed; full workspace/frontend checks were not rerun.
+
+Artifacts and resume inputs live at
+`/Users/chrisle/r1-research/captures/20261107-stock-comparison`:
+`run.json`, `compare.py`, `rbxport-r1`, `classic-input`,
+`rbxport-independent-structure.json`, generated source hashes, test image,
+VM configuration/source and diagnostics. VM console logs contain temporary
+VNC connection credentials and must not be published wholesale. Test VM
+hosts were stopped after the attempt.
+
+**Result: stock differential validation remains incomplete.** Resume with a
+stable USB-capable isolated environment or dedicated disposable physical USB
+and isolated fixture Collection. Retain the actual stock six-file set and
+full tree/hashes before running `compare.py`; never substitute generated files
+for stock inputs. The two-track comparison also does not cover the remaining
+empty/excluded/mixed-format, text, cue/artwork and physical R1 acceptance
+matrix above. Nothing was merged, pushed or released.
