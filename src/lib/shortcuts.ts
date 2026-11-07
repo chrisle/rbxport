@@ -631,6 +631,8 @@ export const BINDINGS: readonly Binding[] = [
   { id: "loadPlayer1", group: "Browse", label: "Load on Player 1", chord: { key: "Enter" }, action: "loadPlayer1", pane: "Browse" },
   { id: "loadPlayer2", group: "Browse", label: "Load on Player 2", chord: { key: "Enter", shiftKey: true }, action: "loadPlayer2", pane: "Browse" },
   { id: "locateLoaded", group: "Browse", label: "Locate track loaded on deck", chord: { key: "l", metaKey: true }, action: "locateLoaded", command: "b139" },
+  // App default: reveal the selected file; configurable under Track.
+  { id: "showInFinder", group: "Browse", label: "Show in Finder", chord: { key: "r", metaKey: true }, action: "showInFinder", command: "400d" },
   { id: "sortItems", group: "Playlist", label: "Sort Items", chord: { key: "" }, action: "sortItems", command: "500d" },
   { id: "renumberTrackOrder", group: "Playlist", label: "Renumber Track Order", chord: { key: "" }, action: "renumberTrackOrder", command: "500e" },
   ...PLAYER_A.map((row): Binding => ({ ...row, id: row.action ?? row.label, group: "Player A", deck: "a" })),

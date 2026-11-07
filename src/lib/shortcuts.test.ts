@@ -14,6 +14,15 @@ describe("actionFor", () => {
     expect(actionFor({ key: "f", ctrlKey: true }, WIN)).toBe("focusSearch");
   });
 
+  it("reveals the selected file with the platform modifier and respects typing and overrides", () => {
+    expect(dispatch({ key: "r", metaKey: true }, MAC, null)).toBe("showInFinder");
+    expect(dispatch({ key: "r", ctrlKey: true }, WIN, null)).toBe("showInFinder");
+    expect(dispatch({ key: "r", metaKey: true }, MAC, { tagName: "INPUT" })).toBeNull();
+    expect(dispatch({ key: "r", metaKey: true }, MAC, null, { showInFinder: { key: "" } })).toBeNull();
+    expect(dispatch({ key: "e", metaKey: true }, MAC, null, { showInFinder: { key: "e", metaKey: true } })).toBe("showInFinder");
+    expect(actionFor({ key: "r" }, MAC)).toBe("reloop");
+  });
+
   it("does not fire on the other platform's modifier", () => {
     // Control-A on a Mac moves the caret to the start of the line; taking it
     // over would break that everywhere in the app.
@@ -63,7 +72,6 @@ describe("actionFor", () => {
     // — rekordbox's Export map puts beat jump on them — so they are not here.
     for (const chord of [
       { key: "q", metaKey: true },
-      { key: "r", metaKey: true },
       { key: "Tab" },
       { key: "z" },
       { key: "F5" },
