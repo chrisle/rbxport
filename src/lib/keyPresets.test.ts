@@ -114,7 +114,7 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
     expect(answered.performance2?.sort()).toEqual([
       "3006", "3007", "300a", "300b", "300c", "3012", "3013", "301e", "301f", "3020", "3021", "3022", "3023",
       "304d", "3054", "3055", "307f", "308b", "3106", "3107", "310a", "310b", "310c", "3112", "3113", "311e",
-      "311f", "3120", "3121", "3122", "3123", "314d", "3154", "3155", "317f", "318b", "7003", "b139",
+      "311f", "3120", "3121", "3122", "3123", "314d", "3154", "3155", "317f", "318b", "400d", "7003", "b139",
     ]);
     // Deck 2's Jump Reverse and its 1 to 8 beat loops are command + O, 7, 8,
     // 9 and 0 in Performance 1, which this app's File and View menus hold.
@@ -224,6 +224,15 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
 });
 
 describe("the Keyboard pane under a preset (#412)", () => {
+  it("lists the editable reveal shortcut without stealing Performance 1's Jump Reverse", () => {
+    expect(rowsFor("Track", true).find((r) => r.bindingId === "showInFinder"))
+      .toMatchObject({ key: "command + R", built: true });
+    expect(rowsFor("Track", false).find((r) => r.bindingId === "showInFinder"))
+      .toMatchObject({ key: "ctrl + R", built: true });
+    expect(rowsFor("Track", true, {}, "performance1").find((r) => r.bindingId === "showInFinder"))
+      .toMatchObject({ key: null, built: true });
+  });
+
   it("shows each row's key in the chosen preset, greyed rows included", () => {
     const rows = (group: Parameters<typeof rowsFor>[0], preset: KeyPreset, mac = true) => rowsFor(group, mac, {}, preset);
     expect(rows("Player A", "performance1").find((r) => r.label === "Play/Pause")).toMatchObject({ key: "Z", built: true, changed: false });

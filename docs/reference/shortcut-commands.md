@@ -94,8 +94,9 @@ The shell keeps the states (`set_menu_enabled`).
 | Load on Player 1 (`loadPlayer1`) | enter | none | no | key; double-click a row; drag to the deck | Player, `a` |
 | Load on Player 2 (`loadPlayer2`) | shift + enter (RBXport's own) | none | no | key; list context menu; drag to the deck | Player, `b` (2 PLAYER layout only) |
 | Locate track loaded on deck (`locateLoaded`) | command + L | b139 | no | key; Track › Locate track loaded on deck (#430) | TrackTable (main browser), none |
+| Show in Finder (`showInFinder`) | command + R (rbxport default) | 400d | Track › Show in Finder | key; list context menu; Track menu | TrackTable, `main`/`sub` |
 | Renumber Track Order (`renumberTrackOrder`) | unbound | 500e | Playlist › Renumber Track Order | key once bound; column header menu; Playlist › Renumber Track Order (#513) | TrackTable, `main`/`sub` |
-| Import To Collection, Analysis Lock On/Off, Reload Tag, Remove from Collection, Show in Finder, Auto Relocate, Relocate (`importToCollection`, `analysisLockOn`, `analysisLockOff`, `reloadTag`, `removeFromCollection`, `showInFinder`, `autoRelocate`, `relocate`) | unbound, not in the Keyboard pane | 400f, 4012, 4013, 4003, 400b, 400d, 4014, 400e | Track › the same names | list context menu; Track menu (#513) | TrackTable, `main`/`sub` |
+| Import To Collection, Analysis Lock On/Off, Reload Tag, Remove from Collection, Auto Relocate, Relocate (`importToCollection`, `analysisLockOn`, `analysisLockOff`, `reloadTag`, `removeFromCollection`, `autoRelocate`, `relocate`) | unbound, not in the Keyboard pane | 400f, 4012, 4013, 4003, 400b, 4014, 400e | Track › the same names | list context menu; Track menu (#513) | TrackTable, `main`/`sub` |
 | Create New Playlist / Intelligent Playlist / Folder, Delete Playlist, Export a playlist to a file (*.txt / *.m3u8) (`createPlaylist`, `createIntelligentPlaylist`, `createFolder`, `deletePlaylist`, `exportPlaylistTxt`, `exportPlaylistM3u8`) | unbound, not in the Keyboard pane | 500a-500c, 5004, 5005, 5006 | Playlist › the same names | Playlist menu (#513), on the selected node; the tree menu calls the same handlers on the node it opened on | TreeView, `main`/`sub` |
 | Sort Items (`sortItems`) | unbound | 500d | Playlist › Sort Items | key once bound; tree context menu on a folder or the Playlists heading (#443) | App (the folder selected in the tree), none |
 | Volume, Volume Down (`volumeUp`, `volumeDown`) | command + F12, command + F11 | 3003, 3004 | no | key; the master knob sets the level directly | App, none |
@@ -165,3 +166,5 @@ apply to an empty deck too.
   (`BrowseBasicView::isActiveCommand` @0x1003153cc passes the question on
   to the list and tree viewers). RBXport's item is always enabled, and with
   nothing selected it does nothing, which is what the key does.
+
+Show in Finder (`showInFinder`): rbxport defaults to Command+R on macOS and Ctrl+R on Windows. Select one track in the active browser or playlist to reveal and highlight its audio file in the system file manager. Change or remove the shortcut in Preferences › Keyboard › Track. Missing files and multiple selections are not revealed; typing in a field does not trigger it. This default is an rbxport choice. Performance presets retain their own mappings: Performance 1 leaves reveal unbound so Command/Ctrl+R still runs Jump Reverse; Performance 2 binds reveal to Command/Ctrl+R.

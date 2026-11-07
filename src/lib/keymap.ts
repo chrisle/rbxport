@@ -209,6 +209,8 @@ export const KEYMAP: Readonly<Record<KeymapGroup, readonly KeymapRow[]>> = {
     { id: "b042", label: "Full Browser", key: "command + 0" },
   ],
   "Track": [
+    // Track menu command; rbxport supplies its own default in shortcuts.ts.
+    { id: "400d", label: "Show in Finder", key: null },
     { id: "b103", label: "Information Window", key: "command + I" },
     { id: "b137", label: "Undo track load", key: "command + Z" },
     { id: "b139", label: "Locate track loaded on deck", key: "command + L" },

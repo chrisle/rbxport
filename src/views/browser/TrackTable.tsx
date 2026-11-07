@@ -1860,11 +1860,11 @@ export const TrackTable = memo(function TrackTable({
       return true;
     },
     // The one selected row (rekordbox's menu bar wants exactly one).
-    showInFinder: () => {
+    showInFinder: ({ repeat }) => {
       if (!onShowInFinder || selection.ids.size !== 1) return false;
       const row = selectedRows()[0];
-      if (row === undefined) return false;
-      onShowInFinder(row);
+      if (row === undefined || row.missing === true) return false;
+      if (!repeat) onShowInFinder(row);
       return true;
     },
   }, listScope);
@@ -1926,8 +1926,8 @@ export const TrackTable = memo(function TrackTable({
       return true;
     },
   }, subBrowser ? "sub" : "main");
-  // Its key, once the Keyboard pane gives it one. rekordbox hands the
-  // command to the sub-browser's list while the sub-browser has the focus
+  // Renumber and reveal share the active browser routing. rekordbox hands
+  // list commands to the sub-browser's list while the sub-browser has the focus
   // and to the main list otherwise [OBS: `BrowseBasicView::performCommand`
   // @0x1003186f8, rekordbox 7.2.19 macOS]; the focus here is where the last
   // press landed, the sub-browser's tree included.
@@ -1940,9 +1940,11 @@ export const TrackTable = memo(function TrackTable({
     };
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (dispatch(event, platform, target, keyOverrides) !== "renumberTrackOrder") return;
+      if (event.defaultPrevented || target?.closest?.('[role="dialog"], [role="menu"]')) return;
+      const action = dispatch(event, platform, target, keyOverrides);
+      if (action !== "renumberTrackOrder" && action !== "showInFinder") return;
       if (subBrowser !== subBrowserEngaged) return;
-      if (runCommand("renumberTrackOrder", { scope: subBrowser ? "sub" : "main", repeat: event.repeat })) {
+      if (runCommand(action, { scope: subBrowser ? "sub" : "main", repeat: event.repeat })) {
         event.preventDefault();
       }
     };

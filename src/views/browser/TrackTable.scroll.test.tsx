@@ -46,6 +46,7 @@ interface Props {
   deckTrackIds?: readonly (string | null)[];
   onShowCollection?: () => void;
   onSelectedRow?: (row: RowDto | null) => void;
+  onShowInFinder?: (row: RowDto) => void;
 }
 
 function render(props: Props) {
@@ -67,6 +68,7 @@ function render(props: Props) {
           libraryGeneration={props.libraryGeneration ?? 0}
           {...(props.pendingEdits ? { pendingEdits: props.pendingEdits } : {})}
           onRate={noop}
+          {...(props.onShowInFinder ? { onShowInFinder: props.onShowInFinder } : {})}
           {...(props.deckTrackIds ? { deckTrackIds: props.deckTrackIds } : {})}
           {...(props.onShowCollection ? { onShowCollection: props.onShowCollection } : {})}
           {...(props.onSelectedRow ? { onSelectedRow: props.onSelectedRow } : {})}
@@ -277,6 +279,31 @@ describe("the list's commands, from a key and from anywhere else (#431)", () => 
   };
   const selectedIds = () =>
     [...host.querySelectorAll('[role="row"][aria-selected="true"]')].map((row) => row.textContent);
+
+  it("reveals one selected playlist track once per press, leaving typing and multiple selections alone", async () => {
+    const revealed: string[] = [];
+    const rows: (RowDto | null)[] = [];
+    render({ spec: PLAYLIST, onShowInFinder: (row) => revealed.push(row.id), onSelectedRow: (row) => rows.push(row) });
+    await settle();
+    await settle();
+    const chord = { key: "r", code: "KeyR", ctrlKey: true };
+    expect(key(chord).defaultPrevented).toBe(false);
+    key({ key: "ArrowDown" });
+    await settle();
+    expect(key(chord).defaultPrevented).toBe(true);
+    expect(revealed).toEqual([rows.at(-1)?.id]);
+    expect(key({ ...chord, repeat: true }).defaultPrevented).toBe(true);
+    expect(revealed).toHaveLength(1);
+    const input = document.createElement("input");
+    host.append(input);
+    act(() => { input.dispatchEvent(new KeyboardEvent("keydown", { ...chord, bubbles: true })); });
+    input.remove();
+    expect(revealed).toHaveLength(1);
+    key({ key: "a", ctrlKey: true });
+    await settle();
+    expect(key(chord).defaultPrevented).toBe(false);
+    expect(revealed).toHaveLength(1);
+  });
 
   it("moves the cursor the same way for Cursor Down and its command", async () => {
     const rows: (RowDto | null)[] = [];
