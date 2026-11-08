@@ -211,3 +211,39 @@ verified R1 export. Stock differential and physical player acceptance remain
 open. This attempt changed no production code and ran no new product test
 suite; the sandbox refusal probes and read-only incident queries are
 operational diagnostics, not export validation. No merge, push or release.
+
+## Authorized regular-account test checkpoint, 2026-11-08
+
+The user clarified that the M2 is not used for their regular rekordbox work
+and explicitly authorized the normal macOS account/library plus TRIODE2 for
+this test, with Cloud Library Sync off. Restored the extracted app's original
+signed layout and verified its deep signature and the recorded writer hash.
+No login prompt was required. `EnableLibrarySync=0` was checked before import
+and after export; cloud sync was not enabled.
+
+Imported only the generated alpha/beta WAV playlist, exported it to TRIODE2,
+then used rekordbox's Remove USB device control. Observed stock “Create
+library” progress, its completion and TRIODE2 disappearing from Devices.
+The device was fully ejected and its node disappeared from macOS. **Actual
+six-file capture/comparison is pending physical reinsertion**, which was
+requested from the user. Do not infer byte parity from the UI completion.
+
+Retained the classic export before finalization in the private artifact
+folder's `stock-before-eject`. Exported WAV hashes match the generated input
+hashes. Added `xdj_r1_compare_pdb`, a guarded codec comparison example that
+reads only that copied classic PDB and actual WAVs, preserving PDB IDs,
+paths, playlist order and metadata. It never reads Cbm as construction input
+or opens a Collection. It deliberately accepts only two alpha/beta WAVs,
+no named categories/artwork, and one flat playlist; it is not a general
+foreign-library converter or full pipeline acceptance test.
+
+The example built, regenerated six structurally valid Cbm files, passed
+focused Clippy with `-D warnings`, and refused missing RB_LITE_TEST/existing
+output. A separate Python parser validated the generated files. No product
+code changed; full workspace/frontend checks were not repeated. Artifacts:
+`authorized-host-test.json`, `rbxport-from-stock-pdb`,
+`rbxport-from-stock-pdb-structure.json`, and build/Clippy logs under the
+20261108-triode2 artifact root. Once TRIODE2 returns, preserve its actual
+files/tree/hashes before doing any further export, then compare against
+`rbxport-from-stock-pdb`. Stock differential and physical-player acceptance
+remain open. No merge, push or release.
