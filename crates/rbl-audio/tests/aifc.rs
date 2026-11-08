@@ -140,3 +140,16 @@ fn a_compression_type_still_refused_is_named_in_the_error() {
     assert!(error.contains("Compression type not implemented"), "{error}");
     assert!(error.contains("'ima4'"), "{error}");
 }
+
+#[test]
+fn r1_excludes_aliased_aifc_even_when_the_shared_reader_decodes_it() {
+    // Generated audio, not a stock capture or physical R1 acceptance test.
+    let dir = tempfile::tempdir().unwrap();
+    let cases: [([u8; 4], u16, Encode); 4] =
+        [(*b"in24", 24, in24), (*b"in32", 32, in32), (*b"FL32", 32, fl32), (*b"FL64", 64, fl64)];
+    for (code, bits, encode) in cases {
+        let path = dir.path().join(format!("{}.aif", String::from_utf8_lossy(&code)));
+        aifc(&path, code, bits, encode);
+        assert!(rbl_audio::legacy::inspect(&path, &|| false).unwrap().is_none());
+    }
+}

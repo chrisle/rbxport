@@ -385,3 +385,37 @@ See `r1-only-results.json`, `r1-*.log` and `final-summary.json` in the validatio
 artifact directory. Final check confirmed TRIODE2 remains mounted and all six
 stock DBH hashes are unchanged. It was never ejected or used as an export
 destination during this task. No merge, push or release.
+
+## Local dev integration — 2026-11-08
+
+The seven feature commits from `codex/xdj-r1-sync` (original tip
+`876d442f9ee371257ee7a25dc0da967a11a7e6c8`) were replayed onto fetched
+`origin/dev` at `c09cce0d1a2bf66ed253f3387ab054e54b23dc50` in an isolated
+integration worktree. The source worktree and backup branch remain intact.
+Conflict resolution retains dev's AIFF-C reader, database-ID overrides,
+analysis-slot allocation, playlist reconciliation and cluster-aware estimates.
+The normal OFF request digest retains current dev's ID and PDB-layout inputs;
+only enabled jobs add the R1 profile. R1 allocation estimates additionally count
+DBH files, DATs, artwork, folders and filesystem companions. Generated regression
+fixtures cover the request digest, ID invalidation, large clusters and AIFF-C
+alias exclusion. The preference remains experimental and OFF by default.
+
+Only R1-focused checks are being rerun for this integration, per the narrowed
+user request; this is not a full workspace or physical-hardware validation.
+No USB access or ejection is needed, and nothing is pushed or released.
+
+The locale generator was also attempted with the installed rekordbox 7 locale
+source. It stops on 53 missing French translations unrelated to R1; its
+unrelated regenerated UI index was discarded. All four R1 catalog strings are
+present in every locale. This broader catalog drift is outside this integration.
+
+Integration validation passed on M2: 20 generated R1 integration tests, two
+stock byte comparisons, three R1/cluster unit tests, eight Cbm unit tests,
+one MP4 bounds test, one AIFF-C exclusion test, the backend job-option test,
+41 preference/settings tests, the Sync Manager option test, UI type checking
+and `git diff --check` (78 tests total). Broad workspace/E2E suites were not
+rerun under the narrowed R1-only request. The compiler reports a pre-existing
+future-compatibility notice for dependency `block` 0.1.6. Physical R1 acceptance
+remains open. Logs: `/Users/chrisle/r1-research/captures/20261108-r1-integration`.
+The local dev checkout is `/Users/chrisle/code/rbxport-worktrees/dev-r1-landing`;
+no push or release is authorized by this local integration.

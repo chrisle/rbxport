@@ -5657,7 +5657,7 @@ mod tests {
         let options = rbl_export::ExportOptions { sync: Some(&selection.sync), ..Default::default() };
         let plan = rbl_export::plan::preview(&stick, &selection.tracks, &selection.playlists, &selection.my_tags, &options).unwrap();
         assert!(plan.estimate.tracks_new > 0, "the estimate counts the tracks");
-        super::write_export_with_phase(&stick, &selection, None, None, None, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export_with_phase(&stick, &selection, None, None, None, false, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
         assert!(rbl_export::verify(&stick).unwrap().is_ok());
     }
 

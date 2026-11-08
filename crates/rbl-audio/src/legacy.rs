@@ -186,7 +186,7 @@ pub fn inspect(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<Option<Info>
         .sample_rate
         .filter(|rate| *rate > 0)
         .ok_or_else(|| error("missing or zero sample rate"))?;
-    let mut reader = crate::compatibility::open(path)?;
+    let (mut reader, _) = crate::compatibility::open(path)?;
     let track = reader.default_track().ok_or(AudioError::NoTrack)?;
     let id = track.id;
     let codec = track.codec_params.codec;

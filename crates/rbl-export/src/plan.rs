@@ -127,11 +127,32 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
         folders.extend((1..=new_artwork.div_ceil(u64::from(crate::ARTWORK_PER_FOLDER))).map(|n| artwork.join(format!("{n:05}"))));
         folders.insert(artwork);
     }
+    let mut r1_artwork_folders = 0;
+    if options.xdj_r1_support {
+        folders.insert(Path::new("/PIONEER").to_owned());
+        folders.insert(Path::new("/PIONEER/DBH").to_owned());
+        new_files += 6;
+        for track in &tracks {
+            let audio = crate::layout(track, 0).audio;
+            let analysis = std::path::PathBuf::from(crate::analysis_directory(&audio, "PIONEER"));
+            folders.extend(analysis.ancestors().filter(|f| f.parent().is_some()).map(Path::to_path_buf));
+            // Conservatively count an R1 DAT even when shared with classic.
+            new_files += 1;
+        }
+        let covers = tracks.iter().filter_map(|t| t.artwork.as_ref()).collect::<std::collections::HashSet<_>>().len() as u64;
+        if covers > 0 {
+            folders.insert(Path::new("/PIONEER/Artwork").to_owned());
+            // A folder per cover is an upper bound when retained image IDs
+            // leave gaps. Include the small fallback for a non-PIONEER root.
+            r1_artwork_folders = covers;
+            new_files += 2 * covers;
+        }
+    }
     // Folders new to the stick stay; every folder written into is made again
     // inside the publication's staging folder first, and both are there at
     // once until it is published.
-    let new_folders = folders.iter().filter(|folder| !crate::under(destination, &folder.to_string_lossy()).is_dir()).count() as u64;
-    let staging_folders = folders.len() as u64 + 2;
+    let new_folders = folders.iter().filter(|folder| !crate::under(destination, &folder.to_string_lossy()).is_dir()).count() as u64 + r1_artwork_folders;
+    let staging_folders = folders.len() as u64 + r1_artwork_folders + 2;
     asset_bytes += unit * new_folders;
     // macOS writes an AppleDouble `._` companion beside each file and folder
     // it creates on FAT32 and exFAT, a cluster each (#591).
@@ -254,6 +275,22 @@ mod tests {
         std::fs::write(base.with_extension("2EX"), vec![4_u8; 150_000]).unwrap();
         SourceTrack { id, source_path: source, title: format!("Track {id}"), artist: "Artist".into(), album: "Album".into(),
             duration_sec: 120, sample_rate: 44_100, analysis_source: Some(base), ..Default::default() }
+    }
+
+    #[test]
+    fn r1_files_and_analysis_use_large_cluster_accounting() {
+        const UNIT: u64 = 128 * 1024;
+        let source = tempfile::tempdir().unwrap();
+        let usb = tempfile::tempdir().unwrap();
+        let tracks = vec![track(source.path(), 1, 3000)];
+        let before = Snapshot::read(usb.path()).unwrap();
+        let options = ExportOptions { xdj_r1_support: true, ..Default::default() };
+        let at = |unit| from_baseline_in(usb.path(), &before, None, &tracks, &[], &options, None, unit).unwrap();
+        let (small, large) = (at(4096), at(UNIT));
+        assert_eq!(large.database_bytes - small.database_bytes, (DATABASE_FILES + 6) * (UNIT - 4096));
+        assert!(large.asset_bytes > small.asset_bytes);
+        assert!(large.asset_bytes >= 5 * UNIT); // classic analysis plus R1 DAT and folders
+        assert!(large.peak_bytes > small.peak_bytes);
     }
 
     /// What a fresh sync of two tracks takes on an exFAT stick with 128 KiB

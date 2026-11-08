@@ -45,7 +45,7 @@ fn export_issue217_controlled_mp3_fixtures() {
         let destination = root.join(name);
         std::fs::create_dir_all(&destination).unwrap();
         let result = tauri::async_runtime::block_on(commands::export_tracks_to_device(
-            app.handle().clone(), app.state::<Arc<AppState>>(), ids.clone(), destination.to_string_lossy().into_owned(), None, conversion,
+            app.handle().clone(), app.state::<Arc<AppState>>(), ids.clone(), destination.to_string_lossy().into_owned(), None, conversion, None,
         )).unwrap();
         println!("{name}: tracks={} failed={:?}", result.tracks, result.failed);
         let snapshot = rbl_export::snapshot::Snapshot::read(&destination).unwrap();

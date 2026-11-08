@@ -73,6 +73,30 @@ fn set(stick: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
         .collect()
 }
 #[test]
+fn r1_off_preserves_current_dev_request_and_database_id_invalidation() {
+    use rbl_export::incremental;
+    let dir = tempfile::tempdir().unwrap();
+    let tracks = vec![source(dir.path(), 1)];
+    let playlists: Vec<SourcePlaylist> = Vec::new();
+    let tags: Vec<rbl_export::SourceMyTag> = Vec::new();
+    let mut options = options(false);
+    let normal = incremental::digest(&(
+        &tracks, &playlists, &tags, options.compatibility, options.keep_unlisted,
+        format!("{:?}", options.sync), options.db_id_override,
+        options.my_tag_master_db_id_override, format!("{:?}", options.defaults),
+        incremental::TRANSFORM_VERSION, 2_u32,
+    )).unwrap();
+    assert_eq!(incremental::request(&tracks, &playlists, &tags, &options).unwrap(), normal);
+    options.db_id_override = Some(42);
+    let db_changed = incremental::request(&tracks, &playlists, &tags, &options).unwrap();
+    assert_ne!(db_changed, normal);
+    options.my_tag_master_db_id_override = Some(43);
+    let tags_changed = incremental::request(&tracks, &playlists, &tags, &options).unwrap();
+    assert_ne!(tags_changed, db_changed);
+    options.xdj_r1_support = true;
+    assert_ne!(incremental::request(&tracks, &playlists, &tags, &options).unwrap(), tags_changed);
+}
+#[test]
 fn off_then_on_unchanged_input_coexists_noop_and_off_retires_owned_r1() {
     let dir = tempfile::tempdir().unwrap();
     let stick = tempfile::tempdir().unwrap();
