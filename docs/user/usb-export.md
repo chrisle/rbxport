@@ -265,13 +265,14 @@ incremental reuse, format changes, source preservation, and failure before
 publication. FFmpeg generated that fixture; tests do not require it.
 Player behavior needs separate firmware/physical validation; see [Testing](../development/testing.md).
 
-## XDJ-R1 support
+## Experimental XDJ-R1 support
 
-Enable **XDJ-R1 support** in Preferences > USB Export to add a legacy R1 library
+Enable **XDJ-R1 support (experimental)** in Preferences > USB Export to add a legacy R1 library
 alongside Device Library and OneLibrary. It defaults to off and applies to all
 USB exports. Sync Manager's Sync preferences button opens the setting.
 Unsupported R1 formats are reported and remain in the normal libraries;
 Maximum CDJ compatibility can convert shared USB audio first. Foreign R1
 libraries or pending device edits block sync to preserve their data. Initial
-support exports only; device-edit import and physical compatibility remain
+support exports only. Playback on an XDJ-R1 has not yet been verified;
+device-edit import and physical compatibility remain
 unverified. See [implementation and acceptance](../reference/xdj-r1.md).

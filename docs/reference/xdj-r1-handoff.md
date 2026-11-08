@@ -330,3 +330,58 @@ Logs are `header-fix-focused.log`, `header-fix-workspace-clippy-final.log`,
 `header-fix-workspace-doc-tests.log` in the private capture directory.
 TRIODE2 remains mounted with the stock capture intact. No merge, push or
 release was performed.
+
+## Experimental labeling and scoped R1 validation, 2026-11-08
+
+The user chose an experimental, default-off feature on the M2 without
+merge/push. They initially requested the full suite, then explicitly narrowed
+the test scope to R1. Preferences now labels the global option
+“XDJ-R1 support (experimental)” and explains that playback on an XDJ-R1 has
+not yet been verified. Both strings use the existing translation system;
+all 17 catalogs and the generated UI catalog were updated. User/reference
+docs match the label. The existing preference UI test checks the label,
+warning, OFF state and opt-in update. The settings default and missing-value
+normalization remain false; existing explicit opt-ins retain their value.
+No backend/export semantics changed in this labeling step.
+
+Focused preference/UI checks: 37 passed. The locale generator ran without
+network translation. Token/icon sources did not change, so their generators
+were not needed. Full validation uses `RB_LITE_TEST=1`, disposable Rust
+fixtures and browser mock backends. Confirmed stock rekordbox and its agent
+were absent before starting, addressing the previous backup-test refusal.
+No stock application was launched during this rerun.
+
+Logs and per-command exit/timing records are under
+`/Users/chrisle/r1-research/captures/20261108-experimental-validation`.
+The runner uses project pnpm 10.17.1 through a temporary Corepack launcher,
+the available Rust 1.99.0 toolchain, two frontend/E2E workers, and E2E ports
+16538/16539 so it does not attach to another checkout's servers. TRIODE2 must
+never be ejected; this validation does not use it as an export destination.
+
+At the user's scope correction, stopped the full-workspace Rust test and
+Playwright runners plus their own descendants. Verified the runner/test
+processes and both worktree browser servers stopped. Those broad runs are
+**cancelled/incomplete**, not reported as passing or as test failures.
+Clippy, frontend lint/build, all 1,367 frontend unit tests and budget had
+already completed successfully before the scope correction.
+
+Final R1-only checks, all exit 0:
+
+| Check | Result |
+| --- | --- |
+| rbl-export cbm codec unit tests | 8 passed |
+| rbl-export R1 asset/cue-bound unit tests | 2 passed |
+| R1 export integrations | 19 passed |
+| Actual stock-byte/header regression tests | 2 passed |
+| Preference persistence/defaults and USB Export pane | 37 passed |
+| Sync Manager R1 option propagation | 1 passed |
+| Locale generation/catalog completeness and git diff --check | Passed |
+
+The scoped checks cover the experimental label/caveat, OFF default and old
+settings, opt-in persistence, job option propagation, codec bounds/sorting,
+stock byte parity, incremental/profile changes, pending-edit protection and
+failure/cancellation recovery. They do not establish physical R1 playback.
+See `r1-only-results.json`, `r1-*.log` and `final-summary.json` in the validation
+artifact directory. Final check confirmed TRIODE2 remains mounted and all six
+stock DBH hashes are unchanged. It was never ejected or used as an export
+destination during this task. No merge, push or release.

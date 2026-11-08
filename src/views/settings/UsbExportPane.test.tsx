@@ -145,11 +145,13 @@ it("says Maximum CDJ compatibility also converts low-sample-rate MP3s", () => {
   expect(help?.textContent).toContain("low-sample-rate MP3s (16, 22.05 or 24 kHz) that some players play too fast");
 });
 
-it("defaults R1 support off and updates the global USB export preference", () => {
+it("labels experimental R1 support, defaults it off and updates the global preference", () => {
   const update = vi.fn();
   act(() => root.render(<PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update, reset: vi.fn() }}><UsbExportPane /></PreferencesProvider>));
   const toggle = host.querySelector<HTMLInputElement>('input[aria-labelledby$="-r1"]')!;
   expect(toggle.checked).toBe(false);
+  expect(host.textContent).toContain("XDJ-R1 support (experimental)");
+  expect(host.textContent).toContain("Playback on an XDJ-R1 has not yet been verified.");
   expect(host.textContent).toContain("Create an additional legacy XDJ-R1 database on USB exports.");
   act(() => toggle.click());
   expect(update).toHaveBeenCalledWith("usbExport", { xdjR1Support: true });

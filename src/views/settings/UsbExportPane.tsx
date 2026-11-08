@@ -39,8 +39,8 @@ export function UsbExportPane() {
       </label>
       <label className={[layout.summary, styles.option].join(" ")}>
         <span className={styles.details}>
-          <strong id={id + "-r1"}>{t("XDJ-R1 support")}</strong>
-          <span id={id + "-r1-help"} className={styles.description}>{t("Create an additional legacy XDJ-R1 database on USB exports.")}</span>
+          <strong id={id + "-r1"}>{t("XDJ-R1 support (experimental)")}</strong>
+          <span id={id + "-r1-help"} className={styles.description}>{t("Create an additional legacy XDJ-R1 database on USB exports.")}{" "}{t("Playback on an XDJ-R1 has not yet been verified.")}</span>
           <span className={styles.default}>{t("Default: Off")}</span>
         </span>
         <input type="checkbox" role="switch" className={controls.toggle}

@@ -1,6 +1,7 @@
 # XDJ-R1 USB export
 
-Preferences > USB Export > Sync > **XDJ-R1 support** is global and defaults to
+Preferences > USB Export > Sync > **XDJ-R1 support (experimental)**
+is global and defaults to
 OFF, including settings saved before this option existed. Sync Manager's existing
 Sync preferences button opens that section. Playlist, folder, Export Track,
 AppleScript export and manual/automatic Sync Manager requests capture the
