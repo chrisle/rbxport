@@ -170,3 +170,44 @@ full tree/hashes before running `compare.py`; never substitute generated files
 for stock inputs. The two-track comparison also does not cover the remaining
 empty/excluded/mixed-format, text, cue/artwork and physical R1 acceptance
 matrix above. Nothing was merged, pushed or released.
+
+## Physical USB attempt, 2026-11-08
+
+The user authorized TRIODE2 for testing and explicitly permitted erasure.
+Verified M2 USB identity (62 GB, FAT32, initial volume UUID
+67517EDC-C106-304C-9663-F4657D8BAE5B, disk9s1), then formatted only that
+partition. The signed stock installer and writer hash matched the previous
+attempt. No stock Cbm capture was obtained.
+
+**Isolation incident:** a direct sandbox launch used a test-only HOME and
+CFFIXED_USER_HOME. Initial checks proved normal Library reads and writes
+outside the test/USB roots were denied. Selecting the extracted app through
+CUA `getApp` nevertheless started a second LaunchServices instance outside
+that confinement. It opened the normal host library and imported 18 factory
+sampler rows. This violates the intended no-installed-library-write boundary.
+Both copies and helpers were stopped promptly. Private copies of the library,
+WAL and settings were retained. Read-only queries against those copies found
+50 content rows, including 18 created during this attempt, all pointing to
+Sampler files with factory sample names. The October 16 backup contains 32
+rows; it is not assumed to be a complete immediate pre-incident baseline.
+No blind restore or row removal was performed. Database and WAL hashes
+remained unchanged after containment; the SHM file changed. Other settings,
+cache and sample-file side effects have not been exhaustively compared.
+
+A test-only wrapper subsequently forced LaunchServices through the same
+sandbox and disabled optional helper launch paths; the original writer
+Mach-O bytes were unchanged. That confined launch did not change the normal
+DB/WAL but could not be controlled through CUA. It was stopped. Do not use
+the initial direct-launch plus `getApp` approach again. A separate macOS
+test account/session is the next isolation boundary before continuing.
+A rekordbox account sign-in requirement has not yet been confirmed there.
+
+Private artifacts:
+`/Users/chrisle/r1-research/captures/20261108-triode2/run.json`,
+`isolation-checks.json`, `usb-format.log`, and `incident/`.
+Incident copies contain real library/settings data and must not be published.
+TRIODE2 is now test media with stock-created initialization files, not a
+verified R1 export. Stock differential and physical player acceptance remain
+open. This attempt changed no production code and ran no new product test
+suite; the sandbox refusal probes and read-only incident queries are
+operational diagnostics, not export validation. No merge, push or release.
