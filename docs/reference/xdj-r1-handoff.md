@@ -247,3 +247,86 @@ code changed; full workspace/frontend checks were not repeated. Artifacts:
 files/tree/hashes before doing any further export, then compare against
 `rbxport-from-stock-pdb`. Stock differential and physical-player acceptance
 remain open. No merge, push or release.
+
+## Completed stock capture and header fix, 2026-11-08
+
+**TRIODE2 operational constraint: NEVER EJECT IT AGAIN.** The user explicitly
+allows mounting/unmounting only. Do not use rekordbox's Remove USB device
+control on TRIODE2: it ejects the device. After their physical reinsertion,
+this phase only read the mounted stick. All comparison/build/tests use saved copies or
+disposable temporary exports. Stock rekordbox was stopped before reinsertion.
+
+[OBS] Captured all six actual stock 6.8.7.0303 DBH files and the complete
+post-finalization tree, with SHA-256 hashes. The stock writer operated on two
+generated PCM WAVs, a flat beta/alpha playlist, no artwork or named metadata,
+BPM 150 and Auto Load on. This is a controlled stock capture, not an RBXport
+fixture relabeled as stock. The exported audio hashes match the inputs.
+Only the six DBH files, hashes and provenance are committed under
+`crates/rbl-export/tests/fixtures/xdj-r1-stock-6.8.7`; private device settings
+and the full tree stay outside Git.
+
+[OBS] The initial raw comparison found CbmDB fully identical except its
+four-byte timestamp. Each category had exactly two other differing bytes:
+header +0x04 was zero in RBXport and 0x0000b04c in stock. This is the CbmDB
+content-table end, not the category file length. The initial parser's
+semantic-field comparison did not include this word; its byte comparison
+correctly exposed the gap. The independent parser now validates that
+cross-file header reference as well.
+
+Fixed the writer to populate this word in every category. Readers reject
+incorrect nonzero values while retaining legacy zero-header compatibility;
+existing ownership/hash protection still rejects foreign or changed sets.
+The enabled request profile advances to `xdj-r1-v3`, regenerating owned v1/v2
+output on unchanged input without recopying audio. OFF request digests and
+ownership schema stay unchanged. A regression test reconstructs zero-header
+v2 files plus their genuine hashes and checks safe migration/no-op behavior.
+
+[OBS] Rebuilt Cbm from the saved stock classic PDB and actual exported WAVs,
+without using Cbm as construction input. Independent Python structure and
+byte comparison now passes: **all six files are byte-identical except bytes
+0x10..0x13, the per-file timestamp**. The checked-in stock regression tests
+also compare every other byte. This covers content IDs/paths/timing/blocks,
+unknown groups, title letters, BPM, flat playlist order and blank fields for
+this particular two-WAV selection. It does not validate other audio families,
+nontrivial metadata/text, artwork, actual cue recall, or physical R1 playback.
+Broader stock fixtures and the physical firmware 1.13 acceptance matrix
+remain required before claiming full compatibility.
+
+Artifacts in the existing 20261108-triode2 capture directory:
+`stock-after-eject`, `stock-tree-sha256.json`, initial `stock-comparison.json`,
+`rbxport-fixed-stock-pdb`, `stock-comparison-fixed.json`, and `compare.py`.
+Original captures remain unchanged; the initial comparison is retained with
+its semantic scope explained. Cloud Library Sync remained off; no login was
+needed. This supersedes the earlier pending-capture checkpoint, not the
+historical isolation-incident record.
+
+Validation of the final header/profile fix:
+
+| Check | Result |
+| --- | --- |
+| Independent Python stock structure/byte comparison | All six match except timestamp bytes 0x10..0x13 |
+| Focused R1 integrations | 19 passed, including legacy v2 migration and OFF behavior |
+| Actual stock-byte/header regression tests | 2 passed |
+| cargo clippy --workspace --all-targets -- -D warnings | Passed |
+| RB_LITE_TEST=1 cargo test --workspace | Exit 101: 1,748 passed, 1 failed, 8 ignored |
+| Failed backup-restore test, exact rerun after agent cleanup | Passed, exit 0 |
+| RB_LITE_TEST=1 cargo test --workspace --doc | Passed, exit 0; no doc tests defined |
+| git diff --check | Passed |
+
+The workspace failure was the unchanged backup restore safety check reporting
+“Quit rekordbox before restoring this backup.” The stock test's background
+rekordboxAgent remained after the main application stopped. Stopped that
+specific test agent and its helpers; the exact failed test then passed.
+No backup code changed and the full workspace command was not repeated after
+cleanup. Do not report its original run as exit 0. All R1 tests passed in that
+workspace run as well. Existing duplicate example-output-name and block 0.1.6
+future-compatibility notices remain. An initial new test-only truncating-cast
+lint was corrected before final Clippy. No frontend/token/icon sources changed,
+so their checks/generators were not repeated. Rust checks used the available
+1.99.0 toolchain directly because this host's rustup launcher was absent.
+
+Logs are `header-fix-focused.log`, `header-fix-workspace-clippy-final.log`,
+`header-fix-workspace-tests.log`, `header-fix-backup-rerun.log`, and
+`header-fix-workspace-doc-tests.log` in the private capture directory.
+TRIODE2 remains mounted with the stock capture intact. No merge, push or
+release was performed.

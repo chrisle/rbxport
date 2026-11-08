@@ -755,6 +755,68 @@ fn the_previous_r1_profile_rebuilds_unchanged_input_without_recopying_audio() {
 }
 
 #[test]
+fn v2_zero_category_headers_migrate_without_recopying_audio() {
+    use rbl_export::incremental;
+    let dir = tempfile::tempdir().unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    let tracks = vec![source(dir.path(), 1)];
+    let playlists = vec![SourcePlaylist {
+        id: 1,
+        name: "Set".into(),
+        track_indices: vec![0],
+        ..Default::default()
+    }];
+    let tags = Vec::<rbl_export::SourceMyTag>::new();
+    let opts = options(true);
+    run(stick.path(), &tracks, true);
+    // Simulate the exact v2 request receipt, preserving valid ownership hashes.
+    let normal = (
+        &tracks,
+        &playlists,
+        &tags,
+        opts.compatibility,
+        opts.keep_unlisted,
+        format!("{:?}", opts.sync),
+        format!("{:?}", opts.defaults),
+        incremental::TRANSFORM_VERSION,
+    );
+    let old_request = incremental::digest(&("xdj-r1-v2", normal)).unwrap();
+    let current = incremental::request(&tracks, &playlists, &tags, &opts).unwrap();
+    assert_ne!(old_request, current);
+    let mut manifest = rbl_export::Manifest::load(stick.path()).unwrap();
+    // Recreate the old writer bytes and their valid ownership receipt.
+    for name in &cbm::FILES[1..] {
+        let relative = format!("PIONEER/DBH/{name}");
+        let path = stick.path().join(&relative);
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[4..8].fill(0);
+        std::fs::write(&path, bytes).unwrap();
+        let hash = incremental::content_digest(&path).unwrap().unwrap();
+        manifest.generation.as_mut().unwrap().r1_files.insert(relative, hash);
+    }
+    manifest.generation.as_mut().unwrap().structure = incremental::manifest_structure(&manifest).unwrap();
+    manifest.generation.as_mut().unwrap().request = old_request;
+    manifest.save(stick.path()).unwrap();
+    let report = run(stick.path(), &tracks, true);
+    assert!(!report.up_to_date);
+    assert_eq!(report.bytes_copied, 0);
+    assert!(report.verified);
+    let files = set(stick.path());
+    for name in &cbm::FILES[1..] {
+        assert_eq!(&files[*name][4..8], &files[cbm::FILES[0]][4..8]);
+    }
+    assert_eq!(
+        rbl_export::Manifest::load(stick.path())
+            .unwrap()
+            .generation
+            .unwrap()
+            .request,
+        current
+    );
+    assert!(run(stick.path(), &tracks, true).up_to_date);
+}
+
+#[test]
 fn oversized_foreign_analysis_candidate_is_preserved_without_reading_it_all() {
     let dir = tempfile::tempdir().unwrap();
     let stick = tempfile::tempdir().unwrap();

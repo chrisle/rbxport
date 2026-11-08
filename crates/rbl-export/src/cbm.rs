@@ -433,6 +433,11 @@ pub fn build(
             1000_u32.saturating_sub(number(source_playlist_rows)?),
         )?,
     );
+    // [OBS] Stock 6.8.7 USB capture: every category repeats CbmDB's
+    // content-table end, rather than its own file length, at header +0x04.
+    for data in out.values_mut() {
+        put32(data, 4, end);
+    }
     validate(&out)?;
     Ok(out)
 }
@@ -605,6 +610,16 @@ pub fn parse_contents(b: &[u8]) -> Result<Parsed> {
 }
 pub fn parse_category(b: &[u8], contents: &[Vec<u8>]) -> Result<Parsed> {
     check_header(b)?;
+    if contents.len() > MAX_TRACKS {
+        return Err(invalid("category content count exceeds mapped limit"));
+    }
+    let end = word(b, 4)?;
+    let expected = number(HEADER + contents.len() * RECORD)?;
+    // Accept the zero written by owned RBXport v1/v2 generations so their
+    // protected, unchanged assets can migrate. New writers always set it.
+    if end != 0 && end != expected {
+        return Err(invalid("category content-table end differs from CbmDB"));
+    }
     let mut directories = Vec::new();
     let mut tocs = Vec::new();
     let mut cursor = HEADER;
