@@ -166,6 +166,13 @@ jobs:
         run: |
           if [ "$FULL" = true ] || [ -z "$BASE_REF" ]; then
             pnpm test --maxWorkers=2
-          else
-            pnpm exec vitest run --changed "$BASE_REF" --passWithNoTests --maxWorkers=2
+            exit
           fi
+          # Workflow edits have no test-module dependants; run the full suite.
+          status=0
+          git diff --quiet "$BASE_REF...HEAD" -- .github/workflows/validate-frontend.yml || status=$?
+          case "$status" in
+            0) pnpm exec vitest run --changed "$BASE_REF" --passWithNoTests --maxWorkers=2 ;;
+            1) pnpm test --maxWorkers=2 ;;
+            *) echo "git diff failed with status $status" >&2; exit "$status" ;;
+          esac
