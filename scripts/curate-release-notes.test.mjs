@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { releaseNotesPrompt, validateCuratedChanges } from "./curate-release-notes.mjs";
+import { releaseNotesPrompt, validateContributorCredits, validateCuratedChanges } from "./curate-release-notes.mjs";
 
 test("accepts and deduplicates release-note shaped changes", () => {
   assert.deepEqual(validateCuratedChanges({ changes: [
@@ -35,4 +35,13 @@ test("appends maintainer instructions to the prompt only when given", () => {
   const prompt = releaseNotesPrompt("v1", "abc", "  Lead with USB sync fixes.  ");
   assert.match(prompt, /Additional instructions from the maintainer[^]*\nLead with USB sync fixes\.$/);
   assert.match(prompt, /only a changes array\./);
+});
+
+test("preserves explicit contributor credit when notes are grouped", () => {
+  const commits = [{ body: "Release-Credit: @Contributor\n" }];
+  assert.throws(() => validateContributorCredits(["(New) Saved loops engage."], commits), /omit contributor credit: @contributor/);
+  assert.doesNotThrow(() => validateContributorCredits(["(New) Saved loops engage. Thanks @Contributor."], commits));
+  assert.throws(() => validateContributorCredits(["(New) Thanks @ContributorExtra."], commits), /omit contributor credit/);
+  assert.doesNotThrow(() => validateContributorCredits(["(Fixed) Import files."], [{ body: "Co-Authored-By: Someone <someone@example.com>" }]));
+  assert.match(releaseNotesPrompt("v1", "abc"), /Release-Credit trailer/);
 });

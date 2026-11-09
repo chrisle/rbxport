@@ -15,6 +15,16 @@ updates these files and workspace crate versions in `Cargo.lock`.
 `release-notes.json` contains app-visible notes prefixed with `(New)`,
 `(Improved)`, or `(Fixed)`.
 
+Credit community contributions in the note describing their change, for example
+`(New) Saved Active Loops engage automatically during playback. Thanks @username.`
+Record a verified GitHub username in a `Release-Credit: @username` commit trailer,
+including when integrating a contributor's commits on another branch. An explicit
+`Release-Note:` trailer can supply the complete credited wording for the fallback
+generator. Curated and fallback notes must retain every credit in the release
+range; generation fails if one is omitted. Credits travel inside the existing
+change strings to the website, updater and release announcements. Do not infer
+GitHub handles from names or email addresses.
+
 `pnpm dev` first synchronizes the version from the newest merged `v*` tag.
 It can reset an untagged version bump, so review incidental version changes
 before committing them. Existing release tags are immutable.

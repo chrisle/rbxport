@@ -8,7 +8,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { groupChanges, validateCuratedChanges } from "./curate-release-notes.mjs";
+import { groupChanges, validateContributorCredits, validateCuratedChanges } from "./curate-release-notes.mjs";
 
 // Release-Note trailers are the authoritative reader-facing description.
 // Without one, include only product changes; never publish CI/test maintenance.
@@ -46,6 +46,7 @@ export function generateReleaseNotes(version, previous, source, curatedJson = pr
   const changes = curatedJson
     ? validateCuratedChanges(JSON.parse(curatedJson)).changes
     : changesFromCommits(commits);
+  validateContributorCredits(changes, commits);
   if (!changes.length) throw new Error("No user-facing release notes. Add Release-Note trailers before cutting a release.");
   const notes = JSON.parse(readFileSync("release-notes.json", "utf8"));
   if (notes.some(note => note.version === version)) throw new Error(`release notes already contain ${version}`);

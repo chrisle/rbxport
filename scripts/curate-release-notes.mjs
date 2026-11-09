@@ -3,7 +3,7 @@
  * reader-facing release notes. The caller is responsible for passing the
  * returned JSON to the release workflow; Codex only receives read-only access.
  */
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +31,21 @@ export function validateCuratedChanges(value) {
   return { changes: groupChanges([...new Set(value.changes)]) };
 }
 
+// Credits are recorded explicitly so a cherry-picked contribution does not
+// depend on guessing a GitHub username from its Git author name or email.
+export function validateContributorCredits(changes, commits) {
+  const credits = new Set(commits.flatMap(({ body = "" }) =>
+    [...body.matchAll(/^Release-Credit:\s*(@[a-z\d][a-z\d-]{0,38})[ \t]*$/gim)].map(match => match[1].toLowerCase()),
+  ));
+  const mentioned = new Set(changes.flatMap(change =>
+    (change.match(/@[a-z\d][a-z\d-]{0,38}/gi) ?? []).map(name => name.toLowerCase()),
+  ));
+  const missing = [...credits].filter(name => !mentioned.has(name));
+  if (missing.length) {
+    throw new Error(`Release notes omit contributor credit: ${missing.join(", ")}. Add thanks beside the contributed change.`);
+  }
+}
+
 // Extra instructions are the maintainer's own text for one release (for example
 // "lead with the USB sync fixes"); they refine the rules below, never replace them.
 export function releaseNotesPrompt(previous, source, instructions = "") {
@@ -45,6 +60,7 @@ Match the established style in the newest curated entries in release-notes.json:
 - Explain observable value to DJs in plain language, not implementation details.
 - Group related commits into one meaningful note and omit CI, tests, refactors, diagnostics, release machinery, and internal protocol bookkeeping unless users directly experience the change.
 - Start every item with exactly (New), (Improved), or (Fixed), and end it with a period.
+- Preserve every GitHub username explicitly recorded by a Release-Credit trailer in this range. Include "Thanks @username" beside the contributed change, including when grouping notes. Do not infer usernames from author names or email addresses.
 - Preserve an RBX-N ticket only when the range explicitly associates that ticket with the user-visible fix.
 - Prefer a short, useful list over one line per commit. Do not invent behavior or claim evidence beyond the diff.
 - Order New, then Fixed, then Improved, with the most important changes first within each group.
@@ -88,7 +104,10 @@ export function curateReleaseNotes({ previous, source, instructions = "", cwd = 
     });
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`codex exec failed with status ${result.status}`);
-    return validateCuratedChanges(JSON.parse(readFileSync(outputPath, "utf8")));
+    const curated = validateCuratedChanges(JSON.parse(readFileSync(outputPath, "utf8")));
+    const bodies = execFileSync("git", ["log", "--format=%b%x1e", `${previous}..${source}`], { cwd, encoding: "utf8" });
+    validateContributorCredits(curated.changes, bodies.split("\x1e").map(body => ({ body })));
+    return curated;
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
