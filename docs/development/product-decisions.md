@@ -18,7 +18,7 @@ while the core stays focused and fast.
 ## Auto Relocate search-folder preferences
 
 On 2026-11-08, Chris accepted completing the Rekordbox-style Auto Relocate
-search-folder preferences for the version after the upcoming release. Keep
-this feature out of the upcoming release and its integration batch. Track
+search-folder preferences for the version after the upcoming 1.11 release. Keep
+this feature out of 1.11 and its integration batch. Track
 remaining behavior and evidence gaps under #415 and the preferences UI under
 #487; this scheduling decision does not certify parity or current UI visibility.
