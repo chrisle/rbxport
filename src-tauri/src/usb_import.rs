@@ -395,6 +395,8 @@ struct PendingCues {
 
 /// Applies a batch of planned imports: every track's journal and files first,
 /// then all the library edits on one writer, then the journals are committed.
+/// The caller holds the edit gate and analysis-write lock, as `import` does,
+/// so opening the writer cannot recover these not-yet-committed journals.
 /// Each track keeps its own journal and its own database transaction, so a
 /// failure part-way leaves each track either fully imported or put back, as
 /// `file_journal::recover` decides from its row.
@@ -1362,9 +1364,8 @@ mod tests {
         );
         let before: Vec<Vec<u8>> = local.iter().map(|p| std::fs::read(p).unwrap()).collect();
         let editor = crate::grid::GridEditor::at(state.backup_dir());
-        // Grid edits made before the import, on every track. Tracks are planned
-        // in map order, so which ones are imported ahead of the refusal varies
-        // (possibly none when the refused one leads its batch).
+        // Grid edits made before the import must survive a preflight refusal
+        // because no batch has changed any track yet.
         for index in 0..tracks { editor.seed_history(&rbl_db::fixture::track_id(index)); }
         assert!(import(&state, &editor, &usb, true, false, false, false).is_err());
         let mut imported = 0;
@@ -1392,6 +1393,10 @@ mod tests {
         let local = local_analysis_for(&state, &location, 3);
         let before: Vec<_> = local.iter().map(|p| std::fs::read(p).unwrap()).collect();
         let editor = crate::grid::GridEditor::at(state.backup_dir());
+        // Match the import caller: the writer's automatic recovery must not
+        // run between publishing these journals and committing their rows.
+        let _gate = state.edit_gate.lock();
+        let _files = state.analysis_write.lock();
         let mut batch = Vec::new();
         for (index, target) in local.iter().enumerate() {
             let id = rbl_db::fixture::track_id(index);
