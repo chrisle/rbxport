@@ -1408,7 +1408,7 @@ mod tests {
         }
         assert!(apply_cue_batch(&state, &editor, &location, batch, &mut ImportReport::default()).is_err());
         assert_ne!(std::fs::read(&local[0]).unwrap(), before[0]);
-        for index in 1..3 { assert_eq!(std::fs::read(&local[index]).unwrap(), before[index]); }
+        for (path, bytes) in local.iter().zip(&before).skip(1) { assert_eq!(&std::fs::read(path).unwrap(), bytes); }
         assert!(!editor.has_history(&rbl_db::fixture::track_id(0)));
         assert!(!state.backup_dir().join("analysis-journal").exists_with_entries());
     }

@@ -59,3 +59,14 @@ it("clears the previous source's cues while the same file loads from another dev
   await act(async () => { finish([{} as Cue, {} as Cue]); await Promise.resolve(); });
   expect(host.textContent).toBe("2");
 });
+
+it("keeps current cues during a metadata refresh of the same device source", async () => {
+  const track = { id: "file:/usb/track.wav", deviceSource: { path: "/usb", format: "oneLibrary", trackId: 42 } } as RowDto;
+  trackCues.mockResolvedValueOnce([{} as Cue]);
+  act(() => root.render(<Probe track={track} />));
+  await settle();
+  trackCues.mockImplementationOnce(() => new Promise<Cue[]>(() => {}));
+  act(() => root.render(<Probe track={{ ...track, title: "Updated title", deviceSource: { path: "/usb", format: "oneLibrary", trackId: 42 } }} />));
+  await settle();
+  expect(host.textContent).toBe("1");
+});
