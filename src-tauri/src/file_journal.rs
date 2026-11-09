@@ -116,6 +116,13 @@ impl FileJournal {
 
     pub fn rollback(&self) -> AppResult<()> { self.install(false, false)?; self.remove() }
 
+    /// Whether the row advanced since this journal was prepared. Used after a
+    /// failed batch to invalidate grid Undo only for rows that actually changed,
+    /// including a commit whose caller reported an error afterward.
+    pub fn row_changed(&self, db: &rbl_db::Library) -> AppResult<bool> {
+        Ok(row(db, &self.manifest.track)?.0 != self.manifest.before_usn)
+    }
+
     /// A failed database call can have committed before a later error. Resolve
     /// from the persisted row rather than blindly restoring the old files.
     pub fn reconcile(self, location: &rbl_db::LibraryLocation) -> AppResult<()> {

@@ -428,11 +428,18 @@ fn apply_cue_batch(
     });
     if let Err(e) = written {
         // Rows already edited keep their new files; the rest are put back.
+        // Read the persisted USNs rather than guessing from the error: a
+        // database call may report failure after its commit reached disk.
+        let changed = state.read_db(|db| Ok(journals.iter().map(|journal| journal.row_changed(db)).collect::<AppResult<Vec<_>>>()))
+            .map_err(write_error).and_then(|changed| changed)
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "could not inspect failed cue import rows; discarding batch grid history");
+                vec![true; batch.len()]
+            });
         let reconciled = journals.pop().map_or(Ok(()), |journal| journal.reconcile(location));
-        // Tracks edited before the refusal now hold the stick's grid; Undo
-        // must not write the pre-import grid back over it. A refused track
-        // was never changed, so forgetting its history too loses nothing.
-        for item in &batch { editor.forget_history(&item.id); }
+        for (item, changed) in batch.iter().zip(changed) {
+            if changed { editor.forget_history(&item.id); }
+        }
         reconciled?;
         return Err(write_error(e));
     }
@@ -1415,6 +1422,9 @@ mod tests {
         assert_ne!(std::fs::read(&local[0]).unwrap(), before[0]);
         for (path, bytes) in local.iter().zip(&before).skip(1) { assert_eq!(&std::fs::read(path).unwrap(), bytes); }
         assert!(!editor.has_history(&rbl_db::fixture::track_id(0)));
+        for index in 1..3 {
+            assert!(editor.has_history(&rbl_db::fixture::track_id(index)), "a refused or unreached track keeps its prior Undo");
+        }
         assert!(!state.backup_dir().join("analysis-journal").exists_with_entries());
     }
 
