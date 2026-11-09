@@ -1349,7 +1349,7 @@ mod tests {
     /// track whole: those edited before it keep their new files, it and the
     /// rest are put back, and no journal is left behind.
     #[test]
-    fn a_failed_edit_in_a_batch_leaves_every_track_whole() {
+    fn malformed_later_track_prevents_every_batch_from_writing() {
         let dir = tempfile::tempdir().unwrap();
         let (state, location, usb, tracks) = library_and_stick(dir.path());
         assert!(tracks >= 40);
@@ -1381,8 +1381,36 @@ mod tests {
             if in_library { assert!(!editor.has_history(&id), "a failed batch leaves no Undo over imported track {index}'s grid"); }
             imported += usize::from(in_library);
         }
-        assert!(imported < tracks, "{imported} of {tracks} tracks imported before the refusal");
+        assert_eq!(imported, 0, "all tracks must pass preflight before any batch writes");
         assert!(!state.backup_dir().join("analysis-journal").exists_with_entries(), "no journal is left behind");
+    }
+
+    #[test]
+    fn a_database_refusal_reconciles_every_journal_in_a_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, usb, _) = library_and_stick(dir.path());
+        let local = local_analysis_for(&state, &location, 3);
+        let before: Vec<_> = local.iter().map(|p| std::fs::read(p).unwrap()).collect();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let mut batch = Vec::new();
+        for (index, target) in local.iter().enumerate() {
+            let id = rbl_db::fixture::track_id(index);
+            editor.seed_history(&id);
+            let source = usb.join(format!("PIONEER/USBANLZ/P000/{:08X}/ANLZ0000", index + 1));
+            let mut entries = rbl_anlz::Anlz::read(&source.with_extension("EXT")).unwrap().cue_entries();
+            if index == 1 {
+                entries[0].kind = 2;
+                entries[0].time_ms = 3000;
+                entries[0].loop_time_ms = 1000;
+            }
+            batch.push(PendingCues { id, entries, bpm: 12800,
+                files: vec![(target.clone(), std::fs::read(source.with_extension("DAT")).unwrap())] });
+        }
+        assert!(apply_cue_batch(&state, &editor, &location, batch, &mut ImportReport::default()).is_err());
+        assert_ne!(std::fs::read(&local[0]).unwrap(), before[0]);
+        for index in 1..3 { assert_eq!(std::fs::read(&local[index]).unwrap(), before[index]); }
+        assert!(!editor.has_history(&rbl_db::fixture::track_id(0)));
+        assert!(!state.backup_dir().join("analysis-journal").exists_with_entries());
     }
 
     /// An import that has to wait for the stick, while an export holds it,

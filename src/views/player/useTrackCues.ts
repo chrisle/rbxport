@@ -24,7 +24,7 @@ export function useTrackCues(
    */
   onLoaded?: (cues: Cue[]) => void,
 ): Cue[] {
-  const [snapshot, setSnapshot] = useState<{ id: string; cues: Cue[] } | null>(null);
+  const [snapshot, setSnapshot] = useState<{ track: RowDto; cues: Cue[] } | null>(null);
   // A ref so the fetch effect does not re-run when the callback's identity
   // does; the deck passes a fresh closure each render.
   const loaded = useRef(onLoaded);
@@ -49,7 +49,7 @@ export function useTrackCues(
       const found = await backend.trackCues(id, device);
       // The track may have changed while this was in flight.
       if (!live || current !== request) return;
-      setSnapshot({ id, cues: found });
+      setSnapshot({ track, cues: found });
       if (first) {
         first = false;
         loaded.current?.(found);
@@ -83,5 +83,5 @@ export function useTrackCues(
 
   // A new track must never see the previous track's Kind-4 candidate while
   // its own cue request is in flight.
-  return snapshot !== null && snapshot.id === track?.id ? snapshot.cues : EMPTY_CUES;
+  return snapshot !== null && snapshot.track === track ? snapshot.cues : EMPTY_CUES;
 }
