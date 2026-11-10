@@ -476,16 +476,64 @@ fn drive_of(path: &str) -> String {
 /// [ASSUME] the second `getMasterDbDriveInfo` out-parameter is
 /// `CurrentDBDrive`, as in `getDriveInfo`.
 fn current_drive(folder: &str, is_default_folder: bool, stored: Option<&str>) -> Option<String> {
+    current_drive_with(folder, is_default_folder, stored, os_mount_point)
+}
+
+/// [`current_drive`] with the operating-system mount lookup supplied, for
+/// a path [`drive_of`] places on `/`.
+///
+/// [ASSUME] rekordbox has no Linux client, so nothing is observed there.
+/// A library authored on Windows and mounted on Linux keeps `E:/` as both
+/// stored drives; its mount (`/media/<user>/Music/`) takes the place of
+/// the `/Volumes/<name>/` rekordbox finds on macOS, so the same
+/// substitution applies. Like [`DriveMapping`] this is read-only.
+fn current_drive_with(
+    folder: &str,
+    is_default_folder: bool,
+    stored: Option<&str>,
+    mount_point: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
     let stored_value = stored.unwrap_or("");
     if is_default_folder || folder.starts_with(stored_value) {
         return stored.map(str::to_owned);
     }
     let drive = drive_of(folder);
     if drive == "/" {
-        stored.map(str::to_owned)
+        mount_point(folder).or_else(|| stored.map(str::to_owned))
     } else {
         Some(drive)
     }
+}
+
+/// The directory a Linux library folder's file system is mounted at, with
+/// a trailing `/`: the deepest ancestor still on the folder's device
+/// (`st_dev`). `None` off Linux, when the folder cannot be read, or when
+/// it is on the root file system (there is no separate drive).
+#[cfg(target_os = "linux")]
+fn os_mount_point(folder: &str) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    mount_point_by(folder, |p| std::fs::metadata(p).ok().map(|m| m.dev()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn os_mount_point(_folder: &str) -> Option<String> {
+    None
+}
+
+/// [`os_mount_point`] over any `device_of`, so tests need no real mount.
+#[cfg(any(target_os = "linux", test))]
+fn mount_point_by(folder: &str, device_of: impl Fn(&Path) -> Option<u64>) -> Option<String> {
+    let path = Path::new(folder);
+    let device = device_of(path)?;
+    let mut mount = path;
+    for ancestor in path.ancestors().skip(1) {
+        if device_of(ancestor) != Some(device) {
+            break;
+        }
+        mount = ancestor;
+    }
+    let text = mount.to_str()?;
+    (text != "/" && !text.is_empty()).then(|| format!("{}/", text.trim_end_matches('/')))
 }
 
 impl Library {
@@ -649,6 +697,54 @@ mod tests {
         assert_eq!(current_drive("/Volumes/old/PIONEER/Master", false, stored).as_deref(), Some("/Volumes/old/"));
         // An empty stored value: juce startsWith("") is true, so nothing changes.
         assert_eq!(current_drive("/Volumes/X/PIONEER/Master", false, Some("")).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn a_linux_mount_stands_in_for_the_windows_drive_letter() {
+        // Device ids by directory: /media/u/Music is its own file system.
+        let dev = |p: &Path| -> Option<u64> {
+            let p = p.to_str()?;
+            if p.starts_with("/media/u/Music") {
+                Some(7)
+            } else if p.starts_with("/media") || p == "/" || p.starts_with("/home") {
+                Some(1)
+            } else {
+                None
+            }
+        };
+        assert_eq!(mount_point_by("/media/u/Music/PIONEER/Master", dev).as_deref(), Some("/media/u/Music/"));
+        assert_eq!(mount_point_by("/home/u/PIONEER/Master", dev), None, "root file system: no drive");
+        assert_eq!(mount_point_by("/nowhere/PIONEER/Master", dev), None);
+
+        // A Windows-authored library: both stored drives are E:/.
+        let mount = |f: &str| mount_point_by(f, dev);
+        let folder = "/media/u/Music/PIONEER/Master";
+        let current = current_drive_with(folder, false, Some("E:/"), mount).unwrap();
+        assert_eq!(current, "/media/u/Music/");
+        let m = DriveMapping::new("E:/", &current).unwrap();
+        assert_eq!(m.apply("E:/Music/Tracks/a.flac"), "/media/u/Music/Music/Tracks/a.flac");
+        assert_eq!(m.apply("e:/x.flac"), "/media/u/Music/x.flac");
+        assert_eq!(m.apply("F:/x.flac"), "F:/x.flac");
+
+        // Unchanged: the root file system keeps the stored value, the
+        // default folder never updates it, /Volumes and drive letters win.
+        assert_eq!(current_drive_with("/home/u/PIONEER/Master", false, Some("E:/"), mount).as_deref(), Some("E:/"));
+        assert_eq!(current_drive_with(folder, true, Some("E:/"), mount).as_deref(), Some("E:/"));
+        assert_eq!(current_drive_with("/Volumes/X/PIONEER/Master", false, Some("E:/"), mount).as_deref(), Some("/Volumes/X/"));
+        assert_eq!(current_drive_with("D:/PIONEER/Master", false, Some("E:/"), mount).as_deref(), Some("D:/"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_real_mount_point_is_an_ancestor_on_the_same_device() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("PIONEER").join("Master");
+        std::fs::create_dir_all(&folder).unwrap();
+        // None when the temp dir is on the root file system.
+        if let Some(mount) = os_mount_point(&folder.to_string_lossy()) {
+            assert!(folder.to_string_lossy().starts_with(&mount) && mount.ends_with('/'));
+        }
+        assert_eq!(os_mount_point("/nonexistent/PIONEER/Master"), None);
     }
 
     #[test]
