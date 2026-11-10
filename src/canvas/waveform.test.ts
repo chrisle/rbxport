@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  BAND_HIGH, BAND_LOW, BAND_MID, bandColour, bandStops, drawBands, drawColumns, drawPreviewCues, drawPreviewMemoryCues, PREVIEW_BADGE, previewClickMs, ramp, segments,
+  BAND_HIGH, BAND_LOW, BAND_MID, bandColour, bandStops, drawBands, drawColumns, drawPcmWave, drawPreviewCues, drawPreviewMemoryCues, PREVIEW_BADGE, previewClickMs, ramp, segments,
   strideOf, waveformKindOf,
 } from "./waveform";
 
@@ -498,5 +498,39 @@ describe("a click on a row preview", () => {
 
   it("is the top for a track with no length", () => {
     expect(previewClickMs(50, 1, 200, 0, [])).toBe(0);
+  });
+});
+
+describe("the detail waveform's vertical centring (#863)", () => {
+  const HEIGHT = 146;
+  const inset = { top: 20, bottom: 16 };
+  const record = () => {
+    const rows: { y: number; h: number }[] = [];
+    const ctx = {
+      fillStyle: "", strokeStyle: "", globalAlpha: 1, clearRect: () => undefined,
+      fillRect: (_x: number, y: number, _w: number, h: number) => { rows.push({ y, h }); },
+    };
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, rows };
+  };
+
+  it("draws the PWV7 waveform about the middle of its inset band", () => {
+    const { ctx, rows } = record();
+    drawBands(ctx, new Uint8Array([200, 200, 200]), 1, HEIGHT, "detail", false, inset);
+    expect(rows[0]!.y + rows[0]!.h / 2).toBeCloseTo((inset.top + HEIGHT - inset.bottom) / 2, 5);
+  });
+
+  it("places the PCM close-zoom lanes in the same band, not across the whole strip", () => {
+    const { ctx, rows } = record();
+    drawPcmWave(ctx, new Uint8Array(), 4, HEIGHT, "3band", { from: 0, to: 1 }, inset);
+    const ys = rows.map((row) => row.y);
+    // Zero lines are painted at lane + 0.5 of a pixel row.
+    expect((Math.min(...ys) + Math.max(...ys)) / 2 - 0.5).toBeCloseTo((inset.top + HEIGHT - inset.bottom) / 2, 5);
+  });
+
+  it("leaves the PCM lanes where they were when no inset is asked for", () => {
+    const { ctx, rows } = record();
+    drawPcmWave(ctx, new Uint8Array(), 4, HEIGHT, "3band");
+    const ys = rows.map((row) => row.y);
+    expect([Math.min(...ys), Math.max(...ys)]).toEqual([HEIGHT * 0.25 + 0.5, HEIGHT * 0.75 + 0.5]);
   });
 });

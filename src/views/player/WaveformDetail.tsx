@@ -241,10 +241,11 @@ export const WaveformDetail = memo(function WaveformDetail({
       const duration = Math.max(toMs - fromMs, 1);
       // Always map samples with their own decoded bounds, not the bounds of
       // an in-flight replacement: otherwise transients jump during read-ahead.
+      const pcmScale = h / Math.max(height, 1);
       drawPcmWave(ctx, loaded?.bytes ?? new Uint8Array(), w, h, palette, {
         from: (pcmWindow.drawFromMs - fromMs) / duration,
         to: (pcmWindow.drawToMs - fromMs) / duration,
-      });
+      }, { top: inset.top * pcmScale, bottom: inset.bottom * pcmScale });
       return;
     }
     if (!data || data.trackId !== trackId) {
