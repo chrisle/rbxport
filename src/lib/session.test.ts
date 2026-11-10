@@ -30,6 +30,7 @@ describe("sanitiseSession", () => {
       layout: "two",
       subWidth: 700,
       subTreeWidth: 240,
+      infoWidth: 420,
       trafficLight: "b",
       artworkMode: "full",
       waveformZoom: { a: 4, b: 32 },
@@ -52,6 +53,15 @@ describe("sanitiseSession", () => {
     const session = sanitiseSession({ treeWidth: 300, subWidth: "wide" });
     expect(session.subWidth).toBe(DEFAULT_SUB_WIDTH);
     expect(session.subTreeWidth).toBe(DEFAULT_SUB_TREE_WIDTH);
+  });
+
+  it("leaves the information panel at its default unless a usable width was stored", () => {
+    expect(DEFAULT_SESSION.infoWidth).toBeNull();
+    expect(sanitiseSession({}).infoWidth).toBeNull();
+    expect(sanitiseSession({ infoWidth: "wide" }).infoWidth).toBeNull();
+    expect(sanitiseSession({ infoWidth: -5 }).infoWidth).toBeNull();
+    expect(sanitiseSession({ infoWidth: NaN }).infoWidth).toBeNull();
+    expect(sanitiseSession({ infoWidth: 400.4 }).infoWidth).toBe(400);
   });
 
   it("keeps only records that could be drawn", () => {
