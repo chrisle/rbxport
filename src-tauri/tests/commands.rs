@@ -2248,6 +2248,28 @@ fn issue_608_collection_cue_read_does_not_accept_linux_usb_file_ids() {
     }
 }
 
+/// The directory the file system holding `folder` is mounted at, with a
+/// trailing `/`; `None` off Linux or on the root file system.
+fn linux_mount_point(folder: &std::path::Path) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let dev = std::fs::metadata(folder).ok()?.dev();
+        let mut mount = folder;
+        for a in folder.ancestors().skip(1) {
+            if std::fs::metadata(a).map(|m| m.dev()).ok() != Some(dev) {
+                break;
+            }
+            mount = a;
+        }
+        if mount != std::path::Path::new("/") {
+            return Some(format!("{}/", mount.to_string_lossy().trim_end_matches('/')));
+        }
+    }
+    let _ = folder;
+    None
+}
+
 /// A drive library's Location, in the Info panel and the browser column, is
 /// the path rekordbox shows: the stored `FolderPath` with `BaseDBDrive`
 /// swapped for `CurrentDBDrive` (`replaceDrivePath`), not the raw column.
@@ -2256,6 +2278,7 @@ fn a_drive_librarys_location_reads_under_the_drives_current_mount() {
     let s = shell();
     let track = track_id(3);
     let location = s.state().location().unwrap();
+    let folder = location.master_db.parent().unwrap().to_path_buf();
     fixture::point_at_audio(&location, 3, "/Volumes/Music/Tracks/a.mp3", 300).unwrap();
     let writer = rbl_db::write::Writer::open(location, s._dir.path().join("drive-backups")).unwrap();
     writer
@@ -2266,9 +2289,13 @@ fn a_drive_librarys_location_reads_under_the_drives_current_mount() {
     drop(writer);
 
     // On Windows a fixture folder off the default sits on a lettered drive,
-    // which rekordbox takes as the current drive instead.
+    // which rekordbox takes as the current drive instead. On Linux a fixture
+    // folder on its own file system (a tmpfs /tmp) is taken the same way, as
+    // that mount.
     let expected = if cfg!(windows) {
         format!("{}/Tracks/a.mp3", &s._dir.path().to_string_lossy()[..2])
+    } else if let Some(mount) = linux_mount_point(&folder) {
+        format!("{mount}Tracks/a.mp3")
     } else {
         "/Volumes/Music 1/Tracks/a.mp3".to_owned()
     };
