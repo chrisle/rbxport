@@ -89,12 +89,15 @@ export function previewPositionMs(snapshot: PreviewSnapshot, now: number = perfo
 /**
  * Previews `trackId` from `positionMs`. The playhead moves there at once; a
  * refusal (a file that is not there) takes it away again and is reported to
- * whoever listens through `onPreviewError`.
+ * whoever listens through `onPreviewError`. The backend only swaps its preview
+ * once the new file opens, so a refusal leaves the previous track playing: the
+ * backend is asked what it is playing, and that track's playhead comes back.
  */
 export function startPreview(trackId: string, positionMs: number, durationMs: number): Promise<void> {
   generation += 1;
   const asked = generation;
   stopPolling();
+  const previous = current;
   publish({ trackId, playing: true, positionMs: Math.max(0, positionMs), durationMs, at: performance.now() });
   return getBackend()
     .then((backend) => backend.previewPlay(trackId, Math.max(0, positionMs)))
@@ -104,12 +107,42 @@ export function startPreview(trackId: string, positionMs: number, durationMs: nu
       publish({ ...current, at: performance.now() });
       schedulePoll(asked);
     })
-    .catch((error: unknown) => {
+    .catch(async (error: unknown) => {
       if (asked !== generation) return;
-      publish(IDLE);
       const message = reasonFrom(error);
+      const restored = previous.trackId === null ? null : await stillPlaying(previous);
+      if (asked !== generation) return;
+      if (restored) {
+        publish(restored);
+        if (restored.playing) schedulePoll(asked);
+      } else {
+        publish(IDLE);
+      }
       for (const listener of errorListeners) listener(message);
     });
+}
+
+/**
+ * What the backend is previewing now, or null if nothing. `previous` is only
+ * the UI's snapshot — it may itself be an optimistic start that never reached
+ * the backend (a refusal chained behind another) — so the backend's own answer
+ * decides what comes back, and `previous` only lends a duration it lacks.
+ */
+async function stillPlaying(previous: PreviewSnapshot): Promise<PreviewSnapshot | null> {
+  try {
+    const state = await (await getBackend()).previewState();
+    if (state.track === null) return null;
+    const known = state.track === previous.trackId ? previous.durationMs : 0;
+    return {
+      trackId: state.track,
+      playing: state.playing,
+      positionMs: state.positionMs,
+      durationMs: state.durationMs > 0 ? state.durationMs : known,
+      at: performance.now(),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Stops the preview where it is. */
@@ -131,6 +164,11 @@ export function onPreviewError(listener: (message: string) => void): () => void 
 /** The preview, re-rendering on a start, a stop and each answer. */
 export function usePreview(): PreviewSnapshot {
   return useSyncExternalStore(subscribe, () => current, () => IDLE);
+}
+
+/** For tests: the snapshot the rows would see. */
+export function __previewSnapshot(): PreviewSnapshot {
+  return current;
 }
 
 /** For tests: back to nothing previewing. */
