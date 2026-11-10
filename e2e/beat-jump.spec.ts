@@ -100,3 +100,32 @@ test("a fixed jump left unbound answers no key", async ({ page }) => {
   await page.waitForTimeout(200);
   expect(await elapsedSeconds(page)).toBe(start);
 });
+
+test("a beat jump while paused moves the head at once, without PLAY", async ({ page }) => {
+  await load(page);
+
+  const forward = player(page).getByRole("button", { name: "Beat jump forward" });
+  const start = await elapsedSeconds(page);
+  const fourBeats = await secondsOf(page, 4);
+  await expect(player(page).getByRole("button", { name: "Play", exact: true })).toBeVisible();
+
+  await forward.click();
+  await expectHeadAt(page, start + fourBeats);
+  // Still paused: the head holds where the jump put it.
+  await page.waitForTimeout(300);
+  await expectHeadAt(page, start + fourBeats);
+});
+
+test("a beat-jump arrow shows a pressed state while it is held, distinct from hover", async ({ page }) => {
+  await load(page);
+
+  const forward = player(page).getByRole("button", { name: "Beat jump forward" });
+  const background = () => forward.evaluate((node) => getComputedStyle(node).backgroundColor);
+  await forward.hover();
+  const hovered = await background();
+  await page.mouse.down();
+  await expect(forward).toHaveAttribute("data-pressed", "");
+  expect(await background()).not.toBe(hovered);
+  await page.mouse.up();
+  await expect(forward).not.toHaveAttribute("data-pressed", "");
+});

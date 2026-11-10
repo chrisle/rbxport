@@ -113,6 +113,7 @@ import { listenEditHistory } from "@/lib/editHistory";
 import { registerDeck } from "@/lib/scripting";
 import { useHoldRepeat } from "./useHoldRepeat";
 import { jumpHead } from "./beatJump";
+import { JumpButton } from "./JumpButton";
 import { DeckInfo } from "./DeckInfo";
 import { DualControls, DualHead } from "./DualDeck";
 import { READ_ONLY_REASON, useMemoryCues } from "./useMemoryCues";
@@ -2311,16 +2312,13 @@ export const Player = memo(function Player({
   const jumps = (
         <div className={styles.pair}>
           {JUMPS.map((button) => (
-            <button
+            <JumpButton
               key={button.id}
-              type="button"
-              className={styles.square}
-              aria-label={button.label}
+              label={button.label}
+              glyph={button.glyph}
               disabled={playback.idle}
-              onClick={() => jump(button.id === "jump-back" ? -1 : 1)}
-            >
-              {button.glyph}
-            </button>
+              onJump={() => jump(button.id === "jump-back" ? -1 : 1)}
+            />
           ))}
         </div>
   );
