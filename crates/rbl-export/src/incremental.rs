@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::{Manifest, ManifestTrack, SourceTrack, SourcePlaylist, SourceMyTag, ExportOptions, Result};
 
 /// Analysis bytes must be regenerated when an export transform changes.
-pub const TRANSFORM_VERSION: u32 = 3;
+/// Revision 4 preserves cue-list placement when replacing exported cues.
+pub const TRANSFORM_VERSION: u32 = 4;
 
 /// What `export.pdb`'s rows hold. Part of the request, so a stick written
 /// with an older layout is rebuilt on its next sync even when nothing else
