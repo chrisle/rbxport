@@ -1388,7 +1388,7 @@
   "Volume",
   "Volume Down",
   "WAV — larger files",
-  "WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.",
+  "WAV/AIFF: keeps the source's 16/24-bit depth and 44.1/48 kHz rate where possible. MP3: smaller, lossy files.",
   "WIDE",
   "Wait for the current backup to finish before changing its folder.",
   "Wait for the device to finish before changing its playlists.",

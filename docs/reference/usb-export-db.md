@@ -1115,9 +1115,11 @@ re-sync does not churn filenames.
 that canonicalises outside the volume.
 
 **Formats.** Compatible MP3 and integer-PCM WAV/AIFF at 44.1 or 48 kHz are
-copied as-is. With Maximum CDJ compatibility on, anything else is converted
-to 16-bit 44.1 kHz stereo WAV/AIFF or 320 kbps CBR MP3 and renamed
-`{stem}-rbx-cdj-{export_id}.{ext}`. A duplicate produced
+copied as-is. With Maximum CDJ compatibility on, anything else is converted to
+320 kbps CBR MP3 or stereo WAV/AIFF. WAV/AIFF output keeps the source's own
+16- or 24-bit depth and 44.1/48 kHz rate where a CDJ can already read them
+(88.2/176.4 kHz halves to 44.1, 96/192 kHz halves to 48, any other rate goes
+to 44.1), and is renamed `{stem}-rbx-cdj-{export_id}.{ext}`. A duplicate produced
 *by* conversion is a `Conflict`, not a silent overwrite. Surround audio is
 refused rather than downmixed; WAV or AIFF past its 32-bit container limit is refused.
 

@@ -58,7 +58,7 @@ export function UsbExportPane() {
             <option value="mp3">{t("MP3 — 320 kbps")}</option>
           </select>
         </div>
-        <p className={styles.description}>{t("WAV/AIFF: 16-bit / 44.1 kHz. MP3: smaller, lossy files.")}</p>
+        <p className={styles.description}>{t("WAV/AIFF: keeps the source's 16/24-bit depth and 44.1/48 kHz rate where possible. MP3: smaller, lossy files.")}</p>
       </div>
       <label className={`${layout.summary} ${styles.option}`}>
         <span className={styles.details}>

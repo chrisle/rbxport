@@ -1242,7 +1242,11 @@ fn export_cancellable_inner(
                     cache.needs_conversion(&track.source_path)?.then_some(target.audio())
                 } else { None };
                 if old.is_some() && !same_source { let _ = cache.properties(&track.source_path)?; }
-                let same_profile = old.is_some_and(|old| old.conversion == conversion.map_or("", rbl_audio::compatibility::Format::profile));
+                let profile = conversion.map_or_else(String::new, |target| {
+                    let (rate, bits) = cache.properties(&track.source_path).ok().map_or((rbl_audio::compatibility::RATE, 16), |p| target.target(&p));
+                    target.profile(rate, bits)
+                });
+                let same_profile = old.is_some_and(|old| old.conversion == profile);
                 if (same_source || source_contents_unchanged.contains(&track_key(track.id, &track.source_path.to_string_lossy()))) && same_profile { return Ok(None); }
                 // Preparation only determines the profile. Conversion happens
                 // while staging this track, so the cache never holds a whole
@@ -1454,7 +1458,16 @@ fn export_cancellable_inner(
         // The stick's own copy, still where its row says and not renamed for
         // a conversion or an analysis collision: kept, nothing copied.
         let adopted = !in_place && adopted_paths.get(index).and_then(Option::as_deref) == Some(place.audio.as_str());
-        let profile = conversion.map_or("", rbl_audio::compatibility::Format::profile);
+        // The actual conversion target for this source (#824): MP3 always
+        // RATE/16; WAV/AIFF keep the source's own depth/rate where possible.
+        // An unconverted track never reads these.
+        let (target_rate, target_bits) = match conversion {
+            Some(target) => cache.and_then(|cache| cache.properties(&track.source_path).ok())
+                .or_else(|| rbl_audio::compatibility::inspect(&track.source_path).ok())
+                .map_or((rbl_audio::compatibility::RATE, 16), |p| target.target(&p)),
+            None => (0, 0),
+        };
+        let profile = conversion.map_or_else(String::new, |target| target.profile(target_rate, target_bits));
         let audio_dest = under(destination, &place.audio);
         let retained_audio = preserved && same_file(&track.source_path, &audio_dest);
         // Looked at, not yet claimed: a track that fails below must leave
@@ -1863,7 +1876,7 @@ fn export_cancellable_inner(
             } else {
                 artwork_path(artwork_id, "a", false).replacen("/PIONEER/", &format!("/{root_name}/"), 1)
             },
-            conversion: if track.source_unavailable { carried.map_or_else(|| profile.to_owned(), |old| old.conversion.clone()) } else { profile.to_owned() },
+            conversion: if track.source_unavailable { carried.map_or_else(|| profile.clone(), |old| old.conversion.clone()) } else { profile.clone() },
             conversion_source_hash: if track.source_unavailable { carried.map_or(source_hash, |old| old.conversion_source_hash) } else { source_hash },
             audio_hash,
             in_place: in_place && !absent,
@@ -1875,7 +1888,7 @@ fn export_cancellable_inner(
         // Gathered here rather than re-derived later, so the two databases
         // cannot disagree about a path or a size.
         let mut metadata = track.metadata.clone();
-        if conversion.is_some() { metadata.bit_depth = 16; }
+        if conversion.is_some() { metadata.bit_depth = u16::try_from(target_bits).unwrap_or(16); }
         let library_id = track.device.as_ref().map_or(track.id, |d| d.master_content_id);
         let master_db_id = track.device.as_ref().map_or(db_id, |d| d.master_db_id);
         one_library_tracks.push(OneLibraryTrack {
@@ -1883,7 +1896,7 @@ fn export_cancellable_inner(
             cues: track.cues.clone(),
             year: track.year, release_date: track.release_date.clone(),
             bitrate: if conversion.is_some() { 0 } else { track.bitrate },
-            sample_rate: if conversion.is_some() { 44_100 } else { track.sample_rate },
+            sample_rate: if conversion.is_some() { target_rate } else { track.sample_rate },
             export_id,
             library_id,
             master_db_id,
@@ -1921,8 +1934,8 @@ fn export_cancellable_inner(
             tempo_x100: track.bpm_x100,
             duration_sec: track.duration_sec,
             year: track.year,
-            bitrate: conversion.map_or(track.bitrate, rbl_audio::compatibility::Format::bitrate),
-            sample_rate: if conversion.is_some() { rbl_audio::compatibility::RATE } else { track.sample_rate },
+            bitrate: conversion.map_or(track.bitrate, |target| target.bitrate(target_rate, target_bits)),
+            sample_rate: if conversion.is_some() { target_rate } else { track.sample_rate },
             // The library's figure when it has one, as rekordbox writes it,
             // even where the file has since changed by a few bytes of tags.
             file_size: u32::try_from(
@@ -1931,7 +1944,7 @@ fn export_cancellable_inner(
             .unwrap_or(0),
             track_number: track.metadata.track_number,
             disc_number: track.metadata.disc_number,
-            sample_depth: conversion.map_or(track.metadata.bit_depth, |_| 16),
+            sample_depth: conversion.map_or(track.metadata.bit_depth, |_| u16::try_from(target_bits).unwrap_or(16)),
             // The same pair exportLibrary.db gets, as rekordbox writes both.
             master_db_id: u32::try_from(master_db_id).unwrap_or(0),
             master_content_id: u32::try_from(library_id).unwrap_or(0),
