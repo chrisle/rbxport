@@ -655,6 +655,14 @@ fn adopted_paths(destination: &Path, tracks: &[SourceTrack], previous: Option<&M
     }).collect()
 }
 
+/// `name` beside `audio` on the stick. A stick path is always `/`-separated:
+/// `Path::join` would put a `\` before `name` on a Windows host, which a
+/// player on any other system reads as part of the file name (#788).
+fn sibling(audio: &str, name: &str) -> String {
+    let parent = audio.rsplit_once('/').map_or("/Contents", |(parent, _)| parent);
+    format!("{parent}/{name}")
+}
+
 fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Manifest>, in_place: &[Option<String>], previous_in_place: &BTreeSet<String>) -> Vec<Layout> {
     let recorded: BTreeMap<_, _> = previous.into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();
     // Library files on the stick keep their names, and nothing copied may land
@@ -702,12 +710,11 @@ fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Ma
             let original = Path::new(&place.audio);
             let stem = original.file_stem().unwrap_or_default().to_string_lossy();
             let ext = original.extension().map_or(String::new(), |s| format!(".{}", s.to_string_lossy()));
-            let parent = original.parent().unwrap_or(Path::new("/Contents"));
             let mut serial = 0_u32;
             loop {
                 let suffix = if serial == 0 { format!("-{id}") } else { format!("-{id}-{serial}") };
                 let name = format!("{stem}{suffix}{ext}");
-                let audio = parent.join(&name).to_string_lossy().into_owned();
+                let audio = sibling(&place.audio, &name);
                 if used.insert(path_key(&audio)) { place.audio = audio; place.file_name = name; break; }
                 serial += 1;
             }
@@ -2994,6 +3001,13 @@ fn staged_files(root: &Path, named: &[&str]) -> std::io::Result<Vec<PathBuf>> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    #[test]
+    fn a_collision_suffixed_path_keeps_forward_slashes_whatever_the_host() {
+        // `Path::join` on Windows gave `/Contents/A/B\\one-7.mp3` (#788).
+        assert_eq!(super::sibling("/Contents/A/B/one.mp3", "one-7.mp3"), "/Contents/A/B/one-7.mp3");
+        assert_eq!(super::sibling("one.mp3", "two.mp3"), "/Contents/two.mp3");
+    }
+
     use super::*;
 
     /// rekordbox 7's `syncMyTag` takes `DBID + 1` and the cloud id as its
