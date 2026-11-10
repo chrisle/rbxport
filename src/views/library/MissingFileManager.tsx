@@ -20,6 +20,13 @@
  * heading sorts by it, again to turn it round (`MissingFileTable` ctor
  * @0x1012a5404: every column added with flags 0x1f). The columns keep their
  * widths when the window changes: the list scrolls sideways instead.
+ *
+ * The title bar drags the window (issue #869); its decompiled source has no
+ * drag or screen-clamping logic to follow (`rekordbox-auto-relocate.md`
+ * documents this dialog's sizing and modality but not movement), so whether
+ * and how rekordbox's own window can be dragged is UNKNOWN. RBXport clamps
+ * the drag so the title bar stays reachable rather than letting the window
+ * go fully off-screen.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -53,6 +60,8 @@ const COLUMN_MAX = 1000;
 /** `setResizeLimits(400, 300, 1024, 768)`. */
 const WINDOW_MIN = { width: 400, height: 300 };
 const WINDOW_MAX = { width: 1024, height: 768 };
+/** How much of the window a drag always leaves on screen, so the title bar stays reachable. */
+const TITLE_MIN_VISIBLE = 40;
 /** The window's edges and corners, each a resize handle. */
 const EDGES = ["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const;
 type Edge = (typeof EDGES)[number];
@@ -80,6 +89,17 @@ export function resizedBox(start: Box, edge: Edge, dx: number, dy: number, view:
     top = start.top + start.height - height;
   }
   return { left, top, width, height };
+}
+
+/**
+ * The window dragged by its title bar from `start` by (dx, dy). The size is
+ * unchanged; the position is clamped so at least `TITLE_MIN_VISIBLE` px of
+ * the window, title bar included, stays inside the viewport on every side.
+ */
+export function draggedBox(start: Box, dx: number, dy: number, view: { width: number; height: number }): Box {
+  const left = clamp(start.left + dx, TITLE_MIN_VISIBLE - start.width, view.width - TITLE_MIN_VISIBLE);
+  const top = clamp(start.top + dy, 0, view.height - TITLE_MIN_VISIBLE);
+  return { left, top, width: start.width, height: start.height };
 }
 
 /** Which rows the buttons act on: every one, or the ones clicked. */
@@ -291,6 +311,27 @@ export function MissingFileManager({ readOnly, search, searching = now, onWrote,
     window.addEventListener("pointerup", up);
   };
 
+  /** Drags the window by its title bar. A control inside it, if any, is left clickable. */
+  const dragWindow = (event: React.PointerEvent) => {
+    if (event.target instanceof Element && event.target.closest("button, a, input, select, [role=\"button\"]")) return;
+    const element = dialog.current;
+    if (!element) return;
+    event.preventDefault();
+    const rect = element.getBoundingClientRect();
+    const start: Box = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    const from = { x: event.clientX, y: event.clientY };
+    const move = (e: PointerEvent) => {
+      const view = { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight };
+      setBox(draggedBox(start, e.clientX - from.x, e.clientY - from.y, view));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   /** Drags an edge or corner of the window. */
   const resizeWindow = (edge: Edge, event: React.PointerEvent) => {
     const element = dialog.current;
@@ -409,7 +450,7 @@ export function MissingFileManager({ readOnly, search, searching = now, onWrote,
       {EDGES.map((edge) => (
         <span key={edge} className={styles.edge} data-edge={edge} aria-hidden onPointerDown={(event) => resizeWindow(edge, event)} />
       ))}
-      <h2 id="missing-file-manager-title" className={styles.title}>Missing File Manager</h2>
+      <h2 id="missing-file-manager-title" className={styles.title} onPointerDown={dragWindow}>Missing File Manager</h2>
       <div
         className={styles.table}
         role="grid"
