@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampWidth, fit, subBounds, subTreeBounds, TREE_BOUNDS, type SplitterBounds } from "./splitter";
+import { clampWidth, fit, infoBounds, subBounds, subTreeBounds, TREE_BOUNDS, type SplitterBounds } from "./splitter";
 
 const wide: SplitterBounds = { ...TREE_BOUNDS, available: 1800 };
 
@@ -88,5 +88,21 @@ describe("subTreeBounds", () => {
     const bounds = subTreeBounds(878);
     expect(clampWidth(298, bounds)).toBe(298);
     expect(clampWidth(2000, bounds)).toBeLessThanOrEqual(878 * 0.5);
+  });
+});
+
+describe("infoBounds", () => {
+  it("keeps the track list its floor, with or without the sub-browser", () => {
+    for (const subOpen of [false, true]) {
+      const b = infoBounds(1800, 305, subOpen);
+      const widest = clampWidth(99999, b);
+      expect(1800 - widest - 305).toBeGreaterThanOrEqual(TREE_BOUNDS.minOther);
+      expect(widest).toBeLessThanOrEqual(900);
+    }
+  });
+
+  it("holds a floor in a window too narrow for it", () => {
+    expect(clampWidth(500, infoBounds(700, 305, true))).toBe(280);
+    expect(clampWidth(10, infoBounds(1800, 305, false))).toBe(280);
   });
 });
