@@ -36,6 +36,9 @@
   font-size: var(--f-size-ui);
   font-weight: 400;
   color: var(--c-text-dim);
+  cursor: move;
+  user-select: none;
+  touch-action: none;
 }
 .table {
   display: flex;
