@@ -14,14 +14,29 @@ fn set_drives(location: &rbl_db::LibraryLocation, base: &str, current: &str) {
 }
 
 /// The `CurrentDBDrive` rekordbox reads a fixture library in `folder`
-/// through: off `/Volumes` on macOS and Linux the stored one; on Windows
-/// the folder's drive letter (`getDrivePathFromFilePath` gives `C:/`).
+/// through: off `/Volumes` on macOS the stored one; on Windows the folder's
+/// drive letter (`getDrivePathFromFilePath` gives `C:/`); on Linux the
+/// folder's mount point when it is not on the root file system.
 fn current_drive_for(folder: &std::path::Path, stored: &str) -> String {
     if cfg!(windows) {
-        format!("{}/", &folder.to_string_lossy()[..2])
-    } else {
-        stored.to_owned()
+        return format!("{}/", &folder.to_string_lossy()[..2]);
     }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let dev = std::fs::metadata(folder).unwrap().dev();
+        let mut mount = folder;
+        for a in folder.ancestors().skip(1) {
+            if std::fs::metadata(a).map(|m| m.dev()).ok() != Some(dev) {
+                break;
+            }
+            mount = a;
+        }
+        if mount != std::path::Path::new("/") {
+            return format!("{}/", mount.to_string_lossy().trim_end_matches('/'));
+        }
+    }
+    stored.to_owned()
 }
 
 #[test]
