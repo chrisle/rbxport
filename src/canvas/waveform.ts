@@ -456,9 +456,16 @@ export function drawPcmWave(
   height: number,
   palette: WavePalette,
   visible: { from: number; to: number } = { from: 0, to: 1 },
+  /** Rows left clear at the top and bottom, in device pixels, as `drawBands` takes them. */
+  inset: { top: number; bottom: number } = { top: 0, bottom: 0 },
 ): void {
   ctx.clearRect(0, 0, width, height);
-  const lanes = [height * 0.25 + 0.5, height * 0.75 + 0.5] as const;
+  // The stereo lanes share the PWV7 waveform's band, so the close zoom stays
+  // centred on the beat markers like the rest of the detail (#863).
+  const top = Math.max(0, Math.min(inset.top, height / 2 - 1));
+  const bottom = Math.max(0, Math.min(inset.bottom, height / 2 - 1));
+  const usable = Math.max(1, height - top - bottom);
+  const lanes = [top + usable * 0.25 + 0.5, top + usable * 0.75 + 0.5] as const;
   const from = visible.from;
   const to = Math.max(from + 1e-6, visible.to);
   // Silence has a visible zero-amplitude line in each stereo lane, rather
@@ -488,7 +495,7 @@ export function drawPcmWave(
       peak = Math.max(peak, Math.abs(values.getInt16(column * 8 + part * 2, true)));
     }
   }
-  const scale = Math.max(1, height / 4 - 2) / Math.max(peak, 1);
+  const scale = Math.max(1, usable / 4 - 2) / Math.max(peak, 1);
   const sampleAt = (fraction: number, lane: number, edge: number): number => {
     const at = Math.max(0, Math.min(fraction * (columns - 1), columns - 1));
     const column = Math.floor(at);
