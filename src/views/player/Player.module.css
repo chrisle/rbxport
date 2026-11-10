@@ -101,6 +101,9 @@
   padding: 0;
 }
 .square:hover:not(:disabled) { background: var(--c-raised); }
+/* Pressed: lit the way a pressed pad is, so a click is seen to land. */
+.square:active:not(:disabled),
+.square[data-pressed]:not(:disabled) { background: var(--c-pad-active); }
 .square:disabled { color: var(--c-icon-off); }
 
 /* The beat-jump size, a dropdown in rekordbox. */
