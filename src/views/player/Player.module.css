@@ -1347,7 +1347,7 @@ button.cueDelete:disabled { color: var(--c-icon-off); }
 /* One annotation across a measured tempo ramp, not one label per beat. */
 .detailTempo,
 .tempoRamp {
-  bottom: calc(var(--s-beat-marker-bottom) + var(--s-beat-head-h) + 2px);
+  bottom: var(--s-detail-tempo-bottom);
   pointer-events: none;
 }
 .tempoRamp {
