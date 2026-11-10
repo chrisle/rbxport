@@ -106,7 +106,7 @@ describe("wheel crossing from PCM back to PWV7", () => {
     await settle();
     pcm.resolve(pcmBytes);
     await settle();
-    expect(drawn.pcm).toHaveBeenCalledWith(expect.anything(), pcmBytes, expect.any(Number), expect.any(Number), "3band", expect.anything());
+    expect(drawn.pcm).toHaveBeenCalledWith(expect.anything(), pcmBytes, expect.any(Number), expect.any(Number), "3band", expect.anything(), expect.anything());
 
     // This is the render a wheel event produces on its first tick out of the
     // PCM range. Layout effects run before the normal PWV7 fetch can settle.
@@ -142,7 +142,7 @@ describe("PCM read-ahead", () => {
     expect(fetchPcm).toHaveBeenLastCalledWith("wheel-race-track", 1500, 7500, 7500);
     expect(drawn.pcm).toHaveBeenLastCalledWith(expect.anything(), first, expect.any(Number), expect.any(Number), "3band", {
       from: 3500 / 6000, to: 5500 / 6000,
-    });
+    }, expect.anything());
     render({ fromMs: 1600, toMs: 7600, drawFromMs: 3600, drawToMs: 5600 });
     await settle();
     expect(fetchPcm).toHaveBeenCalledTimes(2);
@@ -151,7 +151,7 @@ describe("PCM read-ahead", () => {
     await settle();
     expect(drawn.pcm).toHaveBeenLastCalledWith(expect.anything(), next, expect.any(Number), expect.any(Number), "3band", {
       from: (3600 - 1500) / 6000, to: (5600 - 1500) / 6000,
-    });
+    }, expect.anything());
   });
 
   it("ignores a late read after a seek outside its window", async () => {
@@ -171,7 +171,7 @@ describe("PCM read-ahead", () => {
     render({ fromMs: 30100, toMs: 36100, drawFromMs: 32100, drawToMs: 34100 });
     expect(drawn.pcm).toHaveBeenLastCalledWith(expect.anything(), current, expect.any(Number), expect.any(Number), "3band", {
       from: 2100 / 6000, to: 4100 / 6000,
-    });
+    }, expect.anything());
   });
 });
 

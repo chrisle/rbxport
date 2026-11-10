@@ -45,6 +45,18 @@ describe("the detail's cue lane", () => {
     expect(px("--s-beat-marker-top") + px("--s-beat-head-h")).toBeGreaterThan(wave);
   });
 
+  it("centres the waveform between the beat markers' head tips (#863)", () => {
+    const height = px("--s-player-detail-h");
+    const waveTop = px("--s-wave-inset-top");
+    const waveBottom = height - px("--s-wave-inset-bottom");
+    const tipTop = px("--s-beat-marker-top");
+    const tipBottom = height - px("--s-beat-marker-bottom");
+    // The heads reach the same distance past the waveform at both ends, so
+    // the waveform's midline is the markers' midline.
+    expect(waveTop - tipTop).toBe(tipBottom - waveBottom);
+    expect((waveTop + waveBottom) / 2).toBe((tipTop + tipBottom) / 2);
+  });
+
   it("paints the playhead in the colours rekordbox does", () => {
     // Two device columns of flat colour at 150%: paused and playing.
     expect(token("--c-playhead-armed").toUpperCase()).toBe("#FF0000");
