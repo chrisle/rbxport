@@ -90,8 +90,8 @@ export function previewPositionMs(snapshot: PreviewSnapshot, now: number = perfo
  * Previews `trackId` from `positionMs`. The playhead moves there at once; a
  * refusal (a file that is not there) takes it away again and is reported to
  * whoever listens through `onPreviewError`. The backend only swaps its preview
- * once the new file opens, so a refusal leaves the previous track playing: it
- * is asked, and if that track is still the one playing its playhead comes back.
+ * once the new file opens, so a refusal leaves the previous track playing: the
+ * backend is asked what it is playing, and that track's playhead comes back.
  */
 export function startPreview(trackId: string, positionMs: number, durationMs: number): Promise<void> {
   generation += 1;
@@ -122,16 +122,22 @@ export function startPreview(trackId: string, positionMs: number, durationMs: nu
     });
 }
 
-/** `previous` as the backend reports it now, or null if it is no longer previewing. */
+/**
+ * What the backend is previewing now, or null if nothing. `previous` is only
+ * the UI's snapshot — it may itself be an optimistic start that never reached
+ * the backend (a refusal chained behind another) — so the backend's own answer
+ * decides what comes back, and `previous` only lends a duration it lacks.
+ */
 async function stillPlaying(previous: PreviewSnapshot): Promise<PreviewSnapshot | null> {
   try {
     const state = await (await getBackend()).previewState();
-    if (state.track !== previous.trackId) return null;
+    if (state.track === null) return null;
+    const known = state.track === previous.trackId ? previous.durationMs : 0;
     return {
       trackId: state.track,
       playing: state.playing,
       positionMs: state.positionMs,
-      durationMs: state.durationMs > 0 ? state.durationMs : previous.durationMs,
+      durationMs: state.durationMs > 0 ? state.durationMs : known,
       at: performance.now(),
     };
   } catch {
