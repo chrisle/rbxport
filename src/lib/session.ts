@@ -66,6 +66,8 @@ export interface Session {
   /** The sub-browser's width, and its own tree's, both before clamping. */
   subWidth: number;
   subTreeWidth: number;
+  /** The Information panel's dragged width; null until it has been dragged. */
+  infoWidth: number | null;
   /** Which deck the browser's Traffic Light reads: the MASTER menu above the list. */
   trafficLight: TrafficLightSource;
   /**
@@ -128,6 +130,7 @@ export const DEFAULT_SESSION: Session = {
   layout: "one",
   subWidth: DEFAULT_SUB_WIDTH,
   subTreeWidth: DEFAULT_SUB_TREE_WIDTH,
+  infoWidth: null,
   trafficLight: "master",
   artworkMode: "partial",
   waveformZoom: { a: DETAIL_BARS, b: DETAIL_BARS },
@@ -229,6 +232,7 @@ export function sanitiseSession(value: unknown): Session {
     layout: asLayout(raw.layout),
     subWidth: widthOrDefault(raw.subWidth, DEFAULT_SUB_WIDTH),
     subTreeWidth: widthOrDefault(raw.subTreeWidth, DEFAULT_SUB_TREE_WIDTH),
+    infoWidth: raw.infoWidth === null ? null : widthOrDefault(raw.infoWidth, 0) || null,
     trafficLight: TRAFFIC_LIGHT_SOURCES.includes(raw.trafficLight as TrafficLightSource)
       ? (raw.trafficLight as TrafficLightSource)
       : "master",

@@ -45,7 +45,7 @@ import { menuBarEnabled, menuBarSide, menuBarState, onMenuBarState } from "@/lib
 import { hasEditHistory, runEditHistory, setLibraryEditHistory } from "@/lib/editHistory";
 import { transposeKey } from "@/lib/camelot";
 import { stepMasterGain, toggleMute } from "@/lib/volume";
-import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
+import { clampWidth, infoBounds, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { prepareDevicePlaylistDrop } from "@/lib/devicePlaylistDrop";
 import { deviceId, devicePath, renamedDevice } from "@/lib/devices";
@@ -70,6 +70,7 @@ import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout
 import { FIELD_LABEL } from "@/views/info/fieldLabel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { RightRail } from "@/views/browser/RightRail";
+import { InfoSlot } from "@/views/info/InfoSlot";
 import { MyTagPanel } from "@/views/browser/MyTagPanel";
 import { columnContextFor, useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
@@ -219,6 +220,8 @@ function AppBody() {
   // window by the panel itself, so these are what was asked for.
   const [subWidth, setSubWidth] = useState(restored.subWidth);
   const [subTreeWidth, setSubTreeWidth] = useState(restored.subTreeWidth);
+  // The Information panel's width once dragged; null leaves it at its measured default.
+  const [infoWidth, setInfoWidth] = useState<number | null>(restored.infoWidth);
   // The Track Filter bar. Its open state is kept across runs, its picks are
   // not: a library that comes back already narrowed reads as a broken one.
   const [filterOpen, setFilterOpen] = useState(restored.filterOpen);
@@ -443,6 +446,7 @@ function AppBody() {
   const [treeWidth, setTreeWidth] = useState(restored.treeWidth);
   const bodyRef = useRef<HTMLDivElement>(null);
   const dragFrom = useRef<{ x: number; width: number } | null>(null);
+  const [bodyWidth, setBodyWidth] = useState(0);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const clock = useClock();
   // The table's layout follows the kind of thing being browsed, as
@@ -977,12 +981,19 @@ function AppBody() {
     [],
   );
 
+  // What was dragged is what was asked for; what is drawn is what the window
+  // allows, so a window that shrinks and grows again gives the width back.
+  const infoBoundsNow = infoBounds(bodyWidth, treeWidth, subOpen);
+  const infoShown = infoWidth === null || bodyWidth <= 0 ? null : clampWidth(infoWidth, infoBoundsNow);
+
   // Re-clamp when the window changes: a width that fitted a wide window can
   // leave the track list with nothing in a narrow one.
   useEffect(() => {
     const body = bodyRef.current;
     if (!body || typeof ResizeObserver === "undefined") return;
+    setBodyWidth(body.clientWidth);
     const observer = new ResizeObserver(() => {
+      setBodyWidth(body.clientWidth);
       setTreeWidth((w) => clampWidth(w, bounds()));
     });
     observer.observe(body);
@@ -2607,6 +2618,7 @@ function AppBody() {
           setTreeWidth(clampWidth(305, bounds()));
           setSubWidth(DEFAULT_SUB_WIDTH);
           setSubTreeWidth(DEFAULT_SUB_TREE_WIDTH);
+          setInfoWidth(null);
         }
       });
     });
@@ -3145,13 +3157,14 @@ function AppBody() {
       layout,
       subWidth,
       subTreeWidth,
+      infoWidth,
       trafficLight,
       artworkMode: savedArtworkMode,
       waveformZoom,
       jumpSize,
       dualControl: dual,
     });
-  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, myTagOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, savedArtworkMode, waveformZoom, jumpSize, dual]);
+  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, myTagOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, infoWidth, trafficLight, savedArtworkMode, waveformZoom, jumpSize, dual]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
@@ -3393,7 +3406,10 @@ function AppBody() {
         data-testid="body"
         className={styles.body}
         ref={bodyRef}
-        style={{ ["--tree-w" as string]: `${treeWidth}px` }}
+        style={{
+          ["--tree-w" as string]: `${treeWidth}px`,
+          ...(infoShown === null ? {} : { ["--info-w" as string]: `${infoShown}px` }),
+        }}
         data-info={infoOpen || myTagOpen ? "" : undefined}
         data-mytag={myTagOpen ? "" : undefined}
         data-sub={subOpen ? "" : undefined}
@@ -3559,6 +3575,7 @@ function AppBody() {
           />
         ) : null}
         {infoOpen ? (
+          <InfoSlot width={infoShown} bounds={infoBoundsNow} onWidthChange={setInfoWidth}>
           <Suspense fallback={null}><InfoPanel
             // The browser's selection, as rekordbox's Information Window
             // follows it; the deck's track only when nothing is selected —
@@ -3575,6 +3592,7 @@ function AppBody() {
               if (node) setSelectedNode(node);
             }}
           /></Suspense>
+          </InfoSlot>
         ) : null}
         {myTagOpen ? (
           <MyTagPanel
@@ -3687,6 +3705,7 @@ function AppBody() {
             setTreeWidth(clampWidth(305, bounds()));
             setSubWidth(DEFAULT_SUB_WIDTH);
             setSubTreeWidth(DEFAULT_SUB_TREE_WIDTH);
+            setInfoWidth(null);
           }}
           onClose={() => setSettingsOpen(null)}
         />

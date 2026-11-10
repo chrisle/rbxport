@@ -181,13 +181,13 @@
   grid-template-columns:
     var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr
     auto
-    min(var(--s-info-w), 25%);
+    var(--info-w, min(var(--s-info-w), 25%));
 }
 
 .body[data-info] {
   grid-template-columns:
     var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr
-    min(var(--s-info-w), 33%);
+    var(--info-w, min(var(--s-info-w), 33%));
 }
 
 /* The My Tag window in the information window's place, at its own fixed
