@@ -23,7 +23,17 @@ pub fn dropped_file_paths(names: Vec<String>) -> Result<Vec<String>, String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = names;
+        // On Windows this command only runs when the page found no
+        // `window.chrome.webview.postMessageWithAdditionalObjects` to post the
+        // drop to instead (`droppedFilePaths` in `src/ipc/client.ts`); on Linux,
+        // a DOM drop that reaches here has no native-path handling either.
+        // Neither case has diagnostics of its own, so a report naming this
+        // message previously gave no way to tell them apart from a WebView2
+        // bridge refusal (issue #847).
+        tracing::warn!(
+            file_count = names.len(),
+            "dropped_file_paths has no implementation on this platform; the page's own drop handling found no other way to resolve paths"
+        );
         Err("This platform did not provide the dropped files' locations.".into())
     }
 }
@@ -111,7 +121,21 @@ fn reply(id: &str, paths: Result<Vec<String>, String>) -> String {
         Ok(paths) if !paths.is_empty() && paths.iter().all(|path| !path.is_empty()) => {
             serde_json::json!({ REQUEST_KEY: id, "paths": paths })
         }
-        Ok(_) => serde_json::json!({ REQUEST_KEY: id, "error": UNAVAILABLE }),
+        // `dropped_paths` below only returns `Err` when reading WebView2's
+        // `AdditionalObjects` itself failed (already logged there); reaching
+        // `Ok` with too few, or an empty, path had no diagnostic of its own,
+        // so a report naming the resulting message could not say whether
+        // WebView2 gave zero objects, fewer than were posted, or one with an
+        // empty path, e.g. for a dropped item it cannot resolve to a file
+        // (issue #847).
+        Ok(paths) => {
+            tracing::warn!(
+                returned = paths.len(),
+                empty = paths.iter().filter(|path| path.is_empty()).count(),
+                "WebView2 gave fewer dropped-file paths than files were posted, or an empty one"
+            );
+            serde_json::json!({ REQUEST_KEY: id, "error": UNAVAILABLE })
+        }
         Err(error) => serde_json::json!({ REQUEST_KEY: id, "error": error }),
     };
     answer.to_string()
@@ -208,7 +232,20 @@ mod webview2 {
 
 #[cfg(test)]
 mod tests {
-    use super::{reply, request_id, validate_paths, REQUEST_KEY, UNAVAILABLE};
+    use super::{dropped_file_paths, reply, request_id, validate_paths, REQUEST_KEY, UNAVAILABLE};
+
+    /// `dropped_file_paths` is the command `droppedFilePaths` in
+    /// `src/ipc/client.ts` falls back to when the page finds no
+    /// `postMessageWithAdditionalObjects` on `window.chrome.webview`; on every
+    /// non-macOS target it has always refused, so a passing test here is
+    /// evidence that this exact message can still come from either that
+    /// fallback or a WebView2 bridge refusal (`reply`'s own `Ok` branch
+    /// below), not proof either one still happens (issue #847).
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn refuses_on_every_non_macos_target() {
+        assert_eq!(dropped_file_paths(vec!["a.mp3".into(), "b.mp3".into()]), Err(UNAVAILABLE.to_owned()));
+    }
 
     #[test]
     fn answers_only_requests_for_dropped_files() {
