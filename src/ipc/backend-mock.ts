@@ -1003,6 +1003,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     else for (const track of looseTracks.get(device.path) ?? []) union.add(track);
     const tracks = union.size;
     const already = device.export;
+    // What the stick held before this export: read before the export below
+    // marks it as holding a library, or a stick with none reads as one.
+    const settings = settingsOf(device.path);
     const reused = already?.ours === true ? Math.min(already.tracks, tracks) : 0;
     const removed = already?.ours === true ? Math.max(0, already.tracks - tracks) : 0;
     const tracksAdded = tracks - reused;
@@ -1017,7 +1020,6 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The export writes a library, which is what the tabs need. A stick
     // that had none takes the Preferences window's defaults, as the
     // real export does; one that had its own keeps them.
-    const settings = settingsOf(device.path);
     const fresh = !settings.hasLibrarySettings && defaults !== undefined;
     deviceSettings.set(device.path, {
       ...settings,
