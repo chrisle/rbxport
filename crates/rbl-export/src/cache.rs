@@ -18,6 +18,11 @@ struct Receipt {
     digest: String,
 }
 
+/// Profile name probe receipts are keyed under. Bump it whenever `inspect()`
+/// reports different properties for a source (v3: float PCM now reports its
+/// 32/64-bit depth, #824) so older persisted receipts are never matched.
+const PROBE_PROFILE: &str = "probe-v3";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProbeReceipt {
     source: incremental::FileRevision,
@@ -40,6 +45,30 @@ mod tests {
         let restored: Receipt = serde_json::from_slice(&bytes).expect("cache receipt must be readable");
         assert_eq!(restored.source, source);
         assert_eq!(restored.output, output);
+    }
+
+    #[test]
+    fn stale_probe_receipt_without_float_bit_depth_is_not_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = PreparationCache::new(dir.path().join("cache"));
+        let source = dir.path().join("float.wav");
+        // 32-bit IEEE float stereo WAV, 2 frames at 44.1 kHz.
+        let mut wav = Vec::new();
+        wav.extend(b"RIFF"); wav.extend(52u32.to_le_bytes()); wav.extend(b"WAVEfmt ");
+        wav.extend(16u32.to_le_bytes()); wav.extend(3u16.to_le_bytes()); wav.extend(2u16.to_le_bytes());
+        wav.extend(44_100u32.to_le_bytes()); wav.extend((44_100u32 * 8).to_le_bytes());
+        wav.extend(8u16.to_le_bytes()); wav.extend(32u16.to_le_bytes());
+        wav.extend(b"data"); wav.extend(16u32.to_le_bytes()); wav.extend(vec![0u8; 16]);
+        std::fs::write(&source, &wav).unwrap();
+        // A receipt an older build persisted under "probe-v2": float depth unknown.
+        let (old_key, revision) = PreparationCache::key(&source, "probe-v2").unwrap();
+        let stale = rbl_audio::compatibility::AudioProperties { compatible: false, sample_rate: Some(44_100), bit_depth: None, channels: Some(2), frames: Some(2) };
+        let receipt = ProbeReceipt { checksum: incremental::digest(&(&revision, &stale)).unwrap(), source: revision, properties: stale };
+        std::fs::create_dir_all(&cache.root).unwrap();
+        std::fs::write(cache.root.join(format!("{old_key}.probe")), serde_json::to_vec(&receipt).unwrap()).unwrap();
+        let properties = cache.properties(&source).unwrap();
+        assert_eq!(properties.bit_depth, Some(32), "stale bit_depth=None receipt must not be reused");
+        assert_eq!(properties.target().1, 24);
     }
 
     #[test]
@@ -127,7 +156,8 @@ mod tests {
         let manifest = crate::Manifest::load(destination.path()).unwrap();
         let exported = destination.path().join(manifest.tracks[0].audio.trim_start_matches('/'));
         let exported_size = std::fs::metadata(&exported).unwrap().len();
-        assert_eq!(exported_size, 44 + 11_025 * 4);
+        // The 24-bit/96 kHz fixture keeps its depth and halves to 48 kHz (#824).
+        assert_eq!(exported_size, 44 + 12_000 * 6);
         assert!(exported_size > limit);
         assert!(!rbl_audio::compatibility::needs_conversion(&exported).unwrap());
         assert!(crate::verify(destination.path()).unwrap().is_ok());
@@ -243,7 +273,17 @@ impl PreparationCache {
     /// Discard receipts after an explicit content check detects a revision
     /// that file information cannot distinguish. Keep files open consumers use.
     pub fn invalidate(&self, source: &Path) -> Result<()> {
-        for profile in ["original-v1", "probe-v2", "source-hash-v1", "pcm16-44100-stereo-v1", "pcm16be-44100-stereo-v1", "mp3-320-44100-stereo-v1"] {
+        // Every WAV/AIFF target profile a source could be cached under (both
+        // bit depths at both supported rates), plus the format-independent
+        // ones. Profile names are versioned (#824), so a stale conversion
+        // cached under an older name is simply never matched again rather
+        // than needing to be named here too.
+        let mut profiles = vec!["original-v1".to_owned(), PROBE_PROFILE.to_owned(), "source-hash-v1".to_owned(), "mp3-320-44100-stereo-v1".to_owned()];
+        for (rate, bits) in [(44_100, 16), (44_100, 24), (48_000, 16), (48_000, 24)] {
+            profiles.push(rbl_audio::compatibility::Format::Wav.profile(rate, bits));
+            profiles.push(rbl_audio::compatibility::Format::Aiff.profile(rate, bits));
+        }
+        for profile in &profiles {
             let (key, _) = Self::key(source, profile)?;
             let gate = self.gates.lock().map_err(|e| std::io::Error::other(e.to_string()))?
                 .entry(key.clone()).or_insert_with(|| Arc::new(Mutex::new(()))).clone();
@@ -262,14 +302,15 @@ impl PreparationCache {
 
     /// Exact completed output size for selection previews; never encodes.
     pub fn converted_size(&self, source: &Path, target: rbl_audio::compatibility::Format) -> Option<u64> {
-        let (key, source_revision) = Self::key(source, target.profile()).ok()?;
+        let (rate, bits) = self.properties(source).ok().map_or((rbl_audio::compatibility::RATE, 16), |p| target.target(&p));
+        let (key, source_revision) = Self::key(source, &target.profile(rate, bits)).ok()?;
         let receipt: Receipt = serde_json::from_slice(&std::fs::read(self.root.join(format!("{key}.json"))).ok()?).ok()?;
         let path = self.root.join(format!("{key}.{}", target.extension()));
         (receipt.source == source_revision && incremental::revision_fresh(&path).ok()?.as_ref() == Some(&receipt.output)).then_some(receipt.size)
     }
 
     pub fn properties(&self, source: &Path) -> Result<rbl_audio::compatibility::AudioProperties> {
-        let (key, revision) = Self::key(source, "probe-v2")?;
+        let (key, revision) = Self::key(source, PROBE_PROFILE)?;
         let mut probes = self.probes.lock().map_err(|e| std::io::Error::other(e.to_string()))?;
         if let Some(value) = probes.get(&key) { return Ok(value.clone()); }
         let path = self.root.join(format!("{key}.probe"));
@@ -313,7 +354,8 @@ impl PreparationCache {
         &self, source: &Path, target: rbl_audio::compatibility::Format,
         progress: &mut dyn FnMut(u64, Option<u64>), cancelled: &dyn Fn() -> bool,
     ) -> Result<(PathBuf, u64, bool)> {
-        let (key, source_revision) = Self::key(source, target.profile())?;
+        let (rate, bits) = target.target(&self.properties(source)?);
+        let (key, source_revision) = Self::key(source, &target.profile(rate, bits))?;
         let gate = self.gates.lock().map_err(|e| std::io::Error::other(e.to_string()))?
             .entry(key.clone()).or_insert_with(|| Arc::new(Mutex::new(()))).clone();
         let _guard = Self::lock_gate(&gate, cancelled)?;

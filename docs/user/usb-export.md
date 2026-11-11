@@ -189,8 +189,8 @@ and ALAC, is converted to the selected output format:
 
 | Format | Output |
 | --- | --- |
-| WAV (default) | 16-bit PCM, 44.1 kHz, stereo; resamples and reduces higher-resolution input. |
-| AIFF | 16-bit big-endian PCM, 44.1 kHz, stereo; lossless with the same audio data as WAV. |
+| WAV (default) | Integer PCM, stereo; keeps the source's own 16- or 24-bit depth and 44.1 or 48 kHz rate where a CDJ already reads them, deeper or higher only when the source is. |
+| AIFF | Same depth/rate rule as WAV, big-endian; lossless with the same audio data as WAV where the rate matches. |
 | MP3 | 320 kbps CBR, 44.1 kHz, stereo; smaller files with lossy compression. |
 
 Compatible MP3 and integer PCM WAV/AIFF at 44.1 or 48 kHz are copied as-is.

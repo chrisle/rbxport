@@ -1782,5 +1782,6 @@
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "Als er nummers ontbreken, kies je of je ze wilt kopiëren en waar je ze wilt opslaan. Annuleren stopt de import.",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
   "No tracks found to import.": "No tracks found to import.",
-  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled."
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.",
+  "WAV/AIFF: keeps the source's 16/24-bit depth and 44.1/48 kHz rate where possible. MP3: smaller, lossy files.": "WAV/AIFF: keeps the source's 16/24-bit depth and 44.1/48 kHz rate where possible. MP3: smaller, lossy files."
 }
