@@ -18,6 +18,11 @@ struct Receipt {
     digest: String,
 }
 
+/// Profile name probe receipts are keyed under. Bump it whenever `inspect()`
+/// reports different properties for a source (v3: float PCM now reports its
+/// 32/64-bit depth, #824) so older persisted receipts are never matched.
+const PROBE_PROFILE: &str = "probe-v3";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProbeReceipt {
     source: incremental::FileRevision,
@@ -40,6 +45,30 @@ mod tests {
         let restored: Receipt = serde_json::from_slice(&bytes).expect("cache receipt must be readable");
         assert_eq!(restored.source, source);
         assert_eq!(restored.output, output);
+    }
+
+    #[test]
+    fn stale_probe_receipt_without_float_bit_depth_is_not_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = PreparationCache::new(dir.path().join("cache"));
+        let source = dir.path().join("float.wav");
+        // 32-bit IEEE float stereo WAV, 2 frames at 44.1 kHz.
+        let mut wav = Vec::new();
+        wav.extend(b"RIFF"); wav.extend(52u32.to_le_bytes()); wav.extend(b"WAVEfmt ");
+        wav.extend(16u32.to_le_bytes()); wav.extend(3u16.to_le_bytes()); wav.extend(2u16.to_le_bytes());
+        wav.extend(44_100u32.to_le_bytes()); wav.extend((44_100u32 * 8).to_le_bytes());
+        wav.extend(8u16.to_le_bytes()); wav.extend(32u16.to_le_bytes());
+        wav.extend(b"data"); wav.extend(16u32.to_le_bytes()); wav.extend(vec![0u8; 16]);
+        std::fs::write(&source, &wav).unwrap();
+        // A receipt an older build persisted under "probe-v2": float depth unknown.
+        let (old_key, revision) = PreparationCache::key(&source, "probe-v2").unwrap();
+        let stale = rbl_audio::compatibility::AudioProperties { compatible: false, sample_rate: Some(44_100), bit_depth: None, channels: Some(2), frames: Some(2) };
+        let receipt = ProbeReceipt { checksum: incremental::digest(&(&revision, &stale)).unwrap(), source: revision, properties: stale };
+        std::fs::create_dir_all(&cache.root).unwrap();
+        std::fs::write(cache.root.join(format!("{old_key}.probe")), serde_json::to_vec(&receipt).unwrap()).unwrap();
+        let properties = cache.properties(&source).unwrap();
+        assert_eq!(properties.bit_depth, Some(32), "stale bit_depth=None receipt must not be reused");
+        assert_eq!(properties.target().1, 24);
     }
 
     #[test]
@@ -249,7 +278,7 @@ impl PreparationCache {
         // ones. Profile names are versioned (#824), so a stale conversion
         // cached under an older name is simply never matched again rather
         // than needing to be named here too.
-        let mut profiles = vec!["original-v1".to_owned(), "probe-v2".to_owned(), "source-hash-v1".to_owned(), "mp3-320-44100-stereo-v1".to_owned()];
+        let mut profiles = vec!["original-v1".to_owned(), PROBE_PROFILE.to_owned(), "source-hash-v1".to_owned(), "mp3-320-44100-stereo-v1".to_owned()];
         for (rate, bits) in [(44_100, 16), (44_100, 24), (48_000, 16), (48_000, 24)] {
             profiles.push(rbl_audio::compatibility::Format::Wav.profile(rate, bits));
             profiles.push(rbl_audio::compatibility::Format::Aiff.profile(rate, bits));
@@ -281,7 +310,7 @@ impl PreparationCache {
     }
 
     pub fn properties(&self, source: &Path) -> Result<rbl_audio::compatibility::AudioProperties> {
-        let (key, revision) = Self::key(source, "probe-v2")?;
+        let (key, revision) = Self::key(source, PROBE_PROFILE)?;
         let mut probes = self.probes.lock().map_err(|e| std::io::Error::other(e.to_string()))?;
         if let Some(value) = probes.get(&key) { return Ok(value.clone()); }
         let path = self.root.join(format!("{key}.probe"));
