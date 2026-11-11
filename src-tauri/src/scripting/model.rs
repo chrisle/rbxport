@@ -37,7 +37,7 @@ pub const fn four_cc(code: [u8; 4]) -> u32 {
 
 /// `track color`'s enumerators in `ColorID` order: none, then Pink to Purple.
 ///
-/// `[REF]` the same order as `COLOR_NAMES` in `src/lib/trackFilter.ts`.
+/// `[REF]` the same order as `rbl_db::COLOR_NAMES`.
 pub const COLOR_CODES: [u32; 9] = [
     four_cc(*b"RCno"),
     four_cc(*b"RCpk"),

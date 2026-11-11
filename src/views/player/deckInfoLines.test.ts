@@ -68,6 +68,7 @@ describe("the deck's INFO tab", () => {
     expect(deckInfo(row, details)).toEqual({
       rating: 3,
       color: "Aqua",
+      dot: "Aqua",
       comment: "F - 4A - 138",
       file: ["WAV File", "45.1 MB", "44100 Hz", "1411 kbps"],
     });
@@ -77,6 +78,7 @@ describe("the deck's INFO tab", () => {
     expect(deckInfo(null, null)).toEqual({
       rating: 0,
       color: "",
+      dot: "",
       comment: "—",
       file: ["—", "—", "—", "—"],
     });
@@ -86,6 +88,7 @@ describe("the deck's INFO tab", () => {
     expect(deckInfo(row, null)).toEqual({
       rating: 3,
       color: "",
+      dot: "",
       comment: "F - 4A - 138",
       file: ["", "", "", ""],
     });
@@ -117,5 +120,13 @@ describe("the deck's INFO tab", () => {
     expect(colorName("0")).toBe("");
     expect(colorName("")).toBe("");
     expect(colorName("9")).toBe("");
+  });
+
+  it("names a colour as the library does and paints it by its stock dot", () => {
+    const names = ["Pink", "Red", "Orange", "Yellow", "Green", "Peak", "Blue", "Purple"];
+    const info = deckInfo(row, details, names);
+    expect(info.color).toBe("Peak");
+    expect(info.dot).toBe("Aqua");
+    expect(colorName("6", names)).toBe("Peak");
   });
 });

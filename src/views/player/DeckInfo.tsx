@@ -21,6 +21,7 @@ import type { RowDto, TrackDetails } from "@/ipc/types";
 import { CommentIcon } from "@/components/icons";
 import { deckInfo } from "./deckInfoLines";
 import { RatingStar } from "@/components/RatingStar";
+import { useColorNames } from "@/store/useColorNames";
 import styles from "./DeckInfo.module.css";
 
 export const DeckInfo = memo(function DeckInfo({
@@ -29,7 +30,7 @@ export const DeckInfo = memo(function DeckInfo({
   track: RowDto | null;
   details: TrackDetails | null;
 }) {
-  const info = deckInfo(track, details);
+  const info = deckInfo(track, details, useColorNames());
   return (
     <div className={styles.info} data-testid="deck-info">
       <div className={styles.rating} aria-label={`Rating ${info.rating} of 5`}>
@@ -40,7 +41,7 @@ export const DeckInfo = memo(function DeckInfo({
       <div className={styles.color} data-testid="deck-info-color">
         {info.color ? (
           <>
-            <span className={styles.dot} data-color={info.color} aria-hidden />
+            <span className={styles.dot} data-color={info.dot} aria-hidden />
             <span className={styles.line}>{info.color}</span>
           </>
         ) : null}
