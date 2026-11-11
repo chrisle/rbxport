@@ -231,6 +231,19 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           onChange={(keySort) => set({ keySort })}
         />
       </Section>
+      <Section title="Date format">
+        <Radios
+          label="Date format"
+          value={view.dateFormat}
+          choices={[
+            { value: "system", label: "System" },
+            { value: "dmy", label: "DD/MM/YYYY" },
+            { value: "mdy", label: "MM/DD/YYYY" },
+            { value: "ymd", label: "YYYY/MM/DD" },
+          ]}
+          onChange={(dateFormat) => set({ dateFormat })}
+        />
+      </Section>
       <Section title="Waveform">
         <Sub>Full/Preview Waveform</Sub>
         <Radios

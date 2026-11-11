@@ -27,7 +27,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 - [AppleScript](user/applescript.md): macOS automation, objects, commands, and examples.
 - [Linux](user/linux.md): starting a library from scratch without rekordbox, importing, and exporting to a USB stick.
 - [Nix](user/nix.md): installing, running, developing, and removing the flake.
-- [FAQ](user/faq.md): what RBXport is for, and why DJ controllers are not registered or mapped.
+- [FAQ](user/faq.md): what RBXport is for, why DJ controllers are not registered or mapped, and the date format.
 
 ## Technical references
 

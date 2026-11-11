@@ -6,7 +6,7 @@
  * take.
  */
 import type { RowDto, SelectionDetails, TrackDetails, TrackField } from "@/ipc/types";
-import { formatBitrate, formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
+import { dateOrder, formatBitrate, formatBpm, formatBytes, formatDuration, formatShortDate, type DateFormat } from "@/lib/format";
 
 /** A label and the text beside it. */
 export interface Fact {
@@ -64,14 +64,14 @@ export function fileFacts(d: TrackDetails): FileFacts {
  * the selection moves. Until the record arrives the row's own duration is
  * shown and the rest is blank rather than the previous track's.
  */
-export function summaryFacts(row: RowDto, details: TrackDetails | null): Fact[] {
+export function summaryFacts(row: RowDto, details: TrackDetails | null, dateFormat: DateFormat): Fact[] {
   const d = details && details.id === row.id ? details : null;
   const file = d ? fileFacts(d) : null;
   return [
     { label: "Time", value: formatDuration(d?.durationSec ?? row.durationSec) },
     { label: "File Type", value: file?.type ?? "" },
     { label: "Size", value: file?.size ?? "" },
-    { label: "Date Created", value: d ? formatShortDate(d.dateCreated) : "" },
+    { label: "Date Created", value: d ? formatShortDate(d.dateCreated, dateFormat) : "" },
     { label: "Sample Rate", value: file?.sampleRate ?? "" },
     { label: "Bitrate", value: file?.bitrate ?? "" },
     { label: "DJ Play Count", value: d ? String(d.playCount) : "" },
@@ -163,14 +163,13 @@ export function commitsTyping(typed: boolean, draft: string, initial: string, co
  * The capture's boxes are 47, 109 and 61pt wide — a two-digit day, a month
  * name and a year fit those; a numeric month in the middle would not need
  * 109pt. Assumed from the widths, since the captured date is empty; the box
- * is read-only regardless.
+ * is read-only regardless. The boxes stand in the date format's order.
  */
-export function dateSegments(iso: string): [string, string, string] {
+export function dateSegments(iso: string, format: DateFormat, locale?: string): { part: "day" | "month" | "year"; text: string }[] {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  if (!m) return ["", "", ""];
-  const [, y = "", mo = "", d = ""] = m;
-  const month = MONTHS[Number(mo) - 1] ?? "";
-  return [String(Number(d)), month, y];
+  const [, y = "", mo = "", d = ""] = m ?? [];
+  const text = { day: d ? String(Number(d)) : "", month: MONTHS[Number(mo) - 1] ?? "", year: y };
+  return dateOrder(format, locale).map((part) => ({ part, text: text[part] }));
 }
 
 const MONTHS = [

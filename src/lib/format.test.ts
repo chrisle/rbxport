@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatListTotals, formatShortDate, formatStatusSize, formatStatusTime, statusBarListText } from "./format";
+import { dateOrder, formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatListTotals, formatShortDate, formatStatusSize, formatStatusTime, statusBarListText } from "./format";
 
 describe("formatDuration", () => {
   it("pads to two digits like rekordbox", () => {
@@ -41,29 +41,62 @@ describe("formatBitrate", () => {
 });
 
 describe("formatEpochDate", () => {
-  it("prints the local day of a moment in seconds as the date columns do", () => {
-    expect(formatEpochDate(new Date(2026, 8, 6, 0, 0, 1).getTime() / 1000)).toBe("9/6/26");
-    expect(formatEpochDate(new Date(2005, 11, 25, 23, 59).getTime() / 1000)).toBe("12/25/05");
+  it("prints the local day of a moment in seconds, in the chosen format", () => {
+    const sept6 = new Date(2026, 8, 6, 0, 0, 1).getTime() / 1000;
+    expect(formatEpochDate(sept6, "mdy")).toBe("09/06/2026");
+    expect(formatEpochDate(sept6, "dmy")).toBe("06/09/2026");
+    expect(formatEpochDate(sept6, "ymd")).toBe("2026/09/06");
+    expect(formatEpochDate(new Date(2005, 11, 25, 23, 59).getTime() / 1000, "dmy")).toBe("25/12/2005");
+  });
+  it("keeps a moment either side of local midnight on its own local day", () => {
+    const midnight = new Date(2026, 2, 1).getTime() / 1000;
+    expect(formatEpochDate(midnight - 1, "ymd")).toBe("2026/02/28");
+    expect(formatEpochDate(midnight, "ymd")).toBe("2026/03/01");
   });
   it("is blank for a missing or unreadable time", () => {
-    expect(formatEpochDate(null)).toBe("");
-    expect(formatEpochDate(undefined)).toBe("");
-    expect(formatEpochDate(Number.NaN)).toBe("");
-    expect(formatEpochDate(Number.MAX_VALUE)).toBe("");
+    expect(formatEpochDate(null, "dmy")).toBe("");
+    expect(formatEpochDate(undefined, "dmy")).toBe("");
+    expect(formatEpochDate(Number.NaN, "dmy")).toBe("");
+    expect(formatEpochDate(Number.MAX_VALUE, "dmy")).toBe("");
   });
 });
 
 describe("formatShortDate", () => {
-  it("drops leading zeros and shortens the year", () => {
-    expect(formatShortDate("2026-09-06")).toBe("9/6/26");
-    expect(formatShortDate("2026-12-25")).toBe("12/25/26");
+  it("prints each fixed format with a four-digit year", () => {
+    expect(formatShortDate("2026-09-06", "dmy")).toBe("06/09/2026");
+    expect(formatShortDate("2026-09-06", "mdy")).toBe("09/06/2026");
+    expect(formatShortDate("2026-09-06", "ymd")).toBe("2026/09/06");
+  });
+  it("follows the system locale's order, separators and padding", () => {
+    expect(formatShortDate("2026-09-06", "system", "en-GB")).toBe("06/09/2026");
+    expect(formatShortDate("2026-09-06", "system", "en-US")).toBe("9/6/2026");
+    expect(formatShortDate("2026-09-06", "system", "de-DE")).toBe("6.9.2026");
+    expect(formatShortDate("2026-09-06", "system", "sv-SE")).toBe("2026-09-06");
+  });
+  it("orders the fields with dateOrder for the same format", () => {
+    expect(dateOrder("system", "en-GB")).toEqual(["day", "month", "year"]);
+    expect(dateOrder("mdy")).toEqual(["month", "day", "year"]);
+  });
+  it("never moves a stored day, whatever the time zone", () => {
+    const zone = process.env["TZ"];
+    try {
+      for (const tz of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+        process.env["TZ"] = tz;
+        expect(formatShortDate("2026-01-01", "ymd"), tz).toBe("2026/01/01");
+        expect(formatShortDate("2026-01-01", "system", "en-GB"), tz).toBe("01/01/2026");
+      }
+    } finally {
+      if (zone === undefined) delete process.env["TZ"];
+      else process.env["TZ"] = zone;
+    }
   });
   it("accepts a full rekordbox timestamp", () => {
-    expect(formatShortDate("2026-09-05 03:09:51.109 +00:00")).toBe("9/5/26");
+    expect(formatShortDate("2026-09-05 03:09:51.109 +00:00", "dmy")).toBe("05/09/2026");
   });
   it("is blank for missing dates", () => {
-    expect(formatShortDate(null)).toBe("");
-    expect(formatShortDate("")).toBe("");
+    expect(formatShortDate(null, "dmy")).toBe("");
+    expect(formatShortDate("", "dmy")).toBe("");
+    expect(formatShortDate("not a date", "system")).toBe("");
   });
 });
 
