@@ -24,7 +24,8 @@ import type {
 import { TREE_ROOT } from "./types";
 import { applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
 import { toCamelot } from "@/lib/camelot";
-import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
+import { wholeBpm } from "@/lib/trackFilter";
+import { STOCK_COLOR_NAMES } from "@/lib/colorNames";
 import { MY_TAG_LIMIT, newMyTagName } from "@/lib/myTags";
 import { referenceDeviceSettings } from "./mock-device-settings";
 import { createMockDeviceLibraries, type MockImportEntry } from "./mock-device-library";
@@ -135,7 +136,7 @@ function passesFilter(
   }
   if (filter.keys && !filter.keys.includes(row.key)) return false;
   if (filter.ratings && !filter.ratings.includes(row.rating)) return false;
-  if (filter.colors && !filter.colors.includes(COLOR_NAMES[color - 1] ?? "")) return false;
+  if (filter.colors && !filter.colors.includes(color)) return false;
   for (const pick of filter.tags ?? []) {
     if (pick.tags.length === 0) continue;
     const carries = (name: string) =>
@@ -714,6 +715,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
   // The library's My Tags. Edited in place by Adding My Tag, a rename and a
   // delete, as the real backend's table is.
+  // The library's colour names, `djmdColor.Commnt` by id: stock until
+  // renamed.
+  const colorNames: string[] = [...STOCK_COLOR_NAMES];
   const myTagCategories: { id: string; name: string; tags: { id: string; name: string }[] }[] = [
     { id: "3", name: "Situation", tags: [{ id: "t-peak", name: "Peak" }, { id: "t-warm", name: "Warm-up" }] },
     { id: "2", name: "Components", tags: [{ id: "t-synth", name: "Synth" }, { id: "t-vocal", name: "Vocal" }] },
@@ -3627,6 +3631,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     reloadLibrary: () => bump(),
     // The mock's analysis rewrites no files, so nothing redraws.
 
+    colorNames: () => (ready ? wait([...colorNames]) : notReady()),
     filterValues: (spec) => {
       if (!ready) return notReady();
       // Over the source and query alone, never the filter's own result.

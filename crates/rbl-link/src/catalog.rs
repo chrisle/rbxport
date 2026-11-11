@@ -527,7 +527,7 @@ impl IndexCatalog {
                 .into_iter()
                 .map(|id| Row::Named {
                     id,
-                    name: color_name(id).to_owned(),
+                    name: library.color_name(id).to_owned(),
                 })
                 .collect(),
             Query::DurationMinutes => library
@@ -1161,20 +1161,6 @@ fn track_number_visible(scope: &TrackScope) -> bool {
     album_constrained(scope) || matches!(scope, TrackScope::Matching(_))
 }
 
-fn color_name(id: u32) -> &'static str {
-    match id {
-        1 => "Pink",
-        2 => "Red",
-        3 => "Orange",
-        4 => "Yellow",
-        5 => "Green",
-        6 => "Aqua",
-        7 => "Blue",
-        8 => "Purple",
-        _ => "",
-    }
-}
-
 fn secondary_column(
     library: &Library,
     row: rbl_index::Row,
@@ -1247,7 +1233,7 @@ fn secondary_column(
         }
         TrackColumn::Color => {
             let color = u32::from(library.color.get(at).copied().unwrap_or(0));
-            (color_name(color).to_owned(), color)
+            (library.color_name(color).to_owned(), color)
         }
         TrackColumn::Comment => (library.comment.get(at).to_owned(), 0),
         TrackColumn::OriginalArtist => details.map_or_else(
@@ -1882,6 +1868,30 @@ mod tests {
                 Row::Date(v) => *v,
             })
             .collect()
+    }
+
+    #[test]
+    fn colours_are_served_under_the_librarys_own_names() {
+        let mut lib = library_from(&[
+            TestTrack { id: 10, color: 1, ..TestTrack::default() },
+            TestTrack { id: 11, color: 5, ..TestTrack::default() },
+        ]);
+        let mut names: [String; 8] = Default::default();
+        names[0] = "Opener".to_owned();
+        lib.set_color_names(names);
+        let c = IndexCatalog::new(Arc::new(Fixed(Arc::new(lib))), Played::default());
+        let colors: Vec<(u32, String)> = c
+            .list(&Query::Colors)
+            .into_iter()
+            .filter_map(|r| match r {
+                Row::Named { id, name } => Some((id, name)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(colors.first(), Some(&(1, "Opener".to_owned())));
+        assert_eq!(colors.get(4), Some(&(5, "Green".to_owned())));
+        assert_eq!(c.track_row(10, Some(TrackColumn::Color)).unwrap().secondary_text, "Opener");
+        assert_eq!(c.track_row(11, Some(TrackColumn::Color)).unwrap().secondary_text, "Green");
     }
 
     #[test]

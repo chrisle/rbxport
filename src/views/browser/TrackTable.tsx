@@ -36,8 +36,8 @@ import { Artwork } from "@/components/Artwork";
 import { RatingStar } from "@/components/RatingStar";
 import { RecordIcon } from "@/components/icons";
 import { EXTRA_COLUMNS, FIXED_WIDTH, reorderTarget, type ColumnKey, type ColumnSpec } from "@/lib/columns";
-import { COLOR_NAMES } from "@/lib/trackFilter";
-import { COLORS } from "@/views/info/fields";
+import { colorDot, colorNameOf, STOCK_COLOR_NAMES, useColorNames } from "@/store/useColorNames";
+import { COLOR_CHOICES } from "@/views/info/fields";
 import { useTranslation } from "@/i18n";
 import { browseListVars, browseScale, formatKey } from "@/lib/preferences";
 import { trafficLightLit, type TrafficLightReach } from "@/lib/camelot";
@@ -108,7 +108,8 @@ function headingsOf(head: HTMLElement): Element[] {
   return [...head.children].filter((cell) => cell.getAttribute("role") === "columnheader");
 }
 
-export function cellText(row: RowDto, key: Column["key"]): string {
+/** A cell's text. `colorNames` are the library's, 1 to 8 (`useColorNames`). */
+export function cellText(row: RowDto, key: Column["key"], colorNames: readonly string[] = STOCK_COLOR_NAMES): string {
   const extra = row.extra ?? {};
   const value = extra[key];
   switch (key) {
@@ -134,7 +135,7 @@ export function cellText(row: RowDto, key: Column["key"]): string {
       const types: Record<number, string> = { 1: "MP3", 4: "M4A", 5: "FLAC", 6: "M4A", 11: "WAV", 12: "AIFF" };
       return typeof value === "number" ? types[value] ?? (value ? String(value) : "") : "";
     }
-    case "color": return typeof value === "number" && value > 0 ? COLOR_NAMES[value - 1] ?? "" : "";
+    case "color": return typeof value === "number" ? colorNameOf(colorNames, value) : "";
     case "publishTrackInfo": return value === true ? "On" : value === false ? "Off" : "";
     case "cloud": return value === true ? "Cloud" : "";
     case "sampleRate": return typeof value === "number" && value > 0 ? `${value / 1000} kHz` : "";
@@ -419,9 +420,11 @@ const EditableCell = memo(function EditableCell({
 const TrackRow = memo(function TrackRow({
   row, top, selected, played, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
   onComment, onEditField, onEditColor, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
-  reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache, previewHeight,
+  reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache, previewHeight, colorNames,
 }: {
   row: RowDto | undefined;
+  /** The library's colour names, 1 to 8 (`useColorNames`). */
+  colorNames: readonly string[];
   top: number;
   /**
    * The strip the row's waveform and its cue badges share, from
@@ -701,7 +704,7 @@ const TrackRow = memo(function TrackRow({
             return (
               <EditableCell
                 key={col.key}
-                value={cellText(row, col.key)}
+                value={cellText(row, col.key, colorNames)}
                 {...(isKey ? {
                   choices: keyChoices,
                   choiceLabel: (k: string) => formatKey(k, keyDisplay),
@@ -752,7 +755,8 @@ const TrackRow = memo(function TrackRow({
         if (col.key === "color") {
           // rekordbox's ListViewer::paintColourColumn: the colour's ball, then
           // its name; a track with no colour leaves the cell empty.
-          const name = cellText(row, col.key);
+          const name = cellText(row, col.key, colorNames);
+          const dot = colorDot(Number(row.extra?.color ?? 0));
           if (onEditColor) {
             return (
               <EditableCell
@@ -760,13 +764,13 @@ const TrackRow = memo(function TrackRow({
                 value={String(row.extra?.color ?? 0)}
                 className={`${styles.cell} ${styles.colorCell}`}
                 display={<>
-                  {name ? <span className={styles.colorBall} data-color={name} aria-hidden /> : null}
+                  {dot ? <span className={styles.colorBall} data-color={dot} aria-hidden /> : null}
                   {t(name)}
                 </>}
                 label={col.label}
                 col={col.key}
-                choices={["0", ...COLORS.map((color) => color.id)]}
-                choiceLabel={(color) => t(color === "0" ? "No Color" : COLORS.find((entry) => entry.id === color)?.name ?? "")}
+                choices={COLOR_CHOICES}
+                choiceLabel={(color) => t(color === "0" ? "No Color" : colorNameOf(colorNames, color))}
                 onCommit={(color) => onEditColor(row.id, color)}
                 onClick={clickToEdit && selected}
                 onEditBlocked={onEditBlocked}
@@ -776,7 +780,7 @@ const TrackRow = memo(function TrackRow({
           }
           return (
             <div key={col.key} className={`${styles.cell} ${styles.colorCell}`} data-col={col.key} role="gridcell">
-              {name ? <span className={styles.colorBall} data-color={name} aria-hidden /> : null}
+              {dot ? <span className={styles.colorBall} data-color={dot} aria-hidden /> : null}
               {name}
             </div>
           );
@@ -803,7 +807,7 @@ const TrackRow = memo(function TrackRow({
             data-col={col.key}
             role="gridcell"
           >
-            {cellText(row, col.key)}
+            {cellText(row, col.key, colorNames)}
           </div>
         );
       })}
@@ -1147,6 +1151,7 @@ export const TrackTable = memo(function TrackTable({
   // The keys the Keyboard pane's preset and the person's own changes give.
   const keyOverrides = keyMap(preferences.keyboard);
   const tip = useTooltip();
+  const colorNames = useColorNames();
   // The Key cell's list, fetched the first time one opens so the table does
   // not ask for it at startup.
   const [keyChoices, setKeyChoices] = useState<readonly string[] | null>(null);
@@ -2484,6 +2489,7 @@ export const TrackTable = memo(function TrackTable({
                 onReorderDrop={reorderDrop}
                 startupCache={seed !== undefined}
                 previewHeight={band.height}
+                colorNames={colorNames}
               />
             );
           })}

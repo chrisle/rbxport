@@ -100,6 +100,16 @@ pub fn build(dir: &Path, shape: Shape) -> Result<LibraryLocation> {
         params![shape.start_usn, stamp],
     )?;
 
+    // The eight track colours under their stock names, as every rekordbox
+    // library has them.
+    for (id, name) in (1_i64..).zip(crate::COLOR_NAMES) {
+        conn.execute(
+            "INSERT INTO djmdColor (ID, SortKey, Commnt, UUID, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?1, ?4, ?4)",
+            params![id.to_string(), id, name, stamp],
+        )?;
+    }
+
     // One My Tag category with two tags, in the shape the reader expects: a
     // category is `Attribute = 1` under `root`, a tag `Attribute = 0` under it.
     for (id, seq, name, attribute, parent) in [

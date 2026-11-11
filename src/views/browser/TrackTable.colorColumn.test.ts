@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { COLOR_NAMES } from "@/lib/trackFilter";
+import { STOCK_COLOR_NAMES } from "@/lib/colorNames";
 
 const tokens = readFileSync("src/styles/tokens.css", "utf8");
 const table = readFileSync("src/views/browser/TrackTable.module.css", "utf8");
@@ -22,7 +22,7 @@ const REKORDBOX_BALLS: Record<string, string> = {
 
 describe("the track list's Color column", () => {
   it("paints each track colour in rekordbox's own RGB", () => {
-    for (const name of COLOR_NAMES) {
+    for (const name of STOCK_COLOR_NAMES) {
       expect(token(`c-comment-${name.toLowerCase()}`), name).toBe(REKORDBOX_BALLS[name]);
       expect(table, name).toContain(
         `.colorBall[data-color="${name}"] { background: var(--c-comment-${name.toLowerCase()}); }`,

@@ -135,6 +135,12 @@ pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
                         if moved > 0 {
                             tracing::debug!(moved, "cloud track files moved since the snapshot");
                         }
+                        // The colour names are not in the snapshot: a rename
+                        // touches no row its fingerprint counts.
+                        match rbl_index::read_color_names(&db) {
+                            Ok(names) => library.set_color_names(names),
+                            Err(e) => tracing::warn!(error = %e, "could not read the colour names"),
+                        }
                         let load_ms =
                             u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                         tracing::debug!(tracks = library.len(), load_ms, "library from cache");
@@ -748,6 +754,7 @@ pub fn run() {
             details::create_my_tag,
             details::rename_my_tag,
             details::delete_my_tag,
+            details::color_names,
             details::write_my_tag_comments,
             details::clear_artwork,
             // AppleScript's way into the window: it says it is listening,

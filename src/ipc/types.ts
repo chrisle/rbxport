@@ -1049,6 +1049,13 @@ export interface Backend {
   filterValues(spec: ViewSpec): Promise<FilterValues>;
 
   /**
+   * The eight track colours' names, 1 to 8 at indices 0 to 7: the library's
+   * own (`djmdColor.Commnt`) where it renamed one, the stock name otherwise.
+   * Read through `useColorNames`, which asks again on `onLibraryChanged`.
+   */
+  colorNames(): Promise<string[]>;
+
+  /**
    * What a selected device's six tabs show: the display settings a player
    * reads from `DEVSETTING.DAT`, and the name, browse categories, sort
    * options, sub-column and colour comments in `exportLibrary.db`. A stick
@@ -2301,13 +2308,14 @@ export interface BpmFilter {
 
 /**
  * The track filter bar's picks: one entry per ticked column, combined with
- * AND. Keys and colours travel by name, which is what the bar shows.
+ * AND. Keys travel by name, which is what the bar shows; colours by
+ * `ColorID` (1 to 8), since the library can rename them.
  */
 export interface TrackFilter {
   bpm?: BpmFilter;
   keys?: string[];
   ratings?: number[];
-  colors?: string[];
+  colors?: number[];
   /** One entry per ticked My Tag column with tags picked. */
   tags?: TagPick[];
 }

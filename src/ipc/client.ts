@@ -706,6 +706,7 @@ async function realBackend(): Promise<Backend> {
       clearArtwork: (tracks) => invoke<EditHistoryState>("clear_artwork", { tracks }),
     },
     filterValues: (spec) => invoke<FilterValues>("filter_values", { spec }),
+    colorNames: () => invoke<string[]>("color_names"),
     trackDetails: (trackId) => invoke<TrackDetails>("track_details", { track: trackId }),
     trackPlaylists: (trackId) => invoke<RelatedPlaylist[]>("track_playlists", { track: trackId }),
     selectionDetails: (trackIds) => invoke<SelectionDetails>("selection_details", { tracks: trackIds }),
