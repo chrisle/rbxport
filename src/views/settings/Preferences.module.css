@@ -256,6 +256,48 @@
 }
 .note[data-failed] { color: var(--c-error); }
 
+/* Advanced › Browse › Color: the eight track colours, a dot and a name each,
+   as the device panel's Color tab draws a stick's. */
+.colorNames {
+  display: flex;
+  flex-direction: column;
+  margin-left: calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
+}
+.colorRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: var(--s-pref-select-w);
+  max-width: 100%;
+  height: var(--s-pref-row-pitch);
+}
+.colorDot {
+  width: var(--s-filter-dot);
+  height: var(--s-filter-dot);
+  border-radius: 50%;
+  flex: none;
+}
+.colorDot[data-color="Pink"] { background: var(--c-comment-pink); }
+.colorDot[data-color="Red"] { background: var(--c-comment-red); }
+.colorDot[data-color="Orange"] { background: var(--c-comment-orange); }
+.colorDot[data-color="Yellow"] { background: var(--c-comment-yellow); }
+.colorDot[data-color="Green"] { background: var(--c-comment-green); }
+.colorDot[data-color="Aqua"] { background: var(--c-comment-aqua); }
+.colorDot[data-color="Blue"] { background: var(--c-comment-blue); }
+.colorDot[data-color="Purple"] { background: var(--c-comment-purple); }
+.colorName {
+  flex: 1;
+  min-width: 0;
+  height: var(--s-pref-select-h);
+  box-sizing: border-box;
+  border: 0;
+  padding: 0 var(--s-pref-select-pad);
+  background: var(--c-black);
+  color: var(--c-icon-on);
+  font: inherit;
+}
+.colorName:disabled { color: var(--c-device-disabled); }
+
 /* Toggle: a 32 by 16 pill, the knob on the right when on. */
 .toggle {
   appearance: none;

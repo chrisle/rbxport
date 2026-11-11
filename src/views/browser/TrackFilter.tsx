@@ -14,11 +14,12 @@
 import { memo, useMemo, type MouseEvent } from "react";
 import type { FilterValues } from "@/ipc/types";
 import {
-  COLOR_NAMES, RATINGS, TAG_COLUMNS, TOLERANCES, EMPTY_FILTER, pick,
+  COLOR_IDS, RATINGS, TAG_COLUMNS, TOLERANCES, EMPTY_FILTER, pick,
   type FilterState, type PickedColumn, type TagColumn,
 } from "@/lib/trackFilter";
 import { TickIcon } from "@/components/icons";
 import { RatingStar } from "@/components/RatingStar";
+import { colorDot, colorNameOf, useColorNames } from "@/store/useColorNames";
 import styles from "./TrackFilter.module.css";
 
 export interface TrackFilterProps {
@@ -132,6 +133,7 @@ export function TrackFilter({ state, onChange, values, masterBpmX100 }: TrackFil
   const bpms = useMemo(() => values?.bpms.map((c) => c.value) ?? [], [values]);
   const keys = useMemo(() => values?.keys.map((c) => c.value) ?? [], [values]);
   const categories = values?.tags ?? [];
+  const colorNames = useColorNames();
   // A tolerance needs something to centre on: a picked BPM, or the master
   // player. With neither the list is greyed, as the capture's is when no deck
   // is loaded.
@@ -242,13 +244,13 @@ export function TrackFilter({ state, onChange, values, masterBpmX100 }: TrackFil
           </div>
           <PickList
             column={state.color}
-            options={COLOR_NAMES}
+            options={COLOR_IDS}
             all={false}
             className={styles.colorList}
-            render={(name) => (
+            render={(id) => (
               <>
-                <span className={styles.dot} data-color={name} />
-                {name}
+                <span className={styles.dot} data-color={colorDot(id)} />
+                {colorNameOf(colorNames, id)}
               </>
             )}
             onPick={(picked) => onChange({ ...state, color: { ...state.color, values: picked } })}

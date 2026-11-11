@@ -68,6 +68,13 @@ use serde::{Deserialize, Serialize};
 pub use schema::{SchemaProbe, SchemaSupport};
 pub use track_path::{StoredPath, TrackPaths};
 
+/// rekordbox's stock names for the eight track colours, `djmdColor` ids 1
+/// to 8: what a new library is given, and what a colour whose `Commnt` is
+/// NULL or empty is called. A library may rename them (Preferences ›
+/// Advanced › Browse › Color); the index reads its own names.
+pub const COLOR_NAMES: [&str; 8] =
+    ["Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"];
+
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
     #[error("rekordbox does not appear to be installed: {0}")]

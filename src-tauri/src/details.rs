@@ -490,6 +490,30 @@ pub async fn rename_my_tag<R: tauri::Runtime>(
     }).await
 }
 
+/// The eight track colours' names, 1 to 8: the library's own where it has
+/// renamed one, the stock name otherwise.
+#[tauri::command]
+pub async fn color_names(state: State<'_, Arc<AppState>>) -> AppResult<Vec<String>> {
+    let library = state.library()?;
+    Ok(library.color_names().iter().map(|&name| name.to_owned()).collect())
+}
+
+/// Renames track colour `id` (1 to 8); an empty name puts the stock one
+/// back. Every list naming a colour reads the library again, as for a My
+/// Tag rename, and like one it is not recorded: it can be typed back.
+#[tauri::command]
+pub async fn set_color_name<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    id: u8,
+    name: String,
+) -> AppResult<u32> {
+    edit(app, state, "set_color_name", Touched::Tracks, move |w| {
+        w.set_color_name(id, &name)?;
+        Ok(())
+    }).await
+}
+
 /// Deletes a My Tag and takes it off every track. Not undoable, and the
 /// history before it goes: an older tick could name the tag it removes.
 /// `comments` as for [`rename_my_tag`]: the selected tracks' comments lose

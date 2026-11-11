@@ -16,7 +16,7 @@ use rbl_core::xml::escape;
 use crate::{Cue, Library, Row, TrackSource};
 
 /// rekordbox's `Colour` values for `ColorID` 1 to 8, in the palette's own
-/// order (see `COLOR_NAMES`) [DOC: pyrekordbox's account of the format].
+/// order (see `rbl_db::COLOR_NAMES`) [DOC: pyrekordbox's account of the format].
 const COLOURS: [&str; 8] =
     ["0xFF007F", "0xFF0000", "0xFFA500", "0xFFFF00", "0x00FF00", "0x25FDE9", "0x0000FF", "0x660099"];
 

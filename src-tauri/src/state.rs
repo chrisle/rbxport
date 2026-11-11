@@ -10,7 +10,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use rbl_index::folder::FolderView;
 use rbl_index::{
-    BpmFilter, Library, RelatedCriterion, SortColumn, TrackFilter, TrackSource, View, ViewSpec, COLOR_NAMES,
+    BpmFilter, Library, RelatedCriterion, SortColumn, TrackFilter, TrackSource, View, ViewSpec,
 };
 
 use crate::dto::{cue_colour_css, RowCueDto, RowDto, TrackFilterDto, TrackSourceDto, ViewSpecDto};
@@ -1001,7 +1001,8 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
 ///
 /// A key name the library does not hold resolves to no id, so a ticked key
 /// column with only unknown names matches nothing — which is what the list
-/// would show for it. A colour name outside the eight is dropped the same way.
+/// would show for it. Colours travel as ids, so a renamed colour stays
+/// picked; one outside the eight is dropped the same way.
 /// A My Tag column's names resolve within its category to the ids tracks carry.
 pub fn filter_from_wire(library: &Library, dto: &TrackFilterDto) -> TrackFilter {
     TrackFilter {
@@ -1012,17 +1013,10 @@ pub fn filter_from_wire(library: &Library, dto: &TrackFilterDto) -> TrackFilter 
         }),
         keys: dto.keys.as_ref().map(|names| library.key_ids_named(names)),
         ratings: dto.ratings.clone(),
-        colors: dto.colors.as_ref().map(|names| {
-            names
-                .iter()
-                .filter_map(|name| {
-                    COLOR_NAMES
-                        .iter()
-                        .position(|&c| c == name)
-                        .and_then(|at| u8::try_from(at + 1).ok())
-                })
-                .collect()
-        }),
+        colors: dto
+            .colors
+            .as_ref()
+            .map(|ids| ids.iter().copied().filter(|id| (1..=8).contains(id)).collect()),
         tags: dto
             .tags
             .iter()

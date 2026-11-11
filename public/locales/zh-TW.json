@@ -1788,5 +1788,6 @@
   "When tracks are missing, choose whether to copy them and where to save them. Cancel stops the import.": "如果有缺少的曲目，請選擇是否複製以及儲存位置。取消將停止匯入。",
   "Drop files or folders onto All Tracks or a playlist to import them.": "Drop files or folders onto All Tracks or a playlist to import them.",
   "No tracks found to import.": "No tracks found to import.",
-  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled."
+  "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.",
+  "Rename {name}…": "Rename {name}…"
 }

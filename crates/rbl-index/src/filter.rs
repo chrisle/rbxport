@@ -37,7 +37,7 @@ pub struct TrackFilter {
     pub keys: Option<Vec<u32>>,
     /// Star counts, 0 to 5.
     pub ratings: Option<Vec<u8>>,
-    /// `djmdContent.ColorID`, 1 to 8 (see [`COLOR_NAMES`]).
+    /// `djmdContent.ColorID`, 1 to 8 (see [`Library::color_name`]).
     pub colors: Option<Vec<u8>>,
     /// One entry per ticked My Tag column that has tags picked; empty means
     /// no tag constraint. Every entry has to agree, as the other columns do.
@@ -63,12 +63,6 @@ pub struct TagFilter {
     pub any: bool,
 }
 
-/// The eight colour comments, indexed by `ColorID - 1`.
-///
-/// `djmdColor` on the reference library, read-only: ids 1 to 8, `Commnt`
-/// Pink, Red, Orange, Yellow, Green, Aqua, Blue, Purple, in `SortKey` order.
-pub const COLOR_NAMES: [&str; 8] =
-    ["Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"];
 
 impl TrackFilter {
     /// Whether the filter constrains anything at all.

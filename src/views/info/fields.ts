@@ -80,21 +80,11 @@ export function summaryFacts(row: RowDto, details: TrackDetails | null): Fact[] 
 }
 
 /**
- * rekordbox's eight track colours, by `ColorID`.
- *
- * Names are `djmdColor.Commnt` in the reference library, ids 1 to 8 in
- * `SortKey` order; `"0"` (38,671 of 38,681 tracks) and NULL are none.
+ * The colour picker's values: `"0"` (No Color; 38,671 of the reference
+ * library's 38,681 tracks, NULL reads the same) then `ColorID` 1 to 8 in
+ * `SortKey` order. Their names are the library's (`useColorNames`).
  */
-export const COLORS: readonly { id: string; name: string }[] = [
-  { id: "1", name: "Pink" },
-  { id: "2", name: "Red" },
-  { id: "3", name: "Orange" },
-  { id: "4", name: "Yellow" },
-  { id: "5", name: "Green" },
-  { id: "6", name: "Aqua" },
-  { id: "7", name: "Blue" },
-  { id: "8", name: "Purple" },
-];
+export const COLOR_CHOICES: readonly string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8"];
 
 /** The text an Info-tab field starts out with, from the record. */
 export function fieldText(d: TrackDetails, field: TrackField): string {

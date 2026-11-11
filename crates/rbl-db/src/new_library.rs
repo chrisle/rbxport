@@ -72,7 +72,7 @@ const SORTS: &[(&str, &str, i64, i64)] = &[
 ];
 
 /// The eight track colours, `djmdColor`: id and name, sorted by id.
-const COLORS: &[&str] = &["Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"];
+const COLORS: &[&str] = &crate::COLOR_NAMES;
 
 /// The My Tag columns and the tags in each, `djmdMyTag`. A column is its
 /// position as id (`Attribute` 1 under `root`); a tag gets a fresh numeric

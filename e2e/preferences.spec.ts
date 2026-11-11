@@ -533,3 +533,37 @@ test("Browse › FontSize and Line Space apply to the playlist tree", async ({ p
   expect(height).toBe(33);
   if (base) expect(size).toBeCloseTo(base * 1.3, 1);
 });
+
+test("Advanced › Browse › Color renames a track colour everywhere, and a Color cell's right-click opens it", async ({ page }) => {
+  await open(page, "?writable=1");
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Color", exact: true }).click();
+  const values = page.locator('[role="gridcell"][data-col="color"]');
+  await expect(values.filter({ hasText: /^Aqua$/ }).first()).toBeVisible();
+
+  const dialog = await prefs(page);
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Browse" }).click();
+  const aqua = dialog.getByRole("textbox", { name: "Color 6" });
+  await expect(aqua).toHaveValue("Aqua");
+  await aqua.fill("Opener");
+  await aqua.press("Enter");
+  await dialog.getByRole("button", { name: "Close" }).click();
+
+  await expect(values.filter({ hasText: /^Opener$/ }).first()).toBeVisible();
+  await expect(values.filter({ hasText: /^Aqua$/ })).toHaveCount(0);
+  // The filter bar names it the same way.
+  await page.getByTestId("filter-toggle").click();
+  await expect(page.getByTestId("track-filter").getByRole("option", { name: "Opener" })).toBeVisible();
+
+  const opener = values.filter({ hasText: /^Opener$/ }).first();
+  // Scrolled to first: a scroll that lands after the menu opens closes it,
+  // as it closes every menu here.
+  await opener.scrollIntoViewIfNeeded();
+  await expect.poll(() => opener.evaluate((cell) => new Promise((done) => requestAnimationFrame(() => done(cell.isConnected))))).toBe(true);
+  await opener.click({ button: "right" });
+  await page.getByRole("menu", { name: "Color" }).getByRole("menuitem", { name: "Rename Opener…" }).click();
+  const again = page.getByRole("dialog", { name: "Preferences" });
+  await expect(again.getByRole("textbox", { name: "Color 6" })).toHaveValue("Opener");
+});

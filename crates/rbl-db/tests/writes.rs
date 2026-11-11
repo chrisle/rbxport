@@ -3014,6 +3014,28 @@ fn renaming_a_my_tag_refuses_a_name_its_category_already_has() {
 }
 
 #[test]
+fn renaming_a_track_colour_writes_its_comment_and_empty_puts_the_stock_name_back() {
+    let mut f = fixture();
+    let before: i64 = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+    let changed = f.writer.set_color_name(5, "  Peak  ").unwrap();
+    assert_eq!(changed.rows, 1);
+    assert!(changed.usn > before);
+    let (name, usn): (String, i64) = f.conn()
+        .query_row("SELECT Commnt, rb_local_usn FROM djmdColor WHERE ID = '5'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((name.as_str(), usn), ("Peak", changed.usn));
+    // The same name again is no change; the other seven are untouched.
+    assert_eq!(f.writer.set_color_name(5, "Peak").unwrap().rows, 0);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdColor WHERE Commnt IN ('Pink', 'Red', 'Orange', 'Yellow', 'Aqua', 'Blue', 'Purple')"), 7);
+
+    f.writer.set_color_name(5, "").unwrap();
+    let name: String = f.one("SELECT Commnt FROM djmdColor WHERE ID = '5'", &[]);
+    assert_eq!(name, "Green");
+    assert!(matches!(f.writer.set_color_name(0, "X"), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.set_color_name(9, "X"), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
 fn deleting_a_my_tag_marks_it_and_its_tracks_deleted_and_closes_the_gap() {
     use rbl_db::fixture::{MY_TAG_CATEGORY, MY_TAG_PEAK, MY_TAG_WARM_UP};
     let mut f = fixture();
