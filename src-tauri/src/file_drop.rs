@@ -239,7 +239,7 @@ mod tests {
     /// `postMessageWithAdditionalObjects` on `window.chrome.webview`; on every
     /// non-macOS target it has always refused, so a passing test here is
     /// evidence that this exact message can still come from either that
-    /// fallback or a WebView2 bridge refusal (`reply`'s own `Ok` branch
+    /// fallback or a `WebView2` bridge refusal (`reply`'s own `Ok` branch
     /// below), not proof either one still happens (issue #847).
     #[cfg(not(target_os = "macos"))]
     #[test]
