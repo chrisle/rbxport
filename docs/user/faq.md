@@ -41,3 +41,10 @@ Preferences → Advanced. Either one sets the location the other reads. See
 No. On first start with no library, RBXport offers to create an empty one, and
 you can import music, build playlists and export to a USB stick without
 rekordbox or a copied `master.db`. See [Using RBXport on Linux](linux.md).
+
+## Why are dates shown in a different order from rekordbox?
+
+RBXport prints dates in the order your system's region settings use, with a
+four-digit year. To pick a fixed order instead, choose DD/MM/YYYY, MM/DD/YYYY
+or YYYY/MM/DD under Preferences → View → Display Type → Date format. This
+changes only how dates are shown, not what the library stores.
