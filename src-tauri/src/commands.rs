@@ -1831,6 +1831,9 @@ pub(crate) struct ExportSelection {
     /// than make it hold exactly this (a SYNC): see
     /// [`rbl_export::ExportOptions::keep_unlisted`].
     pub keep_unlisted: bool,
+    /// The library's eight colour names, 1 to 8: what a stick with no
+    /// `exportLibrary.db` is given. A stick that has one keeps its own.
+    pub color_names: Vec<String>,
 }
 
 /// What exporting the folder at `folder` writes, in tree order: the
@@ -2059,7 +2062,8 @@ impl ExportSelection {
         // the ancestors were gathered in id order (#315).
         let rank = tree_rank(&tree_view);
         source_playlists.sort_by_key(|p| rank.get(&p.id).copied().unwrap_or(usize::MAX));
-        Ok(Self { tracks, playlists: source_playlists, my_tags, sync, keep_unlisted: false })
+        let color_names = library.color_names().iter().map(|&name| name.to_owned()).collect();
+        Ok(Self { tracks, playlists: source_playlists, my_tags, sync, keep_unlisted: false, color_names })
     }
 
     /// This selection with the loose tracks a stick's record names added,
@@ -2594,14 +2598,14 @@ fn write_export(
             imported_settings.push(("DEVSETTING.DAT".to_owned(), crate::device_settings::dev_defaults(defaults)?.encode()));
         }
     }
-    let library_defaults = defaults.map(crate::device_settings::library_defaults);
+    let library_defaults = crate::device_settings::library_defaults(defaults, &selection.color_names);
     let report = rbl_export::export_cancellable(
         destination,
         &selection.tracks,
         &selection.playlists,
         &selection.my_tags,
         &rbl_export::ExportOptions {
-            defaults: library_defaults.as_ref(),
+            defaults: Some(&library_defaults),
             sync: Some(&selection.sync),
             compatibility: compatibility_format,
             root: preferred_root,
@@ -5275,7 +5279,7 @@ mod tests {
                 SourcePlaylist { id: 8, name: "Play".into(), parent_id: 7, track_indices: vec![0, 0, 2, usize::MAX], ..Default::default() },
                 SourcePlaylist { id: 9, name: "Play".into(), track_indices: vec![0, 1], ..Default::default() },
             ],
-            my_tags: Vec::new(), sync: rbl_export::SyncSource::default(), keep_unlisted: false,
+            my_tags: Vec::new(), sync: rbl_export::SyncSource::default(), keep_unlisted: false, color_names: Vec::new(),
         };
         let files = super::missing_export_files(&selection, |path| {
             checked.set(checked.get() + 1);
@@ -5299,7 +5303,7 @@ mod tests {
                 SourcePlaylist { id: 8, parent_id: 7, name: "Play".into(), track_indices: vec![0], ..Default::default() },
                 SourcePlaylist { id: 9, parent_id: 99, name: "Other".into(), track_indices: vec![0], ..Default::default() },
             ],
-            my_tags: Vec::new(), sync: rbl_export::SyncSource::default(), keep_unlisted: false,
+            my_tags: Vec::new(), sync: rbl_export::SyncSource::default(), keep_unlisted: false, color_names: Vec::new(),
         };
         let files = super::missing_export_files(&selection, |_| false);
         assert_eq!(files[0].title, "Untitled track");
@@ -5818,6 +5822,32 @@ mod tests {
         let want = ["Second", "First"];
         assert_eq!(roots(snapshot.legacy.as_ref().unwrap()), want, "export.pdb");
         assert_eq!(roots(snapshot.one.as_ref().unwrap()), want, "exportLibrary.db");
+        assert!(rbl_export::verify(&stick).unwrap().is_ok());
+    }
+
+    /// A stick with no `exportLibrary.db` is given the library's colour
+    /// names; one that has them keeps its own when the library renames a
+    /// colour again, as rekordbox's per-device names do.
+    #[test]
+    fn a_fresh_stick_gets_the_librarys_colour_names_and_keeps_them_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, stick_dir) = export_rig(dir.path(), |w| {
+            w.set_color_name(1, "Opener").unwrap();
+        });
+        let stick = stick_dir.path().to_path_buf();
+        let names = |stick: &std::path::Path| -> Vec<String> {
+            rbl_devices::settings::read(stick).library.unwrap().colors.into_iter().map(|c| c.name).collect()
+        };
+        export_playlist_to(&state, &location, &stick, &rbl_db::fixture::playlist_id(0));
+        assert_eq!(names(&stick), ["Opener", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"]);
+
+        let mut writer = rbl_db::write::Writer::open(location.clone(), dir.path().join("backups")).unwrap();
+        writer.disable_automatic_backups();
+        writer.set_color_name(1, "Warm-up").unwrap();
+        drop(writer);
+        reload(&state, &location);
+        export_playlist_to(&state, &location, &stick, &rbl_db::fixture::playlist_id(0));
+        assert_eq!(names(&stick).first().map(String::as_str), Some("Opener"), "the stick keeps its own");
         assert!(rbl_export::verify(&stick).unwrap().is_ok());
     }
 

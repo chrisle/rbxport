@@ -740,3 +740,34 @@ it("keeps explicit jog mode separate from image source, copy and deletion", asyn
   expect((await backend.jogImage(null, null, "read")).image).toBe(source.image);
   await expect(backend.jogImage(device.path, "replaced", "custom")).rejects.toThrow("no longer connected");
 });
+
+describe("track colour names", () => {
+  it("renames a colour, filters by id across it, and seeds a fresh stick with the names", async () => {
+    const backend = createMockBackend({ trackCount: 200 });
+    const spec = { source: { kind: "collection" as const }, sort: "trackNo" as const, descending: false, query: "" };
+    const aqua = async () => {
+      const view = await backend.openView({ ...spec, filter: { colors: [6] } });
+      return (await backend.fetchRows(view.viewId, 0, view.len)).map((row) => row.id);
+    };
+    const before = await aqua();
+    expect(before.length).toBeGreaterThan(0);
+    await backend.edits.setColorName(6, " Peak ");
+    expect((await backend.colorNames())[5]).toBe("Peak");
+    // The filter picks by id, so a rename keeps what it finds.
+    expect(await aqua()).toEqual(before);
+
+    await backend.edits.createPlaylist("Colours", TREE_ROOT);
+    const playlist = (await backend.playlistTree()).find((n) => n.name === "Colours")!.id;
+    await backend.edits.addTracksToPlaylist(playlist, ["100000"]);
+    const destination = (await backend.listDevices()).find((d) => !d.export)!.path;
+    await backend.exportPlaylist(playlist, destination, undefined, false);
+    expect((await backend.deviceSettings(destination)).colors[5]).toEqual({ id: 6, name: "Peak" });
+
+    // The stick keeps its own after that; the library's empty name is the stock one.
+    await backend.edits.setColorName(6, "");
+    expect((await backend.colorNames())[5]).toBe("Aqua");
+    await backend.exportPlaylist(playlist, destination, undefined, false);
+    expect((await backend.deviceSettings(destination)).colors[5]?.name).toBe("Peak");
+    await expect(backend.edits.setColorName(9, "X")).rejects.toThrow();
+  });
+});

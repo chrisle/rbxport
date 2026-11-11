@@ -719,6 +719,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   // The library's colour names, `djmdColor.Commnt` by id: stock until
   // renamed.
   const colorNames: string[] = [...STOCK_COLOR_NAMES];
+  const libraryColors = () => colorNames.map((name, i) => ({ id: i + 1, name }));
   const myTagCategories: { id: string; name: string; tags: { id: string; name: string }[] }[] = [
     { id: "3", name: "Situation", tags: [{ id: "t-peak", name: "Peak" }, { id: "t-warm", name: "Warm-up" }] },
     { id: "2", name: "Components", tags: [{ id: "t-synth", name: "Synth" }, { id: "t-vocal", name: "Vocal" }] },
@@ -1012,6 +1013,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     else for (const track of looseTracks.get(device.path) ?? []) union.add(track);
     const tracks = union.size;
     const already = device.export;
+    // Read before the export is recorded below: a stick seen for the first
+    // time is otherwise born with a library of its own.
+    const settings = settingsOf(device.path);
     const reused = already?.ours === true ? Math.min(already.tracks, tracks) : 0;
     const removed = already?.ours === true ? Math.max(0, already.tracks - tracks) : 0;
     const tracksAdded = tracks - reused;
@@ -1026,7 +1030,6 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The export writes a library, which is what the tabs need. A stick
     // that had none takes the Preferences window's defaults, as the
     // real export does; one that had its own keeps them.
-    const settings = settingsOf(device.path);
     const fresh = !settings.hasLibrarySettings && defaults !== undefined;
     deviceSettings.set(device.path, {
       ...settings,
@@ -1042,6 +1045,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
             subColumn: defaults.subColumn,
           }
         : {}),
+      // The library's colour names go on a stick that had none of its own.
+      ...(settings.hasLibrarySettings ? {} : { colors: libraryColors() }),
       hasDeviceLibrary: true,
       hasOneLibrary: true,
       hasLibrarySettings: true,
@@ -3717,6 +3722,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         categories: defaults?.categories ?? current.categories,
         sorts: defaults?.sorts ?? current.sorts,
         subColumn: defaults?.subColumn ?? current.subColumn,
+        colors: libraryColors(),
       };
       deviceSettings.set(path, next);
       const device = devices.find((d) => d.path === path);
