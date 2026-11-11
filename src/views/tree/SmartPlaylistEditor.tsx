@@ -31,7 +31,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { SmartCondition, SmartRule, TrackLookups } from "@/ipc/types";
-import { COLOR_NAMES } from "@/lib/trackFilter";
+import { colorNameOf, useColorNames } from "@/store/useColorNames";
 import styles from "./SmartPlaylistEditor.module.css";
 
 export interface SmartPlaylistEditorProps {
@@ -113,9 +113,9 @@ const UNITS: readonly { value: string; label: string }[] = [
  * as `ValueLeft="1"` and No Color as `ValueLeft="0"`; static, 7.2.19
  * `db::getSmartlistCondition` reads `grouping` with `getIntAttribute`].
  */
-const COLOURS: readonly { value: string; label: string }[] = [
-  ...COLOR_NAMES.map((label, i) => ({ value: String(i + 1), label })),
-  { value: "0", label: "No Color" },
+const COLOURS: readonly { value: string }[] = [
+  ...[1, 2, 3, 4, 5, 6, 7, 8].map((id) => ({ value: String(id) })),
+  { value: "0" },
 ];
 
 function kindOf(property: string): Kind {
@@ -169,6 +169,7 @@ export function emptyCondition(): SmartCondition {
 
 export function SmartPlaylistEditor({ title, name: initialName, rule: initialRule, myTags = [], onSave, onCancel }: SmartPlaylistEditorProps) {
   const [name, setName] = useState(initialName);
+  const colorNames = useColorNames();
   const [logic, setLogic] = useState<"all" | "any">(initialRule.logic === "any" ? "any" : "all");
   const [conditions, setConditions] = useState<SmartCondition[]>(
     initialRule.conditions.length === 0 ? [emptyCondition()] : initialRule.conditions.map(asRead),
@@ -327,7 +328,9 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                         </option>
                       ) : null}
                       {COLOURS.map((c) => (
-                        <option key={c.value} value={c.value}>{c.label}</option>
+                        <option key={c.value} value={c.value}>
+                          {c.value === "0" ? "No Color" : colorNameOf(colorNames, c.value)}
+                        </option>
                       ))}
                     </select>
                   ) : kind === "tag" ? (

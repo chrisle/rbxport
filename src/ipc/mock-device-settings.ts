@@ -6,6 +6,7 @@
  * Kept apart from `backend-mock.ts` so the table of numbers does not sit in
  * the middle of the backend.
  */
+import { STOCK_COLOR_NAMES } from "@/lib/colorNames";
 import type { DeviceSettings, MenuSlot } from "./types";
 
 /** `(id, menuItem, name, seq, visible)` — `category` on the TEST stick [OBS]. */
@@ -55,7 +56,6 @@ const SORTS: [number, number, string, number, number][] = [
   [17, 22, "DATE ADDED", 0, 0],
 ];
 
-const COLORS = ["Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"];
 
 function slots(rows: [number, number, string, number, number][]): MenuSlot[] {
   return rows.map(([id, menuItem, name, seq, visible]) => ({
@@ -85,6 +85,6 @@ export function referenceDeviceSettings(deviceName: string, withLibrary: boolean
     categories: slots(CATEGORIES),
     sorts: slots(SORTS),
     subColumn: null,
-    colors: COLORS.map((name, i) => ({ id: i + 1, name })),
+    colors: STOCK_COLOR_NAMES.map((name, i) => ({ id: i + 1, name })),
   };
 }

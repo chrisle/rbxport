@@ -30,11 +30,11 @@ pub mod xml_export;
 
 pub use category::bpm_bucket;
 pub use filter::{
-    whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TagFilter, TrackFilter, COLOR_NAMES,
+    whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TagFilter, TrackFilter,
 };
 pub use load::{
     content_version, load, load_with_cue_reader, reload_cues_of, reload_histories, reload_metadata,
-    reload_playlists, reload_tag_list, LoadStats,
+    read_color_names, reload_playlists, reload_tag_list, LoadStats,
 };
 pub use smart::SmartRule;
 pub use view::{ListTotals, RelatedCriterion, SearchField, SortColumn, TrackSource, View, ViewSpec};
@@ -189,6 +189,12 @@ pub struct Library {
     /// not change `master.db`, so the snapshot alone would keep opening the
     /// deleted one. Empty for a library without Cloud Library Sync.
     pub(crate) cloud_paths: Vec<(Row, rbl_db::StoredPath)>,
+
+    /// The eight track colours' names, `djmdColor.Commnt` by `ID - 1`. An
+    /// empty one is the stock name (`rbl_db::COLOR_NAMES`). Not in the
+    /// startup snapshot: eight rows are read fresh on every open
+    /// ([`read_color_names`]).
+    pub(crate) color_names: [String; 8],
 }
 
 // Copy-on-write snapshots keep readers on a consistent set of track columns.
@@ -253,6 +259,7 @@ impl Clone for Library {
             my_tag_bounds: self.my_tag_bounds.clone(),
             my_tag_keys: self.my_tag_keys.clone(),
             cloud_paths: self.cloud_paths.clone(),
+            color_names: self.color_names.clone(),
         }
     }
 }
@@ -678,6 +685,34 @@ impl Library {
 
     pub(crate) fn set_my_tags(&mut self, tags: Vec<TagCategory>) {
         self.my_tags = tags;
+    }
+
+    /// What the library calls track colour `id` (1 to 8): its own name, or
+    /// the stock one where it has none. Empty for 0 (No Color) and anything
+    /// outside the eight.
+    #[must_use]
+    pub fn color_name(&self, id: u32) -> &str {
+        let Some(at) = usize::try_from(id).ok().and_then(|id| id.checked_sub(1)) else {
+            return "";
+        };
+        match (self.color_names.get(at), rbl_db::COLOR_NAMES.get(at)) {
+            (Some(own), _) if !own.is_empty() => own,
+            (_, Some(stock)) => stock,
+            _ => "",
+        }
+    }
+
+    /// The eight colours' names, 1 to 8, as [`Library::color_name`] reads
+    /// each.
+    #[must_use]
+    pub fn color_names(&self) -> [&str; 8] {
+        std::array::from_fn(|at| self.color_name(u32::try_from(at + 1).unwrap_or(0)))
+    }
+
+    /// Replaces the colour names: a startup served from the snapshot reads
+    /// them from the database, as [`read_color_names`] does.
+    pub fn set_color_names(&mut self, names: [String; 8]) {
+        self.color_names = names;
     }
 
     /// The My Tag ids on row `row`, as [`smart::my_tag_key`] reads them.

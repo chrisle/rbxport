@@ -664,8 +664,9 @@ pub struct BpmFilterDto {
 
 /// One entry per column of the track filter bar; `None` is an unticked column.
 ///
-/// Keys and colours travel as names — what the bar shows — and are resolved
-/// to ids against the library on the way in.
+/// Keys travel as names — what the bar shows — and are resolved to ids
+/// against the library on the way in. Colours travel as `ColorID`s, 1 to 8,
+/// since the library can rename them.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackFilterDto {
@@ -676,7 +677,7 @@ pub struct TrackFilterDto {
     #[serde(default)]
     pub ratings: Option<Vec<u8>>,
     #[serde(default)]
-    pub colors: Option<Vec<String>>,
+    pub colors: Option<Vec<u8>>,
     /// One entry per ticked My Tag column with tags picked.
     #[serde(default)]
     pub tags: Vec<TagPickDto>,
