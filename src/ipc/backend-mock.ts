@@ -718,6 +718,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   // The library's colour names, `djmdColor.Commnt` by id: stock until
   // renamed.
   const colorNames: string[] = [...STOCK_COLOR_NAMES];
+  const libraryColors = () => colorNames.map((name, i) => ({ id: i + 1, name }));
   const myTagCategories: { id: string; name: string; tags: { id: string; name: string }[] }[] = [
     { id: "3", name: "Situation", tags: [{ id: "t-peak", name: "Peak" }, { id: "t-warm", name: "Warm-up" }] },
     { id: "2", name: "Components", tags: [{ id: "t-synth", name: "Synth" }, { id: "t-vocal", name: "Vocal" }] },
@@ -1039,6 +1040,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
             subColumn: defaults.subColumn,
           }
         : {}),
+      // The library's colour names go on a stick that had none of its own.
+      ...(settings.hasLibrarySettings ? {} : { colors: libraryColors() }),
       hasDeviceLibrary: true,
       hasOneLibrary: true,
       hasLibrarySettings: true,
@@ -3595,6 +3598,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         categories: defaults?.categories ?? current.categories,
         sorts: defaults?.sorts ?? current.sorts,
         subColumn: defaults?.subColumn ?? current.subColumn,
+        colors: libraryColors(),
       };
       deviceSettings.set(path, next);
       const device = devices.find((d) => d.path === path);
