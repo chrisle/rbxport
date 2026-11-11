@@ -25,22 +25,22 @@ describe("browser detail columns", () => {
       },
     };
     for (const column of EXTRA_COLUMNS) {
-      expect(cellText(row, column), column).not.toBe("");
+      expect(cellText(row, column, "ymd"), column).not.toBe("");
     }
-    expect(cellText(row, "hotCue")).toBe("A");
+    expect(cellText(row, "hotCue", "ymd")).toBe("A");
   });
 
   it("prints the file's creation day, and nothing where the file system has none (#308)", () => {
     const row = { extra: { fileCreated: new Date(2026, 9, 12, 23, 30).getTime() / 1000 } } as unknown as RowDto;
-    expect(cellText(row, "fileCreated")).toBe("10/12/26");
-    expect(cellText({ ...row, extra: { fileCreated: null } }, "fileCreated")).toBe("");
-    expect(cellText({ ...row, extra: {} }, "fileCreated")).toBe("");
+    expect(cellText(row, "fileCreated", "dmy")).toBe("12/10/2026");
+    expect(cellText({ ...row, extra: { fileCreated: null } }, "fileCreated", "dmy")).toBe("");
+    expect(cellText({ ...row, extra: {} }, "fileCreated", "dmy")).toBe("");
   });
 
   it("prints VBR for a bitrate the library holds at zero, and nothing for one it did not send", () => {
     const row = { extra: { bitrate: 0 } } as unknown as RowDto;
-    expect(cellText(row, "bitrate")).toBe("VBR");
-    expect(cellText({ ...row, extra: { bitrate: 256 } }, "bitrate")).toBe("256 kbps");
-    expect(cellText({ ...row, extra: {} }, "bitrate")).toBe("");
+    expect(cellText(row, "bitrate", "ymd")).toBe("VBR");
+    expect(cellText({ ...row, extra: { bitrate: 256 } }, "bitrate", "ymd")).toBe("256 kbps");
+    expect(cellText({ ...row, extra: {} }, "bitrate", "ymd")).toBe("");
   });
 });

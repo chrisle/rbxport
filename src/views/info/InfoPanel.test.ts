@@ -4,6 +4,7 @@ import {
   acceptable, commitsTyping, dateSegments, fieldText, fileTypeLabel, selectionView, singleView, summaryFacts,
 } from "./fields";
 import type { RowDto, SelectionDetails, TrackDetails } from "@/ipc/types";
+import type { DateFormat } from "@/lib/format";
 
 const row: RowDto = {
   id: "18969",
@@ -67,12 +68,12 @@ const details: TrackDetails = {
 
 describe("the Summary tab's table", () => {
   it("prints the captured track the way the capture shows it", () => {
-    const byLabel = Object.fromEntries(summaryFacts(row, details).map((f) => [f.label, f.value]));
+    const byLabel = Object.fromEntries(summaryFacts(row, details, "mdy").map((f) => [f.label, f.value]));
     expect(byLabel).toEqual({
       "Time": "04:28",
       "File Type": "WAV File",
       "Size": "45.1 MB",
-      "Date Created": "8/6/23",
+      "Date Created": "08/06/2023",
       "Sample Rate": "44100 Hz",
       "Bitrate": "1411 kbps",
       "DJ Play Count": "0",
@@ -81,13 +82,13 @@ describe("the Summary tab's table", () => {
   });
 
   it("keeps the rows in the captured order", () => {
-    expect(summaryFacts(row, details).map((f) => f.label)).toEqual([
+    expect(summaryFacts(row, details, "mdy").map((f) => f.label)).toEqual([
       "Time", "File Type", "Size", "Date Created", "Sample Rate", "Bitrate", "DJ Play Count", "Location",
     ]);
   });
 
   it("shows the row's own duration and blanks while the record is on its way", () => {
-    const facts = summaryFacts(row, null);
+    const facts = summaryFacts(row, null, "mdy");
     expect(facts.find((f) => f.label === "Time")?.value).toBe("04:28");
     expect(facts.filter((f) => f.label !== "Time").every((f) => f.value === "")).toBe(true);
     expect(facts).toHaveLength(8);
@@ -95,12 +96,12 @@ describe("the Summary tab's table", () => {
 
   it("does not print another track's record", () => {
     const stale = { ...details, id: "1" };
-    expect(summaryFacts(row, stale).find((f) => f.label === "Size")?.value).toBe("");
+    expect(summaryFacts(row, stale, "mdy").find((f) => f.label === "Size")?.value).toBe("");
   });
 
   it("says nothing for a size or rate the library left at zero", () => {
     const bare = { ...details, fileSize: 0, sampleRate: 0 };
-    const byLabel = Object.fromEntries(summaryFacts(row, bare).map((f) => [f.label, f.value]));
+    const byLabel = Object.fromEntries(summaryFacts(row, bare, "mdy").map((f) => [f.label, f.value]));
     expect(byLabel["Size"]).toBe("");
     expect(byLabel["Sample Rate"]).toBe("");
   });
@@ -109,7 +110,7 @@ describe("the Summary tab's table", () => {
     // [OBS] rekordbox 7.2.14 Summary tab: FLAC, VBR MP3 and M4A rows stored
     // at BitRate 0 all read "VBR".
     const flac = { ...details, fileType: 5, bitrate: 0 };
-    const byLabel = Object.fromEntries(summaryFacts(row, flac).map((f) => [f.label, f.value]));
+    const byLabel = Object.fromEntries(summaryFacts(row, flac, "mdy").map((f) => [f.label, f.value]));
     expect(byLabel["Bitrate"]).toBe("VBR");
   });
 });
@@ -151,10 +152,20 @@ describe("the Info tab's fields", () => {
   });
 
   it("splits a release date into day, month name and year", () => {
-    expect(dateSegments("2026-09-11")).toEqual(["11", "September", "2026"]);
-    expect(dateSegments("2023-08-01")).toEqual(["1", "August", "2023"]);
-    expect(dateSegments("")).toEqual(["", "", ""]);
-    expect(dateSegments("not a date")).toEqual(["", "", ""]);
+    const texts = (iso: string, format: DateFormat) => dateSegments(iso, format).map((s) => s.text);
+    expect(texts("2026-09-11", "dmy")).toEqual(["11", "September", "2026"]);
+    expect(texts("2023-08-01", "dmy")).toEqual(["1", "August", "2023"]);
+    expect(texts("", "dmy")).toEqual(["", "", ""]);
+    expect(texts("not a date", "dmy")).toEqual(["", "", ""]);
+  });
+
+  it("stands the Release Date boxes in the date format's order", () => {
+    const parts = (format: DateFormat, locale?: string) => dateSegments("2026-09-11", format, locale).map((s) => s.part);
+    expect(parts("dmy")).toEqual(["day", "month", "year"]);
+    expect(parts("mdy")).toEqual(["month", "day", "year"]);
+    expect(parts("ymd")).toEqual(["year", "month", "day"]);
+    expect(parts("system", "en-GB")).toEqual(["day", "month", "year"]);
+    expect(parts("system", "en-US")).toEqual(["month", "day", "year"]);
   });
 });
 
