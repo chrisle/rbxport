@@ -45,6 +45,10 @@ integer AppleScript holds, and track ids follow suit. `track id "12345"`.
 - `export` *playlist* `to` *device* — writes the playlist to the stick
   with the DJ System and USB Export preferences, and returns the summary
   the window shows. Wrap a long export in `with timeout`.
+- `import` *folder* — imports the folder's audio files and makes a
+  playlist named after it at the top of Playlists, as dropping the folder
+  there does (same name-clash preference, same Auto Analysis). It returns
+  once the import is queued.
 - `make new playlist`, `delete`, `move` — for playlists and folders.
   Deleting a track of a playlist takes it off that playlist; it stays in
   the collection.
@@ -67,6 +71,9 @@ tell application "rbxport"
     -- Preview on the first deck
     load (first track whose name contains "Blackwater") into deck 1
     play deck 1
+
+    -- A folder of new tracks becomes a playlist
+    import POSIX file "/Users/me/Music/New Tracks"
 
     -- To a stick, with time for a big playlist
     with timeout of 3600 seconds
