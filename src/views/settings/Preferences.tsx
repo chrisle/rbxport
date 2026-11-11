@@ -27,7 +27,7 @@ import { usePreferencesContext } from "@/store/usePreferences";
 import type { PreferencePane } from "@/lib/preferences";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { AboutPane } from "./AboutPane";
-import { AdvancedPane, ADVANCED_TABS, type AdvancedTab } from "./AdvancedPane";
+import { AdvancedPane, ADVANCED_SECTIONS, ADVANCED_TABS, type AdvancedTab } from "./AdvancedPane";
 import { AnalysisPane, ANALYSIS_TABS, type AnalysisTab } from "./AnalysisPane";
 import { AudioPane, AUDIO_TABS, type AudioTab } from "./AudioPane";
 import { DjSystemPane, DJ_SYSTEM_TABS, type DjSystemTab } from "./DjSystemPane";
@@ -48,14 +48,18 @@ import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
 export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "backups" | "usbExport" | "rekordbox" | "about";
 
 /** A place in Preferences that opens a pane at one of its sections. */
-type SectionTarget = "usbExportSync" | "usbExportImport";
+type SectionTarget = "usbExportSync" | "usbExportImport" | "colorNames";
 
 export type PreferencesTarget = Pane | "libraryProtection" | SectionTarget;
 
-/** The pane each section target opens, and the id of the section it scrolls to. */
-const SECTION_TARGETS: Record<SectionTarget, { pane: Pane; section: string }> = {
+/**
+ * The pane each section target opens, the Advanced tab it is on (where it
+ * is under Advanced), and the id of the section it scrolls to.
+ */
+const SECTION_TARGETS: Record<SectionTarget, { pane: Pane; section: string; advanced?: AdvancedTab }> = {
   usbExportSync: { pane: "usbExport", section: USB_EXPORT_SECTIONS.sync },
   usbExportImport: { pane: "usbExport", section: USB_EXPORT_SECTIONS.import },
+  colorNames: { pane: "advanced", section: ADVANCED_SECTIONS.color, advanced: "browse" },
 };
 
 const isSectionTarget = (value: string | undefined): value is SectionTarget =>
@@ -163,6 +167,11 @@ export function Preferences({
       setTabs((current) => ({ ...current, advanced: "browse" }));
       setQuery("");
     }
+    const advanced = isSectionTarget(initialPane) ? SECTION_TARGETS[initialPane].advanced : undefined;
+    if (advanced) {
+      setTabs((current) => ({ ...current, advanced }));
+      setQuery("");
+    }
   }, [initialPane]);
   const [tabs, setTabs] = useState<Tabs>(FIRST_TABS);
   const [query, setQuery] = useState("");
@@ -195,7 +204,7 @@ export function Preferences({
     const { pane: target, section } = SECTION_TARGETS[initialPane];
     if (pane !== target) return;
     scroller.current?.querySelector(`#${section}`)?.scrollIntoView({ block: "start" });
-  }, [initialPane, pane]);
+  }, [initialPane, pane, tabs.advanced]);
 
   // The search box narrows the pane to the sections that mention the words
   // typed. The sections' own text is the index: every label in them is what

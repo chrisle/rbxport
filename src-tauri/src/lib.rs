@@ -755,6 +755,7 @@ pub fn run() {
             details::rename_my_tag,
             details::delete_my_tag,
             details::color_names,
+            details::set_color_name,
             details::write_my_tag_comments,
             details::clear_artwork,
             // AppleScript's way into the window: it says it is listening,

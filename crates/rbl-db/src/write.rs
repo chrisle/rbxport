@@ -4537,6 +4537,45 @@ impl Writer {
         Ok(Changed { rows, usn })
     }
 
+    /// Renames track colour `id` (1 to 8): its `djmdColor.Commnt`, which
+    /// rekordbox shows for the colour everywhere and writes to every stick it
+    /// seeds (Preferences › Advanced › Browse › Color). An empty name puts
+    /// the stock one back, as `COLOR_NAMES` has it; a NULL or empty
+    /// `Commnt` already reads as that.
+    pub fn set_color_name(&mut self, id: u8, name: &str) -> Result<Changed> {
+        self.prepare()?;
+        let Some(stock) = usize::from(id).checked_sub(1).and_then(|at| crate::COLOR_NAMES.get(at)) else {
+            return Err(DbError::WriteRefused(format!("no track colour {id}")));
+        };
+        let name = match name.trim() {
+            "" => *stock,
+            trimmed => trimmed,
+        };
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<Option<String>> = tx.query_row(
+            "SELECT Commnt FROM djmdColor WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![id.to_string()],
+            |r| r.get(0),
+        ).optional()?;
+        let Some(current) = current else {
+            return Err(DbError::WriteRefused(format!("no track colour {id}")));
+        };
+        if current.as_deref() == Some(name) {
+            return Ok(Changed { rows: 0, usn: 0 });
+        }
+        let usn = next_usn(&tx)?;
+        let rows = tx.execute(
+            "UPDATE djmdColor SET Commnt = ?1, rb_local_usn = ?2, updated_at = ?3
+             WHERE ID = ?4 AND rb_local_deleted = 0",
+            params![name, usn, stamp, id.to_string()],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
     /// Puts one run of My Tag siblings in the order given: every category,
     /// or every tag of one category, each named once. Nothing else changes:
     /// no row is made, deleted, renamed or given another parent, and no

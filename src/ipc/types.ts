@@ -2078,6 +2078,12 @@ export interface Edits {
    * Add "My Tag" to the "Comments" rewrites (#605).
    */
   deleteMyTag(id: string, comments?: readonly string[]): Promise<number>;
+  /**
+   * Renames track colour `id` (1 to 8); an empty name puts the stock one
+   * back. Not undoable, as a My Tag rename is not; announces
+   * `onLibraryChanged`.
+   */
+  setColorName(id: number, name: string): Promise<number>;
   /** Add Artwork: the image is filed in the share tree and the track points at it. */
   addArtwork(tracks: readonly string[], image: string): Promise<EditHistoryState>;
   /** Add Artwork on a playlist or folder, from the tree menu. */

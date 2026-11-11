@@ -4,13 +4,14 @@
  *
  * Database holds the library's own facts and rekordbox's Database management
  * (the one place rekordbox chooses which library it works on). Browse holds
- * My Tag, Library Protection, Edit Library and the Playback time setting.
+ * My Tag, Color (the eight track colours' names, `djmdColor.Commnt`),
+ * Library Protection, Edit Library and the Playback time setting.
  * Others holds BEAT/BPM SYNC, the quantize beat value and play history.
  *
  * Not here: Auto Relocate Search Folders and Duplicates (hidden; Auto
  * Relocate searches the stored folders, Music, Movies and Desktop by
  * default), iTunes and rekordbox xml (neither is read), Auto Export and
- * Database management's Move Database (neither is built), colour names, display
+ * Database management's Move Database (neither is built), display
  * speed, the long-press menu and the Tag List (none exist here), the
  * export name (link export is not built), hot cue GATE, loop export,
  * Recordings, and every streaming service.
@@ -22,11 +23,57 @@ import type { DatabaseDrive, LibrarySummary } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
 import { errorMessage } from "@/lib/errorMessage";
 import { PLAYBACK_TIME, QUANTIZE_BEATS } from "@/lib/preferences";
+import { colorDot, colorNameOf, STOCK_COLOR_NAMES, useColorNames } from "@/store/useColorNames";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import { Button, Note, Radios, Section, Select, Separator, Slider, Sub, Toggle } from "./controls";
 
 export type AdvancedTab = "database" | "browse" | "others";
+
+/**
+ * One track colour's row: its dot and its name, written on Enter or blur as
+ * the device panel's Color tab writes a stick's. Empty puts the stock name
+ * back, which the backend does.
+ */
+function ColorNameRow({ id, name, disabled, onRename }: {
+  id: number;
+  name: string;
+  disabled: boolean;
+  onRename: (name: string) => void;
+}) {
+  const [draft, setDraft] = useState(name);
+  useEffect(() => setDraft(name), [name]);
+  const commit = () => {
+    const trimmed = draft.trim();
+    // Empty is the stock name, which is what the backend writes for it.
+    setDraft(trimmed === "" ? colorNameOf(STOCK_COLOR_NAMES, id) : trimmed);
+    if (trimmed !== name) onRename(trimmed);
+  };
+  return (
+    <label className={styles.colorRow}>
+      <span className={styles.colorDot} data-color={colorDot(id)} aria-hidden />
+      <input
+        className={styles.colorName}
+        value={draft}
+        aria-label={`Color ${id}`}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            setDraft(name);
+          }
+        }}
+        disabled={disabled}
+        maxLength={64}
+      />
+    </label>
+  );
+}
+
+/** Sections Preferences can be opened at (`PreferencesTarget`). */
+export const ADVANCED_SECTIONS = { color: "advanced-color" } as const;
 
 export const ADVANCED_TABS: readonly { id: AdvancedTab; label: string }[] = [
   { id: "database", label: "Database" },
@@ -46,6 +93,8 @@ export function AdvancedPane({ tab, summary }: {
   const [writingMyTags, setWritingMyTags] = useState(false);
   const [myTagFailure, setMyTagFailure] = useState<string | null>(null);
   const [unlockWarning, setUnlockWarning] = useState(false);
+  const [colorFailure, setColorFailure] = useState<string | null>(null);
+  const colorNames = useColorNames();
   const warningDialog = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -95,6 +144,16 @@ export function AdvancedPane({ tab, summary }: {
     }
   };
 
+  const renameColor = async (id: number, name: string) => {
+    setColorFailure(null);
+    try {
+      const backend = await getBackend();
+      await backend.edits.setColorName(id, name);
+    } catch (error) {
+      setColorFailure(errorMessage(error));
+    }
+  };
+
   if (tab === "browse") {
     return (
       <>
@@ -109,6 +168,20 @@ export function AdvancedPane({ tab, summary }: {
           />
           {writingMyTags ? <Note>{t("Please wait for a while")}</Note> : null}
           {myTagFailure ? <Note failed>{myTagFailure}</Note> : null}
+        </Section>
+        <Section title="Color" id={ADVANCED_SECTIONS.color}>
+          <div className={styles.colorNames}>
+            {colorNames.map((name, at) => (
+              <ColorNameRow
+                key={at}
+                id={at + 1}
+                name={name}
+                disabled={advanced.protectLibrary || summary?.readOnly === true}
+                onRename={(next) => { void renameColor(at + 1, next); }}
+              />
+            ))}
+          </div>
+          {colorFailure ? <Note failed>{colorFailure}</Note> : null}
         </Section>
         <Section title="Library Protection">
           <Toggle

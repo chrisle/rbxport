@@ -419,7 +419,7 @@ const EditableCell = memo(function EditableCell({
 
 const TrackRow = memo(function TrackRow({
   row, top, selected, played, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
-  onComment, onEditField, onEditColor, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
+  onComment, onEditField, onEditColor, onColorMenu, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
   reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache, previewHeight, colorNames,
 }: {
   row: RowDto | undefined;
@@ -463,6 +463,8 @@ const TrackRow = memo(function TrackRow({
   /** Write a metadata field typed over in the row. */
   onEditField: ((id: string, field: TrackField, value: string) => void) | undefined;
   onEditColor: ((id: string, color: string) => void) | undefined;
+  /** A right-click on the Color cell: the colours' menu, not the track's. */
+  onColorMenu: ((at: { x: number; y: number }) => void) | undefined;
   onEditBlocked?: (() => void) | undefined;
   onMenu: (index: number, row: RowDto, at: { x: number; y: number }) => void;
   onDragEnd: () => void;
@@ -580,6 +582,10 @@ const TrackRow = memo(function TrackRow({
       onDoubleClick={() => onOpen(index)}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (onColorMenu && e.target instanceof Element && e.target.closest('[data-col="color"]')) {
+          onColorMenu({ x: e.clientX, y: e.clientY });
+          return;
+        }
         onMenu(index, row, { x: e.clientX, y: e.clientY });
       }}
       draggable={!nativeTrackDragging()}
@@ -897,6 +903,8 @@ export interface TrackTableProps {
   onComment?: (id: string, comment: string) => void;
   /** Set one track's Color from a Collection or Playlist cell. */
   onEditColor?: (id: string, color: string) => void;
+  /** A Color cell's right-click "Rename <name>…": where the eight colours are renamed. */
+  onRenameColors?: () => void;
   /**
    * Write the playlist's new order, dragged by hand.
    *
@@ -1122,7 +1130,7 @@ function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: 
 export const TrackTable = memo(function TrackTable({
   deckTrackIds = NO_DECKS, onShowCollection, spec, onSortChange, onSelectionChange, onTotalsChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns: layoutColumns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onRenumber, subBrowser = false, onEditField, onEditColor, onEditBlocked, seed, onFirstRows,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onRenumber, subBrowser = false, onEditField, onEditColor, onRenameColors, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, pendingRows = 0, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
   onRemoveFromCollection, onAutoRelocate, onRelocate, onConvertMemoryCues, readOnly = false,
@@ -1900,6 +1908,11 @@ export const TrackTable = memo(function TrackTable({
     { x: number; y: number; row: RowDto } | null
   >(null);
 
+  // Right-clicking a Color cell: "Rename <name>…" for each of the eight,
+  // which opens where they are renamed.
+  const [colorMenu, setColorMenu] = useState<{ x: number; y: number } | null>(null);
+  const openColorMenu = useCallback((at: { x: number; y: number }) => setColorMenu(at), []);
+
   const openTrackMenu = useCallback(
     (index: number, row: RowDto, at: { x: number; y: number }) => {
       // Right-clicking a row the selection does not hold selects it first, as
@@ -2465,6 +2478,7 @@ export const TrackTable = memo(function TrackTable({
                 onComment={onComment}
                 onEditField={onEditField}
                 onEditColor={spec.source.kind === "collection" || spec.source.kind === "playlist" ? onEditColor : undefined}
+                onColorMenu={onRenameColors ? openColorMenu : undefined}
                 onEditBlocked={onEditBlocked}
                 keyDisplay={keyDisplay}
                 keyChoices={keyChoices}
@@ -2496,6 +2510,17 @@ export const TrackTable = memo(function TrackTable({
         </div>
       </div>
 
+      {colorMenu && onRenameColors ? (
+        <ContextMenu
+          x={colorMenu.x}
+          y={colorMenu.y}
+          rows={colorNames.map((name, at) => ({ label: `Rename ${name}…`, action: `renameColor:${at + 1}` as const }))}
+          label="Color"
+          context={{ inPlaylist: false, hasFile: false, readOnly: false }}
+          onChoose={() => onRenameColors()}
+          onClose={() => setColorMenu(null)}
+        />
+      ) : null}
       {trackMenu && deviceMenu && spec.source.kind === "device" ? (
         <ContextMenu
           x={trackMenu.x}

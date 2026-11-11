@@ -703,6 +703,7 @@ async function realBackend(): Promise<Backend> {
       createMyTag: (category) => invoke<{ id: string; name: string }>("create_my_tag", { category }),
       renameMyTag: (id, name, comments) => invoke<number>("rename_my_tag", { id, name, comments: comments ?? null }),
       deleteMyTag: (id, comments) => invoke<number>("delete_my_tag", { id, comments: comments ?? null }),
+      setColorName: (id, name) => invoke<number>("set_color_name", { id, name }),
       clearArtwork: (tracks) => invoke<EditHistoryState>("clear_artwork", { tracks }),
     },
     filterValues: (spec) => invoke<FilterValues>("filter_values", { spec }),

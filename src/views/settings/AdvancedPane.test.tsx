@@ -273,3 +273,57 @@ describe("Database management", () => {
     expect(select!.value).toBe(local.masterDb);
   });
 });
+
+it("renames a track colour on Enter, and an emptied name is the stock one again", async () => {
+  const setColorName = vi.fn().mockResolvedValue(1);
+  __setBackend({
+    listBackups,
+    colorNames: () => Promise.resolve(["Pink", "Red", "Orange", "Yellow", "Green", "Peak", "Blue", "Purple"]),
+    onLibraryChanged: () => () => {},
+    onLibraryReady: () => () => {},
+    edits: { setColorName },
+  } as unknown as Backend);
+  mount(false);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const section = host.querySelector('section[aria-label="Color"]');
+  const inputs = [...(section?.querySelectorAll<HTMLInputElement>("input") ?? [])];
+  expect(inputs.map((i) => i.value)).toEqual(["Pink", "Red", "Orange", "Yellow", "Green", "Peak", "Blue", "Purple"]);
+  expect(inputs[5]?.previousElementSibling?.getAttribute("data-color")).toBe("Aqua");
+
+  const type = (input: HTMLInputElement, text: string) => act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const enter = async (input: HTMLInputElement) => {
+    act(() => {
+      input.focus();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  };
+  const first = inputs[0]!;
+  act(() => first.focus());
+  type(first, "  Opener ");
+  await enter(first);
+  expect(setColorName).toHaveBeenLastCalledWith(1, "Opener");
+
+  const peak = inputs[5]!;
+  act(() => peak.focus());
+  type(peak, "");
+  await enter(peak);
+  expect(setColorName).toHaveBeenLastCalledWith(6, "");
+  expect(peak.value).toBe("Aqua");
+});
+
+it("leaves the colour names alone while the library is protected", () => {
+  __setBackend({
+    listBackups,
+    colorNames: () => Promise.resolve(["Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"]),
+    onLibraryChanged: () => () => {},
+    onLibraryReady: () => () => {},
+  } as unknown as Backend);
+  mount(true);
+  const inputs = [...host.querySelectorAll<HTMLInputElement>('section[aria-label="Color"] input')];
+  expect(inputs).toHaveLength(8);
+  expect(inputs.every((i) => i.disabled)).toBe(true);
+});

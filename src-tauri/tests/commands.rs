@@ -3716,6 +3716,38 @@ fn a_my_tag_panel_tick_tags_the_whole_selection_as_one_step() {
     assert!(run(commands::undo_edit(s.handle(), s.state())).is_err());
 }
 
+/// A colour rename reaches every list that names the colour, and the Track
+/// Filter, which picks colours by id, keeps finding the same tracks. Like a
+/// My Tag rename it is not recorded, and it ends the redo branch.
+#[test]
+fn a_colour_rename_is_read_at_once_keeps_the_filter_and_ends_the_redo_branch() {
+    let s = shell();
+    let track = track_id(1);
+    run(commands::set_track_color(s.handle(), s.state(), vec![track.clone()], Some("1".into()))).unwrap();
+    let by_pink = || {
+        let mut spec = collection_spec();
+        spec.filter.colors = Some(vec![1]);
+        let (view, _) = s.open(spec);
+        s.rows(view).into_iter().map(|r| r.id).collect::<Vec<_>>()
+    };
+    let pink = by_pink();
+    assert!(pink.contains(&track), "{pink:?}");
+    run(commands::set_track_color(s.handle(), s.state(), vec![track.clone()], Some("2".into()))).unwrap();
+    assert!(run(commands::undo_edit(s.handle(), s.state())).unwrap().can_redo);
+
+    let changes = s.changes.lock().unwrap().len();
+    run(details::set_color_name(s.handle(), s.state(), 1, "Opener".to_owned())).unwrap();
+    assert!(s.changes.lock().unwrap().len() > changes, "library:changed");
+    let names = run(details::color_names(s.state())).unwrap();
+    assert_eq!(names, ["Opener", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"]);
+    assert_eq!(by_pink(), pink);
+    assert!(run(commands::redo_edit(s.handle(), s.state())).is_err(), "the redo branch is gone");
+
+    // Empty puts the stock name back.
+    run(details::set_color_name(s.handle(), s.state(), 1, String::new())).unwrap();
+    assert_eq!(run(details::color_names(s.state())).unwrap()[0], "Pink");
+}
+
 /// Add "My Tag" to the "Comments" on (#605): a tick rewrites each selected
 /// track's comment in the same Undo step, a rename or a delete rewrites the
 /// selected tracks' only, and turning the setting on or off is one step.

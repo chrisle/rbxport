@@ -1445,6 +1445,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       item.name = name;
       return bump();
     },
+    setColorName: (id, name) => {
+      const stock = STOCK_COLOR_NAMES[id - 1];
+      if (stock === undefined) return Promise.reject(new Error(`no track colour ${id}`));
+      colorNames[id - 1] = name.trim() || stock;
+      return bump();
+    },
     deleteMyTag: (id) => {
       const owner = myTagCategories.find((c) => c.tags.some((t) => t.id === id));
       if (!owner) return Promise.reject(new Error(`no My Tag ${id}`));

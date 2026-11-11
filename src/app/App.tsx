@@ -1077,6 +1077,7 @@ function AppBody() {
   );
   const commentTrack = useCallback((id: string, comment: string) => commentTracks([id], comment), [commentTracks]);
 
+  const renameColors = useCallback(() => openPreferences("colorNames"), [openPreferences]);
   const editTrackColor = useCallback((id: string, color: string) => {
     if (refuseLoose(id)) return;
     // Let the library-changed event update the table and Info panel only after
@@ -3211,7 +3212,7 @@ function AppBody() {
   const subList = useMemo(() => ({
     onDragTracks: setDraggedTracks, onDragError: refuse, players: deckCount(layout), onLoadTrack: loadTrack,
     onShowInformation: showInformation, onShowInFinder: revealTrack, onRate: rateTrack,
-    onComment: commentTrack, onEditColor: editTrackColor, onResetPlayCount: resetPlayCount, onConvertMemoryCues: convertMemoryCues,
+    onComment: commentTrack, onEditColor: editTrackColor, onRenameColors: renameColors, onResetPlayCount: resetPlayCount, onConvertMemoryCues: convertMemoryCues,
     onRemoveFromCollection: removeFromCollection, onImportToCollection: importToCollection,
     onAutoRelocate: autoRelocate, onRelocate: relocate,
     onAnalysisLock: analysisLock, onAddToPlaylist: addToPlaylist, onAddToTagList: addToTagList,
@@ -3224,7 +3225,7 @@ function AppBody() {
     onRemoveTracksFromHistory: removeTracksFromHistory, onReorderPlaylist: reorderPlaylist,
     onDropFilesIntoPlaylist: importDroppedFilesTo, onAnalyseTracks: analyseTracks,
   }), [
-    layout, loadTrack, openInDeckA, showInformation, revealTrack, rateTrack, commentTrack, editTrackColor, resetPlayCount,
+    layout, loadTrack, openInDeckA, showInformation, revealTrack, rateTrack, commentTrack, editTrackColor, renameColors, resetPlayCount,
     convertMemoryCues, removeFromCollection, importToCollection, autoRelocate, relocate, analysisLock, addToPlaylist,
     addToTagList, removeFromTagList, reloadTag, exportTrackTo, menuPlaylists, menuDevices,
     editTrackField, readOnly, explainEditLock, pendingEdits, draggedTracks, addDraggedTo,
@@ -3510,6 +3511,7 @@ function AppBody() {
           onRate={rateTrack}
           onComment={commentTrack}
           onEditColor={editTrackColor}
+          onRenameColors={renameColors}
           // The sub-browser's list is left out on purpose: it has a source and
           // a sort of its own, which this gate does not describe.
           onReorder={canReorder ? reorderPlaylistTracks : undefined}
