@@ -274,6 +274,10 @@
       </parameter>
       <result type="text"/>
     </command>
+    <command name="import" code="RbxpImpt" description="Imports a folder's audio files into the collection and makes a playlist named after the folder at the top of Playlists, as dropping the folder there does. Returns once the import is queued; it runs in the status bar.">
+      <cocoa class="RbxImportCommand"/>
+      <direct-parameter type="file" description="The folder."/>
+    </command>
     <command name="remove collection tracks" code="RbxpRmCt" description="Removes checked track IDs and playlist memberships from this library. JSON request includes library_id and tracks with id/path. Files stay untouched; library protection applies. This clears undo history.">
       <cocoa class="RbxRemoveCollectionCommand"/>
       <direct-parameter type="text"/>

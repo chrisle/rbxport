@@ -64,6 +64,7 @@ pub fn install(app: &AppHandle) {
         RbxAddCommand::class(),
         RbxRemoveCommand::class(),
         RbxExportCommand::class(),
+        RbxImportCommand::class(),
         RbxMyTagCatalogCommand::class(),
         RbxWaveformCommand::class(),
         RbxRemoveCollectionCommand::class(),
@@ -1442,6 +1443,36 @@ fn export(command: &NSScriptCommand) {
     ask_window_for("export", args, EXPORT_TIMEOUT, |_, answer| {
         answer.as_str().map_or(ScriptValue::Missing, |said| ScriptValue::Text(said.to_owned()))
     });
+}
+
+define_class!(
+    // SAFETY: NSScriptCommand is meant to be subclassed, and this adds no ivars.
+    #[unsafe(super(NSScriptCommand, NSObject))]
+    #[name = "RbxImportCommand"]
+    struct RbxImportCommand;
+
+    impl RbxImportCommand {
+        #[unsafe(method_id(performDefaultImplementation))]
+        fn perform(&self) -> Option<Retained<AnyObject>> {
+            once(self, import_folder);
+            None
+        }
+    }
+);
+
+/// `import` *folder*: the window's drop of a folder on Playlists, so the
+/// import, the playlist, a name clash and Auto Analysis go as a drop does.
+fn import_folder(command: &NSScriptCommand) {
+    let ScriptValue::File(path) = from_objc(command.directParameter().as_deref()) else {
+        return fail(&ScriptError::wrong_type("Say which folder: `import POSIX file \"/path/to/folder\"`."));
+    };
+    if !path.is_dir() {
+        return fail(&ScriptError::no_such_object(format!("There is no folder at {}.", path.display())));
+    }
+    if let Err(e) = bridge().and_then(|bridge| bridge.refuse_if_protected()) {
+        return fail(&e);
+    }
+    ask_window("library.importFolder", json!({ "path": path.to_string_lossy() }), |_, _| ScriptValue::Missing);
 }
 
 define_class!(
