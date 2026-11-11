@@ -3055,6 +3055,10 @@ function AppBody() {
       const to = device as { name: string; path: string };
       return writeToDevice(String(playlist), to);
     },
+    "library.importFolder": ({ path }) => {
+      if (readOnly) throw new Error(refusal(advancedPrefs.protectLibrary));
+      importDroppedPathsTo("playlists", [String(path)]);
+    },
   }));
   useEffect(() => {
     let stop: (() => void) | undefined;
