@@ -1793,5 +1793,10 @@
   "Analysis order": "Analyserækkefølge",
   "Analysis stages could not be loaded.": "Analysetrinnene kunne ikke indlæses.",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} kræver, at {requirement} kommer tidligere i analyserækkefølgen.",
-  "Drag stages to change the order they run.": "Træk trinnene for at ændre den rækkefølge, de køres i."
+  "Drag stages to change the order they run.": "Træk trinnene for at ændre den rækkefølge, de køres i.",
+  "DD/MM/YYYY": "DD/MM/YYYY",
+  "Date format": "Date format",
+  "MM/DD/YYYY": "MM/DD/YYYY",
+  "System": "System",
+  "YYYY/MM/DD": "YYYY/MM/DD"
 }

@@ -64,6 +64,26 @@ test("View › Key display format offers and saves the browser key sort", async 
     .getByRole("radio", { name: "Musically — Abm, B, Ebm, F#, Bbm, …" })).toBeChecked();
 });
 
+test("View › Date format reprints the Date Added column without a reload", async ({ page }) => {
+  await open(page);
+  const cell = page.locator('[role="gridcell"][data-col="dateAdded"]').first();
+  const dialog = await prefs(page);
+  const formats = dialog.getByRole("radiogroup", { name: "Date format" });
+  await expect(formats.getByRole("radio", { name: "System" })).toBeChecked();
+
+  await formats.getByRole("radio", { name: "DD/MM/YYYY" }).click();
+  await expect(cell).toHaveText(/^\d{2}\/\d{2}\/2026$/);
+  const [day, month, year] = (await cell.textContent() ?? "").split("/");
+  await formats.getByRole("radio", { name: "YYYY/MM/DD" }).click();
+  await expect(cell).toHaveText(`${year}/${month}/${day}`);
+  await formats.getByRole("radio", { name: "MM/DD/YYYY" }).click();
+  await expect(cell).toHaveText(`${month}/${day}/${year}`);
+
+  await page.reload();
+  const again = await prefs(page);
+  await expect(again.getByRole("radiogroup", { name: "Date format" }).getByRole("radio", { name: "MM/DD/YYYY" })).toBeChecked();
+});
+
 /** Loads the fourth row — analysed, with the mock's four hot cues and a memory cue. */
 async function load(page: Page) {
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();

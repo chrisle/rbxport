@@ -1802,5 +1802,10 @@
   "Analysis order": "分析顺序",
   "Analysis stages could not be loaded.": "无法加载分析步骤。",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage}要求{requirement}在分析顺序中排在前面。",
-  "Drag stages to change the order they run.": "拖动步骤以更改执行顺序。"
+  "Drag stages to change the order they run.": "拖动步骤以更改执行顺序。",
+  "DD/MM/YYYY": "DD/MM/YYYY",
+  "Date format": "Date format",
+  "MM/DD/YYYY": "MM/DD/YYYY",
+  "System": "System",
+  "YYYY/MM/DD": "YYYY/MM/DD"
 }

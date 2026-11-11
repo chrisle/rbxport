@@ -1798,5 +1798,10 @@
   "Analysis order": "Pořadí analýzy",
   "Analysis stages could not be loaded.": "Kroky analýzy se nepodařilo načíst.",
   "{stage} requires {requirement} earlier in the analysis order.": "Krok {stage} vyžaduje, aby mu v pořadí analýzy předcházel krok {requirement}.",
-  "Drag stages to change the order they run.": "Přetažením kroků změníte pořadí jejich provádění."
+  "Drag stages to change the order they run.": "Přetažením kroků změníte pořadí jejich provádění.",
+  "DD/MM/YYYY": "DD/MM/YYYY",
+  "Date format": "Date format",
+  "MM/DD/YYYY": "MM/DD/YYYY",
+  "System": "System",
+  "YYYY/MM/DD": "YYYY/MM/DD"
 }

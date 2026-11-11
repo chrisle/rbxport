@@ -1796,5 +1796,10 @@
   "Analysis order": "Analysereihenfolge",
   "Analysis stages could not be loaded.": "Die Analyseschritte konnten nicht geladen werden.",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} setzt voraus, dass {requirement} in der Analysereihenfolge davor steht.",
-  "Drag stages to change the order they run.": "Ziehen Sie die Schritte, um ihre Ausführungsreihenfolge zu ändern."
+  "Drag stages to change the order they run.": "Ziehen Sie die Schritte, um ihre Ausführungsreihenfolge zu ändern.",
+  "DD/MM/YYYY": "DD/MM/YYYY",
+  "Date format": "Date format",
+  "MM/DD/YYYY": "MM/DD/YYYY",
+  "System": "System",
+  "YYYY/MM/DD": "YYYY/MM/DD"
 }
