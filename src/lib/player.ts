@@ -267,6 +267,93 @@ export function detailWaveOriginMs(
   return correction > 0 && correction <= 50 ? correction : 0;
 }
 
+/** The first column of a waveform tag with any sound in it, or -1. */
+export function firstSoundColumn(bytes: Uint8Array, stride: number, limit = Number.POSITIVE_INFINITY): number {
+  if (stride <= 0) return -1;
+  const columns = Math.min(Math.floor(bytes.length / stride), limit);
+  for (let column = 0; column < columns; column += 1) {
+    const at = column * stride;
+    if (bytes.subarray(at, at + stride).some((value) => value !== 0)) return column;
+  }
+  return -1;
+}
+
+/** Columns either side of the waveform's own place the measurement tries. */
+export const WAVE_LAG_REACH = 15;
+
+/**
+ * Where to compare a detail waveform with its audio: a stretch of
+ * `length` columns starting a second after the waveform first sounds, so
+ * it holds music rather than a fade. `null` when the tag is too short.
+ */
+export function waveProbeColumns(bytes: Uint8Array, stride: number, length = 600): { from: number; length: number } | null {
+  const first = firstSoundColumn(bytes, stride, DETAIL_WAVE_COLUMNS_PER_SECOND * 60);
+  const columns = Math.floor(bytes.length / Math.max(stride, 1));
+  const from = Math.max(first, 0) + DETAIL_WAVE_COLUMNS_PER_SECOND;
+  if (first < 0 || from + length + WAVE_LAG_REACH > columns) return null;
+  return { from, length };
+}
+
+/**
+ * How far a detail waveform's clock runs behind the audio, in milliseconds:
+ * the shift that best lines the waveform's level over a stretch of columns
+ * up with the decoded audio's peaks over the same stretch, read as a PCM
+ * envelope at the waveform's own 150 columns a second, starting
+ * `WAVE_LAG_REACH` columns before it.
+ *
+ * rekordbox's own waveform of an MP3 counts the encoder's leading samples
+ * the decoder drops, so it runs a few dozen milliseconds behind; one written
+ * by rbxport's analysis is on the decoder's clock and measures zero.
+ * Comparing where each first makes a sound could not tell them apart: the
+ * waveform rounds a quiet start to nothing, so it seemed to start late.
+ * `null` when the two do not match well enough to say.
+ */
+export function measuredWaveOriginMs(
+  bytes: Uint8Array,
+  stride: number,
+  probe: { from: number; length: number },
+  pcm: Uint8Array,
+): number | null {
+  const pcmColumns = Math.floor(pcm.length / 8);
+  if (stride <= 0 || pcmColumns < probe.length + 2 * WAVE_LAG_REACH) return null;
+  const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  const audio: number[] = [];
+  for (let column = 0; column < pcmColumns; column += 1) {
+    const at = column * 8;
+    audio.push(Math.max(
+      Math.abs(view.getInt16(at, true)), Math.abs(view.getInt16(at + 2, true)),
+      Math.abs(view.getInt16(at + 4, true)), Math.abs(view.getInt16(at + 6, true)),
+    ));
+  }
+  const wave: number[] = [];
+  for (let column = probe.from; column < probe.from + probe.length; column += 1) {
+    let level = 0;
+    for (let band = 0; band < stride; band += 1) level = Math.max(level, bytes[column * stride + band] ?? 0);
+    wave.push(level);
+  }
+  const standard = (values: readonly number[]) => {
+    const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+    const spread = Math.sqrt(values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length);
+    return spread > 0 ? values.map((v) => (v - mean) / spread) : null;
+  };
+  const w = standard(wave);
+  if (!w) return null;
+  let best = { score: Number.NEGATIVE_INFINITY, lag: 0 };
+  for (let lag = -WAVE_LAG_REACH; lag <= WAVE_LAG_REACH; lag += 1) {
+    const slice = standard(audio.slice(WAVE_LAG_REACH + lag, WAVE_LAG_REACH + lag + probe.length));
+    if (!slice || slice.length < probe.length) continue;
+    let score = 0;
+    for (let i = 0; i < probe.length; i += 1) score += (w[i] ?? 0) * (slice[i] ?? 0);
+    score /= probe.length;
+    if (score > best.score) best = { score, lag };
+  }
+  // A poor match says nothing; at the edge of the reach, nor does a good one.
+  if (best.score < 0.5 || Math.abs(best.lag) === WAVE_LAG_REACH) return null;
+  // The waveform's column c held the audio of column c + lag: a waveform
+  // behind the audio has its sound a lag of minus that many columns late.
+  return best.lag === 0 ? 0 : (-best.lag / DETAIL_WAVE_COLUMNS_PER_SECOND) * 1000;
+}
+
 /**
  * The slice of the track a window of `span` centred on `at` covers.
  *

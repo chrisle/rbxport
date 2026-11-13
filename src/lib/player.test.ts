@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
+import { WAVE_LAG_REACH, firstSoundColumn, measuredWaveOriginMs,
   type BeatGrid,
   tempoAnnotations,
   beatAtMs,
@@ -1294,5 +1294,52 @@ describe("sameLoopRange", () => {
     const memoryLoop = { inSeconds: 10, outSeconds: 10 + (4 * 60) / 136 };
     expect(sameLoopRange(beatLoop, memoryLoop)).toBe(false);
     expect(sameLoopRange(beatLoop, { ...beatLoop, inSeconds: 10.01 })).toBe(false);
+  });
+});
+
+describe("measuredWaveOriginMs", () => {
+  /** A rhythmic level pattern, as both the waveform and the audio carry it. */
+  const level = (column: number) => (column % 23 < 3 ? 1 : column % 7 === 0 ? 0.6 : 0.2);
+  const probe = { from: 300, length: 600 };
+  /** The waveform: three bands a column, its sound `late` columns behind the audio. */
+  const wave = (late: number) => {
+    const columns = 1_200;
+    const bytes = new Uint8Array(columns * 3);
+    for (let column = 0; column < columns; column += 1) {
+      const v = Math.round(level(column - late) * 120);
+      bytes[column * 3] = v;
+      bytes[column * 3 + 1] = Math.round(v / 2);
+    }
+    return bytes;
+  };
+  /** The audio over the probe and the reach either side, a column at a time. */
+  const pcm = () => {
+    const count = probe.length + 2 * WAVE_LAG_REACH;
+    const bytes = new Uint8Array(count * 8);
+    const view = new DataView(bytes.buffer);
+    for (let k = 0; k < count; k += 1) {
+      const v = Math.round(level(probe.from - WAVE_LAG_REACH + k) * 30_000);
+      view.setInt16(k * 8 + 2, v, true);
+      view.setInt16(k * 8 + 6, v, true);
+    }
+    return bytes;
+  };
+
+  it("measures nothing to correct on a waveform on the decoder's clock", () => {
+    expect(measuredWaveOriginMs(wave(0), 3, probe, pcm())).toBe(0);
+  });
+
+  it("measures a waveform that runs behind the audio, as rekordbox's of an MP3 does", () => {
+    // Four columns late: 26.7 ms.
+    expect(measuredWaveOriginMs(wave(4), 3, probe, pcm())).toBeCloseTo(26.7, 0);
+  });
+
+  it("says nothing when the two do not match", () => {
+    expect(measuredWaveOriginMs(new Uint8Array(3_600), 3, probe, pcm())).toBeNull();
+  });
+
+  it("finds a waveform's first sounding column", () => {
+    expect(firstSoundColumn(Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 5, 0]), 3)).toBe(2);
+    expect(firstSoundColumn(new Uint8Array(9), 3)).toBe(-1);
   });
 });

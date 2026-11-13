@@ -16,7 +16,9 @@ import { drawPcmWave, drawWave, strideOf, waveformKindOf, type HalfWaveform, typ
 import { getBackend } from "@/ipc/client";
 import type { WaveformKind } from "@/ipc/types";
 import { exactBackingSize } from "@/lib/canvasSize";
-import { detailWaveOriginMs, detailWaveWindow, waveSlice } from "@/lib/player";
+import {
+  DETAIL_WAVE_COLUMNS_PER_SECOND, detailWaveWindow, measuredWaveOriginMs, WAVE_LAG_REACH, waveProbeColumns, waveSlice,
+} from "@/lib/player";
 import { usePreferences } from "@/store/usePreferences";
 
 /** Raw waveform bytes per track. Small — a few hundred bytes each. */
@@ -132,6 +134,9 @@ export const WaveformDetail = memo(function WaveformDetail({
   const pcmMode = requestedPcmWindow !== undefined;
   // Bumped when the track is re-analysed, so the bytes are fetched again.
   const [revision, setRevision] = useState(0);
+  // The detail waveform's clock against the audio, measured once per
+  // track and analysis: see `measuredWaveOriginMs`.
+  const [measuredOrigin, setMeasuredOrigin] = useState<{ key: string; ms: number | null } | null>(null);
   // View › Color › Waveform color: each palette reads its own tags.
   const palette = usePreferences().view.waveformColor;
   const pcmFromMs = requestedPcmWindow?.fromMs;
@@ -163,6 +168,30 @@ export const WaveformDetail = memo(function WaveformDetail({
   }, [trackId, detail, palette, revision, pcmMode]);
 
   useEffect(() => () => { pendingPcm.current = null; }, [trackId, revision, pcmMode]);
+
+  // The waveform's clock against the audio: four seconds of the waveform
+  // lined up with the same four seconds of decoded audio, once for each
+  // track and analysis.
+  useEffect(() => {
+    if (pcmMode || !detail || !data || data.trackId !== trackId) return undefined;
+    const key = `${trackId}:${revision}:${data.palette}`;
+    if (measuredOrigin?.key === key) return undefined;
+    const stride = strideOf(data.palette, detail);
+    const probe = waveProbeColumns(data.bytes, stride);
+    if (!probe) {
+      setMeasuredOrigin({ key, ms: null });
+      return undefined;
+    }
+    const columnMs = 1000 / DETAIL_WAVE_COLUMNS_PER_SECOND;
+    const fromMs = (probe.from - WAVE_LAG_REACH) * columnMs;
+    const count = probe.length + 2 * WAVE_LAG_REACH;
+    let live = true;
+    void getBackend()
+      .then((backend) => backend.trackPcmWaveform(trackId, fromMs, fromMs + count * columnMs, count))
+      .then((bytes) => { if (live) setMeasuredOrigin({ key, ms: measuredWaveOriginMs(data.bytes, stride, probe, bytes) }); })
+      .catch(() => { if (live) setMeasuredOrigin({ key, ms: null }); });
+    return () => { live = false; };
+  }, [pcmMode, detail, data, trackId, revision, measuredOrigin?.key]);
 
   useEffect(() => {
     if (!pcmWindow) return;
@@ -260,7 +289,12 @@ export const WaveformDetail = memo(function WaveformDetail({
     // The bytes' own palette: the chosen one, or blue for the overview's
     // `PWAV` fallback, whose layout differs.
     const stride = strideOf(data.palette, detail);
-    const originMs = detailWaveOriginMs(firstBeatMs, data.bytes, stride);
+    // Measured against the audio; nothing when it could not be (the old
+    // inference from the first beat moved rbxport's own waveforms early).
+    // Less half a column, so a column is drawn at its centre rather than
+    // its start, where a ramp into the next one read early.
+    const measured = measuredOrigin?.key === `${trackId}:${revision}:${data.palette}` ? measuredOrigin.ms : null;
+    const originMs = (measured ?? 0) - (detail ? 500 / DETAIL_WAVE_COLUMNS_PER_SECOND : 0);
     const timed = detailWaveWindow(progress, span, durationMs, Math.floor(data.bytes.length / stride), originMs);
     const { first, last, x0, width: span_ } = waveSlice(timed.progress, timed.span, data.bytes.length, w, stride);
     // The inset is given in CSS pixels; the canvas is in device pixels.
@@ -274,7 +308,7 @@ export const WaveformDetail = memo(function WaveformDetail({
       bottom: inset.bottom * scale,
     });
     ctx.restore();
-  }, [data, pcmData, trackId, revision, progress, span, durationMs, firstBeatMs, width, height, half, detail, palette, inset.top, inset.bottom, pcmWindow]);
+  }, [data, pcmData, trackId, revision, progress, span, durationMs, firstBeatMs, measuredOrigin, width, height, half, detail, palette, inset.top, inset.bottom, pcmWindow]);
 
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;
 });
