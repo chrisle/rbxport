@@ -129,7 +129,36 @@ pub fn show_window(window: tauri::WebviewWindow) -> Result<(), String> {
         return Ok(());
     }
     window.show().map_err(|e| e.to_string())?;
+    maximise_if_oversized(&window);
     window.set_focus().map_err(|e| e.to_string())
+}
+
+/// A main window restored maximised, or larger than its screen's work area,
+/// is maximised again once it is shown. The restore maximises the window
+/// while it is still hidden, and on Windows that did not survive `show()`:
+/// it came up at the maximised size but not maximised, taller than the
+/// screen with the footer below the taskbar. The fit on restore only watches
+/// the first two seconds, and a large library shows the page later.
+fn maximise_if_oversized(window: &tauri::WebviewWindow) {
+    if window.label() != "main" {
+        return;
+    }
+    if window.is_maximized().unwrap_or(false) {
+        let _ = window.maximize();
+        return;
+    }
+    let monitor = match window.current_monitor() {
+        Ok(Some(monitor)) => monitor,
+        _ => match window.primary_monitor() {
+            Ok(Some(monitor)) => monitor,
+            _ => return,
+        },
+    };
+    let Ok(size) = window.outer_size() else { return };
+    let area = monitor.work_area().size;
+    if size.width > area.width || size.height > area.height {
+        let _ = window.maximize();
+    }
 }
 
 #[tauri::command]
