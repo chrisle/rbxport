@@ -87,6 +87,8 @@
 //! unexplained, and a wrong one in a 38,681-track collection is not
 //! recoverable by undo. See [`Unsupported`].
 
+pub mod auto_gain;
+
 use std::path::{Path, PathBuf};
 
 use rbl_core::ids::{Rng, MAX_CONTENT_ID, MAX_CUE_ID, MAX_PLAYLIST_ID};
@@ -98,6 +100,7 @@ use crate::{is_rekordbox_running, DbError, Library, OpenMode, Result};
 
 /// Tables whose `rb_local_usn` participates in the shared counter.
 const USN_TABLES: &[&str] = &[
+    "djmdMixerParam",
     "djmdContent",
     "djmdPlaylist",
     "djmdSongPlaylist",
