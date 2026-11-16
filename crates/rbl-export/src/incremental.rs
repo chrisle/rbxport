@@ -9,7 +9,7 @@ pub const TRANSFORM_VERSION: u32 = 1;
 /// with an older layout is rebuilt on its next sync even when nothing else
 /// changed, while its analysis files are still reused. 2: the date added in
 /// track string slot 15 (#637).
-const PDB_LAYOUT: u32 = 2;
+const PDB_LAYOUT: u32 = 3;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Metrics {
