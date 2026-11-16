@@ -246,7 +246,7 @@ mod tests {
         // rbxport#891: a Japanese-only query used to fold to "", which the
         // track view treats as no filter at all.
         assert_eq!(fold("ナイト・テスト曲"), "ナイト・テスト曲".replace('・', ""));
-        assert!(!fold("ナイト・テスト曲").is_empty());
+        assert_ne!(fold("ナイト・テスト曲"), "");
     }
 
     #[test]
