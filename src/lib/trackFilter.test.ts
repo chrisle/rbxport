@@ -43,9 +43,9 @@ describe("toSpecFilter", () => {
       ...EMPTY_FILTER,
       key: { enabled: true, values: [] },
       rating: { enabled: true, values: [5] },
-      color: { enabled: true, values: ["Red", "Aqua"] },
+      color: { enabled: true, values: [2, 6] },
     };
-    expect(toSpecFilter(state, null)).toEqual({ ratings: [5], colors: ["Red", "Aqua"] });
+    expect(toSpecFilter(state, null)).toEqual({ ratings: [5], colors: [2, 6] });
     // Every ticked column at All is no filter at all.
     expect(toSpecFilter({ ...EMPTY_FILTER, key: { enabled: true, values: [] } }, null)).toBeUndefined();
   });

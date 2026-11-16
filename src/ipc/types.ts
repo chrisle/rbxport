@@ -1049,6 +1049,13 @@ export interface Backend {
   filterValues(spec: ViewSpec): Promise<FilterValues>;
 
   /**
+   * The eight track colours' names, 1 to 8 at indices 0 to 7: the library's
+   * own (`djmdColor.Commnt`) where it renamed one, the stock name otherwise.
+   * Read through `useColorNames`, which asks again on `onLibraryChanged`.
+   */
+  colorNames(): Promise<string[]>;
+
+  /**
    * What a selected device's six tabs show: the display settings a player
    * reads from `DEVSETTING.DAT`, and the name, browse categories, sort
    * options, sub-column and colour comments in `exportLibrary.db`. A stick
@@ -2071,6 +2078,12 @@ export interface Edits {
    * Add "My Tag" to the "Comments" rewrites (#605).
    */
   deleteMyTag(id: string, comments?: readonly string[]): Promise<number>;
+  /**
+   * Renames track colour `id` (1 to 8); an empty name puts the stock one
+   * back. Not undoable, as a My Tag rename is not; announces
+   * `onLibraryChanged`.
+   */
+  setColorName(id: number, name: string): Promise<number>;
   /** Add Artwork: the image is filed in the share tree and the track points at it. */
   addArtwork(tracks: readonly string[], image: string): Promise<EditHistoryState>;
   /** Add Artwork on a playlist or folder, from the tree menu. */
@@ -2301,13 +2314,14 @@ export interface BpmFilter {
 
 /**
  * The track filter bar's picks: one entry per ticked column, combined with
- * AND. Keys and colours travel by name, which is what the bar shows.
+ * AND. Keys travel by name, which is what the bar shows; colours by
+ * `ColorID` (1 to 8), since the library can rename them.
  */
 export interface TrackFilter {
   bpm?: BpmFilter;
   keys?: string[];
   ratings?: number[];
-  colors?: string[];
+  colors?: number[];
   /** One entry per ticked My Tag column with tags picked. */
   tags?: TagPick[];
 }

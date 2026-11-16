@@ -49,8 +49,9 @@ import { RatingStar } from "@/components/RatingStar";
 import { useTranslation } from "@/i18n";
 import styles from "./InfoPanel.module.css";
 import {
-  acceptable, COLORS, commitsTyping, dateSegments, selectionView, singleView, summaryFacts, type InfoView,
+  acceptable, COLOR_CHOICES, commitsTyping, dateSegments, selectionView, singleView, summaryFacts, type InfoView,
 } from "./fields";
+import { colorNameOf, useColorNames } from "@/store/useColorNames";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 
 export type InfoTab = "summary" | "info" | "artwork";
@@ -380,6 +381,7 @@ function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFo
   // Key Analysis > "Write the value to the ID3 tag": an edited key also goes
   // into each file, as rekordbox's `modifyTrack` writes it.
   const preferences = usePreferences();
+  const colorNames = useColorNames();
   const writeKeyTag = preferences.analysis.writeKeyTag;
   // Add "My Tag" to the "Comments" (#605): a toggle here rewrites the
   // track's comment as a tick in the My Tag panel does.
@@ -491,8 +493,8 @@ function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFo
           label="Color"
           name="color"
           value={view.color === "" ? "0" : view.color}
-          options={["0", ...COLORS.map((c) => c.id)]}
-          optionLabel={(v) => COLORS.find((c) => c.id === v)?.name ?? ""}
+          options={COLOR_CHOICES}
+          optionLabel={(v) => colorNameOf(colorNames, v)}
           disabled={readOnly}
           onChange={setColor}
         />
@@ -701,7 +703,7 @@ function Select({
   label: string;
   name: string;
   value: string;
-  options: string[];
+  options: readonly string[];
   optionLabel?: (value: string) => string;
   disabled: boolean;
   onChange: (value: string) => void;

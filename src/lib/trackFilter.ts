@@ -11,15 +11,8 @@
  */
 import type { TrackFilter } from "@/ipc/types";
 
-/**
- * The eight colour comments, in `ColorID` order (1 to 8).
- *
- * `[REF]` `djmdColor` on the reference library, read-only: `Commnt` Pink, Red,
- * Orange, Yellow, Green, Aqua, Blue, Purple under ids 1 to 8, in `SortKey`
- * order — the order the capture lists them in.
- */
-export const COLOR_NAMES: readonly string[] =
-  ["Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"];
+/** The colour column's rows: `ColorID` 1 to 8, the order the capture lists them in. */
+export const COLOR_IDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8];
 
 /** The `MASTER PLAYER ±` list: ±0% to ±6%, as the capture shows. */
 export const TOLERANCES: readonly number[] = [0, 1, 2, 3, 4, 5, 6];
@@ -51,7 +44,8 @@ export interface FilterState {
   bpm: PickedColumn<number> & { tolerancePct: number };
   key: PickedColumn<string>;
   rating: PickedColumn<number>;
-  color: PickedColumn<string>;
+  /** `ColorID`s, not names: the library can rename a colour. */
+  color: PickedColumn<number>;
   tags: TagColumn[];
 }
 

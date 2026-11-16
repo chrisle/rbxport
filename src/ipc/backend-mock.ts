@@ -24,7 +24,8 @@ import type {
 import { TREE_ROOT } from "./types";
 import { applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
 import { toCamelot } from "@/lib/camelot";
-import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
+import { wholeBpm } from "@/lib/trackFilter";
+import { STOCK_COLOR_NAMES } from "@/lib/colorNames";
 import { MY_TAG_LIMIT, newMyTagName } from "@/lib/myTags";
 import { referenceDeviceSettings } from "./mock-device-settings";
 import { createMockDeviceLibraries, type MockImportEntry } from "./mock-device-library";
@@ -135,7 +136,7 @@ function passesFilter(
   }
   if (filter.keys && !filter.keys.includes(row.key)) return false;
   if (filter.ratings && !filter.ratings.includes(row.rating)) return false;
-  if (filter.colors && !filter.colors.includes(COLOR_NAMES[color - 1] ?? "")) return false;
+  if (filter.colors && !filter.colors.includes(color)) return false;
   for (const pick of filter.tags ?? []) {
     if (pick.tags.length === 0) continue;
     const carries = (name: string) =>
@@ -714,6 +715,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
   // The library's My Tags. Edited in place by Adding My Tag, a rename and a
   // delete, as the real backend's table is.
+  // The library's colour names, `djmdColor.Commnt` by id: stock until
+  // renamed.
+  const colorNames: string[] = [...STOCK_COLOR_NAMES];
+  const libraryColors = () => colorNames.map((name, i) => ({ id: i + 1, name }));
   const myTagCategories: { id: string; name: string; tags: { id: string; name: string }[] }[] = [
     { id: "3", name: "Situation", tags: [{ id: "t-peak", name: "Peak" }, { id: "t-warm", name: "Warm-up" }] },
     { id: "2", name: "Components", tags: [{ id: "t-synth", name: "Synth" }, { id: "t-vocal", name: "Vocal" }] },
@@ -1003,6 +1008,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     else for (const track of looseTracks.get(device.path) ?? []) union.add(track);
     const tracks = union.size;
     const already = device.export;
+    // What the stick held before this export: read before the export below
+    // marks it as holding a library, or a stick with none reads as one.
+    const settings = settingsOf(device.path);
     const reused = already?.ours === true ? Math.min(already.tracks, tracks) : 0;
     const removed = already?.ours === true ? Math.max(0, already.tracks - tracks) : 0;
     const tracksAdded = tracks - reused;
@@ -1017,7 +1025,6 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The export writes a library, which is what the tabs need. A stick
     // that had none takes the Preferences window's defaults, as the
     // real export does; one that had its own keeps them.
-    const settings = settingsOf(device.path);
     const fresh = !settings.hasLibrarySettings && defaults !== undefined;
     deviceSettings.set(device.path, {
       ...settings,
@@ -1033,6 +1040,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
             subColumn: defaults.subColumn,
           }
         : {}),
+      // The library's colour names go on a stick that had none of its own.
+      ...(settings.hasLibrarySettings ? {} : { colors: libraryColors() }),
       hasDeviceLibrary: true,
       hasOneLibrary: true,
       hasLibrarySettings: true,
@@ -1437,6 +1446,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         return Promise.reject(new Error("An item with the same name already exists!"));
       }
       item.name = name;
+      return bump();
+    },
+    setColorName: (id, name) => {
+      const stock = STOCK_COLOR_NAMES[id - 1];
+      if (stock === undefined) return Promise.reject(new Error(`no track colour ${id}`));
+      colorNames[id - 1] = name.trim() || stock;
       return bump();
     },
     deleteMyTag: (id) => {
@@ -3583,6 +3598,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         categories: defaults?.categories ?? current.categories,
         sorts: defaults?.sorts ?? current.sorts,
         subColumn: defaults?.subColumn ?? current.subColumn,
+        colors: libraryColors(),
       };
       deviceSettings.set(path, next);
       const device = devices.find((d) => d.path === path);
@@ -3625,6 +3641,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     reloadLibrary: () => bump(),
     // The mock's analysis rewrites no files, so nothing redraws.
 
+    colorNames: () => (ready ? wait([...colorNames]) : notReady()),
     filterValues: (spec) => {
       if (!ready) return notReady();
       // Over the source and query alone, never the filter's own result.

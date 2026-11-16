@@ -362,6 +362,7 @@ pub fn load_with_cue_reader(
         load_histories(conn, &mut lib, &content_row, &mut stats)?;
         lib.set_tag_list(read_tag_list(conn, &content_row)?);
         lib.set_my_tags(read_my_tags(conn)?);
+        lib.set_color_names(color_names(conn)?);
         lib.set_track_my_tags(read_track_my_tags(conn, &content_row)?);
         load_search_extra(conn, &mut lib)?;
         if let Some(job) = cue_job {
@@ -660,6 +661,33 @@ pub fn reload_playlists(db: &Db, library: &Library) -> rusqlite::Result<Playlist
     }
     let (playlists, _) = read_playlists(db.connection(), &content_row)?;
     Ok(playlists)
+}
+
+/// The eight track colours' names, `djmdColor.Commnt` by `ID` 1 to 8. A
+/// row that is missing, deleted, NULL or empty reads as empty, which
+/// [`Library::color_name`] takes for the stock name. Eight rows: cheap enough
+/// to read on every open rather than keep in the startup snapshot, so a
+/// rename in rekordbox shows on the next start.
+pub fn read_color_names(db: &Db) -> rusqlite::Result<[String; 8]> {
+    color_names(db.connection())
+}
+
+fn color_names(conn: &Connection) -> rusqlite::Result<[String; 8]> {
+    let mut names: [String; 8] = Default::default();
+    if !has_table(conn, "djmdColor") {
+        return Ok(names);
+    }
+    let mut stmt = conn.prepare(
+        "SELECT ID, Commnt FROM djmdColor WHERE rb_local_deleted = 0",
+    )?;
+    let mut rows = stmt.query([])?;
+    while let Some(r) = rows.next()? {
+        let id = text_or_default(r, 0)?.trim().parse::<usize>().unwrap_or(0);
+        if let Some(slot) = id.checked_sub(1).and_then(|at| names.get_mut(at)) {
+            text_or_default(r, 1)?.trim().clone_into(slot);
+        }
+    }
+    Ok(names)
 }
 
 /// Reads the My Tag categories and the tags under each, by name.

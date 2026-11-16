@@ -3,7 +3,8 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import type { FilterValues } from "@/ipc/types";
+import { __setBackend } from "@/ipc/client";
+import type { Backend, FilterValues } from "@/ipc/types";
 import { EMPTY_FILTER, type FilterState } from "@/lib/trackFilter";
 import { TrackFilter } from "./TrackFilter";
 
@@ -137,4 +138,25 @@ it("a column past the fourth ticks, picks and switches like the first four", () 
   expect(latest.tags[5]).toEqual({ enabled: true, values: ["A6"], any: false });
   expect(latest.tags[4]?.enabled).toBe(true);
   expect(latest.tags.slice(0, 4).every((t) => !t.enabled && t.values.length === 0)).toBe(true);
+});
+
+it("lists the colours under the library's names and picks them by id", async () => {
+  act(() => root.unmount());
+  __setBackend({
+    colorNames: () => Promise.resolve(["Pink", "Red", "Orange", "Yellow", "Green", "Peak", "Blue", "Purple"]),
+    onLibraryChanged: () => () => {},
+    onLibraryReady: () => () => {},
+  } as unknown as Backend);
+  root = createRoot(host);
+  act(() => root.render(<Harness onState={(s) => { latest = s; }} />));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const colours = [...host.querySelectorAll<HTMLElement>('[aria-label="Track Filter"] [role="option"]')]
+    .filter((option) => option.querySelector("[data-color]"));
+  expect(colours.map((c) => c.textContent)).toEqual(["Pink", "Red", "Orange", "Yellow", "Green", "Peak", "Blue", "Purple"]);
+  const peak = colours[5]!;
+  // Painted by the colour it is, whatever the library calls it.
+  expect(peak.querySelector("[data-color]")?.getAttribute("data-color")).toBe("Aqua");
+  click(peak);
+  expect(latest.color.values).toEqual([6]);
+  __setBackend(null);
 });

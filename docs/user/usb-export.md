@@ -92,6 +92,9 @@ rating import reads the old values as the same stars.
   and **Export Folder** do. The tree shows one section at a time, so open the
   Sub-Browser to have your playlists beside the stick. Tracks dropped on one
   of the stick's own playlists are not exported there.
+- A stick with no OneLibrary yet is given your library's track colour names
+  (Preferences › Advanced › Browse › Color). After that the stick keeps its
+  own; rename them under **Devices** › the stick › **Color**.
 - Sync Manager makes each ticked stick hold exactly the ticked playlists: a
   playlist from your library that is no longer ticked, or that was deleted
   from your library, is taken off the stick.

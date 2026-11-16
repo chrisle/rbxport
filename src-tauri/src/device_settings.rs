@@ -237,16 +237,28 @@ pub fn reference_stick_settings() -> ReferenceStickSettingsDto {
     }
 }
 
-/// The library rows a fresh stick's export starts from, given the defaults.
-pub fn library_defaults(dto: &StickDefaultsDto) -> StickSettings {
+/// The library rows a fresh stick's export starts from, given the defaults
+/// and the library's eight colour names, 1 to 8. rekordbox seeds a new
+/// stick's colour comments from the library's (Preferences › Advanced ›
+/// Browse › Color); a stick that has its own keeps them, and the device
+/// panel's Color tab edits those.
+pub fn library_defaults(dto: Option<&StickDefaultsDto>, color_names: &[String]) -> StickSettings {
     let mut settings = StickSettings::default();
-    if let Some(categories) = &dto.categories {
-        settings.categories = categories.iter().map(slot_from).collect();
+    if let Some(dto) = dto {
+        if let Some(categories) = &dto.categories {
+            settings.categories = categories.iter().map(slot_from).collect();
+        }
+        if let Some(sorts) = &dto.sorts {
+            settings.sorts = sorts.iter().map(slot_from).collect();
+        }
+        settings.sub_column = dto.sub_column;
     }
-    if let Some(sorts) = &dto.sorts {
-        settings.sorts = sorts.iter().map(slot_from).collect();
+    for color in &mut settings.colors {
+        let named = usize::try_from(color.id).ok().and_then(|id| id.checked_sub(1)).and_then(|at| color_names.get(at));
+        if let Some(name) = named.filter(|name| !name.is_empty()) {
+            color.name.clone_from(name);
+        }
     }
-    settings.sub_column = dto.sub_column;
     settings
 }
 
@@ -351,10 +363,15 @@ pub async fn ensure_device_library(
                 "That device is no longer connected. It may have been unplugged or renamed.",
             ));
         }
-        let library = defaults.as_ref().map(library_defaults);
-        // The library's tags go on the blank stick, as rekordbox puts them
-        // there the moment a drive is connected. A library not loaded yet
-        // gives none, and the stick gets its tags on its first export.
+        // The library's colour names and tags go on the blank stick, as
+        // rekordbox puts them there the moment a drive is connected. A
+        // library not loaded yet gives the stock names and no tags, and the
+        // stick gets its tags on its first export.
+        let color_names: Vec<String> = state
+            .library()
+            .map(|library| library.color_names().iter().map(|&name| name.to_owned()).collect())
+            .unwrap_or_default();
+        let library = library_defaults(defaults.as_ref(), &color_names);
         let (my_tags, db_id, cloud_db_id) = state
             .read_db(|db| {
                 let conn = db.connection();
@@ -367,7 +384,7 @@ pub async fn ensure_device_library(
             .into_iter()
             .find(|device| device.mount_point == mount)
             .and_then(|device| rbl_export::ExportRoot::for_file_system(&device.file_system));
-        rbl_export::create_library_with_root(mount, library.as_ref(), &my_tags, Some(&sync), preferred_root)
+        rbl_export::create_library_with_root(mount, Some(&library), &my_tags, Some(&sync), preferred_root)
             .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
         if let Some(defaults) = &defaults {
             write_dev_defaults(mount, defaults)?;
@@ -545,15 +562,24 @@ mod tests {
 
     #[test]
     fn the_library_defaults_start_from_the_reference_rows() {
-        let library = library_defaults(&defaults());
+        let library = library_defaults(Some(&defaults()), &[]);
         assert_eq!(library.categories.len(), StickSettings::default().categories.len());
         assert_eq!(library.sub_column, Some(5));
+        assert_eq!(library.colors, StickSettings::default().colors);
 
         let mut with_rows = defaults();
         with_rows.categories = Some(vec![MenuSlotDto {
             id: 1, menu_item: 1, name: "GENRE".to_owned(), seq: 1, visible: true,
         }]);
-        assert_eq!(library_defaults(&with_rows).categories.len(), 1);
+        assert_eq!(library_defaults(Some(&with_rows), &[]).categories.len(), 1);
+
+        // The library's colour names, whatever else the defaults say.
+        let mut names = rbl_db::COLOR_NAMES.map(str::to_owned).to_vec();
+        names[0] = "Opener".to_owned();
+        for library in [library_defaults(None, &names), library_defaults(Some(&defaults()), &names)] {
+            let colors: Vec<&str> = library.colors.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(colors, ["Opener", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"]);
+        }
 
         let mut bad = defaults();
         bad.key_display = "roman".to_owned();

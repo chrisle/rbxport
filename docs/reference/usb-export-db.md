@@ -362,8 +362,12 @@ Other rows worth the detail:
   id, folder flag, then the name at offset 20 — five words, not four.
 - **Playlist entry**: entry index, track id, playlist id. 12 bytes.
 - **Colors**: 8-byte prefix, id as u8 at 4 and u16 at 5,
-  name at 8. Eight fixed labels in rekordbox's order — Pink, Red, Orange,
-  Yellow, Green, Aqua, Blue, Purple.
+  name at 8. Eight rows, ids 1 to 8 in rekordbox's order (Pink, Red,
+  Orange, Yellow, Green, Aqua, Blue, Purple), named by the stick's own
+  colour comments (`color.name` in `exportLibrary.db`). A stick without
+  `exportLibrary.db` takes the library's names (`djmdColor.Commnt`, stock
+  where NULL or empty); one that has it keeps its own, which the device
+  panel's Color tab edits.
 - **Artwork**: u32 id plus an inline string naming the image, e.g.
   `/PIONEER/Artwork/00001/a1.jpg`.
 - **Genres, labels, keys**: id plus name, keys writing the id twice.
@@ -572,7 +576,9 @@ The CDJ-3000 validation here does not establish that the player reads this file 
 path is `export.pdb` plus the ANLZ tree. It is rekordbox's device panel that
 needs it, and it is where the per-device settings rekordbox shows live:
 device name, browse categories, sort options, sub-column, the eight colour
-comments. `DEVSETTING.DAT` does *not* carry those.
+comments. `DEVSETTING.DAT` does *not* carry those. A new stick's colour
+comments are the library's (Preferences › Advanced › Browse › Color); after
+that each stick keeps its own, as rekordbox's per-device names do.
 
 ## 7. The analysis bundle
 

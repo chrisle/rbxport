@@ -7,7 +7,8 @@
  * arrived yet shows.
  */
 import type { RowDto, TrackDetails } from "@/ipc/types";
-import { COLORS, fileFacts } from "@/views/info/fields";
+import { colorDot, colorNameOf, STOCK_COLOR_NAMES } from "@/lib/colorNames";
+import { fileFacts } from "@/views/info/fields";
 
 /** What the tab draws. Every string is ready to print. */
 export interface DeckInfo {
@@ -15,6 +16,8 @@ export interface DeckInfo {
   rating: number;
   /** The colour's name, or empty for none or not yet known. */
   color: string;
+  /** The stock name its dot is painted by, whatever the library calls it. */
+  dot: string;
   comment: string;
   /**
    * File type, size, sample rate, bit rate — the four lines the manual
@@ -26,9 +29,13 @@ export interface DeckInfo {
 
 const EMPTY = "—";
 
-export function deckInfo(track: RowDto | null, details: TrackDetails | null): DeckInfo {
+export function deckInfo(
+  track: RowDto | null,
+  details: TrackDetails | null,
+  colorNames: readonly string[] = STOCK_COLOR_NAMES,
+): DeckInfo {
   if (!track) {
-    return { rating: 0, color: "", comment: EMPTY, file: [EMPTY, EMPTY, EMPTY, EMPTY] };
+    return { rating: 0, color: "", dot: "", comment: EMPTY, file: [EMPTY, EMPTY, EMPTY, EMPTY] };
   }
   // The rating and comment come from the row, which the browser overlays
   // the moment either is edited there; the record catches up only when the
@@ -37,13 +44,14 @@ export function deckInfo(track: RowDto | null, details: TrackDetails | null): De
   const file = d ? fileFacts(d) : null;
   return {
     rating: track.rating,
-    color: d ? colorName(d.color) : "",
+    color: d ? colorName(d.color, colorNames) : "",
+    dot: d ? colorDot(d.color) : "",
     comment: track.comment,
     file: file ? [file.type, file.size, file.sampleRate, file.bitrate] : ["", "", "", ""],
   };
 }
 
-/** `"6"` → `"Aqua"`; `"0"`, empty and anything else → nothing. */
-export function colorName(id: string): string {
-  return COLORS.find((c) => c.id === id)?.name ?? "";
+/** `"6"` → `"Aqua"`, or what the library calls it; `"0"`, empty and anything else → nothing. */
+export function colorName(id: string, colorNames: readonly string[] = STOCK_COLOR_NAMES): string {
+  return colorNameOf(colorNames, id);
 }
