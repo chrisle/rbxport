@@ -2095,7 +2095,7 @@ fn export_cancellable_inner(
         device_name: settings.as_ref().or(defaults).map_or("", |s| s.device_name.as_str()),
         background: before.legacy_background,
         menus: settings.as_ref().or(defaults),
-    });
+    })?;
     report.pdb_bytes = pdb.len();
     let staged_db = publication.stage().join(root_name).join("rekordbox");
     std::fs::create_dir_all(&staged_db).map_err(context("Could not write export.pdb".to_owned()))?;
@@ -2419,7 +2419,7 @@ pub fn menu_rows(settings: &rbl_onelibrary::settings::StickSettings) -> (Vec<Vec
 ///
 /// Rows that open with a subtype word carry their slot on the page, as
 /// rekordbox's do; see [`rbl_pdb::rows::set_index_shift`].
-fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
+fn build_pdb(tables: &PdbTables<'_>) -> Result<Vec<u8>> {
     use rbl_pdb::reference;
     use rbl_pdb::rows::set_index_shift;
     let numbered = |row: &mut Vec<u8>, slot: u16| set_index_shift(row, slot);
@@ -2430,18 +2430,22 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
     file.add_table_numbered(3, tables.albums, numbered);
     file.add_table(4, tables.labels);
     file.add_table(5, tables.keys);
-    file.add_table(
-        6,
-        &COLORS
-            .iter()
-            .enumerate()
-            .map(|(i, name)| {
-                let id=u16::try_from(i).unwrap_or(0)+1;
-                let name=tables.colors.iter().find(|c|c.id==i64::from(id)).map_or(*name,|c|c.name.as_str());
-                color_row(id,name)
-            })
-            .collect::<Vec<_>>(),
-    );
+    let limit = rbl_pdb::build::max_row_len(PAGE_SIZE);
+    let color_rows = COLORS.iter().enumerate().map(|(i, stock)| {
+        let id = u16::try_from(i).unwrap_or(0) + 1;
+        let name = tables.colors.iter().find(|c| c.id == i64::from(id)).map_or(*stock, |c| c.name.as_str());
+        let row = color_row(id, name);
+        // Imported library names and existing device settings are not bounded
+        // by the UI's input limit. A DeviceSQL row cannot span pages.
+        if row.len() > limit {
+            return Err(ExportError::Conflict(format!(
+                "Color {id}'s name is longer than export.pdb can hold ({} bytes; at most {limit}). Shorten it and sync again; no database was published.",
+                row.len()
+            )));
+        }
+        Ok(row)
+    }).collect::<Result<Vec<_>>>()?;
+    file.add_table(6, &color_rows);
     file.add_table(7, tables.playlists);
     file.add_table(8, tables.entries);
     for page_type in 9..=15 {
@@ -2476,7 +2480,7 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
         ..rbl_pdb::rows::PdbProperty::default()
     };
     file.add_table_numbered(19, &rbl_pdb::rows::property_row(&property).map_or_else(Vec::new, |row| vec![row]), numbered);
-    file.finish()
+    Ok(file.finish())
 }
 
 /// Writes the database folders an empty stick gets, as rekordbox does the
@@ -2541,7 +2545,7 @@ pub fn create_library_with_root(
         device_name: defaults.map_or("", |s| s.device_name.as_str()),
         background: 0,
         menus: defaults,
-    });
+    })?;
     rbl_core::durable::write(&db_dir.join("export.pdb"), &pdb)?;
     // The library's tags go on even a stick with no tracks [OBS 7.2.11:
     // the blank stick's `exportExt.pdb` held all 99].
