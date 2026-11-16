@@ -50,11 +50,10 @@ const FIXED_LAYOUTS: Record<Exclude<DateFormat, "system">, DateLayout> = {
 const systemLayouts = new Map<string, DateLayout>();
 
 /**
- * The locale's numeric short date — its order, separators and padding — read
- * once from `Intl` and kept, so a table of dates formats none. Only the
- * shape is taken: the digits are put in by hand, so a stored day never goes
- * through a `Date` and never shifts by the time zone. A locale `Intl` cannot
- * describe prints year first.
+ * The locale's field order for the Info panel's Gregorian date segments.
+ * This sampled layout is not used to render System dates; the formatter below
+ * preserves the actual day's calendar, era and numbering system instead.
+ * A locale Intl cannot describe keeps year first.
  */
 function systemLayout(locale: string | undefined): DateLayout {
   const key = locale ?? "";
@@ -84,7 +83,33 @@ export function dateOrder(format: DateFormat, locale?: string): DateField[] {
   return dateLayout(format, locale).flatMap((part) => ("field" in part ? [part.field] : []));
 }
 
+// Cache formatters, not a sample date's digits: calendars and eras vary by day.
+const systemFormatters = new Map<string, Intl.DateTimeFormat | null>();
+function systemFormatter(locale: string | undefined): Intl.DateTimeFormat | null {
+  const key = locale ?? "";
+  if (systemFormatters.has(key)) return systemFormatters.get(key) ?? null;
+  let formatter: Intl.DateTimeFormat | null = null;
+  try {
+    formatter = new Intl.DateTimeFormat(locale, {
+      year: "numeric", month: "numeric", day: "numeric", timeZone: "UTC",
+    });
+  } catch { /* an unknown locale keeps year first */ }
+  systemFormatters.set(key, formatter);
+  return formatter;
+}
+
 function printDate(year: number, month: number, day: number, format: DateFormat, locale: string | undefined): string {
+  if (format === "system") {
+    const formatter = systemFormatter(locale);
+    if (formatter) {
+      // Treat the Gregorian storage fields as a calendar day, not an instant.
+      // setUTCFullYear also avoids Date.UTC's special handling of years 0–99.
+      const date = new Date(0);
+      date.setUTCFullYear(year, month - 1, day);
+      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
+      return formatter.format(date);
+    }
+  }
   const values: Record<DateField, number> = { year, month, day };
   return dateLayout(format, locale).map((part) => {
     if (!("field" in part)) return part.text;
@@ -95,7 +120,8 @@ function printDate(year: number, month: number, day: number, format: DateFormat,
 
 /**
  * A stored day (`YYYY-MM-DD`, with or without a time after it) in the chosen
- * format, four-digit year. `locale` is the system's unless a test names one.
+ * format. Fixed formats use the Gregorian year; System uses Intl's calendar.
+ * `locale` is the runtime's default unless a test names one.
  */
 export function formatShortDate(iso: string | null | undefined, format: DateFormat, locale?: string): string {
   if (!iso) return "";

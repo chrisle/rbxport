@@ -73,6 +73,36 @@ describe("formatShortDate", () => {
     expect(formatShortDate("2026-09-06", "system", "de-DE")).toBe("6.9.2026");
     expect(formatShortDate("2026-09-06", "system", "sv-SE")).toBe("2026-09-06");
   });
+  it.each(["fa-IR", "th-TH", "ja-JP-u-ca-japanese", "ar-SA", "zh-CN-u-ca-chinese"])(
+    "preserves System calendar, era and numerals for %s", (locale) => {
+      for (const iso of ["2026-09-06", "2019-04-30", "2019-05-01", "2024-02-29"]) {
+        const expected = new Intl.DateTimeFormat(locale, {
+          year: "numeric", month: "numeric", day: "numeric", timeZone: "UTC",
+        }).format(new Date(`${iso}T00:00:00Z`));
+        expect(formatShortDate(iso, "system", locale)).toBe(expected);
+      }
+      expect(formatShortDate("2026-09-06", "ymd", locale)).toBe("2026/09/06");
+    },
+  );
+  it("keeps non-Gregorian System days stable across time zones", () => {
+    const zone = process.env["TZ"];
+    try {
+      for (const tz of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+        process.env["TZ"] = tz;
+        expect(formatShortDate("2026-09-06", "system", "th-TH")).toBe("6/9/2569");
+        const local = new Date(2026, 8, 6, 23, 59);
+        expect(formatEpochDate(local.getTime() / 1000, "system", "th-TH")).toBe("6/9/2569");
+      }
+    } finally {
+      if (zone === undefined) delete process.env["TZ"];
+      else process.env["TZ"] = zone;
+    }
+  });
+  it("does not roll invalid System dates or reinterpret years below 100", () => {
+    expect(formatShortDate("2026-02-30", "system", "en-GB")).toBe("");
+    expect(formatShortDate("0099-01-02", "system", "en-US")).toBe("1/2/99");
+    expect(formatShortDate("2026-09-06", "system", "bad_locale")).toBe("2026/09/06");
+  });
   it("orders the fields with dateOrder for the same format", () => {
     expect(dateOrder("system", "en-GB")).toEqual(["day", "month", "year"]);
     expect(dateOrder("mdy")).toEqual(["month", "day", "year"]);
