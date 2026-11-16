@@ -675,7 +675,9 @@ In loop order:
 4. **Conversion.** `compatibility` is set and the cache's probe says the
    file needs it. The file is renamed `{stem}-rbx-cdj-{export_id}.{ext}`.
    Preserved device tracks are never converted. Conversion profiles are
-   44.1 kHz stereo PCM16 for WAV/AIFF and 320 kbps MP3.
+   320 kbps MP3, or stereo PCM16/PCM24 for WAV/AIFF at 44.1 or 48 kHz chosen
+   from the source's own depth and rate (`rbl_audio::compatibility::target_for`,
+   #824).
 5. **Analysis directory.** `analysis_directory(audio, root)` is the CDJ
    firmware path hash ([§3](usb-export-db.md#3-audio-files),
    [collisions](usb-export-db.md#analysis-path-collisions)). On a collision
@@ -766,8 +768,9 @@ In loop order:
 (`plan::preview`) and the export:
 
 - `estimate.copy_bytes`: source bytes for `Copy` actions, and for `Convert`
-  actions the cached converted size or an estimate from duration (PCM at
-  44.1 kHz stereo 16-bit, or 40 kB/s for MP3, plus container overhead).
+  actions the cached converted size or an estimate from duration (PCM at the
+  source-chosen WAV/AIFF depth and rate, or 40 kB/s for MP3, plus container
+  overhead).
 - `asset_bytes`: analysis companions whose recipe changed and artwork whose
   source changed, rounded up to 4 KiB blocks.
 - `database_bytes`: the larger of the current database files and an

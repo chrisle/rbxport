@@ -727,9 +727,11 @@ fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
     let playlists = vec![SourcePlaylist { id: 1, name: "Set".into(), track_indices: vec![0], ..Default::default() }];
     let mut previous_audio = None;
     let mut export_id = None;
+    // The 24-bit/96 kHz fixture keeps its depth and halves to 48 kHz for
+    // WAV/AIFF (#824); MP3 output is unaffected.
     for (compatibility, ext, bitrate) in [
-        (Some(CompatibilityFormat::Wav), "wav", 1411),
-        (Some(CompatibilityFormat::Aiff), "aiff", 1411),
+        (Some(CompatibilityFormat::Wav), "wav", 2304),
+        (Some(CompatibilityFormat::Aiff), "aiff", 2304),
         (Some(CompatibilityFormat::Mp3), "mp3", 320),
         (None, "flac", 0),
     ] {
@@ -754,7 +756,11 @@ fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
         assert_eq!(pdb.u2_at(raw, 0x5a), match ext { "wav" => 11, "aiff" => 12, "mp3" => 1, "flac" => 5, _ => unreachable!() },
             "the CDJ format must describe the exported audio, including conversion");
         assert_eq!(rows[0].file_path, entry.audio);
-        assert_eq!(rows[0].sample_rate, if compatibility.is_some() { 44100 } else { 96000 });
+        assert_eq!(rows[0].sample_rate, match compatibility {
+            Some(CompatibilityFormat::Wav | CompatibilityFormat::Aiff) => 48_000,
+            Some(CompatibilityFormat::Mp3) => 44_100,
+            None => 96_000,
+        });
         assert_eq!(rows[0].bitrate, bitrate);
         assert_eq!(u64::from(rows[0].file_size), std::fs::metadata(&audio).unwrap().len());
         assert!(verify(dest.path()).unwrap().is_ok());

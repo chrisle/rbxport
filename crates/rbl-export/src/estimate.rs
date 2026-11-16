@@ -122,11 +122,20 @@ pub(crate) fn estimate_inspected(
             result.actions.insert(key, AudioAction::InPlace);
             continue;
         }
+        let properties = compatibility
+            .filter(|_| !track.device.as_ref().is_some_and(|d| d.preserve))
+            .and_then(|_| cache.map_or_else(
+                || rbl_audio::compatibility::inspect(&track.source_path).ok(),
+                |cache| cache.properties(&track.source_path).ok(),
+            ));
         let conversion = compatibility
             .filter(|_| !track.device.as_ref().is_some_and(|d| d.preserve))
             .map(CompatibilityFormat::audio)
-            .filter(|_| cache.map_or_else(|| rbl_audio::compatibility::needs_conversion(&track.source_path).unwrap_or(false), |cache| cache.needs_conversion(&track.source_path).unwrap_or(false)));
-        let profile = conversion.map_or("", rbl_audio::compatibility::Format::profile);
+            .filter(|_| properties.as_ref().is_some_and(|p| !p.compatible));
+        let profile = conversion.map_or_else(String::new, |target| {
+            let (rate, bits) = properties.as_ref().map_or((rbl_audio::compatibility::RATE, 16), |p| target.target(p));
+            target.profile(rate, bits)
+        });
         let carried = recorded.get(&key).copied();
         // The stick's own copy of a track another writer exported from this
         // library, which the sync keeps as it is (`adopted_paths`).
@@ -162,11 +171,12 @@ pub(crate) fn estimate_inspected(
         }
         let copied = conversion.map_or(size, |target| {
             if let Some(size) = cache.and_then(|cache| cache.converted_size(&track.source_path, target)) { return size; }
-            let duration = cache.and_then(|cache| cache.properties(&track.source_path).ok())
+            let duration = properties.as_ref()
                 .and_then(|p| p.frames.zip(p.sample_rate.filter(|rate| *rate > 0)))
                 .map_or(u64::from(track.duration_sec), |(frames, rate)| frames.div_ceil(u64::from(rate)));
+            let (rate, bits) = properties.as_ref().map_or((rbl_audio::compatibility::RATE, 16), |p| target.target(p));
             match target {
-                rbl_audio::compatibility::Format::Wav | rbl_audio::compatibility::Format::Aiff => duration.saturating_add(1).saturating_mul(44_100 * 4).saturating_add(4096),
+                rbl_audio::compatibility::Format::Wav | rbl_audio::compatibility::Format::Aiff => duration.saturating_add(1).saturating_mul(u64::from(rate) * u64::from(bits) / 8 * 2).saturating_add(4096),
                 rbl_audio::compatibility::Format::Mp3 => duration.saturating_add(1).saturating_mul(40_000).saturating_add(8192),
             }
         });
