@@ -120,7 +120,12 @@ impl Interner {
 /// Case- and accent-insensitive folding used for both sorting and search.
 ///
 /// Deliberately ASCII-fast: the common case is Latin text, and we only need a
-/// consistent ordering, not a locale-correct collation.
+/// consistent ordering, not a locale-correct collation. Punctuation and
+/// symbols are dropped, as they are for Latin text, but a letter or digit
+/// outside the Latin tables (kana, kanji, Cyrillic, and so on) is kept and
+/// lowercased rather than silently discarded: dropping it made a query made
+/// entirely of such characters fold to "", which callers treat as no filter
+/// at all (see `rbxport#891`).
 pub fn fold(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -128,8 +133,11 @@ pub fn fold(s: &str) -> String {
             'a'..='z' | '0'..='9' | ' ' => out.push(ch),
             'A'..='Z' => out.push(ch.to_ascii_lowercase()),
             _ => {
-                for folded in deaccent(ch) {
-                    out.push(*folded);
+                let deaccented = deaccent(ch);
+                if !deaccented.is_empty() {
+                    out.extend(deaccented.iter().copied());
+                } else if ch.is_alphanumeric() {
+                    out.extend(ch.to_lowercase());
                 }
             }
         }
@@ -231,6 +239,14 @@ mod tests {
     #[test]
     fn folding_drops_punctuation_so_search_ignores_it() {
         assert_eq!(fold("Wh0 - House (Remix)"), "wh0  house remix");
+    }
+
+    #[test]
+    fn folding_preserves_non_latin_letters_instead_of_dropping_them() {
+        // rbxport#891: a Japanese-only query used to fold to "", which the
+        // track view treats as no filter at all.
+        assert_eq!(fold("ナイト・テスト曲"), "ナイト・テスト曲".replace('・', ""));
+        assert_ne!(fold("ナイト・テスト曲"), "");
     }
 
     #[test]
