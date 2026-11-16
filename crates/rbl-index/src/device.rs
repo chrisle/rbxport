@@ -188,4 +188,20 @@ mod tests {
         assert_eq!(ids(&DeviceView::open(rows(), &spec(SortColumn::TrackNo, false, "am"), SearchField::All)), vec![1, 3]);
         assert!(DeviceView::open(rows(), &spec(SortColumn::TrackNo, false, "zebra"), SearchField::Artist).is_empty());
     }
+
+    /// rbxport#891: a Japanese-only query used to fold to "", which this view
+    /// also treated as no filter, leaving the stick's full list visible.
+    fn japanese_rows() -> Vec<DeviceRow> {
+        vec![
+            DeviceRow { id: 1, position: 1, title: "ナイト・テスト曲".into(), comment: "RBXTEST001".into(), ..DeviceRow::default() },
+            DeviceRow { id: 2, position: 2, title: "Daylight Groove".into(), comment: "RBXTEST002".into(), ..DeviceRow::default() },
+        ]
+    }
+
+    #[test]
+    fn a_japanese_only_query_filters_the_device_view_too() {
+        assert_eq!(ids(&DeviceView::open(japanese_rows(), &spec(SortColumn::TrackNo, false, "ナイト・テスト曲"), SearchField::All)), vec![1]);
+        assert!(DeviceView::open(japanese_rows(), &spec(SortColumn::TrackNo, false, "見つからない"), SearchField::All).is_empty());
+        assert_eq!(ids(&DeviceView::open(japanese_rows(), &spec(SortColumn::TrackNo, false, "RBXTEST001"), SearchField::All)), vec![1]);
+    }
 }
