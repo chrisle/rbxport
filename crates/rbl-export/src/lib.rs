@@ -1746,8 +1746,14 @@ fn export_cancellable_inner(
                 parsed.sections = parsed.sections.iter().map(rbl_anlz::encode::with_device_preview).collect();
                 if let Some(cues) = &track.cues {
                     if extension == "DAT" || extension == "EXT" {
+                        // The lists go where the file's own were, as
+                        // rekordbox orders them (an EXT is `PWV3`, the
+                        // cue lists, then `PWV5` and `PWV4`), not after
+                        // the last waveform (#822). Nothing before the
+                        // first list is removed, so its index still holds.
+                        let at = parsed.sections.iter().position(rbl_anlz::Section::is_cue_list).unwrap_or(parsed.sections.len());
                         parsed.sections.retain(|s| !s.is_cue_list());
-                        parsed.sections.extend(rbl_anlz::cues::sections(cues, extension == "EXT"));
+                        parsed.sections.splice(at..at, rbl_anlz::cues::sections(cues, extension == "EXT"));
                     }
                 }
                 Ok::<_, std::io::Error>((extension.clone(), parsed.to_bytes()))

@@ -3,7 +3,10 @@ use std::{collections::{BTreeMap, BTreeSet}, io::Read, path::{Path, PathBuf}};
 use serde::{Deserialize, Serialize};
 use crate::{Manifest, ManifestTrack, SourceTrack, SourcePlaylist, SourceMyTag, ExportOptions, Result};
 
-pub const TRANSFORM_VERSION: u32 = 1;
+/// Raised when what an export writes for an unchanged input changes, so a
+/// stick written by an earlier build is rewritten on its next sync. 2: an
+/// `.EXT` keeps its cue lists ahead of `PWV5`/`PWV4` as rekordbox does (#822).
+pub const TRANSFORM_VERSION: u32 = 2;
 
 /// What `export.pdb`'s rows hold. Part of the request, so a stick written
 /// with an older layout is rebuilt on its next sync even when nothing else
