@@ -327,3 +327,15 @@ it("leaves the colour names alone while the library is protected", () => {
   expect(inputs).toHaveLength(8);
   expect(inputs.every((i) => i.disabled)).toBe(true);
 });
+
+it("rejected rename restores the persisted name", async () => {
+  const setColorName = vi.fn().mockRejectedValue(new Error("write refused"));
+  __setBackend({listBackups, colorNames: () => Promise.resolve(["Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"]), onLibraryChanged: () => () => {}, onLibraryReady: () => () => {}, edits: {setColorName}} as unknown as Backend);
+  mount(false);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const input = host.querySelector<HTMLInputElement>('input[aria-label="Color 1"]')!;
+  act(() => { input.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "Not saved"); input.dispatchEvent(new Event("input", {bubbles: true})); });
+  await act(async () => { input.blur(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(host.textContent).toContain("write refused");
+  expect(input.value).toBe("Pink");
+});

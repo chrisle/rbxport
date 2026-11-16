@@ -39,15 +39,26 @@ function ColorNameRow({ id, name, disabled, onRename }: {
   id: number;
   name: string;
   disabled: boolean;
-  onRename: (name: string) => void;
+  onRename: (name: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState(name);
+  const [saving, setSaving] = useState(false);
   useEffect(() => setDraft(name), [name]);
-  const commit = () => {
+  const commit = async () => {
+    if (disabled || saving) return;
     const trimmed = draft.trim();
-    // Empty is the stock name, which is what the backend writes for it.
-    setDraft(trimmed === "" ? colorNameOf(STOCK_COLOR_NAMES, id) : trimmed);
-    if (trimmed !== name) onRename(trimmed);
+    const accepted = trimmed === "" ? colorNameOf(STOCK_COLOR_NAMES, id) : trimmed;
+    if (accepted === name) {
+      setDraft(name);
+      return;
+    }
+    setSaving(true);
+    try {
+      const saved = await onRename(trimmed);
+      setDraft(saved ? accepted : name);
+    } finally {
+      setSaving(false);
+    }
   };
   return (
     <label className={styles.colorRow}>
@@ -57,7 +68,7 @@ function ColorNameRow({ id, name, disabled, onRename }: {
         value={draft}
         aria-label={`Color ${id}`}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onBlur={() => { void commit(); }}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") {
@@ -65,7 +76,7 @@ function ColorNameRow({ id, name, disabled, onRename }: {
             setDraft(name);
           }
         }}
-        disabled={disabled}
+        disabled={disabled || saving}
         maxLength={64}
       />
     </label>
@@ -149,8 +160,10 @@ export function AdvancedPane({ tab, summary }: {
     try {
       const backend = await getBackend();
       await backend.edits.setColorName(id, name);
+      return true;
     } catch (error) {
       setColorFailure(errorMessage(error));
+      return false;
     }
   };
 
@@ -177,7 +190,7 @@ export function AdvancedPane({ tab, summary }: {
                 id={at + 1}
                 name={name}
                 disabled={advanced.protectLibrary || summary?.readOnly === true}
-                onRename={(next) => { void renameColor(at + 1, next); }}
+                onRename={(next) => renameColor(at + 1, next)}
               />
             ))}
           </div>

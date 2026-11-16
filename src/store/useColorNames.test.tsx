@@ -66,3 +66,36 @@ it("keeps the stock names while there is no library to ask", async () => {
   await settle();
   expect(host.textContent).toBe(STOCK_COLOR_NAMES.join(","));
 });
+
+it("a slower old refresh must not replace the latest names", async () => {
+  act(() => root.render(<Names />));
+  await settle();
+  let old!: (v: string[]) => void;
+  let latest!: (v: string[]) => void;
+  colorNames.mockImplementationOnce(() => new Promise<string[]>((resolve) => { old = resolve; }));
+  act(() => { changed?.(); });
+  await settle();
+  colorNames.mockImplementationOnce(() => new Promise<string[]>((resolve) => { latest = resolve; }));
+  act(() => { changed?.(); });
+  await settle();
+  const newer = [...STOCK_COLOR_NAMES]; newer[0] = "Latest";
+  await act(async () => { latest(newer); await Promise.resolve(); });
+  expect(host.textContent).toContain("Latest");
+  const older = [...STOCK_COLOR_NAMES]; older[0] = "Previous";
+  await act(async () => { old(older); await Promise.resolve(); });
+  expect(host.textContent).toContain("Latest");
+});
+
+it("ignores a pending response from an unsubscribed store session", async () => {
+  let previous!: (v: string[]) => void;
+  colorNames.mockImplementationOnce(() => new Promise<string[]>((resolve) => { previous = resolve; }));
+  act(() => root.render(<Names />));
+  await settle();
+  act(() => root.render(null));
+  names[0] = "New library";
+  act(() => root.render(<Names />));
+  await settle();
+  expect(host.textContent).toContain("New library");
+  await act(async () => { previous([...STOCK_COLOR_NAMES]); await Promise.resolve(); });
+  expect(host.textContent).toContain("New library");
+});

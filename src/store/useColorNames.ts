@@ -17,11 +17,14 @@ export { colorDot, colorNameOf, STOCK_COLOR_NAMES } from "@/lib/colorNames";
 let names: readonly string[] = STOCK_COLOR_NAMES;
 const listeners = new Set<() => void>();
 let stop: (() => void) | null = null;
+let requestGeneration = 0;
 
 async function fetchNames(): Promise<void> {
+  const generation = ++requestGeneration;
   try {
     const backend = await getBackend();
     const fetched = await backend.colorNames();
+    if (generation !== requestGeneration) return;
     if (fetched.length !== STOCK_COLOR_NAMES.length) return;
     if (fetched.every((name, at) => name === names[at])) return;
     names = fetched;
@@ -36,6 +39,7 @@ function start(): void {
   const offs: (() => void)[] = [];
   stop = () => {
     live = false;
+    requestGeneration += 1;
     for (const off of offs) off();
   };
   void (async () => {
