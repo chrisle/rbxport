@@ -108,6 +108,11 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({view: {keyDisplay: "classic"}}).view.keySort).toBe("alphabetical");
     expect(sanitisePreferences({view: {keyDisplay: "alphanumeric"}}).view.keySort).toBe("musical");
   });
+  it("follows the system's date order until a format is chosen", () => {
+    expect(sanitisePreferences({}).view.dateFormat).toBe("system");
+    expect(sanitisePreferences({ view: { dateFormat: "dmy" } }).view.dateFormat).toBe("dmy");
+    expect(sanitisePreferences({ view: { dateFormat: "D/M/YY" } }).view.dateFormat).toBe("system");
+  });
   it("gives the defaults for nothing, garbage, and a wrong shape", () => {
     expect(sanitisePreferences(undefined)).toEqual(DEFAULT_PREFERENCES);
     expect(sanitisePreferences("view")).toEqual(DEFAULT_PREFERENCES);

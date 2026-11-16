@@ -12,6 +12,7 @@
  */
 import { ANALYSIS_SLOTS, SLOTS } from "./queue";
 import { KEY_PRESETS, type KeyPreset } from "./keyPresets";
+import { DATE_FORMATS, type DateFormat } from "./format";
 import type { KeyChord } from "./shortcuts";
 import { fromCamelot, toCamelot, type TrafficLightReach } from "./camelot";
 import type {
@@ -118,6 +119,8 @@ export interface ViewPreferences {
   keyDisplay: KeyDisplay;
   /** How the browser's Key column is ordered. */
   keySort: "alphabetical" | "musical";
+  /** The order dates are printed in: the system's, or a fixed one. */
+  dateFormat: DateFormat;
   /** Full/Preview Waveform: the deck's overview, single-sided or mirrored. */
   overviewWaveform: OverviewWaveform;
   /** Media Browser › Explorer: the folders on disk in the tree. */
@@ -375,6 +378,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     browseLineSpace: BROWSE_SCALE_DEFAULT,
     keyDisplay: "classic",
     keySort: "alphabetical",
+    dateFormat: "system",
     overviewWaveform: "half",
     explorer: true,
     previewCueMarkers: true,
@@ -560,6 +564,7 @@ export function sanitisePreferences(value: unknown): Preferences {
         ["alphabetical", "musical"] as const,
         view.keyDisplay === "alphanumeric" ? "musical" : d.view.keySort,
       ),
+      dateFormat: oneOf(view.dateFormat, DATE_FORMATS, d.view.dateFormat),
       overviewWaveform: oneOf(view.overviewWaveform, OVERVIEWS, d.view.overviewWaveform),
       explorer: bool(view.explorer, d.view.explorer),
       previewCueMarkers: bool(view.previewCueMarkers, d.view.previewCueMarkers),

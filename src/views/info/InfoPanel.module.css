@@ -386,12 +386,15 @@
   padding-right: 9px;
   align-items: center;
 }
+/* Each box keeps its width wherever the date format puts it. */
 .dateBoxes {
-  display: grid;
-  grid-template-columns: 94fr 218fr 122fr;
+  display: flex;
   column-gap: 1.5px;
   height: var(--s-info-field-h);
 }
+.dateBox[data-part="day"] { flex: 94 1 0; }
+.dateBox[data-part="month"] { flex: 218 1 0; }
+.dateBox[data-part="year"] { flex: 122 1 0; }
 .dateBox {
   position: relative;
   background: var(--c-info-field);

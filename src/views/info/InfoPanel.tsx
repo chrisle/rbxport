@@ -306,6 +306,7 @@ const Summary = memo(function Summary({
   const artist = details?.artist ?? track.artist;
   const album = details?.album ?? track.album;
   const tip = useTooltip();
+  const { dateFormat } = usePreferences().view;
   return (
     <>
       <div className={styles.summaryHead}>
@@ -332,7 +333,7 @@ const Summary = memo(function Summary({
         </dl>
       </div>
       <dl className={styles.facts}>
-        {summaryFacts(track, details).map((fact) => (
+        {summaryFacts(track, details, dateFormat).map((fact) => (
           <div key={fact.label} className={styles.fact}>
             <dt className={styles.label}>{fact.label}</dt>
             <dd className={styles.value} title={tip(fact.value)}>{fact.value}</dd>
@@ -676,14 +677,14 @@ function Locked({
 
 /** The Release Date's three boxes and its clear button, all inert. */
 function DateBox({ iso }: { iso: string }) {
-  const [day, month, year] = dateSegments(iso);
+  const segments = dateSegments(iso, usePreferences().view.dateFormat);
   const tip = useTooltip();
   return (
     <div className={styles.dateRow} title={tip(LOCKED["releaseDate"])}>
       <div className={styles.dateBoxes} role="group" aria-label="Release Date" aria-description={LOCKED["releaseDate"]}>
-        {[["day", day], ["month", month], ["year", year]].map(([name, part]) => (
-          <span key={name} className={styles.dateBox}>
-            <span className={styles.dateText}>{part}</span>
+        {segments.map(({ part, text }) => (
+          <span key={part} className={styles.dateBox} data-part={part}>
+            <span className={styles.dateText}>{text}</span>
             <SpinnerIcon className={styles.spinner} aria-hidden />
           </span>
         ))}
