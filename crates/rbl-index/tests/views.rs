@@ -123,6 +123,54 @@ fn search_ignores_punctuation() {
     assert_eq!(lib.open_view(&spec(SortColumn::Title, false, "(extended mix)")).len(), 1);
 }
 
+/// rbxport#891: a Japanese-only query used to fold to "", which the track
+/// view treated as no filter and left the full list visible.
+fn japanese_sample() -> Vec<TestTrack> {
+    vec![
+        TestTrack {
+            id: 1,
+            title: "ナイト・テスト曲",
+            comment: "RBXTEST001",
+            ..TestTrack::default()
+        },
+        TestTrack {
+            id: 2,
+            title: "Daylight Groove",
+            comment: "RBXTEST002",
+            ..TestTrack::default()
+        },
+    ]
+}
+
+#[test]
+fn a_japanese_only_query_filters_to_the_matching_track() {
+    let lib = library_from(&japanese_sample());
+    let view = lib.open_view(&spec(SortColumn::Title, false, "ナイト・テスト曲"));
+    assert_eq!(view.len(), 1);
+    assert_eq!(lib.title.get(view.rows[0] as usize), "ナイト・テスト曲");
+}
+
+#[test]
+fn a_non_matching_japanese_query_yields_zero_results_not_the_full_list() {
+    let lib = library_from(&japanese_sample());
+    let view = lib.open_view(&spec(SortColumn::Title, false, "見つからない"));
+    assert_eq!(view.len(), 0);
+}
+
+#[test]
+fn an_ascii_query_still_works_alongside_japanese_titles() {
+    let lib = library_from(&japanese_sample());
+    assert_eq!(lib.open_view(&spec(SortColumn::Title, false, "RBXTEST001")).len(), 1);
+    assert_eq!(lib.open_view(&spec(SortColumn::Title, false, "Daylight")).len(), 1);
+}
+
+#[test]
+fn accent_folding_is_unchanged_by_the_japanese_fix() {
+    let lib = library_from(&sample());
+    assert_eq!(lib.open_view(&spec(SortColumn::Title, false, "ebano")).len(), 1);
+    assert_eq!(lib.open_view(&spec(SortColumn::Title, false, "ÉBANO")).len(), 1);
+}
+
 #[test]
 fn refining_a_view_matches_searching_from_scratch() {
     let lib = library_from(&sample());
