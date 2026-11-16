@@ -22,6 +22,7 @@ import { EjectIcon, RecordIcon } from "@/components/icons";
 import type { BeatGrid } from "@/lib/player";
 import { TempoToggle } from "./TempoToggle";
 import { TimeReadouts, type PositionSource } from "./TimeReadouts";
+import type { PressProps } from "./usePress";
 import { CueMarkers, OverviewTempoMarkers } from "./Player";
 import { WaveformDetail } from "./WaveformDetail";
 import { RatingStar } from "@/components/RatingStar";
@@ -59,9 +60,7 @@ export interface SimplePlayerProps {
   /** Written by the frame loop, not rendered. */
   overviewHead: React.RefObject<HTMLSpanElement | null>;
   scrubFill: React.RefObject<HTMLDivElement | null>;
-  onScrubStart: (event: React.PointerEvent<HTMLDivElement>) => void;
-  onScrubMove: (event: React.PointerEvent<HTMLDivElement>) => void;
-  onScrubEnd: (event: React.PointerEvent<HTMLDivElement>) => void;
+  scrubPress: PressProps;
   onEject?: (() => void) | undefined;
   onLoadSelected?: (() => void) | undefined;
   /** Whether the track has a waveform to draw, finished or being drawn. */
@@ -71,7 +70,7 @@ export interface SimplePlayerProps {
 export const SimplePlayer = memo(function SimplePlayer({
   track, deck, shell, armed, droppable, onDragOver, onDrop,
   playing, idle, onToggle, positionSource, total, bpmX100, baseBpmX100, onBpmChange, cues, grid, cuePoint,
-  overviewRef, overview, overviewHead, scrubFill, onScrubStart, onScrubMove, onScrubEnd,
+  overviewRef, overview, overviewHead, scrubFill, scrubPress,
   onEject, onLoadSelected, drawn,
 }: SimplePlayerProps) {
 
@@ -150,10 +149,7 @@ export const SimplePlayer = memo(function SimplePlayer({
             the position bar, which is what the capture draws. */}
         <div
           className={styles.band}
-          onPointerDown={onScrubStart}
-          onPointerMove={onScrubMove}
-          onPointerUp={onScrubEnd}
-          onPointerCancel={onScrubEnd}
+          {...scrubPress}
         >
           <div
             ref={overviewRef}

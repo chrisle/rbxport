@@ -15,6 +15,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { TimeReadouts } from "./TimeReadouts";
+import { usePress, type Press } from "./usePress";
 import { useEventCallback } from "@/store/useEventCallback";
 
 import type { Cue, DeckId, Phrase, RowDto } from "@/ipc/types";
@@ -1397,6 +1398,8 @@ export const Player = memo(function Player({
     playback.seek(action.seekTo ?? cuePoint);
     if (playback.playing) playback.toggle();
   }, [playback, cuePoint]);
+  // Uncaptured, so leaving the button lets go of it as a release does.
+  const cuePress = usePress({ down: holdCue, up: dropCue }, { capture: false });
 
   const seek = seekInPhase;
   const positionSeconds = useCallback(() => positionRef.current, [positionRef]);
@@ -1875,20 +1878,17 @@ export const Player = memo(function Player({
    * The overview is a scrubber: the pointer goes where you put it, and holding
    * it down drags the playhead along the track.
    */
-  const scrubOverview = (event: React.PointerEvent<HTMLDivElement>) => {
-    const element = event.currentTarget;
-    const box = element.getBoundingClientRect();
-    if (box.width <= 0) return;
-    element.setPointerCapture(event.pointerId);
+  const scrubOverview = (press: Press) => {
+    const box = press.currentTarget.getBoundingClientRect();
+    if (box.width <= 0) return false;
     playback.scrubBegin();
-    playback.scrubTo(((event.clientX - box.left) / box.width) * total);
+    playback.scrubTo(((press.clientX - box.left) / box.width) * total);
   };
 
-  const dragOverview = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const box = event.currentTarget.getBoundingClientRect();
+  const dragOverview = (press: Press) => {
+    const box = press.currentTarget.getBoundingClientRect();
     if (box.width <= 0) return;
-    playback.scrubTo(((event.clientX - box.left) / box.width) * total);
+    playback.scrubTo(((press.clientX - box.left) / box.width) * total);
   };
 
   /**
@@ -1899,9 +1899,8 @@ export const Player = memo(function Player({
    */
   const grab = useRef<{ x: number; y: number; at: number } | null>(null);
 
-  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    grab.current = { x: event.clientX, y: event.clientY, at: playback.positionRef.current };
+  const startDrag = (press: Press) => {
+    grab.current = { x: press.clientX, y: press.clientY, at: playback.positionRef.current };
     playback.scrubBegin();
   };
 
@@ -1923,25 +1922,27 @@ export const Player = memo(function Player({
     togglePlay();
   };
 
-  const dragDetail = (event: React.PointerEvent<HTMLDivElement>) => {
+  const dragDetail = (press: Press) => {
     const held = grab.current;
-    if (!held || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const box = event.currentTarget.getBoundingClientRect();
-    playback.scrubTo(held.at + dragSeconds(event.clientX - held.x, box.width, span, total));
+    if (!held) return;
+    const box = press.currentTarget.getBoundingClientRect();
+    playback.scrubTo(held.at + dragSeconds(press.clientX - held.x, box.width, span, total));
   };
 
-  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+  const endDrag = (press: Press, cancelled: boolean) => {
     const held = grab.current;
     grab.current = null;
-    const click = held !== null && event.type === "pointerup" && isClick(event.clientX - held.x, event.clientY - held.y);
+    const click = held !== null && !cancelled && isClick(press.clientX - held.x, press.clientY - held.y);
     // A click is PLAY or CUE, not a move, so it is left where it is. A drag
     // on a locked deck lands on the master's beat: see `inPhase`.
     playback.scrubEnd(!click && phaseLocked && playback.playing ? inPhase : undefined);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
     if (click) clickDetail();
   };
+
+  // Presses, not bare pointer events: see `usePress` for the press WebKit
+  // starts with no `pointerdown`.
+  const overviewPress = usePress({ down: scrubOverview, move: dragOverview, up: endDrag });
+  const detailPress = usePress({ down: startDrag, move: dragDetail, up: endDrag });
 
   // A beat's length, for phrases whose time the grid did not resolve.
   const beatMs = bpmX100 > 0 ? 6_000_000 / bpmX100 : 0;
@@ -2279,9 +2280,7 @@ export const Player = memo(function Player({
         overview={overview}
         overviewHead={overviewHead}
         scrubFill={scrubFill}
-        onScrubStart={scrubOverview}
-        onScrubMove={dragOverview}
-        onScrubEnd={endDrag}
+        scrubPress={overviewPress}
         onEject={onEject}
         onLoadSelected={onLoadSelected}
         drawn={hasWaveform}
@@ -2355,10 +2354,9 @@ export const Player = memo(function Player({
           aria-label="Cue"
           // Held, not clicked: on the cue point the deck plays for as long as
           // the button is down and snaps back when it comes up.
-          onPointerDown={holdCue}
-          onPointerUp={dropCue}
-          onPointerCancel={dropCue}
+          {...cuePress}
           onPointerLeave={dropCue}
+          onMouseLeave={dropCue}
           disabled={playback.idle}
         >
           CUE
@@ -2467,10 +2465,7 @@ export const Player = memo(function Player({
               ref={overviewRef}
               className={styles.overview}
               data-testid="player-overview"
-              onPointerDown={scrubOverview}
-              onPointerMove={dragOverview}
-              onPointerUp={endDrag}
-              onPointerCancel={endDrag}
+              {...overviewPress}
               role="progressbar"
               aria-label="Position"
               aria-valuemin={-5}
@@ -2650,10 +2645,7 @@ export const Player = memo(function Player({
             data-testid="player-detail"
             data-pcm={bars <= 0.5 || undefined}
             onWheel={wheelZoom}
-            onPointerDown={startDrag}
-            onPointerMove={dragDetail}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            {...detailPress}
           >
             <div ref={scroller} className={styles.scroller}>
               {track && hasWaveform ? (
