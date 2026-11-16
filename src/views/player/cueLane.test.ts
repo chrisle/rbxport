@@ -45,6 +45,32 @@ describe("the detail's cue lane", () => {
     expect(px("--s-beat-marker-top") + px("--s-beat-head-h")).toBeGreaterThan(wave);
   });
 
+  it("centres the waveform between the beat markers' head tips (#863)", () => {
+    const height = px("--s-player-detail-h");
+    const waveTop = px("--s-wave-inset-top");
+    const waveBottom = height - px("--s-wave-inset-bottom");
+    const tipTop = px("--s-beat-marker-top");
+    const tipBottom = height - px("--s-beat-marker-bottom");
+    // The heads reach the same distance past the waveform at both ends, so
+    // the waveform's midline is the markers' midline.
+    expect(waveTop - tipTop).toBe(tipBottom - waveBottom);
+    expect((waveTop + waveBottom) / 2).toBe((tipTop + tipBottom) / 2);
+  });
+
+  it("keeps the tempo-change label where it was, under the waveform (#863)", () => {
+    const height = px("--s-player-detail-h");
+    const waveBottom = height - px("--s-wave-inset-bottom");
+    const labelH = 16; // 14px text plus 1px padding
+    const labelTop = height - px("--s-detail-tempo-bottom") - labelH;
+    // Moving the beat markers must not lift the label into the waveform: its
+    // top overlaps the waveform's bottom edge by no more than the 7px it did.
+    expect(px("--s-detail-tempo-bottom")).toBe(7);
+    expect(waveBottom - labelTop).toBeLessThanOrEqual(7);
+    const rule = /\.detailTempo,\s*\.tempoRamp\s*\{[^}]*\}/.exec(readFileSync("src/views/player/Player.module.css", "utf8"));
+    expect(rule?.[0]).toContain("bottom: var(--s-detail-tempo-bottom)");
+    expect(rule?.[0]).not.toContain("--s-beat-marker-bottom");
+  });
+
   it("paints the playhead in the colours rekordbox does", () => {
     // Two device columns of flat colour at 150%: paused and playing.
     expect(token("--c-playhead-armed").toUpperCase()).toBe("#FF0000");
