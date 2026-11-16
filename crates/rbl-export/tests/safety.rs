@@ -418,7 +418,10 @@ fn device_only_tags_and_cue_rows_are_preserved() {
     sync(usb.path(), &[], &[]).unwrap();
     let after = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
     assert_eq!(after.cues, before.cues);
-    assert_eq!(after.my_tags, before.my_tags);
+    // The device's tag stays, renumbered from 0 as OneLibrary has it (#893).
+    let kept = |tags: &[rbl_export::SourceMyTag]| tags.iter().map(|t| (t.id, t.name.clone(), t.parent)).collect::<Vec<_>>();
+    assert_eq!(kept(&after.my_tags), kept(&before.my_tags));
+    assert_eq!(after.my_tags.iter().map(|t| t.seq).collect::<Vec<_>>(), vec![0]);
     assert_eq!(after.tag_memberships, before.tag_memberships);
 }
 /// An export that adds to a stick (Export Playlist, Export Track) leaves

@@ -1270,9 +1270,7 @@ fn export_cancellable_inner(
     }
     let tracks = tracks.as_slice();
     let mut merged_tags = my_tags.to_vec();
-    for tag in &before.my_tags {
-        if !merged_tags.iter().any(|t|t.id==tag.id) { merged_tags.push(tag.clone()); }
-    }
+    merged_tags.extend(snapshot::one_based_device_only_tags(&before.my_tags, my_tags));
     let my_tags = merged_tags.as_slice();
     let playlists = playlists.as_slice();
     let playlist_ids = playlist_ids(playlists, previous.as_ref())?;
@@ -2601,6 +2599,7 @@ fn write_one_library(
     // which is what rekordbox lists; then only the memberships of tags that
     // exist, so a stale membership cannot point at nothing.
     let mut known_tags: BTreeSet<u64> = BTreeSet::new();
+    let positions = snapshot::zero_based_tag_positions(my_tags);
     for tag in my_tags {
         let id = i64::try_from(tag.id).unwrap_or(0);
         if id == 0 {
@@ -2609,7 +2608,7 @@ fn write_one_library(
         builder
             .add_my_tag(
                 id,
-                i64::from(tag.seq),
+                i64::from(positions.get(&tag.id).copied().unwrap_or(0)),
                 &tag.name,
                 i64::from(tag.attribute),
                 i64::try_from(tag.parent).unwrap_or(0),

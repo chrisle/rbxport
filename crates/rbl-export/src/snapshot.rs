@@ -248,7 +248,7 @@ impl Snapshot {
                     .my_tags
                     .iter()
                     .find(|t| t.id == tag.id)
-                    .is_some_and(|old| old != tag)
+                    .is_some_and(|old| old != tag && !renumbered_only(old, tag, &baseline.my_tags, &self.my_tags))
                     && !next.my_tags.contains(tag)
                 {
                     return Err(ExportError::Conflict(format!(
@@ -309,6 +309,101 @@ impl Snapshot {
         Ok(())
     }
 }
+/// The sibling group a My Tag is positioned in: the root categories, or the
+/// tags under one category.
+fn tag_group(tag: &crate::SourceMyTag) -> u64 {
+    if tag.attribute == 1 {
+        0
+    } else {
+        tag.parent
+    }
+}
+
+fn group_min(tags: &[crate::SourceMyTag], group: u64) -> Option<u32> {
+    tags.iter()
+        .filter(|t| tag_group(t) == group)
+        .map(|t| t.seq)
+        .min()
+}
+
+/// Whether `now` is `old` with only its position moved by the one-based to
+/// zero-based shift rekordbox makes when it opens a `OneLibrary` this app
+/// wrote one-based (#893): the same id, name, kind and parent, and every tag
+/// that both readings hold in the group is `1` lower (or higher) than before
+/// while the group starts at 0 on one side and 1 on the other. Anything else,
+/// such as a reorder, still differs.
+fn renumbered_only(
+    old: &crate::SourceMyTag,
+    now: &crate::SourceMyTag,
+    baseline: &[crate::SourceMyTag],
+    current: &[crate::SourceMyTag],
+) -> bool {
+    if old.id != now.id
+        || old.name != now.name
+        || old.attribute != now.attribute
+        || old.parent != now.parent
+    {
+        return false;
+    }
+    let group = tag_group(old);
+    let (Some(base_min), Some(now_min)) = (group_min(baseline, group), group_min(current, group))
+    else {
+        return false;
+    };
+    let shift = i64::from(now_min) - i64::from(base_min);
+    if !matches!((base_min, now_min), (1, 0) | (0, 1)) {
+        return false;
+    }
+    baseline.iter().filter(|t| tag_group(t) == group).all(|t| {
+        current.iter().find(|c| c.id == t.id).is_none_or(|c| {
+            i64::from(c.seq) - i64::from(t.seq) == shift && c.name == t.name && c.parent == t.parent
+        })
+    })
+}
+
+/// The My Tags the stick holds that the library does not, with their
+/// positions in the one-based numbering the library's own tags use, so the
+/// two can be ranked together. A sibling group the stick numbers from 0 is
+/// moved up by one; a group numbered from 1 is as it is.
+pub(crate) fn one_based_device_only_tags(
+    device: &[crate::SourceMyTag],
+    library: &[crate::SourceMyTag],
+) -> Vec<crate::SourceMyTag> {
+    device
+        .iter()
+        .filter(|t| !library.iter().any(|l| l.id == t.id))
+        .map(|t| {
+            let zero_based = group_min(device, tag_group(t)) == Some(0);
+            crate::SourceMyTag {
+                seq: if zero_based {
+                    t.seq.saturating_add(1)
+                } else {
+                    t.seq
+                },
+                ..t.clone()
+            }
+        })
+        .collect()
+}
+
+/// The positions `OneLibrary` writes: consecutive from 0 within each sibling
+/// group (root categories together, each category's tags together), in the
+/// order of the tags' one-based `seq`, then id.
+pub(crate) fn zero_based_tag_positions(tags: &[crate::SourceMyTag]) -> BTreeMap<u64, u32> {
+    let mut groups: BTreeMap<u64, Vec<&crate::SourceMyTag>> = BTreeMap::new();
+    for tag in tags {
+        groups.entry(tag_group(tag)).or_default().push(tag);
+    }
+    let mut out = BTreeMap::new();
+    for members in groups.values_mut() {
+        members.sort_by_key(|t| (t.seq, t.id));
+        for (i, tag) in members.iter().enumerate() {
+            out.insert(tag.id, u32::try_from(i).unwrap_or(u32::MAX));
+        }
+    }
+    out
+}
+
 /// The stick's rows a sync writes afresh from the library: the device ids of
 /// the tracks and playlists its selection names.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -857,4 +952,103 @@ pub fn analysis_stamp(root: &Path, snapshot: &Snapshot) -> Result<BTreeMap<Strin
         }
     }
     Ok(files)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod my_tag_position_tests {
+    use super::*;
+    use crate::SourceMyTag;
+
+    fn tag(id: u64, seq: u32, name: &str, attribute: u8, parent: u64) -> SourceMyTag {
+        SourceMyTag {
+            id,
+            seq,
+            name: name.into(),
+            attribute,
+            parent,
+        }
+    }
+
+    fn tags(base: u32) -> Vec<SourceMyTag> {
+        vec![
+            tag(1, base, "Genre", 1, 0),
+            tag(11, base, "Peak", 0, 1),
+            tag(12, base + 1, "Warm-up", 0, 1),
+        ]
+    }
+
+    fn manifest(my_tags: Vec<SourceMyTag>) -> Manifest {
+        Manifest {
+            baseline: Some(Snapshot {
+                my_tags,
+                ..Default::default()
+            }),
+            ..serde_json::from_str(r#"{"version":1,"written":""}"#).unwrap()
+        }
+    }
+
+    fn check(baseline: Vec<SourceMyTag>, current: Vec<SourceMyTag>) -> Result<()> {
+        // `next` holds none of the stick's tags as they are, so only the
+        // renumbering tolerance can accept the difference.
+        let current = Snapshot {
+            my_tags: current,
+            ..Default::default()
+        };
+        current.check_changes(Some(&manifest(baseline)), &Snapshot::default())
+    }
+
+    #[test]
+    fn a_uniform_shift_either_way_is_no_conflict() {
+        assert!(check(tags(1), tags(0)).is_ok());
+        assert!(check(tags(0), tags(1)).is_ok());
+    }
+
+    #[test]
+    fn a_shift_with_a_reorder_rename_or_move_is_a_conflict() {
+        let mut reordered = tags(0);
+        reordered[1].seq = 1;
+        reordered[2].seq = 0;
+        let mut renamed = tags(0);
+        renamed[1].name = "Other".into();
+        let mut moved = tags(0);
+        moved[2].parent = 2;
+        for current in [reordered, renamed, moved] {
+            assert!(check(tags(1), current).is_err());
+        }
+    }
+
+    #[test]
+    fn a_move_by_more_than_the_base_is_a_conflict() {
+        assert!(check(tags(1), tags(3)).is_err());
+    }
+
+    #[test]
+    fn positions_are_consecutive_from_zero_per_group() {
+        let got = zero_based_tag_positions(&[
+            tag(2, 9, "B", 1, 0),
+            tag(1, 4, "A", 1, 0),
+            tag(11, 7, "x", 0, 1),
+            tag(21, 7, "y", 0, 2),
+        ]);
+        assert_eq!(
+            got.into_iter().collect::<Vec<_>>(),
+            vec![(1, 0), (2, 1), (11, 0), (21, 0)]
+        );
+    }
+
+    #[test]
+    fn device_only_tags_from_a_zero_based_group_join_the_one_based_numbering() {
+        let device = vec![
+            tag(11, 0, "Peak", 0, 1),
+            tag(13, 1, "Device", 0, 1),
+            tag(31, 1, "One-based", 0, 3),
+        ];
+        let library = vec![tag(11, 1, "Peak", 0, 1)];
+        let got = one_based_device_only_tags(&device, &library);
+        assert_eq!(
+            got.iter().map(|t| (t.id, t.seq)).collect::<Vec<_>>(),
+            vec![(13, 2), (31, 1)]
+        );
+    }
 }
