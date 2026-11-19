@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resizedBox } from "./MissingFileManager";
+import { draggedBox, resizedBox } from "./MissingFileManager";
 
 const view = { width: 1600, height: 1000 };
 const start = { left: 400, top: 200, width: 608, height: 560 };
@@ -25,5 +25,30 @@ describe("resizedBox", () => {
   it("stays inside the app's window", () => {
     expect(resizedBox(start, "e", 2000, 0, { width: 1100, height: 1000 })).toEqual({ ...start, width: 700 });
     expect(resizedBox(start, "w", -2000, 0, view)).toEqual({ ...start, left: 0, width: 1008 });
+  });
+});
+
+describe("draggedBox", () => {
+  it("moves the window without changing its size", () => {
+    expect(draggedBox(start, 50, 30, view)).toEqual({ ...start, left: 450, top: 230 });
+    expect(draggedBox(start, -100, -50, view)).toEqual({ ...start, left: 300, top: 150 });
+  });
+
+  it("keeps the title bar reachable instead of letting the window go fully off-screen", () => {
+    // Dragged far up: the top edge, where the title bar is, stops at the viewport's top.
+    expect(draggedBox(start, 0, -5000, view)).toEqual({ ...start, top: 0 });
+    // Dragged far down: at least TITLE_MIN_VISIBLE (40px) of the window stays visible at the bottom.
+    expect(draggedBox(start, 0, 5000, view)).toEqual({ ...start, top: 960 });
+    // Dragged far left: at least 40px of the title bar's right end stays visible.
+    expect(draggedBox(start, -5000, 0, view)).toEqual({ ...start, left: -568 });
+    // Dragged far right: at least 40px of the title bar's left end stays visible.
+    expect(draggedBox(start, 5000, 0, view)).toEqual({ ...start, left: 1560 });
+  });
+
+  it("keeps a consistent position whether resize or drag runs first", () => {
+    const resizedThenDragged = draggedBox(resizedBox(start, "se", 100, 50, view), 20, 10, view);
+    const draggedThenResized = resizedBox(draggedBox(start, 20, 10, view), "se", 100, 50, view);
+    expect(resizedThenDragged).toEqual({ left: 420, top: 210, width: 708, height: 610 });
+    expect(draggedThenResized).toEqual(resizedThenDragged);
   });
 });
