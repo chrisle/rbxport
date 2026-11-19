@@ -2934,20 +2934,25 @@ pub async fn deck_seek<R: tauri::Runtime>(
 
 /// Moves a deck's playhead by `by_ms` from where the engine has it.
 #[tauri::command]
-pub async fn deck_move(
+pub async fn deck_move<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     by_ms: f64,
 ) -> AppResult<()> {
     if let Some(engine) = player.opened() {
         engine.move_ms(crate::player::deck_of(&deck), by_ms);
+        // So the interface sees where it landed even while paused, when no
+        // tick is running.
+        crate::player::start_ticker(&app);
     }
     Ok(())
 }
 
 /// Count grid beats from the engine head when the command arrives.
 #[tauri::command]
-pub async fn deck_move_grid(
+pub async fn deck_move_grid<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     grid_times_ms: Vec<f64>,
@@ -2955,6 +2960,8 @@ pub async fn deck_move_grid(
 ) -> AppResult<()> {
     if let Some(engine) = player.opened() {
         engine.move_grid_beats(crate::player::deck_of(&deck), &grid_times_ms, beats);
+        // As `deck_seek`: a paused deck has no tick running to report the move.
+        crate::player::start_ticker(&app);
     }
     Ok(())
 }
