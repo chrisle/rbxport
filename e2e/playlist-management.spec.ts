@@ -723,6 +723,17 @@ test("the order cannot be dragged where the rows are not the playlist's own", as
   expect(await titles(page)).toEqual(before);
 });
 
+test("an intelligent playlist's rows have no order of their own to drag", async ({ page }) => {
+  await open(page);
+  await item(page, "Fresh 128s").click();
+  await expect(page.getByTestId("browser-title")).toContainText("Fresh 128s");
+  await expect(rows(page).first()).toBeVisible();
+  const before = await titles(page);
+  await dragRow(page, 0, 3);
+  await expect(page.getByRole("contentinfo")).not.toContainText("Playlist reordered.");
+  expect(await titles(page)).toEqual(before);
+});
+
 test("the collection has no order of its own to drag", async ({ page }) => {
   await open(page);
   await page.getByRole("treeitem", { name: /All Tracks/ }).click();
@@ -761,6 +772,35 @@ test("a playlist dragged down the tree takes the place it was dropped at", async
     .toBe(before.indexOf(target));
   // Nothing was lost: the same nodes, in a different order.
   expect([...(await treeNames(page))].sort()).toEqual([...before].sort());
+});
+
+test("an intelligent playlist can be dropped between playlists, not only at the end", async ({ page }) => {
+  await open(page);
+  const before = await treeNames(page);
+  const from = before.indexOf("Fresh 128s");
+  expect(from).toBeGreaterThan(0);
+  // Three siblings above it; the top edge of the first one is the place.
+  const target = before[from - 3]!;
+
+  const dst = item(page, target);
+  await item(page, "Fresh 128s").dragTo(dst, { targetPosition: { x: 40, y: 2 } });
+
+  await expect(page.getByRole("contentinfo")).toContainText("Moved Fresh 128s.");
+  await expect
+    .poll(async () => (await treeNames(page)).indexOf("Fresh 128s"))
+    .toBe(from - 3);
+
+  // And a playlist can be dropped below an intelligent one.
+  const after = await treeNames(page);
+  const smartAt = after.indexOf("Fresh 128s");
+  const last = after[smartAt + 3]!;
+  const smart = item(page, "Fresh 128s");
+  const box = await smart.boundingBox();
+  if (!box) throw new Error("the intelligent playlist is not on screen");
+  await item(page, last).dragTo(smart, { targetPosition: { x: 40, y: box.height - 2 } });
+  await expect
+    .poll(async () => (await treeNames(page)).indexOf(last))
+    .toBe(smartAt + 1);
 });
 
 test("a playlist dropped into a folder goes inside it", async ({ page }) => {
