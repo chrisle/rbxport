@@ -1890,6 +1890,7 @@ function AppBody() {
    */
   const canReorder =
     spec.source.kind === "playlist" &&
+    selectedNode?.kind !== "smartPlaylist" &&
     !readOnly &&
     sortState.column === "trackNo" &&
     query === "" &&

@@ -569,7 +569,7 @@ export const TreeView = memo(function TreeView({
       // Its own subtree is not a destination, and neither is anything that is
       // not part of the playlists.
       if (carriedIds?.has(node.id) === true) return;
-      if (node.kind !== "playlist" && node.kind !== "folder") return;
+      if (node.kind !== "playlist" && node.kind !== "smartPlaylist" && node.kind !== "folder") return;
       setMoveTo((at) => (at?.node.id === node.id && at.edge === edge ? at : { node, edge }));
     },
     [carriedIds],
