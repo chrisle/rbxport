@@ -304,11 +304,72 @@ fn a_negative_analysed_bits_on_a_track_the_stick_keeps_does_not_stop_the_sync() 
     let report = sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap();
     assert_eq!(report.tracks, 3, "the stick still holds track 3");
     let kept = device_id(dest.path(), 3);
-    // The flags keep their low byte, 0xE9, with the "analysing" bit 64
-    // cleared as every exported row has it.
-    assert_eq!(analysed_bits(dest.path(), kept), 0xE9 & !64);
+    // Reading a signed value preserves its byte; exporting independently
+    // keeps only the six bits accepted by the device-row writer.
+    assert_eq!(analysed_bits(dest.path(), kept), 0x29);
     assert!(rbl_export::verify_databases(dest.path()).unwrap().errors.is_empty());
     sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap();
+}
+
+#[test]
+fn analysis_flags_are_normalized_on_fresh_repeat_and_metadata_only_exports() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    let mut t = track(src.path(), 1, 0);
+    t.metadata.analysed = 0xe9;
+    let source_audio = std::fs::read(&t.source_path).unwrap();
+    let source_analysis = t.analysis.clone();
+    sync_to(dest.path(), std::slice::from_ref(&t), &[], DB_ID).unwrap();
+    let id = device_id(dest.path(), 1);
+    assert_eq!(analysed_bits(dest.path(), id), 41);
+    let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+    let exported_audio = dest.path().join(manifest.tracks[0].audio.trim_start_matches('/'));
+    let stamp = std::fs::metadata(&exported_audio).unwrap().modified().unwrap();
+    let repeat = sync_to(dest.path(), std::slice::from_ref(&t), &[], DB_ID).unwrap();
+    assert!(repeat.up_to_date);
+    assert_eq!(repeat.bytes_copied, 0);
+    // A changed source flag byte updates metadata without copying the media.
+    t.metadata.analysed = 0xa9;
+    let metadata = sync_to(dest.path(), std::slice::from_ref(&t), &[], DB_ID).unwrap();
+    assert!(!metadata.up_to_date);
+    assert_eq!(metadata.bytes_copied, 0);
+    assert_eq!(analysed_bits(dest.path(), id), 41);
+    assert_eq!(std::fs::metadata(&exported_audio).unwrap().modified().unwrap(), stamp);
+    assert_eq!(std::fs::read(&exported_audio).unwrap(), source_audio);
+    assert_eq!(std::fs::read(&t.source_path).unwrap(), source_audio);
+    assert_eq!(t.analysis, source_analysis);
+    assert_eq!(t.metadata.analysed, 0xa9);
+    let snapshot = Snapshot::read(dest.path()).unwrap();
+    assert_eq!(snapshot.legacy, snapshot.one, "both libraries retain the same browse records");
+}
+
+#[test]
+fn carried_and_missing_source_tracks_normalize_flags_without_recopying_audio() {
+    for missing_source in [false, true] {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let (tracks, playlists) = exported_elsewhere(src.path(), dest.path(), 3, DB_ID);
+        let id = device_id(dest.path(), 3);
+        set_analysed_bits(dest.path(), id, 0xa9);
+        let files = audio_files(dest.path());
+        let before: Vec<_> = files.iter().map(|p| (std::fs::read(p).unwrap(), std::fs::metadata(p).unwrap().modified().unwrap())).collect();
+        if missing_source { std::fs::remove_file(&tracks[2].source_path).unwrap(); }
+        let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
+        let report = if missing_source {
+            sync_to(dest.path(), &tracks, &playlists, DB_ID).unwrap()
+        } else {
+            sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap()
+        };
+        assert_eq!(report.tracks, 3);
+        assert_eq!(report.bytes_copied, 0);
+        assert_eq!(analysed_bits(dest.path(), id), 41, "missing source: {missing_source}");
+        assert_eq!(audio_files(dest.path()), files);
+        for (p, (bytes, stamp)) in files.iter().zip(before) {
+            assert_eq!(std::fs::read(p).unwrap(), bytes);
+            assert_eq!(std::fs::metadata(p).unwrap().modified().unwrap(), stamp);
+        }
+        let snapshot = Snapshot::read(dest.path()).unwrap();
+        assert_eq!(snapshot.legacy, snapshot.one);
+        assert!(rbl_export::verify_databases(dest.path()).unwrap().errors.is_empty());
+    }
 }
 
 #[test]

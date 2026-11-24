@@ -369,7 +369,9 @@ impl Builder {
         self.conn.execute(
             "UPDATE content SET discNo=?2,bitDepth=?3,djPlayCount=?4,analysedBits=?5,isHotCueAutoLoadOn=?6,dateCreated=?7,isrc=?8,fileType=?9,contentLink=?10 WHERE content_id=?1",
             params![track.content_id,track.metadata.disc_number,track.metadata.bit_depth,track.metadata.play_count,
-                track.metadata.analysed & !64,track.metadata.hot_cue_auto_load,track.metadata.date_created,track.metadata.isrc,track.file_type,
+                // The device export row keeps only the low six flags:
+                // rekordbox 7.2.19 export_track_data_to_db, 0x1009b84f8.
+                track.metadata.analysed & 0x3f,track.metadata.hot_cue_auto_load,track.metadata.date_created,track.metadata.isrc,track.file_type,
                 // rekordbox reads the analysis flags here as whether the
                 // stick's analysis is its own version's (#640); an unknown
                 // link stays empty, as it always was.

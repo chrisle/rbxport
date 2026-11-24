@@ -182,6 +182,26 @@ fn the_property_row_reports_what_was_written() {
 }
 
 #[test]
+fn exported_analysis_flags_keep_only_the_low_six_bits_without_changing_the_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("exportLibrary.db");
+    let mut builder = Builder::create(&path).unwrap();
+    for flags in [0, 0x29, 0x69, 0xa9, 0xe9, 0xffff] {
+        let source = Track { content_id: i64::from(flags) + 1,
+            metadata: rbl_core::ExportMetadata { analysed: flags, ..Default::default() },
+            ..Default::default() };
+        builder.add_track(&source).unwrap();
+        assert_eq!(source.metadata.analysed, flags);
+    }
+    builder.finish("fixture", "2026-11-24", 0).unwrap();
+    let db = ExportLibrary::open_read_only(&path).unwrap();
+    for (flags, expected) in [(0, 0), (0x29, 41), (0x69, 41), (0xa9, 41), (0xe9, 41), (0xffff, 63)] {
+        let actual: u32 = db.connection().query_row("SELECT analysedBits FROM content WHERE content_id=?1", [flags + 1], |r| r.get(0)).unwrap();
+        assert_eq!(actual, expected, "source flags {flags:#x}");
+    }
+}
+
+#[test]
 fn the_browse_menus_match_the_reference_export() {
     let (_dir, path) = built();
     let db = ExportLibrary::open_read_only(&path).unwrap();
