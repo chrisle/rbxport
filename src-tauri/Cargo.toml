@@ -106,18 +106,19 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2-foundation = { version = "0.3", default-features = false, features = [
   "std", "NSAppleEventDescriptor", "NSArray", "NSClassDescription", "NSDictionary", "NSEnumerator", "NSObjCRuntime", "NSScriptClassDescription",
   "NSScriptCommand", "NSScriptCommandDescription", "NSScriptObjectSpecifiers", "NSScriptStandardSuiteCommands",
-  "NSString", "NSURL", "NSValue",
+  "NSString", "NSURL", "NSValue", "NSDate", "NSDateFormatter", "NSFormatter", "NSLocale", "NSCalendar", "NSTimeZone",
 ] }
 
 [target.'cfg(windows)'.dependencies]
 midir = "0.11"
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_Foundation"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_Foundation", "Win32_Globalization", "Win32_System_Time"] }
 # The paths of files dropped from Explorer (`file_drop.rs`): WebView2 hands
 # them to the host for `File`s the page posts. The versions Tauri's wry uses.
 webview2-com = "0.38"
 windows-core = "0.61"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 # ALSA sequencer backend: the XDJ-RX3's USB-MIDI output, for its Link Export
 # activation lease (`rx3_link.rs`).
 midir = "0.11"

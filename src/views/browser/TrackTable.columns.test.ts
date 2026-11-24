@@ -11,6 +11,7 @@ describe("browser detail columns", () => {
       genre: "House", label: "Label", comment: "Comment", bpmX100: 12800,
       key: "Am", durationSec: 240, rating: 5, analysed: 1,
       dateAdded: "2026-09-24", releaseDate: "2026-09-24", artworkHue: 0,
+      dateLabels: { dateAdded: "24.09.26", releaseDate: "24.09.26", dateCreated: "24.09.26", fileCreated: "24.09.26" },
       hasArtwork: false, fileName: "track.mp3",
       memoryCues: [],
       hotCues: [["A", 1000, null]],
@@ -31,16 +32,22 @@ describe("browser detail columns", () => {
   });
 
   it("prints the file's creation day, and nothing where the file system has none (#308)", () => {
-    const row = { extra: { fileCreated: new Date(2026, 9, 12, 23, 30).getTime() / 1000 } } as unknown as RowDto;
-    expect(cellText(row, "fileCreated")).toBe("10/12/26");
-    expect(cellText({ ...row, extra: { fileCreated: null } }, "fileCreated")).toBe("");
-    expect(cellText({ ...row, extra: {} }, "fileCreated")).toBe("");
+    const row = { dateLabels: { fileCreated: "12.10.26" }, extra: { fileCreated: new Date(2026, 9, 12, 23, 30).getTime() / 1000 } } as unknown as RowDto;
+    expect(cellText(row, "fileCreated")).toBe("12.10.26");
+    expect(cellText({ ...row, dateLabels: { fileCreated: "" }, extra: { fileCreated: null } }, "fileCreated")).toBe("");
+    expect(cellText({ ...row, dateLabels: {}, extra: {} }, "fileCreated")).toBe("");
   });
 
   it("prints VBR for a bitrate the library holds at zero, and nothing for one it did not send", () => {
     const row = { extra: { bitrate: 0 } } as unknown as RowDto;
     expect(cellText(row, "bitrate")).toBe("VBR");
     expect(cellText({ ...row, extra: { bitrate: 256 } }, "bitrate")).toBe("256 kbps");
-    expect(cellText({ ...row, extra: {} }, "bitrate")).toBe("");
+    expect(cellText({ ...row, dateLabels: {}, extra: {} }, "bitrate")).toBe("");
   });
 });
+
+ it("uses native date labels verbatim and leaves an unlabeled startup day blank", () => {
+   const row = { dateAdded: "2025-03-04", dateLabels: { dateAdded: "04.03.25 custom" } } as unknown as RowDto;
+   expect(cellText(row, "dateAdded")).toBe("04.03.25 custom");
+   expect(cellText({ ...row, dateLabels: {} }, "dateAdded")).toBe("");
+ });

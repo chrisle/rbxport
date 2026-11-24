@@ -1403,6 +1403,7 @@ fn row_dto(row: &DeviceRow) -> RowDto {
         analysed: u8::from(row.analysed),
         date_added: row.date_added.clone(),
         release_date: String::new(),
+        date_labels: std::collections::BTreeMap::new(),
         hot_cues: hot.into_iter().map(|(_, cue)| cue).collect(),
         memory_cues: memory.iter().map(|cue| cue.position_ms).collect(),
         memory_cue_colours,

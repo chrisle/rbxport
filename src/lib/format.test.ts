@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatListTotals, formatShortDate, formatStatusSize, formatStatusTime, statusBarListText } from "./format";
 
@@ -129,4 +130,27 @@ describe("statusBarListText", () => {
     const de = (text: string) => ({ Selected: "Gewählt", Tracks: "Tracks" })[text] ?? text;
     expect(statusBarListText({ picked: true, selected: 5, totals }, de)).toBe("Gewählt: 5 Tracks");
   });
+});
+
+describe("browser mock system short dates", () => {
+  it("uses the short style's year width and padding instead of forcing US or numeric fields", () => {
+    expect(formatShortDate("2025-03-04", "en-GB")).toBe("04/03/2025");
+    expect(formatShortDate("2025-03-04", "en-US")).toBe("3/4/25");
+    expect(formatShortDate("2025-03-04", "de-DE")).toBe("04.03.25");
+  });
+  it("refuses invalid calendar days instead of rolling or printing them", () => {
+    for (const invalid of ["2025-02-29", "2024-02-30", "2025-00-01", "2025-13-01", "0000-01-01"]) {
+      expect(formatShortDate(invalid, "en-GB")).toBe("");
+    }
+    expect(formatShortDate("2024-02-29 23:00:00 +00:00", "en-GB")).toBe("29/02/2024");
+  });
+});
+
+it("keeps stored days stable while epoch days follow UTC+14 and UTC-11", () => {
+  const module = new URL("./format.ts", import.meta.url).href;
+  const script = `import { formatShortDate, formatEpochDate } from ${JSON.stringify(module)}; console.log(JSON.stringify([formatShortDate("2025-03-04 00:15:00 +14:00", "en-GB"), formatEpochDate(Date.UTC(2025,2,4,0,15)/1000,"en-GB")]));`;
+  for (const [zone, expected] of [["Pacific/Kiritimati", "04/03/2025"], ["Pacific/Pago_Pago", "03/03/2025"]]) {
+    const result = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { env: { ...process.env, TZ: zone }, encoding: "utf8" });
+    expect(JSON.parse(result)).toEqual(["04/03/2025", expected]);
+  }
 });

@@ -8,6 +8,7 @@
 pub mod appimage_wayland;
 mod windowfit;
 mod file_drop;
+mod system_dates;
 mod file_drag;
 mod startup;
 mod screen_cache;

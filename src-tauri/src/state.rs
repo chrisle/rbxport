@@ -1098,6 +1098,7 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
                 analysed: library.analysed.get(index).copied().unwrap_or(0),
                 date_added: library.date_added.get(index).to_owned(),
                 release_date: library.release_date.get(index).to_owned(),
+                date_labels: std::collections::BTreeMap::new(),
                 hot_cues: hot_cues_in_slot_order(library, row),
                 memory_cues: library.cues_of(row).iter().filter(|cue| cue.is_memory()).map(|cue| cue.position_ms).collect(),
                 memory_cue_colours: memory_cue_colours(library, row),

@@ -224,7 +224,7 @@ export function sanitiseSession(value: unknown): Session {
     subOpen: raw.subOpen === true,
     filterOpen: raw.filterOpen === true,
     tree: records<TreeNode>(raw.tree, SEEDED_NODES),
-    rows: records<RowDto>(raw.rows, SEEDED_ROWS),
+    rows: records<RowDto>(raw.rows, SEEDED_ROWS).map(({ dateLabels: _oldLocale, ...row }) => row),
     count:
       typeof raw.count === "number" && Number.isFinite(raw.count) && raw.count >= 0
         ? Math.round(raw.count)

@@ -6,7 +6,7 @@
  * take.
  */
 import type { RowDto, SelectionDetails, TrackDetails, TrackField } from "@/ipc/types";
-import { formatBitrate, formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
+import { formatBitrate, formatBpm, formatBytes, formatDuration } from "@/lib/format";
 
 /** A label and the text beside it. */
 export interface Fact {
@@ -71,7 +71,7 @@ export function summaryFacts(row: RowDto, details: TrackDetails | null): Fact[] 
     { label: "Time", value: formatDuration(d?.durationSec ?? row.durationSec) },
     { label: "File Type", value: file?.type ?? "" },
     { label: "Size", value: file?.size ?? "" },
-    { label: "Date Created", value: d ? formatShortDate(d.dateCreated) : "" },
+    { label: "Date Created", value: d?.dateCreatedLabel ?? "" },
     { label: "Sample Rate", value: file?.sampleRate ?? "" },
     { label: "Bitrate", value: file?.bitrate ?? "" },
     { label: "DJ Play Count", value: d ? String(d.playCount) : "" },

@@ -406,6 +406,34 @@ fn a_full_page_stays_inside_the_ipc_response_budget() {
 }
 
 #[test]
+fn requested_system_date_labels_share_the_row_and_info_response_without_rewriting_dates() {
+    let s = shell_prepared(Shape::default(), |_, location| {
+        let db = Db::open(location.clone(), OpenMode::ReadWrite).unwrap();
+        db.connection().execute("UPDATE djmdContent SET StockDate='2025-03-04 23:59:00 -11:00', ReleaseDate='2025-03-04', DateCreated='2025-03-04'", []).unwrap();
+    });
+    let (view, _) = s.open(collection_spec());
+    let plain = run(commands::fetch_rows(s.state(), view, 0, 2, None)).unwrap();
+    assert!(plain.iter().all(|row| row.date_labels.is_empty()));
+    let columns = ["dateAdded", "releaseDate", "dateCreated", "fileCreated", "unknownDate"].map(str::to_owned).to_vec();
+    let page = run(commands::fetch_rows(s.state(), view, 0, 2, Some(columns))).unwrap();
+    for row in &page {
+        assert_eq!(row.date_labels.len(), 4);
+        assert_ne!(row.date_labels["dateAdded"], "");
+        assert_eq!(row.date_labels["dateAdded"], row.date_labels["releaseDate"]);
+        assert_eq!(row.date_labels["dateAdded"], row.date_labels["dateCreated"]);
+        assert_eq!(row.date_labels["fileCreated"], "", "fixture audio does not exist");
+        assert_eq!(row.date_added, "2025-03-04 23:59:00 -11:00");
+        assert_eq!(row.release_date, "2025-03-04");
+    }
+    let info = run(details::track_details(s.state(), page[0].id.clone())).unwrap();
+    assert_eq!(info.date_created, "2025-03-04");
+    assert_eq!(info.date_created_label, page[0].date_labels["dateCreated"]);
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let stored: (String, String, String) = db.connection().query_row("SELECT StockDate, ReleaseDate, DateCreated FROM djmdContent WHERE ID=?1", [&page[0].id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+    assert_eq!(stored, ("2025-03-04 23:59:00 -11:00".into(), "2025-03-04".into(), "2025-03-04".into()));
+}
+
+#[test]
 fn visible_detail_columns_are_added_to_browser_pages() {
     let s = shell();
     let (view, _) = s.open(collection_spec());
