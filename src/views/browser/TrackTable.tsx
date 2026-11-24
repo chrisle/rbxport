@@ -1925,6 +1925,18 @@ export const TrackTable = memo(function TrackTable({
     return true;
   };
   useCommands({
+    addToPlaylist: ({ target }) => {
+      const destinations = spec.source.kind === "device" ? deviceMenu?.playlists : playlists;
+      const run = spec.source.kind === "device" ? deviceMenu?.onAdd : onAddToPlaylist;
+      if (!target || !run || readOnly || deviceMenu?.busy || selection.ids.size === 0 || !destinations?.some(item => item.id === target)) return false;
+      run(target, [...selection.ids]);
+      return true;
+    },
+    exportTrack: ({ target }) => {
+      if (!target || !onExportTrack || spec.source.kind === "device" || hasLooseId(selection.ids) || selection.ids.size === 0 || !devices.some(item => item.id === target)) return false;
+      onExportTrack(target, [...selection.ids]);
+      return true;
+    },
     importToCollection: onSelection(onImportToCollection),
     analysisLockOn: onSelection(onAnalysisLock && ((ids) => onAnalysisLock(ids, true))),
     analysisLockOff: onSelection(onAnalysisLock && ((ids) => onAnalysisLock(ids, false))),
@@ -1952,7 +1964,7 @@ export const TrackTable = memo(function TrackTable({
   // What the native Track menu needs to grey its items, kept current.
   useEffect(() => {
     if (spec.source.kind === "device") {
-      publishListMenuState(listScope, { source: "device", selected: selection.ids.size, rows: [], loose: false });
+      publishListMenuState(listScope, { source: "device", selected: selection.ids.size, rows: [], loose: false, playlists: deviceMenu?.playlists, busy: deviceMenu?.busy });
       return;
     }
     const rows = selectedRows().map((row) => ({ missing: row.missing === true }));
@@ -1960,9 +1972,9 @@ export const TrackTable = memo(function TrackTable({
       source: spec.source.kind,
       selected: selection.ids.size,
       rows,
-      loose: hasLooseId(selection.ids),
+      loose: hasLooseId(selection.ids), playlists, devices,
     });
-  }, [listScope, spec.source.kind, selection.ids, view.token, selectedRows]);
+  }, [listScope, spec.source.kind, selection.ids, view.token, selectedRows, playlists, devices, deviceMenu]);
   useEffect(() => () => publishListMenuState(listScope, null), [listScope]);
 
   // Whether the Delete key speaks to this list: rekordbox's list hears it
@@ -2499,7 +2511,7 @@ export const TrackTable = memo(function TrackTable({
           context={{ inPlaylist: deviceMenu.inPlaylist, hasFile: true, readOnly: readOnly || deviceMenu.busy }}
           onChoose={(action) => {
             const ids = [...selection.ids];
-            if (action.startsWith("deviceAddToPlaylist:")) deviceMenu.onAdd(action.slice("deviceAddToPlaylist:".length), ids);
+            if (action.startsWith("deviceAddToPlaylist:")) runCommand("addToPlaylist", { scope: listScope, target: action.slice("deviceAddToPlaylist:".length) });
             else if (action === "removeFromPlaylist") deviceMenu.onRemove(ids);
           }}
           onClose={() => setTrackMenu(null)}
@@ -2524,11 +2536,11 @@ export const TrackTable = memo(function TrackTable({
           onChoose={(action) => {
             const ids = [...selection.ids];
             if (action.startsWith("addToPlaylist:")) {
-              onAddToPlaylist?.(action.slice("addToPlaylist:".length), ids);
+              runCommand("addToPlaylist", { scope: listScope, target: action.slice("addToPlaylist:".length) });
               return;
             }
             if (action.startsWith("exportTrack:")) {
-              onExportTrack?.(action.slice("exportTrack:".length), ids);
+              runCommand("exportTrack", { scope: listScope, target: action.slice("exportTrack:".length) });
               return;
             }
             switch (action) {

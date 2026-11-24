@@ -96,8 +96,9 @@ The shell keeps the states (`set_menu_enabled`).
 | Locate track loaded on deck (`locateLoaded`) | command + L | b139 | no | key; Track › Locate track loaded on deck (#430) | TrackTable (main browser), none |
 | Show in Finder (`showInFinder`) | command + R (rbxport default) | 400d | Track › Show in Finder | key; list context menu; Track menu | TrackTable, `main`/`sub` |
 | Renumber Track Order (`renumberTrackOrder`) | unbound | 500e | Playlist › Renumber Track Order | key once bound; column header menu; Playlist › Renumber Track Order (#513) | TrackTable, `main`/`sub` |
-| Import To Collection, Analysis Lock On/Off, Reload Tag, Remove from Collection, Auto Relocate, Relocate (`importToCollection`, `analysisLockOn`, `analysisLockOff`, `reloadTag`, `removeFromCollection`, `autoRelocate`, `relocate`) | unbound, not in the Keyboard pane | 400f, 4012, 4013, 4003, 400b, 4014, 400e | Track › the same names | list context menu; Track menu (#513) | TrackTable, `main`/`sub` |
-| Create New Playlist / Intelligent Playlist / Folder, Delete Playlist, Export a playlist to a file (*.txt / *.m3u8) (`createPlaylist`, `createIntelligentPlaylist`, `createFolder`, `deletePlaylist`, `exportPlaylistTxt`, `exportPlaylistM3u8`) | unbound, not in the Keyboard pane | 500a-500c, 5004, 5005, 5006 | Playlist › the same names | Playlist menu (#513), on the selected node; the tree menu calls the same handlers on the node it opened on | TreeView, `main`/`sub` |
+| Import To Collection, Analysis Lock On/Off, Reload Tag, Remove from Collection, Auto Relocate, Relocate (`importToCollection`, `analysisLockOn`, `analysisLockOff`, `reloadTag`, `removeFromCollection`, `autoRelocate`, `relocate`) | unbound in Export; configurable in Keyboard | 400f, 4012, 4013, 4003, 400b, 4014, 400e | Track › the same names | list context menu; Track menu (#513) | TrackTable, `main`/`sub` |
+| Create New Playlist / Intelligent Playlist / Folder, Delete Playlist, Export a playlist to a file (*.txt / *.m3u8) (`createPlaylist`, `createIntelligentPlaylist`, `createFolder`, `deletePlaylist`, `exportPlaylistTxt`, `exportPlaylistM3u8`) | unbound in Export; configurable in Keyboard | 500a-500c, 5004, 5005, 5006 | Playlist › the same names | Playlist menu (#513), on the selected node; the tree menu calls the same handlers on the node it opened on | TreeView, `main`/`sub` |
+| Import Playlist (`importPlaylist`) | unbound in Export; configurable in Keyboard | 5009 | Playlist › Import Playlist | key once bound; native menu; device playlist context menu | TreeView, `main`/`sub` |
 | Sort Items (`sortItems`) | unbound | 500d | Playlist › Sort Items | key once bound; tree context menu on a folder or the Playlists heading (#443); native Playlist menu (#513) | App (the folder selected in the tree), none |
 | Volume, Volume Down (`volumeUp`, `volumeDown`) | command + F12, command + F11 | 3003, 3004 | no | key; the master knob sets the level directly | App, none |
 | Mute (`mute`) | command + F10 | 3005 | no | key | App, none |
@@ -161,8 +162,17 @@ sound apply to an empty deck too.
   normal step per repeat. Holding the on-screen button uses the larger held
   step. This predates #431 and was kept as it was. [UNKNOWN] What a held key
   does in rekordbox.
-- The remaining Track and Playlist submenu and import/export items are tracked
-  in #513; Playlist › Sort Items uses the shared command from #443.
+- Track Add To Playlist / Export Track and Playlist Export Playlist use live
+  destinations from the focused browser. Import Playlist acts on a selected
+  device playlist. Their native and context entries run the same guarded
+  commands; removed destinations are refused. Dynamic destination commands
+  have no invented destination-picker shortcut. The established static
+  Track/Playlist commands are configurable in Keyboard, unbound in Export;
+  Performance presets keep their existing source-derived keys.
+- Native menu state and language-rebuild acceptance on macOS, Windows and
+  Linux remains separate from descriptor, fixture and browser-mock coverage.
+  Root Delete / root or folder file-export reference questions remain tracked
+  in #513. Cloud and sharing commands remain excluded.
 - [UNKNOWN] When rekordbox greys Track › Analyze Track
   (`BrowseBasicView::isActiveCommand` @0x1003153cc passes the question on
   to the list and tree viewers). RBXport's item is always enabled, and with

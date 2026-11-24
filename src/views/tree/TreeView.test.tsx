@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TreeNode } from "@/ipc/types";
+import { runCommand } from "@/lib/commands";
 import { TreeView } from "./TreeView";
 
 declare global {
@@ -105,4 +106,35 @@ describe("TreeView playlist context export", () => {
     act(() => { stick?.click(); });
     expect(onExport).toHaveBeenCalledExactlyOnceWith(clicked, "/Volumes/DJ STICK");
   });
+});
+
+
+it("native device import uses the selected browser row and refuses stale context rows", () => {
+  const imported = vi.fn();
+  act(() => root.render(<TreeView nodes={[playlist]} selectedId={playlist.id} onSelect={() => {}} onDeviceImport={imported} side="sub" />));
+  act(() => { expect(runCommand("importPlaylist", { scope: "sub" })).toBe(true); });
+  expect(imported).toHaveBeenCalledExactlyOnceWith(playlist);
+  act(() => { expect(runCommand("importPlaylist", { scope: "sub", subject: "deleted-row" })).toBe(false); });
+  expect(imported).toHaveBeenCalledTimes(1);
+});
+
+it("refuses device import while library protection or a device job blocks the same context action", () => {
+  const imported = vi.fn();
+  for (const guard of [{ readOnly: true }, { deviceBusy: true }]) {
+    act(() => root.render(<TreeView nodes={[playlist]} selectedId={playlist.id} onSelect={() => {}} onDeviceImport={imported} {...guard} />));
+    act(() => { expect(runCommand("importPlaylist", { scope: "main" })).toBe(false); });
+  }
+  expect(imported).not.toHaveBeenCalled();
+});
+
+
+it("native playlist export uses the selected row and refuses a removed device destination", () => {
+  const node: TreeNode = { id: "selected", name: "Selected", kind: "playlist", depth: 0, childCount: 1 };
+  const exported = vi.fn();
+  act(() => root.render(<TreeView nodes={[node]} selectedId={node.id} onSelect={() => {}} onExport={exported} exportDevices={[{ id: "C:\\USB : α", name: "USB" }]} />));
+  act(() => { expect(runCommand("exportPlaylist", { scope: "main", target: "C:\\USB : α" })).toBe(true); });
+  expect(exported).toHaveBeenCalledExactlyOnceWith(node, "C:\\USB : α");
+  act(() => root.render(<TreeView nodes={[node]} selectedId={node.id} onSelect={() => {}} onExport={exported} exportDevices={[]} />));
+  act(() => { expect(runCommand("exportPlaylist", { scope: "main", target: "C:\\USB : α" })).toBe(false); });
+  expect(exported).toHaveBeenCalledTimes(1);
 });

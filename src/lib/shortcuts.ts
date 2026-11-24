@@ -1,3 +1,5 @@
+import { NATIVE_COMMANDS } from "./nativeCommands";
+
 /**
  * The keyboard map, as a pure function.
  *
@@ -38,8 +40,13 @@ export type Action =
   | "renumberTrackOrder"
   // The Track and Playlist menus' other items (#513), each the command its
   // context-menu entry runs: rekordbox's 400f, 4012, 4013, 4003, 400b, 400d,
-  // 4014, 400e, 500a-500c, 5004, 5005 and 5006. No preset binds them and the
-  // Keyboard pane does not list them yet.
+  // 4014, 400e, 500a-500c, 5004-5006 and 5009. The Export preset leaves
+  // them unbound; Performance presets retain their reference keys. Dynamic
+  // destinations are selected in their menus, without invented picker keys.
+  | "addToPlaylist"
+  | "exportTrack"
+  | "exportPlaylist"
+  | "importPlaylist"
   | "importToCollection"
   | "analysisLockOn"
   | "analysisLockOff"
@@ -214,7 +221,7 @@ export interface FixedJump {
  * None of the eight has been read from rekordbox itself.
  *
  * [UNKNOWN] what key, if any, rekordbox's Performance 1 and 2 presets give
- * any of these: this app's `PERFORMANCE_KEYMAP` lists them with none.
+ * any of these: this app's Performance preset table lists them with none.
  */
 const FIXED_JUMP_SIZES = [
   ["HalfBeat", "1/2 beat", 0.5],
@@ -508,7 +515,7 @@ export function dispatchBinding(
 export interface Binding {
   /** Stable, for the person's own key to be stored against. */
   id: string;
-  group: "Browse" | "Player A" | "Player B" | "General" | "Playlist" | "Menu";
+  group: "Track" | "Browse" | "Player A" | "Player B" | "General" | "Playlist" | "Menu";
   /** rekordbox's description of the command. */
   label: string;
   chord: KeyChord;
@@ -633,6 +640,8 @@ export const BINDINGS: readonly Binding[] = [
   { id: "locateLoaded", group: "Browse", label: "Locate track loaded on deck", chord: { key: "l", metaKey: true }, action: "locateLoaded", command: "b139" },
   // App default: reveal the selected file; configurable under Track.
   { id: "showInFinder", group: "Browse", label: "Show in Finder", chord: { key: "r", metaKey: true }, action: "showInFinder", command: "400d" },
+  // Native command rows have no default chord in the Export preset.
+  ...NATIVE_COMMANDS.map(([action, command, label, group]) => ({ id: action, action, command, label, group, chord: { key: "" } })),
   { id: "sortItems", group: "Playlist", label: "Sort Items", chord: { key: "" }, action: "sortItems", command: "500d" },
   { id: "renumberTrackOrder", group: "Playlist", label: "Renumber Track Order", chord: { key: "" }, action: "renumberTrackOrder", command: "500e" },
   ...PLAYER_A.map((row): Binding => ({ ...row, id: row.action ?? row.label, group: "Player A", deck: "a" })),

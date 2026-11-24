@@ -28,6 +28,26 @@ type Labels = HashMap<String, String>;
 /// Menu item ids and whether each is live.
 type Enabled = HashMap<String, bool>;
 
+#[derive(Clone, serde::Deserialize)]
+pub struct MenuTarget {
+    id: String,
+    name: String,
+}
+type Targets = HashMap<String, Vec<MenuTarget>>;
+const DYNAMIC_MENUS: [&str; 3] = ["add-to-playlist", "export-track", "export-playlist"];
+
+fn saved_targets() -> &'static RwLock<Targets> {
+    static TARGETS: OnceLock<RwLock<Targets>> = OnceLock::new();
+    TARGETS.get_or_init(|| RwLock::new(Targets::new()))
+}
+
+fn target_rows(id: &str) -> Vec<MenuTarget> {
+    saved_targets().read().ok().and_then(|targets| targets.get(id).cloned()).unwrap_or_default()
+}
+
+fn target_id(menu: &str, target: &str) -> String { format!("{menu}:{target}") }
+
+
 fn saved_labels() -> &'static RwLock<Labels> {
     static LABELS: OnceLock<RwLock<Labels>> = OnceLock::new();
     LABELS.get_or_init(|| RwLock::new(Labels::new()))
@@ -307,6 +327,8 @@ enum Row {
     /// An item: its id, which is also what the click sends, and its label key.
     Item(&'static str, &'static str),
     Separator,
+    /// Destinations supplied by the focused list/tree.
+    Dynamic(&'static str, &'static str),
     /// A submenu: its id, its label key and its rows.
     Sub(&'static str, &'static str, &'static [Row]),
 }
@@ -314,8 +336,7 @@ enum Row {
 /// rekordbox's Track menu, in its order and with its separators, holding
 /// only what rbxport has [OBS static: `MainComponent::getMenuForIndex`
 /// @0x100964638, rekordbox 7.2.19 macOS; OBS: the Windows menu bar, issue
-/// #513]. Left out: Add To Playlist and Export Track (lists of playlists and
-/// sticks, not yet here), Cloud Library Sync and Show in Spotify.
+/// #513]. Cloud Library Sync and Show in Spotify remain excluded.
 ///
 /// The items carry no key: rekordbox's Export key map binds none of them
 /// (`Analyze Track`'s shift + command + A is the browser's own key, kept
@@ -334,7 +355,11 @@ const TRACK_MENU: &[Row] = &[
         ],
     ),
     Row::Separator,
+    Row::Dynamic("add-to-playlist", "Add To Playlist"),
+    Row::Separator,
     Row::Item("reload-tag", "Reload Tag"),
+    Row::Separator,
+    Row::Dynamic("export-track", "Export Track"),
     Row::Separator,
     Row::Item("remove-from-collection", "Remove from Collection"),
     Row::Separator,
@@ -346,9 +371,12 @@ const TRACK_MENU: &[Row] = &[
 /// rekordbox's Playlist menu, in its order, holding only what rbxport has
 /// [OBS static: `getMenuForIndex` @0x100966490-@0x100966988, rekordbox
 /// 7.2.19 macOS; OBS: the Windows menu bar, issue #513]. Left out: Batch
-/// Auto Upload setting, Import Playlist, Copy to Playlists category, Playlist
+/// Auto Upload setting, Copy to Playlists category, Playlist
 /// display setting and the sharing items.
 const PLAYLIST_MENU: &[Row] = &[
+    Row::Dynamic("export-playlist", "Export Playlist"),
+    Row::Item("import-playlist", "Import Playlist"),
+    Row::Separator,
     Row::Item("create-playlist", "Create New Playlist"),
     Row::Item(
         "create-intelligent-playlist",
@@ -405,6 +433,13 @@ fn add_rows<'a, R: Runtime>(
                     .enabled(is_enabled(id))
                     .build(app)?,
             ),
+            Row::Dynamic(id, key) => {
+                let mut sub = SubmenuBuilder::with_id(app, id, label(labels, key)).enabled(is_enabled(id));
+                for target in target_rows(id) {
+                    sub = sub.item(&MenuItemBuilder::with_id(target_id(id, &target.id), target.name).build(app)?);
+                }
+                menu.item(&sub.build()?)
+            }
             Row::Sub(id, key, items) => {
                 let sub =
                     SubmenuBuilder::with_id(app, id, label(labels, key)).enabled(is_enabled(id));
@@ -485,6 +520,37 @@ fn apply_enabled<R: Runtime>(kinds: Vec<MenuItemKind<R>>, items: &Enabled) -> Re
     Ok(())
 }
 
+/// Replace destination rows without rebuilding Edit/Undo or platform menu state.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri extractors are owned")]
+pub fn set_menu_targets<R: Runtime>(app: AppHandle<R>, targets: Targets) -> Result<(), String> {
+    if targets.keys().any(|id| !DYNAMIC_MENUS.contains(&id.as_str())) {
+        return Err("Unknown destination menu".to_owned());
+    }
+    if let Ok(mut saved) = saved_targets().write() { *saved = targets; }
+    if let Some(menu) = app.menu() {
+        apply_targets(&app, menu.items().map_err(|e| e.to_string())?)?;
+    }
+    Ok(())
+}
+
+fn apply_targets<R: Runtime>(app: &AppHandle<R>, items: Vec<MenuItemKind<R>>) -> Result<(), String> {
+    for item in items {
+        let MenuItemKind::Submenu(sub) = item else { continue };
+        let id = sub.id().0.as_str();
+        if DYNAMIC_MENUS.contains(&id) {
+            for old in sub.items().map_err(|e| e.to_string())? { sub.remove(&old).map_err(|e| e.to_string())?; }
+            for target in target_rows(id) {
+                let item = MenuItemBuilder::with_id(target_id(id, &target.id), target.name).build(app).map_err(|e| e.to_string())?;
+                sub.append(&item).map_err(|e| e.to_string())?;
+            }
+        } else {
+            apply_targets(app, sub.items().map_err(|e| e.to_string())?)?;
+        }
+    }
+    Ok(())
+}
+
 /// Rebuilds the native menu from the same translated labels as the web UI.
 #[tauri::command]
 #[allow(
@@ -522,7 +588,7 @@ mod tests {
     fn ids(rows: &[Row]) -> Vec<&'static str> {
         rows.iter()
             .flat_map(|row| match *row {
-                Row::Item(id, _) => vec![id],
+                Row::Item(id, _) | Row::Dynamic(id, _) => vec![id],
                 Row::Separator => vec!["-"],
                 Row::Sub(id, _, items) => {
                     let mut all = vec![id];
@@ -546,7 +612,11 @@ mod tests {
                 "analysis-lock-on",
                 "analysis-lock-off",
                 "-",
+                "add-to-playlist",
+                "-",
                 "reload-tag",
+                "-",
+                "export-track",
                 "-",
                 "remove-from-collection",
                 "-",
@@ -562,6 +632,9 @@ mod tests {
         assert_eq!(
             ids(PLAYLIST_MENU),
             [
+                "export-playlist",
+                "import-playlist",
+                "-",
                 "create-playlist",
                 "create-intelligent-playlist",
                 "create-folder",

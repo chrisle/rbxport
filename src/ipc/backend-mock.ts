@@ -3088,6 +3088,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       };
     },
     setMenuLabels: () => wait(undefined),
+    setMenuTargets: (targets) => {
+      Object.assign(window, { __menuTargets: targets });
+      return wait(undefined);
+    },
     // Kept where a test can read which items the shell would grey.
     setMenuEnabled: (items) => {
       const w = window as unknown as { __menuEnabled?: Record<string, boolean> };
