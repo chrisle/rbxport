@@ -59,7 +59,7 @@ export type SubListProps = Pick<
   | "onAutoRelocate" | "onRelocate"
   | "onAnalysisLock" | "onAddToPlaylist" | "onAddToTagList" | "onRemoveFromTagList" | "onReloadTag"
   | "onExportTrack" | "playlists" | "devices" | "onEditField" | "onEditBlocked" | "onFocusedRow"
-  | "onSelectedRow" | "onSelectedTracks"
+  | "onSelectedRow" | "onSelectedTracks" | "loadedTracks"
 > & {
   /** Resolves true once removed; false when declined or refused. */
   onRemoveTracksFromPlaylist: (playlistId: string, ids: readonly string[]) => Promise<boolean>;

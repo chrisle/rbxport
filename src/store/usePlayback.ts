@@ -14,13 +14,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { AppErrorDto, Backend, DeckId, Tick } from "@/ipc/types";
+import type { LoadedTrack, AppErrorDto, Backend, DeckId, Tick } from "@/ipc/types";
 import { canPlay } from "@/ipc/audio";
 import { extrapolate, follow, NO_ANCHOR, pinned, SNAP_SECONDS, type Anchor } from "@/lib/clock";
 
 export interface Playback {
   /** True while audio is actually running. */
   playing: boolean;
+  /** Confirmed audio owner, independent of transport state. */
+  loadedTrack: LoadedTrack | null;
   /** Requested transport state, including Play preserved while a track opens. */
   wantsPlaying: () => boolean;
   /**
@@ -196,6 +198,12 @@ export function reasonFrom(error: unknown): string {
 
 export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK, renderPosition = true): Playback {
   const [playing, setPlaying] = useState(false);
+  const [loadedTrack, setLoadedTrack] = useState<LoadedTrack | null>(null);
+  const confirmedOwner = useRef<LoadedTrack | null>(null);
+  const publishOwner = useCallback((owner: LoadedTrack | null) => {
+    confirmedOwner.current = owner;
+    setLoadedTrack(previous => previous?.[0] === owner?.[0] && previous?.[1] === owner?.[1] ? previous : owner);
+  }, []);
   const [tempo, setTempoState] = useState(1);
   const [masterTempo, setMasterTempoState] = useState(false);
   const [keyShift, setKeyShiftState] = useState(0);
@@ -266,6 +274,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const completeLoad = useCallback((request: HeldLoad) => {
     if (!currentLoad(request) || !loadPending.current || readyLoad.current === request.loadId) return;
     readyLoad.current = request.loadId;
+    publishOwner([request.trackId, request.loadId]);
     loadPending.current = false;
     applyingLoad.current = request.loadId;
     setError(null);
@@ -311,11 +320,13 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         if (applyingLoad.current === request.loadId) applyingLoad.current = 0;
       }
     })();
-  }, [currentLoad, DECK]);
+  }, [currentLoad, DECK, publishOwner]);
 
   /** Starts a uniquely identified load; stale completions cannot satisfy it. */
   const beginLoad = useCallback((nextTrack: string, restore: boolean) => {
+    const previousOwner = confirmedOwner.current;
     const request = { trackId: nextTrack, loadId: allocateLoadId() };
+    publishOwner(null);
     targetLoad.current = request;
     held.set(DECK, request);
     readyLoad.current = 0;
@@ -347,6 +358,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       } catch (failure) {
         if (currentLoad(request)) {
           held.set(DECK, null);
+          publishOwner(previousOwner);
           targetLoad.current = null;
           loadPending.current = false;
           desiredPlaying.current = false;
@@ -355,7 +367,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         }
       }
     })();
-  }, [currentLoad, DECK, emit, setPosition]);
+  }, [currentLoad, DECK, emit, setPosition, publishOwner]);
 
   /** Takes a tick as the truth about where the deck is. */
   const anchorOn = useCallback(
@@ -380,6 +392,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       if (target !== null && loadPending.current) completeLoad(target);
       if (target !== null && applyingLoad.current === target.loadId) return;
       if (target !== null) readyLoad.current = target.loadId;
+      if (!deck.loaded) publishOwner(null);
+      else if (target !== null) publishOwner([target.trackId, target.loadId]);
       const now = performance.now();
       // A load completion can precede the first audible output buffer. An
       // older stopped or zero-frame tick cannot override queued Play intent.
@@ -468,7 +482,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         emit(at);
       }
     },
-    [completeLoad, emit, DECK, setPosition],
+    [completeLoad, emit, DECK, setPosition, publishOwner],
   );
 
   // The deck reports itself loaded, or says why it could not be.
@@ -489,6 +503,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
           // A deck that could not open the file holds nothing, so the next
           // mount asks again rather than trusting a load that never landed.
           held.set(DECK, null);
+          publishOwner(null);
           targetLoad.current = null;
           loadPending.current = false;
           applyingLoad.current = 0;
@@ -504,6 +519,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       const unlistenReset = backend.onDeckReset?.(() => {
         if (!live) return;
         const current = selectedTrack.current;
+        publishOwner(null);
         if (current !== null) beginLoad(current, true);
       }) ?? (() => undefined);
       if (!live) {
@@ -531,7 +547,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       live = false;
       stop?.();
     };
-  }, [anchorOn, beginLoad, completeLoad, DECK]);
+  }, [anchorOn, beginLoad, completeLoad, DECK, publishOwner]);
 
   // Point the deck at the selected track. Loading does not start playback:
   // choosing a track in the browser should not make noise.
@@ -551,6 +567,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       return;
     }
     held.set(DECK, null);
+    publishOwner(null);
     targetLoad.current = null;
     readyLoad.current = 0;
     loadPending.current = false;
@@ -570,7 +587,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     setError(null);
     emit(0);
     void getBackend().then((backend) => backend.deckUnload(DECK)).catch((failure) => setError(reasonFrom(failure)));
-  }, [trackId, beginLoad, emit, DECK, setPosition]);
+  }, [trackId, beginLoad, emit, DECK, setPosition, publishOwner]);
 
   // One frame loop for the whole player, running only while audio is, so an
   // idle window schedules nothing.
@@ -1006,11 +1023,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   }, [loopCall, DECK]);
 
   return useMemo(() => ({
-    playing, wantsPlaying, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
+    playing, loadedTrack, wantsPlaying, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
     scrubBegin, scrubTo, scrubEnd, isScrubbing, positionRef, positionNow, subscribe,
     tempo, masterTempo, keyShift, shiftsKey, setKeyShift, setTempo, nudgeTempo, setMasterTempo,
     loop, currentLoop, setLoop, moveLoop, setLoopActive, clearLoop,
-  }), [playing, wantsPlaying, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
+  }), [playing, loadedTrack, wantsPlaying, position, duration, idle, error, toggle, playAfter, seek, moveBy, moveByGridBeats, seekFraction,
     scrubBegin, scrubTo, scrubEnd, isScrubbing, positionNow, subscribe, tempo, masterTempo, keyShift, shiftsKey,
     setKeyShift, setTempo, nudgeTempo, setMasterTempo, loop, currentLoop, setLoop, moveLoop, setLoopActive, clearLoop]);
 }

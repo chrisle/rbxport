@@ -1937,6 +1937,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   };
   /** The deck that a command names. */
   const deckOf = (deck: DeckId) => (deck === "a" ? deckA : deckB);
+  const loadedSources: Partial<Record<DeckId, { path: string; track: string; request: number }>> = {};
   /** The beat of the track on each deck, in seconds, or 0 for none. */
   const deckBeat = { a: 0, b: 0 };
   // Where each deck is, for an end-to-end test that compares the two.
@@ -2685,6 +2686,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       d.autoLooping = false;
       d.loaded = row !== undefined;
       d.loadId = row === undefined ? 0 : loadId;
+      loadedSources[deck] = { path: String(row?.extra?.location ?? ""), track: trackId, request: loadId };
       d.generation += 1;
       if (!deckA.playing && !deckB.playing) stopClock();
       for (const listener of deckEventListeners) {
@@ -3147,6 +3149,16 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(mockLinkStatus());
     },
     onLinkStatus: () => () => undefined,
+    loadedRows: (rows, tracks) => {
+      const path = (id: string) => id.startsWith("file:") ? id.slice(5) : String(all.find(row => row.id === id)?.extra?.location ?? "");
+      if (rows.length > 128 || tracks.length > 2) return Promise.reject(new Error("Too many loaded-track candidates."));
+      const paths = (["a", "b"] as const).flatMap(deck => {
+        const source = loadedSources[deck];
+        return source && deckOf(deck).loaded && deckOf(deck).loadId === source.request &&
+          tracks.some(([id, request]) => id === source.track && request === source.request) ? [source.path] : [];
+      }).filter(Boolean);
+      return wait(rows.filter(id => path(id) !== "" && paths.includes(path(id))));
+    },
     playedTracks: () => wait([...new Set([...deckPlayed, ...(linkMode === "on" ? linkPlayed : [])])].sort()),
     resetPlayedTracks: () => {
       const had = deckPlayed.size + linkPlayed.size > 0;

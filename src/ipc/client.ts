@@ -513,6 +513,7 @@ async function realBackend(): Promise<Backend> {
     nudgeLinkMaster: (deltaBpm) => invoke<LinkStatus>("link_nudge_master", { deltaBpm }),
     takeLinkMasterTempo: () => invoke<LinkStatus>("link_take_master_tempo"),
     onLinkStatus: (listener) => subscribe<LinkStatus>("link:status", listener),
+    loadedRows: (rows, tracks) => invoke<string[]>("loaded_rows", { rows, tracks }),
     playedTracks: () => invoke<string[]>("played_tracks"),
     resetPlayedTracks: () => invoke<void>("reset_played_tracks"),
     onPlayedChanged: (listener) => subscribe("played:changed", () => listener()),

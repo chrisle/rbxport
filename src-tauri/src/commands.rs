@@ -2773,7 +2773,13 @@ pub async fn deck_load<R: tauri::Runtime>(
     let engine = player.engine(&app)?;
     let which = crate::player::deck_of(&deck);
     // The engine's own thread does the opening; this only hands it the path.
-    engine.load_as(which, &path, load_id);
+    // Capture the actual resolved path before the worker can install it.
+    // Later library reloads/relocations cannot reinterpret this audio owner.
+    {
+        let mut sources = player.loaded_sources.lock();
+        sources.insert(which, (load_id.max(1), track.clone(), path.clone()));
+        engine.load_as(which, &path, load_id);
+    }
     player.loaded_tracks.lock().insert(which, track.clone());
     // And the grid, for the metronome. Read off the async thread: it is a
     // file, and the deck is loading on its own thread anyway.
@@ -2876,6 +2882,7 @@ pub async fn deck_unload(
     deck: String,
 ) -> AppResult<()> {
     player.loaded_tracks.lock().remove(&crate::player::deck_of(&deck));
+    player.loaded_sources.lock().remove(&crate::player::deck_of(&deck));
     if let Some(engine) = player.opened() {
         engine.unload(crate::player::deck_of(&deck));
     }
@@ -4834,6 +4841,31 @@ pub async fn record_play<R: tauri::Runtime>(
         let _ = tauri::Emitter::emit(&emitter, crate::link::PLAYED_CHANGED, ());
     }
     Ok(generation)
+}
+
+/// Match the visible window to confirmed deck owners using indexed audio
+/// paths. No database/file IO, transport polling or collection scan.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri injects State by value")]
+pub fn loaded_rows(state: State<'_, Arc<AppState>>, player: State<'_, Arc<crate::player::Player>>, rows: Vec<String>, tracks: Vec<(String, u64)>) -> AppResult<Vec<String>> {
+    if rows.len() > MAX_ROWS as usize || tracks.len() > 2 {
+        return Err(AppError::new(ErrorKind::Malformed, "Too many loaded-track candidates."));
+    }
+    let Some(engine) = player.opened() else { return Ok(Vec::new()) };
+    // Same ordering as the handoff: observe the receipt after its clock
+    // has been handed the corresponding request.
+    let sources = player.loaded_sources.lock();
+    let snapshot = engine.snapshot();
+    let paths: Vec<_> = [(rbl_deck::Deck::A, snapshot.a), (rbl_deck::Deck::B, snapshot.b)].into_iter()
+        .filter_map(|(deck, current)| sources.get(&deck).filter(|(request, id, _)|
+            current.loaded && current.load_id == *request && tracks.iter().any(|(owner, expected)| owner == id && expected == request)).map(|(_, id, path)| (id, path))).collect();
+    let library = state.library()?;
+    // A device file ID keeps the DB spelling even when opening resolved its
+    // case on the stick. Its exact captured alias remains bound to this load;
+    // numeric library IDs must still match their current audio path.
+    Ok(rows.into_iter().filter(|id| library.audio_path_of(id).is_some_and(|path|
+        !path.is_empty() && paths.iter().any(|(source, loaded)|
+            std::path::Path::new(path) == loaded.as_path() || (id.starts_with("file:") && id == *source)))).collect())
 }
 
 /// The tracks the track list colours as played, by id (#540).

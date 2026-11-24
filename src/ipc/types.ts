@@ -7,6 +7,9 @@
  * `#[serde(rename_all = "camelCase")]` on the Rust side.
  */
 
+/** A confirmed decoder load, distinct from selection and transport state. */
+export type LoadedTrack = readonly [id: string, loadId: number];
+
 /** One row of the track table. Kept flat and small: ~200 bytes of JSON. */
 export interface RowDto {
   id: string;
@@ -686,6 +689,8 @@ export interface Backend {
   takeLinkMasterTempo(): Promise<LinkStatus>;
   /** Called as LINK turns on or off and as the players change. */
   onLinkStatus(listener: (status: LinkStatus) => void): () => void;
+  /** Visible rows sharing a file with a confirmed loaded deck (bounded to128 rows,2 decks). */
+  loadedRows(rows: readonly string[], tracks: readonly LoadedTrack[]): Promise<string[]>;
   /**
    * The tracks the track list colours as played, by id: those the deck
    * recorded a play of, and while LINK is on those a player added to its
