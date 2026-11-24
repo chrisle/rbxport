@@ -28,7 +28,8 @@ files intact, and history is recorded only after publication succeeds.
 
 A tempo edit patches the matching PDB row's four-byte tempo field and the
 OneLibrary row's `bpmx100`. Other content columns and counters are preserved.
-The paired row is selected by its master database/content IDs; the existing
+The paired row must be unique and name the same audio. Mismatched or ambiguous
+origins refuse the entire write. It is selected by its master database/content IDs; the existing
 fallback for two zero IDs uses its analysis path. That fallback is an
 assumption. Additional duplicate-match criteria used by another writer are
 not established here, so this is not a claim of complete writer parity.
