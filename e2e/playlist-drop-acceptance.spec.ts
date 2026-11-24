@@ -31,9 +31,11 @@ test("87-to-88 cross-playlist drop stays visible across the last cached page and
   await expect(page.getByRole("contentinfo")).toContainText("Added 1 track to Probe destination 536.");
   await destination.click();
   await expect(page.getByTestId("browser-title")).toHaveText("Probe destination 536 (88 Tracks)");
+  const copiedRow = page.getByRole("row").filter({ has: page.locator('[data-col="trackNo"]').filter({ hasText: /^88$/ }) });
   const scroller = page.getByTestId("track-scroll");
   await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect(page.locator('[role="gridcell"][data-col="title"]').filter({ hasText: text })).toBeVisible();
+  await expect(copiedRow.locator('[data-col="title"]')).toHaveText(text);
+  await expect(copiedRow).toBeVisible();
   const search = page.getByRole("searchbox", { name: "Search within this track list", exact: true }).first();
   await search.fill(text);
   const searchedRow = page.getByRole("row").filter({ has: page.locator('[data-col="title"]').filter({ hasText: text }) })
@@ -54,5 +56,6 @@ test("87-to-88 cross-playlist drop stays visible across the last cached page and
   await destination.click();
   await expect(page.getByTestId("browser-title")).toHaveText("Probe destination 536 (88 Tracks)");
   await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect(page.locator('[role="gridcell"][data-col="title"]').filter({ hasText: text })).toBeVisible();
+  await expect(copiedRow.locator('[data-col="title"]')).toHaveText(text);
+  await expect(copiedRow).toBeVisible();
 });
