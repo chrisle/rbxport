@@ -42,10 +42,11 @@ export function deckInfo(
   // library announces the write. The colour and the file are not on the row.
   const d = details && details.id === track.id ? details : null;
   const file = d ? fileFacts(d) : null;
+  const color = track.deviceSource ? String(track.extra?.color ?? 0) : d?.color;
   return {
     rating: track.rating,
-    color: d ? colorName(d.color, colorNames) : "",
-    dot: d ? colorDot(d.color) : "",
+    color: color ? colorName(color, colorNames) : "",
+    dot: color ? colorDot(color) : "",
     comment: track.comment,
     file: file ? [file.type, file.size, file.sampleRate, file.bitrate] : ["", "", "", ""],
   };

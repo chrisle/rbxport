@@ -51,7 +51,7 @@ import styles from "./InfoPanel.module.css";
 import {
   acceptable, COLOR_CHOICES, commitsTyping, dateSegments, selectionView, singleView, summaryFacts, type InfoView,
 } from "./fields";
-import { colorNameOf, useColorNames } from "@/store/useColorNames";
+import { colorNameOf, useColorNames, type ColorOwner } from "@/store/useColorNames";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 
 export type InfoTab = "summary" | "info" | "artwork";
@@ -244,6 +244,7 @@ export function InfoPanel({
             ) : null}
             <InfoForm
               key={`selection-${selectionKey}`}
+              colorOwner={selection.some(id => id.startsWith("file:")) ? null : undefined}
               view={selectionView(selection, selectionRecord)}
               lookups={lookups}
               readOnly={readOnly}
@@ -266,6 +267,7 @@ export function InfoPanel({
           ) : null}
           <InfoForm
             key={track.id}
+            colorOwner={track.deviceSource ?? (track.id.startsWith("file:") ? null : undefined)}
             view={singleView(track, record)}
             lookups={lookups}
             readOnly={readOnly}
@@ -366,6 +368,7 @@ const Summary = memo(function Summary({
 // --------------------------------------------------------------------- Info
 
 interface InfoFormProps {
+  colorOwner?: ColorOwner | null | undefined;
   view: InfoView;
   lookups: TrackLookups | null;
   readOnly: boolean;
@@ -375,12 +378,12 @@ interface InfoFormProps {
 }
 
 
-function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFormProps) {
+function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit, colorOwner }: InfoFormProps) {
   const { ids, text } = view;
   // Key Analysis > "Write the value to the ID3 tag": an edited key also goes
   // into each file, as rekordbox's `modifyTrack` writes it.
   const preferences = usePreferences();
-  const colorNames = useColorNames();
+  const colorNames = useColorNames(colorOwner);
   const writeKeyTag = preferences.analysis.writeKeyTag;
   // Add "My Tag" to the "Comments" (#605): a toggle here rewrites the
   // track's comment as a tick in the My Tag panel does.
@@ -721,7 +724,7 @@ function Select({
         >
           {!options.includes("") && !options.includes("0") ? <option value="" /> : null}
           {options.map((option) => (
-            <option key={option} value={option}>{optionLabel ? optionLabel(option) : option}</option>
+            <option key={option} value={option} data-i18n-ignore={name === "color" && option !== "0" || undefined}>{optionLabel ? optionLabel(option) : option}</option>
           ))}
         </select>
         <SpinnerIcon className={styles.spinner} aria-hidden />

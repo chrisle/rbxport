@@ -66,3 +66,41 @@ it("keeps the stock names while there is no library to ask", async () => {
   await settle();
   expect(host.textContent).toBe(STOCK_COLOR_NAMES.join(","));
 });
+
+it("separates device formats and master owners, and rejects obsolete answers after switching", async () => {
+  const pending: { owner: Parameters<Backend["colorNames"]>[0]; done: (names: string[]) => void }[] = [];
+  __setBackend({
+    colorNames: (owner: Parameters<Backend["colorNames"]>[0]) => new Promise<string[]>(done => pending.push({ owner, done })),
+    onLibraryChanged: () => () => {}, onLibraryReady: () => () => {}, onDevicesChanged: () => () => {},
+  } as unknown as Backend);
+  function Owner({ format }: { format: "oneLibrary" | "deviceLibrary" }) {
+    return <span>{useColorNames({ path: "/stick", format }).join(",")}</span>;
+  }
+  act(() => root.render(<Owner format="oneLibrary" />)); await settle();
+  act(() => root.render(<Owner format="deviceLibrary" />)); await settle();
+  expect(pending.map(call => call.owner)).toEqual([
+    { path: "/stick", format: "oneLibrary" }, { path: "/stick", format: "deviceLibrary" },
+  ]);
+  await act(async () => { pending[1]!.done(["PDB label", ...STOCK_COLOR_NAMES.slice(1)]); await Promise.resolve(); });
+  await act(async () => { pending[0]!.done(["obsolete OneLibrary", ...STOCK_COLOR_NAMES.slice(1)]); await Promise.resolve(); });
+  expect(host.textContent).toContain("PDB label");
+  expect(host.textContent).not.toContain("obsolete");
+  act(() => root.render(<Names />)); await settle();
+  expect(pending[2]!.owner).toBeUndefined();
+  expect(host.textContent).not.toContain("PDB label");
+  await act(async () => { pending[2]!.done(["Master label", ...STOCK_COLOR_NAMES.slice(1)]); await Promise.resolve(); });
+  expect(host.textContent).toContain("Master label");
+});
+
+it("ignores an earlier refresh and clears owner state when its last subscriber leaves", async () => {
+  const pending: ((value: string[]) => void)[] = [];
+  colorNames.mockImplementation(() => new Promise<string[]>(done => pending.push(done)));
+  act(() => root.render(<Names />)); await settle();
+  act(() => { changed?.(); }); await settle();
+  await act(async () => { pending[1]!(["Newest", ...STOCK_COLOR_NAMES.slice(1)]); await Promise.resolve(); });
+  await act(async () => { pending[0]!(["Old", ...STOCK_COLOR_NAMES.slice(1)]); await Promise.resolve(); });
+  expect(host.textContent).toContain("Newest");
+  act(() => root.render(null));
+  act(() => root.render(<Names />)); await settle();
+  expect(host.textContent).not.toContain("Newest");
+});

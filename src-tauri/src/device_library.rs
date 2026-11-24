@@ -208,6 +208,15 @@ fn connected(path: &str) -> AppResult<PathBuf> {
     Ok(mount)
 }
 
+pub(crate) async fn color_names(path: String, format: String) -> AppResult<Vec<String>> {
+    blocking("device_color_names", move || {
+        let mount = connected(&path)?;
+        let format = format_from(&format)?;
+        device::color_names_without_recovery(&mount, format)
+            .map(Vec::from).map_err(|error| device_error(&error))
+    }).await
+}
+
 /// What a failed read or write of the stick says. A refused edit is the
 /// user's to fix, not a bug.
 pub(crate) fn device_error(e: &rbl_export::ExportError) -> AppError {
@@ -1410,7 +1419,7 @@ fn row_dto(row: &DeviceRow) -> RowDto {
         artwork_hue: 0,
         has_artwork: row.has_artwork,
         file_name: row.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-        extra: None,
+        extra: Some(serde_json::Map::from_iter([("color".to_owned(), serde_json::json!(row.color))])),
         device_source: None,
         // A stick's own row: its file is on the stick, not a collection
         // file that rekordbox could mark missing.

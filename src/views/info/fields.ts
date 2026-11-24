@@ -201,7 +201,7 @@ export function singleView(row: RowDto, details: TrackDetails | null): InfoView 
     text: (field) => fieldText(record, field),
     rating: record.rating,
     comment: record.comment,
-    color: details?.color ?? "0",
+    color: row.deviceSource ? String(row.extra?.color ?? 0) : details?.color ?? "0",
     albumArtist: details?.albumArtist ?? "",
     bpm: formatBpm(record.bpmX100),
     releaseDate: record.releaseDate,

@@ -3236,7 +3236,7 @@ function AppBody() {
   const showInformation = useCallback((row: RowDto) => { loadRequest.current.a++; setPlayerTrack(row); setInfoOpen(true); setMyTagOpen(false); }, []);
   const toggleFilter = useCallback(() => setFilterOpen(was => !was), []);
   const filterBar = useMemo(() => <TrackFilter state={filterState} onChange={setFilterState}
-    values={filterValues} masterBpmX100={masterBpmX100} />, [filterState, filterValues, masterBpmX100]);
+    values={filterValues} masterBpmX100={masterBpmX100} owner={spec.source.kind === "device" ? spec.source : undefined} />, [filterState, filterValues, masterBpmX100, spec.source]);
   const subTree = useMemo(() => ({
     dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
     canDropToDevicePlaylists: draggedTracks?.sourceKind !== "device", onDropDeviceTracks: addDraggedToDevice,

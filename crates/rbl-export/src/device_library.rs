@@ -216,6 +216,38 @@ pub fn read_without_recovery(root: &Path, format: Format) -> Result<Library> {
     read_unlocked(root, format)
 }
 
+/// Read only the selected device database's colour comments. No recovery or
+/// settings publication is performed; missing/empty slots use the stock names.
+pub fn color_names_without_recovery(root: &Path, format: Format) -> Result<[String; 8]> {
+    let _lease = rbl_core::durable::read_lease(root)?;
+    if crate::recovery_pending(root) {
+        return Err(ExportError::Conflict("The device has an interrupted export that must be recovered before its colour names can be read.".into()));
+    }
+    let path = db_dir(root)?.join(format.file_name());
+    let mut names = crate::COLORS.map(str::to_owned);
+    let rows: Vec<(u32, String)> = match format {
+        Format::DeviceLibrary => {
+            let bytes = std::fs::read(path)?;
+            let pdb = rbl_pdb::Pdb::parse(&bytes).map_err(unreadable)?;
+            pdb.table(rbl_pdb::PageType::Colors).map(|table| pdb.named_rows(table)
+                .into_iter().map(|row| (row.id, row.name)).collect()).unwrap_or_default()
+        }
+        Format::OneLibrary => {
+            let db = rbl_onelibrary::ExportLibrary::open_read_only(&path).map_err(one_error)?;
+            let mut stmt = db.connection().prepare("SELECT color_id, COALESCE(name, '') FROM color").map_err(one_error)?;
+            let rows = stmt.query_map([], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)))
+                .map_err(one_error)?.collect::<std::result::Result<Vec<_>, _>>().map_err(one_error)?;
+            rows
+        }
+    };
+    for (id, name) in rows {
+        if let Some(slot) = id.checked_sub(1).and_then(|id| usize::try_from(id).ok()).and_then(|at| names.get_mut(at)) {
+            if !name.is_empty() { *slot = name; }
+        }
+    }
+    Ok(names)
+}
+
 fn read_unlocked(root: &Path, format: Format) -> Result<Library> {
     let path = db_dir(root)?.join(format.file_name());
     if !path.is_file() {

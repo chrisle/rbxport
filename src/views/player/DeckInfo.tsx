@@ -30,7 +30,7 @@ export const DeckInfo = memo(function DeckInfo({
   track: RowDto | null;
   details: TrackDetails | null;
 }) {
-  const info = deckInfo(track, details, useColorNames());
+  const info = deckInfo(track, details, useColorNames(track?.deviceSource ?? (track?.id.startsWith("file:") ? null : undefined)));
   return (
     <div className={styles.info} data-testid="deck-info">
       <div className={styles.rating} aria-label={`Rating ${info.rating} of 5`}>
@@ -42,7 +42,7 @@ export const DeckInfo = memo(function DeckInfo({
         {info.color ? (
           <>
             <span className={styles.dot} data-color={info.dot} aria-hidden />
-            <span className={styles.line}>{info.color}</span>
+            <span className={styles.line} data-i18n-ignore>{info.color}</span>
           </>
         ) : null}
       </div>
