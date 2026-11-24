@@ -797,7 +797,16 @@ test("an intelligent playlist can be dropped between playlists, not only at the 
   const smart = item(page, "Fresh 128s");
   const box = await smart.boundingBox();
   if (!box) throw new Error("the intelligent playlist is not on screen");
-  await item(page, last).dragTo(smart, { targetPosition: { x: 40, y: box.height - 2 } });
+  const source = (await item(page, last).boundingBox())!;
+  await page.mouse.move(source.x + 40, source.y + source.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(source.x + 48, source.y + source.height / 2);
+  // WebKit needs a second move at the destination to deliver dragover.
+  const dropPoint = { x: box.x + 40, y: box.y + box.height * 0.75 };
+  await page.mouse.move(dropPoint.x, dropPoint.y, { steps: 5 });
+  await page.mouse.move(dropPoint.x, dropPoint.y);
+  await expect(smart).toHaveAttribute("data-move", "below");
+  await page.mouse.up();
   await expect
     .poll(async () => (await treeNames(page)).indexOf(last))
     .toBe(smartAt + 1);
