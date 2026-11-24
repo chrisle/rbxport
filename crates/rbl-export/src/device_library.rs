@@ -636,7 +636,7 @@ pub fn apply(root: &Path, format: Format, edit: &Edit) -> Result<Applied> {
             if wal.is_file() {
                 std::fs::copy(&wal, staged_dir.join(format!("{}-wal", format.file_name())))?;
             }
-            rbl_onelibrary::playlists::apply(&staged, &one_change(&current.nodes, &after)).map_err(one_error)?;
+            rbl_onelibrary::playlists::apply(&staged, &one_change(&current.nodes, &after, edit)).map_err(one_error)?;
             // The rollback journal leaves nothing beside the file; a stale
             // `-wal` or `-shm` on the stick goes with the publication.
             for suffix in ["-wal", "-shm"] {
@@ -680,10 +680,19 @@ fn check_written(written: &[Node], planned: &[Node]) -> Result<()> {
 }
 
 /// The rows of `exportLibrary.db` an edit changes.
-fn one_change(before: &[Node], after: &[Node]) -> rbl_onelibrary::playlists::Change {
+fn one_change(before: &[Node], after: &[Node], edit: &Edit) -> rbl_onelibrary::playlists::Change {
     use rbl_onelibrary::playlists::{Change, PlaylistRow, FOLDER};
     let old: BTreeMap<u32, &Node> = before.iter().map(|n| (n.id, n)).collect();
     let new: BTreeMap<u32, &Node> = after.iter().map(|n| (n.id, n)).collect();
+    // Ordinal edits must persist the entire affected sibling plan. A
+    // canonical rank can equal its old rank while differing from the raw
+    // signed SQLite position; comparing ranks alone would skip that row.
+    // Rename and membership edits retain raw positions without rewriting them.
+    let sequence_parent = match edit {
+        Edit::Create { parent, .. } => Some(*parent),
+        Edit::Delete { id } => old.get(id).map(|node| node.parent),
+        _ => None,
+    };
     let mut change = Change::default();
     for (id, node) in &new {
         match old.get(id) {
@@ -703,7 +712,7 @@ fn one_change(before: &[Node], after: &[Node]) -> rbl_onelibrary::playlists::Cha
                 if was.name != node.name {
                     change.rename.push((i64::from(*id), node.name.clone()));
                 }
-                if was.sequence != node.sequence {
+                if sequence_parent == Some(node.parent) || was.sequence != node.sequence {
                     change.sequence.push((i64::from(*id), i64::from(node.sequence)));
                 }
                 if was.tracks != node.tracks {

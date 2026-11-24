@@ -1,4 +1,4 @@
-//! Signed OneLibrary ordering is normalized only after preserving sibling order.
+//! Signed `OneLibrary` ordering is normalized only after preserving sibling order.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use rbl_export::{
     device_library::{self, Format},
@@ -256,5 +256,132 @@ fn first_and_repeated_sync_preserve_signed_order_without_copying_audio() {
         let report = run().unwrap();
         assert_eq!((report.bytes_copied, report.tracks_added), (0, 0));
         assert_eq!(Snapshot::read(root.path()).unwrap().one.unwrap(), baseline);
+    }
+}
+
+fn position_fixture(root: &Path, source: &Path, positions: &[i64]) {
+    seed(root, source, &[]);
+    let conn = rbl_onelibrary::playlists::open_read_write(&database(root)).unwrap();
+    for (index, sequence) in positions.iter().enumerate() {
+        let id = i64::try_from(index).unwrap() + 1;
+        conn.execute("INSERT INTO playlist(playlist_id,playlist_id_parent,sequenceNo,name,attribute) VALUES(?1,0,?2,?3,0)",rusqlite::params![id,sequence,format!("List {id}")]).unwrap();
+    }
+    for (position, track) in [(1, 2), (2, 1), (3, 2)] {
+        conn.execute(
+            "INSERT INTO playlist_content VALUES(1,?1,?2)",
+            rusqlite::params![track, position],
+        )
+        .unwrap();
+    }
+}
+
+fn raw_positions(root: &Path) -> Vec<(i64, i64)> {
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(&database(root)).unwrap();
+    rbl_onelibrary::playlists::read(db.connection())
+        .unwrap()
+        .0
+        .into_iter()
+        .map(|row| (row.id, row.sequence))
+        .collect()
+}
+
+fn assert_delete_order(positions: &[i64], removed: u32, expected: &[u32]) {
+    let root = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    position_fixture(root.path(), source.path(), positions);
+    let pdb = root.path().join("PIONEER/rekordbox/export.pdb");
+    let other = std::fs::read(&pdb).unwrap();
+    device_library::apply(
+        root.path(),
+        Format::OneLibrary,
+        &device_library::Edit::Delete { id: removed },
+    )
+    .unwrap();
+    let library = device_library::read(root.path(), Format::OneLibrary).unwrap();
+    assert_eq!(
+        library.nodes.iter().map(|node| node.id).collect::<Vec<_>>(),
+        expected
+    );
+    assert_eq!(library.node(1).unwrap().tracks, [2, 1, 2]);
+    assert_eq!(
+        raw_positions(root.path()),
+        expected
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(rank, id)| (i64::from(id), i64::try_from(rank).unwrap()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(std::fs::read(pdb).unwrap(), other);
+}
+
+#[test]
+fn deleting_reifies_all_planned_siblings_after_signed_ordering() {
+    assert_delete_order(&[-10, 100, 200, 300], 3, &[1, 2, 4]);
+}
+
+#[test]
+fn deleting_reifies_all_planned_siblings_after_oversized_ordering() {
+    let large = i64::from(u32::MAX) + 1;
+    assert_delete_order(&[100, large, large + 1], 2, &[1, 3]);
+}
+
+#[test]
+fn creating_reifies_signed_and_oversized_sibling_positions() {
+    let large = i64::from(u32::MAX) + 1;
+    for positions in [vec![-10, 100, 200], vec![100, large, large + 1]] {
+        let root = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        position_fixture(root.path(), source.path(), &positions);
+        let made = device_library::apply(
+            root.path(),
+            Format::OneLibrary,
+            &device_library::Edit::Create {
+                parent: 0,
+                name: "New".into(),
+                folder: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(made.id, 4);
+        let library = device_library::read(root.path(), Format::OneLibrary).unwrap();
+        assert_eq!(
+            library.nodes.iter().map(|node| node.id).collect::<Vec<_>>(),
+            [4, 1, 2, 3]
+        );
+        assert_eq!(library.node(1).unwrap().tracks, [2, 1, 2]);
+        assert_eq!(raw_positions(root.path()), [(1, 1), (2, 2), (3, 3), (4, 0)]);
+    }
+}
+
+#[test]
+fn name_and_membership_edits_preserve_raw_signed_positions() {
+    let large = i64::from(u32::MAX) + 1;
+    for positions in [vec![-10, 100, 200], vec![100, large, large + 1]] {
+        let root = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        position_fixture(root.path(), source.path(), &positions);
+        let before = raw_positions(root.path());
+        for edit in [
+            device_library::Edit::Rename {
+                id: 1,
+                name: "Renamed".into(),
+            },
+            device_library::Edit::Add {
+                playlist: 1,
+                tracks: vec![1],
+                duplicates: true,
+            },
+            device_library::Edit::Remove {
+                playlist: 1,
+                tracks: vec![2],
+            },
+        ] {
+            device_library::apply(root.path(), Format::OneLibrary, &edit).unwrap();
+            assert_eq!(raw_positions(root.path()), before);
+        }
+        let library = device_library::read(root.path(), Format::OneLibrary).unwrap();
+        assert_eq!(library.node(1).unwrap().name, "Renamed");
+        assert_eq!(library.node(1).unwrap().tracks, [1, 1]);
     }
 }

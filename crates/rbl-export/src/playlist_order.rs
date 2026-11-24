@@ -9,11 +9,11 @@ pub(crate) fn ranked(mut rows: Vec<PlaylistRow>) -> Result<Vec<(PlaylistRow, u32
     let mut rank = 0_u64;
     rows.into_iter()
         .map(|row| {
-            if parent != Some(row.parent) {
+            if parent == Some(row.parent) {
+                rank += 1;
+            } else {
                 parent = Some(row.parent);
                 rank = 0;
-            } else {
-                rank += 1;
             }
             Ok((
                 row,
