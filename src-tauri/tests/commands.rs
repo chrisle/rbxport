@@ -1332,6 +1332,43 @@ fn playlist_add_reports_only_stored_visible_membership() {
     assert_eq!(ids(&s.playlist_rows(&playlist)), [track.as_str()]);
 }
 
+#[test]
+fn a_cross_playlist_append_is_visible_at_position_88_after_a_fresh_library_read() {
+    let s = shell_with_shape(Shape { tracks: 88, playlists: 2, tracks_per_playlist: 0, history_sessions: 0, start_usn: 1000 });
+    let source = playlist_id(0);
+    let destination = playlist_id(1);
+    let copied = track_id(87);
+    let initial: Vec<_> = (0..87).map(track_id).collect();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), destination.clone(), initial, None, None)).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), source.clone(), vec![copied.clone()], None, None)).unwrap();
+    assert_eq!(s.playlist_rows(&destination).len(), 87);
+    assert!(run(commands::playlist_duplicates(s.state(), destination.clone(), vec![copied.clone()])).unwrap().is_empty());
+    let added = run(commands::add_tracks_to_playlist(s.handle(), s.state(), destination.clone(), vec![copied.clone()], None, None)).unwrap();
+    assert_eq!(added.added, 1);
+    let rows = s.playlist_rows(&destination);
+    assert_eq!(rows.len(), 88);
+    assert_eq!((&rows[87].id, rows[87].track_no), (&copied, 88));
+    assert_eq!(ids(&s.playlist_rows(&source)), [copied.as_str()], "copying does not remove source membership");
+    let title = rows[87].title.clone();
+    let (searched, _) = s.open(ViewSpecDto { query: title.clone(), ..playlist_spec(&destination) });
+    assert!(s.rows(searched).iter().any(|row| row.id == copied && row.track_no == 88));
+
+    // Discard the command's live index and rebuild from an independent
+    // read-only database connection, as a subsequent app start would.
+    let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+    let (reopened, _) = rbl_index::load(&db).unwrap();
+    let destination_index = reopened.playlists().index_of(destination.parse().unwrap()).unwrap();
+    let spec = rbl_index::ViewSpec { source: rbl_index::TrackSource::Playlist(destination_index),
+        sort: rbl_index::SortColumn::TrackNo, descending: false, query: String::new(), filter: Default::default() };
+    let view = reopened.open_view(&spec);
+    assert_eq!(view.len(), 88);
+    assert_eq!(reopened.ids[view.rows[87] as usize].to_string(), copied);
+    assert_eq!(view.track_no_at(87), 88);
+    let narrowed = reopened.open_view(&rbl_index::ViewSpec { query: title, ..spec });
+    let at = narrowed.rows.iter().position(|row| reopened.ids[*row as usize].to_string() == copied).unwrap();
+    assert_eq!(narrowed.track_no_at(at), 88);
+}
+
 /// #499: a reorder, and Renumber Track Order, which comes the same way, is
 /// one Undo that puts the old order back; Redo the new one.
 #[test]

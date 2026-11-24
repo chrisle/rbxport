@@ -2203,16 +2203,20 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         folderViews.set(viewId, rows);
         return wait<ViewHandle>({ viewId, len: rows.length, gen: 1 });
       }
-      let candidates = candidatesFor(spec);
+      // Number playlist occurrences before narrowing them, as the native
+      // index does: a search for entry 88 must still display 88, including
+      // when the same track occurs more than once in the playlist.
+      let order = candidatesFor({ ...spec, query: "" }).map((row, position) => ({ row, trackNo: position + 1 }));
+      const query = fold(spec.query.trim());
+      if (query) order = order.filter(({ row }) => all[row] && matchesSearch(all[row], query, spec.searchField ?? "all"));
       const filter = spec.filter;
       if (filter) {
-        candidates = candidates.filter((i) => {
+        order = order.filter(({ row: i }) => {
           const row = all[i];
           return row ? passesFilter(row, colors[i] ?? 0, filter, detailsOf(row).myTags, myTagCategories) : false;
         });
       }
 
-      const order = candidates.map((row, position) => ({ row, trackNo: position + 1 }));
       const rows = all;
       // `trackNo` is not a column to rank by: it means "leave them in the
       // order this view produced them", which for a playlist is its
