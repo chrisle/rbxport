@@ -328,7 +328,7 @@ export function SmartPlaylistEditor({ title, name: initialName, rule: initialRul
                         </option>
                       ) : null}
                       {COLOURS.map((c) => (
-                        <option key={c.value} value={c.value}>
+                        <option key={c.value} value={c.value} data-i18n-ignore={c.value !== "0" || undefined}>
                           {c.value === "0" ? "No Color" : colorNameOf(colorNames, c.value)}
                         </option>
                       ))}

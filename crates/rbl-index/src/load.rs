@@ -684,7 +684,7 @@ fn color_names(conn: &Connection) -> rusqlite::Result<[String; 8]> {
     while let Some(r) = rows.next()? {
         let id = text_or_default(r, 0)?.trim().parse::<usize>().unwrap_or(0);
         if let Some(slot) = id.checked_sub(1).and_then(|at| names.get_mut(at)) {
-            text_or_default(r, 1)?.trim().clone_into(slot);
+            text_or_default(r, 1)?.clone_into(slot);
         }
     }
     Ok(names)

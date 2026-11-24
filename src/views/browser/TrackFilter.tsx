@@ -19,10 +19,11 @@ import {
 } from "@/lib/trackFilter";
 import { TickIcon } from "@/components/icons";
 import { RatingStar } from "@/components/RatingStar";
-import { colorDot, colorNameOf, useColorNames } from "@/store/useColorNames";
+import { colorDot, colorNameOf, useColorNames, type ColorOwner } from "@/store/useColorNames";
 import styles from "./TrackFilter.module.css";
 
 export interface TrackFilterProps {
+  owner?: ColorOwner | undefined;
   state: FilterState;
   onChange: (next: FilterState) => void;
   /** What the lists offer, or `null` until the backend has answered. */
@@ -127,13 +128,13 @@ const Stars = memo(function Stars({ stars }: { stars: number }) {
   );
 });
 
-export function TrackFilter({ state, onChange, values, masterBpmX100 }: TrackFilterProps) {
+export function TrackFilter({ state, onChange, values, masterBpmX100, owner }: TrackFilterProps) {
   // Value lists, not rows: at most a few hundred entries, mapped once per
   // answer rather than per render.
   const bpms = useMemo(() => values?.bpms.map((c) => c.value) ?? [], [values]);
   const keys = useMemo(() => values?.keys.map((c) => c.value) ?? [], [values]);
   const categories = values?.tags ?? [];
-  const colorNames = useColorNames();
+  const colorNames = useColorNames(owner);
   // A tolerance needs something to centre on: a picked BPM, or the master
   // player. With neither the list is greyed, as the capture's is when no deck
   // is loaded.
@@ -250,7 +251,7 @@ export function TrackFilter({ state, onChange, values, masterBpmX100 }: TrackFil
             render={(id) => (
               <>
                 <span className={styles.dot} data-color={colorDot(id)} />
-                {colorNameOf(colorNames, id)}
+                <span data-i18n-ignore>{colorNameOf(colorNames, id)}</span>
               </>
             )}
             onPick={(picked) => onChange({ ...state, color: { ...state.color, values: picked } })}

@@ -4444,3 +4444,26 @@ fn a_device_grid_command_stays_bound_to_the_loaded_database_after_another_is_bro
     assert_eq!(std::fs::read(&alternate).unwrap(), other);
     assert_eq!(std::fs::read(&s.location.master_db).unwrap(), personal_before);
 }
+
+#[test]
+fn colour_name_reads_bind_the_requested_owner_and_never_write_the_master() {
+    let s = shell_prepared(Shape { tracks: 1, ..Shape::default() }, |_, location| {
+        let db = Db::open(location.clone(), OpenMode::ReadWrite).unwrap();
+        db.connection().execute("UPDATE djmdColor SET Commnt='Master label' WHERE ID='1'", []).unwrap();
+    });
+    let before = std::fs::read(&s.location.master_db).unwrap();
+    assert_eq!(run(details::color_names(s.state(), None, None)).unwrap()[0], "Master label");
+    let stick = tempfile::tempdir().unwrap();
+    let directory = stick.path().join("PIONEER/rekordbox");
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut pdb = rbl_pdb::build::FileBuilder::new(4096);
+    pdb.add_table(6, &[rbl_pdb::rows::color_row(1, "Device label")]);
+    let path = directory.join("export.pdb");
+    let bytes = pdb.finish(); std::fs::write(&path, &bytes).unwrap();
+    let mount = stick.path().display().to_string();
+    assert_eq!(run(details::color_names(s.state(), Some(mount.clone()), Some("deviceLibrary".into()))).unwrap()[0], "Device label");
+    assert!(run(details::color_names(s.state(), Some(mount.clone()), Some("oneLibrary".into()))).is_err());
+    assert_eq!(run(details::color_names(s.state(), Some(mount), None)).unwrap_err().kind, ErrorKind::Malformed);
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    assert_eq!(std::fs::read(&s.location.master_db).unwrap(), before);
+}

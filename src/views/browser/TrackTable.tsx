@@ -226,7 +226,7 @@ const Stars = memo(function Stars({
  * safe.
  */
 const EditableCell = memo(function EditableCell({
-  value, label, col, onCommit, onClick, tip, doubleClickLoads = false, onEditBlocked, choices, choiceLabel, display, lit, onOpen, className,
+  value, label, col, onCommit, onClick, tip, doubleClickLoads = false, onEditBlocked, choices, choiceLabel, literalChoices, display, lit, onOpen, className,
 }: {
   value: string;
   /** What the cell shows when it is not being edited; the value itself when absent. */
@@ -240,6 +240,7 @@ const EditableCell = memo(function EditableCell({
   choices?: readonly string[] | null;
   /** How a choice reads in the list, e.g. `Ebm` or `2A`. */
   choiceLabel?: (choice: string) => string;
+  literalChoices?: boolean;
   /** The Traffic Light lit this cell. */
   lit?: boolean;
   /** Called each time the editor opens. */
@@ -367,7 +368,7 @@ const EditableCell = memo(function EditableCell({
           }}
         >
           {options.includes("") ? null : <option value="" />}
-          {options.map((option) => <option key={option} value={option}>{choiceLabel ? choiceLabel(option) : option}</option>)}
+          {options.map((option) => <option key={option} value={option} data-i18n-ignore={literalChoices && option !== "0" || undefined}>{choiceLabel ? choiceLabel(option) : option}</option>)}
         </select>
       </div>
     );
@@ -765,12 +766,13 @@ const TrackRow = memo(function TrackRow({
                 className={`${styles.cell} ${styles.colorCell}`}
                 display={<>
                   {dot ? <span className={styles.colorBall} data-color={dot} aria-hidden /> : null}
-                  {t(name)}
+                  <span data-i18n-ignore>{name}</span>
                 </>}
                 label={col.label}
                 col={col.key}
                 choices={COLOR_CHOICES}
-                choiceLabel={(color) => t(color === "0" ? "No Color" : colorNameOf(colorNames, color))}
+                literalChoices
+                choiceLabel={(color) => color === "0" ? t("No Color") : colorNameOf(colorNames, color)}
                 onCommit={(color) => onEditColor(row.id, color)}
                 onClick={clickToEdit && selected}
                 onEditBlocked={onEditBlocked}
@@ -781,7 +783,7 @@ const TrackRow = memo(function TrackRow({
           return (
             <div key={col.key} className={`${styles.cell} ${styles.colorCell}`} data-col={col.key} role="gridcell">
               {dot ? <span className={styles.colorBall} data-color={dot} aria-hidden /> : null}
-              {name}
+              <span data-i18n-ignore>{name}</span>
             </div>
           );
         }
@@ -1151,7 +1153,8 @@ export const TrackTable = memo(function TrackTable({
   // The keys the Keyboard pane's preset and the person's own changes give.
   const keyOverrides = keyMap(preferences.keyboard);
   const tip = useTooltip();
-  const colorNames = useColorNames();
+  const colorNames = useColorNames(columns.some(column => column.key === "color")
+    ? spec.source.kind === "device" ? spec.source : undefined : null);
   // The Key cell's list, fetched the first time one opens so the table does
   // not ask for it at startup.
   const [keyChoices, setKeyChoices] = useState<readonly string[] | null>(null);

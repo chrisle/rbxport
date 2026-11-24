@@ -493,9 +493,12 @@ pub async fn rename_my_tag<R: tauri::Runtime>(
 /// The eight track colours' names, 1 to 8: the library's own where it has
 /// renamed one, the stock name otherwise.
 #[tauri::command]
-pub async fn color_names(state: State<'_, Arc<AppState>>) -> AppResult<Vec<String>> {
-    let library = state.library()?;
-    Ok(library.color_names().iter().map(|&name| name.to_owned()).collect())
+pub async fn color_names(state: State<'_, Arc<AppState>>, path: Option<String>, format: Option<String>) -> AppResult<Vec<String>> {
+    match (path, format) {
+        (Some(path), Some(format)) => crate::device_library::color_names(path, format).await,
+        (None, None) => Ok(state.library()?.color_names().iter().map(|&name| name.to_owned()).collect()),
+        _ => Err(AppError::new(ErrorKind::Malformed, "A device colour source needs both its path and database format.")),
+    }
 }
 
 /// Deletes a My Tag and takes it off every track. Not undoable, and the

@@ -3655,7 +3655,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     reloadLibrary: () => bump(),
     // The mock's analysis rewrites no files, so nothing redraws.
 
-    colorNames: () => (ready ? wait([...colorNames]) : notReady()),
+    colorNames: (source) => source ? wait(settingsOf(source.path).colors.map(color => color.name)) : (ready ? wait([...colorNames]) : notReady()),
     filterValues: (spec) => {
       if (!ready) return notReady();
       // Over the source and query alone, never the filter's own result.

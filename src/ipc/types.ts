@@ -1056,7 +1056,7 @@ export interface Backend {
    * own (`djmdColor.Commnt`) where it renamed one, the stock name otherwise.
    * Read through `useColorNames`, which asks again on `onLibraryChanged`.
    */
-  colorNames(): Promise<string[]>;
+  colorNames(source?: Pick<DeviceTrackSource, "path" | "format">): Promise<string[]>;
 
   /**
    * What a selected device's six tabs show: the display settings a player
