@@ -16,7 +16,7 @@
  * jog does not turn and there is no waveform here — rekordbox draws none in
  * this strip either.
  */
-import { useEffect, useRef, useState } from "react";
+import { type DragEventHandler, useEffect, useRef, useState } from "react";
 
 import { Artwork } from "@/components/Artwork";
 import { LinkIcon, LinkOnIcon } from "@/components/icons";
@@ -184,6 +184,11 @@ function PlayerDeck({
   onDrop?: ((playerNumber: number) => void) | undefined;
 }) {
   const loaded = player.loaded !== null;
+  // WebKit can refuse the drop when only dragover was accepted. Take the
+  // entering drag too, as playlist targets do, without loading until drop.
+  const takeDrag: DragEventHandler<HTMLDivElement> | undefined = droppable
+    ? (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
+    : undefined;
   return (
     <div
       className={styles.deck}
@@ -192,14 +197,8 @@ function PlayerDeck({
       data-playing={player.playing || undefined}
       data-drop-target={droppable ? true : undefined}
       aria-label={`Player ${player.number}`}
-      onDragOver={
-        droppable
-          ? (e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "copy";
-            }
-          : undefined
-      }
+      onDragEnter={takeDrag}
+      onDragOver={takeDrag}
       onDrop={
         droppable && onDrop
           ? (e) => {

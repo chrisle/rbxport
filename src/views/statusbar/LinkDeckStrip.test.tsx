@@ -200,6 +200,13 @@ describe("LinkDeckStrip", () => {
 
     const deck = host.querySelector("[data-drop-target]");
     expect(deck).not.toBeNull();
+    const enter = new Event("dragenter", { bubbles: true, cancelable: true });
+    const transfer = { dropEffect: "none" };
+    Object.defineProperty(enter, "dataTransfer", { value: transfer });
+    act(() => { deck?.dispatchEvent(enter); });
+    expect(enter.defaultPrevented).toBe(true);
+    expect(transfer.dropEffect).toBe("copy");
+    expect(dropped).toEqual([]);
     act(() => {
       deck?.dispatchEvent(new Event("drop", { bubbles: true }));
     });
@@ -253,6 +260,9 @@ describe("LinkDeckStrip", () => {
   it("does not make decks drop targets when nothing is being dragged", () => {
     render({ peers: [peer()], link: on([cdj({ number: 3 })]), onToggle: () => {}, onDropToPlayer: () => {} });
     expect(host.querySelector("[data-drop-target]")).toBeNull();
+    const enter = new Event("dragenter", { bubbles: true, cancelable: true });
+    act(() => { host.querySelector('[aria-label="Player 3"]')?.dispatchEvent(enter); });
+    expect(enter.defaultPrevented).toBe(false);
   });
 
   it("marks LINK unavailable and explains why on click when it is blocked", () => {

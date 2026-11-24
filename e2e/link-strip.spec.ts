@@ -90,3 +90,45 @@ test("a deck takes a track dragged from the library; the mixer does not", async 
   // context closed with the drag still ending, and took the next test with it.
   await expect(deck).not.toHaveAttribute("data-drop-target", "true");
 });
+
+test("a split-view playlist drag loads only the chosen LINK player", async ({ page }) => {
+  await page.goto("/?link=on");
+  await page.getByRole("button", { name: "Sub-Browser Window" }).click();
+  const panel = page.getByRole("region", { name: "Sub-Browser" });
+  const row = panel.getByRole("grid").locator('[role="row"]:has([role="gridcell"])').first();
+  await expect(row).toBeVisible();
+  await page.evaluate(async () => {
+    const moduleUrl = "/src/ipc/client.ts";
+    const { getBackend } = await import(moduleUrl) as typeof import("../src/ipc/client");
+    const backend = await getBackend();
+    const loads: { player: number; id: string }[] = [];
+    Object.assign(window, { linkDropEvidence: { loads, accepted: false, payload: "" } });
+    const original = backend.loadTrackOnLink.bind(backend);
+    backend.loadTrackOnLink = (player, id) => { loads.push({ player, id }); return original(player, id); };
+    document.addEventListener("dragover", (event) => {
+      if ((event.target as Element).closest('[aria-label="Player 2"]') && event.defaultPrevented) {
+        (window as unknown as { linkDropEvidence: { accepted: boolean } }).linkDropEvidence.accepted = true;
+      }
+    });
+    document.addEventListener("drop", (event) => {
+      if ((event.target as Element).closest('[aria-label="Player 2"]')) {
+        (window as unknown as { linkDropEvidence: { payload: string } }).linkDropEvidence.payload = event.dataTransfer?.getData("text/plain") ?? "";
+      }
+    }, true);
+  });
+  await row.locator('[data-col="title"]').hover({ position: { x: 8, y: 8 } });
+  await page.mouse.down();
+  const player = page.getByLabel("Player 2", { exact: true });
+  try {
+    await player.hover();
+    await player.hover({ position: { x: 10, y: 10 } });
+    await expect(player).toHaveAttribute("data-drop-target", "true");
+    await expect(page.getByLabel("Mixer 33")).not.toHaveAttribute("data-drop-target", "true");
+  } finally { await page.mouse.up(); }
+  const evidence = await page.evaluate(() => (window as unknown as {
+    linkDropEvidence: { loads: { player: number; id: string }[]; accepted: boolean; payload: string };
+  }).linkDropEvidence);
+  expect(evidence.accepted).toBe(true);
+  expect(evidence.payload).toMatch(/^\d+$/);
+  expect(evidence.loads).toEqual([{ player: 2, id: evidence.payload }]);
+});
