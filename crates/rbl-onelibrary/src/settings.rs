@@ -23,8 +23,9 @@
 //!   `category` table against `djmdCategory` would settle it.
 //! - No `sort` row has `isSelectedAsSubColumn = 1` on that stick, and the
 //!   Column tab shows "Not Specified", which is consistent. The reference
-//!   stick `build.rs` was transcribed from has it set on `COMMENTS`, so the
-//!   column is the flag; what rekordbox lists as choices is `[ASSUME]` the
+//!   stick `build.rs` was transcribed from has it set on `COMMENTS`. That
+//!   personal selection is cleared for fresh-device defaults. The column
+//!   is the flag; what rekordbox lists as choices is `[ASSUME]` the
 //!   sort options, since that is the table the flag lives in.
 //! - `property.backGroundColorType` is "Background Color : `OneLibrary`"
 //!   [OBS rekordbox 7.2.14, 2026-10-08]. It was 0 while the menu showed
@@ -83,7 +84,7 @@ pub struct StickSettings {
 }
 
 impl Default for StickSettings {
-    /// The reference stick's rows, which is what a fresh export writes.
+    /// The reference browse rows, with no sub-column selected on a fresh export.
     fn default() -> Self {
         let name_of = |menu_item: i64| {
             reference::MENU_ITEMS
@@ -260,8 +261,8 @@ mod tests {
         assert_eq!(settings.categories.len(), 22);
         assert_eq!(settings.sorts.len(), 17);
         assert_eq!(settings.colors.len(), 8);
-        // The sub-column the reference stick carries.
-        assert_eq!(settings.sub_column, Some(21));
+        // Do not copy the reference stick's personal Comments selection.
+        assert_eq!(settings.sub_column, None);
         let artist = settings.categories.iter().find(|s| s.menu_item == 2).unwrap();
         assert_eq!(artist.name, "ARTIST");
         assert!(artist.visible);

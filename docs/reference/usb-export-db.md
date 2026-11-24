@@ -1801,3 +1801,9 @@ CREATE TABLE sort(sort_id integer primary key, menuItem_id integer, sequenceNo i
 Menu names above must be wrapped in U+FFFA and U+FFFB before insertion.
 Color IDs 1–8 use Pink, Red, Orange, Yellow, Green, Aqua, Blue and Purple.
 Existing device category, sort and color settings override these defaults.
+
+The captured table above includes its owner's Comments sub-column selection.
+Fresh exports clear `isSelectedAsSubColumn` in every row (and bit 1 of the
+Device Library sort flags), so Column starts as **Not Specified**. An explicit
+DJ System default or an existing device choice, including Comments, is retained
+in both libraries.
