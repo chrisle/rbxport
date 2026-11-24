@@ -211,7 +211,8 @@ pub fn audio_file_type(filename: &str) -> u16 {
         .unwrap_or_default();
     match extension.to_ascii_lowercase().as_str() {
         "mp3" => 1,
-        "m4a" | "mp4" | "aac" => 4,
+        "mp4" => 3,
+        "m4a" | "aac" => 4,
         "flac" => 5,
         "wav" => 11,
         "aif" | "aiff" => 12,

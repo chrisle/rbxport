@@ -176,7 +176,7 @@ fn track_record_control_words_match_the_player_accepted_layout() {
     // and previously round-tripped records that the CDJ displayed as empty.
     for (filename, format) in [
         ("track.mp3", 1_u16), ("TRACK.MP3", 1), ("track.m4a", 4),
-        ("track.aac", 4), ("track.flac", 5), ("track.wav", 11),
+        ("track.aac", 4), ("track.mp4", 3), ("TRACK.MP4", 3), ("track.flac", 5), ("track.wav", 11),
         ("track.aif", 12), ("track.aiff", 12),
     ] {
         let row = track_row(&TrackInput { filename: filename.into(), ..Default::default() });

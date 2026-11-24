@@ -29,6 +29,34 @@ fn track(dir: &std::path::Path, n: u32, title: &str, artist: &str) -> SourceTrac
 }
 
 #[test]
+fn mp4_export_types_follow_the_final_container_after_optional_conversion() {
+    let src = tempfile::tempdir().unwrap();
+    let path = src.path().join("container.mp4");
+    let original = include_bytes!("../../rbl-db/tests/fixtures/silent.m4a");
+    std::fs::write(&path, original).unwrap();
+    for (compatibility, expected, extension) in [(None, 3, "mp4"), (Some(rbl_export::CompatibilityFormat::Wav), 11, "wav")] {
+        let dest = common::stick();
+        let source = SourceTrack { id: 1, source_path: path.clone(), title: "Container".into(), ..Default::default() };
+        let options = rbl_export::ExportOptions { compatibility, ..Default::default() };
+        let report = rbl_export::export_with_options(dest.path(), std::slice::from_ref(&source), &[], &[], &options, &mut |_| {}).unwrap();
+        assert!(report.verified);
+        let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+        assert!(manifest.tracks[0].audio.ends_with(extension));
+        let bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+        let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+        let row = pdb.rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap())[0];
+        assert_eq!(pdb.u2_at(row, 0x5a), expected);
+        let one = rbl_onelibrary::ExportLibrary::open_read_only(&dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+        let kind: u16 = one.connection().query_row("SELECT fileType FROM content", [], |row| row.get(0)).unwrap();
+        assert_eq!(kind, expected);
+        let repeat = rbl_export::export_with_options(dest.path(), &[source], &[], &[], &options, &mut |_| {}).unwrap();
+        assert!(repeat.up_to_date);
+        assert_eq!(repeat.bytes_copied, 0);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+}
+
+#[test]
 fn writes_a_tree_a_player_can_browse() {
     let src = tempfile::tempdir().unwrap();
     let dest = common::stick();
