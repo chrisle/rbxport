@@ -30,6 +30,9 @@ calendar day retains its ISO representation; an epoch has no UTC fallback that
 could display the wrong local day. Non-UTF-8 Linux output is treated as unavailable.
 The browser-only mock uses `Intl.DateTimeFormat` short style with a Gregorian
 calendar; it demonstrates browser-locale behavior, not native custom preferences.
+Native date text and its tooltip remain literal even when a custom pattern
+contains a translated UI word. The literal marker protects only its own
+attributes; descendant control attributes still localize normally.
 The Information Release Date editor retains its existing control order.
 
 ## Evidence and checks
