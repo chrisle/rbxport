@@ -2399,6 +2399,44 @@ fn a_conversion_stops_at_the_last_free_hot_slot_and_a_track_with_no_memory_cues_
 // ---------------------------------------------------------------- playing
 
 #[test]
+fn paused_move_commands_restart_the_tick_after_the_idle_ticker_stops() {
+    for grid in [false, true] {
+        let s = shell();
+        let audio = s._dir.path().join("Paused Move.wav");
+        write_wav(&audio, 10);
+        let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
+        let id = report.tracks[0].id.clone();
+        run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), id, 1)).unwrap();
+        let loaded = s.pull_until("the paused deck to load", |t| t.a.loaded);
+        assert!(!loaded.a.playing);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while s.player().ticking().load(std::sync::atomic::Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "the idle ticker did not stop");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (sent, received) = std::sync::mpsc::channel();
+        s.app.listen("deck:tick", move |event| {
+            let _ = sent.send(serde_json::from_str::<serde_json::Value>(event.payload()).unwrap());
+        });
+        if grid {
+            let times = (0..=20).map(|beat| f64::from(beat) * 500.0).collect();
+            run(commands::deck_move_grid(s.handle(), s.player(), "a".into(), times, 2.0)).unwrap();
+        } else {
+            run(commands::deck_move(s.handle(), s.player(), "a".into(), 1_000.0)).unwrap();
+        }
+        s.pull_until("the paused move to reach the engine", |t| t.a.frames == i64::from(RATE));
+        let tick = loop {
+            let tick = received.recv_timeout(Duration::from_secs(2)).expect("a paused move must publish a new deck tick without PLAY");
+            if tick["a"]["frames"].as_i64() == Some(i64::from(RATE)) { break tick; }
+        };
+        assert_eq!(tick["a"]["frames"].as_i64(), Some(i64::from(RATE)));
+        assert_eq!(tick["a"]["playing"].as_bool(), Some(false));
+        assert!(tick["a"]["generation"].as_u64().unwrap() > u64::from(loaded.a.generation));
+    }
+}
+
+#[test]
 fn an_imported_file_goes_into_a_playlist_and_plays_on_a_deck() {
     let s = shell();
     let audio = s._dir.path().join("Silent Two Seconds.wav");

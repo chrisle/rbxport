@@ -12,7 +12,9 @@ let root: Root;
 const jumped = vi.fn();
 
 const button = () => host.querySelector("button")!;
-const fire = (type: string) => act(() => { button().dispatchEvent(new Event(type, { bubbles: true })); });
+const fire = (type: string, mouseButton = 0) => act(() => {
+  button().dispatchEvent(new MouseEvent(type, { bubbles: true, button: mouseButton }));
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -38,4 +40,18 @@ it("lights on press and stays lit briefly after release", () => {
 it("a click still jumps once", () => {
   act(() => { button().click(); });
   expect(jumped).toHaveBeenCalledTimes(1);
+});
+
+it("a secondary pointer press does not light an arrow that will not jump", () => {
+  fire("pointerdown", 2);
+  expect(button().hasAttribute("data-pressed")).toBe(false);
+  expect(jumped).not.toHaveBeenCalled();
+});
+
+it("cancelling a pointer press clears the brief feedback", () => {
+  fire("pointerdown");
+  fire("pointercancel");
+  act(() => { vi.advanceTimersByTime(PRESS_HOLD_MS); });
+  expect(button().hasAttribute("data-pressed")).toBe(false);
+  expect(jumped).not.toHaveBeenCalled();
 });
