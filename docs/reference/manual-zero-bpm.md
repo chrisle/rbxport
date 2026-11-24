@@ -45,6 +45,14 @@ has identical grid bytes. Writes compare the expected BPM and analysis associati
 in the database transaction; stale, deleted or missing rows are refused.
 Metadata-only updates do not increment the analysis revision.
 
+A grid journal binds its planned analysis association and expected character
+revision in its first durable manifest. A newer row USN and matching BPM
+alone cannot establish that its guarded writer committed. Recovery retains
+ambiguous outside changes and original file snapshots; a genuine grid row
+commit can still complete publication after its caller reports an error.
+An older uncommitted journal without an analysis association is retained
+when a changed row cannot be attributed safely.
+
 ## Disposable acceptance coverage
 
 `src-tauri/src/grid.rs` covers zero, positive tempo restoration, an existing

@@ -1790,5 +1790,7 @@
   "Resize the information panel": "Resize the information panel",
   "Analysis Lock is set on tracks in the collection, not on a device": "Analysis Lock is set on tracks in the collection, not on a device",
   "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
-  "Unlock the beat grid for editing": "Unlock the beat grid for editing"
+  "Unlock the beat grid for editing": "Unlock the beat grid for editing",
+  "Enter 0 or a BPM from 40 to 499.": "Enter 0 or a BPM from 40 to 499.",
+  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing."
 }

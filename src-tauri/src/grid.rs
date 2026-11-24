@@ -609,8 +609,8 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
         let ext = rbl_anlz::Anlz::read(&files.ext).map_err(|e| AppError::internal(e.to_string()))?;
         if let Some(cleared) = ext.with_extended_grid_edit(&parsed.beat_grid().unwrap_or_default(), &next, parsed.grid_offset().unwrap_or(0)) { changed_files.push((files.ext.clone(), cleared)); }
     }
-    let journal = crate::file_journal::FileJournal::prepare(&editor.journal_root, location, track,
-        new_bpm, None, true, &changed_files)?;
+    let journal = crate::file_journal::FileJournal::prepare_grid(&editor.journal_root, location, track,
+        new_bpm, &files.relative, &changed_files)?;
     if let Err(e) = journal.publish() {
         journal.rollback()?;
         return Err(e);
@@ -1346,6 +1346,57 @@ mod tests {
         assert_eq!(row_bpm(&state), 0);
         assert_eq!(std::fs::read(&replacement).unwrap(), bytes);
         assert!(!f.editor.backup_dir.exists());
+    }
+
+    #[test]
+    fn a_refused_grid_write_cannot_claim_an_external_matching_bpm_as_its_commit() {
+        for elsewhere in [RELATIVE, "/PIONEER/USBANLZ/elsewhere/ANLZ0000.DAT"] {
+            let f = open();
+            let dat = rbl_anlz::resolve(&f.location.share_root, RELATIVE);
+            let ext = dat.with_extension("EXT");
+            let old_dat = std::fs::read(&dat).unwrap();
+            let old_ext = std::fs::read(&ext).unwrap();
+            let db = Db::open(f.location.clone(), OpenMode::ReadWrite).unwrap();
+            let (old_usn, old_bpm): (i64, u32) = db.connection().query_row("SELECT rb_local_usn, BPM FROM djmdContent WHERE ID=?1", [Fixture::track()], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+            let mut refused = |bpm, _changed, _before| {
+                db.connection().execute("UPDATE djmdContent SET BPM=?2, AnalysisDataPath=?3, rb_local_usn=rb_local_usn+1 WHERE ID=?1", rusqlite::params![Fixture::track(), bpm, elsewhere]).unwrap();
+                Err(AppError::new(ErrorKind::Conflict, "The planned row no longer matches."))
+            };
+            let result = apply_options(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Edit {
+                edit: GridEdit::Tempo { bpm_x100: 15_000, anchor_ms: 0 }, from_ms: None,
+            }, &GridOptions::default(), &mut refused);
+            assert!(result.is_err());
+            let pending = f.editor.journal_root.join("analysis-journal");
+            assert_eq!(std::fs::read_dir(&pending).unwrap().count(), 1, "the outside row is not proof that this grid committed");
+            assert!(f.editor.histories.lock()[&Fixture::track()].undo.is_empty());
+            let row: (u32, String, i64) = db.connection().query_row("SELECT BPM, AnalysisDataPath, rb_local_usn FROM djmdContent WHERE ID=?1", [Fixture::track()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+            assert_eq!(row, (15_000, elsewhere.to_owned(), old_usn + 1), "preserve the outside row");
+            // The journal retained its original images. Restoring the exact
+            // uncommitted row lets recovery roll both files back, not retain
+            // the rejected edit's published images as a completed operation.
+            db.connection().execute("UPDATE djmdContent SET BPM=?2, AnalysisDataPath=?3, rb_local_usn=?4 WHERE ID=?1", rusqlite::params![Fixture::track(), old_bpm, RELATIVE, old_usn]).unwrap();
+            crate::file_journal::recover(&f.editor.journal_root, &f.location).unwrap();
+            assert_eq!(std::fs::read(&dat).unwrap(), old_dat);
+            assert_eq!(std::fs::read(&ext).unwrap(), old_ext);
+        }
+    }
+
+    #[test]
+    fn a_real_grid_commit_reported_as_an_error_keeps_its_files() {
+        let f = open();
+        let state = app_state(&f);
+        let _files = state.analysis_write.lock();
+        let mut save_then_error = |bpm, changed, before| {
+            save_tempo(&state, &Fixture::track(), bpm, changed, before, RELATIVE)?;
+            Err(AppError::internal("Failure after the database commit."))
+        };
+        let result = apply_options(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Edit {
+            edit: GridEdit::Tempo { bpm_x100: 15_000, anchor_ms: 0 }, from_ms: None,
+        }, &GridOptions::default(), &mut save_then_error);
+        assert!(result.is_err());
+        assert_eq!(row_bpm(&state), 15_000);
+        assert!(f.dat().beat_grid().unwrap().iter().all(|beat| beat.tempo_x100 == 15_000));
+        assert_eq!(std::fs::read_dir(f.editor.journal_root.join("analysis-journal")).unwrap().count(), 0);
     }
 
     #[test]
