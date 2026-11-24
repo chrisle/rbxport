@@ -219,7 +219,8 @@ pub fn device_tiny_preview_byte(byte: u8) -> u8 {
 #[must_use]
 pub fn with_device_preview(section: &Section) -> Section {
     if section.tag == FourCc::new(b"PWV4") {
-        if section.waveform_stride() != Some(6) || section.payload.len() % 6 != 0 {
+        let declared_size = usize::try_from(section.header_u4(4)).ok().and_then(|count| count.checked_mul(6));
+        if section.header.len() != 12 || section.waveform_stride() != Some(6) || declared_size != Some(section.payload.len()) {
             return section.clone();
         }
         let mut exported = section.clone();
@@ -870,6 +871,21 @@ mod tests {
         let mut truncated = local.clone();
         truncated.payload.pop();
         assert_eq!(with_device_preview(&truncated), truncated);
+        let mut aligned_truncation = local.clone();
+        aligned_truncation.payload.truncate(6);
+        assert_eq!(with_device_preview(&aligned_truncation), aligned_truncation);
+        let mut extra_column = local.clone();
+        extra_column.payload.extend_from_slice(&[1, 2, 3, 4, 5, 6]);
+        assert_eq!(with_device_preview(&extra_column), extra_column);
+        let mut wrong_count = local.clone();
+        wrong_count.header[4..8].copy_from_slice(&3_u32.to_be_bytes());
+        assert_eq!(with_device_preview(&wrong_count), wrong_count);
+        let mut short_header = local.clone();
+        short_header.header.truncate(4);
+        assert_eq!(with_device_preview(&short_header), short_header);
+        let mut unknown_header = local.clone();
+        unknown_header.header.extend_from_slice(&[0; 4]);
+        assert_eq!(with_device_preview(&unknown_header), unknown_header);
     }
 
     #[test]
