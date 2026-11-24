@@ -782,10 +782,12 @@ its 12-byte common framing. Integers are big-endian.
 
 | Offset | Type | Value or meaning |
 |---|---|---|
-| `0x0c` | u32 | Entry size, 24 |
+| `0x0c` | u16 | Format version, 0 or 1 |
+| `0x0e` | u16 | Entry size, normally 24 |
 | `0x10` | u16 | Phrase count `n` |
 | `0x12` | u16 | Mood: 1 high, 2 mid, 3 low |
-| `0x14` | 6 bytes | Unknown; preserve |
+| `0x14` | u32 | Reserved; preserve |
+| `0x18` | u16 | Reserved; must be zero after decoding |
 | `0x1a` | u16 | End beat |
 | `0x1c` | 2 bytes | Unknown; preserve |
 | `0x1e` | u8 | Lighting bank |
@@ -812,8 +814,9 @@ CB E1 EE FA E5 EE AD EE E9 D2 E9 EB E1 E9 F3 E8 E9 F4 E1
 ```
 
 For each byte at section offset `0x12 + i`, XOR with
-`(base[i % 19] + (n & 0xff)) & 0xff`. XOR is its own inverse.
-A plaintext mood is 1, 2 or 3. Masked and plaintext source sections both
+`(base[(i + version) % 19] + (n & 0xff)) & 0xff`. XOR is its own inverse.
+Use the reserved word at `0x18` to detect masking, then require it to decode
+to zero and require a valid mood. Masked and plaintext source sections both
 exist; distinguish them before applying the transform to avoid masking an
 already masked section twice.
 

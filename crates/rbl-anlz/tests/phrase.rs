@@ -86,6 +86,57 @@ fn labels(bytes: &[u8]) -> Vec<&'static str> {
     rbl_anlz::parse(bytes).unwrap().phrases().unwrap().iter().map(|p| p.label).collect()
 }
 
+fn versioned_pssi(version: u16, entries: &[Vec<u8>], masked: bool) -> Vec<u8> {
+    let count = u16::try_from(entries.len()).unwrap();
+    let mut b = body(1, 129, 0, entries);
+    if masked {
+        for (at, byte) in b.iter_mut().enumerate() {
+            *byte ^= MASK_BASE[(at + usize::from(version)) % MASK_BASE.len()]
+                .wrapping_add(count as u8);
+        }
+    }
+    let mut raw = version.to_be_bytes().to_vec();
+    raw.extend_from_slice(&24_u16.to_be_bytes());
+    raw.extend_from_slice(&count.to_be_bytes());
+    raw.extend_from_slice(&b);
+    let mut builder = AnlzBuilder::new();
+    builder.raw(FourCc::new(b"PSSI"), raw[..20].to_vec(), raw[20..].to_vec());
+    builder.finish()
+}
+
+#[test]
+fn version_one_phrases_survive_plain_and_masked_reads() {
+    let entries = [entry(1, 1, 1, 1, 0, 0, None), entry(2, 65, 3, 0, 0, 0, None)];
+    for masked in [false, true] {
+        let anlz = rbl_anlz::parse(&versioned_pssi(1, &entries, masked)).unwrap();
+        let phrases = anlz.phrases().unwrap();
+        assert_eq!(phrases.iter().map(|p| (p.beat, p.label)).collect::<Vec<_>>(), [(1, "INTRO 1"), (65, "DOWN")]);
+    }
+}
+
+#[test]
+fn version_one_export_mask_and_edits_retain_the_version_and_phrases() {
+    let entries = [entry(1, 1, 1, 1, 0, 0, None), entry(2, 65, 3, 0, 0, 0, None)];
+    let plain = rbl_anlz::parse(&versioned_pssi(1, &entries, false)).unwrap();
+    let masked = rbl_anlz::parse(&versioned_pssi(1, &entries, true)).unwrap();
+    let section = &plain.sections[0];
+    assert_eq!(section.with_export_phrase_mask(), masked.sections[0]);
+    assert_eq!(masked.sections[0].with_export_phrase_mask(), masked.sections[0]);
+    let edited = masked.sections[0].with_phrase_edit(rbl_anlz::PhraseEdit::Cut { beat: 33 }).unwrap();
+    assert_eq!(&edited.header[..4], &[0, 1, 0, 24]);
+    assert_eq!(edited.as_song_structure().unwrap().phrases.iter().map(|p| p.beat).collect::<Vec<_>>(), [1, 33, 65]);
+}
+
+#[test]
+fn an_unknown_phrase_version_is_preserved_without_editing() {
+    let bytes = versioned_pssi(2, &[entry(1, 1, 1, 1, 0, 0, None)], false);
+    let anlz = rbl_anlz::parse(&bytes).unwrap();
+    let section = &anlz.sections[0];
+    assert!(section.as_song_structure().is_none());
+    assert!(section.with_phrase_edit(rbl_anlz::PhraseEdit::Cut { beat: 33 }).is_none());
+    assert_eq!(section.with_export_phrase_mask(), *section);
+}
+
 // ---- PSSI ----
 
 #[test]

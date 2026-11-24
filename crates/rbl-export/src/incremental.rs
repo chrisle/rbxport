@@ -3,7 +3,8 @@ use std::{collections::{BTreeMap, BTreeSet}, io::Read, path::{Path, PathBuf}};
 use serde::{Deserialize, Serialize};
 use crate::{Manifest, ManifestTrack, SourceTrack, SourcePlaylist, SourceMyTag, ExportOptions, Result};
 
-pub const TRANSFORM_VERSION: u32 = 1;
+/// Analysis bytes must be regenerated when an export transform changes.
+pub const TRANSFORM_VERSION: u32 = 3;
 
 /// What `export.pdb`'s rows hold. Part of the request, so a stick written
 /// with an older layout is rebuilt on its next sync even when nothing else
