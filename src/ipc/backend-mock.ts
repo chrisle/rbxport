@@ -1691,6 +1691,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    * also bumps the generation, because the row's BPM column changed.
    */
   interface HeldGrid {
+    trackId: string;
     durationMs: number;
     beats: EditableBeat[];
     transaction?: string | undefined;
@@ -1720,7 +1721,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     for (let n = 0; n < count; n++) {
       beats.push({ number: (n % 4) + 1, tempoX100: row.bpmX100, timeMs: Math.round(n * beatMs) });
     }
-    const made = { beats, durationMs: row.durationSec * 1000, undo: [], redo: [], locked: false };
+    const made = { trackId, beats, durationMs: row.durationSec * 1000, undo: [], redo: [], locked: false };
     gridStore.set(key, made);
     return made;
   };
@@ -1741,7 +1742,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     const row = all[Number.parseInt(trackId, 10) - 100000];
     const bpm = tempoX100(held.beats);
     if (source) {
-      for (const [key, other] of gridStore) if (key === trackId || key.startsWith(`${trackId}|`)) other.beats = held.beats;
+      for (const other of gridStore.values()) if (other.trackId === trackId) other.beats = held.beats;
       if (stickLibraries.setTempo(trackId, bpm)) for (const listener of deviceListeners) listener();
     }
     for (const listener of gridListeners) listener(trackId);
