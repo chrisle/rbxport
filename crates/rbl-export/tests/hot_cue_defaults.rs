@@ -63,7 +63,7 @@ fn upgrade_old_receipt(old_layout: bool, hot_loops: bool) {
     let cues=slots.iter().map(|&slot|rbl_anlz::cues::ExportCue {
         kind:if slot<=3 {slot} else {slot+1},time_ms:u32::from(slot)*1000,
         loop_time_ms:hot_loops.then_some(u32::from(slot)*1000+1000),
-        loop_numerator:if hot_loops {2} else {0},loop_denominator:if hot_loops {1} else {0},
+        loop_numerator:if hot_loops {2} else {0},loop_denominator:u16::from(hot_loops),
         ..Default::default()
     }).collect();
     let mut track=SourceTrack{id:1,source_path:audio.clone(),title:"Default colours".into(),duration_sec:300,
