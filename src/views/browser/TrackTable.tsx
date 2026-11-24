@@ -19,7 +19,7 @@ import type { DeckId, ListTotals, RowDto, SortColumn, TrackField, ViewSpec } fro
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
-import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatShortDate, type DateFormat } from "@/lib/format";
+import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatShortDate } from "@/lib/format";
 import {
   applyClick, clickSettles, cursorIn, cursorNeedsList, cursorOf, cursorTarget, emptySelection, extendSelection, inListOrder, pressModifier, pressSelects, selectAll,
   selectedTracks, type CursorMove, type ExtendMove, type SelectionState,
@@ -108,7 +108,7 @@ function headingsOf(head: HTMLElement): Element[] {
   return [...head.children].filter((cell) => cell.getAttribute("role") === "columnheader");
 }
 
-export function cellText(row: RowDto, key: Column["key"], dateFormat: DateFormat): string {
+export function cellText(row: RowDto, key: Column["key"]): string {
   const extra = row.extra ?? {};
   const value = extra[key];
   switch (key) {
@@ -122,14 +122,14 @@ export function cellText(row: RowDto, key: Column["key"], dateFormat: DateFormat
     case "key": return row.key;
     case "bpm": return formatBpm(row.bpmX100);
     case "duration": return formatDuration(row.durationSec);
-    case "dateAdded": return formatShortDate(row.dateAdded, dateFormat);
-    case "releaseDate": return formatShortDate(row.releaseDate, dateFormat);
+    case "dateAdded": return formatShortDate(row.dateAdded);
+    case "releaseDate": return formatShortDate(row.releaseDate);
     case "rating": return "";
     case "fileName": return row.fileName ?? "";
     case "hotCue": return row.hotCues.map(([letter]) => letter).join(", ");
     case "size": return typeof value === "number" && value > 0 ? formatBytes(value) : "";
-    case "dateCreated": return typeof value === "string" ? formatShortDate(value, dateFormat) : "";
-    case "fileCreated": return typeof value === "number" ? formatEpochDate(value, dateFormat) : "";
+    case "dateCreated": return typeof value === "string" ? formatShortDate(value) : "";
+    case "fileCreated": return typeof value === "number" ? formatEpochDate(value) : "";
     case "fileType": {
       const types: Record<number, string> = { 1: "MP3", 4: "M4A", 5: "FLAC", 6: "M4A", 11: "WAV", 12: "AIFF" };
       return typeof value === "number" ? types[value] ?? (value ? String(value) : "") : "";
@@ -418,7 +418,7 @@ const EditableCell = memo(function EditableCell({
 
 const TrackRow = memo(function TrackRow({
   row, top, selected, played, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
-  onComment, onEditField, onEditColor, onEditBlocked, onMenu, keyDisplay, dateFormat, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
+  onComment, onEditField, onEditColor, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
   reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache, previewHeight,
 }: {
   row: RowDto | undefined;
@@ -436,8 +436,6 @@ const TrackRow = memo(function TrackRow({
   columns: readonly ColumnSpec[];
   /** Preferences: `Ebm` or `2A`. */
   keyDisplay: KeyDisplay;
-  /** Preferences: the order a date column prints a day in. */
-  dateFormat: DateFormat;
   /** The keys the Key cell offers; null until fetched. */
   keyChoices: readonly string[] | null;
   /** The Key cell opened: fetch the list. */
@@ -668,7 +666,7 @@ const TrackRow = memo(function TrackRow({
               <span className={styles.summaryTitle}>{row.title}</span>
               <span className={styles.summaryLine}>
                 <span className={styles.summaryText}>{row.artist}</span>
-                <span className={styles.summaryText}>{cellText(row, "bpm", dateFormat)}</span>
+                <span className={styles.summaryText}>{cellText(row, "bpm")}</span>
                 <span className={styles.summaryText}>{formatKey(row.key, keyDisplay)}</span>
               </span>
             </div>
@@ -703,7 +701,7 @@ const TrackRow = memo(function TrackRow({
             return (
               <EditableCell
                 key={col.key}
-                value={cellText(row, col.key, dateFormat)}
+                value={cellText(row, col.key)}
                 {...(isKey ? {
                   choices: keyChoices,
                   choiceLabel: (k: string) => formatKey(k, keyDisplay),
@@ -754,7 +752,7 @@ const TrackRow = memo(function TrackRow({
         if (col.key === "color") {
           // rekordbox's ListViewer::paintColourColumn: the colour's ball, then
           // its name; a track with no colour leaves the cell empty.
-          const name = cellText(row, col.key, dateFormat);
+          const name = cellText(row, col.key);
           if (onEditColor) {
             return (
               <EditableCell
@@ -805,7 +803,7 @@ const TrackRow = memo(function TrackRow({
             data-col={col.key}
             role="gridcell"
           >
-            {cellText(row, col.key, dateFormat)}
+            {cellText(row, col.key)}
           </div>
         );
       })}
@@ -1145,7 +1143,7 @@ export const TrackTable = memo(function TrackTable({
   const extraColumns = useMemo(() => EXTRA_COLUMNS.filter((key) => columns.some((column) => column.key === key)), [columns]);
   const view = useTrackView(spec, libraryGeneration, pendingEdits, seed, extraColumns);
   const played = usePlayedTracks();
-  const { keyDisplay, dateFormat, previewCueMarkers, tooltips } = preferences.view;
+  const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;
   // The keys the Keyboard pane's preset and the person's own changes give.
   const keyOverrides = keyMap(preferences.keyboard);
   const tip = useTooltip();
@@ -2464,7 +2462,6 @@ export const TrackTable = memo(function TrackTable({
                 onEditColor={spec.source.kind === "collection" || spec.source.kind === "playlist" ? onEditColor : undefined}
                 onEditBlocked={onEditBlocked}
                 keyDisplay={keyDisplay}
-                dateFormat={dateFormat}
                 keyChoices={keyChoices}
                 onOpenKeys={loadKeyChoices}
                 previewCues={previewCueMarkers}

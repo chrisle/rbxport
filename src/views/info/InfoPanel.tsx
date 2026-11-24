@@ -305,7 +305,6 @@ const Summary = memo(function Summary({
   const artist = details?.artist ?? track.artist;
   const album = details?.album ?? track.album;
   const tip = useTooltip();
-  const { dateFormat } = usePreferences().view;
   return (
     <>
       <div className={styles.summaryHead}>
@@ -332,7 +331,7 @@ const Summary = memo(function Summary({
         </dl>
       </div>
       <dl className={styles.facts}>
-        {summaryFacts(track, details, dateFormat).map((fact) => (
+        {summaryFacts(track, details).map((fact) => (
           <div key={fact.label} className={styles.fact}>
             <dt className={styles.label}>{fact.label}</dt>
             <dd className={styles.value} title={tip(fact.value)}>{fact.value}</dd>
@@ -676,7 +675,7 @@ function Locked({
 
 /** The Release Date's three boxes and its clear button, all inert. */
 function DateBox({ iso }: { iso: string }) {
-  const segments = dateSegments(iso, usePreferences().view.dateFormat);
+  const segments = dateSegments(iso);
   const tip = useTooltip();
   return (
     <div className={styles.dateRow} title={tip(LOCKED["releaseDate"])}>

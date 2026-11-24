@@ -1802,10 +1802,5 @@
   "Analysis order": "Порядок анализа",
   "Analysis stages could not be loaded.": "Не удалось загрузить этапы анализа.",
   "{stage} requires {requirement} earlier in the analysis order.": "Для этапа {stage} требуется, чтобы этап {requirement} выполнялся раньше.",
-  "Drag stages to change the order they run.": "Перетаскивайте этапы, чтобы изменить порядок их выполнения.",
-  "DD/MM/YYYY": "DD/MM/YYYY",
-  "Date format": "Date format",
-  "MM/DD/YYYY": "MM/DD/YYYY",
-  "System": "System",
-  "YYYY/MM/DD": "YYYY/MM/DD"
+  "Drag stages to change the order they run.": "Перетаскивайте этапы, чтобы изменить порядок их выполнения."
 }

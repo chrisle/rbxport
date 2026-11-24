@@ -28,60 +28,7 @@ export function formatBitrate(kbps: number): string {
   return kbps === 0 ? "VBR" : `${kbps} kbps`;
 }
 
-/**
- * View › Date format: the order the browser and Info panel print a day in.
- * `system` follows the operating system's locale, as rekordbox does.
- */
-export type DateFormat = "system" | "dmy" | "mdy" | "ymd";
-export const DATE_FORMATS: readonly DateFormat[] = ["system", "dmy", "mdy", "ymd"];
-
 type DateField = "day" | "month" | "year";
-
-/** A day's printed shape: its three fields, padded or not, and the text between. */
-type DatePart = { field: DateField; pad: boolean } | { text: string };
-type DateLayout = readonly DatePart[];
-
-const FIXED_LAYOUTS: Record<Exclude<DateFormat, "system">, DateLayout> = {
-  dmy: [{ field: "day", pad: true }, { text: "/" }, { field: "month", pad: true }, { text: "/" }, { field: "year", pad: false }],
-  mdy: [{ field: "month", pad: true }, { text: "/" }, { field: "day", pad: true }, { text: "/" }, { field: "year", pad: false }],
-  ymd: [{ field: "year", pad: false }, { text: "/" }, { field: "month", pad: true }, { text: "/" }, { field: "day", pad: true }],
-};
-
-const systemLayouts = new Map<string, DateLayout>();
-
-/**
- * The locale's field order for the Info panel's Gregorian date segments.
- * This sampled layout is not used to render System dates; the formatter below
- * preserves the actual day's calendar, era and numbering system instead.
- * A locale Intl cannot describe keeps year first.
- */
-function systemLayout(locale: string | undefined): DateLayout {
-  const key = locale ?? "";
-  const known = systemLayouts.get(key);
-  if (known) return known;
-  let layout: DateLayout = FIXED_LAYOUTS.ymd;
-  try {
-    // 3 February 2001: a single-digit day and month show whether the locale pads.
-    const parts = new Intl.DateTimeFormat(locale, { year: "numeric", month: "numeric", day: "numeric" })
-      .formatToParts(new Date(2001, 1, 3));
-    const shape = parts.flatMap((part): DatePart[] =>
-      part.type === "day" || part.type === "month" || part.type === "year"
-        ? [{ field: part.type, pad: part.type !== "year" && part.value.length === 2 }]
-        : part.type === "literal" ? [{ text: part.value }] : []);
-    if (shape.filter((part) => "field" in part).length === 3) layout = shape;
-  } catch { /* an unknown locale keeps year first */ }
-  systemLayouts.set(key, layout);
-  return layout;
-}
-
-function dateLayout(format: DateFormat, locale: string | undefined): DateLayout {
-  return format === "system" ? systemLayout(locale) : FIXED_LAYOUTS[format];
-}
-
-/** The order of a format's day, month and year, for the Info panel's date boxes. */
-export function dateOrder(format: DateFormat, locale?: string): DateField[] {
-  return dateLayout(format, locale).flatMap((part) => ("field" in part ? [part.field] : []));
-}
 
 // Cache formatters, not a sample date's digits: calendars and eras vary by day.
 const systemFormatters = new Map<string, Intl.DateTimeFormat | null>();
@@ -98,38 +45,40 @@ function systemFormatter(locale: string | undefined): Intl.DateTimeFormat | null
   return formatter;
 }
 
-function printDate(year: number, month: number, day: number, format: DateFormat, locale: string | undefined): string {
-  if (format === "system") {
-    const formatter = systemFormatter(locale);
-    if (formatter) {
-      // Treat the Gregorian storage fields as a calendar day, not an instant.
-      // setUTCFullYear also avoids Date.UTC's special handling of years 0–99.
-      const date = new Date(0);
-      date.setUTCFullYear(year, month - 1, day);
-      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
-      return formatter.format(date);
-    }
-  }
-  const values: Record<DateField, number> = { year, month, day };
-  return dateLayout(format, locale).map((part) => {
-    if (!("field" in part)) return part.text;
-    const text = String(values[part.field]);
-    return part.pad ? text.padStart(2, "0") : text;
-  }).join("");
+/**
+ * The order of the system's day, month and year, for the Info panel's
+ * Gregorian date boxes. A locale Intl cannot describe keeps year first.
+ */
+export function dateOrder(locale?: string): DateField[] {
+  const fields = systemFormatter(locale)?.formatToParts(new Date(Date.UTC(2001, 1, 3)))
+    .flatMap((part): DateField[] =>
+      part.type === "day" || part.type === "month" || part.type === "year" ? [part.type] : []);
+  return fields?.length === 3 ? fields : ["year", "month", "day"];
+}
+
+function printDate(year: number, month: number, day: number, locale: string | undefined): string {
+  // Treat the Gregorian storage fields as a calendar day, not an instant.
+  // setUTCFullYear also avoids Date.UTC's special handling of years 0–99.
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
+  const formatter = systemFormatter(locale);
+  if (formatter) return formatter.format(date);
+  return `${year}/${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}`;
 }
 
 /**
- * A stored day (`YYYY-MM-DD`, with or without a time after it) in the chosen
- * format. Fixed formats use the Gregorian year; System uses Intl's calendar.
- * `locale` is the runtime's default unless a test names one.
+ * A stored day (`YYYY-MM-DD`, with or without a time after it) in the
+ * system's order, on Intl's calendar. `locale` is the runtime's default
+ * unless a test names one.
  */
-export function formatShortDate(iso: string | null | undefined, format: DateFormat, locale?: string): string {
+export function formatShortDate(iso: string | null | undefined, locale?: string): string {
   if (!iso) return "";
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   if (!m) return "";
   const [, y, mo, d] = m;
   if (!y || !mo || !d) return "";
-  return printDate(Number(y), Number(mo), Number(d), format, locale);
+  return printDate(Number(y), Number(mo), Number(d), locale);
 }
 
 /**
@@ -137,11 +86,11 @@ export function formatShortDate(iso: string | null | undefined, format: DateForm
  * on this machine's calendar: the File Created column's time is the file
  * system's, not a date the library stored, so its day is local.
  */
-export function formatEpochDate(seconds: number | null | undefined, format: DateFormat, locale?: string): string {
+export function formatEpochDate(seconds: number | null | undefined, locale?: string): string {
   if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "";
   const date = new Date(seconds * 1000);
   if (Number.isNaN(date.getTime())) return "";
-  return printDate(date.getFullYear(), date.getMonth() + 1, date.getDate(), format, locale);
+  return printDate(date.getFullYear(), date.getMonth() + 1, date.getDate(), locale);
 }
 
 /** `144.8 GB` / `15.2 MB` — status-bar totals. */

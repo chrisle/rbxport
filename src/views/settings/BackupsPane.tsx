@@ -5,7 +5,6 @@ import type { Backend, Backup } from "@/ipc/types";
 import { formatBytes, formatEpochDate } from "@/lib/format";
 import { useTranslation } from "@/i18n";
 import { useBackupProgress } from "@/store/useBackupProgress";
-import { usePreferences } from "@/store/usePreferences";
 import { Button, Section } from "./controls";
 import styles from "./BackupsPane.module.css";
 import { BackupSizeChart } from "./BackupSizeChart";
@@ -14,7 +13,6 @@ import layout from "./PaneLayout.module.css";
 export function BackupsPane() {
   const t = useTranslation();
   const job = useBackupProgress();
-  const { dateFormat } = usePreferences().view;
   const [backups, setBackups] = useState<Backup[]>([]);
   const [directory, setDirectory] = useState("");
   const [loading, setLoading] = useState(true);
@@ -119,7 +117,7 @@ export function BackupsPane() {
       <thead><tr><th>{t("Date")}</th><th>{t("Time")}</th><th>{t("Size")}</th><th>{t("Actions")}</th></tr></thead>
       <tbody>{backups.map(backup => {
         const created = new Date(backup.createdAt);
-        const day = formatEpochDate(backup.createdAt / 1000, dateFormat);
+        const day = formatEpochDate(backup.createdAt / 1000);
         const date = `${day} ${created.toLocaleTimeString()}`;
         return <tr key={backup.path}>
           <td><time dateTime={created.toISOString()}>{day}</time></td>

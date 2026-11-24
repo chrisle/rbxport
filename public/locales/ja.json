@@ -1806,10 +1806,5 @@
   "Analysis order": "解析順序",
   "Analysis stages could not be loaded.": "解析ステップを読み込めませんでした。",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage}の解析には、{requirement}が先に実行される必要があります。",
-  "Drag stages to change the order they run.": "ステップをドラッグして実行順序を変更できます。",
-  "DD/MM/YYYY": "DD/MM/YYYY",
-  "Date format": "Date format",
-  "MM/DD/YYYY": "MM/DD/YYYY",
-  "System": "System",
-  "YYYY/MM/DD": "YYYY/MM/DD"
+  "Drag stages to change the order they run.": "ステップをドラッグして実行順序を変更できます。"
 }

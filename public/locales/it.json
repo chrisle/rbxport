@@ -1799,10 +1799,5 @@
   "Analysis order": "Ordine di analisi",
   "Analysis stages could not be loaded.": "Impossibile caricare le fasi di analisi.",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} richiede che {requirement} venga prima nell’ordine di analisi.",
-  "Drag stages to change the order they run.": "Trascina le fasi per modificarne l’ordine di esecuzione.",
-  "DD/MM/YYYY": "DD/MM/YYYY",
-  "Date format": "Date format",
-  "MM/DD/YYYY": "MM/DD/YYYY",
-  "System": "System",
-  "YYYY/MM/DD": "YYYY/MM/DD"
+  "Drag stages to change the order they run.": "Trascina le fasi per modificarne l’ordine di esecuzione."
 }

@@ -1797,10 +1797,5 @@
   "Analysis order": "Elemzési sorrend",
   "Analysis stages could not be loaded.": "Az elemzési lépéseket nem sikerült betölteni.",
   "{stage} requires {requirement} earlier in the analysis order.": "A(z) {stage} lépéshez a(z) {requirement} lépésnek előrébb kell szerepelnie az elemzési sorrendben.",
-  "Drag stages to change the order they run.": "Húzza a lépéseket a végrehajtási sorrend módosításához.",
-  "DD/MM/YYYY": "DD/MM/YYYY",
-  "Date format": "Date format",
-  "MM/DD/YYYY": "MM/DD/YYYY",
-  "System": "System",
-  "YYYY/MM/DD": "YYYY/MM/DD"
+  "Drag stages to change the order they run.": "Húzza a lépéseket a végrehajtási sorrend módosításához."
 }

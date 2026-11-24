@@ -4,7 +4,6 @@ import { getBackend } from "@/ipc/client";
 import type { BackupSizes } from "@/ipc/types";
 import { formatBytes, formatEpochDate } from "@/lib/format";
 import { useTranslation } from "@/i18n";
-import { usePreferences } from "@/store/usePreferences";
 import { Button } from "./controls";
 import styles from "./BackupsPane.module.css";
 
@@ -29,7 +28,6 @@ function size(bytes: number): string {
 
 function UpdatedTime({ timestamp }: { timestamp: number }) {
   const t = useTranslation();
-  const { dateFormat } = usePreferences().view;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -41,7 +39,7 @@ function UpdatedTime({ timestamp }: { timestamp: number }) {
     : minutes < 60 ? t(count === 1 ? "{count} minute ago" : "{count} minutes ago", { count })
       : minutes < 1440 ? t(count === 1 ? "{count} hour ago" : "{count} hours ago", { count })
         : t(count === 1 ? "{count} day ago" : "{count} days ago", { count });
-  return <time dateTime={new Date(timestamp).toISOString()} title={`${formatEpochDate(timestamp / 1000, dateFormat)} ${new Date(timestamp).toLocaleTimeString()}`}>{label}</time>;
+  return <time dateTime={new Date(timestamp).toISOString()} title={`${formatEpochDate(timestamp / 1000)} ${new Date(timestamp).toLocaleTimeString()}`}>{label}</time>;
 }
 
 export function BackupSizeChart() {
