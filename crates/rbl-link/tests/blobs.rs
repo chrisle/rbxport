@@ -234,6 +234,31 @@ fn every_hot_slot_gets_its_full_colour_default_in_link() {
 }
 
 #[test]
+fn uncoloured_hot_loops_get_the_loop_default_in_link() {
+    for slot in 1_u8..=8 {
+        let kind=if slot<=3 {slot} else {slot+1};
+        for (colour,rgb) in [(0,[255,140,0]),(42,[255,0,0])] {
+            let cue=ExtendedCue::from(&Cue{id:1,position_ms:1000,out_ms:2000,kind,colour,memory_colour:None});
+            let (blob,count)=blobs::extended_cues_blob(&[cue]);assert_eq!(count,1);
+            assert_eq!(colour_of(&blob),[colour,rgb[0],rgb[1],rgb[2]],"slot {slot}, colour {colour}");
+            assert_eq!(blob[4],slot);assert_eq!(blob[6],2);
+            assert_eq!(&blob[0x0c..0x10],1000_u32.to_le_bytes());
+            assert_eq!(&blob[0x10..0x14],2000_u32.to_le_bytes());
+        }
+    }
+    for out_ms in [0,1000] {
+        let cue=ExtendedCue::from(&Cue{id:1,position_ms:1000,out_ms,kind:6,colour:0,memory_colour:None});
+        let (blob,_)=blobs::extended_cues_blob(&[cue]);
+        assert_eq!(colour_of(&blob),[0,0,255,48]);assert_eq!(blob[6],1);
+        assert_eq!(&blob[0x10..0x14],u32::MAX.to_le_bytes());
+    }
+    let memory=ExtendedCue{position_ms:1000,out_ms:2000,hot_slot:0,comment:String::new(),colour:0,memory_colour:Some(5)};
+    let (blob,_)=blobs::extended_cues_blob(&[memory]);
+    assert_eq!(blob[4],0);assert_eq!(blob[6],2);assert_eq!(blob[0x3a],6);
+    assert_eq!(colour_of(&blob),[0,0,0,0]);
+}
+
+#[test]
 fn a_memory_cue_carries_no_colour() {
     let memory = ExtendedCue::from(&Cue {
         id: 2,
