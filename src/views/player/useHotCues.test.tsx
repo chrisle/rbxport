@@ -455,3 +455,12 @@ describe("pressing an empty pad with a loop playing (#554)", () => {
     expect(sent).toEqual(["add:track-1:A:1000"]);
   });
 });
+
+it("refuses cue writes for device and loose file identities but still calls their cues", async () => {
+  mount({ trackId: "file:/fixture/device.wav", cues: [hot("foreign", "A", 1200)] });
+  expect(pads.canEdit).toBe(false);
+  act(() => { pads.press("E"); pads.clear("A"); pads.move("A", "B"); pads.press("A"); });
+  await settle();
+  expect(sent).toEqual([]);
+  expect(transport).toEqual(["seek:1.2", "play"]);
+});

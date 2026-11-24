@@ -1505,7 +1505,7 @@ export const Player = memo(function Player({
   // must come from that same result. Keeping a second readOnly-only branch
   // let a cached WebKit render show an enabled-action tooltip on a control
   // that the hook had already disabled.
-  const hotCueEditReason = hot.canEdit ? undefined : READ_ONLY_REASON;
+  const hotCueEditReason = hot.editReason;
   // The GRID EDIT cluster. The playhead it reads is the extrapolated one:
   // a beat is a few frames, and the frame loop's copy can be a frame behind.
   const positionMs = useCallback(() => positionNow() * 1000, [positionNow]);
@@ -1725,7 +1725,7 @@ export const Player = memo(function Player({
     cuePoint, setCuePoint, readOnly, onError,
   });
   // Editability and its explanation come from the hook, as for the hot cues.
-  const memoryCueEditReason = memory.canEdit ? undefined : READ_ONLY_REASON;
+  const memoryCueEditReason = memory.editReason;
   // A play is recorded after Preferences › Advanced › Browse › Playback time
   // setting's seconds of the track sounding, once per load, when Advanced ›
   // History says so and the library can be written (#540).
@@ -2801,7 +2801,7 @@ export const Player = memo(function Player({
                       : tip(hotCueEditReason ?? `Set Hot Cue ${letter}${key ? ` (${key})` : ""}`)}
                     disabled={!cue && !hot.canEdit}
                     onClick={() => hot.press(letter)}
-                    onContextMenu={cue ? (event) => {
+                    onContextMenu={cue && hot.canEdit ? (event) => {
                       // Rekordbox: right-click a set hot cue button to pick its colour.
                       event.preventDefault(); event.stopPropagation();
                       setCueColorMenu({x: event.clientX, y: event.clientY, cue});
@@ -3096,7 +3096,7 @@ export const Player = memo(function Player({
                     setDropSlot(null);
                   } : undefined}
                   onClick={live ? () => hot.press(letter) : undefined}
-                  onContextMenu={cue ? (event) => {
+                  onContextMenu={cue && hot.canEdit ? (event) => {
                     event.preventDefault(); event.stopPropagation();
                     setCueColorMenu({x: event.clientX, y: event.clientY, cue});
                   } : undefined}
@@ -3128,7 +3128,7 @@ export const Player = memo(function Player({
                         type="button"
                         className={styles.cueDelete}
                         aria-label={`Clear hot cue ${letter}`}
-                        title={hot.canEdit ? `Clear Hot Cue ${letter}` : READ_ONLY_REASON}
+                        title={hot.canEdit ? `Clear Hot Cue ${letter}` : hotCueEditReason}
                         disabled={!hot.canEdit || cue.id === ""}
                         onClick={(event) => {
                           // The row underneath calls the cue; a clear is not
@@ -3159,10 +3159,10 @@ export const Player = memo(function Player({
                 className={styles.cueRow}
                 data-loop={cue.outMs > 0 ? "" : undefined}
                 onClick={() => callCue(cue)}
-                onContextMenu={(event) => {
+                onContextMenu={memory.canEdit ? (event) => {
                   event.preventDefault(); event.stopPropagation();
                   setCueColorMenu({x: event.clientX, y: event.clientY, cue});
-                }}
+                } : undefined}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -3203,7 +3203,7 @@ export const Player = memo(function Player({
                   </button>
                 ) : null}
                 <CueName cue={cue} renaming={renamingCue} setRenaming={setRenamingCue}
-                  canEdit={!readOnly} onSave={(text) => writeCue((edits) => edits.setCueComment(cue.id, text))} />
+                  canEdit={memory.canEdit} onSave={(text) => writeCue((edits) => edits.setCueComment(cue.id, text))} />
                 <button
                   type="button"
                   className={styles.cueDelete}
@@ -3251,11 +3251,11 @@ export const Player = memo(function Player({
       {cueColorMenu ? <CueColorMenu
         x={cueColorMenu.x} y={cueColorMenu.y} memory={cueColorMenu.cue.memory}
         onClose={() => setCueColorMenu(null)}
-        onComment={!readOnly && cueColorMenu.cue.id !== ""
+        onComment={memory.canEdit && cueColorMenu.cue.id !== ""
           ? () => setRenamingCue({ id: cueColorMenu.cue.id, text: cueColorMenu.cue.comment ?? "" })
           : undefined}
         onChoose={(colour) => {
-          if (!readOnly && cueColorMenu.cue.id !== "") {
+          if (memory.canEdit && cueColorMenu.cue.id !== "") {
             writeCue((edits) => edits.setCueColour(cueColorMenu.cue.id, colour));
           }
         }}

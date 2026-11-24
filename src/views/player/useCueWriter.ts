@@ -14,6 +14,12 @@ import { getBackend } from "@/ipc/client";
 /** What the interface says when the library cannot be written to. */
 export const READ_ONLY_REASON = "The library is read-only. Check Library Protection in Preferences, and quit rekordbox to edit.";
 
+/** Cue commands address collection rows, never device or loose file IDs. */
+export function cueWriteReason(trackId: string | null, readOnly: boolean): string | undefined {
+  if (trackId?.startsWith("file:")) return "That track is not in the library.";
+  return trackId === null || readOnly ? READ_ONLY_REASON : undefined;
+}
+
 /** The cue commands, as `write` hands them to an action. */
 export type CueEdits = Awaited<ReturnType<typeof getBackend>>["edits"];
 

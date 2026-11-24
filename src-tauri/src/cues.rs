@@ -449,7 +449,7 @@ mod tests {
     use rbl_db::{Library as Db, OpenMode};
 
     struct Fixture {
-        _dir: tempfile::TempDir,
+        dir: tempfile::TempDir,
         writer: Writer,
         library: rbl_index::Library,
     }
@@ -460,7 +460,7 @@ mod tests {
         let writer = Writer::open(location.clone(), dir.path().join("backups")).expect("writer");
         let db = Db::open(location, OpenMode::ReadOnly).expect("read-only");
         let (library, _) = rbl_index::load(&db).expect("index");
-        Fixture { _dir: dir, writer, library }
+        Fixture { dir, writer, library }
     }
 
     impl Fixture {
@@ -773,6 +773,42 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.kind, ErrorKind::ReadOnly);
+    }
+
+    #[test]
+    fn device_and_loose_file_ids_cannot_write_collection_cues() {
+        let mut f = open();
+        let audio = f.dir.path().join("loose.wav");
+        // A disposable PCM WAV exists, but is not a collection content ID.
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&38_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&44_100_u32.to_le_bytes());
+        wav.extend_from_slice(&88_200_u32.to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&2_u32.to_le_bytes());
+        wav.extend_from_slice(&0_i16.to_le_bytes());
+        std::fs::write(&audio, wav).unwrap();
+        let file = format!("file:{}", audio.display());
+        let snapshot = |writer: &Writer| writer.library().connection().query_row(
+            "SELECT (SELECT COUNT(*) FROM djmdCue), (SELECT MAX(rb_local_usn) FROM djmdContent)",
+            [], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, i64>(1)?))).unwrap();
+        let before = snapshot(&f.writer);
+        for edit in [
+            CueEdit::Add { track: file.clone(), kind: CueKind::Hot('A'), position_ms: 100 },
+            CueEdit::AddLoop { track: file.clone(), kind: CueKind::Memory, in_ms: 100, out_ms: 500, beat_loop: None },
+        ] {
+            let refused = apply(&mut f.writer, edit).unwrap_err();
+            assert_eq!(refused.kind, ErrorKind::ReadOnly);
+            assert!(refused.message.contains(&file));
+            assert_eq!(snapshot(&f.writer), before);
+        }
     }
 
     #[test]

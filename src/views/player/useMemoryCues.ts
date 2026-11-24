@@ -18,7 +18,7 @@ import { useCallback } from "react";
 
 import type { Cue } from "@/ipc/types";
 import { memoryCueAt, memoryCueNumber, memoryLoopAt, nextMemoryCue, previousMemoryCue } from "@/lib/cues";
-import { useCueWriter } from "./useCueWriter";
+import { cueWriteReason, useCueWriter } from "./useCueWriter";
 
 export { READ_ONLY_REASON } from "./useCueWriter";
 
@@ -55,6 +55,7 @@ export interface MemoryCueDeck {
 export interface MemoryCueActions {
   /** Whether the controls do anything: a track is loaded and can be written. */
   canEdit: boolean;
+  editReason: string | undefined;
   /** `Set Memory Cue`: stores the cue point, or the loop playing, as a memory cue. */
   store: () => void;
   /** `Call Previous Memory Cue`. */
@@ -73,7 +74,8 @@ export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
   const {
     trackId, cues, positionSeconds, seek, setLoop, playingLoop, beatLoopBeats, cuePoint, setCuePoint, readOnly, onError,
   } = deck;
-  const canEdit = trackId !== null && !readOnly;
+  const editReason = cueWriteReason(trackId, readOnly);
+  const canEdit = editReason === undefined;
   const write = useCueWriter(onError);
 
   /**
@@ -167,5 +169,5 @@ export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
     if (cue) remove(cue);
   }, [cues, positionSeconds, remove]);
 
-  return { canEdit, store, callPrevious, callNext, callNumber, deleteAtHead, remove };
+  return { canEdit, editReason, store, callPrevious, callNext, callNumber, deleteAtHead, remove };
 }

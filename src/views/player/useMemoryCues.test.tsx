@@ -428,3 +428,12 @@ describe("what the deck is told when a write fails", () => {
     expect(onError).toHaveBeenLastCalledWith("the library is open read-only");
   });
 });
+
+it("refuses memory writes for a file identity but still calls its saved cues", async () => {
+  mount({ trackId: "file:/fixture/loose.wav", cuePoint: 2 });
+  expect(memory.canEdit).toBe(false);
+  act(() => { memory.store(); memory.remove(CUES[0]!); memory.callNumber(1); });
+  await settle();
+  expect(sent).toEqual([]);
+  expect(seeked).toEqual([1]);
+});

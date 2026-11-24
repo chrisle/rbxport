@@ -49,7 +49,7 @@ import { useCallback } from "react";
 import type { Cue } from "@/ipc/types";
 import { hotCue } from "@/lib/cues";
 import { foldIntoLoop, nearestBeatMs, quantizedLaunchMs, type BeatGrid } from "@/lib/player";
-import { useCueWriter } from "./useCueWriter";
+import { cueWriteReason, useCueWriter } from "./useCueWriter";
 
 /** A loop's range, in seconds. */
 export interface DeckLoopRange {
@@ -111,6 +111,7 @@ export interface HotCueDeck {
 export interface HotCueActions {
   /** Whether an empty pad can be set: a track is loaded and can be written. */
   canEdit: boolean;
+  editReason: string | undefined;
   /** The cue in a slot, or `null` for an empty pad. */
   at: (letter: string) => Cue | null;
   /**
@@ -131,7 +132,8 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
   const {
     trackId, cues, positionSeconds, seek, play, playing, jumpAt, setLoop, activeLoop, beatLoopBeats, exitLoop, quantiseTo, readOnly, onError,
   } = deck;
-  const canEdit = trackId !== null && !readOnly;
+  const editReason = cueWriteReason(trackId, readOnly);
+  const canEdit = editReason === undefined;
   const write = useCueWriter(onError);
 
   const at = useCallback((letter: string) => hotCue(cues, letter), [cues]);
@@ -215,5 +217,5 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
     [cues, canEdit, write],
   );
 
-  return { canEdit, at, press, clear, move };
+  return { canEdit, editReason, at, press, clear, move };
 }

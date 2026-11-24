@@ -139,6 +139,7 @@ export interface DualControlsProps {
   /** MEMORY, the one memory-cue control the row draws; the rest stay on keys. */
   memory: {
     canEdit: boolean;
+    editReason?: string | undefined;
     store: () => void;
   };
   quantize: boolean;
@@ -214,7 +215,7 @@ export const DualControls = memo(function DualControls({
         type="button"
         className={styles.memory}
         aria-label="Set memory cue"
-        title={tip(readOnly ? READ_ONLY_REASON : "Set Memory Cue (M)")}
+        title={tip(memory.editReason ?? (readOnly ? READ_ONLY_REASON : "Set Memory Cue (M)"))}
         disabled={!memory.canEdit}
         onClick={memory.store}
       >
