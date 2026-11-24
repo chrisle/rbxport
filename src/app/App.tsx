@@ -1,3 +1,4 @@
+import { ImportSkipsDialog } from "@/components/ImportSkipsDialog";
 import { ConfirmHost } from "@/components/ConfirmDialog";
 import type { DuplicateAnswer } from "@/components/DuplicateTracksDialog";
 import type { FolderClashAnswer } from "@/lib/folderDrop";
@@ -116,7 +117,6 @@ const ROW_FIELDS: ReadonlySet<TrackField> = new Set<TrackField>([
 ]);
 
 const DuplicateTracksDialog = lazy(() => import("@/components/DuplicateTracksDialog").then(m => ({ default: m.DuplicateTracksDialog })));
-const ImportSkipsDialog = lazy(() => import("@/components/ImportSkipsDialog").then(m => ({ default: m.ImportSkipsDialog })));
 const FolderClashDialog = lazy(() => import("@/components/FolderClashDialog").then(m => ({ default: m.FolderClashDialog })));
 const DeviceImportCopyDialog = lazy(() => import("@/components/DeviceImportCopyDialog").then(m => ({ default: m.DeviceImportCopyDialog })));
 const AnalysisDialog = lazy(() => import("@/views/analysis/AnalysisDialog").then(m => ({ default: m.AnalysisDialog })));
