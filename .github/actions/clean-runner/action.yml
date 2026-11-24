@@ -1,14 +1,10 @@
 name: Clean the runner
 description: >-
-  Remove build output and per-job caches from a self-hosted runner so a finished
-  job, passed or failed, does not leave its disk use behind. Use it as the last
-  step with `if: always()`.
+  Remove build output and per-job caches in the post-job phase, on success or
+  failure. Register before actions that cache these paths so their post steps
+  save the cache before cleanup.
 runs:
-  using: composite
-  steps:
-    - name: Remove build output and the job's cargo home
-      shell: bash
-      run: |
-        rm -rf target dist test-results playwright-report dist-mock \
-          "${CARGO_HOME:-$RUNNER_TEMP/cargo-home}"
-        df -h . | tail -1
+  using: node24
+  main: register.mjs
+  post: cleanup.mjs
+  post-if: always()

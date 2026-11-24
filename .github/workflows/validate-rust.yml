@@ -37,6 +37,10 @@ jobs:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
 
+      # Post actions run in reverse registration order: save caches first.
+      - name: Register runner cleanup
+        uses: ./.github/actions/clean-runner
+
       - name: Install the Linux build dependencies
         run: |
           sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
@@ -63,6 +67,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          # Cargo home is per job; hash compiler options, not its random path.
+          env-vars: CARGO_BUILD CARGO_PROFILE CARGO_TARGET CARGO_INCREMENTAL CARGO_ENCODED_ CC CFLAGS CXX CMAKE RUST
           shared-key: clippy-linux
 
       - name: Resolve affected packages
@@ -130,10 +136,6 @@ jobs:
           du -sh target/debug/* 2>/dev/null | sort -rh | head -5 || true
           df -h . | tail -1
 
-      - name: Clean the runner
-        if: always()
-        uses: ./.github/actions/clean-runner
-
   msrv:
     name: Rust MSRV check
     needs: rust
@@ -143,6 +145,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref }}
+
+      # Post actions run in reverse registration order: save caches first.
+      - name: Register runner cleanup
+        uses: ./.github/actions/clean-runner
 
       - name: Install the Linux build dependencies
         run: |
@@ -169,10 +175,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          # Cargo home is per job; hash compiler options, not its random path.
+          env-vars: CARGO_BUILD CARGO_PROFILE CARGO_TARGET CARGO_INCREMENTAL CARGO_ENCODED_ CC CFLAGS CXX CMAKE RUST
 
       - name: Check the declared MSRV
         run: cargo +1.89.0 check --workspace --all-targets
-
-      - name: Clean the runner
-        if: always()
-        uses: ./.github/actions/clean-runner

@@ -133,6 +133,8 @@ jobs:
         if: needs.changes.outputs.rust == 'true'
         with:
           cache-bin: false
+          # Cargo home is per job; hash compiler options, not its random path.
+          env-vars: CARGO_BUILD CARGO_PROFILE CARGO_TARGET CARGO_INCREMENTAL CARGO_ENCODED_ CC CFLAGS CXX CMAKE RUST
           shared-key: clippy-linux
 
       # Fix only the packages the Rust lane will lint, and leave enforcement

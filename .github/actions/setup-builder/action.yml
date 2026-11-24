@@ -88,6 +88,8 @@ runs:
       if: runner.os != 'Windows'
       with:
         cache-bin: false
+        # Cargo home is per job; hash compiler options, not its random path.
+        env-vars: CARGO_BUILD CARGO_PROFILE CARGO_TARGET CARGO_INCREMENTAL CARGO_ENCODED_ CC CFLAGS CXX CMAKE RUST
         key: ${{ inputs.target }}
 
     - name: Install frontend dependencies
