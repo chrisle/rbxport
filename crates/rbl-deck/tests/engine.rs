@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rbl_deck::{Deck, DeckEvent, Engine, NullSink, Sink, FADE_FRAMES};
+use rbl_deck::{Deck, DeckEvent, DeckSnapshot, Engine, NullSink, Sink, FADE_FRAMES};
 
 const RATE: u32 = 44_100;
 
@@ -226,11 +226,26 @@ impl Harness {
         out
     }
 
-    fn position(&self, deck: Deck) -> u64 {
+    fn state(&self, deck: Deck) -> DeckSnapshot {
         match deck {
-            Deck::A => self.engine.snapshot().a.position_frames,
-            Deck::B => self.engine.snapshot().b.position_frames,
+            Deck::A => self.engine.snapshot().a,
+            Deck::B => self.engine.snapshot().b,
         }
+    }
+
+    /// Wait for a command's published result, without advancing the audio.
+    fn wait_for_state(&self, deck: Deck, expected: &str, ready: impl Fn(DeckSnapshot) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let state = self.state(deck);
+            if ready(state) { return; }
+            assert!(Instant::now() < deadline, "{expected}: {state:?}; {:?}", self.events());
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn position(&self, deck: Deck) -> u64 {
+        self.state(deck).position_frames
     }
 
     fn events(&self) -> Vec<String> {
@@ -1326,6 +1341,7 @@ fn a_release_onto_the_cue_lands_on_it_or_after_it_but_never_before() {
 /// worth apart, pulling the sink as a device would, and returns what came out.
 fn drag(h: &Harness, deck: Deck, from: u64, to: u64, steps: u64) -> Vec<f32> {
     let ms = |frames: u64| frames as f64 * 1000.0 / f64::from(RATE);
+    let generation = h.state(deck).generation;
     h.engine.scrub_begin(deck);
     let mut out = Vec::new();
     for step in 0..=steps {
@@ -1340,6 +1356,12 @@ fn drag(h: &Harness, deck: Deck, from: u64, to: u64, steps: u64) -> Vec<f32> {
         }
     }
     h.engine.scrub_end(deck);
+    // Begin and end each publish a new generation on the decode thread.
+    // Ending the UI gesture only queues ScrubEnd; inspect its final seek,
+    // rather than the rate-capped read head while that command is pending.
+    h.wait_for_state(deck, "the drag's final seek did not land", |state| {
+        state.generation.wrapping_sub(generation) >= 2 && state.position_frames == to
+    });
     out
 }
 
@@ -1749,7 +1771,11 @@ fn lead_in_obeys_tempo_and_pause() {
     h.wait_for_load(1);
     h.engine.set_tempo(Deck::A, 1.5);
     h.engine.seek_ms(Deck::A, -1000.0);
-    std::thread::sleep(Duration::from_millis(30));
+    // Tempo is applied by the decode thread. A guessed sleep can leave the
+    // callback counting some of this lead-in at the old rate under load.
+    h.wait_for_state(Deck::A, "the requested tempo was not applied", |state| {
+        state.tempo.to_bits() == 1.5_f32.to_bits()
+    });
     h.engine.play(Deck::A);
     h.sink.pull(4410);
     assert_eq!(h.engine.snapshot().a.pre_roll_frames, 44100 - 6615);
