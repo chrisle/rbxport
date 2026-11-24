@@ -45,7 +45,7 @@ fn unchanged_and_playlist_only_syncs_do_not_read_any_media() {
 }
 
 #[test]
-fn layout_three_receipts_rebuild_database_metadata_without_recopying_media() {
+fn old_layout_with_current_transform_rebuilds_only_database_metadata() {
     let source = tempfile::tempdir().unwrap();
     let usb = common::stick();
     let mut tracks = vec![track(source.path(), 1)];
@@ -67,19 +67,20 @@ fn layout_three_receipts_rebuild_database_metadata_without_recopying_media() {
         let db = rbl_onelibrary::playlists::open_read_write(&database).unwrap();
         db.execute_batch("UPDATE property SET dbVersion='1000'; UPDATE content SET analysedBits=169").unwrap();
     }
-    // Historical layout-3 request encoding, deliberately independent of the
-    // current request() implementation: every input and analysis revision is
-    // unchanged, and the old database receipts match the bytes on the stick.
+    // Isolate layout 3 at the current analysis transform. Historical transform
+    // 5 upgrades are covered independently in hot_cue_defaults.rs; this case
+    // must continue proving that a row-layout-only upgrade reads no analysis.
+    let current_transform = rbl_export::incremental::TRANSFORM_VERSION;
     let tags: &[rbl_export::SourceMyTag] = &[];
     let old_request = rbl_export::incremental::digest(&(
         tracks.as_slice(), lists.as_slice(), tags, options.compatibility, options.keep_unlisted,
         format!("{:?}", options.sync), options.db_id_override, options.my_tag_master_db_id_override,
-        format!("{:?}", options.defaults), 5_u32, 3_u32,
+        format!("{:?}", options.defaults), current_transform, 3_u32,
     )).unwrap();
     let current_request = rbl_export::incremental::request(&tracks, &lists, tags, &options).unwrap();
     assert_ne!(old_request, current_request, "row layout changes must invalidate the request receipt");
     let generation = older.generation.as_mut().unwrap();
-    assert_eq!(generation.transform_version, 5, "the historical analysis recipe is unchanged");
+    assert_eq!(generation.transform_version, current_transform, "only the row layout is old");
     generation.request = old_request;
     generation.databases = rbl_export::incremental::databases(usb.path()).unwrap();
     assert_eq!(generation.inputs, rbl_export::incremental::inputs(&tracks).unwrap());
