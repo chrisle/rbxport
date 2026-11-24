@@ -22,6 +22,7 @@ pub mod cache;
 pub mod plan;
 pub mod sync_record;
 pub mod snapshot;
+mod playlist_order;
 mod reconcile;
 mod verification;
 

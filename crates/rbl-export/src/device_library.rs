@@ -307,22 +307,29 @@ fn one_error(e: impl std::fmt::Display) -> ExportError {
 fn read_one(path: &Path) -> Result<(Vec<Node>, Vec<Track>)> {
     let db = rbl_onelibrary::ExportLibrary::open_read_only(path).map_err(one_error)?;
     let (rows, mut contents) = rbl_onelibrary::playlists::read(db.connection()).map_err(one_error)?;
-    let id = |v: i64| u32::try_from(v).unwrap_or(0);
-    let nodes = rows
+    // Keep representable raw positions for existing edit/inspection callers.
+    // If one sibling needs a signed position, rank that entire sibling group
+    // after sorting, so neither clamping nor mixed raw/ranked values reorder it.
+    let ranked_parents: BTreeSet<_> = rows.iter()
+        .filter(|row| u32::try_from(row.sequence).is_err()).map(|row| row.parent).collect();
+    let nodes = crate::playlist_order::ranked(rows)?
         .into_iter()
-        .map(|row| {
+        .map(|(row, sequence)| {
             let folder = row.attribute == rbl_onelibrary::playlists::FOLDER;
-            let tracks = contents.remove(&row.id).unwrap_or_default();
-            Node {
-                id: id(row.id),
-                parent: id(row.parent),
+            let tracks = contents.remove(&row.id).unwrap_or_default().into_iter()
+                .map(u32::try_from).collect::<std::result::Result<Vec<_>, _>>().map_err(one_error)?;
+            Ok(Node {
+                id: u32::try_from(row.id).map_err(one_error)?,
+                parent: u32::try_from(row.parent).map_err(one_error)?,
                 name: row.name,
                 folder,
-                sequence: id(row.sequence),
-                tracks: if folder { Vec::new() } else { tracks.into_iter().map(id).collect() },
-            }
+                sequence: if ranked_parents.contains(&row.parent) { sequence } else {
+                    u32::try_from(row.sequence).map_err(one_error)?
+                },
+                tracks: if folder { Vec::new() } else { tracks },
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
     let mut statement = db
         .connection()
         .prepare(

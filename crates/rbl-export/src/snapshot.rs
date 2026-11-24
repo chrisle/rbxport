@@ -744,28 +744,17 @@ fn read_one_library(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> R
         out.identity.insert(track.id, identity);
         library.tracks.push(track);
     }
-    let mut q = conn.prepare("SELECT playlist_id, COALESCE(playlist_id_parent,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(sequenceNo,0) FROM playlist ORDER BY sequenceNo, playlist_id").map_err(sql)?;
-    let nodes = q
-        .query_map([], |r| {
-            Ok(Playlist {
-                id: r.get(0)?,
-                parent: r.get(1)?,
-                name: r.get(2)?,
-                folder: r.get::<_, i64>(3)? == 1,
-                sequence: r.get(4)?,
-                tracks: Vec::new(),
-            })
-        })
-        .map_err(sql)?;
-    for node in nodes {
-        let mut node = node.map_err(sql)?;
-        let mut q = conn.prepare("SELECT content_id FROM playlist_content WHERE playlist_id=?1 ORDER BY sequenceNo").map_err(sql)?;
-        node.tracks = q
-            .query_map([node.id], |r| r.get(0))
-            .map_err(sql)?
-            .collect::<std::result::Result<_, _>>()
-            .map_err(sql)?;
-        library.playlists.push(node);
+    let (rows, mut contents) = rbl_onelibrary::playlists::read(conn).map_err(sql)?;
+    for (row, sequence) in crate::playlist_order::ranked(rows)? {
+        library.playlists.push(Playlist {
+            id: u32::try_from(row.id).map_err(sql)?,
+            parent: u32::try_from(row.parent).map_err(sql)?,
+            name: row.name,
+            folder: row.attribute == rbl_onelibrary::playlists::FOLDER,
+            sequence,
+            tracks: contents.remove(&row.id).unwrap_or_default().into_iter()
+                .map(u32::try_from).collect::<std::result::Result<_, _>>().map_err(sql)?,
+        });
     }
     library.normalize();
     out.one = Some(library);
