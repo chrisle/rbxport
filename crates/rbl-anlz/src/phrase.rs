@@ -25,10 +25,10 @@
 //! +00 index u16   1-based
 //! +02 beat  u16   first beat of the phrase
 //! +04 kind  u16   meaning depends on the mood
-//! +07 k1    u8  ┐
-//! +09 k2    u8  ├ high-mood label variants
-//! +13 k3    u8  ┘
-//! +0b b     u8    0: one extra beat, 1: three (only seen on "UP 3")
+//! +06 k1    u16 ┐
+//! +08 k2    u16 ├ non-zero flags for high-mood label variants
+//! +12 k3    u16 ┘
+//! +0a buildup u16  roll-up start beat (preserved, not exposed here)
 //! +0c beat2 u16 ┐
 //! +0e beat3 u16 ├ lighting hints inside the phrase, purpose [UNKNOWN]
 //! +10 beat4 u16 ┘
@@ -113,21 +113,21 @@ pub struct SongStructure {
 /// The label rekordbox shows for a `kind` in a given mood.
 ///
 /// The high mood's numbered variants are not in `kind` at all: they come from
-/// three flag bytes, in the combinations tabulated by Deep Symmetry [REF].
+/// three boolean flag words, in the combinations tabulated by Deep Symmetry [REF].
 /// Every one of the 8,488 high-mood phrases in the reference library uses one
 /// of those combinations and no other [OBS].
-fn label_for(mood: Mood, kind: u16, k1: u8, k2: u8, k3: u8) -> &'static str {
+fn label_for(mood: Mood, kind: u16, k1: bool, k2: bool, k3: bool) -> &'static str {
     match mood {
         Mood::High => match (kind, k1, k2, k3) {
-            (1, 1, _, _) => "INTRO 1",
+            (1, true, _, _) => "INTRO 1",
             (1, _, _, _) => "INTRO 2",
-            (2, _, 0, 0) => "UP 1",
-            (2, _, 0, _) => "UP 2",
+            (2, _, false, false) => "UP 1",
+            (2, _, false, _) => "UP 2",
             (2, _, _, _) => "UP 3",
             (3, ..) => "DOWN",
-            (5, 1, _, _) => "CHORUS 1",
+            (5, true, _, _) => "CHORUS 1",
             (5, ..) => "CHORUS 2",
-            (6, 1, _, _) => "OUTRO 1",
+            (6, true, _, _) => "OUTRO 1",
             (6, ..) => "OUTRO 2",
             _ => "",
         },
@@ -233,9 +233,9 @@ impl Section {
         let mut phrases = Vec::with_capacity(count);
         for entry in entries.chunks_exact(len_entry_bytes).take(count) {
             let kind = be16(entry, 4);
-            let k1 = entry.get(0x07).copied().unwrap_or(0);
-            let k2 = entry.get(0x09).copied().unwrap_or(0);
-            let k3 = entry.get(0x13).copied().unwrap_or(0);
+            let k1 = be16(entry, 0x06) != 0;
+            let k2 = be16(entry, 0x08) != 0;
+            let k3 = be16(entry, 0x12) != 0;
             phrases.push(Phrase {
                 index: be16(entry, 0),
                 beat: be16(entry, 2),
