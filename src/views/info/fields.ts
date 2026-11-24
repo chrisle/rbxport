@@ -129,10 +129,10 @@ export function acceptable(field: TrackField, value: string): boolean {
     case "trackNumber": return /^\s*\d{0,4}\s*$/.test(value);
     case "discNumber": return /^\s*\d{0,3}\s*$/.test(value);
     case "playCount": return /^\s*\d{0,6}\s*$/.test(value);
-    // 20 to 400, as the writer takes it.
+    // Zero is an Info metadata marker, never a zero-tempo grid.
     case "bpm": {
       const bpm = Number.parseFloat(value.trim());
-      return /^\s*\d+(\.\d+)?\s*$/.test(value) && bpm >= 20 && bpm <= 400;
+      return /^\s*\d+(\.\d+)?\s*$/.test(value) && (bpm === 0 || (bpm >= 40 && bpm <= 499));
     }
     default: return true;
   }

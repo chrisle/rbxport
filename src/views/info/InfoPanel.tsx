@@ -13,7 +13,7 @@
  *   Bitrate, DJ Play Count and Location.
  * - **Info**: the editable form, laid out as captured. What the writer will
  *   take is live; what it will not — the album artist (it lives on the
- *   shared album row), BPM (it also lives in the analysis grid), Mix Name,
+ *   shared album row), Mix Name,
  *   Message and the two flags (read from columns whose spelling on write has
  *   not been seen), and the Release Date box (its three segments' order is
  *   assumed) — is drawn read-only with the reason in its tooltip.
@@ -80,7 +80,6 @@ const LOCKED: Record<string, string> = {
   albumArtist:
     "The album artist is stored on the album, which every track of the album shares; " +
     "whether rekordbox edits that row or makes a new album is not known.",
-  bpm: "The BPM also lives in the analysis grid; editing one without the other is not known to be safe.",
   releaseDate: "The order of the three date boxes is assumed from their widths; the date is shown, not edited.",
   mixName: "Read from the Subtitle column, which holds mix names in the reference library; not written until a capture confirms it.",
   message: "Read from the DeliveryComment column, which is never filled in the reference library; not written.",
@@ -442,7 +441,7 @@ function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFo
       <div className={styles.rowThirds}>
         <Locked label="Album Artist" name="albumArtist" value={view.albumArtist} />
         {field("trackNumber", { numeric: true })}
-        <Locked label="BPM" name="bpm" value={view.bpm} />
+        {field("bpm", view.multiple ? { disabled: true, greyed: true } : undefined)}
       </div>
       <div className={styles.rowThirds}>
         {field("originalArtist")}

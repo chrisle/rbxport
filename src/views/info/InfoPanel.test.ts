@@ -150,6 +150,11 @@ describe("the Info tab's fields", () => {
     expect(acceptable("title", "")).toBe(true);
   });
 
+  it("accepts zero BPM metadata while rejecting negative and overflowing values", () => {
+    for (const value of ["0", "0.00", " 0 ", "120.25"]) expect(acceptable("bpm", value)).toBe(true);
+    for (const value of ["-1", "0.01", "NaN", "Infinity", "1e999", "999999999999", "", "120junk"]) expect(acceptable("bpm", value)).toBe(false);
+  });
+
   it("splits a release date into day, month name and year", () => {
     expect(dateSegments("2026-09-11")).toEqual(["11", "September", "2026"]);
     expect(dateSegments("2023-08-01")).toEqual(["1", "August", "2023"]);

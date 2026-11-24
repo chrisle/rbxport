@@ -326,3 +326,33 @@ test("a grid shift moves a synced deck with the grid at once", async ({ page }) 
   for (let n = 0; n < 10; n++) await later(a).click();
   await expect.poll(async () => Math.abs((await offBeat()) - start), { timeout: 1000 }).toBeLessThan(0.004);
 });
+
+test("Info saves zero BPM metadata while the grid and its Undo stay usable", async ({ page }) => {
+  await load(page);
+  const original = await bpm(page);
+  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("info"));
+  const info = page.getByRole("complementary", { name: "Information" });
+  await info.getByRole("tab", { name: "Info", exact: true }).click();
+  const metadata = info.getByRole("textbox", { name: "BPM", exact: true });
+  await expect(metadata).toBeEditable();
+  await metadata.fill("0");
+  await metadata.press("Enter");
+  await expect(metadata).toHaveValue("0.00");
+  await expect(page.locator('[role="gridcell"][data-col="bpm"]').nth(3)).toHaveText("");
+  await expect(bpmField(page)).toHaveValue(original.toFixed(2));
+  await button(page, "Undo the last grid edit").click();
+  await expect(metadata).toHaveValue(original.toFixed(2));
+  await button(page, "Redo the last grid edit").click();
+  await expect(metadata).toHaveValue("0.00");
+  await metadata.fill("150");
+  await metadata.press("Enter");
+  await expect(bpmField(page)).toHaveValue("150.00");
+  await button(page, "Undo the last grid edit").click();
+  await expect(metadata).toHaveValue("0.00");
+  await expect(bpmField(page)).toHaveValue(original.toFixed(2));
+  for (const invalid of ["-1", "1e999", "1000"]) {
+    await metadata.fill(invalid);
+    await metadata.press("Enter");
+    await expect(metadata).toHaveValue("0.00");
+  }
+});

@@ -121,7 +121,7 @@ test("the fields the writer will not take are read-only and say why", async ({ p
   await enableTooltips(page);
   const panel = await openPanel(page, "/?writable");
   await panel.getByRole("tab", { name: "Info" }).click();
-  for (const name of ["Album Artist", "BPM", "Mix Name", "Message"]) {
+  for (const name of ["Album Artist", "Mix Name", "Message"]) {
     const box = panel.getByRole("textbox", { name, exact: true });
     await expect(box).toHaveAttribute("readonly", "");
     await expect(box).toHaveAttribute("title", /.+/);

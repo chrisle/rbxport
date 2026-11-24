@@ -1474,8 +1474,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }
       if (field === "bpm") {
         const bpm = Number.parseFloat(value.trim());
-        if (!Number.isFinite(bpm) || bpm < 20 || bpm > 400) {
-          return Promise.reject(new Error(`${JSON.stringify(value)} is not a BPM between 20 and 400`));
+        if (!/^\s*\d+(\.\d+)?\s*$/.test(value) || !Number.isFinite(bpm) || (bpm !== 0 && (bpm < 40 || bpm > 499))) {
+          return Promise.reject(new Error(`${JSON.stringify(value)} is not 0 or a BPM between 40 and 499`));
         }
         const row = all.find((r) => r.id === tracks[0]);
         const held = tracks[0] === undefined ? null : gridOf(tracks[0]);
@@ -1483,9 +1483,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           // As the real backend (#505): the grid editor's Set Tempo over the
           // whole track, one entry in the track's grid history.
           if (held.locked) return refuse("The beat grid is locked. Unlock it to edit.");
-          const next = applyEditFrom(held.beats, null, { kind: "tempo", bpmX100: Math.round(bpm * 100), anchorMs: 0 }, row.durationSec * 1000);
-          if (!sameGrid(next, held.beats)) {
-            held.undo.push({ beats: held.beats, label: "Set Tempo" });
+          const next = bpm === 0 ? held.beats : applyEditFrom(held.beats, null, { kind: "tempo", bpmX100: Math.round(bpm * 100), anchorMs: 0 }, row.durationSec * 1000);
+          if (!sameGrid(next, held.beats) || row.bpmX100 !== Math.round(bpm * 100)) {
+            held.undo.push({ beats: held.beats, label: "Set Tempo", bpm: row.bpmX100 });
             held.transaction = undefined;
             held.redo = [];
             held.beats = next;
@@ -1646,7 +1646,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         ? (edit.ms < 0 ? "Shift Beat Grid Left" : "Shift Beat Grid Right")
         : { double: "Double Tempo", halve: "Halve Tempo", downbeat: "Set Downbeat",
           tempo: "Set Tempo", tap: "Tap Tempo", stretch: "Adjust Tempo", align: "Align Beat Grid" }[edit.kind];
-      if (!options?.transaction || held.transaction !== options.transaction) held.undo.push({ beats: held.beats, label });
+      if (!options?.transaction || held.transaction !== options.transaction) held.undo.push({ beats: held.beats, label, bpm: all.find((r) => r.id === track)?.bpmX100 });
       held.transaction = edit.kind === "tap" ? options?.transaction : undefined;
       held.redo = [];
       held.beats = next;
@@ -1659,9 +1659,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       held.transaction = undefined;
       const previous = held.undo.pop();
       if (!previous) return notFound("Nothing to undo.");
-      held.redo.push({ beats: held.beats, label: previous.label });
+      held.redo.push({ beats: held.beats, label: previous.label, bpm: all.find((r) => r.id === track)?.bpmX100 });
       held.beats = previous.beats;
-      return gridChanged(track, held, source);
+      return gridChanged(track, held, source, source ? undefined : previous.bpm);
     },
     gridRedo: (track, _deck, source) => {
       if (track.startsWith("file:") && !source) return refuse("Reload this track from its device library before editing its grid.");
@@ -1670,16 +1670,16 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       held.transaction = undefined;
       const next = held.redo.pop();
       if (!next) return notFound("Nothing to redo.");
-      held.undo.push({ beats: held.beats, label: next.label });
+      held.undo.push({ beats: held.beats, label: next.label, bpm: all.find((r) => r.id === track)?.bpmX100 });
       held.beats = next.beats;
-      return gridChanged(track, held, source);
+      return gridChanged(track, held, source, source ? undefined : next.bpm);
     },
     gridLock: (track, on) => {
       const held = gridOf(track);
       if (!held) return notFound("That track has no beat grid to edit.");
       if (track.startsWith("file:")) return refuse("Analysis Lock is set on a track in the collection, not on a device.");
       held.locked = on;
-      return gridChanged(track, held);
+      return gridChanged(track, held, undefined, all.find((r) => r.id === track)?.bpmX100);
     },
   };
 
@@ -1695,8 +1695,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     durationMs: number;
     beats: EditableBeat[];
     transaction?: string | undefined;
-    undo: { beats: EditableBeat[]; label: string }[];
-    redo: { beats: EditableBeat[]; label: string }[];
+    undo: { beats: EditableBeat[]; label: string; bpm?: number | undefined }[];
+    redo: { beats: EditableBeat[]; label: string; bpm?: number | undefined }[];
     locked: boolean;
   }
   const gridStore = new Map<string, HeldGrid>();
@@ -1738,9 +1738,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     redoLabel: held.redo.at(-1)?.label ?? null,
     locked: held.locked,
   });
-  const gridChanged = async (trackId: string, held: HeldGrid, source?: DeviceTrackSource): Promise<GridState> => {
+  const gridChanged = async (trackId: string, held: HeldGrid, source?: DeviceTrackSource, metadataBpm = tempoX100(held.beats)): Promise<GridState> => {
     const row = all[Number.parseInt(trackId, 10) - 100000];
-    const bpm = tempoX100(held.beats);
+    const bpm = metadataBpm;
     if (source) {
       for (const other of gridStore.values()) if (other.trackId === trackId) other.beats = held.beats;
       if (stickLibraries.setTempo(trackId, bpm)) for (const listener of deviceListeners) listener();

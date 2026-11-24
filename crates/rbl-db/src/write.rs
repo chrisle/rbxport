@@ -3739,6 +3739,21 @@ impl Writer {
         self.touch_content(content, "BPM", &Value::Integer(i64::from(bpm_x100)))
     }
 
+    /// Update only the BPM column, including the Info editor's zero marker.
+    /// This deliberately leaves analysis bytes and `AnalysisUpdated` unchanged;
+    /// a caller retiming a grid must use `save_grid_revision` instead.
+    pub fn set_bpm_metadata(&mut self, content: &str, expected_bpm: u32, expected_analysis: &str, bpm_x100: u32) -> Result<Changed> {
+        self.prepare()?;
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let usn = next_usn(&tx)?;
+        let rows = tx.execute("UPDATE djmdContent SET BPM=?2, rb_local_usn=?3, updated_at=?4 WHERE ID=?1 AND rb_local_deleted=0 AND COALESCE(BPM,0)=?5 AND COALESCE(AnalysisDataPath,'')=?6",
+            params![content, bpm_x100, usn, time::now(), expected_bpm, expected_analysis])?;
+        if rows != 1 { return Err(DbError::WriteRefused("The track's BPM or analysis changed. Reload it before editing.".into())); }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
     /// Sets a track's comment.
     pub fn set_comment(&mut self, content: &str, comment: &str) -> Result<Changed> {
         self.touch_content(content, "Commnt", &Value::Text(comment.to_owned()))
@@ -4648,9 +4663,21 @@ impl Writer {
 
     /// Persist an edited grid's tempo and invalidate cached analysis consumers.
     pub fn save_grid_revision(&mut self, content: &str, bpm: u32) -> Result<()> {
+        self.save_grid_revision_inner(content, bpm, None)
+    }
+
+    /// Publish a grid revision only while its planned row still matches.
+    pub fn save_grid_revision_if_current(&mut self, content: &str, bpm: u32, expected_bpm: u32, expected_analysis: &str) -> Result<()> {
+        self.save_grid_revision_inner(content, bpm, Some((expected_bpm, expected_analysis)))
+    }
+
+    fn save_grid_revision_inner(&mut self, content: &str, bpm: u32, expected: Option<(u32, &str)>) -> Result<()> {
         self.prepare()?;
         let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let previous: Option<String> = tx.query_row("SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [content], |r| r.get(0))?;
+        let (previous, before_bpm, before_analysis): (Option<String>, u32, String) = tx.query_row("SELECT AnalysisUpdated, COALESCE(BPM,0), COALESCE(AnalysisDataPath,'') FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [content], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        if expected.is_some_and(|(bpm, path)| bpm != before_bpm || path != before_analysis) {
+            return Err(DbError::WriteRefused("The track's BPM or analysis changed. Reload it before editing.".into()));
+        }
         // modifyAnalysisUpdated increments the first UTF-16 code unit, not
         // a parsed decimal integer. Preserve that reference wire behavior.
         let unit = previous.as_deref().unwrap_or("").encode_utf16().next().unwrap_or(0).wrapping_add(1);

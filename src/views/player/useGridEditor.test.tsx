@@ -216,7 +216,7 @@ describe("recovered grid control behavior", () => {
     expect(edits.gridEdit).toHaveBeenCalledTimes(2);
   });
   it("validates typed BPM and sends a tempo edit", async () => {
-    mount(); act(() => { grid.setBpm("20"); grid.setBpm("500"); }); await settle();
+    mount(); act(() => { grid.setBpm("0"); grid.setBpm("20"); grid.setBpm("500"); }); await settle();
     expect(edits.gridEdit).not.toHaveBeenCalled();
     act(() => grid.setBpm("128.5")); await settle();
     expect(edits.gridEdit.mock.calls[0]?.[1]).toEqual({ kind: "tempo", bpmX100: 12850, anchorMs: 0 });

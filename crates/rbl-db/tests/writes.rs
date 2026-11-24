@@ -5685,3 +5685,29 @@ fn unreadable_aiffs_are_each_refused_with_their_own_reason_and_the_rest_import()
     assert!(lines[0].starts_with("No COMM.aiff: its tags could not be read: "), "{lines:?}");
     assert!(lines[1].starts_with("Truncated.aiff: its tags could not be read: "), "{lines:?}");
 }
+
+#[test]
+fn zero_bpm_metadata_and_grid_revisions_are_bound_to_the_planned_row() {
+    let mut f = fixture();
+    let id = track_id(1);
+    let path = "/PIONEER/USBANLZ/one/ANLZ0000.DAT";
+    f.conn().execute("UPDATE djmdContent SET BPM=60000, AnalysisDataPath=?2, AnalysisUpdated='9' WHERE ID=?1", params![id, path]).unwrap();
+    let before_usn = f.one::<i64>("SELECT rb_local_usn FROM djmdContent WHERE ID=?1", &[&id]);
+    for (expected, analysis) in [(12800, path), (60000, "different-analysis")] {
+        assert!(f.writer.set_bpm_metadata(&id, expected, analysis, 0).is_err());
+        assert!(f.writer.save_grid_revision_if_current(&id, 15000, expected, analysis).is_err());
+        assert_eq!(f.one::<i64>("SELECT rb_local_usn FROM djmdContent WHERE ID=?1", &[&id]), before_usn);
+        assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&id]), 60000);
+        assert_eq!(f.one::<String>("SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1", &[&id]), "9");
+    }
+    f.writer.set_bpm_metadata(&id, 60000, path, 0).unwrap();
+    assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&id]), 0);
+    assert_eq!(f.one::<String>("SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1", &[&id]), "9");
+    f.writer.save_grid_revision_if_current(&id, 15000, 0, path).unwrap();
+    assert_eq!(f.one::<String>("SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1", &[&id]), ":");
+    assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&id]), 15000);
+    f.conn().execute("UPDATE djmdContent SET rb_local_deleted=1 WHERE ID=?1", [&id]).unwrap();
+    assert!(f.writer.set_bpm_metadata(&id, 15000, path, 0).is_err());
+    assert!(f.writer.set_bpm_metadata("missing", 0, "", 0).is_err());
+    assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&track_id(2)]), 12802);
+}

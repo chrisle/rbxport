@@ -483,6 +483,34 @@ describe("mock edits", () => {
     expect((await backend.edits.gridRedo(id)).bpmX100).toBe(15_000);
   });
 
+  it("keeps a zero BPM marker separate from the grid through Undo/Redo and later tempo edits", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    let id = "";
+    for (let n = 100000; n < 100020 && !id; n++) {
+      if (await backend.gridState(String(n)).then(() => true, () => false)) id = String(n);
+    }
+    const grid = await backend.gridState(id);
+    const original = (await backend.trackDetails(id)).bpmX100;
+    await backend.edits.setTrackField([id], "bpm", "0");
+    expect((await backend.trackDetails(id)).bpmX100).toBe(0);
+    expect((await backend.gridState(id)).bpmX100).toBe(grid.bpmX100);
+    expect((await backend.gridState(id)).beats).toBe(grid.beats);
+    await backend.edits.gridUndo(id);
+    expect((await backend.trackDetails(id)).bpmX100).toBe(original);
+    await backend.edits.gridRedo(id);
+    expect((await backend.trackDetails(id)).bpmX100).toBe(0);
+    await backend.edits.setTrackField([id], "bpm", "150");
+    await backend.edits.gridUndo(id);
+    expect((await backend.trackDetails(id)).bpmX100).toBe(0);
+    expect((await backend.gridState(id)).bpmX100).toBe(grid.bpmX100);
+    await backend.edits.gridRedo(id);
+    expect((await backend.trackDetails(id)).bpmX100).toBe(15_000);
+    for (const value of ["-1", "NaN", "Infinity", "1e999", "1000", "120junk"]) {
+      await expect(backend.edits.setTrackField([id], "bpm", value)).rejects.toThrow();
+      expect((await backend.trackDetails(id)).bpmX100).toBe(15_000);
+    }
+  });
+
   it("refuses a title for several tracks, as rekordbox greys the box", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await expect(backend.edits.setTrackField(["100000", "100001"], "title", "Same")).rejects.toThrow();

@@ -103,6 +103,9 @@ pub struct GridOptions {
     /// read; the command fills it in, the frontend never sends it.
     #[serde(skip)]
     registered: Option<String>,
+    /// Info-only row marker; never sent by a grid or device command.
+    #[serde(skip)]
+    metadata_bpm: Option<u32>,
     device_source: Option<crate::dto::DeviceTrackSourceDto>,
 }
 
@@ -125,7 +128,7 @@ pub struct GridOutcome {
     pub state: GridStateDto,
     /// Whether `djmdContent.BPM` changed, so the library has to be re-read.
     pub bpm_changed: bool,
-    /// Whether the files were rewritten: false when the edit changed nothing.
+    /// Whether files or row metadata changed: false for a no-op.
     pub written: bool,
     /// The grid as it now stands, for the deck's metronome: milliseconds and
     /// the beat's number in its bar.
@@ -151,6 +154,8 @@ struct HistoryEntry {
     /// find.
     after: Vec<Beat>,
     label: &'static str,
+    /// Row-only zero markers must survive later grid edits and Undo/Redo.
+    row_bpms: Option<(u32, u32)>,
 }
 
 impl GridEdit {
@@ -225,7 +230,7 @@ impl GridEditor {
     #[cfg(test)]
     pub(crate) fn seed_history(&self, track: &str) {
         self.histories.lock().entry(track.to_owned()).or_default()
-            .undo.push(HistoryEntry { before: Vec::new(), after: Vec::new(), label: "Seeded" });
+            .undo.push(HistoryEntry { before: Vec::new(), after: Vec::new(), label: "Seeded", row_bpms: None });
     }
 
     /// Whether the track has any undo or redo entry.
@@ -427,14 +432,14 @@ pub fn apply(
     action: GridAction,
     set_bpm: &mut dyn FnMut(u32) -> AppResult<()>,
 ) -> AppResult<GridOutcome> {
-    apply_options(editor, library, location, track, action, &GridOptions::default(), set_bpm)
+    apply_options(editor, library, location, track, action, &GridOptions::default(), &mut |bpm, _, _| set_bpm(bpm))
 }
 
 /// Records what just happened in the track's undo/redo history — the part
 /// of [`apply_options`] after the write has already landed. `before` and
 /// `after` are the grid the action found and the grid it wrote.
 fn record_history(editor: &GridEditor, track: &str, action: GridAction, before: Vec<Beat>, after: Vec<Beat>,
-    options: &GridOptions) {
+    options: &GridOptions, row_bpms: Option<(u32, u32)>) {
     let mut histories = editor.histories.lock();
     let history = histories.entry(track.to_owned()).or_default();
     match action {
@@ -444,8 +449,13 @@ fn record_history(editor: &GridEditor, track: &str, action: GridAction, before: 
             match history.undo.last_mut() {
                 // A tap in the same run joins the entry the run started:
                 // Undo still goes back to the grid before the first tap.
-                Some(open) if transaction.is_some() && history.transaction.as_ref() == transaction => open.after = after,
-                _ => history.undo.push(HistoryEntry { before, after, label: edit.label() }),
+                Some(open) if transaction.is_some() && history.transaction.as_ref() == transaction => {
+                    open.after = after;
+                    if let Some((_, after)) = &mut open.row_bpms {
+                        *after = row_bpms.map_or_else(|| u32::from(tempo_x100(&open.after)), |(_, bpm)| bpm);
+                    }
+                },
+                _ => history.undo.push(HistoryEntry { before, after, label: edit.label(), row_bpms }),
             }
             history.transaction = transaction.cloned();
             if history.undo.len() > HISTORY_CAP { history.undo.remove(0); }
@@ -520,7 +530,7 @@ fn plan_next(editor: &GridEditor, track: &str, beats: &[Beat], action: GridActio
 
 fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::LibraryLocation,
     track: &str, action: GridAction, options: &GridOptions,
-    set_bpm: &mut dyn FnMut(u32) -> AppResult<()>) -> AppResult<GridOutcome> {
+    set_bpm: &mut dyn FnMut(u32, bool, u32) -> AppResult<()>) -> AppResult<GridOutcome> {
     // The writer's own rule, applied to the files as well as the row: a
     // fixture in a tempdir is not the installed library, so its tests run
     // whether or not rekordbox is open.
@@ -536,10 +546,40 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
     let files = files_of(library, &location.share_root, track, options.registered.as_deref())?;
     let (parsed, beats) = read_dat(&files.dat)?;
 
+    let old_row_bpm = row_tempo(location, track)?;
+    let history_bpms = {
+        let mut histories = editor.histories.lock();
+        let history = histories.entry(track.to_owned()).or_default();
+        let entries = match action {
+            GridAction::Undo => Some(&mut history.undo),
+            GridAction::Redo => Some(&mut history.redo),
+            GridAction::Edit { .. } => None,
+        };
+        if let Some(entries) = entries {
+            if let Some(entry) = entries.last() {
+                if let Some((before, after)) = entry.row_bpms {
+                    let expected = if action == GridAction::Undo { after } else { before };
+                    if old_row_bpm != expected {
+                        let label = entry.label;
+                        entries.pop();
+                        return Err(conflict(action, label));
+                    }
+                    Some((before, after))
+                } else { None }
+            } else { None }
+        } else { None }
+    };
     let locked = matches!(action, GridAction::Edit { .. }) && (editor.is_locked(track) || database_locked(location, track)?);
     let row = library.row_of(track).map(|row| row as usize);
     let duration = options.duration_ms.or_else(|| row.and_then(|i| library.length_sec.get(i)).map(|s| s.saturating_mul(1000)));
-    let Some(next) = plan_next(editor, track, &beats, action, options, duration, locked)? else {
+    let planned = if options.metadata_bpm == Some(0) {
+        if locked { return Err(AppError::new(ErrorKind::ReadOnly, "The beat grid is locked. Unlock it to edit.")); }
+        Some(beats.clone())
+    } else {
+        plan_next(editor, track, &beats, action, options, duration, locked)?
+            .or_else(|| options.metadata_bpm.filter(|bpm| *bpm != old_row_bpm).map(|_| beats.clone()))
+    };
+    let Some(next) = planned else {
         return Ok(GridOutcome {
             state: editor.state_for(track, &beats),
             bpm_changed: false,
@@ -548,6 +588,19 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
         });
     };
 
+    let new_bpm = history_bpms.map(|(before, after)| if action == GridAction::Undo { before } else { after })
+        .or(options.metadata_bpm).unwrap_or_else(|| u32::from(tempo_x100(&next)));
+    let row_bpms = history_bpms.or_else(|| (old_row_bpm == 0 || options.metadata_bpm == Some(0)).then_some((old_row_bpm, new_bpm)));
+    let bpm_changed = if row_bpms.is_some() { new_bpm != old_row_bpm } else { new_bpm != u32::from(tempo_x100(&beats)) };
+    if next == beats {
+        if bpm_changed { set_bpm(new_bpm, false, old_row_bpm)?; }
+        if bpm_changed || !matches!(action, GridAction::Edit { .. }) {
+            record_history(editor, track, action, beats, next.clone(), options, row_bpms);
+        }
+        return Ok(GridOutcome {
+            state: editor.state_for(track, &next), bpm_changed, written: bpm_changed, beats: wire_beats(&next),
+        });
+    }
     editor.back_up(&files.dat, &files.relative, "DAT")?;
     editor.back_up(&files.ext, &files.relative, "EXT")?;
     let mut changed_files = vec![(files.dat.clone(), parsed.with_beat_grid(&next))];
@@ -555,22 +608,19 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
         let ext = rbl_anlz::Anlz::read(&files.ext).map_err(|e| AppError::internal(e.to_string()))?;
         if let Some(cleared) = ext.with_extended_grid_edit(&parsed.beat_grid().unwrap_or_default(), &next, parsed.grid_offset().unwrap_or(0)) { changed_files.push((files.ext.clone(), cleared)); }
     }
-    let old_bpm = u32::from(tempo_x100(&beats));
-    let new_bpm = u32::from(tempo_x100(&next));
-    let bpm_changed = new_bpm != old_bpm;
     let journal = crate::file_journal::FileJournal::prepare(&editor.journal_root, location, track,
         new_bpm, None, true, &changed_files)?;
     if let Err(e) = journal.publish() {
         journal.rollback()?;
         return Err(e);
     }
-    if let Err(refused) = set_bpm(new_bpm) {
+    if let Err(refused) = set_bpm(new_bpm, true, old_row_bpm) {
         journal.reconcile(location)?;
         return Err(refused);
     }
     journal.commit()?;
 
-    record_history(editor, track, action, beats, next.clone(), options);
+    record_history(editor, track, action, beats, next.clone(), options, row_bpms);
 
     Ok(GridOutcome {
         state: GridStateDto { locked: editor.is_locked(track) || database_locked(location, track)?, ..editor.state_for(track, &next) },
@@ -578,6 +628,16 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
         written: true,
         beats: wire_beats(&next),
     })
+}
+
+fn row_tempo(location: &rbl_db::LibraryLocation, track: &str) -> AppResult<u32> {
+    let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).map_err(write_error)?;
+    db.connection().query_row("SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [track], |r| r.get(0))
+        .map_err(|e| AppError::internal(e.to_string()))
+}
+
+fn save_tempo(state: &AppState, track: &str, bpm: u32, analysis_changed: bool, before: u32, path: &str) -> AppResult<()> {
+    state.write(|w| if analysis_changed { w.save_grid_revision_if_current(track, bpm, before, path) } else { w.set_bpm_metadata(track, before, path, bpm).map(|_| ()) }).map_err(write_error)
 }
 
 /// The Info panel's BPM field: the grid editor's Set Tempo over the whole
@@ -592,9 +652,9 @@ pub(crate) fn set_tempo(state: &AppState, editor: &GridEditor, track: &str, valu
 }
 
 fn set_tempo_inner(state: &AppState, editor: &GridEditor, track: &str, value: &str) -> AppResult<()> {
-    let bpm: f64 = value.trim().parse().map_err(|_| AppError::new(ErrorKind::Malformed, "Enter a BPM from 40 to 499."))?;
-    if !bpm.is_finite() || !(40.0..=499.0).contains(&bpm) {
-        return Err(AppError::new(ErrorKind::Malformed, "Enter a BPM from 40 to 499."));
+    let bpm: f64 = value.trim().parse().map_err(|_| AppError::new(ErrorKind::Malformed, "Enter 0 or a BPM from 40 to 499."))?;
+    if !bpm.is_finite() || (bpm != 0.0 && !(40.0..=499.0).contains(&bpm)) {
+        return Err(AppError::new(ErrorKind::Malformed, "Enter 0 or a BPM from 40 to 499."));
     }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "validated 40..=499 above")]
     let bpm_x100 = (bpm * 100.0).round() as u16;
@@ -604,29 +664,30 @@ fn set_tempo_inner(state: &AppState, editor: &GridEditor, track: &str, value: &s
         rbl_db::test_mode(), rbl_db::is_rekordbox_running()) {
         return Err(AppError::new(ErrorKind::ReadOnly, reason));
     }
-    if database_locked(&location, track)? { return Err(AppError::new(ErrorKind::ReadOnly, "The beat grid is locked.")); }
+    if editor.is_locked(track) || database_locked(&location, track)? { return Err(AppError::new(ErrorKind::ReadOnly, "The beat grid is locked.")); }
     crate::file_journal::recover(state.backup_dir(), &location)?;
     let library = state.library()?;
     let row = library.row_of(track).ok_or_else(|| AppError::new(ErrorKind::NotFound, "That track is no longer in the library."))?;
     let relative = state.analysis_path_of(&library, row as usize, track);
-    let mut set_bpm = |bpm_x100: u32| state.write(|w| w.save_grid_revision(track, bpm_x100)).map_err(write_error);
+    let mut set_bpm = |bpm_x100: u32, analysis_changed: bool, before: u32| save_tempo(state, track, bpm_x100, analysis_changed, before, &relative);
     if relative.is_empty() {
         // No analysis, so no grid and nothing for the grid history.
-        return set_bpm(u32::from(bpm_x100));
+        return set_bpm(u32::from(bpm_x100), false, row_tempo(&location, track)?);
     }
     let (_, beats) = read_dat(&rbl_anlz::resolve(&location.share_root, &relative))?;
-    if rbl_anlz::grid::is_dynamic_from(&beats, None) { return Err(AppError::new(ErrorKind::Malformed, "Use the grid BPM field to confirm replacing tempo changes.")); }
+    if bpm_x100 != 0 && rbl_anlz::grid::is_dynamic_from(&beats, None) { return Err(AppError::new(ErrorKind::Malformed, "Use the grid BPM field to confirm replacing tempo changes.")); }
     let options = GridOptions {
         registered: state.registered_analysis(track),
+        metadata_bpm: Some(u32::from(bpm_x100)),
         duration_ms: library.length_sec.get(row as usize).map(|s| s.saturating_mul(1000)),
         ..GridOptions::default()
     };
     let edit = GridAction::Edit { edit: GridEdit::Tempo { bpm_x100, anchor_ms: 0 }, from_ms: None };
     let outcome = apply_options(editor, &library, &location, track, edit, &options, &mut set_bpm)?;
-    if !outcome.written {
+    if !outcome.written && bpm_x100 != 0 {
         // The grid already stands at that tempo: nothing to record, but the
         // row still takes the typed value, as it did before #505.
-        set_bpm(u32::from(bpm_x100))?;
+        set_bpm(u32::from(bpm_x100), false, row_tempo(&location, track)?)?;
     }
     Ok(())
 }
@@ -768,7 +829,7 @@ pub(crate) fn apply_device(editor: &GridEditor, assets: &crate::device_library::
         known.retain(|(path, _)| !written.iter().any(|(file, _)| file == path));
         known.extend(written);
     }
-    record_history(editor, track, action, beats, next.clone(), options);
+    record_history(editor, track, action, beats, next.clone(), options, None);
     Ok(GridOutcome {
         state: GridStateDto { locked: false, lockable: false, ..editor.state_for(track, &next) },
         bpm_changed,
@@ -845,10 +906,8 @@ async fn run<R: tauri::Runtime>(
         blocking(name, move || {
             let _edit_guard = state.edit_gate.lock();
             let _files_guard = state.analysis_write.lock();
-            let mut set_bpm = |bpm_x100: u32| {
-                let track = track.clone();
-                state.write(|writer| writer.save_grid_revision(&track, bpm_x100)).map_err(write_error)
-            };
+            let relative = files_of(&library, &location.share_root, &track, options.registered.as_deref())?.relative;
+            let mut set_bpm = |bpm_x100: u32, changed: bool, before: u32| save_tempo(&state, &track, bpm_x100, changed, before, &relative);
             apply_options(&editor, &library, &location, &track, action, &options, &mut set_bpm)
         })
         .await
@@ -1117,7 +1176,7 @@ mod tests {
         let f = open();
         let original = f.dat().beat_grid().unwrap();
         let options = GridOptions { transaction: Some("tap-test-run".into()), duration_ms: Some(4500), ..GridOptions::default() };
-        let mut save = |_bpm| Ok(());
+        let mut save = |_bpm, _changed, _before| Ok(());
         for bpm in [120.0, 121.25] {
             apply_options(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Edit {
                 edit: GridEdit::Tap { bpm, anchor_ms: 1600 }, from_ms: None,
@@ -1125,10 +1184,10 @@ mod tests {
         }
         assert_eq!(f.editor.histories.lock()[&Fixture::track()].undo.len(), 1);
         let last_tap = f.dat().beat_grid().unwrap();
-        apply(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Undo, &mut save).unwrap();
+        apply(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Undo, &mut |bpm| save(bpm, true, 0)).unwrap();
         assert_eq!(f.dat().beat_grid().unwrap(), original);
         // Redo lands on the run's last tap, not its first.
-        apply(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Redo, &mut save).unwrap();
+        apply(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Redo, &mut |bpm| save(bpm, true, 0)).unwrap();
         assert_eq!(f.dat().beat_grid().unwrap(), last_tap);
     }
 
@@ -1137,13 +1196,133 @@ mod tests {
     fn through_writer(f: &Fixture, state: &AppState, action: GridAction) -> AppResult<GridOutcome> {
         // Held as `run` holds it, so the writer leaves this journal alone.
         let _files = state.analysis_write.lock();
-        let mut set_bpm = |bpm: u32| state.write(|w| w.save_grid_revision(&Fixture::track(), bpm)).map_err(write_error);
-        apply(&f.editor, &f.library, &f.location, &Fixture::track(), action, &mut set_bpm)
+        let mut set_bpm = |bpm: u32, changed: bool, before: u32| save_tempo(state, &Fixture::track(), bpm, changed, before, RELATIVE);
+        apply_options(&f.editor, &f.library, &f.location, &Fixture::track(), action, &GridOptions::default(), &mut set_bpm)
     }
 
     fn row_bpm(state: &AppState) -> u32 {
         state.read_db(|db| Ok(db.connection().query_row(
             "SELECT BPM FROM djmdContent WHERE ID=?1", [Fixture::track()], |r| r.get(0))?)).unwrap()
+    }
+
+    #[test]
+    fn zero_bpm_is_undoable_metadata_and_never_a_zero_grid() {
+        let f = open();
+        fixture::set_tempo(&f.location, 1, 60_000).unwrap();
+        let state = app_state(&f);
+        let dat = rbl_anlz::resolve(&f.location.share_root, RELATIVE);
+        let before_dat = std::fs::read(&dat).unwrap();
+        let before_ext = std::fs::read(dat.with_extension("EXT")).unwrap();
+        let old_bpm = row_bpm(&state);
+        let revision = || state.read_db(|db| Ok(db.connection().query_row("SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1", [Fixture::track()], |r| r.get::<_, Option<String>>(0))?)).unwrap();
+        let old_revision = revision();
+        set_tempo(&state, &f.editor, &Fixture::track(), "0.00").unwrap();
+        assert_eq!(row_bpm(&state), 0);
+        assert_eq!(revision(), old_revision);
+        assert_eq!(std::fs::read(&dat).unwrap(), before_dat);
+        assert_eq!(std::fs::read(dat.with_extension("EXT")).unwrap(), before_ext);
+        assert!(f.dat().beat_grid().unwrap().iter().all(|b| b.tempo_x100 > 0));
+        assert_eq!(f.editor.state_for(&Fixture::track(), &grid()).bpm_x100, 12_000);
+        assert!(!f.editor.backup_dir.exists(), "metadata does not back up analysis");
+        through_writer(&f, &state, GridAction::Undo).unwrap();
+        assert_eq!(row_bpm(&state), old_bpm);
+        through_writer(&f, &state, GridAction::Redo).unwrap();
+        assert_eq!(row_bpm(&state), 0);
+        assert_eq!(std::fs::read(&dat).unwrap(), before_dat);
+        assert_eq!(std::fs::read(dat.with_extension("EXT")).unwrap(), before_ext);
+        assert_eq!(revision(), old_revision);
+
+        // A later positive tempo edits the grid; Undo restores the zero
+        // marker and the original grid together, not the grid's positive BPM.
+        set_tempo(&state, &f.editor, &Fixture::track(), "150").unwrap();
+        assert_eq!(row_bpm(&state), 15_000);
+        through_writer(&f, &state, GridAction::Undo).unwrap();
+        assert_eq!(row_bpm(&state), 0);
+        assert_eq!(f.dat().beat_grid().unwrap(), grid());
+        through_writer(&f, &state, GridAction::Redo).unwrap();
+        assert_eq!(row_bpm(&state), 15_000);
+    }
+
+    #[test]
+    fn zero_marker_to_the_existing_grid_tempo_remains_undoable_without_files() {
+        let f = open();
+        let state = app_state(&f);
+        set_tempo(&state, &f.editor, &Fixture::track(), "0").unwrap();
+        let dat = rbl_anlz::resolve(&f.location.share_root, RELATIVE);
+        let before = std::fs::read(&dat).unwrap();
+        set_tempo(&state, &f.editor, &Fixture::track(), "120").unwrap();
+        assert_eq!(row_bpm(&state), 12_000);
+        through_writer(&f, &state, GridAction::Undo).unwrap();
+        assert_eq!(row_bpm(&state), 0);
+        assert_eq!(std::fs::read(&dat).unwrap(), before);
+    }
+
+    #[test]
+    fn zero_marker_refuses_external_row_changes_and_keeps_unrelated_tracks() {
+        let f = open();
+        let state = app_state(&f);
+        let other = state.read_db(|db| Ok(db.connection().query_row("SELECT BPM FROM djmdContent WHERE ID=?1", [track_id(2)], |r| r.get::<_, u32>(0))?)).unwrap();
+        set_tempo(&state, &f.editor, &Fixture::track(), "0").unwrap();
+        fixture::set_tempo(&f.location, 1, 17_500).unwrap();
+        assert_eq!(through_writer(&f, &state, GridAction::Undo).unwrap_err().kind, ErrorKind::Conflict);
+        assert_eq!(row_bpm(&state), 17_500);
+        assert_eq!(state.read_db(|db| Ok(db.connection().query_row("SELECT BPM FROM djmdContent WHERE ID=?1", [track_id(2)], |r| r.get::<_, u32>(0))?)).unwrap(), other);
+    }
+
+    #[test]
+    fn zero_and_positive_bpm_validation_is_bounded_before_any_write() {
+        let f = open();
+        let state = app_state(&f);
+        let before = row_bpm(&state);
+        for value in ["-1", "NaN", "inf", "1e999", "655.36", "500", "0.01", "", "120junk"] {
+            assert!(set_tempo(&state, &f.editor, &Fixture::track(), value).is_err(), "{value}");
+            assert_eq!(row_bpm(&state), before);
+            assert!(!f.editor.has_history(&Fixture::track()));
+        }
+        for value in ["40", "499", "0"] {
+            set_tempo(&state, &f.editor, &Fixture::track(), value).unwrap();
+        }
+        assert_eq!(row_bpm(&state), 0);
+        assert!(f.dat().beat_grid().unwrap().iter().all(|b| b.tempo_x100 > 0));
+    }
+
+    #[test]
+    fn zero_bpm_works_without_analysis_and_preserves_a_dynamic_grid() {
+        let f = open();
+        let state = app_state(&f);
+        set_tempo(&state, &f.editor, &track_id(2), "0").unwrap();
+        assert_eq!(state.read_db(|db| Ok(db.connection().query_row("SELECT BPM FROM djmdContent WHERE ID=?1", [track_id(2)], |r| r.get::<_, u32>(0))?)).unwrap(), 0);
+        assert!(!f.editor.has_history(&track_id(2)));
+        let mut dynamic = grid();
+        dynamic[4].tempo_x100 = 13_000;
+        written_elsewhere(&f, &dynamic);
+        let dat = rbl_anlz::resolve(&f.location.share_root, RELATIVE);
+        let bytes = std::fs::read(&dat).unwrap();
+        set_tempo(&state, &f.editor, &Fixture::track(), "0").unwrap();
+        assert_eq!(std::fs::read(&dat).unwrap(), bytes);
+        assert_eq!(f.dat().beat_grid().unwrap(), dynamic);
+    }
+
+    #[test]
+    fn zero_bpm_refuses_stale_analysis_and_failed_writes_without_history_or_file_changes() {
+        let f = open();
+        let state = app_state(&f);
+        let dat = rbl_anlz::resolve(&f.location.share_root, RELATIVE);
+        let bytes = std::fs::read(&dat).unwrap();
+        let before = row_bpm(&state);
+        fixture::set_analysis_path(&f.location, 1, "/PIONEER/USBANLZ/other/ANLZ0000.DAT").unwrap();
+        assert!(set_tempo(&state, &f.editor, &Fixture::track(), "0").is_err());
+        assert_eq!(row_bpm(&state), before);
+        assert!(f.editor.histories.lock()[&Fixture::track()].undo.is_empty());
+        fixture::set_analysis_path(&f.location, 1, RELATIVE).unwrap();
+        let db = Db::open(f.location.clone(), OpenMode::ReadWrite).unwrap();
+        db.connection().execute_batch("CREATE TRIGGER refuse_bpm BEFORE UPDATE OF BPM ON djmdContent BEGIN SELECT RAISE(ABORT, 'refused'); END;").unwrap();
+        drop(db);
+        assert!(set_tempo(&state, &f.editor, &Fixture::track(), "0").is_err());
+        assert_eq!(row_bpm(&state), before);
+        assert!(f.editor.histories.lock()[&Fixture::track()].undo.is_empty());
+        assert_eq!(std::fs::read(&dat).unwrap(), bytes);
+        assert!(!f.editor.backup_dir.exists());
     }
 
     #[test]
@@ -1253,7 +1432,7 @@ mod tests {
         let mut f = open();
         f.edit(GridEdit::Halve);
         f.run(GridAction::Undo).unwrap();
-        f.editor.histories.lock().entry("other".into()).or_default().undo.push(HistoryEntry { before: grid(), after: grid(), label: "Set Tempo" });
+        f.editor.histories.lock().entry("other".into()).or_default().undo.push(HistoryEntry { before: grid(), after: grid(), label: "Set Tempo", row_bpms: None });
         let elsewhere: Vec<Beat> = grid().into_iter().map(|b| Beat { time_ms: b.time_ms + 3, ..b }).collect();
         written_elsewhere(&f, &elsewhere);
         let refused = f.run(GridAction::Redo).unwrap_err();
@@ -1288,7 +1467,7 @@ mod tests {
 
     fn confirmed(f: &Fixture, edit: GridEdit, from_ms: Option<u32>, allow_dynamic: bool) -> AppResult<GridOutcome> {
         let options = GridOptions { allow_dynamic, duration_ms: Some(9100), ..GridOptions::default() };
-        apply_options(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Edit { edit, from_ms }, &options, &mut |_| Ok(()))
+        apply_options(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Edit { edit, from_ms }, &options, &mut |_, _, _| Ok(()))
     }
 
     #[test]
