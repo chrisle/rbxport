@@ -38,6 +38,9 @@ const overrides = {
     "{size} total · {count} track": "{size} i alt · {count} nummer",
   },
   de: {
+    "CUE": "CUE",
+    "HOT CUE": "HOT CUE",
+    "cue": "cue",
     "Backups": "Sicherungen",
     "Check for updates": "Nach Updates suchen",
     "No backups yet.": "Noch keine Sicherungen.",
