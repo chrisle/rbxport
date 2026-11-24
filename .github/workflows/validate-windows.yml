@@ -77,6 +77,13 @@ jobs:
         if: inputs.check_rust
         run: cargo check --workspace --all-targets
 
+      - name: Device discovery during publication
+        if: inputs.check_rust
+        shell: pwsh
+        env:
+          RB_LITE_TEST: "1"
+        run: cargo test -p rbl-devices --test inspect a_stick_being_written_is_reported_busy_without_waiting_for_the_export
+
       - name: Check silent updater task script
         if: inputs.check_rust
         shell: pwsh

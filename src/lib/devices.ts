@@ -73,9 +73,9 @@ export function fullness(device: Device): number | null {
 }
 
 /** What is already on the volume, in a sentence. */
-export function contentsText(device: Device): string {
+export function contentsText(device: Device, t: (key: string) => string = key => key): string {
   const found = device.export;
-  if (device.busy) return "Being written to now. What it holds shows when the sync finishes.";
+  if (device.busy) return t("Being written to now. What it holds shows when the sync finishes.");
   if (!found) return "No export on this device yet.";
   const tracks = `${found.tracks} track${found.tracks === 1 ? "" : "s"}`;
   const playlists = `${found.playlists} playlist${found.playlists === 1 ? "" : "s"}`;

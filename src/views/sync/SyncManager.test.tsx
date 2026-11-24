@@ -1219,6 +1219,30 @@ it("opening and closing a USB does not select it for synchronization", async () 
 });
 
 
+it("keeps devices and conversion progress visible while a stick's library read waits (#798)", async () => {
+  const backend = await getBackend();
+  let finishRead: ((state: DeviceSyncState) => void) | undefined;
+  const waiting = new Promise<DeviceSyncState>(resolve => { finishRead = resolve; });
+  const converting = { ...stick("USB C"), busy: true };
+  listDevices.mockResolvedValue([...DEVICES, converting]);
+  __setBackend({ ...backend, deviceSyncState: path => path === converting.path ? waiting : backend.deviceSyncState(path) });
+  act(() => {
+    exportProgress?.({ path: converting.path, state: "converting", done: 1, total: 4, title: "Converting track" });
+    devicesChanged?.();
+  });
+  await settle();
+  for (const name of ["USB A", "USB B", "USB C"]) expect(box(name)).not.toBeNull();
+  expect(host.querySelector('progress[aria-label="Exporting USB C"]')?.getAttribute("value")).toBe("25");
+  expect(host.textContent).toContain("Converting track");
+  // No device-library reply has been needed to render the device or its job.
+  act(() => { finishRead?.({ selected: [], onDevice: ["Converted playlist"], automatic: false }); });
+  await settle();
+  act(() => { exportProgress?.({ path: converting.path, state: "done", done: 4, total: 4, title: "" }); });
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand USB C"]'));
+  await settle();
+  expect(host.querySelector('[aria-label="USB C library"]')?.textContent).toContain("Converted playlist");
+});
+
 it("connection changes refresh only the device list; SYNC never imports (#199)", async () => {
   expect(importUsb).not.toHaveBeenCalled();
   listDevices.mockResolvedValueOnce([...DEVICES, stick("USB C")]);

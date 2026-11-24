@@ -1088,6 +1088,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_non_waiting_read_lease_does_not_create_a_lock_or_bypass_a_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(try_read_lease(dir.path()).unwrap().is_none());
+        let lock_path = dir.path().join(".rbxport-write.lock");
+        assert!(!lock_path.exists(), "discovery must stay read-only");
+
+        let first = read_lock(dir.path()).unwrap();
+        let second = try_read_lease(dir.path()).unwrap().unwrap();
+        let writer = std::fs::OpenOptions::new().read(true).write(true).open(lock_path).unwrap();
+        assert!(fs2::FileExt::try_lock_exclusive(&writer).is_err());
+        drop(first);
+        assert!(fs2::FileExt::try_lock_exclusive(&writer).is_err(), "the non-waiting reader must keep its shared lease");
+        drop(second);
+        fs2::FileExt::try_lock_exclusive(&writer).unwrap();
+        assert_eq!(try_read_lease(dir.path()).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        drop(writer);
+        assert!(try_read_lease(dir.path()).unwrap().is_some());
+    }
+
+    #[test]
     fn an_unchanged_destination_keeps_its_identity_while_files_are_written() {
         let dir = tempfile::tempdir().unwrap();
         let identity = VolumeIdentity::capture(dir.path()).unwrap();
