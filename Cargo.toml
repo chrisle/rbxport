@@ -62,3 +62,7 @@ opt-level = 2
 inherits = "release"
 debug = 1
 strip = "none"
+
+[patch.crates-io]
+# Let WebView2 deliver object messages to the dropped-file path listener.
+wry = { git = "https://github.com/chrisle/wry", rev = "ccd50e685b7d0ee6775a8e6c5021afcd9a0c4e2e" }
