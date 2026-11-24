@@ -113,7 +113,7 @@ fn a_revision_three_receipt_reprocesses_cue_order_without_recopying_audio() {
     assert_eq!(tags(&rbl_anlz::Anlz::read(&saved).unwrap()), ["PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PWV5", "PWV4"]);
     assert_eq!(std::fs::read(src.path().join("library.EXT")).unwrap(), original_ext);
     let current = rbl_export::Manifest::load(dest.path()).unwrap();
-    assert_eq!(current.generation.as_ref().unwrap().transform_version, 4);
+    assert_eq!(current.generation.as_ref().unwrap().transform_version, rbl_export::incremental::TRANSFORM_VERSION);
     let again = export(dest.path(), &[track], &[]).unwrap();
     assert_eq!((again.bytes_copied, again.analysis_files), (0, 0));
 }
