@@ -14,10 +14,15 @@ remains a collection operation and is refused for device tracks.
 ## Write boundary
 
 The application refuses device writes while rekordbox is running. A shared
-USB lease covers the analysis snapshot and its backup; the publication writer
-then checks the original bytes under its exclusive lease. A concurrent export
+USB lease covers the analysis snapshot and its backup; for an explicit edit
+it creates a missing lock on a stock device. Read-only queries remain
+observational. Linked or non-file lock paths refuse before recovery or lock
+creation. The publication writer checks the original bytes under its exclusive lease. A concurrent export
 that wins the handoff makes the edit refuse instead of overwriting its grid.
-The current row must still name the same audio and analysis files. Relative
+Both DAT and any present EXT are validated as plain on-device files before
+reading or backing up either, including an EXT that needs no rewrite.
+The browsed local track ID must be unique before any analysis backup; every
+selected paired ID must also identify one live row. The current row must still name the same audio and analysis files. Relative
 paths, plain files, and the permitted DAT/EXT companions are checked; symlinks,
 wrong-track files, missing files and malformed replacement analysis are refused.
 
@@ -46,7 +51,8 @@ stamp checks and final analysis-byte check provide additional conflict checks.
 | --- | --- |
 | Exact loaded source | Native commands browse two databases sharing audio but naming different analysis, then edit/undo/redo only the loaded source; forged and unbound sources refuse. |
 | Publication handoff | An analysis change after planning refuses with both databases and the newer analysis intact. |
-| File association | Wrong-track, missing, outside-root and symlink-backed analysis refuse. |
+| Write intent | A missing lock is created, a publisher waits through the planning lease, and a dangling lock link creates no outside file. |
+| File association | Wrong-track, missing, outside-root and symlink-backed analysis refuse. Native linked-EXT fixtures preserve outside sentinels, create no backups, and change no grid/database/history. |
 | Database writes | Both database formats, paired master IDs, unchanged non-tempo columns/counters, unchanged audio, and a paired-database failure. |
 | Backup/history | Same-name media and media swapped at one mount retain their original bytes; device histories stay separate. |
 | Recovery mechanism | Existing export publication/recovery suites; no new real-media crash test. |

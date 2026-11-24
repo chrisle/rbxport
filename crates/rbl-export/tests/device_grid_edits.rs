@@ -308,3 +308,89 @@ fn mismatched_or_ambiguous_paired_origins_refuse_before_any_file_changes() {
         assert_eq!((db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary)), before);
     }
 }
+
+#[test]
+fn duplicate_browsed_track_ids_refuse_without_publishing_any_file() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    stick(src.path(), dest.path());
+    let path = dest.path().join("PIONEER/rekordbox/export.pdb");
+    let mut bytes = std::fs::read(&path).unwrap();
+    let at = {
+        let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+        pdb.rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap()).into_iter()
+            .find(|row| pdb.u4_at(*row, 0x48) == 2).unwrap().offset + 0x48
+    };
+    bytes[at..at + 4].copy_from_slice(&1_u32.to_le_bytes());
+    std::fs::write(path, bytes).unwrap();
+    // Binary search can select either duplicate. The caller follows the
+    // selected row correctly, but the old tempo patcher updated both IDs.
+    let library = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
+    let selected = library.track(1).unwrap();
+    let relative = PathBuf::from(selected.analysis_path.trim_start_matches('/'));
+    let dat = dest.path().join(&relative);
+    let original = std::fs::read(&dat).unwrap();
+    let before = (db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary));
+    let next = Anlz::read(&dat).unwrap().with_beat_grid(&grid(12, 12_600));
+    let write = GridWrite { audio: selected.path.clone(), track: 1, files: vec![snapshot(dest.path(), relative, next)], bpm_x100: Some(12_600) };
+    assert!(device_library::write_grid(dest.path(), Format::DeviceLibrary, &write).is_err());
+    assert_eq!(std::fs::read(dat).unwrap(), original);
+    assert_eq!((db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary)), before);
+    assert!(!dest.path().join(".rbxport-publication").exists());
+}
+
+#[test]
+fn duplicate_paired_track_ids_refuse_even_when_only_one_origin_matches() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    stick(src.path(), dest.path());
+    let library = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
+    let (one, two) = (library.track(1).unwrap(), library.track(2).unwrap());
+    let path = dest.path().join("PIONEER/rekordbox/export.pdb");
+    let mut bytes = std::fs::read(&path).unwrap();
+    let at = {
+        let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+        pdb.rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap()).into_iter()
+            .find(|row| pdb.u4_at(*row, 0x48) == 2).unwrap().offset + 0x48
+    };
+    bytes[at..at + 4].copy_from_slice(&1_u32.to_le_bytes());
+    // Keep different master IDs but make both duplicate local IDs name the
+    // selected audio. A same-audio check alone cannot disambiguate the ID.
+    assert_eq!(one.path.len(), two.path.len());
+    let positions: Vec<_> = bytes.windows(two.path.len()).enumerate().filter_map(|(at, part)| (part == two.path.as_bytes()).then_some(at)).collect();
+    assert!(!positions.is_empty());
+    for at in positions { bytes[at..at + one.path.len()].copy_from_slice(one.path.as_bytes()); }
+    std::fs::write(path, bytes).unwrap();
+    let paired = device_library::read(dest.path(), Format::DeviceLibrary).unwrap();
+    assert_eq!(paired.tracks.iter().filter(|row| row.id == 1 && row.path == one.path).count(), 2);
+    let relative = dat_of(dest.path(), Format::OneLibrary, 1);
+    let dat = dest.path().join(&relative);
+    let original = std::fs::read(&dat).unwrap();
+    let before = (db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary));
+    let next = Anlz::read(&dat).unwrap().with_beat_grid(&grid(12, 12_600));
+    let write = GridWrite { audio: one.path.clone(), track: 1, files: vec![snapshot(dest.path(), relative, next)], bpm_x100: Some(12_600) };
+    assert!(device_library::write_grid(dest.path(), Format::OneLibrary, &write).is_err());
+    assert_eq!(std::fs::read(dat).unwrap(), original);
+    assert_eq!((db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary)), before);
+}
+
+#[test]
+fn a_write_plan_creates_a_shared_lock_before_a_first_publisher() {
+    let dest = tempfile::tempdir().unwrap();
+    assert!(rbl_core::durable::read_lease(dest.path()).unwrap().is_none());
+    assert!(!dest.path().join(".rbxport-write.lock").exists(), "read-only queries stay observational");
+    let lease = device_library::grid_write_lease(dest.path()).unwrap();
+    assert!(dest.path().join(".rbxport-write.lock").is_file(), "a stock device needs a real planning lease");
+    let (started, ready) = std::sync::mpsc::channel();
+    let (done, finished) = std::sync::mpsc::channel();
+    let path = dest.path().to_path_buf();
+    let writer = std::thread::spawn(move || {
+        started.send(()).unwrap();
+        let publication = rbl_core::durable::Publication::new(&path, ".grid-lease-test").unwrap();
+        done.send(()).unwrap();
+        drop(publication);
+    });
+    ready.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(finished.recv_timeout(std::time::Duration::from_millis(100)).is_err(), "an exclusive publisher must wait through planning/backup");
+    drop(lease);
+    finished.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    writer.join().unwrap();
+}

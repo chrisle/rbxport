@@ -153,7 +153,7 @@ impl DeviceAssets {
 /// too.
 // perf-ok: one `lstat` per part (four or five for a stick file), only for a
 // stick's own track.
-fn plainly_under(mount: &Path, path: &Path) -> bool {
+pub(crate) fn plainly_under(mount: &Path, path: &Path) -> bool {
     let Ok(below) = path.strip_prefix(mount) else { return false };
     let mut at = mount.to_path_buf();
     let mut any = false;
@@ -1294,12 +1294,11 @@ fn one_library_cues(mount: &Path) -> HashMap<u32, Vec<rbl_index::Cue>> {
 pub(crate) fn grid_assets(source: &DeviceTrackSourceDto, track: &str) -> AppResult<DeviceAssets> {
     let mount = connected(&source.path)?;
     let format = format_from(&source.format)?;
-    let library = device::read_without_recovery(&mount, format).map_err(|e| device_error(&e))?;
-    let row = library.track(source.track_id).ok_or_else(|| AppError::new(ErrorKind::NotFound, "That device track is no longer available. Reload it from the device."))?;
+    let row = device::read_grid_track(&mount, format, source.track_id).map_err(|e| device_error(&e))?;
     if rbl_index::folder::loose_id(&audio_path(&mount, &row.path)) != track {
         return Err(AppError::new(ErrorKind::Malformed, "That device row no longer names the loaded audio. Reload it from the device."));
     }
-    Ok(assets_of(&mount, format, row).1)
+    Ok(assets_of(&mount, format, &row).1)
 }
 
 fn assets_of(mount: &Path, format: Format, track: &device::Track) -> (String, DeviceAssets) {
