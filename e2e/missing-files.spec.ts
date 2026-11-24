@@ -360,6 +360,24 @@ test("a heading sorts the Missing File Manager forwards, then backwards (#541)",
   await expect(grid.locator("[role=columnheader] svg")).toHaveCount(1);
 });
 
+test("the Missing File Manager title bar moves the window without resizing it (#869)", async ({ page }) => {
+  await open(page);
+  const manager = await openManager(page);
+  const before = (await manager.boundingBox())!;
+  const title = (await manager.getByRole("heading", { name: "Missing File Manager" }).boundingBox())!;
+  const x = title.x + title.width / 2;
+  const y = title.y + title.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 120, y + 70, { steps: 5 });
+  await page.mouse.up();
+  const moved = (await manager.boundingBox())!;
+  expect(moved.x).toBeCloseTo(before.x + 120, 0);
+  expect(moved.y).toBeCloseTo(before.y + 70, 0);
+  expect(moved.width).toBeCloseTo(before.width, 0);
+  expect(moved.height).toBeCloseTo(before.height, 0);
+});
+
 test("the Missing File Manager and its columns resize (#541)", async ({ page }) => {
   await open(page);
   const manager = await openManager(page);
