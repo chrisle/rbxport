@@ -7,9 +7,9 @@ use std::path::Path;
 use symphonia::core::{
     audio::SampleBuffer,
     codecs::{
-        DecoderOptions, CODEC_TYPE_FLAC, CODEC_TYPE_MP3, CODEC_TYPE_PCM_F32LE,
-        CODEC_TYPE_PCM_S16BE, CODEC_TYPE_PCM_S16LE, CODEC_TYPE_PCM_S24BE, CODEC_TYPE_PCM_S24LE,
-        CODEC_TYPE_PCM_S32LE,
+        CodecType, DecoderOptions, CODEC_TYPE_FLAC, CODEC_TYPE_MP3, CODEC_TYPE_PCM_F32BE,
+        CODEC_TYPE_PCM_F32LE, CODEC_TYPE_PCM_F64BE, CODEC_TYPE_PCM_F64LE, CODEC_TYPE_PCM_S16BE,
+        CODEC_TYPE_PCM_S16LE, CODEC_TYPE_PCM_S24BE, CODEC_TYPE_PCM_S24LE, CODEC_TYPE_PCM_S32LE,
     },
     formats::FormatOptions,
     io::{MediaSourceStream, MediaSourceStreamOptions},
@@ -17,8 +17,25 @@ use symphonia::core::{
     probe::Hint,
 };
 
+/// MP3's fixed output rate, and the fallback for a WAV/AIFF source rate that
+/// is none of 44.1/48 kHz or an exact double/quadruple of them.
 pub const RATE: u32 = 44_100;
 const CHUNK: usize = 1024;
+
+/// The bit depth and sample rate to write a WAV/AIFF conversion at, chosen so
+/// a source already at 16/24-bit, 44.1/48 kHz round-trips losslessly and only
+/// a source the players genuinely can't read is resampled or requantized.
+/// MP3 output ignores this and always encodes at [`RATE`]/320 kbps.
+pub fn target_for(source_rate: u32, source_bits: Option<u32>) -> (u32, u32) {
+    let bits = if source_bits.is_some_and(|b| b > 16) { 24 } else { 16 };
+    let rate = match source_rate {
+        44_100 | 48_000 => source_rate,
+        88_200 | 176_400 => 44_100,
+        96_000 | 192_000 => 48_000,
+        _ => RATE,
+    };
+    (rate, bits)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -34,22 +51,43 @@ impl Format {
             Self::Mp3 => "mp3",
         }
     }
-    pub fn profile(self) -> &'static str {
+    /// A cache/manifest profile name for a conversion to this format at
+    /// `rate`/`bits`. Named per target (not just per format) and bumped to
+    /// `v2` so a conversion cached under the old, always-16-bit/44.1 kHz
+    /// profile is redone once rather than silently reused.
+    pub fn profile(self, rate: u32, bits: u32) -> String {
         match self {
-            Self::Wav => "pcm16-44100-stereo-v1",
-            Self::Aiff => "pcm16be-44100-stereo-v1",
-            Self::Mp3 => "mp3-320-44100-stereo-v1",
+            Self::Wav => format!("pcm{bits}-{rate}-stereo-v2"),
+            Self::Aiff => format!("pcm{bits}be-{rate}-stereo-v2"),
+            Self::Mp3 => "mp3-320-44100-stereo-v1".to_owned(),
         }
     }
-    pub fn bitrate(self) -> u32 {
+    /// Nominal kbps for the track database's `bitrate` field.
+    pub fn bitrate(self, rate: u32, bits: u32) -> u32 {
         match self {
-            Self::Wav | Self::Aiff => 1411,
+            Self::Wav | Self::Aiff => bits * 2 * rate / 1000,
             Self::Mp3 => 320,
         }
+    }
+    /// The rate/bits a conversion to this format would use for `properties`:
+    /// [`target_for`] for WAV/AIFF, always [`RATE`]/16 for MP3.
+    pub fn target(self, properties: &AudioProperties) -> (u32, u32) {
+        if self == Self::Mp3 { (RATE, 16) } else { properties.target() }
     }
 }
 fn error(e: impl std::fmt::Display) -> AudioError {
     AudioError::Unsupported(e.to_string())
+}
+
+/// `reported` bit depth, filled in for IEEE float PCM: symphonia's WAV/AIFF
+/// readers record the codec but not a bit depth for it, even though the
+/// format itself is 32- or 64-bit.
+fn bit_depth(codec: CodecType, reported: Option<u32>) -> Option<u32> {
+    match codec {
+        CODEC_TYPE_PCM_F32LE | CODEC_TYPE_PCM_F32BE => Some(32),
+        CODEC_TYPE_PCM_F64LE | CODEC_TYPE_PCM_F64BE => Some(64),
+        _ => reported,
+    }
 }
 fn open(path: &Path) -> Result<(Box<dyn symphonia::core::formats::FormatReader>, crate::aifc::Aifc)> {
     let (source, aifc) = crate::aifc::open(path)?;
@@ -88,6 +126,12 @@ pub struct AudioProperties {
     pub channels: Option<u32>,
     pub frames: Option<u64>,
 }
+impl AudioProperties {
+    /// [`target_for`] applied to these properties' rate and bit depth.
+    pub fn target(&self) -> (u32, u32) {
+        target_for(self.sample_rate.unwrap_or(0), self.bit_depth)
+    }
+}
 
 pub fn inspect(path: &Path) -> Result<AudioProperties> {
     let (format, aifc) = open(path)?;
@@ -111,13 +155,28 @@ pub fn inspect(path: &Path) -> Result<AudioProperties> {
     Ok(AudioProperties { compatible: codec_ok
         && matches!(p.sample_rate, Some(44_100 | 48_000))
         && p.channels.is_some_and(|c| matches!(c.count(), 1 | 2)),
-        sample_rate: p.sample_rate, bit_depth: p.bits_per_sample,
+        sample_rate: p.sample_rate, bit_depth: bit_depth(p.codec, p.bits_per_sample),
         channels: p.channels.and_then(|c| u32::try_from(c.count()).ok()), frames: p.n_frames })
+}
+
+/// `rate` as the 80-bit IEEE 754 extended-precision float AIFF's `COMM`
+/// chunk stores a sample rate in. `rate` is never 0 on this path: it is
+/// always one of [`target_for`]'s fixed output rates.
+fn extended80(rate: u32) -> [u8; 10] {
+    let msb = 31_u32.saturating_sub(rate.leading_zeros());
+    let exponent = 16_383_u16.saturating_add(u16::try_from(msb).unwrap_or(u16::MAX));
+    let mantissa = u64::from(rate) << (63 - msb);
+    let mut bytes = [0_u8; 10];
+    bytes[0..2].copy_from_slice(&exponent.to_be_bytes());
+    bytes[2..10].copy_from_slice(&mantissa.to_be_bytes());
+    bytes
 }
 
 struct Output {
     file: BufWriter<File>,
     format: Format,
+    rate: u32,
+    bits: u32,
     encoder: Option<mp3lame_encoder::Encoder>,
     bytes: Vec<u8>,
     frames: u64,
@@ -125,7 +184,7 @@ struct Output {
     bytes_written: u64,
 }
 impl Output {
-    fn new(path: &Path, format: Format, byte_limit: Option<u64>) -> Result<Self> {
+    fn new(path: &Path, format: Format, rate: u32, bits: u32, byte_limit: Option<u64>) -> Result<Self> {
         // create_new also prevents accidentally overwriting a source path.
         let mut file = BufWriter::new(File::options().write(true).create_new(true).open(path)?);
         let encoder = if format == Format::Mp3 {
@@ -135,7 +194,7 @@ impl Output {
                     .ok_or_else(|| error("cannot initialize MP3 encoder"))?
                     .with_num_channels(2)
                     .map_err(error)?
-                    .with_sample_rate(RATE)
+                    .with_sample_rate(rate)
                     .map_err(error)?
                     .with_brate(Bitrate::Kbps320)
                     .map_err(error)?
@@ -160,6 +219,8 @@ impl Output {
         Ok(Self {
             file,
             format,
+            rate,
+            bits,
             encoder,
             bytes: Vec::with_capacity(16384),
             frames: 0,
@@ -182,24 +243,37 @@ impl Output {
                 .encode_to_vec(mp3lame_encoder::DualPcm { left, right }, &mut self.bytes)
                 .map_err(error)?;
         } else {
+            let frame_bytes = u64::from(self.bits / 8) * 2;
             let (overhead, message) = match self.format {
                 Format::Wav => (36, "converted WAV exceeds the 4 GB RIFF limit"),
                 Format::Aiff => (46, "converted AIFF exceeds the 4 GB FORM limit"),
                 Format::Mp3 => (0, "converted PCM exceeds its container limit"),
             };
-            if (self.frames + left.len() as u64) * 4 > u64::from(u32::MAX - overhead) {
+            if (self.frames + left.len() as u64) * frame_bytes > u64::from(u32::MAX - overhead) {
                 return Err(error(message));
             }
             for (&l, &r) in left.iter().zip(right) {
                 for sample in [l, r] {
-                    let pcm = (sample.clamp(-1.0, 1.0) * 32768.0)
-                        .round()
-                        .clamp(-32768.0, 32767.0) as i16;
-                    let bytes = match self.format {
-                        Format::Aiff => pcm.to_be_bytes(),
-                        Format::Wav | Format::Mp3 => pcm.to_le_bytes(),
-                    };
-                    self.bytes.extend_from_slice(&bytes);
+                    if self.bits == 24 {
+                        let pcm = (sample.clamp(-1.0, 1.0) * 8_388_608.0)
+                            .round()
+                            .clamp(-8_388_608.0, 8_388_607.0) as i32;
+                        match self.format {
+                            Format::Aiff => self.bytes.extend_from_slice(&pcm.to_be_bytes()[1..]),
+                            Format::Wav | Format::Mp3 => {
+                                self.bytes.extend_from_slice(&pcm.to_le_bytes()[..3]);
+                            }
+                        }
+                    } else {
+                        let pcm = (sample.clamp(-1.0, 1.0) * 32768.0)
+                            .round()
+                            .clamp(-32768.0, 32767.0) as i16;
+                        let bytes = match self.format {
+                            Format::Aiff => pcm.to_be_bytes(),
+                            Format::Wav | Format::Mp3 => pcm.to_le_bytes(),
+                        };
+                        self.bytes.extend_from_slice(&bytes);
+                    }
                 }
             }
         }
@@ -231,7 +305,9 @@ impl Output {
                 self.file.write_all(&self.bytes)?;
             }
         } else {
-            let size = u32::try_from(self.frames * 4).map_err(error)?;
+            let bytes_per_sample = self.bits / 8;
+            let frame_bytes = bytes_per_sample * 2;
+            let size = u32::try_from(self.frames * u64::from(frame_bytes)).map_err(error)?;
             self.file.seek(SeekFrom::Start(0))?;
             match self.format {
                 Format::Wav => {
@@ -241,10 +317,10 @@ impl Output {
                     self.file.write_all(&16_u32.to_le_bytes())?;
                     self.file.write_all(&1_u16.to_le_bytes())?;
                     self.file.write_all(&2_u16.to_le_bytes())?;
-                    self.file.write_all(&RATE.to_le_bytes())?;
-                    self.file.write_all(&(RATE * 4).to_le_bytes())?;
-                    self.file.write_all(&4_u16.to_le_bytes())?;
-                    self.file.write_all(&16_u16.to_le_bytes())?;
+                    self.file.write_all(&self.rate.to_le_bytes())?;
+                    self.file.write_all(&(self.rate * frame_bytes).to_le_bytes())?;
+                    self.file.write_all(&u16::try_from(frame_bytes).map_err(error)?.to_le_bytes())?;
+                    self.file.write_all(&u16::try_from(self.bits).map_err(error)?.to_le_bytes())?;
                     self.file.write_all(b"data")?;
                     self.file.write_all(&size.to_le_bytes())?;
                 }
@@ -256,9 +332,8 @@ impl Output {
                     self.file.write_all(&18_u32.to_be_bytes())?;
                     self.file.write_all(&2_u16.to_be_bytes())?;
                     self.file.write_all(&frames.to_be_bytes())?;
-                    self.file.write_all(&16_u16.to_be_bytes())?;
-                    // 44,100 as an IEEE 754 80-bit extended float.
-                    self.file.write_all(&[0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0])?;
+                    self.file.write_all(&u16::try_from(self.bits).map_err(error)?.to_be_bytes())?;
+                    self.file.write_all(&extended80(self.rate))?;
                     self.file.write_all(b"SSND")?;
                     self.file.write_all(&(size + 8).to_be_bytes())?;
                     self.file.write_all(&0_u32.to_be_bytes())?;
@@ -323,14 +398,21 @@ pub fn convert_observed_limited(source: &Path, destination: &Path, target: Forma
     if rate == 0 {
         return Err(error("unknown sample rate"));
     }
+    // MP3 output is always 320 kbps/44.1 kHz; WAV/AIFF keep the source's own
+    // bit depth and rate wherever a CDJ can already read them (#824).
+    let (target_rate, target_bits) = if target == Format::Mp3 {
+        (RATE, 16)
+    } else {
+        target_for(rate, bit_depth(params.codec, params.bits_per_sample))
+    };
     let mut decoder = symphonia::default::get_codecs()
         .make(params, &DecoderOptions::default())
         .map_err(error)?;
-    let mut output = Output::new(destination, target, byte_limit)?;
-    let mut resampler = if rate == RATE {
+    let mut output = Output::new(destination, target, target_rate, target_bits, byte_limit)?;
+    let mut resampler = if rate == target_rate {
         None
     } else {
-        Some(FftFixedIn::<f32>::new(rate as usize, RATE as usize, CHUNK, 2, 2).map_err(error)?)
+        Some(FftFixedIn::<f32>::new(rate as usize, target_rate as usize, CHUNK, 2, 2).map_err(error)?)
     };
     let mut delay = resampler.as_ref().map_or(0, Resampler::output_delay);
     let mut pending = [Vec::<f32>::new(), Vec::<f32>::new()];
@@ -377,7 +459,7 @@ pub fn convert_observed_limited(source: &Path, destination: &Path, target: Forma
                     &mut output,
                     &converted,
                     &mut delay,
-                    input_frames * u64::from(RATE) / u64::from(rate),
+                    input_frames * u64::from(target_rate) / u64::from(rate),
                 )?;
                 for channel in &mut pending {
                     channel.drain(..CHUNK);
@@ -394,7 +476,7 @@ pub fn convert_observed_limited(source: &Path, destination: &Path, target: Forma
         return Err(error("audio ended before its declared length"));
     }
     if let Some(resampler) = &mut resampler {
-        let target_frames = input_frames * u64::from(RATE) / u64::from(rate);
+        let target_frames = input_frames * u64::from(target_rate) / u64::from(rate);
         while output.frames < target_frames {
             for channel in &mut pending {
                 channel.resize(CHUNK, 0.0);
@@ -441,42 +523,172 @@ mod tests {
         assert!(std::fs::metadata(&dest).unwrap().len() <= limit);
     }
 
+    /// Sign-extends a 2- or 3-byte PCM sample to `i32`.
+    fn decode_sample(bytes: &[u8], big_endian: bool) -> i32 {
+        let mut buf = [0_u8; 4];
+        if big_endian {
+            let pad = 4 - bytes.len();
+            buf[pad..].copy_from_slice(bytes);
+            if bytes[0] & 0x80 != 0 {
+                buf[..pad].fill(0xFF);
+            }
+            i32::from_be_bytes(buf)
+        } else {
+            buf[..bytes.len()].copy_from_slice(bytes);
+            if bytes[bytes.len() - 1] & 0x80 != 0 {
+                buf[bytes.len()..].fill(0xFF);
+            }
+            i32::from_le_bytes(buf)
+        }
+    }
+
+    /// `data`'s interleaved stereo PCM frames, `bits`-deep, normalized to
+    /// `[-1.0, 1.0]`.
+    fn decode_pcm_frames(data: &[u8], bits: u16, big_endian: bool) -> Vec<(f64, f64)> {
+        let bytes_per_sample = usize::from(bits / 8);
+        let scale = f64::from(1_u32 << (bits - 1));
+        data.chunks_exact(bytes_per_sample * 2)
+            .map(|frame| {
+                let (l, r) = frame.split_at(bytes_per_sample);
+                (
+                    f64::from(decode_sample(l, big_endian)) / scale,
+                    f64::from(decode_sample(r, big_endian)) / scale,
+                )
+            })
+            .collect()
+    }
+
+    /// Mean absolute error of `frames` against the 440/880 Hz tone every
+    /// fixture in this module encodes, starting `skip` frames in (past
+    /// resampler warm-up) for `take` frames.
+    fn sine_error(frames: &[(f64, f64)], rate: u32, skip: usize, take: usize) -> f64 {
+        frames
+            .iter()
+            .enumerate()
+            .skip(skip)
+            .take(take)
+            .map(|(i, (l, r))| {
+                let t = i as f64 / f64::from(rate);
+                (l - 0.5 * (std::f64::consts::TAU * 440.0 * t).sin()).abs()
+                    + (r - 0.25 * (std::f64::consts::TAU * 880.0 * t).sin()).abs()
+            })
+            .sum::<f64>()
+            / take as f64
+    }
+
+    /// A minimal PCM (or IEEE float) WAV file: a 440/880 Hz stereo tone at
+    /// `rate`, `bits`-deep, for `frames` frames.
+    fn wav_fixture(path: &Path, rate: u32, bits: u16, float: bool, frames: usize) {
+        let bytes_per_sample = usize::from(bits / 8);
+        let mut data = Vec::with_capacity(frames * bytes_per_sample * 2);
+        for i in 0..frames {
+            let t = i as f64 / f64::from(rate);
+            for (freq, amp) in [(440.0, 0.5), (880.0, 0.25)] {
+                let v = amp * (std::f64::consts::TAU * freq * t).sin();
+                match (float, bits) {
+                    (true, 32) => data.extend_from_slice(&(v as f32).to_le_bytes()),
+                    (false, 16) => data.extend_from_slice(&((v * 32_767.0) as i16).to_le_bytes()),
+                    (false, 24) => data.extend_from_slice(&((v * 8_388_607.0) as i32).to_le_bytes()[..3]),
+                    (false, 32) => data.extend_from_slice(&((v * 2_147_483_647.0) as i32).to_le_bytes()),
+                    _ => unreachable!("unsupported fixture depth"),
+                }
+            }
+        }
+        let frame_bytes = u32::try_from(bytes_per_sample * 2).unwrap();
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend_from_slice(&(36 + u32::try_from(data.len()).unwrap()).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&(if float { 3_u16 } else { 1_u16 }).to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&rate.to_le_bytes());
+        bytes.extend_from_slice(&(rate * frame_bytes).to_le_bytes());
+        bytes.extend_from_slice(&u16::try_from(frame_bytes).unwrap().to_le_bytes());
+        bytes.extend_from_slice(&bits.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+        bytes.extend_from_slice(&data);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    /// A minimal AIFF-C file (`COMM` compression type `NONE`, which
+    /// symphonia reads natively, no alias needed): a 440/880 Hz stereo tone
+    /// at `rate`, `bits`-deep, for `frames` frames.
+    fn aiff_fixture(path: &Path, rate: u32, bits: u16, frames: usize) {
+        let mut data = Vec::with_capacity(frames * usize::from(bits / 8) * 2);
+        for i in 0..frames {
+            let t = i as f64 / f64::from(rate);
+            for (freq, amp) in [(440.0, 0.5), (880.0, 0.25)] {
+                let v = amp * (std::f64::consts::TAU * freq * t).sin();
+                match bits {
+                    16 => data.extend_from_slice(&((v * 32_767.0) as i16).to_be_bytes()),
+                    24 => data.extend_from_slice(&((v * 8_388_607.0) as i32).to_be_bytes()[1..]),
+                    _ => unreachable!("unsupported fixture depth"),
+                }
+            }
+        }
+        let mut comm = Vec::new();
+        comm.extend_from_slice(&2_u16.to_be_bytes());
+        comm.extend_from_slice(&u32::try_from(frames).unwrap().to_be_bytes());
+        comm.extend_from_slice(&bits.to_be_bytes());
+        comm.extend_from_slice(&extended80(rate));
+        comm.extend_from_slice(b"NONE");
+        comm.extend_from_slice(&[0, 0]);
+        let mut body = b"AIFC".to_vec();
+        body.extend_from_slice(b"FVER");
+        body.extend_from_slice(&4_u32.to_be_bytes());
+        body.extend_from_slice(&0xA280_5140_u32.to_be_bytes());
+        body.extend_from_slice(b"COMM");
+        body.extend_from_slice(&u32::try_from(comm.len()).unwrap().to_be_bytes());
+        body.extend_from_slice(&comm);
+        body.extend_from_slice(b"SSND");
+        body.extend_from_slice(&u32::try_from(data.len() + 8).unwrap().to_be_bytes());
+        body.extend_from_slice(&[0; 8]);
+        body.extend_from_slice(&data);
+        let mut file = b"FORM".to_vec();
+        file.extend_from_slice(&u32::try_from(body.len()).unwrap().to_be_bytes());
+        file.extend_from_slice(&body);
+        std::fs::write(path, file).unwrap();
+    }
+
     #[test]
-    fn flac_to_wav_preserves_stereo_and_duration_at_cd_rate() {
+    fn target_for_chooses_the_closest_supported_depth_and_rate() {
+        assert_eq!(target_for(44_100, Some(16)), (44_100, 16));
+        assert_eq!(target_for(48_000, Some(16)), (48_000, 16));
+        assert_eq!(target_for(48_000, Some(24)), (48_000, 24));
+        assert_eq!(target_for(96_000, Some(24)), (48_000, 24));
+        assert_eq!(target_for(88_200, Some(16)), (44_100, 16));
+        assert_eq!(target_for(176_400, Some(16)), (44_100, 16));
+        assert_eq!(target_for(192_000, Some(24)), (48_000, 24));
+        assert_eq!(target_for(22_050, Some(16)), (44_100, 16));
+        // Deeper than 24 bits, or float (reported as 32/64 bits), goes to 24.
+        assert_eq!(target_for(44_100, Some(32)), (44_100, 24));
+        assert_eq!(target_for(44_100, Some(64)), (44_100, 24));
+        // 17-24 bits keeps 24; an unknown depth stays conservatively at 16.
+        assert_eq!(target_for(44_100, Some(20)), (44_100, 24));
+        assert_eq!(target_for(44_100, None), (44_100, 16));
+    }
+
+    #[test]
+    fn flac_96k_24bit_to_wav_keeps_24_bit_and_halves_to_48k() {
         let dir = tempfile::tempdir().unwrap();
         let source = fixture();
         let before = std::fs::read(&source).unwrap();
         assert!(needs_conversion(&source).unwrap());
         let dest = dir.path().join("converted.wav");
         let size = convert(&source, &dest, Format::Wav).unwrap();
-        assert_eq!(size, 44 + 11025 * 4);
+        let frames = 12_000_u64; // 0.25 s at the halved 48 kHz target
+        assert_eq!(size, 44 + frames * 6);
         assert!(!needs_conversion(&dest).unwrap());
         let bytes = std::fs::read(&dest).unwrap();
         assert_eq!(&bytes[20..24], &[1, 0, 2, 0]);
-        assert_eq!(&bytes[34..36], &[16, 0]);
-        let frames: Vec<_> = bytes[44..]
-            .chunks_exact(4)
-            .map(|b| {
-                (
-                    f32::from(i16::from_le_bytes([b[0], b[1]])) / 32768.0,
-                    f32::from(i16::from_le_bytes([b[2], b[3]])) / 32768.0,
-                )
-            })
-            .collect();
+        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 48_000);
+        assert_eq!(u16::from_le_bytes(bytes[32..34].try_into().unwrap()), 6);
+        assert_eq!(u16::from_le_bytes(bytes[34..36].try_into().unwrap()), 24);
+        let decoded = decode_pcm_frames(&bytes[44..], 24, false);
+        let error = sine_error(&decoded, 48_000, 100, 10_000);
         // Test the signal, not just its header: no pitch change, channel swap,
         // mono downmix, or resampler delay moving cues away from their audio.
-        let error = frames
-            .iter()
-            .enumerate()
-            .skip(100)
-            .take(10000)
-            .map(|(i, (l, r))| {
-                let t = i as f32 / RATE as f32;
-                (l - 0.5 * (std::f32::consts::TAU * 440.0 * t).sin()).abs()
-                    + (r - 0.25 * (std::f32::consts::TAU * 880.0 * t).sin()).abs()
-            })
-            .sum::<f32>()
-            / 10000.0;
         assert!(error < 0.002, "resampled stereo error: {error}");
         assert_eq!(std::fs::read(source).unwrap(), before);
     }
@@ -501,27 +713,125 @@ mod tests {
         assert_eq!(
             std::fs::metadata(restored).unwrap().len(),
             44 + 11025 * 4,
-            "LAME delay and padding must be recoverable"
+            "LAME delay and padding must be recoverable, and an MP3's unknown bit depth keeps the 16-bit/44.1 kHz default"
         );
     }
 
     #[test]
-    fn flac_to_aiff_is_big_endian_pcm_at_cd_rate() {
+    fn flac_96k_24bit_to_aiff_keeps_24_bit_and_halves_to_48k() {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("converted.aiff");
         let size = convert(&fixture(), &dest, Format::Aiff).unwrap();
-        assert_eq!(size, 54 + 11025 * 4);
+        let frames = 12_000_u32; // 0.25 s at the halved 48 kHz target
+        assert_eq!(size, 54 + u64::from(frames) * 6);
         assert!(!needs_conversion(&dest).unwrap());
         let bytes = std::fs::read(&dest).unwrap();
-        assert_eq!(&bytes[..12], b"FORM\0\0\xacrAIFF");
+        assert_eq!(&bytes[..4], b"FORM");
+        assert_eq!(&bytes[8..12], b"AIFF");
         assert_eq!(&bytes[12..20], b"COMM\0\0\0\x12");
-        assert_eq!(&bytes[20..28], &[0, 2, 0, 0, 43, 17, 0, 16]);
-        assert_eq!(&bytes[28..38], &[0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(&bytes[38..54], b"SSND\0\0\xacL\0\0\0\0\0\0\0\0");
-        let audio = crate::decode_mono(&dest, None).unwrap();
-        assert_eq!(audio.sample_rate, RATE);
-        assert_eq!(audio.source_channels, 2);
-        assert!(audio.samples.iter().any(|sample| sample.abs() > 0.1));
+        assert_eq!(&bytes[20..22], &2_u16.to_be_bytes());
+        assert_eq!(&bytes[22..26], &frames.to_be_bytes());
+        assert_eq!(&bytes[26..28], &24_u16.to_be_bytes());
+        assert_eq!(&bytes[28..38], &extended80(48_000));
+        assert_eq!(&bytes[38..42], b"SSND");
+        let decoded = decode_pcm_frames(&bytes[54..], 24, true);
+        let error = sine_error(&decoded, 48_000, 100, 10_000);
+        assert!(error < 0.002, "resampled stereo error: {error}");
+    }
+
+    #[test]
+    fn wav_sources_already_at_a_supported_depth_and_rate_round_trip_bit_exact() {
+        let dir = tempfile::tempdir().unwrap();
+        for (rate, bits) in [(44_100_u32, 16_u16), (48_000, 16), (48_000, 24)] {
+            let source = dir.path().join(format!("source-{rate}-{bits}.wav"));
+            wav_fixture(&source, rate, bits, false, 2_000);
+            let dest = dir.path().join(format!("out-{rate}-{bits}.wav"));
+            convert(&source, &dest, Format::Wav).unwrap();
+            let before = std::fs::read(&source).unwrap();
+            let after = std::fs::read(&dest).unwrap();
+            assert_eq!(
+                u32::from_le_bytes(after[24..28].try_into().unwrap()),
+                rate,
+                "{rate}/{bits}"
+            );
+            assert_eq!(
+                u16::from_le_bytes(after[34..36].try_into().unwrap()),
+                bits,
+                "{rate}/{bits}"
+            );
+            // No resampling and no requantization: a source already at this
+            // depth/rate is a lossless container swap, byte for byte.
+            assert_eq!(after[44..], before[44..], "{rate}/{bits} audio bytes");
+        }
+    }
+
+    #[test]
+    fn aiff_source_at_48k_24bit_round_trips_without_resampling() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.aif");
+        aiff_fixture(&source, 48_000, 24, 2_000);
+        let dest = dir.path().join("out.aiff");
+        convert(&source, &dest, Format::Aiff).unwrap();
+        let bytes = std::fs::read(&dest).unwrap();
+        assert_eq!(&bytes[26..28], &24_u16.to_be_bytes());
+        assert_eq!(&bytes[28..38], &extended80(48_000));
+        let decoded = decode_pcm_frames(&bytes[54..], 24, true);
+        // Tight tolerance: no resampling at all, only the fixture's own
+        // quantization step (~1.2e-7) on each side of the round trip.
+        let error = sine_error(&decoded, 48_000, 0, decoded.len());
+        assert!(error < 1e-4, "round-trip error: {error}");
+    }
+
+    #[test]
+    fn wav_above_the_base_rates_halve_to_the_matching_rate() {
+        let dir = tempfile::tempdir().unwrap();
+        for (source_rate, expected_rate) in [(88_200_u32, 44_100_u32), (176_400, 44_100), (192_000, 48_000)] {
+            let source = dir.path().join(format!("source-{source_rate}.wav"));
+            wav_fixture(&source, source_rate, 16, false, source_rate as usize / 2);
+            let dest = dir.path().join(format!("out-{source_rate}.wav"));
+            convert(&source, &dest, Format::Wav).unwrap();
+            let bytes = std::fs::read(&dest).unwrap();
+            assert_eq!(
+                u32::from_le_bytes(bytes[24..28].try_into().unwrap()),
+                expected_rate,
+                "{source_rate}"
+            );
+            assert_eq!(u16::from_le_bytes(bytes[34..36].try_into().unwrap()), 16, "{source_rate}");
+            let decoded = decode_pcm_frames(&bytes[44..], 16, false);
+            let error = sine_error(&decoded, expected_rate, 100, 1_000.min(decoded.len() - 100));
+            assert!(error < 0.01, "{source_rate} resampled stereo error: {error}");
+        }
+    }
+
+    #[test]
+    fn wav_at_an_unusual_rate_falls_back_to_44100() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source-22050.wav");
+        wav_fixture(&source, 22_050, 16, false, 11_025);
+        let dest = dir.path().join("out-22050.wav");
+        convert(&source, &dest, Format::Wav).unwrap();
+        let bytes = std::fs::read(&dest).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 44_100);
+        let decoded = decode_pcm_frames(&bytes[44..], 16, false);
+        let error = sine_error(&decoded, 44_100, 100, 1_000);
+        assert!(error < 0.01, "resampled stereo error: {error}");
+    }
+
+    #[test]
+    fn wav_deeper_than_24_bits_or_float_narrows_to_24() {
+        let dir = tempfile::tempdir().unwrap();
+        for float in [false, true] {
+            let source = dir.path().join(format!("source-32-{float}.wav"));
+            wav_fixture(&source, 44_100, 32, float, 2_000);
+            let dest = dir.path().join(format!("out-32-{float}.wav"));
+            convert(&source, &dest, Format::Wav).unwrap();
+            let bytes = std::fs::read(&dest).unwrap();
+            assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 44_100, "{float}");
+            assert_eq!(u16::from_le_bytes(bytes[34..36].try_into().unwrap()), 24, "{float}");
+            let decoded = decode_pcm_frames(&bytes[44..], 24, false);
+            let error = sine_error(&decoded, 44_100, 0, decoded.len());
+            assert!(error < 1e-4, "{float} requantization error: {error}");
+        }
     }
 
     #[test]
