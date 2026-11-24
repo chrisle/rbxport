@@ -811,7 +811,7 @@ Within each 24-byte phrase entry:
 | `0x07`, `0x09`, `0x13` | u8 each | High-mood variants k1, k2, k3 |
 | `0x0b` | u8 | Additional-beat variant |
 | `0x0c`, `0x0e`, `0x10` | u16 each | Internal lighting beat hints |
-| `0x15` | u8 | Nonzero for a fill-in |
+| `0x14` | u16 | Nonzero for a fill-in |
 | `0x16` | u16 | Fill-in start beat |
 
 Preserve all unspecified bytes. The 19-byte mask base is:
@@ -826,6 +826,11 @@ Use the reserved word at `0x18` to detect masking, then require it to decode
 to zero and require a valid mood. Masked and plaintext source sections both
 exist; distinguish them before applying the transform to avoid masking an
 already masked section twice.
+
+Splitting a phrase clears the first half's fill-in. The second half retains
+it only when its start beat is not before the new phrase start; otherwise
+both the fill flag and start beat are cleared. Unknown entry fields remain
+unchanged.
 
 `PWV6` and `PWV7` are three-band waveforms. `PSSI` carries phrase data for
 Lighting; `PVDI` is rekordbox metadata.
