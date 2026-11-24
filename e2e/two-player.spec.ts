@@ -101,6 +101,27 @@ test("both loaded PWV7 waveforms keep painted bounds after deck B flips", async 
   }
 });
 
+test("close-zoom PCM respects the waveform band on both decks", async ({ page }) => {
+  await page.addInitScript(() => {
+    const session = JSON.parse(localStorage.getItem("rbl.session") ?? "{}") as { waveformZoom?: { a: number; b: number } };
+    session.waveformZoom = { a: 0.5, b: 0.5 };
+    localStorage.setItem("rbl.session", JSON.stringify(session));
+  });
+  const { a, b } = await twoPlayer(page, "", [3, 4]);
+  const top = await token(page, "--s-wave-inset-top");
+  const bottom = await token(page, "--s-wave-inset-bottom");
+  for (const deck of [a, b]) {
+    const detail = deck.getByTestId("player-detail");
+    await expect(detail).toHaveAttribute("data-pcm");
+    const canvas = detail.locator("canvas").first();
+    await expect.poll(async () => (await paintedRows(canvas)).first).toBeGreaterThanOrEqual(0);
+    const rows = await paintedRows(canvas);
+    const scale = rows.height / rows.cssHeight;
+    expect(rows.first / scale).toBeGreaterThanOrEqual(top - 1);
+    expect((rows.height - 1 - rows.last) / scale).toBeGreaterThanOrEqual(bottom - 1);
+  }
+});
+
 test("deck A is laid out the way the capture measures it", async ({ page }) => {
   const { a } = await twoPlayer(page);
   // The region is the deck and the cue panel beside it; the deck's own right
