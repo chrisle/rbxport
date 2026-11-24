@@ -3,7 +3,7 @@
  *
  * rekordbox draws short blue dashes over the stretches of a track that carry
  * vocals — the thing you look at to find the drop or the last chorus. The data
- * is the `PVDI` tag in the `.2EX` analysis file, one value per overview column.
+ * is the `PVDI` tag in the `.2EX` analysis file, sampled in its own frames.
  *
  * Drawn as a canvas rather than as elements: a run of a thousand `<span>`s for
  * a five-pixel strip is a lot of layout for something this small.
@@ -43,15 +43,6 @@ async function load(trackId: string): Promise<Uint8Array> {
   return pending;
 }
 
-/**
- * Above which value a column counts as carrying a vocal.
- *
- * **Unverified.** The tag's value range has not been characterised against
- * rekordbox's own rendering, so this is a midpoint of a byte rather than a
- * measured threshold. It decides only how much of the strip is filled.
- */
-const PRESENT = 128;
-
 export const VocalStrip = memo(function VocalStrip({ trackId }: { trackId: string | null }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [box, size] = useElementSize<HTMLDivElement>();
@@ -87,16 +78,22 @@ export const VocalStrip = memo(function VocalStrip({ trackId }: { trackId: strin
       getComputedStyle(canvas).getPropertyValue("--c-vocal").trim() || theme.color.vocal.value;
     const step = data.length / w;
     for (let x = 0; x < w; x++) {
-      // The loudest column in this pixel's span, so a short vocal phrase is
-      // not lost when many columns share a pixel.
-      let peak = 0;
-      const first = Math.floor(x * step);
-      const last = Math.max(first + 1, Math.floor((x + 1) * step));
-      for (let i = first; i < last && i < data.length; i++) {
-        peak = Math.max(peak, data[i] ?? 0);
+      // Low three bits carry intensity. Weight partial frame coverage so
+      // resizing does not turn a short vocal point into a solid pixel.
+      const from = x * step;
+      const to = (x + 1) * step;
+      let total = 0;
+      const last = Math.ceil(to);
+      for (let i = Math.floor(from); i < last && i < data.length; i++) {
+        total += ((data[i] ?? 0) & 7) * (Math.min(to, i + 1) - Math.max(from, i));
       }
-      if (peak >= PRESENT) ctx.fillRect(x, 0, 1, h);
+      const alpha = Math.min(1, total / (step * 4));
+      if (alpha > 0) {
+        ctx.globalAlpha = alpha;
+        ctx.fillRect(x, 0, 1, h);
+      }
     }
+    ctx.globalAlpha = 1;
   }, [data, size.width, size.height]);
 
   return (

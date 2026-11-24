@@ -2429,7 +2429,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const out = new Uint8Array(1200);
       for (let i = 0; i < out.length; i++) {
         const at = i / out.length;
-        out[i] = at > 0.25 && at < 0.85 && Math.floor(at * 40) % 3 !== 0 ? 200 : 0;
+        out[i] = at > 0.25 && at < 0.85 && Math.floor(at * 40) % 3 !== 0
+          ? 1 + Math.floor(at * 40) % 4 : 0;
       }
       return wait(out);
     },
