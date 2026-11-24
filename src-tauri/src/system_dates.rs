@@ -198,7 +198,9 @@ mod platform {
     use windows_sys::Win32::{
         Foundation::{FILETIME, SYSTEMTIME},
         Globalization::{GetDateFormatEx, DATE_SHORTDATE},
-        System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime},
+        System::Time::{
+            FileTimeToSystemTime, SystemTimeToTzSpecificLocalTimeEx, DYNAMIC_TIME_ZONE_INFORMATION,
+        },
     };
 
     // WinNls.h defines LOCALE_NAME_USER_DEFAULT as a null locale name.
@@ -217,29 +219,47 @@ mod platform {
                     wDayOfWeek: u16::from(day.weekday().number_days_from_sunday()),
                     ..Default::default()
                 },
-                Value::Epoch(seconds) => {
-                    let ticks = u64::try_from(seconds.checked_add(11_644_473_600)?)
-                        .ok()?
-                        .checked_mul(10_000_000)?;
-                    let bytes = ticks.to_le_bytes();
-                    let file = FILETIME {
-                        dwLowDateTime: u32::from_le_bytes(bytes[..4].try_into().ok()?),
-                        dwHighDateTime: u32::from_le_bytes(bytes[4..].try_into().ok()?),
-                    };
-                    let mut utc = SYSTEMTIME::default();
-                    let mut local = SYSTEMTIME::default();
-                    // SAFETY: valid initialized fixed-size Windows structures;
-                    // null timezone requests this machine's current timezone.
-                    if unsafe { FileTimeToSystemTime(&file, &mut utc) } == 0
-                        || unsafe { SystemTimeToTzSpecificLocalTime(null(), &utc, &mut local) } == 0
-                    {
-                        return None;
-                    }
-                    local
-                }
+                Value::Epoch(seconds) => local_time(seconds, None)?,
             };
             print(&date, USER_DEFAULT, None)
         }
+    }
+    fn local_time(
+        seconds: i64,
+        zone: Option<&DYNAMIC_TIME_ZONE_INFORMATION>,
+    ) -> Option<SYSTEMTIME> {
+        let ticks = u64::try_from(seconds.checked_add(11_644_473_600)?)
+            .ok()?
+            .checked_mul(10_000_000)?;
+        let bytes = ticks.to_le_bytes();
+        let file = FILETIME {
+            dwLowDateTime: u32::from_le_bytes(bytes[..4].try_into().ok()?),
+            dwHighDateTime: u32::from_le_bytes(bytes[4..].try_into().ok()?),
+        };
+        let mut utc = SYSTEMTIME::default();
+        let mut local = SYSTEMTIME::default();
+        // SAFETY: initialized fixed-size structures and an optional borrowed
+        // zone valid for this call. Null selects the current dynamic timezone;
+        // Ex applies its historical DST rules for the timestamp's year.
+        if unsafe { FileTimeToSystemTime(&file, &mut utc) } == 0
+            || unsafe {
+                SystemTimeToTzSpecificLocalTimeEx(
+                    zone.map_or(null(), std::ptr::from_ref),
+                    &utc,
+                    &mut local,
+                )
+            } == 0
+        {
+            return None;
+        }
+        Some(local)
+    }
+    #[cfg(test)]
+    pub(super) fn historical_epoch_for_test(
+        seconds: i64,
+        zone: &DYNAMIC_TIME_ZONE_INFORMATION,
+    ) -> Option<SYSTEMTIME> {
+        local_time(seconds, Some(zone))
     }
     fn print(
         date: &SYSTEMTIME,
@@ -582,6 +602,89 @@ mod tests {
                 .unwrap(),
             expected
         );
+    }
+    #[cfg(windows)]
+    #[test]
+    #[allow(unsafe_code)]
+    fn system_dates_windows_epoch_uses_historical_dynamic_dst_without_changing_preferences() {
+        use windows_sys::Win32::{
+            Foundation::SYSTEMTIME,
+            System::Time::{
+                EnumDynamicTimeZoneInformation, GetTimeZoneInformationForYear,
+                SystemTimeToTzSpecificLocalTime, DYNAMIC_TIME_ZONE_INFORMATION,
+                TIME_ZONE_INFORMATION,
+            },
+        };
+        // Enumerate read-only: never install a timezone or change user settings.
+        let mut pacific = None;
+        for index in 0..1024 {
+            let mut zone = DYNAMIC_TIME_ZONE_INFORMATION::default();
+            if unsafe { EnumDynamicTimeZoneInformation(index, &mut zone) } != 0 {
+                break;
+            }
+            let end = zone.TimeZoneKeyName.iter().position(|&c| c == 0).unwrap();
+            if String::from_utf16(&zone.TimeZoneKeyName[..end]).unwrap() == "Pacific Standard Time"
+            {
+                pacific = Some(zone);
+                break;
+            }
+        }
+        let zone = pacific.expect("Windows Pacific Standard Time registry entry");
+        for (year, expected_day) in [(2006, 14), (2007, 15)] {
+            let timestamp = time::Date::from_calendar_date(year, time::Month::March, 15)
+                .unwrap()
+                .with_hms(7, 30, 0)
+                .unwrap()
+                .assume_utc()
+                .unix_timestamp();
+            let local = platform::historical_epoch_for_test(timestamp, &zone).unwrap();
+            assert_eq!(
+                (local.wYear, local.wMonth, local.wDay),
+                (u16::try_from(year).unwrap(), 3, expected_day)
+            );
+            // Independent read-only oracle: resolve this timestamp's year to
+            // its specific registry rules, then convert with that ruleset.
+            let mut year_rules = TIME_ZONE_INFORMATION::default();
+            assert_ne!(
+                unsafe {
+                    GetTimeZoneInformationForYear(
+                        u16::try_from(year).unwrap(),
+                        &zone,
+                        &mut year_rules,
+                    )
+                },
+                0
+            );
+            let utc = SYSTEMTIME {
+                wYear: u16::try_from(year).unwrap(),
+                wMonth: 3,
+                wDay: 15,
+                wHour: 7,
+                wMinute: 30,
+                ..Default::default()
+            };
+            let mut expected = SYSTEMTIME::default();
+            assert_ne!(
+                unsafe { SystemTimeToTzSpecificLocalTime(&year_rules, &utc, &mut expected) },
+                0
+            );
+            assert_eq!(
+                (
+                    local.wYear,
+                    local.wMonth,
+                    local.wDay,
+                    local.wHour,
+                    local.wMinute
+                ),
+                (
+                    expected.wYear,
+                    expected.wMonth,
+                    expected.wDay,
+                    expected.wHour,
+                    expected.wMinute
+                )
+            );
+        }
     }
     #[cfg(target_os = "linux")]
     #[test]
