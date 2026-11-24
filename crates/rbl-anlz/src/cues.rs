@@ -246,12 +246,16 @@ const DEVICE_PALETTE: [[u8; 3]; 65] = [
 /// `PCO2` carries it after the colour code. `slot` is 1 for A; a code of 0
 /// gets the slot's default colour.
 pub fn export_colour(code: u8, slot: u32) -> [u8; 3] {
-    // Default colors read from rekordbox exports for A-D and I-L.
+    // Full-colour hot-cue defaults, repeated for A-H and I-P.
     let default = match slot {
         1 | 9 => 43,
         2 | 10 => 8,
         3 | 11 => 23,
         4 | 12 => 60,
+        5 | 13 => 19,
+        6 | 14 => 38,
+        7 | 15 => 1,
+        8 | 16 => 32,
         _ => 0,
     };
     DEVICE_PALETTE
@@ -287,6 +291,20 @@ mod tests {
         assert_eq!(export_colour(0, 1), [255, 0, 23]);
         assert_eq!(export_colour(62, 1), [26, 0, 255]);
     }
+    #[test]
+    fn every_hot_slot_gets_its_full_colour_default_in_pcp2() {
+        let colours=[[255,0,23],[0,196,255],[51,255,0],[77,0,255],
+            [0,255,48],[255,94,0],[0,0,255],[255,232,0]];
+        for slot in 1_u8..=16 {
+            let kind=if slot<=3 {slot} else {slot+1};
+            for (code,rgb) in [(0,colours[usize::from(slot-1)%8]),(42,[255,0,0])] {
+                let cue=ExportCue{kind,color_code:code,..Default::default()};
+                let lists=sections(&[cue],true);
+                assert_eq!(&lists[2].payload[44..48],&[code,rgb[0],rgb[1],rgb[2]],"slot {slot}, code {code}");
+            }
+        }
+    }
+
     #[test]
     fn exports_memory_loop_comments_colors_and_the_d_slot() {
         let cues = vec![
