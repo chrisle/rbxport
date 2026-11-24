@@ -194,7 +194,7 @@ jobs:
     # GITHUB_TOKEN pushes do not start another workflow run. Validate the SHA
     # written by autofix here, and never execute untrusted fork code on ARC.
     if: >-
-      always() && needs.changes.result == 'success' &&
+      !cancelled() && needs.changes.result == 'success' &&
       (needs.autofix.result == 'success' || needs.autofix.result == 'skipped') &&
       (github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository)
