@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { KEYMAP, KEYMAP_GROUPS, keyForPlatform } from "./keymap";
+import reference from "./keymap-reference.fixture.json";
 import { BINDINGS } from "./shortcuts";
 import { rowsFor } from "@/views/settings/KeyboardPane";
 
 describe("the Export key map", () => {
+  it("preserves every original row, key and group order through compact storage", () => {
+    expect(KEYMAP_GROUPS.map(group => [group, KEYMAP[group]])).toEqual(reference);
+  });
   it("has the ten groups the pane lists, in its order", () => {
     expect([...KEYMAP_GROUPS]).toEqual([
       "Browse", "Player A", "Player B", "General", "File", "View", "Track", "Playlist", "Help", "Link Export",
