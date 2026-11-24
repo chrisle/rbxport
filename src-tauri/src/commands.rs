@@ -312,11 +312,15 @@ pub async fn fetch_rows(
                 .with_detail(format!("len {len} exceeds the {MAX_ROWS}-row cap")),
         );
     }
+    let extra_columns = extra_columns.unwrap_or_default();
     if let Some(device) = state.device_view(view_id) {
-        return crate::device_library::fetch_rows(&device, offset, len);
+        return blocking("fetch_device_rows", move || {
+            let mut rows = crate::device_library::fetch_rows(&device, offset, len)?;
+            crate::system_dates::rows(&mut rows, &extra_columns);
+            Ok(rows)
+        }).await;
     }
     let library = state.library()?;
-    let extra_columns = extra_columns.unwrap_or_default();
     let handle = Arc::clone(&state);
     if let Some(folder) = state.folder_view(view_id) {
         let mut rows = crate::explorer::fetch_rows(library, folder, offset, len).await?;
@@ -325,6 +329,7 @@ pub async fn fetch_rows(
         } else {
             blocking("fetch_row_details", move || {
                 enrich_rows(&handle, &mut rows, &extra_columns)?;
+                crate::system_dates::rows(&mut rows, &extra_columns);
                 Ok(rows)
             }).await
         }
@@ -338,6 +343,7 @@ pub async fn fetch_rows(
                 row.track_no = view.track_no_at(offset.saturating_add(position));
             }
             if !extra_columns.is_empty() { enrich_rows(&handle, &mut rows, &extra_columns)?; }
+            crate::system_dates::rows(&mut rows, &extra_columns);
             Ok(rows)
         })
         .await

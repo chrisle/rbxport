@@ -1,3 +1,4 @@
+import { formatShortDate, formatEpochDate } from "@/lib/format";
 /**
  * In-browser stand-in for the Rust backend.
  *
@@ -1800,6 +1801,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       sampleRate: 44_100,
       bitDepth: wav ? 16 : 0,
       dateCreated: row.dateAdded.slice(0, 10),
+      dateCreatedLabel: formatShortDate(row.dateAdded),
       releaseDate: row.releaseDate,
       path: `/Volumes/MUSIC/${row.artist || "Unknown Artist"}/${row.title}.${wav ? "wav" : "mp3"}`,
       hotCueAutoLoad: true,
@@ -2259,6 +2261,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     fetchRows: (viewId, offset, len, extraColumns = []) => {
       const project = (row: RowDto): RowDto => {
         const { extra, ...base } = row;
+        const dateLabels: Record<string, string> = {};
+        for (const key of extraColumns) {
+          if (key === "dateAdded" || key === "releaseDate") dateLabels[key] = formatShortDate(row[key]);
+          else if (key === "dateCreated") dateLabels[key] = formatShortDate(typeof extra?.[key] === "string" ? extra[key] : "");
+          else if (key === "fileCreated") dateLabels[key] = formatEpochDate(typeof extra?.[key] === "number" ? extra[key] : null);
+        }
+        base.dateLabels = dateLabels;
         if (extraColumns.length === 0) return base;
         return {
           ...base,
@@ -3813,7 +3822,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const row = all.find((r) => r.id === trackId);
       if (!row) return Promise.reject(new Error("That track is no longer in the library."));
       // A copy: the panel must not be able to edit the backend's own record.
-      return wait({ ...detailsOf(row) });
+      const detail = detailsOf(row);
+      return wait({ ...detail, dateCreatedLabel: formatShortDate(detail.dateCreated) });
     },
     trackPlaylists: (trackId) => {
       if (!ready) return notReady();

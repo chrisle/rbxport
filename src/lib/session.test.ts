@@ -181,3 +181,9 @@ describe("sanitiseSession", () => {
     expect(DEFAULT_SESSION.dualControl).toBe(false);
   });
 });
+
+it("drops cached OS date labels from a previous process but preserves the stored day", () => {
+  const restored = sanitiseSession({ rows: [{ id: "one", dateAdded: "2025-03-04", dateLabels: { dateAdded: "old OS pattern" } }] });
+  expect(restored.rows[0]?.dateAdded).toBe("2025-03-04");
+  expect(restored.rows[0]?.dateLabels).toBeUndefined();
+});

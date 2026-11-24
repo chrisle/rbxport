@@ -57,6 +57,7 @@ const details: TrackDetails = {
   sampleRate: 44_100,
   bitDepth: 16,
   dateCreated: "2023-08-06",
+  dateCreatedLabel: "8/6/23",
   releaseDate: "",
   path: "/Volumes/SD/RB/_2025-10-moved4/unknownartist/unknownalbum/age.wav",
   hotCueAutoLoad: true,
@@ -253,4 +254,10 @@ describe("the Info tab for several selected tracks", () => {
     expect(view.myTags).toEqual([]);
     expect(singleView(row, null).myTags).toBeNull();
   });
+});
+
+it("uses the matching record's native date label without reformatting it", () => {
+  const current = { ...details, dateCreatedLabel: "06.08.23 custom" };
+  expect(summaryFacts(row, current).find(f => f.label === "Date Created")?.value).toBe("06.08.23 custom");
+  expect(summaryFacts({ ...row, id: "other" }, current).find(f => f.label === "Date Created")?.value).toBe("");
 });

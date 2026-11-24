@@ -19,7 +19,7 @@ import type { DeckId, ListTotals, RowDto, SortColumn, TrackField, ViewSpec } fro
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
-import { formatBitrate, formatBpm, formatBytes, formatDuration, formatEpochDate, formatShortDate } from "@/lib/format";
+import { formatBitrate, formatBpm, formatBytes, formatDuration } from "@/lib/format";
 import {
   applyClick, clickSettles, cursorIn, cursorNeedsList, cursorOf, cursorTarget, emptySelection, extendSelection, inListOrder, pressModifier, pressSelects, selectAll,
   selectedTracks, type CursorMove, type ExtendMove, type SelectionState,
@@ -111,6 +111,7 @@ function headingsOf(head: HTMLElement): Element[] {
 export function cellText(row: RowDto, key: Column["key"]): string {
   const extra = row.extra ?? {};
   const value = extra[key];
+  if (["dateAdded", "releaseDate", "dateCreated", "fileCreated"].includes(key)) return row.dateLabels?.[key] ?? "";
   switch (key) {
     case "trackNo": return String(row.trackNo);
     case "title": return row.title;
@@ -122,14 +123,10 @@ export function cellText(row: RowDto, key: Column["key"]): string {
     case "key": return row.key;
     case "bpm": return formatBpm(row.bpmX100);
     case "duration": return formatDuration(row.durationSec);
-    case "dateAdded": return formatShortDate(row.dateAdded);
-    case "releaseDate": return formatShortDate(row.releaseDate);
     case "rating": return "";
     case "fileName": return row.fileName ?? "";
     case "hotCue": return row.hotCues.map(([letter]) => letter).join(", ");
     case "size": return typeof value === "number" && value > 0 ? formatBytes(value) : "";
-    case "dateCreated": return typeof value === "string" ? formatShortDate(value) : "";
-    case "fileCreated": return typeof value === "number" ? formatEpochDate(value) : "";
     case "fileType": {
       const types: Record<number, string> = { 1: "MP3", 4: "M4A", 5: "FLAC", 6: "M4A", 11: "WAV", 12: "AIFF" };
       return typeof value === "number" ? types[value] ?? (value ? String(value) : "") : "";
@@ -1140,7 +1137,7 @@ export const TrackTable = memo(function TrackTable({
     [layoutColumns, artworkMode, rowH],
   );
   const band = previewBand(rowH);
-  const extraColumns = useMemo(() => EXTRA_COLUMNS.filter((key) => columns.some((column) => column.key === key)), [columns]);
+  const extraColumns = useMemo(() => [...EXTRA_COLUMNS, "dateAdded", "releaseDate"].filter((key) => columns.some((column) => column.key === key)), [columns]);
   const view = useTrackView(spec, libraryGeneration, pendingEdits, seed, extraColumns);
   const played = usePlayedTracks();
   const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;

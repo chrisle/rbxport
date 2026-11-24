@@ -195,6 +195,7 @@ fn loose_row(position: usize, name: &str, id: &str, tags: Option<&rbl_index::fol
         analysed: 0,
         date_added: String::new(),
         release_date: String::new(),
+        date_labels: std::collections::BTreeMap::new(),
         hot_cues: Vec::new(),
         memory_cues: Vec::new(),
         memory_cue_colours: Vec::new(),

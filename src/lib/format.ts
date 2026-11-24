@@ -28,26 +28,34 @@ export function formatBitrate(kbps: number): string {
   return kbps === 0 ? "VBR" : `${kbps} kbps`;
 }
 
-/** `9/6/26` — US short date, no leading zeros, two-digit year. */
-export function formatShortDate(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  if (!m) return "";
-  const [, y, mo, d] = m;
-  if (!y || !mo || !d) return "";
-  return `${Number(mo)}/${Number(d)}/${y.slice(2)}`;
+// Browser mock only. Native pages carry their OS-formatted labels instead.
+let browserDate: Intl.DateTimeFormat | undefined;
+function printBrowserDay(date: Date, locale?: string): string {
+  const options = { dateStyle: "short", calendar: "gregory", timeZone: "UTC" } as const;
+  return (locale ? new Intl.DateTimeFormat(locale, options)
+    : browserDate ??= new Intl.DateTimeFormat(undefined, options)).format(date);
 }
 
-/**
- * A moment in seconds since the Unix epoch as the date columns print a day,
- * `M/D/YY`, on this machine's calendar: the File Created column's time is
- * the file system's, not a date the library stored, so its day is local.
- */
-export function formatEpochDate(seconds: number | null | undefined): string {
+/** A stored Gregorian day stays a day, regardless of the browser's timezone. */
+export function formatShortDate(iso: string | null | undefined, locale?: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
+  if (!match) return "";
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  if (year < 1) return "";
+  // Adapted from Bradley Wood's PR #881: setUTCFullYear avoids 0–99's
+  // JavaScript constructor reinterpretation; validate before formatting.
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
+  return printBrowserDay(date, locale);
+}
+
+/** Epoch timestamps first select their local day; formatting cannot shift it. */
+export function formatEpochDate(seconds: number | null | undefined, locale?: string): string {
   if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "";
   const date = new Date(seconds * 1000);
   if (Number.isNaN(date.getTime())) return "";
-  return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(-2)}`;
+  return formatShortDate(`${String(date.getFullYear()).padStart(4, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`, locale);
 }
 
 /** `144.8 GB` / `15.2 MB` — status-bar totals. */

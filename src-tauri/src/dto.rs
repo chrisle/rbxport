@@ -24,6 +24,9 @@ pub struct RowDto {
     pub analysed: u8,
     pub date_added: String,
     pub release_date: String,
+    /// Native OS short-date labels for requested columns; raw dates stay intact.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub date_labels: std::collections::BTreeMap<String, String>,
     /// The track's hot cues, for the badges on the row's preview waveform.
     ///
     /// A tuple per cue rather than an object: `["A",46,"#3CEB50",false]` is

@@ -24,6 +24,8 @@ export interface RowDto {
   rating: number;
   /** 0 = not analysed, 1 = analysed. */
   analysed: number;
+  /** Native labels from the requested page; never replace stored dates. */
+  dateLabels?: Readonly<Record<string, string>>;
   dateAdded: string;
   releaseDate: string;
   /**
@@ -2248,6 +2250,7 @@ export interface TrackDetails {
   bitDepth: number;
   /** `YYYY-MM-DD`. */
   dateCreated: string;
+  dateCreatedLabel?: string;
   releaseDate: string;
   /** The audio file's absolute path. */
   path: string;
