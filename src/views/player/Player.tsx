@@ -1,3 +1,4 @@
+import type { LoadedTrack } from "@/ipc/types";
 /**
  * The preview player.
  *
@@ -253,6 +254,7 @@ export interface PlayerProps {
   onSyncToggle?: (() => void) | undefined;
   /** This deck started playing: the first deck to play takes MASTER. */
   onStartPlaying?: (() => void) | undefined;
+  onLoadedTrack?: ((id: LoadedTrack | null) => void) | undefined;
   /**
    * The tempo the master is playing at, in hundredths of a BPM, or null
    * with no master track. A synced deck re-matches whenever it changes —
@@ -887,11 +889,12 @@ export const Player = memo(function Player({
   dragging = false, deck = "a",
   simple = false, transportSlot, flipped = false, dual = false, publishZoom, onWheelZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
-  publishSync, peerSync, isMaster = false, onMaster, synced = false, syncOn = synced, onSyncToggle, onStartPlaying,
+  publishSync, peerSync, isMaster = false, onMaster, synced = false, syncOn = synced, onSyncToggle, onStartPlaying, onLoadedTrack,
   leaderBpmX100 = null, onPlayingBpm, onKeyShift, onGridNudge, publishGridFollow, readOnly = false,
   drawing = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck, false);
+  useEffect(() => { onLoadedTrack?.(playback.loadedTrack); }, [onLoadedTrack, playback.loadedTrack]);
   const t = useTranslation();
   // A waveform to draw: the analysis's, or one an analysis is drawing now.
   const hasWaveform = track !== null && (track.analysed > 0 || drawing);

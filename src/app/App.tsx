@@ -1,3 +1,4 @@
+import type { LoadedTrack } from "@/ipc/types";
 import { ImportSkipsDialog } from "@/components/ImportSkipsDialog";
 import { ConfirmHost } from "@/components/ConfirmDialog";
 import type { DuplicateAnswer } from "@/components/DuplicateTracksDialog";
@@ -908,6 +909,11 @@ function AppBody() {
   // What each deck holds, Deck 1 first, for Track › Locate track loaded on
   // deck; and All Tracks, where it looks for a track the open list lacks
   // (rekordbox selects Collection).
+  const [loadedTracks, setLoadedTracks] = useState<readonly (LoadedTrack | null)[]>([null, null]);
+  const reportLoaded = useMemo(() => ({
+    a: (id: LoadedTrack | null) => setLoadedTracks(ids => ids[0] === id ? ids : [id, ids[1] ?? null]),
+    b: (id: LoadedTrack | null) => setLoadedTracks(ids => ids[1] === id ? ids : [ids[0] ?? null, id]),
+  }), []);
   const deckTrackIds = useMemo(() => [playerTrack?.id ?? null, playerTrackB?.id ?? null], [playerTrack?.id, playerTrackB?.id]);
   // With All Tracks hidden from the tree (View › Layout), the Playlists
   // heading lists the same collection.
@@ -3261,7 +3267,7 @@ function AppBody() {
     exportRunning,
   ]);
   const subList = useMemo(() => ({
-    onDragTracks: setDraggedTracks, onDragError: refuse, players: deckCount(layout), onLoadTrack: loadTrack,
+    loadedTracks, onDragTracks: setDraggedTracks, onDragError: refuse, players: deckCount(layout), onLoadTrack: loadTrack,
     onShowInformation: showInformation, onShowInFinder: revealTrack, onRate: rateTrack,
     onComment: commentTrack, onEditColor: editTrackColor, onResetPlayCount: resetPlayCount, onConvertMemoryCues: convertMemoryCues,
     onRemoveFromCollection: removeFromCollection, onImportToCollection: importToCollection,
@@ -3276,7 +3282,7 @@ function AppBody() {
     onRemoveTracksFromHistory: removeTracksFromHistory, onReorderPlaylist: reorderPlaylist,
     onDropFilesIntoPlaylist: importDroppedFilesTo, onAnalyseTracks: analyseTracks,
   }), [
-    layout, loadTrack, openInDeckA, showInformation, revealTrack, rateTrack, commentTrack, editTrackColor, resetPlayCount,
+    loadedTracks, layout, loadTrack, openInDeckA, showInformation, revealTrack, rateTrack, commentTrack, editTrackColor, resetPlayCount,
     convertMemoryCues, removeFromCollection, importToCollection, autoRelocate, relocate, analysisLock, addToPlaylist,
     addToTagList, removeFromTagList, reloadTag, exportTrackTo, menuPlaylists, menuDevices,
     editTrackField, readOnly, explainEditLock, pendingEdits, draggedTracks, addDraggedTo,
@@ -3381,6 +3387,7 @@ function AppBody() {
             onMaster={masterA}
             synced={isFollowing(sync, "a")}
             syncOn={sync.on.a}
+            onLoadedTrack={reportLoaded.a}
             onStartPlaying={startedPlaying.a}
             onSyncToggle={deckCount(layout) > 1 ? toggleSync.a : undefined}
             leaderBpmX100={syncMaster === "a" ? null : leaderBpmX100}
@@ -3421,6 +3428,7 @@ function AppBody() {
               onMaster={masterB}
               synced={isFollowing(sync, "b")}
               syncOn={sync.on.b}
+              onLoadedTrack={reportLoaded.b}
               onStartPlaying={startedPlaying.b}
               onSyncToggle={toggleSync.b}
               leaderBpmX100={syncMaster === "b" ? null : leaderBpmX100}
@@ -3521,6 +3529,7 @@ function AppBody() {
           // leave the real source permanently in its loading state.
           key={sessionReady ? "library-ready" : "library-loading"}
           spec={spec}
+          loadedTracks={loadedTracks}
           deckTrackIds={deckTrackIds}
           onShowCollection={showCollection}
           onSortChange={handleSort}

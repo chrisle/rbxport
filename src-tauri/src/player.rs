@@ -153,6 +153,8 @@ pub type SinkOpener =
 /// Holds the engine, which is not built until something is played.
 pub struct Player {
     pub(crate) loaded_tracks: Mutex<std::collections::HashMap<Deck, String>>,
+    /// At most one exact resolved source receipt per deck, checked against its installed load ID.
+    pub(crate) loaded_sources: Mutex<std::collections::HashMap<Deck, (u64, String, std::path::PathBuf)>>,
     engine: Mutex<Option<Arc<Engine>>>,
     /// How the engine's output is opened: the audio device in the app, and a
     /// sink the test pulls by hand in its tests.
@@ -206,6 +208,7 @@ impl Player {
             ticking: std::sync::atomic::AtomicBool::new(false),
             tick_requests: std::sync::atomic::AtomicU64::new(0),
             loaded_tracks: Mutex::new(std::collections::HashMap::new()),
+            loaded_sources: Mutex::new(std::collections::HashMap::new()),
             device: Mutex::new(None),
             wish: Mutex::new(StreamWish::default()),
             metronome: Mutex::new((rbl_deck::ClickSound::Two, rbl_deck::ClickVolume::Large)),

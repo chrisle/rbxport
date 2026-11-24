@@ -32,7 +32,7 @@ const emptyTick: Tick = {
 let host: HTMLDivElement;
 let root: Root;
 let deck: Playback;
-let track = "track-a";
+let track: string | null = "track-a";
 let loaded: (event: DeckEvent) => void;
 let tick: (value: Tick) => void;
 let reset: () => void;
@@ -82,7 +82,7 @@ async function settle() {
   await act(async () => { await done(); await done(); });
 }
 
-async function select(next: string) {
+async function select(next: string | null) {
   track = next;
   await act(async () => { root.render(<Probe />); await done(); });
 }
@@ -266,4 +266,54 @@ it("reloads and restores the current deck after its audio engine is replaced", a
   finish(replacement);
   await settle();
   expect(sent).toEqual(["seek:8500", "play"]);
+});
+
+
+it("publishes only confirmed audio owners, retaining pause and refusing stale completions", async () => {
+  expect(deck.loadedTrack?.[0] ?? null).toBeNull();
+  const first = loads[0]!;
+  finish(first); await settle();
+  expect(deck.loadedTrack?.[0] ?? null).toBe(first.track);
+  act(() => tick({ ...emptyTick, b: { ...emptyDeck, loadId: first.id, loaded: true, playing: false } }));
+  expect(deck.loadedTrack?.[0] ?? null).toBe(first.track);
+  await select("replacement");
+  expect(deck.loadedTrack).toBeNull();
+  finish(first); await settle();
+  expect(deck.loadedTrack).toBeNull();
+  const next = loads.at(-1)!;
+  finish(next); await settle();
+  expect(deck.loadedTrack?.[0] ?? null).toBe("replacement");
+  act(() => loaded({ deck: "b", loadId: next.id, totalFrames: 0, sampleRate: 0, message: "decoder refused" }));
+  expect(deck.loadedTrack?.[0] ?? null).toBeNull();
+});
+
+
+it("keeps the installed owner after an early missing-file refusal and clears it on unload/reset", async () => {
+  const first = loads[0]!; finish(first); await settle();
+  __setBackend({ ...backend(), deckLoad: () => Promise.reject(new Error("missing file")) });
+  await select("missing"); await settle();
+  expect(deck.loadedTrack?.[0] ?? null).toBe(first.track);
+  act(() => tick({ ...emptyTick, b: { ...emptyDeck, loadId: first.id, loaded: true, playing: true } }));
+  expect(deck.loadedTrack?.[0] ?? null).toBe(first.track);
+  act(() => reset()); await settle();
+  expect(deck.loadedTrack?.[0] ?? null).toBeNull();
+});
+
+
+it("clears a confirmed owner when the track is ejected", async () => {
+  const first = loads[0]!; finish(first); await settle();
+  expect(deck.loadedTrack?.[0] ?? null).toBe(first.track);
+  await select(null); await settle();
+  expect(deck.loadedTrack?.[0] ?? null).toBeNull();
+});
+
+
+it("publishes a new request identity when the same numeric row is loaded again", async () => {
+  const first = loads[0]!; finish(first); await settle();
+  expect(deck.loadedTrack?.[1]).toBe(first.id);
+  act(() => reset()); await settle();
+  expect(deck.loadedTrack).toBeNull();
+  const restored = loads.at(-1)!; finish(restored); await settle();
+  expect(deck.loadedTrack).toEqual([first.track, restored.id]);
+  expect(restored.id).not.toBe(first.id);
 });

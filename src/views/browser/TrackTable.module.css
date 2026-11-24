@@ -362,7 +362,7 @@
 .colorBall[data-color="Blue"] { background: var(--c-comment-blue); }
 .colorBall[data-color="Purple"] { background: var(--c-comment-purple); }
 
-.attr { display: flex; align-items: center; gap: 8px; }
+.attr { position: relative; display: flex; align-items: center; gap: 8px; }
 .analysed {
   width: 10px;
   height: 10px;
@@ -544,3 +544,9 @@
   outline: 1px solid var(--c-accent);
   outline-offset: -1px;
 }
+
+/* Stock EXPORT loaded-file marker:7x8, retained during pause, replacing CUE.
+   The right status icon is centered at3/4 width with a left analysis icon;
+   otherwise centered alone (ListViewer::drawTrackStatusIcons,7.2.19). */
+.loaded { position: absolute; left: 75%; top: calc((100% - 8px) / 2); transform: translateX(-50%); width: 7px; height: 8px; background: #969696; clip-path: polygon(0 0,100% 50%,0 100%); }
+.loaded[data-alone] { left: 50%; }

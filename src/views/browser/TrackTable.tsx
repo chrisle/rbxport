@@ -1,3 +1,4 @@
+import type { LoadedTrack } from "@/ipc/types";
 /**
  * The track browser.
  *
@@ -16,6 +17,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { flushSync } from "react-dom";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { DeckId, ListTotals, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/types";
+import { useLoadedRows } from "@/store/useLoadedRows";
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
@@ -417,7 +419,7 @@ const EditableCell = memo(function EditableCell({
 });
 
 const TrackRow = memo(function TrackRow({
-  row, top, selected, played, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
+  row, top, selected, played, loaded, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
   onComment, onEditField, onEditColor, onEditBlocked, onMenu, keyDisplay, keyChoices, onOpenKeys, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
   reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache, previewHeight,
 }: {
@@ -432,6 +434,7 @@ const TrackRow = memo(function TrackRow({
   selected: boolean;
   /** Played (#540): the row's text is drawn in rekordbox's played green. */
   played: boolean;
+  loaded: boolean;
   index: number;
   columns: readonly ColumnSpec[];
   /** Preferences: `Ebm` or `2A`. */
@@ -631,6 +634,9 @@ const TrackRow = memo(function TrackRow({
                 // in either capture shows CUE beside it [OBS issue #201].
                 <span className={styles.missing} role="img" aria-label="File is Missing"
                   title={tooltips ? "File is Missing" : undefined} />
+              ) : loaded ? (
+                <span className={styles.loaded} data-loaded data-alone={!row.analysed || undefined}
+                  role="img" aria-label={t("Loaded")} />
               ) : (
                 <span className={styles.cue}>{row.hotCues.length > 0 ? "CUE" : ""}</span>
               )}
@@ -839,6 +845,8 @@ export interface TrackTableProps {
    * loaded on deck (command + L).
    */
   deckTrackIds?: readonly (string | null)[];
+  /** Confirmed loaded audio, shared with the independent sub-browser. */
+  loadedTracks?: readonly (LoadedTrack | null)[];
   /** Opens All Tracks, where Locate looks for a track the open list lacks. */
   onShowCollection?: () => void;
   spec: ViewSpec;
@@ -1116,7 +1124,7 @@ function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: 
 }
 
 export const TrackTable = memo(function TrackTable({
-  deckTrackIds = NO_DECKS, onShowCollection, spec, onSortChange, onSelectionChange, onTotalsChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
+  loadedTracks = [], deckTrackIds = NO_DECKS, onShowCollection, spec, onSortChange, onSelectionChange, onTotalsChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns: layoutColumns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onRenumber, subBrowser = false, onEditField, onEditColor, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, pendingRows = 0, onSelectedTracks, onAnalyse,
@@ -1367,6 +1375,8 @@ export const TrackTable = memo(function TrackTable({
   }, [virtualizer, rowH]);
 
   const items = virtualizer.getVirtualItems();
+  const loaded = useLoadedRows(items.flatMap(item => { const row = view.rowAt(item.index); return row ? [row.id] : []; }),
+    columns.some(column => column.key === "attr") ? loadedTracks : [], `${libraryGeneration}:${view.token}`);
   // Row keys handed out this render; see `rowKey`. The drag source's frozen
   // key is taken first, so no other row can be handed it.
   const keyed = new Set<string>(dragSource !== null && dragSourceKey !== null ? [dragSourceKey] : []);
@@ -2464,6 +2474,7 @@ export const TrackTable = memo(function TrackTable({
               <TrackRow
                 key={item.index === dragSource && dragSourceKey !== null ? dragSourceKey : rowKey(row, item.key, keyed)}
                 row={row}
+                loaded={row !== undefined && loaded.has(row.id)}
                 index={item.index}
                 columns={columns}
                 onDragStart={startDraggingTracks}

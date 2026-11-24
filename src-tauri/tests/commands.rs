@@ -4444,3 +4444,85 @@ fn a_device_grid_command_stays_bound_to_the_loaded_database_after_another_is_bro
     assert_eq!(std::fs::read(&alternate).unwrap(), other);
     assert_eq!(std::fs::read(&s.location.master_db).unwrap(), personal_before);
 }
+
+
+#[test]
+fn loaded_row_matching_uses_confirmed_source_receipts_through_pause_and_relocation() {
+    let s = shell_prepared(Shape { tracks: 3, ..Shape::default() }, |dir, location| {
+        let a = write_wav(&dir.join("a.wav"), 1);
+        let b = write_wav(&dir.join("b.wav"), 1);
+        let db = Db::open(location.clone(), OpenMode::ReadWrite).unwrap();
+        for id in [track_id(0), track_id(1)] {
+            db.connection().execute("UPDATE djmdContent SET FolderPath=?1 WHERE ID=?2", [a.to_string_lossy().into_owned(), id]).unwrap();
+        }
+        db.connection().execute("UPDATE djmdContent SET FolderPath=?1 WHERE ID=?2", [b.to_string_lossy().into_owned(), track_id(2)]).unwrap();
+    });
+    let library = s.app.state::<Arc<AppState>>().library().unwrap();
+    let same_file = rbl_index::folder::loose_id(Path::new(library.audio_path_of(&track_id(0)).unwrap()));
+    let other_file = "file:/other-stick/same-name.mp3".to_owned();
+    let rows = vec![track_id(0), track_id(1), track_id(2), same_file.clone(), other_file.clone(), "invalid".into()];
+    let matches = |owners: Vec<String>| commands::loaded_rows(s.state(), s.player(), rows.clone(), owners.into_iter().map(|id| { let request = if id == track_id(2) {92} else {91}; (id, request) }).collect()).unwrap();
+    assert!(s.player().opened().is_none());
+    assert!(matches(vec![track_id(0)]).is_empty(), "selected IDs alone are not installed audio");
+    assert!(s.player().opened().is_none(), "marker reads never open an audio device");
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), track_id(0), 91)).unwrap();
+    s.pull_until("A loaded", |tick| tick.a.loaded && tick.a.load_id == 91);
+    let before = std::fs::read(&s.location.master_db).unwrap();
+    assert_eq!(matches(vec![track_id(0)]), [track_id(0), track_id(1), same_file.clone()]);
+    assert!(matches(vec!["invalid".into()]).is_empty());
+    assert!(matches(vec![]).is_empty());
+    assert!(commands::loaded_rows(s.state(), s.player(), vec![same_file.clone(); 129], vec![(track_id(0), 91)]).is_err());
+    assert!(commands::loaded_rows(s.state(), s.player(), vec![track_id(0)], vec![(track_id(0), 91); 3]).is_err());
+    run(commands::deck_play(s.handle(), s.player(), s.preview(), "a".into())).unwrap();
+    s.pull_until("A playing", |tick| tick.a.playing);
+    run(commands::deck_pause(s.player(), "a".into())).unwrap();
+    assert_eq!(matches(vec![track_id(0)]), [track_id(0), track_id(1), same_file.clone()]);
+    assert_eq!(std::fs::read(&s.location.master_db).unwrap(), before);
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "b".into(), track_id(2), 92)).unwrap();
+    s.pull_until("B loaded", |tick| tick.b.loaded && tick.b.load_id == 92);
+    assert_eq!(matches(vec![track_id(0), track_id(2)]), [track_id(0), track_id(1), track_id(2), same_file.clone()]);
+    // A still owns a.wav while the same numeric library row is relocated.
+    let db = Db::open(s.location.clone(), OpenMode::ReadWrite).unwrap();
+    db.connection().execute("UPDATE djmdContent SET FolderPath=?1 WHERE ID=?2", [s._dir.path().join("b.wav").display().to_string(), track_id(0)]).unwrap();
+    let (reloaded, _) = rbl_index::load(&db).unwrap();
+    s.state().set_library(reloaded, false, db.schema().db_version, 0, s.location.clone());
+    let relocated = std::fs::read(&s.location.master_db).unwrap();
+    assert_eq!(matches(vec![track_id(0)]), [track_id(1), same_file.clone()], "do not reinterpret the installed owner through new metadata");
+    assert_eq!(std::fs::read(&s.location.master_db).unwrap(), relocated);
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), track_id(0), 93)).unwrap();
+    s.pull_until("relocated A loaded", |tick| tick.a.loaded && tick.a.load_id == 93);
+    assert!(matches(vec![track_id(0)]).is_empty(), "same row ID under an old load cannot satisfy a new owner");
+    assert_eq!(commands::loaded_rows(s.state(), s.player(), rows.clone(), vec![(track_id(0), 93)]).unwrap(), [track_id(0), track_id(2)]);
+    run(commands::deck_unload(s.player(), "a".into())).unwrap();
+    assert!(matches(vec![track_id(0)]).is_empty());
+    assert_eq!(matches(vec![track_id(2)]), [track_id(0), track_id(2)]);
+}
+
+
+#[test]
+fn a_device_row_keeps_its_marker_when_loading_resolves_the_library_spelling() {
+    let s = shell();
+    let source = write_wav(&s._dir.path().join("source.wav"), 1);
+    let stick = tempfile::tempdir().unwrap();
+    rbl_export::export(stick.path(), &[rbl_export::SourceTrack {
+        id: 1, source_path: source, title: "Case-bound source".into(), ..Default::default()
+    }], &[]).unwrap();
+    // Preserve the DB spelling while the real directory uses lower case.
+    // Linux takes openable's cached-device fallback; case-insensitive hosts
+    // still exercise the identical immutable file-ID/receipt contract.
+    std::fs::rename(stick.path().join("Contents"), stick.path().join("case-transition")).unwrap();
+    std::fs::rename(stick.path().join("case-transition"), stick.path().join("contents")).unwrap();
+    let mount = stick.path().display().to_string();
+    let spec = ViewSpecDto { source: TrackSourceDto::Device { path: mount.clone(), format: "deviceLibrary".into(), playlist: "0".into() }, ..collection_spec() };
+    let view = run(commands::open_view(s.state(), spec)).unwrap();
+    let rows = run(commands::fetch_rows(s.state(), view.view_id, 0, 1, None)).unwrap();
+    let id = rows[0].id.clone();
+    assert!(id.contains("/Contents/"));
+    #[cfg(target_os = "linux")]
+    assert!(!Path::new(id.strip_prefix("file:").unwrap()).exists(), "Linux must exercise fallback spelling");
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), id.clone(), 201)).unwrap();
+    s.pull_until("device audio installed", |tick| tick.a.loaded && tick.a.load_id == 201);
+    let marked = commands::loaded_rows(s.state(), s.player(), vec![id.clone()], vec![(id.clone(), 201)]).unwrap();
+    assert_eq!(marked.as_slice(), std::slice::from_ref(&id));
+    assert!(commands::loaded_rows(s.state(), s.player(), vec![id.clone()], vec![(id, 200)]).unwrap().is_empty());
+}
