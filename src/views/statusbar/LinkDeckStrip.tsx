@@ -16,7 +16,7 @@
  * jog does not turn and there is no waveform here — rekordbox draws none in
  * this strip either.
  */
-import { type DragEventHandler, useEffect, useRef, useState } from "react";
+import { type DragEvent, useEffect, useRef, useState } from "react";
 
 import { Artwork } from "@/components/Artwork";
 import { LinkIcon, LinkOnIcon } from "@/components/icons";
@@ -174,6 +174,13 @@ export function LinkDeckStrip({
   );
 }
 
+// WebKit can refuse the drop when only dragover was accepted. Take the
+// entering drag too, as playlist targets do, without loading until drop.
+function takePlayerDrag(event: DragEvent<HTMLDivElement>) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+}
+
 function PlayerDeck({
   player,
   droppable,
@@ -184,11 +191,6 @@ function PlayerDeck({
   onDrop?: ((playerNumber: number) => void) | undefined;
 }) {
   const loaded = player.loaded !== null;
-  // WebKit can refuse the drop when only dragover was accepted. Take the
-  // entering drag too, as playlist targets do, without loading until drop.
-  const takeDrag: DragEventHandler<HTMLDivElement> | undefined = droppable
-    ? (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
-    : undefined;
   return (
     <div
       className={styles.deck}
@@ -197,8 +199,8 @@ function PlayerDeck({
       data-playing={player.playing || undefined}
       data-drop-target={droppable ? true : undefined}
       aria-label={`Player ${player.number}`}
-      onDragEnter={takeDrag}
-      onDragOver={takeDrag}
+      onDragEnter={droppable ? takePlayerDrag : undefined}
+      onDragOver={droppable ? takePlayerDrag : undefined}
       onDrop={
         droppable && onDrop
           ? (e) => {
