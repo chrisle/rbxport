@@ -334,7 +334,7 @@ const Summary = memo(function Summary({
         {summaryFacts(track, details).map((fact) => (
           <div key={fact.label} className={styles.fact}>
             <dt className={styles.label}>{fact.label}</dt>
-            <dd className={styles.value} title={tip(fact.value)}>{fact.value}</dd>
+            <dd className={styles.value} title={tip(fact.value)} data-i18n-ignore={fact.label === "Date Created" || undefined}>{fact.value}</dd>
           </div>
         ))}
         {playlists.length > 0 ? (
