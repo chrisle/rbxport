@@ -45,6 +45,72 @@ fn unchanged_and_playlist_only_syncs_do_not_read_any_media() {
 }
 
 #[test]
+fn layout_three_receipts_rebuild_database_metadata_without_recopying_media() {
+    let source = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let mut tracks = vec![track(source.path(), 1)];
+    tracks[0].metadata.analysed = 0xe9;
+    let lists = playlists(vec![0]);
+    let sync = SyncSource { db_id: 123, ..Default::default() };
+    let options = ExportOptions { sync: Some(&sync), ..Default::default() };
+    run(usb.path(), &tracks, &lists);
+    let mut older = Manifest::load(usb.path()).unwrap();
+    let exported = &older.tracks[0];
+    let mut guarded = vec![tracks[0].source_path.clone(), tracks[0].analysis_source.clone().unwrap(),
+        usb.path().join(exported.audio.trim_start_matches('/'))];
+    guarded.extend(std::fs::read_dir(usb.path().join(exported.anlz_dir.trim_start_matches('/'))).unwrap()
+        .map(|entry| entry.unwrap().path()).filter(|path| path.is_file()));
+    let before: Vec<_> = guarded.iter().map(|path| (std::fs::read(path).unwrap(),
+        std::fs::metadata(path).unwrap().modified().unwrap())).collect();
+    let database = usb.path().join("PIONEER/rekordbox/exportLibrary.db");
+    {
+        let db = rbl_onelibrary::playlists::open_read_write(&database).unwrap();
+        db.execute_batch("UPDATE property SET dbVersion='1000'; UPDATE content SET analysedBits=169").unwrap();
+    }
+    // Historical layout-3 request encoding, deliberately independent of the
+    // current request() implementation: every input and analysis revision is
+    // unchanged, and the old database receipts match the bytes on the stick.
+    let tags: &[rbl_export::SourceMyTag] = &[];
+    let old_request = rbl_export::incremental::digest(&(
+        tracks.as_slice(), lists.as_slice(), tags, options.compatibility, options.keep_unlisted,
+        format!("{:?}", options.sync), options.db_id_override, options.my_tag_master_db_id_override,
+        format!("{:?}", options.defaults), 5_u32, 3_u32,
+    )).unwrap();
+    let current_request = rbl_export::incremental::request(&tracks, &lists, tags, &options).unwrap();
+    assert_ne!(old_request, current_request, "row layout changes must invalidate the request receipt");
+    let generation = older.generation.as_mut().unwrap();
+    assert_eq!(generation.transform_version, 5, "the historical analysis recipe is unchanged");
+    generation.request = old_request;
+    generation.databases = rbl_export::incremental::databases(usb.path()).unwrap();
+    assert_eq!(generation.inputs, rbl_export::incremental::inputs(&tracks).unwrap());
+    assert!(rbl_export::incremental::receipts_match(usb.path(), generation).unwrap());
+    older.save(usb.path()).unwrap();
+
+    let repaired = run(usb.path(), &tracks, &lists);
+    assert!(!repaired.up_to_date);
+    assert_eq!(repaired.metrics.database_builds, 1);
+    assert_eq!((repaired.bytes_copied, repaired.analysis_files,
+        repaired.metrics.audio_bytes_read, repaired.metrics.analysis_bytes_read), (0, 0, 0, 0));
+    {
+        let db = rbl_onelibrary::ExportLibrary::open_read_only(&database).unwrap();
+        let version: String = db.connection().query_row("SELECT dbVersion FROM property", [], |row| row.get(0)).unwrap();
+        let flags: u32 = db.connection().query_row("SELECT analysedBits FROM content", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, "10000");
+        assert_eq!(flags, 41);
+    }
+    let repeat = run(usb.path(), &tracks, &lists);
+    assert!(repeat.up_to_date);
+    assert_eq!(repeat.metrics.database_builds, 0);
+    assert_eq!((repeat.bytes_copied, repeat.analysis_files), (0, 0));
+    for (path, (bytes, stamp)) in guarded.iter().zip(before) {
+        assert_eq!(std::fs::read(path).unwrap(), bytes, "{} changed", path.display());
+        assert_eq!(std::fs::metadata(path).unwrap().modified().unwrap(), stamp, "{} was rewritten", path.display());
+    }
+    assert_eq!(tracks[0].metadata.analysed, 0xe9);
+    assert!(rbl_export::verify(usb.path()).unwrap().is_ok());
+}
+
+#[test]
 fn changed_analysis_does_not_copy_audio_and_only_reads_its_source_bundle() {
     let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1), track(source.path(), 2)];
