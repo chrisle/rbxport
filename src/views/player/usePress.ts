@@ -38,6 +38,9 @@ export interface PressProps {
   onPointerMove: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerUp: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerLeave: (event: React.PointerEvent<HTMLElement>) => void;
+  onLostPointerCapture: (event: React.PointerEvent<HTMLElement>) => void;
+  onMouseLeave: (event: React.MouseEvent<HTMLElement>) => void;
   onMouseDown: (event: React.MouseEvent<HTMLElement>) => void;
 }
 
@@ -70,6 +73,7 @@ export function usePress(handlers: PressHandlers, { capture = true } = {}): Pres
   });
 
   const onPointerDown = useEventCallback((event: React.PointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
     pointerPressed.current = true;
     if (held.current) return;
     const target = event.currentTarget;
@@ -85,7 +89,7 @@ export function usePress(handlers: PressHandlers, { capture = true } = {}): Pres
     move(press(event, now.target));
   });
 
-  const release = (event: React.PointerEvent<HTMLElement>) => {
+  const release = (event: React.PointerEvent<HTMLElement>, cancelled = event.type !== "pointerup") => {
     // A cancelled pointer sends no compatibility mouse events after it.
     if (event.type === "pointercancel") pointerPressed.current = false;
     const now = held.current;
@@ -94,10 +98,21 @@ export function usePress(handlers: PressHandlers, { capture = true } = {}): Pres
     if (now.target.hasPointerCapture(event.pointerId)) {
       now.target.releasePointerCapture(event.pointerId);
     }
-    up(press(event, now.target), event.type === "pointercancel");
+    up(press(event, now.target), cancelled);
   };
   const onPointerUp = useEventCallback(release);
   const onPointerCancel = useEventCallback(release);
+  const onLostPointerCapture = useEventCallback(release);
+  const onPointerLeave = useEventCallback((event: React.PointerEvent<HTMLElement>) => {
+    if (!capture) release(event, true);
+  });
+  const onMouseLeave = useEventCallback((event: React.MouseEvent<HTMLElement>) => {
+    const now = held.current;
+    if (capture || now?.kind !== "mouse") return;
+    now.stop();
+    held.current = null;
+    up(press(event, now.target), true);
+  });
 
   const onMouseDown = useEventCallback((event: React.MouseEvent<HTMLElement>) => {
     if (pointerPressed.current) {
@@ -138,7 +153,7 @@ export function usePress(handlers: PressHandlers, { capture = true } = {}): Pres
   // One object for the life of the component, so a memoised child that takes
   // it is not redrawn for it.
   return useMemo(
-    () => ({ onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onMouseDown }),
-    [onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onMouseDown],
+    () => ({ onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onPointerLeave, onLostPointerCapture, onMouseDown, onMouseLeave }),
+    [onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onPointerLeave, onLostPointerCapture, onMouseDown, onMouseLeave],
   );
 }
