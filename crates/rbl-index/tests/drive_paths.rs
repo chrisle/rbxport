@@ -104,7 +104,7 @@ fn windows_paths_resolve_to_real_files_on_a_linux_mount_without_rewriting_the_da
     std::fs::write(&audio, b"disposable audio path fixture").unwrap();
     let expected_audio = std::fs::canonicalize(&audio).unwrap();
     let relative = audio.strip_prefix("/dev/shm").unwrap().to_string_lossy();
-    let stored_path = format!("E:{relative}");
+    let stored_path = format!("E:/{relative}");
     fixture::point_at_audio(&location, 0, &stored_path, 300).unwrap();
     set_drives(&location, "E:/", "E:/");
     let before = std::fs::read(&location.master_db).unwrap();
