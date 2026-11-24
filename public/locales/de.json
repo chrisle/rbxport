@@ -1792,5 +1792,9 @@
   "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
   "Unlock the beat grid for editing": "Unlock the beat grid for editing",
   "Enter 0 or a BPM from 40 to 499.": "Enter 0 or a BPM from 40 to 499.",
-  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing."
+  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing.",
+  "Analysis order": "Analysereihenfolge",
+  "Analysis stages could not be loaded.": "Die Analyseschritte konnten nicht geladen werden.",
+  "{stage} requires {requirement} earlier in the analysis order.": "{stage} setzt voraus, dass {requirement} in der Analysereihenfolge davor steht.",
+  "Drag stages to change the order they run.": "Ziehen Sie die Schritte, um ihre Ausführungsreihenfolge zu ändern."
 }

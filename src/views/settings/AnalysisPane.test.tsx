@@ -3,7 +3,7 @@
  *
  * Key Analysis > "Write the value to the ID3 tag" on the Analysis pane
  * (#204): rekordbox's `writeKeyInTag`, off by default, under its own
- * heading below Track Analysis.
+ * tab alongside Track Analysis.
  */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -11,17 +11,20 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { DEFAULT_PREFERENCES, type Preferences } from "@/lib/preferences";
 import { PreferencesProvider } from "@/store/usePreferences";
-import { AnalysisPane } from "./AnalysisPane";
+import { __setBackend } from "@/ipc/client";
+import { createMockBackend } from "@/ipc/backend-mock";
+import { BUILTIN_ANALYSIS_STAGES } from "@/lib/analysisStages";
+import { AnalysisPane, type AnalysisTab } from "./AnalysisPane";
 
 let host: HTMLDivElement;
 let root: Root;
 let update: ReturnType<typeof vi.fn>;
 
-function mount(preferences: Preferences) {
+function mount(preferences: Preferences, tab: AnalysisTab = "key") {
   act(() => {
     root.render(
       <PreferencesProvider value={{ preferences, update, reset: () => {} }}>
-        <AnalysisPane tab="track" />
+        <AnalysisPane tab={tab} />
       </PreferencesProvider>,
     );
   });
@@ -48,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  __setBackend(null);
   vi.unstubAllGlobals();
 });
 
@@ -79,4 +83,26 @@ it("offers Analyze key under Key Analysis, on by default, with the Mixed In Key 
 it("shows Analyze key off when saved off", () => {
   mount({ ...DEFAULT_PREFERENCES, analysis: { ...DEFAULT_PREFERENCES.analysis, detectKey: false } });
   expect(keySwitch("Analyze key").checked).toBe(false);
+});
+
+it("moves stages from Advanced and keeps the key switches on their own tab", async () => {
+  __setBackend({ ...createMockBackend(), analysisStages: () => Promise.resolve(BUILTIN_ANALYSIS_STAGES) });
+  mount(DEFAULT_PREFERENCES, "track");
+  expect(host.querySelector('section[aria-label="Analysis order"]')).toBeNull();
+  mount(DEFAULT_PREFERENCES, "advanced");
+  await act(async () => {});
+  const section = host.querySelector('section[aria-label="Analysis order"]');
+  expect([...section!.querySelectorAll("li")].map(stage => stage.textContent)).toEqual(["Waveform", "BPM / Grid", "KEY"]);
+  expect(host.querySelector('section[aria-label="Key Analysis"]')).toBeNull();
+  const key = [...section!.querySelectorAll("li")].find(stage => stage.textContent === "KEY");
+  act(() => {
+    key?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+  });
+  expect(update).toHaveBeenCalledWith("analysis", { stageOrder: ["waveform", "key", "grid"] });
+
+  mount({ ...DEFAULT_PREFERENCES, analysis: { ...DEFAULT_PREFERENCES.analysis, stageOrder: ["waveform", "key", "grid"] } }, "advanced");
+  expect([...section!.querySelectorAll("li")].map(stage => stage.textContent)).toEqual(["Waveform", "KEY", "BPM / Grid"]);
+  mount(DEFAULT_PREFERENCES, "key");
+  expect(host.querySelector('section[aria-label="Analysis order"]')).toBeNull();
+  expect(writeSwitch().checked).toBe(false);
 });

@@ -6,14 +6,17 @@ export const BUILTIN_ANALYSIS_STAGES: AnalysisStageDescriptor[] = [
   { id: "key", label: "KEY", description: "", requires: ["core.audio"], produces: ["core.key"], defaultEnabled: true, requiresFullTrack: false, revision: "1" },
   { id: "waveform", label: "Waveform", description: "", requires: ["core.audio"], produces: ["core.waveform"], defaultEnabled: true, requiresFullTrack: false, revision: "1" },
 ];
+export function analysisStageOrder(preference: readonly string[] | undefined, descriptors: AnalysisStageDescriptor[]): string[] {
+  return [...new Set([...(preference ?? []), "waveform", "grid", "key", ...descriptors.map(stage => stage.id)])];
+}
+
 export function selectedStageOrder(settings: AnalysisSettings, descriptors: AnalysisStageDescriptor[]): string[] {
   const selected = new Set([
     ...(settings.bpmGrid ? ["waveform", "grid"] : []),
     ...(settings.key ? ["key"] : []),
     ...(settings.extensionStages ?? []),
   ]);
-  const preference = settings.stageOrder ?? ["waveform", "grid", "key"];
-  return [...new Set([...preference, ...descriptors.map(stage => stage.id), ...selected])].filter(id => selected.has(id));
+  return [...new Set([...analysisStageOrder(settings.stageOrder, descriptors), ...selected])].filter(id => selected.has(id));
 }
 /** Match the host's explicit-order dependency check; never reorder for the user. */
 export function analysisDependencyError(order: string[], descriptors: AnalysisStageDescriptor[]): { stage: string; requirement: string } | null {

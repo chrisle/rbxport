@@ -18,7 +18,7 @@ export type AnalysisChoice = AnalysisSettings & { mode: AnalysisMode };
  * BPM / Grid ticked and greyed, since every track it covers has never been
  * analysed [OBS: rekordbox 7.2.14, chris-win11].
  */
-export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRange, initialFirstBeatCue, initialKey = true, onConfirm, onCancel }: {
+export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRange, initialFirstBeatCue, stageOrder = [], initialKey = true, onConfirm, onCancel }: {
   count: number;
   /** The launch prompt for never-analysed Collection tracks. */
   auto?: boolean;
@@ -27,6 +27,7 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
   initialBpmRange: BpmRange;
   /** The Preferences switch, which this window has no box for. */
   initialFirstBeatCue: boolean;
+  stageOrder?: string[] | undefined;
   /**
    * The Preferences "Analyze key" switch. Off starts KEY unticked whatever was
    * last confirmed, so keys from Mixed In Key are not overwritten by accident;
@@ -73,17 +74,9 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
   }, []);
   const t = useTranslation();
   const update = (patch: Partial<AnalysisChoice>) => setSettings(current => ({ ...current, ...patch }));
-  const order = selectedStageOrder(settings, stages);
+  const order = selectedStageOrder({ ...settings, stageOrder }, stages);
   const dependency = analysisDependencyError(order, stages);
   const canAnalyse = order.length > 0 && !dependency && !stageLoadFailed;
-  const move = (index: number, direction: number) => {
-    const next = [...order];
-    const current = next[index];
-    const adjacent = next[index + direction];
-    if (current === undefined || adjacent === undefined) return;
-    next[index] = adjacent; next[index + direction] = current;
-    update({ stageOrder: next });
-  };
 
   return (
     <dialog ref={dialog} className={styles.dialog} aria-labelledby="analysis-title"
@@ -139,18 +132,6 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
               {stage.description && <p className={styles.stageDescription}>{t(stage.description)}</p>}
             </div>
           ))}
-          <h3>{t("Analysis order")}</h3>
-          <ol className={styles.stageOrder}>
-            {order.map((id, index) => {
-              const stage = stages.find(stage => stage.id === id);
-              const label = stage?.label ?? id;
-              return <li key={id}>
-                <span>{t(label)}</span>
-                <button type="button" disabled={index === 0} aria-label={t("Move {stage} up", { stage: t(label) })} onClick={() => move(index, -1)}>↑</button>
-                <button type="button" disabled={index === order.length - 1} aria-label={t("Move {stage} down", { stage: t(label) })} onClick={() => move(index, 1)}>↓</button>
-              </li>;
-            })}
-          </ol>
           {dependency && <p role="alert">{t("{stage} requires {requirement} earlier in the analysis order.", { stage: t(dependency.stage), requirement: t(dependency.requirement) })}</p>}
           {stageLoadFailed && <p role="alert">{t("Analysis options could not be loaded. Close this dialog and try again.")}</p>}
         </div>

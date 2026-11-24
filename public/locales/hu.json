@@ -1793,5 +1793,9 @@
   "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
   "Unlock the beat grid for editing": "Unlock the beat grid for editing",
   "Enter 0 or a BPM from 40 to 499.": "Enter 0 or a BPM from 40 to 499.",
-  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing."
+  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing.",
+  "Analysis order": "Elemzési sorrend",
+  "Analysis stages could not be loaded.": "Az elemzési lépéseket nem sikerült betölteni.",
+  "{stage} requires {requirement} earlier in the analysis order.": "A(z) {stage} lépéshez a(z) {requirement} lépésnek előrébb kell szerepelnie az elemzési sorrendben.",
+  "Drag stages to change the order they run.": "Húzza a lépéseket a végrehajtási sorrend módosításához."
 }

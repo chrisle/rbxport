@@ -1795,5 +1795,9 @@
   "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
   "Unlock the beat grid for editing": "Unlock the beat grid for editing",
   "Enter 0 or a BPM from 40 to 499.": "Enter 0 or a BPM from 40 to 499.",
-  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing."
+  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing.",
+  "Analysis order": "Σειρά ανάλυσης",
+  "Analysis stages could not be loaded.": "Δεν ήταν δυνατή η φόρτωση των σταδίων ανάλυσης.",
+  "{stage} requires {requirement} earlier in the analysis order.": "Για το στάδιο {stage}, το στάδιο {requirement} πρέπει να προηγείται στη σειρά ανάλυσης.",
+  "Drag stages to change the order they run.": "Σύρετε τα στάδια για να αλλάξετε τη σειρά εκτέλεσής τους."
 }

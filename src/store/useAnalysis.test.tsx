@@ -134,8 +134,8 @@ it("analyses a deck's track next, ahead of a batch, and asks for it to be drawn"
   expect(held.analyseTrack.mock.calls[0]).toEqual(["a", "rbxport", defaults]);
 });
 
-it("queues tracks without key analysis when Analyze key is off", async () => {
-  await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true, firstBeatCue: false, bpmRange: "70-180", writeKeyTag: false, detectKey: false }} />); await Promise.resolve(); });
+it("applies the preferred stage order to automatic analysis with key disabled", async () => {
+  await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: true, firstBeatCue: false, bpmRange: "70-180", writeKeyTag: false, detectKey: false, stageOrder: ["key", "grid", "waveform", "example.extension"] }} />); await Promise.resolve(); });
   await act(async () => { analysis.add([{ id: "a", title: "First" }]); await Promise.resolve(); });
-  expect(held.analyseTrack).toHaveBeenCalledWith("a", "rbxport", expect.objectContaining({ bpmGrid: true, key: false }));
+  expect(held.analyseTrack).toHaveBeenCalledWith("a", "rbxport", expect.objectContaining({ bpmGrid: true, key: false, stageOrder: ["grid", "waveform"] }));
 });

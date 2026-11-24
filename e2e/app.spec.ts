@@ -1578,11 +1578,9 @@ test("the player marks a track's cues on its waveforms", async ({ page }) => {
   await expect(detail.locator('[data-cue]:not([data-cue=""])')).toHaveCount(0);
 });
 
-test("the Analysis pane says what Auto Analysis will do", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+test("Analysis settings save stage order and provide a separate Key Analysis tab", async ({ page }) => {
+  await page.goto("/index.html#preferences/analysis");
   const dialog = page.getByRole("dialog", { name: "Preferences" });
-  await dialog.getByRole("tab", { name: "Analysis" }).click();
 
   const section = dialog.getByRole("region", { name: "Track Analysis" });
   const automatic = section.getByRole("switch", { name: "Automatic analysis" });
@@ -1590,12 +1588,43 @@ test("the Analysis pane says what Auto Analysis will do", async ({ page }) => {
   await automatic.click();
   await expect(automatic).toBeChecked();
 
+  const analysisTabs = dialog.getByRole("tablist").filter({
+    has: page.getByRole("tab", { name: "Track Analysis", exact: true }),
+  });
+  const order = dialog.getByRole("region", { name: "Analysis order" });
+  await expect(order).toHaveCount(0);
+  await analysisTabs.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await expect(order.getByRole("listitem")).toHaveText([/Waveform/, /BPM \/ Grid/, /KEY/]);
+  await expect(order.getByText("Drag stages to change the order they run.")).toBeVisible();
+  const keyRow = order.getByText("KEY", { exact: true });
+  const gridRow = order.getByText("BPM / Grid", { exact: true });
+  const keyBox = (await keyRow.boundingBox())!;
+  const gridBox = (await gridRow.boundingBox())!;
+  await page.mouse.move(keyBox.x + 20, keyBox.y + keyBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(gridBox.x + 20, gridBox.y + gridBox.height / 2, { steps: 5 });
+  await expect(gridRow).toHaveAttribute("data-drop-target", "true");
+  const preview = order.locator('div[aria-hidden="true"]').filter({ hasText: "KEY" });
+  await expect(preview).toBeVisible();
+  const firstPosition = (await preview.boundingBox())!;
+  await page.mouse.move(gridBox.x + 60, gridBox.y + gridBox.height / 2);
+  await expect.poll(async () => (await preview.boundingBox())?.x).toBeCloseTo(firstPosition.x + 40, 0);
+  await page.mouse.up();
+  await expect(preview).toHaveCount(0);
+  await expect(order.getByRole("listitem")).toHaveText([/Waveform/, /KEY/, /BPM \/ Grid/]);
+
+  await dialog.getByRole("tab", { name: "Key Analysis", exact: true }).click();
+  await expect(order).toHaveCount(0);
   // rekordbox's Key Analysis > Write the value to the ID3 tag: off by default (#204).
   const writeKey = dialog.getByRole("region", { name: "Key Analysis" })
     .getByRole("switch", { name: "Write the value to the ID3 tag" });
   await expect(writeKey).not.toBeChecked();
   await writeKey.click();
   await expect(writeKey).toBeChecked();
+
+  await page.reload();
+  await analysisTabs.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await expect(order.getByRole("listitem")).toHaveText([/Waveform/, /KEY/, /BPM \/ Grid/]);
 });
 
 test("a rating appears at once rather than waiting for the reload", async ({ page }) => {

@@ -1802,5 +1802,9 @@
   "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
   "Unlock the beat grid for editing": "Unlock the beat grid for editing",
   "Enter 0 or a BPM from 40 to 499.": "Enter 0 or a BPM from 40 to 499.",
-  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing."
+  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing.",
+  "Analysis order": "解析順序",
+  "Analysis stages could not be loaded.": "解析ステップを読み込めませんでした。",
+  "{stage} requires {requirement} earlier in the analysis order.": "{stage}の解析には、{requirement}が先に実行される必要があります。",
+  "Drag stages to change the order they run.": "ステップをドラッグして実行順序を変更できます。"
 }

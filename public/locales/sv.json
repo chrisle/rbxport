@@ -1791,5 +1791,9 @@
   "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
   "Unlock the beat grid for editing": "Unlock the beat grid for editing",
   "Enter 0 or a BPM from 40 to 499.": "Enter 0 or a BPM from 40 to 499.",
-  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing."
+  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing.",
+  "Analysis order": "Analysordning",
+  "Analysis stages could not be loaded.": "Det gick inte att läsa in analysstegen.",
+  "{stage} requires {requirement} earlier in the analysis order.": "{stage} kräver att {requirement} kommer tidigare i analysordningen.",
+  "Drag stages to change the order they run.": "Dra stegen för att ändra ordningen de körs i."
 }

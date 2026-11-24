@@ -1798,5 +1798,9 @@
   "Lock the beat grid so nothing here changes it": "Lock the beat grid so nothing here changes it",
   "Unlock the beat grid for editing": "Unlock the beat grid for editing",
   "Enter 0 or a BPM from 40 to 499.": "Enter 0 or a BPM from 40 to 499.",
-  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing."
+  "The track's BPM or analysis changed. Reload it before editing.": "The track's BPM or analysis changed. Reload it before editing.",
+  "Analysis order": "分析顺序",
+  "Analysis stages could not be loaded.": "无法加载分析步骤。",
+  "{stage} requires {requirement} earlier in the analysis order.": "{stage}要求{requirement}在分析顺序中排在前面。",
+  "Drag stages to change the order they run.": "拖动步骤以更改执行顺序。"
 }

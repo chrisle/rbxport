@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import { usePreferences } from "./usePreferences";
 import type { AnalysisResult } from "@/ipc/types";
+import { BUILTIN_ANALYSIS_STAGES, selectedStageOrder } from "@/lib/analysisStages";
 import { bpmRangeLimits, type AnalysisPreferences } from "@/lib/preferences";
 import {
   cancel as cancelQueue,
@@ -56,7 +57,7 @@ export function useAnalysis(
 ): Analysis {
   const stored = usePreferences();
   const storedPreferences = stored.analysis;
-  const { mode, concurrentTracks, firstBeatCue, bpmRange, writeKeyTag, detectKey } = preferences ?? storedPreferences;
+  const { mode, concurrentTracks, firstBeatCue, bpmRange, writeKeyTag, detectKey, stageOrder } = preferences ?? storedPreferences;
   // "Write the value to the ID3 tag" is read when a track's analysis is
   // sent, not when it was queued: rekordbox reads `writeKeyInTag` as each
   // analysis completes. The key display format decides the notation.
@@ -118,8 +119,14 @@ export function useAnalysis(
 
   // The preferred settings, for a track queued without the dialog.
   const preferred = useCallback(
-    (): NonNullable<QueueItem["analysis"]> => ({ mode, bpmGrid: true, key: detectKey, highPrecision: true, ...bpmRangeLimits(bpmRange), firstBeatCue }),
-    [mode, firstBeatCue, bpmRange, detectKey],
+    (): NonNullable<QueueItem["analysis"]> => {
+      const settings = { mode, bpmGrid: true, key: detectKey, highPrecision: true, ...bpmRangeLimits(bpmRange), firstBeatCue };
+      if (!stageOrder?.length) return settings;
+      const order = selectedStageOrder({ ...settings, stageOrder }, BUILTIN_ANALYSIS_STAGES);
+      const defaultOrder = selectedStageOrder(settings, BUILTIN_ANALYSIS_STAGES);
+      return order.every((id, index) => id === defaultOrder[index]) ? settings : { ...settings, stageOrder: order };
+    },
+    [mode, firstBeatCue, bpmRange, detectKey, stageOrder],
   );
   const add = useCallback((items: readonly QueueItem[], settings?: QueueItem["analysis"]) => {
     // Capture settings at enqueue time, including automatic imports. Later

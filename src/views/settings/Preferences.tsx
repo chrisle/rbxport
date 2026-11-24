@@ -20,6 +20,7 @@ import {
   PrefKeyboardIcon, PrefViewIcon,
   LinkIcon,
 } from "@/components/icons";
+import { useTranslation } from "@/i18n";
 import { getBackend } from "@/ipc/client";
 import { ReportBug } from "@/views/report/ReportBug";
 import type { LibrarySummary, Limiter } from "@/ipc/types";
@@ -166,6 +167,7 @@ export function Preferences({
   }, [initialPane]);
   const [tabs, setTabs] = useState<Tabs>(FIRST_TABS);
   const [query, setQuery] = useState("");
+  const t = useTranslation();
   const { reset } = usePreferencesContext();
   const [reportOpen, setReportOpen] = useState(false);
   const openReport = () => {
@@ -298,7 +300,7 @@ export function Preferences({
               : pane === "audio"
                 ? tabStrip(AUDIO_TABS, tabs.audio, (audio) => setTabs((t) => ({ ...t, audio })))
                 : pane === "analysis"
-                  ? tabStrip(ANALYSIS_TABS, tabs.analysis, (analysis) => setTabs((t) => ({ ...t, analysis })))
+                  ? tabStrip(ANALYSIS_TABS.map(tab => ({ ...tab, label: t(tab.label) })), tabs.analysis, (analysis) => setTabs((t) => ({ ...t, analysis })))
                   : pane === "djSystem"
                     ? tabStrip(DJ_SYSTEM_TABS, tabs.djSystem, (djSystem) => setTabs((t) => ({ ...t, djSystem })))
                     : pane === "advanced"

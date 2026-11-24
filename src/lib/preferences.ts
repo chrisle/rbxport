@@ -10,6 +10,7 @@
  * the same way: a hand-edited value, a value from a build that spelt a choice
  * differently, or nothing at all must each come back as a working set.
  */
+import { legacyAnalysisOrder } from "./analysisChoice";
 import { ANALYSIS_SLOTS, SLOTS } from "./queue";
 import { KEY_PRESETS, type KeyPreset } from "./keyPresets";
 import type { KeyChord } from "./shortcuts";
@@ -218,6 +219,8 @@ export interface AnalysisPreferences {
    * the Analysis Setting window's KEY box. On by default.
    */
   detectKey: boolean;
+  /** Preferred order across built-in and registered analysis stages. */
+  stageOrder?: string[];
 }
 
 /**
@@ -412,6 +415,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     bpmRange: "70-180",
     writeKeyTag: false,
     detectKey: true,
+    stageOrder: [],
   },
   djSystem: {
     waveformColor: "3band",
@@ -598,6 +602,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       bpmRange: oneOf(analysis.bpmRange, BPM_RANGES, d.analysis.bpmRange),
       writeKeyTag: bool(analysis.writeKeyTag, d.analysis.writeKeyTag),
       detectKey: bool(analysis.detectKey, d.analysis.detectKey),
+      stageOrder: [...new Set(strings(analysis.stageOrder))],
     },
     djSystem: {
       waveformColor: oneOf(dj.waveformColor, WAVEFORM_COLORS, d.djSystem.waveformColor),
@@ -656,7 +661,10 @@ const KEY = PREFERENCES_KEY;
 
 /** Reads the stored preferences, falling back to the defaults on anything odd. */
 export function loadPreferences(): Preferences {
-  return storedPreferences() ?? DEFAULT_PREFERENCES;
+  const stored = storedPreferences();
+  if (stored) return stored;
+  const stageOrder = legacyAnalysisOrder();
+  return stageOrder.length ? { ...DEFAULT_PREFERENCES, analysis: { ...DEFAULT_PREFERENCES.analysis, stageOrder } } : DEFAULT_PREFERENCES;
 }
 
 /**
@@ -670,7 +678,13 @@ export function loadPreferences(): Preferences {
 export function storedPreferences(): Preferences | null {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw === null ? null : sanitisePreferences(JSON.parse(raw));
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    const preferences = sanitisePreferences(parsed);
+    if (!Array.isArray(part<AnalysisPreferences>(part<Preferences>(parsed).analysis).stageOrder)) {
+      preferences.analysis.stageOrder = legacyAnalysisOrder();
+    }
+    return preferences;
   } catch {
     // A private window, cleared storage, or a browser that refuses it: the
     // caller's own set is a working window, so there is nothing to report.
