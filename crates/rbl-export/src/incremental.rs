@@ -8,7 +8,8 @@ pub const TRANSFORM_VERSION: u32 = 1;
 /// What `export.pdb`'s rows hold. Part of the request, so a stick written
 /// with an older layout is rebuilt on its next sync even when nothing else
 /// changed, while its analysis files are still reused. 2: the date added in
-/// track string slot 15 (#637).
+/// track string slot 15 (#637). 3: zero-based `OneLibrary` My Tag positions
+/// within each sibling group (#893).
 const PDB_LAYOUT: u32 = 3;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -1202,6 +1202,26 @@ Use the library's cloud database id when it has one (the `ID` of its live
 rekordbox 6 tagged and says "You have to resync My Tag after starting
 rekordbox 6." (#640; static analysis of the arm64 build).
 
+#### My Tag positions
+
+Write `myTag.sequenceNo` consecutively from zero within each sibling group:
+the root categories form one group, and each category's tags form another.
+[OBS: report #893] rekordbox 7.2.19 on Windows renumbered an RBXport 1.10.0
+one-based export on open, causing the following sync to report a false tag
+conflict. The regression coverage uses synthetic libraries and temporary
+destinations; it does not establish a new physical-device result.
+
+Keep library siblings in source order. Device-only tags stay after the
+library sibling they followed on the stick, preserving the order of each
+device-only run, including tags before the first library sibling. Merge by
+these relationships before assigning positions: combining the two sets of
+numeric positions can create ties and reorder an interleaved device tag.
+
+Accept a uniform zero-based/one-based shift of otherwise unchanged sibling
+definitions during conflict checking. Renames, moves, reorders and assignment
+changes retain their conflict checks. Layout receipt version 3 rebuilds older
+databases on the next sync while reusing unchanged audio.
+
 #### OneLibrary publication
 
 Write with `journal_mode=DELETE` and

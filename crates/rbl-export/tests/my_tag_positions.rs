@@ -173,6 +173,34 @@ fn device_only_tags_keep_their_place() {
 }
 
 #[test]
+fn interleaved_device_only_tags_keep_their_place_in_either_numbering() {
+    for base in [0, 1] {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        let lib = [track(src.path(), 1, "House 1")];
+        sync(dest.path(), &lib, &library_tags()).unwrap();
+        {
+            let conn = rbl_onelibrary::playlists::open_read_write(&db(dest.path())).unwrap();
+            conn.execute("UPDATE myTag SET sequenceNo = 3 WHERE myTag_id = 12", []).unwrap();
+            conn.execute("INSERT INTO myTag (myTag_id, sequenceNo, name, attribute, myTag_id_parent) VALUES (13, 1, 'Device first', 0, 1), (14, 2, 'Device second', 0, 1)", []).unwrap();
+        }
+        shift_database(dest.path(), base);
+        let mut manifest = Manifest::load(dest.path()).unwrap();
+        manifest.baseline = Some(rbl_export::snapshot::Snapshot::read(dest.path()).unwrap());
+        manifest.save(dest.path()).unwrap();
+        let mut tags = library_tags();
+        tags[0].name = "Genres".into();
+        for _ in 0..2 {
+            sync(dest.path(), &lib, &tags).unwrap();
+            assert_eq!(
+                positions(dest.path()),
+                vec![(1, 0), (2, 1), (11, 0), (12, 3), (13, 1), (14, 2), (21, 0)],
+                "device-only tags must stay between the same library siblings (base {base})"
+            );
+        }
+    }
+}
+
+#[test]
 fn gaps_in_the_librarys_numbers_become_consecutive_in_the_same_order() {
     let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
     let mut tags = library_tags();

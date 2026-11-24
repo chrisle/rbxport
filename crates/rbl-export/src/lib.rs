@@ -1269,8 +1269,7 @@ fn export_cancellable_inner(
         }
     }
     let tracks = tracks.as_slice();
-    let mut merged_tags = my_tags.to_vec();
-    merged_tags.extend(snapshot::one_based_device_only_tags(&before.my_tags, my_tags));
+    let merged_tags = snapshot::merge_my_tags(&before.my_tags, my_tags);
     let my_tags = merged_tags.as_slice();
     let playlists = playlists.as_slice();
     let playlist_ids = playlist_ids(playlists, previous.as_ref())?;

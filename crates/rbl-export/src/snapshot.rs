@@ -361,29 +361,49 @@ fn renumbered_only(
     })
 }
 
-/// The My Tags the stick holds that the library does not, with their
-/// positions in the one-based numbering the library's own tags use, so the
-/// two can be ranked together. A sibling group the stick numbers from 0 is
-/// moved up by one; a group numbered from 1 is as it is.
-pub(crate) fn one_based_device_only_tags(
+/// Merge device-only tags after the library sibling they follow on the
+/// stick, retaining each run's order. Numeric positions alone cannot be
+/// combined: an inserted device tag can share the next library tag's number.
+/// Source siblings keep their source order; groups with device-only tags
+/// receive fresh one-based positions for both library writers.
+pub(crate) fn merge_my_tags(
     device: &[crate::SourceMyTag],
     library: &[crate::SourceMyTag],
 ) -> Vec<crate::SourceMyTag> {
-    device
-        .iter()
-        .filter(|t| !library.iter().any(|l| l.id == t.id))
-        .map(|t| {
-            let zero_based = group_min(device, tag_group(t)) == Some(0);
-            crate::SourceMyTag {
-                seq: if zero_based {
-                    t.seq.saturating_add(1)
-                } else {
-                    t.seq
-                },
-                ..t.clone()
+    let library_ids: BTreeSet<u64> = library.iter().map(|t| t.id).collect();
+    let groups: BTreeSet<u64> = library.iter().chain(device).map(tag_group).collect();
+    let mut merged = Vec::new();
+    for group in groups {
+        let mut source: Vec<_> = library.iter().filter(|t| tag_group(t) == group).collect();
+        source.sort_by_key(|t| (t.seq, t.id));
+        let mut current: Vec<_> = device.iter().filter(|t| tag_group(t) == group).collect();
+        current.sort_by_key(|t| (t.seq, t.id));
+        if current.iter().all(|t| library_ids.contains(&t.id)) {
+            merged.extend(source.into_iter().cloned());
+            continue;
+        }
+        let mut anchor = None;
+        let mut after: BTreeMap<Option<u64>, Vec<&crate::SourceMyTag>> = BTreeMap::new();
+        for tag in current {
+            if source.iter().any(|t| t.id == tag.id) {
+                anchor = Some(tag.id);
+            } else if !library_ids.contains(&tag.id) {
+                after.entry(anchor).or_default().push(tag);
             }
-        })
-        .collect()
+        }
+        let mut ordered = after.remove(&None).unwrap_or_default();
+        for tag in source {
+            ordered.push(tag);
+            ordered.extend(after.remove(&Some(tag.id)).unwrap_or_default());
+        }
+        merged.extend(ordered.into_iter().enumerate().map(|(index, tag)| {
+            crate::SourceMyTag {
+                seq: u32::try_from(index + 1).unwrap_or(u32::MAX),
+                ..tag.clone()
+            }
+        }));
+    }
+    merged
 }
 
 /// The positions `OneLibrary` writes: consecutive from 0 within each sibling
@@ -1045,10 +1065,10 @@ mod my_tag_position_tests {
             tag(31, 1, "One-based", 0, 3),
         ];
         let library = vec![tag(11, 1, "Peak", 0, 1)];
-        let got = one_based_device_only_tags(&device, &library);
+        let got = merge_my_tags(&device, &library);
         assert_eq!(
             got.iter().map(|t| (t.id, t.seq)).collect::<Vec<_>>(),
-            vec![(13, 2), (31, 1)]
+            vec![(11, 1), (13, 2), (31, 1)]
         );
     }
 }
