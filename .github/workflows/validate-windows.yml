@@ -62,11 +62,16 @@ jobs:
           "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
           "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
 
-      - name: Keep the Windows target directory short
+      - name: Give this job a short Windows target directory
+        id: target
         if: inputs.check_rust
         shell: pwsh
         run: |
-          "CARGO_TARGET_DIR=C:/rbl-target" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          # A fresh target avoids reusing another checkout's workspace binaries.
+          # This is shorter than C:/rbl-target, keeping OpenSSL below MAX_PATH.
+          $jobTarget = "C:/rb-$([Guid]::NewGuid().ToString('N').Substring(0, 6))"
+          New-Item -ItemType Directory -Path $jobTarget -ErrorAction Stop | Out-Null
+          "CARGO_TARGET_DIR=$jobTarget" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
 
       - uses: dtolnay/rust-toolchain@stable
         if: inputs.check_rust
@@ -134,3 +139,12 @@ jobs:
       - name: Check Windows desktop file paths
         if: inputs.check_file_drop
         run: pnpm exec vitest run src/ipc/file-drop.test.ts
+
+      - name: Remove this job's Windows target directory
+        if: always() && steps.target.outcome == 'success'
+        shell: pwsh
+        run: |
+          if ($env:CARGO_TARGET_DIR -notmatch '^C:/rb-[0-9a-f]{6}$') {
+            throw "Refusing to remove a target outside this job's short directory."
+          }
+          Remove-Item -LiteralPath $env:CARGO_TARGET_DIR -Recurse -Force -ErrorAction Stop
