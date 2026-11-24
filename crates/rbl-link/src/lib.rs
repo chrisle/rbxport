@@ -187,14 +187,14 @@ struct Facts {
 }
 
 impl beacon::LibraryFacts for Facts {
-    fn track_count(&self) -> u16 {
+    fn track_count(&self) -> u32 {
         self.source
             .library()
-            .map_or(0, |l| u16::try_from(l.len()).unwrap_or(u16::MAX))
+            .map_or(0, |l| u32::try_from(l.len()).unwrap_or(u32::MAX))
     }
-    fn playlist_count(&self) -> u16 {
+    fn playlist_count(&self) -> u32 {
         self.source.library().map_or(0, |l| {
-            u16::try_from(l.playlists().len()).unwrap_or(u16::MAX)
+            u32::try_from(l.playlists().len()).unwrap_or(u32::MAX)
         })
     }
     fn device_settings(&self) -> rbl_prolink::DeviceSettings {
@@ -559,5 +559,47 @@ mod tests {
                 display
             );
         }
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    fn media_counts_keep_the_real_library_above_the_sixteen_bit_boundary() {
+        struct Indexed(Arc<Library>);
+        impl Source for Indexed {
+            fn library(&self) -> Option<Arc<Library>> { Some(Arc::clone(&self.0)) }
+            fn share_root(&self) -> std::path::PathBuf { std::path::PathBuf::new() }
+            fn details(&self, _: &str) -> Option<rbl_db::details::TrackDetails> { None }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape {
+            tracks: 0, playlists: 0, tracks_per_playlist: 0, history_sessions: 0, start_usn: 1000,
+        }).unwrap();
+        let db = rbl_db::Library::open(location, rbl_db::OpenMode::ReadWrite).unwrap();
+        // Populate one transaction rather than fsync each fixture row. These
+        // are real disposable schema rows; no installed library or audio.
+        db.connection().execute_batch(
+            "BEGIN;
+             WITH RECURSIVE n(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM n WHERE id<65536)
+             INSERT INTO djmdContent (ID, Title, FolderPath, FileNameL, UUID, created_at, updated_at)
+             SELECT CAST(id AS TEXT), 'Count fixture', '/fixture/count.mp3', 'count.mp3',
+                    'fixture-track-' || id, '2026-11-24', '2026-11-24' FROM n;
+             WITH RECURSIVE n(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM n WHERE id<65536)
+             INSERT INTO djmdPlaylist (ID, Seq, Name, Attribute, ParentID, UUID, created_at, updated_at)
+             SELECT CAST(id AS TEXT), id, 'Count fixture', 0, 'root',
+                    'fixture-playlist-' || id, '2026-11-24', '2026-11-24' FROM n;
+             COMMIT;"
+        ).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        assert_eq!(library.len(), 65_536);
+        assert_eq!(library.playlists().len(), 65_536);
+        let facts = Facts { source: Arc::new(Indexed(Arc::new(library))) };
+        let bytes = rbl_prolink::MediaResponse {
+            name: rbl_prolink::REKORDBOX_NAME.to_owned(), device_number: 17,
+            slot: rbl_prolink::SLOT_REKORDBOX,
+            tracks: beacon::LibraryFacts::track_count(&facts),
+            playlists: beacon::LibraryFacts::playlist_count(&facts),
+        }.encode();
+        assert_eq!(u32::from_be_bytes(bytes[0xa4..0xa8].try_into().unwrap()), 65_536);
+        assert_eq!(u32::from_be_bytes(bytes[0xac..0xb0].try_into().unwrap()), 65_536);
     }
 }

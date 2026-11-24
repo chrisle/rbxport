@@ -42,10 +42,10 @@ fn status_playing_ours() -> Vec<u8> {
 #[derive(Default)]
 struct Facts(Mutex<Vec<u32>>);
 impl LibraryFacts for Facts {
-    fn track_count(&self) -> u16 {
+    fn track_count(&self) -> u32 {
         38_681
     }
-    fn playlist_count(&self) -> u16 {
+    fn playlist_count(&self) -> u32 {
         627
     }
     fn track_loaded(&self, track: u32) {
@@ -182,8 +182,8 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
         let response = receive(&player, 0x06);
         assert_eq!(response.len(), 0xc0);
         assert_eq!(response[0x2b], slot, "the slot named back");
-        assert_eq!(u16::from_be_bytes([response[0xa6], response[0xa7]]), 38_681);
-        assert_eq!(u16::from_be_bytes([response[0xae], response[0xaf]]), 627);
+        assert_eq!(u32::from_be_bytes(response[0xa4..0xa8].try_into().unwrap()), 38_681);
+        assert_eq!(u32::from_be_bytes(response[0xac..0xb0].try_into().unwrap()), 627);
     }
 
     player

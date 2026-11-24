@@ -292,6 +292,53 @@ fn numbers(kind: u16, tx: u32, args: &[u32]) -> Message {
     )
 }
 
+#[test]
+fn large_library_and_playlist_menus_keep_counts_and_page_ids_past_65535() {
+    struct Large(u32);
+    impl Catalog for Large {
+        fn list(&self, query: &Query) -> Vec<Row> {
+            match query {
+                Query::Tracks { .. } => (1..=self.0).map(|id| Row::Track { id, position: id }).collect(),
+                _ => Vec::new(),
+            }
+        }
+        fn track_row(&self, id: u32, _: Option<TrackColumn>) -> Option<TrackRow> {
+            (1..=self.0).contains(&id).then(|| {
+                let mut row = the_track();
+                row.id = id;
+                row.title = format!("Boundary track {id}");
+                row
+            })
+        }
+        fn track(&self, _: u32) -> Option<TrackDetails> { None }
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> { None }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
+    }
+    for count in [65_535, 65_536, 171_717] {
+        let mut session = CatalogHandler::new(Arc::new(Large(count))).open();
+        session.handle(&setup_request(1));
+        for (kind, args) in [
+            (kind::TRACK_MENU, vec![CTX, 0]),
+            (kind::PLAYLIST_MENU, vec![CTX, 0, 1, 0]),
+        ] {
+            let header = session.handle(&numbers(kind, 2, &args));
+            assert_eq!(header.len(), 1);
+            assert_eq!(header[0].kind, kind::MENU_HEADER);
+            assert_eq!(header[0].arguments[1], Argument::Number(count));
+            assert!(header[0].encode().ends_with(&count.to_be_bytes()));
+            for offset in [65_534.min(count - 2), count - 2] {
+                let page = session.handle(&numbers(kind::RENDER, 3, &[CTX, offset, 2, 0, count, 0xc, 1, 0]));
+                assert_eq!(page.len(), 4, "header, two rows and footer");
+                assert_eq!(page[0].kind, kind::RENDER_HEADER);
+                assert_eq!(page[0].arguments[1], Argument::Number(offset));
+                assert_eq!(page[1].arguments[1], Argument::Number(offset + 1));
+                assert_eq!(page[2].arguments[1], Argument::Number(offset + 2));
+                assert_eq!(page[3].kind, kind::MENU_FOOTER);
+            }
+        }
+    }
+}
+
 /// Asks for a menu and renders all of it; returns the items.
 fn browse(session: &mut Box<dyn Session>, kind: u16, args: &[u32]) -> (u32, Vec<Message>) {
     let header = session.handle(&numbers(kind, 0x100, args));
