@@ -136,6 +136,9 @@ jobs:
           # Cargo home is per job; hash compiler options, not its random path.
           env-vars: CARGO_BUILD CARGO_PROFILE CARGO_TARGET CARGO_INCREMENTAL CARGO_ENCODED_ CC CFLAGS CXX CMAKE RUST
           shared-key: clippy-linux
+          # Validation owns the immutable cache so it includes test dependencies.
+          # An autofix-only cache would contain check metadata but no test rlibs.
+          save-if: false
 
       # Fix only the packages the Rust lane will lint, and leave enforcement
       # (-D warnings) to that lane so Clippy gates the PR exactly once.
