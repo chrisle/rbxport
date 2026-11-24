@@ -177,7 +177,7 @@ const LAST_COLOUR_CODE: u8 = 64;
 /// 21's RGB, and its memory cues zeros; its source colours were not kept.
 /// [ASSUME] Uncoloured hot cues use the USB default RGB: their slot's colour
 /// for points, orange for valid loops. Default-colour LINK packets remain
-/// uncaptured. A code past the palette follows the point fallback.
+/// uncaptured. A code past the palette is treated as uncoloured.
 fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16>) -> Vec<u8> {
     let comment: Vec<u8> = if cue.comment.is_empty() {
         Vec::new()
