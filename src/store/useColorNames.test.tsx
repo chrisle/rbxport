@@ -78,7 +78,7 @@ it("separates device formats and master owners, and rejects obsolete answers aft
   }
   act(() => root.render(<Owner format="oneLibrary" />)); await settle();
   act(() => root.render(<Owner format="deviceLibrary" />)); await settle();
-  expect(pending.map(call => call.owner)).toEqual([
+  expect(pending.map(({ owner }) => owner && ({ path: owner.path, format: owner.format }))).toEqual([
     { path: "/stick", format: "oneLibrary" }, { path: "/stick", format: "deviceLibrary" },
   ]);
   await act(async () => { pending[1]!.done(["PDB label", ...STOCK_COLOR_NAMES.slice(1)]); await Promise.resolve(); });
@@ -103,4 +103,14 @@ it("ignores an earlier refresh and clears owner state when its last subscriber l
   act(() => root.render(null));
   act(() => root.render(<Names />)); await settle();
   expect(host.textContent).not.toContain("Newest");
+});
+
+it("uses an explicit unbound fallback rather than reading the master namespace", async () => {
+  function Unbound() { return <span>{useColorNames(null).join(",")}</span>; }
+  names[0] = "Master name";
+  act(() => root.render(<Unbound />)); await settle();
+  expect(host.textContent).toBe(STOCK_COLOR_NAMES.join(","));
+  expect(colorNames).not.toHaveBeenCalled();
+  act(() => root.render(<Names />)); await settle();
+  expect(host.textContent).toContain("Master name");
 });

@@ -64,6 +64,7 @@ export interface InfoPanelProps {
    * More than one is a multiple selection, shown and edited as a whole.
    */
   selection: readonly string[];
+  selectionOwner?: ColorOwner | null | undefined;
   /** The library is open read-only, so the form is greyed and says why. */
   readOnly: boolean;
   /** Bumped after every edit; the record is read again when it changes. */
@@ -91,7 +92,7 @@ const LOCKED: Record<string, string> = {
 const READ_ONLY_REASON = "The library is read-only. Check Library Protection in Preferences, and quit rekordbox to edit";
 
 export function InfoPanel({
-  track, selection, readOnly, libraryGeneration, onRate, onComment, onEdit, onOpenPlaylist,
+  track, selection, readOnly, libraryGeneration, onRate, onComment, onEdit, onOpenPlaylist, selectionOwner,
 }: InfoPanelProps) {
   const [tab, setTab] = useState<InfoTab>("summary");
   const [details, setDetails] = useState<TrackDetails | null>(null);
@@ -244,7 +245,7 @@ export function InfoPanel({
             ) : null}
             <InfoForm
               key={`selection-${selectionKey}`}
-              colorOwner={selection.some(id => id.startsWith("file:")) ? null : undefined}
+              colorOwner={selectionOwner === undefined ? selection.some(id => id.startsWith("file:")) ? null : undefined : selectionOwner}
               view={selectionView(selection, selectionRecord)}
               lookups={lookups}
               readOnly={readOnly}
