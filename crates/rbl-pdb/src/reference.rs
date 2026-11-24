@@ -5,8 +5,8 @@
 //! three tables were the same bytes in both. They are the browse column
 //! names (`columns`, page type 16) and the browse category and sort
 //! settings (types 17 and 18), and a player expects them to be there. Kept
-//! as rekordbox's bytes rather than re-encoded from names, so nothing here
-//! can drift from what the reference stick carried.
+//! as rekordbox's bytes rather than re-encoded from names. The reference
+//! stick's personal Comments sub-column selection is cleared in the defaults.
 //!
 //! The columns are the same on every stick. The category and sort rows are
 //! the device panel's Category, Sort and Column tabs at their defaults; an
@@ -74,7 +74,7 @@ pub const CATEGORIES: &[&[u8]] = &[
 /// `sorts`, page type 18: 17 rows, one per sort option.
 pub const SORTS: &[&[u8]] = &[
     &[0x01, 0x00, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00],
-    &[0x15, 0x00, 0x07, 0x00, 0x03, 0x00, 0x00, 0x00],
+    &[0x15, 0x00, 0x07, 0x00, 0x01, 0x00, 0x00, 0x00],
     &[0x0e, 0x00, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00],
     &[0x08, 0x00, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00],
     &[0x09, 0x00, 0x0a, 0x00, 0x01, 0x00, 0x00, 0x00],

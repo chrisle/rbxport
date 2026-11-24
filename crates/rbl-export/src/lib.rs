@@ -2268,7 +2268,7 @@ struct PdbTables<'a> {
 /// its Category, Sort and Column settings from these rows, not from
 /// `exportLibrary.db` (#619). The slots are numbered and filtered as
 /// `exportLibrary.db` gets them, so both describe the same menu. The
-/// defaults give rekordbox's reference bytes.
+/// defaults retain the reference browse order without selecting a sub-column.
 #[must_use]
 pub fn menu_rows(settings: &rbl_onelibrary::settings::StickSettings) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     use rbl_onelibrary::build::reference::MENU_ITEMS;

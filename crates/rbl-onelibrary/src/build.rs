@@ -1,9 +1,11 @@
 //! Writing an `exportLibrary.db`.
 //!
 //! Everything here — the schema, the menu definitions, the colour names — was
-//! transcribed from a real rekordbox-authored export
+//! seeded from a real rekordbox-authored export
 //! (`~/code/cdj3k-emu/tests/fixtures/usb-real.img`), read with
-//! `cargo run -p rbl-onelibrary --example inspect`. None of it is invented.
+//! `cargo run -p rbl-onelibrary --example inspect`. Fresh defaults clear the
+//! reference stick's personal sub-column selection; an explicit choice is
+//! supplied through `StickSettings` instead.
 //!
 //! The reference tables matter more than they look. `menuItem`, `category` and
 //! `sort` are how rekordbox knows which browse columns exist and in what
@@ -132,7 +134,7 @@ pub const SORTS: &[(i64, i64, i64, i64, i64)] = &[
     (4, 5, 5, 1, 0),
     (5, 6, 6, 1, 0),
     (6, 1, 0, 0, 0),
-    (7, 21, 0, 0, 1),
+    (7, 21, 0, 0, 0),
     (8, 14, 0, 0, 0),
     (9, 8, 0, 0, 0),
     (10, 9, 0, 0, 0),

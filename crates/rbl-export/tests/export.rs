@@ -368,6 +368,56 @@ fn an_export_carries_a_readable_export_library_beside_the_pdb() {
 }
 
 #[test]
+fn fresh_exports_do_not_force_a_sub_column_in_either_library() {
+    for empty in [true, false] {
+        let src = tempfile::tempdir().unwrap();
+        let dest = common::stick();
+        if empty {
+            assert!(rbl_export::create_library(dest.path(), None, &[], None).unwrap());
+        } else {
+            export(dest.path(), &[track(src.path(), 1, "One", "A")], &[]).unwrap();
+        }
+        assert_sub_column(dest.path(), None);
+    }
+}
+
+fn assert_sub_column(dest: &std::path::Path, expected: Option<i64>) {
+    let settings = rbl_onelibrary::settings::StickSettings::read(
+        &dest.join("PIONEER/rekordbox/exportLibrary.db"),
+    ).unwrap();
+    assert_eq!(settings.sub_column, expected, "OneLibrary column");
+
+    let bytes = std::fs::read(dest.join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let selected: Vec<_> = pdb.rows(pdb.table(rbl_pdb::PageType::Sorts).unwrap())
+        .iter()
+        .filter_map(|row| {
+            let row = &bytes[row.offset..row.offset + 8];
+            (row[4] & 2 != 0).then(|| i64::from(u16::from_le_bytes([row[0], row[1]])))
+        })
+        .collect();
+    assert_eq!(selected, expected.into_iter().collect::<Vec<_>>(), "Device Library column");
+}
+
+#[test]
+fn explicit_and_existing_sub_column_choices_survive_in_both_libraries() {
+    use rbl_onelibrary::settings::StickSettings;
+
+    for choice in [None, Some(5), Some(21)] {
+        let src = tempfile::tempdir().unwrap();
+        let dest = common::stick();
+        let tracks = [track(src.path(), 1, "One", "A")];
+        let defaults = StickSettings { sub_column: choice, ..StickSettings::default() };
+        rbl_export::export_with(dest.path(), &tracks, &[], Some(&defaults)).unwrap();
+        assert_sub_column(dest.path(), choice);
+
+        let other = StickSettings { sub_column: Some(2), ..StickSettings::default() };
+        rbl_export::export_with(dest.path(), &tracks, &[], Some(&other)).unwrap();
+        assert_sub_column(dest.path(), choice);
+    }
+}
+
+#[test]
 fn a_fresh_stick_takes_the_defaults_it_is_given_and_keeps_them_after() {
     use rbl_onelibrary::settings::StickSettings;
 
