@@ -19,7 +19,8 @@ discard labels so a prior process's locale output is not reused at startup.
   Gregorian components in UTC; epoch dates use the local timezone.
 * Windows uses `GetDateFormatEx` with the user-default locale, `DATE_SHORTDATE`,
   a null explicit pattern and user overrides enabled. Gregorian `SYSTEMTIME`
-  components represent stored days; epoch conversion uses the local timezone.
+  components represent stored days; epoch conversion uses `SystemTimeToTzSpecificLocalTimeEx`
+  and the local timezone's dynamic historical DST rules.
 * Linux owns an environment-derived `LC_TIME` locale and uses `strftime_l("%x")`.
   It never changes the process's locale. This implements the LC_TIME/LANG contract;
   additional desktop-specific date preferences are not established here.
@@ -43,5 +44,9 @@ OS preferences. Linux tests use an owned C locale and isolated timezone children
 The Windows validation workflow explicitly runs the owning `system_dates` tests.
 
 The application command fixture checks row/details labels and unchanged database
-values. Chromium/WebKit tests check verbatim native-label presentation and bounded
+values. A Windows historical-zone fixture compares Pacific dates around the 2007
+DST-rule change with read-only year-specific registry rules. It changes no host
+timezone and makes no claim that the legacy API fails that vector on current Windows.
+Chromium/WebKit tests check literal native-label presentation after the German
+catalogue has visibly loaded, including a custom pattern literal matching a UI key, and bounded
 visible-column requests; they do not simulate the native OS formatter.

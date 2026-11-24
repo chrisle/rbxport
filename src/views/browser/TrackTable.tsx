@@ -799,6 +799,7 @@ const TrackRow = memo(function TrackRow({
             className={col.align === "right" ? `${styles.cell} ${styles.right}` : styles.cell}
             data-col={col.key}
             role="gridcell"
+            data-i18n-ignore={row.dateLabels?.[col.key] !== undefined || undefined}
           >
             {cellText(row, col.key)}
           </div>
