@@ -198,13 +198,11 @@ fn the_other_library_s_row_is_the_one_with_the_same_master_ids() {
     stick(src.path(), dest.path());
     let pdb_track = device_library::read(dest.path(), Format::DeviceLibrary).unwrap().track(1).unwrap().clone();
     assert_ne!((pdb_track.master_db_id, pdb_track.master_content_id), (0, 0), "the export says where track 1 came from");
-    // Swap the two OneLibrary rows' master ids: track 1 there now claims to
-    // be the other collection track, and track 2 claims to be this one.
+    // Renumber the paired rows without changing their origin or audio.
+    // Matching by the local ID would then update the wrong track.
     let path = dest.path().join("PIONEER/rekordbox").join(Format::OneLibrary.file_name());
     let conn = rbl_onelibrary::playlists::open_read_write(&path).unwrap();
-    let ids: Vec<i64> = [1, 2].iter().map(|id| conn.query_row("SELECT masterContentId FROM content WHERE content_id = ?1", [id], |r| r.get(0)).unwrap()).collect();
-    conn.execute("UPDATE content SET masterContentId = ?1 WHERE content_id = 1", [ids[1]]).unwrap();
-    conn.execute("UPDATE content SET masterContentId = ?1 WHERE content_id = 2", [ids[0]]).unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=OFF; UPDATE content SET content_id=99 WHERE content_id=1; UPDATE content SET content_id=1 WHERE content_id=2; UPDATE content SET content_id=2 WHERE content_id=99;").unwrap();
     drop(conn);
     let one = device_library::read(dest.path(), Format::OneLibrary).unwrap();
     assert_eq!(one.track(2).unwrap().master_content_id, pdb_track.master_content_id);
@@ -284,4 +282,29 @@ fn a_paired_database_failure_leaves_the_grid_and_both_databases_untouched() {
     assert_eq!(std::fs::read(dat).unwrap(), original);
     assert_eq!((db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary)), before);
     assert!(!dest.path().join(".rbxport-publication").exists());
+}
+
+#[test]
+fn mismatched_or_ambiguous_paired_origins_refuse_before_any_file_changes() {
+    for ambiguous in [false, true] {
+        let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+        stick(src.path(), dest.path());
+        let relative = dat_of(dest.path(), Format::DeviceLibrary, 1);
+        let dat = dest.path().join(&relative);
+        let original = std::fs::read(&dat).unwrap();
+        let next = Anlz::read(&dat).unwrap().with_beat_grid(&grid(12, 12_600));
+        let path = dest.path().join("PIONEER/rekordbox/exportLibrary.db");
+        let conn = rbl_onelibrary::playlists::open_read_write(&path).unwrap();
+        if ambiguous {
+            conn.execute_batch("UPDATE content SET masterDbId=(SELECT masterDbId FROM content WHERE content_id=1), masterContentId=(SELECT masterContentId FROM content WHERE content_id=1) WHERE content_id=2;").unwrap();
+        } else {
+            conn.execute_batch("UPDATE content SET path='/Contents/unrelated.mp3' WHERE content_id=1;").unwrap();
+        }
+        drop(conn);
+        let before = (db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary));
+        let write = GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), relative, next)], bpm_x100: Some(12_600) };
+        assert!(device_library::write_grid(dest.path(), Format::DeviceLibrary, &write).is_err());
+        assert_eq!(std::fs::read(dat).unwrap(), original);
+        assert_eq!((db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary)), before);
+    }
 }

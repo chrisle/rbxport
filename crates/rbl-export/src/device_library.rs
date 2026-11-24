@@ -843,11 +843,21 @@ pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> 
                 vec![write.track]
             } else {
                 let library = read_unlocked(root, *library_format)?;
-                library.tracks.iter().filter(|t| if master == (0, 0) {
+                let rows: Vec<_> = library.tracks.iter().filter(|t| if master == (0, 0) {
                     analysis.as_ref().is_some_and(|a| !t.analysis_path.is_empty() && path_key(&t.analysis_path) == *a)
                 } else {
                     (t.master_db_id, t.master_content_id) == master
-                }).map(|t| t.id).collect()
+                }).map(|t| t.id).collect();
+                let audio_key = path_key(&track.path);
+                let same_audio = |t: &Track| path_key(&t.path) == audio_key;
+                // Origin IDs alone are insufficient if stale/corrupt rows
+                // disagree about the audio, or several rows claim the same
+                // origin. Do not guess which paired row should be changed.
+                if rows.len() > 1 || rows.iter().any(|id| library.track(*id).is_none_or(|t| !same_audio(t)))
+                    || (rows.is_empty() && library.tracks.iter().any(same_audio)) {
+                    return Err(refused("The paired device rows do not uniquely identify the same audio. Nothing was changed; reload or repair this device library."));
+                }
+                rows
             };
             if rows.is_empty() {
                 continue;
