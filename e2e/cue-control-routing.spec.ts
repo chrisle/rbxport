@@ -79,7 +79,7 @@ test("saved file cues still play but never open collection-edit menus", async ({
       ]);
     };
     for (const name of ["addCue", "addLoop", "deleteCue", "moveHotCue", "setCueColour", "setCueComment", "setActiveLoop"] as const) {
-      const original = backend.edits[name] as (...args: unknown[]) => Promise<unknown>;
+      const original = backend.edits[name].bind(backend.edits) as (...args: unknown[]) => Promise<unknown>;
       Object.assign(backend.edits, { [name]: (...args: unknown[]) => { writes.push(name); return original(...args); } });
     }
     window.dispatchEvent(new Event("focus"));
