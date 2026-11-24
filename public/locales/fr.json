@@ -294,6 +294,7 @@
   "Shift Beatgrid to the center": "Décaler la grille rythmique vers le centre",
   "Expand beat intervals": "Augmenter les intervalles entre les battements",
   "Shrink beat intervals": "Diminuer les intervalles entre les battements",
+  "Sidebar Icon Size": "Taille des icônes de la barre latérale",
   "SYNC": "Synchronisation",
   "Master Tempo": "Tempo principal",
   "Tempo Reset": "Réinitialisation du tempo",

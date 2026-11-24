@@ -1,13 +1,15 @@
-/* Geometry and colour come from design/tokens; nothing here is a literal. */
 .rail {
   display: flex;
   flex-direction: column;
-  width: var(--s-tree-rail-w);
+  width: calc(var(--s-tree-rail-w) + var(--rail-icon-size) - 16px);
   flex: none;
+  overflow-y: auto;
+  scrollbar-width: thin;
   background: var(--c-panel);
   border-right: 1px solid var(--c-black);
   padding-top: 4px;
 }
+.rail[data-icon-only] { width: calc(var(--rail-icon-size) + 20px); }
 .sources {
   display: flex;
   flex-direction: column;
@@ -37,7 +39,11 @@
   margin-bottom: 4px;
 }
 
-.icon { width: 16px; height: 16px; }
+.icon {
+  width: var(--rail-icon-size);
+  height: var(--rail-icon-size);
+  flex: none;
+}
 .label {
   max-width: 100%;
   font-size: var(--f-size-xs);
@@ -46,3 +52,4 @@
   overflow-wrap: anywhere;
   hyphens: auto;
 }
+.rail[data-icon-only] .label { display: none; }

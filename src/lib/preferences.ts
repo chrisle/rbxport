@@ -69,6 +69,8 @@ export function quantizeFraction(value: QuantizeBeat): number {
 export const BROWSE_SCALE_STEPS = 5;
 export const BROWSE_SCALES: readonly number[] = [0.8, 0.9, 1, 1.15, 1.3];
 export const BROWSE_SCALE_DEFAULT = 2;
+export const BROWSE_ICON_SIZES = [12, 16, 20, 24, 32] as const;
+const LEGACY_BROWSE_ICON_SIZES = [12, 12, 16, 24, 32] as const;
 
 export function browseScale(step: number): number {
   return BROWSE_SCALES[step] ?? 1;
@@ -114,6 +116,8 @@ export interface ViewPreferences {
   browseBold: boolean;
   /** Browse › Line Space, as a slider stop 0 to 4. */
   browseLineSpace: number;
+  /** Browse › Sidebar Icon Size, in CSS pixels. */
+  browseIconSize: (typeof BROWSE_ICON_SIZES)[number];
   /** Key display format: `Ebm` or `2A`. */
   keyDisplay: KeyDisplay;
   /** How the browser's Key column is ordered. */
@@ -373,6 +377,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     browseFontSize: BROWSE_SCALE_DEFAULT,
     browseBold: false,
     browseLineSpace: BROWSE_SCALE_DEFAULT,
+    browseIconSize: 16,
     keyDisplay: "classic",
     keySort: "alphabetical",
     overviewWaveform: "half",
@@ -554,6 +559,9 @@ export function sanitisePreferences(value: unknown): Preferences {
       browseFontSize: step(view.browseFontSize, d.view.browseFontSize),
       browseBold: bool(view.browseBold, d.view.browseBold),
       browseLineSpace: step(view.browseLineSpace, d.view.browseLineSpace),
+      browseIconSize: BROWSE_ICON_SIZES.find((size) => size === view.browseIconSize)
+        ?? LEGACY_BROWSE_ICON_SIZES[step(view.browseIconSize, -1)]
+        ?? d.view.browseIconSize,
       keyDisplay: oneOf(view.keyDisplay, KEY_DISPLAYS, d.view.keyDisplay),
       keySort: oneOf(
         view.keySort,

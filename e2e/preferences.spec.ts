@@ -533,3 +533,40 @@ test("Browse › FontSize and Line Space apply to the playlist tree", async ({ p
   expect(height).toBe(33);
   if (base) expect(size).toBeCloseTo(base * 1.3, 1);
 });
+
+test("Browse › Sidebar Icon Size resizes the rail immediately and persists", async ({ page }) => {
+  await open(page);
+  const rail = page.getByRole("tablist", { name: "Library sources" });
+  const playlists = rail.getByRole("tab", { name: "Playlists" });
+  const icon = playlists.locator("svg");
+  const label = playlists.getByText("Playlists", { exact: true });
+  await expect(icon).toHaveCSS("width", "16px");
+  await expect(label).toBeVisible();
+  const railWidth = () => rail.evaluate((el) => el.getBoundingClientRect().width);
+  const defaultWidth = await railWidth();
+
+  const dialog = await prefs(page);
+  const size = dialog.getByRole("region", { name: "Browse", exact: true })
+    .getByRole("slider", { name: "Sidebar Icon Size" });
+  await size.press("Home");
+  await expect(icon).toHaveCSS("width", "12px");
+  await expect(label).toBeHidden();
+  await expect.poll(railWidth).toBeLessThan(defaultWidth);
+  const compactWidth = await railWidth();
+  await size.press("ArrowRight");
+  await expect(icon).toHaveCSS("width", "16px");
+  await expect(label).toBeVisible();
+  await size.press("ArrowRight");
+  await expect(icon).toHaveCSS("width", "20px");
+  await size.press("ArrowRight");
+  await expect(icon).toHaveCSS("width", "24px");
+  await size.press("End");
+  await expect(icon).toHaveCSS("width", "32px");
+  await expect.poll(railWidth).toBeGreaterThan(defaultWidth);
+
+  await size.press("Home");
+  await page.reload();
+  await expect(icon).toHaveCSS("width", "12px");
+  await expect(label).toBeHidden();
+  await expect.poll(railWidth).toBe(compactWidth);
+});

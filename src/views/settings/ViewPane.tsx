@@ -6,7 +6,7 @@
  * and a radio that cannot be chosen still says the choice exists.
  */
 import { getBackend } from "@/ipc/client";
-import { BROWSE_SCALE_STEPS } from "@/lib/preferences";
+import { BROWSE_ICON_SIZES, BROWSE_SCALE_STEPS } from "@/lib/preferences";
 import { LANGUAGE_CHOICES, useTranslation } from "@/i18n";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
@@ -191,6 +191,14 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           value={view.browseLineSpace}
           steps={BROWSE_SCALE_STEPS}
           onChange={(browseLineSpace) => set({ browseLineSpace })}
+        />
+        <Separator />
+        <Sub>{t("Sidebar Icon Size")}</Sub>
+        <Slider
+          label={t("Sidebar Icon Size")}
+          value={BROWSE_ICON_SIZES.indexOf(view.browseIconSize)}
+          steps={BROWSE_ICON_SIZES.length}
+          onChange={(stop) => set({ browseIconSize: BROWSE_ICON_SIZES[stop] ?? view.browseIconSize })}
         />
         <Separator />
         {/* rekordbox 7.2.19's ViewBrowsePlayedColorComponent: RESET asks,

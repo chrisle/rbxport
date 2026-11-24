@@ -114,6 +114,13 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({ view: 3, advanced: [] })).toEqual(DEFAULT_PREFERENCES);
   });
 
+  it.each([[0, 12], [1, 12], [2, 16], [3, 24], [4, 32], [20, 20]])(
+    "reads stored sidebar icon size %i as %i px",
+    (stored, pixels) => {
+      expect(sanitisePreferences({ view: { browseIconSize: stored } }).view.browseIconSize).toBe(pixels);
+    },
+  );
+
   it("keeps every valid choice and replaces each bad one on its own", () => {
     const stored = {
       view: {

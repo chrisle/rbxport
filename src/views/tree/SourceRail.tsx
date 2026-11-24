@@ -8,15 +8,16 @@
  * No Collection button: All Tracks is the first row of the tree and never out
  * of sight, so jumping to it is jumping to where you already are.
  */
-import { useState, type SVGProps } from "react";
+import { useState, type CSSProperties, type SVGProps } from "react";
 
 import type { Source } from "@/lib/tree";
 
 import { ContextMenu } from "@/components/ContextMenu";
 import { DeviceIcon, ExplorerIcon, FolderIcon, HistoryIcon, ListIcon, SyncIcon } from "@/components/icons";
 import { shortcutMenu } from "@/lib/contextMenus";
+import { BROWSE_ICON_SIZES } from "@/lib/preferences";
+import { usePreferences, useTooltip } from "@/store/usePreferences";
 import styles from "./SourceRail.module.css";
-import { useTooltip } from "@/store/usePreferences";
 
 const SOURCES: ReadonlyArray<{
   id: Source;
@@ -73,9 +74,14 @@ export function SourceRail({
   selected, onSelect, empty, onOpenSync, shortcuts = [], onOpenShortcut, onDeleteShortcut,
 }: SourceRailProps) {
   const tip = useTooltip();
+  const iconSize = usePreferences().view.browseIconSize;
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   return (
-    <div className={styles.rail}>
+    <div
+      className={styles.rail}
+      data-icon-only={iconSize === BROWSE_ICON_SIZES[0] || undefined}
+      style={{ "--rail-icon-size": `${iconSize}px` } as CSSProperties}
+    >
       <div className={styles.sources} role="tablist" aria-label="Library sources" aria-orientation="vertical">
         {SOURCES.map(({ id, label, Icon }) => (
           <button
