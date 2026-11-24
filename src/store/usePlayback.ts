@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { confirmedLoads } from "./useLoadedTracks";
 import { getBackend } from "@/ipc/client";
 import type { LoadedTrack, AppErrorDto, Backend, DeckId, Tick } from "@/ipc/types";
 import { canPlay } from "@/ipc/audio";
@@ -198,12 +199,11 @@ export function reasonFrom(error: unknown): string {
 
 export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK, renderPosition = true): Playback {
   const [playing, setPlaying] = useState(false);
-  const [loadedTrack, setLoadedTrack] = useState<LoadedTrack | null>(null);
-  const confirmedOwner = useRef<LoadedTrack | null>(null);
+  const [loadedTrack, setLoadedTrack] = useState<LoadedTrack | null>(confirmedLoads.get(DECK) ?? null);
   const publishOwner = useCallback((owner: LoadedTrack | null) => {
-    confirmedOwner.current = owner;
+    confirmedLoads.set(DECK, owner);
     setLoadedTrack(previous => previous?.[0] === owner?.[0] && previous?.[1] === owner?.[1] ? previous : owner);
-  }, []);
+  }, [DECK]);
   const [tempo, setTempoState] = useState(1);
   const [masterTempo, setMasterTempoState] = useState(false);
   const [keyShift, setKeyShiftState] = useState(0);
@@ -324,7 +324,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
 
   /** Starts a uniquely identified load; stale completions cannot satisfy it. */
   const beginLoad = useCallback((nextTrack: string, restore: boolean) => {
-    const previousOwner = confirmedOwner.current;
+    const previousOwner = confirmedLoads.get(DECK) ?? null;
     const request = { trackId: nextTrack, loadId: allocateLoadId() };
     publishOwner(null);
     targetLoad.current = request;
@@ -356,9 +356,9 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         const backend = await getBackend();
         if (currentLoad(request)) await backend.deckLoad(DECK, nextTrack, request.loadId);
       } catch (failure) {
-        if (currentLoad(request)) {
+        if (currentLoad(request) && held.get(DECK)?.loadId === request.loadId) {
           held.set(DECK, null);
-          publishOwner(previousOwner);
+          publishOwner(confirmedLoads.has(DECK) ? previousOwner : null);
           targetLoad.current = null;
           loadPending.current = false;
           desiredPlaying.current = false;
@@ -392,7 +392,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       if (target !== null && loadPending.current) completeLoad(target);
       if (target !== null && applyingLoad.current === target.loadId) return;
       if (target !== null) readyLoad.current = target.loadId;
-      if (!deck.loaded) publishOwner(null);
+      if (!deck.loaded || (target === null && deck.loadId !== undefined && confirmedLoads.get(DECK)?.[1] !== deck.loadId)) publishOwner(null);
       else if (target !== null) publishOwner([target.trackId, target.loadId]);
       const now = performance.now();
       // A load completion can precede the first audible output buffer. An

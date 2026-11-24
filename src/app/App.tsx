@@ -1,3 +1,4 @@
+import { useLoadedTracks } from "@/store/useLoadedTracks";
 import type { LoadedTrack } from "@/ipc/types";
 import { ImportSkipsDialog } from "@/components/ImportSkipsDialog";
 import { ConfirmHost } from "@/components/ConfirmDialog";
@@ -909,11 +910,11 @@ function AppBody() {
   // What each deck holds, Deck 1 first, for Track › Locate track loaded on
   // deck; and All Tracks, where it looks for a track the open list lacks
   // (rekordbox selects Collection).
-  const [loadedTracks, setLoadedTracks] = useState<readonly (LoadedTrack | null)[]>([null, null]);
+  const [loadedTracks, setLoadedTracks] = useLoadedTracks();
   const reportLoaded = useMemo(() => ({
     a: (id: LoadedTrack | null) => setLoadedTracks(ids => ids[0] === id ? ids : [id, ids[1] ?? null]),
     b: (id: LoadedTrack | null) => setLoadedTracks(ids => ids[1] === id ? ids : [ids[0] ?? null, id]),
-  }), []);
+  }), [setLoadedTracks]);
   const deckTrackIds = useMemo(() => [playerTrack?.id ?? null, playerTrackB?.id ?? null], [playerTrack?.id, playerTrackB?.id]);
   // With All Tracks hidden from the tree (View › Layout), the Playlists
   // heading lists the same collection.

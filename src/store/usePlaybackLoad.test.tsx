@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
 import type { Backend, DeckEvent, Tick } from "@/ipc/types";
+import { confirmedLoads, useLoadedTracks } from "./useLoadedTracks";
 import { usePlayback, type Playback } from "./usePlayback";
 import { registerDeck, setPlaying as setScriptPlaying } from "@/lib/scripting";
 
@@ -38,6 +39,7 @@ let tick: (value: Tick) => void;
 let reset: () => void;
 let loads: { track: string; id: number }[];
 let sent: string[];
+let resetListeners: Set<() => void>;
 
 const done = () => Promise.resolve();
 
@@ -53,8 +55,8 @@ function backend(): Backend {
       return () => undefined;
     },
     onDeckReset: (listener: () => void) => {
-      reset = listener;
-      return () => undefined;
+      resetListeners.add(listener);
+      return () => { resetListeners.delete(listener); };
     },
     deckLoad: (_deck: "a" | "b", next: string, loadId: number) => {
       loads.push({ track: next, id: loadId });
@@ -97,6 +99,8 @@ beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   loads = [];
   sent = [];
+  resetListeners = new Set();
+  reset = () => { for (const listener of resetListeners) listener(); };
   track = `track-a-${Math.random()}`;
   vi.stubGlobal("requestAnimationFrame", () => 1);
   vi.stubGlobal("cancelAnimationFrame", () => undefined);
@@ -316,4 +320,40 @@ it("publishes a new request identity when the same numeric row is loaded again",
   const restored = loads.at(-1)!; finish(restored); await settle();
   expect(deck.loadedTrack).toEqual([first.track, restored.id]);
   expect(restored.id).not.toBe(first.id);
+});
+
+
+it("retains the installed owner when a refused selection is retried after remount", async () => {
+  const first = loads[0]!; finish(first); await settle();
+  const actual: Tick = { ...emptyTick, b: { ...emptyDeck, loadId: first.id, loaded: true } };
+  __setBackend({ ...backend(), deckState: () => Promise.resolve(actual), deckLoad: () => Promise.reject(new Error("missing file")) });
+  await select("missing-remount"); await settle();
+  expect(deck.loadedTrack).toEqual([first.track, first.id]);
+  act(() => root.unmount());
+  root = createRoot(host);
+  await act(async () => { root.render(<Probe />); await done(); });
+  await settle();
+  expect(deck.loadedTrack).toEqual([first.track, first.id]);
+  act(() => tick(actual));
+  expect(deck.loadedTrack).toEqual([first.track, first.id]);
+});
+
+
+it("cannot restore an owner from a refused request arriving after a hidden-player reset", async () => {
+  const first = loads[0]!; finish(first); await settle();
+  let reject: (error: Error) => void = () => {};
+  const actual: Tick = { ...emptyTick, b: { ...emptyDeck, loadId: first.id, loaded: true } };
+  __setBackend({ ...backend(), deckState: () => Promise.resolve(actual),
+    deckLoad: () => new Promise<void>((_, no) => { reject = no; }),
+  });
+  let visible = true;
+  function Shell() { useLoadedTracks(); return visible ? <Probe /> : null; }
+  await act(async () => { root.render(<Shell />); await Promise.resolve(); });
+  track = "late-missing";
+  await act(async () => { root.render(<Shell />); await Promise.resolve(); });
+  visible = false;
+  await act(async () => { root.render(<Shell />); await Promise.resolve(); });
+  await act(async () => { reset(); await Promise.resolve(); });
+  await act(async () => { reject(new Error("missing file")); await Promise.resolve(); });
+  expect(confirmedLoads.get("b") ?? null).toBeNull();
 });
