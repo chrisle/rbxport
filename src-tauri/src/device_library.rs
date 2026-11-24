@@ -2567,6 +2567,13 @@ mod tests {
             ..Default::default()
         };
         rbl_export::export(dest.path(), &[track], &[]).unwrap();
+        // USB export replaces the collection's two PWV4 summary fields;
+        // height and RGB are still the source bytes read back by the deck.
+        let mut device_pwv4 = pwv4.clone();
+        for column in device_pwv4.chunks_exact_mut(6) {
+            column[1] = 255;
+            column[2] = 127;
+        }
         let mount = dest.path();
 
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
@@ -2580,7 +2587,7 @@ mod tests {
             for (kind, want) in [
                 ("bands", &pwv6),
                 ("bandsDetail", &pwv7),
-                ("colour", &pwv4),
+                ("colour", &device_pwv4),
                 ("colourDetail", &pwv5),
                 ("mono", &pwav),
                 ("monoDetail", &pwv3),
@@ -2612,6 +2619,13 @@ mod tests {
             ..Default::default()
         };
         rbl_export::export(dest.path(), &[track], &[]).unwrap();
+        // USB export replaces the collection's two PWV4 summary fields;
+        // height and RGB are still the source bytes read back by the deck.
+        let mut device_pwv4 = pwv4.clone();
+        for column in device_pwv4.chunks_exact_mut(6) {
+            column[1] = 255;
+            column[2] = 127;
+        }
         let mount = dest.path();
 
         for format in [Format::DeviceLibrary, Format::OneLibrary] {
@@ -2626,7 +2640,7 @@ mod tests {
                 assert!(crate::commands::waveform_of(&dat, kind, None, None).is_empty(), "{format:?} {kind}");
             }
             assert_eq!(crate::commands::waveform_of(&dat, "mono", None, None), pwav, "{format:?}");
-            assert_eq!(crate::commands::waveform_of(&dat, "colour", None, None), pwv4, "{format:?}");
+            assert_eq!(crate::commands::waveform_of(&dat, "colour", None, None), device_pwv4, "{format:?}");
         }
     }
 
