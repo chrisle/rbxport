@@ -219,6 +219,21 @@ fn a_hot_cue_carries_its_own_colour() {
 }
 
 #[test]
+fn every_hot_slot_gets_its_full_colour_default_in_link() {
+    let colours=[[255,0,23],[0,196,255],[51,255,0],[77,0,255],
+        [0,255,48],[255,94,0],[0,0,255],[255,232,0]];
+    for slot in 1_u8..=8 {
+        let kind=if slot<=3 {slot} else {slot+1};
+        for (colour,rgb) in [(0,colours[usize::from(slot-1)%8]),(42,[255,0,0])] {
+            let cue=ExtendedCue::from(&Cue{id:1,position_ms:100,out_ms:0,kind,colour,memory_colour:None});
+            let (blob,count)=blobs::extended_cues_blob(&[cue]);
+            assert_eq!(count,1);
+            assert_eq!(colour_of(&blob),[colour,rgb[0],rgb[1],rgb[2]],"slot {slot}, colour {colour}");
+        }
+    }
+}
+
+#[test]
 fn a_memory_cue_carries_no_colour() {
     let memory = ExtendedCue::from(&Cue {
         id: 2,
