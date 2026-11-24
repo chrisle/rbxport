@@ -32,7 +32,7 @@
 //! +0c beat2 u16 ┐
 //! +0e beat3 u16 ├ lighting hints inside the phrase, purpose [UNKNOWN]
 //! +10 beat4 u16 ┘
-//! +15 fill      u8    non-zero when the phrase ends with a fill-in
+//! +14 fill      u16   non-zero when the phrase ends with a fill-in
 //! +16 fill_beat u16   where that fill-in starts
 //! ```
 //!
@@ -241,7 +241,7 @@ impl Section {
                 beat: be16(entry, 2),
                 kind,
                 label: label_for(mood, kind, k1, k2, k3),
-                fill_in: entry.get(0x15).copied().unwrap_or(0) != 0,
+                fill_in: be16(entry, 0x14) != 0,
                 fill_in_beat: be16(entry, 0x16),
             });
         }
@@ -259,7 +259,8 @@ impl Section {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhraseEdit {
     /// CUT: the phrase under `beat` is split there. The new phrase carries
-    /// the old one's kind and flags, so it draws under the same label.
+    /// the old one's kind. A fill-in remains only on the latter half, and
+    /// only if its start does not precede the new phrase start.
     Cut { beat: u16 },
     /// CLEAR: the phrase under `beat` is taken out; the one before it runs
     /// on to where it ended.
@@ -272,8 +273,8 @@ impl Section {
     /// or an edit that changes nothing (a cut on a phrase's first beat, a
     /// clear with no phrase under the beat).
     ///
-    /// Each entry is carried byte for byte and only its index and beat
-    /// rewritten, so the fields nobody has named keep whatever they held;
+    /// Each entry is carried byte for byte apart from its index, beat and
+    /// fill-in bounds, so the fields nobody has named keep whatever they held;
     /// a cut phrase's lighting hints are copied into both halves [ASSUME].
     #[must_use]
     pub fn with_phrase_edit(&self, edit: PhraseEdit) -> Option<Section> {
@@ -307,6 +308,10 @@ impl Section {
                 }
                 let mut second = first.clone();
                 second.get_mut(2..4)?.copy_from_slice(&beat.to_be_bytes());
+                if be16(&second, 0x16) < beat {
+                    second.get_mut(0x14..0x18)?.fill(0);
+                }
+                entries.get_mut(at)?.get_mut(0x14..0x18)?.fill(0);
                 entries.insert(at + 1, second);
             }
             PhraseEdit::Clear { .. } => {

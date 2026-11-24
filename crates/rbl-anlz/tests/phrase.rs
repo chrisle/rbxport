@@ -128,6 +128,28 @@ fn version_one_export_mask_and_edits_retain_the_version_and_phrases() {
 }
 
 #[test]
+fn a_phrase_cut_keeps_fill_metadata_inside_the_resulting_phrase() {
+    let entries = [entry(1, 1, 1, 1, 0, 0, Some(57)), entry(2, 65, 3, 0, 0, 0, None)];
+    for version in [0, 1] {
+        for masked in [false, true] {
+            let anlz = rbl_anlz::parse(&versioned_pssi(version, &entries, masked)).unwrap();
+            for cut in [33, 57, 61] {
+                let edited = anlz.sections[0].with_phrase_edit(rbl_anlz::PhraseEdit::Cut { beat: cut }).unwrap();
+                let structure = edited.as_song_structure().unwrap();
+                assert_eq!(structure.phrases[0].beat, 1);
+                assert!(!structure.phrases[0].fill_in);
+                assert_eq!(structure.phrases[0].fill_in_beat, 0);
+                assert_eq!(structure.phrases[1].beat, cut);
+                assert_eq!(structure.phrases[1].fill_in, cut <= 57);
+                assert_eq!(structure.phrases[1].fill_in_beat, if cut <= 57 { 57 } else { 0 });
+                let exported = edited.with_export_phrase_mask();
+                assert_eq!(exported.as_song_structure().unwrap(), structure);
+            }
+        }
+    }
+}
+
+#[test]
 fn an_unknown_phrase_version_is_preserved_without_editing() {
     let bytes = versioned_pssi(2, &[entry(1, 1, 1, 1, 0, 0, None)], false);
     let anlz = rbl_anlz::parse(&bytes).unwrap();
@@ -244,7 +266,9 @@ fn an_unknown_kind_gets_no_label_rather_than_an_invented_one() {
 
 #[test]
 fn reads_a_fill_in() {
-    let entries = vec![entry(1, 545, 2, 0, 0, 0, Some(575)), entry(2, 577, 5, 1, 0, 0, None)];
+    let mut filled = entry(1, 545, 2, 0, 0, 0, Some(575));
+    filled[0x14..0x16].copy_from_slice(&0x0100_u16.to_be_bytes());
+    let entries = vec![filled, entry(2, 577, 5, 1, 0, 0, None)];
     let anlz = rbl_anlz::parse(&pssi_local(1, 0, 0, &entries, false)).unwrap();
     let phrases = anlz.phrases().unwrap();
     assert!(phrases[0].fill_in);
