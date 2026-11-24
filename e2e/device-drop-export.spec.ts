@@ -104,3 +104,82 @@ test("a collection playlist track dropped onto a USB playlist in the sub-browser
   await onStick.click();
   await expect(panel.getByRole("grid").locator('[role="row"]:has([role="gridcell"])')).toHaveCount(3);
 });
+
+for (const side of ["main", "sub"] as const) {
+  test(`a real HTML drag is accepted by the ${side} USB playlist in split view`, async ({ page }) => {
+    await page.addInitScript(() => {
+      const evidence = { accepted: [] as string[], payloads: [] as string[] };
+      Object.assign(window, { deviceDropEvidence: evidence });
+      document.addEventListener("dragover", (event) => {
+        const row = (event.target as Element).closest('[data-kind="devicePlaylist"]');
+        if (row && event.defaultPrevented) {
+          evidence.accepted.push(row.closest('[data-browser-side]')?.getAttribute("data-browser-side") ?? "");
+        }
+      });
+      document.addEventListener("drop", (event) => {
+        if ((event.target as Element).closest('[data-kind="devicePlaylist"]')) {
+          evidence.payloads.push(event.dataTransfer?.getData("text/plain") ?? "");
+        }
+      });
+
+    });
+    await page.goto("/?writable=1&tracks=4");
+    await expect(page.getByTestId("browser-title")).toContainText("Melodic Vox");
+    await page.getByRole("button", { name: "Sub-Browser Window" }).click();
+    const panel = page.getByRole("region", { name: "Sub-Browser" });
+    const targetTree = page.locator(`nav[data-browser-side="${side}"]`);
+    await targetTree.getByRole("tab", { name: "Devices" }).click();
+    await targetTree.getByRole("button", { name: "Expand TEST" }).click();
+    const onStick = targetTree.locator('[role="treeitem"][data-kind="devicePlaylist"]').first();
+    await expect(onStick).toBeVisible();
+    if (side === "main") {
+      await panel.getByRole("tree").locator('[data-kind="playlist"]').filter({ hasText: "Melodic Vox" }).first().click();
+    }
+    const sourceGrid = side === "main" ? panel.getByRole("grid") : page.getByRole("grid").first();
+    const row = sourceGrid.locator('[role="row"]:has([role="gridcell"])').first();
+    // Hold a native browser drag over the target before releasing, so its
+    // offered/highlighted state is observed rather than racing a quick drop.
+    await row.locator('[data-col="title"]').hover({ position: { x: 8, y: 8 } });
+    await page.mouse.down();
+    try {
+      await onStick.hover({ position: { x: 100, y: 10 } });
+      await onStick.hover({ position: { x: 110, y: 10 } });
+      await expect(onStick).toHaveAttribute("data-device-track-drop", "true");
+      await expect(onStick).toHaveAttribute("data-over", "true");
+    } finally {
+      await page.mouse.up();
+    }
+    await expect(page.getByRole("contentinfo")).toContainText("Added to NP3-TEST-MP3.");
+    const evidence = await page.evaluate(() => (window as unknown as {
+      deviceDropEvidence: { accepted: string[]; payloads: string[] };
+    }).deviceDropEvidence);
+    expect(evidence.accepted).toContain(side);
+    expect(evidence.payloads).toHaveLength(1);
+    expect(evidence.payloads[0]).toMatch(/^\d+$/);
+    await onStick.click();
+    const targetGrid = side === "main" ? page.getByRole("grid").first() : panel.getByRole("grid");
+    await expect(targetGrid.locator('[role="row"]:has([role="gridcell"])')).toHaveCount(3);
+    const membership = await page.evaluate(async (payloads) => {
+      const moduleUrl = "/src/ipc/client.ts";
+      const { getBackend } = await import(moduleUrl) as typeof import("../src/ipc/client");
+      const backend = await getBackend();
+      const path = (await backend.listDevices()).find((device) => device.name === "TEST")!.path;
+      const mapped = await backend.devicePlaylistCollectionTracks(path, "deviceLibrary", payloads);
+      const tracks = mapped.filter((id): id is string => id !== null);
+      return {
+        mapped,
+        target: await backend.devicePlaylistDuplicates(path, "deviceLibrary", "3", tracks),
+        other: await backend.devicePlaylistDuplicates(path, "oneLibrary", "3", tracks),
+      };
+    }, evidence.payloads);
+    expect(membership.mapped).toHaveLength(1);
+    expect(membership.mapped[0]).not.toBeNull();
+    expect(membership.target).toEqual(membership.mapped);
+    expect(membership.other).toEqual([]);
+    const otherLibrary = targetTree.locator('[data-kind="devicePlaylist"]').nth(3);
+    await otherLibrary.click();
+    await expect(targetGrid.locator('[role="row"]:has([role="gridcell"])')).toHaveCount(2);
+    await onStick.click();
+    await expect(targetGrid.locator('[role="row"]:has([role="gridcell"])')).toHaveCount(3);
+  });
+}
