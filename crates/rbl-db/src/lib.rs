@@ -506,13 +506,16 @@ fn current_drive_with(
 }
 
 /// The directory a Linux library folder's file system is mounted at, with
-/// a trailing `/`: the deepest ancestor still on the folder's device
+/// a trailing `/`: the highest ancestor still on the folder's device
 /// (`st_dev`). `None` off Linux, when the folder cannot be read, or when
 /// it is on the root file system (there is no separate drive).
 #[cfg(target_os = "linux")]
 fn os_mount_point(folder: &str) -> Option<String> {
     use std::os::unix::fs::MetadataExt;
-    mount_point_by(folder, |p| std::fs::metadata(p).ok().map(|m| m.dev()))
+    // Resolve a selected symlink before walking parents: its lexical parent
+    // can be on another filesystem without the symlink being a mount root.
+    let folder = std::fs::canonicalize(folder).ok()?;
+    mount_point_by(folder.to_str()?, |p| std::fs::metadata(p).ok().map(|m| m.dev()))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -527,7 +530,8 @@ fn mount_point_by(folder: &str, device_of: impl Fn(&Path) -> Option<u64>) -> Opt
     let device = device_of(path)?;
     let mut mount = path;
     for ancestor in path.ancestors().skip(1) {
-        if device_of(ancestor) != Some(device) {
+        // An unreadable ancestor is not evidence of a mount boundary.
+        if device_of(ancestor)? != device {
             break;
         }
         mount = ancestor;
@@ -732,6 +736,14 @@ mod tests {
         assert_eq!(current_drive_with(folder, true, Some("E:/"), mount).as_deref(), Some("E:/"));
         assert_eq!(current_drive_with("/Volumes/X/PIONEER/Master", false, Some("E:/"), mount).as_deref(), Some("/Volumes/X/"));
         assert_eq!(current_drive_with("D:/PIONEER/Master", false, Some("E:/"), mount).as_deref(), Some("D:/"));
+    }
+
+    #[test]
+    fn an_unreadable_ancestor_does_not_manufacture_a_mount_point() {
+        let folder = "/media/u/Music/PIONEER/Master";
+        assert_eq!(mount_point_by(folder, |p| {
+            (p != Path::new("/media/u/Music/PIONEER")).then_some(7)
+        }), None);
     }
 
     #[cfg(target_os = "linux")]
