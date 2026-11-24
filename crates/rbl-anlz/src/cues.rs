@@ -137,7 +137,8 @@ pub fn sections(cues: &[ExportCue], extended: bool) -> Vec<Section> {
                     entry[44..44 + comment.len()].copy_from_slice(&comment);
                     entry[44 + comment.len()] = cue.color_code;
                     entry[45 + comment.len()..48 + comment.len()]
-                        .copy_from_slice(&export_colour(cue.color_code, cue.slot()));
+                        .copy_from_slice(&export_cue_colour(cue.color_code, cue.slot(),
+                            cue.loop_time_ms.is_some_and(|out| out > cue.time_ms)));
                 } else {
                     put32(&mut entry, 16, if cue.active_loop { 4 } else { 0 });
                     put32(&mut entry, 20, 0x10000);
@@ -264,6 +265,14 @@ pub fn export_colour(code: u8, slot: u32) -> [u8; 3] {
         .unwrap_or([0; 3])
 }
 
+/// The device RGB for a cue, including an uncoloured hot loop's orange
+/// default. `hot_loop` means a valid out point after the in point. Memory
+/// cues retain their existing colour-row/RGB behavior; explicit colours win.
+pub fn export_cue_colour(code: u8, slot: u32, hot_loop: bool) -> [u8; 3] {
+    let effective = if code == 0 && hot_loop && (1..=16).contains(&slot) { 36 } else { code };
+    export_colour(effective, slot)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -303,6 +312,35 @@ mod tests {
                 assert_eq!(&lists[2].payload[44..48],&[code,rgb[0],rgb[1],rgb[2]],"slot {slot}, code {code}");
             }
         }
+    }
+
+    #[test]
+    fn uncoloured_hot_loops_get_the_loop_default_without_changing_loop_fields() {
+        for slot in 1_u8..=16 {
+            let kind=if slot<=3 {slot} else {slot+1};
+            for (code,rgb) in [(0,[255,140,0]),(42,[255,0,0])] {
+                let cue=ExportCue{kind,time_ms:1000,loop_time_ms:Some(2000),loop_numerator:2,
+                    loop_denominator:1,color_code:code,..Default::default()};
+                let lists=sections(&[cue],true);let entry=&lists[2].payload;
+                assert_eq!(&entry[44..48],&[code,rgb[0],rgb[1],rgb[2]],"slot {slot}, code {code}");
+                assert_eq!(&entry[12..16],u32::from(slot).to_be_bytes());
+                assert_eq!(entry[16],2);
+                assert_eq!(&entry[20..24],1000_u32.to_be_bytes());
+                assert_eq!(&entry[24..28],2000_u32.to_be_bytes());
+                assert_eq!(&entry[36..40],&[0,2,0,1]);
+            }
+        }
+        for out in [0,1000] {
+            let cue=ExportCue{kind:6,time_ms:1000,loop_time_ms:Some(out),..Default::default()};
+            let lists=sections(&[cue],true);
+            assert_eq!(&lists[2].payload[44..48],&[0,0,255,48],"out must be after in");
+            assert_eq!(&lists[2].payload[24..28],out.to_be_bytes());
+        }
+        // A memory loop keeps its memory colour row and existing RGB semantics.
+        let memory=ExportCue{kind:4,time_ms:1000,loop_time_ms:Some(2000),color_id:6,..Default::default()};
+        let lists=sections(&[memory],true);let entry=&lists[3].payload;
+        assert_eq!(&entry[12..16],0_u32.to_be_bytes());assert_eq!(entry[16],2);
+        assert_eq!(entry[28],6);assert_eq!(&entry[44..48],&[0,0,0,0]);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! (measured against a CDJ-3000 where captured fixtures are available).
 //! The VBR compatibility placeholder is retained behavior, not a vendor oracle.
 
-use rbl_anlz::cues::export_colour;
+use rbl_anlz::cues::export_cue_colour;
 use rbl_anlz::{Anlz, Beat, Section};
 use rbl_index::Cue;
 
@@ -175,8 +175,9 @@ const LAST_COLOUR_CODE: u8 = 64;
 /// after its comment, from the same palette as the USB export. [OBS] The
 /// capture's hot cues carry `15 00 ff 00` here, code 21 and palette entry
 /// 21's RGB, and its memory cues zeros; its source colours were not kept.
-/// [ASSUME] A hot cue without a colour gets code 0 and its slot's default
-/// RGB, as on USB, and so does a code past the palette.
+/// [ASSUME] Uncoloured hot cues use the USB default RGB: their slot's colour
+/// for points, orange for valid loops. Default-colour LINK packets remain
+/// uncaptured. A code past the palette follows the point fallback.
 fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16>) -> Vec<u8> {
     let comment: Vec<u8> = if cue.comment.is_empty() {
         Vec::new()
@@ -228,7 +229,7 @@ fn extended_cue_entry(cue: &ExtendedCue, previous: Option<u16>, next: Option<u16
             cue.colour
         };
         e[at] = code;
-        e[at + 1..at + 4].copy_from_slice(&export_colour(code, u32::from(cue.hot_slot)));
+        e[at + 1..at + 4].copy_from_slice(&export_cue_colour(code, u32::from(cue.hot_slot), is_loop));
     }
     e
 }
