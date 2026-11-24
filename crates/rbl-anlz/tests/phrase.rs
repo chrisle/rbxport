@@ -88,7 +88,7 @@ fn labels(bytes: &[u8]) -> Vec<&'static str> {
 
 fn versioned_pssi(version: u16, entries: &[Vec<u8>], masked: bool) -> Vec<u8> {
     let count = u16::try_from(entries.len()).unwrap();
-    let mut b = body(1, 129, 0, entries);
+    let mut b = body(1, (entries.len() as u16 * 32 + 1).max(129), 0, entries);
     if masked {
         for (at, byte) in b.iter_mut().enumerate() {
             *byte ^= MASK_BASE[(at + usize::from(version)) % MASK_BASE.len()]
@@ -102,6 +102,32 @@ fn versioned_pssi(version: u16, entries: &[Vec<u8>], masked: bool) -> Vec<u8> {
     let mut builder = AnlzBuilder::new();
     builder.raw(FourCc::new(b"PSSI"), raw[..20].to_vec(), raw[20..].to_vec());
     builder.finish()
+}
+
+#[test]
+fn phrase_variant_flags_use_the_whole_nonzero_word() {
+    let specifications = [(1,0x0100,0,0,"INTRO 1"),(2,0,0,0x0100,"UP 2"),
+        (2,0,0x0100,0,"UP 3"),(5,2,0,0,"CHORUS 1"),(6,0xffff,0,0,"OUTRO 1"),
+        (1,0,0,0,"INTRO 2")];
+    let entries:Vec<_> = specifications.iter().enumerate().map(|(index,&(kind,k1,k2,k3,_))| {
+        let mut bytes=entry(index as u16+1,index as u16*32+1,kind,0,0,0,None);
+        for (at,value) in [(6,k1 as u16),(8,k2 as u16),(0x12,k3 as u16)] {
+            bytes[at..at+2].copy_from_slice(&value.to_be_bytes());
+        }
+        bytes
+    }).collect();
+    let expected:Vec<_>=specifications.iter().map(|row|row.4).collect();
+    for version in [0,1] { for masked in [false,true] {
+        let parsed=rbl_anlz::parse(&versioned_pssi(version,&entries,masked)).unwrap();
+        assert_eq!(parsed.phrases().unwrap().iter().map(|phrase|phrase.label).collect::<Vec<_>>(),expected);
+        let original=parsed.to_bytes();
+        let exported=parsed.sections[0].with_export_phrase_mask();
+        assert_eq!(exported.as_song_structure(),parsed.song_structure());
+        assert_eq!(parsed.to_bytes(),original,"reading/export masking cannot mutate the input");
+        let cut=rbl_anlz::parse(&parsed.with_phrase_edit(rbl_anlz::PhraseEdit::Cut{beat:17}).unwrap()).unwrap();
+        let mut split=expected.clone();split.insert(1,"INTRO 1");
+        assert_eq!(cut.phrases().unwrap().iter().map(|phrase|phrase.label).collect::<Vec<_>>(),split);
+    }}
 }
 
 #[test]
