@@ -1,7 +1,8 @@
+import { PERFORMANCE_KEYMAP } from "./fixtures/performanceKeymap";
 import { describe, expect, it } from "vitest";
 
 import {
-  chordFromText, heldByShell, KEY_PRESET_NAMES, KEY_PRESETS, keyMap, PERFORMANCE_KEYMAP, performanceKeys,
+  chordFromText, heldByShell, KEY_PRESET_NAMES, KEY_PRESETS, keyMap, performanceKeys,
   presetChord, type KeyPreset,
 } from "./keyPresets";
 import { sanitisePreferences } from "./preferences";
@@ -121,7 +122,7 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
       "301e", "301f", "3020", "3021", "3022", "3023", "3024", "3039", "303a", "303b", "3043", "3044", "3045",
       "304b", "304d", "3054", "3055", "3106", "3107", "3108", "310a", "310b", "310c", "3118", "3119", "311e",
       "311f", "3120", "3121", "3122", "3123", "3124", "3139", "313a", "313b", "3143", "3144", "3145", "314b",
-      "314d", "3154", "3155", "7003", "b139",
+      "314d", "3154", "3155", "500a", "7003", "b139",
     ]);
     expect(answered.performance2?.sort()).toEqual([
       "3006", "3007", "300a", "300b", "300c", "3012", "3013", "301e", "301f", "3020", "3021", "3022", "3023",
@@ -275,4 +276,12 @@ describe("the stored preset", () => {
     expect(sanitisePreferences({ keyboard: { overrides: { cue: { key: "k" } } } }).keyboard)
       .toEqual({ preset: "export", overrides: { cue: { key: "k" } } });
   });
+});
+
+
+it("keeps both complete preset key vectors identical to the full reference table", () => {
+  for (const row of PERFORMANCE_KEYMAP) {
+    expect(performanceKeys("performance1", row.id), row.id).toEqual(row.p1);
+    expect(performanceKeys("performance2", row.id), row.id).toEqual(row.p2);
+  }
 });

@@ -61,3 +61,14 @@ describe("the shared commands", () => {
     expect(hasCommand("selectAll", "main")).toBe(false);
   });
 });
+
+
+it("passes exact menu destinations and context rows only to their owning browser", () => {
+  const main = vi.fn(() => true), sub = vi.fn(() => true);
+  const stopMain = registerCommand("exportPlaylist", main, "main");
+  const stopSub = registerCommand("exportPlaylist", sub, "sub");
+  expect(runCommand("exportPlaylist", { scope: "sub", target: "C:\\USB : α", subject: "clicked:row" })).toBe(true);
+  expect(sub).toHaveBeenCalledWith({ repeat: false, target: "C:\\USB : α", subject: "clicked:row" });
+  expect(main).not.toHaveBeenCalled();
+  stopMain(); stopSub();
+});

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { BrowserFocus } from "./browserFocus";
 import { hasCommand, registerCommand } from "./commands";
 import {
-  menuBarEnabled, menuBarItem, menuBarState, onMenuBarState, publishListMenuState, publishTreeMenuState,
+  menuBarEnabled, menuBarTargets, menuBarItem, menuBarState, onMenuBarState, publishListMenuState, publishTreeMenuState,
   type ListMenuState, type TreeMenuState,
 } from "./menuBar";
 
@@ -129,8 +129,8 @@ describe("menuBarEnabled", () => {
     }
   });
 
-  it("greys a stick's tracks", () => {
-    expect(enabled(LIST, { source: "device", selected: 1, rows: [{}] }, "devicePlaylist")).toEqual([]);
+  it("greys collection Track actions over a stick while allowing its playlist import", () => {
+    expect(enabled(LIST, { source: "device", selected: 1, rows: [{}] }, "devicePlaylist")).toEqual(["import-playlist"]);
   });
 
   it("offers a playlist's items", () => {
@@ -224,4 +224,57 @@ describe("menu bar state", () => {
     expect(menuBarState().lists.main).toBeUndefined();
     off();
   });
+});
+
+
+describe("native destination menus", () => {
+  const collection = [{ id: "7", name: "Collection list" }];
+  const device = [{ id: "7", name: "Device list" }];
+  const sticks = [{ id: "C:\\USB : α", name: "USB" }];
+  it("binds colliding target IDs to their browser/source and retires old choices", () => {
+    const lists = { main: { source: "collection" as const, selected: 1, rows: [], loose: false, playlists: collection, devices: sticks },
+      sub: { source: "device" as const, selected: 1, rows: [], loose: false, playlists: device } };
+    const trees = { main: { kind: "playlist" as const, hasChildren: false, devices: sticks } };
+    const first = menuBarTargets({ focus: LIST, lists, trees });
+    const old = `add-to-playlist:${first["add-to-playlist"]?.[0]?.id}`;
+    const originalChoice = menuBarItem(old);
+    const second = menuBarTargets({ focus: { pane: "list", side: "sub" }, lists, trees });
+    expect(menuBarItem(old)).toBeNull();
+    expect(originalChoice).toMatchObject({ action: "addToPlaylist", target: "7", browserSide: "main" });
+    expect(menuBarItem(`add-to-playlist:${second["add-to-playlist"]?.[0]?.id}`)).toMatchObject({ target: "7", browserSide: "sub" });
+    expect(second["export-track"]).toEqual([]);
+  });
+  it("retains exact path values and ignores unknown or empty native tokens", () => {
+    const targets = menuBarTargets({ focus: LIST, lists: { main: { source: "collection", selected: 1, rows: [], loose: false, devices: sticks } }, trees: {} });
+    expect(menuBarItem(`export-track:${targets["export-track"]?.[0]?.id}`)).toMatchObject({ action: "exportTrack", target: "C:\\USB : α" });
+    expect(menuBarItem("export-track:C:\\USB : α")).toBeNull();
+    expect(menuBarItem("export-track:")).toBeNull();
+  });
+  it("keeps unchanged destinations across tree/text focus without rebuilding rows", () => {
+    const lists = { main: { source: "collection" as const, selected: 1, rows: [], loose: false, playlists: collection } };
+    const first = menuBarTargets({ focus: LIST, lists, trees: {} });
+    expect(menuBarTargets({ focus: TREE, lists, trees: {} })["add-to-playlist"]).toBe(first["add-to-playlist"]);
+    expect(menuBarTargets({ focus: null, lists, trees: {} })["add-to-playlist"]).toBe(first["add-to-playlist"]);
+  });
+  it("greys absent, missing, busy and unsupported destinations", () => {
+    expect(enabled(LIST, { selected: 1, rows: [{}], playlists: collection, devices: sticks }, "playlist")).toContain("export-track");
+    expect(enabled(LIST, { selected: 1, rows: [{ missing: true }], playlists: collection, devices: sticks }, "playlist")).not.toContain("export-track");
+    expect(enabled(LIST, { selected: 1, loose: true, playlists: collection, devices: sticks }, "playlist")).toContain("add-to-playlist");
+    expect(enabled(LIST, { selected: 1, loose: true, playlists: collection, devices: sticks }, "playlist")).not.toContain("export-track");
+    expect(enabled(LIST, { source: "device", selected: 1, playlists: device, busy: true }, "devicePlaylist")).not.toContain("add-to-playlist");
+    expect(enabled(TREE, null, "devicePlaylist")).toContain("import-playlist");
+    expect(enabled(TREE, null, "deviceFolder")).not.toContain("import-playlist");
+  });
+});
+
+
+it("retires same-number destinations when the same browser changes device library", () => {
+  const firstList = { source: "device" as const, selected: 1, rows: [], loose: false, playlists: [{ id: "7", name: "Library A" }] };
+  const first = menuBarTargets({ focus: LIST, lists: { main: firstList }, trees: {} });
+  const oldToken = first["add-to-playlist"]?.[0]?.id;
+  const secondList = { ...firstList, playlists: [{ id: "7", name: "Library B" }] };
+  const second = menuBarTargets({ focus: LIST, lists: { main: secondList }, trees: {} });
+  expect(second["add-to-playlist"]?.[0]?.id).not.toBe(oldToken);
+  expect(menuBarItem(`add-to-playlist:${oldToken}`)).toBeNull();
+  expect(menuBarItem(`add-to-playlist:${second["add-to-playlist"]?.[0]?.id}`)).toMatchObject({ target: "7", browserSide: "main" });
 });

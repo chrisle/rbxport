@@ -1,3 +1,5 @@
+import { NATIVE_COMMANDS } from "./nativeCommands";
+
 /**
  * The native Track and Playlist menus: which item runs which command, and
  * which items are greyed right now.
@@ -11,6 +13,7 @@
  * terms of what the list and the tree here know. Where rbxport cannot do
  * what rekordbox would, the item stays greyed rather than doing nothing.
  */
+import type { MenuTarget } from "./contextMenus";
 import type { BrowserFocus, BrowserSide } from "./browserFocus";
 import type { Action } from "./shortcuts";
 import type { TrackSource, TreeNode } from "@/ipc/types";
@@ -27,6 +30,9 @@ export interface ListMenuState {
   rows: readonly { missing?: boolean }[];
   /** Some of the selection is files on disk that are not in the collection. */
   loose: boolean;
+  playlists?: readonly MenuTarget[] | undefined;
+  devices?: readonly MenuTarget[] | undefined;
+  busy?: boolean | undefined;
 }
 
 /** What the tree on one side has selected. */
@@ -34,6 +40,8 @@ export interface TreeMenuState {
   kind: TreeNode["kind"] | null;
   /** Whether the selected folder or Playlists heading has a child row. */
   hasChildren: boolean;
+  devices?: readonly MenuTarget[] | undefined;
+  busy?: boolean | undefined;
 }
 
 /** A native menu item that runs a shared command. */
@@ -46,30 +54,30 @@ export interface MenuBarItem {
   writes: boolean;
   /** App owns this command without a browser-side scope. */
   scope?: "global";
+  target?: string;
+  browserSide?: BrowserSide;
 }
 
 /** Ids as `src-tauri/src/menu.rs` gives them. */
 export const MENU_BAR_ITEMS: readonly MenuBarItem[] = [
-  { id: "import-to-collection", action: "importToCollection", owner: "list", writes: true },
-  { id: "analysis-lock-on", action: "analysisLockOn", owner: "list", writes: true },
-  { id: "analysis-lock-off", action: "analysisLockOff", owner: "list", writes: true },
-  { id: "reload-tag", action: "reloadTag", owner: "list", writes: true },
-  { id: "remove-from-collection", action: "removeFromCollection", owner: "list", writes: true },
+  ...NATIVE_COMMANDS.map(([action, , , group]): MenuBarItem => ({
+    id: action.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`), action,
+    owner: group === "Track" ? "list" : "tree", writes: !action.startsWith("export"),
+  })),
+  { id: "add-to-playlist", action: "addToPlaylist", owner: "list", writes: true },
+  { id: "export-track", action: "exportTrack", owner: "list", writes: false },
+  { id: "export-playlist", action: "exportPlaylist", owner: "tree", writes: false },
   { id: "show-in-finder", action: "showInFinder", owner: "list", writes: false },
-  { id: "auto-relocate", action: "autoRelocate", owner: "list", writes: true },
-  { id: "relocate", action: "relocate", owner: "list", writes: true },
-  { id: "create-playlist", action: "createPlaylist", owner: "tree", writes: true },
-  { id: "create-intelligent-playlist", action: "createIntelligentPlaylist", owner: "tree", writes: true },
-  { id: "create-folder", action: "createFolder", owner: "tree", writes: true },
-  { id: "delete-playlist", action: "deletePlaylist", owner: "tree", writes: true },
   { id: "sort-items", action: "sortItems", owner: "tree", writes: true, scope: "global" },
   { id: "renumber-track-order", action: "renumberTrackOrder", owner: "list", writes: true },
-  { id: "export-playlist-txt", action: "exportPlaylistTxt", owner: "tree", writes: false },
-  { id: "export-playlist-m3u8", action: "exportPlaylistM3u8", owner: "tree", writes: false },
 ];
 
+export function menuBarAction(action: Action): MenuBarItem | null {
+  return MENU_BAR_ITEMS.find(item => item.action === action) ?? null;
+}
+
 export function menuBarItem(id: string): MenuBarItem | null {
-  return MENU_BAR_ITEMS.find((item) => item.id === id) ?? null;
+  return MENU_BAR_ITEMS.find(item => item.id === id) ?? destinationChoices.get(id) ?? null;
 }
 
 /**
@@ -133,6 +141,8 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   const anyPresent = rows.length < n || rows.some((row) => row.missing !== true);
   const library = list !== undefined && LIBRARY_LISTS.has(list.source);
   const tracks = list !== undefined && n > 0 && !onStick && !list.loose;
+  live("add-to-playlist", n > 0 && anyPresent && !list?.busy && (list?.playlists?.length ?? 0) > 0);
+  live("export-track", n > 0 && anyPresent && !onStick && !list?.loose && (list?.devices?.length ?? 0) > 0);
 
   // Import To Collection, 0x400f: a selection in a browse of files outside
   // the collection. rbxport imports the loose files of the selection.
@@ -157,6 +167,8 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   live("relocate", tracks && anyMissing);
 
   const kind = tree?.kind ?? null;
+  live("export-playlist", (kind === "playlist" || kind === "smartPlaylist" || kind === "folder") && (tree?.devices?.length ?? 0) > 0);
+  live("import-playlist", kind === "devicePlaylist" && !tree?.busy);
   // Create New Playlist / Intelligent Playlist / Folder, 0x500a-0x500c: the
   // Collection or anything in the Playlists tree.
   const create = kind !== null && CREATE_NODES.has(kind);
@@ -182,6 +194,40 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   return out;
 }
 
+const NO_TARGETS: readonly MenuTarget[] = [];
+const destinationChoices = new Map<string, MenuBarItem>();
+const destinations = new Map<string, { source: readonly MenuTarget[]; side: BrowserSide; rows: readonly MenuTarget[] }>();
+let nextDestination = 0;
+
+function destinationRows(id: string, source: readonly MenuTarget[], side: BrowserSide): readonly MenuTarget[] {
+  const previous = destinations.get(id);
+  if (previous?.source === source && previous.side === side) return previous.rows;
+  for (const row of previous?.rows ?? []) destinationChoices.delete(`${id}:${row.id}`);
+  const item = MENU_BAR_ITEMS.find(entry => entry.id === id);
+  if (!item) return NO_TARGETS;
+  const rows = source.map(target => {
+    const token = String(++nextDestination);
+    destinationChoices.set(`${id}:${token}`, { ...item, target: target.id, browserSide: side });
+    return { id: token, name: target.name };
+  });
+  destinations.set(id, { source, side, rows });
+  return rows;
+}
+
+/** Choice tokens bind a destination to its current owner, including device library. */
+export function menuBarTargets({ focus, lists, trees }: Pick<MenuBarInput, "focus" | "lists" | "trees">): Record<string, readonly MenuTarget[]> {
+  // Disabled parents can keep their rows: text/tree focus need not rebuild
+  // thousands of native playlist entries just to grey them.
+  if (focus === null) return Object.fromEntries([...destinations].map(([id, entry]) => [id, entry.rows]));
+  const side = menuBarSide(focus);
+  const list = lists[side], tree = trees[side];
+  return {
+    "add-to-playlist": destinationRows("add-to-playlist", list?.playlists ?? NO_TARGETS, side),
+    "export-track": destinationRows("export-track", list?.devices ?? NO_TARGETS, side),
+    "export-playlist": destinationRows("export-playlist", tree?.devices ?? NO_TARGETS, side),
+  };
+}
+
 /** What the lists and trees on screen last reported. */
 const lists: Partial<Record<BrowserSide, ListMenuState>> = {};
 const trees: Partial<Record<BrowserSide, TreeMenuState>> = {};
@@ -194,6 +240,7 @@ function changed(): void {
 function sameList(a: ListMenuState | undefined, b: ListMenuState | undefined): boolean {
   if (a === undefined || b === undefined) return a === b;
   return a.source === b.source && a.selected === b.selected && a.loose === b.loose &&
+    a.playlists === b.playlists && a.devices === b.devices && a.busy === b.busy &&
     a.rows.length === b.rows.length && a.rows.every((row, i) => row.missing === b.rows[i]?.missing);
 }
 
@@ -210,6 +257,7 @@ export function publishListMenuState(side: BrowserSide, state: ListMenuState | n
 export function publishTreeMenuState(side: BrowserSide, state: TreeMenuState | null): void {
   const next = state ?? undefined;
   if (trees[side]?.kind === next?.kind && trees[side]?.hasChildren === next?.hasChildren &&
+    trees[side]?.devices === next?.devices && trees[side]?.busy === next?.busy &&
     (trees[side] === undefined) === (next === undefined)) return;
   if (next === undefined) delete trees[side];
   else trees[side] = next;

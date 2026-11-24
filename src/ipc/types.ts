@@ -643,6 +643,9 @@ export interface Backend {
   /** Rebuilds the native application menu with the active UI translations. */
   setMenuLabels(labels: Readonly<Record<string, string>>): Promise<void>;
 
+  /** Current playlist/device destinations for native menu submenus. */
+  setMenuTargets(targets: Readonly<Record<string, readonly { id: string; name: string }[]>>): Promise<void>;
+
   /** Greys or enables native menu items by id (the Track and Playlist menus). */
   setMenuEnabled(items: Readonly<Record<string, boolean>>): Promise<void>;
 
