@@ -159,6 +159,8 @@ pub struct Player {
     open_sink: SinkOpener,
     /// Whether a ticker is already running, so play does not start a second.
     ticking: std::sync::atomic::AtomicBool,
+    /// A delivery request must survive the idle ticker's final snapshot.
+    tick_requests: std::sync::atomic::AtomicU64,
     /// The output the engine should open, as an id from `rbl_deck`.
     ///
     /// `None` is the system default. Changing it drops the engine so the next
@@ -202,6 +204,7 @@ impl Player {
             master_level: Mutex::new(1.0),
             open_sink,
             ticking: std::sync::atomic::AtomicBool::new(false),
+            tick_requests: std::sync::atomic::AtomicU64::new(0),
             loaded_tracks: Mutex::new(std::collections::HashMap::new()),
             device: Mutex::new(None),
             wish: Mutex::new(StreamWish::default()),
@@ -403,6 +406,7 @@ fn emit_deck_event<R: Runtime>(app: &AppHandle<R>, event: &DeckEvent) {
 /// Playing or beginning a drag starts it again.
 pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
     let player = app.state::<Arc<Player>>();
+    player.tick_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if player.ticking().swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
@@ -413,6 +417,7 @@ pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
     let spawned = std::thread::Builder::new().name("rbl-deck-tick".to_owned()).spawn(move || {
         let mut since_deck_tick = 0_u32;
         let mut silent_ticks = 0_u32;
+        let mut reported_request = handle.state::<Arc<Player>>().tick_requests.load(std::sync::atomic::Ordering::SeqCst);
         loop {
             std::thread::sleep(METER_TICK);
             let player = handle.state::<Arc<Player>>();
@@ -433,6 +438,11 @@ pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
                 continue;
             }
             since_deck_tick = 0;
+            let request = player.tick_requests.load(std::sync::atomic::Ordering::SeqCst);
+            if request != reported_request {
+                silent_ticks = 0;
+                reported_request = request;
+            }
             let snapshot = engine.snapshot();
             // The peaks were taken and cleared above, so the deck tick carries
             // what this pass read rather than an empty meter.
@@ -453,9 +463,11 @@ pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
         }
         let player = handle.state::<Arc<Player>>();
         player.ticking().store(false, std::sync::atomic::Ordering::SeqCst);
-        // A play or scrub can start between the idle check and releasing the
-        // ticker flag. Its start request saw us still running; hand it off now.
-        if player.opened().is_some_and(|engine| engine.any_sounding()) {
+        // A command can arrive after the final snapshot but before the flag
+        // is released. A paused move makes no sound, so its unreported request
+        // must also hand off to a fresh ticker.
+        if player.tick_requests.load(std::sync::atomic::Ordering::SeqCst) != reported_request
+            || player.opened().is_some_and(|engine| engine.any_sounding()) {
             start_ticker(&handle);
         }
     });

@@ -162,6 +162,14 @@ impl Shell {
         run(commands::deck_state(self.player())).unwrap()
     }
 
+    fn wait_for_ticker_to_stop(&self) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while self.player().ticking().load(std::sync::atomic::Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "the idle ticker did not stop");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     fn preview(&self) -> State<'_, Arc<Preview>> {
         self.app.state::<Arc<Preview>>()
     }
@@ -2410,11 +2418,7 @@ fn paused_move_commands_restart_the_tick_after_the_idle_ticker_stops() {
         let loaded = s.pull_until("the paused deck to load", |t| t.a.loaded);
         assert!(!loaded.a.playing);
 
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while s.player().ticking().load(std::sync::atomic::Ordering::SeqCst) {
-            assert!(Instant::now() < deadline, "the idle ticker did not stop");
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        s.wait_for_ticker_to_stop();
         let (sent, received) = std::sync::mpsc::channel();
         s.app.listen("deck:tick", move |event| {
             let _ = sent.send(serde_json::from_str::<serde_json::Value>(event.payload()).unwrap());
@@ -2434,6 +2438,44 @@ fn paused_move_commands_restart_the_tick_after_the_idle_ticker_stops() {
         assert_eq!(tick["a"]["playing"].as_bool(), Some(false));
         assert!(tick["a"]["generation"].as_u64().unwrap() > u64::from(loaded.a.generation));
     }
+}
+
+#[test]
+fn a_paused_move_requested_from_the_final_idle_tick_is_not_lost() {
+    let s = shell();
+    let audio = s._dir.path().join("Closing Tick.wav");
+    write_wav(&audio, 10);
+    let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
+    run(commands::deck_load(s.handle(), s.state(), s.player(), s.preview(), "a".into(), report.tracks[0].id.clone(), 1)).unwrap();
+    s.pull_until("the paused deck to load", |t| t.a.loaded);
+    s.wait_for_ticker_to_stop();
+
+    let (sent, received) = std::sync::mpsc::channel();
+    let count = std::sync::atomic::AtomicUsize::new(0);
+    let handle = s.handle();
+    let listener = s.app.listen("deck:tick", move |event| {
+        let tick: serde_json::Value = serde_json::from_str(event.payload()).unwrap();
+        let at = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        // The fifth silent tick is the one after which the ticker stops.
+        // Request a move inside its synchronous native event callback, while
+        // the ticker still owns its running flag but has sampled the old head.
+        if at == 5 {
+            run(commands::deck_move(handle.clone(), handle.state::<Arc<Player>>(), "a".into(), 1_000.0)).unwrap();
+        }
+        let _ = sent.send((at, tick));
+    });
+    rbxport_lib::player::start_ticker(&s.handle());
+    while received.recv_timeout(Duration::from_secs(2)).unwrap().0 != 5 {}
+    s.pull_until("the move from the final tick to reach the engine", |t| t.a.frames == i64::from(RATE));
+    loop {
+        let (_, tick) = received.recv_timeout(Duration::from_secs(2)).expect("a move requested during the final idle tick must publish its new head");
+        if tick["a"]["frames"].as_i64() == Some(i64::from(RATE)) {
+            assert_eq!(tick["a"]["playing"].as_bool(), Some(false));
+            break;
+        }
+    }
+    s.app.unlisten(listener);
+    s.wait_for_ticker_to_stop();
 }
 
 #[test]
