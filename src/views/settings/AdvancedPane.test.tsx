@@ -212,11 +212,11 @@ describe("Database management", () => {
   const drive = { name: "DJ SSD", masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db", current: false };
   const drives = [local, drive];
 
-  async function mountDatabase(backend: Partial<Backend>, readOnly = false) {
+  async function mountDatabase(backend: Partial<Backend>, readOnly = false, loaded = true) {
     __setBackend({ listBackups, findDuplicates: vi.fn(), ...backend } as unknown as Backend);
     act(() => root.render(
       <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update, reset: vi.fn() }}>
-        <AdvancedPane tab="database" summary={{ trackCount: 1, playlistCount: 1, dbVersion: "6000", readOnly } as never} />
+        <AdvancedPane tab="database" summary={loaded ? { trackCount: 1, playlistCount: 1, dbVersion: "6000", readOnly } as never : null} />
       </PreferencesProvider>,
     ));
     await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
@@ -243,6 +243,24 @@ describe("Database management", () => {
   it("is greyed out with only one drive, and while rekordbox runs", async () => {
     expect((await mountDatabase({ databaseDrives: vi.fn().mockResolvedValue(drives.slice(0, 1)) }))!.disabled).toBe(true);
     expect((await mountDatabase({ databaseDrives: vi.fn().mockResolvedValue(drives) }, true))!.disabled).toBe(true);
+  });
+
+  it("can choose the sole available library when no library is currently open", async () => {
+    const switchLibrary = vi.fn().mockResolvedValue(undefined);
+    const confirm = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const select = await mountDatabase({ databaseDrives: vi.fn().mockResolvedValue([drive]), confirm, switchLibrary }, false, false);
+    expect(select!.disabled).toBe(false);
+    expect(select!.value).toBe("");
+    expect(select!.selectedOptions[0]?.textContent).toBe("Select a drive");
+
+    await choose(select!, drive.masterDb);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(switchLibrary).not.toHaveBeenCalled();
+    expect(select!.value).toBe("");
+    await choose(select!, drive.masterDb);
+    expect(switchLibrary).toHaveBeenCalledExactlyOnceWith(drive.masterDb);
+    expect(select!.value).toBe(drive.masterDb);
+    expect(select!.disabled).toBe(true);
   });
 
   it("asks before switching, and switches only on OK", async () => {
