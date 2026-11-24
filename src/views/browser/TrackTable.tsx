@@ -935,7 +935,7 @@ export interface TrackTableProps {
    */
   pendingRows?: number;
   /** The rows behind the selection, for queueing analysis. */
-  onSelectedTracks?: (tracks: { id: string; title: string }[]) => void;
+  onSelectedTracks?: (tracks: { id: string; title: string }[], source?: ViewSpec["source"]) => void;
   /** Analyse whatever is selected. */
   onAnalyse?: () => void;
   /** Right-click actions the table cannot do itself. */
@@ -1870,27 +1870,25 @@ export const TrackTable = memo(function TrackTable({
     recheckMissing(onlySelected);
   }, [onlySelected, recheckMissing, spec.source.kind]);
 
-  const reportedRow = useRef<string | null>(null);
+  const reportedRow = useRef<RowDto | null>(null);
   useEffect(() => {
     if (!onSelectedRow) return;
-    // One row, or nothing: a deck holds one track, so a selection of four has
-    // no answer to which of them clicking a deck would load.
+    // Keep the actual cached row, including its source and colour ID. A
+    // different database can return the same file ID with different data.
     const only = selection.ids.size === 1 ? [...selection.ids][0] : undefined;
-    if (only === reportedRow.current) return;
-    reportedRow.current = only ?? null;
-    if (only === undefined) {
-      onSelectedRow(null);
-      return;
-    }
-    for (let i = 0; i < view.count; i++) {
-      const row = view.rowAt(i);
-      if (row?.id === only) {
-        onSelectedRow(row);
-        return;
+    let selected: RowDto | null = null;
+    if (only !== undefined) {
+      for (let i = 0; i < view.count; i++) {
+        const row = view.rowAt(i);
+        if (row?.id === only) {
+          selected = row;
+          break;
+        }
       }
     }
-    // Selected but not fetched — off screen, which a click cannot reach.
-    onSelectedRow(null);
+    if (selected === reportedRow.current) return;
+    reportedRow.current = selected;
+    onSelectedRow(selected);
   }, [selection.ids, view, view.token, onSelectedRow]);
 
   // The rows behind the selection, resolved from what is cached. A selection
@@ -2132,10 +2130,10 @@ export const TrackTable = memo(function TrackTable({
       // Only when it has actually changed. This hands a new array upwards, and
       // the app holds it in state: sending an equal one re-renders the window,
       // which renders this table, which runs this effect again.
-      const stamp = tracks.map((t) => t.id).join(",");
+      const stamp = tracks.length ? JSON.stringify([view.token, tracks.map((t) => t.id)]) : "";
       if (stamp === reportedSelection.current) return;
       reportedSelection.current = stamp;
-      onSelectedTracks(tracks);
+      onSelectedTracks(tracks, spec.source);
     };
     // An answer still on its way for another selection or view is dropped.
     const known = listOrder.current;
@@ -2168,7 +2166,7 @@ export const TrackTable = memo(function TrackTable({
       // The order only decides which track's colour the information panel
       // shows; the selection already reported stands.
     });
-  }, [selection.ids, view, onSelectedTracks, listedIds]);
+  }, [selection.ids, view, onSelectedTracks, listedIds, spec.source]);
 
   // An arrow drawn to rekordbox's geometry rather than the text arrows that
   // stood in for it: those render in the body font and sit off the baseline.

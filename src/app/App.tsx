@@ -1,5 +1,6 @@
 import { ImportSkipsDialog } from "@/components/ImportSkipsDialog";
 import { ConfirmHost } from "@/components/ConfirmDialog";
+import type { ColorOwner } from "@/store/useColorNames";
 import type { DuplicateAnswer } from "@/components/DuplicateTracksDialog";
 import type { FolderClashAnswer } from "@/lib/folderDrop";
 import { JobQueue, slices, type JobView } from "@/lib/jobQueue";
@@ -279,7 +280,7 @@ function AppBody() {
   // The track ids the information panel follows: the selection of whichever
   // browser list changed last, in the order that list reports it. More than
   // one is a multiple selection, which the panel edits as a whole.
-  const [infoSelection, setInfoSelection] = useState<readonly string[]>([]);
+  const [[infoSelection, infoColorOwner], setInfoSelection] = useState<readonly [readonly string[], ColorOwner | null | undefined]>([[], undefined]);
   // Where each deck's transport is drawn in the two-deck layouts. State rather
   // than a ref, because the players have to re-render once the slots exist.
   const [transportA, setTransportA] = useState<HTMLDivElement | null>(null);
@@ -2292,13 +2293,13 @@ function AppBody() {
     setAnalysisSelection(tracks.map(({ id, title }) => ({ id, title })));
   });
   const analyseSelection = useEventCallback(() => analyseTracks(selectedTracks));
-  const reportMainSelection = useCallback((tracks: { id: string; title: string }[]) => {
+  const reportSubSelection = useCallback((tracks: { id: string; title: string }[], source?: ViewSpec["source"]) => {
+    setInfoSelection([tracks.map((t) => t.id), source?.kind === "device" ? source : tracks.some(track => track.id.startsWith("file:")) ? null : undefined]);
+  }, []);
+  const reportMainSelection = useCallback((tracks: { id: string; title: string }[], source?: ViewSpec["source"]) => {
     setSelectedTracks(tracks);
-    setInfoSelection(tracks.map((t) => t.id));
-  }, []);
-  const reportSubSelection = useCallback((tracks: { id: string; title: string }[]) => {
-    setInfoSelection(tracks.map((t) => t.id));
-  }, []);
+    reportSubSelection(tracks, source);
+  }, [reportSubSelection]);
   /** Configure one track: the deck's own, from its menu. */
   const analyseOne = useCallback(
     (id: string, title: string) => {
@@ -3621,6 +3622,7 @@ function AppBody() {
             // never for a multiple selection, which the panel shows as one.
             track={infoSelection.length > 1 ? null : selectedRow ?? playerTrack}
             selection={infoSelection}
+            selectionOwner={infoColorOwner}
             readOnly={readOnly}
             libraryGeneration={libraryGeneration}
             onRate={rateTracks}
