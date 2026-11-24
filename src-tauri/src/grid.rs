@@ -155,7 +155,7 @@ struct HistoryEntry {
     after: Vec<Beat>,
     label: &'static str,
     /// Row-only zero markers must survive later grid edits and Undo/Redo.
-    row_bpms: Option<(u32, u32)>,
+    row_bpms: Option<(u32, u32, String)>,
 }
 
 impl GridEdit {
@@ -439,7 +439,7 @@ pub fn apply(
 /// of [`apply_options`] after the write has already landed. `before` and
 /// `after` are the grid the action found and the grid it wrote.
 fn record_history(editor: &GridEditor, track: &str, action: GridAction, before: Vec<Beat>, after: Vec<Beat>,
-    options: &GridOptions, row_bpms: Option<(u32, u32)>) {
+    options: &GridOptions, row_bpms: Option<(u32, u32, String)>) {
     let mut histories = editor.histories.lock();
     let history = histories.entry(track.to_owned()).or_default();
     match action {
@@ -451,8 +451,8 @@ fn record_history(editor: &GridEditor, track: &str, action: GridAction, before: 
                 // Undo still goes back to the grid before the first tap.
                 Some(open) if transaction.is_some() && history.transaction.as_ref() == transaction => {
                     open.after = after;
-                    if let Some((_, after)) = &mut open.row_bpms {
-                        *after = row_bpms.map_or_else(|| u32::from(tempo_x100(&open.after)), |(_, bpm)| bpm);
+                    if let Some((_, after, _)) = &mut open.row_bpms {
+                        *after = row_bpms.as_ref().map_or_else(|| u32::from(tempo_x100(&open.after)), |(_, bpm, _)| *bpm);
                     }
                 },
                 _ => history.undo.push(HistoryEntry { before, after, label: edit.label(), row_bpms }),
@@ -557,14 +557,14 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
         };
         if let Some(entries) = entries {
             if let Some(entry) = entries.last() {
-                if let Some((before, after)) = entry.row_bpms {
-                    let expected = if action == GridAction::Undo { after } else { before };
-                    if old_row_bpm != expected {
+                if let Some((before, after, analysis)) = &entry.row_bpms {
+                    let expected = if action == GridAction::Undo { *after } else { *before };
+                    if old_row_bpm != expected || *analysis != files.relative {
                         let label = entry.label;
                         entries.pop();
                         return Err(conflict(action, label));
                     }
-                    Some((before, after))
+                    Some((*before, *after))
                 } else { None }
             } else { None }
         } else { None }
@@ -590,7 +590,8 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
 
     let new_bpm = history_bpms.map(|(before, after)| if action == GridAction::Undo { before } else { after })
         .or(options.metadata_bpm).unwrap_or_else(|| u32::from(tempo_x100(&next)));
-    let row_bpms = history_bpms.or_else(|| (old_row_bpm == 0 || options.metadata_bpm == Some(0)).then_some((old_row_bpm, new_bpm)));
+    let row_bpms = history_bpms.map(|(before, after)| (before, after, files.relative.clone()))
+        .or_else(|| (old_row_bpm == 0 || options.metadata_bpm == Some(0)).then(|| (old_row_bpm, new_bpm, files.relative.clone())));
     let bpm_changed = if row_bpms.is_some() { new_bpm != old_row_bpm } else { new_bpm != u32::from(tempo_x100(&beats)) };
     if next == beats {
         if bpm_changed { set_bpm(new_bpm, false, old_row_bpm)?; }
@@ -1322,6 +1323,28 @@ mod tests {
         assert_eq!(row_bpm(&state), before);
         assert!(f.editor.histories.lock()[&Fixture::track()].undo.is_empty());
         assert_eq!(std::fs::read(&dat).unwrap(), bytes);
+        assert!(!f.editor.backup_dir.exists());
+    }
+
+    #[test]
+    fn zero_history_refuses_a_different_analysis_even_with_identical_grid_bytes() {
+        let mut f = open();
+        let state = app_state(&f);
+        set_tempo(&state, &f.editor, &Fixture::track(), "0").unwrap();
+        let dat = rbl_anlz::resolve(&f.location.share_root, RELATIVE);
+        let bytes = std::fs::read(&dat).unwrap();
+        let relative = "/PIONEER/USBANLZ/replaced/ANLZ0000.DAT";
+        let replacement = rbl_anlz::resolve(&f.location.share_root, relative);
+        std::fs::create_dir_all(replacement.parent().unwrap()).unwrap();
+        std::fs::write(&replacement, &bytes).unwrap();
+        fixture::set_analysis_path(&f.location, 1, relative).unwrap();
+        let db = Db::open(f.location.clone(), OpenMode::ReadOnly).unwrap();
+        f.library = rbl_index::load(&db).unwrap().0;
+        let mut save = |bpm, changed, before| save_tempo(&state, &Fixture::track(), bpm, changed, before, relative);
+        let outcome = apply_options(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Undo, &GridOptions::default(), &mut save);
+        assert_eq!(outcome.unwrap_err().kind, ErrorKind::Conflict);
+        assert_eq!(row_bpm(&state), 0);
+        assert_eq!(std::fs::read(&replacement).unwrap(), bytes);
         assert!(!f.editor.backup_dir.exists());
     }
 

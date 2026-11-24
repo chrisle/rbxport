@@ -40,7 +40,8 @@ As required by #505, an analysed track's Info edit remains one action in
 its grid history. Zero entries retain the before/after row BPM as well as
 the grid. Undo of a later grid edit can therefore restore the zero marker
 with its earlier positive grid. Zero-related Undo/Redo refuses conflicting
-newer row values. Writes compare the expected BPM and analysis association
+newer row values or a changed analysis association, even if the new file
+has identical grid bytes. Writes compare the expected BPM and analysis association
 in the database transaction; stale, deleted or missing rows are refused.
 Metadata-only updates do not increment the analysis revision.
 
