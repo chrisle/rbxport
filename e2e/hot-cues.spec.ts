@@ -188,6 +188,8 @@ test("with rekordbox holding the library, setting and clearing are refused and c
   await expect(pad(page, "A")).not.toHaveAttribute("title", /read-only/);
   await expect(clearButton(page, "A")).toBeDisabled();
   await expect(clearButton(page, "A")).toHaveAttribute("title", /read-only/);
+  await pad(page, "A").click({ button: "right" });
+  await expect(page.getByRole("menu", { name: "Hot cue color" })).toHaveCount(0);
 
   // Calling moves the playhead to the cue's time, which the list shows, and
   // plays from there. The list rounds down to the second and the deck runs
@@ -372,12 +374,14 @@ test("with Q on, a call inside a one-beat loop leaves the loop and lands on the 
 });
 
 test("right-clicking a set pad opens the cue colour menu and recolours it (#272)", async ({ page }) => {
-  await load(page);
+  await load(page, "?writable=1");
+  await expect(pad(page, "A")).not.toHaveAttribute("style", /--cue-colour: ?#508CFF/i);
   await pad(page, "A").click({ button: "right" });
   const menu = page.getByRole("menu", { name: "Hot cue color" });
   await expect(menu).toBeVisible();
   await menu.getByRole("button", { name: "Color 6" }).click();
   await expect(menu).toBeHidden();
+  await expect(pad(page, "A")).toHaveAttribute("style", /--cue-colour: ?#508CFF/i);
 });
 
 test("a hot cue set or reset here takes its slot's HOT CUE color default, not green (#593)", async ({ page }) => {
