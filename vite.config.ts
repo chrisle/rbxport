@@ -79,9 +79,16 @@ export default defineConfig(({ mode }) => ({
     sourcemap: sentryAuthToken ? "hidden" : false,
     rollupOptions: {
       output: {
+        // Keep shared startup dependencies out of otherwise lazy view chunks.
+        onlyExplicitManualChunks: true,
         manualChunks(id) {
           // Third-party code gains no protection from obfuscation.
           if (id.includes("/node_modules/")) return "vendor";
+          // Share wrappers and compression across the small, related lazy dialogs.
+          // Their imports remain lazy; no dialog is added to the initial entry.
+          if (/\/src\/components\/(DuplicateTracksDialog|FolderClashDialog|DeviceImportCopyDialog)\.tsx$/.test(id)
+            || id.endsWith("/src/views/library/NewLibraryDialog.tsx")) return "library-dialogs";
+          if (/\/src\/views\/(report\/ReportBug|log\/LogView|update\/UpdateManager)\.tsx$/.test(id)) return "support";
           // keep canvas + device views off the cold-start path
           if (id.includes("/src/canvas/")) return "canvas";
         },
