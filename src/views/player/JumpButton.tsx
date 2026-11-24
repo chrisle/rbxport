@@ -36,11 +36,11 @@ export function JumpButton({ label, glyph, disabled, onJump }: {
   return (
     <button
       type="button"
-      className={styles.square}
+      className={`${styles.square} ${styles.jump}`}
       aria-label={label}
       disabled={disabled}
       data-pressed={pressed ? "" : undefined}
-      onPointerDown={press}
+      onPointerDown={(event) => { if (event.button === 0) press(); }}
       onPointerUp={lift}
       onPointerLeave={lift}
       onPointerCancel={lift}
