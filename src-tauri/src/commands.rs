@@ -3548,7 +3548,7 @@ pub async fn track_vocals(
         let Ok(two) = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "2EX")) else {
             return Ok(Vec::new());
         };
-        Ok(window_of(two.vocals().unwrap_or_default(), 1, from, len))
+        Ok(window_of(two.vocals().as_deref().unwrap_or_default(), 1, from, len))
     })
     .await
     .map(tauri::ipc::Response::new)

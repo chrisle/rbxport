@@ -835,6 +835,16 @@ unchanged.
 `PWV6` and `PWV7` are three-band waveforms. `PSSI` carries phrase data for
 Lighting; `PVDI` is rekordbox metadata.
 
+The `PVDI` header uses four big-endian 16-bit fields: version, frame
+numerator, frame denominator and point size, followed by a 32-bit point
+count. The vocal reader handles the USB-masked flag
+`0x8000` in the version field, with one-byte points at 1024/22050 seconds. Other
+version bits are preserved and do not select a different transform. Plain points are
+borrowed; masked points decode into a separate buffer, preserving the
+original section for export and backup. Unsupported framing yields no
+vocal strip rather than exposing encoded bytes as intensity.
+
+
 ## 8. Artwork
 
 `/PIONEER/Artwork/{id/20+1:05}/{a,b}{id}{,_m}.jpg` — **four files per

@@ -378,7 +378,10 @@ fn pvdi(declared: u32, payload: &[u8]) -> Vec<u8> {
 fn reads_the_vocal_strip() {
     let strip = [0, 0, 1, 2, 3, 4, 4, 4, 3, 1, 0];
     let anlz = rbl_anlz::parse(&pvdi(strip.len() as u32, &strip)).unwrap();
-    assert_eq!(anlz.vocals().unwrap(), strip);
+    let decoded=anlz.vocals().unwrap();
+    let points:&[u8]=decoded.as_ref();
+    assert_eq!(points.as_ptr(),anlz.sections[0].payload.as_ptr());
+    assert_eq!(points, strip);
     assert!(strip.iter().all(|v| *v <= rbl_anlz::VOCAL_MAX));
 }
 
@@ -407,4 +410,49 @@ fn one_vocal_entry_covers_the_measured_frame() {
     // 44100/2048, which is what 600 tracks measure at against both the PWV7
     // column count and the PQTZ grid.
     assert!((rbl_anlz::VOCAL_FRAME_MS - 46.44).abs() < 0.01);
+}
+
+#[test]
+fn masked_vocals_decode_without_mutating_the_tag() {
+    // Fixed 64-point vector crosses the mask's 19-byte period repeatedly.
+    let encoded = [0x1e,0xdc,0x1c,0x1a,0x06,0x19,0x1a,0x13,0x1a,0x27,0x18,0x18,0x26,0x12,0xff,0x11,
+        0x1f,0x28,0x16,0x1a,0xdd,0x1f,0x1b,0x01,0x1d,0x1b,0x10,0x1b,0x20,0x1c,0x19,0x25,
+        0x13,0xf8,0x15,0x1e,0x2b,0x17,0x1d,0xd9,0x1e,0x18,0x00,0x1a,0x1f,0x11,0x18,0x21,
+        0x1b,0x1d,0x24,0x10,0xf9,0x12,0x1a,0x2a,0x14,0x1c,0xde,0x1a,0x19,0x03,0x1b,0x18];
+    let mut parsed=rbl_anlz::parse(&pvdi(64,&encoded)).unwrap();
+    parsed.sections[0].header[0..2].copy_from_slice(&0x8000_u16.to_be_bytes());
+    for version in [0x8000_u16,0x8001,0xffff] {
+        parsed.sections[0].header[0..2].copy_from_slice(&version.to_be_bytes());
+        let original=parsed.to_bytes();
+        let decoded=parsed.vocals().unwrap();
+        assert_eq!(decoded.as_ref(),(0..64).map(|i|i%5).collect::<Vec<u8>>());
+        assert_eq!(parsed.to_bytes(),original);
+        assert_eq!(rbl_anlz::parse(&original).unwrap().vocals().unwrap().as_ref(),decoded.as_ref());
+    }
+}
+
+#[test]
+fn unsupported_vocal_framing_is_not_returned_as_intensity_bytes() {
+    for (at,value) in [(2,0_u16),(2,512),(4,0),(4,44100),(6,0),(6,2)] {
+        let mut parsed=rbl_anlz::parse(&pvdi(3,&[0,2,4])).unwrap();
+        parsed.sections[0].header[at..at+2].copy_from_slice(&value.to_be_bytes());
+        let original=parsed.to_bytes();
+        assert!(parsed.vocals().is_none(),"field {at}={value}");
+        assert_eq!(parsed.to_bytes(),original);
+    }
+}
+
+
+#[test]
+fn unmasked_version_bits_keep_plain_vocals_borrowed() {
+    for version in [0_u16,1,0x7fff] {
+        let mut parsed=rbl_anlz::parse(&pvdi(3,&[0,2,4])).unwrap();
+        parsed.sections[0].header[0..2].copy_from_slice(&version.to_be_bytes());
+        let original=parsed.to_bytes();
+        let decoded=parsed.vocals().unwrap();
+        let points:&[u8]=decoded.as_ref();
+        assert_eq!(points.as_ptr(),parsed.sections[0].payload.as_ptr());
+        assert_eq!(points,[0,2,4]);
+        assert_eq!(parsed.to_bytes(),original);
+    }
 }

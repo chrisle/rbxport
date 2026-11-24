@@ -1130,7 +1130,7 @@ mod tests {
         restore(&state, &location, Path::new(&snapshot), rbl_backup::restore::Parts::ALL);
         assert_eq!(fs::read(&art).unwrap(), b"thumbnail bytes");
         assert_eq!(fs::read(&vocals).unwrap(), anlz);
-        assert_eq!(rbl_anlz::Anlz::read(&vocals).unwrap().vocals().unwrap(), &[0, 2, 4, 1]);
+        assert_eq!(rbl_anlz::Anlz::read(&vocals).unwrap().vocals().unwrap().as_ref(), &[0, 2, 4, 1]);
         for name in LIBRARY_FILES { assert_eq!(fs::read(root.join(name)).unwrap(), b"original selections"); }
     }
 
