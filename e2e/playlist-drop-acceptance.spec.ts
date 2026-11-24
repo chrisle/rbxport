@@ -1,0 +1,58 @@
+import { expect, test } from "@playwright/test";
+
+test("87-to-88 cross-playlist drop stays visible across the last cached page and search", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const addedId = await page.evaluate(async (modulePath) => {
+    const { getBackend } = await import(modulePath) as typeof import("../src/ipc/client");
+    const backend = await getBackend();
+    const handle = await backend.openView({ source: { kind: "collection" }, sort: "trackNo", descending: false, query: "" });
+    const ids = await backend.viewIdsInRange(handle.viewId, 0, 87);
+    if (ids.length !== 88) throw new Error("need 88 distinct fixture tracks");
+    await backend.edits.createPlaylist("Probe source 536", "root");
+    await backend.edits.createPlaylist("Probe destination 536", "root");
+    const tree = await backend.playlistTree();
+    const source = tree.find((node) => node.name === "Probe source 536");
+    const destination = tree.find((node) => node.name === "Probe destination 536");
+    if (!source || !destination) throw new Error("fixture playlists missing");
+    await backend.edits.addTracksToPlaylist(source.id, ids.slice(87), false);
+    await backend.edits.addTracksToPlaylist(destination.id, ids.slice(0, 87), false);
+    const added = ids[87];
+    if (!added) throw new Error("last fixture track missing");
+    return added;
+  }, "/src/ipc/client.ts");
+  const source = page.getByRole("treeitem").filter({ hasText: "Probe source 536" }).first();
+  const destination = page.getByRole("treeitem").filter({ hasText: "Probe destination 536" }).first();
+  await source.click();
+  await expect(page.getByTestId("browser-title")).toHaveText("Probe source 536 (1 Tracks)");
+  const title = page.locator('[role="gridcell"][data-col="title"]').first();
+  const text = (await title.innerText()).trim();
+  await title.dragTo(destination);
+  await expect(page.getByRole("contentinfo")).toContainText("Added 1 track to Probe destination 536.");
+  await destination.click();
+  await expect(page.getByTestId("browser-title")).toHaveText("Probe destination 536 (88 Tracks)");
+  const scroller = page.getByTestId("track-scroll");
+  await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect(page.locator('[role="gridcell"][data-col="title"]').filter({ hasText: text })).toBeVisible();
+  const search = page.getByRole("searchbox", { name: "Search within this track list", exact: true }).first();
+  await search.fill(text);
+  const searchedRow = page.getByRole("row").filter({ has: page.locator('[data-col="title"]').filter({ hasText: text }) })
+    .filter({ has: page.getByRole("gridcell", { name: "88", exact: true }) });
+  await expect(searchedRow.locator('[data-col="trackNo"]')).toHaveText("88");
+  const found = await page.evaluate(async ({ modulePath, text }) => {
+    const backend = await (await import(modulePath) as typeof import("../src/ipc/client")).getBackend();
+    const nodes = await backend.playlistTree();
+    const destination = nodes.find((node) => node.name === "Probe destination 536");
+    if (!destination) throw new Error("fixture destination missing");
+    const handle = await backend.openView({ source: { kind: "playlist", id: destination.id }, sort: "trackNo", descending: false, query: text });
+    return { count: handle.len, rows: await backend.fetchRows(handle.viewId, 0, 10, []) };
+  }, { modulePath: "/src/ipc/client.ts", text });
+  expect(found.count).toBeGreaterThan(0);
+  expect(found.rows.some((row) => row.id === addedId && row.trackNo === 88)).toBe(true);
+  await search.fill("");
+  await source.click();
+  await destination.click();
+  await expect(page.getByTestId("browser-title")).toHaveText("Probe destination 536 (88 Tracks)");
+  await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect(page.locator('[role="gridcell"][data-col="title"]').filter({ hasText: text })).toBeVisible();
+});
