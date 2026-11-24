@@ -290,7 +290,7 @@ export function AdvancedPane({ tab, summary }: {
  * library is. The list is the default drive when it holds a library, then
  * every connected drive holding `PIONEER/Master/master.db` (or
  * `.PIONEER/Master` on HFS), named by volume label (`C:BOOTCAMP` on
- * Windows), and it is greyed out while there is only one; choosing one asks
+ * Windows), and it is greyed out with only the current library; choosing one asks
  * "Are you sure you want to switch Master Database?" and switches
  * (`DetailDatabaseManagement::setup`, `comboBoxChanged`, `selectDrive`)
  * [OBS rekordbox 7.2.11, static analysis; Windows layout observed on
@@ -314,7 +314,7 @@ function DatabaseManagementSection({ readOnly }: { readOnly: boolean }) {
     return () => { live = false; };
   }, []);
 
-  const current = drives.find((drive) => drive.current)?.masterDb ?? drives[0]?.masterDb ?? "";
+  const current = drives.find((drive) => drive.current)?.masterDb ?? "";
   const choose = async (masterDb: string) => {
     if (masterDb === current) return;
     const backend = await getBackend();
@@ -343,9 +343,9 @@ function DatabaseManagementSection({ readOnly }: { readOnly: boolean }) {
         label="Select a drive"
         nested
         value={current}
-        choices={drives.map((drive) => ({ value: drive.masterDb, label: drive.name }))}
+        choices={[...(!current ? [{ value: "", label: t("Select a drive") }] : []), ...drives.map((drive) => ({ value: drive.masterDb, label: drive.name }))]}
         preserveChoiceLabels
-        disabled={readOnly || switching || drives.length < 2}
+        disabled={readOnly || switching || drives.every((drive) => drive.current)}
         onChange={(masterDb) => { void choose(masterDb); }}
       />
       {failed ? <Note failed>{failed}</Note> : null}

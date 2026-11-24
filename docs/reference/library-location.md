@@ -90,7 +90,9 @@ Preferences › Advanced › Database ends with **Database management**,
 "Select a drive", listing the default drive when it holds a library and
 every connected drive holding `PIONEER/Master/master.db` or
 `.PIONEER/Master/master.db`, by volume label (`C:LABEL` on Windows). It is
-greyed out with one entry, and while rekordbox runs. Choosing a drive asks
+greyed out when no different library can be selected, and while rekordbox
+runs. If no library is open, a sole discovered library remains selectable; the
+chooser shows “Select a drive” until that library is explicitly chosen. Choosing a drive asks
 rekordbox's "Are you sure you want to switch Master Database?" with OK and
 Cancel. OK opens the chosen `master.db` read-only to check its key and
 schema, sets `masterDbDirectory` to its folder, and starts rbxport again on
