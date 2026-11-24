@@ -41,9 +41,9 @@ describe("formatBitrate", () => {
 });
 
 describe("formatEpochDate", () => {
-  it("prints the local day of a moment in seconds, in the system's order", () => {
+  it("prints the local day of a moment in seconds, in the system's short pattern", () => {
     const sept6 = new Date(2026, 8, 6, 0, 0, 1).getTime() / 1000;
-    expect(formatEpochDate(sept6, "en-US")).toBe("9/6/2026");
+    expect(formatEpochDate(sept6, "en-US")).toBe("9/6/26");
     expect(formatEpochDate(sept6, "en-GB")).toBe("06/09/2026");
     expect(formatEpochDate(new Date(2005, 11, 25, 23, 59).getTime() / 1000, "en-GB")).toBe("25/12/2005");
   });
@@ -61,17 +61,19 @@ describe("formatEpochDate", () => {
 });
 
 describe("formatShortDate", () => {
-  it("follows the system locale's order, separators and padding", () => {
-    expect(formatShortDate("2026-09-06", "en-GB")).toBe("06/09/2026");
-    expect(formatShortDate("2026-09-06", "en-US")).toBe("9/6/2026");
-    expect(formatShortDate("2026-09-06", "de-DE")).toBe("6.9.2026");
+  it("follows the OS short date pattern: order, separators, padding and year width", () => {
+    // Foundation's short style on macOS: en_US M/d/yy, en_GB dd/MM/y, de_DE dd.MM.yy.
+    expect(formatShortDate("2025-03-04", "en-US")).toBe("3/4/25");
+    expect(formatShortDate("2025-03-04", "en-GB")).toBe("04/03/2025");
+    expect(formatShortDate("2025-03-04", "de-DE")).toBe("04.03.25");
+    expect(formatShortDate("2026-12-25", "en-US")).toBe("12/25/26");
     expect(formatShortDate("2026-09-06", "sv-SE")).toBe("2026-09-06");
   });
   it.each(["fa-IR", "th-TH", "ja-JP-u-ca-japanese", "ar-SA", "zh-CN-u-ca-chinese"])(
     "preserves the calendar, era and numerals for %s", (locale) => {
       for (const iso of ["2026-09-06", "2019-04-30", "2019-05-01", "2024-02-29"]) {
         const expected = new Intl.DateTimeFormat(locale, {
-          year: "numeric", month: "numeric", day: "numeric", timeZone: "UTC",
+          dateStyle: "short", timeZone: "UTC",
         }).format(new Date(`${iso}T00:00:00Z`));
         expect(formatShortDate(iso, locale)).toBe(expected);
       }
@@ -82,9 +84,9 @@ describe("formatShortDate", () => {
     try {
       for (const tz of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
         process.env["TZ"] = tz;
-        expect(formatShortDate("2026-09-06", "th-TH")).toBe("6/9/2569");
+        expect(formatShortDate("2026-09-06", "th-TH")).toBe("6/9/69");
         const local = new Date(2026, 8, 6, 23, 59);
-        expect(formatEpochDate(local.getTime() / 1000, "th-TH")).toBe("6/9/2569");
+        expect(formatEpochDate(local.getTime() / 1000, "th-TH")).toBe("6/9/69");
       }
     } finally {
       if (zone === undefined) delete process.env["TZ"];
@@ -99,6 +101,7 @@ describe("formatShortDate", () => {
   it("orders the fields with dateOrder for the same locale", () => {
     expect(dateOrder("en-GB")).toEqual(["day", "month", "year"]);
     expect(dateOrder("en-US")).toEqual(["month", "day", "year"]);
+    expect(dateOrder("de-DE")).toEqual(["day", "month", "year"]);
     expect(dateOrder("bad_locale")).toEqual(["year", "month", "day"]);
   });
   it("never moves a stored day, whatever the time zone", () => {

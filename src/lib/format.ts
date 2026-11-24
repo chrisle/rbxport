@@ -30,6 +30,15 @@ export function formatBitrate(kbps: number): string {
 
 type DateField = "day" | "month" | "year";
 
+/*
+ * rekordbox prints a day in the OS short date pattern: CFDateFormatter's
+ * short style for the current locale. Intl's `dateStyle: "short"` is the
+ * same CLDR pattern — en-US M/d/yy, en-GB dd/MM/y, de-DE dd.MM.yy — with the
+ * locale's calendar and numerals. A pattern customised in the OS (macOS
+ * Language & Region, Linux LC_TIME) never reaches the webview's locale, so
+ * only the locale's own pattern is followed.
+ */
+
 // Cache formatters, not a sample date's digits: calendars and eras vary by day.
 const systemFormatters = new Map<string, Intl.DateTimeFormat | null>();
 function systemFormatter(locale: string | undefined): Intl.DateTimeFormat | null {
@@ -37,9 +46,7 @@ function systemFormatter(locale: string | undefined): Intl.DateTimeFormat | null
   if (systemFormatters.has(key)) return systemFormatters.get(key) ?? null;
   let formatter: Intl.DateTimeFormat | null = null;
   try {
-    formatter = new Intl.DateTimeFormat(locale, {
-      year: "numeric", month: "numeric", day: "numeric", timeZone: "UTC",
-    });
+    formatter = new Intl.DateTimeFormat(locale, { dateStyle: "short", timeZone: "UTC" });
   } catch { /* an unknown locale keeps year first */ }
   systemFormatters.set(key, formatter);
   return formatter;
@@ -69,7 +76,7 @@ function printDate(year: number, month: number, day: number, locale: string | un
 
 /**
  * A stored day (`YYYY-MM-DD`, with or without a time after it) in the
- * system's order, on Intl's calendar. `locale` is the runtime's default
+ * system's short date pattern, on Intl's calendar. `locale` is the runtime's default
  * unless a test names one.
  */
 export function formatShortDate(iso: string | null | undefined, locale?: string): string {
