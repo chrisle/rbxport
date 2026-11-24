@@ -1,4 +1,5 @@
-import { useCallback, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { useTranslation } from "@/i18n";
 import { clampWidth, type SplitterBounds } from "@/lib/splitter";
 import styles from "./InfoSlot.module.css";
 
@@ -21,48 +22,37 @@ interface InfoSlotProps {
  * panel can be narrowed when it takes too much of the window (#860).
  */
 export function InfoSlot({ width, bounds, onWidthChange, children }: InfoSlotProps) {
+  const t = useTranslation();
   const from = useRef<{ x: number; width: number } | null>(null);
   const slot = useRef<HTMLDivElement>(null);
 
-  const current = useCallback(
-    () => width ?? slot.current?.getBoundingClientRect().width ?? bounds.min,
-    [width, bounds.min],
-  );
+  const current = () => width ?? slot.current?.getBoundingClientRect().width ?? bounds.min;
 
-  const onPointerDown = useCallback(
-    (event: PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return;
-      from.current = { x: event.clientX, width: current() };
-      // Capture, so the drag survives the pointer leaving the handle.
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      event.preventDefault();
-    },
-    [current],
-  );
-  const onPointerMove = useCallback(
-    (event: PointerEvent<HTMLDivElement>) => {
-      const start = from.current;
-      if (!start) return;
-      // The handle is on the left edge, so dragging left widens the panel.
-      onWidthChange(clampWidth(start.width - (event.clientX - start.x), bounds));
-    },
-    [bounds, onWidthChange],
-  );
-  const onPointerEnd = useCallback((event: PointerEvent<HTMLDivElement>) => {
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    from.current = { x: event.clientX, width: current() };
+    // Capture, so the drag survives the pointer leaving the handle.
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const start = from.current;
+    if (!start) return;
+    // The handle is on the left edge, so dragging left widens the panel.
+    onWidthChange(clampWidth(start.width - (event.clientX - start.x), bounds));
+  };
+  const onPointerEnd = (event: PointerEvent<HTMLDivElement>) => {
     from.current = null;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-  }, []);
-  const onKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      const step = event.shiftKey ? KEY_STEP_LARGE : KEY_STEP;
-      onWidthChange(clampWidth(current() + (event.key === "ArrowLeft" ? step : -step), bounds));
-      event.preventDefault();
-    },
-    [bounds, current, onWidthChange],
-  );
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const step = event.shiftKey ? KEY_STEP_LARGE : KEY_STEP;
+    onWidthChange(clampWidth(current() + (event.key === "ArrowLeft" ? step : -step), bounds));
+    event.preventDefault();
+  };
 
   return (
     <div ref={slot} className={styles.slot}>
@@ -75,7 +65,7 @@ export function InfoSlot({ width, bounds, onWidthChange, children }: InfoSlotPro
         onKeyDown={onKeyDown}
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize the information panel"
+        aria-label={t("Resize the information panel")}
         aria-valuenow={width === null ? undefined : width}
         aria-valuemin={bounds.min}
         aria-valuemax={clampWidth(Number.MAX_SAFE_INTEGER, bounds)}

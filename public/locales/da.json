@@ -1782,5 +1782,6 @@
   "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.": "The library database is busy. Close rekordbox or another app using it, then try the backup again. Keep Library Protection enabled.",
   "Being written to now. What it holds shows when the sync finishes.": "Being written to now. What it holds shows when the sync finishes.",
   "Some files were not imported": "Some files were not imported",
-  "{count} files were not imported:": "{count} files were not imported:"
+  "{count} files were not imported:": "{count} files were not imported:",
+  "Resize the information panel": "Resize the information panel"
 }
