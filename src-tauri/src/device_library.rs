@@ -1289,6 +1289,19 @@ fn one_library_cues(mount: &Path) -> HashMap<u32, Vec<rbl_index::Cue>> {
 }
 
 /// A stick track's row id with what its library names beside the audio.
+/// Resolve the exact loaded Devices row, rather than the last library
+/// browsed for an audio path shared by two databases.
+pub(crate) fn grid_assets(source: &DeviceTrackSourceDto, track: &str) -> AppResult<DeviceAssets> {
+    let mount = connected(&source.path)?;
+    let format = format_from(&source.format)?;
+    let library = device::read_without_recovery(&mount, format).map_err(|e| device_error(&e))?;
+    let row = library.track(source.track_id).ok_or_else(|| AppError::new(ErrorKind::NotFound, "That device track is no longer available. Reload it from the device."))?;
+    if rbl_index::folder::loose_id(&audio_path(&mount, &row.path)) != track {
+        return Err(AppError::new(ErrorKind::Malformed, "That device row no longer names the loaded audio. Reload it from the device."));
+    }
+    Ok(assets_of(&mount, format, row).1)
+}
+
 fn assets_of(mount: &Path, format: Format, track: &device::Track) -> (String, DeviceAssets) {
     (
         rbl_index::folder::loose_id(&audio_path(mount, &track.path)),
@@ -1335,7 +1348,7 @@ pub async fn device_track_cues(path: String, format: String, device_track_id: u3
         if rbl_index::folder::loose_id(&audio_path(&mount, &row.path)) != track {
             return Ok(Vec::new());
         }
-        let assets = assets_of(&mount, row).1;
+        let assets = assets_of(&mount, format, row).1;
         let Some(dat) = assets.analysis_dat() else { return Ok(Vec::new()) };
         let ext = rbl_anlz::sibling(Path::new(&row.analysis_path), "EXT");
         let ext = ext.to_str().and_then(|relative| DeviceAssets::on_stick(&mount, relative));
@@ -2076,7 +2089,7 @@ mod tests {
             .map(|format| {
                 let library = device::read(mount, format).unwrap();
                 let track = library.tracks.iter().find(|t| t.title == "Track 0").unwrap();
-                (format, track.id, assets_of(mount, track).0)
+                (format, track.id, assets_of(mount, format, track).0)
             })
             .collect();
 

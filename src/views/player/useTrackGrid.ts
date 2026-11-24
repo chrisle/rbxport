@@ -35,12 +35,15 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
   const [grid, setGrid] = useState<BeatGrid>(NO_BEATS);
   const [state, setState] = useState<GridState | null>(null);
   const [gridTrackId, setGridTrackId] = useState<string | null>(null);
+  const sourceKey = `${track?.id ?? ""}|${track?.deviceSource?.path ?? ""}|${track?.deviceSource?.format ?? ""}|${track?.deviceSource?.trackId ?? ""}`;
+  const [readSource, setReadSource] = useState<string | null>(null);
 
   useEffect(() => {
     if (!track || !track.analysed) {
       setGrid(NO_BEATS);
       setState(null);
       setGridTrackId(track?.id ?? null);
+      setReadSource(sourceKey);
       return;
     }
     const id = track.id;
@@ -54,16 +57,17 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
       const current = ++request;
       const backend = await getBackend();
       const [bytes, found] = await Promise.all([
-        backend.trackBeats(id),
+        (track.deviceSource ? backend.trackBeats(id, track.deviceSource) : backend.trackBeats(id)).catch(() => new Uint8Array()),
         // A track with no grid answers `notFound`; that is a state, not
         // an error the deck has to show.
-        backend.gridState(id).catch(() => null),
+        (track.deviceSource ? backend.gridState(id, track.deviceSource) : backend.gridState(id)).catch(() => null),
       ]);
       // The track may have changed while this was in flight.
       if (!live || current !== request) return;
       setGrid(parseBeatGrid(bytes));
       setState(found);
       setGridTrackId(id);
+      setReadSource(sourceKey);
     };
 
     void (async () => {
@@ -89,7 +93,7 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
       stopAnalysis?.();
       stopLibrary?.();
     };
-  }, [track]);
+  }, [track, sourceKey]);
 
-  return { grid, state, setState, gridTrackId };
+  return { grid, state: readSource === sourceKey ? state : null, setState, gridTrackId };
 }

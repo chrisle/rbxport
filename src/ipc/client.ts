@@ -212,17 +212,17 @@ async function realBackend(): Promise<Backend> {
     analysisStages: () => invoke<AnalysisStageDescriptor[]>("analysis_stages"),
     analyseTrack: (trackId, mode = "rbxport", settings, keyTag, drawing, keyDisplay) =>
       invoke<AnalysisResult>("analyse_track", { trackId, mode, settings, keyTag: keyTag ?? null, drawing: drawing ?? false, keyDisplay: keyDisplay ?? null }),
-    trackBeats: async (trackId) => {
+    trackBeats: async (trackId, deviceSource) => {
       // Raw bytes rather than a JSON array of objects: a long mix has tens of
       // thousands of beats, and `{"timeMs":123,"downbeat":true}` each is an
       // order of magnitude more to send and to parse.
       const bytes = await invoke<ArrayBuffer | number[] | Uint8Array>("track_beats", {
-        track: trackId,
+        track: trackId, deviceSource: deviceSource ?? null,
       });
       if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
-    gridState: (trackId) => invoke<GridState>("grid_state", { track: trackId }),
+    gridState: (trackId, deviceSource) => invoke<GridState>("grid_state", { track: trackId, deviceSource: deviceSource ?? null }),
     trackCues: (trackId, device) => device
       ? invoke<Cue[]>("device_track_cues", { track: trackId, path: device.path, format: device.format, deviceTrackId: device.trackId })
       : invoke<Cue[]>("track_cues", { track: trackId }),
@@ -688,8 +688,8 @@ async function realBackend(): Promise<Backend> {
         invoke<GridState>("grid_edit", {
           track, edit, fromMs: options?.fromMs ?? null, deck: options?.deck ?? null, options,
         }),
-      gridUndo: (track, deck) => invoke<GridState>("grid_undo", { track, deck: deck ?? null }),
-      gridRedo: (track, deck) => invoke<GridState>("grid_redo", { track, deck: deck ?? null }),
+      gridUndo: (track, deck, deviceSource) => invoke<GridState>("grid_undo", { track, deck: deck ?? null, deviceSource: deviceSource ?? null }),
+      gridRedo: (track, deck, deviceSource) => invoke<GridState>("grid_redo", { track, deck: deck ?? null, deviceSource: deviceSource ?? null }),
       gridLock: (track, on) => invoke<GridState>("grid_lock", { track, on }),
       convertMemoryCuesToHot: (track) => invoke<number>("convert_memory_cues_to_hot", { track }),
       setTrackField: (tracks, field, value, options) =>

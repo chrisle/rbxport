@@ -45,6 +45,9 @@ Commands in these guides run from the repository root unless stated otherwise.
 - [Playback test fixtures](../crates/rbl-deck/tests/fixtures/README.md): generated audio and regeneration.
 - [Licensing](../LICENSING.md): bundled library terms.
 
+- [Device grid edits](reference/device-grid-edits.md): loaded-row identity,
+  USB publication guards, fixture coverage and remaining evidence limits.
+
 ## Internal material
 
 The sibling `rbxport-private` checkout contains firmware harnesses, private test

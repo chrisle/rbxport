@@ -56,7 +56,7 @@ pub struct RowDto {
     pub device_source: Option<DeviceTrackSourceDto>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceTrackSourceDto {
     pub path: String,

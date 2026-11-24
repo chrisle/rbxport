@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
-import type { Backend, GridState, GridEdit, GridEditOptions } from "@/ipc/types";
+import type { Backend, GridState, GridEdit, GridEditOptions, DeviceTrackSource } from "@/ipc/types";
 import { SHIFT_MS, HELD_SHIFT_MS, MAX_STRETCH_MS } from "@/lib/gridEdit";
 import { useGridEditor, type GridEditorActions } from "./useGridEditor";
 
@@ -42,6 +42,7 @@ let edits: {
 };
 
 interface ProbeProps {
+  deviceSource?: DeviceTrackSource | undefined;
   trackId: string | null;
   state: GridState | null;
   readOnly: boolean;
@@ -49,9 +50,9 @@ interface ProbeProps {
 }
 
 /** Mounts the hook and hands the test what it returned. */
-function Probe({ trackId, state, readOnly, dynamic = false }: ProbeProps) {
+function Probe({ trackId, deviceSource, state, readOnly, dynamic = false }: ProbeProps) {
   grid = useGridEditor({
-    trackId,
+    trackId, deviceSource,
     deck: "a",
     state,
     setState,
@@ -237,6 +238,27 @@ describe("recovered grid control behavior", () => {
     expect(edits.gridEdit.mock.calls[0]?.[0]).toBe("file:/Volumes/TEST/Contents/a.mp3");
     expect(edits.gridLock).not.toHaveBeenCalled();
   });
+  it("binds edit, undo and redo to the loaded device row", async () => {
+    const source: DeviceTrackSource = { path: "/Volumes/TEST", format: "oneLibrary", trackId: 7 };
+    mount({ trackId: "file:/Volumes/TEST/Contents/a.mp3", deviceSource: source, state: gridState({ lockable: false }) });
+    act(() => grid.double()); await settle();
+    expect(edits.gridEdit.mock.calls[0]?.[2]).toMatchObject({ deviceSource: source });
+    act(() => grid.undo()); await settle();
+    act(() => grid.redo()); await settle();
+    expect(edits.gridUndo).toHaveBeenCalledWith("file:/Volumes/TEST/Contents/a.mp3", "a", source);
+    expect(edits.gridRedo).toHaveBeenCalledWith("file:/Volumes/TEST/Contents/a.mp3", "a", source);
+  });
+
+  it("drops a queued edit when the same audio switches device libraries", async () => {
+    const path = "/Volumes/TEST";
+    const id = "file:/Volumes/TEST/Contents/a.mp3";
+    mount({ trackId: id, deviceSource: { path, format: "deviceLibrary", trackId: 1 } });
+    act(() => grid.double());
+    mount({ trackId: id, deviceSource: { path, format: "oneLibrary", trackId: 9 } });
+    await settle();
+    expect(edits.gridEdit).not.toHaveBeenCalled();
+  });
+
   it("clears scope when loading another track", async () => {
     mount(); act(() => grid.adjustFrom()); await settle();
     mount({trackId: "t2"}); expect(grid.fromMs).toBeNull();

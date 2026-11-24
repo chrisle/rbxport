@@ -1547,6 +1547,7 @@ export const Player = memo(function Player({
   }, [onError]);
   const gridEditor = useGridEditor({
     trackId: playback.idle ? null : track?.id ?? null,
+    deviceSource: track?.deviceSource,
     deck, state: gridState, setState: setGridState, positionMs, readOnly, onError: onGridError,
     durationMs: totalMs,
     isDynamicFrom,
