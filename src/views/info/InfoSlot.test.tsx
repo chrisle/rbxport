@@ -87,8 +87,4 @@ describe("InfoSlot", () => {
     expect(onWidthChange).toHaveBeenLastCalledWith(bounds.min + 64);
   });
 
-  it("renders the panel beside the handle", () => {
-    setup();
-    ;
-  });
 });

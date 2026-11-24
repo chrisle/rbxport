@@ -71,22 +71,23 @@ export function subTreeBounds(available: number): SplitterBounds {
   return { ...TREE_BOUNDS, available };
 }
 
-/** Width the right rail takes at the window's edge, held out of the Information panel's reach. */
-const RIGHT_RAIL_RESERVE = 48;
+/** Existing CSS chrome: --s-right-rail-w (24) and --s-tree-gutter-w (1). */
+const INFO_CHROME_RESERVE = 25;
 
 /**
  * The Information panel's splitter, on its left edge.
  *
  * `body` is the browser row's width; `tree` the main tree's width, and
- * `subOpen` whether the sub-browser sits between. The panel can be narrowed
- * to a column of fields and widened to half the row, but never so far that
- * the track list falls below the floor the tree splitter keeps for it.
+ * `subOpen` whether the sub-browser sits between. Rekordbox 7.2.19's
+ * LowerContainer gives the Information pane a 1px minimum and a full-width
+ * maximum. Preserve the browser's existing list/sub-browser floors within
+ * that range; there is no separate half-row or 280px limit.
  */
 export function infoBounds(body: number, tree: number, subOpen: boolean): SplitterBounds {
   return {
     available: body,
-    min: 280,
-    maxFraction: 0.5,
-    minOther: tree + RIGHT_RAIL_RESERVE + (subOpen ? subBounds(body).min : 0) + TREE_BOUNDS.minOther,
+    min: 1,
+    maxFraction: 1,
+    minOther: tree + INFO_CHROME_RESERVE + (subOpen ? subBounds(body).min : 0) + TREE_BOUNDS.minOther,
   };
 }
