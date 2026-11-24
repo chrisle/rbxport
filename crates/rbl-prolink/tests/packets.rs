@@ -423,6 +423,27 @@ fn a_current_cdj_3000_asks_about_slot_4_and_the_answer_names_it_back() {
 }
 
 #[test]
+fn media_response_preserves_full_count_words_and_the_rest_of_the_captured_packet() {
+    // Count bytes independently obtained by executing the installed 7.2.19
+    // setDeviceProperty ARM64 instructions in isolation, not a device pass.
+    for (tracks, track_bytes, playlists, playlist_bytes) in [
+        (65_535, [0, 0, 0xff, 0xff], 2, [0, 0, 0, 2]),
+        (65_536, [0, 1, 0, 0], 65_535, [0, 0, 0xff, 0xff]),
+        (171_717, [0, 2, 0x9e, 0xc5], 65_536, [0, 1, 0, 0]),
+        (u32::MAX, [0xff; 4], 171_717, [0, 2, 0x9e, 0xc5]),
+    ] {
+        let actual = rbl_prolink::MediaResponse {
+            name: REKORDBOX_NAME.to_owned(), device_number: REKORDBOX_DEVICE_NUMBER,
+            slot: rbl_prolink::SLOT_REKORDBOX, tracks, playlists,
+        }.encode();
+        let mut expected = hex(CAPTURED_MEDIA_RESPONSE_SLOT_4);
+        expected[0xa4..0xa8].copy_from_slice(&track_bytes);
+        expected[0xac..0xb0].copy_from_slice(&playlist_bytes);
+        assert_eq!(actual, expected, "tracks {tracks}, playlists {playlists}");
+    }
+}
+
+#[test]
 fn the_device_settings_response_matches_the_capture() {
     assert_eq!(
         rbl_prolink::device_settings_response(

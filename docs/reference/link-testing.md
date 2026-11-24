@@ -62,6 +62,17 @@ Unit tests should be deterministic and fast. The main Link Export suite is `crat
 
 Use complete encoded-message comparisons for protocol layouts. Use semantic assertions for catalog queries and persistent state. A unit test should fail at the smallest responsible component and should not duplicate a socket integration test merely to increase count.
 
+Media-query replies carry full big-endian 32-bit track and playlist counts at
+packet offsets `0xa4` and `0xac`. [OBS static] rekordbox 7.2.19
+`PSvLinkNfsDevPropResInfo::setDeviceProperty` writes those whole words; the
+CDJ-3000X 1.40 `NfsDevpropRet` converter also byte-swaps whole words at the
+corresponding payload offsets. Isolated execution of the desktop encoder's
+instructions preserves 65,535, 65,536 and 171,717. The count fixture checks a
+real disposable 65,536-row index through the advertisement, and menu fixtures
+check full counts and pagination past the boundary. Ordinary captured replies
+remain byte-identical. These are format and fixture results, not proof of a
+particular player's large-library display or browsing capacity.
+
 ### Protocol integration tests
 
 `crates/rbl-link/tests/link.rs` builds a temporary library, starts RBX services on loopback, and drives them with `rbl-fakecdj`. These tests cover socket framing, RemoteDB, portmap, mountd, NFS, and model-specific opcode handling. They do not start AtEmu and must never be reported as hardware-emulation results.

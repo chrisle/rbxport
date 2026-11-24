@@ -807,8 +807,8 @@ pub struct MediaResponse {
     /// CDJ-3000, `03` to the EP122 emulator. A player ignores an answer
     /// about a slot it did not ask about.
     pub slot: u8,
-    pub tracks: u16,
-    pub playlists: u16,
+    pub tracks: u32,
+    pub playlists: u32,
 }
 
 /// Byte length of a media response.
@@ -836,10 +836,13 @@ impl MediaResponse {
         utf16.resize(0x40, 0);
         out.extend_from_slice(&utf16);
         // Creation date and the rest: zero for rekordbox.
-        out.resize(0xa6, 0);
+        // [OBS static] rekordbox 7.2.19 setDeviceProperty @0x1008629b0
+        // writes full BE32 counts at A4/AC, as the CDJ-3000X 1.40
+        // NfsDevpropRet converter @0x013ea90c swaps those whole words.
+        out.resize(0xa4, 0);
         out.extend_from_slice(&self.tracks.to_be_bytes());
         // Colour none; tracks are rekordbox's; settings present.
-        out.extend_from_slice(&[0x00, 0x00, 0x01, 0x01, 0x00, 0x00]);
+        out.extend_from_slice(&[0x00, 0x00, 0x01, 0x01]);
         out.extend_from_slice(&self.playlists.to_be_bytes());
         out.resize(MEDIA_RESPONSE_LEN, 0);
         debug_assert_eq!(out.len(), MEDIA_RESPONSE_LEN);

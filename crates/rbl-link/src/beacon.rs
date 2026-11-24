@@ -115,8 +115,8 @@ const MASTER_BPM_MAX: u16 = 30_000;
 /// players' status tells the library. Read on every query rather than fixed
 /// at start, so a reload behind us is reflected.
 pub trait LibraryFacts: Send + Sync {
-    fn track_count(&self) -> u16;
-    fn playlist_count(&self) -> u16;
+    fn track_count(&self) -> u32;
+    fn playlist_count(&self) -> u32;
     fn device_settings(&self) -> rbl_prolink::DeviceSettings {
         rbl_prolink::DeviceSettings::default()
     }
@@ -2511,8 +2511,8 @@ mod all_in_one_tests {
     fn a_late_player_status_cannot_revive_terminal_membership_or_report_a_load() {
         struct Loads(std::sync::atomic::AtomicUsize);
         impl LibraryFacts for Loads {
-            fn track_count(&self) -> u16 { 1 }
-            fn playlist_count(&self) -> u16 { 0 }
+            fn track_count(&self) -> u32 { 1 }
+            fn playlist_count(&self) -> u32 { 0 }
             fn track_loaded(&self, _: u32) { self.0.fetch_add(1, Ordering::Relaxed); }
         }
         let now = Instant::now();
