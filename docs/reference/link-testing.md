@@ -79,6 +79,24 @@ The CDJ-3000 firmware suite uses an isolated three-track library and drives the 
 
 An AtEmu case must assert a user-visible result, not only that a packet was accepted. Load coverage continues through firmware browsing, path lookup, NFS read, analysis retrieval, playback motion, and RBX receiving the deck's status packets.
 
+## Track-info file types
+
+The first row of the `2102` track-info menu carries `djmdContent.FileType`
+in its ID field (argument 2): MP3 `1`, M4A `4`, FLAC `5`, WAV `11`, and
+AIFF `12`. Unknown type `0` retains the previous MP3 value `1`. The seven-row
+menu, its other fields, and its missing-track response are unchanged.
+Session tests check the complete encoded first row for these values.
+
+The [#801 contributor report](https://github.com/chrisle/rbxport/pull/801)
+describes a rekordbox 7.2.18 Windows capture with `5` for FLAC and successful
+FLAC loading after this change on CDJ-2000NXS2 firmware 1.87. Those physical
+results are contributor-reported; this review used disposable protocol tests.
+Other models, WAV/AIFF playback, and the remaining first-row fields need
+separate device validation. In particular, [#747](https://github.com/chrisle/rbxport/issues/747)
+reports an MP3 emergency loop, whose type value is unchanged by this fix;
+[#677](https://github.com/chrisle/rbxport/issues/677) has no established file
+format or matching reproduction. Neither issue is resolved by these tests.
+
 ## Hardware behavior catalog
 
 “Expected on screen” comes from the manuals. “Automated oracle” is what RBX can prove without the physical display. All rows apply to all three devices unless the device column narrows them.

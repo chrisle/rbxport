@@ -2371,3 +2371,34 @@ fn direct_database_socket_closes_unready_and_uses_negotiated_setup_identity() {
     }
     bound.shutdown();
 }
+
+#[test]
+fn track_info_renders_the_catalog_file_type_in_the_existing_reply_envelope() {
+    struct FileTypeCatalog(u32);
+    impl Catalog for FileTypeCatalog {
+        fn list(&self, _: &Query) -> Vec<Row> { Vec::new() }
+        fn artwork(&self, _: u32, _: ArtworkSize) -> Option<Vec<u8>> { None }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
+        fn track_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow> {
+            Small(false).track_row(id, column)
+        }
+        fn track(&self, id: u32) -> Option<TrackDetails> {
+            Small(false).track(id).map(|mut track| { track.file_type = self.0; track })
+        }
+    }
+    for (file_type, expected_type) in [(0, 1), (1, 1), (4, 4), (5, 5), (11, 11), (12, 12)] {
+        let mut session = CatalogHandler::new(Arc::new(FileTypeCatalog(file_type))).open();
+        session.handle(&setup_request(1));
+        let (count, rows) = browse(&mut session, kind::TRACK_INFO, &[0x0108_0301, TRACK]);
+        assert_eq!(count, 7);
+        let expected = Message::new(0x101, kind::MENU_ITEM, vec![
+            Argument::Number(1), Argument::Number(expected_type), Argument::Number(2), Argument::String(String::new()),
+            Argument::Number(2), Argument::String(String::new()), Argument::Number(0x2304), Argument::Number(0),
+            Argument::Number(0), Argument::Number(0), Argument::Number(0x100), Argument::Number(0x14),
+            Argument::Number(0x1814_5d65), Argument::Number(4), Argument::String("D".into()), Argument::Number(0x1e80),
+        ]);
+        assert_eq!(rows[0].encode(), expected.encode(), "file type {file_type}");
+        let (missing, rows) = browse(&mut session, kind::TRACK_INFO, &[0x0108_0301, TRACK + 1]);
+        assert_eq!((missing, rows.len()), (0, 0));
+    }
+}

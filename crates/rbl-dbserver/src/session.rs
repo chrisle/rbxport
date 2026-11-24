@@ -1984,11 +1984,9 @@ fn delivery_rows(t: &TrackDetails) -> Vec<Item> {
 /// The seven rows of a track-info reply.
 fn track_info_rows(t: &TrackDetails) -> Vec<Item> {
     vec![
-        // The first row's id is the file's type (`djmdContent.FileType`: 1 mp3, 5 flac, 11 wav, 12 aiff), which a
-        // CDJ-2000NXS2 reads to pick its decoder [OBS capture 2026-10-30: rekordbox sent 5 for a FLAC]. It was a
-        // constant 1 (the MP3 the row was first captured with), so an NXS2 took every track for an MP3: a FLAC was
-        // scanned through in 2 KiB reads, never finished loading, and a WAV ended in an error. An unknown type
-        // (0) keeps the old 1.
+        // The first row carries the library file type. The NXS2 FLAC capture
+        // reported in #801 sends 5 here; retain the previous MP3 value for
+        // unknown type 0. Other captured row fields remain unchanged.
         Item {
             a: 1,
             id: if t.file_type == 0 { 1 } else { t.file_type },
@@ -2015,7 +2013,7 @@ mod track_info_tests {
 
     #[test]
     fn the_first_track_info_row_carries_the_files_type() {
-        for (file_type, sent) in [(1, 1), (5, 5), (11, 11), (12, 12), (0, 1)] {
+        for (file_type, sent) in [(1, 1), (4, 4), (5, 5), (11, 11), (12, 12), (0, 1)] {
             let rows = track_info_rows(&TrackDetails { file_type, ..TrackDetails::default() });
             assert_eq!(rows[0].id, sent, "file type {file_type}");
         }
