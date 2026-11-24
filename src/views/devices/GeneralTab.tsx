@@ -29,6 +29,7 @@ import type {
   WaveformPosition,
 } from "@/ipc/types";
 import { contentsText, formatSpace } from "@/lib/devices";
+import { useTranslation } from "@/i18n";
 import styles from "./DevicePanel.module.css";
 import { useTooltip } from "@/store/usePreferences";
 
@@ -170,6 +171,7 @@ export function GeneralTab({
   onRefresh,
   busy,
 }: GeneralTabProps) {
+  const t = useTranslation();
   // The name is committed on Enter or blur, not per keystroke: each write
   // goes to the stick.
   const [name, setName] = useState(settings.deviceName);
@@ -311,7 +313,7 @@ export function GeneralTab({
       </table>
 
       <div className={styles.sync}>
-        <p className={styles.contents}>{contentsText(device)}</p>
+        <p className={styles.contents}>{contentsText(device, t)}</p>
         <div className={styles.actions}>
           <label className={styles.caption} htmlFor="device-playlist">
             Playlist
