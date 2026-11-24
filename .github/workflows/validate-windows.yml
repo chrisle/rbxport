@@ -114,7 +114,7 @@ jobs:
 
       # Backups write, flush and rename files, which Windows treats differently
       # from Unix (handle access rights, open-file locking). Run them natively.
-      - name: Backup tests
+      - name: Native backup and file-drop tests
         if: inputs.check_rust
         shell: pwsh
         env:
@@ -143,8 +143,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Embedding test manifest failed: $LASTEXITCODE" }
           Push-Location src-tauri
           try {
-            & $testExe[0].executable backup
-            if ($LASTEXITCODE -ne 0) { throw "Backup tests failed: $LASTEXITCODE" }
+            foreach ($filter in @('backup', 'file_drop')) {
+              & $testExe[0].executable $filter
+              if ($LASTEXITCODE -ne 0) { throw "$filter tests failed: $LASTEXITCODE" }
+            }
           } finally { Pop-Location }
 
       - uses: pnpm/action-setup@v4
