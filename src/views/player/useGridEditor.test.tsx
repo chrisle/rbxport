@@ -259,6 +259,25 @@ describe("recovered grid control behavior", () => {
     expect(edits.gridEdit).not.toHaveBeenCalled();
   });
 
+  it("binds a held device-grid shift to the loaded row without a stale deck reset", async () => {
+    const source: DeviceTrackSource = { path: "/Volumes/TEST", format: "oneLibrary", trackId: 7 };
+    mount({ trackId: "file:/Volumes/TEST/Contents/a.mp3", deviceSource: source });
+    act(() => grid.shift(1, true)); await settle();
+    expect(edits.gridEdit).toHaveBeenCalledWith("file:/Volumes/TEST/Contents/a.mp3",
+      { kind: "nudge", ms: HELD_SHIFT_MS }, { deviceSource: source });
+    expect((edits.gridEdit.mock.calls[0]?.[2] as GridEditOptions).deck).toBeUndefined();
+  });
+
+  it("does not send a queued device-grid shift after switching libraries", async () => {
+    const path = "/Volumes/TEST", id = "file:/Volumes/TEST/Contents/a.mp3";
+    mount({ trackId: id, deviceSource: { path, format: "deviceLibrary", trackId: 1 } });
+    act(() => grid.shift(1));
+    mount({ trackId: id, deviceSource: { path, format: "oneLibrary", trackId: 9 } });
+    await settle();
+    expect(edits.gridEdit).not.toHaveBeenCalled();
+    expect(grid.nudging).toBe(false);
+  });
+
   it("clears scope when loading another track", async () => {
     mount(); act(() => grid.adjustFrom()); await settle();
     mount({trackId: "t2"}); expect(grid.fromMs).toBeNull();
@@ -298,5 +317,10 @@ describe("recovered grid control behavior", () => {
   it("reports failed writes", async () => {
     edits.gridEdit.mockRejectedValue({message: "write failed"}); mount();
     act(() => grid.double()); await settle(); expect(onError).toHaveBeenCalledWith("write failed");
+  });
+  it("retains the native reason when a grid publication is refused", async () => {
+    edits.gridEdit.mockRejectedValue({ message: "Could not update USB.", detail: "The paired row changed." }); mount();
+    act(() => grid.double()); await settle();
+    expect(onError).toHaveBeenCalledWith("Could not update USB. The paired row changed.");
   });
 });

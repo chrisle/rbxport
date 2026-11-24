@@ -1,5 +1,5 @@
 /** Grid arithmetic mirrored from rbl-anlz; see the Ghidra pre-release audit. */
-import type { GridEdit } from "@/ipc/types";
+import type { DeviceTrackSource, GridEdit } from "@/ipc/types";
 import type { BeatGrid } from "./player";
 export interface EditableBeat { number: number; tempoX100: number; timeMs: number }
 export const SHIFT_MS = 1;
@@ -10,6 +10,11 @@ export const TAP_GAP_MS = 1500;
 export const MIN_BPM_X100 = 4000;
 export const MAX_BPM_X100 = 49900;
 const MAX_BEATS = 1 << 20;
+
+/** One unambiguous identity for grid reads and queued edits, including paths. */
+export function gridSourceKey(trackId: string | null | undefined, source?: DeviceTrackSource): string {
+  return JSON.stringify([trackId, source?.path, source?.format, source?.trackId]);
+}
 
 export function tapTempo(taps: readonly number[]): number | null {
   if (taps.length < 2) return null;

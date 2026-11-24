@@ -11,6 +11,23 @@ import { createMockBackend } from "./backend-mock";
 import { TREE_ROOT } from "./types";
 
 describe("USB-only playlist files", () => {
+  it("requires the loaded device source for grid writes and history", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const view = await backend.openView({ source: { kind: "device", path: "/Volumes/TEST", format: "deviceLibrary", playlist: "0" }, sort: "title", descending: false, query: "" });
+    const row = (await backend.fetchRows(view.viewId, 0, 1))[0]!;
+    const source = row.deviceSource;
+    if (!source) throw new Error("Expected a device row");
+    const before = await backend.gridState(row.id, source);
+    await expect(backend.edits.gridEdit(row.id, { kind: "nudge", ms: 5 })).rejects.toThrow("Reload this track from its device library");
+    expect(await backend.gridState(row.id, source)).toEqual(before);
+    await backend.edits.gridEdit(row.id, { kind: "nudge", ms: 5 }, { deviceSource: source });
+    const edited = await backend.gridState(row.id, source);
+    expect(edited.canUndo).toBe(true);
+    await expect(backend.edits.gridUndo(row.id)).rejects.toThrow("Reload this track from its device library");
+    await expect(backend.edits.gridRedo(row.id)).rejects.toThrow("Reload this track from its device library");
+    expect(await backend.gridState(row.id, source)).toEqual(edited);
+  });
+
   it("adds a loose device file once to both libraries without collection import", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     const path = "/Volumes/TEST";

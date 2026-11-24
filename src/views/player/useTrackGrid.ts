@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 
 import type { GridState, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
+import { gridSourceKey } from "@/lib/gridEdit";
 import { NO_BEATS, parseBeatGrid, type BeatGrid } from "@/lib/player";
 
 export interface TrackGrid {
@@ -35,7 +36,7 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
   const [grid, setGrid] = useState<BeatGrid>(NO_BEATS);
   const [state, setState] = useState<GridState | null>(null);
   const [gridTrackId, setGridTrackId] = useState<string | null>(null);
-  const sourceKey = `${track?.id ?? ""}|${track?.deviceSource?.path ?? ""}|${track?.deviceSource?.format ?? ""}|${track?.deviceSource?.trackId ?? ""}`;
+  const sourceKey = gridSourceKey(track?.id, track?.deviceSource);
   const [readSource, setReadSource] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,10 +58,10 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
       const current = ++request;
       const backend = await getBackend();
       const [bytes, found] = await Promise.all([
-        (track.deviceSource ? backend.trackBeats(id, track.deviceSource) : backend.trackBeats(id)).catch(() => new Uint8Array()),
+        backend.trackBeats(id, track.deviceSource).catch(() => new Uint8Array()),
         // A track with no grid answers `notFound`; that is a state, not
         // an error the deck has to show.
-        (track.deviceSource ? backend.gridState(id, track.deviceSource) : backend.gridState(id)).catch(() => null),
+        backend.gridState(id, track.deviceSource).catch(() => null),
       ]);
       // The track may have changed while this was in flight.
       if (!live || current !== request) return;

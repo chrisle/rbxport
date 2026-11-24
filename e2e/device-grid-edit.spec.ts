@@ -47,3 +47,15 @@ test("a track from the Devices tree offers no Analysis Lock", async ({ page }) =
   await loadFromStick(page);
   await expect(button(page, "Lock the grid")).toBeDisabled();
 });
+
+// The coalesced nudge uses a separate save path from tempo edits.
+test("a device grid shift saves to its loaded source with undo and redo", async ({ page }) => {
+  await loadFromStick(page);
+  await expect(button(page, "Undo the last grid edit")).toBeDisabled();
+  await button(page, "Shift the grid later").click();
+  await expect(button(page, "Undo the last grid edit")).toBeEnabled();
+  await button(page, "Undo the last grid edit").click();
+  await expect(button(page, "Undo the last grid edit")).toBeDisabled();
+  await button(page, "Redo the last grid edit").click();
+  await expect(button(page, "Undo the last grid edit")).toBeEnabled();
+});

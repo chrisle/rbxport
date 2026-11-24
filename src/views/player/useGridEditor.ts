@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { DeckId, DeviceTrackSource, GridEdit, GridEditOptions, GridState } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useTranslation } from "@/i18n";
-import { SHIFT_MS, HELD_SHIFT_MS, MAX_STRETCH_MS, tapTempo, tapTimeout, withTap } from "@/lib/gridEdit";
+import { errorMessage } from "@/lib/errorMessage";
+import { gridSourceKey, SHIFT_MS, HELD_SHIFT_MS, MAX_STRETCH_MS, tapTempo, tapTimeout, withTap } from "@/lib/gridEdit";
 
 export interface GridEditorDeck {
   trackId: string | null;
@@ -45,14 +46,6 @@ export interface GridEditorActions {
   redo: () => void;
   toggleLock: () => void;
 }
-function describe(error: unknown): string {
-  // Tauri rejects with a bare string when a call never reaches a command
-  // (unknown command, refused permission, arguments it cannot read); saying
-  // it beats a generic failure nobody can trace (#107).
-  if (typeof error === "string" && error.trim()) return error;
-  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string" && error.message.trim()) return error.message;
-  return "The beat grid could not be saved.";
-}
 export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   const { trackId, deviceSource, deck: deckId, state, setState, positionMs, readOnly, onError, isDynamicFrom, confirmDynamic, onNudge } = deck;
   const t = useTranslation();
@@ -84,7 +77,7 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   // (#196). One batch waits behind the save in flight; its target is the
   // beat under the playhead at its first press.
   const pendingStretch = useRef<{ byMs: number; timeMs: number; fromMs: number | null } | null>(null);
-  const target = `${trackId ?? ""}\u0000${deviceSource?.path ?? ""}\u0000${deviceSource?.format ?? ""}\u0000${deviceSource?.trackId ?? ""}`;
+  const target = gridSourceKey(trackId, deviceSource);
   const currentTrack = useRef(target);
   currentTrack.current = target;
   const cancelTaps = useCallback(() => {
@@ -114,7 +107,7 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
         setState(next);
         after?.();
         onError?.(null);
-      } catch (error) { if (currentTrack.current === target) onError?.(describe(error)); }
+      } catch (error) { if (currentTrack.current === target) onError?.(errorMessage(error).trim() || errorMessage(null)); }
       finally { done?.(); }
     });
   }, [target, setState, onError]);
@@ -161,6 +154,7 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     // No deck: the deck already plays the shifted grid, and a save that ends
     // behind newer presses must not put an older grid on its metronome.
     const options: GridEditOptions = {};
+    if (deviceSource) options.deviceSource = deviceSource;
     if (deck.durationMs !== undefined) options.durationMs = deck.durationMs;
     run(edits => {
       nudgeQueued.current = false;
@@ -168,7 +162,7 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
       pendingNudge.current = 0;
       return sum === 0 ? Promise.resolve(null) : edits.gridEdit(trackId, { kind: "nudge", ms: sum }, options);
     }, undefined, () => { if (!nudgeQueued.current) setNudging(false); });
-  }, [fromMs, canEdit, trackId, onNudge, deck.durationMs, run]);
+  }, [fromMs, canEdit, trackId, deviceSource, onNudge, deck.durationMs, run]);
   const stretch = useCallback((direction: -1 | 1, held = false) => {
     if (!canEdit || trackId === null) return;
     const byMs = -direction * (held ? HELD_SHIFT_MS : SHIFT_MS);

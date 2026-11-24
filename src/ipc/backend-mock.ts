@@ -22,7 +22,7 @@ import type {
   DeckId, DeviceTrackSource, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind, LogLine, LogLevel,
 } from "./types";
 import { TREE_ROOT } from "./types";
-import { applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
+import { gridSourceKey, applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
 import { toCamelot } from "@/lib/camelot";
 import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
 import { MY_TAG_LIMIT, newMyTagName } from "@/lib/myTags";
@@ -1631,13 +1631,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return cuesChanged(found.track, undefined);
     },
     gridEdit: (track, edit, options) => {
+      if (track.startsWith("file:") && !options?.deviceSource) return refuse("Reload this track from its device library before editing its grid.");
       const held = gridOf(track, options?.deviceSource);
       if (!held) return notFound("That track has no beat grid to edit.");
       if (held.locked) return refuse("The beat grid is locked. Unlock it to edit.");
       const invalid = validateEdit(held.beats, options?.fromMs ?? null, edit);
       if (invalid) return refuse(invalid);
       if (["stretch", "tempo"].includes(edit.kind) && !options?.allowDynamic && isDynamicFrom(held.beats, options?.fromMs ?? null)) return refuse("Confirm replacing this section's tempo changes.");
-      const duration = options?.durationMs ?? (all[Number.parseInt(track, 10) - 100000]?.durationSec ?? 0) * 1000;
+      const duration = options?.durationMs ?? held.durationMs;
       const next = applyEditFrom(held.beats, options?.fromMs ?? null, edit, duration);
       if (next.length === 0) return failed("malformed", "That edit would leave the track without a beat.");
       if (sameGrid(next, held.beats)) return wait(gridStateOf(held, track));
@@ -1652,6 +1653,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return gridChanged(track, held, options?.deviceSource);
     },
     gridUndo: (track, _deck, source) => {
+      if (track.startsWith("file:") && !source) return refuse("Reload this track from its device library before editing its grid.");
       const held = gridOf(track, source);
       if (!held) return notFound("That track has no beat grid to edit.");
       held.transaction = undefined;
@@ -1662,6 +1664,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return gridChanged(track, held, source);
     },
     gridRedo: (track, _deck, source) => {
+      if (track.startsWith("file:") && !source) return refuse("Reload this track from its device library before editing its grid.");
       const held = gridOf(track, source);
       if (!held) return notFound("That track has no beat grid to edit.");
       held.transaction = undefined;
@@ -1688,6 +1691,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    * also bumps the generation, because the row's BPM column changed.
    */
   interface HeldGrid {
+    durationMs: number;
     beats: EditableBeat[];
     transaction?: string | undefined;
     undo: { beats: EditableBeat[]; label: string }[];
@@ -1702,12 +1706,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   // How far each drawing analysis has got through its track, 0 to 1.
   const drawn = new Map<string, number>();
   const gridOf = (trackId: string, source?: DeviceTrackSource): HeldGrid | null => {
-    if (source && !stickLibraries.rows(source.path, source.format, "0").some(row => row.id === trackId && row.deviceSource?.trackId === source.trackId)) return null;
-    const key = source ? `${trackId}|${source.format}:${source.trackId}` : trackId;
+    const deviceRow = source && stickLibraries.rows(source.path, source.format, "0").find(row => row.id === trackId && row.deviceSource?.trackId === source.trackId);
+    if (source && !deviceRow) return null;
+    const key = gridSourceKey(trackId, source);
     const held = gridStore.get(key);
     if (held) return held;
     // A Devices tree track's grid is the stick's (#660).
-    const row = all[Number.parseInt(trackId, 10) - 100000] ?? stickLibraries.track(trackId);
+    const row = deviceRow || all[Number.parseInt(trackId, 10) - 100000] || stickLibraries.track(trackId);
     if (!row || ("analysed" in row && row.analysed === 0) || row.bpmX100 === 0) return null;
     const beatMs = (60 / (row.bpmX100 / 100)) * 1000;
     const count = Math.min(Math.floor((row.durationSec * 1000) / beatMs) + 1, 65536);
@@ -1715,7 +1720,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     for (let n = 0; n < count; n++) {
       beats.push({ number: (n % 4) + 1, tempoX100: row.bpmX100, timeMs: Math.round(n * beatMs) });
     }
-    const made = { beats, undo: [], redo: [], locked: false };
+    const made = { beats, durationMs: row.durationSec * 1000, undo: [], redo: [], locked: false };
     gridStore.set(key, made);
     return made;
   };

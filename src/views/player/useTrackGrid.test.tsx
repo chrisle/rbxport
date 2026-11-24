@@ -112,6 +112,20 @@ it("disables edits while the same audio switches to another device source", asyn
   expect(latest.state).toBeNull();
 });
 
+it("does not confuse pipe characters in device paths with source field boundaries", async () => {
+  // Both paths are below their respective mounts. Their pipe-joined keys
+  // used to collide, leaving the first source editable during the new read.
+  const first = { ...track, id: "file:/Volumes/A/b.mp3|/Volumes/A/Y.mp3|/Volumes/A/b.mp3",
+    deviceSource: { path: "/Volumes/A", format: "deviceLibrary" as const, trackId: 7 } };
+  const second = { ...track, id: "file:/Volumes/A/b.mp3|/Volumes/A/Y.mp3",
+    deviceSource: { path: "/Volumes/A/b.mp3|/Volumes/A", format: "deviceLibrary" as const, trackId: 7 } };
+  act(() => root.render(<Probe row={first} />)); await settle();
+  expect(latest.state).not.toBeNull();
+  trackBeats.mockReturnValueOnce(new Promise(() => {}));
+  act(() => root.render(<Probe row={second} />));
+  expect(latest.state).toBeNull();
+});
+
 it("disables a source that disappeared instead of leaving an editable stale grid", async () => {
   trackBeats.mockRejectedValue(new Error("device row disappeared"));
   gridState.mockRejectedValue(new Error("device row disappeared"));
