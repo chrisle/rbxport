@@ -9,7 +9,8 @@
 //!   three of "whiteness" — how much of the column is treble.
 //! - `PWV4`: six bytes a column, the first the raw peak out of 127 and the
 //!   last three the red, green and blue, which track the low, mid and high
-//!   bands [OBS]. Bytes 1 and 2 are `[UNKNOWN]` and written as zero.
+//!   bands [OBS]. This fallback author leaves the two local summary fields
+//!   zero; [`with_device_preview`] supplies their device-export values.
 //! - `PWV5`: a big-endian `u16` a column, `rrrgggbbbhhhhh00`, red, green
 //!   and blue again the low, mid and high bands [OBS].
 //! - `PWV6`, `PWV7`: three bytes a column, low, mid and high out of 127.
@@ -207,14 +208,27 @@ pub fn device_tiny_preview_byte(byte: u8) -> u8 {
     (byte & 0x1f).clamp(PWV2_FLOOR, PWV2_MAX_BYTE)
 }
 
-/// A section with its `PWAV` or `PWV2` bytes brought to what rekordbox
-/// writes and players accept; every other section unchanged. Analysis
+/// A section with its `PWAV` or `PWV2` bytes brought into the device range,
+/// or its `PWV4` summary fields set for device export. Analysis
 /// written before issue #278 carried whiteness in `PWV2`, which makes a
 /// Nexus player (XDJ-1000MK2, XDJ-RX2) reject the track's whole preview, and
 /// zero-height columns, which it reads as unfinished; an export repairs both
-/// rather than asking for every track to be analysed again.
+/// rather than asking for every track to be analysed again. The two local
+/// `PWV4` summary bytes are replaced by 255 and 127 on the device copy;
+/// its height and RGB channels, and the original section, remain unchanged.
 #[must_use]
 pub fn with_device_preview(section: &Section) -> Section {
+    if section.tag == FourCc::new(b"PWV4") {
+        if section.waveform_stride() != Some(6) || section.payload.len() % 6 != 0 {
+            return section.clone();
+        }
+        let mut exported = section.clone();
+        for column in exported.payload.chunks_exact_mut(6) {
+            column[1] = 255;
+            column[2] = 127;
+        }
+        return exported;
+    }
     let repair: fn(u8) -> u8 = if section.tag == FourCc::new(b"PWAV") {
         device_preview_byte
     } else if section.tag == FourCc::new(b"PWV2") {
@@ -311,7 +325,9 @@ fn pwv5_colour(column: BandColumn) -> (u16, u16, u16) {
     let high = 3 * u32::from(column.high);
     let strongest = low.max(mid).max(high);
     if strongest == 0 {
-        return (0, 0, 0);
+        // Match the production analyser: height zero conveys silence;
+        // keeping its colour white avoids a black detail column.
+        return (7, 7, 7);
     }
     let share = |value: u32, full: u32| u16::try_from((2 * full * value + strongest) / (2 * strongest)).unwrap_or(0);
     (share(low, 7), share(mid, 5), share(high, 7))
@@ -727,7 +743,6 @@ mod tests {
         assert_eq!(loud[0], 7);
         assert_eq!(loud[..3], quiet[..3]);
         assert!(quiet[3] < loud[3]);
-        assert_eq!(pwv5_word(BandColumn::default()), 0, "silence is black and flat");
     }
 
     #[test]
@@ -838,6 +853,28 @@ mod tests {
         let pwv3 = Section::new(b"PWV3", vec![0; 12], vec![0x00, 0xe0]);
         assert_eq!(with_device_preview(&pwv3), pwv3);
         assert_eq!(device_tiny_preview_byte(0xff), 15);
+    }
+
+    #[test]
+    fn device_rgb_overview_uses_export_fields_without_changing_its_waveform() {
+        let mut builder = AnlzBuilder::new();
+        builder.waveform_scroll(b"PWV4", 6, &[90, 180, 15, 60, 40, 20, 12, 250, 6, 9, 8, 7]);
+        let local = crate::parse(&builder.finish()).unwrap().sections.remove(0);
+        let exported = with_device_preview(&local);
+        assert_eq!(exported.payload, [90, 255, 127, 60, 40, 20, 12, 255, 127, 9, 8, 7]);
+        assert_eq!(exported.header, local.header);
+        assert_eq!(local.payload, [90, 180, 15, 60, 40, 20, 12, 250, 6, 9, 8, 7]);
+        assert_eq!(with_device_preview(&exported), exported);
+        let unknown_stride = Section::new(b"PWV4", vec![0; 12], vec![1, 2, 3, 4]);
+        assert_eq!(with_device_preview(&unknown_stride), unknown_stride);
+        let mut truncated = local.clone();
+        truncated.payload.pop();
+        assert_eq!(with_device_preview(&truncated), truncated);
+    }
+
+    #[test]
+    fn legacy_rgb_silence_is_white_with_zero_height() {
+        assert_eq!(pwv5_fields(pwv5_word(BandColumn::default())), [7, 7, 7, 0]);
     }
 
     #[test]

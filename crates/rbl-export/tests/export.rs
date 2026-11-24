@@ -893,6 +893,43 @@ fn an_export_brings_an_old_pwv2_into_the_range_players_accept() {
 }
 
 #[test]
+fn rgb_overview_export_fields_do_not_change_the_library_analysis() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = common::stick();
+    let mut t = track(src.path(), 1, "RGB Overview", "Artist");
+    let local = [90, 180, 15, 60, 40, 20, 12, 250, 6, 9, 8, 7];
+    let ext = rbl_anlz::AnlzBuilder::new().path("?/library.mp3")
+        .waveform_scroll(b"PWV4", 6, &local)
+        .waveform_scroll(b"PWV5", 2, &[0xff, 0x80, 0xe0, 0x40])
+        .finish();
+    let source_ext = src.path().join("library.EXT");
+    std::fs::write(&source_ext, &ext).unwrap();
+    std::fs::write(src.path().join("library.DAT"), &t.analysis[0].1).unwrap();
+    t.analysis.clear();
+    t.analysis_source = Some(src.path().join("library.DAT"));
+    let report = export(dest.path(), std::slice::from_ref(&t), &[]).unwrap();
+    assert!(report.skipped.is_empty());
+    let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+    let saved = dest.path().join(manifest.tracks[0].anlz_dir.trim_start_matches('/')).join("ANLZ0000.EXT");
+    let parsed = rbl_anlz::Anlz::read(&saved).unwrap();
+    assert_eq!(parsed.waveform(b"PWV4").unwrap().1, &[90, 255, 127, 60, 40, 20, 12, 255, 127, 9, 8, 7]);
+    assert_eq!(parsed.waveform(b"PWV5").unwrap().1, &[0xff, 0x80, 0xe0, 0x40]);
+    let snapshot = rbl_export::snapshot::Snapshot::read(dest.path()).unwrap();
+    for library in [snapshot.legacy.as_ref().unwrap(), snapshot.one.as_ref().unwrap()] {
+        let device_copy = dest.path().join(library.tracks[0].analysis.trim_start_matches('/')).with_extension("EXT");
+        assert_eq!(device_copy, saved, "both libraries point at the normalized analysis");
+    }
+    assert_eq!(std::fs::read(&source_ext).unwrap(), ext);
+    let mut older = manifest;
+    older.generation.as_mut().unwrap().transform_version = 1;
+    older.save(dest.path()).unwrap();
+    let refreshed = export(dest.path(), std::slice::from_ref(&t), &[]).unwrap();
+    assert_eq!(refreshed.bytes_copied, 0, "the existing audio is reused");
+    assert!(refreshed.metrics.analysis_bytes_read > 0, "an older receipt must reprocess the source analysis");
+    assert_eq!(std::fs::read(&source_ext).unwrap(), ext);
+}
+
+#[test]
 fn a_firmware_path_hash_collision_keeps_both_analysis_bundles() {
     let src = tempfile::tempdir().unwrap();
     let dest = common::stick();

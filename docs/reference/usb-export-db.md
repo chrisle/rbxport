@@ -644,10 +644,17 @@ ignores it is wrong by exactly that much.
 | `PWAV` | DAT | 1 | 400 | `wwwhhhhh` — 3 bits whiteness, 5 bits height |
 | `PWV2` | DAT | 1 | 100 | height alone, 1-15 — **no whiteness bits** |
 | `PWV3` | EXT | 1 | 150/s | same encoding |
-| `PWV4` | EXT | 6 | 1200 | `peak>>1`, 0, 0, then low, mid, high (red, green, blue) |
+| `PWV4` | EXT | 6 | 1200 | peak, two local summary fields, then low, mid, high (red, green, blue); device exports replace bytes 1/2 with 255/127 |
 | `PWV5` | EXT | 2 | 150/s | be16 `rrrgggbbbhhhhh00`, red/green/blue = low/mid/high |
 | `PWV6` | 2EX | 3 | 1200 | low, mid, high |
 | `PWV7` | 2EX | 3 | 150/s | `band>>1` |
+
+The device `PWV4` conversion changes only the exported copy's two summary
+fields. Local signed-minimum and bass-peak values are retained in the library,
+and the overview height and RGB channels pass through unchanged. Older export
+receipts reprocess the analysis on the next sync while reusing unchanged audio.
+The legacy band-column `PWV5` encoder emits white at zero height for silence,
+matching the production analyser rather than writing an all-black colour.
 
 **The five-bit tags do not share a ceiling.** `PWAV` stops at 25, `PWV2` at
 15, the detail tags use all 31. A renderer that
@@ -1046,8 +1053,7 @@ the pad recalls the saved cue.
   cloud database id, as the static derivation (#640) predicts, and a
   hardware check that a player lists My Tags from rbxport's `exportExt.pdb`
   type-4 rows (which match a rekordbox 7 export's byte for byte).
-- `PWV4` header bytes 1–2, the third header word of `PWV3`/`PWV5`, and the
-  `PQT2` payload derivation.
+- The third header word of `PWV3`/`PWV5`, and the `PQT2` payload derivation.
 - Remaining reader/UI cue display-color measurements; the export palette
   is captured separately and is no longer an export blocker.
 - `DEVSETTING.DAT` body bytes 14–16, which rekordbox sets after editing its
