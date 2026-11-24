@@ -129,3 +129,22 @@ and on Linux the mounted disks plus the folders in `/media`, `/media/$USER`,
 `/run/media/$USER` and `/mnt`. Both folder names are checked on every
 filesystem, so a drive moved between machines is still found. Discovery only
 checks that the files exist; nothing is opened until a drive is chosen.
+
+## Track paths across operating systems
+
+An external library can retain Windows paths such as `E:/Music/Tracks/a.flac`
+when selected on Linux. For a non-default library on a separate filesystem,
+rbxport uses that filesystem's current mount as the read-side replacement for
+its stored `BaseDBDrive`. If that drive is mounted at `/media/dj/Music`, the
+example resolves to `/media/dj/Music/Music/Tracks/a.flac`. Paths on other drives
+are left alone. Selecting the library through a symlink resolves the physical
+mount first.
+
+This resolution does not update `FolderPath`, `BaseDBDrive`, or
+`CurrentDBDrive`, so opening the library on Linux does not relocate its tracks
+in the database. The existing stored value stands for the default library,
+for a folder on the root filesystem, or when the mount cannot be determined.
+Mount detection uses filesystem device boundaries; bind mounts that share
+their parent's device are not identified as separate drives. This is a Linux
+reader behavior; it does not claim a Rekordbox Linux implementation or a
+physical exFAT-drive validation.

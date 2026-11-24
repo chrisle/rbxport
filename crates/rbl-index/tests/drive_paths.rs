@@ -88,3 +88,46 @@ fn a_library_without_drive_values_reads_paths_as_stored() {
     assert_eq!(mapping.apply("/volumes/music/x.mp3"), format!("{expected_drive}x.mp3"), "the prefix compares ignoring case");
     assert_eq!(mapping.apply("/Volumes/Music 2/x.mp3"), "/Volumes/Music 2/x.mp3");
 }
+
+/// #855: use a real Linux filesystem boundary without mounting or writing
+/// removable media. Both a direct selection and a symlink must read the same
+/// audio while preserving the Windows-authored database values.
+#[cfg(target_os = "linux")]
+#[test]
+fn windows_paths_resolve_to_real_files_on_a_linux_mount_without_rewriting_the_database() {
+    use std::os::unix::fs::MetadataExt;
+    assert_ne!(std::fs::metadata("/dev/shm").unwrap().dev(), std::fs::metadata("/").unwrap().dev(), "this regression needs /dev/shm on a separate filesystem");
+    let root = tempfile::Builder::new().prefix("rbxport-drive-855-").tempdir_in("/dev/shm").unwrap();
+    let location = fixture::build(&root.path().join("PIONEER/Master"), fixture::Shape::default()).unwrap();
+    let audio = root.path().join("Tracks/a.mp3");
+    std::fs::create_dir(audio.parent().unwrap()).unwrap();
+    std::fs::write(&audio, b"disposable audio path fixture").unwrap();
+    let expected_audio = std::fs::canonicalize(&audio).unwrap();
+    let relative = audio.strip_prefix("/dev/shm").unwrap().to_string_lossy();
+    let stored_path = format!("E:{relative}");
+    fixture::point_at_audio(&location, 0, &stored_path, 300).unwrap();
+    set_drives(&location, "E:/", "E:/");
+    let before = std::fs::read(&location.master_db).unwrap();
+
+    let links = tempfile::tempdir().unwrap();
+    let alias = links.path().join("selected-drive");
+    std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+    let mut via_link = location.clone();
+    via_link.master_db = alias.join("PIONEER/Master/master.db");
+    for selected in [location.clone(), via_link] {
+        let db = Library::open(selected, OpenMode::ReadOnly).unwrap();
+        let (index, _) = rbl_index::load(&db).unwrap();
+        let id = fixture::track_id(0);
+        let numeric_id: u64 = id.parse().unwrap();
+        let row = index.ids.iter().position(|x| *x == numeric_id).unwrap();
+        let resolved = index.folder_path.get(row);
+        assert_eq!(resolved, expected_audio.to_str().unwrap());
+        assert!(std::path::Path::new(resolved).is_file());
+        assert_eq!(db.track_details(&id).unwrap().unwrap().path, resolved);
+        let drives: (String, String) = db.connection().query_row("SELECT BaseDBDrive, CurrentDBDrive FROM djmdProperty", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(drives, ("E:/".into(), "E:/".into()));
+        let stored: String = db.connection().query_row("SELECT FolderPath FROM djmdContent WHERE ID = ?1", [&id], |r| r.get(0)).unwrap();
+        assert_eq!(stored, stored_path);
+    }
+    assert_eq!(std::fs::read(&location.master_db).unwrap(), before);
+}
