@@ -77,6 +77,15 @@ jobs:
         if: inputs.check_rust
         run: cargo check --workspace --all-targets
 
+      # Host path separators leak only when the export runs on Windows.
+      # Inspect both USB databases and analysis, using disposable files only.
+      - name: Portable export collision paths
+        if: inputs.check_rust
+        shell: pwsh
+        env:
+          RB_LITE_TEST: "1"
+        run: cargo test -p rbl-export --test safety collisions_and_unicode_names_keep_distinct_audio
+
       - name: Check silent updater task script
         if: inputs.check_rust
         shell: pwsh

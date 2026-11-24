@@ -127,14 +127,32 @@ fn collisions_and_unicode_names_keep_distinct_audio() {
     sync(usb.path(), &[a.clone(), b.clone()], &[playlist(1, &[0, 1])]).unwrap();
     let m = Manifest::load(usb.path()).unwrap();
     assert_ne!(m.tracks[0].audio, m.tracks[1].audio);
-    for (row, byte) in m.tracks.iter().zip([1, 2]) {
-        assert_eq!(
-            std::fs::read(usb.path().join(row.audio.trim_start_matches('/'))).unwrap(),
-            vec![byte; 128]
-        );
+    let before: std::collections::BTreeMap<_, _> = m.tracks.iter().map(|row| (row.library_id, row.audio.clone())).collect();
+    // #788: a Windows Path::join put a backslash before the collision suffix.
+    // Windows can find that audio locally, but macOS would treat the backslash
+    // in the databases/analysis as part of a filename. Inspect portable paths
+    // explicitly rather than relying on this host's filesystem lookup alone.
+    for tracks in [[a.clone(), b.clone()], [b, a]] {
+        sync(usb.path(), &tracks, &[playlist(1, &[0, 1])]).unwrap();
+        let manifest = Manifest::load(usb.path()).unwrap();
+        let bytes = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+        let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+        let rows = pdb.track_rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap());
+        let one = rbl_onelibrary::ExportLibrary::open_read_only(&usb.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+        for row in &manifest.tracks {
+            let expected = if row.library_id == 1 { "1.mp3".to_owned() } else { format!("1-{}.mp3", row.export_id) };
+            assert_eq!(row.audio, format!("/Contents/{}/Album/{expected}", "a".repeat(48)));
+            assert_eq!(before[&row.library_id], row.audio, "repeat sync must preserve collision names");
+            assert!(!row.audio.contains('\\'), "USB paths must use forward slashes");
+            assert_eq!(rows.iter().find(|p| p.id == row.export_id).unwrap().file_path, row.audio);
+            let one_path: String = one.connection().query_row("SELECT path FROM content WHERE content_id = ?1", [row.export_id], |r| r.get(0)).unwrap();
+            assert_eq!(one_path, row.audio);
+            let anlz = rbl_anlz::Anlz::read(&usb.path().join(row.anlz_dir.trim_start_matches('/')).join("ANLZ0000.DAT")).unwrap();
+            assert_eq!(anlz.path().as_deref(), Some(row.audio.as_str()));
+            assert_eq!(std::fs::read(usb.path().join(row.audio.trim_start_matches('/'))).unwrap(), vec![row.library_id as u8; 128]);
+        }
+        assert!(verify(usb.path()).unwrap().is_ok());
     }
-    sync(usb.path(), &[b, a], &[playlist(1, &[0, 1])]).unwrap();
-    assert!(verify(usb.path()).unwrap().is_ok());
 }
 #[test]
 fn identity_is_written_and_another_master_cannot_reuse_the_manifest() {
