@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { Device, DeviceFormat, DeviceLibrary, DevicePlaylistEdit, DevicePlaylistEditResult, TreeNode } from "@/ipc/types";
 import { withDeviceLibraries } from "@/lib/deviceLibrary";
+import { errorMessage } from "@/lib/errorMessage";
 import { deviceNodes, devicePath } from "@/lib/devices";
 
 export interface DeviceLibraries {
@@ -28,7 +29,7 @@ export interface DeviceLibraries {
   revision: number;
 }
 
-export function useDeviceLibraries(devices: readonly Device[]): DeviceLibraries {
+export function useDeviceLibraries(devices: readonly Device[], onError: (message: string) => void): DeviceLibraries {
   const [loaded, setLoaded] = useState<ReadonlyMap<string, readonly DeviceLibrary[]>>(() => new Map());
   const [revision, setRevision] = useState(0);
   // Sticks asked for and not yet answered, so a double-click on a twisty
@@ -41,17 +42,16 @@ export function useDeviceLibraries(devices: readonly Device[]): DeviceLibraries 
 
   const read = useCallback(async (path: string) => {
     pending.current.add(path);
-    const backend = await getBackend();
     let found: readonly DeviceLibrary[] = [];
     try {
+      const backend = await getBackend();
       found = await backend.deviceLibraries(path);
-    } catch {
-      // Unreadable, or gone: a stick with nothing under it, as the Explorer
-      // shows a folder it may not open.
+    } catch (error) {
+      onError(errorMessage(error));
     }
     pending.current.delete(path);
     setLoaded((current) => new Map(current).set(path, found));
-  }, []);
+  }, [onError]);
 
   const expand = useCallback(
     (node: TreeNode) => {

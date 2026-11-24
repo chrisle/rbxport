@@ -10,7 +10,8 @@ const device: Device = { path: "/Volumes/TEST", name: "TEST", volumeId: "test", 
 let latest: DeviceLibraries;
 const host = document.createElement("div");
 const root = createRoot(host);
-function Probe({ devices }: { devices: Device[] }) { latest = useDeviceLibraries(devices); return null; }
+const report = vi.fn();
+function Probe({ devices }: { devices: Device[] }) { latest = useDeviceLibraries(devices, report); return null; }
 const settle = () => act(async () => { await Promise.resolve(); });
 afterEach(() => { act(() => root.unmount()); __setBackend(null); });
 

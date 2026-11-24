@@ -228,6 +228,7 @@ fn id_from(text: &str) -> AppResult<u32> {
 pub async fn device_libraries(path: String) -> AppResult<Vec<DeviceLibraryDto>> {
     blocking("device_libraries", move || {
         let mount = connected(&path)?;
+        rbl_export::export_root_name(&mount).map_err(|error| device_error(&error))?;
         Ok(readable_libraries(&mount))
     })
     .await
@@ -1571,6 +1572,21 @@ mod tests {
         std::fs::create_dir_all(dest.path().join(".PIONEER/rekordbox")).unwrap();
         std::fs::copy(dest.path().join("PIONEER/rekordbox/export.pdb"), dest.path().join(".PIONEER/rekordbox/export.pdb")).unwrap();
         assert!(readable_libraries(dest.path()).is_empty());
+    }
+
+    #[test]
+    fn conflicting_library_roots_report_the_reason_without_changing_any_file() {
+        let (_src, dest) = stick();
+        std::fs::create_dir_all(dest.path().join(".PIONEER/rekordbox")).unwrap();
+        std::fs::copy(dest.path().join("PIONEER/rekordbox/export.pdb"), dest.path().join(".PIONEER/rekordbox/export.pdb")).unwrap();
+        let snapshot = || files_under(dest.path()).into_iter().map(|name| {
+            let bytes = std::fs::read(dest.path().join(&name)).unwrap();
+            (name, bytes)
+        }).collect::<std::collections::BTreeMap<_, _>>();
+        let before = snapshot();
+        let error = tauri::async_runtime::block_on(device_libraries(dest.path().to_string_lossy().into_owned())).unwrap_err();
+        assert_eq!(error.message, "Both PIONEER and .PIONEER contain libraries. Reconcile them before syncing.");
+        assert_eq!(snapshot(), before);
     }
 
     #[test]

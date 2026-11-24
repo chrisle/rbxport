@@ -203,8 +203,6 @@ function AppBody() {
   // Connected volumes. Asked for, never polled: a 1 Hz scan of every mount
   // point is exactly the kind of idle work the budgets forbid.
   const [devices, setDevices] = useState<readonly Device[]>([]);
-  // What each stick's own libraries hold, read when a stick is opened.
-  const deviceLibraries = useDeviceLibraries(devices);
   const [syncing, setSyncing] = useState(false);
   const [ejectingDeviceId, setEjectingDeviceId] = useState<string | null>(null);
   const ejectingDeviceRef = useRef(false);
@@ -695,6 +693,8 @@ function AppBody() {
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
+  const deviceLibraryError = useEventCallback((text: string) => refuse(t(text)));
+  const deviceLibraries = useDeviceLibraries(devices, deviceLibraryError);
   const stopJob = useCallback((id: number) => jobs.stop(id), [jobs]);
   jobError.current = (job, error) => refuse(error instanceof Error ? error.message : `${job.label} failed.`);
   // A waveform click whose track could not be previewed says why.

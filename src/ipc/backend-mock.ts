@@ -3685,7 +3685,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return () => progressListeners.delete(listener);
     },
     // The fake disk above. Copies, as with the tree: the map is the mock's.
-    deviceLibraries: (path) => wait(stickLibraries.libraries(path)),
+    deviceLibraries: (path) => readFlagFromUrl("deviceConflictFixture")
+      ? Promise.reject(new Error("Both PIONEER and .PIONEER contain libraries. Reconcile them before syncing."))
+      : wait(stickLibraries.libraries(path)),
     devicePlaylistCollectionTracks: (path, format, tracks) =>
       wait(stickLibraries.collectionTracks(path, format, tracks, [...(looseTracks.get(path) ?? [])])),
     devicePlaylistEdit: (path, format, edit) => {

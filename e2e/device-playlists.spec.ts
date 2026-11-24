@@ -210,3 +210,12 @@ test("a stick's playlists cannot be changed while rekordbox holds the library", 
   const menu = page.getByRole("menu", { name: "Playlists" });
   await expect(menu.getByRole("menuitem", { name: "Create New Playlist" })).toBeDisabled();
 });
+
+test("conflicting device roots explain why playlists cannot be listed (#631)", async ({ page }) => {
+  await page.goto("/?writable=1&deviceConflictFixture=1");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
+  await page.getByRole("button", { name: "Expand TEST" }).click();
+  await expect(page.getByRole("alert")).toContainText("Both PIONEER and .PIONEER contain libraries. Reconcile them before syncing.");
+  await expect(kind(page, "deviceLibrary")).toHaveCount(0);
+});
