@@ -1,3 +1,5 @@
+import { nativeKeyRows } from "./nativeCommands";
+
 /**
  * rekordbox's keyboard map: the Export preset, as its Keyboard pane lists it.
  *
@@ -245,6 +247,8 @@ export const KEYMAP: Readonly<Record<KeymapGroup, readonly KeymapRow[]>> = {
     { id: "b042", label: "Full Browser", key: "command + 0" },
   ],
   "Track": [
+    ...nativeKeyRows("Track"),
+
     // Track menu command; rbxport supplies its own default in shortcuts.ts.
     { id: "400d", label: "Show in Finder", key: null },
     { id: "b103", label: "Information Window", key: "command + I" },
@@ -259,6 +263,8 @@ export const KEYMAP: Readonly<Record<KeymapGroup, readonly KeymapRow[]>> = {
   // `Sort Items` is 0x500d, just above it and unbound the same way
   // (`getCommandInfo` @0x10096b01c).
   "Playlist": [
+    ...nativeKeyRows("Playlist"),
+
     { id: "500d", label: "Sort Items", key: null },
     { id: "500e", label: "Renumber Track Order", key: null },
   ],

@@ -83,3 +83,10 @@ describe("menu", () => {
     expect(outcome).toHaveProperty("refused");
   });
 });
+
+
+it("guards library writes and ignores an unregistered native destination", () => {
+  expect(resolveMenu("add-to-playlist", true)).toHaveProperty("refused");
+  expect(resolveMenu("import-playlist", true)).toHaveProperty("refused");
+  expect(resolveMenu("export-track:unregistered", true)).toBeNull();
+});

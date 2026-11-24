@@ -42,7 +42,7 @@ import { keyMap } from "@/lib/keyPresets";
 import { detectPlatform, dispatch, isTyping, menuAccelerator, type Action } from "@/lib/shortcuts";
 import { hasCommand, runCommand } from "@/lib/commands";
 import { browserFocus, followBrowserFocus, onBrowserFocus } from "@/lib/browserFocus";
-import { menuBarEnabled, menuBarSide, menuBarState, onMenuBarState } from "@/lib/menuBar";
+import { menuBarEnabled, menuBarAction, menuBarTargets, menuBarSide, menuBarState, onMenuBarState } from "@/lib/menuBar";
 import { hasEditHistory, runEditHistory, setLibraryEditHistory } from "@/lib/editHistory";
 import { transposeKey } from "@/lib/camelot";
 import { stepMasterGain, toggleMute } from "@/lib/volume";
@@ -2422,6 +2422,9 @@ function AppBody() {
       runEditHistory(id);
       return;
     }
+    // Retire choices when their owning library/browser changed before delivery.
+    const menuState = { focus: browserFocus(), ...menuBarState() };
+    menuBarTargets(menuState);
     const outcome = resolveMenu(id, readOnly, advancedPrefs.protectLibrary);
     if (!outcome) return;
     if ("refused" in outcome) {
@@ -2460,8 +2463,9 @@ function AppBody() {
     if (outcome.action === "bar-command" && outcome.item) {
       // Track and Playlist items use the same command as their other entry
       // points. Sort Items is owned by App and has no browser-side scope.
+      if (outcome.item.browserSide !== undefined && !menuBarEnabled({ ...menuState, has: hasCommand })[outcome.item.id]) return;
       runCommand(outcome.item.action, outcome.item.scope === "global"
-        ? undefined : { scope: menuBarSide(browserFocus()) });
+        ? undefined : { scope: outcome.item.browserSide ?? menuBarSide(browserFocus()), ...(outcome.item.target === undefined ? {} : { target: outcome.item.target }) });
       return;
     }
     if (outcome.action === "analyze-track") {
@@ -2501,9 +2505,16 @@ function AppBody() {
   // and what the lists and trees report, and sent on whenever they change.
   useEffect(() => {
     const sent: Record<string, boolean> = {};
+    let sentTargets: ReturnType<typeof menuBarTargets> | undefined;
     let queued = false;
     const push = () => {
       queued = false;
+      const state = { focus: browserFocus(), ...menuBarState() };
+      const targets = menuBarTargets(state);
+      if (!sentTargets || Object.keys(targets).some(id => sentTargets?.[id] !== targets[id])) {
+        sentTargets = targets;
+        void getBackend().then(backend => backend.setMenuTargets(targets)).catch(() => { sentTargets = undefined; });
+      }
       const enabled = menuBarEnabled({
         focus: browserFocus(),
         ...menuBarState(),
@@ -2608,7 +2619,16 @@ function AppBody() {
       // and selection live in the table and the deck keys in the decks, which
       // listen for themselves, and everything else falls through to the
       // browser and the OS.
-      if (action === null || !SHELL_COMMANDS.has(action)) return;
+      if (action === null || event.defaultPrevented) return;
+      const bar = menuBarAction(action);
+      if (bar) {
+        const live = menuBarEnabled({ focus: browserFocus(), ...menuBarState(), has: hasCommand });
+        if (!live[bar.id]) return;
+        runMenu(bar.id);
+        event.preventDefault();
+        return;
+      }
+      if (!SHELL_COMMANDS.has(action)) return;
       if (!runCommand(action, { repeat: event.repeat })) return;
       // Escape keeps its default, so whatever else it closes still closes.
       if (action !== "clearSearch") event.preventDefault();

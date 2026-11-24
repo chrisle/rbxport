@@ -35,6 +35,10 @@ export interface CommandInput {
    * never repeats.
    */
   repeat: boolean;
+  /** Chosen playlist/device for a parameterised menu command. */
+  target?: string;
+  /** Context-menu row; omitted when the current selection owns the command. */
+  subject?: string;
 }
 
 /**
@@ -96,9 +100,9 @@ export function hasCommand(action: Action, scope?: CommandScope): boolean {
  * call. Returns false when nothing on screen answers it or it does not
  * apply right now.
  */
-export function runCommand(action: Action, options: { scope?: CommandScope; repeat?: boolean } = {}): boolean {
+export function runCommand(action: Action, options: { scope?: CommandScope; repeat?: boolean; target?: string; subject?: string } = {}): boolean {
   const list = registry.get(slot(action, options.scope));
   const handler = list?.[list.length - 1];
   if (!handler) return false;
-  return handler({ repeat: options.repeat === true });
+  return handler({ repeat: options.repeat === true, ...(options.target === undefined ? {} : { target: options.target }), ...(options.subject === undefined ? {} : { subject: options.subject }) });
 }

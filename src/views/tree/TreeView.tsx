@@ -22,6 +22,7 @@ import { SourceRail } from "./SourceRail";
 import { browseListVars } from "@/lib/preferences";
 import { usePreferences } from "@/store/usePreferences";
 import type { TreeExpansion } from "@/lib/session";
+import { runCommand } from "@/lib/commands";
 import { useCommands } from "@/store/useCommands";
 import { publishTreeMenuState } from "@/lib/menuBar";
 import { deviceDropPath } from "@/lib/deviceLibrary";
@@ -510,6 +511,18 @@ export const TreeView = memo(function TreeView({
     return true;
   };
   useCommands({
+    exportPlaylist: ({ target, subject }) => {
+      const node = subject === undefined ? selectedNode : nodes.find(item => item.id === subject);
+      if (!target || !onExport || !node || !["playlist", "smartPlaylist", "folder"].includes(node.kind) || !exportDevices?.some(item => item.id === target)) return false;
+      onExport(node, target);
+      return true;
+    },
+    importPlaylist: ({ subject }) => {
+      const node = subject === undefined ? selectedNode : nodes.find(item => item.id === subject);
+      if (!onDeviceImport || node?.kind !== "devicePlaylist" || readOnly || deviceBusy) return false;
+      onDeviceImport(node);
+      return true;
+    },
     createPlaylist: onSelected(onCreatePlaylist),
     createIntelligentPlaylist: onSelected(onCreateSmartPlaylist),
     createFolder: onSelected(onCreateFolder),
@@ -522,8 +535,9 @@ export const TreeView = memo(function TreeView({
     publishTreeMenuState(side, {
       kind: selectedNode?.kind ?? null,
       hasChildren: parent !== undefined && childrenOf(nodes, parent).length > 0,
+      devices: exportDevices, busy: deviceBusy,
     });
-  }, [side, selectedNode, nodes]);
+  }, [side, selectedNode, nodes, exportDevices, deviceBusy]);
   useEffect(() => () => publishTreeMenuState(side, null), [side]);
   /** The row whose name is being typed over, if any. */
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -785,7 +799,7 @@ export const TreeView = memo(function TreeView({
                 onDeviceDelete?.(menu.node);
                 break;
               case "deviceImportPlaylist":
-                onDeviceImport?.(menu.node);
+                runCommand("importPlaylist", { scope: side, subject: menu.node.id });
                 break;
             }
           }}
@@ -804,7 +818,7 @@ export const TreeView = memo(function TreeView({
           context={{ inPlaylist: true, hasFile: true, readOnly }}
           onChoose={(action) => {
             if (action.startsWith("exportTo:")) {
-              onExport?.(menu.node, action.slice("exportTo:".length));
+              runCommand("exportPlaylist", { scope: side, target: action.slice("exportTo:".length), subject: menu.node.id });
               return;
             }
             switch (action) {

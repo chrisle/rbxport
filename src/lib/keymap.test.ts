@@ -86,11 +86,18 @@ describe("the Export key map", () => {
     expect(rowsFor("Help", false)).toEqual([]);
     // Playlist holds rekordbox's Sort Items and Renumber Track Order, in
     // its order: live, unbound, and assignable, as rekordbox lists them.
-    expect(rowsFor("Playlist", true)).toEqual([
+    expect(rowsFor("Playlist", true).filter(row => ["500d", "500e"].includes(row.id))).toEqual([
       { id: "500d", label: "Sort Items", key: null, built: true, bindingId: "sortItems", changed: false },
       { id: "500e", label: "Renumber Track Order", key: null, built: true, bindingId: "renumberTrackOrder", changed: false },
     ]);
-    expect(rowsFor("Playlist", false, { renumberTrackOrder: { key: "r", metaKey: true, altKey: true } })[1])
+    expect(rowsFor("Playlist", false, { renumberTrackOrder: { key: "r", metaKey: true, altKey: true } }).find(row => row.id === "500e"))
       .toMatchObject({ key: "alt + ctrl + R", changed: true });
   });
+});
+
+
+it("exposes established native commands as configurable unbound Keyboard rows", () => {
+  expect(rowsFor("Track", true).find(row => row.id === "4012")).toMatchObject({ bindingId: "analysisLockOn", key: null, built: true });
+  expect(rowsFor("Playlist", true).find(row => row.id === "5009")).toMatchObject({ bindingId: "importPlaylist", key: null, built: true });
+  expect(rowsFor("Playlist", true, { importPlaylist: { key: "i", altKey: true } }).find(row => row.id === "5009")).toMatchObject({ bindingId: "importPlaylist", key: "option + I", built: true });
 });
