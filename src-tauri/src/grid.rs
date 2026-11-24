@@ -639,6 +639,7 @@ struct DeviceGrid {
     track: u32,
     dat: PathBuf,
     ext: PathBuf,
+    ext_present: bool,
 }
 
 impl DeviceGrid {
@@ -650,7 +651,19 @@ impl DeviceGrid {
             return Err(AppError::new(ErrorKind::NotFound, "That track has not been analysed, so it has no grid to edit."));
         };
         let ext = rbl_anlz::sibling(&dat, "EXT");
-        Ok(Self { mount: assets.mount.clone(), format, track, dat, ext })
+        // Validate both companions before reading or backing up either one.
+        // An EXT without a rewritten PQT2 never reaches GridWrite.files, so
+        // the publication's later path check cannot protect these reads.
+        let plain_file = |path: &Path| crate::device_library::plainly_under(&assets.mount, path)
+            && std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file());
+        let refused = || AppError::new(ErrorKind::Malformed, "This track's analysis companions must be plain files on the USB. Nothing was changed.");
+        if !plain_file(&dat) { return Err(refused()); }
+        let ext_present = match std::fs::symlink_metadata(&ext) {
+            Ok(_) if plain_file(&ext) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            _ => return Err(refused()),
+        };
+        Ok(Self { mount: assets.mount.clone(), format, track, dat, ext, ext_present })
     }
 
     /// `path`, relative to the stick's root.
@@ -714,8 +727,12 @@ pub(crate) fn apply_device(editor: &GridEditor, assets: &crate::device_library::
     let _editing = editor.editing.lock();
     let key = device_history_key(track, assets);
     let track = key.as_str();
-    rbl_export::recover(&assets.mount).map_err(|e| AppError::internal(e.to_string()))?;
-    let lease = device_read_lease(&assets.mount)?;
+    let lease = rbl_export::device_library::grid_write_lease(&assets.mount).map_err(|e| crate::device_library::device_error(&e))?;
+    let (format, id) = assets.library.ok_or_else(|| AppError::new(ErrorKind::NotFound, "That track's device library is not known. Open it again from the device."))?;
+    let current = rbl_export::device_library::read_grid_track(&assets.mount, format, id).map_err(|e| crate::device_library::device_error(&e))?;
+    if current.path != assets.audio || current.analysis_path != assets.analysis {
+        return Err(AppError::new(ErrorKind::Malformed, "That device row changed. Reload it before editing the grid."));
+    }
     let grid = DeviceGrid::of(assets)?;
     let (parsed, beats, original) = read_dat_snapshot(&grid.dat)?;
     let unchanged = |beats: &[Beat]| GridOutcome {
@@ -731,7 +748,7 @@ pub(crate) fn apply_device(editor: &GridEditor, assets: &crate::device_library::
     let mut files = vec![rbl_export::device_library::GridFile {
         path: grid.relative(&grid.dat)?, original, replacement: parsed.with_beat_grid(&next),
     }];
-    if grid.ext.is_file() {
+    if grid.ext_present {
         editor.back_up_device(&grid.ext, &grid.backup_key(&grid.ext)?)?;
         let original = std::fs::read(&grid.ext).map_err(|e| AppError::internal(e.to_string()))?;
         let ext = rbl_anlz::parse(&original).map_err(|e| AppError::internal(e.to_string()))?;
@@ -1748,6 +1765,101 @@ mod tests {
             let forged = crate::dto::DeviceTrackSourceDto { track_id: 99, ..source("deviceLibrary") };
             assert!(crate::device_library::grid_assets(&forged, &track).is_err());
             assert!(crate::device_library::grid_assets(&source("deviceLibrary"), "file:other-audio").is_err());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_write_plan_refuses_a_dangling_lock_link_without_creating_an_outside_file() {
+            let s = exported();
+            let assets = s.assets(Format::DeviceLibrary);
+            let dat = assets.analysis_dat().unwrap();
+            let original = std::fs::read(&dat).unwrap();
+            let databases = [Format::DeviceLibrary, Format::OneLibrary].map(|format| std::fs::read(s.dest.path().join("PIONEER/rekordbox").join(format.file_name())).unwrap());
+            let outside = tempfile::tempdir().unwrap();
+            let target = outside.path().join("must-not-be-created.lock");
+            let lock = s.dest.path().join(".rbxport-write.lock");
+            std::fs::remove_file(&lock).unwrap();
+            std::os::unix::fs::symlink(&target, &lock).unwrap();
+            let result = apply_device(&s.editor, &assets, "file:track-1", GridAction::Edit { edit: GridEdit::Nudge { ms: 5 }, from_ms: None }, &GridOptions::default(), false);
+            assert!(!target.exists(), "a lock link must not create a file outside the device");
+            assert_eq!(backed_up(&s.editor), Vec::<Vec<u8>>::new());
+            assert!(result.is_err());
+            assert_eq!(std::fs::read(dat).unwrap(), original);
+            assert_eq!([Format::DeviceLibrary, Format::OneLibrary].map(|format| std::fs::read(s.dest.path().join("PIONEER/rekordbox").join(format.file_name())).unwrap()), databases);
+            assert!(s.editor.histories.lock().is_empty());
+        }
+
+        #[test]
+        fn duplicate_browsed_ids_refuse_before_analysis_backup_or_history() {
+            let (src, dest, app) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            let tracks: Vec<_> = (1..=2_u64).map(|id| {
+                let audio = src.path().join(format!("{id}.mp3"));
+                std::fs::write(&audio, [u8::try_from(id).unwrap(); 128]).unwrap();
+                rbl_export::SourceTrack { id, source_path: audio, bpm_x100: 12_000, duration_sec: 20,
+                    analysis: vec![("DAT".into(), AnlzBuilder::new().path("/audio.mp3").beat_grid(&grid()).finish())], ..Default::default() }
+            }).collect();
+            rbl_export::export(dest.path(), &tracks, &[]).unwrap();
+            let path = dest.path().join("PIONEER/rekordbox/export.pdb");
+            let mut bytes = std::fs::read(&path).unwrap();
+            let at = {
+                let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+                pdb.rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap()).into_iter()
+                    .find(|row| pdb.u4_at(*row, 0x48) == 2).unwrap().offset + 0x48
+            };
+            bytes[at..at + 4].copy_from_slice(&1_u32.to_le_bytes());
+            std::fs::write(path, bytes).unwrap();
+            let library = stick::read(dest.path(), Format::DeviceLibrary).unwrap();
+            let selected = library.track(1).unwrap();
+            let assets = crate::device_library::DeviceAssets { mount: dest.path().to_path_buf(), audio: selected.path.clone(), analysis: selected.analysis_path.clone(), artwork: String::new(), library: Some((Format::DeviceLibrary, 1)) };
+            let data: Vec<_> = library.tracks.iter().map(|row| {
+                let path = dest.path().join(row.analysis_path.trim_start_matches('/'));
+                let bytes = std::fs::read(&path).unwrap();
+                (path, bytes)
+            }).collect();
+            let databases = [Format::DeviceLibrary, Format::OneLibrary].map(|format| std::fs::read(dest.path().join("PIONEER/rekordbox").join(format.file_name())).unwrap());
+            let editor = GridEditor::at(app.path());
+            let result = apply_device(&editor, &assets, "file:loaded", GridAction::Edit { edit: GridEdit::Double, from_ms: None }, &GridOptions::default(), false);
+            assert!(backed_up(&editor).is_empty(), "ambiguous source must refuse before backing up analysis");
+            assert!(result.is_err());
+            for (path, bytes) in data { assert_eq!(std::fs::read(path).unwrap(), bytes); }
+            assert_eq!([Format::DeviceLibrary, Format::OneLibrary].map(|format| std::fs::read(dest.path().join("PIONEER/rekordbox").join(format.file_name())).unwrap()), databases);
+            assert!(editor.histories.lock().is_empty());
+            assert!(editor.device_written.lock().is_empty());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_linked_ext_is_refused_before_reading_or_backing_up_any_analysis() {
+            for valid_analysis in [false, true] {
+                let s = exported();
+                let assets = s.assets(Format::DeviceLibrary);
+                let dat = assets.analysis_dat().unwrap();
+                let ext = rbl_anlz::sibling(&dat, "EXT");
+                let before = std::fs::read(&dat).unwrap();
+                let databases = [Format::DeviceLibrary, Format::OneLibrary].map(|format| std::fs::read(s.dest.path().join("PIONEER/rekordbox").join(format.file_name())).unwrap());
+                let outside_root = tempfile::tempdir().unwrap();
+                let outside = outside_root.path().join("outside-private.EXT");
+                // A valid file with no PQT2 needs no EXT rewrite, so checking
+                // only the files sent to the publication is too late.
+                let private = if valid_analysis {
+                    AnlzBuilder::new().path("/outside-private-sentinel.mp3").finish()
+                } else { b"outside private sentinel, not analysis".to_vec() };
+                std::fs::write(&outside, &private).unwrap();
+                if std::fs::symlink_metadata(&ext).is_ok() { std::fs::remove_file(&ext).unwrap(); }
+                std::os::unix::fs::symlink(&outside, &ext).unwrap();
+                let result = apply_device(&s.editor, &assets, "file:track-1",
+                    GridAction::Edit { edit: GridEdit::Nudge { ms: 5 }, from_ms: None }, &GridOptions::default(), false);
+                let copies = backed_up(&s.editor);
+                assert!(!copies.contains(&private), "outside bytes must never be copied to app backups");
+                assert!(copies.is_empty(), "reject companions before backing up even the valid DAT");
+                assert!(result.is_err());
+                assert_eq!(std::fs::read(&outside).unwrap(), private);
+                assert_eq!(std::fs::read(&dat).unwrap(), before);
+                assert_eq!([Format::DeviceLibrary, Format::OneLibrary].map(|format| std::fs::read(s.dest.path().join("PIONEER/rekordbox").join(format.file_name())).unwrap()), databases);
+                assert!(std::fs::symlink_metadata(&ext).unwrap().file_type().is_symlink());
+                assert!(s.editor.histories.lock().is_empty());
+                assert!(s.editor.device_written.lock().is_empty());
+            }
         }
 
         #[test]

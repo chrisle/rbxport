@@ -765,6 +765,46 @@ fn check_grid_snapshot(root: &Path, files: &[GridFile]) -> Result<()> {
     Ok(())
 }
 
+fn unique_grid_track(library: &Library, id: u32) -> Result<&Track> {
+    let mut matching = library.tracks.iter().filter(|track| track.id == id);
+    let track = matching.next().ok_or_else(|| refused("That track is no longer in this device library. Nothing was changed."))?;
+    if matching.next().is_some() {
+        return Err(refused("This device library has ambiguous track IDs. Nothing was changed; reload or repair the library."));
+    }
+    Ok(track)
+}
+
+/// An exact grid-edit source. Duplicate local IDs cannot select a row safely.
+pub fn read_grid_track(root: &Path, format: Format, id: u32) -> Result<Track> {
+    let library = read_without_recovery(root, format)?;
+    Ok(unique_grid_track(&library, id)?.clone())
+}
+
+fn check_grid_lock(root: &Path) -> Result<()> {
+    let path = root.join(".rbxport-write.lock");
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+        Ok(_) => Err(refused("The device write lock is not a plain file on this USB. Nothing was changed.")),
+    }
+}
+
+/// A write-intent shared lease spanning grid planning and backups. Unlike
+/// observational reads this creates a missing lock on a stock device, so a
+/// first publisher must wait too. Validate the leaf before recovery or create
+/// so a dangling lock link cannot create a file outside the device.
+pub fn grid_write_lease(root: &Path) -> Result<std::fs::File> {
+    check_grid_lock(root)?;
+    crate::recover(root)?;
+    check_grid_lock(root)?;
+    let lease = rbl_core::durable::read_lock(root)?;
+    if crate::recovery_pending(root) {
+        return Err(refused("This USB needs recovery before its grid can be edited."));
+    }
+    Ok(lease)
+}
+
 /// Publishes a [`GridWrite`] to the stick at `root`, for a track browsed in
 /// `format`: the analysis files and, with a new tempo, the track's row,
 /// all through one publication of the export journal, so an interruption
@@ -788,13 +828,14 @@ fn check_grid_snapshot(root: &Path, files: &[GridFile]) -> Result<()> {
 /// and `hasModified` stay as they are. The audio and every other file are
 /// left alone.
 pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> {
+    check_grid_lock(root)?;
     crate::recover(root)?;
     let dir = db_dir(root)?;
     if !dir.join(format.file_name()).is_file() {
         return Err(missing(format));
     }
+    check_grid_lock(root)?;
     let publication = rbl_core::durable::Publication::new(root, PUBLICATION)?;
-    check_grid_snapshot(root, &write.files)?;
     let present = formats(root);
     let stamps = |dir: &Path| -> Result<Vec<_>> {
         present.iter().map(|f| Ok((file_stamp(&dir.join(f.file_name()))?, file_stamp(&dir.join(format!("{}-wal", f.file_name())))?))).collect()
@@ -805,9 +846,7 @@ pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> 
     }
     let stamp = stamps(&dir)?;
     let browsed = read_unlocked(root, format)?;
-    let Some(track) = browsed.track(write.track) else {
-        return Err(refused("That track is no longer in this device library. Nothing was changed."));
-    };
+    let track = unique_grid_track(&browsed, write.track)?;
     if path_key(&track.path) != path_key(&write.audio) {
         return Err(refused("That device row no longer names the loaded audio. Nothing was changed; reload the track."));
     }
@@ -821,6 +860,7 @@ pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> 
     }) {
         return Err(refused("Those analysis files no longer belong to this device track. Nothing was changed; reload the track."));
     }
+    check_grid_snapshot(root, &write.files)?;
     let mut files = Vec::with_capacity(write.files.len() + 6);
     for file in &write.files {
         let relative = &file.path;
@@ -848,6 +888,10 @@ pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> 
                 } else {
                     (t.master_db_id, t.master_content_id) == master
                 }).map(|t| t.id).collect();
+                // Every selected numeric ID must be unique too: a paired
+                // row with a different origin can reuse that ID, and the
+                // PDB patcher must never update both records.
+                for &id in &rows { unique_grid_track(&library, id)?; }
                 let audio_key = path_key(&track.path);
                 let same_audio = |t: &Track| path_key(&t.path) == audio_key;
                 // Origin IDs alone are insufficient if stale/corrupt rows
@@ -915,7 +959,7 @@ fn stage_tempo(root: &Path, staged_dir: &Path, relative: &Path, format: Format, 
     Ok(files)
 }
 
-/// `export.pdb` with every live row of `track` given `bpm_x100`. The tempo
+/// `export.pdb` with the unique live row of `track` given `bpm_x100`. The tempo
 /// is a fixed four bytes of the row (0x38), so nothing else moves.
 fn patch_pdb_tempo(bytes: &[u8], track: u32, bpm_x100: u32) -> Result<Vec<u8>> {
     use rbl_pdb::PageType;
@@ -928,6 +972,7 @@ fn patch_pdb_tempo(bytes: &[u8], track: u32, bpm_x100: u32) -> Result<Vec<u8>> {
         if pdb.u4_at(row, 0x48) != track {
             continue;
         }
+        if found { return Err(cannot()); }
         let at = row.offset + 0x38;
         next.get_mut(at..at + 4).ok_or_else(cannot)?.copy_from_slice(&bpm_x100.to_le_bytes());
         found = true;
