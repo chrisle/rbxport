@@ -246,6 +246,14 @@ fn uncoloured_hot_loops_get_the_loop_default_in_link() {
             assert_eq!(&blob[0x10..0x14],2000_u32.to_le_bytes());
         }
     }
+    // Invalid LINK palette codes retain the existing normalization to zero,
+    // then follow the appropriate point or loop default for hot slot E.
+    for (out_ms,rgb) in [(0,[0,255,48]),(2000,[255,140,0])] {
+        let cue=ExtendedCue::from(&Cue{id:1,position_ms:1000,out_ms,kind:6,colour:65,memory_colour:None});
+        let (blob,_)=blobs::extended_cues_blob(&[cue]);
+        assert_eq!(colour_of(&blob),[0,rgb[0],rgb[1],rgb[2]]);
+        assert_eq!(blob[6],if out_ms>1000 {2} else {1});
+    }
     for out_ms in [0,1000] {
         let cue=ExtendedCue::from(&Cue{id:1,position_ms:1000,out_ms,kind:6,colour:0,memory_colour:None});
         let (blob,_)=blobs::extended_cues_blob(&[cue]);
