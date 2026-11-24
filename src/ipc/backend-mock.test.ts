@@ -380,6 +380,26 @@ describe("mock edits", () => {
     expect(generation).toBeGreaterThan(4);
   });
 
+  it("keeps each playlist occurrence's original number through search and filtering", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createPlaylist("Occurrences", TREE_ROOT);
+    const list = (await backend.playlistTree()).find((node) => node.name === "Occurrences")!;
+    await backend.edits.addTracksToPlaylist(list.id, ["100000", "100002", "100001", "100002"], true);
+    const spec = { source: { kind: "playlist", id: list.id }, sort: "trackNo", descending: false, query: "" } as const;
+    const full = await backend.openView(spec);
+    const original = await backend.fetchRows(full.viewId, 0, 10);
+    const target = original[1]!;
+    for (const narrowing of [{ query: target.title, searchField: "title" as const }, { filter: { ratings: [target.rating] } }]) {
+      for (const descending of [false, true]) {
+        const view = await backend.openView({ ...spec, ...narrowing, descending });
+        const rows = await backend.fetchRows(view.viewId, 0, 10);
+        expect(rows.filter((row) => row.id === target.id).map((row) => row.trackNo))
+          .toEqual(descending ? [4, 2] : [2, 4]);
+        expect(view.totals?.tracks).toBe(4);
+      }
+    }
+  });
+
   it("undoes one add sent in slices, and a reorder, as one step each (#499)", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.createPlaylist("Set", TREE_ROOT);
