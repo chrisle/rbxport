@@ -29,13 +29,20 @@ test("table and Info retain batched native short-date labels verbatim", async ({
   await expect(panel.getByText("Play", { exact: true })).toBeVisible();
   await page.evaluate(() => {
     const preferences = JSON.parse(localStorage.getItem("rbl.preferences") ?? "{}");
-    localStorage.setItem("rbl.preferences", JSON.stringify({ ...preferences, view: { ...preferences.view, locale: "de" } }));
-    window.dispatchEvent(new Event("rbl-preferences"));
+    localStorage.setItem("rbl.preferences", JSON.stringify({ ...preferences, view: { ...preferences.view, locale: "de", tooltips: true } }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "rbl.preferences" }));
   });
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
   await expect(page.getByRole("columnheader", { name: /^Trackname/ })).toBeVisible();
   await expect(date).toHaveText("Play");
   await expect(panel.getByText("Play", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Play", { exact: true })).toHaveAttribute("title", "Play");
+  await page.evaluate(() => {
+    const preferences = JSON.parse(localStorage.getItem("rbl.preferences") ?? "{}");
+    localStorage.setItem("rbl.preferences", JSON.stringify({ ...preferences, view: { ...preferences.view, tooltips: false } }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "rbl.preferences" }));
+  });
+  await expect(panel.getByText("Play", { exact: true })).not.toHaveAttribute("title");
   const requests = await page.evaluate(() => (window as unknown as { __datePages: { len: number; columns: string[] }[] }).__datePages);
   expect(requests.length).toBeGreaterThan(0);
   expect(requests.every(request => request.len <= 128)).toBe(true);

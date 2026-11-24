@@ -81,6 +81,7 @@ function localize(root: Node, catalog: Catalog, force: boolean) {
     if (node.data !== next) node.data = next;
   };
   const visitElement = (element: Element) => {
+    if (element.hasAttribute("data-i18n-ignore")) return;
     let originals = originalAttributes.get(element);
     if (!originals) { originals = new Map(); originalAttributes.set(element, originals); }
     for (const name of attributes) {
