@@ -123,6 +123,7 @@ export function planValidation(paths, { all = false } = {}) {
       if (
         path.startsWith("src-tauri/windows/") ||
         path === "src-tauri/src/file_drop.rs" ||
+        path === "src-tauri/src/file_drop_windows_tests.rs" ||
         path === "src-tauri/Cargo.toml"
       ) {
         enable(plan, "windows_rust");

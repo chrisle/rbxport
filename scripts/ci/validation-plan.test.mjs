@@ -41,6 +41,7 @@ test("Windows installer resources add the Windows-native check", () => {
 
 test("Windows-only desktop Rust adds the Windows-native check", () => {
   assert.deepEqual(enabled("src-tauri/src/file_drop.rs"), ["rust", "windows_rust"]);
+  assert.deepEqual(enabled("src-tauri/src/file_drop_windows_tests.rs"), ["rust", "windows_rust"]);
   assert.deepEqual(enabled("src-tauri/Cargo.toml"), ["rust", "windows_rust"]);
 });
 

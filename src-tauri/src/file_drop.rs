@@ -121,18 +121,13 @@ fn reply(id: &str, paths: Result<Vec<String>, String>) -> String {
         Ok(paths) if !paths.is_empty() && paths.iter().all(|path| !path.is_empty()) => {
             serde_json::json!({ REQUEST_KEY: id, "paths": paths })
         }
-        // `dropped_paths` below only returns `Err` when reading WebView2's
-        // `AdditionalObjects` itself failed (already logged there); reaching
-        // `Ok` with too few, or an empty, path had no diagnostic of its own,
-        // so a report naming the resulting message could not say whether
-        // WebView2 gave zero objects, fewer than were posted, or one with an
-        // empty path, e.g. for a dropped item it cannot resolve to a file
-        // (issue #847).
+        // A successful COM read can still return zero objects or an empty
+        // path. The page separately checks that the count matches its files.
         Ok(paths) => {
             tracing::warn!(
                 returned = paths.len(),
                 empty = paths.iter().filter(|path| path.is_empty()).count(),
-                "WebView2 gave fewer dropped-file paths than files were posted, or an empty one"
+                "WebView2 returned no dropped-file paths or an empty path"
             );
             serde_json::json!({ REQUEST_KEY: id, "error": UNAVAILABLE })
         }
@@ -203,7 +198,7 @@ mod webview2 {
     ///
     /// # Safety
     /// Must run inside the `WebMessageReceived` handler that received `args`.
-    unsafe fn dropped_paths(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Result<Vec<String>, String> {
+    pub(super) unsafe fn dropped_paths(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Result<Vec<String>, String> {
         let read = || -> windows_core::Result<Vec<String>> {
             // Needs a WebView2 Runtime that supports `AdditionalObjects`.
             let args = args.cast::<ICoreWebView2WebMessageReceivedEventArgs2>()?;
@@ -230,9 +225,16 @@ mod webview2 {
     }
 }
 
+#[cfg(all(windows, test))]
+#[path = "file_drop_windows_tests.rs"]
+#[allow(unsafe_code, non_snake_case, clippy::pedantic, clippy::unwrap_used, clippy::expect_used)]
+mod windows_tests;
+
 #[cfg(test)]
 mod tests {
-    use super::{dropped_file_paths, reply, request_id, validate_paths, REQUEST_KEY, UNAVAILABLE};
+    use super::{reply, request_id, validate_paths, REQUEST_KEY, UNAVAILABLE};
+    #[cfg(not(target_os = "macos"))]
+    use super::dropped_file_paths;
 
     /// `dropped_file_paths` is the command `droppedFilePaths` in
     /// `src/ipc/client.ts` falls back to when the page finds no
@@ -279,6 +281,39 @@ mod tests {
             let answer: serde_json::Value = serde_json::from_str(&reply("7f", paths)).unwrap_or_default();
             assert_eq!(answer, serde_json::json!({ REQUEST_KEY: "7f", "error": UNAVAILABLE }));
         }
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    fn invalid_path_diagnostics_contain_counts_without_names_or_request_ids() {
+        use tracing_subscriber::prelude::*;
+        // Parallel reply tests share this tracing callsite. Run its collector
+        // in a separate process so they cannot affect the captured events.
+        const CHILD: &str = "RBXPORT_DROP_LOG_CAPTURE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+                .args(["--exact", "file_drop::tests::invalid_path_diagnostics_contain_counts_without_names_or_request_ids"])
+                .env(CHILD, "1").env("RB_LITE_TEST", "1").output().expect("isolated log test");
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+            return;
+        }
+        let held: &'static std::sync::Mutex<crate::logging::LogBuffer> =
+            Box::leak(Box::new(std::sync::Mutex::new(crate::logging::LogBuffer::new(4))));
+        let subscriber = tracing_subscriber::registry().with(crate::logging::BufferLayer(held));
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::callsite::rebuild_interest_cache();
+            reply("fixture-private-id", Ok(vec![r"C:\fixture\private-name.mp3".into(), String::new()]));
+            reply("fixture-private-id", Ok(Vec::new()));
+            reply("fixture-private-id", Ok(vec![r"C:\fixture\private-name.mp3".into()]));
+        });
+        let page = held.lock().expect("fixture buffer").after(0);
+        let messages: Vec<_> = page.lines.iter().map(|line| line.message.as_str()).collect();
+        assert_eq!(messages, [
+            "WebView2 returned no dropped-file paths or an empty path returned=2 empty=1",
+            "WebView2 returned no dropped-file paths or an empty path returned=0 empty=0",
+        ]);
+        assert!(page.lines.iter().all(|line| line.level == "warn"));
     }
 
     #[cfg(target_os = "macos")]
