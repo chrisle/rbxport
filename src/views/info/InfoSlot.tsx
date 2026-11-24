@@ -31,6 +31,7 @@ export function InfoSlot({ width, bounds, onWidthChange, children }: InfoSlotPro
 
   const onPointerDown = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
       from.current = { x: event.clientX, width: current() };
       // Capture, so the drag survives the pointer leaving the handle.
       event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -77,6 +78,7 @@ export function InfoSlot({ width, bounds, onWidthChange, children }: InfoSlotPro
         aria-label="Resize the information panel"
         aria-valuenow={width === null ? undefined : width}
         aria-valuemin={bounds.min}
+        aria-valuemax={clampWidth(Number.MAX_SAFE_INTEGER, bounds)}
         tabIndex={0}
       />
       {children}

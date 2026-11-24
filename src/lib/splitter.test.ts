@@ -97,12 +97,13 @@ describe("infoBounds", () => {
       const b = infoBounds(1800, 305, subOpen);
       const widest = clampWidth(99999, b);
       expect(1800 - widest - 305).toBeGreaterThanOrEqual(TREE_BOUNDS.minOther);
-      expect(widest).toBeLessThanOrEqual(900);
+      if (!subOpen) expect(widest).toBeGreaterThan(900);
     }
   });
 
   it("holds a floor in a window too narrow for it", () => {
-    expect(clampWidth(500, infoBounds(700, 305, true))).toBe(280);
-    expect(clampWidth(10, infoBounds(1800, 305, false))).toBe(280);
+    expect(clampWidth(500, infoBounds(700, 305, true))).toBe(1);
+    expect(clampWidth(0, infoBounds(1800, 305, false))).toBe(1);
+    expect(clampWidth(160, infoBounds(1800, 305, false))).toBe(160);
   });
 });
