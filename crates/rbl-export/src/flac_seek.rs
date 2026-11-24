@@ -1,9 +1,9 @@
 //! `PVB2`: the FLAC seek index rekordbox ends a FLAC track's `.EXT` with.
-//! Without it a CDJ-2000NXS2 (fw 1.83) scans the file on load and appends a
-//! partial index of its own; five FLACs exported without one came back from a
-//! gig that way, after slow loads [OBS 2026-11-02].
+//! The #828 contributor reported slow loads and player-written partial
+//! indexes on CDJ-2000NXS2 firmware 1.83. This module validates file structure;
+//! it does not establish a physical loading-speed or playback result.
 //!
-//! [OBS, contributor report 2026-11-02] Layout matched entry for entry
+//! The #828 contributor reported this layout matched entry for entry
 //! against four rekordbox-written files (not independently reproduced here): a
 //! 20-byte header (a zero word, total samples from STREAMINFO as u64, entry
 //! count, entry length 20), then 400 entries of (first sample u64, byte offset
@@ -355,6 +355,7 @@ fn build(total: u64, frames: &[Frame]) -> rbl_anlz::Section {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -438,6 +439,7 @@ mod tests {
     fn variable_blocks_and_short_final_frame() {
         let mut b = stream(0, 24);
         b[20] &= !0x0e; // STREAMINFO mono
+        b[8..12].copy_from_slice(&[0, 16, 0, 16]);
         for (sample, block) in [(0, 16), (16, 8)] {
             let mut frame = vec![0xff, 0xf9, 0x69, 0x08, sample, block - 1];
             frame.push(crc8(&frame));
@@ -587,6 +589,38 @@ mod tests {
             let crc = crc16(&b[42..footer]);
             b[footer..].copy_from_slice(&crc.to_be_bytes());
             assert!(index(&b).is_none());
+        }
+    }
+
+    #[test]
+    fn compressed_flac_fixture_has_exact_frame_offsets_and_pvb2_bytes() {
+        let bytes = include_bytes!("../../rbl-audio/tests/fixtures/stereo-96k.flac");
+        let (total, frames) = index(bytes).unwrap();
+        assert_eq!(total, 24_000);
+        assert_eq!(frames, [
+            Frame { sample: 0, offset: 0, block: 8_192 },
+            Frame { sample: 8_192, offset: 18_776, block: 8_192 },
+            Frame { sample: 16_384, offset: 37_899, block: 7_616 },
+        ]);
+        let section = build(total, &frames);
+        let mut header = vec![0; 4];
+        header.extend_from_slice(&24_000u64.to_be_bytes());
+        header.extend_from_slice(&400u32.to_be_bytes());
+        header.extend_from_slice(&20u32.to_be_bytes());
+        assert_eq!(section.header, header);
+        // A 60-sample step selects the first frame for entries 0..137,
+        // the second for 137..274, and the short final frame thereafter.
+        for (range, sample, offset, block) in [
+            (0..137, 0u64, 0u64, 8_192u32),
+            (137..274, 8_192, 18_776, 8_192),
+            (274..400, 16_384, 37_899, 7_616),
+        ] {
+            let mut expected = sample.to_be_bytes().to_vec();
+            expected.extend_from_slice(&offset.to_be_bytes());
+            expected.extend_from_slice(&block.to_be_bytes());
+            for entry in range {
+                assert_eq!(&section.payload[entry * 20..(entry + 1) * 20], expected);
+            }
         }
     }
 

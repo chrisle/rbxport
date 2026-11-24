@@ -1754,9 +1754,8 @@ fn export_cancellable_inner(
                         parsed.sections.splice(at..at, rbl_anlz::cues::sections(cues, extension == "EXT"));
                     }
                 }
-                // rekordbox ends a FLAC's EXT with its `PVB2` seek index; a
-                // CDJ-2000NXS2 without one scans the file on load. A converted
-                // track is no longer that FLAC, so its index cannot stay.
+                // Add a missing FLAC seek index to the EXT. A converted
+                // track is no longer that FLAC, so its offsets cannot stay.
                 if extension.eq_ignore_ascii_case("EXT") {
                     let pvb2 = rbl_core::FourCc::new(b"PVB2");
                     let flac = conversion.is_none() && place.audio.to_ascii_lowercase().ends_with(".flac");

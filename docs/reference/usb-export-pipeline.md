@@ -726,7 +726,10 @@ In loop order:
    cues (`rbl_anlz::cues::sections`). A FLAC's EXT gains the `PVB2` seek
    index rekordbox writes when it has none (`flac_seek`: 400 frame entries
    built from structurally parsed frames with CRC checks), and a converted track's EXT drops it.
-   Incomplete or malformed FLACs do not receive a partial index. This validates
+   Existing indexes are preserved. Files with unknown total sample counts,
+   incomplete frames, or malformed coding do not receive a generated index.
+   The FLAC parser follows [RFC 9639](https://www.rfc-editor.org/rfc/rfc9639.html)
+   for frame headers, subframes, residuals and CRCs. This validates
    format structure, not physical CDJ playback compatibility. See
    [Analysis export transformation](usb-export-db.md#analysis-export-transformation)
    and [Source cue export](usb-export-db.md#source-cue-export).
