@@ -2355,8 +2355,6 @@ export const Player = memo(function Player({
           // Held, not clicked: on the cue point the deck plays for as long as
           // the button is down and snaps back when it comes up.
           {...cuePress}
-          onPointerLeave={dropCue}
-          onMouseLeave={dropCue}
           disabled={playback.idle}
         >
           CUE

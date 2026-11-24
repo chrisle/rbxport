@@ -29,8 +29,8 @@ function render(capture = true) {
 
 // jsdom has no PointerEvent either; a MouseEvent of the pointer type with a
 // pointer id is what React's handlers read.
-function pointer(target: EventTarget, type: string, clientX: number, pointerId = 1) {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, button: 0 });
+function pointer(target: EventTarget, type: string, clientX: number, pointerId = 1, button = 0) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, button });
   Object.defineProperty(event, "pointerId", { value: pointerId });
   act(() => {
     target.dispatchEvent(event);
@@ -111,6 +111,29 @@ describe("usePress", () => {
     expect(up).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores compatibility mouse events after touch capture ends", () => {
+    const overview = render();
+    pointer(overview, "pointerdown", 10);
+    pointer(overview, "pointerup", 10);
+    pointer(overview, "lostpointercapture", 10);
+    mouse(overview, "mousedown", 10);
+    mouse(overview, "mouseup", 10);
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(up).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses touch compatibility events after capture is lost during a press", () => {
+    const overview = render();
+    pointer(overview, "pointerdown", 10);
+    pointer(overview, "lostpointercapture", 20);
+    pointer(overview, "pointerup", 30);
+    mouse(overview, "mousedown", 30);
+    mouse(overview, "mouseup", 30);
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(up).toHaveBeenCalledTimes(1);
+    expect(up.mock.calls[0]![1]).toBe(true);
+  });
+
   it("presses from the mouse again after a pointer press", () => {
     const overview = render();
     pointer(overview, "pointerdown", 10);
@@ -156,6 +179,45 @@ describe("usePress", () => {
     expect(move).not.toHaveBeenCalled();
     expect(up).not.toHaveBeenCalled();
     expect(captured.size).toBe(0);
+  });
+
+  it("releases an uncaptured press when it leaves, so another press can start", () => {
+    const overview = render(false);
+    pointer(overview, "pointerdown", 10);
+    mouse(overview, "mousedown", 10);
+    // React derives pointerleave from pointerout.
+    pointer(overview, "pointerout", 20);
+    expect(up).toHaveBeenCalledTimes(1);
+    expect(up.mock.calls[0]![1]).toBe(true);
+    pointer(document.body, "pointerup", 20);
+    pointer(overview, "pointerdown", 30);
+    expect(down).toHaveBeenCalledTimes(2);
+    pointer(overview, "pointerup", 30);
+    expect(up).toHaveBeenCalledTimes(2);
+  });
+
+  it("ends a mouse fallback press on an uncaptured leave", () => {
+    const overview = render(false);
+    mouse(overview, "mousedown", 10);
+    mouse(overview, "mouseout", 20);
+    expect(up).toHaveBeenCalledTimes(1);
+    expect(up.mock.calls[0]![1]).toBe(true);
+    mouse(document.body, "mouseup", 30);
+    expect(up).toHaveBeenCalledTimes(1);
+    mouse(overview, "mousedown", 40);
+    expect(down).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels when pointer capture is lost and ignores secondary pointer presses", () => {
+    const overview = render();
+    pointer(overview, "pointerdown", 10, 1, 2);
+    expect(down).not.toHaveBeenCalled();
+    pointer(overview, "pointerdown", 10);
+    pointer(overview, "lostpointercapture", 20);
+    expect(up).toHaveBeenCalledTimes(1);
+    expect(up.mock.calls[0]![1]).toBe(true);
+    pointer(overview, "pointerdown", 30);
+    expect(down).toHaveBeenCalledTimes(2);
   });
 
   it("leaves the pointer uncaptured when asked", () => {
