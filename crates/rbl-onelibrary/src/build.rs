@@ -20,15 +20,14 @@ use crate::{key, unlock, Error, Result};
 
 use reference::{COLORS, MENU_ITEMS};
 
-/// `dbVersion` written into `property`, as the reference export carries it.
-pub const DB_VERSION: &str = "1000";
+/// `property.dbVersion` written by rekordbox 7.2.19's `initPropertyTable`.
+pub const DB_VERSION: &str = "10000";
 
 /// Other `dbVersion` strings rekordbox writes into `exportLibrary.db`, for
 /// which a sync may rebuild the database when the tables and columns match
-/// [`DB_VERSION`]'s. "10000" is read from two reporters' diagnostic logs
-/// (issues #618 and #796) [OBS]; the tables on those sticks were not seen
-/// [UNKNOWN], hence the structural check.
-pub const ALSO_READABLE_DB_VERSIONS: &[&str] = &["10000"];
+/// [`DB_VERSION`]'s. Earlier RBXport exports used "1000"; retain their
+/// readability without accepting tables or columns the rebuild cannot preserve.
+pub const ALSO_READABLE_DB_VERSIONS: &[&str] = &["1000"];
 
 /// The schema, verbatim from a real export. Twenty-two tables, several of
 /// which stay empty but must exist.

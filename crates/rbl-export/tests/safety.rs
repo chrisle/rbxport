@@ -640,18 +640,21 @@ fn a_track_we_exported_and_a_device_playlist_kept_is_removed_once_unnamed() {
     assert!(verify(usb.path()).unwrap().is_ok());
 }
 
-/// Rekordbox's own exports carry `dbVersion` "10000" (issues #796, #618): the
-/// sync must read and rebuild them when the tables are the known ones.
+/// Earlier RBXport exports used "1000". Rebuild a known layout using the
+/// current writer version without losing compatibility with those exports.
 #[test]
-fn newer_db_version_with_the_known_schema_is_accepted() {
+fn legacy_db_version_with_the_known_schema_is_accepted_and_rewritten() {
     let src = tempfile::tempdir().unwrap();
     let usb = common::stick();
     let t = track(src.path(), 1);
     sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
-    edit(usb.path(), "UPDATE property SET dbVersion='10000'");
+    edit(usb.path(), "UPDATE property SET dbVersion='1000'");
     sync(usb.path(), &[t], &[]).unwrap();
     let snapshot = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
     assert_eq!(snapshot.one.as_ref().map(|l| l.tracks.len()), Some(1));
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(&usb.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    let version: String = db.connection().query_row("SELECT dbVersion FROM property", [], |row| row.get(0)).unwrap();
+    assert_eq!(version, "10000");
 }
 
 #[test]
@@ -677,7 +680,7 @@ fn newer_db_version_with_an_unknown_column_is_rejected_unchanged() {
     let path = usb.path().join("PIONEER/rekordbox/exportLibrary.db");
     let bytes = std::fs::read(&path).unwrap();
     let err = sync(usb.path(), &[t], &[]).unwrap_err().to_string();
-    assert!(err.contains("\"10000\"") && err.contains("expected \"1000\""), "{err}");
+    assert!(err.contains("\"10000\"") && err.contains("expected \"10000\""), "{err}");
     assert!(err.contains("futureField"), "{err}");
     assert_eq!(bytes, std::fs::read(path).unwrap());
 }
@@ -701,5 +704,19 @@ fn unknown_db_version_names_expected_and_found() {
     sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     edit(usb.path(), "UPDATE property SET dbVersion='9999'");
     let err = sync(usb.path(), &[t], &[]).unwrap_err().to_string();
-    assert!(err.contains("\"9999\"") && err.contains("expected \"1000\""), "{err}");
+    assert!(err.contains("\"9999\"") && err.contains("expected \"10000\""), "{err}");
+}
+
+#[test]
+fn legacy_version_with_an_unknown_layout_is_rejected_unchanged() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let t = track(src.path(), 1);
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
+    edit(usb.path(), "UPDATE property SET dbVersion='1000'; ALTER TABLE content ADD COLUMN futureField integer");
+    let path = usb.path().join("PIONEER/rekordbox/exportLibrary.db");
+    let bytes = std::fs::read(&path).unwrap();
+    let err = sync(usb.path(), &[t], &[]).unwrap_err().to_string();
+    assert!(err.contains("futureField"), "{err}");
+    assert_eq!(bytes, std::fs::read(path).unwrap());
 }

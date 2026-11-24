@@ -175,6 +175,7 @@ fn the_property_row_reports_what_was_written() {
         )
         .unwrap();
     assert_eq!(device, "RBXPORT");
+    assert_eq!(version, "10000", "rekordbox 7.2.19's property writer version");
     assert_eq!(version, DB_VERSION);
     assert_eq!(count, 3, "the track count is written, not assumed");
     assert_eq!(created, "2026-09-07", "a date, not a timestamp");

@@ -693,16 +693,15 @@ fn read_one_into(out: &mut Snapshot, path: &Path) -> Result<()> {
     // A sync rebuilds the database, so a version other than ours is safe only
     // when rekordbox is known to write it and every table and column is one
     // the rebuild writes back; otherwise data would be dropped.
-    if version != rbl_onelibrary::build::DB_VERSION {
-        let known = rbl_onelibrary::build::ALSO_READABLE_DB_VERSIONS.contains(&version.as_str());
-        let differences = if known { db.schema_differences().map_err(sql)? } else { Vec::new() };
-        if !known || !differences.is_empty() {
-            let detail = if known { format!(" and the layout differs ({})", differences.join("; ")) } else { String::new() };
-            return Err(ExportError::Conflict(format!(
-                "Unsupported OneLibrary schema: dbVersion is {version:?} (expected {:?}){detail}; the device was left unchanged.",
-                rbl_onelibrary::build::DB_VERSION,
-            )));
-        }
+    let known = version == rbl_onelibrary::build::DB_VERSION
+        || rbl_onelibrary::build::ALSO_READABLE_DB_VERSIONS.contains(&version.as_str());
+    let differences = if known { db.schema_differences().map_err(sql)? } else { Vec::new() };
+    if !known || !differences.is_empty() {
+        let detail = if known { format!(" and the layout differs ({})", differences.join("; ")) } else { String::new() };
+        return Err(ExportError::Conflict(format!(
+            "Unsupported OneLibrary schema: dbVersion is {version:?} (expected {:?}){detail}; the device was left unchanged.",
+            rbl_onelibrary::build::DB_VERSION,
+        )));
     }
     read_one_library(&db, out)?;
     read_one_history_and_tags(&db, out)?;
