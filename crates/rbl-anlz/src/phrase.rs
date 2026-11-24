@@ -5,11 +5,13 @@
 //! [REF] and confirmed here against the reference library [OBS]:
 //!
 //! ```text
-//! 0c  len_entry_bytes  u32   always 24
+//! 0c  version          u16   supported versions 0 and 1
+//! 0e  len_entry_bytes  u16   normally 24
 //! 10  len_entries      u16   phrase count
 //! 12  ── body, sometimes XOR-masked ──
 //!     +00  mood       u16   1 high, 2 mid, 3 low
-//!     +02  unknown    6 bytes, zero in every file checked
+//!     +02  reserved   u32
+//!     +06  reserved   u16   zero after decoding
 //!     +08  end_beat   u16   where the last phrase ends
 //!     +0a  unknown    2 bytes
 //!     +0c  bank       u8    Lighting-mode stylistic bank
@@ -34,19 +36,16 @@
 //! +16 fill_beat u16   where that fill-in starts
 //! ```
 //!
-//! **The masking.** rekordbox 6 garbles everything from byte `0x12` with a
-//! repeating 19-byte XOR pad, each byte of a fixed base plus the low byte of
-//! `len_entries`. Files written by rekordbox 7 into the local share tree are
-//! *not* masked — 0 of 600 checked carry the pad [OBS] — so both have to be
-//! read. Which one a file is cannot be asked of the file, so it is decided by
-//! whether the mood reads as 1, 2 or 3; that test cannot be fooled, because a
-//! masked body only puts a zero in the mood's high byte when `len_entries` is
-//! 53, and the low byte is then 0x16 XOR the mood, which is never 1, 2 or 3.
+//! **The masking.** The body from byte `0x12` may be XOR-masked with a
+//! repeating 19-byte pad. Its starting offset is the tag version modulo 19,
+//! and each pad byte adds the low byte of `len_entries`. The reserved word
+//! at bytes `0x18..0x1a` must be zero after decoding; check it before deciding
+//! whether to unmask, then validate it and the mood again afterward.
 
 use crate::Section;
 use rbl_core::FourCc;
 
-/// The XOR pad rekordbox 6 masks the body with, before `len_entries` is added
+/// The fixed XOR pad, before `len_entries` is added
 /// to every byte.
 const MASK_BASE: [u8; 19] = [
     0xCB, 0xE1, 0xEE, 0xFA, 0xE5, 0xEE, 0xAD, 0xEE, 0xE9, 0xD2, 0xE9, 0xEB, 0xE1, 0xE9, 0xF3, 0xE8,
@@ -166,29 +165,44 @@ fn be16(bytes: &[u8], at: usize) -> u16 {
     ])
 }
 
-fn be32(bytes: &[u8], at: usize) -> u32 {
-    u32::from_be_bytes([
-        bytes.get(at).copied().unwrap_or(0),
-        bytes.get(at + 1).copied().unwrap_or(0),
-        bytes.get(at + 2).copied().unwrap_or(0),
-        bytes.get(at + 3).copied().unwrap_or(0),
-    ])
+fn phrase_layout(raw: &[u8]) -> Option<(u16, usize, u16)> {
+    raw.get(..6)?;
+    let version = be16(raw, 0);
+    let entry_bytes = usize::from(be16(raw, 2));
+    if version > 1 || entry_bytes < MIN_ENTRY_BYTES {
+        return None;
+    }
+    Some((version, entry_bytes, be16(raw, 4)))
 }
 
 /// Undoes the XOR pad in place.
-fn unmask(body: &mut [u8], len_entries: u16) {
+fn unmask(body: &mut [u8], len_entries: u16, version: u16) {
     // The pad's period does not divide a `u16` boundary, so the offset within
     // it is the offset within the body — not within any chunk.
     #[allow(clippy::cast_possible_truncation)]
     let add = len_entries as u8;
+    let offset = usize::from(version) % MASK_BASE.len();
     for (at, byte) in body.iter_mut().enumerate() {
         let pad = MASK_BASE
-            .get(at % MASK_BASE.len())
+            .get((at % MASK_BASE.len() + offset) % MASK_BASE.len())
             .copied()
             .unwrap_or(0)
             .wrapping_add(add);
         *byte ^= pad;
     }
+}
+
+fn decoded_body(raw: &[u8], count: u16, version: u16) -> Option<(Vec<u8>, Mood)> {
+    let mut body = raw.get(6..)?.to_vec();
+    body.get(..BODY_PREAMBLE)?;
+    if be16(&body, 6) != 0 {
+        unmask(&mut body, count, version);
+    }
+    if be16(&body, 6) != 0 {
+        return None;
+    }
+    let mood = Mood::from_u16(be16(&body, 0))?;
+    Some((body, mood))
 }
 
 impl Section {
@@ -201,27 +215,14 @@ impl Section {
         if self.tag != FourCc::new(b"PSSI") {
             return None;
         }
-        // `len_header` is 20 in the exported files the spec describes and 32 in
-        // the ones rekordbox 7 writes locally, which puts the same fields on
-        // either side of the header/payload split. Joining them back up is what
-        // makes one set of offsets serve both.
+        // Field offsets are relative to the joined tag bytes, independent of
+        // where its declared header/payload boundary falls.
         let mut raw = Vec::with_capacity(self.header.len() + self.payload.len());
         raw.extend_from_slice(&self.header);
         raw.extend_from_slice(&self.payload);
 
-        let len_entry_bytes = be32(&raw, 0) as usize;
-        let len_entries = be16(&raw, 4);
-        if len_entry_bytes < MIN_ENTRY_BYTES {
-            return None;
-        }
-
-        let mut body = raw.get(6..)?.to_vec();
-        let mood = if let Some(mood) = Mood::from_u16(be16(&body, 0)) {
-            mood
-        } else {
-            unmask(&mut body, len_entries);
-            Mood::from_u16(be16(&body, 0))?
-        };
+        let (version, len_entry_bytes, len_entries) = phrase_layout(&raw)?;
+        let (body, mood) = decoded_body(&raw, len_entries, version)?;
 
         let entries = body.get(BODY_PREAMBLE..)?;
         // A count the payload cannot back is a damaged tag; read what is
@@ -282,16 +283,8 @@ impl Section {
         let mut raw = Vec::with_capacity(self.header.len() + self.payload.len());
         raw.extend_from_slice(&self.header);
         raw.extend_from_slice(&self.payload);
-        let entry_bytes = be32(&raw, 0) as usize;
-        let len_entries = be16(&raw, 4);
-        if entry_bytes < MIN_ENTRY_BYTES {
-            return None;
-        }
-        let mut body = raw.get(6..)?.to_vec();
-        if Mood::from_u16(be16(&body, 0)).is_none() {
-            unmask(&mut body, len_entries);
-            Mood::from_u16(be16(&body, 0))?;
-        }
+        let (version, entry_bytes, len_entries) = phrase_layout(&raw)?;
+        let (body, _) = decoded_body(&raw, len_entries, version)?;
         let preamble = body.get(..BODY_PREAMBLE)?.to_vec();
         let count = (len_entries as usize).min(body.get(BODY_PREAMBLE..)?.len() / entry_bytes);
         let mut entries: Vec<Vec<u8>> = body
@@ -334,8 +327,7 @@ impl Section {
         for entry in &entries {
             out.extend_from_slice(entry);
         }
-        // The same split as the file had: 20 header bytes in an export, 32
-        // in rekordbox 7's own, and the fields sit the same either way.
+        // Preserve the file's declared header/payload boundary.
         let split = self.header.len().min(out.len());
         Some(Section::new(b"PSSI", out.get(..split)?.to_vec(), out.get(split..)?.to_vec()))
     }
@@ -375,9 +367,11 @@ impl Section {
         if self.tag != FourCc::new(b"PSSI") { return self.clone(); }
         let mut raw = self.header.clone();
         raw.extend_from_slice(&self.payload);
-        if raw.len() < 8 || Mood::from_u16(be16(&raw, 6)).is_none() { return self.clone(); }
-        let count = be16(&raw, 4);
-        unmask(&mut raw[6..], count);
+        let Some((version, _, count)) = phrase_layout(&raw) else { return self.clone(); };
+        if raw.len() < 6 + BODY_PREAMBLE || be16(&raw, 12) != 0 || Mood::from_u16(be16(&raw, 6)).is_none() {
+            return self.clone();
+        }
+        unmask(&mut raw[6..], count, version);
         Self::new(b"PSSI", raw[..self.header.len()].to_vec(), raw[self.header.len()..].to_vec())
     }
 }
@@ -406,7 +400,7 @@ mod edit_tests {
             body.extend_from_slice(&entry);
         }
         if masked {
-            unmask(&mut body, 3); // XOR is its own inverse
+            unmask(&mut body, 3, 0); // XOR is its own inverse
         }
         raw.extend_from_slice(&body);
         Section::new(b"PSSI", raw[..20].to_vec(), raw[20..].to_vec())
