@@ -724,13 +724,45 @@ fn one_change(before: &[Node], after: &[Node]) -> rbl_onelibrary::playlists::Cha
 /// `CAnalyzerIF::setBeatInfoWithExtBeat`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridWrite {
+    /// The audio path of the loaded row; a replaced row must be reloaded.
+    pub audio: String,
     /// The track's id in the library it was browsed from.
     pub track: u32,
     /// The analysis files rewritten, each volume-relative as it is on disk,
     /// with its new bytes. Each must already be on the stick.
-    pub files: Vec<(PathBuf, Vec<u8>)>,
+    pub files: Vec<GridFile>,
     /// The track's new tempo x100 when the edit changed it.
     pub bpm_x100: Option<u32>,
+}
+
+/// One analysis file's snapshot and replacement. The original must still
+/// match under the publication lease, so an export between planning and
+/// writing cannot be overwritten by a stale grid edit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridFile {
+    pub path: PathBuf,
+    pub original: Vec<u8>,
+    pub replacement: Vec<u8>,
+}
+
+fn grid_file_is_plain(root: &Path, relative: &Path) -> bool {
+    if relative.as_os_str().is_empty() { return false; }
+    let mut path = root.to_path_buf();
+    for part in relative.components() {
+        let std::path::Component::Normal(part) = part else { return false };
+        path.push(part);
+        if !std::fs::symlink_metadata(&path).is_ok_and(|m| !m.file_type().is_symlink()) { return false; }
+    }
+    path.is_file()
+}
+
+fn check_grid_snapshot(root: &Path, files: &[GridFile]) -> Result<()> {
+    for file in files {
+        if !grid_file_is_plain(root, &file.path) || std::fs::read(root.join(&file.path))? != file.original {
+            return Err(refused("The device analysis changed while it was being edited. Nothing was changed; reload the track."));
+        }
+    }
+    Ok(())
 }
 
 /// Publishes a [`GridWrite`] to the stick at `root`, for a track browsed in
@@ -761,29 +793,43 @@ pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> 
     if !dir.join(format.file_name()).is_file() {
         return Err(missing(format));
     }
-    for (relative, _) in &write.files {
-        let plain = relative.components().all(|c| matches!(c, std::path::Component::Normal(_)));
-        if !plain || relative.as_os_str().is_empty() || !root.join(relative).is_file() {
-            return Err(refused("That track's analysis file is not on the device. Nothing was changed."));
-        }
-    }
     let publication = rbl_core::durable::Publication::new(root, PUBLICATION)?;
+    check_grid_snapshot(root, &write.files)?;
     let present = formats(root);
     let stamps = |dir: &Path| -> Result<Vec<_>> {
         present.iter().map(|f| Ok((file_stamp(&dir.join(f.file_name()))?, file_stamp(&dir.join(format!("{}-wal", f.file_name())))?))).collect()
     };
+    for format in &present {
+        let relative = dir.join(format.file_name()).strip_prefix(root).map_err(std::io::Error::other)?.to_path_buf();
+        if !grid_file_is_plain(root, &relative) { return Err(refused("The device database is not a plain file on this device. Nothing was changed.")); }
+    }
     let stamp = stamps(&dir)?;
     let browsed = read_unlocked(root, format)?;
     let Some(track) = browsed.track(write.track) else {
         return Err(refused("That track is no longer in this device library. Nothing was changed."));
     };
+    if path_key(&track.path) != path_key(&write.audio) {
+        return Err(refused("That device row no longer names the loaded audio. Nothing was changed; reload the track."));
+    }
+    let dat = StickFiles::new(root).locate(&track.analysis_path);
+    let ext = rbl_anlz::sibling(&dat, "EXT");
+    let allowed = [&dat, &ext];
+    let mut unique = BTreeSet::new();
+    if write.files.is_empty() || write.files.iter().any(|file| {
+        let path = root.join(&file.path);
+        !allowed.contains(&&path) || !unique.insert(file.path.clone())
+    }) {
+        return Err(refused("Those analysis files no longer belong to this device track. Nothing was changed; reload the track."));
+    }
     let mut files = Vec::with_capacity(write.files.len() + 6);
-    for (relative, bytes) in &write.files {
+    for file in &write.files {
+        let relative = &file.path;
         let staged = publication.stage().join(relative);
         if let Some(parent) = staged.parent() {
             rbl_core::durable::create_dir_all(parent)?;
         }
-        rbl_core::durable::write(&staged, bytes)?;
+        rbl_anlz::parse(&file.replacement).map_err(|_| refused("The edited analysis file did not read back. Nothing was changed."))?;
+        rbl_core::durable::write(&staged, &file.replacement)?;
         files.push(relative.clone());
     }
     if let Some(bpm_x100) = write.bpm_x100 {
@@ -813,6 +859,7 @@ pub fn write_grid(root: &Path, format: Format, write: &GridWrite) -> Result<()> 
     if stamps(&dir)? != stamp {
         return Err(refused("The device library changed while it was being edited. Nothing was changed; try again."));
     }
+    check_grid_snapshot(root, &write.files)?;
     publication.commit(&files)?;
     Ok(())
 }

@@ -88,3 +88,34 @@ it("names the track its grid was read for, so a switch is not taken for the new 
   await settle();
   expect(latest.gridTrackId).toBe("next");
 });
+
+it("reads grid bytes and state from the loaded device row when audio is shared", async () => {
+  const source = { path: "/Volumes/TEST", format: "oneLibrary" as const, trackId: 9 };
+  const row = { ...track, id: "file:/Volumes/TEST/a.mp3", deviceSource: source };
+  act(() => root.render(<Probe row={row} />));
+  await settle();
+  expect(trackBeats).toHaveBeenLastCalledWith(row.id, source);
+  expect(gridState).toHaveBeenLastCalledWith(row.id, source);
+  const other = { ...row, deviceSource: { ...source, format: "deviceLibrary" as const, trackId: 1 } };
+  act(() => root.render(<Probe row={other} />));
+  await settle();
+  expect(trackBeats).toHaveBeenLastCalledWith(row.id, other.deviceSource);
+  expect(gridState).toHaveBeenLastCalledWith(row.id, other.deviceSource);
+});
+
+it("disables edits while the same audio switches to another device source", async () => {
+  const first = { ...track, id: "file:/Volumes/TEST/a.mp3", deviceSource: { path: "/Volumes/TEST", format: "deviceLibrary" as const, trackId: 1 } };
+  act(() => root.render(<Probe row={first} />)); await settle();
+  expect(latest.state).not.toBeNull();
+  trackBeats.mockReturnValueOnce(new Promise(() => {}));
+  act(() => root.render(<Probe row={{ ...first, deviceSource: { ...first.deviceSource, format: "oneLibrary", trackId: 9 } }} />));
+  expect(latest.state).toBeNull();
+});
+
+it("disables a source that disappeared instead of leaving an editable stale grid", async () => {
+  trackBeats.mockRejectedValue(new Error("device row disappeared"));
+  gridState.mockRejectedValue(new Error("device row disappeared"));
+  act(() => root.render(<Probe />)); await settle(); await settle();
+  expect(latest.state).toBeNull();
+  expect(latest.grid.times.length).toBe(0);
+});

@@ -92,6 +92,7 @@ export interface MockDeviceLibraries {
    * grid; null when no stick holds it. Every track here is analysed, as
    * an exported track is.
    */
+  setTempo(row: string, bpmX100: number): boolean;
   track(row: string): { bpmX100: number; durationSec: number } | null;
 }
 
@@ -153,9 +154,16 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
   };
 
   return {
+    setTempo: (row, bpmX100) => {
+      for (const path of sticks.keys()) {
+        const track = deviceTracks.find(t => trackRow(path, t, 0).id === row);
+        if (track && track.bpmX100 !== bpmX100) { track.bpmX100 = bpmX100; return true; }
+      }
+      return false;
+    },
     track: (row) => {
       for (const path of sticks.keys()) {
-        const track = TRACKS.find((t) => trackRow(path, t, 0).id === row);
+        const track = deviceTracks.find((t) => trackRow(path, t, 0).id === row);
         if (track) return { bpmX100: track.bpmX100, durationSec: track.durationSec };
       }
       return null;
@@ -196,7 +204,7 @@ export function createMockDeviceLibraries(): MockDeviceLibraries {
         : library.nodes.find((n) => String(n.id) === playlist)?.tracks ?? [];
       return ids.flatMap((id, at) => {
         const track = deviceTracks.find((t) => t.id === id);
-        return track ? [trackRow(path, track, at + 1)] : [];
+        return track ? [{ ...trackRow(path, track, at + 1), deviceSource: { path, format, trackId: id } }] : [];
       });
     },
     playlist: (path, format, playlist) => {

@@ -57,7 +57,7 @@ export interface RowDto {
   /** Extra database fields requested for visible browser columns. */
   extra?: Record<string, string | number | boolean | null>;
   /** Selected Devices database row; Explorer and collection rows omit this. */
-  deviceSource?: { path: string; format: DeviceFormat; trackId: number };
+  deviceSource?: DeviceTrackSource;
 }
 
 export type TrackSource =
@@ -441,14 +441,14 @@ export interface Backend {
    * is the expensive part; `parseBeatGrid` turns these bytes into typed arrays
    * and `beatsIn` slices the window being drawn.
    */
-  trackBeats(trackId: string): Promise<Uint8Array>;
+  trackBeats(trackId: string, deviceSource?: DeviceTrackSource): Promise<Uint8Array>;
 
   /**
    * The GRID panel's view of a track's grid: its tempo, how many beats,
    * whether there is anything to undo or redo, and whether it is locked.
    * Rejects as `notFound` for a track with no grid.
    */
-  gridState(trackId: string): Promise<GridState>;
+  gridState(trackId: string, deviceSource?: DeviceTrackSource): Promise<GridState>;
 
   /** A track's cue points, ordered by position. */
   trackCues(trackId: string, device?: { path: string; format: DeviceFormat; trackId: number }): Promise<Cue[]>;
@@ -1402,6 +1402,8 @@ export interface Device {
 /** One of the two libraries a stick can hold: `export.pdb` or `exportLibrary.db`. */
 export type DeviceFormat = "deviceLibrary" | "oneLibrary";
 
+export interface DeviceTrackSource { path: string; format: DeviceFormat; trackId: number }
+
 /** A library on a stick, for the Devices tree. */
 export interface DeviceLibrary {
   format: DeviceFormat;
@@ -2127,8 +2129,8 @@ export interface Edits {
    * Every one resolves to the grid's state afterwards.
    */
   gridEdit(track: string, edit: GridEdit, options?: GridEditOptions): Promise<GridState>;
-  gridUndo(track: string, deck?: DeckId): Promise<GridState>;
-  gridRedo(track: string, deck?: DeckId): Promise<GridState>;
+  gridUndo(track: string, deck?: DeckId, deviceSource?: DeviceTrackSource): Promise<GridState>;
+  gridRedo(track: string, deck?: DeckId, deviceSource?: DeviceTrackSource): Promise<GridState>;
   /** Locks or unlocks the grid against editing. */
   gridLock(track: string, on: boolean): Promise<GridState>;
 }
@@ -2152,6 +2154,7 @@ export type GridEdit =
   | { kind: "align"; timeMs: number };
 
 export interface GridEditOptions {
+  deviceSource?: DeviceTrackSource;
   durationMs?: number;
   /** Apply from the beat nearest this time on; omitted, the whole grid. */
   fromMs?: number;

@@ -77,6 +77,13 @@ jobs:
         if: inputs.check_rust
         run: cargo check --workspace --all-targets
 
+      - name: Device grid publication fixtures
+        if: inputs.check_rust
+        shell: pwsh
+        env:
+          RB_LITE_TEST: "1"
+        run: cargo test -p rbl-export --test device_grid_edits
+
       - name: Check silent updater task script
         if: inputs.check_rust
         shell: pwsh

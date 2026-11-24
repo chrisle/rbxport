@@ -4248,3 +4248,55 @@ fn a_cue_edit_after_an_undo_ends_the_redo_branch() {
     run(cues::add_cue(s.handle(), s.state(), track, CueKind::Memory, 1_000)).unwrap();
     assert!(!commands::current_history(&s.state()).can_redo);
 }
+
+#[test]
+fn a_device_grid_command_stays_bound_to_the_loaded_database_after_another_is_browsed() {
+    use rbl_export::device_library::{self as device, Format};
+    use rbxport_lib::grid::{self, GridEdit, GridEditor};
+    let s = shell();
+    s.app.manage(Arc::new(GridEditor::at(&s._dir.path().join("grid-editor"))));
+    let personal_before = std::fs::read(&s.location.master_db).unwrap();
+    let usb = s._dir.path().join("usb-grid");
+    std::fs::create_dir(&usb).unwrap();
+    let audio = s._dir.path().join("device-grid.wav");
+    write_wav(&audio, 10);
+    let beats: Vec<_> = (0..8).map(|i| rbl_anlz::Beat { beat_number: (i % 4 + 1) as u16, tempo_x100: 12_000, time_ms: i * 500 }).collect();
+    let track = rbl_export::SourceTrack {
+        id: 1, source_path: audio, title: "Device grid".into(), bpm_x100: 12_000, duration_sec: 10,
+        analysis: vec![("DAT".into(), rbl_anlz::AnlzBuilder::new().path("/audio.wav").beat_grid(&beats).finish())],
+        ..Default::default()
+    };
+    rbl_export::export(&usb, &[track], &[]).unwrap();
+    let legacy = device::read(&usb, Format::DeviceLibrary).unwrap().track(1).unwrap().clone();
+    let dat = usb.join(legacy.analysis_path.trim_start_matches('/'));
+    let original = std::fs::read(&dat).unwrap();
+    let alternate = usb.join("PIONEER/USBANLZ/alternate/ANLZ0000.DAT");
+    std::fs::create_dir_all(alternate.parent().unwrap()).unwrap();
+    let other_beats: Vec<_> = beats.iter().map(|b| rbl_anlz::Beat { tempo_x100: 13_000, time_ms: b.time_ms + 100, ..*b }).collect();
+    let other = rbl_anlz::AnlzBuilder::new().path("/audio.wav").beat_grid(&other_beats).finish();
+    std::fs::write(&alternate, &other).unwrap();
+    let conn = rbl_onelibrary::playlists::open_read_write(&usb.join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    conn.execute("UPDATE content SET analysisDataFilePath='/PIONEER/USBANLZ/alternate/ANLZ0000.DAT' WHERE content_id=1", []).unwrap();
+    drop(conn);
+    let source = |format: &str| rbxport_lib::dto::DeviceTrackSourceDto { path: usb.to_string_lossy().into_owned(), format: format.into(), track_id: 1 };
+    let id = rbl_index::folder::loose_id(&usb.join(legacy.path.trim_start_matches('/')));
+    for format in ["deviceLibrary", "oneLibrary"] {
+        s.open(ViewSpecDto { source: TrackSourceDto::Device { path: usb.to_string_lossy().into_owned(), format: format.into(), playlist: "0".into() }, ..collection_spec() });
+    }
+    let editor = || s.app.state::<Arc<GridEditor>>();
+    let legacy_state = run(grid::grid_state(s.state(), editor(), id.clone(), Some(source("deviceLibrary")))).unwrap();
+    let one_state = run(grid::grid_state(s.state(), editor(), id.clone(), Some(source("oneLibrary")))).unwrap();
+    assert_eq!((legacy_state.bpm_x100, one_state.bpm_x100), (12_000, 13_000));
+    assert!(run(grid::grid_edit(s.handle(), s.state(), s.player(), editor(), id.clone(), GridEdit::Nudge { ms: 5 }, None, None, None)).is_err(), "unbound device writes must be refused");
+    let options = serde_json::from_value(serde_json::json!({ "deviceSource": source("deviceLibrary") })).unwrap();
+    run(grid::grid_edit(s.handle(), s.state(), s.player(), editor(), id.clone(), GridEdit::Nudge { ms: 5 }, None, None, Some(options))).unwrap();
+    assert_eq!(rbl_anlz::Anlz::read(&dat).unwrap().beat_grid().unwrap()[0].time_ms, 5);
+    assert_eq!(std::fs::read(&alternate).unwrap(), other);
+    assert!(run(grid::grid_undo(s.handle(), s.state(), s.player(), editor(), id.clone(), None, Some(source("oneLibrary")))).is_err());
+    run(grid::grid_undo(s.handle(), s.state(), s.player(), editor(), id.clone(), None, Some(source("deviceLibrary")))).unwrap();
+    assert_eq!(std::fs::read(&dat).unwrap(), original);
+    run(grid::grid_redo(s.handle(), s.state(), s.player(), editor(), id, None, Some(source("deviceLibrary")))).unwrap();
+    assert_eq!(rbl_anlz::Anlz::read(&dat).unwrap().beat_grid().unwrap()[0].time_ms, 5);
+    assert_eq!(std::fs::read(&alternate).unwrap(), other);
+    assert_eq!(std::fs::read(&s.location.master_db).unwrap(), personal_before);
+}

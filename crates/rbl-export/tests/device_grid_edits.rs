@@ -12,7 +12,7 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use rbl_anlz::{Anlz, AnlzBuilder, Beat};
-use rbl_export::device_library::{self, Format, GridWrite};
+use rbl_export::device_library::{self, Format, GridFile, GridWrite};
 use rbl_export::{export, verify, SourcePlaylist, SourceTrack};
 
 fn grid(first_ms: u32, tempo_x100: u16) -> Vec<Beat> {
@@ -64,6 +64,14 @@ fn tempo_of(dest: &Path, format: Format, id: u32) -> u32 {
     device_library::read(dest, format).unwrap().track(id).unwrap().bpm_x100
 }
 
+fn audio_of(root: &Path, id: u32) -> String {
+    device_library::read(root, Format::DeviceLibrary).unwrap().track(id).map(|t| t.path.clone()).unwrap_or_default()
+}
+
+fn snapshot(root: &Path, path: PathBuf, replacement: Vec<u8>) -> GridFile {
+    GridFile { original: std::fs::read(root.join(&path)).unwrap_or_default(), path, replacement }
+}
+
 #[test]
 fn a_new_tempo_goes_to_the_analysis_file_and_to_the_track_in_both_libraries() {
     for format in [Format::DeviceLibrary, Format::OneLibrary] {
@@ -76,7 +84,7 @@ fn a_new_tempo_goes_to_the_analysis_file_and_to_the_track_in_both_libraries() {
         let next = grid(12, 12_600);
         let bytes = Anlz::read(&dat).unwrap().with_beat_grid(&next);
 
-        device_library::write_grid(dest.path(), format, &GridWrite { track: 1, files: vec![(relative.clone(), bytes)], bpm_x100: Some(12_600) }).unwrap();
+        device_library::write_grid(dest.path(), format, &GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), relative.clone(), bytes)], bpm_x100: Some(12_600) }).unwrap();
 
         assert_eq!(Anlz::read(&dat).unwrap().beat_grid().unwrap(), next, "{format:?}");
         assert_eq!(tempo_of(dest.path(), format, 1), 12_600, "{format:?}: the row takes the grid's tempo");
@@ -104,7 +112,7 @@ fn a_grid_moved_at_the_same_tempo_leaves_both_libraries_byte_for_byte() {
         let next = grid(40, 12_800);
         let bytes = Anlz::read(&dat).unwrap().with_beat_grid(&next);
 
-        device_library::write_grid(dest.path(), format, &GridWrite { track: 2, files: vec![(relative, bytes)], bpm_x100: None }).unwrap();
+        device_library::write_grid(dest.path(), format, &GridWrite { audio: audio_of(dest.path(), 2), track: 2, files: vec![snapshot(dest.path(), relative, bytes)], bpm_x100: None }).unwrap();
 
         assert_eq!(Anlz::read(&dat).unwrap().beat_grid().unwrap(), next);
         assert_eq!((db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary)), before, "{format:?}");
@@ -122,11 +130,13 @@ fn a_refused_grid_write_changes_nothing_on_the_stick() {
     let bytes = Anlz::read(&dat).unwrap().with_beat_grid(&grid(12, 12_600));
     let refused = [
         // A track this library does not hold.
-        GridWrite { track: 99, files: vec![(relative.clone(), bytes.clone())], bpm_x100: Some(12_600) },
+        GridWrite { audio: audio_of(dest.path(), 99), track: 99, files: vec![snapshot(dest.path(), relative.clone(), bytes.clone())], bpm_x100: Some(12_600) },
         // A path that leaves the stick.
-        GridWrite { track: 1, files: vec![(PathBuf::from("../outside.DAT"), bytes.clone())], bpm_x100: None },
+        GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), PathBuf::from("../outside.DAT"), bytes.clone())], bpm_x100: None },
+        // A malformed replacement is never published over valid analysis.
+        GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), relative.clone(), b"not analysis".to_vec())], bpm_x100: Some(12_600) },
         // A file the stick does not have: a grid write never creates one.
-        GridWrite { track: 1, files: vec![(PathBuf::from("PIONEER/USBANLZ/P000/00000000/ANLZ0000.DAT"), bytes.clone())], bpm_x100: None },
+        GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), PathBuf::from("PIONEER/USBANLZ/P000/00000000/ANLZ0000.DAT"), bytes.clone())], bpm_x100: None },
     ];
     for write in &refused {
         assert!(device_library::write_grid(dest.path(), Format::DeviceLibrary, write).is_err(), "{write:?}");
@@ -164,7 +174,7 @@ fn a_new_tempo_leaves_every_update_counter_as_it_was() {
         let relative = dat_of(dest.path(), format, 1);
         let bytes = Anlz::read(&dest.path().join(&relative)).unwrap().with_beat_grid(&grid(12, 12_600));
 
-        device_library::write_grid(dest.path(), format, &GridWrite { track: 1, files: vec![(relative, bytes)], bpm_x100: Some(12_600) }).unwrap();
+        device_library::write_grid(dest.path(), format, &GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), relative, bytes)], bpm_x100: Some(12_600) }).unwrap();
 
         let after = content_rows(dest.path());
         assert_eq!(after.len(), before.len());
@@ -201,9 +211,77 @@ fn the_other_library_s_row_is_the_one_with_the_same_master_ids() {
     let relative = dat_of(dest.path(), Format::DeviceLibrary, 1);
     let bytes = Anlz::read(&dest.path().join(&relative)).unwrap().with_beat_grid(&grid(12, 12_600));
 
-    device_library::write_grid(dest.path(), Format::DeviceLibrary, &GridWrite { track: 1, files: vec![(relative, bytes)], bpm_x100: Some(12_600) }).unwrap();
+    device_library::write_grid(dest.path(), Format::DeviceLibrary, &GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), relative, bytes)], bpm_x100: Some(12_600) }).unwrap();
 
     assert_eq!(tempo_of(dest.path(), Format::DeviceLibrary, 1), 12_600);
     assert_eq!(tempo_of(dest.path(), Format::OneLibrary, 2), 12_600, "the row with track 1's master ids");
     assert_eq!(tempo_of(dest.path(), Format::OneLibrary, 1), 12_800, "the row with the same id but other master ids");
+}
+
+#[test]
+fn an_export_between_planning_and_publication_cannot_be_overwritten() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    stick(src.path(), dest.path());
+    let relative = dat_of(dest.path(), Format::DeviceLibrary, 1);
+    let dat = dest.path().join(&relative);
+    let parsed = Anlz::read(&dat).unwrap();
+    let write = GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), relative, parsed.with_beat_grid(&grid(12, 12_600)))], bpm_x100: Some(12_600) };
+    // A completed exporter/other editor won the gap before our writer lease.
+    let exported = parsed.with_beat_grid(&grid(50, 12_900));
+    std::fs::write(&dat, &exported).unwrap();
+    let before = (db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary));
+    assert!(device_library::write_grid(dest.path(), Format::DeviceLibrary, &write).is_err());
+    assert_eq!(std::fs::read(dat).unwrap(), exported);
+    assert_eq!((db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary)), before);
+}
+
+#[test]
+fn a_stale_device_row_cannot_edit_another_tracks_analysis() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    stick(src.path(), dest.path());
+    let other = dat_of(dest.path(), Format::DeviceLibrary, 2);
+    let dat = dest.path().join(&other);
+    let before = std::fs::read(&dat).unwrap();
+    let libraries = (db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary));
+    let next = Anlz::read(&dat).unwrap().with_beat_grid(&grid(12, 12_600));
+    let write = GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), other, next)], bpm_x100: Some(12_600) };
+    assert!(device_library::write_grid(dest.path(), Format::DeviceLibrary, &write).is_err());
+    assert_eq!(std::fs::read(dat).unwrap(), before);
+    assert_eq!((db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary)), libraries);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_analysis_symlink_cannot_publish_outside_the_device() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    stick(src.path(), dest.path());
+    let relative = dat_of(dest.path(), Format::DeviceLibrary, 1);
+    let dat = dest.path().join(&relative);
+    let outside = src.path().join("outside-analysis");
+    let before = std::fs::read(&dat).unwrap();
+    let next = Anlz::read(&dat).unwrap().with_beat_grid(&grid(12, 12_600));
+    let directory = dat.parent().unwrap();
+    std::fs::rename(directory, &outside).unwrap();
+    std::os::unix::fs::symlink(&outside, directory).unwrap();
+    let write = GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), relative, next)], bpm_x100: Some(12_600) };
+    assert!(device_library::write_grid(dest.path(), Format::DeviceLibrary, &write).is_err());
+    assert_eq!(std::fs::read(outside.join(dat.file_name().unwrap())).unwrap(), before);
+    assert!(std::fs::symlink_metadata(directory).unwrap().file_type().is_symlink());
+}
+
+#[test]
+fn a_paired_database_failure_leaves_the_grid_and_both_databases_untouched() {
+    let (src, dest) = (tempfile::tempdir().unwrap(), common::stick());
+    stick(src.path(), dest.path());
+    let relative = dat_of(dest.path(), Format::DeviceLibrary, 1);
+    let dat = dest.path().join(&relative);
+    let original = std::fs::read(&dat).unwrap();
+    let next = Anlz::read(&dat).unwrap().with_beat_grid(&grid(12, 12_600));
+    std::fs::write(dest.path().join("PIONEER/rekordbox/exportLibrary.db"), b"unreadable paired database").unwrap();
+    let before = (db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary));
+    let write = GridWrite { audio: audio_of(dest.path(), 1), track: 1, files: vec![snapshot(dest.path(), relative, next)], bpm_x100: Some(12_600) };
+    assert!(device_library::write_grid(dest.path(), Format::DeviceLibrary, &write).is_err());
+    assert_eq!(std::fs::read(dat).unwrap(), original);
+    assert_eq!((db(dest.path(), Format::DeviceLibrary), db(dest.path(), Format::OneLibrary)), before);
+    assert!(!dest.path().join(".rbxport-publication").exists());
 }

@@ -2661,15 +2661,17 @@ fn read_analysis(share: &std::path::Path, relative: &str) -> AppResult<Vec<(Stri
 pub async fn track_beats(
     state: State<'_, Arc<AppState>>,
     track: String,
+    device_source: Option<crate::dto::DeviceTrackSourceDto>,
 ) -> AppResult<tauri::ipc::Response> {
-    let dat = analysis_dat(&state, &track)?;
+    let dat = if device_source.is_none() { analysis_dat(&state, &track)? } else { None };
     blocking("track_beats", move || {
+        let _lease = device_source.as_ref().map(|source| rbl_core::durable::read_lease(std::path::Path::new(&source.path))).transpose().map_err(|e| AppError::internal(e.to_string()))?;
+        let dat = if let Some(source) = device_source {
+            crate::device_library::grid_assets(&source, &track)?.analysis_dat()
+        } else { dat };
         let Some(dat) = dat else { return Ok(Vec::new()) };
-        let beats = read_beat_grid(&dat);
-        Ok(encode_beat_grid(&beats))
-    })
-    .await
-    .map(tauri::ipc::Response::new)
+        Ok(encode_beat_grid(&read_beat_grid(&dat)))
+    }).await.map(tauri::ipc::Response::new)
 }
 
 /// A track's beat grid from its `.DAT`: milliseconds, the beat's number in

@@ -1,12 +1,13 @@
 /** Beat-grid controls recovered from rekordbox's BeatGridAdjustment/TapButton. */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DeckId, GridEdit, GridEditOptions, GridState } from "@/ipc/types";
+import type { DeckId, DeviceTrackSource, GridEdit, GridEditOptions, GridState } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useTranslation } from "@/i18n";
 import { SHIFT_MS, HELD_SHIFT_MS, MAX_STRETCH_MS, tapTempo, tapTimeout, withTap } from "@/lib/gridEdit";
 
 export interface GridEditorDeck {
   trackId: string | null;
+  deviceSource?: DeviceTrackSource | undefined;
   deck: DeckId;
   state: GridState | null;
   setState: (state: GridState) => void;
@@ -53,7 +54,7 @@ function describe(error: unknown): string {
   return "The beat grid could not be saved.";
 }
 export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
-  const { trackId, deck: deckId, state, setState, positionMs, readOnly, onError, isDynamicFrom, confirmDynamic, onNudge } = deck;
+  const { trackId, deviceSource, deck: deckId, state, setState, positionMs, readOnly, onError, isDynamicFrom, confirmDynamic, onNudge } = deck;
   const t = useTranslation();
   // The playhead can sit up to five seconds before the track starts, but the
   // grid has no time before zero and the command takes unsigned
@@ -83,8 +84,9 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   // (#196). One batch waits behind the save in flight; its target is the
   // beat under the playhead at its first press.
   const pendingStretch = useRef<{ byMs: number; timeMs: number; fromMs: number | null } | null>(null);
-  const currentTrack = useRef(trackId);
-  currentTrack.current = trackId;
+  const target = `${trackId ?? ""}\u0000${deviceSource?.path ?? ""}\u0000${deviceSource?.format ?? ""}\u0000${deviceSource?.trackId ?? ""}`;
+  const currentTrack = useRef(target);
+  currentTrack.current = target;
   const cancelTaps = useCallback(() => {
     if (tapTimer.current) clearTimeout(tapTimer.current);
     tapTimer.current = null;
@@ -96,8 +98,8 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     nudgeQueued.current = false;
     pendingStretch.current = null;
     setNudging(false);
-  }, [trackId]);
-  useEffect(() => { setFromMs(null); cancelTaps(); return () => { if (tapTimer.current) clearTimeout(tapTimer.current); }; }, [trackId, cancelTaps]);
+  }, [target]);
+  useEffect(() => { setFromMs(null); cancelTaps(); return () => { if (tapTimer.current) clearTimeout(tapTimer.current); }; }, [target, cancelTaps]);
   useEffect(() => { if (readOnly || state?.locked) cancelTaps(); }, [readOnly, state?.locked, cancelTaps]);
 
   // A null result is an action that had nothing to send.
@@ -105,22 +107,23 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     after?: () => void, done?: () => void) => {
     queue.current = queue.current.then(async () => {
       try {
-        if (currentTrack.current !== trackId) return;
+        if (currentTrack.current !== target) return;
         const backend = await getBackend();
         const next = await action(backend.edits);
-        if (currentTrack.current !== trackId || next === null) return;
+        if (currentTrack.current !== target || next === null) return;
         setState(next);
         after?.();
         onError?.(null);
-      } catch (error) { if (currentTrack.current === trackId) onError?.(describe(error)); }
+      } catch (error) { if (currentTrack.current === target) onError?.(describe(error)); }
       finally { done?.(); }
     });
-  }, [trackId, setState, onError]);
+  }, [target, setState, onError]);
   // `take` names the edit when its turn in the queue comes, so presses made
   // while it waited can still join it; null sends nothing.
   const send = useCallback((take: () => { change: GridEdit; transaction?: string | undefined } | null, boundary: number | null, after?: () => void) => {
     if (!canEdit || trackId === null) return;
     const options: GridEditOptions = { deck: deckId };
+    if (deviceSource) options.deviceSource = deviceSource;
     if (deck.durationMs !== undefined) options.durationMs = deck.durationMs;
     if (boundary !== null) options.fromMs = boundary;
     run(async edits => {
@@ -142,7 +145,7 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
       }
       return edits.gridEdit(trackId, change, options);
     }, after);
-  }, [canEdit, trackId, deckId, run, isDynamicFrom, confirmDynamic, state, deck.durationMs, t]);
+  }, [canEdit, trackId, deviceSource, deckId, run, isDynamicFrom, confirmDynamic, state, deck.durationMs, t]);
   const edit = useCallback((change: GridEdit, boundary = fromMs, transaction?: string, after?: () => void) => {
     send(() => ({ change, transaction }), boundary, after);
   }, [send, fromMs]);
@@ -209,8 +212,8 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     const bpmX100 = tapTempo(next);
     if (bpmX100 !== null) edit({ kind: "tap", bpm: 60_000 * (next.length - 1) / (next[next.length - 1]! - next[0]!), anchorMs: tapAnchor.current }, null, `${session.current}:${deckId}:${trackId}:${tapRun.current}`);
   }, [canEdit, fromMs, playheadMs, cancelTaps, edit, deckId, trackId]);
-  const undo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => edits.gridUndo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, run, cancelTaps]);
-  const redo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => edits.gridRedo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, run, cancelTaps]);
+  const undo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => deviceSource ? edits.gridUndo(trackId, deckId, deviceSource) : edits.gridUndo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, deviceSource, run, cancelTaps]);
+  const redo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => deviceSource ? edits.gridRedo(trackId, deckId, deviceSource) : edits.gridRedo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, deviceSource, run, cancelTaps]);
   const toggleLock = useCallback(() => {
     if (hasGrid && !readOnly && trackId !== null && state !== null && state.lockable !== false) { cancelTaps(); run(edits => edits.gridLock(trackId, !state.locked)); }
   }, [hasGrid, readOnly, trackId, state, cancelTaps, run]);

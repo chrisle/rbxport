@@ -19,7 +19,7 @@ import type {
   DatabaseDrive, EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SelectionDetails, SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, RelocateSearch, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
-  DeckId, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind, LogLine, LogLevel,
+  DeckId, DeviceTrackSource, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind, LogLine, LogLevel,
 } from "./types";
 import { TREE_ROOT } from "./types";
 import { applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
@@ -1631,7 +1631,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return cuesChanged(found.track, undefined);
     },
     gridEdit: (track, edit, options) => {
-      const held = gridOf(track);
+      const held = gridOf(track, options?.deviceSource);
       if (!held) return notFound("That track has no beat grid to edit.");
       if (held.locked) return refuse("The beat grid is locked. Unlock it to edit.");
       const invalid = validateEdit(held.beats, options?.fromMs ?? null, edit);
@@ -1649,27 +1649,27 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       held.transaction = edit.kind === "tap" ? options?.transaction : undefined;
       held.redo = [];
       held.beats = next;
-      return gridChanged(track, held);
+      return gridChanged(track, held, options?.deviceSource);
     },
-    gridUndo: (track) => {
-      const held = gridOf(track);
+    gridUndo: (track, _deck, source) => {
+      const held = gridOf(track, source);
       if (!held) return notFound("That track has no beat grid to edit.");
       held.transaction = undefined;
       const previous = held.undo.pop();
       if (!previous) return notFound("Nothing to undo.");
       held.redo.push({ beats: held.beats, label: previous.label });
       held.beats = previous.beats;
-      return gridChanged(track, held);
+      return gridChanged(track, held, source);
     },
-    gridRedo: (track) => {
-      const held = gridOf(track);
+    gridRedo: (track, _deck, source) => {
+      const held = gridOf(track, source);
       if (!held) return notFound("That track has no beat grid to edit.");
       held.transaction = undefined;
       const next = held.redo.pop();
       if (!next) return notFound("Nothing to redo.");
       held.undo.push({ beats: held.beats, label: next.label });
       held.beats = next.beats;
-      return gridChanged(track, held);
+      return gridChanged(track, held, source);
     },
     gridLock: (track, on) => {
       const held = gridOf(track);
@@ -1696,12 +1696,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   }
   const gridStore = new Map<string, HeldGrid>();
   const gridListeners = new Set<(trackId: string) => void>();
+  const deviceListeners = new Set<() => void>();
   const analysisListeners = new Set<(trackId: string) => void>();
   const progressListeners = new Set<(trackId: string) => void>();
   // How far each drawing analysis has got through its track, 0 to 1.
   const drawn = new Map<string, number>();
-  const gridOf = (trackId: string): HeldGrid | null => {
-    const held = gridStore.get(trackId);
+  const gridOf = (trackId: string, source?: DeviceTrackSource): HeldGrid | null => {
+    if (source && !stickLibraries.rows(source.path, source.format, "0").some(row => row.id === trackId && row.deviceSource?.trackId === source.trackId)) return null;
+    const key = source ? `${trackId}|${source.format}:${source.trackId}` : trackId;
+    const held = gridStore.get(key);
     if (held) return held;
     // A Devices tree track's grid is the stick's (#660).
     const row = all[Number.parseInt(trackId, 10) - 100000] ?? stickLibraries.track(trackId);
@@ -1713,7 +1716,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       beats.push({ number: (n % 4) + 1, tempoX100: row.bpmX100, timeMs: Math.round(n * beatMs) });
     }
     const made = { beats, undo: [], redo: [], locked: false };
-    gridStore.set(trackId, made);
+    gridStore.set(key, made);
     return made;
   };
   const sameGrid = (a: readonly EditableBeat[], b: readonly EditableBeat[]) =>
@@ -1729,9 +1732,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     redoLabel: held.redo.at(-1)?.label ?? null,
     locked: held.locked,
   });
-  const gridChanged = async (trackId: string, held: HeldGrid): Promise<GridState> => {
+  const gridChanged = async (trackId: string, held: HeldGrid, source?: DeviceTrackSource): Promise<GridState> => {
     const row = all[Number.parseInt(trackId, 10) - 100000];
     const bpm = tempoX100(held.beats);
+    if (source) {
+      for (const [key, other] of gridStore) if (key === trackId || key.startsWith(`${trackId}|`)) other.beats = held.beats;
+      if (stickLibraries.setTempo(trackId, bpm)) for (const listener of deviceListeners) listener();
+    }
     for (const listener of gridListeners) listener(trackId);
     if (row && row.bpmX100 !== bpm) {
       row.bpmX100 = bpm;
@@ -2363,8 +2370,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // beats to draw without an analysis file behind it. Encoded as the
     // backend encodes it: seven bytes a beat, milliseconds, the beat's
     // number, then the tempo there x100.
-    trackBeats: (trackId) => {
-      const held = gridOf(trackId);
+    trackBeats: (trackId, source) => {
+      const held = gridOf(trackId, source);
       if (!held) return wait(new Uint8Array());
       const bytes = new Uint8Array(held.beats.length * 7);
       const view = new DataView(bytes.buffer);
@@ -2375,8 +2382,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       });
       return wait(bytes);
     },
-    gridState: (trackId) => {
-      const held = gridOf(trackId);
+    gridState: (trackId, source) => {
+      const held = gridOf(trackId, source);
       if (!held) return notFound("That track has no beat grid.");
       return wait(gridStateOf(held, trackId));
     },
@@ -3060,7 +3067,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // test can fire an item the way the shell would; this is the mock, which
     // exists to be driven, rather than a seam in the app.
     // The fake volumes never come or go.
-    onDevicesChanged: () => () => undefined,
+    onDevicesChanged: (listener) => { deviceListeners.add(listener); return () => { deviceListeners.delete(listener); }; },
 
     // A browser has no AppleScript to ask anything of the window.
     serveScripts: () => () => undefined,

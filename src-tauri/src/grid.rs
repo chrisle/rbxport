@@ -103,6 +103,7 @@ pub struct GridOptions {
     /// read; the command fills it in, the frontend never sends it.
     #[serde(skip)]
     registered: Option<String>,
+    device_source: Option<crate::dto::DeviceTrackSourceDto>,
 }
 
 /// rekordbox stores its analysis lock in bit 7 of Analysed.
@@ -379,16 +380,21 @@ fn files_of(library: &Library, share: &Path, track: &str, registered: Option<&st
 }
 
 fn read_dat(dat: &Path) -> AppResult<(rbl_anlz::Anlz, Vec<Beat>)> {
-    let parsed = rbl_anlz::Anlz::read(dat).map_err(|e| {
-        AppError::new(ErrorKind::NotFound, "That track's analysis file could not be read.")
-            .with_detail(format!("{}: {e}", dat.display()))
-    })?;
+    let (parsed, beats, _) = read_dat_snapshot(dat)?;
+    Ok((parsed, beats))
+}
+
+fn read_dat_snapshot(dat: &Path) -> AppResult<(rbl_anlz::Anlz, Vec<Beat>, Vec<u8>)> {
+    let error = |detail: String| AppError::new(ErrorKind::NotFound, "That track's analysis file could not be read.")
+        .with_detail(format!("{}: {detail}", dat.display()));
+    let original = std::fs::read(dat).map_err(|e| error(e.to_string()))?;
+    let parsed = rbl_anlz::parse(&original).map_err(|e| error(e.to_string()))?;
     let Some(beats) = parsed.beat_grid().filter(|beats| !beats.is_empty()) else {
         return Err(AppError::new(ErrorKind::NotFound, "That track has no beat grid to edit."));
     };
     let offset = i64::from(parsed.grid_offset().unwrap_or(0));
     let beats = beats.into_iter().filter_map(|beat| u32::try_from(i64::from(beat.time_ms) + offset).ok().map(|time_ms| Beat { time_ms, ..beat })).collect();
-    Ok((parsed, beats))
+    Ok((parsed, beats, original))
 }
 
 /// The grid as the panel sees it, without changing anything.
@@ -664,7 +670,23 @@ impl DeviceGrid {
 
 /// The grid of a Devices tree track, as the panel sees it. Its lock is not
 /// offered: that would be the stick's to keep.
+fn device_read_lease(mount: &Path) -> AppResult<Option<std::fs::File>> {
+    let lease = rbl_core::durable::read_lease(mount).map_err(|e| AppError::internal(e.to_string()))?;
+    if rbl_export::recovery_pending(mount) {
+        return Err(AppError::internal("This USB needs recovery before its grid can be read."));
+    }
+    Ok(lease)
+}
+
+fn device_history_key(track: &str, assets: &crate::device_library::DeviceAssets) -> String {
+    let source = assets.library.map(|(format, id)| format!("{}:{id}", format.file_name())).unwrap_or_default();
+    format!("{track}|{source}|{}", assets.analysis)
+}
+
 pub(crate) fn device_state(editor: &GridEditor, assets: &crate::device_library::DeviceAssets, track: &str) -> AppResult<GridStateDto> {
+    let key = device_history_key(track, assets);
+    let track = key.as_str();
+    let _lease = device_read_lease(&assets.mount)?;
     let grid = DeviceGrid::of(assets)?;
     let (_, beats) = read_dat(&grid.dat)?;
     Ok(GridStateDto { locked: false, lockable: false, ..editor.state_for(track, &beats) })
@@ -690,8 +712,12 @@ pub(crate) fn apply_device(editor: &GridEditor, assets: &crate::device_library::
         return Err(refused);
     }
     let _editing = editor.editing.lock();
+    let key = device_history_key(track, assets);
+    let track = key.as_str();
+    rbl_export::recover(&assets.mount).map_err(|e| AppError::internal(e.to_string()))?;
+    let lease = device_read_lease(&assets.mount)?;
     let grid = DeviceGrid::of(assets)?;
-    let (parsed, beats) = read_dat(&grid.dat)?;
+    let (parsed, beats, original) = read_dat_snapshot(&grid.dat)?;
     let unchanged = |beats: &[Beat]| GridOutcome {
         state: GridStateDto { locked: false, lockable: false, ..editor.state_for(track, beats) },
         bpm_changed: false,
@@ -702,18 +728,23 @@ pub(crate) fn apply_device(editor: &GridEditor, assets: &crate::device_library::
         return Ok(unchanged(&beats));
     };
     editor.back_up_device(&grid.dat, &grid.backup_key(&grid.dat)?)?;
-    let mut files = vec![(grid.relative(&grid.dat)?, parsed.with_beat_grid(&next))];
+    let mut files = vec![rbl_export::device_library::GridFile {
+        path: grid.relative(&grid.dat)?, original, replacement: parsed.with_beat_grid(&next),
+    }];
     if grid.ext.is_file() {
         editor.back_up_device(&grid.ext, &grid.backup_key(&grid.ext)?)?;
-        let ext = rbl_anlz::Anlz::read(&grid.ext).map_err(|e| AppError::internal(e.to_string()))?;
-        if let Some(bytes) = ext.with_extended_grid_edit(&parsed.beat_grid().unwrap_or_default(), &next, parsed.grid_offset().unwrap_or(0)) {
-            files.push((grid.relative(&grid.ext)?, bytes));
+        let original = std::fs::read(&grid.ext).map_err(|e| AppError::internal(e.to_string()))?;
+        let ext = rbl_anlz::parse(&original).map_err(|e| AppError::internal(e.to_string()))?;
+        if let Some(replacement) = ext.with_extended_grid_edit(&parsed.beat_grid().unwrap_or_default(), &next, parsed.grid_offset().unwrap_or(0)) {
+            files.push(rbl_export::device_library::GridFile { path: grid.relative(&grid.ext)?, original, replacement });
         }
     }
     let (old_bpm, new_bpm) = (u32::from(tempo_x100(&beats)), u32::from(tempo_x100(&next)));
     let bpm_changed = new_bpm != old_bpm;
-    let written: Vec<(PathBuf, blake3::Hash)> = files.iter().map(|(path, bytes)| (grid.mount.join(path), blake3::hash(bytes))).collect();
-    let write = rbl_export::device_library::GridWrite { track: grid.track, files, bpm_x100: bpm_changed.then_some(new_bpm) };
+    let written: Vec<(PathBuf, blake3::Hash)> = files.iter().map(|file| (grid.mount.join(&file.path), blake3::hash(&file.replacement))).collect();
+    let write = rbl_export::device_library::GridWrite { audio: assets.audio.clone(), track: grid.track, files, bpm_x100: bpm_changed.then_some(new_bpm) };
+    // Hand off to the writer lease; GridFile's original bytes close this gap.
+    drop(lease);
     rbl_export::device_library::write_grid(&grid.mount, grid.format, &write).map_err(|e| crate::device_library::device_error(&e))?;
     {
         let mut known = editor.device_written.lock();
@@ -740,7 +771,10 @@ fn follow_grid<R: tauri::Runtime>(app: &tauri::AppHandle<R>, player: &crate::pla
     // The deck's metronome plays the grid it was given on load; give it this one.
     if let (Some(deck), Some(engine)) = (deck, player.opened()) {
         let grid: Vec<(u32, bool)> = outcome.beats.iter().map(|&(ms, number)| (ms, number == 1)).collect();
-        engine.set_metronome_grid(crate::player::deck_of(&deck), &grid);
+        let deck = crate::player::deck_of(&deck);
+        if player.loaded_tracks.lock().get(&deck).is_some_and(|loaded| loaded == track) {
+            engine.set_metronome_grid(deck, &grid);
+        }
     }
     let _ = tauri::Emitter::emit(app, "grid:changed", track);
 }
@@ -760,15 +794,28 @@ async fn run<R: tauri::Runtime>(
     deck: Option<String>,
     mut options: GridOptions,
 ) -> AppResult<GridStateDto> {
-    // A Devices tree track: its grid is on the stick, not in the library.
-    if let Some(assets) = state.device_assets(&track) {
+    // Bind every command to the loaded Devices row, even if another view
+    // has since registered the same audio path from a different database.
+    if let Some(source) = options.device_source.clone() {
         let editor = Arc::clone(&editor);
         let changed = track.clone();
-        let outcome = blocking(name, move || apply_device(&editor, &assets, &track, action, &options, rbl_db::is_rekordbox_app_running())).await?;
-        if outcome.written {
-            follow_grid(&app, &player, deck, &outcome, &changed);
-        }
+        let outcome = blocking(name, move || {
+            let assets = crate::device_library::grid_assets(&source, &track)?;
+            apply_device(&editor, &assets, &track, action, &options, rbl_db::is_rekordbox_app_running())
+        }).await;
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if matches!(action, GridAction::Undo | GridAction::Redo) { let _ = tauri::Emitter::emit(&app, "grid:changed", &changed); }
+                return Err(error);
+            }
+        };
+        if outcome.written { follow_grid(&app, &player, deck, &outcome, &changed); }
+        if outcome.bpm_changed { let _ = tauri::Emitter::emit(&app, "devices:changed", ()); }
         return Ok(outcome.state);
+    }
+    if state.device_assets(&track).is_some() {
+        return Err(AppError::new(ErrorKind::Malformed, "Reload this track from its device library before editing its grid."));
     }
     let library = state.library()?;
     let location = state.location()?;
@@ -818,10 +865,17 @@ pub async fn grid_state(
     state: State<'_, Arc<AppState>>,
     editor: State<'_, Arc<GridEditor>>,
     track: String,
+    device_source: Option<crate::dto::DeviceTrackSourceDto>,
 ) -> AppResult<GridStateDto> {
-    if let Some(assets) = state.device_assets(&track) {
+    if let Some(source) = device_source {
         let editor = Arc::clone(&editor);
-        return blocking("grid_state", move || device_state(&editor, &assets, &track)).await;
+        return blocking("grid_state", move || {
+            let assets = crate::device_library::grid_assets(&source, &track)?;
+            device_state(&editor, &assets, &track)
+        }).await;
+    }
+    if state.device_assets(&track).is_some() {
+        return Err(AppError::new(ErrorKind::Malformed, "Reload this track from its device library before editing its grid."));
     }
     let library = state.library()?;
     let location = state.location()?;
@@ -861,8 +915,9 @@ pub async fn grid_undo<R: tauri::Runtime>(
     editor: State<'_, Arc<GridEditor>>,
     track: String,
     deck: Option<String>,
+    device_source: Option<crate::dto::DeviceTrackSourceDto>,
 ) -> AppResult<GridStateDto> {
-    run(app, state, player, editor, "grid_undo", track, GridAction::Undo, deck, GridOptions::default()).await
+    run(app, state, player, editor, "grid_undo", track, GridAction::Undo, deck, GridOptions { device_source, ..GridOptions::default() }).await
 }
 
 #[tauri::command]
@@ -873,8 +928,9 @@ pub async fn grid_redo<R: tauri::Runtime>(
     editor: State<'_, Arc<GridEditor>>,
     track: String,
     deck: Option<String>,
+    device_source: Option<crate::dto::DeviceTrackSourceDto>,
 ) -> AppResult<GridStateDto> {
-    run(app, state, player, editor, "grid_redo", track, GridAction::Redo, deck, GridOptions::default()).await
+    run(app, state, player, editor, "grid_redo", track, GridAction::Redo, deck, GridOptions { device_source, ..GridOptions::default() }).await
 }
 
 /// Locks or unlocks a track's grid. Nothing in the library changes: see the
@@ -1662,6 +1718,36 @@ mod tests {
 
             let copies = backed_up(&editor);
             assert!(copies.contains(&original_a) && copies.contains(&original_b));
+        }
+
+        #[test]
+        fn a_loaded_device_source_keeps_its_analysis_and_undo_when_the_audio_is_shared() {
+            let s = exported();
+            let source = |format: &str| crate::dto::DeviceTrackSourceDto { path: s.dest.path().to_string_lossy().into_owned(), format: format.into(), track_id: 1 };
+            let original_assets = s.assets(Format::DeviceLibrary);
+            let track = rbl_index::folder::loose_id(&original_assets.audio_file().unwrap());
+            let original_dat = original_assets.analysis_dat().unwrap();
+            let alternate = s.dest.path().join("PIONEER/USBANLZ/alternate/ANLZ0000.DAT");
+            std::fs::create_dir_all(alternate.parent().unwrap()).unwrap();
+            let shifted: Vec<Beat> = grid().into_iter().map(|b| Beat { time_ms: b.time_ms + 100, ..b }).collect();
+            std::fs::write(&alternate, AnlzBuilder::new().path("/x.mp3").beat_grid(&shifted).finish()).unwrap();
+            let conn = rbl_onelibrary::playlists::open_read_write(&s.dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+            conn.execute("UPDATE content SET analysisDataFilePath='/PIONEER/USBANLZ/alternate/ANLZ0000.DAT' WHERE content_id=1", []).unwrap();
+            drop(conn);
+            let legacy = crate::device_library::grid_assets(&source("deviceLibrary"), &track).unwrap();
+            let one = crate::device_library::grid_assets(&source("oneLibrary"), &track).unwrap();
+            assert_eq!(legacy.analysis_dat().unwrap(), original_dat);
+            assert_eq!(one.analysis_dat().unwrap(), alternate);
+            let other_before = std::fs::read(&alternate).unwrap();
+            apply_device(&s.editor, &legacy, &track, GridAction::Edit { edit: GridEdit::Nudge { ms: 5 }, from_ms: None }, &GridOptions::default(), false).unwrap();
+            assert_eq!(std::fs::read(&alternate).unwrap(), other_before);
+            assert!(device_state(&s.editor, &legacy, &track).unwrap().can_undo);
+            assert!(!device_state(&s.editor, &one, &track).unwrap().can_undo);
+            assert!(apply_device(&s.editor, &one, &track, GridAction::Undo, &GridOptions::default(), false).is_err());
+            assert_eq!(std::fs::read(&alternate).unwrap(), other_before);
+            let forged = crate::dto::DeviceTrackSourceDto { track_id: 99, ..source("deviceLibrary") };
+            assert!(crate::device_library::grid_assets(&forged, &track).is_err());
+            assert!(crate::device_library::grid_assets(&source("deviceLibrary"), "file:other-audio").is_err());
         }
 
         #[test]

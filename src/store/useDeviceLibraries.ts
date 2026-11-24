@@ -70,9 +70,14 @@ export function useDeviceLibraries(devices: readonly Device[]): DeviceLibraries 
       const kept = new Map([...current].filter(([path]) => present.has(path)));
       return kept.size === current.size ? current : kept;
     });
+    let refreshed = false;
     for (const path of known.current.keys()) {
-      if (present.has(path) && !pending.current.has(path)) void read(path);
+      if (present.has(path) && !pending.current.has(path)) {
+        refreshed = true;
+        void read(path);
+      }
     }
+    if (refreshed) setRevision(current => current + 1);
   }, [devices, read]);
 
   const edit = useCallback(
