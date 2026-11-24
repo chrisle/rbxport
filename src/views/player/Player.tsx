@@ -588,23 +588,25 @@ const JUMPS = [
 
 /**
  * What the waveform leaves clear at the top and bottom of its band: the
- * `--s-wave-inset-*` tokens, read once. The strip above carries the bar
- * count and the cue markers' lane. The beat-marker heads overlap the waveform
- * at its top edge, as rekordbox does, while the bottom inset keeps the feet
- * clear of the band's edge.
- * The overview does not take it: its own grid row is already the 30pt the
- * capture paints.
+ * Read the detail insets once. The single deck centres the waveform between
+ * the beat-marker heads. The paired decks use the original insets so their
+ * mirrored waveforms still meet at the same baseline.
  */
-let waveInset: { top: number; bottom: number } | null = null;
-function waveInsetOf(): { top: number; bottom: number } {
-  if (waveInset) return waveInset;
+type WaveInset = { top: number; bottom: number };
+let waveInsets: { single: WaveInset; dual: WaveInset } | null = null;
+function waveInsetOf(dual: boolean): WaveInset {
+  if (waveInsets) return dual ? waveInsets.dual : waveInsets.single;
   const read = (name: string, fallback: number) => {
     if (typeof document === "undefined") return fallback;
     const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
     return Number.isFinite(value) ? value : fallback;
   };
-  waveInset = { top: read("--s-wave-inset-top", 20), bottom: read("--s-wave-inset-bottom", 16) };
-  return waveInset;
+  const top = read("--s-wave-inset-top", 20);
+  const bottom = read("--s-wave-inset-bottom", 16);
+  const markerInsetDifference = read("--s-beat-marker-top", 18) - read("--s-beat-marker-bottom", 1);
+  const shift = (markerInsetDifference - (top - bottom)) / 2;
+  waveInsets = { single: { top: top + shift, bottom: bottom - shift }, dual: { top, bottom } };
+  return dual ? waveInsets.dual : waveInsets.single;
 }
 
 /** Hot cue slots, as the pad row lays them out. */
@@ -2680,7 +2682,7 @@ export const Player = memo(function Player({
                   // it and deck B's, whose canvas is flipped, hangs from it
                   // [OBS]. On its own the deck draws the centred waveform.
                   half={dual ? "overlaid" : false}
-                  inset={waveInsetOf()}
+                  inset={waveInsetOf(dual)}
                 />
               ) : null}
               <BeatGrid
