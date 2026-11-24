@@ -11,6 +11,29 @@ import { createMockBackend } from "./backend-mock";
 import { TREE_ROOT } from "./types";
 
 describe("USB-only playlist files", () => {
+  it("refreshes already loaded paired device grids after edit, undo and redo", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const sourceView = async (format: "deviceLibrary" | "oneLibrary") => {
+      const view = await backend.openView({ source: { kind: "device", path: "/Volumes/TEST", format, playlist: "0" }, sort: "title", descending: false, query: "" });
+      return (await backend.fetchRows(view.viewId, 0, 1))[0]!;
+    };
+    const first = await sourceView("deviceLibrary"), paired = await sourceView("oneLibrary");
+    if (!first.deviceSource || !paired.deviceSource) throw new Error("Expected paired device rows");
+    expect(paired.id).toBe(first.id);
+    const before = await backend.trackBeats(first.id, first.deviceSource);
+    expect(await backend.trackBeats(paired.id, paired.deviceSource)).toEqual(before);
+
+    await backend.edits.gridEdit(first.id, { kind: "nudge", ms: 5 }, { deviceSource: first.deviceSource });
+    const edited = await backend.trackBeats(first.id, first.deviceSource);
+    expect(edited).not.toEqual(before);
+    expect(await backend.trackBeats(paired.id, paired.deviceSource)).toEqual(edited);
+
+    await backend.edits.gridUndo(first.id, undefined, first.deviceSource);
+    expect(await backend.trackBeats(paired.id, paired.deviceSource)).toEqual(before);
+    await backend.edits.gridRedo(first.id, undefined, first.deviceSource);
+    expect(await backend.trackBeats(paired.id, paired.deviceSource)).toEqual(edited);
+  });
+
   it("requires the loaded device source for grid writes and history", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     const view = await backend.openView({ source: { kind: "device", path: "/Volumes/TEST", format: "deviceLibrary", playlist: "0" }, sort: "title", descending: false, query: "" });
