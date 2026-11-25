@@ -2186,7 +2186,17 @@ fn export_cancellable_inner(
     current_databases.remove(&shm);
     let mut initial_databases = database_signatures;
     initial_databases.remove(&shm);
-    if current_databases != initial_databases || snapshot::analysis_stamp(destination, &before)? != analysis_before || incremental::inputs(requested_tracks)? != source_revisions {
+    let changed_input = if current_databases != initial_databases {
+        Some("databases")
+    } else if snapshot::analysis_stamp(destination, &before)? != analysis_before {
+        Some("analysis")
+    } else if incremental::inputs(requested_tracks)? != source_revisions {
+        Some("source")
+    } else {
+        None
+    };
+    if let Some(input_role) = changed_input {
+        tracing::warn!(input_role, "USB sync input changed");
         return Err(ExportError::Conflict("The device changed during sync. Close other writers and retry.".into()));
     }
     if cancelled() { return Err(ExportError::Cancelled); }

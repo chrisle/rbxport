@@ -152,11 +152,27 @@ fn an_absent_wal_index_can_be_rebuilt_by_our_reader() {
 
 #[test]
 fn real_source_and_database_edits_still_refuse_before_publication() {
-    for kind in ["source", "database", "wal"] {
+    for kind in ["source", "database", "wal", "analysis"] {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let writer_log = log.reopen().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || writer_log.try_clone().unwrap())
+            .finish();
+        let _capture = tracing::subscriber::set_default(subscriber);
         let source = tempfile::tempdir().unwrap();
         let usb = common::stick();
         let tracks = tracks(source.path());
         sync(usb.path(), &tracks, "Before", &mut |_| {}).unwrap();
+        if kind == "analysis" {
+            // A supported older receipt lacks generation output stamps. With
+            // current stamps the earlier exported-media guard owns this edit.
+            let mut receipt = Manifest::load(usb.path()).unwrap();
+            receipt.generation = None;
+            receipt.save(usb.path()).unwrap();
+        }
         let pdb = usb.path().join("PIONEER/rekordbox/export.pdb");
         let original = std::fs::read(&pdb).unwrap();
         // Keep a real WAL writer alive only in the WAL control. Its next
@@ -170,6 +186,13 @@ fn real_source_and_database_edits_still_refuse_before_publication() {
                 .unwrap();
             c
         });
+        let analysis = rbl_export::snapshot::Snapshot::read(usb.path())
+            .unwrap()
+            .legacy
+            .unwrap()
+            .tracks[0]
+            .analysis
+            .clone();
         let mut changed = false;
         let mut published = false;
         let result = sync(usb.path(), &tracks, "After", &mut |p| {
@@ -181,6 +204,14 @@ fn real_source_and_database_edits_still_refuse_before_publication() {
             }
             changed = true;
             match kind {
+                "analysis" => {
+                    std::fs::File::open(usb.path().join(analysis.trim_start_matches('/')))
+                        .unwrap()
+                        .set_times(std::fs::FileTimes::new().set_modified(
+                            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(5),
+                        ))
+                        .unwrap()
+                }
                 "source" => std::fs::write(&tracks[0].source_path, b"new source bytes").unwrap(),
                 "database" => {
                     let c = rbl_onelibrary::playlists::open_read_write(&db(usb.path())).unwrap();
@@ -201,10 +232,28 @@ fn real_source_and_database_edits_still_refuse_before_publication() {
             }
         });
         assert!(changed && !published, "{kind}");
-        assert!(
-            result.unwrap_err().to_string().contains("changed"),
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "USB sync conflict: The device changed during sync. Close other writers and retry.",
             "{kind}"
         );
+        let logged = std::fs::read_to_string(log.path()).unwrap();
+        let events: Vec<_> = logged
+            .lines()
+            .filter(|line| line.contains("USB sync input changed"))
+            .collect();
+        assert_eq!(events.len(), 1, "{kind}: {logged}");
+        let role = if kind == "wal" || kind == "database" {
+            "databases"
+        } else {
+            kind
+        };
+        assert!(
+            events[0].ends_with(&format!("input_role=\"{role}\"")),
+            "{logged}"
+        );
+        assert!(!events[0].contains(&usb.path().to_string_lossy().to_string()));
+        assert!(!events[0].contains(&source.path().to_string_lossy().to_string()));
         assert_eq!(std::fs::read(pdb).unwrap(), original, "{kind}");
         if let Some(c) = writer {
             let name: String = c
