@@ -894,8 +894,8 @@ export interface TrackTableProps {
    * whatever is selected, and this is what it takes.
    */
   onSelectedRow?: (row: RowDto | null) => void;
-  /** What is being dragged, so a drop target knows what it would get. */
-  onDragTracks?: (drag: TrackDrag | null) => void;
+  /** Publish a drag, or retire only the exact payload named by a cleanup. */
+  onDragTracks?: (drag: TrackDrag | null, expected?: TrackDrag) => void;
   /** Accept tracks dragged from the other browser into this playlist. */
   dragging?: boolean;
   onDropTracks?: ((playlistId: string) => void) | undefined;
@@ -1673,13 +1673,19 @@ export const TrackTable = memo(function TrackTable({
     };
   }, [platform, keyOverrides, answersLocate, listScope]);
 
+  const publishedDrag = useRef<TrackDrag | null>(null);
+  const publishDrag = useCallback((drag: TrackDrag) => {
+    publishedDrag.current = drag;
+    onDragTracks?.(drag);
+  }, [onDragTracks]);
+
   const startDragOut = useCallback(
     (row: RowDto, index: number) => {
       // Whatever is selected, plus the row grabbed if it was not part of it —
       // dragging an unselected row should move that row, not the selection
       // somewhere else on screen.
       if (!selection.ids.has(row.id)) {
-        onDragTracks?.({ ids: [row.id], row, sourceKind: spec.source.kind, position: { spec, index } });
+        publishDrag({ ids: [row.id], row, sourceKind: spec.source.kind, position: { spec, index } });
         return;
       }
       // A playlist takes all of them; a deck takes the first in list order,
@@ -1722,10 +1728,10 @@ export const TrackTable = memo(function TrackTable({
         // The drag may be cancelled without a consumer awaiting the ranks.
         void orderedIds.catch(() => {});
       }
-      onDragTracks?.({ ids: complete ? cached : [...selection.ids], orderedIds,
+      publishDrag({ ids: complete ? cached : [...selection.ids], orderedIds,
         row: first, sourceKind: spec.source.kind, position: { spec, index: firstIndex } });
     },
-    [selection.ids, onDragTracks, spec, view, listedIds, translate],
+    [selection.ids, publishDrag, spec, view, listedIds, translate],
   );
 
   // The ids travelling with the hand, and where they would land. Held here
@@ -1802,7 +1808,9 @@ export const TrackTable = memo(function TrackTable({
     setDropAt(null);
     setDragSource(null);
     setDragSourceKey(null);
-    onDragTracks?.(null);
+    const owner = publishedDrag.current;
+    publishedDrag.current = null;
+    if (owner) onDragTracks?.(null, owner);
   });
 
   // A drop anywhere in the window ends a drag begun here, without waiting for

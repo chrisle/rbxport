@@ -687,6 +687,9 @@ function AppBody() {
   // What is in flight out of the browser: a playlist takes the ids, a deck
   // takes the one row under the hand.
   const [draggedTracks, setDraggedTracks] = useState<TrackDrag | null>(null);
+  const receiveTrackDrag = useCallback((drag: TrackDrag | null, expected?: TrackDrag) => {
+    setDraggedTracks(current => drag === null && expected !== undefined && current !== expected ? current : drag);
+  }, []);
   /**
    * The last thing the app has to say, and whether it went wrong.
    *
@@ -3314,7 +3317,7 @@ function AppBody() {
     exportRunning,
   ]);
   const subList = useMemo(() => ({
-    loadedTracks, onDragTracks: setDraggedTracks, onDragError: refuse, players: deckCount(layout), onLoadTrack: loadTrack,
+    loadedTracks, onDragTracks: receiveTrackDrag, onDragError: refuse, players: deckCount(layout), onLoadTrack: loadTrack,
     onShowInformation: showInformation, onShowInFinder: revealTrack, onRate: rateTrack,
     onComment: commentTrack, onEditColor: editTrackColor, onResetPlayCount: resetPlayCount, onConvertMemoryCues: convertMemoryCues,
     onRemoveFromCollection: removeFromCollection, onImportToCollection: importToCollection,
@@ -3329,7 +3332,7 @@ function AppBody() {
     onRemoveTracksFromHistory: removeTracksFromHistory, onReorderPlaylist: reorderPlaylist,
     onDropFilesIntoPlaylist: importDroppedFilesTo, onAnalyseTracks: analyseTracks,
   }), [
-    loadedTracks, layout, loadTrack, openInDeckA, showInformation, revealTrack, rateTrack, commentTrack, editTrackColor, resetPlayCount,
+    loadedTracks, receiveTrackDrag, layout, loadTrack, openInDeckA, showInformation, revealTrack, rateTrack, commentTrack, editTrackColor, resetPlayCount,
     convertMemoryCues, removeFromCollection, importToCollection, autoRelocate, relocate, analysisLock, addToPlaylist,
     addToTagList, removeFromTagList, reloadTag, exportTrackTo, menuPlaylists, menuDevices,
     editTrackField, readOnly, explainEditLock, pendingEdits, draggedTracks, addDraggedTo,
@@ -3615,7 +3618,7 @@ function AppBody() {
           onArtworkMode={setArtworkMode}
           onFocusedRow={(row, from) => { void openInDeckA(row, from); }}
           onSelectedRow={setSelectedRow}
-          onDragTracks={setDraggedTracks}
+          onDragTracks={receiveTrackDrag}
           dragging={draggedTracks !== null}
           onDropTracks={selectedNode?.kind === "playlist" ? addDraggedTo : undefined}
           onDragError={refuse}
