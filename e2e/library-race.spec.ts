@@ -25,6 +25,71 @@ async function releaseLibrary(page: Page): Promise<void> {
   await page.evaluate(() => (window as unknown as { __libraryReady: () => void }).__libraryReady());
 }
 
+type CreateLibraryFixture = {
+  __finishLibraryCreation: () => void;
+  __reportUnavailableLibrary: () => void;
+};
+
+async function startLibraryCreation(page: Page): Promise<void> {
+  // Keep the real App and dialog. The native Create command returns after
+  // scheduling a load, so the command's reply and the load event can arrive
+  // in either order.
+  await page.route("**/src/main.tsx", async (route) => {
+    const response = await route.fetch();
+    const fixture = `
+      import { getBackend as fixtureBackend } from "/src/ipc/client.ts";
+      const backend = await fixtureBackend();
+      const subscribe = backend.onLibraryProblem;
+      backend.onLibraryProblem = (listener) => {
+        window.__reportUnavailableLibrary = () => listener({
+          kind: "unavailable",
+          masterDb: "/disconnected/rekordbox/master.db",
+          defaultMasterDb: "/fixture/rekordbox/master.db",
+        });
+        return subscribe(listener);
+      };
+      backend.createLibrary = () => new Promise(resolve => {
+        window.__finishLibraryCreation = resolve;
+      });
+    `;
+    await route.fulfill({ response, body: fixture + await response.text() });
+  });
+  await page.goto("/?nolibrary");
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Creating…" })).toBeDisabled();
+}
+
+async function finishLibraryCreation(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    (window as unknown as CreateLibraryFixture).__finishLibraryCreation();
+    // Let the command's promise and its React render finish before checking
+    // whether the dialog survived the reply.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    }));
+  });
+}
+
+test("creating a library keeps the dialog until the library loads", async ({ page }) => {
+  await startLibraryCreation(page);
+  await finishLibraryCreation(page);
+  await expect(page.getByRole("button", { name: "Creating…" })).toBeDisabled();
+
+  await releaseLibrary(page);
+  await expect(page.getByRole("dialog", { name: "No rekordbox Library" })).toHaveCount(0);
+  await expect(page.locator('[role="row"] [data-col="title"]').first()).toBeVisible();
+});
+
+test("the Create reply cannot dismiss a newer library question", async ({ page }) => {
+  await startLibraryCreation(page);
+  await page.evaluate(() => (window as unknown as CreateLibraryFixture).__reportUnavailableLibrary());
+  const unavailable = page.getByRole("dialog").filter({ hasText: "Cannot find Master Database." });
+  await expect(unavailable).toBeVisible();
+
+  await finishLibraryCreation(page);
+  await expect(unavailable).toBeVisible();
+});
+
 test("a view opened before the library is ready fills in once it is", async ({ page }) => {
   await page.goto("/?slow&tracks=4000");
 

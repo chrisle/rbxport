@@ -3722,11 +3722,9 @@ function AppBody() {
       ) : null}
       {missingLibrary !== null ? (
         <NewLibraryDialog key={missingLibrary.kind} problem={missingLibrary}
-          onCreate={async () => {
-            await (await getBackend()).createLibrary();
-            // The ready event that follows loads it like any other start.
-            setMissingLibrary(null);
-          }}
+          // The command schedules loading. The ready or problem event owns
+          // the dialog after that, regardless of when the command replies.
+          onCreate={async () => (await getBackend()).createLibrary()}
           // Closed by the ready event when the default folder has a library,
           // or asked again by the problem event when it is empty.
           onUseDefault={async () => (await getBackend()).useDefaultLibrary()}
