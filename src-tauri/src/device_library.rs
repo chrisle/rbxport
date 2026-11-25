@@ -1192,7 +1192,11 @@ fn device_cues(
                         .find(|entry| {
                             entry.hot_cue == 0
                                 && entry.time_ms == cue.position_ms
-                                && (entry.kind != 2 || entry.loop_time_ms == cue.out_ms)
+                                && if cue.out_ms > cue.position_ms {
+                                    entry.kind == 2 && entry.loop_time_ms == cue.out_ms
+                                } else {
+                                    entry.kind == 1
+                                }
                         })
                         .and_then(|entry| {
                             u8::try_from(entry.library_color())
@@ -3086,6 +3090,97 @@ mod tests {
         assert_eq!(ids_in_range(&view, 1, 0), vec![page[0].id.clone(), page[1].id.clone()]);
         assert!(fetch_rows(&view, 0, MAX_ROWS + 1).is_err());
     }
+    #[test]
+    fn coincident_memory_point_created_after_loop_keeps_both_colours() {
+        coincident_memory_colours(true);
+    }
+
+    #[test]
+    fn coincident_memory_loop_created_after_point_keeps_both_colours() {
+        coincident_memory_colours(false);
+    }
+
+    fn coincident_memory_colours(loop_first: bool) {
+        let collection = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(collection.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let content = rbl_db::fixture::track_id(0);
+        let audio = collection.path().join("generated.wav");
+        let bytes = wav(441_000);
+        std::fs::write(&audio, &bytes).unwrap();
+        rbl_db::fixture::point_at_audio(&location, 0, &audio.to_string_lossy(), 10).unwrap();
+        let mut writer = rbl_db::write::Writer::open(location.clone(), collection.path().join("backups")).unwrap();
+        let relative = writer.analysis_data_path_for(&content).unwrap();
+        let dat = location.share_root.join(relative.trim_start_matches('/'));
+        std::fs::create_dir_all(dat.parent().unwrap()).unwrap();
+        let analysis = rbl_anlz::AnlzBuilder::new().path(&audio.to_string_lossy()).finish();
+        for extension in ["DAT", "EXT"] { std::fs::write(dat.with_extension(extension), &analysis).unwrap(); }
+        writer.set_analysis(&content, &rbl_db::write::AnalysisWrite {
+            bpm_x100: 12_800, key: None, analysis_path: &relative, length_sec: Some(10),
+        }).unwrap();
+        // Normal memory additions distinguish a point from a loop at the
+        // same start. Use actual collection writes and normal export extras.
+        for is_loop in [loop_first, !loop_first] {
+            let cue = if is_loop { writer.add_loop(&content, 0, 3_000, 5_000, 0).unwrap() }
+                else { writer.add_cue(&content, 0, 3_000).unwrap() };
+            writer.set_cue_colour(&cue, Some(if is_loop { 2 } else { 1 })).unwrap();
+        }
+        drop(writer);
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(collection.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        let library = state.library().unwrap();
+        let selection = crate::commands::ExportSelection::from_playlists_and_tracks(
+            &state, &library, &state.share_root(), &[], &[content.parse().unwrap()], false).unwrap();
+        assert_eq!(selection.tracks[0].cues.as_ref().unwrap().len(), 2);
+        let stick = tempfile::tempdir().unwrap();
+        assert!(rbl_export::export(stick.path(), &selection.tracks, &selection.playlists).unwrap().verified);
+        let before = contents_under(stick.path());
+        let master_before = std::fs::read(&location.master_db).unwrap();
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let device = device::read(stick.path(), format).unwrap();
+            let track = &device.tracks[0];
+            let sql = if format == Format::OneLibrary { one_library_cues(stick.path()) } else { HashMap::new() };
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            let cues = device_cues(stick.path(), track, format, &sql, &mut remaining);
+            let memory: Vec<_> = cues.iter().filter(|cue| cue.is_memory()).collect();
+            assert_eq!(memory.len(), 2, "{format:?}, loop_first={loop_first}");
+            let point = memory.iter().find(|cue| cue.out_ms <= cue.position_ms).unwrap();
+            let loop_cue = memory.iter().find(|cue| cue.out_ms > cue.position_ms).unwrap();
+            assert_eq!((point.position_ms, point.memory_colour), (3_000, Some(1)), "{format:?}, loop_first={loop_first}");
+            assert_eq!((loop_cue.position_ms, loop_cue.out_ms, loop_cue.memory_colour), (3_000, 5_000, Some(2)), "{format:?}, loop_first={loop_first}");
+        }
+        assert_eq!(contents_under(stick.path()), before);
+        let device = device::read(stick.path(), Format::OneLibrary).unwrap();
+        let track = &device.tracks[0];
+        let sql = one_library_cues(stick.path());
+        let ext = assets_of(stick.path(), Format::OneLibrary, track).1.analysis_dat().unwrap().with_extension("EXT");
+        for only in ["point", "loop", "wrong_loop_end"] {
+            let mut companion = rbl_anlz::Anlz::read(&ext).unwrap();
+            companion.sections.retain(|section| !section.is_cue_list());
+            let mut kept: Vec<_> = selection.tracks[0].cues.as_ref().unwrap().iter()
+                .filter(|cue| cue.loop_time_ms.is_some() == (only != "point")).cloned().collect();
+            if only == "wrong_loop_end" { kept[0].loop_time_ms = Some(6_000); }
+            companion.sections.extend(rbl_anlz::cues::sections(&kept, true));
+            std::fs::write(&ext, companion.to_bytes()).unwrap();
+            let edited = contents_under(stick.path());
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            let cues = device_cues(stick.path(), track, Format::OneLibrary, &sql, &mut remaining);
+            assert_eq!(cues.len(), 2, "SQL timing/identity remains authoritative: {only}");
+            for cue in cues {
+                let expected = if cue.out_ms > cue.position_ms {
+                    (only == "loop").then_some(2)
+                } else { (only == "point").then_some(1) };
+                assert_eq!(cue.position_ms, 3_000);
+                assert_eq!(cue.memory_colour, expected, "{only}, out={}", cue.out_ms);
+            }
+            assert_eq!(contents_under(stick.path()), edited);
+        }
+        assert_eq!(std::fs::read(&location.master_db).unwrap(), master_before);
+        assert_eq!(std::fs::read(audio).unwrap(), bytes);
+        for extension in ["DAT", "EXT"] { assert_eq!(std::fs::read(dat.with_extension(extension)).unwrap(), analysis); }
+    }
+
     #[test]
     fn browsing_both_device_formats_reads_cues_without_changing_a_clean_stick() {
         let rig = rig_with(|index, track| {
