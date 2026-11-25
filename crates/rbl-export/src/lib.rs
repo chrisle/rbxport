@@ -2297,7 +2297,16 @@ fn export_cancellable_inner(
     if !trusted.is_subset(&trusted_after) {
         return Err(ExportError::Conflict("Exported media changed during sync. Retry after closing other writers.".into()));
     }
-    if incremental::databases(destination)? != database_signatures || snapshot::analysis_stamp(destination, &before)? != analysis_before || incremental::inputs(requested_tracks)? != source_revisions {
+    // SQLite readers can rebuild or update the WAL index themselves. It is
+    // shared coordination/cache state, not database content (sqlite.org/walformat.html).
+    // Ignore only that file in this late conflict check. Keep committed receipt
+    // matching unchanged, and still journal the old DB, WAL and SHM together.
+    let shm = format!("{root_name}/rekordbox/exportLibrary.db-shm");
+    let mut current_databases = incremental::databases(destination)?;
+    current_databases.remove(&shm);
+    let mut initial_databases = database_signatures;
+    initial_databases.remove(&shm);
+    if current_databases != initial_databases || snapshot::analysis_stamp(destination, &before)? != analysis_before || incremental::inputs(requested_tracks)? != source_revisions {
         return Err(ExportError::Conflict("The device changed during sync. Close other writers and retry.".into()));
     }
     if cancelled() { return Err(ExportError::Cancelled); }
