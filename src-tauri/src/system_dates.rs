@@ -342,7 +342,7 @@ mod platform {
                 }
                 Value::Epoch(seconds) => {
                     let seconds = libc::time_t::try_from(seconds).ok()?;
-                    if unsafe { libc::localtime_r(&seconds, &mut tm) }.is_null() {
+                    if unsafe { libc::localtime_r(&raw const seconds, &raw mut tm) }.is_null() {
                         return None;
                     }
                 }
@@ -356,7 +356,7 @@ mod platform {
                         bytes.as_mut_ptr().cast(),
                         bytes.len(),
                         c"%x".as_ptr(),
-                        &tm,
+                        &raw const tm,
                         self.0,
                     )
                 };
