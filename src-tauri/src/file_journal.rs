@@ -28,6 +28,11 @@ struct Manifest {
 
 pub struct FileJournal { dir: PathBuf, manifest: Manifest }
 
+// Only cue import interprets zero as preserving the row's current BPM.
+// Analysis and grid edits continue to journal their exact requested value.
+#[derive(Clone, Copy)]
+enum BpmAfter { Exact(u32), CueImport(u32) }
+
 fn error(e: impl std::fmt::Display) -> AppError { AppError::internal(format!("Analysis recovery: {e}")) }
 
 fn row(db: &rbl_db::Library, track: &str) -> AppResult<(i64, u32, String, i64, String)> {
@@ -50,7 +55,14 @@ impl FileJournal {
     pub fn prepare_with(db: &rbl_db::Library, root: &Path, location: &rbl_db::LibraryLocation, track: &str,
         bpm_after: u32, path_after: Option<String>, changes_row: bool,
         files: &[(PathBuf, Vec<u8>)]) -> AppResult<Self> {
-        Self::prepare_bound(db, root, location, track, bpm_after, path_after, changes_row, files, None)
+        Self::prepare_bound(db, root, location, track, BpmAfter::Exact(bpm_after), path_after, changes_row, files, None)
+    }
+
+    /// Match `Writer::import_usb_cues`: zero preserves the BPM in the same
+    /// row snapshot that supplies the journal's pre-edit USN and association.
+    pub fn prepare_cue_import_with(db: &rbl_db::Library, root: &Path, location: &rbl_db::LibraryLocation,
+        track: &str, bpm: u32, files: &[(PathBuf, Vec<u8>)]) -> AppResult<Self> {
+        Self::prepare_bound(db, root, location, track, BpmAfter::CueImport(bpm), None, true, files, None)
     }
 
     /// Stage a grid journal with its planned association and revision bound
@@ -58,14 +70,18 @@ impl FileJournal {
     pub fn prepare_grid(root: &Path, location: &rbl_db::LibraryLocation, track: &str,
         bpm_after: u32, analysis_path: &str, files: &[(PathBuf, Vec<u8>)]) -> AppResult<Self> {
         let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).map_err(error)?;
-        Self::prepare_bound(&db, root, location, track, bpm_after, None, true, files, Some(analysis_path))
+        Self::prepare_bound(&db, root, location, track, BpmAfter::Exact(bpm_after), None, true, files, Some(analysis_path))
     }
 
     #[allow(clippy::too_many_arguments, reason = "journal inputs plus an optional planned grid association")]
     fn prepare_bound(db: &rbl_db::Library, root: &Path, location: &rbl_db::LibraryLocation, track: &str,
-        bpm_after: u32, path_after: Option<String>, changes_row: bool,
+        bpm_after: BpmAfter, path_after: Option<String>, changes_row: bool,
         files: &[(PathBuf, Vec<u8>)], grid_path: Option<&str>) -> AppResult<Self> {
-        let (before_usn, _, analysis_path_before, analysis_update_before, analysis_revision_before) = row(db, track)?;
+        let (before_usn, bpm_before, analysis_path_before, analysis_update_before, analysis_revision_before) = row(db, track)?;
+        let bpm_after = match bpm_after {
+            BpmAfter::CueImport(0) => bpm_before,
+            BpmAfter::Exact(bpm) | BpmAfter::CueImport(bpm) => bpm,
+        };
         let grid_revision_after = grid_path.map(|_| {
             let unit = analysis_revision_before.encode_utf16().next().unwrap_or(0).wrapping_add(1);
             if unit == 0 { String::new() } else { String::from_utf16_lossy(&[unit]) }
@@ -304,6 +320,76 @@ mod tests {
         assert!(recover(&backup, &location).is_err());
         assert!(manifest.exists());
         assert_eq!(std::fs::read(dat).unwrap(), b"old");
+    }
+
+    #[test]
+    fn zero_bpm_cue_import_recovery_uses_the_preparation_rows_bpm() {
+        let (root, location, backup, track) = fixture();
+        let dat = root.path().join("DAT");
+        std::fs::write(&dat, b"old").unwrap();
+        let mut writer = rbl_db::write::Writer::open(location.clone(), &backup).unwrap();
+        writer.set_bpm_x100(&track, 12700).unwrap();
+        let journal = FileJournal::prepare_cue_import_with(writer.library(), &backup, &location, &track, 0,
+            &[(dat.clone(), b"new".to_vec())]).unwrap();
+        journal.publish().unwrap();
+        writer.import_usb_cues(&track, &[], 0).unwrap();
+        drop(writer);
+        drop(journal);
+        recover(&backup, &location).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        assert_eq!(row(&db, &track).unwrap().1, 12700);
+        assert_eq!(std::fs::read(dat).unwrap(), b"new");
+        recover(&backup, &location).unwrap();
+    }
+
+    #[test]
+    fn zero_bpm_cue_import_still_refuses_a_different_row_commit() {
+        let (root, location, backup, track) = fixture();
+        let dat = root.path().join("DAT");
+        std::fs::write(&dat, b"old").unwrap();
+        let mut writer = rbl_db::write::Writer::open(location.clone(), &backup).unwrap();
+        writer.set_bpm_x100(&track, 12700).unwrap();
+        let journal = FileJournal::prepare_cue_import_with(writer.library(), &backup, &location, &track, 0,
+            &[(dat.clone(), b"new".to_vec())]).unwrap();
+        journal.publish().unwrap();
+        let directory = journal.dir.clone();
+        writer.set_bpm_x100(&track, 13000).unwrap();
+        drop(writer);
+        drop(journal);
+        let error = recover(&backup, &location).unwrap_err();
+        assert!(error.full_message().contains("row changed outside"));
+        assert!(directory.join("manifest.json").is_file());
+        assert_eq!(std::fs::read(dat).unwrap(), b"new");
+    }
+
+    #[test]
+    fn exact_zero_bpm_edits_keep_their_recovery_semantics() {
+        for grid in [false, true] {
+            let (root, location, backup, track) = fixture();
+            let dat = root.path().join("DAT");
+            std::fs::write(&dat, b"old").unwrap();
+            let mut writer = rbl_db::write::Writer::open(location.clone(), &backup).unwrap();
+            writer.set_bpm_x100(&track, 12700).unwrap();
+            let images = [(dat.clone(), b"new".to_vec())];
+            let journal = if grid {
+                FileJournal::prepare_grid(&backup, &location, &track, 0, "", &images)
+            } else {
+                FileJournal::prepare(&backup, &location, &track, 0, None, true, &images)
+            }.unwrap();
+            journal.publish().unwrap();
+            if grid { writer.save_grid_revision(&track, 0).unwrap(); }
+            else {
+                writer.register_analysis(&track, &rbl_db::write::AnalysisRegistration {
+                    bpm_x100: 0, key: None, analysis_data_path: "",
+                }).unwrap();
+            }
+            drop(writer);
+            drop(journal);
+            recover(&backup, &location).unwrap();
+            assert_eq!(std::fs::read(dat).unwrap(), b"new");
+            let db = rbl_db::Library::open(location, rbl_db::OpenMode::ReadOnly).unwrap();
+            assert_eq!(row(&db, &track).unwrap().1, 0);
+        }
     }
 
 }

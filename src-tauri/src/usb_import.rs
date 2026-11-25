@@ -423,7 +423,7 @@ fn apply_cue_batch(
     if batch.is_empty() { return Ok(()); }
     let mut journals = Vec::with_capacity(batch.len());
     for item in &batch {
-        let prepared = state.read_db(|db| Ok(crate::file_journal::FileJournal::prepare_with(db, state.backup_dir(), location, &item.id, item.bpm, None, true, &item.files)))
+        let prepared = state.read_db(|db| Ok(crate::file_journal::FileJournal::prepare_cue_import_with(db, state.backup_dir(), location, &item.id, item.bpm, &item.files)))
             .map_err(write_error)
             .and_then(|prepared| prepared);
         match prepared {
@@ -1692,4 +1692,64 @@ mod tests {
         assert!(error.message.contains("Could not recover an interrupted export"));
         assert!(error.message.contains("missing-track.wav"));
     }
+
+    #[test]
+    fn preserved_zero_bpm_recovers_a_committed_prefix_after_later_import_refusal() {
+        for requested_bpm in [12800_u16, 0] {
+            let dir = tempfile::tempdir().unwrap();
+            let (state, location, usb, _) = library_and_stick(dir.path());
+            let local = local_analysis_for(&state, &location, 3);
+            let before: Vec<_> = local.iter().map(|p| std::fs::read(p).unwrap()).collect();
+            let editor = crate::grid::GridEditor::at(state.backup_dir());
+            let _gate = state.edit_gate.lock();
+            let _files = state.analysis_write.lock();
+            let mut batch = Vec::new();
+            let mut source_images = Vec::new();
+            for (index, target) in local.iter().enumerate() {
+                let id = rbl_db::fixture::track_id(index);
+                editor.seed_history(&id);
+                let source = usb.join(format!("PIONEER/USBANLZ/P000/{:08X}/ANLZ0000", index + 1));
+                let mut dat = rbl_anlz::Anlz::read(&source.with_extension("DAT")).unwrap();
+                if index == 0 {
+                    let grid = dat.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap();
+                    grid.payload[2..4].copy_from_slice(&requested_bpm.to_be_bytes());
+                    std::fs::write(source.with_extension("DAT"), dat.to_bytes()).unwrap();
+                }
+                let entries_file = rbl_anlz::Anlz::read(&source.with_extension("EXT")).unwrap();
+                let mut entries = entries_file.cue_entries();
+                if index == 1 {
+                    // The existing later-row refusal leaves the first row
+                    // committed before the production caller reconciles.
+                    entries[0].kind = 2;
+                    entries[0].time_ms = 3000;
+                    entries[0].loop_time_ms = 1000;
+                }
+                for extension in ["DAT", "EXT"] {
+                    let path = source.with_extension(extension);
+                    source_images.push((path.clone(), std::fs::read(path).unwrap()));
+                }
+                batch.push(PendingCues { id, entries,
+                    bpm: u32::from(dat.beat_grid().unwrap()[0].tempo_x100),
+                    files: vec![(target.clone(), dat.to_bytes())] });
+            }
+            let error = apply_cue_batch(&state, &editor, &location, batch, &mut ImportReport::default()).unwrap_err();
+            assert!(!error.full_message().contains("row changed outside"), "raw BPM {requested_bpm}: {}", error.full_message());
+            assert!(error.full_message().contains("Invalid USB cue data"), "the original later-row refusal is retained");
+            assert!(!state.backup_dir().join("analysis-journal").exists_with_entries(), "raw BPM {requested_bpm}: a committed prefix must reconcile: {error}");
+            crate::file_journal::recover(state.backup_dir(), &location).unwrap();
+            let expected_bpm = if requested_bpm == 0 { 12000 } else { u32::from(requested_bpm) };
+            let actual_bpm: u32 = state.read_db(|db| Ok(db.connection().query_row(
+                "SELECT BPM FROM djmdContent WHERE ID=?1", [rbl_db::fixture::track_id(0)], |row| row.get(0))?)).unwrap();
+            assert_eq!(actual_bpm, expected_bpm, "the writer's zero-preserve behavior is unchanged");
+            let first_entries = rbl_anlz::Anlz::read(&usb.join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.EXT")).unwrap().cue_entries();
+            assert!(database_cues_match(&state, &rbl_db::fixture::track_id(0), &first_entries).unwrap());
+            assert_ne!(std::fs::read(&local[0]).unwrap(), before[0]);
+            assert_eq!(rbl_anlz::Anlz::read(&local[0]).unwrap().beat_grid().unwrap()[0].tempo_x100, requested_bpm);
+            for (path, image) in local.iter().zip(&before).skip(1) { assert_eq!(&std::fs::read(path).unwrap(), image); }
+            assert!(!editor.has_history(&rbl_db::fixture::track_id(0)));
+            for index in 1..3 { assert!(editor.has_history(&rbl_db::fixture::track_id(index))); }
+            for (path, image) in source_images { assert_eq!(std::fs::read(path).unwrap(), image); }
+        }
+    }
+
 }
