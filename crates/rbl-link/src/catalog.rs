@@ -1410,11 +1410,14 @@ impl Catalog for IndexCatalog {
         // The database's row for what the index leaves out; a read that
         // fails costs those fields, not the reply.
         let details = self.source.details(&id.to_string());
-        let file_size = details
-            .as_ref()
-            .map(|d| d.file_size)
-            .filter(|&size| size > 0)
-            .or_else(|| std::fs::metadata(&path).ok().map(|m| m.len()))
+        // A key-tag rewrite can change the file length before its saved size
+        // is refreshed. Describe the file NFS opens now, including an empty
+        // file; retain the library's size when no regular file is reachable.
+        let file_size = std::fs::metadata(&path)
+            .ok()
+            .filter(std::fs::Metadata::is_file)
+            .map(|metadata| metadata.len())
+            .or_else(|| details.as_ref().map(|d| d.file_size).filter(|&size| size > 0))
             .unwrap_or(0);
         let track_row = self.track_row(id, None)?;
         let key_name = track_row.key_name.clone();
