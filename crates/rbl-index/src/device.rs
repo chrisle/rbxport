@@ -7,7 +7,7 @@
 //! searches what it read the way a [`crate::View`] orders and searches the
 //! collection, so the two lists behave alike under the same header click.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use crate::strings::fold;
 use crate::{Cue, SearchField, SortColumn, ViewSpec};
@@ -39,8 +39,8 @@ pub struct DeviceRow {
     pub analysed: bool,
     /// Whether the stick's library names artwork for the track.
     pub has_artwork: bool,
-    /// Cues read from this device library when the view was opened.
-    pub cues: Vec<Cue>,
+    /// Immutable cues read when the view opened, shared by playlist occurrences.
+    pub cues: Arc<[Cue]>,
 }
 
 /// The rows a view shows, ordered and searched.

@@ -1114,9 +1114,16 @@ pub async fn open_view(state: &State<'_, Arc<AppState>>, path: String, format: S
         handle.remember_device_assets(&mount, library.tracks.iter().map(|t| assets_of(&mount, format, t)));
         let mut view = DeviceView::open(rows, &parsed, field).with_source(mount.clone(), format_name(format).to_owned());
         let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
-        for row in &mut view.rows {
-            if let Some(track) = library.track(row.id) {
-                row.cues = device_cues(&mount, track, format, &one_cues, &mut remaining);
+        let mut cue_rows = HashMap::<u32, usize>::new();
+        for at in 0..view.rows.len() {
+            let id = view.rows[at].id;
+            if let Some(&first) = cue_rows.get(&id) {
+                // Playlist occurrences share this exact device row's cues,
+                // not another ID that happens to name the same audio path.
+                view.rows[at].cues = view.rows[first].cues.clone();
+            } else if let Some(track) = library.track(id) {
+                view.rows[at].cues = device_cues(&mount, track, format, &one_cues, &mut remaining).into();
+                cue_rows.insert(id, at);
             }
         }
         let (view_id, len, generation) = handle.open_device_view(view);
@@ -1144,7 +1151,7 @@ fn device_row(mount: &Path, track: &device::Track, at: usize) -> DeviceRow {
         color: track.color,
         analysed: !track.analysis_path.is_empty(),
         has_artwork: !track.artwork_path.is_empty(),
-        cues: Vec::new(),
+        cues: Arc::default(),
     }
 }
 
@@ -2318,7 +2325,7 @@ mod tests {
             assert_eq!(loaded.len(), 2, "{format:?}: existing loaded route reads DAT");
             let one_cues = if format == Format::OneLibrary { one_library_cues(mount) } else { HashMap::new() };
             let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
-            row.cues = device_cues(mount, track, format, &one_cues, &mut remaining);
+            row.cues = device_cues(mount, track, format, &one_cues, &mut remaining).into();
             let view = DeviceView::open(vec![row], &rbl_index::ViewSpec {
                 source: rbl_index::TrackSource::Collection, sort: rbl_index::SortColumn::TrackNo,
                 descending: false, query: String::new(), filter: rbl_index::TrackFilter::default(),
@@ -3230,7 +3237,7 @@ mod tests {
                 .enumerate()
                 .map(|(at, track)| {
                     let mut row = device_row(mount, track, at);
-                    row.cues = device_cues(mount, track, format, &one_cues, &mut remaining);
+                    row.cues = device_cues(mount, track, format, &one_cues, &mut remaining).into();
                     row
                 })
                 .collect();
@@ -3288,11 +3295,11 @@ mod tests {
         std::fs::write(&ext, b"malformed analysis").unwrap();
         let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
         let mut damaged = device_row(mount, track, 0);
-        damaged.cues = device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining);
+        damaged.cues = device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).into();
         assert!(row_dto(&damaged).hot_cues.is_empty());
         let one_cues = one_library_cues(mount);
         let mut still_in_database = device_row(mount, track, 0);
-        still_in_database.cues = device_cues(mount, track, Format::OneLibrary, &one_cues, &mut remaining);
+        still_in_database.cues = device_cues(mount, track, Format::OneLibrary, &one_cues, &mut remaining).into();
         assert_eq!(row_dto(&still_in_database).memory_cues, [3_000]);
         #[cfg(unix)]
         {
@@ -3302,7 +3309,7 @@ mod tests {
             std::fs::remove_file(&ext).unwrap();
             std::os::unix::fs::symlink(&target, &ext).unwrap();
             let mut linked = device_row(mount, track, 0);
-            linked.cues = device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining);
+            linked.cues = device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).into();
             assert!(row_dto(&linked).hot_cues.is_empty(), "analysis symlinks outside the stick are not followed");
         }
     }
@@ -3338,7 +3345,7 @@ mod tests {
             let cues = device_cues(mount, track, format, &one_cues, &mut remaining);
             assert_eq!(remaining, MAX_BROWSER_EXT_VIEW_BYTES, "oversized file should not be read");
             let mut row = device_row(mount, track, 0);
-            row.cues = cues;
+            row.cues = cues.into();
             let dto = row_dto(&row);
             if format == Format::DeviceLibrary {
                 assert!(dto.hot_cues.is_empty());
@@ -3352,6 +3359,168 @@ mod tests {
         let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
         assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).len(), 2, "absent EXT permits the bounded DAT fallback");
         assert_ne!(device_cues(mount, track, Format::OneLibrary, &one_library_cues(mount), &mut remaining), [] as [rbl_index::Cue; 0]);
+    }
+
+    #[test]
+    fn duplicate_device_library_occurrences_keep_browser_cues() {
+        duplicate_browser_cues(Format::DeviceLibrary);
+    }
+
+    #[test]
+    fn duplicate_onelibrary_occurrences_keep_browser_memory_colours() {
+        duplicate_browser_cues(Format::OneLibrary);
+    }
+
+    fn duplicate_browser_cues(format: Format) {
+        use tauri::Manager;
+        let source = tempfile::tempdir().unwrap();
+        let stick = tempfile::tempdir().unwrap();
+        let mut tracks = Vec::new();
+        for id in 1..=2_u64 {
+            let path = source.path().join(format!("generated-{id}.wav"));
+            std::fs::write(&path, wav(44_100)).unwrap();
+            let mut track = rbl_export::SourceTrack { id, source_path: path, title: format!("Track {id}"), ..Default::default() };
+            analysed_on_the_stick(0, &mut track);
+            let (_, bytes) = track.analysis.iter_mut().find(|(extension, _)| extension == "EXT").unwrap();
+            let mut rich = rbl_anlz::parse(bytes).unwrap();
+            rich.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; 1024 * 1024]));
+            *bytes = rich.to_bytes();
+            // Different rows must keep their own cue source, even when the
+            // collection originally selected identical audio metadata.
+            track.cues.as_mut().unwrap()[1].color_id = if id == 1 { 3 } else { 5 };
+            tracks.push(track);
+        }
+        let playlists = [
+            rbl_export::SourcePlaylist { id: 10, name: "Repeated".into(), track_indices: [vec![0; 65], vec![1]].concat(), ..Default::default() },
+            rbl_export::SourcePlaylist { id: 20, name: "Independent".into(), track_indices: vec![1], ..Default::default() },
+        ];
+        rbl_export::export(stick.path(), &tracks, &playlists).unwrap();
+        let before = contents_under(stick.path());
+        let source_before = contents_under(source.path());
+        let app = tauri::test::mock_app();
+        app.manage(Arc::new(AppState::with_backups(source.path().join("backups"))));
+        let state = app.state::<Arc<AppState>>();
+        let spec: ViewSpecDto = serde_json::from_value(serde_json::json!({
+            "source": {"kind":"collection"}, "sort":"trackNo", "descending":false, "query":""
+        })).unwrap();
+        let library = device::read(stick.path(), format).unwrap();
+        let repeated = library.nodes.iter().find(|node| node.name == "Repeated").unwrap().id;
+        let independent = library.nodes.iter().find(|node| node.name == "Independent").unwrap().id;
+        let open = |playlist: u32| tauri::async_runtime::block_on(open_view(
+            &state, stick.path().to_string_lossy().into_owned(), format_name(format).into(), playlist.to_string(), &spec)).unwrap();
+        let handle = open(repeated);
+        let view = state.device_view(handle.view_id).unwrap();
+        assert_eq!(view.rows.len(), 66);
+        let other = open(independent);
+        let other = state.device_view(other.view_id).unwrap();
+        assert_eq!(other.rows[0].cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, Some(4));
+        let first = &view.rows[0];
+        assert!(!first.cues.is_empty());
+        for (index, row) in view.rows.iter().take(65).enumerate() {
+            assert_eq!(row.cues.len(), first.cues.len(), "{format:?}, occurrence {index}");
+            assert!(Arc::ptr_eq(&row.cues, &first.cues), "one allocation per exact device ID");
+            assert_eq!(row.cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, Some(2), "{format:?}, occurrence {index}");
+        }
+        assert_eq!(view.rows[65].cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, Some(4));
+        assert_eq!(contents_under(stick.path()), before);
+        let track = library.track(first.id).unwrap();
+        let ext = assets_of(stick.path(), format, track).1.analysis_dat().unwrap().with_extension("EXT");
+        let original_ext = std::fs::read(&ext).unwrap();
+        // Two different device IDs may refer to the same audio while keeping
+        // distinct analysis records. Do not key reuse by that shared path.
+        let other_track = &library.tracks[1];
+        assert_ne!(track.analysis_path, other_track.analysis_path);
+        let pdb = stick.path().join("PIONEER/rekordbox/export.pdb");
+        let mut pdb_bytes = std::fs::read(&pdb).unwrap();
+        let from = rbl_pdb::build::device_sql_string(&other_track.path);
+        let to = rbl_pdb::build::device_sql_string(&track.path);
+        assert_eq!(from.len(), to.len());
+        let at = pdb_bytes.windows(from.len()).position(|bytes| bytes == from).unwrap();
+        pdb_bytes[at..at + to.len()].copy_from_slice(&to);
+        std::fs::write(&pdb, pdb_bytes).unwrap();
+        let database = rbl_onelibrary::playlists::open_read_write(&stick.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+        database.execute("UPDATE content SET path=?1 WHERE content_id=?2", rusqlite::params![track.path, other_track.id]).unwrap();
+        drop(database);
+        let aliased = device::read(stick.path(), format).unwrap();
+        assert_eq!(aliased.track(track.id).unwrap().path, aliased.track(other_track.id).unwrap().path);
+        let aliases_before = contents_under(stick.path());
+        let same_path = open(repeated);
+        let same_path = state.device_view(same_path.view_id).unwrap();
+        assert_eq!(same_path.rows[0].cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, Some(2));
+        assert_eq!(same_path.rows[65].cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, Some(4));
+        assert!(!Arc::ptr_eq(&same_path.rows[0].cues, &same_path.rows[65].cues));
+        assert_eq!(contents_under(stick.path()), aliases_before);
+        // A cached refusal is local to that ID, not to another audio alias.
+        std::fs::write(&ext, b"invalid generated analysis").unwrap();
+        let refused_before = contents_under(stick.path());
+        let refused = open(repeated);
+        let refused = state.device_view(refused.view_id).unwrap();
+        for row in refused.rows.iter().take(65) {
+            if format == Format::DeviceLibrary { assert!(row.cues.is_empty()); }
+            else { assert_eq!(row.cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, None); }
+        }
+        assert_eq!(refused.rows[65].cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, Some(4));
+        assert_eq!(contents_under(stick.path()), refused_before);
+        let mut changed = rbl_anlz::parse(&original_ext).unwrap();
+        changed.sections.retain(|section| !section.is_cue_list());
+        let mut changed_cues = tracks[0].cues.clone().unwrap();
+        changed_cues[1].color_id = 5;
+        changed.sections.extend(rbl_anlz::cues::sections(&changed_cues, true));
+        std::fs::write(&ext, changed.to_bytes()).unwrap();
+        let rebuilt_before = contents_under(stick.path());
+        let rebuilt = open(repeated);
+        let rebuilt = state.device_view(rebuilt.view_id).unwrap();
+        assert_eq!(rebuilt.rows[0].cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, Some(4));
+        assert_eq!(view.rows[0].cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, Some(2));
+        assert!(!Arc::ptr_eq(&rebuilt.rows[0].cues, &view.rows[0].cues), "rebuild owns a fresh snapshot");
+        assert_eq!(rebuilt.rows.iter().map(|row| (row.id, row.position)).collect::<Vec<_>>(),
+            view.rows.iter().map(|row| (row.id, row.position)).collect::<Vec<_>>());
+        assert_eq!(contents_under(stick.path()), rebuilt_before);
+        assert_eq!(contents_under(source.path()), source_before);
+    }
+
+    #[test]
+    fn unique_device_rows_still_share_the_real_view_budget() {
+        use tauri::Manager;
+        let source = tempfile::tempdir().unwrap();
+        let stick = tempfile::tempdir().unwrap();
+        let tracks: Vec<_> = (1..=17_u64).map(|id| {
+            let path = source.path().join(format!("generated-{id}.wav"));
+            std::fs::write(&path, wav(44_100)).unwrap();
+            let mut track = rbl_export::SourceTrack { id, source_path: path, title: format!("Track {id}"), ..Default::default() };
+            analysed_on_the_stick(0, &mut track);
+            track.cues.as_mut().unwrap()[1].color_id = 3;
+            let (_, bytes) = track.analysis.iter_mut().find(|(extension, _)| extension == "EXT").unwrap();
+            let mut rich = rbl_anlz::parse(bytes).unwrap();
+            rich.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; 4 * 1024 * 1024]));
+            *bytes = rich.to_bytes();
+            track
+        }).collect();
+        let playlists = [rbl_export::SourcePlaylist { id: 10, name: "Unique then repeat".into(),
+            track_indices: [(0..17).collect::<Vec<_>>(), vec![0]].concat(), ..Default::default() }];
+        rbl_export::export(stick.path(), &tracks, &playlists).unwrap();
+        let app = tauri::test::mock_app();
+        app.manage(Arc::new(AppState::with_backups(source.path().join("backups"))));
+        let state = app.state::<Arc<AppState>>();
+        let spec: ViewSpecDto = serde_json::from_value(serde_json::json!({
+            "source": {"kind":"collection"}, "sort":"trackNo", "descending":false, "query":""
+        })).unwrap();
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let library = device::read(stick.path(), format).unwrap();
+            let playlist = library.nodes.iter().find(|node| !node.folder).unwrap().id;
+            let handle = tauri::async_runtime::block_on(open_view(&state,
+                stick.path().to_string_lossy().into_owned(), format_name(format).into(), playlist.to_string(), &spec)).unwrap();
+            let view = state.device_view(handle.view_id).unwrap();
+            assert_eq!(view.rows.len(), 18);
+            for (index, row) in view.rows.iter().take(17).enumerate() {
+                if format == Format::DeviceLibrary { assert_eq!(row.cues.len(), if index < 15 { 2 } else { 0 }); }
+                else { assert_eq!(row.cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour,
+                    (index < 15).then_some(2)); }
+            }
+            assert_eq!(view.rows[17].id, view.rows[0].id);
+            assert_eq!(view.rows[17].cues.len(), 2);
+            assert_eq!(view.rows[17].cues.iter().find(|cue| cue.is_memory()).unwrap().memory_colour, Some(2));
+        }
     }
 
     #[test]
@@ -3407,7 +3576,7 @@ mod tests {
             let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
             for row in &mut view.rows {
                 let track = library.track(row.id).unwrap();
-                row.cues = device_cues(stick.path(), track, format, &one_cues, &mut remaining);
+                row.cues = device_cues(stick.path(), track, format, &one_cues, &mut remaining).into();
             }
             assert_eq!(view.len(), 600);
             assert!(view.rows.iter().all(|row| !row.cues.is_empty()));
