@@ -1392,3 +1392,81 @@ it("excludes only a stick without enough temporary space, even when the final fi
   expect(syncDevices.mock.calls[0]?.[1]).toEqual(["/Volumes/USB B"]);
   expect(status()).toContain("USB A: Not enough temporary space to sync safely");
 });
+
+
+describe("whole-command estimate failures", () => {
+  const loading = { kind: "notFound", message: "The library has not finished loading yet.", detail: "/private/estimate-sentinel" };
+
+  it("explains an unfinished library without changing measured space or sync preflight", async () => {
+    vi.useFakeTimers();
+    estimateSync.mockRejectedValueOnce(loading);
+    click(box("Closing")); click(box("USB B")); await settle();
+    const storage = host.querySelector('[aria-label="USB B storage used"]');
+    const measured = storage?.getAttribute("aria-valuenow");
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(host.textContent).toContain(loading.message);
+    expect(host.textContent).not.toContain("estimate-sentinel");
+    expect(host.textContent).not.toContain("Not enough temporary space");
+    expect(host.textContent).not.toContain("Calculating space…");
+    expect(storage?.getAttribute("aria-valuenow")).toBe(measured);
+    expect(host.textContent).toContain("24.0 GB free (75%)");
+    const sync = host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]');
+    expect(sync?.disabled).toBe(false);
+    click(sync); await settle();
+    expect(validateExportFiles).toHaveBeenCalledWith(["p3"]);
+    expect(syncDevices).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { kind: "internal", message: "The library has not finished loading yet.", detail: "/private/estimate-sentinel" },
+    { kind: "notFound", message: "/private/estimate-sentinel" },
+    new Error("/private/estimate-sentinel"),
+    "/private/estimate-sentinel",
+  ])("keeps unknown and internal errors generic without exposing details (%#)", async (error) => {
+    vi.useFakeTimers();
+    estimateSync.mockRejectedValueOnce(error);
+    click(box("Closing")); click(box("USB B")); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(host.textContent).toContain("Could not calculate space. Refresh the device and try again.");
+    expect(host.textContent).not.toContain("estimate-sentinel");
+    expect(host.textContent).not.toContain(loading.message);
+  });
+
+  it("replaces loading guidance when the normal library-change retry succeeds", async () => {
+    vi.useFakeTimers();
+    estimateSync.mockRejectedValueOnce(loading);
+    click(box("Closing")); click(box("USB B")); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(host.textContent).toContain(loading.message);
+    act(() => libraryChanged?.()); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(estimateSync).toHaveBeenCalledTimes(2);
+    expect(host.textContent).toContain("2.0 GB to add");
+    expect(host.textContent).not.toContain(loading.message);
+  });
+
+  it("ignores a rejection from a retired playlist selection", async () => {
+    vi.useFakeTimers();
+    let rejectOld: ((error: unknown) => void) | undefined;
+    estimateSync.mockImplementationOnce(() => new Promise<SyncEstimate[]>((_resolve, reject) => { rejectOld = reject; }));
+    click(box("Closing")); click(box("USB B")); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    click(box("Warm Up")); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    act(() => rejectOld?.(loading)); await settle();
+    expect(host.textContent).toContain("2.0 GB to add");
+    expect(host.textContent).not.toContain(loading.message);
+    expect(host.textContent).not.toContain("Could not calculate space.");
+  });
+  it("ignores a whole-command rejection after unmount", async () => {
+    vi.useFakeTimers();
+    let rejectOld: ((error: unknown) => void) | undefined;
+    estimateSync.mockImplementationOnce(() => new Promise<SyncEstimate[]>((_resolve, reject) => { rejectOld = reject; }));
+    click(box("Closing")); click(box("USB B")); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    act(() => root.unmount()); root = createRoot(host);
+    act(() => rejectOld?.(loading)); await settle();
+    expect(host.textContent).toBe("");
+  });
+
+});

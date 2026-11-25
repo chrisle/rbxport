@@ -258,7 +258,18 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
       void getBackend()
         .then((backend) => backend.estimateSync(ids, destinations, deleteUnlistedMusic, compatibilityFormat))
         .then((found) => { if (live) { setEstimates(new Map(found.map((e) => [e.path, e] as const))); setEstimatesLoading(false); } })
-        .catch(() => { if (live) { setEstimates(new Map(destinations.map(path => [path, { path, copyBytes: 0, freeBytes: 0, reuseBytes: 0, tracksNew: 0, tracksChanged: 0, tracksKept: 0, tracksRemoved: 0, tracksMissing: 0, approximate: true, unknownSize: true, error: t("Could not calculate space. Refresh the device and try again.") }]))); setEstimatesLoading(false); } });
+        .catch((error: unknown) => {
+          if (!live) return;
+          const loading = error !== null && typeof error === "object"
+            && "kind" in error && error.kind === "notFound"
+            && "message" in error && error.message === "The library has not finished loading yet.";
+          // Only this known native contract is user guidance; arbitrary error
+          // messages and details can contain private paths or developer data.
+          const message = t(loading ? "The library has not finished loading yet."
+            : "Could not calculate space. Refresh the device and try again.");
+          setEstimates(new Map(destinations.map(path => [path, { path, copyBytes: 0, freeBytes: 0, reuseBytes: 0, tracksNew: 0, tracksChanged: 0, tracksKept: 0, tracksRemoved: 0, tracksMissing: 0, approximate: true, unknownSize: true, error: message }])));
+          setEstimatesLoading(false);
+        });
     }, 200);
     return () => { live = false; window.clearTimeout(timer); };
   }, [nodes, ticked, estimateDevices, capacityRevision, deleteUnlistedMusic, compatibilityFormat, reported, t]);
