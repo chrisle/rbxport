@@ -1,5 +1,5 @@
 /**
- * One cue write at a time, with its failure reported rather than thrown.
+ * One cue write per track at a time, with its failure reported rather than thrown.
  *
  * Shared by the MEMORY cluster and the hot cue pads. Every write goes through
  * the backend's cue commands and nothing is shown ahead of it: the backend
@@ -7,7 +7,7 @@
  * markers and the list follow from the same array. A cue write is one indexed
  * row, so there is no reload to wait through.
  */
-import { useCallback, useRef } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
 
 import { getBackend } from "@/ipc/client";
 
@@ -33,33 +33,42 @@ function describe(error: unknown): string {
 }
 
 /**
- * A `write(action)` that runs one action at a time.
+ * A `write(action)` that runs one action per track at a time.
  *
  * A held key repeats thirty times a second, and each repeat used to be
  * another cue at the same point until the first came back; the guard drops
- * everything after the first press. `onError` hears the failure, or `null`
- * once a write lands.
+ * later presses for that track. Only the currently committed owner hears
+ * the failure, or `null` once its write lands.
  */
 export function useCueWriter(
-  onError?: (message: string | null) => void,
+  onError: ((message: string | null) => void) | undefined,
+  owner: string | null,
 ): (action: (edits: CueEdits) => Promise<unknown>) => void {
-  const inFlight = useRef(false);
+  const inFlight = useRef(new Set<string | null>());
+  const scope = useMemo(() => ({ owner }), [owner]);
+  const current = useRef<typeof scope | null>(null);
+  // Only a committed selection owns notifications. An abandoned render must
+  // not retire the visible track, and A remains locked across A-B-A.
+  useLayoutEffect(() => {
+    current.current = scope;
+    return () => { if (current.current === scope) current.current = null; };
+  }, [scope]);
   return useCallback(
     (action: (edits: CueEdits) => Promise<unknown>) => {
-      if (inFlight.current) return;
-      inFlight.current = true;
+      if (current.current !== scope || inFlight.current.has(owner)) return;
+      inFlight.current.add(owner);
       void (async () => {
         try {
           const backend = await getBackend();
           await action(backend.edits);
-          onError?.(null);
+          if (current.current === scope) onError?.(null);
         } catch (error) {
-          onError?.(describe(error));
+          if (current.current === scope) onError?.(describe(error));
         } finally {
-          inFlight.current = false;
+          inFlight.current.delete(owner);
         }
       })();
     },
-    [onError],
+    [onError, owner, scope],
   );
 }

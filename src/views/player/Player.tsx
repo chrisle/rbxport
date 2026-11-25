@@ -972,7 +972,7 @@ export const Player = memo(function Player({
   const [panel, setPanel] = useState<CuePanel>("memory");
   const [renamingCue, setRenamingCue] = useState<{ id: string; text: string } | null>(null);
   const [cueColorMenu, setCueColorMenu] = useState<{x: number; y: number; cue: Cue} | null>(null);
-  const writeCue = useCueWriter(onError);
+  const writeCue = useCueWriter(onError, track?.id ?? null);
   /**
    * Where CUE returns to. A track opens on its first memory cue, which is
    * where rekordbox and a CDJ both put the playhead, and CUE moves it from

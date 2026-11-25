@@ -76,7 +76,7 @@ export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
   } = deck;
   const editReason = cueWriteReason(trackId, readOnly);
   const canEdit = editReason === undefined;
-  const write = useCueWriter(onError);
+  const write = useCueWriter(onError, trackId);
 
   /**
    * MEMORY stores the cue point, never the playhead, playing or paused; with

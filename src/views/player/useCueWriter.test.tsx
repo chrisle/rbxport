@@ -12,7 +12,7 @@
  * the deck shows whatever comes out of `describe`, so a failure with no usable
  * message has to end up as a sentence rather than `[object Object]`.
  */
-import { act } from "react";
+import { act, startTransition, StrictMode, Suspense } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,6 +30,7 @@ let write: (action: (edits: CueEdits) => Promise<unknown>) => void;
 let onError: ReturnType<typeof vi.fn>;
 /** The `edits` the stub backend hands out, so an action can be seen to get it. */
 let edits: CueEdits;
+let owner: string | null;
 
 /** A promise the test resolves by hand, to hold a write in flight. */
 function deferred<T>() {
@@ -43,7 +44,7 @@ function deferred<T>() {
 }
 
 function Probe() {
-  write = useCueWriter(onError);
+  write = useCueWriter(onError, owner);
   return null;
 }
 
@@ -58,6 +59,7 @@ const settle = () =>
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   onError = vi.fn();
+  owner = "track-A";
   edits = { addCue: () => Promise.resolve("cue-1") } as unknown as CueEdits;
   __setBackend({ edits } as unknown as Backend);
   host = document.createElement("div");
@@ -200,3 +202,167 @@ describe("what the deck is told", () => {
   });
 });
 /* eslint-enable @typescript-eslint/prefer-promise-reject-errors */
+
+
+describe("track ownership", () => {
+  const select = (id: string | null) => {
+    owner = id;
+    act(() => root.render(<Probe />));
+  };
+
+  it.each([false, true])("retires old track notifications on switch (failure=%s)", async (failure) => {
+    const old = deferred<string>();
+    act(() => write(() => old.promise));
+    await settle();
+    select("track-B");
+    if (failure) old.fail(new Error("old A refused"));
+    else old.settle("old A saved");
+    await settle();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("accepts a new track but retains the pending track lock across A-B-A", async () => {
+    const a = deferred<string>();
+    const b = deferred<string>();
+    const calls: string[] = [];
+    act(() => write(() => { calls.push("A"); return a.promise; }));
+    await settle();
+    select("track-B");
+    act(() => write(() => { calls.push("B"); return b.promise; }));
+    await settle();
+    expect(calls).toEqual(["A", "B"]);
+    select("track-A");
+    act(() => write(() => { calls.push("duplicate A"); return Promise.resolve("duplicate"); }));
+    await settle();
+    expect(calls).toEqual(["A", "B"]);
+    b.settle("B saved");
+    a.settle("old A saved");
+    await settle();
+    expect(onError).not.toHaveBeenCalled();
+    act(() => write(() => { calls.push("new A"); return Promise.resolve("new A saved"); }));
+    await settle();
+    expect(calls).toEqual(["A", "B", "new A"]);
+    expect(onError).toHaveBeenLastCalledWith(null);
+  });
+
+  it("does not let an old completion unlock a new owner's pending write", async () => {
+    const a = deferred<string>();
+    const b = deferred<string>();
+    const next = vi.fn(() => b.promise);
+    act(() => write(() => a.promise));
+    await settle();
+    select("track-B");
+    act(() => write(next));
+    await settle();
+    a.settle("A saved");
+    await settle();
+    act(() => write(next));
+    await settle();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    b.settle("B saved");
+    await settle();
+    expect(onError).toHaveBeenLastCalledWith(null);
+  });
+
+  it("keeps the current error when an old track later succeeds", async () => {
+    const a = deferred<string>();
+    act(() => write(() => a.promise));
+    await settle();
+    select("track-B");
+    act(() => write(() => Promise.reject(new Error("current B refused"))));
+    await settle();
+    expect(onError).toHaveBeenLastCalledWith("current B refused");
+    a.settle("old A saved");
+    await settle();
+    expect(onError).toHaveBeenCalledExactlyOnceWith("current B refused");
+  });
+
+  it.each([false, true])("retires notifications on unmount without canceling accepted writes (failure=%s)", async (failure) => {
+    const old = deferred<string>();
+    const action = vi.fn(() => old.promise);
+    act(() => write(action));
+    await settle();
+    act(() => root.render(null));
+    if (failure) old.fail(new Error("disposed refused"));
+    else old.settle("disposed saved");
+    await settle();
+    expect(action).toHaveBeenCalledOnce();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("keeps an accepted action's target when selection changes before dispatch", async () => {
+    const action = vi.fn(() => Promise.resolve("accepted A"));
+    act(() => write(action));
+    select("track-B");
+    await settle();
+    expect(action).toHaveBeenCalledExactlyOnceWith(edits);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("refuses a retained callback from a retired owner", async () => {
+    const stale = write;
+    select("track-B");
+    const action = vi.fn(() => Promise.resolve("obsolete"));
+    act(() => stale(action));
+    await settle();
+    expect(action).not.toHaveBeenCalled();
+  });
+});
+
+
+it("does not revive an old write callback after A-B-A", async () => {
+  const stale = write;
+  owner = "track-B";
+  act(() => root.render(<Probe />));
+  owner = "track-A";
+  act(() => root.render(<Probe />));
+  const action = vi.fn(() => Promise.resolve("obsolete"));
+  act(() => stale(action));
+  await settle();
+  expect(action).not.toHaveBeenCalled();
+});
+
+it("accepts current writes after StrictMode replays subscription cleanup", async () => {
+  act(() => root.render(<StrictMode><Probe /></StrictMode>));
+  const action = vi.fn(() => Promise.resolve("current"));
+  act(() => write(action));
+  await settle();
+  expect(action).toHaveBeenCalledExactlyOnceWith(edits);
+  expect(onError).toHaveBeenCalledExactlyOnceWith(null);
+});
+
+
+it("keeps the committed owner while a transition renders another owner but suspends", async () => {
+  const blocked = deferred<void>();
+  let attemptedB = false;
+  function ConcurrentProbe({ id, suspend }: { id: string; suspend: boolean }) {
+    const currentWrite = useCueWriter(onError, id);
+    if (suspend) {
+      attemptedB = true;
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- React Suspense throws a pending promise.
+      throw blocked.promise;
+    }
+    write = currentWrite;
+    return <span>{id}</span>;
+  }
+  act(() => root.render(<Suspense fallback={<span>Waiting</span>}><ConcurrentProbe id="track-A" suspend={false} /></Suspense>));
+  const committedA = write;
+  const pending = deferred<string>();
+  act(() => committedA(() => pending.promise));
+  await settle();
+  await act(async () => {
+    startTransition(() => root.render(<Suspense fallback={<span>Waiting</span>}><ConcurrentProbe id="track-B" suspend /></Suspense>));
+    await Promise.resolve();
+  });
+  expect(attemptedB).toBe(true);
+  expect(host.textContent).toBe("track-A");
+  pending.fail(new Error("committed A refused"));
+  await settle();
+  expect(onError).toHaveBeenLastCalledWith("committed A refused");
+  const next = vi.fn(() => Promise.resolve("committed A saved"));
+  act(() => committedA(next));
+  await settle();
+  expect(next).toHaveBeenCalledExactlyOnceWith(edits);
+  expect(onError).toHaveBeenLastCalledWith(null);
+});

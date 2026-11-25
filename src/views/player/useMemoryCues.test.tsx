@@ -454,3 +454,19 @@ it("refuses memory writes for a file identity but still calls its saved cues", a
   expect(sent).toEqual([]);
   expect(seeked).toEqual([1]);
 });
+
+it("stores a new track's memory cue while the previous track's write is pending", async () => {
+  let finishOld: (id: string) => void = () => {};
+  __setBackend({ edits: { addCue: (id: string) => {
+    sent.push(id);
+    return id === "memory-owner-A" ? new Promise<string>(resolve => { finishOld = resolve; }) : Promise.resolve("new B cue");
+  } } } as unknown as Backend);
+  mount({ trackId: "memory-owner-A", cues: [], cuePoint: 1 });
+  act(() => memory.store());
+  await settle();
+  mount({ trackId: "memory-owner-B", cues: [], cuePoint: 2 });
+  act(() => memory.store());
+  await settle();
+  expect(sent).toEqual(["memory-owner-A", "memory-owner-B"]);
+  await act(async () => { finishOld("old A cue"); await Promise.resolve(); });
+});

@@ -134,7 +134,7 @@ export function useHotCues(deck: HotCueDeck): HotCueActions {
   } = deck;
   const editReason = cueWriteReason(trackId, readOnly);
   const canEdit = editReason === undefined;
-  const write = useCueWriter(onError);
+  const write = useCueWriter(onError, trackId);
 
   const at = useCallback((letter: string) => hotCue(cues, letter), [cues]);
 

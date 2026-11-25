@@ -464,3 +464,36 @@ it("refuses cue writes for device and loose file identities but still calls thei
   expect(sent).toEqual([]);
   expect(transport).toEqual(["seek:1.2", "play"]);
 });
+
+
+it("old rejection does not report on a replacement track", async () => {
+  let rejectOld: (error: Error) => void = () => {};
+  const onError = vi.fn();
+  __setBackend({ edits: { addCue: (id: string) => {
+    sent.push(id);
+    return new Promise<string>((_, reject) => { rejectOld = reject; });
+  } } } as unknown as Backend);
+  mount({ trackId: "generated-owner-A", onError });
+  act(() => pads.press("A"));
+  await settle();
+  mount({ trackId: "generated-owner-B", onError });
+  await act(async () => { rejectOld(new Error("old A write refused")); await Promise.resolve(); });
+  expect(sent).toEqual(["generated-owner-A"]);
+  expect(onError).not.toHaveBeenCalled();
+});
+
+it("a pending prior track does not drop the new track press", async () => {
+  let finishOld: (id: string) => void = () => {};
+  __setBackend({ edits: { addCue: (id: string) => {
+    sent.push(id);
+    return id === "generated-owner-A" ? new Promise<string>(resolve => { finishOld = resolve; }) : Promise.resolve("new B cue");
+  } } } as unknown as Backend);
+  mount({ trackId: "generated-owner-A" });
+  act(() => pads.press("A"));
+  await settle();
+  mount({ trackId: "generated-owner-B" });
+  act(() => pads.press("A"));
+  await settle();
+  try { expect(sent).toEqual(["generated-owner-A", "generated-owner-B"]); }
+  finally { await act(async () => { finishOld("old A cue"); await Promise.resolve(); }); }
+});
