@@ -73,6 +73,25 @@ fn sql(e: impl std::fmt::Display) -> ExportError {
     ExportError::OneLibrary(e.to_string())
 }
 
+/// Ordinals belong to a logical read, not to the entire database. Keep rejected
+/// values and arbitrary SQLite error text out of the additional diagnostic.
+fn log_read_error(query: &'static str, error: &rusqlite::Error) {
+    let (column_index, error_kind) = match error {
+        rusqlite::Error::IntegralValueOutOfRange(index, _) => (Some(*index), "integer-out-of-range"),
+        rusqlite::Error::InvalidColumnType(index, _, _) => (Some(*index), "invalid-column-type"),
+        rusqlite::Error::FromSqlConversionFailure(index, _, _) => (Some(*index), "conversion"),
+        rusqlite::Error::InvalidColumnIndex(index) => (Some(*index), "column-index"),
+        _ => (None, "query"),
+    };
+    let column_index = column_index.filter(|index| *index != usize::MAX);
+    tracing::warn!(query, ?column_index, error_kind, "OneLibrary snapshot read failed");
+}
+
+fn read_error(query: &'static str, error: rusqlite::Error) -> ExportError {
+    log_read_error(query, &error);
+    sql(error)
+}
+
 /// An `exportLibrary.db` integer column read as the unsigned type this crate
 /// writes. SQLite columns are untyped, so a stick can hold a negative or
 /// oversized value that rusqlite refuses to read as unsigned ("Integer -1 out
@@ -743,7 +762,14 @@ fn read_one_library(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> R
         out.identity.insert(track.id, identity);
         library.tracks.push(track);
     }
-    let (rows, mut contents) = rbl_onelibrary::playlists::read(conn).map_err(sql)?;
+    let (rows, mut contents) = rbl_onelibrary::playlists::read(conn).map_err(|error| {
+        // This reader owns both tree and membership queries. An ordinal alone
+        // must not be mislabeled as a particular table's column.
+        if let rbl_onelibrary::Error::Sqlite(ref source) = error {
+            log_read_error("playlists", source);
+        }
+        sql(error)
+    })?;
     for (row, sequence) in crate::playlist_order::ranked(rows)? {
         library.playlists.push(Playlist {
             id: u32::try_from(row.id).map_err(sql)?,
@@ -787,7 +813,7 @@ fn read_one_history_and_tags(db: &rbl_onelibrary::ExportLibrary, out: &mut Snaps
             .map_err(sql)?;
         out.history.push(h);
     }
-    let mut tags=conn.prepare("SELECT myTag_id, COALESCE(sequenceNo,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(myTag_id_parent,0) FROM myTag ORDER BY myTag_id").map_err(sql)?;
+    let mut tags=conn.prepare("SELECT myTag_id, COALESCE(sequenceNo,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(myTag_id_parent,0) FROM myTag ORDER BY myTag_id").map_err(|error| read_error("myTag", error))?;
     out.my_tags = tags
         .query_map([], |r| {
             Ok(crate::SourceMyTag {
@@ -798,9 +824,9 @@ fn read_one_history_and_tags(db: &rbl_onelibrary::ExportLibrary, out: &mut Snaps
                 parent: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
             })
         })
-        .map_err(sql)?
+        .map_err(|error| read_error("myTag", error))?
         .collect::<std::result::Result<_, _>>()
-        .map_err(sql)?;
+        .map_err(|error| read_error("myTag", error))?;
     let mut tags = conn
         .prepare(
             "SELECT content_id, myTag_id FROM myTag_content ORDER BY content_id, myTag_id",
