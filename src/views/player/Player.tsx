@@ -2190,6 +2190,10 @@ export const Player = memo(function Player({
     shiftGridLeft: live(() => gridEditor.shift(-1)),
     shiftGridRight: live(() => gridEditor.shift(1)),
     shiftGridToCenter: once(gridEditor.align),
+    markDownbeat: input => {
+      if (!gridEditor.canEdit || gridEditor.fromMs !== null) return false;
+      return once(gridEditor.mark)(input);
+    },
   };
   // A fixed-distance jump moves by its own beats, the menu's size aside; a
   // held key repeats it, as the menu-driven jumps repeat.

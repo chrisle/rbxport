@@ -228,7 +228,7 @@ describe("recovered grid control behavior", () => {
   });
   it("allows unlocking a locked grid but refuses edits", async () => {
     mount({state: gridState({locked: true})});
-    act(() => { grid.double(); grid.toggleLock(); }); await settle();
+    act(() => { grid.double(); grid.mark(); grid.toggleLock(); }); await settle();
     expect(edits.gridEdit).not.toHaveBeenCalled(); expect(edits.gridLock).toHaveBeenCalledWith("t1", false);
   });
   it("edits a Devices tree track's grid but never sets its lock (#660)", async () => {
@@ -237,6 +237,14 @@ describe("recovered grid control behavior", () => {
     act(() => { grid.double(); grid.toggleLock(); }); await settle();
     expect(edits.gridEdit.mock.calls[0]?.[0]).toBe("file:/Volumes/TEST/Contents/a.mp3");
     expect(edits.gridLock).not.toHaveBeenCalled();
+  });
+  it("the downbeat button keeps its existing edit and loaded device source", async () => {
+    const source: DeviceTrackSource = { path: "/Volumes/TEST", format: "oneLibrary", trackId: 7 };
+    const id = "file:/Volumes/TEST/Contents/a.mp3";
+    mount({ trackId: id, deviceSource: source, state: gridState({ lockable: false }) });
+    playhead = 1600;
+    act(() => grid.mark()); await settle();
+    expect(edits.gridEdit).toHaveBeenCalledWith(id, { kind: "downbeat", timeMs: 1600 }, { deck: "a", deviceSource: source });
   });
   it("binds edit, undo and redo to the loaded device row", async () => {
     const source: DeviceTrackSource = { path: "/Volumes/TEST", format: "oneLibrary", trackId: 7 };
