@@ -672,7 +672,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     }
     // Preserve the interpolated head when toggling between native ticks. A
     // new timestamp around the old frame counter would rewind it on resume.
-    anchor.current = { ...pinned(anchor.current, positionRef.current, performance.now()), playing: wanted && !readyStart.current?.waiting };
+    // An ordinary transport press cancels any previously scheduled start.
+    anchor.current = { ...pinned(anchor.current, positionRef.current, performance.now()), playing: wanted && !readyStart.current?.waiting, startsAt: undefined };
     void (async () => {
       try {
         const backend = await getBackend();
@@ -705,7 +706,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       }
       setPlaying(true);
       // Anchored in the future: `extrapolate` holds the head still until then.
-      anchor.current = { ...anchor.current, playing: true, at: performance.now() + wait };
+      const startsAt = performance.now() + wait;
+      anchor.current = { ...anchor.current, playing: true, at: startsAt, startsAt };
       void (async () => {
         try {
           const backend = await getBackend();

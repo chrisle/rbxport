@@ -745,3 +745,77 @@ it.each(["play", "pause", "scheduled"] as const)("still reports the current %s f
   expect(deck.playing).toBe(false);
   expect(deck.error).toBe("current transport failure");
 });
+
+
+it.each([0, 200])("honors a ready scheduled start of %d ms before its first native tick", async (wait) => {
+  let now = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  let frame: FrameRequestCallback | undefined;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frame = callback; return 1; });
+  finish(loads[0]!);
+  await settle();
+  const state = { ...emptyDeck, loadId: loads[0]!.id, loaded: true, generation: 8,
+    frames: RATE * 10, totalFrames: RATE * 300 };
+  act(() => tick({ ...emptyTick, b: state }));
+  expect(deck.positionRef.current).toBe(10);
+  act(() => deck.playAfter(wait));
+  await settle();
+  expect(sent.at(-1)).toBe(`play-after:${wait}`);
+  now += 80;
+  act(() => frame?.(now));
+  if (wait === 0) expect(deck.positionRef.current).toBeGreaterThan(10);
+  else expect(deck.positionRef.current).toBe(10);
+});
+
+it("honors native remaining-start frames, then accepts stalled and advancing authority", async () => {
+  let now = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  let frame: FrameRequestCallback | undefined;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frame = callback; return 1; });
+  finish(loads[0]!);
+  await settle();
+  const state = { ...emptyDeck, loadId: loads[0]!.id, loaded: true, generation: 8,
+    frames: RATE * 10, totalFrames: RATE * 300 };
+  act(() => tick({ ...emptyTick, b: state }));
+  act(() => deck.playAfter(200));
+  await settle();
+  act(() => tick({ ...emptyTick, b: { ...state, playing: true, startInFrames: RATE / 5 } }));
+  for (const instant of [1080, 1160, 1199]) {
+    now = instant;
+    act(() => frame?.(now));
+    expect(deck.positionRef.current).toBe(10);
+  }
+  // Once the scheduled wait expires the existing clock may interpolate;
+  // this is intentionally not the newly-loaded first-audio-frame gate.
+  now = 1216;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBeGreaterThan(10);
+  act(() => tick({ ...emptyTick, b: { ...state, playing: true } }));
+  expect(deck.positionNow()).toBe(10);
+  act(() => tick({ ...emptyTick, b: { ...state, playing: true, frames: RATE * 10.04 } }));
+  expect(deck.positionNow()).toBeCloseTo(10.04);
+});
+
+it("cancels a scheduled deadline when Pause is followed by immediate ordinary Play", async () => {
+  let now = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  let frame: FrameRequestCallback | undefined;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frame = callback; return 1; });
+  finish(loads[0]!);
+  await settle();
+  const state = { ...emptyDeck, loadId: loads[0]!.id, loaded: true, generation: 8,
+    frames: RATE * 10, totalFrames: RATE * 300 };
+  act(() => tick({ ...emptyTick, b: state }));
+  act(() => deck.playAfter(200));
+  await settle();
+  now = 1050;
+  act(() => deck.toggle());
+  await settle();
+  now = 1070;
+  act(() => deck.toggle());
+  await settle();
+  expect(sent.slice(-3)).toEqual(["play-after:200", "pause", "play"]);
+  now = 1086;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBeCloseTo(10.016, 8);
+});
