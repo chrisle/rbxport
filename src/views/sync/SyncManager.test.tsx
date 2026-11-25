@@ -1533,3 +1533,89 @@ it("retains an estimate failure if explicit device Refresh itself fails", async 
   expect(host.textContent).toContain("Could not calculate space.");
   expect(host.textContent).toContain("Couldn’t read USB devices.");
 });
+
+
+it("retires an older background device scan after an explicit Refresh", async () => {
+  vi.useFakeTimers();
+  click(box("Closing")); click(box("USB B")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  let old: ((devices: Device[]) => void) | undefined;
+  listDevices.mockImplementationOnce(() => new Promise<Device[]>(resolve => { old = resolve; }));
+  act(() => devicesChanged?.()); await settle();
+  act(() => devicesChanged?.()); await settle();
+  click([...host.querySelectorAll("button")].find(button => button.textContent === "Refresh"));
+  await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(2);
+  act(() => old?.([])); await settle();
+  expect(box("USB B")?.checked).toBe(true);
+  expect(host.textContent).toContain("2.0 GB to add");
+  expect(estimateSync).toHaveBeenCalledTimes(2);
+});
+
+
+it.each([[false, false], [false, true], [true, false], [true, true]])("carries explicit estimate retry to a newer device scan (newer finishes first=%s, capacity changes=%s)", async (newerFirst, capacityChanges) => {
+  vi.useFakeTimers();
+  click(box("Closing")); click(box("USB B")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  let manual: ((devices: Device[]) => void) | undefined;
+  let newer: ((devices: Device[]) => void) | undefined;
+  listDevices.mockImplementationOnce(() => new Promise<Device[]>(resolve => { manual = resolve; }));
+  click([...host.querySelectorAll("button")].find(button => button.textContent === "Refresh")); await settle();
+  listDevices.mockImplementationOnce(() => new Promise<Device[]>(resolve => { newer = resolve; }));
+  act(() => devicesChanged?.()); await settle();
+  const changed = DEVICES.map(device => ({ ...device, freeBytes: (capacityChanges ? 12 : 24) * 1024 ** 3 }));
+  if (!newerFirst) {
+    act(() => manual?.(DEVICES)); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(estimateSync).toHaveBeenCalledTimes(1);
+    expect([...host.querySelectorAll("button")].find(button => button.textContent === "Refreshing…")?.disabled).toBe(true);
+  }
+  act(() => newer?.(changed)); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(2);
+  expect(estimateSync.mock.calls[1]?.slice(0, 2)).toEqual([["p3"], ["/Volumes/USB B"]]);
+  if (newerFirst) { act(() => manual?.([])); await settle(); }
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(2);
+  expect(box("USB B")?.checked).toBe(true);
+  expect(host.textContent).toContain(capacityChanges ? "12.0 GB free" : "24.0 GB free");
+  expect(host.textContent).toContain("2.0 GB to add");
+});
+
+it("ignores an older device scan rejection after successful manual Refresh", async () => {
+  vi.useFakeTimers();
+  click(box("Closing")); click(box("USB B")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  let rejectOld: ((error: Error) => void) | undefined;
+  listDevices.mockImplementationOnce(() => new Promise<Device[]>((_resolve, reject) => { rejectOld = reject; }));
+  act(() => devicesChanged?.()); await settle();
+  act(() => devicesChanged?.()); await settle();
+  click([...host.querySelectorAll("button")].find(button => button.textContent === "Refresh")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  act(() => rejectOld?.(new Error("retired enumeration failure"))); await settle();
+  expect(host.textContent).not.toContain("Couldn’t read USB devices.");
+  expect(box("USB B")?.checked).toBe(true);
+  expect(estimateSync).toHaveBeenCalledTimes(2);
+});
+
+it("preserves current device removal and retires a failed winning refresh", async () => {
+  vi.useFakeTimers();
+  click(box("Closing")); click(box("USB B")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  let manual: ((devices: Device[]) => void) | undefined;
+  listDevices.mockImplementationOnce(() => new Promise<Device[]>(resolve => { manual = resolve; }));
+  click([...host.querySelectorAll("button")].find(button => button.textContent === "Refresh")); await settle();
+  listDevices.mockRejectedValueOnce(new Error("current enumeration failure"));
+  act(() => devicesChanged?.()); await settle();
+  expect(host.textContent).toContain("Couldn’t read USB devices.");
+  act(() => manual?.(DEVICES)); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(1);
+  expect(host.textContent).toContain("Couldn’t read USB devices.");
+  listDevices.mockResolvedValueOnce([]);
+  act(() => devicesChanged?.()); await settle();
+  expect(box("USB B")).toBeNull();
+  expect(syncButton()?.disabled).toBe(true);
+  expect(host.textContent).not.toContain("Couldn’t read USB devices.");
+});

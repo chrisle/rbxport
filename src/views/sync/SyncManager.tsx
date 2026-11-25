@@ -365,22 +365,39 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
     };
   }, []);
 
+  const deviceScan = useRef({ generation: 0, retryEstimate: false });
+  useEffect(() => () => {
+    deviceScan.current.generation++;
+    deviceScan.current.retryEstimate = false;
+  }, []);
   const refreshDevices = useCallback(async (retryEstimate = false) => {
+    const scan = deviceScan.current;
+    const generation = ++scan.generation;
+    scan.retryEstimate ||= retryEstimate;
     setLoadingDevices(true);
     setDevicesError("");
     try {
       const backend = await getBackend();
       const found = await backend.listDevices();
+      if (generation !== scan.generation) return found;
       setDevices(found);
-      if (retryEstimate) setEstimateRefresh(revision => revision + 1);
+      // A newer device notification may take over a manual refresh. Keep its
+      // estimate retry paired with the winning device snapshot.
+      if (scan.retryEstimate) setEstimateRefresh(revision => revision + 1);
+      scan.retryEstimate = false;
       // A stick that was pulled is not a destination any more.
       const present = new Set(found.map((d) => d.path));
       setTickedDevices((current) => new Set([...current].filter((path) => present.has(path))));
       return found;
     } catch (e) {
-      setDevicesError("Couldn’t read USB devices. Click Refresh to try again.");
+      if (generation === scan.generation) {
+        scan.retryEstimate = false;
+        setDevicesError("Couldn’t read USB devices. Click Refresh to try again.");
+      }
       throw e;
-    } finally { setLoadingDevices(false); }
+    } finally {
+      if (generation === scan.generation) setLoadingDevices(false);
+    }
   }, []);
   useEffect(() => {
     void refreshDevices().catch(() => {
