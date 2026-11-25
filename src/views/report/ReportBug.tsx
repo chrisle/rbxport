@@ -102,6 +102,8 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
   const [opening, setOpening] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [diagnosticError, setDiagnosticError] = useState("");
+  const diagnosticGeneration = useRef(0);
   const [turnstileToken, setTurnstileToken] = useState("");
   const [receipt, setReceipt] = useState<BugReportReceipt | null>(null);
   const [resetCount, setResetCount] = useState(0);
@@ -109,12 +111,19 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
   // Turnstile's own code, so a report of this message says which failure it was.
   const reportTurnstileError = useCallback((code: string) => setError(`Human verification could not load (${code}). Check your connection and try again.`), []);
   useEffect(() => {
-    if (!include) { setAttachment(null); return; }
-    let live = true;
-    void getBackend().then(backend => backend.reportAttachment()).then(text => {
-      if (live) { setAttachment(text); setError(""); }
-    }).catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { live = false; };
+    const generation = ++diagnosticGeneration.current;
+    setOpening(false);
+    if (!include) {
+      setAttachment(null);
+      setDiagnosticError("");
+    } else {
+      void getBackend().then(backend => backend.reportAttachment()).then(text => {
+        if (diagnosticGeneration.current === generation) { setAttachment(text); setDiagnosticError(""); }
+      }).catch((e: unknown) => {
+        if (diagnosticGeneration.current === generation) setDiagnosticError(e instanceof Error ? e.message : String(e));
+      });
+    }
+    return () => { diagnosticGeneration.current = generation + 1; };
   }, [include]);
   const body = (
     <section className={styles.dialog} role="dialog" aria-label="Report bug" aria-modal={windowed ? undefined : true}>
@@ -147,12 +156,15 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
               <label className={styles.toggle}><input type="checkbox" checked={include} onChange={e => setInclude(e.target.checked)} />Attach log and system information</label>
               <button type="button" className={styles.previewToggle} disabled={!include || attachment === null || opening} onClick={() => {
                 if (attachment === null) return;
+                const generation = diagnosticGeneration.current;
                 setOpening(true);
-                setError("");
+                setDiagnosticError("");
                 const preview = formatBugReportAttachment(attachment, email, loadPreferences());
                 void getBackend().then(backend => backend.openReportAttachment(preview))
-                  .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-                  .finally(() => setOpening(false));
+                  .catch((e: unknown) => {
+                    if (diagnosticGeneration.current === generation) setDiagnosticError(e instanceof Error ? e.message : String(e));
+                  })
+                  .finally(() => { if (diagnosticGeneration.current === generation) setOpening(false); });
               }}>
                 {opening ? "Opening…" : "Show log"}
               </button>
@@ -160,6 +172,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
             <p className={styles.hint}>The log may include library paths and track titles.</p>
           </div>
           <Turnstile onToken={receiveTurnstileToken} onError={reportTurnstileError} resetCount={resetCount} />
+          {diagnosticError ? <p className={styles.error} role="alert">{diagnosticError}</p> : null}
           {error ? <p className={styles.error} role="alert">{error}</p> : null}
         </div>
         <footer>
