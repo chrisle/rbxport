@@ -647,7 +647,7 @@ pub(super) fn preview_overlap(
     ))
 }
 
-/// Enforce the fully bound budget, or only the verified overlap minimum when
+/// Enforce the fully bound budget, or the verified audio allocation minimum when
 /// the rest of the estimate is uncertain. Keep an already prepared fatal error's
 /// original outcome: it must not become a new capacity error.
 pub(super) fn preflight(
@@ -656,13 +656,27 @@ pub(super) fn preflight(
     estimated_overlap: u64,
     resolved_overlap: OverlapSpace,
     unknown: bool,
+    unit: u64,
     available: impl FnOnce() -> std::io::Result<u64>,
 ) -> Result<()> {
     if entries.iter().any(Result::is_err) {
         return Ok(());
     }
     let required = if unknown {
-        resolved_overlap.allocated
+        entries
+            .iter()
+            .fold(resolved_overlap.allocated, |allocated, entry| {
+                let Ok(AudioPreparation::Ready(audio)) = entry else {
+                    return allocated;
+                };
+                // Conversion output remains unknown here. Moves and accepted existing
+                // copies are excluded by the same decision execution consumes.
+                if audio.writes_audio() && audio.placement.conversion.is_none() {
+                    allocated.saturating_add(super::plan::allocation(audio.placement.size, unit))
+                } else {
+                    allocated
+                }
+            })
     } else {
         original_peak.max(
             original_peak
@@ -898,6 +912,7 @@ mod tests {
                     plan.overlap_bytes,
                     overlap,
                     false,
+                    unit,
                     || Ok(available)
                 )
                 .is_err(),
@@ -910,6 +925,7 @@ mod tests {
                 plan.overlap_bytes,
                 overlap,
                 plan.unknown_size,
+                unit,
                 || {
                     queried.set(true);
                     Ok(available)
@@ -922,6 +938,53 @@ mod tests {
                 result.is_ok()
             );
             unexpectedly_accepted.push(result.is_ok());
+            let floor = small + large + if changed_bytes { small } else { 0 };
+            assert!(
+                preflight(
+                    &prepared,
+                    plan.peak_bytes,
+                    plan.overlap_bytes,
+                    overlap,
+                    true,
+                    unit,
+                    || Ok(floor - 1)
+                )
+                .is_err()
+            );
+            preflight(
+                &prepared,
+                plan.peak_bytes,
+                plan.overlap_bytes,
+                overlap,
+                true,
+                unit,
+                || Ok(floor),
+            )
+            .unwrap();
+            // Relocation images are an independent allocation, charged once
+            // beside ordinary writes rather than replacing their minimum.
+            assert!(
+                preflight(
+                    &prepared,
+                    plan.peak_bytes,
+                    plan.overlap_bytes,
+                    super::tests::overlap(unit),
+                    true,
+                    unit,
+                    || Ok(floor + unit - 1)
+                )
+                .is_err()
+            );
+            preflight(
+                &prepared,
+                plan.peak_bytes,
+                plan.overlap_bytes,
+                super::tests::overlap(unit),
+                true,
+                unit,
+                || Ok(floor + unit),
+            )
+            .unwrap();
             assert_eq!(std::fs::read(&published_audio).unwrap(), audio_before);
             assert_eq!(
                 std::fs::metadata(&published_audio)
@@ -976,12 +1039,14 @@ mod tests {
             panic!("valid generated conversion")
         };
         assert!(audio.writes_audio() && audio.placement.conversion.is_some());
+        let unit = crate::plan::allocation_unit(&root);
         preflight(
             &prepared,
             plan.peak_bytes,
             0,
             OverlapSpace::default(),
             true,
+            unit,
             || Ok(0),
         )
         .unwrap();
@@ -1058,7 +1123,8 @@ mod tests {
 
     #[test]
     fn preflight_checks_known_overlap_even_with_uncertain_base() {
-        assert!(preflight(&[], 1_000_000, 0, overlap(8192), true, || Ok(8191)).is_err());
+        let unit = 4096;
+        assert!(preflight(&[], 1_000_000, 0, overlap(8192), true, unit, || Ok(8191)).is_err());
         preflight(
             &[],
             1_000_000,
@@ -1068,10 +1134,11 @@ mod tests {
                 temporary: 16384,
             },
             true,
+            unit,
             || Ok(8192),
         )
         .unwrap();
-        preflight(&[], 1_000_000, 0, overlap(0), true, || {
+        preflight(&[], 1_000_000, 0, overlap(0), true, unit, || {
             panic!("no known requirement")
         })
         .unwrap();
@@ -1079,26 +1146,36 @@ mod tests {
 
     #[test]
     fn preflight_preserves_original_and_saturated_peaks() {
+        let unit = 4096;
         assert!(
-            preflight(&[], u64::MAX, u64::MAX, overlap(1), false, || Ok(
+            preflight(&[], u64::MAX, u64::MAX, overlap(1), false, unit, || Ok(
                 u64::MAX - 1
             ))
             .is_err()
         );
-        assert!(preflight(&[], 100, 90, overlap(1), false, || Ok(99)).is_err());
-        assert!(preflight(&[], 100, 0, overlap(50), false, || Ok(149)).is_err());
-        preflight(&[], 100, 0, overlap(50), false, || Ok(150)).unwrap();
+        assert!(preflight(&[], 100, 90, overlap(1), false, unit, || Ok(99)).is_err());
+        assert!(preflight(&[], 100, 0, overlap(50), false, unit, || Ok(149)).is_err());
+        preflight(&[], 100, 0, overlap(50), false, unit, || Ok(150)).unwrap();
     }
 
     #[test]
     fn fatal_prepared_errors_are_not_masked_but_skipped_tracks_keep_the_overlap_floor() {
+        let unit = 4096;
         let fatal = [Err(ExportError::Cancelled)];
-        preflight(&fatal, u64::MAX, 0, overlap(8192), false, || {
+        preflight(&fatal, u64::MAX, 0, overlap(8192), false, unit, || {
             panic!("retain the prepared fatal error")
         })
         .unwrap();
         let skipped = [Ok(AudioPreparation::Failed("read failed".into()))];
-        assert!(preflight(&skipped, u64::MAX, 0, overlap(8192), true, || Ok(8191)).is_err());
-        preflight(&skipped, u64::MAX, 0, overlap(8192), true, || Ok(8192)).unwrap();
+        assert!(
+            preflight(&skipped, u64::MAX, 0, overlap(8192), true, unit, || Ok(
+                8191
+            ))
+            .is_err()
+        );
+        preflight(&skipped, u64::MAX, 0, overlap(8192), true, unit, || {
+            Ok(8192)
+        })
+        .unwrap();
     }
 }

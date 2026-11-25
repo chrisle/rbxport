@@ -1448,8 +1448,9 @@ fn export_cancellable_inner(
             }
         }
     }
-    let overlap_space = prepared_audio::overlap_space(destination, previous.as_ref(), &audio_plan, &trusted, plan::allocation_unit(destination))?;
-    prepared_audio::preflight(&audio_plan, plan.peak_bytes, plan.overlap_bytes, overlap_space, plan.unknown_size,
+    let allocation_unit = plan::allocation_unit(destination);
+    let overlap_space = prepared_audio::overlap_space(destination, previous.as_ref(), &audio_plan, &trusted, allocation_unit)?;
+    prepared_audio::preflight(&audio_plan, plan.peak_bytes, plan.overlap_bytes, overlap_space, plan.unknown_size, allocation_unit,
         || fs2::available_space(destination))?;
     for (index, (track, audio)) in tracks.iter().zip(audio_plan).enumerate() {
         // Reported before the track is dealt with, so a skip reports too:
