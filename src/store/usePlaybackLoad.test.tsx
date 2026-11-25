@@ -602,3 +602,59 @@ it.each(["seek", "native generation", "stop", "scheduled play", "loop", "EOF"] a
     expect(sent).toEqual(["play"]);
   },
 );
+
+
+it("binds an event-first ready start to the new load's first tick generation", async () => {
+  let now = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  let frame: FrameRequestCallback | undefined;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frame = callback; return 1; });
+  finish(loads[0]!);
+  await settle();
+  act(() => tick({ ...emptyTick, b: { ...emptyDeck, loadId: loads[0]!.id, loaded: true,
+    generation: 7, totalFrames: RATE * 300 } }));
+  await select("new-event-first-track");
+  const request = loads[1]!;
+  finish(request);
+  await settle();
+  act(() => deck.toggle());
+  await settle();
+  expect(sent).toEqual(["play"]);
+  now += 80;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+  // A late tick from the previous load cannot bind the new start's generation.
+  act(() => tick({ ...emptyTick, b: { ...emptyDeck, loadId: loads[0]!.id, loaded: true,
+    playing: true, generation: 7, frames: RATE * 12, totalFrames: RATE * 300 } }));
+  expect(deck.positionNow()).toBe(0);
+  const state = { ...emptyDeck, loadId: request.id, loaded: true, playing: true,
+    generation: 8, totalFrames: RATE * 300 };
+  act(() => tick({ ...emptyTick, b: state }));
+  now += 16;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+  act(() => tick({ ...emptyTick, b: { ...state, frames: RATE / 10 } }));
+  expect(deck.positionNow()).toBeCloseTo(0.1);
+  // Once bound, a genuinely newer generation is still an intentional seek.
+  act(() => tick({ ...emptyTick, b: { ...state, generation: 9, frames: 0 } }));
+  now += 80;
+  expect(deck.positionNow()).toBeCloseTo(0.08);
+});
+
+it.each(["unloaded tick", "deck error"] as const)("releases a ready-start gate after %s", async (failure) => {
+  finish(loads[0]!);
+  await settle();
+  const state = { ...emptyDeck, loadId: loads[0]!.id, loaded: true,
+    generation: 1, totalFrames: RATE * 300 };
+  act(() => tick({ ...emptyTick, b: state }));
+  act(() => deck.toggle());
+  await settle();
+  if (failure === "deck error") {
+    act(() => loaded({ deck: "b", loadId: loads[0]!.id, totalFrames: 0,
+      sampleRate: RATE, message: "Generated decoder refusal" }));
+    expect(deck.error).toBe("Generated decoder refusal");
+  }
+  act(() => tick({ ...emptyTick, b: { ...state, loaded: false, totalFrames: 0 } }));
+  expect(deck.playing).toBe(false);
+  expect(deck.duration).toBe(0);
+});

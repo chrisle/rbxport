@@ -240,8 +240,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const desiredDelay = useRef<number | null>(null);
   /** A queued start must wait for frames from the deck, not the load event. */
   const awaitingLoadedStart = useRef<number | null>(null);
-  /** Fresh load, or the generation awaiting its first ordinary ready-start frame. */
-  const readyStart = useRef<"fresh" | number | null>(null);
+  /** The fresh load and first authoritative generation of an ordinary ready start. */
+  const readyStart = useRef<{ loadId: number; generation: number | null; waiting: boolean } | null>(null);
   const transportVersion = useRef(0);
   const deferredSeek = useRef<number | null>(null);
   const desiredTempo = useRef(1);
@@ -338,7 +338,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     loadPending.current = true;
     applyingLoad.current = 0;
     awaitingLoadedStart.current = null;
-    readyStart.current = "fresh";
+    readyStart.current = { loadId: request.loadId, generation: null, waiting: false };
     scrubbing.current = false;
     landing.current = null;
     pending.current = null;
@@ -367,6 +367,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
           publishOwner(confirmedLoads.has(DECK) ? previousOwner : null);
           targetLoad.current = null;
           loadPending.current = false;
+          readyStart.current = null;
           desiredPlaying.current = false;
           setPlaying(false);
           setError(reasonFrom(failure));
@@ -403,8 +404,13 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       const now = performance.now();
       // A load completion can precede the first audible output buffer. An
       // older stopped or zero-frame tick cannot override queued Play intent.
-      if (typeof readyStart.current === "number" && readyStart.current !== deck.generation) readyStart.current = null;
-      const start = awaitingLoadedStart.current ?? (typeof readyStart.current === "number" ? 0 : null);
+      const first = readyStart.current;
+      if (first !== null) {
+        if (!deck.loaded || first.loadId !== target?.loadId) readyStart.current = null;
+        else if (first.generation === null) first.generation = deck.generation;
+        else if (first.generation !== deck.generation) readyStart.current = null;
+      }
+      const start = awaitingLoadedStart.current ?? (readyStart.current?.waiting ? 0 : null);
       if (start !== null && (!deck.playing || rate <= 0 || deck.frames <= start * rate)) {
         anchor.current = pinned({ ...anchor.current, sampleRate: rate }, positionRef.current, now);
         return;
@@ -515,6 +521,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
           targetLoad.current = null;
           loadPending.current = false;
           applyingLoad.current = 0;
+          readyStart.current = null;
           desiredPlaying.current = false;
           setPlaying(false);
           setError(event.message.trim() === "" ? FALLBACK : event.message);
@@ -658,13 +665,13 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       return;
     }
     setPlaying(wanted);
-    if (wanted && readyStart.current === "fresh" && positionRef.current === 0 &&
+    if (wanted && readyStart.current !== null && positionRef.current === 0 &&
         anchor.current.frames === 0 && !desiredLoop.current?.active) {
-      readyStart.current = anchor.current.generation;
+      readyStart.current.waiting = true;
     }
     // Preserve the interpolated head when toggling between native ticks. A
     // new timestamp around the old frame counter would rewind it on resume.
-    anchor.current = { ...pinned(anchor.current, positionRef.current, performance.now()), playing: wanted && typeof readyStart.current !== "number" };
+    anchor.current = { ...pinned(anchor.current, positionRef.current, performance.now()), playing: wanted && !readyStart.current?.waiting };
     void (async () => {
       try {
         const backend = await getBackend();
