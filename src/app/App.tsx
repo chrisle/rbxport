@@ -749,9 +749,10 @@ function AppBody() {
     let cancelled = false;
     let stopReady: (() => void) | undefined;
     let stopProblem: (() => void) | undefined;
+    let revision = 0;
 
     /** One attempt at the first load. False means the library is not up yet. */
-    const attempt = async (backend: Backend) => {
+    const attempt = async (backend: Backend, current = revision) => {
       try {
         // Devices are deliberately not in here. A stick that cannot be read
         // must not stop the collection from appearing, and it used to: this
@@ -761,7 +762,7 @@ function AppBody() {
           backend.playlistTree(),
           backend.librarySummary(),
         ]);
-        if (cancelled) return true;
+        if (cancelled || current !== revision) return true;
         setTree(withSources(nodes));
         setSummary(info);
         setLoadError(null);
@@ -794,10 +795,12 @@ function AppBody() {
       // ready in the gap between a failed attempt and a later subscription,
       // and that gap is exactly where the window used to get stuck.
       stopReady = backend.onLibraryReady(() => {
+        revision += 1;
         void attempt(backend);
       });
       const applyProblem = (problem: LibraryProblem | null) => {
         if (cancelled || problem === null) return;
+        revision += 1;
         if (problem.kind === "failed") {
           // A library that is there and would not open is reported, not asked about.
           setMissingLibrary(null);
@@ -809,7 +812,12 @@ function AppBody() {
       stopProblem = backend.onLibraryProblem(applyProblem);
       // Asked as well: with no library at all the backend gives up before
       // this window has subscribed, and the event is gone.
-      if (!(await attempt(backend))) applyProblem(await backend.libraryProblem().catch(() => null));
+      const initial = revision;
+      if (!(await attempt(backend)) && initial === revision) {
+        const problem = await backend.libraryProblem().catch(() => null);
+        // A ready/problem event outranks an older startup snapshot.
+        if (initial === revision) applyProblem(problem);
+      }
     })();
 
     return () => {

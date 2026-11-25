@@ -132,3 +132,77 @@ test("scrolling a recovered view still fetches the rows it lands on", async ({ p
     )
     .toBeGreaterThan(5);
 });
+
+async function holdStartupProblem(page: Page, holdReady = false) {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch();
+    const fixture = `
+      import { getBackend as startupBackend } from "/src/ipc/client.ts";
+      const backend = await startupBackend();
+      const subscribeProblem = backend.onLibraryProblem;
+      const readTree = backend.playlistTree;
+      const create = backend.createLibrary;
+      let creating = false;
+      backend.createLibrary = () => { creating = true; return create(); };
+      backend.playlistTree = () => {
+        const result = readTree();
+        if (!creating || !${holdReady}) return result;
+        return result.then(rows => new Promise(resolve => { window.__releaseReadyTree = () => resolve(rows); }));
+      };
+      let reportProblem;
+      backend.onLibraryProblem = listener => {
+        reportProblem = listener;
+        return subscribeProblem(listener);
+      };
+      backend.libraryProblem = () => new Promise(resolve => {
+        const missing = { kind: "missing", masterDb: "/fixture/master.db" };
+        window.__releaseStartupProblem = () => resolve(missing);
+        window.__newLibraryProblem = () => reportProblem({ kind: "unavailable", masterDb: "/disconnected/master.db", defaultMasterDb: "/fixture/master.db" });
+        queueMicrotask(() => reportProblem(missing));
+      });
+    `;
+    await route.fulfill({ response, body: fixture + await response.text() });
+  });
+  await page.goto("/?nolibrary");
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  if (holdReady) {
+    await page.waitForFunction(() => typeof (window as unknown as { __releaseReadyTree?: unknown }).__releaseReadyTree === "function");
+    return;
+  }
+  await expect(page.locator('[role="row"] [data-col="title"]').first()).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "No rekordbox Library" })).toHaveCount(0);
+}
+
+test("an old startup problem reply cannot reopen the dialog after Create loads", async ({ page }) => {
+  await holdStartupProblem(page);
+  await page.evaluate(async () => {
+    (window as unknown as { __releaseStartupProblem: () => void }).__releaseStartupProblem();
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  await expect(page.getByRole("dialog", { name: "No rekordbox Library" })).toHaveCount(0);
+});
+
+test("a new library problem still opens after Create loads and retires the old reply", async ({ page }) => {
+  await holdStartupProblem(page);
+  await page.evaluate(() => (window as unknown as { __newLibraryProblem: () => void }).__newLibraryProblem());
+  const unavailable = page.getByRole("dialog").filter({ hasText: "Cannot find Master Database." });
+  await expect(unavailable).toBeVisible();
+  await page.evaluate(async () => {
+    (window as unknown as { __releaseStartupProblem: () => void }).__releaseStartupProblem();
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  await expect(unavailable).toBeVisible();
+});
+
+
+test("an older ready response cannot dismiss a newer library question", async ({ page }) => {
+  await holdStartupProblem(page, true);
+  await page.evaluate(() => (window as unknown as { __newLibraryProblem: () => void }).__newLibraryProblem());
+  const unavailable = page.getByRole("dialog").filter({ hasText: "Cannot find Master Database." });
+  await expect(unavailable).toBeVisible();
+  await page.evaluate(async () => {
+    (window as unknown as { __releaseReadyTree: () => void }).__releaseReadyTree();
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  await expect(unavailable).toBeVisible();
+});
