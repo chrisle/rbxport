@@ -501,7 +501,8 @@ function AppBody() {
   }, []);
   const [reportOpen, setReportOpen] = useState(false);
   const openReport = useCallback(() => {
-    void getBackend().then(backend => backend.openReportWindow()).then(opened => { if (!opened) setReportOpen(true); });
+    void getBackend().then(backend => backend.openReportWindow()).then(opened => { if (!opened) setReportOpen(true); })
+      .catch(() => setReportOpen(true));
   }, []);
   // The Log window, the same way again: clicking the status bar's message
   // opens it, or brings the open one to the front.

@@ -173,7 +173,7 @@ export function Preferences({
   const openReport = () => {
     void getBackend().then((backend) => backend.openReportWindow()).then((opened) => {
       if (!opened) setReportOpen(true);
-    });
+    }).catch(() => setReportOpen(true));
   };
 
   useEffect(() => {
