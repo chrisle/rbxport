@@ -153,6 +153,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   const [states, setStates] = useState<ReadonlyMap<string, DeviceSyncState>>(new Map());
   const [estimates, setEstimates] = useState<ReadonlyMap<string, SyncEstimate>>(new Map());
   const [estimatesLoading, setEstimatesLoading] = useState(false);
+  const [estimateRefresh, setEstimateRefresh] = useState(0);
   const [query, setQuery] = useState("");
   const [loadingTree, setLoadingTree] = useState(true);
   // Sync Manager can open before the library has finished loading; the tree is
@@ -272,7 +273,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
         });
     }, 200);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [nodes, ticked, estimateDevices, capacityRevision, deleteUnlistedMusic, compatibilityFormat, reported, t]);
+  }, [nodes, ticked, estimateDevices, capacityRevision, estimateRefresh, deleteUnlistedMusic, compatibilityFormat, reported, t]);
   const playlistCount = selectedCount === 1 ? t("{count} playlist", { count: selectedCount }) : t("{count} playlists", { count: selectedCount });
   const deviceCount = tickedDevices.size === 1 ? t("{count} USB device", { count: tickedDevices.size }) : t("{count} USB devices", { count: tickedDevices.size });
   const selectionSummary = t("{playlists} → {devices}", { playlists: playlistCount, devices: deviceCount });
@@ -364,13 +365,14 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
     };
   }, []);
 
-  const refreshDevices = useCallback(async () => {
+  const refreshDevices = useCallback(async (retryEstimate = false) => {
     setLoadingDevices(true);
     setDevicesError("");
     try {
       const backend = await getBackend();
       const found = await backend.listDevices();
       setDevices(found);
+      if (retryEstimate) setEstimateRefresh(revision => revision + 1);
       // A stick that was pulled is not a destination any more.
       const present = new Set(found.map((d) => d.path));
       setTickedDevices((current) => new Set([...current].filter((path) => present.has(path))));
@@ -1094,7 +1096,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
             <button
               type="button"
               className={styles.refresh}
-              onClick={() => void refreshDevices().catch(() => {})}
+              onClick={() => void refreshDevices(true).catch(() => {})}
               disabled={busy || loadingDevices}
             >
               {loadingDevices ? "Refreshing…" : "Refresh"}

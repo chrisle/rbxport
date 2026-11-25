@@ -1470,3 +1470,66 @@ describe("whole-command estimate failures", () => {
   });
 
 });
+
+it("retries a failed estimate on explicit Refresh even when device capacity is unchanged", async () => {
+  vi.useFakeTimers();
+  estimateSync.mockRejectedValueOnce(new Error("temporary estimate failure"));
+  click(box("Closing")); click(box("USB B")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(1);
+  expect(host.textContent).toContain("Could not calculate space. Refresh the device and try again.");
+  const reads = listDevices.mock.calls.length;
+  click([...host.querySelectorAll("button")].find(button => button.textContent === "Refresh"));
+  await settle();
+  expect(listDevices.mock.calls.length).toBe(reads + 1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(2);
+  expect(host.textContent).toContain("2.0 GB to add");
+  expect(host.textContent).not.toContain("Could not calculate space.");
+});
+
+
+it("does not retry unchanged estimates on background device notifications", async () => {
+  vi.useFakeTimers();
+  click(box("Closing")); click(box("USB B")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(1);
+  act(() => devicesChanged?.()); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(1);
+  expect(host.textContent).toContain("2.0 GB to add");
+});
+
+
+it("combines changed capacity and explicit Refresh into one fresh estimate", async () => {
+  vi.useFakeTimers();
+  let old: ((value: SyncEstimate[]) => void) | undefined;
+  estimateSync.mockImplementationOnce(() => new Promise<SyncEstimate[]>(resolve => { old = resolve; }));
+  click(box("Closing")); click(box("USB B")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(1);
+  listDevices.mockResolvedValueOnce(DEVICES.map(device => ({ ...device, freeBytes: 12 * 1024 ** 3 })));
+  click([...host.querySelectorAll("button")].find(button => button.textContent === "Refresh"));
+  await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(2);
+  expect(host.textContent).toContain("2.0 GB to add");
+  act(() => old?.([{ path: "/Volumes/USB B", copyBytes: 0, reuseBytes: 0, freeBytes: 0, tracksNew: 0, tracksChanged: 0, tracksKept: 0, tracksRemoved: 0, tracksMissing: 0, approximate: true, error: "retired estimate" }]));
+  await settle();
+  expect(host.textContent).not.toContain("retired estimate");
+  expect(host.textContent).toContain("2.0 GB to add");
+});
+
+it("retains an estimate failure if explicit device Refresh itself fails", async () => {
+  vi.useFakeTimers();
+  estimateSync.mockRejectedValueOnce(new Error("temporary estimate failure"));
+  click(box("Closing")); click(box("USB B")); await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  listDevices.mockRejectedValueOnce(new Error("temporary enumeration failure"));
+  click([...host.querySelectorAll("button")].find(button => button.textContent === "Refresh"));
+  await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(estimateSync).toHaveBeenCalledTimes(1);
+  expect(host.textContent).toContain("Could not calculate space.");
+  expect(host.textContent).toContain("Couldn’t read USB devices.");
+});
