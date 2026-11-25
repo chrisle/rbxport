@@ -1291,14 +1291,15 @@ impl Update {
         let cursor = Cursor::new(bytes);
         let mut extracted_files: Vec<PathBuf> = Vec::new();
 
-        // Create temp directories for backup and extraction
+        // Renames must stay on the install path's filesystem. Select and
+        // allocate both directories before moving the current application.
+        let tmp_root = mac_temp_root(&self.extract_path)?;
         let tmp_backup_dir = tempfile::Builder::new()
             .prefix("tauri_current_app")
-            .tempdir()?;
-
+            .tempdir_in(&tmp_root)?;
         let tmp_extract_dir = tempfile::Builder::new()
             .prefix("tauri_updated_app")
-            .tempdir()?;
+            .tempdir_in(&tmp_root)?;
 
         let decoder = GzDecoder::new(cursor);
         let mut archive = tar::Archive::new(decoder);
@@ -1322,20 +1323,17 @@ impl Update {
             extracted_files.push(extraction_path);
         }
 
-        // Try to move the current app to backup
-        let move_result = std::fs::rename(
+        let backup = tmp_backup_dir.path().join("current_app");
+        let need_authorization = match replace_bundle(
             &self.extract_path,
-            tmp_backup_dir.path().join("current_app"),
-        );
-        let need_authorization = if let Err(err) = move_result {
-            if err.kind() == std::io::ErrorKind::PermissionDenied {
-                true
-            } else {
-                std::fs::remove_dir_all(tmp_extract_dir.path()).ok();
-                return Err(err.into());
-            }
-        } else {
-            false
+            tmp_extract_dir.path(),
+            &backup,
+        ) {
+            Ok(()) => false,
+            // The ordinary protected-directory route is unchanged. Never
+            // retry destructively with authorization if restoration failed.
+            Err(failure) if needs_authorization(&failure, &backup) => true,
+            Err(failure) => return Err(failed_install(tmp_backup_dir, &backup, failure.into_io())),
         };
 
         if need_authorization {
@@ -1370,13 +1368,6 @@ impl Update {
                     "Failed to move the new app into place",
                 )));
             }
-        } else {
-            // Remove existing directory if it exists
-            if self.extract_path.exists() {
-                std::fs::remove_dir_all(&self.extract_path)?;
-            }
-            // Move the new app to the target path
-            std::fs::rename(tmp_extract_dir.path(), &self.extract_path)?;
         }
 
         let _ = std::process::Command::new("touch")
@@ -1384,6 +1375,102 @@ impl Update {
             .status();
 
         Ok(())
+    }
+}
+
+/// Prefer the system temporary directory when it is on the app's volume;
+/// otherwise stage beside the app. Do not follow an install-path symlink.
+#[cfg(target_os = "macos")]
+fn mac_temp_root(target: &Path) -> Result<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let device = std::fs::symlink_metadata(target)?.dev();
+    [
+        Some(std::env::temp_dir()),
+        target.parent().map(Path::to_path_buf),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|path| {
+        path.metadata()
+            .is_ok_and(|metadata| metadata.dev() == device)
+    })
+    .ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::CrossesDevices,
+            "no temporary directory on the app's filesystem is available",
+        )
+        .into()
+    })
+}
+
+/// Which move failed determines whether the historical authorization
+/// fallback applies. A restored placement failure is still an install error.
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+enum BundleMoveError {
+    Backup(std::io::Error),
+    Install(std::io::Error),
+}
+
+#[cfg(target_os = "macos")]
+impl BundleMoveError {
+    fn into_io(self) -> std::io::Error {
+        match self {
+            Self::Backup(error) | Self::Install(error) => error,
+        }
+    }
+}
+
+/// Keep the old bundle until the new one has been moved into place. Restore
+/// it on failure; the caller retains the backup if restoration also fails.
+#[cfg(target_os = "macos")]
+fn replace_bundle(
+    target: &Path,
+    staged: &Path,
+    backup: &Path,
+) -> std::result::Result<(), BundleMoveError> {
+    replace_bundle_with(target, staged, backup, |from, to| std::fs::rename(from, to))
+}
+
+#[cfg(target_os = "macos")]
+fn replace_bundle_with(
+    target: &Path,
+    staged: &Path,
+    backup: &Path,
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> std::result::Result<(), BundleMoveError> {
+    rename(target, backup).map_err(BundleMoveError::Backup)?;
+    if let Err(error) = rename(staged, target) {
+        let _ = rename(backup, target);
+        return Err(BundleMoveError::Install(error));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn backup_may_remain(backup: &Path) -> bool {
+    !matches!(std::fs::symlink_metadata(backup), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+}
+
+#[cfg(target_os = "macos")]
+fn needs_authorization(failure: &BundleMoveError, backup: &Path) -> bool {
+    matches!(failure, BundleMoveError::Backup(error) if error.kind() == std::io::ErrorKind::PermissionDenied)
+        && !backup_may_remain(backup)
+}
+
+/// Never let TempDir cleanup remove a stranded old bundle, even if another
+/// writer created a target after the failed move. Surface its location.
+#[cfg(target_os = "macos")]
+fn failed_install(backup_dir: tempfile::TempDir, backup: &Path, error: std::io::Error) -> Error {
+    if backup_may_remain(backup) {
+        let path = backup.to_path_buf();
+        let _ = backup_dir.keep();
+        Error::PreviousAppNotRestored {
+            backup: path,
+            source: error,
+        }
+    } else {
+        Error::Io(error)
     }
 }
 
@@ -1657,6 +1744,198 @@ fn escape_msi_property_arg(arg: impl AsRef<OsStr>) -> String {
         }
     } else {
         format!("\"\"{arg}\"\"")
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod mac_placement_tests {
+    use super::*;
+    use std::fs;
+    use std::io::{Error as IoError, ErrorKind};
+    use std::os::unix::fs::MetadataExt;
+
+    fn bundle(parent: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+        let path = parent.join(name);
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("marker"), bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn same_volume_install_keeps_the_old_generation_until_success() {
+        let root = tempfile::tempdir().unwrap();
+        let target = bundle(root.path(), "current", b"old");
+        let stage = bundle(root.path(), "staged", b"new");
+        let backup = root.path().join("backup");
+        assert_eq!(
+            mac_temp_root(&target).unwrap().metadata().unwrap().dev(),
+            target.metadata().unwrap().dev()
+        );
+        replace_bundle(&target, &stage, &backup).unwrap();
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"new");
+        assert_eq!(fs::read(backup.join("marker")).unwrap(), b"old");
+        assert!(!stage.exists());
+    }
+
+    #[test]
+    fn a_refused_first_move_preserves_the_original_and_authorization_route() {
+        let root = tempfile::tempdir().unwrap();
+        let target = bundle(root.path(), "current", b"old");
+        let stage = bundle(root.path(), "staged", b"new");
+        let backup_dir = tempfile::tempdir_in(root.path()).unwrap();
+        let backup = backup_dir.path().join("previous");
+        let error = replace_bundle_with(&target, &stage, &backup, |_, _| {
+            Err(IoError::new(
+                ErrorKind::PermissionDenied,
+                "generated permission refusal",
+            ))
+        })
+        .unwrap_err();
+        assert!(needs_authorization(&error, &backup));
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"old");
+        assert_eq!(fs::read(stage.join("marker")).unwrap(), b"new");
+        let Error::Io(error) = failed_install(backup_dir, &backup, error.into_io()) else {
+            panic!("no backup was stranded")
+        };
+        assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn a_failed_install_restores_the_original_and_original_error() {
+        for kind in [ErrorKind::StorageFull, ErrorKind::PermissionDenied] {
+            let root = tempfile::tempdir().unwrap();
+            let target = bundle(root.path(), "current", b"old");
+            let stage = bundle(root.path(), "staged", b"new");
+            let backup_dir = tempfile::tempdir_in(root.path()).unwrap();
+            let backup = backup_dir.path().join("previous");
+            let mut calls = 0;
+            let error = replace_bundle_with(&target, &stage, &backup, |from, to| {
+                calls += 1;
+                if calls == 2 {
+                    Err(IoError::new(kind, "generated install refusal"))
+                } else {
+                    fs::rename(from, to)
+                }
+            })
+            .unwrap_err();
+            assert_eq!(calls, 3);
+            assert_eq!(fs::read(target.join("marker")).unwrap(), b"old");
+            assert_eq!(fs::read(stage.join("marker")).unwrap(), b"new");
+            assert!(!backup.exists());
+            assert!(!needs_authorization(&error, &backup));
+            let Error::Io(error) = failed_install(backup_dir, &backup, error.into_io()) else {
+                panic!("restored install changed error category")
+            };
+            assert_eq!(error.kind(), kind);
+            assert_eq!(error.to_string(), "generated install refusal");
+        }
+    }
+
+    #[test]
+    fn a_failed_restore_retains_recoverable_bytes_even_with_a_new_target() {
+        for outside_target in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let target = bundle(root.path(), "current", b"old");
+            let stage = bundle(root.path(), "staged", b"new");
+            let backup_dir = tempfile::tempdir_in(root.path()).unwrap();
+            let backup = backup_dir.path().join("previous");
+            let mut calls = 0;
+            let error = replace_bundle_with(&target, &stage, &backup, |from, to| {
+                calls += 1;
+                if calls == 1 {
+                    return fs::rename(from, to);
+                }
+                if calls == 3 && outside_target {
+                    bundle(root.path(), "current", b"outside");
+                }
+                Err(IoError::new(
+                    ErrorKind::PermissionDenied,
+                    "generated move refusal",
+                ))
+            })
+            .unwrap_err();
+            assert_eq!(calls, 3);
+            assert!(!needs_authorization(&error, &backup));
+            let error = failed_install(backup_dir, &backup, error.into_io());
+            let message = error.to_string();
+            let Error::PreviousAppNotRestored {
+                backup: kept,
+                source,
+            } = error
+            else {
+                panic!("backup metadata missing")
+            };
+            assert_eq!(kept, backup);
+            assert_eq!(source.kind(), ErrorKind::PermissionDenied);
+            assert!(message.contains(kept.to_str().unwrap()));
+            assert_eq!(fs::read(kept.join("marker")).unwrap(), b"old");
+            if outside_target {
+                assert_eq!(fs::read(target.join("marker")).unwrap(), b"outside");
+            } else {
+                assert!(!target.exists());
+            }
+        }
+    }
+
+    #[test]
+    fn a_new_destination_directory_refuses_exact_placement_and_keeps_both_generations() {
+        let root = tempfile::tempdir().unwrap();
+        let target = bundle(root.path(), "current", b"old");
+        let staged = bundle(root.path(), "staged", b"new");
+        let backup_dir = tempfile::tempdir_in(root.path()).unwrap();
+        let backup = backup_dir.path().join("previous");
+        let mut calls = 0;
+        let failure = replace_bundle_with(&target, &staged, &backup, |from, to| {
+            calls += 1;
+            if calls == 2 {
+                bundle(root.path(), "current", b"outside");
+            }
+            fs::rename(from, to)
+        })
+        .unwrap_err();
+        assert_eq!(calls, 3);
+        assert!(matches!(&failure, BundleMoveError::Install(_)));
+        assert!(!needs_authorization(&failure, &backup));
+        let error = failed_install(backup_dir, &backup, failure.into_io());
+        let Error::PreviousAppNotRestored { backup: kept, .. } = error else {
+            panic!("original backup was not retained")
+        };
+        assert_eq!(fs::read(kept.join("marker")).unwrap(), b"old");
+        assert_eq!(fs::read(staged.join("marker")).unwrap(), b"new");
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"outside");
+        assert!(!target.join("staged").exists());
+    }
+
+    #[test]
+    #[ignore = "requires RBX_UPDATER_CROSS_VOLUME_FIXTURE on another filesystem"]
+    fn cross_volume_default_temp_uses_same_volume_staging_before_replacement() {
+        let external = std::env::var_os("RBX_UPDATER_CROSS_VOLUME_FIXTURE")
+            .expect("explicit disposable fixture root");
+        let root = tempfile::tempdir_in(external).unwrap();
+        let target = bundle(root.path(), "current", b"old");
+        let system = tempfile::tempdir().unwrap();
+        assert_ne!(
+            target.metadata().unwrap().dev(),
+            system.path().metadata().unwrap().dev()
+        );
+        let error = fs::rename(&target, system.path().join("old-backup")).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::CrossesDevices);
+        assert!(!needs_authorization(
+            &BundleMoveError::Backup(error),
+            &system.path().join("old-backup")
+        ));
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"old");
+        let chosen = mac_temp_root(&target).unwrap();
+        assert_eq!(chosen, root.path());
+        let staged = tempfile::tempdir_in(&chosen).unwrap();
+        fs::write(staged.path().join("marker"), b"new").unwrap();
+        let backup = tempfile::tempdir_in(&chosen).unwrap();
+        replace_bundle(&target, staged.path(), &backup.path().join("previous")).unwrap();
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"new");
+        assert_eq!(
+            fs::read(backup.path().join("previous/marker")).unwrap(),
+            b"old"
+        );
     }
 }
 

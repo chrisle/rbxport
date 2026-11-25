@@ -15,6 +15,15 @@ pub enum Error {
     /// IO errors.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// Installation and restoration failed; the previous bundle is retained.
+    #[error("Failed to install the update ({source}); the previous app is preserved at {backup:?}")]
+    PreviousAppNotRestored {
+        /// The recoverable previous bundle, never removed by temporary cleanup.
+        backup: std::path::PathBuf,
+        /// The original placement failure.
+        #[source]
+        source: std::io::Error,
+    },
     /// Semver errors.
     #[error(transparent)]
     Semver(#[from] semver::Error),
