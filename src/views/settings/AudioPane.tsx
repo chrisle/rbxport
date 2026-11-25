@@ -70,7 +70,7 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
 
   // A chosen device that is not in the list is one that has been unplugged:
   // the engine is on the system default, and the select says so.
-  const chosenListed = audio === null || audio.chosen === null || audio.devices.some((d) => d.id === audio.chosen);
+  const chosenListed = audio === null || prefs.outputDevice === null || audio.devices.some((d) => d.id === prefs.outputDevice);
 
   // Read when the pane opens rather than held: an interface is plugged in
   // while the app is running more often than not, and a list from launch
@@ -97,10 +97,9 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
             <select
               className={styles.select}
               aria-label="Audio output device"
-              value={chosenListed ? audio.chosen ?? "" : ""}
+              value={chosenListed ? prefs.outputDevice ?? "" : ""}
               onChange={(event) => {
                 const chosen = event.target.value === "" ? null : event.target.value;
-                setAudio({ ...audio, chosen });
                 // Remembered first, so the choice survives a failed push and
                 // the next launch; the engine is told directly as well, since
                 // this pane can be in a window with no App behind it.

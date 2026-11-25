@@ -12,9 +12,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
 import type { Backend, Limiter } from "@/ipc/types";
-import { DEFAULT_PREFERENCES } from "@/lib/preferences";
+import { DEFAULT_PREFERENCES, PREFERENCES_KEY } from "@/lib/preferences";
 import { DEFAULT_LIMITER } from "@/store/useLimiter";
-import { PreferencesProvider, type PreferencesStore } from "@/store/usePreferences";
+import { PreferencesProvider, usePreferencesStore, type PreferencesStore } from "@/store/usePreferences";
+import { useAudioOutput } from "@/store/useAudioOutput";
 import { AudioPane } from "./AudioPane";
 
 declare global {
@@ -63,6 +64,7 @@ function drag(input: HTMLInputElement, value: number) {
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear();
   onLimiterChange = vi.fn();
   __setBackend({
     audioDevices: () => Promise.resolve({ devices: [], default: null, chosen: null }),
@@ -237,5 +239,36 @@ describe("AudioPane's output device (#799)", () => {
     expect(select()?.value).toBe("");
     expect(host.textContent).toContain("not connected");
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each(["reset", "storage"] as const)("shows the applied output after a live preference %s", async change => {
+    const setAudioDevice = vi.fn(() => Promise.resolve());
+    __setBackend({
+      audioDevices: () => Promise.resolve({ devices, default: "a", chosen: "m4" }),
+      setAudioDevice,
+    } as unknown as Backend);
+    let store: PreferencesStore | undefined;
+    function LiveOutput() {
+      const current = usePreferencesStore({ ...DEFAULT_PREFERENCES, audio: { ...DEFAULT_PREFERENCES.audio, outputDevice: "m4" } });
+      store = current;
+      useAudioOutput(current.preferences.audio.outputDevice);
+      return <PreferencesProvider value={current}>
+        <AudioPane tab="configuration" limiter={DEFAULT_LIMITER} onLimiterChange={onLimiterChange} reduction={0} />
+      </PreferencesProvider>;
+    }
+    act(() => root.render(<LiveOutput />));
+    await settle();
+    expect(select()?.value).toBe("m4");
+    act(() => {
+      if (change === "reset") store?.reset("audio");
+      else {
+        localStorage.setItem(PREFERENCES_KEY, JSON.stringify(DEFAULT_PREFERENCES));
+        window.dispatchEvent(new StorageEvent("storage", { key: PREFERENCES_KEY }));
+      }
+    });
+    await settle();
+    expect(setAudioDevice).toHaveBeenLastCalledWith(null);
+    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY) ?? "{}").audio.outputDevice).toBeNull();
+    expect(select()?.value).toBe("");
   });
 });
