@@ -409,6 +409,70 @@ pub struct Publication {
     root_handle: same_file::Handle,
 }
 
+/// A validation boundary during format-owned retained restoration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecoveryPoint {
+    Before,
+    /// The rename and both affected directory flushes have completed.
+    After,
+}
+
+/// Access to an existing journal while its volume write lock is held.
+/// Only [`Publication::recover_with`] can construct this borrowed context.
+pub struct PendingRecovery<'a> {
+    root: &'a Path,
+    journal: &'a Path,
+    root_handle: same_file::Handle,
+    journal_handle: same_file::Handle,
+}
+
+impl PendingRecovery<'_> {
+    #[must_use]
+    pub fn root(&self) -> &Path { self.root }
+
+    #[must_use]
+    pub fn journal(&self) -> &Path { self.journal }
+
+    pub fn check_root(&self) -> std::io::Result<()> {
+        if self.root_handle != same_file::Handle::from_path(self.root)? {
+            return Err(std::io::Error::other("Destination volume changed during recovery"));
+        }
+        let journal = std::fs::symlink_metadata(self.journal)?;
+        let relative = self.journal.strip_prefix(self.root).map_err(std::io::Error::other)?;
+        if !journal.is_dir() || journal.file_type().is_symlink()
+            || self.journal.canonicalize()? != self.root.canonicalize()?.join(relative)
+            || self.journal_handle != same_file::Handle::from_path(self.journal)? {
+            return Err(std::io::Error::other("Recovery journal changed while it was checked"));
+        }
+        Ok(())
+    }
+
+    /// Ensure a hashed file still occupies its checked pathname.
+    pub fn check_file(&self, file: &std::fs::File, path: &Path) -> std::io::Result<()> {
+        self.check_root()?;
+        if same_file::Handle::from_file(file.try_clone()?)? != same_file::Handle::from_path(path)? {
+            return Err(std::io::Error::other("Recovery image changed while it was checked"));
+        }
+        Ok(())
+    }
+
+    /// Restore old entries without retiring their evidence. The format owner
+    /// rechecks each affected path immediately before the existing restoration.
+    pub fn restore_previous(&self, check: &mut impl FnMut(&Path, RecoveryPoint) -> std::io::Result<()>) -> std::io::Result<()> {
+        self.check_root()?;
+        Publication::rollback_at_with(self.root, self.journal, false, &mut |path, point| {
+            self.check_root()?;
+            check(path, point)
+        })
+    }
+
+    /// Called only after the format owner independently verifies the old state.
+    pub fn retire(&self) -> std::io::Result<()> {
+        self.check_root()?;
+        Publication::retire(self.root, self.journal)
+    }
+}
+
 impl Publication {
     /// A same-volume relocation, applied only after publication intent is durable.
     pub fn stage_move(&self, from: &Path, to: &Path) -> std::io::Result<()> {
@@ -551,16 +615,29 @@ impl Publication {
     }
 
     fn rollback_at(root: &Path, journal: &Path) -> std::io::Result<()> {
+        Self::rollback_at_with(root, journal, true, &mut |_, _| Ok(()))
+    }
+
+    fn rollback_at_with(
+        root: &Path,
+        journal: &Path,
+        retire: bool,
+        check: &mut impl FnMut(&Path, RecoveryPoint) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
         let root_handle = same_file::Handle::from_path(root)?;
         let entries: Vec<PublicationEntry> = serde_json::from_slice(&std::fs::read(journal.join("publication.json"))?)?;
         validate_paths(&entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>())?;
         for (to, from) in Self::moves(journal)? {
-            let source = root.join(from);
-            let moved = root.join(to);
+            check(&from, RecoveryPoint::Before)?;
+            check(&to, RecoveryPoint::Before)?;
+            let source = root.join(&from);
+            let moved = root.join(&to);
             if moved.try_exists()? && !source.try_exists()? {
                 if let Some(parent) = source.parent() { create_dir_all(parent)?; }
                 rename(&moved, &source)?;
                 sync_dir(source.parent().unwrap_or(root))?;
+                if !retire { sync_dir(moved.parent().unwrap_or(root))?; }
+                check(&from, RecoveryPoint::After)?;
             } else if moved.try_exists()? && source.try_exists()? {
                 return Err(std::io::Error::other("Relocated audio changed during rollback; recovery data retained"));
             }
@@ -570,6 +647,7 @@ impl Publication {
                 return Err(std::io::Error::other("Destination volume changed during rollback"));
             }
             let path = publish_as(journal, entry);
+            check(&path, RecoveryPoint::Before)?;
             let old = journal.join(".previous").join(&path);
             let target = root.join(&path);
             let rejected = journal.join(".rejected").join(&path);
@@ -578,19 +656,25 @@ impl Publication {
                     if let Some(parent) = rejected.parent() { create_dir_all(parent)?; }
                     rename(&target, &rejected)?;
                     sync_dir(target.parent().unwrap_or(root))?;
+                    if !retire { sync_dir(rejected.parent().unwrap_or(journal))?; }
+                    check(&path, RecoveryPoint::After)?;
                 }
                 if let Some(parent) = target.parent() { create_dir_all(parent)?; }
                 rename(&old, &target)?;
                 sync_dir(target.parent().unwrap_or(root))?;
+                if !retire { sync_dir(old.parent().unwrap_or(journal))?; }
+                check(&path, RecoveryPoint::After)?;
             } else if entry.had_target == Some(false) && target.try_exists()? && !journal.join(&path).try_exists()? && !rejected.try_exists()? {
                 if let Some(parent) = rejected.parent() { create_dir_all(parent)?; }
                 rename(&target, &rejected)?;
                 sync_dir(target.parent().unwrap_or(root))?;
+                if !retire { sync_dir(rejected.parent().unwrap_or(journal))?; }
+                check(&path, RecoveryPoint::After)?;
             } else if entry.had_target == Some(true) && !target.try_exists()? {
                 return Err(std::io::Error::other(format!("Previous generation is unavailable for {}; recovery data retained", path.display())));
             }
         }
-        Self::retire(root, journal)
+        if retire { Self::retire(root, journal) } else { Ok(()) }
     }
     pub fn new(root: &Path, name: &str) -> std::io::Result<Self> {
         create_dir_all(root)?;
@@ -685,12 +769,39 @@ impl Publication {
     }
 
     pub fn recover(root: &Path, name: &str) -> std::io::Result<()> {
+        Self::with_pending(root, name, |journal| Self::finish(root, journal, true))
+    }
+
+    /// Let a format owner repair a specifically authenticated retained state
+    /// under the same write lock as ordinary replay. Returning false preserves
+    /// the existing replay and refusal behavior.
+    pub fn recover_with(
+        root: &Path,
+        name: &str,
+        repair: impl FnOnce(&PendingRecovery<'_>) -> std::io::Result<bool>,
+    ) -> std::io::Result<()> {
+        if !root.join(name).try_exists()? { return Ok(()); }
+        // Capture before waiting for the lock: a mount-path replacement must
+        // not bind restoration to a different directory after that wait.
+        let expected_root = same_file::Handle::from_path(root)?;
+        Self::with_pending(root, name, |journal| {
+            if expected_root != same_file::Handle::from_path(root)? {
+                return Err(std::io::Error::other("Destination volume changed during recovery"));
+            }
+            let pending = PendingRecovery { root, journal, root_handle: expected_root, journal_handle: same_file::Handle::from_path(journal)? };
+            if repair(&pending)? { Ok(()) } else { Self::finish(root, journal, true) }
+        })
+    }
+
+    fn with_pending(
+        root: &Path,
+        name: &str,
+        apply: impl FnOnce(&Path) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
         let journal = root.join(name);
         if journal.try_exists()? {
             let _lock = lock(root)?;
-            if journal.try_exists()? {
-                Self::finish(root, &journal, true)?;
-            }
+            if journal.try_exists()? { apply(&journal)?; }
         }
         Ok(())
     }
@@ -2461,4 +2572,90 @@ mod tests {
             }
         }
     }
+
+    fn pending_recovery_fixture(root: &Path) {
+        write_file(&root.join("track.bin"), b"old");
+        let publication = Publication::new(root, ".checked-journal").unwrap();
+        write_file(&publication.stage().join("track.bin"), b"new");
+        publication.commit_retained(&[PathBuf::from("track.bin")]).unwrap();
+        write_file(&root.join(".checked-journal/.incomplete"), b"track.bin");
+    }
+
+    fn pending_recovery_image(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+        fn collect(root: &Path, at: &Path, out: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>) {
+            for entry in std::fs::read_dir(at).unwrap() {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_dir() { collect(root, &entry.path(), out); }
+                else { out.insert(entry.path().strip_prefix(root).unwrap().to_owned(), std::fs::read(entry.path()).unwrap()); }
+            }
+        }
+        let mut out = std::collections::BTreeMap::new(); collect(root, root, &mut out); out
+    }
+
+    fn pending_recovery_restore(pending: &PendingRecovery<'_>, stop: Option<usize>) -> std::io::Result<bool> {
+        let lock = std::fs::OpenOptions::new().read(true).write(true).open(pending.root().join(".rbxport-write.lock"))?;
+        assert!(fs2::FileExt::try_lock_exclusive(&lock).is_err(), "the entire callback retains the volume lock");
+        let marker = pending.journal().join(".format-owned-intent");
+        if !marker.exists() { write(&marker, b"1")?; }
+        let mut completed = 0;
+        pending.restore_previous(&mut |path, point| {
+            assert_eq!(path, Path::new("track.bin"));
+            let current = std::fs::read(pending.root().join(path)).ok();
+            let previous = std::fs::read(pending.journal().join(".previous").join(path)).ok();
+            let rejected = std::fs::read(pending.journal().join(".rejected").join(path)).ok();
+            let valid = matches!((current.as_deref(), previous.as_deref(), rejected.as_deref()),
+                (Some(b"new"), Some(b"old"), None) | (None, Some(b"old"), Some(b"new")) | (Some(b"old"), None, Some(b"new")));
+            if !valid { return Err(std::io::Error::other("changed generated image")); }
+            if point == RecoveryPoint::After {
+                if stop == Some(completed) { return Err(std::io::ErrorKind::Interrupted.into()); }
+                completed += 1;
+            }
+            Ok(())
+        })?;
+        assert_eq!(std::fs::read(pending.root().join("track.bin"))?, b"old");
+        assert!(!pending.journal().join(".rollback").exists());
+        pending.retire()?;
+        Ok(true)
+    }
+
+    #[test]
+    fn pending_recovery_keeps_lock_and_generic_refusal_at_each_restore_boundary() {
+        for boundary in 0..2 {
+            let root = tempfile::tempdir().unwrap(); pending_recovery_fixture(root.path());
+            let error = Publication::recover_with(root.path(), ".checked-journal", |pending| pending_recovery_restore(pending, Some(boundary))).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+            assert!(!root.path().join(".checked-journal/.rollback").exists());
+            let before = pending_recovery_image(root.path());
+            assert!(Publication::recover(root.path(), ".checked-journal").is_err());
+            assert_eq!(pending_recovery_image(root.path()), before);
+            Publication::recover_with(root.path(), ".checked-journal", |pending| pending_recovery_restore(pending, None)).unwrap();
+            assert_eq!(std::fs::read(root.path().join("track.bin")).unwrap(), b"old");
+            assert!(!root.path().join(".checked-journal").exists());
+        }
+    }
+
+    #[test]
+    fn pending_recovery_rejects_changed_target_before_resume_or_retirement() {
+        let root = tempfile::tempdir().unwrap(); pending_recovery_fixture(root.path());
+        assert!(Publication::recover_with(root.path(), ".checked-journal", |pending| pending_recovery_restore(pending, Some(0))).is_err());
+        write_file(&root.path().join("track.bin"), b"foreign");
+        let before = pending_recovery_image(root.path());
+        assert!(Publication::recover_with(root.path(), ".checked-journal", |pending| pending_recovery_restore(pending, None)).is_err());
+        assert_eq!(pending_recovery_image(root.path()), before);
+    }
+
+    #[test]
+    fn pending_recovery_rejects_replaced_journal_directory() {
+        let root = tempfile::tempdir().unwrap(); pending_recovery_fixture(root.path());
+        let error = Publication::recover_with(root.path(), ".checked-journal", |pending| {
+            std::fs::rename(pending.journal(), root.path().join("saved-journal"))?;
+            std::fs::create_dir(pending.journal())?;
+            pending.check_root()?;
+            unreachable!("a replaced journal must not authorize restoration")
+        }).unwrap_err();
+        assert!(error.to_string().starts_with("Recovery journal changed"));
+        assert_eq!(std::fs::read(root.path().join("saved-journal/.previous/track.bin")).unwrap(), b"old");
+        assert_eq!(std::fs::read(root.path().join("track.bin")).unwrap(), b"new");
+    }
+
 }

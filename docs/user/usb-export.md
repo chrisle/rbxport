@@ -227,6 +227,12 @@ and saving. Stop works before publication; “Stop all exports” stops cancella
 jobs together. Saving must finish before eject. An interrupted export is
 recovered on the next explicit operation. Do not unplug while saving.
 
+If an older build left a journal after moving a track and reusing its old audio
+path for another track, retry Sync with the same USB attached. RBXport checks
+the saved receipts before restoring the previous export and continuing the sync. A retry can reuse unchanged audio from the restored
+library. If the saved files cannot be verified, RBXport leaves the recovery
+data on the USB and reports the failure.
+
 Missing sources keep a usable existing USB version and report a warning. Tracks
 without a usable copy are skipped. If audio changed but its analysis did not,
 re-analyse it before expecting current waveforms/cues. **Verify all files

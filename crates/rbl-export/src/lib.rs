@@ -25,6 +25,7 @@ pub mod snapshot;
 mod playlist_order;
 mod prepared_audio;
 mod legacy_menus;
+mod legacy_recovery;
 pub use legacy_menus::{DeviceMenus, read_owned as read_device_menus};
 mod reconcile;
 mod verification;
@@ -2965,7 +2966,12 @@ const PUBLICATION: &str = ".rbxport-publication";
 pub fn recovery_pending(destination: &Path) -> bool { destination.join(PUBLICATION).exists() }
 
 pub fn recover(destination: &Path) -> std::io::Result<()> {
-    match rbl_core::durable::Publication::recover(destination, PUBLICATION) {
+    let recovered = if legacy_recovery::pending(destination) {
+        rbl_core::durable::Publication::recover_with(destination, PUBLICATION, legacy_recovery::recover)
+    } else {
+        rbl_core::durable::Publication::recover(destination, PUBLICATION)
+    };
+    match recovered {
         Err(error) if rbl_core::durable::is_device_changed(&error) && (rbl_core::durable::Publication::validation_pending(destination, PUBLICATION) || destination.join(PUBLICATION).join(".moves.json").exists()) => return Err(error),
         Err(error) if rbl_core::durable::is_device_changed(&error) => {
             let root_name = export_root_name(destination).unwrap_or("PIONEER");
