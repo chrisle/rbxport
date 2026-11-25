@@ -291,6 +291,68 @@ fn superscript_device_names_are_escaped_in_generated_paths_and_reused() {
     }
 }
 
+// Only metadata contains reserved names; source files are ordinary files on
+// every platform. Never try to open a console-device alias as a source.
+#[test]
+fn console_device_metadata_exports_with_safe_collision_paths_and_repeat() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = common::stick();
+    let mut tracks = Vec::new();
+    for id in [1, 2, 3] {
+        let directory = src.path().join(format!("source-{id}"));
+        std::fs::create_dir(&directory).unwrap();
+        let (artist, album) = match id {
+            1 => ("CONIN$", "conout$"),
+            // An ordinary name already spelling the escaped path collides
+            // with it, but still keeps its own metadata and distinct audio.
+            2 => ("_CONIN$", "_conout$"),
+            _ => ("CONIN$ Band", "CONOUT$X"),
+        };
+        let mut t = track(&directory, id, "Console name fixture", artist);
+        t.id = u64::from(id);
+        t.album = album.into();
+        let source = directory.join("ordinary.mp3");
+        std::fs::rename(&t.source_path, &source).unwrap();
+        t.source_path = source;
+        tracks.push(t);
+    }
+    let originals: Vec<_> = tracks.iter().map(|t| (std::fs::read(&t.source_path).unwrap(), std::fs::metadata(&t.source_path).unwrap().modified().unwrap())).collect();
+    assert!(export(dest.path(), &tracks, &[]).unwrap().verified);
+    let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+    assert_eq!(manifest.tracks.iter().map(|entry| entry.audio.as_str()).collect::<Vec<_>>(), [
+        "/Contents/_CONIN$/_conout$/ordinary.mp3",
+        "/Contents/_CONIN$/_conout$/ordinary-2.mp3",
+        "/Contents/CONIN$ Band/CONOUT$X/ordinary.mp3",
+    ]);
+    let snapshot = rbl_export::snapshot::Snapshot::read(dest.path()).unwrap();
+    assert_eq!(snapshot.legacy, snapshot.one);
+    let mut before = Vec::new();
+    for (index, entry) in manifest.tracks.iter().enumerate() {
+        let row = &snapshot.legacy.as_ref().unwrap().tracks[index];
+        assert_eq!((&row.artist, &row.album, &row.path), (&tracks[index].artist, &tracks[index].album, &entry.audio));
+        let audio = dest.path().join(entry.audio.trim_start_matches('/'));
+        assert_eq!(std::fs::read(&audio).unwrap(), originals[index].0);
+        before.push((audio.clone(), std::fs::read(&audio).unwrap(), std::fs::metadata(&audio).unwrap().modified().unwrap()));
+        for extension in &entry.analysis_extensions {
+            let path = dest.path().join(entry.anlz_dir.trim_start_matches('/')).join(format!("ANLZ0000.{extension}"));
+            assert_eq!(rbl_anlz::Anlz::read(&path).unwrap().path().as_deref(), Some(entry.audio.as_str()));
+            before.push((path.clone(), std::fs::read(&path).unwrap(), std::fs::metadata(&path).unwrap().modified().unwrap()));
+        }
+    }
+    assert!(verify(dest.path()).unwrap().is_ok());
+    let again = export(dest.path(), &tracks, &[]).unwrap();
+    assert!(again.up_to_date);
+    assert_eq!((again.bytes_copied, again.analysis_files), (0, 0));
+    for (path, bytes, modified) in before {
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(std::fs::metadata(path).unwrap().modified().unwrap(), modified);
+    }
+    for (t, (bytes, modified)) in tracks.iter().zip(originals) {
+        assert_eq!(std::fs::read(&t.source_path).unwrap(), bytes);
+        assert_eq!(std::fs::metadata(&t.source_path).unwrap().modified().unwrap(), modified);
+    }
+}
+
 #[test]
 fn truncated_reserved_components_export_with_safe_paths_and_stable_receipts() {
     let src = tempfile::tempdir().unwrap();

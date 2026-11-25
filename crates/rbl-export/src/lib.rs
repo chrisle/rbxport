@@ -346,6 +346,10 @@ fn is_reserved_device_name(stem: &str) -> bool {
     matches!(
         stem.to_ascii_uppercase().as_str(),
         "CON" | "PRN" | "AUX" | "NUL"
+            // Win32 also recognizes these console devices (CreateFileW,
+            // Consoles; RtlIsDosDeviceName_U). Apply the same portable
+            // basename/extension rule as for the other reserved devices.
+            | "CONIN$" | "CONOUT$"
             | "COM0" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
             | "LPT0" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
             // Win32 also treats the Latin-1 superscript digits as device
@@ -3294,6 +3298,22 @@ mod tests {
         assert_eq!(fat_safe("Content"), "Content");
         assert_eq!(fat_safe("COM10"), "COM10");
         assert_eq!(fat_safe("CONTACT"), "CONTACT");
+    }
+
+    #[test]
+    fn console_device_names_are_escaped_without_matching_nearby_names() {
+        for base in ["CONIN$", "CONOUT$", "conin$", "ConOut$"] {
+            assert_eq!(dir_name(base), format!("_{base}"));
+            for suffix in ["", ".mp3", ".one.two"] {
+                let name = format!("{base}{suffix}");
+                assert_eq!(fat_file_name(&name), format!("_{name}"));
+            }
+        }
+        for allowed in ["CONIN", "CONOUT", "CONIN$X", "XCONOUT$", "CONIN$ Band", "CONIN＄"] {
+            assert_eq!(dir_name(allowed), allowed);
+            let name = format!("{allowed}.mp3");
+            assert_eq!(fat_file_name(&name), name);
+        }
     }
 
     #[test]

@@ -91,7 +91,7 @@ jobs:
           RB_LITE_TEST: "1"
         run: cargo test -p rbl-export --test safety collisions_and_unicode_names_keep_distinct_audio
 
-      - name: Truncated Windows device names
+      - name: Windows reserved device names
         if: inputs.check_rust
         shell: pwsh
         env:
@@ -100,6 +100,10 @@ jobs:
           cargo test -p rbl-export --lib truncation_cannot_create_a_reserved_device_basename
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test -p rbl-export --test export truncated_reserved_components_export_with_safe_paths_and_stable_receipts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test -p rbl-export --lib console_device_names_are_escaped_without_matching_nearby_names
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test -p rbl-export --test export console_device_metadata_exports_with_safe_collision_paths_and_repeat
 
       - name: Migrate historical Windows export paths
         if: inputs.check_rust
