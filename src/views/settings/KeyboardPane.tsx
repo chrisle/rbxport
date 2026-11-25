@@ -14,8 +14,8 @@
  * was; backspace takes it away. A chord another row already has moves to
  * the row that took it. One this app does not answer is greyed, the way
  * rekordbox greys what a selection cannot do, so the map reads the same
- * here as there. The menu's accelerators are the shell's and stay as they
- * are, in every preset; a preset key one of them holds is left off its row.
+ * here as there. Performance 1 reclaims its five Deck B keys from the menu;
+ * other menu accelerators remain the shell's.
  * Reset puts the preset's keys back.
  */
 import { useEffect, useMemo, useState } from "react";
@@ -59,9 +59,11 @@ export function rowsFor(
   const rows: Row[] = KEYMAP[group].map((row) => {
     const binding = byCommand.get(row.id);
     if (binding?.action === undefined) {
-      // The menu's keys are the shell's, the Export preset's in every
-      // preset; any other row this app lacks shows the preset's key.
-      const text = preset === "export" || binding !== undefined
+      // Show effective menu keys too; Performance 1 reclaims five for Deck B.
+      // Other unavailable commands show their reference preset key.
+      const text = binding?.group === "Menu" && presetChord(binding, preset).chord.key === ""
+        ? null
+        : preset === "export" || binding !== undefined
         ? row.key
         : performanceKeys(preset, row.id).join(", ") || null;
       return {

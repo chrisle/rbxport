@@ -646,7 +646,7 @@ export interface Backend {
   onMenu(listener: (id: string) => void): () => void;
 
   /** Rebuilds the native application menu with the active UI translations. */
-  setMenuLabels(labels: Readonly<Record<string, string>>): Promise<void>;
+  setMenuLabels(labels: Readonly<Record<string, string>>, performance1: boolean): Promise<void>;
 
   /** Current playlist/device destinations for native menu submenus. */
   setMenuTargets(targets: Readonly<Record<string, readonly { id: string; name: string }[]>>): Promise<void>;

@@ -104,7 +104,7 @@ import { statusBarListText } from "@/lib/format";
 import { autoRelocated, missingAmong, relocateSteps, relocateTracks } from "@/lib/relocate";
 import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
-import { nativeMenuLabels } from "@/lib/nativeMenu";
+import { useNativeMenu } from "@/store/useNativeMenu";
 
 /** The commands the shell itself registers, and so the keys it runs. */
 const SHELL_COMMANDS: ReadonlySet<Action> = new Set<Action>([
@@ -174,11 +174,11 @@ export function App() {
 
 function AppBody() {
   const t = useTranslation();
-  useShowWindowWhenReady();
+  const prefs = usePreferencesStore();
+  const performance1 = prefs.preferences.keyboard.preset === "performance1";
+  const menuReady = useNativeMenu(t, performance1);
+  useShowWindowWhenReady(menuReady);
   useEffect(() => { reportStartupPaint("shell-painted"); }, []);
-  useEffect(() => {
-    void getBackend().then((backend) => backend.setMenuLabels(nativeMenuLabels(t))).catch(() => undefined);
-  }, [t]);
   useEffect(() => {
     // Native file drags can land anywhere, including outside a drop target.
     // Cancel WebKit's file navigation without stopping playlist/deck handlers.
@@ -513,7 +513,6 @@ function AppBody() {
   const openSupport = useCallback(() => {
     void getBackend().then(backend => backend.openUrl("https://www.paypal.com/donate/?hosted_button_id=H6GGU8PHP8CJE")).catch(() => {});
   }, []);
-  const prefs = usePreferencesStore();
   const { view: viewPrefs, advanced: advancedPrefs, analysis: analysisPrefs } = prefs.preferences;
   // Every write path reads this one flag: rekordbox holding the database,
   // or Library Protection in Preferences, refuse the same way.
@@ -2633,7 +2632,7 @@ function AppBody() {
     const onKeyDown = (event: KeyboardEvent) => {
       // The native menu's accelerators, on the platforms where a keystroke
       // in the webview never reaches them (see `menuAccelerator`).
-      const item = menuAccelerator(event, platform);
+      const item = menuAccelerator(event, platform, performance1);
       if (item !== null) {
         // Let the webview keep its own text history for keyboard commands.
         if ((item === "undo" || item === "redo") && isTyping(event.target as HTMLElement | null)) return;
@@ -2664,7 +2663,7 @@ function AppBody() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [platform, runMenu, keyOverrides]);
+  }, [platform, runMenu, keyOverrides, performance1]);
 
   // The Preferences window asking for what only this window holds.
   useEffect(() => {

@@ -473,7 +473,7 @@ async function realBackend(): Promise<Backend> {
     onAnalysisProgress: (listener) => subscribe<string>("analysis:progress", listener),
     reloadLibrary: () => invoke<number>("reload_library"),
     onMenu: (listener) => subscribe<string>("menu", listener),
-    setMenuLabels: (labels) => invoke<void>("set_menu_labels", { labels }),
+    setMenuLabels: (labels, performance1) => invoke<void>("set_menu_labels", { labels, performance1 }),
     setMenuTargets: (targets) => invoke<void>("set_menu_targets", { targets }),
     setMenuEnabled: (items) => invoke<void>("set_menu_enabled", { items }),
     serveScripts: (handle) => {

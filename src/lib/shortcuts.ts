@@ -302,6 +302,9 @@ function primary(chord: KeyChord, platform: Platform): boolean {
   return platform.mac ? chord.metaKey === true : chord.ctrlKey === true;
 }
 
+/** Native menu keys reclaimed by the existing Deck B Performance 1 commands. */
+export const PERFORMANCE_DECK_MENU_KEYS: readonly string[] = ["o", "7", "8", "9", "0"];
+
 /**
  * The native menu item a chord is the accelerator of, on a platform where
  * the webview eats it — or `null`.
@@ -315,12 +318,13 @@ function primary(chord: KeyChord, platform: Platform): boolean {
  * are produced here and handled exactly as a menu click is. Full screen is
  * left out: the shell does that one itself, on the native event.
  */
-export function menuAccelerator(chord: KeyChord, platform: Platform): string | null {
+export function menuAccelerator(chord: KeyChord, platform: Platform, performance1 = false): string | null {
   if (platform.mac || chord.ctrlKey !== true || chord.metaKey === true || chord.altKey === true) {
     return null;
   }
   if (chord.key.toLowerCase() === "z") return chord.shiftKey === true ? "redo" : "undo";
   if (chord.shiftKey === true) return null;
+  if (performance1 && PERFORMANCE_DECK_MENU_KEYS.includes(chord.key.toLowerCase())) return null;
   switch (chord.key.toLowerCase()) {
     case "y":
       return "redo";

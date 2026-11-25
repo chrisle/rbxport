@@ -22,7 +22,8 @@ fn main() {
         the_menu_builds_and_carries_the_ids_the_frontend_switches_on();
         the_menu_offers_the_clipboard_items_a_text_field_needs();
         the_menu_rebuilds_with_translated_labels();
-        println!("3 menu checks passed");
+        preset_switches_keep_menu_actions_and_dynamic_history();
+        println!("4 menu checks passed");
     }
     #[cfg(not(target_os = "macos"))]
     println!("skipped: the menu bar is macOS-shaped and untested elsewhere");
@@ -106,7 +107,7 @@ fn the_menu_rebuilds_with_translated_labels() {
         ("View".to_owned(), "Ansicht".to_owned()),
         ("Help".to_owned(), "Hilfe".to_owned()),
     ]);
-    rbxport_lib::menu::set_menu_labels(app.handle().clone(), labels)
+    rbxport_lib::menu::set_menu_labels(app.handle().clone(), labels, false)
         .expect("translated menu installs");
 
     let menu = app.menu().expect("installed menu");
@@ -122,4 +123,44 @@ fn the_menu_rebuilds_with_translated_labels() {
             "no {translated} menu; got {titles:?}"
         );
     }
+}
+
+#[cfg(target_os = "macos")]
+fn preset_switches_keep_menu_actions_and_dynamic_history() {
+    use std::collections::HashMap;
+    fn item(app: &tauri::AppHandle<tauri::test::MockRuntime>, wanted: &str) -> tauri::menu::MenuItem<tauri::test::MockRuntime> {
+        fn find(items: Vec<tauri::menu::MenuItemKind<tauri::test::MockRuntime>>, wanted: &str) -> Option<tauri::menu::MenuItem<tauri::test::MockRuntime>> {
+            for kind in items {
+                if let Some(item) = kind.as_menuitem() {
+                    if item.id().0 == wanted { return Some(item.clone()); }
+                }
+                if let Some(sub) = kind.as_submenu() {
+                    if let Some(found) = find(sub.items().unwrap(), wanted) { return Some(found); }
+                }
+            }
+            None
+        }
+        find(app.menu().unwrap().items().unwrap(), wanted).expect("menu action remains present")
+    }
+    let app = tauri::test::mock_app();
+    let handle = app.handle().clone();
+    rbxport_lib::menu::set_menu_labels(handle.clone(), HashMap::new(), false).unwrap();
+    rbxport_lib::menu::set_history_menu(handle.clone(), Some("Rename Playlist".into()), None).unwrap();
+    rbxport_lib::menu::set_menu_enabled(handle.clone(), HashMap::from([("reload-tag".into(), false)])).unwrap();
+    for performance1 in [true, false, true] {
+        rbxport_lib::menu::set_menu_labels(handle.clone(), HashMap::new(), performance1).unwrap();
+        assert_eq!(item(&handle, "undo").text().unwrap(), "Undo Rename Playlist");
+        assert!(!item(&handle, "reload-tag").is_enabled().unwrap());
+        assert!(item(&handle, "import").is_enabled().unwrap());
+        for id in ["import", "layout-one", "layout-two", "layout-simple", "layout-browser"] {
+            assert_eq!(item(&handle, id).id().0, id);
+        }
+    }
+    let translated = HashMap::from([("Import".into(), "Importieren".into())]);
+    rbxport_lib::menu::set_menu_labels(handle.clone(), translated.clone(), true).unwrap();
+    assert_eq!(item(&handle, "import").text().unwrap(), "Importieren");
+    rbxport_lib::menu::set_menu_labels(handle.clone(), translated, false).unwrap();
+    assert_eq!(item(&handle, "import").text().unwrap(), "Importieren");
+    assert!(!item(&handle, "reload-tag").is_enabled().unwrap());
+        assert!(item(&handle, "import").is_enabled().unwrap());
 }

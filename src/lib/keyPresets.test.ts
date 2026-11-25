@@ -106,7 +106,7 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
         const binding = built(row.id);
         if (first === undefined || binding === undefined) continue;
         const chord = chordFromText(first);
-        if (chord !== null && heldByShell(chord)) {
+        if (chord !== null && heldByShell(chord, preset)) {
           shell[preset]?.push(row.id);
           continue;
         }
@@ -120,7 +120,7 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
     expect(answered.performance1?.sort()).toEqual([
       "3006", "3007", "3008", "3009", "300a", "300b", "300c", "3012", "3013", "3014", "3015", "3018", "3019",
       "301e", "301f", "3020", "3021", "3022", "3023", "3024", "3039", "303a", "303b", "3043", "3044", "3045",
-      "304b", "304d", "3054", "3055", "3106", "3107", "3108", "310a", "310b", "310c", "3118", "3119", "311e",
+      "304b", "304d", "3054", "3055", "3106", "3107", "3108", "3109", "310a", "310b", "310c", "3112", "3113", "3114", "3115", "3118", "3119", "311e",
       "311f", "3120", "3121", "3122", "3123", "3124", "3139", "313a", "313b", "3143", "3144", "3145", "314b",
       "314d", "3154", "3155", "500a", "7003", "b139",
     ]);
@@ -129,9 +129,8 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
       "304d", "3054", "3055", "307f", "308b", "3106", "3107", "310a", "310b", "310c", "3112", "3113", "311e",
       "311f", "3120", "3121", "3122", "3123", "314d", "3154", "3155", "317f", "318b", "400d", "7003", "b139",
     ]);
-    // Deck 2's Jump Reverse and its 1 to 8 beat loops are command + O, 7, 8,
-    // 9 and 0 in Performance 1, which this app's File and View menus hold.
-    expect(shell.performance1?.sort()).toEqual(["3109", "3112", "3113", "3114", "3115"]);
+    // Performance 1 reclaims command + O, 7, 8, 9 and 0 for Deck 2.
+    expect(shell.performance1).toEqual([]);
     expect(shell.performance2).toEqual([]);
   });
 
@@ -174,6 +173,7 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
       expect(matchBinding({ key: "Enter", shiftKey: true }, MAC, keys)?.action, preset).toBe("loadPlayer2");
       for (const binding of BINDINGS) {
         if (binding.command === undefined || binding.action === undefined) {
+          if (preset === "performance1" && binding.group === "Menu" && ["menu.import", "menu.layout-one", "menu.layout-two", "menu.layout-simple", "menu.layout-browser"].includes(binding.id)) continue;
           expect(presetChord(binding, preset).chord, `${preset} ${binding.id}`).toEqual(binding.chord);
         }
       }
@@ -196,7 +196,7 @@ describe("a Performance preset's keys on this app's decks (#412)", () => {
           const name = describeChord(chord, platform);
           expect(seen.get(name), `${preset}: ${name} is ${seen.get(name)} and ${binding.id}`).toBeUndefined();
           seen.set(name, binding.id);
-          expect(heldByShell(chord), `${preset}: ${binding.id} on the menu's ${name}`).toBe(false);
+          expect(heldByShell(chord, preset), `${preset}: ${binding.id} on the menu's ${name}`).toBe(false);
         }
       }
     }
@@ -259,11 +259,11 @@ describe("the Keyboard pane under a preset (#412)", () => {
     const labels = rows("Player A", "performance1").map((r) => r.label);
     expect(labels.indexOf("Set Hot Cue D")).toBe(labels.indexOf("Set Hot Cue C") + 1);
     expect(rows("Player A", "performance1").find((r) => r.label === "Set Hot Cue D")).toMatchObject({ key: "4", bindingId: "hotCueD" });
-    // Player B's Jump Reverse is command + O, the menu's Import here.
+    // Player B's Jump Reverse reclaims command + O from Import.
     expect(rows("Player B", "performance1").find((r) => r.label === "Jump Reverse"))
-      .toMatchObject({ key: null, shell: true, bindingId: "b.jumpBack" });
-    // The menu's own rows keep the shell's keys.
-    expect(rows("View", "performance1").find((r) => r.label === "1 Player")).toMatchObject({ key: "command + 7", built: true });
+      .toMatchObject({ key: "command + O", bindingId: "b.jumpBack" });
+    // The menu row shows that its key has been reclaimed.
+    expect(rows("View", "performance1").find((r) => r.label === "1 Player")).toMatchObject({ key: null, built: true });
     expect(rows("Browse", "none").find((r) => r.label === "Select All")).toMatchObject({ key: "command + A" });
   });
 });

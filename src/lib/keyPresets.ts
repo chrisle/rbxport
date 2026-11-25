@@ -43,7 +43,7 @@
  * keys, which are not the preset's. The rows are here so the pane and
  * `presetChord` treat them as rekordbox's, not this app's own.
  */
-import { BINDINGS, sameChord, type Binding, type KeyChord, type KeyOverrides } from "./shortcuts";
+import { BINDINGS, PERFORMANCE_DECK_MENU_KEYS, sameChord, type Binding, type KeyChord, type KeyOverrides } from "./shortcuts";
 
 /** The presets rekordbox's Keyboard pane offers, in `PresetKeyMapping::getPresetList`'s order. */
 export const KEY_PRESETS = ["performance1", "performance2", "export", "none"] as const;
@@ -299,10 +299,11 @@ export function chordFromText(text: string): KeyChord | null {
 
 /**
  * Keys the shell's menu answers before the page sees them, whatever the
- * preset: its accelerators (the `Menu` rows), Import Folder, Undo and Redo,
+ * preset, apart from five Deck B keys reclaimed in Performance 1: its
+ * accelerators (the `Menu` rows), Import Folder, Undo and Redo,
  * and the items macOS supplies (Quit, Close Window, Hide, Cut, Copy, Paste).
  * rekordbox's PERFORMANCE mode has no menu on these keys, so a preset row on
- * one of them could never fire here.
+ * one of the remaining keys is left unavailable here.
  */
 const SHELL_CHORDS: readonly KeyChord[] = [
   ...BINDINGS.filter((binding) => binding.group === "Menu").map((binding) => binding.chord),
@@ -312,7 +313,9 @@ const SHELL_CHORDS: readonly KeyChord[] = [
 ];
 
 /** Whether the shell's menu takes a chord before the page can. */
-export function heldByShell(chord: KeyChord): boolean {
+export function heldByShell(chord: KeyChord, preset: KeyPreset = "export"): boolean {
+  if (preset === "performance1" && chord.metaKey === true && !chord.altKey && !chord.shiftKey &&
+      PERFORMANCE_DECK_MENU_KEYS.includes(chord.key.toLowerCase())) return false;
   return chord.key !== "" && SHELL_CHORDS.some((held) => sameChord(held, chord));
 }
 
@@ -320,18 +323,21 @@ export function heldByShell(chord: KeyChord): boolean {
  * What a binding's key is in a preset, before the person's own: the Export
  * preset's is the binding's own; a Performance preset's is the first key it
  * gives the same rekordbox command, or none, and None gives none. This
- * app's own rows and the menu's keep their keys in every preset. `shell` is
+ * app's own rows keep their keys; five menu keys yield to Performance 1. `shell` is
  * true when the preset's key is one the menu holds here, so the row is left
  * without it.
  */
 export function presetChord(binding: Binding, preset: KeyPreset): { chord: KeyChord; shell: boolean } {
+  if (binding.group === "Menu" && !heldByShell(binding.chord, preset)) {
+    return { chord: { key: "" }, shell: false };
+  }
   if (preset === "export" || binding.command === undefined || binding.action === undefined) {
     return { chord: binding.chord, shell: false };
   }
   const first = performanceKeys(preset, binding.command)[0];
   const chord = first === undefined ? null : chordFromText(first);
   if (chord === null) return { chord: { key: "" }, shell: false };
-  if (heldByShell(chord)) return { chord: { key: "" }, shell: true };
+  if (heldByShell(chord, preset)) return { chord: { key: "" }, shell: true };
   return { chord, shell: false };
 }
 

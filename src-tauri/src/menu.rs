@@ -140,15 +140,48 @@ pub fn about_metadata_for_platform<R: Runtime>(
 }
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    build_with_labels(app, &Labels::new())
+    build_with_labels(app, &Labels::new(), false)
 }
 
-fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::Result<Menu<R>> {
+/// Menu clicks remain available while Performance 1 owns these five keys.
+const DECK_MENU_KEYS: [(&str, &str); 5] = [
+    ("import", "CmdOrCtrl+O"),
+    ("layout-one", "CmdOrCtrl+7"),
+    ("layout-two", "CmdOrCtrl+8"),
+    ("layout-simple", "CmdOrCtrl+9"),
+    ("layout-browser", "CmdOrCtrl+0"),
+];
+
+fn deck_menu_accelerator(id: &str, performance1: bool) -> Option<&'static str> {
+    if performance1 { return None; }
+    DECK_MENU_KEYS.iter().find_map(|&(item, key)| (item == id).then_some(key))
+}
+
+fn deck_menu_item(builder: MenuItemBuilder, id: &str, performance1: bool) -> MenuItemBuilder {
+    match deck_menu_accelerator(id, performance1) {
+        Some(key) => builder.accelerator(key),
+        None => builder,
+    }
+}
+
+fn apply_deck_keys<R: Runtime>(items: Vec<MenuItemKind<R>>, performance1: bool) -> Result<(), String> {
+    for item in items {
+        match item {
+            MenuItemKind::MenuItem(item) if DECK_MENU_KEYS.iter().any(|&(id, _)| id == item.id().0) => {
+                item.set_accelerator(deck_menu_accelerator(&item.id().0, performance1)).map_err(|error| error.to_string())?;
+            }
+            MenuItemKind::Submenu(sub) => apply_deck_keys(sub.items().map_err(|error| error.to_string())?, performance1)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels, performance1: bool) -> tauri::Result<Menu<R>> {
     let settings = MenuItemBuilder::with_id("settings", label(labels, "Settings…"))
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
-    let import = MenuItemBuilder::with_id("import", label(labels, "Import"))
-        .accelerator("CmdOrCtrl+O")
+    let import = deck_menu_item(MenuItemBuilder::with_id("import", label(labels, "Import")), "import", performance1)
         .build(app)?;
     // The folder counterpart of Import: one dialog picks a folder and every
     // audio file under it, recursively, is added. ⇧⌘O sits beside ⌘O.
@@ -258,23 +291,19 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
         .separator()
         // The layout switch, on the keys rekordbox's Export preset gives it.
         .item(
-            &MenuItemBuilder::with_id("layout-one", label(labels, "1 Player"))
-                .accelerator("CmdOrCtrl+7")
+            &deck_menu_item(MenuItemBuilder::with_id("layout-one", label(labels, "1 Player")), "layout-one", performance1)
                 .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id("layout-two", label(labels, "2 Players"))
-                .accelerator("CmdOrCtrl+8")
+            &deck_menu_item(MenuItemBuilder::with_id("layout-two", label(labels, "2 Players")), "layout-two", performance1)
                 .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id("layout-simple", label(labels, "Simple Player"))
-                .accelerator("CmdOrCtrl+9")
+            &deck_menu_item(MenuItemBuilder::with_id("layout-simple", label(labels, "Simple Player")), "layout-simple", performance1)
                 .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id("layout-browser", label(labels, "Full Browser"))
-                .accelerator("CmdOrCtrl+0")
+            &deck_menu_item(MenuItemBuilder::with_id("layout-browser", label(labels, "Full Browser")), "layout-browser", performance1)
                 .build(app)?,
         )
         .build()?;
@@ -557,8 +586,14 @@ fn apply_targets<R: Runtime>(app: &AppHandle<R>, items: Vec<MenuItemKind<R>>) ->
     clippy::needless_pass_by_value,
     reason = "Tauri's AppHandle extractor is injected by value"
 )]
-pub fn set_menu_labels<R: Runtime>(app: AppHandle<R>, labels: Labels) -> Result<(), String> {
-    let menu = build_with_labels(&app, &labels).map_err(|error| error.to_string())?;
+pub fn set_menu_labels<R: Runtime>(app: AppHandle<R>, labels: Labels, performance1: bool) -> Result<(), String> {
+    // A preset switch need not rebuild menus or discard dynamic Undo titles.
+    if saved_labels().read().is_ok_and(|saved| *saved == labels) {
+        if let Some(menu) = app.menu() {
+            return apply_deck_keys(menu.items().map_err(|error| error.to_string())?, performance1);
+        }
+    }
+    let menu = build_with_labels(&app, &labels, performance1).map_err(|error| error.to_string())?;
     app.set_menu(menu).map_err(|error| error.to_string())?;
     if let Ok(mut saved) = saved_labels().write() {
         *saved = labels;
@@ -584,6 +619,20 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
 #[cfg(test)]
 mod tests {
     use super::{Row, PLAYLIST_MENU, TRACK_MENU};
+
+    #[test]
+    fn performance_menu_keys_preserve_items_and_restore_both_platform_modifiers() {
+        for (id, key) in [
+            ("import", "CmdOrCtrl+O"), ("layout-one", "CmdOrCtrl+7"),
+            ("layout-two", "CmdOrCtrl+8"), ("layout-simple", "CmdOrCtrl+9"),
+            ("layout-browser", "CmdOrCtrl+0"),
+        ] {
+            assert_eq!(super::deck_menu_accelerator(id, true), None);
+            assert_eq!(super::deck_menu_accelerator(id, false), Some(key));
+        }
+        assert_eq!(super::DECK_MENU_KEYS.len(), 5);
+        assert!(!super::DECK_MENU_KEYS.iter().any(|&(id, _)| ["settings", "info", "sub", "undo", "redo", "import-folder"].contains(&id)));
+    }
 
     fn ids(rows: &[Row]) -> Vec<&'static str> {
         rows.iter()
