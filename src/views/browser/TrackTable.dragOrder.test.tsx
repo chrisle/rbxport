@@ -175,14 +175,23 @@ it("refuses cached old row ranks while a same-source sort projection is replacin
 });
 
 
-it("does not synchronously walk a large sparse playlist tail on dragstart", async () => {
+it.each([false, true])("does not synchronously walk a large sparse playlist tail (swapping=%s)", async swapping => {
   const backend = createMockBackend({ trackCount: 20_000, writable: true, latencyMs: 0 });
   await backend.edits.createPlaylist("Sparse source", "root");
   const playlist = (await backend.playlistTree()).find(node => node.name === "Sparse source")!;
+  const open = backend.openView.bind(backend);
+  let hold = false;
+  let release!: () => void;
+  backend.openView = async spec => {
+    if (hold) await new Promise<void>(resolve => { release = resolve; });
+    return open(spec);
+  };
   await backend.edits.addTracksToPlaylist(playlist.id, Array.from({ length: 20_000 }, (_, index) => String(100000 + index)), false);
   __setBackend(backend);
   let payload: TrackDrag | null = null;
-  mountSource({ source: { kind: "playlist", id: playlist.id }, sort: "trackNo", descending: false, query: "" }, drag => { payload = drag; });
+  const spec: ViewSpec = { source: { kind: "playlist", id: playlist.id }, sort: "trackNo", descending: false, query: "" };
+  const receive = (drag: TrackDrag | null) => { payload = drag; };
+  mountSource(spec, receive);
   await settle(); await settle();
   const rows = host.querySelectorAll('[role="row"][aria-selected]');
   for (const [at, modifier] of [[2, false], [0, true]] as const) {
@@ -195,10 +204,21 @@ it("does not synchronously walk a large sparse playlist tail on dragstart", asyn
     await settle();
   }
   expect(host.querySelectorAll('[role="row"][aria-selected="true"]')).toHaveLength(2);
-  sparseReads.count = 0;
-  dragSelected();
-  expect(sparseReads.count).toBeLessThan(512);
-  const drag = payload as TrackDrag | null;
-  expect(drag?.row.id).toBe("100000");
-  expect(await drag?.orderedIds).toEqual(["100000", "100002"]);
+  if (swapping) {
+    hold = true;
+    mountSource({ ...spec, sort: "title", descending: true }, receive);
+    await settle();
+    expect(release).toBeDefined();
+  }
+  try {
+    sparseReads.count = 0;
+    dragSelected();
+    expect(sparseReads.count).toBeLessThan(512);
+    const drag = payload as TrackDrag | null;
+    expect(drag?.row.id).toBe("100000");
+    if (swapping) await expect(drag?.orderedIds).rejects.toThrow("The track list changed");
+    else expect(await drag?.orderedIds).toEqual(["100000", "100002"]);
+  } finally {
+    if (swapping) { release(); await settle(); }
+  }
 });

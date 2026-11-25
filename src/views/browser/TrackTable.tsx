@@ -1693,7 +1693,8 @@ export const TrackTable = memo(function TrackTable({
       const cached: string[] = [];
       const seen = new Set<string>();
       let allFresh = true;
-      for (let i = 0; i < view.count && (repeatedRows || seen.size < selection.ids.size); i += 1) {
+      const sourceReady = !view.swapping && !view.loading;
+      for (let i = 0; sourceReady && i < view.count && (repeatedRows || seen.size < selection.ids.size); i += 1) {
         const at = view.rowAt(i);
         if (!view.fresh(i)) allFresh = false;
         if (at && view.fresh(i) && selection.ids.has(at.id)) {
@@ -1707,11 +1708,11 @@ export const TrackTable = memo(function TrackTable({
       }
       let orderedIds: Promise<readonly string[]> | undefined;
       const complete = seen.size === selection.ids.size && (!repeatedRows || allFresh);
-      if (view.swapping || view.loading || !complete) {
+      if (!sourceReady || !complete) {
         const chosen = selection.ids;
         // Capture this source handle now. A drop can finish before its ranks
         // arrive; the queued add must wait rather than copy in click order.
-        orderedIds = (view.swapping || view.loading
+        orderedIds = (!sourceReady
           ? Promise.reject(new Error(translate("The track list changed. Start the drag again.")))
           : listedIds()).then(listed => {
           const ranked = listed.filter(id => chosen.has(id));
