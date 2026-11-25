@@ -281,6 +281,10 @@ impl Source for StateSource {
         self.0.upgrade()?.library().ok()
     }
 
+    fn analysis_file(&self, library: &Arc<rbl_index::Library>, row: rbl_index::Row) -> Option<std::path::PathBuf> {
+        self.0.upgrade()?.analysis_file_for_snapshot(library, row as usize)
+    }
+
     fn share_root(&self) -> std::path::PathBuf {
         self.0.upgrade().map(|state| state.share_root()).unwrap_or_default()
     }
@@ -1194,4 +1198,63 @@ mod history_tests {
         assert_eq!(error.kind, crate::error::ErrorKind::NotFound);
         assert_eq!(name(&state), original);
     }
+
+    #[test]
+    fn newly_saved_analysis_is_available_to_link_before_the_queue_reload() {
+        use rbl_dbserver::catalog::{Analysis, Catalog};
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let track = rbl_db::fixture::track_id(0);
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
+        state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        drop(db);
+        crate::backups::create(&state).unwrap();
+        let original = state.library().unwrap();
+        let row = original.row_of(&track).unwrap() as usize;
+        assert_eq!(original.analysis_path.get(row), "");
+        let source = StateSource(Arc::downgrade(&state), Arc::new(|_, _| {}),
+            rbl_prolink::DeviceSettings::default(), rbl_link::KeyOrder::Musical);
+        let catalog = rbl_link::IndexCatalog::new(Arc::new(source), rbl_link::Played::default());
+        let wanted = [Analysis::WaveformPreview,
+            Analysis::Tag { fourcc: *b"PWV4", extension: *b"EXT" },
+            Analysis::Tag { fourcc: *b"PWV6", extension: *b"2EX" }];
+        let numeric = track.parse().unwrap();
+        for what in &wanted { assert!(catalog.analysis(numeric, what).is_none()); }
+        let relative = state.write(|writer| writer.analysis_data_path_for(&track)).unwrap();
+        let dat = rbl_anlz::resolve(&location.share_root, &relative);
+        std::fs::create_dir_all(dat.parent().unwrap()).unwrap();
+        let mut blue = rbl_anlz::AnlzBuilder::new();
+        blue.waveform_preview(b"PWAV", &[0x29; 400]).waveform_preview(b"PWV2", &[9; 100]);
+        std::fs::write(&dat, blue.finish()).unwrap();
+        let mut rgb = rbl_anlz::AnlzBuilder::new();
+        rgb.waveform_scroll(b"PWV4", 6, &[9; 7200]);
+        std::fs::write(rbl_anlz::sibling(&dat, "EXT"), rgb.finish()).unwrap();
+        let mut bands = rbl_anlz::AnlzBuilder::new();
+        bands.waveform_scroll(b"PWV6", 3, &[9; 3600]);
+        std::fs::write(rbl_anlz::sibling(&dat, "2EX"), bands.finish()).unwrap();
+        // The successful analysis path publishes files, registers the row,
+        // and notes the association before the queue's eventual index reload.
+        state.write(|writer| writer.set_analysis(&track, &rbl_db::write::AnalysisWrite {
+            bpm_x100: 12000, key: None, analysis_path: &relative, length_sec: None,
+        })).unwrap();
+        state.note_analysis(&track, &relative);
+        assert!(Arc::ptr_eq(&original, &state.library().unwrap()));
+        for kind in ["mono", "colour", "bands"] {
+            assert_ne!(crate::commands::waveform_bytes(&state, &original, &location.share_root,
+                &track, kind, None, None).unwrap(), [] as [u8; 0]);
+        }
+        let during: Vec<_> = wanted.iter().map(|what| catalog.analysis(numeric, what)).collect();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (reloaded, _) = rbl_index::load(&db).unwrap();
+        state.set_library(reloaded, false, db.schema().db_version, 0, location);
+        let after: Vec<_> = wanted.iter().map(|what| catalog.analysis(numeric, what)).collect();
+        assert!(after.iter().all(|bytes| bytes.as_ref().is_some_and(|bytes| !bytes.is_empty())),
+            "all three preview APIs serve the generated files after reload");
+        assert!(during == after, "completed analysis should not wait for the queue's final reload: during={:?}, after={:?}",
+            during.iter().map(|bytes| bytes.as_ref().map(Vec::len)).collect::<Vec<_>>(),
+            after.iter().map(|bytes| bytes.as_ref().map(Vec::len)).collect::<Vec<_>>());
+    }
+
 }

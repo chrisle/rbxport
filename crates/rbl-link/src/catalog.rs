@@ -48,6 +48,12 @@ pub enum KeyOrder {
 pub trait Source: Send + Sync {
     /// The library as it is now.
     fn library(&self) -> Option<Arc<Library>>;
+    /// The analysis file bound to the captured index. Mutable sources must
+    /// capture its owner, association and share root together before file IO.
+    fn analysis_file(&self, library: &Arc<Library>, row: rbl_index::Row) -> Option<PathBuf> {
+        let relative = library.analysis_path.get(row as usize);
+        (!relative.is_empty()).then(|| rbl_anlz::resolve(&self.share_root(), relative))
+    }
     fn key_notation(&self) -> KeyNotation {
         KeyNotation::Alphanumeric
     }
@@ -1127,11 +1133,7 @@ impl IndexCatalog {
             }
             cache.epoch
         };
-        let relative = library.analysis_path.get(row as usize);
-        if relative.is_empty() {
-            return None;
-        }
-        let dat_path = rbl_anlz::resolve(&self.source.share_root(), relative);
+        let dat_path = self.source.analysis_file(library, row)?;
         let parsed = Arc::new(Parsed {
             library: owner,
             row,

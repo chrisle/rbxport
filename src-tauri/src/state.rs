@@ -574,12 +574,16 @@ impl AppState {
         // and opening reads `inner`, so taking them the other way round here
         // would be a deadlock waiting for a reload during a point read.
         *self.reader.lock() = None;
-        // What the new index holds now needs no overlay. An analysis that
-        // landed after this read began is not in it, so its entry stays.
-        self.fresh_analysis.lock().retain(|track, _| {
-            library.row_of(track).is_some_and(|row| library.analysis_path.get(row as usize).is_empty())
-        });
+        // Keep the overlay and its owner change atomic. Snapshot-bound
+        // readers take these locks in the same order, without file IO.
+        let mut fresh = self.fresh_analysis.lock();
         let mut inner = self.inner.write();
+        let same_master = inner.location.as_ref().is_some_and(|old| old.master_db == location.master_db);
+        // A same-master analysis that landed after this index read stays;
+        // another master can reuse the ID but never its pending association.
+        fresh.retain(|track, _| same_master
+            && library.row_of(track).is_some_and(|row| library.analysis_path.get(row as usize).is_empty()));
+        drop(fresh);
         // Another library's ids name other tracks: its rows start unmarked,
         // as rekordbox's do when it opens another master database.
         if inner.location.as_ref().is_some_and(|old| old.master_db != location.master_db) {
@@ -610,6 +614,25 @@ impl AppState {
             return indexed.to_owned();
         }
         self.registered_analysis(track).unwrap_or_default()
+    }
+
+    /// Bind a LINK request's owner, association and root before releasing
+    /// state locks. A retired snapshot must not read another library's files.
+    pub(crate) fn analysis_file_for_snapshot(&self, library: &Arc<Library>, row: usize) -> Option<std::path::PathBuf> {
+        let (relative, share) = {
+            let fresh = self.fresh_analysis.lock();
+            let inner = self.inner.read();
+            if !inner.library.as_ref().is_some_and(|current| Arc::ptr_eq(current, library)) {
+                return None;
+            }
+            let indexed = library.analysis_path.get(row);
+            let relative = if indexed.is_empty() {
+                library.ids.get(row).and_then(|id| fresh.get(&id.to_string()))?.clone()
+            } else { indexed.to_owned() };
+            (relative, inner.location.as_ref()?.share_root.clone())
+        };
+        // Pure path resolution; the caller reads it without either lock.
+        (!relative.is_empty()).then(|| rbl_anlz::resolve(&share, &relative))
     }
 
     /// A track's analysis `.DAT` when it was registered after the index was
@@ -1340,5 +1363,51 @@ mod played_tests {
         assert_eq!(state.played_tracks(), ["1"]);
         state.set_library(load(&two), true, None, 0, two);
         assert_eq!(state.played_tracks(), [] as [String; 0]);
+    }
+}
+
+#[cfg(test)]
+mod analysis_owner_tests {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_fresh_analysis_note_survives_same_master_reload_but_not_a_reused_id_in_another_master() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = rbl_db::fixture::build(&dir.path().join("first"), rbl_db::fixture::Shape::default()).unwrap();
+        let second = rbl_db::fixture::build(&dir.path().join("second"), rbl_db::fixture::Shape::default()).unwrap();
+        let read = |location: &rbl_db::LibraryLocation| {
+            let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+            rbl_index::load(&db).unwrap().0
+        };
+        let state = AppState::with_backups(dir.path().join("backups"));
+        let track = rbl_db::fixture::track_id(0);
+        state.set_library(read(&first), false, None, 0, first.clone());
+        state.note_analysis(&track, "/first/ANLZ0000.DAT");
+        let expected_first = rbl_anlz::resolve(&first.share_root, "/first/ANLZ0000.DAT");
+        let previous = state.library().unwrap();
+        let row = previous.row_of(&track).unwrap() as usize;
+        let captured = state.analysis_file_for_snapshot(&previous, row).unwrap();
+        assert_eq!(captured, expected_first);
+        state.set_library(read(&first), false, None, 0, first);
+        assert_eq!(state.registered_analysis(&track).as_deref(), Some("/first/ANLZ0000.DAT"));
+        let current = state.library().unwrap();
+        assert_eq!(state.analysis_file_for_snapshot(&previous, row), None, "old snapshots cannot borrow the current overlay");
+        assert_eq!(state.analysis_file_for_snapshot(&current, row), Some(expected_first.clone()));
+        state.set_library(read(&second), false, None, 0, second.clone());
+        assert_eq!(state.registered_analysis(&track), None, "the other master owns the reused content ID");
+        state.note_analysis(&track, "/second/ANLZ0000.DAT");
+        assert_eq!(state.analysis_file_for_snapshot(&current, row), None);
+        assert_eq!(captured, expected_first, "a captured path retains its original root after a switch");
+        assert_eq!(state.analysis_file_for_snapshot(&state.library().unwrap(), row),
+            Some(rbl_anlz::resolve(&second.share_root, "/second/ANLZ0000.DAT")));
+        rbl_db::fixture::set_analysis_path(&second, 0, "/indexed.DAT").unwrap();
+        state.set_library(read(&second), false, None, 0, second.clone());
+        let indexed = state.library().unwrap();
+        let indexed_file = state.analysis_file_for_snapshot(&indexed, row);
+        assert_eq!(indexed_file, Some(rbl_anlz::resolve(&second.share_root, "/indexed.DAT")));
+        assert_eq!(state.registered_analysis(&track), None, "the new index supersedes its overlay");
+        state.set_library(read(&second), false, None, 0, second);
+        assert_eq!(state.analysis_file_for_snapshot(&indexed, row), None, "indexed paths also require the current owner");
     }
 }
