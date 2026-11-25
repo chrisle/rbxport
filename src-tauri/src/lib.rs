@@ -332,6 +332,13 @@ fn window_geometry() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 fn fit_window<R: tauri::Runtime>(window: &tauri::Window<R>) {
     use tauri::{PhysicalPosition, PhysicalSize};
 
+    // Windows' maximized outer frame extends beyond the work area. Moving or
+    // resizing it clears maximization in Tao, undoing the restored state.
+    // An unreadable state is also a reason to leave native geometry alone.
+    if !matches!(window.is_maximized(), Ok(false)) {
+        return;
+    }
+
     // The monitor the window is on, or the primary one when it is off every
     // screen and Tauri cannot say which it belongs to.
     let monitor = match window.current_monitor() {
