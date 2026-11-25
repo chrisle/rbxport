@@ -35,6 +35,7 @@ import type {
 } from "@/ipc/types";
 import { TREE_ROOT } from "@/ipc/types";
 import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
+import { watchDetailWaveforms } from "@/lib/detailWaveformCache";
 import { clearWaveformPreviewCache } from "@/views/browser/WaveformPreview";
 import { TreeView } from "@/views/tree/TreeView";
 import { ConnectedTopBar } from "@/views/topbar/TopBar";
@@ -750,6 +751,7 @@ function AppBody() {
     let cancelled = false;
     let stopReady: (() => void) | undefined;
     let stopProblem: (() => void) | undefined;
+    let stopWaveforms: (() => void) | undefined;
     let revision = 0;
 
     /** One attempt at the first load. False means the library is not up yet. */
@@ -792,6 +794,7 @@ function AppBody() {
     void (async () => {
       const backend = await getBackend();
       if (cancelled) return;
+      stopWaveforms = watchDetailWaveforms(backend);
       // Subscribed before the first attempt, not after. The library can become
       // ready in the gap between a failed attempt and a later subscription,
       // and that gap is exactly where the window used to get stuck.
@@ -825,6 +828,7 @@ function AppBody() {
       cancelled = true;
       stopReady?.();
       stopProblem?.();
+      stopWaveforms?.();
     };
     // `restored` is read once and never changes, but the rule cannot know that
     // and the id is genuinely read here.

@@ -14,21 +14,10 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 
 import { drawPcmWave, drawWave, strideOf, waveformKindOf, type HalfWaveform, type WavePalette } from "@/canvas";
 import { getBackend } from "@/ipc/client";
-import type { WaveformKind } from "@/ipc/types";
+import { forgetDetailWaveform, loadDetailWaveform, subscribeDetailWaveform } from "@/lib/detailWaveformCache";
 import { exactBackingSize } from "@/lib/canvasSize";
 import { detailWaveOriginMs, detailWaveWindow, waveSlice } from "@/lib/player";
 import { usePreferences } from "@/store/usePreferences";
-
-/** Raw waveform bytes per track. Small — a few hundred bytes each. */
-const bytesByTrack = new Map<string, Uint8Array>();
-/** In-flight fetches, shared so StrictMode's double effect does not double-fetch. */
-const inFlight = new Map<string, Promise<Uint8Array>>();
-/**
- * Bumped per track each time its bytes are dropped, so a fetch that set off
- * before then neither fills the cache nor is shared with a newer request:
- * while an analysis draws the track, its bytes change several times a second.
- */
-const editions = new Map<string, number>();
 
 /** Waveform bytes are not interchangeable: PCM is eight bytes per point and
  * PWV7 is three. Keep their format beside the response during a zoom switch. */
@@ -47,34 +36,6 @@ interface PcmBuffer extends LoadedWaveform {
   toMs: number;
 }
 
-async function load(trackId: string, kind: WaveformKind): Promise<Uint8Array> {
-  const key = `${trackId}:${kind}`;
-  const cached = bytesByTrack.get(key);
-  if (cached) return cached;
-  const existing = inFlight.get(key);
-  if (existing) return existing;
-
-  const edition = editions.get(trackId) ?? 0;
-  const current = () => (editions.get(trackId) ?? 0) === edition;
-  const pending = (async () => {
-    try {
-      const backend = await getBackend();
-      const data = await backend.trackWaveform(trackId, kind);
-      // A missing companion/tag is an empty success. Do not keep that miss
-      // across a later mount after the analysis files become available.
-      if (current() && data.length > 0) bytesByTrack.set(key, data);
-      return data;
-    } catch {
-      // A track without analysis simply stays blank.
-      return new Uint8Array();
-    } finally {
-      if (current()) inFlight.delete(key);
-    }
-  })();
-  inFlight.set(key, pending);
-  return pending;
-}
-
 /**
  * The bytes to draw for `palette`, and the palette they are in. A deck's
  * overview whose palette tag is missing (a 3Band `PWV6` on a track with no
@@ -85,9 +46,9 @@ async function load(trackId: string, kind: WaveformKind): Promise<Uint8Array> {
  * has no such fallback here.
  */
 async function loadTag(trackId: string, palette: WavePalette, detail: boolean): Promise<LoadedTag> {
-  const bytes = await load(trackId, waveformKindOf(palette, detail));
+  const bytes = await loadDetailWaveform(trackId, waveformKindOf(palette, detail));
   if (bytes.length > 0 || detail || palette === "blue") return { trackId, bytes, palette };
-  return { trackId, bytes: await load(trackId, waveformKindOf("blue", false)), palette: "blue" };
+  return { trackId, bytes: await loadDetailWaveform(trackId, waveformKindOf("blue", false)), palette: "blue" };
 }
 
 export interface WaveformDetailProps {
@@ -111,16 +72,6 @@ export interface WaveformDetailProps {
   inset?: { top: number; bottom: number };
   /** A source-audio window to draw as a stereo PCM envelope instead of PWV7. */
   pcmWindow?: { fromMs: number; toMs: number; drawFromMs: number; drawToMs: number } | undefined;
-}
-
-/** Drops a track's bytes: its analysis was rewritten, or drew further. */
-function forget(trackId: string): void {
-  editions.set(trackId, (editions.get(trackId) ?? 0) + 1);
-  for (const cache of [bytesByTrack, inFlight]) {
-    for (const key of [...cache.keys()]) {
-      if (key.startsWith(`${trackId}:`)) cache.delete(key);
-    }
-  }
 }
 
 export const WaveformDetail = memo(function WaveformDetail({
@@ -200,21 +151,22 @@ export const WaveformDetail = memo(function WaveformDetail({
   useEffect(() => {
     let live = true;
     let stop: (() => void) | undefined;
+    const stopChanged = subscribeDetailWaveform(trackId, () => setRevision(r => r + 1));
     void (async () => {
       const backend = await getBackend();
       if (!live) return;
       const refetch = (changed: string) => {
         if (changed !== trackId) return;
-        forget(trackId);
+        forgetDetailWaveform(trackId);
         setRevision((r) => r + 1);
       };
-      const stopChanged = backend.onAnalysisChanged(refetch);
       // An analysis drawing the track for a deck has decoded more of it.
       const stopProgress = backend.onAnalysisProgress(refetch);
-      stop = () => { stopChanged(); stopProgress(); };
+      stop = stopProgress;
     })();
     return () => {
       live = false;
+      stopChanged();
       stop?.();
     };
   }, [trackId]);

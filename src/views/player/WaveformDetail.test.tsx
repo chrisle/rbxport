@@ -21,9 +21,18 @@ vi.mock("@/canvas", () => ({
   })[palette],
 }));
 
-import { __setBackend } from "@/ipc/client";
+import { __setBackend as setIpcBackend } from "@/ipc/client";
+import { watchDetailWaveforms } from "@/lib/detailWaveformCache";
 import type { Backend } from "@/ipc/types";
 import { WaveformDetail } from "./WaveformDetail";
+
+let stopCache: (() => void) | undefined;
+// The app shell owns this subscription even when no deck is shown.
+function __setBackend(backend: Backend | null) {
+  stopCache?.();
+  setIpcBackend(backend);
+  stopCache = backend ? watchDetailWaveforms(backend) : undefined;
+}
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -366,4 +375,30 @@ it.each([false, true])("an invalidated old read cannot replace newer cached byte
   await settle();
   expect(read).toHaveBeenCalledTimes(2);
   expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
+});
+
+
+it.each([false, true])("refreshes a previously loaded track after analysis changes while not shown (all hidden=%s)", async hidden => {
+  const a = `generated-unloaded-A-${hidden}`;
+  const b = `generated-unloaded-B-${hidden}`;
+  const before = new Uint8Array([1, 1, 1, 1, 1, 1]);
+  const after = new Uint8Array([90, 50, 20, 80, 40, 10]);
+  let updated = false;
+  const listeners = new Set<(id: string) => void>();
+  const read = vi.fn((id: string) => Promise.resolve(id === a && updated ? after : before));
+  __setBackend({ trackWaveform: read,
+    onAnalysisChanged: (listener: (id: string) => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    onAnalysisProgress: () => () => {},
+  } as unknown as Backend);
+  const show = (id: string) => act(() => root.render(<WaveformDetail trackId={id} progress={0.5} span={1} width={400} height={80} detail />));
+  show(a); await settle();
+  expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), before, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
+  if (hidden) act(() => root.render(null));
+  else show(b);
+  await settle();
+  updated = true;
+  act(() => { for (const listener of listeners) listener(a); }); await settle();
+  show(a); await settle();
+  expect(read.mock.calls.filter(([id]) => id === a)).toHaveLength(2);
+  expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), after, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
 });
