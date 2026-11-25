@@ -658,3 +658,90 @@ it.each(["unloaded tick", "deck error"] as const)("releases a ready-start gate a
   expect(deck.playing).toBe(false);
   expect(deck.duration).toBe(0);
 });
+
+it.each(["play", "pause", "scheduled"] as const)("ignores an older %s rejection after a newer transport intent", async (command) => {
+  finish(loads[0]!);
+  await settle();
+  let rejectOld: (error: Error) => void = () => {};
+  const old = new Promise<void>((_, reject) => { rejectOld = reject; });
+  const next = backend();
+  if (command === "pause") {
+    act(() => deck.toggle());
+    await settle();
+    next.deckPause = () => old;
+  } else if (command === "play") next.deckPlay = () => old;
+  else next.deckPlayAfter = () => old;
+  __setBackend(next);
+  act(() => command === "scheduled" ? deck.playAfter(200) : deck.toggle());
+  await settle();
+  __setBackend(backend());
+  if (command !== "pause") {
+    act(() => deck.toggle());
+    await settle();
+  }
+  act(() => deck.toggle());
+  await settle();
+  expect(deck.playing).toBe(true);
+  await act(async () => { rejectOld(new Error("obsolete transport failure")); await done(); });
+  expect(deck.playing).toBe(true);
+  expect(deck.error).toBeNull();
+});
+
+it.each([false, true])("ignores an old load rejection with replacement Play=%s and preserves its first-frame wait", async (playFirst) => {
+  let now = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  let frame: FrameRequestCallback | undefined;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frame = callback; return 1; });
+  finish(loads[0]!);
+  await settle();
+  let rejectOld: (error: Error) => void = () => {};
+  __setBackend({ ...backend(), deckPlay: () => new Promise<void>((_, reject) => { rejectOld = reject; }) });
+  act(() => deck.toggle());
+  await settle();
+  // Unload resets playback intent without a newer Play/Pause version.
+  __setBackend(backend());
+  await select(null);
+  await settle();
+  await select("replacement-transport-owner");
+  finish(loads.at(-1)!);
+  await settle();
+  if (playFirst) {
+    act(() => deck.toggle());
+    await settle();
+  }
+  await act(async () => { rejectOld(new Error("old load play failed")); await done(); });
+  expect(deck.playing).toBe(playFirst);
+  expect(deck.error).toBeNull();
+  if (!playFirst) {
+    act(() => deck.toggle());
+    await settle();
+  }
+  now += 80;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+  act(() => tick({ ...emptyTick, b: { ...emptyDeck, loadId: loads.at(-1)!.id, loaded: true, playing: true, totalFrames: RATE * 300 } }));
+  now += 80;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+  act(() => tick({ ...emptyTick, b: { ...emptyDeck, loadId: loads.at(-1)!.id, loaded: true, playing: true, frames: RATE / 10, totalFrames: RATE * 300 } }));
+  expect(deck.positionNow()).toBeCloseTo(0.1);
+});
+
+it.each(["play", "pause", "scheduled"] as const)("still reports the current %s failure", async (command) => {
+  finish(loads[0]!);
+  await settle();
+  if (command === "pause") {
+    act(() => deck.toggle());
+    await settle();
+  }
+  const next = backend();
+  const fail = () => Promise.reject(new Error("current transport failure"));
+  if (command === "pause") next.deckPause = fail;
+  else if (command === "play") next.deckPlay = fail;
+  else next.deckPlayAfter = fail;
+  __setBackend(next);
+  act(() => command === "scheduled" ? deck.playAfter(200) : deck.toggle());
+  await settle();
+  expect(deck.playing).toBe(false);
+  expect(deck.error).toBe("current transport failure");
+});

@@ -655,6 +655,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     }
     desiredDelay.current = null;
     const version = ++transportVersion.current;
+    const request = targetLoad.current;
     // The button follows at once rather than on the next tick, which is up to
     // a tenth of a second away.
     if (!isReady()) {
@@ -675,10 +676,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     void (async () => {
       try {
         const backend = await getBackend();
-        if (version !== transportVersion.current || !isReady()) return;
+        if (version !== transportVersion.current || request !== targetLoad.current || !isReady()) return;
         if (wanted) await backend.deckPlay(DECK);
         else await backend.deckPause(DECK);
       } catch (failure) {
+        if (version !== transportVersion.current || request !== targetLoad.current) return;
         desiredPlaying.current = false;
         readyStart.current = null;
         setPlaying(false);
@@ -695,6 +697,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       desiredPlaying.current = true;
       desiredDelay.current = wait;
       const version = ++transportVersion.current;
+      const request = targetLoad.current;
       if (!isReady()) {
         setPlaying(true);
         anchor.current = pinned(anchor.current, positionRef.current, performance.now());
@@ -706,9 +709,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       void (async () => {
         try {
           const backend = await getBackend();
-          if (version !== transportVersion.current || !isReady()) return;
+          if (version !== transportVersion.current || request !== targetLoad.current || !isReady()) return;
           await backend.deckPlayAfter(DECK, wait);
         } catch (failure) {
+          if (version !== transportVersion.current || request !== targetLoad.current) return;
           desiredPlaying.current = false;
           setPlaying(false);
           setError(reasonFrom(failure));
