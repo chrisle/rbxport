@@ -213,7 +213,7 @@ describe("Database management", () => {
   const drives = [local, drive];
 
   async function mountDatabase(backend: Partial<Backend>, readOnly = false, loaded = true) {
-    __setBackend({ listBackups, findDuplicates: vi.fn(), ...backend } as unknown as Backend);
+    __setBackend({ listBackups, findDuplicates: vi.fn(), onDevicesChanged: () => () => {}, ...backend } as unknown as Backend);
     act(() => root.render(
       <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update, reset: vi.fn() }}>
         <AdvancedPane tab="database" summary={loaded ? { trackCount: 1, playlistCount: 1, dbVersion: "6000", readOnly } as never : null} />
@@ -243,6 +243,62 @@ describe("Database management", () => {
   it("is greyed out with only one drive, and while rekordbox runs", async () => {
     expect((await mountDatabase({ databaseDrives: vi.fn().mockResolvedValue(drives.slice(0, 1)) }))!.disabled).toBe(true);
     expect((await mountDatabase({ databaseDrives: vi.fn().mockResolvedValue(drives) }, true))!.disabled).toBe(true);
+  });
+
+  it.each([false, true])("refreshes mounted and removed database targets without reopening Preferences (read-only=%s)", async (readOnly) => {
+    let changed = () => {};
+    const stop = vi.fn();
+    const databaseDrives = vi.fn().mockResolvedValueOnce([local]).mockResolvedValueOnce(drives).mockResolvedValueOnce([local]);
+    const switchLibrary = vi.fn();
+    const select = await mountDatabase({ databaseDrives, switchLibrary,
+      onDevicesChanged: listener => { changed = listener; return stop; } }, readOnly);
+    expect(select!.disabled).toBe(true);
+    await act(async () => { changed(); await Promise.resolve(); });
+    expect([...select!.options].map(option => option.value)).toEqual(drives.map(drive => drive.masterDb));
+    expect(select!.disabled).toBe(readOnly);
+    expect(select!.value).toBe(local.masterDb);
+    await act(async () => { changed(); await Promise.resolve(); });
+    expect([...select!.options].map(option => option.value)).toEqual([local.masterDb]);
+    expect(select!.disabled).toBe(true);
+    expect(switchLibrary).not.toHaveBeenCalled();
+    act(() => root.render(null));
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])("ignores older drive scans and replies after the pane is disposed (failure=%s)", async (failure) => {
+    let changed = () => {};
+    let old = () => {};
+    let late: (value: typeof drives) => void = () => {};
+    const databaseDrives = vi.fn().mockImplementationOnce(() => new Promise((resolve, reject) => { old = () => failure ? reject(new Error("old scan failed")) : resolve(drives); }))
+      .mockResolvedValueOnce([local]).mockImplementationOnce(() => new Promise(resolve => { late = resolve; }));
+    const select = await mountDatabase({ databaseDrives,
+      onDevicesChanged: listener => { changed = listener; return () => {}; } });
+    await act(async () => { changed(); await Promise.resolve(); });
+    await act(async () => { old(); await Promise.resolve(); });
+    expect([...select!.options].map(option => option.value)).toEqual([local.masterDb]);
+    expect(select!.disabled).toBe(true);
+    await act(async () => { changed(); await Promise.resolve(); });
+    act(() => root.render(null));
+    await act(async () => { late(drives); await Promise.resolve(); });
+    expect(host.textContent).toBe("");
+    act(() => changed());
+    expect(databaseDrives).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not undo a confirmed switch with a scan started before it completed", async () => {
+    let changed = () => {};
+    let stale: (value: typeof drives) => void = () => {};
+    const databaseDrives = vi.fn().mockResolvedValueOnce(drives)
+      .mockImplementationOnce(() => new Promise(resolve => { stale = resolve; }));
+    const switchLibrary = vi.fn().mockResolvedValue(undefined);
+    const select = await mountDatabase({ databaseDrives, switchLibrary, confirm: vi.fn().mockResolvedValue(true),
+      onDevicesChanged: listener => { changed = listener; return () => {}; } });
+    await act(async () => { changed(); await Promise.resolve(); });
+    await choose(select!, drive.masterDb);
+    expect(select!.value).toBe(drive.masterDb);
+    await act(async () => { stale(drives); await Promise.resolve(); });
+    expect(select!.value).toBe(drive.masterDb);
+    expect(switchLibrary).toHaveBeenCalledExactlyOnceWith(drive.masterDb);
   });
 
   it("can choose the sole available library when no library is currently open", async () => {

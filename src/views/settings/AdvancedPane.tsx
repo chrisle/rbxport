@@ -305,13 +305,23 @@ function DatabaseManagementSection({ readOnly }: { readOnly: boolean }) {
   const [switching, setSwitching] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
 
+  const scan = useRef(0);
   useEffect(() => {
     let live = true;
-    void getBackend()
-      .then((backend) => backend.databaseDrives())
-      .then((found) => { if (live) setDrives(found); })
-      .catch(() => { if (live) setDrives([]); });
-    return () => { live = false; };
+    let stop: (() => void) | undefined;
+    void getBackend().then((backend) => {
+      if (!live) return;
+      const refresh = () => {
+        if (!live) return;
+        const request = ++scan.current;
+        void backend.databaseDrives()
+          .then((found) => { if (live && request === scan.current) setDrives(found); })
+          .catch(() => { if (live && request === scan.current) setDrives([]); });
+      };
+      stop = backend.onDevicesChanged(refresh);
+      refresh();
+    }).catch(() => {});
+    return () => { live = false; stop?.(); };
   }, []);
 
   const current = drives.find((drive) => drive.current)?.masterDb ?? "";
@@ -327,6 +337,8 @@ function DatabaseManagementSection({ readOnly }: { readOnly: boolean }) {
     setFailed(null);
     try {
       await backend.switchLibrary(masterDb);
+      // A scan begun before the switch must not restore its old current flag.
+      scan.current++;
       setDrives((all) => all.map((drive) => ({ ...drive, current: drive.masterDb === masterDb })));
     } catch {
       // rekordbox says only this; the reason is in the log.
