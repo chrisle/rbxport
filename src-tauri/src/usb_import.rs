@@ -1320,7 +1320,7 @@ mod tests {
         assert_eq!(state.writer_opens(), opens);
         assert_eq!((report.histories, report.skipped), (0, 1));
         assert_eq!(report.warnings, vec!["History 'Mixed' contains tracks that could not be matched to this library; it was left on the USB.".to_owned()]);
-        assert!(imported_history_rows(&state, "%").is_empty());
+        assert_eq!(imported_history_rows(&state, "%"), []);
         assert_eq!(std::fs::read(one).unwrap(), before);
     }
 
