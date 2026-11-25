@@ -150,7 +150,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Embedding test manifest failed: $LASTEXITCODE" }
           Push-Location src-tauri
           try {
-            foreach ($filter in @('backup', 'file_drop', 'system_dates')) {
+            foreach ($filter in @('backup', 'file_drop', 'system_dates', 'commands::tests::database_')) {
               & $testExe[0].executable $filter
               if ($LASTEXITCODE -ne 0) { throw "$filter tests failed: $LASTEXITCODE" }
             }

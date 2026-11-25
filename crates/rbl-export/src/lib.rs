@@ -58,6 +58,17 @@ pub enum ExportError {
     OneLibrary(String),
 }
 
+// Keep actual filesystem failures typed until the app classifies them. SQL,
+// key and schema errors retain their own category rather than matching text.
+impl From<rbl_onelibrary::Error> for ExportError {
+    fn from(error: rbl_onelibrary::Error) -> Self {
+        match error {
+            rbl_onelibrary::Error::Io(error) => Self::Io(context("could not write exportLibrary.db".into())(error)),
+            error => Self::OneLibrary(error.to_string()),
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, ExportError>;
 
 /// Which rekordbox library root a fresh volume should use.
@@ -2076,7 +2087,7 @@ fn export_cancellable_inner(
     // Carry device colour labels into both database formats.
     let existing_database = db_dir.join("exportLibrary.db");
     let settings = if existing_database.exists() {
-        Some(rbl_onelibrary::settings::StickSettings::read(&existing_database).map_err(|e| one_library_error(&e))?)
+        Some(rbl_onelibrary::settings::StickSettings::read(&existing_database).map_err(ExportError::from)?)
     } else { legacy_menus::read(&db_dir.join("export.pdb"), defaults)? };
     // The artwork table names the small image of each; a player derives the
     // others from the same name [ASSUME: what the `artwork` row of a
@@ -2689,7 +2700,7 @@ fn write_one_library(
     // An unreadable existing database is refused, preserving its settings.
     let fresh = || defaults.cloned().unwrap_or_default();
     let settings = if path.exists() {
-        StickSettings::read(&path).map_err(|e| one_library_error(&e))?
+        StickSettings::read(&path).map_err(ExportError::from)?
     } else {
         fresh()
     };
@@ -2697,10 +2708,10 @@ fn write_one_library(
     // the previous attempt's file; replacing it is correct, keeping it is not.
     let staging = tempfile::tempdir_in(db_dir)?;
     let staged = staging.path().join("exportLibrary.db");
-    let mut builder = Builder::create_with(&staged, &settings).map_err(|e| one_library_error(&e))?;
+    let mut builder = Builder::create_with(&staged, &settings).map_err(ExportError::from)?;
 
     for (id, image) in artwork_paths {
-        builder.add_image(i64::from(*id), image).map_err(|e| one_library_error(&e))?;
+        builder.add_image(i64::from(*id), image).map_err(ExportError::from)?;
     }
     // Every tag the library has, whether or not a track here carries it,
     // which is what rekordbox lists; then only the memberships of tags that
@@ -2720,7 +2731,7 @@ fn write_one_library(
                 i64::from(tag.attribute),
                 i64::try_from(tag.parent).unwrap_or(0),
             )
-            .map_err(|e| one_library_error(&e))?;
+            .map_err(ExportError::from)?;
         known_tags.insert(tag.id);
     }
 
@@ -2732,14 +2743,14 @@ fn write_one_library(
         let parent = playlists.iter().position(|p| p.id != 0 && p.id == playlist.parent_id).map_or(0, |p| i64::from(playlist_ids[p]));
         builder
             .add_playlist_node(playlist_id, &playlist.name, parent, i64::from(positions[i]), playlist.folder)
-            .map_err(|e| one_library_error(&e))?;
+            .map_err(ExportError::from)?;
         let mut position: i64 = 0;
         for &track_index in &playlist.track_indices {
             let Some(Some(export_id)) = export_ids.get(track_index).copied() else { continue };
             position += 1;
             builder
                 .add_to_playlist(playlist_id, i64::from(export_id), position)
-                .map_err(|e| one_library_error(&e))?;
+                .map_err(ExportError::from)?;
         }
     }
 
@@ -2747,22 +2758,22 @@ fn write_one_library(
     // device name is the one the stick has been given, and empty until
     // then: rekordbox writes it empty on a fresh export [OBS 7.2.11].
     if let Some(path) = existing_database.filter(|p| p.exists()) {
-        builder.preserve_cues(path).map_err(|e| one_library_error(&e))?;
+        builder.preserve_cues(path).map_err(ExportError::from)?;
     }
     for track in tracks {
         if let Some(cues) = &track.cues {
-            builder.replace_cues(i64::from(track.export_id), cues).map_err(|e| one_library_error(&e))?;
+            builder.replace_cues(i64::from(track.export_id), cues).map_err(ExportError::from)?;
         }
     }
     for history in &before.history {
-        builder.add_history(history.id, &history.name, history.parent, history.sequence, history.folder).map_err(|e| one_library_error(&e))?;
+        builder.add_history(history.id, &history.name, history.parent, history.sequence, history.folder).map_err(ExportError::from)?;
         for (position, id) in history.tracks.iter().enumerate() {
-            builder.add_history_track(history.id, i64::from(*id), i64::try_from(position + 1).unwrap_or(0)).map_err(|e| one_library_error(&e))?;
+            builder.add_history_track(history.id, i64::from(*id), i64::try_from(position + 1).unwrap_or(0)).map_err(ExportError::from)?;
         }
     }
     let created = rbl_core::time::local_date();
-    builder.finish(&settings.device_name, &created, master_db_id).map_err(|e| one_library_error(&e))?;
-    rbl_core::durable::replace(&staged, &path).map_err(|e| ExportError::OneLibrary(format!("could not stage it: {e}")))?;
+    builder.finish(&settings.device_name, &created, master_db_id).map_err(ExportError::from)?;
+    rbl_core::durable::replace(&staged, &path).map_err(context("could not write exportLibrary.db: could not stage it".into()))?;
     Ok(())
 }
 
@@ -2775,11 +2786,11 @@ fn add_tracks(
 ) -> Result<()> {
     use rbl_onelibrary::build::{LookupTable, Track};
     for track in tracks {
-        let artist = builder.intern(LookupTable::Artist, &track.artist).map_err(|e| one_library_error(&e))?;
-        let album = builder.intern(LookupTable::Album, &track.album).map_err(|e| one_library_error(&e))?;
-        let genre = builder.intern(LookupTable::Genre, &track.genre).map_err(|e| one_library_error(&e))?;
-        let label = builder.intern(LookupTable::Label, &track.label).map_err(|e| one_library_error(&e))?;
-        let key = builder.intern(LookupTable::Key, &track.key).map_err(|e| one_library_error(&e))?;
+        let artist = builder.intern(LookupTable::Artist, &track.artist).map_err(ExportError::from)?;
+        let album = builder.intern(LookupTable::Album, &track.album).map_err(ExportError::from)?;
+        let genre = builder.intern(LookupTable::Genre, &track.genre).map_err(ExportError::from)?;
+        let label = builder.intern(LookupTable::Label, &track.label).map_err(ExportError::from)?;
+        let key = builder.intern(LookupTable::Key, &track.key).map_err(ExportError::from)?;
         builder
             .add_track(&Track {
                 metadata: track.metadata.clone(),
@@ -2809,21 +2820,17 @@ fn add_tracks(
                 date_added: track.date_added.clone(),
                 image_id: (track.image_id != 0).then_some(i64::from(track.image_id)),
             })
-            .map_err(|e| one_library_error(&e))?;
+            .map_err(ExportError::from)?;
         for tag in &track.my_tags {
             if !known_tags.contains(tag) {
                 continue;
             }
             builder
                 .tag_track(i64::try_from(*tag).unwrap_or(0), i64::from(track.export_id))
-                .map_err(|e| one_library_error(&e))?;
+                .map_err(ExportError::from)?;
         }
     }
     Ok(())
-}
-
-fn one_library_error(error: &rbl_onelibrary::Error) -> ExportError {
-    ExportError::OneLibrary(error.to_string())
 }
 
 /// Copies a file's bytes and nothing else, reading the next chunk while the
@@ -3100,6 +3107,57 @@ fn staged_files(root: &Path, named: &[&str]) -> std::io::Result<Vec<PathBuf>> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    #[test]
+    fn one_library_io_keeps_the_os_kind_and_flush_context() {
+        #[cfg(unix)]
+        let codes = [5, 28, 13, 30, 45];
+        #[cfg(windows)]
+        let codes = [23, 483, 1117, 112, 5];
+        #[cfg(not(any(unix, windows)))]
+        let codes = [28];
+        for code in codes {
+            let raw = std::io::Error::from_raw_os_error(code);
+            let kind = raw.kind();
+            let expected = format!("could not write exportLibrary.db: could not flush the new database: {raw}");
+            let error = rbl_onelibrary::Error::Io(std::io::Error::new(kind, format!("could not flush the new database: {raw}")));
+            let mapped = super::ExportError::from(error);
+            assert_eq!(mapped.to_string(), expected);
+            let super::ExportError::Io(mapped) = mapped else { panic!("a typed database I/O error became text"); };
+            assert_eq!(mapped.kind(), kind);
+        }
+    }
+
+    #[test]
+    fn one_library_non_io_errors_keep_their_original_category_and_text() {
+        for error in [
+            rbl_onelibrary::Error::Sqlite(rusqlite::Error::InvalidQuery),
+            rbl_onelibrary::Error::Sqlite(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_IOERR), Some("SQL I/O error (os error 5)".into()))),
+            rbl_onelibrary::Error::Sqlite(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_SCHEMA), Some("schema changed (os error 5)".into()))),
+            rbl_onelibrary::Error::Key(rbl_onelibrary::key::KeyError::WrongPrefix),
+            rbl_onelibrary::Error::Open { path: "fixture.db".into(), source: rusqlite::Error::InvalidQuery },
+            rbl_onelibrary::Error::Exists("fixture.db".into()),
+        ] {
+            let expected = error.to_string();
+            let super::ExportError::OneLibrary(mapped) = super::ExportError::from(error) else { panic!("non-I/O error was reclassified"); };
+            assert_eq!(mapped, expected);
+        }
+    }
+
+    #[test]
+    fn one_library_target_collision_keeps_the_move_label_and_existing_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("exportLibrary.db");
+        let builder = rbl_onelibrary::build::Builder::create(&target).unwrap();
+        std::fs::write(&target, b"another writer's bytes").unwrap();
+        let error = builder.finish("fixture", "2026-11-25", 0).unwrap_err();
+        let mapped = super::ExportError::from(error);
+        assert!(mapped.to_string().contains("could not move the new database into place"));
+        assert!(!mapped.to_string().contains("could not flush"));
+        let super::ExportError::Io(mapped) = mapped else { panic!("the typed move failure became text"); };
+        assert_eq!(mapped.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(target).unwrap(), b"another writer's bytes");
+    }
+
     #[test]
     fn historical_collision_spelling_has_a_narrow_relative_shape() {
         assert_eq!(super::historical_audio_spelling("/Contents/A/B\\one-7.mp3"), Some("/Contents/A/B/one-7.mp3".into()));

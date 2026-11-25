@@ -2491,6 +2491,15 @@ fn media_failed(error: &std::io::Error) -> bool {
         }
         source = inner.source();
     }
+    // A filename can contain an OS-looking code. When the actual I/O kind
+    // says this is a collision, permission or other definite non-media
+    // failure, do not let that path turn the text fallback into evidence.
+    // Real raw/source errno evidence above still takes precedence.
+    if matches!(error.kind(), std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::NotFound
+        | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+        | std::io::ErrorKind::Unsupported | std::io::ErrorKind::StorageFull) {
+        return false;
+    }
     let text = error.to_string();
     CODES.iter().any(|code| text.contains(&format!("(os error {code})")))
 }
@@ -5306,6 +5315,106 @@ mod tests {
             let error = super::sync_error(&rbl_export::ExportError::Io(std::io::Error::from_raw_os_error(code)));
             assert_ne!(error.message, super::MEDIA_FAILED, "os error {code}");
         }
+    }
+
+    #[test]
+    fn database_io_errors_keep_the_existing_sync_classification() {
+        fn flush_error(code: i32) -> rbl_export::ExportError {
+            let raw = std::io::Error::from_raw_os_error(code);
+            rbl_export::ExportError::from(rbl_onelibrary::Error::Io(std::io::Error::new(
+                raw.kind(), format!("could not flush the new database: {raw}"),
+            )))
+        }
+        #[cfg(unix)]
+        let media = [5];
+        #[cfg(windows)]
+        let media = [23, 483, 1117];
+        #[cfg(not(any(unix, windows)))]
+        let media: [i32; 0] = [];
+        for code in media {
+            let mapped = flush_error(code);
+            let error = super::sync_error(&mapped);
+            assert_eq!(error.message, super::MEDIA_FAILED, "os error {code}");
+            assert_eq!(error.detail, Some(format!("({mapped})")));
+            // The other export-error consumer keeps its existing generic
+            // device-library wording and the identical detailed context.
+            let device = crate::device_library::device_error(&mapped);
+            assert_eq!(device.kind, crate::error::ErrorKind::Internal);
+            assert_eq!(device.message, "The device library could not be read or written.");
+            assert_eq!(device.detail, Some(mapped.to_string()));
+        }
+        #[cfg(unix)]
+        let full_code = 28;
+        #[cfg(windows)]
+        let full_code = 112;
+        #[cfg(any(unix, windows))]
+        {
+            let mapped = flush_error(full_code);
+            let error = super::sync_error(&mapped);
+            assert_eq!(error.kind, crate::error::ErrorKind::ReadOnly);
+            assert_eq!(error.message, "Not enough space available on the device");
+            assert_eq!(error.detail, Some(format!("({mapped})")));
+        }
+        #[cfg(target_vendor = "apple")]
+        let controls = [2, 13, 30, 45, 102];
+        #[cfg(all(unix, not(target_vendor = "apple")))]
+        let controls = [2, 13, 30, 95];
+        #[cfg(windows)]
+        let controls = [2, 5, 19, 32, 50];
+        #[cfg(not(any(unix, windows)))]
+        let controls: [i32; 0] = [];
+        for code in controls {
+            let mapped = flush_error(code);
+            let error = super::sync_error(&mapped);
+            assert_eq!(error.message, mapped.to_string(), "os error {code}");
+            assert_ne!(error.message, super::MEDIA_FAILED);
+        }
+        // OS-looking SQL text is not a typed filesystem failure.
+        let sql = rbl_onelibrary::Error::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_IOERR),
+            Some("user text (os error 5) (os error 23)".into()),
+        ));
+        let mapped = rbl_export::ExportError::from(sql);
+        assert!(matches!(&mapped, rbl_export::ExportError::OneLibrary(_)));
+        assert_eq!(super::sync_error(&mapped).message, mapped.to_string());
+    }
+
+    #[test]
+    fn database_path_text_is_not_evidence_of_media_failure() {
+        #[cfg(unix)]
+        let media_code = 5;
+        #[cfg(windows)]
+        let media_code = 23;
+        #[cfg(not(any(unix, windows)))]
+        let media_code = 5;
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join(format!("ordinary name (os error {media_code})"));
+        std::fs::create_dir(&parent).unwrap();
+        let target = parent.join("exportLibrary.db");
+        let builder = rbl_onelibrary::build::Builder::create(&target).unwrap();
+        std::fs::write(&target, b"preserve existing bytes").unwrap();
+        let collision = builder.finish("fixture", "2026-11-25", 0).unwrap_err();
+        let mapped = rbl_export::ExportError::from(collision);
+        let kind = match &mapped {
+            rbl_export::ExportError::Io(io) => io.kind(),
+            _ => std::io::ErrorKind::Other,
+        };
+        assert_eq!(kind, std::io::ErrorKind::AlreadyExists, "collision lost its I/O kind");
+        assert_eq!(super::sync_error(&mapped).message, mapped.to_string());
+        // On filesystems lacking exclusive rename, durable::persist_new
+        // returns this path-bearing AlreadyExists context. Reproduce that
+        // existing fallback shape without mounting a removable filesystem.
+        let fallback = std::io::Error::new(kind, format!("{} already exists", target.display()));
+        let fallback = rbl_onelibrary::Error::Io(std::io::Error::new(fallback.kind(),
+            format!("could not move the new database into place: {fallback}")));
+        let mapped = rbl_export::ExportError::from(fallback);
+        assert_eq!(super::sync_error(&mapped).message, mapped.to_string(), "a path is not an OS failure code");
+        assert_eq!(std::fs::read(target).unwrap(), b"preserve existing bytes");
+        // Definite typed/source evidence still takes precedence; only the
+        // fallback from an otherwise unstructured message is constrained.
+        #[cfg(any(unix, windows))]
+        assert!(super::media_failed(&std::io::Error::new(std::io::ErrorKind::AlreadyExists,
+            std::io::Error::from_raw_os_error(media_code))));
     }
 
     /// A track whose analysis folder is gone from disk is exported without
