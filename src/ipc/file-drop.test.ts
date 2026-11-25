@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const { invoke, onDragDropEvent, scaleFactor, unlisten } = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -24,6 +24,8 @@ beforeEach(() => {
   Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
   delete (window as { chrome?: unknown }).chrome;
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 /** A stand-in for WebView2's `window.chrome.webview` and its host. */
 function fakeWebView2(answer: (request: Record<string, unknown>, files: File[]) => Record<string, unknown> | undefined) {
@@ -87,7 +89,37 @@ it("gives up on a WebView2 host that never answers", async () => {
   }
 });
 
-it("converts native Linux drop coordinates to CSS pixels", async () => {
+it.each([1, 2, 3])("keeps Linux GTK-local drop coordinates at scale %s", async (scale) => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64)");
+  let handler: ((event: { payload: unknown }) => void) | undefined;
+  scaleFactor.mockResolvedValue(scale);
+  onDragDropEvent.mockImplementation((next) => {
+    handler = next;
+    return Promise.resolve(unlisten);
+  });
+  const { subscribeNativeFileDrops } = await import("./client");
+  const received = vi.fn();
+  const stop = subscribeNativeFileDrops(received);
+  await vi.waitFor(() => expect(handler).toBeTypeOf("function"));
+  // Pinned Wry's GTK transport forwards widget-local logical coordinates,
+  // even though Tauri labels the payload PhysicalPosition.
+  handler?.({ payload: { type: "over", paths: ["/fixture/folder"], position: { x: 240, y: 100 } } });
+  handler?.({ payload: { type: "drop", paths: [], position: { x: 240, y: 100 } } });
+  expect(received).not.toHaveBeenCalled();
+  handler?.({ payload: { type: "drop", paths: ["/fixture/folder"], position: { x: 240, y: 100 } } });
+  expect(received).toHaveBeenLastCalledWith({ paths: ["/fixture/folder"], x: 240, y: 100 });
+  // Moving between outputs cannot change this widget-local coordinate space.
+  scaleFactor.mockResolvedValue(scale + 1);
+  handler?.({ payload: { type: "drop", paths: ["/fixture/folder"], position: { x: 240, y: 120 } } });
+  expect(received).toHaveBeenLastCalledWith({ paths: ["/fixture/folder"], x: 240, y: 120 });
+  stop();
+  expect(unlisten).toHaveBeenCalledOnce();
+});
+
+it.each(["Win32", "MacIntel"])("retains the existing native-drop conversion on %s", async (platform) => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(platform);
   let handler: ((event: { payload: unknown }) => void) | undefined;
   scaleFactor.mockResolvedValue(2);
   onDragDropEvent.mockImplementation((next) => {
@@ -98,8 +130,8 @@ it("converts native Linux drop coordinates to CSS pixels", async () => {
   const received = vi.fn();
   const stop = subscribeNativeFileDrops(received);
   await vi.waitFor(() => expect(handler).toBeTypeOf("function"));
-  handler?.({ payload: { type: "drop", paths: ["/Music/a.mp3"], position: { x: 240, y: 100 } } });
-  expect(received).toHaveBeenCalledWith({ paths: ["/Music/a.mp3"], x: 120, y: 50 });
+  handler?.({ payload: { type: "drop", paths: ["/fixture/a.mp3"], position: { x: 480, y: 200 } } });
+  expect(received).toHaveBeenCalledWith({ paths: ["/fixture/a.mp3"], x: 240, y: 100 });
   stop();
   expect(unlisten).toHaveBeenCalledOnce();
 });

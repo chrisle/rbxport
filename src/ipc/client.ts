@@ -116,7 +116,9 @@ export function subscribeNativeFileDrops(listener: (drop: NativeFileDrop) => voi
     import("@tauri-apps/api/webview"),
     import("@tauri-apps/api/window"),
   ]).then(async ([{ getCurrentWebview }, { getCurrentWindow }]) => {
-    const scale = await getCurrentWindow().scaleFactor();
+    // GTK passes widget-local logical coordinates through pinned Wry unchanged,
+    // despite Tauri's PhysicalPosition label. Scaling them again misses the row.
+    const scale = detectPlatform().linux ? 1 : await getCurrentWindow().scaleFactor();
     const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type !== "drop" || event.payload.paths.length === 0) return;
       listener({
