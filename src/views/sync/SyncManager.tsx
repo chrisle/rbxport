@@ -242,7 +242,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   // ticking has settled. A key rather than the device list: that is re-read
   // on a timer and would restart the estimate every time.
   const estimateDevices = [...tickedDevices].sort().join("\n");
-  const capacityRevision = devices.map(d => `${d.path}:${d.totalBytes}:${d.freeBytes}:${d.fileSystem}`).join("\n");
+  const capacityRevision = devices.map(d => `${d.path}:${d.volumeId}:${d.totalBytes}:${d.freeBytes}:${d.fileSystem}`).join("\n");
   const reported = completedReports.size;
   useEffect(() => {
     const ids = nodes.filter((n) => isExportablePlaylist(n) && ticked.has(n.id)).map((n) => n.id);

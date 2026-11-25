@@ -1690,3 +1690,106 @@ describe("post-sync device refresh ownership", () => {
     expect(syncButton()?.hasAttribute("aria-busy")).toBe(false);
   });
 });
+
+
+describe("mounted-volume estimate identity", () => {
+  const path = "/Volumes/USB B";
+  const replaced = DEVICES.map(device => ({ ...device, volumeId: device.path === path ? "dev:replacement" : device.volumeId }));
+  const estimate = (enoughSpace: boolean, bytes = 2 * 1024 ** 3): SyncEstimate => ({
+    path, copyBytes: bytes, reuseBytes: 0, freeBytes: 0, tracksNew: 1, tracksChanged: 0,
+    tracksKept: 0, tracksRemoved: 0, tracksMissing: 0, approximate: false,
+    netAdditionalBytes: bytes, peakBytes: bytes, enoughSpace,
+  });
+  const select = async () => {
+    vi.useFakeTimers();
+    click(box("Closing")); click(box("USB B")); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  };
+  const replace = async () => {
+    listDevices.mockResolvedValue(replaced);
+    act(() => devicesChanged?.()); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  };
+
+  it.each(["error", "insufficient", "sufficient"] as const)("retires the old %s estimate while the new volume estimate is pending", async (previous) => {
+    estimateSync.mockResolvedValueOnce([{ ...estimate(previous !== "insufficient"), ...(previous === "error" ? { error: "previous volume estimate failed" } : {}) }]);
+    await select();
+    let finish!: (value: SyncEstimate[]) => void;
+    estimateSync.mockImplementationOnce(() => new Promise<SyncEstimate[]>(resolve => { finish = resolve; }));
+    await replace();
+    const during = host.textContent ?? "";
+    const requests = estimateSync.mock.calls.length;
+    expect(box("USB B")?.checked).toBe(true);
+    // Preserve normal unknown/pending-estimate policy; native sync checks space itself.
+    expect(syncButton()?.disabled).toBe(false);
+    if (finish) act(() => finish([estimate(true, 1024 ** 3)]));
+    await settle();
+    expect(during).not.toContain("previous volume estimate failed");
+    expect(during).not.toContain("Not enough temporary space to sync safely");
+    expect(during).not.toContain("2.0 GB to add");
+    expect(during).toContain("Calculating space…");
+    expect(requests).toBe(2);
+    expect(host.textContent).toContain("1.0 GB to add");
+  });
+
+  it.each([false, true])("does not reuse prior enoughSpace=%s for pending replacement sync eligibility", async (enoughSpace) => {
+    estimateSync.mockResolvedValueOnce([estimate(enoughSpace)]);
+    await select();
+    let finish: ((value: SyncEstimate[]) => void) | undefined;
+    estimateSync.mockImplementationOnce(() => new Promise<SyncEstimate[]>(resolve => { finish = resolve; }));
+    await replace();
+    expect(syncButton()?.disabled).toBe(false);
+    click(syncButton()); await settle(); await settle();
+    act(() => finish?.([estimate(true)]));
+    await settle();
+    expect(syncDevices).toHaveBeenCalledTimes(1);
+    expect(syncDevices.mock.calls[0]?.[1]).toEqual([path]);
+    expect(status()).not.toContain("Not enough temporary space");
+  });
+
+  it.each(["success", "error", "reject"] as const)("retires a pending old-volume %s after replacement", async (outcome) => {
+    let finishOld!: (value: SyncEstimate[]) => void;
+    let rejectOld!: (error: Error) => void;
+    estimateSync.mockImplementationOnce(() => new Promise<SyncEstimate[]>((resolve, reject) => { finishOld = resolve; rejectOld = reject; }));
+    await select();
+    let finishNew: ((value: SyncEstimate[]) => void) | undefined;
+    estimateSync.mockImplementationOnce(() => new Promise<SyncEstimate[]>(resolve => { finishNew = resolve; }));
+    await replace();
+    if (outcome === "reject") act(() => rejectOld(new Error("retired request")));
+    else act(() => finishOld([{ ...estimate(false, 9 * 1024 ** 3), ...(outcome === "error" ? { error: "retired volume error" } : {}) }]));
+    await settle();
+    const during = host.textContent ?? "";
+    act(() => finishNew?.([estimate(true, 1024 ** 3)]));
+    await settle();
+    expect(during).not.toContain("9.0 GB to add");
+    expect(during).not.toContain("retired volume error");
+    expect(during).not.toContain("Could not calculate space.");
+    expect(during).toContain("Calculating space…");
+    expect(estimateSync).toHaveBeenCalledTimes(2);
+    expect(host.textContent).toContain("1.0 GB to add");
+  });
+
+  it("uses the fresh replacement's insufficient-space result after pending work settles", async () => {
+    estimateSync.mockResolvedValueOnce([estimate(true)]);
+    await select();
+    let finish: ((value: SyncEstimate[]) => void) | undefined;
+    estimateSync.mockImplementationOnce(() => new Promise<SyncEstimate[]>(resolve => { finish = resolve; }));
+    await replace();
+    expect(syncButton()?.disabled).toBe(false);
+    act(() => finish?.([estimate(false, 1024 ** 3)])); await settle();
+    expect(host.textContent).toContain("1.0 GB to add");
+    expect(host.textContent).toContain("Not enough temporary space to sync safely");
+    click(syncButton()); await settle();
+    expect(syncDevices).not.toHaveBeenCalled();
+    expect(status()).toContain("USB B: Not enough temporary space to sync safely");
+  });
+
+  it("does not repeat the estimate for an unchanged-owner notification with equal geometry", async () => {
+    await select();
+    listDevices.mockResolvedValue(DEVICES.map(device => ({ ...device })));
+    act(() => devicesChanged?.()); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(estimateSync).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain("2.0 GB to add");
+  });
+});
