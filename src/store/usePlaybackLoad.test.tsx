@@ -34,11 +34,14 @@ let host: HTMLDivElement;
 let root: Root;
 let deck: Playback;
 let track: string | null = "track-a";
+let intent = 0;
 let loaded: (event: DeckEvent) => void;
 let tick: (value: Tick) => void;
 let reset: () => void;
 let loads: { track: string; id: number }[];
 let sent: string[];
+let unloads = 0;
+let tickSubscriptions = 0;
 let resetListeners: Set<() => void>;
 
 const done = () => Promise.resolve();
@@ -47,6 +50,7 @@ function backend(): Backend {
   return {
     deckState: () => Promise.resolve(emptyTick),
     onDeckTick: (listener: (tick: Tick) => void) => {
+      tickSubscriptions++;
       tick = listener;
       return () => undefined;
     },
@@ -62,7 +66,7 @@ function backend(): Backend {
       loads.push({ track: next, id: loadId });
       return done();
     },
-    deckUnload: done,
+    deckUnload: () => { unloads++; return done(); },
     deckPlay: () => { sent.push("play"); return done(); },
     deckPlayAfter: (_deck: "a" | "b", ms: number) => { sent.push(`play-after:${ms}`); return done(); },
     deckPause: () => { sent.push("pause"); return done(); },
@@ -76,7 +80,7 @@ function backend(): Backend {
 }
 
 function Probe() {
-  deck = usePlayback(track, "b");
+  deck = usePlayback(track, "b", true, intent);
   return null;
 }
 
@@ -98,6 +102,9 @@ function finish(request: { id: number }) {
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   loads = [];
+  unloads = 0;
+  tickSubscriptions = 0;
+  intent = 0;
   sent = [];
   resetListeners = new Set();
   reset = () => { for (const listener of resetListeners) listener(); };
@@ -374,4 +381,88 @@ it("ignores a deck snapshot that arrives after its Player unmounts and resets", 
     await done();
   });
   expect(confirmedLoads.get("b") ?? null).toBeNull();
+});
+
+
+it("restarts a deliberate same-track load while an unchanged render keeps its position", async () => {
+  const first = loads[0]!; finish(first); await settle();
+  act(() => deck.seek(19)); await settle();
+  expect(deck.positionRef.current).toBe(19);
+  await select(track); await settle();
+  expect(loads).toHaveLength(1);
+  expect(deck.positionRef.current).toBe(19);
+  intent++;
+  await select(track); await settle();
+  expect(loads).toHaveLength(2);
+  expect(tickSubscriptions).toBe(1);
+  expect(loads[1]!.track).toBe(first.track);
+  expect(loads[1]!.id).not.toBe(first.id);
+  expect(deck.positionRef.current).toBe(0);
+  finish(first); await settle();
+  expect(deck.loadedTrack).toBeNull();
+  finish(loads[1]!); await settle();
+  expect(deck.loadedTrack).toEqual([first.track, loads[1]!.id]);
+  expect(deck.playing).toBe(false);
+});
+
+it("keeps ordinary playing-load behavior on explicit reload and does not repeat it on remount", async () => {
+  finish(loads[0]!); await settle();
+  act(() => deck.toggle()); await settle();
+  intent++;
+  await select(track); await settle();
+  const reloaded = loads.at(-1)!;
+  expect(loads).toHaveLength(2);
+  sent = [];
+  finish(reloaded); await settle();
+  expect(sent).toEqual(["play"]);
+  const actual: Tick = { ...emptyTick, b: { ...emptyDeck, loadId: reloaded.id, loaded: true, frames: RATE * 23, totalFrames: RATE * 300 } };
+  __setBackend({ ...backend(), deckState: () => Promise.resolve(actual) });
+  act(() => root.unmount()); root = createRoot(host);
+  await act(async () => { root.render(<Probe />); await done(); });
+  await settle();
+  expect(loads).toHaveLength(2);
+  expect(deck.positionRef.current).toBe(23);
+});
+
+
+it("does not unload an already-ejected deck again when its view remounts after explicit loading", async () => {
+  finish(loads[0]!); await settle();
+  intent++; await select(track); await settle();
+  finish(loads.at(-1)!); await settle();
+  await select(null); await settle();
+  expect(unloads).toBe(1);
+  act(() => root.unmount()); root = createRoot(host);
+  await act(async () => { root.render(<Probe />); await done(); });
+  await settle();
+  expect(unloads).toBe(1);
+});
+
+
+it("ignores an initial snapshot superseded by a newer explicit load in the mounted Player", async () => {
+  const first = loads[0]!; finish(first); await settle();
+  let answer: (value: Tick) => void = () => {};
+  __setBackend({ ...backend(), deckState: () => new Promise<Tick>(done => { answer = done; }) });
+  act(() => root.unmount()); root = createRoot(host);
+  await act(async () => { root.render(<Probe />); await done(); });
+  intent++; await select(track); await settle();
+  const second = loads.at(-1)!; finish(second); await settle();
+  await act(async () => {
+    answer({ ...emptyTick, b: { ...emptyDeck, loadId: first.id, loaded: true } });
+    await done();
+  });
+  expect(loads).toHaveLength(2);
+  expect(deck.loadedTrack).toEqual([second.track, second.id]);
+});
+
+it("ignores a pre-completion snapshot when a pending explicit reload has already completed", async () => {
+  finish(loads[0]!); await settle();
+  let answer: (value: Tick) => void = () => {};
+  __setBackend({ ...backend(), deckState: () => new Promise<Tick>(done => { answer = done; }) });
+  intent++;
+  act(() => root.unmount()); root = createRoot(host);
+  await act(async () => { root.render(<Probe />); await done(); });
+  const second = loads.at(-1)!; finish(second); await settle();
+  await act(async () => { answer(emptyTick); await done(); });
+  expect(loads).toHaveLength(2);
+  expect(deck.loadedTrack).toEqual([second.track, second.id]);
 });

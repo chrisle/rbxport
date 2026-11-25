@@ -276,6 +276,7 @@ function AppBody() {
   // track on it: the browser's selection drives deck A alone, or picking
   // through a playlist would keep replacing whatever B was cued to.
   const [playerTrackB, setPlayerTrackB] = useState<RowDto | null>(null);
+  const [loadIntents, setLoadIntents] = useState({ a: 0, b: 0 });
   // The one row the browser has selected, so an empty deck can be clicked to
   // take it. Selecting still loads nothing by itself.
   const [selectedRow, setSelectedRow] = useState<RowDto | null>(null);
@@ -1443,6 +1444,7 @@ function AppBody() {
     const edits = row ? pendingEdits.get(row.id) : undefined;
     const current = row && edits ? { ...row, ...edits } : row;
     set(current);
+    if (current) setLoadIntents(intents => ({ ...intents, [deck]: intents[deck] + 1 }));
     // A track loaded without analysis is analysed now, ahead of anything
     // waiting, and its waveform drawn on the deck from left to right as the
     // file decodes. [UNKNOWN] whether rekordbox analyses a track on load;
@@ -3362,6 +3364,7 @@ function AppBody() {
           {deckCount(layout) > 1 ? <MixerStrip /> : null}
           <Player
             track={playerTrack}
+            loadIntent={loadIntents.a}
             drawing={playerTrack !== null && drawingIds.has(playerTrack.id)}
             onEject={ejectA}
             onError={setPlayerError}
@@ -3403,6 +3406,7 @@ function AppBody() {
             <Player
               deck="b"
               track={playerTrackB}
+              loadIntent={loadIntents.b}
               drawing={playerTrackB !== null && drawingIds.has(playerTrackB.id)}
               onEject={ejectB}
               onAnalyse={analyseOne}
