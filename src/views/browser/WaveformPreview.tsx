@@ -22,15 +22,6 @@ import styles from "./TrackTable.module.css";
 /** Shared across every row: bounded, and released when entries fall out. */
 const cache = new WaveformCache(500);
 
-export function clearWaveformPreviewCache(): void {
-  cache.clear();
-}
-// A re-analysed track's renderings are stale; its rows draw afresh when they
-// next settle. One subscription for the module rather than one per row.
-void getBackend().then((backend) => {
-  backend.onAnalysisChanged((trackId) => cache.forget(trackId));
-});
-
 /**
  * In-flight renders, shared rather than skipped.
  *
@@ -39,7 +30,37 @@ void getBackend().then((backend) => {
  * on cleanup and the second sees the in-flight marker and returns, so nothing
  * ever painted. Sharing the promise means every caller still gets the result.
  */
-const inFlight = new Map<string, Promise<RenderedWaveform | null>>();
+interface PreviewRequest {
+  trackId: string;
+  retired: boolean;
+  promise: Promise<RenderedWaveform | null>;
+}
+const inFlight = new Map<string, PreviewRequest>();
+const visibleRows = new Map<string, Set<() => void>>();
+
+function retireRequests(trackId?: string): void {
+  for (const [key, request] of inFlight) {
+    if (trackId !== undefined && request.trackId !== trackId) continue;
+    request.retired = true;
+    inFlight.delete(key);
+  }
+}
+
+export function clearWaveformPreviewCache(): void {
+  cache.clear();
+  retireRequests();
+  visibleRows.forEach(listeners => listeners.forEach(refresh => refresh()));
+}
+
+// One native subscription for the module. A completed analysis wakes only its
+// visible rows; requests begun before it cannot refill the bitmap cache.
+void getBackend().then((backend) => {
+  backend.onAnalysisChanged((trackId) => {
+    cache.forget(trackId);
+    retireRequests(trackId);
+    visibleRows.get(trackId)?.forEach(refresh => refresh());
+  });
+});
 
 /**
  * How long a row must stay on screen before its waveform is asked for.
@@ -98,28 +119,35 @@ async function load(
   half: boolean,
 ): Promise<RenderedWaveform | null> {
   const existing = inFlight.get(key);
-  if (existing) return existing;
+  if (existing) return existing.promise;
 
-  const pending = (async () => {
+  const request: PreviewRequest = { trackId, retired: false, promise: read() };
+  async function read(): Promise<RenderedWaveform | null> {
     await acquire();
     try {
+      if (request.retired) return null;
       const backend = await getBackend();
+      if (request.retired) return null;
       const data = await backend.trackWaveform(trackId, waveformKindOf(palette, false));
-      if (data.length === 0) return null;
+      if (request.retired || data.length === 0) return null;
       const rendered = await renderPreview(data, width, height, dpr, palette, half);
-      if (rendered) cache.set(key, rendered);
+      if (request.retired) {
+        if (rendered && "close" in rendered.bitmap) rendered.bitmap.close();
+        return null;
+      }
+      if (rendered) cache.set(key, trackId, rendered);
       return rendered;
     } catch {
       // A track without analysis simply stays blank.
       return null;
     } finally {
       release();
-      inFlight.delete(key);
+      if (inFlight.get(key) === request) inFlight.delete(key);
     }
-  })();
+  }
 
-  inFlight.set(key, pending);
-  return pending;
+  inFlight.set(key, request);
+  return request.promise;
 }
 
 export interface WaveformPreviewProps {
@@ -180,23 +208,33 @@ export const WaveformPreview = memo(function WaveformPreview({
       drawPreviewCues(ctx, badges, durationSec * 1000, canvas.width, dpr);
     };
 
-    const cached = cache.get(key);
-    if (cached) {
-      paint(cached);
-      return;
-    }
-
-    // Nothing is asked for until the row has settled. A row a flick goes past
-    // is unmounted before this fires, and the request is never made.
-    const timer = window.setTimeout(() => {
-      void load(trackId, key, width, height, dpr, palette, half).then((rendered) => {
-        if (rendered) paint(rendered);
-      });
-    }, SETTLE_MS);
+    let timer: number | undefined;
+    let revision = 0;
+    const refresh = () => {
+      const current = ++revision;
+      window.clearTimeout(timer);
+      const cached = cache.get(key);
+      if (cached) {
+        paint(cached);
+        return;
+      }
+      // A row a flick goes past unmounts before making a request.
+      timer = window.setTimeout(() => {
+        void load(trackId, key, width, height, dpr, palette, half).then((rendered) => {
+          if (rendered && current === revision) paint(rendered);
+        });
+      }, SETTLE_MS);
+    };
+    const listeners = visibleRows.get(trackId) ?? new Set<() => void>();
+    listeners.add(refresh);
+    visibleRows.set(trackId, listeners);
+    refresh();
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      listeners.delete(refresh);
+      if (listeners.size === 0) visibleRows.delete(trackId);
     };
   }, [trackId, width, height, hotCues, memoryCues, memoryCueColours, durationSec, palette, half, hotCueColor, startupCache]);
 

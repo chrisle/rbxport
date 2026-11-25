@@ -27,6 +27,7 @@ let stops: number;
 let previewRefusal: Error | null;
 let WaveformPreview: typeof import("./WaveformPreview").WaveformPreview;
 let previewFromClick: typeof import("./WaveformPreview").previewFromClick;
+let clearWaveformPreviewCache: typeof import("./WaveformPreview").clearWaveformPreviewCache;
 /**
  * Taken from the same module graph the component imports.
  *
@@ -74,7 +75,7 @@ beforeEach(async () => {
     },
     previewState: () => new Promise(() => {}),
   } as unknown as Backend);
-  ({ WaveformPreview, previewFromClick } = await import("./WaveformPreview"));
+  ({ WaveformPreview, previewFromClick, clearWaveformPreviewCache } = await import("./WaveformPreview"));
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -108,6 +109,17 @@ describe("WaveformPreview", () => {
     void act(() => vi.advanceTimersByTime(200));
     await settle();
     expect(asked).toEqual(["2"]);
+  });
+
+  it("still loads a mounted row after the startup cache is cleared", async () => {
+    mount("live-row");
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    await settle();
+    expect(asked).toEqual(["live-row"]);
+    clearWaveformPreviewCache();
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    await settle();
+    expect(asked).toEqual(["live-row", "live-row"]);
   });
 
   it("keeps a screenful of settled rows off the command channel at once", async () => {
@@ -208,6 +220,77 @@ describe("a click on a row's waveform", () => {
     await settle();
     expect(told).toEqual(["That track's file could not be found."]);
     expect(host.querySelector("button")).toBeNull();
+  });
+});
+
+describe("analysis completion", () => {
+  afterEach(() => { vi.doUnmock("@/canvas"); vi.restoreAllMocks(); });
+
+  it.each([false, true])("refreshes only the changed row with an older read held=%s", async (held) => {
+    vi.resetModules();
+    const rendered: number[] = [];
+    const painted: number[] = [];
+    const requests: string[] = [];
+    const pixels = new WeakMap<HTMLCanvasElement, number>();
+    let changed!: (id: string) => void;
+    let releaseOld!: (value: Uint8Array) => void;
+    const older = new Promise<Uint8Array>(resolve => { releaseOld = resolve; });
+    let current = 11;
+    vi.doMock("@/canvas", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("@/canvas")>()),
+      renderPreview: (bytes: Uint8Array, width: number, height: number) => {
+        const bitmap = document.createElement("canvas");
+        const colour = bytes[0]!;
+        pixels.set(bitmap, colour);
+        rendered.push(colour);
+        return Promise.resolve({ bitmap, width, height });
+      },
+    }));
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      clearRect: () => undefined,
+      drawImage: (bitmap: HTMLCanvasElement) => { painted.push(pixels.get(bitmap)!); },
+    } as unknown as CanvasRenderingContext2D);
+    const { __setBackend } = await import("@/ipc/client");
+    __setBackend({
+      trackWaveform: (id: string) => {
+        requests.push(id);
+        if (held && current === 11 && id === "120") return older;
+        return Promise.resolve(new Uint8Array([id === "120" ? current : 77]));
+      },
+      onAnalysisChanged: (listener: (id: string) => void) => { changed = listener; return () => undefined; },
+    } as unknown as Backend);
+    const { WaveformPreview: Preview } = await import("./WaveformPreview");
+    // The other track's width equals the target track's numeric ID.
+    const rows = () => <>{["120", "111"].map(id => (
+      <Preview key={id} trackId={id} width={120} height={20} hotCues={[]} durationSec={300} />
+    ))}</>;
+    const drain = async () => {
+      await act(() => vi.advanceTimersByTimeAsync(200));
+      await settle();
+    };
+    act(() => root.render(rows()));
+    await drain();
+    expect(requests).toEqual(["120", "111"]);
+    expect(painted).toContain(77);
+    if (!held) expect(painted).toContain(11);
+
+    const before = painted.length;
+    current = 22;
+    act(() => changed("120"));
+    await drain();
+    expect(requests).toEqual(["120", "111", "120"]);
+    expect(painted.slice(before)).toEqual([22]);
+
+    releaseOld(new Uint8Array([11]));
+    await settle();
+    expect(painted.slice(before)).toEqual([22]);
+    expect(rendered.filter(value => value === 11)).toHaveLength(held ? 0 : 1);
+    act(() => root.render(null));
+    act(() => root.render(rows()));
+    await drain();
+    expect(requests).toEqual(["120", "111", "120"]);
+    expect(painted.slice(-2)).toEqual([22, 77]);
+    __setBackend(null);
   });
 });
 

@@ -777,7 +777,7 @@ export async function renderPreview(
 
 /** Bounded cache of rendered previews, keyed by track and size. */
 export class WaveformCache {
-  #entries = new Map<string, RenderedWaveform>();
+  #entries = new Map<string, { trackId: string; rendered: RenderedWaveform }>();
   #max: number;
 
   constructor(max = 500) {
@@ -794,16 +794,16 @@ export class WaveformCache {
       this.#entries.delete(key);
       this.#entries.set(key, hit);
     }
-    return hit;
+    return hit?.rendered;
   }
 
-  set(key: string, value: RenderedWaveform): void {
+  set(key: string, trackId: string, rendered: RenderedWaveform): void {
     this.#entries.delete(key);
-    this.#entries.set(key, value);
+    this.#entries.set(key, { trackId, rendered });
     while (this.#entries.size > this.#max) {
       const oldest = this.#entries.keys().next();
       if (oldest.done) break;
-      const evicted = this.#entries.get(oldest.value);
+      const evicted = this.#entries.get(oldest.value)?.rendered;
       // Release the GPU-side copy explicitly; the GC will not do it promptly.
       if (evicted && "close" in evicted.bitmap) evicted.bitmap.close();
       this.#entries.delete(oldest.value);
@@ -816,17 +816,16 @@ export class WaveformCache {
 
   /** Drops every rendering of one track: its analysis was rewritten. */
   forget(trackId: string): void {
-    const marker = `:${trackId}:`;
     for (const [key, entry] of this.#entries) {
-      if (!key.includes(marker)) continue;
-      if ("close" in entry.bitmap) entry.bitmap.close();
+      if (entry.trackId !== trackId) continue;
+      if ("close" in entry.rendered.bitmap) entry.rendered.bitmap.close();
       this.#entries.delete(key);
     }
   }
 
   clear(): void {
-    for (const entry of this.#entries.values()) {
-      if ("close" in entry.bitmap) entry.bitmap.close();
+    for (const { rendered } of this.#entries.values()) {
+      if ("close" in rendered.bitmap) rendered.bitmap.close();
     }
     this.#entries.clear();
   }
