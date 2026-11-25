@@ -7,6 +7,17 @@
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 
+/// Control-side seek identity, independent of internal audio generations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SeekRequest {
+    serial: u64,
+    load: u64,
+}
+
+impl SeekRequest {
+    pub(crate) fn load(self) -> u64 { self.load }
+}
+
 /// One deck's shared state.
 #[derive(Debug, Default)]
 pub struct DeckClock {
@@ -34,6 +45,8 @@ pub struct DeckClock {
     /// Serializes publishing a result with invalidating it. The audio thread
     /// never takes this; it is only shared by the caller and decode worker.
     load_gate: std::sync::Mutex<()>,
+    seek_serial: AtomicU64,
+    seek_pending: AtomicBool,
     /// The decode thread has pushed the last block it will push. The callback
     /// stops the deck when it has drained what is left.
     end_of_stream: AtomicBool,
@@ -348,6 +361,8 @@ impl DeckClock {
     /// Makes `request` the only load whose result may be installed.
     pub fn request_load(&self, request: u64) {
         let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.seek_serial.fetch_add(1, Ordering::AcqRel);
+        self.seek_pending.store(false, Ordering::Release);
         self.requested_load.store(request, Ordering::Release);
         self.load_id.store(0, Ordering::Release);
         self.loaded.store(false, Ordering::Release);
@@ -384,6 +399,57 @@ impl DeckClock {
         }
         self.load_id.store(0, Ordering::Release);
         self.loaded.store(false, Ordering::Release);
+        true
+    }
+
+    /// Publish a new explicit target while excluding a decoder completion.
+    /// This gate is never taken by the realtime callback or held over I/O.
+    pub(crate) fn request_seek(&self, frame: u64, pre_roll: u64) -> Option<SeekRequest> {
+        let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let load = self.load_id();
+        if !self.loaded() || load == 0 || self.requested_load() != load { return None; }
+        let serial = self.seek_serial.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        self.seek_pending.store(true, Ordering::Release);
+        self.set_pre_roll(pre_roll);
+        self.rearm_active_before(frame);
+        self.set_position(frame);
+        self.set_start_in(0);
+        self.set_end_of_stream(false);
+        self.bump_generation();
+        Some(SeekRequest { serial, load })
+    }
+
+    fn seek_matches(&self, request: SeekRequest) -> bool {
+        self.loaded() && self.load_id() == request.load && self.requested_load() == request.load
+            && self.seek_serial.load(Ordering::Acquire) == request.serial
+    }
+
+    pub(crate) fn seek_current(&self, request: SeekRequest) -> bool { self.seek_matches(request) }
+
+    pub(crate) fn audio_current(&self, request: SeekRequest) -> bool {
+        !self.seek_pending.load(Ordering::Acquire) && self.seek_matches(request)
+    }
+
+    /// Internal restarts may use the current source, but never outrank an
+    /// explicit target that is still waiting for its command to complete.
+    pub(crate) fn current_seek(&self) -> Option<SeekRequest> {
+        let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let request = SeekRequest { serial: self.seek_serial.load(Ordering::Acquire), load: self.load_id() };
+        self.audio_current(request).then_some(request)
+    }
+
+    pub(crate) fn complete_seek(&self, request: SeekRequest, publish: impl FnOnce()) -> bool {
+        let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !self.seek_matches(request) { return false; }
+        publish();
+        self.seek_pending.store(false, Ordering::Release);
+        true
+    }
+
+    pub(crate) fn with_current_audio(&self, request: SeekRequest, publish: impl FnOnce()) -> bool {
+        let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !self.audio_current(request) { return false; }
+        publish();
         true
     }
 

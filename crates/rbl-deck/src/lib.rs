@@ -603,7 +603,9 @@ impl Engine {
         // Playing to the end and pressing play again starts it over, which is
         // what a deck does rather than sitting silently at the end.
         if handle.clock().end_of_stream() && handle.clock().position() >= handle.clock().total() {
-            handle.send(deck::Command::Seek(0));
+            if let Some(request) = handle.clock().request_seek(0, 0) {
+                handle.send(deck::Command::Seek { frame: 0, request });
+            }
         }
         handle.clock().set_start_in(0);
         handle.clock().set_playing(true);
@@ -624,7 +626,9 @@ impl Engine {
             return;
         }
         if handle.clock().end_of_stream() && handle.clock().position() >= handle.clock().total() {
-            handle.send(deck::Command::Seek(0));
+            if let Some(request) = handle.clock().request_seek(0, 0) {
+                handle.send(deck::Command::Seek { frame: 0, request });
+            }
         }
         handle.clock().set_start_in(frames);
         handle.clock().set_playing(true);
@@ -644,29 +648,10 @@ impl Engine {
         let Some(handle) = self.deck(deck) else {
             return;
         };
-        // The clock moves now rather than when the first block after the seek
-        // is played: a seek while paused must show where it landed.
-        handle.clock().set_pre_roll(pre_roll);
-        handle.clock().rearm_active_before(frame);
-        handle
-            .clock()
-            .set_position(frame.min(handle.clock().total().max(frame)));
-        // A head moved by hand is no longer where the beat was worked out
-        // from; whatever wait was pending is over.
-        handle.clock().set_start_in(0);
-        // And the generation with it, here rather than on the deck thread.
-        //
-        // The callback treats "the clock's generation is ahead of mine" as
-        // "a seek is in flight" and stops moving the playhead for audio the
-        // seek has replaced. Bumping only when the deck thread got round to
-        // the command left a window — position already moved, generation not
-        // yet — in which the callback still believed the old blocks in the
-        // ring were current and stamped their position back over the one that
-        // had just been set. Measured releasing CUE: a cue at 1.4346 s read
-        // back as 1.4106, 24 ms in front of it, and the next press then moved
-        // the cue point there because it was outside `CUE_TOLERANCE`.
-        handle.clock().bump_generation();
-        handle.send(deck::Command::Seek(frame));
+        // Publish the target and invalidate old audio before queueing it.
+        // Its ticket remains distinct from scrub/load generation changes.
+        let Some(request) = handle.clock().request_seek(frame, pre_roll) else { return };
+        handle.send(deck::Command::Seek { frame, request });
         handle.send(deck::Command::Wake);
     }
 

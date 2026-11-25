@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use rtrb::Producer;
 
 use crate::block::{Block, BLOCK_FRAMES, RING_BLOCKS};
-use crate::clock::DeckClock;
+use crate::clock::{DeckClock, SeekRequest};
 use crate::decode::Streamer;
 use crate::scrub::{PcmWindow, Scrubber, WINDOW_REACH};
 use crate::stretch::{Stretcher, Varispeed, Wsola};
@@ -29,7 +29,7 @@ pub enum Command {
     /// Both play and pause are already in the clock when this arrives; the
     /// command exists to wake the thread from its blocking wait.
     Wake,
-    Seek(u64),
+    Seek { frame: u64, request: SeekRequest },
     /// A drag has started. The deck decodes a window around the playhead and
     /// starts producing from it at whatever rate the drag asks for.
     ScrubBegin,
@@ -130,6 +130,7 @@ struct Worker {
     events: EventSink,
     streamer: Option<Streamer>,
     generation: u32,
+    seek_request: Option<SeekRequest>,
     #[cfg(test)]
     before_seek_publication: Option<Box<dyn FnOnce() -> Option<DeckError> + Send>>,
     /// The read head, present only while a drag is running.
@@ -206,6 +207,7 @@ impl Worker {
             events,
             streamer: None,
             generation: 0,
+            seek_request: None,
             #[cfg(test)]
             before_seek_publication: None,
             scrubber: None,
@@ -272,7 +274,7 @@ impl Worker {
     fn handle(&mut self, command: Command) -> bool {
         match command {
             Command::Load { request, path } => self.load(request, &path),
-            Command::Seek(frame) => self.seek(frame),
+            Command::Seek { frame, request } => self.seek(frame, request),
             Command::ScrubBegin => self.scrub_begin(),
             Command::ScrubTo(frame, pre_roll, at) => self.scrub_to(frame, pre_roll, at),
             Command::ScrubEnd => self.scrub_end(),
@@ -314,6 +316,7 @@ impl Worker {
         self.clock.set_loop(None);
         self.clock.set_playing(false);
         self.streamer = None;
+        self.seek_request = None;
         self.forget_loop_audio();
         self.clock.set_loaded(false);
         self.clock.set_end_of_stream(false);
@@ -339,6 +342,7 @@ impl Worker {
                     self.streamer = None;
                     return;
                 }
+                self.seek_request = self.clock.current_seek();
                 (self.events)(DeckEvent::Loaded {
                     deck: self.deck,
                     load_id: request,
@@ -380,7 +384,7 @@ impl Worker {
         let Some(streamer) = self.streamer.as_mut() else { return };
         match streamer.seek(frame) {
             Ok(landed) => {
-                self.clock.set_end_of_stream(false);
+                self.end_stream(false);
                 self.head = landed as f64;
                 self.restart_stretch();
             }
@@ -390,11 +394,18 @@ impl Worker {
 
     /// Tells the interface that the file could not be read.
     fn report(&self, e: &DeckError) {
-        (self.events)(DeckEvent::Error {
-            deck: self.deck,
-            load_id: self.clock.load_id(),
-            message: e.to_string(),
-        });
+        let Some(request) = self.seek_request else { return };
+        if self.clock.with_current_audio(request, || {}) {
+            (self.events)(DeckEvent::Error {
+                deck: self.deck, load_id: request.load(), message: e.to_string(),
+            });
+        }
+    }
+
+    fn end_stream(&self, ended: bool) {
+        if let Some(request) = self.seek_request {
+            self.clock.with_current_audio(request, || self.clock.set_end_of_stream(ended));
+        }
     }
 
     /// The input is about to come from the streamer at wherever it is sent
@@ -462,7 +473,7 @@ impl Worker {
             self.from_loop_audio = None;
             let Some(streamer) = self.streamer.as_mut() else { return false };
             if let Err(e) = streamer.seek(from) {
-                self.clock.set_end_of_stream(true);
+                self.end_stream(true);
                 self.report(&e);
                 return false;
             }
@@ -470,7 +481,7 @@ impl Worker {
         if stretching {
             self.wraps.push_back((from, to));
         }
-        self.clock.set_end_of_stream(false);
+        self.end_stream(false);
         true
     }
 
@@ -495,7 +506,7 @@ impl Worker {
         }
         if let Some(e) = failed {
             self.loop_audio.clear();
-            self.clock.set_end_of_stream(true);
+            self.end_stream(true);
             self.report(&e);
             return false;
         }
@@ -541,7 +552,7 @@ impl Worker {
             Err(e) => {
                 // A decode that fails mid-track stops the deck rather than
                 // playing whatever was left in the buffer.
-                self.clock.set_end_of_stream(true);
+                self.end_stream(true);
                 self.report(&e);
                 None
             }
@@ -554,7 +565,11 @@ impl Worker {
         self.from_loop_audio.is_none() && self.streamer.as_ref().is_some_and(Streamer::finished)
     }
 
-    fn seek(&mut self, frame: u64) {
+    fn seek(&mut self, frame: u64, request: SeekRequest) {
+        // Cheaply skip already retired commands. The guarded completion below
+        // also checks after an arbitrarily slow demuxer seek.
+        if !self.clock.seek_current(request) { return; }
+        self.seek_request = None;
         self.forget_input();
         let Some(streamer) = self.streamer.as_mut() else { return };
         let result = streamer.seek(frame);
@@ -563,22 +578,30 @@ impl Worker {
             Some(before) => before().map_or(result, Err),
             None => result,
         };
-        match result {
+        // Resetting a native stretcher may do work; keep it outside the
+        // short request/publication gate just like the demuxer seek itself.
+        if result.is_ok() { self.restart_stretch(); }
+        let clock = Arc::clone(&self.clock);
+        let mut failure = None;
+        let published = clock.complete_seek(request, || match result {
             Ok(landed) => {
-                self.clock.set_end_of_stream(false);
-                // The position first, then the generation: the callback reads
-                // them in that order, and must never take a new generation's
-                // blocks while still believing the old position.
-                self.clock.set_position(landed);
                 self.head = landed as f64;
-                self.restart_stretch();
-                // Adopted, not bumped: `seek_frames` already moved the counter
-                // when it moved the position, so that the callback stopped
-                // trusting the ring at the same instant. Bumping again here
-                // would start a second changeover for one seek.
-                self.generation = self.clock.generation();
+                // The request remains valid across legitimate internal bumps.
+                self.generation = clock.generation();
+                self.seek_request = Some(request);
+                clock.set_position(landed);
+                clock.set_end_of_stream(false);
             }
-            Err(e) => self.report(&e),
+            Err(error) => {
+                // No old-source PCM can masquerade as the failed new target.
+                clock.set_end_of_stream(true);
+                failure = Some(error);
+            }
+        });
+        if published {
+            if let Some(error) = failure {
+                (self.events)(DeckEvent::Error { deck: self.deck, load_id: request.load(), message: error.to_string() });
+            }
         }
     }
 
@@ -632,6 +655,7 @@ impl Worker {
         self.clock.set_loop(None);
         self.clock.set_playing(false);
         self.streamer = None;
+        self.seek_request = None;
         self.forget_loop_audio();
         self.generation = self.clock.bump_generation();
         self.clock.set_loaded(false);
@@ -695,7 +719,7 @@ impl Worker {
             scrubber.target()
         };
         self.clock.bump_generation();
-        self.seek(at);
+        if let Some(request) = self.clock.current_seek() { self.seek(at, request); }
         self.clock.set_scrubbing(false);
     }
 
@@ -764,6 +788,7 @@ impl Worker {
 
     /// Decodes one block into the ring. False when there is nothing to add.
     fn produce(&mut self) -> bool {
+        if !self.seek_request.is_some_and(|request| self.clock.audio_current(request)) { return false; }
         if self.scrubber.is_some() {
             return self.produce_scrub();
         }
@@ -794,7 +819,7 @@ impl Worker {
             return false;
         }
         if self.input_finished() {
-            self.clock.set_end_of_stream(true);
+            self.end_stream(true);
             return false;
         }
 
@@ -810,7 +835,7 @@ impl Worker {
         let Some((start, frames)) = self.read_input(&mut block.samples) else { return false };
         if frames == 0 {
             if self.input_finished() {
-                self.clock.set_end_of_stream(true);
+                self.end_stream(true);
             }
             return false;
         }
@@ -929,7 +954,7 @@ impl Worker {
                 let Some((_, frames)) = read else { return false };
                 if frames == 0 {
                     if self.input_finished() {
-                        self.clock.set_end_of_stream(true);
+                        self.end_stream(true);
                     }
                     break;
                 }
@@ -1041,7 +1066,7 @@ mod tests {
         worker: Worker,
         clock: Arc<DeckClock>,
         ring: rtrb::Consumer<Block>,
-        _dir: tempfile::TempDir,
+        dir: tempfile::TempDir,
     }
 
     impl Rig {
@@ -1064,26 +1089,22 @@ mod tests {
             assert!(clock.loaded(), "the fixture did not load");
             worker.handle(Command::SetTempo(tempo));
             worker.handle(Command::SetMasterTempo(master_tempo));
-            Self { worker, clock, ring, _dir: dir }
+            Self { worker, clock, ring, dir }
         }
 
         /// Sets a loop and sends the head to its in point, as the engine does.
         fn set_loop(&mut self, from: u64, to: u64) {
             self.clock.set_loop(Some((from, to)));
             self.clock.set_looping(true);
-            self.clock.bump_generation();
-            self.worker.handle(Command::Seek(from));
+            let request = self.clock.request_seek(from, 0).unwrap();
+            self.worker.handle(Command::Seek { frame: from, request });
         }
 
         /// Publish a control-side seek before its worker command is handled,
         /// matching `Engine::seek_with_pre_roll` without timing a real thread.
         fn request_seek(&self, frame: u64) -> Command {
-            self.clock.set_pre_roll(0);
-            self.clock.rearm_active_before(frame);
-            self.clock.set_position(frame);
-            self.clock.set_start_in(0);
-            self.clock.bump_generation();
-            Command::Seek(frame)
+            let request = self.clock.request_seek(frame, 0).unwrap();
+            Command::Seek { frame, request }
         }
 
         /// Everything the decode thread queues, until at least `frames`.
@@ -1190,19 +1211,14 @@ mod tests {
         rig.worker.before_seek_publication = Some(Box::new(move || {
             // The real Streamer seek already returned; its old completion
             // has not published. This is a deterministic blocking-I/O window.
-            clock.set_pre_roll(0);
-            clock.rearm_active_before(24_576);
-            clock.set_position(24_576);
-            clock.set_start_in(0);
-            clock.bump_generation();
-            *requested.lock().unwrap() = Some(Command::Seek(24_576));
+            let request = clock.request_seek(24_576, 0).unwrap();
+            *requested.lock().unwrap() = Some(Command::Seek { frame: 24_576, request });
             None
         }));
         rig.worker.handle(first);
         let published = rig.clock.position();
-        assert!(rig.worker.produce());
-        let old = rig.ring.pop().unwrap();
-        let accepted = old.generation >= rig.clock.generation();
+        let produced = rig.worker.produce();
+        let accepted = produced && rig.ring.pop().unwrap().generation >= rig.clock.generation();
         let latest = pending.lock().unwrap().take().unwrap();
         rig.worker.handle(latest);
         let final_audio = rig.render(BLOCK_FRAMES);
@@ -1245,9 +1261,8 @@ mod tests {
             let requested = Arc::clone(&pending);
             rig.worker.before_seek_publication = Some(Box::new(move || {
                 if retired {
-                    clock.set_position(24_576);
-                    clock.bump_generation();
-                    *requested.lock().unwrap() = Some(Command::Seek(24_576));
+                    let request = clock.request_seek(24_576, 0).unwrap();
+                    *requested.lock().unwrap() = Some(Command::Seek { frame: 24_576, request });
                 }
                 // Fault injection at completion, after the actual generated
                 // source seek, models an old I/O error without changing media.
@@ -1264,6 +1279,61 @@ mod tests {
             assert_eq!(errors.lock().unwrap().len(), usize::from(!retired),
                 "only the current failure may be reported; retired={retired}");
         }
+    }
+
+    #[test]
+    fn a_new_load_retires_in_progress_seek_audio_and_error_completion() {
+        for failed in [false, true] {
+            let mut rig = Rig::new(1.0, false);
+            let errors = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let received = Arc::clone(&errors);
+            rig.worker.events = Arc::new(move |event| {
+                if let DeckEvent::Error { message, .. } = event {
+                    received.lock().unwrap().push(message);
+                }
+            });
+            let first = rig.request_seek(8_192);
+            let clock = Arc::clone(&rig.clock);
+            rig.worker.before_seek_publication = Some(Box::new(move || {
+                clock.request_load(2);
+                failed.then(|| DeckError::Decode("retired source failure".into()))
+            }));
+            rig.worker.handle(first);
+            assert!(!rig.clock.loaded());
+            assert!(!rig.worker.produce());
+            rig.worker.load(2, &rig.dir.path().join("staircase.wav"));
+            assert_eq!(rig.clock.load_id(), 2);
+            assert_eq!(rig.clock.position(), 0);
+            assert!(!rig.clock.end_of_stream());
+            let new_audio = rig.render(BLOCK_FRAMES);
+            assert_eq!(new_audio.blocks[0].0, 0);
+            assert!(new_audio.frames[0].abs() < 1.0);
+            assert_eq!(*errors.lock().unwrap(), Vec::<String>::new());
+        }
+    }
+
+    #[test]
+    fn a_retired_producer_cannot_end_the_new_target_or_report_its_read_error() {
+        let mut rig = Rig::new(1.0, false);
+        let errors = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received = Arc::clone(&errors);
+        rig.worker.events = Arc::new(move |event| {
+            if let DeckEvent::Error { message, .. } = event {
+                received.lock().unwrap().push(message);
+            }
+        });
+        let latest = rig.request_seek(24_576);
+        // A prior fill/loop read finishes after the request changed. These
+        // are the production completion helpers, without any timing guess.
+        rig.worker.end_stream(true);
+        rig.worker.report(&DeckError::Decode("retired fill failure".into()));
+        assert!(!rig.clock.end_of_stream());
+        assert_eq!(*errors.lock().unwrap(), Vec::<String>::new());
+        assert!(!rig.worker.produce());
+        rig.worker.handle(latest);
+        let final_audio = rig.render(BLOCK_FRAMES);
+        assert_eq!(final_audio.blocks[0].0, 24_576);
+        assert!(!rig.clock.end_of_stream());
     }
 
     /// Output frames between successive returns to the in point.
