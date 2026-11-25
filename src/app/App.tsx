@@ -1303,43 +1303,54 @@ function AppBody() {
           // slice, and one even when a slice fails, so the slices that
           // landed are shown.
           let landed = 0;
-          let sliced;
+          let fresh: ImportReport["tracks"] = [];
+          let refreshed = false;
           try {
-            sliced = await importInSlices(files, (slice) => backend.importPathsSlice(slice), signal, (reached, sofar) => {
-              landed = sofar.imported;
-              update({ done: reached });
-            });
+            let sliced;
+            try {
+              sliced = await importInSlices(files, (slice) => backend.importPathsSlice(slice), signal, (reached, sofar) => {
+                landed = sofar.imported;
+                fresh = sofar.tracks;
+                update({ done: reached });
+              });
+            } finally {
+              if (landed > 0) {
+                await backend.reloadLibrary();
+                refreshed = true;
+              }
+            }
+            // Files the library already held still belong in the playlist.
+            const { ids: toAdd, skipped, existing } = sliced;
+            update({ label: t("Adding {count} to {name}", { count: total, name }) });
+            const allowDuplicates = signal.aborted ? false : await resolveDuplicates(playlistId, toAdd, name);
+            let added = 0;
+            let processed = 0;
+            // Every slice of this add is one step of Edit › Undo (#499); the
+            // import before it is not in the history.
+            const transaction = crypto.randomUUID();
+            for (const slice of slices(toAdd, ADD_SLICE)) {
+              if (signal.aborted || allowDuplicates === null) break;
+              const result = await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates, transaction);
+              added += result.added;
+              processed += slice.length;
+              update({ done: total + processed, pendingRows: toAdd.length - processed });
+            }
+            setTree(await backend.playlistTree());
+            const already = existing > 0 ? `; ${existing} already in the library` : "";
+            const left = skippedTail(skipped);
+            noteSkips(skipped);
+            report(signal.aborted
+              ? `Stopped: ${noun(added)} added to ${name}${left}${already}.`
+              : allowDuplicates === null
+                ? `Nothing added to ${name}${left}${already}.`
+                : added === 0 && toAdd.length > 0
+                  ? `Already in ${name}${left}${already}.`
+                  : `Added ${noun(added)} to ${name}${left}${already}.`);
           } finally {
-            if (landed > 0) await backend.reloadLibrary();
+            // Preserve the duplicate-choice timing, including failures after
+            // a committed import or an earlier successful import slice.
+            if (refreshed && analysisPrefs.auto && fresh.length > 0) analysis.add(fresh);
           }
-          // Files the library already held still belong in the playlist.
-          const { ids: toAdd, tracks: fresh, skipped, existing } = sliced;
-          update({ label: t("Adding {count} to {name}", { count: total, name }) });
-          const allowDuplicates = signal.aborted ? false : await resolveDuplicates(playlistId, toAdd, name);
-          let added = 0;
-          let processed = 0;
-          // Every slice of this add is one step of Edit › Undo (#499); the
-          // import before it is not in the history.
-          const transaction = crypto.randomUUID();
-          for (const slice of slices(toAdd, ADD_SLICE)) {
-            if (signal.aborted || allowDuplicates === null) break;
-            const result = await backend.edits.addTracksToPlaylist(playlistId, slice, allowDuplicates, transaction);
-            added += result.added;
-            processed += slice.length;
-            update({ done: total + processed, pendingRows: toAdd.length - processed });
-          }
-          setTree(await backend.playlistTree());
-          if (analysisPrefs.auto && fresh.length > 0) analysis.add(fresh);
-          const already = existing > 0 ? `; ${existing} already in the library` : "";
-          const left = skippedTail(skipped);
-          noteSkips(skipped);
-          report(signal.aborted
-            ? `Stopped: ${noun(added)} added to ${name}${left}${already}.`
-            : allowDuplicates === null
-              ? `Nothing added to ${name}${left}${already}.`
-              : added === 0 && toAdd.length > 0
-                ? `Already in ${name}${left}${already}.`
-                : `Added ${noun(added)} to ${name}${left}${already}.`);
         },
       });
     },
