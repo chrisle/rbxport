@@ -72,20 +72,28 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
   // the engine is on the system default, and the select says so.
   const chosenListed = audio === null || prefs.outputDevice === null || audio.devices.some((d) => d.id === prefs.outputDevice);
 
-  // Read when the pane opens rather than held: an interface is plugged in
-  // while the app is running more often than not, and a list from launch
-  // would be missing whatever somebody just connected.
+  // Recheck on return to Preferences: outputs can be connected or removed
+  // while the pane stays open. Enumeration never changes the saved choice.
   useEffect(() => {
-    void (async () => {
-      try {
-        const backend = await getBackend();
-        setAudio(await backend.audioDevices());
-      } catch {
-        // A build with no engine behind it has no devices to offer, and the
-        // pane says so rather than showing an error for something nobody
-        // asked about.
-      }
-    })();
+    let live = true;
+    let scan = 0;
+    let stop: (() => void) | undefined;
+    void getBackend().then((backend) => {
+      if (!live) return;
+      const refresh = () => {
+        const request = ++scan;
+        void backend.audioDevices().then((found) => {
+          if (live && request === scan) setAudio(found);
+        }).catch(() => {
+          // Keep the last successful list during a transient failure. Before
+          // the first success, retain the existing no-engine feedback.
+        });
+      };
+      window.addEventListener("focus", refresh);
+      stop = () => window.removeEventListener("focus", refresh);
+      refresh();
+    }).catch(() => {});
+    return () => { live = false; stop?.(); };
   }, []);
 
   return (

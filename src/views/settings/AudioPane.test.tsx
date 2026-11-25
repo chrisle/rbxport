@@ -11,7 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
-import type { Backend, Limiter } from "@/ipc/types";
+import type { AudioDevices, Backend, Limiter } from "@/ipc/types";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY } from "@/lib/preferences";
 import { DEFAULT_LIMITER } from "@/store/useLimiter";
 import { PreferencesProvider, usePreferencesStore, type PreferencesStore } from "@/store/usePreferences";
@@ -271,4 +271,78 @@ describe("AudioPane's output device (#799)", () => {
     expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY) ?? "{}").audio.outputDevice).toBeNull();
     expect(select()?.value).toBe("");
   });
+
+  const available = (present = true): AudioDevices => ({
+    devices: present ? devices : devices.slice(0, 1), default: "a", chosen: "m4",
+  });
+  function pendingDevices() {
+    let resolve!: (value: AudioDevices) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<AudioDevices>((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+  }
+  const focus = () => act(() => { window.dispatchEvent(new Event("focus")); });
+
+  it("refreshes vanished and returned saved devices on focus without changing routing intent", async () => {
+    const audioDevices = vi.fn().mockResolvedValue(available());
+    const setAudioDevice = vi.fn();
+    __setBackend({ audioDevices, setAudioDevice } as unknown as Backend);
+    const update = vi.fn();
+    mountWithStore("m4", update);
+    await settle();
+    expect(select()?.value).toBe("m4");
+    audioDevices.mockResolvedValue(available(false));
+    focus(); await settle();
+    expect(select()?.value).toBe("");
+    expect(host.textContent).toContain("not connected");
+    audioDevices.mockResolvedValue(available());
+    focus(); await settle();
+    expect(select()?.value).toBe("m4");
+    expect(host.textContent).not.toContain("not connected");
+    expect(update).not.toHaveBeenCalled();
+    expect(setAudioDevice).not.toHaveBeenCalled();
+  });
+
+  it.each(["resolve", "reject"] as const)("ignores an older device scan's %s after a newer focus scan", async outcome => {
+    const older = pendingDevices();
+    const newer = pendingDevices();
+    const audioDevices = vi.fn().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    __setBackend({ audioDevices } as unknown as Backend);
+    mountWithStore("m4", vi.fn());
+    await settle();
+    focus(); await settle();
+    await act(async () => { newer.resolve(available(false)); await newer.promise; });
+    expect(select()?.value).toBe("");
+    if (outcome === "resolve") older.resolve(available());
+    else older.reject(new Error("enumeration refused"));
+    await settle();
+    expect(select()?.value).toBe("");
+    expect(host.textContent).toContain("not connected");
+  });
+
+  it("retains the last device list on transient failure and recovers from an initial failure", async () => {
+    const audioDevices = vi.fn().mockRejectedValueOnce(new Error("not ready")).mockResolvedValueOnce(available())
+      .mockRejectedValueOnce(new Error("temporary"));
+    __setBackend({ audioDevices } as unknown as Backend);
+    mountWithStore("m4", vi.fn()); await settle();
+    expect(select()).toBeNull();
+    expect(host.textContent).toContain("No output devices to choose from");
+    focus(); await settle();
+    expect(select()?.value).toBe("m4");
+    focus(); await settle();
+    expect(select()?.value).toBe("m4");
+  });
+
+  it("retires the listener and pending scan when the pane is disposed", async () => {
+    const pending = pendingDevices();
+    const audioDevices = vi.fn().mockReturnValue(pending.promise);
+    __setBackend({ audioDevices } as unknown as Backend);
+    mountWithStore("m4", vi.fn()); await settle();
+    act(() => root.render(<div>another pane</div>));
+    focus(); await settle();
+    expect(audioDevices).toHaveBeenCalledTimes(1);
+    pending.resolve(available()); await settle();
+    expect(host.textContent).toBe("another pane");
+  });
+
 });
