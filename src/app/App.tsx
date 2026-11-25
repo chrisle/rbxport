@@ -688,7 +688,7 @@ function AppBody() {
   // takes the one row under the hand.
   const [draggedTracks, setDraggedTracks] = useState<TrackDrag | null>(null);
   const receiveTrackDrag = useCallback((drag: TrackDrag | null, expected?: TrackDrag) => {
-    setDraggedTracks(current => drag === null && expected !== undefined && current !== expected ? current : drag);
+    setDraggedTracks(current => drag === null && current !== expected ? current : drag);
   }, []);
   /**
    * The last thing the app has to say, and whether it went wrong.
