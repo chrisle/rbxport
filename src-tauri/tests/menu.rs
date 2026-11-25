@@ -142,13 +142,34 @@ fn preset_switches_keep_menu_actions_and_dynamic_history() {
         }
         find(app.menu().unwrap().items().unwrap(), wanted).expect("menu action remains present")
     }
+    fn native_key(wanted: &str) -> String {
+        fn find(menu: &objc2_app_kit::NSMenu, wanted: &str) -> Option<String> {
+            for item in menu.itemArray().iter() {
+                if item.title().to_string() == wanted { return Some(item.keyEquivalent().to_string()); }
+                if let Some(sub) = item.submenu() {
+                    if let Some(found) = find(&sub, wanted) { return Some(found); }
+                }
+            }
+            None
+        }
+        let application = objc2_app_kit::NSApplication::sharedApplication(objc2::MainThreadMarker::new().unwrap());
+        find(&application.mainMenu().expect("actual AppKit menu installed"), wanted).expect("actual native item present")
+    }
+    fn native_keys(performance1: bool, import_title: &str) {
+        for (title, key) in [(import_title, "o"), ("1 Player", "7"), ("2 Players", "8"), ("Simple Player", "9"), ("Full Browser", "0")] {
+            assert_eq!(native_key(title), if performance1 { "" } else { key }, "native key equivalent for {title}");
+        }
+        assert_eq!(native_key("Information Window"), "i", "unaffected key stays installed");
+    }
     let app = tauri::test::mock_app();
     let handle = app.handle().clone();
     rbxport_lib::menu::set_menu_labels(handle.clone(), HashMap::new(), false).unwrap();
+    native_keys(false, "Import");
     rbxport_lib::menu::set_history_menu(handle.clone(), Some("Rename Playlist".into()), None).unwrap();
     rbxport_lib::menu::set_menu_enabled(handle.clone(), HashMap::from([("reload-tag".into(), false)])).unwrap();
     for performance1 in [true, false, true] {
         rbxport_lib::menu::set_menu_labels(handle.clone(), HashMap::new(), performance1).unwrap();
+        native_keys(performance1, "Import");
         assert_eq!(item(&handle, "undo").text().unwrap(), "Undo Rename Playlist");
         assert!(!item(&handle, "reload-tag").is_enabled().unwrap());
         assert!(item(&handle, "import").is_enabled().unwrap());
@@ -158,9 +179,13 @@ fn preset_switches_keep_menu_actions_and_dynamic_history() {
     }
     let translated = HashMap::from([("Import".into(), "Importieren".into())]);
     rbxport_lib::menu::set_menu_labels(handle.clone(), translated.clone(), true).unwrap();
+    native_keys(true, "Importieren");
+    assert_eq!(item(&handle, "undo").text().unwrap(), "Undo Rename Playlist");
     assert_eq!(item(&handle, "import").text().unwrap(), "Importieren");
     rbxport_lib::menu::set_menu_labels(handle.clone(), translated, false).unwrap();
+    native_keys(false, "Importieren");
+    assert_eq!(item(&handle, "undo").text().unwrap(), "Undo Rename Playlist");
     assert_eq!(item(&handle, "import").text().unwrap(), "Importieren");
     assert!(!item(&handle, "reload-tag").is_enabled().unwrap());
-        assert!(item(&handle, "import").is_enabled().unwrap());
+    assert!(item(&handle, "import").is_enabled().unwrap());
 }

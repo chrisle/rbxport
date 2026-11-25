@@ -61,6 +61,18 @@ fn label(labels: &Labels, key: &str) -> String {
         .map_or_else(|| key.to_owned(), Clone::clone)
 }
 
+/// Keep action suffixes structured so a rebuilt menu can localize Undo/Redo.
+fn saved_history() -> &'static RwLock<[Option<String>; 2]> {
+    static HISTORY: OnceLock<RwLock<[Option<String>; 2]>> = OnceLock::new();
+    HISTORY.get_or_init(|| RwLock::new([None, None]))
+}
+
+fn history_label(labels: &Labels, key: &str, index: usize) -> String {
+    let title = label(labels, key);
+    saved_history().read().ok().and_then(|history| history[index].clone())
+        .map_or_else(|| title.clone(), |action| format!("{title} {action}"))
+}
+
 fn current_label(key: &str) -> String {
     saved_labels()
         .read()
@@ -85,6 +97,9 @@ pub fn set_history_menu<R: Runtime>(
     undo: Option<String>,
     redo: Option<String>,
 ) -> Result<(), String> {
+    if let Ok(mut history) = saved_history().write() {
+        *history = [undo.clone(), redo.clone()];
+    }
     let Some(menu) = app.menu() else {
         return Ok(());
     };
@@ -162,19 +177,6 @@ fn deck_menu_item(builder: MenuItemBuilder, id: &str, performance1: bool) -> Men
         Some(key) => builder.accelerator(key),
         None => builder,
     }
-}
-
-fn apply_deck_keys<R: Runtime>(items: Vec<MenuItemKind<R>>, performance1: bool) -> Result<(), String> {
-    for item in items {
-        match item {
-            MenuItemKind::MenuItem(item) if DECK_MENU_KEYS.iter().any(|&(id, _)| id == item.id().0) => {
-                item.set_accelerator(deck_menu_accelerator(&item.id().0, performance1)).map_err(|error| error.to_string())?;
-            }
-            MenuItemKind::Submenu(sub) => apply_deck_keys(sub.items().map_err(|error| error.to_string())?, performance1)?,
-            _ => {}
-        }
-    }
-    Ok(())
 }
 
 fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels, performance1: bool) -> tauri::Result<Menu<R>> {
@@ -315,12 +317,12 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels, performanc
     // items stay predefined so macOS forwards them to the webview's fields.
     let edit = SubmenuBuilder::with_id(app, "edit", label(labels, "Edit"))
         .item(
-            &MenuItemBuilder::with_id("undo", label(labels, "Undo"))
+            &MenuItemBuilder::with_id("undo", history_label(labels, "Undo", 0))
                 .accelerator("CmdOrCtrl+Z")
                 .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id("redo", label(labels, "Redo"))
+            &MenuItemBuilder::with_id("redo", history_label(labels, "Redo", 1))
                 .accelerator("CmdOrCtrl+Shift+Z")
                 .build(app)?,
         )
@@ -587,13 +589,11 @@ fn apply_targets<R: Runtime>(app: &AppHandle<R>, items: Vec<MenuItemKind<R>>) ->
     reason = "Tauri's AppHandle extractor is injected by value"
 )]
 pub fn set_menu_labels<R: Runtime>(app: AppHandle<R>, labels: Labels, performance1: bool) -> Result<(), String> {
-    // A preset switch need not rebuild menus or discard dynamic Undo titles.
-    if saved_labels().read().is_ok_and(|saved| *saved == labels) {
-        if let Some(menu) = app.menu() {
-            return apply_deck_keys(menu.items().map_err(|error| error.to_string())?, performance1);
-        }
-    }
+    // muda 0.19.3 leaves the native macOS key equivalent installed when
+    // set_accelerator(None) is called. Construct fresh items on every update.
     let menu = build_with_labels(&app, &labels, performance1).map_err(|error| error.to_string())?;
+    let enabled = saved_enabled().read().map(|saved| saved.clone()).unwrap_or_default();
+    apply_enabled(menu.items().map_err(|error| error.to_string())?, &enabled)?;
     app.set_menu(menu).map_err(|error| error.to_string())?;
     if let Ok(mut saved) = saved_labels().write() {
         *saved = labels;
