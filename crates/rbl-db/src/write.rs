@@ -209,7 +209,7 @@ const WRITABLE_COLUMNS: &[&str] = &[
     // The tempo, which a grid edit changes with the `.DAT`'s grid.
     "BPM",
     // The information panel's Info tab.
-    "Title", "Lyricist", "ReleaseYear", "TrackNo", "DiscNo", "DJPlayCount", "KeyID", "BPM", "ImagePath",
+    "Title", "Subtitle", "ISRC", "Lyricist", "ReleaseYear", "ReleaseDate", "TrackNo", "DiscNo", "DJPlayCount", "KeyID", "ImagePath",
     "ArtistID", "OrgArtistID", "ComposerID", "RemixerID", "AlbumID", "GenreID", "LabelID",
 ];
 
@@ -1867,11 +1867,10 @@ impl Writer {
         clash: FolderClash<'_>,
         at: Option<usize>,
     ) -> Result<FolderPlaylist> {
-        let mut outcome = FolderPlaylist::default();
         if files.is_empty() {
-            outcome.at = at;
-            return Ok(outcome);
+            return Ok(FolderPlaylist { at, ..FolderPlaylist::default() });
         }
+        let mut outcome = FolderPlaylist::default();
         let existing = self.child_named(parent, name)?;
         let replacing = match (&existing, clash) {
             // No clash, or a copy that leaves the clash where it is.
@@ -2030,6 +2029,7 @@ impl Writer {
         }
         set_counter(&tx, usn)?;
         tx.commit()?;
+        self.import_covers(outcome.imported.iter().map(|(content, _)| content.as_str()));
         outcome.playlist = Some(id);
         Ok(outcome)
     }
@@ -2461,6 +2461,7 @@ impl Writer {
         }
         set_counter(&tx, usn)?;
         tx.commit()?;
+        self.import_covers(added.iter().map(|(content, _)| content.as_str()));
         Ok(ImportedPlaylist { id, name, tracks: contents.len(), added })
     }
 
@@ -3012,22 +3013,24 @@ impl Writer {
         }
 
         let artist = intern(&tx, "djmdArtist", "Name", &tags.artist, &mut self.rng, &stamp)?;
-        let album = intern(&tx, "djmdAlbum", "Name", &tags.album, &mut self.rng, &stamp)?;
+        let album = tagged_album(&tx, &tags.album, &tags.album_artist, &mut self.rng, &stamp)?;
         let genre = intern(&tx, "djmdGenre", "Name", &tags.genre, &mut self.rng, &stamp)?;
         let label = intern(&tx, "djmdLabel", "Name", &tags.label, &mut self.rng, &stamp)?;
         let key = tag_key_id(&tx, &tags.key, &mut self.rng, &stamp)?;
 
+        let credits = tagged_credits(&tx, &tags, &mut self.rng, &stamp)?;
         let usn = next_usn(&tx)?;
         insert_content(
             &tx,
             &NewContent {
                 id: &id, uuid: &uuid, folder: &folder, file_name: &file_name, path, tags: &tags,
-                artist: &artist, album: &album, genre: &genre, label: &label, key: &key,
+                artist: &artist, album: &album, genre: &genre, label: &label, key: &key, credits: &credits,
                 today: &today, stamp: &stamp, master_db: &master_db, device: &device, usn,
             },
         )?;
         set_counter(&tx, usn)?;
         tx.commit()?;
+        self.import_covers(std::iter::once(id.as_str()));
         Ok(id)
     }
 
@@ -3055,7 +3058,20 @@ impl Writer {
             set_counter(&tx, usn)?;
         }
         tx.commit()?;
+        self.import_covers(outcomes.iter().filter_map(|outcome| match outcome {
+            ImportOutcome::Added(id) => Some(id.as_str()),
+            _ => None,
+        }));
         Ok(outcomes)
+    }
+
+    fn import_covers<'a>(&mut self, contents: impl Iterator<Item = &'a str>) {
+        for content in contents {
+            // A damaged cover must not make an otherwise usable file fail import.
+            if let Err(error) = self.import_artwork(content) {
+                tracing::warn!(content, %error, "could not import embedded artwork");
+            }
+        }
     }
 
     // -------------------------------------------------------------- analysis
@@ -3988,6 +4004,9 @@ impl Writer {
     pub fn check_track_edit(&self, edit: &TrackEdit, undo: bool) -> Result<()> {
         if !WRITABLE_COLUMNS.contains(&edit.column) {
             return Err(DbError::WriteRefused(format!("{} is not writable", edit.column)));
+        }
+        if edit.column == "BPM" && !can_reload_tempo(self.library.connection(), &edit.content)? {
+            return Err(DbError::Conflict("the track now has analysis".to_owned()));
         }
         let expected = if undo { &edit.after } else { &edit.before };
         let same: Option<bool> = self.library.connection().query_row(
@@ -5003,35 +5022,35 @@ impl Writer {
     /// Read the current database row so a stale index cannot replace custom art.
     pub fn import_artwork(&mut self, content: &str) -> Result<bool> {
         self.prepare()?;
-        let (path, image): (String, Option<String>) = self.library.connection().query_row(
+        let (stored_path, image): (String, Option<String>) = self.library.connection().query_row(
             "SELECT FolderPath, ImagePath FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
             [content], |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         if image.is_some_and(|p| !p.is_empty()) {
             return Ok(false);
         }
-        let path = self.real_path(&path);
-        let Some(bytes) = crate::import::read_artwork(Path::new(&path))
-            .map_err(|e| DbError::WriteRefused(e.to_string()))? else {
+        let path = self.real_path(&stored_path);
+        let Some(relative) = save_embedded_cover(
+            Path::new(&path), &self.library.location().share_root, &mut self.rng,
+        )? else {
             return Ok(false);
         };
-        let format = image::guess_format(&bytes)
-            .map_err(|e| DbError::WriteRefused(format!("invalid embedded artwork: {e}")))?;
-        let extension = match format {
-            image::ImageFormat::Jpeg => "jpg",
-            image::ImageFormat::Png => "png",
-            _ => return Ok(false),
-        };
-        // Validate before publishing an ImagePath that rekordbox cannot draw.
-        image::load_from_memory(&bytes)
-            .map_err(|e| DbError::WriteRefused(format!("invalid embedded artwork: {e}")))?;
-        let uuid = self.rng.uuid4();
-        let bucket = uuid.get(..3).unwrap_or("000");
-        let relative = format!("/PIONEER/Artwork/{bucket}/{uuid}/artwork.{extension}");
-        let target = rbl_anlz::resolve(&self.library.location().share_root, &relative);
-        write_artwork_sizes(&target, &bytes)?;
-        self.touch_content(content, "ImagePath", &Value::Text(relative))?;
-        Ok(true)
+        // Only publish the cover if the source and destination still match
+        // the row we read before decoding and writing the image.
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let usn = next_usn(&tx)?;
+        let changed = tx.execute(
+            "UPDATE djmdContent SET ImagePath = ?1, rb_local_usn = ?2, updated_at = ?3
+               WHERE ID = ?4 AND FolderPath = ?5 AND COALESCE(ImagePath, '') = '' AND rb_local_deleted = 0",
+            params![relative, usn, stamp, content, stored_path],
+        )?;
+        if changed > 0 {
+            set_counter(&tx, usn)?;
+        }
+        tx.commit()?;
+        Ok(changed > 0)
     }
 
     /// Gives a playlist artwork, or takes it away with `None`. The image
@@ -5088,24 +5107,70 @@ impl Writer {
         let path = self.library.track_paths().resolve(&stored);
         let tags = crate::import::read_tags(Path::new(&path))
             .map_err(|e| DbError::WriteRefused(e.to_string()))?;
+        let share_root = self.library.location().share_root.clone();
         let stamp = time::now();
         let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut fields = Vec::new();
-        for (column, value) in [("Title", &tags.title), ("Commnt", &tags.comment)] {
+        for (column, value) in [
+            ("Title", &tags.title), ("Commnt", &tags.comment), ("Subtitle", &tags.subtitle),
+            ("Lyricist", &tags.lyricist), ("ISRC", &tags.isrc),
+        ] {
             if !value.is_empty() { fields.push((column, Value::Text(value.clone()))); }
         }
-        for (column, table, value) in [("ArtistID", "djmdArtist", &tags.artist), ("AlbumID", "djmdAlbum", &tags.album),
-            ("GenreID", "djmdGenre", &tags.genre), ("LabelID", "djmdLabel", &tags.label)] {
+        for (column, table, value) in [
+            ("ArtistID", "djmdArtist", &tags.artist), ("GenreID", "djmdGenre", &tags.genre),
+            ("LabelID", "djmdLabel", &tags.label), ("OrgArtistID", "djmdArtist", &tags.original_artist),
+            ("ComposerID", "djmdArtist", &tags.composer), ("RemixerID", "djmdArtist", &tags.remixer),
+        ] {
             if !value.is_empty() {
                 let id = intern(&tx, table, "Name", value.trim(), &mut self.rng, &stamp)?;
                 fields.push((column, id.map_or(Value::Null, Value::Text)));
+            }
+        }
+        if !tags.album.is_empty() || !tags.album_artist.is_empty() {
+            let current: Option<(String, String)> = tx.query_row(
+                "SELECT COALESCE(a.Name, ''), COALESCE(ar.Name, '')
+                   FROM djmdContent c JOIN djmdAlbum a ON a.ID = c.AlbumID AND a.rb_local_deleted = 0
+                   LEFT JOIN djmdArtist ar ON ar.ID = a.AlbumArtistID AND ar.rb_local_deleted = 0
+                  WHERE c.ID = ?1 AND c.rb_local_deleted = 0",
+                [content], |r| Ok((r.get(0)?, r.get(1)?)),
+            ).optional()?;
+            let mut album_name = tags.album.trim();
+            let mut album_artist = tags.album_artist.trim();
+            if let Some((current_name, current_artist)) = &current {
+                if album_name.is_empty() { album_name = current_name; }
+                if album_artist.is_empty() && album_name == current_name { album_artist = current_artist; }
+            }
+            if !album_name.is_empty() && !current.as_ref().is_some_and(|(name, artist)| {
+                album_name == name && album_artist == artist
+            }) {
+                let album = tagged_album(&tx, album_name, album_artist, &mut self.rng, &stamp)?;
+                fields.push(("AlbumID", album.map_or(Value::Null, Value::Text)));
             }
         }
         if let Some(key) = tag_key_id(&tx, &tags.key, &mut self.rng, &stamp)? {
             fields.push(("KeyID", Value::Text(key)));
         }
         if tags.year != 0 { fields.push(("ReleaseYear", Value::Integer(i64::from(tags.year)))); }
+        if let Some(date) = tags.release_date { fields.push(("ReleaseDate", Value::Text(date))); }
         if tags.track_no != 0 { fields.push(("TrackNo", Value::Integer(i64::from(tags.track_no)))); }
+        if tags.disc_no != 0 { fields.push(("DiscNo", Value::Integer(i64::from(tags.disc_no)))); }
+        if let Some(bpm) = tags.bpm_x100 {
+            if can_reload_tempo(&tx, content)? {
+                fields.push(("BPM", Value::Integer(i64::from(bpm))));
+            }
+        }
+        let needs_cover = tx.query_row(
+            "SELECT COALESCE(ImagePath, '') = '' FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+            [content], |r| r.get::<_, bool>(0),
+        ).optional()?.unwrap_or(false);
+        if needs_cover {
+            match save_embedded_cover(Path::new(&path), &share_root, &mut self.rng) {
+                Ok(Some(relative)) => fields.push(("ImagePath", Value::Text(relative))),
+                Ok(None) => {}
+                Err(error) => tracing::warn!(content, %error, "could not reload embedded artwork"),
+            }
+        }
         let mut changed = 0;
         let mut edits = Vec::new();
         for (column, value) in fields {
@@ -5862,11 +5927,16 @@ fn insert_files(
             Ok(id)
         };
         let artist = name_id("djmdArtist", "Name", &tags.artist, rng)?;
-        let album = name_id("djmdAlbum", "Name", &tags.album, rng)?;
+        let album = if tags.album_artist.is_empty() {
+            name_id("djmdAlbum", "Name", &tags.album, rng)?
+        } else {
+            tagged_album(tx, &tags.album, &tags.album_artist, rng, stamp)?
+        };
         let genre = name_id("djmdGenre", "Name", &tags.genre, rng)?;
         let label = name_id("djmdLabel", "Name", &tags.label, rng)?;
         let key = name_id("djmdKey", "ScaleName", &tags.key, rng)?;
 
+        let credits = tagged_credits(tx, &tags, rng, stamp)?;
         let id = unused_id_in(tx, rng, "djmdContent", MAX_CONTENT_ID)?;
         let uuid = rng.uuid4();
         // Making a lookup row above moves the registry's counter, so the
@@ -5881,7 +5951,7 @@ fn insert_files(
             tx,
             &NewContent {
                 id: &id, uuid: &uuid, folder: &folder, file_name: &file_name, path, tags: &tags,
-                artist: &artist, album: &album, genre: &genre, label: &label, key: &key,
+                artist: &artist, album: &album, genre: &genre, label: &label, key: &key, credits: &credits,
                 today: &today, stamp, master_db: &master_db, device: &device, usn,
             },
         )?;
@@ -5919,6 +5989,7 @@ struct NewContent<'a> {
     genre: &'a Option<String>,
     label: &'a Option<String>,
     key: &'a Option<String>,
+    credits: &'a TaggedCredits,
     today: &'a str,
     stamp: &'a str,
     master_db: &'a Option<String>,
@@ -5930,10 +6001,10 @@ struct NewContent<'a> {
 /// ([`Writer::import_file`]) or in a batch ([`Writer::import_files`]).
 fn insert_content(conn: &Connection, row: &NewContent<'_>) -> Result<()> {
     let NewContent {
-        id, uuid, folder, file_name, path, tags, artist, album, genre, label, key,
+        id, uuid, folder, file_name, path, tags, artist, album, genre, label, key, credits,
         today, stamp, master_db, device, usn,
     } = row;
-// Every column rekordbox 7 fills on a file it imports itself, as on
+// Base columns rekordbox 7 fills on a file it imports itself, as on
 // the 645 rows it made on this machine [OBS] — the empty strings are
 // empty strings there, not NULLs. `rb_file_id` is the file system's number
 // for the file, as rekordbox writes it ([`crate::file_id`]). Left unset
@@ -5949,15 +6020,16 @@ fn insert_content(conn: &Connection, row: &NewContent<'_>) -> Result<()> {
                  OrgFolderPath, ModifiedByRBM, DeliveryControl, DeliveryComment, Lyricist, Reserved1, ExtInfo,
                  SamplerTrackInfo, SamplerPlayOffset, SamplerGain, VideoAssociate, LyricStatus, ServiceID,
                  rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
-                 usn, rb_local_usn, created_at, updated_at, rb_file_id)
-             VALUES (?1, ?2, ?3, '', ?4, '', ?5, ?6, ?7, ?8, ?24,
-                     ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0,
+                 usn, rb_local_usn, created_at, updated_at, rb_file_id, ReleaseDate,
+                 OrgArtistID, ComposerID, RemixerID, ISRC, BPM)
+             VALUES (?1, ?2, ?3, '', ?4, ?27, ?5, ?6, ?7, ?8, ?24,
+                     ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?28,
                      ?17, 0, 0, 0, NULL, ?18,
                      ?19, ?19, ?20, ?1, ?21, 'on',
-                     '', '', '', '', '', '', 'null',
+                     '', '', '', '', ?29, '', 'null',
                      0, 0, 0, 0, 0, 0,
                      0, 0, 0, 0,
-                     NULL, ?22, ?23, ?23, ?25)",
+                     NULL, ?22, ?23, ?23, ?25, ?26, ?30, ?31, ?32, ?33, ?34)",
         params![
             id,
             folder,
@@ -5983,7 +6055,16 @@ fn insert_content(conn: &Connection, row: &NewContent<'_>) -> Result<()> {
             usn,
             stamp,
             key,
-            crate::file_id::column(path)
+            crate::file_id::column(path),
+            tags.release_date,
+            tags.subtitle,
+            i64::from(tags.disc_no),
+            tags.lyricist,
+            credits.original_artist,
+            credits.composer,
+            credits.remixer,
+            (!tags.isrc.is_empty()).then_some(tags.isrc.as_str()),
+            tags.bpm_x100.map(i64::from),
         ],
     )?;
     Ok(())
@@ -6040,6 +6121,78 @@ fn parse_number(value: &str, max: i64) -> Result<i64> {
         return Err(DbError::WriteRefused(format!("{n} is outside 0 to {max}")));
     }
     Ok(n)
+}
+
+struct TaggedCredits {
+    original_artist: Option<String>,
+    composer: Option<String>,
+    remixer: Option<String>,
+}
+
+fn save_embedded_cover(path: &Path, share_root: &Path, rng: &mut Rng) -> Result<Option<String>> {
+    let Some(bytes) = crate::import::read_artwork(path)
+        .map_err(|e| DbError::WriteRefused(e.to_string()))? else {
+        return Ok(None);
+    };
+    let format = image::guess_format(&bytes)
+        .map_err(|e| DbError::WriteRefused(format!("invalid embedded artwork: {e}")))?;
+    let extension = match format {
+        image::ImageFormat::Jpeg => "jpg",
+        image::ImageFormat::Png => "png",
+        _ => return Ok(None),
+    };
+    // Validate before publishing an ImagePath that rekordbox cannot draw.
+    image::load_from_memory(&bytes)
+        .map_err(|e| DbError::WriteRefused(format!("invalid embedded artwork: {e}")))?;
+    let uuid = rng.uuid4();
+    let bucket = uuid.get(..3).unwrap_or("000");
+    let relative = format!("/PIONEER/Artwork/{bucket}/{uuid}/artwork.{extension}");
+    let target = rbl_anlz::resolve(share_root, &relative);
+    write_artwork_sizes(&target, &bytes)?;
+    Ok(Some(relative))
+}
+
+fn can_reload_tempo(conn: &Connection, content: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(Analysed, 0) = 0 AND COALESCE(AnalysisDataPath, '') = ''
+           FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+        [content], |r| r.get::<_, bool>(0),
+    ).optional()?.unwrap_or(false))
+}
+
+fn tagged_credits(conn: &Connection, tags: &crate::import::TrackTags, rng: &mut Rng, stamp: &str) -> Result<TaggedCredits> {
+    Ok(TaggedCredits {
+        original_artist: intern(conn, "djmdArtist", "Name", &tags.original_artist, rng, stamp)?,
+        composer: intern(conn, "djmdArtist", "Name", &tags.composer, rng, stamp)?,
+        remixer: intern(conn, "djmdArtist", "Name", &tags.remixer, rng, stamp)?,
+    })
+}
+
+/// Match tagged album artists without rewriting an album shared by other tracks.
+fn tagged_album(conn: &Connection, name: &str, album_artist: &str, rng: &mut Rng, stamp: &str) -> Result<Option<String>> {
+    if name.is_empty() || album_artist.is_empty() {
+        return intern(conn, "djmdAlbum", "Name", name, rng, stamp);
+    }
+    let found = conn.query_row(
+        "SELECT a.ID FROM djmdAlbum a JOIN djmdArtist ar ON ar.ID = a.AlbumArtistID
+          WHERE a.Name = ?1 AND ar.Name = ?2 AND a.rb_local_deleted = 0 AND ar.rb_local_deleted = 0
+          ORDER BY a.ID LIMIT 1",
+        params![name, album_artist], |r| r.get::<_, String>(0),
+    ).optional()?;
+    if found.is_some() {
+        return Ok(found);
+    }
+    let artist = intern(conn, "djmdArtist", "Name", album_artist, rng, stamp)?;
+    let id = rng.numeric_id(MAX_PLAYLIST_ID);
+    let usn = next_usn(conn)?;
+    conn.execute(
+        "INSERT INTO djmdAlbum (ID, Name, AlbumArtistID, UUID, rb_data_status, rb_local_data_status,
+             rb_local_deleted, rb_local_synced, usn, rb_local_usn, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 0, 0, 0, 0, NULL, ?5, ?6, ?6)",
+        params![id, name, artist, rng.uuid4(), usn, stamp],
+    )?;
+    set_counter(conn, usn)?;
+    Ok(Some(id))
 }
 
 fn intern(

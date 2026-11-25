@@ -3774,6 +3774,44 @@ fn key_of(f: &Fixture, id: &str) -> Option<String> {
 }
 
 #[test]
+fn mp3_release_date_is_saved_on_import_and_reload() {
+    use lofty::config::WriteOptions;
+    use lofty::id3::v2::Id3v2Tag;
+    use lofty::prelude::{ItemKey, TagExt};
+
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("release-date.mp3");
+    tagged_mp3(&path, &[
+        (ItemKey::ReleaseDate, "2024-03-15T09:30:00"),
+        (ItemKey::RecordingDate, "2023-02-01"),
+    ]);
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+    let date = |f: &Fixture| f.one::<String>("SELECT ReleaseDate FROM djmdContent WHERE ID = ?1", &[&id]);
+    assert_eq!(date(&f), "2024-03-15");
+    assert_eq!(f.one::<i64>("SELECT ReleaseYear FROM djmdContent WHERE ID = ?1", &[&id]), 2023);
+
+    let mut tag = Id3v2Tag::default();
+    tag.insert_user_text("RELEASEDATE".to_owned(), "2025-06-01".to_owned());
+    tag.save_to_path(&path, WriteOptions::default()).unwrap();
+    let (_, edits) = f.writer.reload_tags_with_undo(&id).unwrap();
+    assert_eq!(date(&f), "2025-06-01");
+    assert_eq!(f.one::<i64>("SELECT ReleaseYear FROM djmdContent WHERE ID = ?1", &[&id]), 2025);
+    for edit in edits.iter().rev() {
+        f.writer.undo_track_edit(edit).unwrap();
+    }
+    assert_eq!(date(&f), "2024-03-15");
+    for edit in &edits {
+        f.writer.redo_track_edit(edit).unwrap();
+    }
+    assert_eq!(date(&f), "2025-06-01");
+
+    tagged_mp3(&path, &[(ItemKey::ReleaseDate, "2025")]);
+    f.writer.reload_tags_with_undo(&id).unwrap();
+    assert_eq!(date(&f), "2025-06-01");
+}
+
+#[test]
 fn an_imported_files_key_tag_points_the_track_at_a_key_row() {
     use lofty::prelude::ItemKey;
 
@@ -3871,6 +3909,71 @@ fn reload_tag_records_each_column_it_changed_with_its_exact_ids() {
 }
 
 #[test]
+fn batch_import_and_reload_save_extended_mp3_tags() {
+    use lofty::prelude::ItemKey;
+    use rbl_db::write::ImportOutcome;
+
+    let audio = tempfile::tempdir().unwrap();
+    let first = audio.path().join("first.mp3");
+    let second = audio.path().join("second.mp3");
+    let tags = [
+        (ItemKey::AlbumTitle, "Shared Title"),
+        (ItemKey::AlbumArtist, "First Album Artist"),
+        (ItemKey::Composer, "Composer"),
+        (ItemKey::Remixer, "Remixer"),
+        (ItemKey::OriginalArtist, "Original Artist"),
+        (ItemKey::Lyricist, "Lyricist"),
+        (ItemKey::TrackSubtitle, "Extended Mix"),
+        (ItemKey::Isrc, "USAAA2600001"),
+        (ItemKey::DiscNumber, "2/3"),
+        (ItemKey::ReleaseDate, "2026-07-18"),
+    ];
+    tagged_mp3(&first, &tags);
+    tagged_mp3(&second, &tags);
+    let mut f = fixture();
+    let outcomes = f.writer.import_files(&[first.clone(), second]).unwrap();
+    let [ImportOutcome::Added(first_id), ImportOutcome::Added(second_id)] = outcomes.as_slice() else {
+        panic!("expected two imports: {outcomes:?}");
+    };
+    let details = |f: &Fixture, id: &str| f.writer.library().track_details(id).unwrap().unwrap();
+    let before = details(&f, first_id);
+    assert_eq!(before.album_artist, "First Album Artist");
+    assert_eq!(before.album_id, details(&f, second_id).album_id);
+    assert_eq!(before.composer, "Composer");
+    assert_eq!(before.remixer, "Remixer");
+    assert_eq!(before.original_artist, "Original Artist");
+    assert_eq!(before.lyricist, "Lyricist");
+    assert_eq!(before.mix_name, "Extended Mix");
+    assert_eq!(before.disc_number, 2);
+    assert_eq!(before.year, 2026);
+    assert_eq!(before.release_date, "2026-07-18");
+    let isrc = |f: &Fixture| f.one::<String>("SELECT ISRC FROM djmdContent WHERE ID = ?1", &[first_id]);
+    assert_eq!(isrc(&f), "USAAA2600001");
+
+    tagged_mp3(&first, &[
+        (ItemKey::AlbumArtist, "Second Album Artist"),
+        (ItemKey::Composer, "New Composer"),
+        (ItemKey::DiscNumber, "3"),
+        (ItemKey::Isrc, "USAAA2600002"),
+    ]);
+    let (_, edits) = f.writer.reload_tags_with_undo(first_id).unwrap();
+    let after = details(&f, first_id);
+    assert_eq!(after.album, "Shared Title");
+    assert_eq!(after.album_artist, "Second Album Artist");
+    assert_eq!(after.composer, "New Composer");
+    assert_eq!(after.disc_number, 3);
+    assert_eq!(after.mix_name, before.mix_name);
+    assert_eq!(after.release_date, before.release_date);
+    assert_eq!(isrc(&f), "USAAA2600002");
+    assert_eq!(details(&f, second_id).album_artist, "First Album Artist");
+    for edit in edits.iter().rev() {
+        f.writer.undo_track_edit(edit).unwrap();
+    }
+    assert_eq!(details(&f, first_id), before);
+    assert_eq!(isrc(&f), "USAAA2600001");
+}
+
+#[test]
 fn a_wavs_id3_chunk_gives_an_imported_track_no_key() {
     use lofty::config::WriteOptions;
     use lofty::prelude::{ItemKey, TagExt};
@@ -3889,20 +3992,31 @@ fn a_wavs_id3_chunk_gives_an_imported_track_no_key() {
 }
 
 #[test]
-fn a_bpm_tag_is_not_read_on_import_or_reload() {
+fn mp3_tempo_is_imported_and_reload_preserves_analysed_tempo() {
     use lofty::prelude::ItemKey;
 
-    // rekordbox's convertTagData never reads the tag's BPM: it comes from
-    // analysis, so an unanalysed import has none.
     let audio = tempfile::tempdir().unwrap();
     let path = audio.path().join("bpm.mp3");
-    tagged_mp3(&path, &[(ItemKey::TrackTitle, "Tempo"), (ItemKey::Bpm, "128")]);
+    tagged_mp3(&path, &[(ItemKey::IntegerBpm, "128")]);
     let mut f = fixture();
     let id = f.writer.import_file(&path).unwrap();
-    let bpm = |f: &Fixture| f.one::<Option<i64>>("SELECT BPM FROM djmdContent WHERE ID = ?1", &[&id]).unwrap_or(0);
-    assert_eq!(bpm(&f), 0);
+    let bpm = |f: &Fixture| f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID = ?1", &[&id]);
+    assert_eq!(bpm(&f), 12800);
+
+    tagged_mp3(&path, &[(ItemKey::IntegerBpm, "130")]);
+    let (_, edits) = f.writer.reload_tags_with_undo(&id).unwrap();
+    assert_eq!(bpm(&f), 13000);
+    let [tempo_edit] = edits.as_slice() else { panic!("expected one tempo edit: {edits:?}"); };
+    f.writer.undo_track_edit(tempo_edit).unwrap();
+    assert_eq!(bpm(&f), 12800);
+    f.writer.redo_track_edit(tempo_edit).unwrap();
+    assert_eq!(bpm(&f), 13000);
+
+    f.conn().execute("UPDATE djmdContent SET AnalysisDataPath = 'grid.DAT' WHERE ID = ?1", [&id]).unwrap();
+    tagged_mp3(&path, &[(ItemKey::IntegerBpm, "135")]);
     f.writer.reload_tags(&id).unwrap();
-    assert_eq!(bpm(&f), 0);
+    assert_eq!(bpm(&f), 13000);
+    assert!(f.writer.undo_track_edit(tempo_edit).is_err());
 }
 
 #[test]
@@ -3933,15 +4047,13 @@ fn embedded_cover_is_registered_with_thumbnails_and_never_replaces_custom_art() 
     let mut f = fixture();
     let path = f._dir.path().join("cover.wav");
     write_wav(&path, 1);
-    let id = f.writer.import_file(&path).unwrap();
-    assert!(!f.writer.import_artwork(&id).unwrap(), "untagged audio has no cover");
     let png = f._dir.path().join("front.png");
     image::RgbImage::from_pixel(12, 8, image::Rgb([10, 100, 200])).save(&png).unwrap();
     let bytes = std::fs::read(&png).unwrap();
     let mut tag = Tag::new(TagType::Id3v2);
     tag.push_picture(Picture::new_unchecked(PictureType::CoverFront, Some(MimeType::Png), None, bytes.clone()));
     tag.save_to_path(&path, WriteOptions::default()).unwrap();
-    assert!(f.writer.import_artwork(&id).unwrap());
+    let id = f.writer.import_file(&path).unwrap();
     let relative: String = f.one("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&id]);
     let filed = rbl_anlz::resolve(&f.writer.library().location().share_root, &relative);
     assert_eq!(std::fs::read(&filed).unwrap(), bytes);
@@ -3953,7 +4065,19 @@ fn embedded_cover_is_registered_with_thumbnails_and_never_replaces_custom_art() 
     f.writer.set_artwork(&id, Some(&png)).unwrap();
     let custom: String = f.one("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&id]);
     assert!(!f.writer.import_artwork(&id).unwrap());
+    f.writer.reload_tags(&id).unwrap();
     assert_eq!(f.one::<String>("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&id]), custom);
+
+    let existing = f._dir.path().join("existing.wav");
+    write_wav(&existing, 1);
+    let existing_id = f.writer.import_file(&existing).unwrap();
+    tag.save_to_path(&existing, WriteOptions::default()).unwrap();
+    let (_, edits) = f.writer.reload_tags_with_undo(&existing_id).unwrap();
+    let [cover_edit] = edits.as_slice() else { panic!("expected one artwork edit: {edits:?}"); };
+    f.writer.undo_track_edit(cover_edit).unwrap();
+    assert!(f.one::<Option<String>>("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&existing_id]).is_none());
+    f.writer.redo_track_edit(cover_edit).unwrap();
+    assert!(f.one::<Option<String>>("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&existing_id]).is_some());
 }
 
 #[test]

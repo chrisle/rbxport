@@ -25,6 +25,13 @@ pub struct TrackTags {
     pub title: String,
     pub artist: String,
     pub album: String,
+    pub album_artist: String,
+    pub original_artist: String,
+    pub composer: String,
+    pub remixer: String,
+    pub lyricist: String,
+    pub subtitle: String,
+    pub isrc: String,
     pub genre: String,
     pub label: String,
     pub comment: String,
@@ -33,7 +40,10 @@ pub struct TrackTags {
     pub bitrate: u32,
     pub sample_rate: u32,
     pub year: u16,
+    pub release_date: Option<String>,
     pub track_no: u16,
+    pub disc_no: u16,
+    pub bpm_x100: Option<u32>,
     pub file_size: u64,
     /// Bits per sample; 16 when the format does not say (an MP3), which is
     /// what rekordbox records for one.
@@ -343,19 +353,66 @@ pub fn read_tags(path: &Path) -> Result<TrackTags, ImportError> {
 
     // Each field from the tag rekordbox takes it from; see [`field_sources`].
     let (text_from, numbers_from) = field_sources(&tagged);
-    let text = |key: &ItemKey| {
-        text_from
+    let find_text = |sources: &[&Tag], key: &ItemKey| {
+        sources
             .iter()
             .find_map(|tag| tag.get_string(key).filter(|v| !v.is_empty()))
             .unwrap_or_default()
             .to_owned()
     };
+    let text = |key: &ItemKey| find_text(&text_from, key);
     tags.title = text(&ItemKey::TrackTitle);
     tags.artist = text(&ItemKey::TrackArtist);
     tags.album = text(&ItemKey::AlbumTitle);
     tags.genre = text(&ItemKey::Genre);
     tags.comment = text(&ItemKey::Comment);
     tags.label = tag_label(&tagged);
+    // WAV keeps RIFF INFO precedence for its core fields. Its ID3 chunk
+    // can still supply extended fields that RIFF INFO does not carry.
+    let wav_id3 = (tagged.file_type() == FileType::Wav)
+        .then(|| tagged.tag(TagType::Id3v2))
+        .flatten();
+    let extended_from: Vec<_> = numbers_from.iter().copied().chain(wav_id3).collect();
+    let extended_text = |key: &ItemKey| find_text(&extended_from, key);
+    tags.album_artist = extended_text(&ItemKey::AlbumArtist);
+    tags.original_artist = extended_text(&ItemKey::OriginalArtist);
+    tags.composer = extended_text(&ItemKey::Composer);
+    tags.remixer = extended_text(&ItemKey::Remixer);
+    tags.lyricist = extended_text(&ItemKey::Lyricist);
+    if tags.lyricist.is_empty() {
+        // Lofty can map ID3's TEXT frame to Writer.
+        if let Some(lyricist) = tagged.tag(TagType::Id3v2)
+            .and_then(|tag| tag.get_string(&ItemKey::Writer))
+        {
+            tags.lyricist.push_str(lyricist);
+        }
+    }
+    tags.subtitle = extended_text(&ItemKey::TrackSubtitle);
+    tags.isrc = extended_text(&ItemKey::Isrc);
+    // ID3 can store the release date as TDRL or a user-text RELEASEDATE frame.
+    let release_dates = || {
+        extended_from.iter().flat_map(|tag| {
+            let custom = tag.items().filter_map(|item| match item.key() {
+                ItemKey::Unknown(name)
+                    if name.eq_ignore_ascii_case("RELEASEDATE") || name.eq_ignore_ascii_case("RELEASE DATE") =>
+                {
+                    item.value().text()
+                }
+                _ => None,
+            });
+            tag.get_strings(&ItemKey::ReleaseDate).chain(custom)
+        })
+    };
+    tags.release_date = release_dates().find_map(|value| {
+        let date = value.trim().split('T').next()?;
+        match date.as_bytes() {
+            [b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'-',
+             b'0'..=b'9', b'0'..=b'9', b'-', b'0'..=b'9', b'0'..=b'9'] => {
+                Some(date.to_owned())
+            }
+            _ => None,
+        }
+    });
     tags.year = numbers_from
         .iter()
         .find_map(|tag| {
@@ -364,16 +421,36 @@ pub fn read_tags(path: &Path) -> Result<TrackTags, ImportError> {
                 .or_else(|| tag.get_string(&ItemKey::Year).and_then(|v| v.parse().ok()))
                 .filter(|&y: &u16| y != 0)
         })
-        .unwrap_or(0);
-    tags.track_no = numbers_from
-        .iter()
-        .find_map(|tag| {
-            tag.get_string(&ItemKey::TrackNumber)
-                // "3/12" is a legal track number; take the part before the slash.
-                .and_then(|v| v.split('/').next().and_then(|n| n.trim().parse().ok()))
-                .filter(|&n: &u16| n != 0)
+        .or_else(|| {
+            release_dates()
+                .find_map(|value| {
+                    let year = value.trim().split('-').next()?;
+                    if year.len() != 4 || !year.bytes().all(|byte| byte.is_ascii_digit()) {
+                        return None;
+                    }
+                    year.parse::<u16>().ok().filter(|&year| year > 0)
+                })
         })
         .unwrap_or(0);
+    let number = |sources: &[&Tag], key: &ItemKey| {
+        sources.iter().find_map(|tag| {
+            // "3/12" stores both a number and a total. The library needs the number.
+            tag.get_string(key)?
+                .split('/').next()?.trim().parse::<u16>().ok()
+                .filter(|&n| n > 0)
+        }).unwrap_or(0)
+    };
+    tags.track_no = number(&numbers_from, &ItemKey::TrackNumber);
+    tags.disc_no = number(&extended_from, &ItemKey::DiscNumber);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "validated tempo range")]
+    {
+        tags.bpm_x100 = extended_from.iter().find_map(|tag| {
+            let bpm = tag.get_string(&ItemKey::Bpm)
+                .or_else(|| tag.get_string(&ItemKey::IntegerBpm))?
+                .trim().parse::<f64>().ok()?;
+            (20.0..=400.0).contains(&bpm).then(|| (bpm * 100.0).round() as u32)
+        });
+    }
     tags.key = tag_key(&tagged);
 
     if tags.title.is_empty() {
@@ -648,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn a_wav_reads_its_riff_info_and_not_its_id3_chunk() {
+    fn a_wav_reads_core_fields_from_riff_info_and_extended_fields_from_id3() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("both.wav");
         write_wav(&path);
@@ -662,12 +739,15 @@ mod tests {
             (ItemKey::AlbumTitle, "Id3 Album"),
             (ItemKey::Label, "Id3 Label"),
             (ItemKey::InitialKey, "2A"),
+            (ItemKey::ReleaseDate, "2024-07-02"),
         ]);
 
         let tags = read_tags(&path).unwrap();
         assert_eq!((tags.title.as_str(), tags.artist.as_str()), ("Info Title", "Info Artist"));
         assert_eq!((tags.album.as_str(), tags.label.as_str(), tags.key.as_str()), ("", "", ""));
         assert_eq!(tags.track_no, 2);
+        assert_eq!(tags.release_date.as_deref(), Some("2024-07-02"));
+        assert_eq!(tags.year, 2024);
     }
 
     #[test]
@@ -737,12 +817,14 @@ mod tests {
     }
 
     #[test]
-    fn a_flac_takes_its_key_and_label_from_its_vorbis_comments() {
+    fn a_flac_takes_its_key_label_and_release_date_from_its_vorbis_comments() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("keyed.flac");
-        write_flac(&path, &["TITLE=T", "INITIALKEY=Am", "ORGANIZATION=Org"]);
+        write_flac(&path, &["TITLE=T", "INITIALKEY=Am", "ORGANIZATION=Org", "RELEASEDATE=2024-03-15"]);
         let tags = read_tags(&path).unwrap();
         assert_eq!((tags.title.as_str(), tags.key.as_str(), tags.label.as_str()), ("T", "Am", "Org"));
+        assert_eq!(tags.release_date.as_deref(), Some("2024-03-15"));
+        assert_eq!(tags.year, 2024);
     }
 
     #[test]

@@ -23,8 +23,8 @@
 //! - **`Lyricist`** is a plain text column on the track, not a reference.
 //! - **`Subtitle`** holds what the ID3 subtitle frame holds — "extended mix",
 //!   "Original Mix", "remastered" on the 479 rows that have one — which is
-//!   the field rekordbox labels Mix Name. Read as that; not written, because
-//!   no capture shows a non-empty Mix Name to confirm it.
+//!   the field rekordbox labels Mix Name. File imports and Reload Tag store
+//!   the embedded subtitle here.
 //! - **`HotCueAutoLoad`** is the text `"on"` on all 38,681 rows. What the
 //!   unticked box is spelled as has never been seen, so it is not written.
 //! - **`DeliveryControl`** is `"on"` on 220 rows, `""` on 825 and NULL on the
