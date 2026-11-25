@@ -411,38 +411,11 @@ impl Publication {
         self.check_root()?;
         let mut moves = Self::moves(self.stage.path())?;
         if moves.is_empty() { return Ok((0, 0)); }
-        validate_paths(paths)?;
-        // A normalized key only narrows candidates. Confirm aliases on the
-        // actual filesystem; distinct names on a case-sensitive host must not
-        // become overlapping just because their comparison keys coincide.
-        let alias_key = |path: &Path| {
-            let normalized = nfc_path(path);
-            normalized.to_str().map_or_else(
-                || normalized.as_os_str().to_ascii_lowercase(),
-                |text| std::ffi::OsString::from(text.to_lowercase()),
-            )
-        };
-        let mut named: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
-        for path in paths { named.entry(alias_key(path)).or_default().push(path); }
+        let publication_paths = RelocationPaths::new(paths)?;
         let mut overlapping = Vec::new();
         let mut folders = std::collections::BTreeSet::new();
         for (to, from) in &moves {
-            let candidates = named.get(&alias_key(from));
-            let mut overlaps = candidates.is_some_and(|paths| paths.contains(&from))
-                || self.stage.path().join(from).try_exists()?;
-            if !overlaps {
-                // A deletion has no staged image to look up. Only inspect
-                // possible spelling aliases, never every selected audio path.
-                for path in candidates.into_iter().flatten() {
-                    match same_root(&self.root.join(from), &self.root.join(path)) {
-                        Ok(true) => { overlaps = true; break; }
-                        Ok(false) => {},
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
-                        Err(error) => return Err(error),
-                    }
-                }
-            }
-            if !overlaps { continue; }
+            if !publication_paths.overlaps(&self.root, Some(self.stage.path()), from)? { continue; }
             let target = self.stage.path().join(to);
             if target.try_exists()? {
                 return Err(std::io::Error::other("Relocation also has a staged destination; publication was not started"));
@@ -1171,6 +1144,51 @@ fn lock(root: &Path) -> std::io::Result<std::fs::File> {
         .map_err(at("open the write lock on", root))?;
     fs2::FileExt::lock_exclusive(&file).map_err(at("lock", root))?;
     Ok(file)
+}
+
+/// The publication names that can overlap an audio relocation source.
+/// Normalized keys only narrow candidates: aliases are confirmed on the actual
+/// filesystem, so disjoint names on case-sensitive hosts remain zero-copy.
+pub struct RelocationPaths<'a> {
+    named: std::collections::BTreeMap<std::ffi::OsString, Vec<&'a Path>>,
+}
+
+impl<'a> RelocationPaths<'a> {
+    pub fn new(paths: &'a [PathBuf]) -> std::io::Result<Self> {
+        validate_paths(paths)?;
+        let mut named: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
+        for path in paths { named.entry(Self::alias_key(path)).or_default().push(path.as_path()); }
+        Ok(Self { named })
+    }
+
+    fn alias_key(path: &Path) -> std::ffi::OsString {
+        let normalized = nfc_path(path);
+        normalized.to_str().map_or_else(
+            || normalized.as_os_str().to_ascii_lowercase(),
+            |text| std::ffi::OsString::from(text.to_lowercase()),
+        )
+    }
+
+    /// Observe existing staged images when available. Before staging, the
+    /// caller supplies the complete planned publication names to `new`.
+    pub fn overlaps(&self, root: &Path, stage: Option<&Path>, from: &Path) -> std::io::Result<bool> {
+        let candidates = self.named.get(&Self::alias_key(from));
+        if candidates.is_some_and(|paths| paths.contains(&from))
+            || stage.map(|stage| stage.join(from).try_exists()).transpose()?.unwrap_or(false) {
+            return Ok(true);
+        }
+        // A deletion has no staged image. Inspect only possible aliases,
+        // never every selected audio path.
+        for path in candidates.into_iter().flatten() {
+            match same_root(&root.join(from), &root.join(path)) {
+                Ok(true) => return Ok(true),
+                Ok(false) => {},
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(false)
+    }
 }
 
 #[cfg(test)]
@@ -2095,6 +2113,25 @@ mod tests {
         assert_eq!(std::fs::read(publication.stage().join("old")).unwrap(), b"replacement");
         assert!(!publication.stage().join("new").exists());
         assert_eq!(std::fs::read(publication.stage().join(".moves.json")).unwrap(), moves);
+    }
+
+    #[test]
+    fn planned_relocation_names_match_staged_overlap_classification() {
+        for (from, replacement) in [("Contents/a.mp3", "Contents/a.mp3"),
+            ("Contents/z.mp3", "Contents/z.mp3"), ("Contents/CASE.mp3", "Contents/case.mp3"),
+            ("Contents/caf\u{e9}.mp3", "Contents/cafe\u{301}.mp3")] {
+            let root = tempfile::tempdir().unwrap();
+            write_file(&root.path().join(from), b"original");
+            let stage = tempfile::tempdir_in(root.path()).unwrap();
+            let paths = [PathBuf::from(replacement), PathBuf::from("Contents/new.mp3")];
+            let planned = RelocationPaths::new(&paths).unwrap();
+            let expected = from == replacement || same_root(&root.path().join(from), &root.path().join(replacement)).unwrap_or(false);
+            assert_eq!(planned.overlaps(root.path(), None, Path::new(from)).unwrap(), expected);
+            write_file(&stage.path().join(replacement), b"replacement");
+            assert_eq!(planned.overlaps(root.path(), Some(stage.path()), Path::new(from)).unwrap(), expected);
+            let disjoint = [PathBuf::from("Contents/new.mp3")];
+            assert!(!RelocationPaths::new(&disjoint).unwrap().overlaps(root.path(), None, Path::new(from)).unwrap());
+        }
     }
 
     #[test]
