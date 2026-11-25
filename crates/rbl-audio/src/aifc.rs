@@ -143,7 +143,17 @@ impl MediaSource for Patched {
 /// Opens `path` for symphonia: the file as it is, or an AIFF-C file with an
 /// aliased compression type shown under the code symphonia knows.
 pub fn open(path: &Path) -> io::Result<(Box<dyn MediaSource>, Aifc)> {
-    let mut file = File::open(path)?;
+    let file = File::open(path).inspect_err(|error| log_source_failure("file-open", error))?;
+    prepare(file).inspect_err(|error| log_source_failure("source-header", error))
+}
+
+fn log_source_failure(operation: &str, error: &io::Error) {
+    // Keep diagnostics useful without recording the path or arbitrary error text.
+    tracing::warn!(operation, error_kind = ?error.kind(), os_error = ?error.raw_os_error(),
+        "audio source preparation failed");
+}
+
+fn prepare(mut file: File) -> io::Result<(Box<dyn MediaSource>, Aifc)> {
     let found = find_compression(&mut file)?;
     file.seek(SeekFrom::Start(0))?;
     let Some((at, code, bits)) = found else {
@@ -170,6 +180,54 @@ pub fn open(path: &Path) -> io::Result<(Box<dyn MediaSource>, Aifc)> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    fn capture(action: impl FnOnce()) -> String {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let writer = log.reopen().unwrap();
+        let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || writer.try_clone().unwrap()).finish();
+        tracing::subscriber::with_default(subscriber, action);
+        std::fs::read_to_string(log.path()).unwrap()
+    }
+
+    #[test]
+    fn source_failure_stages_do_not_log_paths_or_change_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("private-name-missing.aif");
+        let original = File::open(&missing).err().unwrap();
+        let logged = capture(|| {
+            let error = open(&missing).err().unwrap();
+            assert_eq!(error.kind(), original.kind());
+            assert_eq!(error.raw_os_error(), original.raw_os_error());
+            assert_eq!(error.to_string(), original.to_string());
+        });
+        assert!(logged.contains("operation=\"file-open\""), "{logged}");
+        assert!(logged.contains("error_kind=NotFound"), "{logged}");
+        assert!(logged.contains(&format!("os_error={:?}", original.raw_os_error())), "{logged}");
+        assert_eq!(logged.lines().count(), 1);
+        assert!(!logged.contains("private-name"));
+        assert!(!logged.contains(&*dir.path().to_string_lossy()));
+
+        let invalid = dir.path().join("private-name-invalid.aif");
+        std::fs::write(&invalid, aifc(*b"in24", 16, &[0; 4])).unwrap();
+        let logged = capture(|| {
+            let error = open(&invalid).err().unwrap();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(error.raw_os_error(), None);
+            assert_eq!(error.to_string(), "AIFF-C compression type 'in24' requires 24-bit samples, COMM sample width is 16 bits");
+        });
+        assert!(logged.contains("operation=\"source-header\""), "{logged}");
+        assert!(logged.contains("error_kind=InvalidData"), "{logged}");
+        assert_eq!(logged.lines().count(), 1);
+        assert!(!logged.contains("private-name"));
+        assert!(!logged.contains(&*dir.path().to_string_lossy()));
+        assert!(!logged.contains("in24"), "no arbitrary error text is logged");
+
+        let valid = dir.path().join("private-name-valid.aif");
+        std::fs::write(&valid, aifc(*b"NONE", 16, &[0; 4])).unwrap();
+        assert_eq!(capture(|| { assert!(open(&valid).is_ok()); }), "");
+    }
 
     /// A minimal AIFF-C file: FVER, COMM with `code`, SSND with `data`.
     fn aifc(code: [u8; 4], bits: u16, data: &[u8]) -> Vec<u8> {

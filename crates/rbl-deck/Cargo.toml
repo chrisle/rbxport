@@ -36,6 +36,7 @@ rbl-core = { path = "../rbl-core" }
 rbl-audio = { path = "../rbl-audio" }
 
 [dev-dependencies]
+tracing-subscriber = "0.3"
 tempfile = "3"
 # The load probe walks the installed library; the engine itself needs neither.
 rbl-db = { path = "../rbl-db" }

@@ -19,4 +19,5 @@ mp3lame-encoder = "0.2.5"
 rubato = "0.16"
 
 [dev-dependencies]
+tracing-subscriber = "0.3"
 tempfile = "3"

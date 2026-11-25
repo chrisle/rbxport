@@ -111,7 +111,10 @@ impl Streamer {
                 &FormatOptions::default(),
                 &MetadataOptions::default(),
             )
-            .map_err(|e| DeckError::Decode(aifc.describe(e)))?;
+            .map_err(|e| {
+                tracing::warn!(operation = "format-probe", "audio format probe failed");
+                DeckError::Decode(aifc.describe(e))
+            })?;
         let format = probed.format;
 
         let track = format
@@ -583,6 +586,32 @@ fn scale_frames(frames: u64, from: u32, to: u32) -> u64 {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probe_failure_stage_does_not_log_paths_or_change_the_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let writer = log.reopen().unwrap();
+        let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || writer.try_clone().unwrap()).finish();
+        let invalid = dir.path().join("private-name-invalid.wav");
+        std::fs::write(&invalid, b"not an audio file").unwrap();
+        tracing::subscriber::with_default(subscriber, || {
+            let error = Streamer::open(&invalid, 44_100).err().unwrap();
+            assert!(matches!(&error, DeckError::Decode(_)));
+            assert!(error.to_string().starts_with("unsupported or unreadable audio: "));
+            let valid = dir.path().join("private-name-valid.wav");
+            write_wav(&valid, 44_100, 2, &[0.; 100]);
+            assert!(Streamer::open(&valid, 44_100).is_ok());
+        });
+        let logged = std::fs::read_to_string(log.path()).unwrap();
+        assert!(logged.contains("operation=\"format-probe\""), "{logged}");
+        assert_eq!(logged.lines().count(), 1, "valid audio emits no failure event");
+        assert!(!logged.contains("private-name"));
+        assert!(!logged.contains(&*dir.path().to_string_lossy()));
+        assert!(!logged.contains("unsupported"), "no arbitrary error text is logged");
+    }
 
     /// A 16-bit PCM WAV, so the tests need no fixture file.
     fn write_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[f32]) {
