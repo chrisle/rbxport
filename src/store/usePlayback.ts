@@ -240,6 +240,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const desiredDelay = useRef<number | null>(null);
   /** A queued start must wait for frames from the deck, not the load event. */
   const awaitingLoadedStart = useRef<number | null>(null);
+  /** Fresh load, or the generation awaiting its first ordinary ready-start frame. */
+  const readyStart = useRef<"fresh" | number | null>(null);
   const transportVersion = useRef(0);
   const deferredSeek = useRef<number | null>(null);
   const desiredTempo = useRef(1);
@@ -336,6 +338,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     loadPending.current = true;
     applyingLoad.current = 0;
     awaitingLoadedStart.current = null;
+    readyStart.current = "fresh";
     scrubbing.current = false;
     landing.current = null;
     pending.current = null;
@@ -400,12 +403,14 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       const now = performance.now();
       // A load completion can precede the first audible output buffer. An
       // older stopped or zero-frame tick cannot override queued Play intent.
-      const start = awaitingLoadedStart.current;
+      if (typeof readyStart.current === "number" && readyStart.current !== deck.generation) readyStart.current = null;
+      const start = awaitingLoadedStart.current ?? (typeof readyStart.current === "number" ? 0 : null);
       if (start !== null && (!deck.playing || rate <= 0 || deck.frames <= start * rate)) {
         anchor.current = pinned({ ...anchor.current, sampleRate: rate }, positionRef.current, now);
         return;
       }
       awaitingLoadedStart.current = null;
+      if (deck.frames !== 0 || deck.playing) readyStart.current = null;
       setPlaying(deck.playing);
       desiredPlaying.current = deck.playing;
       setDuration(rate > 0 ? deck.totalFrames / rate : 0);
@@ -582,6 +587,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     applyingLoad.current = 0;
     desiredPlaying.current = false;
     awaitingLoadedStart.current = null;
+    readyStart.current = null;
     desiredDelay.current = null;
     deferredSeek.current = null;
     desiredLoop.current = null;
@@ -636,7 +642,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     // may already be queued. A second press cancels that intent.
     const wanted = isReady() ? !playing : !desiredPlaying.current;
     desiredPlaying.current = wanted;
-    if (!wanted) awaitingLoadedStart.current = null;
+    if (!wanted) {
+      awaitingLoadedStart.current = null;
+      readyStart.current = null;
+    }
     desiredDelay.current = null;
     const version = ++transportVersion.current;
     // The button follows at once rather than on the next tick, which is up to
@@ -649,9 +658,13 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       return;
     }
     setPlaying(wanted);
+    if (wanted && readyStart.current === "fresh" && positionRef.current === 0 &&
+        anchor.current.frames === 0 && !desiredLoop.current?.active) {
+      readyStart.current = anchor.current.generation;
+    }
     // Preserve the interpolated head when toggling between native ticks. A
     // new timestamp around the old frame counter would rewind it on resume.
-    anchor.current = { ...pinned(anchor.current, positionRef.current, performance.now()), playing: wanted };
+    anchor.current = { ...pinned(anchor.current, positionRef.current, performance.now()), playing: wanted && typeof readyStart.current !== "number" };
     void (async () => {
       try {
         const backend = await getBackend();
@@ -660,6 +673,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         else await backend.deckPause(DECK);
       } catch (failure) {
         desiredPlaying.current = false;
+        readyStart.current = null;
         setPlaying(false);
         setError(reasonFrom(failure));
       }
@@ -669,6 +683,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const playAfter = useCallback(
     (delayMs: number) => {
       if (idle || playing) return;
+      readyStart.current = null;
       const wait = Number.isFinite(delayMs) ? Math.max(0, delayMs) : 0;
       desiredPlaying.current = true;
       desiredDelay.current = wait;
@@ -699,6 +714,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const seek = useCallback(
     (seconds: number) => {
       if (idle || !Number.isFinite(seconds)) return;
+      readyStart.current = null;
       const at = Math.max(-5, seconds);
       // Locally first: the head must move under the pointer, not a tick later.
       anchor.current = {
@@ -730,6 +746,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const moveBy = useCallback(
     (seconds: number) => {
       if (idle || !Number.isFinite(seconds) || !isLoaded()) return;
+      readyStart.current = null;
       anchor.current = {
         ...anchor.current,
         frames: anchor.current.frames + seconds * anchor.current.sampleRate,
@@ -746,6 +763,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   );
   const moveByGridBeats = useCallback((gridTimesMs: number[], beats: number) => {
     if (idle || !isLoaded() || gridTimesMs.length < 2 || !Number.isFinite(beats)) return;
+    readyStart.current = null;
     void (async () => {
       try {
         await (await getBackend()).deckMoveGrid(DECK, gridTimesMs, beats);
@@ -766,6 +784,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
    */
   const scrubBegin = useCallback(() => {
     if (idle || scrubbing.current || !isReady()) return;
+    readyStart.current = null;
     scrubbing.current = true;
     landing.current = null;
     // The head stops running the moment it is grabbed. A playing deck keeps
@@ -983,6 +1002,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const setLoop = useCallback(
     (inSeconds: number, outSeconds: number) => {
       if (!Number.isFinite(inSeconds) || !Number.isFinite(outSeconds) || outSeconds <= inSeconds) return;
+      readyStart.current = null;
       const next = { inSeconds: Math.max(0, inSeconds), outSeconds, active: true };
       desiredLoop.current = next;
       pendingLoop.current = next;
@@ -1018,6 +1038,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     });
   }, [idle, isLoaded, positionNow, emit, loopCall, DECK, setPosition, anchorOn]);
   const setLoopActive = useCallback((on: boolean) => {
+    readyStart.current = null;
     if (desiredLoop.current !== null) {
       desiredLoop.current = { ...desiredLoop.current, active: on };
       pendingLoop.current = desiredLoop.current;

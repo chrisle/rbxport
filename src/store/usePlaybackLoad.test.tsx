@@ -511,3 +511,94 @@ it.each([0.8, 1, 1.2])("keeps pause/resume continuous between ticks at tempo %s"
   expect(deck.positionRef.current).toBeCloseTo(2.1);
   expect(deck.positionNow()).toBeCloseTo(2.1);
 });
+
+
+it("pins a confirmed-ready zero-frame start until its first advancing tick", async () => {
+  let now = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  let frame: FrameRequestCallback | undefined;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frame = callback; return 1; });
+  finish(loads[0]!);
+  await settle();
+  const state = { ...emptyDeck, loadId: loads[0]!.id, loaded: true, frames: 0,
+    generation: 1, totalFrames: RATE * 300 };
+  act(() => tick({ ...emptyTick, b: state }));
+  act(() => deck.toggle());
+  await settle();
+  expect(sent).toEqual(["play"]);
+  now += 80;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+  act(() => tick({ ...emptyTick, b: { ...state, playing: true } }));
+  now += 16;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBe(0);
+  act(() => tick({ ...emptyTick, b: { ...state, playing: true, frames: RATE / 10 } }));
+  expect(deck.positionNow()).toBeCloseTo(0.1);
+  now += 16;
+  act(() => frame?.(now));
+  expect(deck.positionRef.current).toBeGreaterThan(0);
+});
+
+it.each(["seek", "native generation", "stop", "scheduled play", "loop", "EOF"] as const)(
+  "keeps %s authoritative around a ready start", async (control) => {
+    let now = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    let frame: FrameRequestCallback | undefined;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frame = callback; return 1; });
+    finish(loads[0]!);
+    await settle();
+    const state = { ...emptyDeck, loadId: loads[0]!.id, loaded: true, generation: 1,
+      totalFrames: RATE * 300 };
+    act(() => tick({ ...emptyTick, b: state }));
+    if (control === "scheduled play") {
+      act(() => deck.playAfter(80));
+      await settle();
+      act(() => tick({ ...emptyTick, b: { ...state, playing: true, startInFrames: RATE * 0.08 } }));
+      now += 40;
+      act(() => frame?.(now));
+      expect(deck.positionRef.current).toBe(0);
+      now += 80;
+      expect(deck.positionNow()).toBeCloseTo(0.04);
+      expect(sent).toEqual(["play-after:80"]);
+      return;
+    }
+    if (control === "loop") {
+      act(() => deck.setLoop(0, 2));
+      await settle();
+      act(() => tick({ ...emptyTick, b: { ...state, loopOutFrames: RATE * 2, looping: true } }));
+    } else if (control === "EOF") {
+      act(() => tick({ ...emptyTick, b: { ...state, frames: RATE * 300 } }));
+    }
+    act(() => deck.toggle());
+    await settle();
+    if (control === "stop") {
+      // Held CUE release seeks back and stops while no PCM has advanced.
+      act(() => deck.seek(0));
+      act(() => deck.toggle());
+      await settle();
+      act(() => tick({ ...emptyTick, b: state }));
+      now += 100;
+      act(() => frame?.(now));
+      expect(deck.playing).toBe(false);
+      expect(deck.positionRef.current).toBe(0);
+      expect(sent).toEqual(["play", "seek:0", "pause"]);
+      return;
+    }
+    if (control === "seek") {
+      act(() => deck.seek(2));
+      await settle();
+      act(() => tick({ ...emptyTick, b: { ...state, frames: RATE * 2, generation: 2, playing: true } }));
+      now += 80;
+      expect(deck.positionNow()).toBeCloseTo(2.08);
+      expect(sent).toEqual(["play", "seek:2000"]);
+      return;
+    }
+    // A native seek/EOF restart is an intentional generation, not startup.
+    act(() => tick({ ...emptyTick, b: { ...state, generation: control === "loop" ? 1 : 2,
+      playing: true, loopOutFrames: control === "loop" ? RATE * 2 : 0, looping: control === "loop" } }));
+    now += 80;
+    expect(deck.positionNow()).toBeCloseTo(0.08);
+    expect(sent).toEqual(["play"]);
+  },
+);
