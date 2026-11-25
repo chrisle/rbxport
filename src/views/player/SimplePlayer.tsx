@@ -14,6 +14,7 @@
  * refs are the frame loop's: it writes transforms straight into them, which
  * is why the head and the position bar are not rendered from state.
  */
+import { HoverTarget } from "@/components/HoverTarget";
 import { memo } from "react";
 
 import type { Cue, DeckId, RowDto } from "@/ipc/types";
@@ -188,6 +189,7 @@ export const SimplePlayer = memo(function SimplePlayer({
               aria-hidden
             />
           ) : null}
+          <HoverTarget identity={`${track?.id}:${overview.width}:${total}`} enabled={track !== null && total > 0} />
           <span
             ref={overviewHead}
             className={styles.playhead}

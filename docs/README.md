@@ -41,6 +41,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 - [LINK behavior and hardware coverage](reference/link-testing.md): device dialects, behavior catalog, and physical checks.
 - [Analysis crate](../crates/rbl-analysis/README.md): algorithm reading path and evaluation tools.
 - [Waveform calibration](reference/waveform-analysis.md): measured overview behavior and its limits.
+- [Waveform hover destinations](reference/waveform-hover.md): independent seek feedback and unchanged detail-waveform gestures.
 - [Playback crate](../crates/rbl-deck/README.md): thread model, code map, and test workflow.
 - [Playback test fixtures](../crates/rbl-deck/tests/fixtures/README.md): generated audio and regeneration.
 - [Licensing](../LICENSING.md): bundled library terms.

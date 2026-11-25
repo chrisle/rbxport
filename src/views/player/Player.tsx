@@ -1,3 +1,4 @@
+import { HoverTarget } from "@/components/HoverTarget";
 import type { LoadedTrack } from "@/ipc/types";
 /**
  * The preview player.
@@ -2499,6 +2500,7 @@ export const Player = memo(function Player({
               ) : null}
               <CueMarkers cues={cues} totalMs={total * 1000} loop={playback.loop} />
               <OverviewTempoMarkers grid={grid} totalMs={total * 1000} />
+              <HoverTarget identity={`${track?.id}:${overview.width}:${total}`} enabled={track !== null && total > 0} />
             </div>
             {/* How far through the track the head is, under the overview. */}
             <div className={styles.scrub} aria-hidden>

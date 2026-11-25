@@ -5,6 +5,7 @@
  * bitmap, so scrolling back over a row is a single `drawImage` rather than an
  * IPC round trip and a redraw.
  */
+import { HoverTarget } from "@/components/HoverTarget";
 import { memo, useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { getBackend } from "@/ipc/client";
 import type { RowCue } from "@/ipc/types";
@@ -211,6 +212,8 @@ export const WaveformPreview = memo(function WaveformPreview({
         aria-hidden
       />
       <PreviewPlayhead trackId={trackId} width={width} />
+      <HoverTarget identity={`${trackId}:${width}:${height}`} enabled={durationSec > 0}
+        position={(x, y, w) => previewClickMs(x, y, w, durationSec * 1000, hotCues) / (durationSec * 1000)} />
     </span>
   );
 });

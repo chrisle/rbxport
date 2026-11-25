@@ -253,3 +253,38 @@ describe("the row preview's shape", () => {
     expect(drawnHalf).toEqual([true, false]);
   });
 });
+
+
+it("shows a hover target without starting preview or requesting another waveform", () => {
+  mount("hover");
+  const wave = host.querySelector("canvas")!.parentElement!;
+  wave.getBoundingClientRect = () => ({ left: 20, top: 5, width: 120, height: 20, right: 140, bottom: 25, x: 20, y: 5, toJSON: () => ({}) });
+  act(() => { wave.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 80, clientY: 20 })); });
+  const target = wave.querySelector<HTMLElement>("[data-hover-head]");
+  expect(target).not.toBeNull();
+  expect(target!.hidden).toBe(false);
+  expect(target!.style.left).toBe("60px");
+  expect(previews).toEqual([]);
+  expect(asked).toEqual([]);
+  act(() => { wave.dispatchEvent(new MouseEvent("pointerleave")); });
+  expect(target!.hidden).toBe(true);
+});
+
+
+it("points at the same hot-cue target as a preview click and resets a recycled row", async () => {
+  act(() => root.render(<WaveformPreview trackId="cue" width={120} height={20} hotCues={[["A", 100_000, null]]} durationSec={300} />));
+  const surface = host.querySelector("canvas")!.parentElement!;
+  surface.getBoundingClientRect = () => ({ left: 20, top: 5, width: 120, height: 20, right: 140, bottom: 25, x: 20, y: 5, toJSON: () => ({}) });
+  act(() => { surface.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 65, clientY: 7 })); });
+  const line = surface.querySelector<HTMLElement>("[data-hover-head]")!;
+  expect(line.hidden).toBe(false);
+  expect(line.style.left).toBe("40px"); // Mouse x45 hits A's badge, whose click target is x40.
+  expect(previews).toEqual([]);
+  mount("replacement");
+  expect(line.hidden).toBe(true);
+  void act(() => vi.advanceTimersByTime(200)); await settle();
+  const askedBefore = [...asked];
+  for (let at = 20; at < 100; at++) act(() => { surface.dispatchEvent(new MouseEvent("pointermove", { clientX: at, clientY: 20 })); });
+  expect(asked).toEqual(askedBefore);
+  expect(previews).toEqual([]);
+});
