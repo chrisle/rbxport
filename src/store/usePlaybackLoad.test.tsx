@@ -466,3 +466,48 @@ it("ignores a pre-completion snapshot when a pending explicit reload has already
   expect(loads).toHaveLength(2);
   expect(deck.loadedTrack).toEqual([second.track, second.id]);
 });
+
+it.each([0.8, 1, 1.2])("keeps pause/resume continuous between ticks at tempo %s", async (tempo) => {
+  let now = 1_000;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  let frame: FrameRequestCallback | undefined;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frame = callback;
+    return 1;
+  });
+  finish(loads[0]!);
+  await settle();
+  const state = { ...emptyDeck, loadId: loads[0]!.id, loaded: true, playing: true,
+    frames: 10 * RATE, totalFrames: 300 * RATE, generation: 1, tempo };
+  act(() => tick({ ...emptyTick, b: state }));
+  now += 80;
+  act(() => frame?.(now));
+  const before = deck.positionRef.current;
+  expect(before).toBeCloseTo(10 + 0.08 * tempo);
+
+  act(() => deck.toggle());
+  await settle();
+  expect(deck.playing).toBe(false);
+  expect(deck.positionNow()).toBeCloseTo(before);
+  now += 20;
+  expect(deck.positionRef.current).toBe(before);
+  act(() => deck.toggle());
+  await settle();
+  now += 16;
+  act(() => frame?.(now));
+  expect(sent).toEqual(["pause", "play"]);
+  expect(deck.positionRef.current).toBeGreaterThanOrEqual(before);
+  expect(deck.positionNow()).toBeCloseTo(before + 0.016 * tempo);
+
+  // An intentional native seek remains authoritative, including backwards.
+  act(() => tick({ ...emptyTick, b: { ...state, frames: 2 * RATE, generation: 2 } }));
+  expect(deck.positionRef.current).toBe(2);
+  expect(deck.positionNow()).toBe(2);
+  // A later stopped tick owns the final paused position, rather than our
+  // optimistic local transport anchor.
+  act(() => tick({ ...emptyTick, b: { ...state, frames: 2.1 * RATE, generation: 2, playing: false } }));
+  now += 100;
+  expect(deck.playing).toBe(false);
+  expect(deck.positionRef.current).toBeCloseTo(2.1);
+  expect(deck.positionNow()).toBeCloseTo(2.1);
+});

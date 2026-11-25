@@ -649,7 +649,9 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       return;
     }
     setPlaying(wanted);
-    anchor.current = { ...anchor.current, playing: wanted, at: performance.now() };
+    // Preserve the interpolated head when toggling between native ticks. A
+    // new timestamp around the old frame counter would rewind it on resume.
+    anchor.current = { ...pinned(anchor.current, positionRef.current, performance.now()), playing: wanted };
     void (async () => {
       try {
         const backend = await getBackend();
