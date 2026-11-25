@@ -669,7 +669,42 @@ fn sibling(audio: &str, name: &str) -> String {
     format!("{parent}/{name}")
 }
 
-fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Manifest>, in_place: &[Option<String>], previous_in_place: &BTreeSet<String>) -> Vec<Layout> {
+/// The shape the former Windows collision writer produced. Do not interpret
+/// arbitrary backslashes (including literal Unix filenames) as separators.
+fn historical_audio_spelling(audio: &str) -> Option<String> {
+    let (parent, name) = audio.split_once('\\')?;
+    let folders: Vec<_> = parent.strip_prefix("/Contents/")?.split('/').collect();
+    let safe = |part: &str| part != "." && part != ".." && fat_safe(part) == part;
+    if folders.len() != 2 || !folders.iter().all(|part| safe(part)) || !safe(name) {
+        return None;
+    }
+    Some(format!("{parent}/{name}"))
+}
+
+fn historical_audio_alias(destination: &Path, audio: &str) -> Option<String> {
+    if !cfg!(windows) { return None; }
+    let portable = historical_audio_spelling(audio)?;
+    let old = checked_under(destination, audio).ok()?;
+    let new = checked_under(destination, &portable).ok()?;
+    (new.is_file() && same_file(&old, &new)).then_some(portable)
+}
+
+fn requested_audio_migration(destination: &Path, tracks: &[SourceTrack], previous: Option<&Manifest>) -> bool {
+    if !cfg!(windows) { return false; }
+    let Some(previous) = previous else { return false };
+    // Well-formed generations need no filesystem work beyond their existing
+    // receipts. Only requested, owned entries may force a metadata rebuild.
+    let candidates: BTreeMap<_, _> = previous.tracks.iter()
+        .filter(|old| !old.in_place && old.preserved != Some(true) && old.conversion.is_empty()
+            && historical_audio_spelling(&old.audio).is_some())
+        .map(|old| (old.key(), old)).collect();
+    if candidates.is_empty() { return false; }
+    tracks.iter().filter(|track| !track.device.as_ref().is_some_and(|device| device.preserve))
+        .any(|track| candidates.get(&track_key(track.id, &track.source_path.to_string_lossy()))
+            .is_some_and(|old| historical_audio_alias(destination, &old.audio).is_some()))
+}
+
+fn layouts(destination: &Path, tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Manifest>, in_place: &[Option<String>], previous_in_place: &BTreeSet<String>) -> Vec<Layout> {
     let recorded: BTreeMap<_, _> = previous.into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();
     // Library files on the stick keep their names, and nothing copied may land
     // on one: not this run's, nor one an earlier run pointed at and left.
@@ -708,7 +743,9 @@ fn layouts(tracks: &[SourceTrack], ids: &[u32], root: &str, previous: Option<&Ma
         // Keep a previous collision suffix when another colliding track goes away.
         if let Some(old) = recorded.get(&track_key(track.id, &track.source_path.to_string_lossy())) {
             if old.conversion.is_empty() && Path::new(&old.audio).parent() == Path::new(&place.audio).parent() && old.source == track.source_path.to_string_lossy() {
-                place.audio.clone_from(&old.audio);
+                place.audio = if !old.in_place && old.preserved != Some(true) {
+                    historical_audio_alias(destination, &old.audio).unwrap_or_else(|| old.audio.clone())
+                } else { old.audio.clone() };
                 place.file_name = Path::new(&old.audio).file_name().map_or_else(|| place.file_name.clone(), |f| f.to_string_lossy().into_owned());
             }
         }
@@ -1180,7 +1217,8 @@ fn export_cancellable_inner(
         .is_some_and(|g| g.transform_version == incremental::TRANSFORM_VERSION && g.databases == database_signatures);
     if let Some(old) = previous.as_ref().filter(|_| generation_matches) {
         if old.generation.as_ref().is_some_and(|g| g.request == request && g.inputs == source_revisions)
-            && settings_files.is_empty() && incremental::receipts_match(destination, old.generation.as_ref().ok_or_else(|| ExportError::Conflict("Missing generation receipt".into()))?)? {
+            && settings_files.is_empty() && !requested_audio_migration(destination, tracks, previous.as_ref())
+            && incremental::receipts_match(destination, old.generation.as_ref().ok_or_else(|| ExportError::Conflict("Missing generation receipt".into()))?)? {
             return Ok(ExportReport {
                 verified: true, up_to_date: true, tracks: old.tracks.len(), playlists: old.playlists.len(),
                 kept_existing: old.generation.as_ref().map_or(0, |g| g.kept_existing),
@@ -1347,7 +1385,7 @@ fn export_cancellable_inner(
     // An adopted copy keeps its place as a library file on the stick does:
     // never renamed, and nothing else copied over it.
     let kept_paths: Vec<Option<String>> = in_place_paths.iter().zip(&adopted_paths).map(|(a, b)| a.clone().or_else(|| b.clone())).collect();
-    let layouts = layouts(tracks, &ids, root_name, previous.as_ref(), &kept_paths, &previous_in_place);
+    let layouts = layouts(destination, tracks, &ids, root_name, previous.as_ref(), &kept_paths, &previous_in_place);
     // Losing access to a selected source must never delete its good USB copy.
     // A track only carried from the stick has no other source; its missing
     // audio is the stick's own state, kept below as it is.
@@ -1487,7 +1525,9 @@ fn export_cancellable_inner(
         // Unchanged means: same source bytes by size and time, same place on
         // the stick, and still actually there.
         let unchanged_metadata = !in_place && previous_entry.is_some_and(|c| {
-            c.audio == place.audio && c.size == size && c.conversion == profile
+            (c.audio == place.audio || (!c.in_place && c.preserved != Some(true) && c.conversion.is_empty()
+                && historical_audio_alias(destination, &c.audio).is_some_and(|portable| portable == place.audio)))
+                && c.size == size && c.conversion == profile
                 && ((c.modified == modified && source_receipt_matches) || source_contents_unchanged.contains(&key))
         });
         // The stick's copy as it is now, by size and time only.
@@ -3038,6 +3078,41 @@ fn staged_files(root: &Path, named: &[&str]) -> std::io::Result<Vec<PathBuf>> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    #[test]
+    fn historical_collision_spelling_has_a_narrow_relative_shape() {
+        assert_eq!(super::historical_audio_spelling("/Contents/A/B\\one-7.mp3"), Some("/Contents/A/B/one-7.mp3".into()));
+        for unsupported in ["/Contents/A/B/one-7.mp3", "C:\\Contents\\one.mp3", "/Contents/A\\one.mp3",
+            "/Contents/A/B/C\\one.mp3", "/Contents/A/..\\one.mp3", "/Contents/A/B\\../one.mp3",
+            "/Contents/A/B\\one\\two.mp3", "/Contents/A/B\\", "/Contents/A/B\\one:stream"] {
+            assert_eq!(super::historical_audio_spelling(unsupported), None, "{unsupported}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_historical_audio_alias_requires_an_existing_regular_file() {
+        let root = tempfile::tempdir().unwrap();
+        let audio = "/Contents/A/B\\one-7.mp3";
+        assert_eq!(super::historical_audio_alias(root.path(), audio), None);
+        let target = root.path().join("Contents/A/B/one-7.mp3");
+        std::fs::create_dir_all(&target).unwrap();
+        assert_eq!(super::historical_audio_alias(root.path(), audio), None);
+        std::fs::remove_dir(&target).unwrap();
+        std::fs::write(&target, b"audio").unwrap();
+        assert_eq!(super::historical_audio_alias(root.path(), audio), Some("/Contents/A/B/one-7.mp3".into()));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_unix_literal_backslash_is_not_a_windows_audio_alias() {
+        let root = tempfile::tempdir().unwrap();
+        let literal = root.path().join("Contents/A/B\\one-7.mp3");
+        std::fs::create_dir_all(literal.parent().unwrap()).unwrap();
+        std::fs::write(&literal, b"literal Unix filename").unwrap();
+        assert_eq!(super::historical_audio_alias(root.path(), "/Contents/A/B\\one-7.mp3"), None);
+        assert_eq!(std::fs::read(literal).unwrap(), b"literal Unix filename");
+    }
+
     #[test]
     fn a_collision_suffixed_path_keeps_forward_slashes_whatever_the_host() {
         // `Path::join` on Windows gave `/Contents/A/B\\one-7.mp3` (#788).

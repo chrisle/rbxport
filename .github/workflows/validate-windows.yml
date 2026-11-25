@@ -91,6 +91,13 @@ jobs:
           RB_LITE_TEST: "1"
         run: cargo test -p rbl-export --test safety collisions_and_unicode_names_keep_distinct_audio
 
+      - name: Migrate historical Windows export paths
+        if: inputs.check_rust
+        shell: pwsh
+        env:
+          RB_LITE_TEST: "1"
+        run: cargo test -p rbl-export --test windows_path_migration
+
       - name: Device discovery during publication
         if: inputs.check_rust
         shell: pwsh
