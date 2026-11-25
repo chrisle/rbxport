@@ -45,10 +45,10 @@ interface PcmBuffer extends LoadedWaveform {
  * only when it was loaded, and otherwise the `PWAV` one (#372). The detail
  * has no such fallback here.
  */
-async function loadTag(trackId: string, palette: WavePalette, detail: boolean): Promise<LoadedTag> {
-  const bytes = await loadDetailWaveform(trackId, waveformKindOf(palette, detail));
+async function loadTag(trackId: string, palette: WavePalette, detail: boolean, retryPendingMiss?: () => boolean): Promise<LoadedTag> {
+  const bytes = await loadDetailWaveform(trackId, waveformKindOf(palette, detail), retryPendingMiss);
   if (bytes.length > 0 || detail || palette === "blue") return { trackId, bytes, palette };
-  return { trackId, bytes: await loadDetailWaveform(trackId, waveformKindOf("blue", false)), palette: "blue" };
+  return { trackId, bytes: await loadDetailWaveform(trackId, waveformKindOf("blue", false), retryPendingMiss), palette: "blue" };
 }
 
 export interface WaveformDetailProps {
@@ -105,17 +105,35 @@ export const WaveformDetail = memo(function WaveformDetail({
   // them up until its own arrive, so a waveform being drawn grows rather
   // than blinking out at every step.
   const shown = useRef("");
+  const request = useMemo(() => ({ trackId, loadIntent, detail, palette, revision, pcmMode }),
+    [trackId, loadIntent, detail, palette, revision, pcmMode]);
+  const committed = useRef<typeof request | null>(null);
+  const requested = useRef<typeof request | null>(null);
+  useLayoutEffect(() => {
+    committed.current = request;
+    return () => { committed.current = null; };
+  }, [request]);
   useEffect(() => {
+    const { trackId, loadIntent, detail, palette, revision, pcmMode } = request;
+    const previous = requested.current;
+    requested.current = request;
     if (pcmMode) return;
     let live = true;
+    let retry = previous !== null && previous.trackId === trackId && previous.loadIntent !== loadIntent
+      && previous.detail === detail && previous.palette === palette && previous.revision === revision && !previous.pcmMode;
+    const retryPendingMiss = () => {
+      if (!live || committed.current !== request || !retry) return false;
+      retry = false;
+      return true;
+    };
     const what = `${trackId}:${detail}:${palette}`;
     if (shown.current !== what) setData(null);
     shown.current = what;
-    void loadTag(trackId, palette, detail).then((loaded) => {
-      if (live) setData(loaded);
+    void loadTag(trackId, palette, detail, retryPendingMiss).then((loaded) => {
+      if (live && committed.current === request) setData(loaded);
     });
     return () => { live = false; };
-  }, [trackId, loadIntent, detail, palette, revision, pcmMode]);
+  }, [request]);
 
   useEffect(() => () => { pendingPcm.current = null; }, [trackId, revision, pcmMode]);
 

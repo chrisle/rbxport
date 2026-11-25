@@ -25,6 +25,8 @@ import { __setBackend as setIpcBackend } from "@/ipc/client";
 import { watchDetailWaveforms } from "@/lib/detailWaveformCache";
 import type { Backend } from "@/ipc/types";
 import { WaveformDetail } from "./WaveformDetail";
+import { PreferencesProvider } from "@/store/usePreferences";
+import { DEFAULT_PREFERENCES } from "@/lib/preferences";
 
 let stopCache: (() => void) | undefined;
 // The app shell owns this subscription even when no deck is shown.
@@ -422,7 +424,7 @@ describe("explicit deck load waveform reads", () => {
     expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
   });
 
-  it.each([false, true])("keeps a same-track pending load shared (empty=%s)", async empty => {
+  it.each([false, true])("shares a pending load then retries its miss once for the newer intent (empty=%s)", async empty => {
     const pending = deferred<Uint8Array>();
     const bytes = new Uint8Array([90, 50, 20, 80, 40, 10]);
     const read = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(bytes);
@@ -434,7 +436,8 @@ describe("explicit deck load waveform reads", () => {
     show(2); await settle();
     expect(read).toHaveBeenCalledTimes(1);
     pending.resolve(empty ? new Uint8Array() : bytes); await settle();
-    expect(drawn.wave).toHaveBeenCalledTimes(empty ? 0 : 1);
+    expect(read).toHaveBeenCalledTimes(empty ? 2 : 1);
+    expect(drawn.wave).toHaveBeenCalledTimes(1);
     show(3); await settle();
     expect(read).toHaveBeenCalledTimes(empty ? 2 : 1);
     expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
@@ -449,12 +452,97 @@ describe("explicit deck load waveform reads", () => {
       <WaveformDetail trackId={id} loadIntent={loadIntent} progress={0.5} span={1} width={400} height={80} detail />,
     ));
     show(`explicit-retired-A-${empty}`, 1); await settle();
-    show(`explicit-retired-B-${empty}`, 2); await settle();
+    show(`explicit-retired-A-${empty}`, 2); await settle();
+    show(`explicit-retired-B-${empty}`, 3); await settle();
     drawn.wave.mockClear();
     old.resolve(empty ? new Uint8Array() : new Uint8Array([1, 1, 1])); await settle();
     expect(drawn.wave).not.toHaveBeenCalled();
-    show(`explicit-retired-B-${empty}`, 3); await settle();
+    show(`explicit-retired-B-${empty}`, 4); await settle();
     expect(read).toHaveBeenCalledTimes(2);
     expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
   });
+});
+
+
+it.each([false, true])("two visible views share one bounded retry (still missing=%s)", async missing => {
+  const old = deferred<Uint8Array>();
+  const fresh = deferred<Uint8Array>();
+  const bytes = new Uint8Array([90, 50, 20, 80, 40, 10]);
+  const read = vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise).mockResolvedValue(new Uint8Array());
+  __setBackend({ trackWaveform: read, onAnalysisChanged: () => () => {}, onAnalysisProgress: () => () => {} } as unknown as Backend);
+  const show = (loadIntent: number) => act(() => root.render(<>
+    {["a", "b"].map(deck => <WaveformDetail key={deck} trackId={`pending-two-views-${missing}`} loadIntent={loadIntent} progress={0.5} span={1} width={400} height={80} detail />)}
+  </>));
+  show(1); await settle();
+  show(2); await settle();
+  show(3); await settle(); // Only the most recent committed intents may retry.
+  expect(read).toHaveBeenCalledTimes(1);
+  old.resolve(new Uint8Array()); await settle();
+  expect(read).toHaveBeenCalledTimes(2);
+  fresh.resolve(missing ? new Uint8Array() : bytes); await settle();
+  show(3); await settle();
+  expect(read).toHaveBeenCalledTimes(2);
+  if (missing) expect(drawn.wave).not.toHaveBeenCalled();
+  else expect(drawn.wave).toHaveBeenCalledTimes(2);
+});
+
+it.each(["unmount", "pcm"] as const)("retires a pending retry on %s", async change => {
+  const old = deferred<Uint8Array>();
+  const read = vi.fn(() => old.promise);
+  __setBackend({ trackWaveform: read, trackPcmWaveform: fetchPcm, onAnalysisChanged: () => () => {}, onAnalysisProgress: () => () => {} } as unknown as Backend);
+  const show = (loadIntent: number, pcmMode = false) => act(() => root.render(
+    <WaveformDetail trackId={`pending-retired-${change}`} loadIntent={loadIntent} progress={0.5} span={1} width={400} height={80} detail
+      pcmWindow={pcmMode ? { fromMs: 0, toMs: 1000, drawFromMs: 0, drawToMs: 1000 } : undefined} />,
+  ));
+  show(1); await settle();
+  show(2); await settle();
+  if (change === "unmount") act(() => root.render(null));
+  else { show(2, true); await settle(); }
+  old.resolve(new Uint8Array()); await settle();
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(drawn.wave).not.toHaveBeenCalled();
+});
+
+it("retires a pending retry when a newer analysis edition starts", async () => {
+  const old = deferred<Uint8Array>();
+  const fresh = deferred<Uint8Array>();
+  const bytes = new Uint8Array([90, 50, 20, 80, 40, 10]);
+  const read = vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
+  let changed = (_id: string) => {};
+  __setBackend({ trackWaveform: read,
+    onAnalysisChanged: (listener: (id: string) => void) => { changed = listener; return () => {}; },
+    onAnalysisProgress: () => () => {},
+  } as unknown as Backend);
+  const id = "pending-retired-edition";
+  const show = (loadIntent: number) => act(() => root.render(
+    <WaveformDetail trackId={id} loadIntent={loadIntent} progress={0.5} span={1} width={400} height={80} detail />,
+  ));
+  show(1); await settle();
+  show(2); await settle();
+  act(() => changed(id)); await settle();
+  expect(read).toHaveBeenCalledTimes(2);
+  old.resolve(new Uint8Array()); await settle();
+  expect(read).toHaveBeenCalledTimes(2);
+  fresh.resolve(bytes); await settle();
+  expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
+});
+
+
+it("retires a queued retry when the palette changes", async () => {
+  const old = deferred<Uint8Array>();
+  const bytes = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
+  const read = vi.fn((_id: string, kind: string) => kind === "bandsDetail" ? old.promise : Promise.resolve(bytes));
+  __setBackend({ trackWaveform: read, onAnalysisChanged: () => () => {}, onAnalysisProgress: () => () => {} } as unknown as Backend);
+  const show = (loadIntent: number, color: "3band" | "rgb") => act(() => root.render(
+    <PreferencesProvider value={{ preferences: { ...DEFAULT_PREFERENCES, view: { ...DEFAULT_PREFERENCES.view, waveformColor: color } }, update: () => {}, reset: () => {} }}>
+      <WaveformDetail trackId="pending-palette-change" loadIntent={loadIntent} progress={0.5} span={1} width={400} height={80} detail />
+    </PreferencesProvider>,
+  ));
+  show(1, "3band"); await settle();
+  show(2, "3band"); await settle();
+  show(2, "rgb"); await settle();
+  drawn.wave.mockClear();
+  old.resolve(new Uint8Array()); await settle();
+  expect(read.mock.calls.map(([, kind]) => kind)).toEqual(["bandsDetail", "colourDetail"]);
+  expect(drawn.wave).not.toHaveBeenCalled();
 });

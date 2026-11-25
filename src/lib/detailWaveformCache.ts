@@ -13,15 +13,23 @@ const inFlight = new Map<string, Promise<Uint8Array>>();
  */
 const editions = new Map<string, number>();
 
-export async function loadDetailWaveform(trackId: string, kind: WaveformKind): Promise<Uint8Array> {
+export async function loadDetailWaveform(
+  trackId: string, kind: WaveformKind, retryPendingMiss?: () => boolean,
+): Promise<Uint8Array> {
   const key = `${trackId}:${kind}`;
   const cached = bytesByTrack.get(key);
   if (cached) return cached;
-  const existing = inFlight.get(key);
-  if (existing) return existing;
-
   const edition = editions.get(trackId) ?? 0;
   const current = () => (editions.get(trackId) ?? 0) === edition;
+  const existing = inFlight.get(key);
+  if (existing) {
+    const bytes = await existing;
+    // A newer explicit Load can join a read made before analysis returned.
+    // Retry that miss once, only while its committed owner/edition survives.
+    return bytes.length === 0 && current() && retryPendingMiss?.()
+      ? loadDetailWaveform(trackId, kind)
+      : bytes;
+  }
   const pending = (async () => {
     try {
       const backend = await getBackend();
