@@ -113,3 +113,105 @@ it("retires queued writes when the same path is remounted and waits for the new 
   expect(save).toHaveBeenCalledTimes(2);
   expect(save.mock.calls[1]).toEqual(["/generated-a", settings(6)]);
 });
+
+
+function renderVolume(volumeId: string) {
+  const mounted = { ...device(), volumeId, export: { tracks: 1, playlists: 1, ours: true, written: "same-export-stamp" } };
+  act(() => root.render(<DevicePanel device={mounted} playlists={[]} onSync={vi.fn()} onRefresh={vi.fn()} onError={error} />));
+}
+
+it("retains confirmed settings and accepted queued edits for the same mounted identity", async () => {
+  const first = pending();
+  const read = vi.fn().mockResolvedValue(settings());
+  const save = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(settings(6));
+  __setBackend({ deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
+  renderVolume("volume-a"); await settle(); tab("Column"); choose(5); await settle(); choose(6); await settle();
+  renderVolume("volume-a"); await settle();
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(column().value).toBe("6");
+  first.resolve(settings(5)); await settle();
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(column().value).toBe("6"); expect(error).not.toHaveBeenCalled();
+});
+
+it("re-reads replacement identity with the same path and export stamp before offering edits", async () => {
+  const replacement = pending();
+  const read = vi.fn().mockResolvedValueOnce(settings()).mockReturnValueOnce(replacement.promise);
+  const save = vi.fn();
+  __setBackend({ deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
+  renderVolume("volume-a"); await settle(); tab("Column");
+  renderVolume("volume-b"); await settle();
+  const pendingControl = column();
+  replacement.resolve(settings(3)); await settle();
+  expect(pendingControl).toBeNull();
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(column().value).toBe("3");
+  expect(save).not.toHaveBeenCalled();
+});
+
+it("retires not-yet-dispatched edits when a replacement keeps the path and export stamp", async () => {
+  const dispatched = pending(), replacement = pending();
+  const read = vi.fn().mockResolvedValueOnce(settings()).mockReturnValueOnce(replacement.promise);
+  const save = vi.fn().mockReturnValueOnce(dispatched.promise).mockResolvedValue(settings(5));
+  __setBackend({ deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
+  renderVolume("volume-a"); await settle(); tab("Column"); choose(5); await settle(); choose(6); await settle();
+  expect(save).toHaveBeenCalledTimes(1);
+  renderVolume("volume-b"); await settle();
+  dispatched.resolve(settings(5)); await settle();
+  const callsBeforeReplacementRead = save.mock.calls.length;
+  replacement.resolve(settings(3)); await settle();
+  expect(callsBeforeReplacementRead).toBe(1);
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(column().value).toBe("3");
+  choose(5); await settle();
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save.mock.calls[1]).toEqual(["/generated-a", settings(5)]);
+  expect(error).not.toHaveBeenCalled();
+});
+
+it.each(["success", "failure"] as const)("retires an initial read's late %s after same-path identity replacement", async outcome => {
+  const initial = pending(), replacement = pending();
+  const read = vi.fn().mockReturnValueOnce(initial.promise).mockReturnValueOnce(replacement.promise);
+  __setBackend({ deviceSettings: read } as unknown as Backend);
+  renderVolume("volume-a"); await settle(); tab("Column");
+  renderVolume("volume-b"); await settle();
+  replacement.resolve(settings(3)); await settle();
+  if (outcome === "success") initial.resolve(settings(2));
+  else initial.reject(new Error("retired volume refusal"));
+  await settle();
+  expect(error).not.toHaveBeenCalled();
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(column().value).toBe("3");
+});
+
+it("does not seed defaults from an old pending read after same-path identity replacement", async () => {
+  const initial = pending();
+  const read = vi.fn().mockReturnValueOnce(initial.promise).mockResolvedValue(settings(3));
+  const defaults = vi.fn().mockResolvedValue(settings(2));
+  __setBackend({ deviceSettings: read, writeDeviceDefaults: defaults } as unknown as Backend);
+  renderVolume("volume-a"); await settle();
+  renderVolume("volume-b"); await settle();
+  initial.resolve({ ...settings(2), hasDevSetting: false }); await settle();
+  expect(defaults).not.toHaveBeenCalled();
+  expect(read).toHaveBeenCalledTimes(2);
+});
+
+
+it("seeds the replacement owner's missing DEVSETTING and retains its current tab", async () => {
+  const initial = pending(), seeded = pending();
+  const read = vi.fn().mockReturnValueOnce(initial.promise).mockResolvedValueOnce({ ...settings(3), hasDevSetting: false });
+  const defaults = vi.fn().mockReturnValueOnce(seeded.promise);
+  __setBackend({ deviceSettings: read, writeDeviceDefaults: defaults } as unknown as Backend);
+  renderVolume("volume-a"); await settle(); tab("Column");
+  renderVolume("volume-b"); await settle();
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(defaults).toHaveBeenCalledTimes(1);
+  expect(defaults.mock.calls[0]?.[0]).toBe("/generated-a");
+  expect(column()).toBeNull();
+  initial.resolve({ ...settings(2), hasDevSetting: false }); await settle();
+  expect(defaults).toHaveBeenCalledTimes(1);
+  seeded.resolve(settings(3)); await settle();
+  expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Column");
+  expect(column().value).toBe("3");
+  expect(error).not.toHaveBeenCalled();
+});

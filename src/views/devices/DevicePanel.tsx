@@ -68,7 +68,7 @@ export function DevicePanel({
   // an export on its own leaves the stick without.
   const stickDefaults = usePreferences().djSystem;
   const hasExport = device.export !== null;
-  const owner = useMemo(() => ({ path: device.path, exportStamp, hasExport, version: 0, confirmed: null as DeviceSettings | null, tail: Promise.resolve() }), [device.path, exportStamp, hasExport]);
+  const owner = useMemo(() => ({ path: device.path, volumeId: device.volumeId, exportStamp, hasExport, version: 0, confirmed: null as DeviceSettings | null, tail: Promise.resolve() }), [device.path, device.volumeId, exportStamp, hasExport]);
   const active = useRef<typeof owner | null>(null);
   useLayoutEffect(() => {
     active.current = owner;
