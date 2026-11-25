@@ -412,13 +412,37 @@ impl Publication {
         let mut moves = Self::moves(self.stage.path())?;
         if moves.is_empty() { return Ok((0, 0)); }
         validate_paths(paths)?;
-        let named: std::collections::BTreeSet<_> = paths.iter().collect();
+        // A normalized key only narrows candidates. Confirm aliases on the
+        // actual filesystem; distinct names on a case-sensitive host must not
+        // become overlapping just because their comparison keys coincide.
+        let alias_key = |path: &Path| {
+            let normalized = nfc_path(path);
+            normalized.to_str().map_or_else(
+                || normalized.as_os_str().to_ascii_lowercase(),
+                |text| std::ffi::OsString::from(text.to_lowercase()),
+            )
+        };
+        let mut named: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
+        for path in paths { named.entry(alias_key(path)).or_default().push(path); }
         let mut overlapping = Vec::new();
         let mut folders = std::collections::BTreeSet::new();
         for (to, from) in &moves {
-            // A staged lookup follows the actual filesystem's case/Unicode
-            // equivalence, rather than guessing that all hosts fold names.
-            if !named.contains(from) && !self.stage.path().join(from).try_exists()? { continue; }
+            let candidates = named.get(&alias_key(from));
+            let mut overlaps = candidates.is_some_and(|paths| paths.contains(&from))
+                || self.stage.path().join(from).try_exists()?;
+            if !overlaps {
+                // A deletion has no staged image to look up. Only inspect
+                // possible spelling aliases, never every selected audio path.
+                for path in candidates.into_iter().flatten() {
+                    match same_root(&self.root.join(from), &self.root.join(path)) {
+                        Ok(true) => { overlaps = true; break; }
+                        Ok(false) => {},
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+            if !overlaps { continue; }
             let target = self.stage.path().join(to);
             if target.try_exists()? {
                 return Err(std::io::Error::other("Relocation also has a staged destination; publication was not started"));
@@ -2171,6 +2195,28 @@ mod tests {
             publication.rollback().unwrap();
             assert_eq!(std::fs::read(root.path().join(from)).unwrap(), b"original audio");
             assert!(!root.path().join(to).exists());
+        }
+    }
+
+    #[test]
+    fn an_alias_deletion_cannot_consume_a_relocation_source() {
+        for (from, deleted) in [("Middle.mp3", "middle.mp3"), ("Middle-Caf\u{e9}.mp3", "Middle-Cafe\u{301}.mp3")] {
+            for to in ["z-destination.mp3", "0-destination.mp3"] {
+                let root = tempfile::tempdir().unwrap();
+                write_file(&root.path().join(from), b"original audio");
+                let aliases = root.path().join(deleted).exists();
+                let publication = Publication::new(root.path(), ".journal").unwrap();
+                publication.stage_move(Path::new(from), Path::new(to)).unwrap();
+                let mut paths = vec![deleted.into(), to.into()]; paths.sort();
+                publication.commit_retained(&paths).unwrap();
+                assert_eq!(std::fs::read(root.path().join(to)).unwrap(), b"original audio");
+                assert!(!root.path().join(from).exists());
+                assert_eq!(Publication::moves(&publication.journal).unwrap().is_empty(), aliases,
+                    "materialize only aliases confirmed by this filesystem");
+                publication.rollback().unwrap();
+                assert_eq!(std::fs::read(root.path().join(from)).unwrap(), b"original audio");
+                assert!(!root.path().join(to).exists());
+            }
         }
     }
 
