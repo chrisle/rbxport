@@ -201,9 +201,9 @@ export const SubBrowser = memo(function SubBrowser({
   // Kept here for its own Analyze Track, and told to the shell, whose
   // information panel follows whichever list was selected in last.
   const reportSelection = list.onSelectedTracks;
-  const onSelectedTracks = useCallback((tracks: { id: string; title: string }[]) => {
+  const onSelectedTracks = useCallback((tracks: { id: string; title: string }[], source?: ViewSpec["source"]) => {
     setSelectedTracks(tracks);
-    reportSelection?.(tracks);
+    reportSelection?.(tracks, source);
   }, [reportSelection]);
   // Its own columns too: a sub-browser is usually kept narrow, and forcing it
   // to share the main table's widths would make it useless.
