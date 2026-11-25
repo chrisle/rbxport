@@ -30,3 +30,7 @@ unicode-normalization = "0.1"
 # `durable::flush`. Already in the lock through tempfile.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 rustix = { version = "1", features = ["fs"] }
+
+# The same stable handle-information API/version already used by same-file.
+[target.'cfg(windows)'.dependencies]
+winapi-util = "=0.1.11"

@@ -324,35 +324,54 @@ pub struct VolumeIdentity { handle: same_file::Handle, seen: String }
 
 impl VolumeIdentity {
     pub fn capture(root: &Path) -> std::io::Result<Self> {
-        Ok(Self { handle: same_file::Handle::from_path(root)?, seen: describe(root) })
+        Ok(Self::from_handle(same_file::Handle::from_path(root)?))
+    }
+
+    fn from_handle(handle: same_file::Handle) -> Self {
+        let seen = describe(&handle);
+        Self { handle, seen }
     }
 
     /// Fails when `root` no longer names the directory captured at the start.
-    /// The message carries the device and inode seen at each end so a report
-    /// shows which part of the identity moved (#778: reported on a freshly
-    /// formatted stick under macOS with no device change).
+    /// Both diagnostic labels come from the compared handles, so replacing
+    /// a path again cannot relabel either object (#778). Description failures
+    /// never decide whether the identities match.
     pub fn check(&self, root: &Path) -> std::io::Result<()> {
-        if self.handle != same_file::Handle::from_path(root)? {
+        self.check_handle(&same_file::Handle::from_path(root)?)
+    }
+
+    fn check_handle(&self, current: &same_file::Handle) -> std::io::Result<()> {
+        if self.handle != *current {
             return Err(std::io::Error::other(format!(
                 "The destination changed since export started (at start: {}; now: {})",
                 self.seen,
-                describe(root)
+                describe(current)
             )));
         }
         Ok(())
     }
 }
 
+// Never reopen the path for diagnostics: it may already name a third object.
 #[cfg(unix)]
-fn describe(root: &Path) -> String {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(root).map_or_else(|e| format!("unreadable: {e}"), |m| format!("dev {} ino {}", m.dev(), m.ino()))
+fn describe(handle: &same_file::Handle) -> String {
+    format!("dev {} ino {}", handle.dev(), handle.ino())
 }
 
-#[cfg(not(unix))]
-fn describe(root: &Path) -> String {
-    std::fs::metadata(root).map_or_else(|e| format!("unreadable: {e}"), |_| "directory".to_owned())
+#[cfg(windows)]
+fn describe(handle: &same_file::Handle) -> String {
+    // Same API/key as same-file; both compared handles remain open throughout.
+    windows_description(winapi_util::file::information(handle.as_file()))
 }
+
+#[cfg(windows)]
+fn windows_description(info: std::io::Result<winapi_util::file::Information>) -> String {
+    info.map_or_else(|_| "identity unavailable".to_owned(), |info|
+        format!("volume {} file index {}", info.volume_serial_number(), info.file_index()))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn describe(_handle: &same_file::Handle) -> String { "directory".to_owned() }
 
 /// Durable commit intent for a set of files. Recovery rolls publication forward
 /// using retained images, so recovery itself can be interrupted repeatedly.
@@ -1215,6 +1234,116 @@ mod tests {
         assert_eq!(try_read_lease(dir.path()).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
         drop(writer);
         assert!(try_read_lease(dir.path()).unwrap().is_some());
+    }
+
+    #[cfg(unix)]
+    fn handle_description(handle: &same_file::Handle) -> String {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = handle.as_file().metadata().unwrap();
+        format!("dev {} ino {}", metadata.dev(), metadata.ino())
+    }
+
+    #[cfg(windows)]
+    fn handle_description(handle: &same_file::Handle) -> String {
+        let info = winapi_util::file::information(handle.as_file()).unwrap();
+        format!("volume {} file index {}", info.volume_serial_number(), info.file_index())
+    }
+
+    // Interleave replacement at the private phases, not with a timing race:
+    // the production capture/check still open exactly one handle per phase.
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn destination_start_description_uses_the_opened_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("selected");
+        std::fs::create_dir(&root).unwrap();
+        write_file(&root.join("marker"), b"A");
+        let handle = same_file::Handle::from_path(&root).unwrap();
+        let expected = handle_description(&handle);
+        std::fs::rename(&root, dir.path().join("A")).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        write_file(&root.join("marker"), b"B");
+        let identity = VolumeIdentity::from_handle(handle);
+        let current = same_file::Handle::from_path(&root).unwrap();
+        let now = handle_description(&current);
+        assert_ne!(expected, now);
+        let error = identity.check(&root).unwrap_err().to_string();
+        assert_eq!(error, format!("The destination changed since export started (at start: {expected}; now: {now})"));
+        assert_eq!(std::fs::read(dir.path().join("A/marker")).unwrap(), b"A");
+        assert_eq!(std::fs::read(root.join("marker")).unwrap(), b"B");
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn destination_current_description_uses_the_compared_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("selected");
+        std::fs::create_dir(&root).unwrap();
+        write_file(&root.join("marker"), b"A");
+        let identity = VolumeIdentity::capture(&root).unwrap();
+        let start = handle_description(&identity.handle);
+        std::fs::rename(&root, dir.path().join("A")).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        write_file(&root.join("marker"), b"B");
+        let current = same_file::Handle::from_path(&root).unwrap();
+        let expected = handle_description(&current);
+        std::fs::rename(&root, dir.path().join("B")).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        write_file(&root.join("marker"), b"C");
+        let replacement = same_file::Handle::from_path(&root).unwrap();
+        assert_ne!(expected, handle_description(&replacement));
+        let error = identity.check_handle(&current).unwrap_err().to_string();
+        assert_eq!(error, format!("The destination changed since export started (at start: {start}; now: {expected})"));
+        // The current selected spelling now names C, not the object compared.
+        identity.check_handle(&identity.handle).unwrap();
+        for name in ["A", "B"] {
+            assert_eq!(std::fs::read(dir.path().join(name).join("marker")).unwrap(), name.as_bytes());
+        }
+        assert_eq!(std::fs::read(root.join("marker")).unwrap(), b"C");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn destination_aliases_keep_identity_until_they_name_another_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("A");
+        let b = dir.path().join("B");
+        let alias = dir.path().join("alias");
+        for (root, marker) in [(&a, b"A"), (&b, b"B")] {
+            std::fs::create_dir(root).unwrap();
+            write_file(&root.join("marker"), marker);
+        }
+        std::os::unix::fs::symlink(&a, &alias).unwrap();
+        let identity = VolumeIdentity::capture(&alias).unwrap();
+        let expected = handle_description(&identity.handle);
+        identity.check(&a.join(".")).unwrap();
+        std::fs::create_dir(a.join("child")).unwrap();
+        identity.check(&alias.join("child/..")).unwrap();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(&a, &alias).unwrap();
+        identity.check(&alias).unwrap();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(&b, &alias).unwrap();
+        assert!(identity.check(&alias).is_err());
+        assert_eq!(describe(&identity.handle), expected);
+        assert_eq!(std::fs::read(a.join("marker")).unwrap(), b"A");
+        assert_eq!(std::fs::read(b.join("marker")).unwrap(), b"B");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn destination_diagnostic_failure_does_not_change_the_guard() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("selected");
+        std::fs::create_dir(&root).unwrap();
+        let mut identity = VolumeIdentity::capture(&root).unwrap();
+        identity.seen = windows_description(Err(std::io::ErrorKind::PermissionDenied.into()));
+        assert_eq!(identity.seen, "identity unavailable");
+        identity.check(&root).unwrap();
+        std::fs::rename(&root, dir.path().join("original")).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        let error = identity.check(&root).unwrap_err().to_string();
+        assert!(error.starts_with("The destination changed since export started (at start: identity unavailable; now: volume "));
     }
 
     #[test]
