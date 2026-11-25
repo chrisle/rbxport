@@ -41,6 +41,8 @@ test("tree search scopes to a kind of row and supports keyboard selection", asyn
   await input.fill("a");
   await page.getByRole("button", { name: "Tree search scope", exact: true }).click();
   await expect(menu.getByRole("menuitemradio", { name: "Folder", exact: true })).toHaveAttribute("aria-checked", "true");
-  await page.getByTestId("browser-title").click();
+  const browserTitle = page.getByTestId("browser-title");
+  await expect(browserTitle.getByRole("combobox", { name: "Playlists", exact: true })).toBeDisabled();
+  await browserTitle.click();
   await expect(menu).toHaveCount(0);
 });

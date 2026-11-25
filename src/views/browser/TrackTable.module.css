@@ -552,4 +552,4 @@
 .loaded[data-alone] { left: 50%; }
 
 .playlistPath { max-width: 100%; border: 0; background: transparent; font: inherit; color: inherit; }
-.playlistPath:disabled { opacity: 1; }
+.playlistPath:disabled { opacity: 1; pointer-events: none; }

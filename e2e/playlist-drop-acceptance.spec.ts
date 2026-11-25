@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectPlaylistCaption } from "./helpers";
 
 test("87-to-88 cross-playlist drop stays visible across the last cached page and search", async ({ page }) => {
   await page.goto("/?writable=1");
@@ -24,13 +25,13 @@ test("87-to-88 cross-playlist drop stays visible across the last cached page and
   const source = page.getByRole("treeitem").filter({ hasText: "Probe source 536" }).first();
   const destination = page.getByRole("treeitem").filter({ hasText: "Probe destination 536" }).first();
   await source.click();
-  await expect(page.getByTestId("browser-title")).toHaveText("Probe source 536 (1 Tracks)");
+  await expectPlaylistCaption(page, "Probe source 536 (1 Tracks)");
   const title = page.locator('[role="gridcell"][data-col="title"]').first();
   const text = (await title.innerText()).trim();
   await title.dragTo(destination);
   await expect(page.getByRole("contentinfo")).toContainText("Added 1 track to Probe destination 536.");
   await destination.click();
-  await expect(page.getByTestId("browser-title")).toHaveText("Probe destination 536 (88 Tracks)");
+  await expectPlaylistCaption(page, "Probe destination 536 (88 Tracks)");
   const copiedRow = page.getByRole("row").filter({ has: page.locator('[data-col="trackNo"]').filter({ hasText: /^88$/ }) });
   const scroller = page.getByTestId("track-scroll");
   await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
@@ -54,7 +55,7 @@ test("87-to-88 cross-playlist drop stays visible across the last cached page and
   await search.fill("");
   await source.click();
   await destination.click();
-  await expect(page.getByTestId("browser-title")).toHaveText("Probe destination 536 (88 Tracks)");
+  await expectPlaylistCaption(page, "Probe destination 536 (88 Tracks)");
   await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await expect(copiedRow.locator('[data-col="title"]')).toHaveText(text);
   await expect(copiedRow).toBeVisible();

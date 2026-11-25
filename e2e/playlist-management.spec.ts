@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expectPlaylistCaption } from "./helpers";
 
 /**
  * Managing playlists from the interface: made from the tree's menu, filled
@@ -123,7 +124,7 @@ test("a track dropped on a new playlist is in it, and its menu takes it out agai
   await expect(page.getByRole("contentinfo")).toContainText("Already in New playlist.");
 
   await made.click();
-  await expect(page.getByTestId("browser-title")).toHaveText("New playlist (1 Tracks)");
+  await expectPlaylistCaption(page, "New playlist (1 Tracks)");
   const only = rows(page).first();
   await expect(only.locator('[data-col="title"]')).toHaveText(title);
   // Numbered by its place in the playlist, not the collection.
@@ -176,7 +177,7 @@ test("a repeated input ID reports the one membership actually added", async ({ p
     .repeatedPlaylistDragInjected?.())).toBe(true);
   await expect(page.getByRole("contentinfo")).toContainText("Added 1 track to New playlist.");
   await made.click();
-  await expect(page.getByTestId("browser-title")).toHaveText("New playlist (1 Tracks)");
+  await expectPlaylistCaption(page, "New playlist (1 Tracks)");
   await expect(rows(page)).toHaveCount(1);
   await expect(rows(page).first().locator('[data-col="title"]')).toHaveText(title);
 });
@@ -225,7 +226,7 @@ test("dragging a selection drops every row in it, not just the one under the han
   await expect(page.getByRole("contentinfo")).not.toContainText("Selected:");
 
   await made.click();
-  await expect(page.getByTestId("browser-title")).toHaveText("New playlist (3 Tracks)");
+  await expectPlaylistCaption(page, "New playlist (3 Tracks)");
 });
 
 test("removing from an existing playlist shortens it by exactly the selection", async ({ page }) => {

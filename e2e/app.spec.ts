@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectPlaylistCaption } from "./helpers";
 
 /** Presses that take the detail waveform from any step out to the widest. */
 const ZOOM_STEPS_COUNT = 8;
@@ -68,7 +69,7 @@ test("sorting a column orders the rows and toggles direction", async ({ page }) 
 
 test("choosing a playlist swaps the view and its title", async ({ page }) => {
   await page.getByRole("treeitem", { name: /Hardstyle/ }).click();
-  await expect(page.getByText(/^Hardstyle \(\d+ Tracks\)/)).toBeVisible();
+  await expectPlaylistCaption(page, /^Hardstyle \(\d+ Tracks\)/);
 });
 
 test("scrolling loads further rows without leaving gaps", async ({ page }) => {

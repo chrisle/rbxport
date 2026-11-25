@@ -5,6 +5,7 @@
  * what a browser can check; the sound is the backend's.
  */
 import { expect, test, type Page } from "@playwright/test";
+import { expectPlaylistCaption } from "./helpers";
 
 const player = (page: Page) => page.getByRole("region", { name: "Preview player" });
 const waveform = (page: Page, row: number) =>
@@ -87,7 +88,7 @@ test("choosing another playlist stops the preview", async ({ page }) => {
   const stop = await preview(page, 3);
 
   await page.getByRole("treeitem", { name: /Hardstyle/ }).click();
-  await expect(page.getByText(/^Hardstyle \(\d+ Tracks\)/)).toBeVisible();
+  await expectPlaylistCaption(page, /^Hardstyle \(\d+ Tracks\)/);
   // Back to the list it was started from: the row is there again, stopped.
   await page.getByRole("treeitem", { name: /All Tracks/ }).click();
   await expect(waveform(page, 3)).toBeVisible();
