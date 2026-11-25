@@ -244,6 +244,53 @@ fn a_missing_source_file_skips_that_track_rather_than_failing_the_export() {
     assert!(verify(dest.path()).unwrap().is_ok());
 }
 
+/// Win32 reserves COM/LPT followed by Latin-1 superscript 1, 2 or 3,
+/// including extensions. Only generated path components change: both
+/// database formats keep the original metadata and agree with ANLZ PPTH.
+#[test]
+fn superscript_device_names_are_escaped_in_generated_paths_and_reused() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = common::stick();
+    let mut reserved = track(src.path(), 1, "Reserved superscripts", "COM¹");
+    reserved.album = "lpt²".into();
+    let mut allowed = track(src.path(), 2, "Allowed Unicode", "COM⁴");
+    allowed.album = "LPT⁵".into();
+    let tracks = [reserved, allowed];
+    let originals: Vec<_> = tracks.iter().map(|track| std::fs::read(&track.source_path).unwrap()).collect();
+    assert!(export(dest.path(), &tracks, &[]).unwrap().verified);
+    let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+    assert_eq!(manifest.tracks[0].audio, "/Contents/_COM¹/_lpt²/source-1.mp3");
+    assert_eq!(manifest.tracks[1].audio, "/Contents/COM⁴/LPT⁵/source-2.mp3");
+    let snapshot = rbl_export::snapshot::Snapshot::read(dest.path()).unwrap();
+    assert_eq!(snapshot.legacy, snapshot.one);
+    let exported = &snapshot.legacy.as_ref().unwrap().tracks;
+    assert_eq!(exported[0].artist, "COM¹");
+    assert_eq!(exported[0].album, "lpt²");
+    let mut before = Vec::new();
+    for (index, entry) in manifest.tracks.iter().enumerate() {
+        assert_eq!(exported[index].path, entry.audio);
+        let audio = dest.path().join(entry.audio.trim_start_matches('/'));
+        assert_eq!(std::fs::read(&audio).unwrap(), originals[index]);
+        before.push((audio.clone(), std::fs::read(&audio).unwrap(), std::fs::metadata(&audio).unwrap().modified().unwrap()));
+        for extension in &entry.analysis_extensions {
+            let path = dest.path().join(entry.anlz_dir.trim_start_matches('/')).join(format!("ANLZ0000.{extension}"));
+            assert_eq!(rbl_anlz::Anlz::read(&path).unwrap().path().as_deref(), Some(entry.audio.as_str()));
+            before.push((path.clone(), std::fs::read(&path).unwrap(), std::fs::metadata(&path).unwrap().modified().unwrap()));
+        }
+    }
+    assert!(verify(dest.path()).unwrap().is_ok());
+    let again = export(dest.path(), &tracks, &[]).unwrap();
+    assert!(again.up_to_date);
+    assert_eq!((again.bytes_copied, again.analysis_files), (0, 0));
+    for (path, bytes, modified) in before {
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(std::fs::metadata(path).unwrap().modified().unwrap(), modified);
+    }
+    for (track, bytes) in tracks.iter().zip(originals) {
+        assert_eq!(std::fs::read(&track.source_path).unwrap(), bytes);
+    }
+}
+
 #[test]
 fn names_that_fat32_cannot_hold_are_made_safe() {
     let src = tempfile::tempdir().unwrap();

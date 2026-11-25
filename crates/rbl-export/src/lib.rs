@@ -339,6 +339,9 @@ fn is_reserved_device_name(stem: &str) -> bool {
         "CON" | "PRN" | "AUX" | "NUL"
             | "COM0" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
             | "LPT0" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+            // Win32 also treats the Latin-1 superscript digits as device
+            // numbers, including when the basename has an extension.
+            | "COM¹" | "COM²" | "COM³" | "LPT¹" | "LPT²" | "LPT³"
     )
 }
 
@@ -3114,6 +3117,21 @@ mod tests {
         assert_eq!(fat_safe("lpt9"), "_lpt9");
         assert_eq!(dir_name("AUX"), "_AUX");
         assert_eq!(fat_file_name("PRN.mp3"), "_PRN.mp3");
+        // Win32 also reserves the Latin-1 superscript digits, including
+        // names with extensions; other Unicode digits are not aliases.
+        for prefix in ["COM", "com", "LPT", "lPt"] {
+            for digit in ["¹", "²", "³"] {
+                for extension in ["", ".mp3", ".tar.gz"] {
+                    let name = format!("{prefix}{digit}{extension}");
+                    assert_eq!(fat_safe(&name), format!("_{name}"));
+                }
+            }
+        }
+        assert_eq!(fat_safe("COM¹. "), "_COM¹");
+        assert_eq!(fat_safe("lpt².mp3 "), "_lpt².mp3");
+        for name in ["COM⁴", "COM₁", "COM١", "COM１", "LPT⁵", "LPTⅢ", "LPT³music", "music COM¹"] {
+            assert_eq!(fat_safe(name), name);
+        }
         // Not reserved: longer names and non-matching digits stay untouched.
         assert_eq!(fat_safe("Content"), "Content");
         assert_eq!(fat_safe("COM10"), "COM10");
