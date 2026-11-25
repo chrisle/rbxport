@@ -99,3 +99,19 @@ it("offers to rename the master library's eight colours, and not a device's", as
   rightClick();
   expect(colorMenu()).toBeNull();
 });
+
+it("words the rename menu in German around the library's literal names", async () => {
+  const catalog = { ...de, "Rename {name}…": "„{name}“ umbenennen…" };
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve(catalog) })));
+  backend.colorNames = () => Promise.resolve(["Play", "Play", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"]);
+  render({ kind: "collection" }, noop); await settle(); await settle();
+  act(() => {
+    host.querySelector('[role="row"] [data-col="color"]')!.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+  });
+  await settle();
+  const items = [...document.querySelectorAll<HTMLElement>('[role="menu"][aria-label] [role="menuitem"]')];
+  expect(items.map(item => item.textContent).slice(0, 3)).toEqual(["„Play“ umbenennen…", "„Play“ umbenennen…", "„Orange“ umbenennen…"]);
+  expect(items).toHaveLength(8);
+  expect(items.every(item => item.hasAttribute("data-i18n-ignore"))).toBe(true);
+});

@@ -2648,7 +2648,7 @@ export const TrackTable = memo(function TrackTable({
         <ContextMenu
           x={colorMenu.x}
           y={colorMenu.y}
-          rows={colorNames.map((name, at) => ({ label: `Rename ${name}…`, action: `renameColor:${at + 1}` as const }))}
+          rows={colorNames.map((name, at) => ({ label: translate("Rename {name}…", { name }), literal: true, action: `renameColor:${at + 1}` as const }))}
           label="Color"
           context={{ inPlaylist: false, hasFile: false, readOnly: false }}
           onChoose={() => onRenameColors()}

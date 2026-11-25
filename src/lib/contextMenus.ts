@@ -93,6 +93,12 @@ export interface MenuEntry<A> {
   importsLoose?: boolean;
   /** In a submenu of choices, the one in force: drawn with a tick. */
   checked?: boolean;
+  /**
+   * Already translated, around text the library owns (a colour's name): the
+   * page's translation leaves it as it is, and it is keyed by its action,
+   * since two such names can be spelled alike.
+   */
+  literal?: boolean;
 }
 
 /** A separator between groups. */
