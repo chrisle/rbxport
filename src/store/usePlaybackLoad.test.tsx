@@ -357,3 +357,21 @@ it("cannot restore an owner from a refused request arriving after a hidden-playe
   await act(async () => { reject(new Error("missing file")); await Promise.resolve(); });
   expect(confirmedLoads.get("b") ?? null).toBeNull();
 });
+
+
+it("ignores a deck snapshot that arrives after its Player unmounts and resets", async () => {
+  const first = loads[0]!; finish(first); await settle();
+  let answer: (value: Tick) => void = () => {};
+  __setBackend({ ...backend(), deckState: () => new Promise<Tick>(done => { answer = done; }) });
+  let visible = true;
+  function Shell() { useLoadedTracks(); return visible ? <Probe /> : null; }
+  await act(async () => { root.render(<Shell />); await done(); });
+  visible = false;
+  await act(async () => { root.render(<Shell />); await done(); });
+  await act(async () => { reset(); await done(); });
+  await act(async () => {
+    answer({ ...emptyTick, b: { ...emptyDeck, loadId: first.id, loaded: true } });
+    await done();
+  });
+  expect(confirmedLoads.get("b") ?? null).toBeNull();
+});
