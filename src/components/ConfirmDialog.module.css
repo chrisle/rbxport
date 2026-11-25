@@ -7,11 +7,12 @@
   justify-content: center;
   background: var(--c-modal-scrim);
 }
-.window {
+.window,
+.dialog {
   width: 360px;
   max-width: calc(100vw - 32px);
   padding: 16px 20px 18px;
-  border: 1px solid var(--c-pref-button-border);
+  border: 1px solid var(--c-text-dim);
   border-radius: 10px;
   background: var(--c-black);
   color: var(--c-icon-on);
@@ -23,14 +24,6 @@
   position: fixed;
   inset: 0;
   margin: auto;
-  width: 360px;
-  max-width: calc(100vw - 32px);
-  padding: 16px 20px 18px;
-  border: 1px solid var(--c-pref-button-border);
-  border-radius: 10px;
-  background: var(--c-black);
-  color: var(--c-icon-on);
-  font-size: var(--f-size-pref-label);
 }
 .dialog::backdrop { background: var(--c-modal-scrim); }
 .title { font-weight: 700; }
