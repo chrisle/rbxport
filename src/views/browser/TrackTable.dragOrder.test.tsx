@@ -9,6 +9,19 @@ import { defaultLayout, resolve } from "@/lib/columns";
 import { detectPlatform } from "@/lib/shortcuts";
 import { TrackTable, type TrackDrag } from "./TrackTable";
 
+const sparseReads = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@/store/useTrackView", async importOriginal => {
+  const original = await importOriginal<typeof import("@/store/useTrackView")>();
+  const { useMemo } = await import("react");
+  return { ...original, useTrackView: (...args: Parameters<typeof original.useTrackView>) => {
+    const view = original.useTrackView(...args);
+    return useMemo(() => ({ ...view, rowAt: (index: number) => {
+      sparseReads.count++;
+      return view.rowAt(index);
+    } }), [view]);
+  } };
+});
+
 let host: HTMLDivElement;
 let root: Root;
 const noop = () => {};
@@ -159,4 +172,33 @@ it("refuses cached old row ranks while a same-source sort projection is replacin
   dragSelected();
   await expect((payload as TrackDrag | null)?.orderedIds).rejects.toThrow("The track list changed");
   release(); await settle();
+});
+
+
+it("does not synchronously walk a large sparse playlist tail on dragstart", async () => {
+  const backend = createMockBackend({ trackCount: 20_000, writable: true, latencyMs: 0 });
+  await backend.edits.createPlaylist("Sparse source", "root");
+  const playlist = (await backend.playlistTree()).find(node => node.name === "Sparse source")!;
+  await backend.edits.addTracksToPlaylist(playlist.id, Array.from({ length: 20_000 }, (_, index) => String(100000 + index)), false);
+  __setBackend(backend);
+  let payload: TrackDrag | null = null;
+  mountSource({ source: { kind: "playlist", id: playlist.id }, sort: "trackNo", descending: false, query: "" }, drag => { payload = drag; });
+  await settle(); await settle();
+  const rows = host.querySelectorAll('[role="row"][aria-selected]');
+  for (const [at, modifier] of [[2, false], [0, true]] as const) {
+    const row = rows[at];
+    if (!row) throw new Error("sparse selected fixture row missing");
+    const options = { bubbles: true, button: 0, ...(detectPlatform().mac ? { metaKey: modifier } : { ctrlKey: modifier }) };
+    act(() => {
+      for (const event of ["mousedown", "mouseup", "click"]) row.dispatchEvent(new MouseEvent(event, options));
+    });
+    await settle();
+  }
+  expect(host.querySelectorAll('[role="row"][aria-selected="true"]')).toHaveLength(2);
+  sparseReads.count = 0;
+  dragSelected();
+  expect(sparseReads.count).toBeLessThan(512);
+  const drag = payload as TrackDrag | null;
+  expect(drag?.row.id).toBe("100000");
+  expect(await drag?.orderedIds).toEqual(["100000", "100002"]);
 });

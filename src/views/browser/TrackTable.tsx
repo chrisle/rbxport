@@ -1701,6 +1701,9 @@ export const TrackTable = memo(function TrackTable({
           cached.push(at.id);
           seen.add(at.id);
         }
+        // A hole needs asynchronous ranks anyway. Once the earliest cached
+        // selection is known, no synchronous walk of the tail can help.
+        if (!allFresh && cached.length > 0) break;
       }
       let orderedIds: Promise<readonly string[]> | undefined;
       const complete = seen.size === selection.ids.size && (!repeatedRows || allFresh);
@@ -1709,10 +1712,10 @@ export const TrackTable = memo(function TrackTable({
         // Capture this source handle now. A drop can finish before its ranks
         // arrive; the queued add must wait rather than copy in click order.
         orderedIds = (view.swapping || view.loading
-          ? Promise.reject(new Error("The track list changed. Start the drag again."))
+          ? Promise.reject(new Error(translate("The track list changed. Start the drag again.")))
           : listedIds()).then(listed => {
           const ranked = listed.filter(id => chosen.has(id));
-          if (new Set(ranked).size !== chosen.size) throw new Error("The track list changed. Start the drag again.");
+          if (new Set(ranked).size !== chosen.size) throw new Error(translate("The track list changed. Start the drag again."));
           return ranked;
         });
         // The drag may be cancelled without a consumer awaiting the ranks.
@@ -1721,7 +1724,7 @@ export const TrackTable = memo(function TrackTable({
       onDragTracks?.({ ids: complete ? cached : [...selection.ids], orderedIds,
         row: first, sourceKind: spec.source.kind, position: { spec, index: firstIndex } });
     },
-    [selection.ids, onDragTracks, spec, view, listedIds],
+    [selection.ids, onDragTracks, spec, view, listedIds, translate],
   );
 
   // The ids travelling with the hand, and where they would land. Held here

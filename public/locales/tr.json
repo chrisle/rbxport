@@ -1804,5 +1804,6 @@
   "Could not open Display All Missing Files. Try again, or use File in the main window.": "Could not open Display All Missing Files. Try again, or use File in the main window.",
   "Display All Missing Files opens all missing collection files in the main window and stops this sync.": "Display All Missing Files opens all missing collection files in the main window and stops this sync.",
   "A track can have at most 10 memory cues or loops.": "A track can have at most 10 memory cues or loops.",
-  "Hot Cue {letter} has been set since": "Hot Cue {letter} has been set since"
+  "Hot Cue {letter} has been set since": "Hot Cue {letter} has been set since",
+  "The track list changed. Start the drag again.": "The track list changed. Start the drag again."
 }
