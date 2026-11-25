@@ -1513,6 +1513,16 @@ Recovery completes an interrupted run before anything else reads the
 stick; a missing image is an error, never an instruction to delete data.
 Obsolete files are removed only *after* the commit, and only if not retained.
 
+A metadata change can relocate unchanged audio while another track takes its
+old path. Before commit intent, publication materializes only these overlapping
+relocations as staged images, preserving both the original and replacement.
+Disjoint relocations still use same-volume renames without copying audio.
+The exceptional copy checks remaining space using the filesystem's allocation
+unit plus directory/companion overhead before writing, and reports its copied
+bytes. The earlier space preview is approximate; insufficient remaining space
+or a copy failure leaves the published generation intact and starts no journal.
+Interrupted publication and rollback then use the ordinary retained images.
+
 Every track write re-checks the volume's dev/ino to catch the stick being
 swapped, and `ENXIO`/`ENODEV`/`EIO` (on Windows `ERROR_NOT_READY`,
 `ERROR_DEV_NOT_EXIST` or `ERROR_DEVICE_NOT_CONNECTED`) become `DeviceGone`.

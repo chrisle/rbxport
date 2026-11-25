@@ -389,6 +389,72 @@ impl Publication {
             Err(e) => Err(e),
         }
     }
+
+    /// Keep a relocation's original bytes when its source is also replaced or
+    /// deleted by this publication. Disjoint moves still require no copy.
+    /// Returns (files, bytes) copied into the stage, before durable intent.
+    pub fn prepare_overlapping_moves(&self, paths: &[PathBuf]) -> std::io::Result<(usize, u64)> {
+        self.prepare_overlapping_moves_with(paths, copy)
+    }
+
+    /// As [`Self::prepare_overlapping_moves`], using the caller's staged copy
+    /// operation (for chunked progress/cancellation). A failed copy starts no
+    /// publication. The successful image keeps its source modification time.
+    pub fn prepare_overlapping_moves_with(&self, paths: &[PathBuf], copy_file: impl FnMut(&Path, &Path) -> std::io::Result<u64>) -> std::io::Result<(usize, u64)> {
+        self.prepare_moves_with(paths, || {
+            let stats = fs2::statvfs(&self.root)?;
+            Ok((stats.available_space(), stats.allocation_granularity().max(4096)))
+        }, copy_file)
+    }
+
+    fn prepare_moves_with(&self, paths: &[PathBuf], space: impl FnOnce() -> std::io::Result<(u64, u64)>, mut copy_file: impl FnMut(&Path, &Path) -> std::io::Result<u64>) -> std::io::Result<(usize, u64)> {
+        self.check_root()?;
+        let mut moves = Self::moves(self.stage.path())?;
+        if moves.is_empty() { return Ok((0, 0)); }
+        validate_paths(paths)?;
+        let named: std::collections::BTreeSet<_> = paths.iter().collect();
+        let mut overlapping = Vec::new();
+        let mut folders = std::collections::BTreeSet::new();
+        for (to, from) in &moves {
+            // A staged lookup follows the actual filesystem's case/Unicode
+            // equivalence, rather than guessing that all hosts fold names.
+            if !named.contains(from) && !self.stage.path().join(from).try_exists()? { continue; }
+            let target = self.stage.path().join(to);
+            if target.try_exists()? {
+                return Err(std::io::Error::other("Relocation also has a staged destination; publication was not started"));
+            }
+            for parent in target.ancestors().skip(1).take_while(|p| p.starts_with(self.stage.path())) {
+                if !parent.try_exists()? { folders.insert(parent.to_owned()); }
+            }
+            overlapping.push((to.clone(), from.clone(), std::fs::metadata(self.root.join(from))?.len()));
+        }
+        if overlapping.is_empty() { return Ok((0, 0)); }
+        let (available, unit) = space()?;
+        let allocated = |bytes: u64| bytes.div_ceil(unit).saturating_mul(unit);
+        // Include directories and a companion cluster per file/folder, also
+        // on hosts without AppleDouble. No published file is moved on failure.
+        let required = overlapping.iter().fold(0_u64, |sum, (_, _, size)| sum.saturating_add(allocated(*size)))
+            .saturating_add((overlapping.len() as u64).saturating_add((folders.len() as u64).saturating_mul(2)).saturating_add(2).saturating_mul(unit));
+        if required > available {
+            return Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "Not enough temporary space to preserve overlapping audio relocations; publication was not started"));
+        }
+        let mut bytes = 0;
+        for (to, from, size) in &overlapping {
+            let target = self.stage.path().join(to);
+            // Another relocation's spelling may alias this name only after
+            // its image was created. Never overwrite that staged original.
+            if target.try_exists()? { return Err(std::io::Error::other("Relocation destinations alias; publication was not started")); }
+            if let Some(parent) = target.parent() { create_dir_all(parent)?; }
+            let modified = std::fs::metadata(self.root.join(from))?.modified()?;
+            let copied = copy_file(&self.root.join(from), &target)?;
+            if copied != *size { return Err(std::io::Error::other("Relocation source changed while being staged; publication was not started")); }
+            std::fs::OpenOptions::new().write(true).open(&target)?.set_modified(modified)?;
+            bytes += copied;
+            moves.remove(to);
+        }
+        write(&self.stage.path().join(".moves.json"), &serde_json::to_vec(&moves)?)?;
+        Ok((overlapping.len(), bytes))
+    }
     /// Publish while retaining both generations until independent validation.
     pub fn commit_retained(&self, paths: &[PathBuf]) -> std::io::Result<()> {
         write(&self.stage.path().join(".verification-required"), b"1")?;
@@ -524,6 +590,7 @@ impl Publication {
     pub fn commit(&self, paths: &[std::path::PathBuf]) -> std::io::Result<()> {
         self.check_root()?;
         validate_paths(paths)?;
+        self.prepare_overlapping_moves(paths)?;
         let moves = Self::moves(self.stage.path())?;
         let mut entries = Vec::with_capacity(paths.len());
         let mut directories = std::collections::BTreeSet::new();
@@ -1944,6 +2011,167 @@ mod tests {
         assert_eq!(std::fs::read(root.path().join("Contents/old.mp3")).unwrap(), b"audio");
         assert_eq!(std::fs::read(root.path().join("db")).unwrap(), b"old database");
         assert!(!root.path().join("Contents/new.mp3").exists());
+    }
+
+    #[test]
+    fn overlapping_relocations_keep_both_images_through_replay_and_rollback() {
+        for (from, to) in [("Contents/z.mp3", "Contents/a.mp3"), ("Contents/a.mp3", "Contents/z.mp3")] {
+            for published in 0..=2 {
+                let root = tempfile::tempdir().unwrap();
+                write_file(&root.path().join(from), b"original audio");
+                let publication = Publication::new(root.path(), ".journal").unwrap();
+                publication.stage_move(Path::new(from), Path::new(to)).unwrap();
+                write_file(&publication.stage().join(from), b"replacement audio");
+                let mut paths = vec![PathBuf::from(from), PathBuf::from(to)]; paths.sort();
+                assert_eq!(publication.prepare_overlapping_moves(&paths).unwrap(), (1, 14));
+                assert_eq!(std::fs::read(publication.stage().join(to)).unwrap(), b"original audio");
+                assert_eq!(std::fs::read(publication.stage().join(from)).unwrap(), b"replacement audio");
+                assert!(Publication::moves(publication.stage()).unwrap().is_empty());
+                // Crash after durable intent and each possible publication
+                // prefix, without requiring a timing-dependent process kill.
+                let entries: Vec<_> = paths.iter().map(|path| PublicationEntry {
+                    path: path.clone(), present: true, had_target: Some(path == Path::new(from)), exact: true,
+                }).collect();
+                write_file(&publication.stage().join("publication.json"), &serde_json::to_vec(&entries).unwrap());
+                write_file(&publication.stage().join(".verification-required"), b"1");
+                std::fs::rename(publication.stage(), &publication.journal).unwrap();
+                for entry in entries.iter().take(published) {
+                    let target = root.path().join(&entry.path);
+                    if target.exists() {
+                        let old = publication.journal.join(".previous").join(&entry.path);
+                        create_dir_all(old.parent().unwrap()).unwrap();
+                        rename(&target, &old).unwrap();
+                    }
+                    rename(&publication.journal.join(&entry.path), &target).unwrap();
+                }
+                drop(publication);
+                Publication::recover(root.path(), ".journal").unwrap();
+                assert_eq!(std::fs::read(root.path().join(from)).unwrap(), b"replacement audio");
+                assert_eq!(std::fs::read(root.path().join(to)).unwrap(), b"original audio");
+                Publication::recover(root.path(), ".journal").unwrap();
+                Publication::rollback_pending(root.path(), ".journal").unwrap();
+                assert_eq!(std::fs::read(root.path().join(from)).unwrap(), b"original audio");
+                assert!(!root.path().join(to).exists());
+            }
+        }
+    }
+
+    #[test]
+    fn overlap_space_refusal_leaves_the_previous_generation_and_stage_intact() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(&root.path().join("old"), b"old");
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        publication.stage_move(Path::new("old"), Path::new("new")).unwrap();
+        write_file(&publication.stage().join("old"), b"replacement");
+        let moves = std::fs::read(publication.stage().join(".moves.json")).unwrap();
+        let error = publication.prepare_moves_with(&["old".into(), "new".into()], || Ok((8192, 4096)), copy).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::StorageFull);
+        assert!(!root.path().join(".journal").exists());
+        assert_eq!(std::fs::read(root.path().join("old")).unwrap(), b"old");
+        assert_eq!(std::fs::read(publication.stage().join("old")).unwrap(), b"replacement");
+        assert!(!publication.stage().join("new").exists());
+        assert_eq!(std::fs::read(publication.stage().join(".moves.json")).unwrap(), moves);
+    }
+
+    #[test]
+    fn disjoint_relocations_do_not_copy_or_require_extra_space() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(&root.path().join("old"), b"audio");
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        publication.stage_move(Path::new("old"), Path::new("new")).unwrap();
+        assert_eq!(publication.prepare_moves_with(&["new".into()], || Err(std::io::Error::other("no copy needs no space query")), copy).unwrap(), (0, 0));
+        assert!(!publication.stage().join("new").exists());
+        publication.commit(&["new".into()]).unwrap();
+        assert_eq!(std::fs::read(root.path().join("new")).unwrap(), b"audio");
+        assert!(!root.path().join("old").exists());
+    }
+
+    #[test]
+    fn an_overlap_copy_error_never_starts_publication() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(&root.path().join("old"), b"original audio");
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        publication.stage_move(Path::new("old"), Path::new("new")).unwrap();
+        write_file(&publication.stage().join("old"), b"replacement audio");
+        let failed = |_: &Path, target: &Path| {
+            // A partial write followed by ENOSPC must remain a stage, not an
+            // intent that could publish truncated audio during recovery.
+            write_file(target, b"partial");
+            Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "fixture disk full"))
+        };
+        let error = publication.prepare_moves_with(&["old".into(), "new".into()], || Ok((u64::MAX, 4096)), failed).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::StorageFull);
+        assert!(!root.path().join(".journal").exists());
+        assert!(!publication.stage().join("publication.json").exists());
+        assert_eq!(std::fs::read(root.path().join("old")).unwrap(), b"original audio");
+        assert_eq!(std::fs::read(publication.stage().join("old")).unwrap(), b"replacement audio");
+        assert_eq!(Publication::moves(publication.stage()).unwrap().len(), 1);
+        assert!(publication.commit(&["old".into(), "new".into()]).is_err(), "an ignored copy error cannot promote its partial image");
+        assert!(!root.path().join(".journal").exists());
+        let stage = publication.stage().to_owned();
+        drop(publication);
+        assert!(!stage.exists());
+    }
+
+    #[test]
+    fn overlap_detection_follows_the_filesystems_actual_name_equivalence() {
+        for (from, replacement) in [("Contents/Source.mp3", "Contents/source.mp3"), ("Contents/Caf\u{e9}.mp3", "Contents/Cafe\u{301}.mp3")] {
+            let root = tempfile::tempdir().unwrap();
+            write_file(&root.path().join(from), b"original audio");
+            let aliases = root.path().join(replacement).exists();
+            let publication = Publication::new(root.path(), ".journal").unwrap();
+            publication.stage_move(Path::new(from), Path::new("Contents/new.mp3")).unwrap();
+            write_file(&publication.stage().join(replacement), b"replacement audio");
+            let mut paths = vec![PathBuf::from(replacement), PathBuf::from("Contents/new.mp3")]; paths.sort();
+            let prepared = publication.prepare_overlapping_moves(&paths).unwrap();
+            assert_eq!(prepared, if aliases { (1, 14) } else { (0, 0) });
+            publication.commit(&paths).unwrap();
+            assert_eq!(std::fs::read(root.path().join("Contents/new.mp3")).unwrap(), b"original audio");
+            assert_eq!(std::fs::read(root.path().join(replacement)).unwrap(), b"replacement audio");
+        }
+    }
+
+    #[test]
+    fn aliased_relocation_destinations_cannot_overwrite_a_staged_original() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(&root.path().join("one"), b"original one");
+        write_file(&root.path().join("two"), b"original two");
+        let aliases = root.path().join("ONE").exists();
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        publication.stage_move(Path::new("one"), Path::new("DEST")).unwrap();
+        publication.stage_move(Path::new("two"), Path::new("dest")).unwrap();
+        write_file(&publication.stage().join("one"), b"replacement one");
+        write_file(&publication.stage().join("two"), b"replacement two");
+        let result = publication.prepare_overlapping_moves(&["DEST".into(), "dest".into(), "one".into(), "two".into()]);
+        if aliases {
+            assert!(result.is_err());
+            assert_eq!(std::fs::read(publication.stage().join("DEST")).unwrap(), b"original one");
+            assert!(!root.path().join(".journal").exists());
+        } else {
+            assert_eq!(result.unwrap(), (2, 24));
+            assert_eq!(std::fs::read(publication.stage().join("dest")).unwrap(), b"original two");
+        }
+        assert_eq!(std::fs::read(root.path().join("one")).unwrap(), b"original one");
+        assert_eq!(std::fs::read(root.path().join("two")).unwrap(), b"original two");
+        assert_eq!(std::fs::read(publication.stage().join("one")).unwrap(), b"replacement one");
+        assert_eq!(std::fs::read(publication.stage().join("two")).unwrap(), b"replacement two");
+    }
+
+    #[test]
+    fn a_relocation_source_also_named_for_deletion_remains_recoverable() {
+        for (from, to) in [("z", "a"), ("a", "z")] {
+            let root = tempfile::tempdir().unwrap();
+            write_file(&root.path().join(from), b"original audio");
+            let publication = Publication::new(root.path(), ".journal").unwrap();
+            publication.stage_move(Path::new(from), Path::new(to)).unwrap();
+            let mut paths = vec![from.into(), to.into()]; paths.sort();
+            publication.commit_retained(&paths).unwrap();
+            assert!(!root.path().join(from).exists());
+            assert_eq!(std::fs::read(root.path().join(to)).unwrap(), b"original audio");
+            publication.rollback().unwrap();
+            assert_eq!(std::fs::read(root.path().join(from)).unwrap(), b"original audio");
+            assert!(!root.path().join(to).exists());
+        }
     }
 
     #[test]

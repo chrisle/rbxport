@@ -2198,6 +2198,20 @@ fn export_cancellable_inner(
         }
     }
     files.sort(); files.dedup();
+    let prepared = publication.prepare_overlapping_moves_with(&files, |from, to| {
+        copy_staged_observed(from, to, &mut |done, total| {
+            progress(&ExportProgress { stage: "copying", title: from.file_name().unwrap_or_default().to_string_lossy().into_owned(), unit: "bytes", bytes_done: done, bytes_total: total, reused: report.reused, copied: report.tracks_added + report.tracks_updated, ..Default::default() });
+            !cancelled()
+        }).map(|(bytes, _)| bytes)
+    });
+    let (materialized, copied) = match prepared {
+        Err(_) if cancelled() => return Err(ExportError::Cancelled),
+        result => result?,
+    };
+    report.bytes_copied += copied;
+    report.bytes_reused = report.bytes_reused.saturating_sub(copied);
+    report.reused = report.reused.saturating_sub(materialized);
+    report.tracks_updated += materialized;
     // Catch another writer changing a database while this export was staging.
     incremental::recheck();
     for (path, expected) in &full_source_hashes {

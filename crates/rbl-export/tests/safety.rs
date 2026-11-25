@@ -49,6 +49,78 @@ fn track(root: &Path, id: u64) -> SourceTrack {
         ..Default::default()
     }
 }
+
+#[test]
+fn relocating_audio_can_replace_its_old_path_in_either_publication_order() {
+    use rbl_export::device_library::{self, Format};
+    fn tree_bytes(root: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+        fn walk(root: &Path, at: &Path, files: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>) {
+            for entry in std::fs::read_dir(at).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() { walk(root, &path, files); }
+                else { files.insert(path.strip_prefix(root).unwrap().to_owned(), std::fs::read(path).unwrap()); }
+            }
+        }
+        let mut files = std::collections::BTreeMap::new();
+        walk(root, root, &mut files);
+        files
+    }
+    for (old_artist, new_artist) in [("Z", "A"), ("A", "Z")] {
+        let sources = tempfile::tempdir().unwrap();
+        let usb = common::stick();
+        let make = |id, artist: &str| {
+            let folder = sources.path().join(format!("source-{id}"));
+            std::fs::create_dir(&folder).unwrap();
+            let mut t = track(&folder, id);
+            let source = folder.join("same.mp3");
+            std::fs::rename(&t.source_path, &source).unwrap();
+            t.source_path = source;
+            t.artist = artist.into();
+            t
+        };
+        let mut original = make(1, old_artist);
+        sync(usb.path(), &[original.clone()], &[playlist(10, &[0])]).unwrap();
+        original.artist = new_artist.into();
+        let replacement = make(2, old_artist);
+        let mut tracks = [original, replacement];
+        let published_before = tree_bytes(usb.path());
+        let cancelled = std::cell::Cell::new(false);
+        let source = SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false, cloud_db_id: 0 };
+        let stopped = rbl_export::export_cancellable(
+            usb.path(), &tracks, &[playlist(10, &[0, 1])], &[],
+            &rbl_export::ExportOptions { sync: Some(&source), ..Default::default() },
+            &mut |event| { if event.stage == "copying" && event.title == "same.mp3" { cancelled.set(true); } },
+            &|| cancelled.get(),
+        );
+        assert!(cancelled.get(), "cancel during the exceptional overlap copy");
+        assert!(matches!(stopped, Err(rbl_export::ExportError::Cancelled)), "{stopped:?}");
+        assert_eq!(tree_bytes(usb.path()), published_before, "cancelled staging preserves the complete old generation");
+        let report = sync(usb.path(), &tracks, &[playlist(10, &[0, 1])]).unwrap();
+        assert!(report.verified);
+        assert_eq!(report.bytes_copied, 256, "the exceptional USB-side copy is accounted for");
+        for format in [Format::OneLibrary, Format::DeviceLibrary] {
+            let library = device_library::read(usb.path(), format).unwrap();
+            assert_eq!(library.tracks.len(), 2);
+            for (id, artist) in [(1, new_artist), (2, old_artist)] {
+                let row = library.tracks.iter().find(|t| t.master_content_id == id).unwrap();
+                assert_eq!(row.master_db_id, 123);
+                assert_eq!(row.path, format!("/Contents/{artist}/Album/same.mp3"));
+                assert_eq!(std::fs::read(usb.path().join(row.path.trim_start_matches('/'))).unwrap(), vec![id as u8; 128]);
+            }
+        }
+        for t in &tracks { assert_eq!(std::fs::read(&t.source_path).unwrap(), vec![t.id as u8; 128]); }
+        let before = tree_bytes(usb.path());
+        let repeat = sync(usb.path(), &tracks, &[playlist(10, &[0, 1])]).unwrap();
+        assert!(repeat.up_to_date);
+        assert_eq!(repeat.bytes_copied, 0);
+        assert_eq!(tree_bytes(usb.path()), before);
+        tracks[0].artist = "M".into();
+        let disjoint = sync(usb.path(), &tracks, &[playlist(10, &[0, 1])]).unwrap();
+        assert!(disjoint.verified);
+        assert_eq!((disjoint.bytes_copied, disjoint.reused), (0, 2), "ordinary relocations remain zero-copy");
+        assert_eq!(std::fs::read(usb.path().join("Contents/M/Album/same.mp3")).unwrap(), vec![1; 128]);
+    }
+}
 fn playlist(id: u64, indices: &[usize]) -> SourcePlaylist {
     SourcePlaylist {
         id,
