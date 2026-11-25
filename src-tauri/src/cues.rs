@@ -22,7 +22,7 @@ use rbl_index::Cue;
 use serde::Deserialize;
 use tauri::State;
 
-use rbl_db::write::CueRevision;
+use rbl_db::write::{CueRevision, CueRow};
 
 use crate::commands::{announce_history, blocking, write_error};
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -187,6 +187,40 @@ impl CueEdit {
     }
 }
 
+enum MemoryAddition<'a> {
+    Existing(&'a str),
+    Full,
+}
+
+/// The normal MEMORY action's existing 20 ms duplicate policy and ten-row
+/// limit, checked against committed rows rather than a delayed UI refresh.
+fn memory_addition<'a>(before: &'a [CueRow], edit: &CueEdit) -> Option<MemoryAddition<'a>> {
+    let (start, end) = match edit {
+        CueEdit::Add { kind: CueKind::Memory, position_ms, .. } => (*position_ms, None),
+        CueEdit::AddLoop { kind: CueKind::Memory, in_ms, out_ms, beat_loop, .. }
+            if out_ms > in_ms && !beat_loop.is_some_and(|(n, d)| n == 0 || d == 0) => (*in_ms, Some(*out_ms)),
+        _ => return None,
+    };
+    let mut count = 0_usize;
+    let mut nearest: Option<(&str, u32)> = None;
+    for (id, from, to) in before.iter().filter_map(CueRow::memory_entry) {
+        count += 1;
+        let distance = from.abs_diff(start);
+        if distance > 20 { continue }
+        let out_distance = match end {
+            Some(out) if to > from && to.abs_diff(out) <= 20 => to.abs_diff(out),
+            None if to <= from => 0,
+            _ => continue,
+        };
+        let distance = distance + out_distance;
+        if nearest.is_none_or(|(old, delta)| (distance, id) < (delta, old)) {
+            nearest = Some((id, distance));
+        }
+    }
+    nearest.map(|(id, _)| MemoryAddition::Existing(id))
+        .or_else(|| (count >= 10).then_some(MemoryAddition::Full))
+}
+
 /// [`apply`], with the rows it changed: the track's cue rows read before
 /// and after through the same writer, which the caller holds under the edit
 /// gate, so nothing else's change is mistaken for this edit's.
@@ -201,6 +235,23 @@ pub fn apply_recorded(writer: &mut rbl_db::write::Writer, edit: CueEdit) -> AppR
         | CueEdit::Delete { cue } => owner_of(writer, cue)?,
     };
     let before = writer.cue_rows(&track).map_err(write_error)?;
+    if let Some(addition) = memory_addition(&before, &edit) {
+        // A no-op must not waive add_cue's existing live-track requirement.
+        // New additions retain the writer's normal owner check unchanged.
+        let live: bool = writer.library().connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0)",
+            [&track], |row| row.get(0),
+        ).map_err(|error| write_error(error.into()))?;
+        if live {
+            let cue = match addition {
+                MemoryAddition::Existing(id) => id.to_owned(),
+                MemoryAddition::Full => return Err(AppError::new(ErrorKind::Conflict,
+                    "A track can have at most 10 memory cues or loops.")),
+            };
+            let revision = CueRevision::between(&track, &[], &[]);
+            return Ok((CueChange { track, cue }, revision));
+        }
+    }
     let change = apply(writer, edit)?;
     let after = writer.cue_rows(&change.track).map_err(write_error)?;
     let revision = CueRevision::between(&change.track, &before, &after);
@@ -500,6 +551,151 @@ mod tests {
         for odd in [0.0, -4.0, 1.5, 0.3, f64::NAN, f64::INFINITY, 70_000.0] {
             assert_eq!(beat_fraction(odd).unwrap_err().kind, ErrorKind::Malformed, "{odd}");
         }
+    }
+
+    #[test]
+    fn a_completed_memory_save_is_idempotent_before_the_client_refreshes() {
+        let mut f = open();
+        let track = track_id(1);
+        let edit = CueEdit::AddLoop { track: track.clone(), kind: CueKind::Memory,
+            in_ms: 30_000, out_ms: 32_000, beat_loop: Some((4, 1)) };
+        let (first, revision) = apply_recorded(&mut f.writer, edit.clone()).unwrap();
+        assert!(!revision.is_empty());
+        let committed = f.writer.cue_rows(&track).unwrap();
+        let (repeated, repeated_revision) = apply_recorded(&mut f.writer, edit).unwrap();
+        assert_eq!(repeated.cue, first.cue, "a stale client receives the committed ID");
+        assert!(repeated_revision.is_empty(), "nothing new to record in Undo");
+        assert_eq!(f.writer.cue_rows(&track).unwrap(), committed);
+        f.writer.undo_cue_revision(&revision).unwrap();
+        f.reload(&track);
+        assert!(f.cues(&track).is_empty(), "one Undo removes the one saved loop");
+        f.writer.redo_cue_revision(&revision).unwrap();
+        f.reload(&track);
+        assert_eq!(f.cues(&track).len(), 1);
+    }
+
+    #[test]
+    fn memory_additions_use_committed_point_loop_and_twenty_ms_rules() {
+        let mut f = open();
+        let track = track_id(1);
+        let (saved_loop, _) = apply_recorded(&mut f.writer, CueEdit::AddLoop {
+            track: track.clone(), kind: CueKind::Memory, in_ms: 30_000,
+            out_ms: 32_000, beat_loop: Some((4, 1)) }).unwrap();
+        let (point, _) = apply_recorded(&mut f.writer, CueEdit::Add {
+            track: track.clone(), kind: CueKind::Memory, position_ms: 30_000 }).unwrap();
+        assert_ne!(point.cue, saved_loop.cue, "a point and loop may share their IN");
+        for (edit, expected) in [
+            (CueEdit::Add { track: track.clone(), kind: CueKind::Memory, position_ms: 30_020 }, point.cue),
+            (CueEdit::AddLoop { track: track.clone(), kind: CueKind::Memory,
+                in_ms: 30_020, out_ms: 32_020, beat_loop: Some((8, 1)) }, saved_loop.cue.clone()),
+        ] {
+            let (matched, revision) = apply_recorded(&mut f.writer, edit).unwrap();
+            assert_eq!(matched.cue, expected);
+            assert!(revision.is_empty());
+        }
+        apply_recorded(&mut f.writer, CueEdit::ActiveLoop { cue: saved_loop.cue.clone(), on: true }).unwrap();
+        let active = f.writer.cue_rows(&track).unwrap();
+        let (matched, revision) = apply_recorded(&mut f.writer, CueEdit::AddLoop {
+            track: track.clone(), kind: CueKind::Memory, in_ms: 30_000,
+            out_ms: 32_000, beat_loop: None }).unwrap();
+        assert_eq!(matched.cue, saved_loop.cue);
+        assert!(revision.is_empty());
+        assert_eq!(f.writer.cue_rows(&track).unwrap(), active, "active/colour/beat metadata is untouched");
+        let (_, revision) = apply_recorded(&mut f.writer, CueEdit::AddLoop {
+            track: track.clone(), kind: CueKind::Memory, in_ms: 30_021,
+            out_ms: 32_021, beat_loop: None }).unwrap();
+        assert!(!revision.is_empty(), "21 ms remains a distinct loop");
+    }
+
+    #[test]
+    fn a_stale_memory_view_cannot_write_an_eleventh_entry() {
+        let mut f = open();
+        let track = track_id(1);
+        for index in 0..9 {
+            apply(&mut f.writer, CueEdit::Add { track: track.clone(), kind: CueKind::Memory,
+                position_ms: index * 1000 }).unwrap();
+        }
+        let (tenth, _) = apply_recorded(&mut f.writer, CueEdit::AddLoop {
+            track: track.clone(), kind: CueKind::Memory, in_ms: 30_000,
+            out_ms: 32_000, beat_loop: Some((4, 1)) }).unwrap();
+        // Kind 4 is also a memory entry, as a legacy Active Loop is read.
+        f.writer.library().connection().execute("UPDATE djmdCue SET Kind = 4 WHERE ID = ?1", [&tenth.cue]).unwrap();
+        let committed = f.writer.cue_rows(&track).unwrap();
+        let error = apply_recorded(&mut f.writer, CueEdit::AddLoop {
+            track: track.clone(), kind: CueKind::Memory, in_ms: 40_000,
+            out_ms: 42_000, beat_loop: Some((4, 1)) }).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Conflict);
+        assert_eq!(error.message, "A track can have at most 10 memory cues or loops.");
+        assert_eq!(f.writer.cue_rows(&track).unwrap(), committed);
+        let point_error = apply_recorded(&mut f.writer, CueEdit::Add {
+            track: track.clone(), kind: CueKind::Memory, position_ms: 99_000 }).unwrap_err();
+        assert_eq!(point_error.kind, ErrorKind::Conflict);
+        // Invalid input keeps the writer's existing refusal, even at capacity.
+        let invalid = apply_recorded(&mut f.writer, CueEdit::AddLoop {
+            track: track.clone(), kind: CueKind::Memory, in_ms: 40_000,
+            out_ms: 39_000, beat_loop: None }).unwrap_err();
+        assert_eq!(invalid.kind, ErrorKind::ReadOnly);
+        let (same, revision) = apply_recorded(&mut f.writer, CueEdit::AddLoop {
+            track: track.clone(), kind: CueKind::Memory, in_ms: 30_000,
+            out_ms: 32_000, beat_loop: Some((4, 1)) }).unwrap();
+        assert_eq!(same.cue, tenth.cue);
+        assert!(revision.is_empty(), "a duplicate at the limit still creates nothing");
+        apply_recorded(&mut f.writer, CueEdit::Add { track: track.clone(),
+            kind: CueKind::Hot('A'), position_ms: 99_000 }).unwrap();
+        apply_recorded(&mut f.writer, CueEdit::Delete { cue: tenth.cue }).unwrap();
+        let (_, revision) = apply_recorded(&mut f.writer, CueEdit::AddLoop {
+            track: track.clone(), kind: CueKind::Memory, in_ms: 40_000,
+            out_ms: 42_000, beat_loop: Some((4, 1)) }).unwrap();
+        assert!(!revision.is_empty(), "hot and deleted rows do not fill the memory list");
+    }
+
+    #[test]
+    fn memory_plain_sentinels_match_the_current_cue_decoder() {
+        use rusqlite::types::Value;
+        let mut f = open();
+        let track = track_id(1);
+        let saved = apply(&mut f.writer, CueEdit::Add { track: track.clone(),
+            kind: CueKind::Memory, position_ms: 30_000 }).unwrap();
+        for (from, out, expected) in [
+            (Value::Integer(30_000), Value::Integer(-1), 30_000),
+            (Value::Integer(-1), Value::Integer(-1), 0),
+            (Value::Null, Value::Null, 0),
+            (Value::Integer(4_294_967_296), Value::Null, 0),
+            (Value::Integer(30_000), Value::Integer(4_294_967_296), 30_000),
+            (Value::Real(30_000.9), Value::Integer(-1), 30_000),
+            (Value::Text("30000.9".into()), Value::Text("-1".into()), 30_000),
+            (Value::Blob(vec![1]), Value::Blob(vec![2]), 0),
+        ] {
+            f.writer.library().connection().execute("UPDATE djmdCue SET InMsec = ?1, OutMsec = ?2 WHERE ID = ?3",
+                (&from, &out, &saved.cue)).unwrap();
+            f.reload(&track);
+            assert_eq!(f.cues(&track)[0].position_ms, expected);
+            assert_eq!(f.cues(&track)[0].out_ms, 0);
+            let committed = f.writer.cue_rows(&track).unwrap();
+            let (same, revision) = apply_recorded(&mut f.writer, CueEdit::Add {
+                track: track.clone(), kind: CueKind::Memory, position_ms: expected }).unwrap();
+            assert_eq!(same.cue, saved.cue);
+            assert!(revision.is_empty());
+            assert_eq!(f.writer.cue_rows(&track).unwrap(), committed, "canonical comparisons never rewrite the source fields");
+        }
+    }
+
+    #[test]
+    fn memory_noops_preserve_owner_checks_and_raw_write_contracts() {
+        let mut f = open();
+        let track = track_id(1);
+        let edit = CueEdit::AddLoop { track: track.clone(), kind: CueKind::Memory,
+            in_ms: 20_000, out_ms: 22_000, beat_loop: None };
+        apply_recorded(&mut f.writer, edit.clone()).unwrap();
+        // The raw writer/apply API retains its separate contract.
+        apply(&mut f.writer, edit.clone()).unwrap();
+        f.reload(&track);
+        assert_eq!(f.cues(&track).len(), 2);
+        f.writer.library().connection().execute("UPDATE djmdContent SET rb_local_deleted = 1 WHERE ID = ?1", [&track]).unwrap();
+        let before = f.writer.cue_rows(&track).unwrap();
+        let error = apply_recorded(&mut f.writer, edit).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::ReadOnly, "an orphan cue must not bypass add's live owner check");
+        assert_eq!(f.writer.cue_rows(&track).unwrap(), before);
     }
 
     #[test]

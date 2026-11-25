@@ -417,6 +417,23 @@ describe("deleting", () => {
 });
 
 describe("what the deck is told when a write fails", () => {
+  it("reports a committed memory-limit refusal and releases the next save", async () => {
+    const message = "A track can have at most 10 memory cues or loops.";
+    const onError = vi.fn();
+    __setBackend({ edits: { addLoop: () => Promise.reject(new Error(message)) } } as unknown as Backend);
+    mount({ cues: [], onError, playingLoop: () => ({ inSeconds: 30, outSeconds: 32 }) });
+    act(() => memory.store());
+    await settle();
+    expect(onError).toHaveBeenLastCalledWith(message);
+    expect(sent).toEqual([]);
+    __setBackend(stubBackend());
+    act(() => memory.store());
+    await settle();
+    expect(sent).toEqual(["loop:track-1:memory:30000-32000:-"]);
+    expect(onError).toHaveBeenLastCalledWith(null);
+  });
+
+
   it("passes the backend's refusal up", async () => {
     const onError = vi.fn();
     __setBackend({

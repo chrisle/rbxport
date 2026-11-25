@@ -916,6 +916,20 @@ impl CueRow {
         }
     }
 
+    /// A live memory row's ID and canonical millisecond points. Negative,
+    /// NULL and unrepresentable points read as zero, as the cue display does;
+    /// the snapshot's stored values are never changed by this interpretation.
+    pub fn memory_entry(&self) -> Option<(&str, u32, u32)> {
+        let number = |name| crate::details::number_value(self.column(name).unwrap_or(&Value::Null));
+        let kind = u8::try_from(number("Kind")).unwrap_or(0);
+        if !matches!(self.column("rb_local_deleted"), Some(Value::Integer(0)))
+            || !matches!(kind, 0 | 4) {
+            return None;
+        }
+        let point = |name| u32::try_from(number(name).max(0)).unwrap_or(0);
+        Some((&self.id, point("InMsec"), point("OutMsec")))
+    }
+
     /// The same row, soft-deleted: what an added cue was before it was added.
     fn deleted(&self) -> Self {
         let mut row = self.clone();

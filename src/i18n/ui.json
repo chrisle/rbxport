@@ -59,6 +59,7 @@
   "A rating is 0 to 5 stars.",
   "A setting takes a boolean, a number, text or a list of text.",
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.",
+  "A track can have at most 10 memory cues or loops.",
   "A-GAIN",
   "AIFF — larger files",
   "ALL DATA WILL BE ERASED",

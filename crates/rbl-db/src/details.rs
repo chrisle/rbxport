@@ -652,9 +652,14 @@ fn text(r: &rusqlite::Row<'_>, index: usize) -> String {
 /// `DBVersion`), so reading them as `i64` fails on some rows and not others;
 /// whatever type the cell has is read and parsed, the way `rbl-index` does.
 fn number(r: &rusqlite::Row<'_>, index: usize) -> i64 {
-    match r.get::<_, Value>(index).unwrap_or(Value::Null) {
-        Value::Integer(n) => n,
-        Value::Real(f) => real_to_i64(f),
+    number_value(&r.get::<_, Value>(index).unwrap_or(Value::Null))
+}
+
+/// The same tolerant numeric interpretation for an already-read snapshot.
+pub(crate) fn number_value(value: &Value) -> i64 {
+    match value {
+        Value::Integer(n) => *n,
+        Value::Real(f) => real_to_i64(*f),
         Value::Text(s) => s.trim().parse::<f64>().map_or(0, real_to_i64),
         Value::Null | Value::Blob(_) => 0,
     }
