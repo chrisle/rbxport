@@ -231,7 +231,9 @@ Missing sources keep a usable existing USB version and report a warning. Tracks
 without a usable copy are skipped. If audio changed but its analysis did not,
 re-analyse it before expecting current waveforms/cues. **Verify all files
 (slower)** in Preferences › USB Export › Sync reads exported audio and analysis to detect changes that preserve
-size and timestamps; ordinary sync uses inexpensive verified receipts.
+size and timestamps. The optional scan shows **Verifying all existing files**.
+Ordinary sync uses inexpensive verified receipts and still verifies changed
+files and databases before saving.
 
 Conversion changes export copies, preserving source audio and analysis timing.
 It updates device database/analysis paths and reuses unchanged conversions on

@@ -28,6 +28,15 @@ describe("export stage feedback", () => {
       expect(isExportActive({ ...job, state })).toBe(true);
     }
   });
+  it("distinguishes the optional full scan from staged verification", () => {
+    const t = (text: string) => text;
+    const full = { ...job, state: "verifying-all" as const, canCancel: false };
+    expect(stageLabel(full, t)).toBe("Verifying all existing files");
+    expect(stageLabel({ ...job, state: "verifying" }, t)).toBe("Verifying changed files and databases");
+    expect(isExportActive(full)).toBe(true);
+    expect(stagePercent(full)).toBeUndefined();
+    expect(canStopExport(full)).toBe(false);
+  });
   it("disables stopping once publication has started", () => {
     expect(canStopExport({ ...job, state: "publishing", canCancel: false })).toBe(false);
     expect(canStopExport({ ...job, canCancel: true })).toBe(true);

@@ -436,6 +436,26 @@ fn a_reused_mount_path_is_rejected_before_any_export_writes() {
 }
 
 #[test]
+fn progress_distinguishes_full_integrity_from_staged_verification() {
+    for verify_all in [false, true] {
+        let source = tempfile::tempdir().unwrap();
+        let usb = common::stick();
+        let tracks = vec![track(source.path(), 1), track(source.path(), 2)];
+        run(usb.path(), &tracks[..1], &playlists(vec![0]));
+        let mut stages = Vec::new();
+        let sync = SyncSource { db_id: 123, ..Default::default() };
+        rbl_export::export_with_options(usb.path(), &tracks, &playlists(vec![0, 1]), &[],
+            &ExportOptions { verify_all, sync: Some(&sync), ..Default::default() },
+            &mut |p| {
+                if matches!(p.stage, "verifying-all" | "verifying") { stages.push(p.stage); }
+            },
+        ).unwrap();
+        let expected: &[&str] = if verify_all { &["verifying-all", "verifying"] } else { &["verifying"] };
+        assert_eq!(stages, expected);
+    }
+}
+
+#[test]
 fn full_integrity_check_detects_stamp_preserving_destination_edits() {
     let source = tempfile::tempdir().unwrap(); let usb = common::stick();
     let tracks = vec![track(source.path(), 1)]; run(usb.path(), &tracks, &playlists(vec![0]));

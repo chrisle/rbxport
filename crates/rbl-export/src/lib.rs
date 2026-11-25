@@ -1145,7 +1145,7 @@ fn export_cancellable_inner(
     let mut previous = Manifest::load(destination);
     let mut full_source_hashes = BTreeMap::new();
     if verify_all && previous.is_some() {
-        progress(&ExportProgress { stage: "verifying", ..Default::default() });
+        progress(&ExportProgress { stage: "verifying-all", ..Default::default() });
         let check = verification::verify_content(destination)?;
         if !check.is_ok() { return Err(ExportError::Conflict(format!("Full integrity check failed: {}", verification_failure(&check)))); }
         if let Some(manifest) = &mut previous {

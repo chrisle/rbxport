@@ -1799,5 +1799,6 @@
   "Analysis order": "Σειρά ανάλυσης",
   "Analysis stages could not be loaded.": "Δεν ήταν δυνατή η φόρτωση των σταδίων ανάλυσης.",
   "{stage} requires {requirement} earlier in the analysis order.": "Για το στάδιο {stage}, το στάδιο {requirement} πρέπει να προηγείται στη σειρά ανάλυσης.",
-  "Drag stages to change the order they run.": "Σύρετε τα στάδια για να αλλάξετε τη σειρά εκτέλεσής τους."
+  "Drag stages to change the order they run.": "Σύρετε τα στάδια για να αλλάξετε τη σειρά εκτέλεσής τους.",
+  "Verifying all existing files": "Verifying all existing files"
 }

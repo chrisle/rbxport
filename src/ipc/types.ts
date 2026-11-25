@@ -1758,7 +1758,7 @@ export interface ExportProgress {
   upToDate?: boolean;
   path: string;
   warningsCount?: number;
-  state: "preparing" | "planning" | "recovering" | "checking" | "converting" | "copying" | "database" | "verifying" | "publishing" | "finalizing" | "ejecting" | "done" | "failed" | "cancelled";
+  state: "preparing" | "planning" | "recovering" | "checking" | "converting" | "copying" | "database" | "verifying-all" | "verifying" | "publishing" | "finalizing" | "ejecting" | "done" | "failed" | "cancelled";
   done: number;
   total: number;
   title: string;

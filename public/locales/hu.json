@@ -1797,5 +1797,6 @@
   "Analysis order": "Elemzési sorrend",
   "Analysis stages could not be loaded.": "Az elemzési lépéseket nem sikerült betölteni.",
   "{stage} requires {requirement} earlier in the analysis order.": "A(z) {stage} lépéshez a(z) {requirement} lépésnek előrébb kell szerepelnie az elemzési sorrendben.",
-  "Drag stages to change the order they run.": "Húzza a lépéseket a végrehajtási sorrend módosításához."
+  "Drag stages to change the order they run.": "Húzza a lépéseket a végrehajtási sorrend módosításához.",
+  "Verifying all existing files": "Verifying all existing files"
 }

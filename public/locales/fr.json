@@ -1799,5 +1799,6 @@
   "Analysis order": "Ordre d’analyse",
   "Analysis stages could not be loaded.": "Impossible de charger les étapes d’analyse.",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} nécessite que {requirement} figure plus haut dans l’ordre d’analyse.",
-  "Drag stages to change the order they run.": "Faites glisser les étapes pour modifier leur ordre d’exécution."
+  "Drag stages to change the order they run.": "Faites glisser les étapes pour modifier leur ordre d’exécution.",
+  "Verifying all existing files": "Verifying all existing files"
 }

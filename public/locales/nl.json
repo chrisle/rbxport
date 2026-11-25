@@ -1796,5 +1796,6 @@
   "Analysis order": "Analysevolgorde",
   "Analysis stages could not be loaded.": "De analysestappen konden niet worden geladen.",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} vereist dat {requirement} eerder in de analysevolgorde staat.",
-  "Drag stages to change the order they run.": "Sleep de stappen om de volgorde van uitvoering te wijzigen."
+  "Drag stages to change the order they run.": "Sleep de stappen om de volgorde van uitvoering te wijzigen.",
+  "Verifying all existing files": "Verifying all existing files"
 }

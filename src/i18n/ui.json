@@ -1390,6 +1390,7 @@
   "Use the grid BPM field to confirm replacing tempo changes.",
   "Value",
   "Verify all files (slower)",
+  "Verifying all existing files",
   "Verifying backup…",
   "Verifying changed files and databases",
   "Version",

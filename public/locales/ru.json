@@ -1802,5 +1802,6 @@
   "Analysis order": "Порядок анализа",
   "Analysis stages could not be loaded.": "Не удалось загрузить этапы анализа.",
   "{stage} requires {requirement} earlier in the analysis order.": "Для этапа {stage} требуется, чтобы этап {requirement} выполнялся раньше.",
-  "Drag stages to change the order they run.": "Перетаскивайте этапы, чтобы изменить порядок их выполнения."
+  "Drag stages to change the order they run.": "Перетаскивайте этапы, чтобы изменить порядок их выполнения.",
+  "Verifying all existing files": "Verifying all existing files"
 }
