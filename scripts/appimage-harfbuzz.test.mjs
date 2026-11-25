@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -66,11 +66,11 @@ case "$2" in
 --file-header)
   echo '  Class: ELF64'
   echo '  Data: little endian'
-  case "$3" in *libharfbuzz.so.0) echo '  Machine: x86-64';; *) echo '  Machine: ${wrongMachine ? "AArch64" : "x86-64"}';; esac;;
+  case "$3" in *libharfbuzz.so.0|*provider.elf) echo '  Machine: x86-64';; *) echo '  Machine: ${wrongMachine ? "AArch64" : "x86-64"}';; esac;;
 --dynamic) echo '  0x0000000e (SONAME) Library soname: [${wrongSoname ? "other.so.0" : "libharfbuzz.so.0"}]';;
 --dyn-syms)
   case "$3" in
-  *libharfbuzz.so.0) echo '${entry(baseline, "12")}';;
+  *libharfbuzz.so.0|*provider.elf) echo '${entry(baseline, "12")}';;
   *libpangoft2-1.0.so.0) echo '${entry(missing ? "hb_missing_ft2" : baseline)}';;
   *) echo '${entry(baseline)}';;
   esac;;
@@ -82,5 +82,30 @@ esac
     assert.throws(run({ missing: true }), /libpangoft2.*hb_missing_ft2/);
     assert.throws(run({ wrongMachine: true }), /architecture differs/);
     assert.throws(run({ wrongSoname: true }), /wrong SONAME/);
+    unlinkSync(join(dir, "libharfbuzz.so.0"));
+    writeFileSync(join(dir, "provider.elf"), "");
+    symlinkSync("provider.elf", join(dir, "libharfbuzz.so.0"));
+    assert.equal(run()().length, 4, "ordinary internal SONAME link remains supported");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test("refuses escaping provider or consumer links before ELF inspection", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rbxport-337-links-"));
+  try {
+    const libs = join(dir, "lib");
+    mkdirSync(libs);
+    const outside = join(dir, "host.so");
+    writeFileSync(outside, "outside sentinel");
+    writeFileSync(join(libs, "libpango-1.0.so.0"), "fixture");
+    const provider = join(libs, "libharfbuzz.so.0");
+    symlinkSync(outside, provider);
+    assert.throws(() => verifyHarfbuzz(libs, "must-not-execute-readelf"), /resolves outside/);
+    unlinkSync(provider);
+    writeFileSync(provider, "fixture");
+    unlinkSync(join(libs, "libpango-1.0.so.0"));
+    symlinkSync("../host.so", join(libs, "libpango-1.0.so.0"));
+    assert.throws(() => verifyHarfbuzz(libs, "must-not-execute-readelf"), /resolves outside/);
+    assert.equal(readFileSync(outside, "utf8"), "outside sentinel");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

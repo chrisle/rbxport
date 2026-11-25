@@ -1,7 +1,7 @@
 /** Read-only ELF check for the Pango/HarfBuzz pair shipped in an AppImage. */
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { join, sep } from "node:path";
 
 // GNU and LLVM readelf both support this stable, wide symbol-table format.
 export function symbols(output) {
@@ -28,6 +28,15 @@ export function verifyHarfbuzz(libdir, readelf = "readelf") {
   if (!existsSync(provider)) throw new Error("AppImage is missing libharfbuzz.so.0; bundled Pango must not use the host's older HarfBuzz (#337)");
   const names = readdirSync(libdir).filter((name) => /^libpango.*\.so\.\d+$/.test(name) || name === "libharfbuzz-icu.so.0");
   if (!names.includes("libpango-1.0.so.0")) throw new Error("AppImage is missing its Pango consumer");
+  const root = realpathSync(libdir);
+  const contained = (file) => {
+    const actual = realpathSync(file);
+    if (!actual.startsWith(root + sep)) throw new Error(`${file}: library resolves outside the extracted AppImage library directory`);
+    return actual;
+  };
+  // Validate every input before inspecting any ELF, including normal SONAME links.
+  const providerFile = contained(provider);
+  const consumerFiles = names.map((name) => [name, contained(join(libdir, name))]);
   const inspect = (file, flag) => execFileSync(readelf, ["--wide", flag, file], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
   const identity = (file) => {
     const header = inspect(file, "--file-header");
@@ -37,15 +46,14 @@ export function verifyHarfbuzz(libdir, readelf = "readelf") {
       return match[1];
     }).join(";");
   };
-  const providerIdentity = identity(provider);
-  if (!/\(SONAME\)[^\n]*\[libharfbuzz\.so\.0\]/.test(inspect(provider, "--dynamic"))) {
+  const providerIdentity = identity(providerFile);
+  if (!/\(SONAME\)[^\n]*\[libharfbuzz\.so\.0\]/.test(inspect(providerFile, "--dynamic"))) {
     throw new Error("bundled HarfBuzz has the wrong SONAME");
   }
-  const consumers = names.map((name) => {
-    const file = join(libdir, name);
+  const consumers = consumerFiles.map(([name, file]) => {
     if (identity(file) !== providerIdentity) throw new Error(`${name}: ELF architecture differs from bundled HarfBuzz`);
     return [name, symbols(inspect(file, "--dyn-syms"))];
   });
-  checkHarfbuzz(symbols(inspect(provider, "--dyn-syms")), consumers);
+  checkHarfbuzz(symbols(inspect(providerFile, "--dyn-syms")), consumers);
   return names;
 }
