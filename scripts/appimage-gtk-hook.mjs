@@ -2,7 +2,7 @@
 
 /**
  * Puts rbxport's copy of linuxdeploy-plugin-gtk where the Tauri bundler
- * looks for it, and checks that a built AppImage carries its AppRun hook.
+ * looks for it, and checks a built AppImage’s AppRun hook and Pango/HarfBuzz ABI.
  *
  * The hook picks the GTK theme the whole process runs with: it exports
  * `GTK_THEME=Adwaita:<variant>`, which GTK reads before any setting, so the
@@ -22,6 +22,8 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+
+import { verifyHarfbuzz } from "./appimage-harfbuzz.mjs";
 
 export const PLUGIN = new URL("../packaging/appimage/linuxdeploy-plugin-gtk.sh", import.meta.url);
 const PLUGIN_NAME = "linuxdeploy-plugin-gtk.sh";
@@ -81,7 +83,12 @@ function verify(appimage) {
     if (!hookMatches(hook, plugin)) {
       throw new Error(`${appimage}: its GTK AppRun hook is not the one in packaging/appimage (#448)`);
     }
-    console.log(`${appimage}: GTK AppRun hook matches packaging/appimage`);
+    // Extraction only: verification also runs after signing, so never rewrite the bundle.
+    for (const pattern of ["usr/lib/libpango*.so*", "usr/lib/libharfbuzz*.so*"]) {
+      execFileSync(resolve(appimage), ["--appimage-extract", pattern], { cwd: work, stdio: "ignore" });
+    }
+    verifyHarfbuzz(join(work, "squashfs-root", "usr/lib"));
+    console.log(`${appimage}: GTK AppRun hook and bundled Pango/HarfBuzz symbols verified`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

@@ -4,9 +4,11 @@
 # GTK4 environment variables: https://developer.gnome.org/gtk4/stable/gtk-running.html
 
 # rbxport: tauri-apps/linuxdeploy-plugin-gtk at b5eb8d05 (the copy
-# @tauri-apps/cli 2.11 downloads once and keeps in ~/.cache/tauri), with only
+# @tauri-apps/cli 2.11 downloads once and keeps in ~/.cache/tauri), with
 # the AppRun hook's light/dark detection replaced by upstream's portal and
 # color-scheme check (linuxdeploy/linuxdeploy-plugin-gtk 221b680a, 3b67a1d1).
+# Also force the main HarfBuzz provider alongside Pango (#337): linuxdeploy
+# normally excludes it, leaving newer bundled Pango to use an older host ABI.
 # scripts/appimage-gtk-hook.mjs installs it before an AppImage build (#448).
 
 # abort on all errors
@@ -293,6 +295,7 @@ librsvg_libdir="$(get_pkgconf_variable "libdir" "librsvg-2.0")"
 pango_libdir="$(get_pkgconf_variable "libdir" "pango")"
 pangocairo_libdir="$(get_pkgconf_variable "libdir" "pangocairo")"
 pangoft2_libdir="$(get_pkgconf_variable "libdir" "pangoft2")"
+harfbuzz_libdir="$(get_pkgconf_variable "libdir" "harfbuzz")"
 FIND_ARRAY=(
     "$gdk_libdir"     "libgdk_pixbuf-*.so*"
     "$gobject_libdir" "libgobject-*.so*"
@@ -301,6 +304,7 @@ FIND_ARRAY=(
     "$pango_libdir"      "libpango-*.so*"
     "$pangocairo_libdir" "libpangocairo-*.so*"
     "$pangoft2_libdir"   "libpangoft2-*.so*"
+    "$harfbuzz_libdir"   "libharfbuzz.so*"
 )
 LIBRARIES=()
 for (( i=0; i<${#FIND_ARRAY[@]}; i+=2 )); do
