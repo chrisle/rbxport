@@ -1595,6 +1595,68 @@ mod tests {
         assert_eq!(found[0].tracks, 3);
     }
 
+    #[test]
+    fn outward_drag_uses_a_device_rows_guarded_audio_path() {
+        let root = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(&root.path().join("collection"), rbl_db::fixture::Shape {
+            tracks: 1, playlists: 0, history_sessions: 0, ..Default::default()
+        }).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+        let collection_file = root.path().join("collection.wav");
+        std::fs::write(&collection_file, b"collection source").unwrap();
+        db.connection().execute("UPDATE djmdContent SET FolderPath = ?1", [collection_file.to_str().unwrap()]).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(root.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        let mount = root.path().join("device");
+        std::fs::create_dir_all(mount.join("Contents")).unwrap();
+        let original = mount.join("Contents/MiXeD.wav");
+        let variant = mount.join("Contents/mixed.wav");
+        let held = mount.join("Contents/held");
+        let loose = root.path().join("loose.wav");
+        std::fs::write(&loose, b"loose source").unwrap();
+        let collection = rbl_db::fixture::track_id(0);
+        let track = device::Track { id: 42, path: "/Contents/MiXeD.wav".into(), ..Default::default() };
+        let row = row_dto(&device_row(&mount, &track, 0));
+        assert_eq!(row.id, rbl_index::folder::loose_id(&original));
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            std::fs::write(&original, b"device source").unwrap();
+            state.remember_device_assets(&mount, [assets_of(&mount, format, &track)]);
+            let selection = vec![collection.clone(), rbl_index::folder::loose_id(&loose), row.id.clone(), row.id.clone()];
+            let paths = crate::file_drag::track_paths(&state, &selection).unwrap();
+            assert_eq!(paths.len(), 3, "device and ordinary sources retain selection deduplication");
+            assert_eq!(paths[0], collection_file);
+            assert_eq!(paths[1], loose);
+            assert_eq!(std::fs::read(&paths[2]).unwrap(), b"device source");
+            std::fs::rename(&original, &held).unwrap();
+            std::fs::rename(&held, &variant).unwrap();
+            let case_sensitive = !original.exists();
+            let paths = crate::file_drag::track_paths(&state, &selection).unwrap();
+            assert_eq!(std::fs::read(&paths[2]).unwrap(), b"device source");
+            if case_sensitive {
+                assert_eq!(paths[2], variant, "the native drag receives the actual filename");
+                let other = mount.join("Contents/MIXED.wav");
+                std::fs::write(&other, b"ambiguous").unwrap();
+                assert!(crate::file_drag::track_paths(&state, &selection).is_err(), "the whole selection refuses ambiguous device paths");
+                std::fs::remove_file(&other).unwrap();
+            }
+            std::fs::remove_file(&variant).unwrap();
+            assert!(crate::file_drag::track_paths(&state, &selection).is_err(), "a missing device file refuses the whole drag");
+            #[cfg(unix)]
+            {
+                // The raw ID is a real file through a link, but a registered
+                // device source must keep the device resolver's containment.
+                std::os::unix::fs::symlink(&loose, &original).unwrap();
+                assert!(crate::file_drag::track_paths(&state, &selection).is_err(), "a linked device file must not fall back to the raw ID");
+                std::fs::remove_file(&original).unwrap();
+            }
+        }
+        assert_eq!(std::fs::read(&loose).unwrap(), b"loose source");
+        assert_eq!(std::fs::read(&collection_file).unwrap(), b"collection source");
+        let unready = AppState::with_backups(root.path().join("unready-backups"));
+        assert!(crate::file_drag::track_paths(&unready, &[rbl_index::folder::loose_id(&loose)]).is_err(), "loose IDs still require the existing library readiness policy");
+    }
+
     /// Overwrites one of the stick's databases with bytes neither reader
     /// takes, as a damaged or half-written file would be.
     fn damage(mount: &Path, format: Format) {

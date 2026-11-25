@@ -10,8 +10,7 @@ pub async fn drag_tracks(
     #[cfg(target_os = "macos")]
     {
         tracing::debug!(tracks = ids.len(), "preparing native track drag");
-        let library = state.library().map_err(|error| error.message)?;
-        let paths = resolve_paths(&ids, |id| library.audio_path_of(id).map(str::to_owned))?;
+        let paths = track_paths(&state, &ids)?;
         let (send, mut receive) = tauri::async_runtime::channel(1);
         let handle = window.clone();
         window
@@ -55,9 +54,25 @@ pub async fn drag_tracks(
 }
 
 #[cfg(any(target_os = "macos", test))]
+pub(crate) fn track_paths(
+    state: &crate::state::AppState,
+    ids: &[String],
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let library = state.library().map_err(|error| error.message)?;
+    resolve_paths(ids, |id| {
+        if let Some(assets) = state.device_assets(id) {
+            // The row keeps the database's spelling, while the stick's own
+            // file may use another case. Never bypass its plain-path guard.
+            return assets.audio_file();
+        }
+        library.audio_path_of(id).map(std::path::PathBuf::from)
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
 fn resolve_paths(
     ids: &[String],
-    path_of: impl Fn(&str) -> Option<String>,
+    path_of: impl Fn(&str) -> Option<std::path::PathBuf>,
 ) -> Result<Vec<std::path::PathBuf>, String> {
     if ids.is_empty() {
         return Err("No tracks were selected.".into());
@@ -66,7 +81,6 @@ fn resolve_paths(
     let mut seen = std::collections::HashSet::new();
     for id in ids {
         let path = path_of(id)
-            .map(std::path::PathBuf::from)
             .ok_or_else(|| "A selected track has no audio file.".to_string())?;
         if !path.is_absolute() || !path.is_file() {
             return Err(format!("The audio file is missing: {}", path.display()));
@@ -92,11 +106,7 @@ mod tests {
         std::fs::write(&b, b"b").unwrap();
         let ids = vec!["1".into(), "2".into(), "3".into()];
         let result = resolve_paths(&ids, |id| {
-            Some(
-                if id == "2" { &b } else { &a }
-                    .to_string_lossy()
-                    .into_owned(),
-            )
+            Some(if id == "2" { b.clone() } else { a.clone() })
         });
         assert_eq!(result.unwrap(), vec![a, b]);
     }
